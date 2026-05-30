@@ -1,19 +1,33 @@
+use bevy_diegetic::AlignY;
+use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Percent;
+use bevy_diegetic::Px;
+use bevy_diegetic::Sizing;
+use bevy_diegetic::TextWrap;
+use bevy_kana::ToF32;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::TITLE_COLOR;
+use fairy_dust::TITLE_SIZE;
+use fairy_dust::screen_panel_frame;
+use fairy_dust::screen_panel_material;
+
 use super::*;
 
+/// The diegetic screen panel that hosts the event log on the right half.
 #[derive(Component)]
-pub(crate) struct EventLogNode;
-
-#[derive(Component)]
-pub(crate) struct EventLogHint;
-
-#[derive(Component)]
-pub(crate) struct EventLogToggleHint;
+pub(crate) struct EventLogPanel;
 
 /// Marker resource: when present, the next `AnimationEnd` enables the event log.
 #[derive(Resource)]
 pub(super) struct EnableLogOnAnimationEnd;
 
-struct PendingLogEntry {
+struct LogEntry {
     text:  String,
     color: Color,
 }
@@ -27,71 +41,166 @@ enum EventLogState {
 
 #[derive(Resource, Default)]
 pub(crate) struct EventLog {
-    state:   EventLogState,
-    pending: Vec<PendingLogEntry>,
+    state:      EventLogState,
+    entries:    Vec<LogEntry>,
+    /// Logical px scrolled up from the bottom; `0.0` follows the streaming tail.
+    scrollback: f32,
 }
 
-pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
-    // Event log scroll container (right edge, scrollable, hidden until enabled)
-    commands.spawn((
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            width: Val::Px(EVENT_LOG_WIDTH),
-            bottom: Val::Px(EVENT_LOG_PANEL_BOTTOM_PIXELS),
-            flex_direction: FlexDirection::Column,
-            overflow: Overflow::scroll_y(),
-            ..default()
-        },
-        Visibility::Hidden,
-        Pickable::IGNORE,
-        EventLogNode,
-        UiTargetCamera(camera),
-    ));
+impl EventLog {
+    pub(crate) fn push(&mut self, text: String) { self.push_colored(text, EVENT_LOG_COLOR); }
 
-    // Log toggle hint (bottom-right, always visible once initial animation completes)
-    commands.spawn((
-        Text::new(LOG_TOGGLE_HINT_TEXT),
-        TextFont {
-            font_size: FontSize::Px(UI_FONT_SIZE),
-            ..default()
-        },
-        TextColor(HINT_TEXT_COLOR),
-        TextLayout::justify(Justify::Left),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            width: Val::Px(EVENT_LOG_WIDTH),
-            ..default()
-        },
-        Visibility::Hidden,
-        EventLogToggleHint,
-        UiTargetCamera(camera),
-    ));
+    fn push_error(&mut self, text: String) { self.push_colored(text, EVENT_LOG_ERROR_COLOR); }
 
-    // Log scroll/clear hints (bottom-right, hidden until log enabled)
-    commands.spawn((
-        Text::new(LOG_SCROLL_HINT_TEXT),
-        TextFont {
-            font_size: FontSize::Px(UI_FONT_SIZE),
-            ..default()
-        },
-        TextColor(HINT_TEXT_COLOR),
-        TextLayout::justify(Justify::Left),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(EVENT_LOG_HINT_BOTTOM_PIXELS),
-            right: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            width: Val::Px(EVENT_LOG_WIDTH),
-            ..default()
-        },
-        Visibility::Hidden,
-        EventLogHint,
-        UiTargetCamera(camera),
-    ));
+    fn separator(&mut self) { self.push_colored(EVENT_LOG_SEPARATOR.into(), EVENT_LOG_COLOR); }
+
+    fn push_colored(&mut self, text: String, color: Color) {
+        if self.state == EventLogState::Disabled {
+            return;
+        }
+        self.entries.push(LogEntry { text, color });
+        // A new entry re-pins the view to the bottom so the tail stays visible.
+        self.scrollback = 0.0;
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+        self.scrollback = 0.0;
+    }
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PANEL — a 50%-width, full-height diegetic screen panel on the right edge.
+// ═════════════════════════════════════════════════════════════════════════════
+
+pub(crate) fn spawn_log_panel(commands: &mut Commands) {
+    let unlit = screen_panel_material();
+    let built = DiegeticPanel::screen()
+        .size(Px(EVENT_LOG_WIDTH), Percent(0.5))
+        .anchor(Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_log_tree(&EventLog::default()))
+        .build();
+
+    match built {
+        Ok(built) => {
+            commands.spawn((
+                EventLogPanel,
+                built,
+                Transform::default(),
+                Visibility::Hidden,
+            ));
+        },
+        Err(error) => {
+            error!("showcase: failed to build event log panel: {error}");
+        },
+    }
+}
+
+/// Rebuilds the panel tree whenever entries or the scroll position change.
+pub(crate) fn rebuild_log_panel(
+    log: Res<EventLog>,
+    panels: Query<Entity, With<EventLogPanel>>,
+    mut commands: Commands,
+) {
+    if !log.is_changed() {
+        return;
+    }
+    let Ok(entity) = panels.single() else {
+        return;
+    };
+    commands.set_tree(entity, build_log_tree(&log));
+}
+
+fn build_log_tree(log: &EventLog) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::GROW).height(Sizing::GROW));
+    build_log_layout(&mut builder, log);
+    builder.build()
+}
+
+fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
+    let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
+    let hint = LayoutTextStyle::new(EVENT_LOG_HINT_SIZE).with_color(HINT_TEXT_COLOR);
+
+    screen_panel_frame(
+        builder,
+        Sizing::GROW,
+        Sizing::GROW,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(EVENT_LOG_CHILD_GAP),
+                |builder| {
+                    builder.text(EVENT_LOG_TITLE, title);
+                    title_divider(builder);
+                    // Scroll viewport: fills the remaining height, clips overflow,
+                    // and follows the tail (scrollback 0) until the user scrolls up.
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .direction(Direction::TopToBottom)
+                            .child_gap(EVENT_LOG_ENTRY_GAP)
+                            .scroll_y_from_end(log.scrollback),
+                        |builder| {
+                            for entry in &log.entries {
+                                builder.text(
+                                    &entry.text,
+                                    LayoutTextStyle::new(EVENT_LOG_TEXT_SIZE)
+                                        .with_color(entry.color)
+                                        .wrap(TextWrap::Words),
+                                );
+                            }
+                        },
+                    );
+                    footer_hints(builder, &hint);
+                },
+            );
+        },
+    );
+}
+
+/// Full-width blue rule under the panel title, like the title bar's separators.
+fn title_divider(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(EVENT_LOG_DIVIDER_THICKNESS))
+            .background(EVENT_LOG_DIVIDER_COLOR),
+        |_| {},
+    );
+}
+
+/// The two scroll/clear hints side by side, split by a vertical blue separator.
+fn footer_hints(builder: &mut LayoutBuilder, hint: &LayoutTextStyle) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .direction(Direction::LeftToRight)
+            .child_gap(EVENT_LOG_CHILD_GAP)
+            .child_align_y(AlignY::Center),
+        |builder| {
+            builder.text(LOG_SCROLL_HINT_TEXT, hint.clone());
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(EVENT_LOG_DIVIDER_THICKNESS))
+                    .height(Sizing::fixed(EVENT_LOG_HINT_SEPARATOR_HEIGHT))
+                    .background(EVENT_LOG_DIVIDER_COLOR),
+                |_| {},
+            );
+            builder.text(LOG_CLEAR_HINT_TEXT, hint.clone());
+        },
+    );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// VISIBILITY + SCROLL — keyboard control over the panel.
+// ═════════════════════════════════════════════════════════════════════════════
 
 /// Enables the event log when the initial `AnimateToFit` animation completes.
 pub(crate) fn enable_log_on_initial_fit(
@@ -99,57 +208,22 @@ pub(crate) fn enable_log_on_initial_fit(
     mut commands: Commands,
     marker: Option<Res<EnableLogOnAnimationEnd>>,
     mut log: ResMut<EventLog>,
-    mut container_query: Query<
-        &mut Visibility,
-        (
-            With<EventLogNode>,
-            Without<EventLogHint>,
-            Without<EventLogToggleHint>,
-        ),
-    >,
-    mut hint_query: Query<
-        &mut Visibility,
-        (
-            With<EventLogHint>,
-            Without<EventLogNode>,
-            Without<EventLogToggleHint>,
-        ),
-    >,
-    mut toggle_hint_query: Query<
-        &mut Visibility,
-        (
-            With<EventLogToggleHint>,
-            Without<EventLogNode>,
-            Without<EventLogHint>,
-        ),
-    >,
+    mut panels: Query<&mut Visibility, With<EventLogPanel>>,
 ) {
     if marker.is_none() {
         return;
     }
     commands.remove_resource::<EnableLogOnAnimationEnd>();
     log.state = EventLogState::Enabled;
-    for mut visibility in &mut container_query {
-        *visibility = Visibility::Inherited;
-    }
-    for mut visibility in &mut hint_query {
-        *visibility = Visibility::Inherited;
-    }
-    for mut visibility in &mut toggle_hint_query {
+    for mut visibility in &mut panels {
         *visibility = Visibility::Inherited;
     }
 }
 
 pub(crate) fn toggle_event_log(
     keyboard: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
     mut log: ResMut<EventLog>,
-    mut container_query: Query<
-        (Entity, &mut Visibility, &mut ScrollPosition),
-        (With<EventLogNode>, Without<EventLogHint>),
-    >,
-    children_query: Query<&Children>,
-    mut hint_query: Query<&mut Visibility, (With<EventLogHint>, Without<EventLogNode>)>,
+    mut panels: Query<&mut Visibility, With<EventLogPanel>>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyL) {
         return;
@@ -160,61 +234,47 @@ pub(crate) fn toggle_event_log(
         EventLogState::Enabled => EventLogState::Disabled,
     };
 
-    if log.state == EventLogState::Enabled {
-        for (_, mut visibility, _) in &mut container_query {
-            *visibility = Visibility::Inherited;
-        }
-        for mut visibility in &mut hint_query {
-            *visibility = Visibility::Inherited;
-        }
-    } else {
-        // Clear log entries and hide.
-        for (entity, mut visibility, mut scroll) in &mut container_query {
-            if let Ok(children) = children_query.get(entity) {
-                for child in children.iter() {
-                    commands.entity(child).despawn();
-                }
-            }
-            scroll.y = 0.0;
-            *visibility = Visibility::Hidden;
-        }
-        for mut visibility in &mut hint_query {
-            *visibility = Visibility::Hidden;
-        }
-        log.pending.clear();
+    let visibility = match log.state {
+        EventLogState::Enabled => Visibility::Inherited,
+        EventLogState::Disabled => {
+            log.clear();
+            Visibility::Hidden
+        },
+    };
+    for mut panel_visibility in &mut panels {
+        *panel_visibility = visibility;
     }
 }
 
-impl EventLog {
-    pub(crate) fn push(&mut self, text: String) {
-        if self.state == EventLogState::Disabled {
-            return;
-        }
-        self.pending.push(PendingLogEntry {
-            text,
-            color: EVENT_LOG_COLOR,
-        });
+/// Scrolls the event log with Up/Down arrow keys, clears with `C`.
+pub(crate) fn scroll_event_log(
+    keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut log: ResMut<EventLog>,
+) {
+    if log.state == EventLogState::Disabled {
+        return;
     }
 
-    fn push_error(&mut self, text: String) {
-        if self.state == EventLogState::Disabled {
-            return;
-        }
-        self.pending.push(PendingLogEntry {
-            text,
-            color: EVENT_LOG_ERROR_COLOR,
-        });
+    if keyboard.just_pressed(KeyCode::KeyC) {
+        log.clear();
+        return;
     }
 
-    fn separator(&mut self) {
-        if self.state == EventLogState::Disabled {
-            return;
-        }
-        self.pending.push(PendingLogEntry {
-            text:  EVENT_LOG_SEPARATOR.into(),
-            color: EVENT_LOG_COLOR,
-        });
-    }
+    // Frame-rate-independent: `EVENT_LOG_SCROLL_SPEED` is px per second.
+    let step = EVENT_LOG_SCROLL_SPEED * time.delta_secs();
+    let delta = if keyboard.pressed(KeyCode::ArrowUp) {
+        step
+    } else if keyboard.pressed(KeyCode::ArrowDown) {
+        -step
+    } else {
+        return;
+    };
+
+    // Bound scrollback to an upper estimate of the content height so holding Up
+    // at the top doesn't accumulate a value that Down must then unwind.
+    let cap = log.entries.len().to_f32() * EVENT_LOG_MAX_ENTRY_HEIGHT;
+    log.scrollback = (log.scrollback + delta).clamp(0.0, cap);
 }
 
 fn format_vec3(vector: Vec3) -> String {
@@ -285,76 +345,4 @@ pub(crate) fn log_zoom_end(event: On<ZoomEnd>, mut log: ResMut<EventLog>) {
 
 pub(crate) fn log_animation_rejected(event: On<AnimationRejected>, mut log: ResMut<EventLog>) {
     log.push_error(format!("AnimationRejected\n  source={:?}", event.source));
-}
-
-/// Spawns pending log entries as child `Text` nodes inside the scroll container
-/// and auto-scrolls to the bottom.
-pub(crate) fn update_event_log_text(
-    mut commands: Commands,
-    mut log: ResMut<EventLog>,
-    container_query: Query<(Entity, &ComputedNode), With<EventLogNode>>,
-    mut scroll_query: Query<&mut ScrollPosition, With<EventLogNode>>,
-) {
-    if log.pending.is_empty() {
-        return;
-    }
-
-    let Ok((container, computed)) = container_query.single() else {
-        return;
-    };
-
-    for entry in log.pending.drain(..) {
-        commands.entity(container).with_child((
-            Text::new(entry.text),
-            TextFont {
-                font_size: FontSize::Px(EVENT_LOG_FONT_SIZE),
-                ..default()
-            },
-            TextColor(entry.color),
-        ));
-    }
-
-    // Auto-scroll to bottom.
-    if let Ok(mut scroll) = scroll_query.single_mut() {
-        let content_height = computed.content_size().y;
-        let container_height = computed.size().y;
-        let max_scroll =
-            (content_height - container_height).max(0.0) * computed.inverse_scale_factor();
-        scroll.y =
-            EVENT_LOG_SCROLL_SPEED.mul_add(EVENT_LOG_AUTO_SCROLL_STEP_MULTIPLIER, max_scroll);
-    }
-}
-
-/// Scrolls the event log with Up/Down arrow keys, clears with `C`.
-pub(crate) fn scroll_event_log(
-    mut commands: Commands,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut scroll_query: Query<(Entity, &mut ScrollPosition, &ComputedNode), With<EventLogNode>>,
-    children_query: Query<&Children>,
-) {
-    let Ok((container, mut scroll, computed)) = scroll_query.single_mut() else {
-        return;
-    };
-
-    if keyboard.just_pressed(KeyCode::KeyC) {
-        if let Ok(children) = children_query.get(container) {
-            for child in children.iter() {
-                commands.entity(child).despawn();
-            }
-        }
-        scroll.y = 0.0;
-        return;
-    }
-
-    let delta_y = if keyboard.pressed(KeyCode::ArrowDown) {
-        EVENT_LOG_SCROLL_SPEED
-    } else if keyboard.pressed(KeyCode::ArrowUp) {
-        -EVENT_LOG_SCROLL_SPEED
-    } else {
-        return;
-    };
-
-    let max_scroll =
-        (computed.content_size().y - computed.size().y).max(0.0) * computed.inverse_scale_factor();
-    scroll.y = (scroll.y + delta_y).clamp(0.0, max_scroll);
 }

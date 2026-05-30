@@ -8,35 +8,24 @@
 //! Controls:
 //!   P or Space — toggle game pause
 
-use std::f32::consts::FRAC_PI_2;
-use std::f32::consts::PI;
-
 use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::InvalidSize;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextAlign;
-use bevy_diegetic::Unit;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::TimeSource;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
+use fairy_dust::CubeFacePanelContent;
+use fairy_dust::CubeFacePanelStyle;
 use fairy_dust::DescriptionPanel;
+use fairy_dust::Face;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
+use fairy_dust::cube_face_panel;
+use fairy_dust::cube_face_panel_tree;
+use fairy_dust::cube_face_transform;
 
 fn main() {
     fairy_dust::sprinkle_example()
@@ -50,10 +39,7 @@ fn main() {
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .insert((Cube, CameraHomeTarget))
-        .with_orbit_cam(
-            configure_camera,
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(configure_camera, OrbitCamPreset::BlenderLike)
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
@@ -61,10 +47,13 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_title("Pausing")
-                .with_anchor(Anchor::TopLeft),
+                .with_anchor(Anchor::TopLeft)
+                .control(PAUSE_CONTROL),
         )
+        .wire_chip_to_activation::<PauseState>(PAUSE_CONTROL)
         .with_description_panel(description_panel())
         .with_camera_control_panel()
+        .init_resource::<PauseState>()
         .add_systems(PostStartup, spawn_face_panels)
         // Chained so the pause toggle, panel refresh, and cube rotation all
         // observe the same `Time<Virtual>` state within a single frame.
@@ -90,19 +79,49 @@ fn main() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CUBE_ROTATION_SPEED: f32 = 0.8;
+const PAUSE_CONTROL: &str = "P Pause";
 
 #[derive(Component)]
 struct Cube;
 
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum PauseState {
+    #[default]
+    Running,
+    Paused,
+}
+
+impl PauseState {
+    const fn control_activation(self) -> ControlActivation {
+        match self {
+            Self::Running => ControlActivation::Inactive,
+            Self::Paused => ControlActivation::Active,
+        }
+    }
+}
+
+impl TitleChipActivation for PauseState {
+    fn activation(&self) -> ControlActivation { self.control_activation() }
+}
+
 const fn configure_camera(camera: &mut OrbitCam) { camera.time_source = TimeSource::Real; }
 
-fn pause_game_system(key_input: Res<ButtonInput<KeyCode>>, mut time: ResMut<Time<Virtual>>) {
+fn pause_game_system(
+    key_input: Res<ButtonInput<KeyCode>>,
+    mut time: ResMut<Time<Virtual>>,
+    mut pause_state: ResMut<PauseState>,
+) {
     if key_input.just_pressed(KeyCode::KeyP) || key_input.just_pressed(KeyCode::Space) {
         if time.is_paused() {
             time.unpause();
         } else {
             time.pause();
         }
+        *pause_state = if time.is_paused() {
+            PauseState::Paused
+        } else {
+            PauseState::Running
+        };
     }
 }
 
@@ -118,12 +137,12 @@ fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Cu
 // SCENE SCAFFOLDING — cube body, ground, and camera home placement.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_GROUND_CLEARANCE: f32 = 0.1;
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + CUBE_GROUND_CLEARANCE, 0.0);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
+const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(CUBE_GROUND_CLEARANCE);
 
-const GROUND_SIZE: f32 = 5.0;
+const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;
 
 const HOME_PITCH: f32 = 0.42;
 const HOME_YAW: f32 = -0.28;
@@ -134,11 +153,16 @@ const HOME_MARGIN: f32 = 0.5;
 // when the pause state changes.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const FACE_PANEL_OFFSET: f32 = CUBE_SIZE * 0.5 + 0.003;
-const FACE_PANEL_PADDING: f32 = 0.04;
-const FACE_PANEL_ROW_GAP: f32 = 0.05;
 const FACE_PANEL_TEXT_SIZE: f32 = 68.0;
-const FACE_PANEL_TEXT_COLOR: Color = Color::srgb(0.16, 0.42, 1.0);
+const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle {
+    size:             CUBE_SIZE,
+    padding:          0.04,
+    row_gap:          0.05,
+    title_size:       FACE_PANEL_TEXT_SIZE,
+    body_size:        FACE_PANEL_TEXT_SIZE,
+    active_body_size: FACE_PANEL_TEXT_SIZE,
+    color:            fairy_dust::CUBE_FACE_PANEL_BLUE,
+};
 
 const CAMERA_LABEL: &str = "OrbitCam";
 const CAMERA_TIME_SOURCE_LABEL: &str = "TimeSource::Real";
@@ -154,27 +178,33 @@ fn spawn_face_panels(mut commands: Commands, cube_query: Query<Entity, With<Cube
         return;
     };
 
-    let Ok(camera_panel) = face_panel(CAMERA_LABEL, CAMERA_TIME_SOURCE_LABEL) else {
+    let Ok(camera_panel) = cube_face_panel(
+        FACE_PANEL_STYLE,
+        panel_content(CAMERA_LABEL, CAMERA_TIME_SOURCE_LABEL),
+    ) else {
         return;
     };
-    let Ok(game_panel) = game_status_panel(false) else {
+    let Ok(game_panel) = cube_face_panel(
+        FACE_PANEL_STYLE,
+        panel_content(game_status_title(false), GAME_TIME_SOURCE_LABEL),
+    ) else {
         return;
     };
 
     commands.entity(cube).with_children(|parent| {
-        for transform in [front_face_transform(), back_face_transform()] {
+        for face in [Face::Front, Face::Back] {
             parent.spawn((
                 Name::new("Camera time source panel"),
                 camera_panel.clone(),
-                transform,
+                cube_face_transform(face, CUBE_SIZE),
             ));
         }
-        for transform in [left_face_transform(), right_face_transform()] {
+        for face in [Face::Left, Face::Right] {
             parent.spawn((
                 Name::new("Game time source panel"),
                 GameStatusPanel,
                 game_panel.clone(),
-                transform,
+                cube_face_transform(face, CUBE_SIZE),
             ));
         }
     });
@@ -195,61 +225,18 @@ fn update_game_panels(
     }
 
     *paused_state = Some(paused);
-    let tree = face_panel_tree(game_status_title(paused), GAME_TIME_SOURCE_LABEL);
+    let tree = cube_face_panel_tree(
+        FACE_PANEL_STYLE,
+        panel_content(game_status_title(paused), GAME_TIME_SOURCE_LABEL),
+    );
 
     for panel in &panels {
         commands.set_tree(panel, tree.clone());
     }
 }
 
-fn face_panel(title: &str, time_source: &str) -> Result<DiegeticPanel, InvalidSize> {
-    let transparent = face_panel_material();
-    DiegeticPanel::world()
-        .size(CUBE_SIZE, CUBE_SIZE)
-        .font_unit(Unit::Millimeters)
-        .anchor(Anchor::Center)
-        .material(transparent.clone())
-        .text_material(transparent)
-        .with_tree(face_panel_tree(title, time_source))
-        .build()
-}
-
-fn game_status_panel(paused: bool) -> Result<DiegeticPanel, InvalidSize> {
-    face_panel(game_status_title(paused), GAME_TIME_SOURCE_LABEL)
-}
-
-fn face_panel_tree(title: &str, time_source: &str) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::new()
-            .width(Sizing::fixed(CUBE_SIZE))
-            .height(Sizing::fixed(CUBE_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(FACE_PANEL_ROW_GAP)
-            .padding(Padding::all(FACE_PANEL_PADDING))
-            .clip(),
-    );
-    let text_style = face_panel_text();
-    builder.text(title, text_style.clone());
-    builder.text(time_source, text_style);
-    builder.build()
-}
-
-fn face_panel_text() -> LayoutTextStyle {
-    LayoutTextStyle::new(FACE_PANEL_TEXT_SIZE)
-        .with_color(FACE_PANEL_TEXT_COLOR)
-        .with_align(TextAlign::Center)
-        .with_shadow_mode(GlyphShadowMode::None)
-        .no_wrap()
-}
-
-fn face_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::NONE,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default_panel_material()
-    }
+fn panel_content(title: &'static str, time_source: &'static str) -> CubeFacePanelContent {
+    CubeFacePanelContent::idle(title, [time_source])
 }
 
 const fn game_status_title(paused: bool) -> &'static str {
@@ -258,21 +245,6 @@ const fn game_status_title(paused: bool) -> &'static str {
     } else {
         GAME_UNPAUSED_LABEL
     }
-}
-
-const fn front_face_transform() -> Transform { Transform::from_xyz(0.0, 0.0, FACE_PANEL_OFFSET) }
-
-fn back_face_transform() -> Transform {
-    Transform::from_xyz(0.0, 0.0, -FACE_PANEL_OFFSET).with_rotation(Quat::from_rotation_y(PI))
-}
-
-fn left_face_transform() -> Transform {
-    Transform::from_xyz(-FACE_PANEL_OFFSET, 0.0, 0.0)
-        .with_rotation(Quat::from_rotation_y(-FRAC_PI_2))
-}
-
-fn right_face_transform() -> Transform {
-    Transform::from_xyz(FACE_PANEL_OFFSET, 0.0, 0.0).with_rotation(Quat::from_rotation_y(FRAC_PI_2))
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

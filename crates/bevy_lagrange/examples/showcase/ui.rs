@@ -10,22 +10,6 @@ pub(crate) struct AnimationConflictPolicyLabel;
 pub(crate) struct PausedOverlay;
 
 pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
-    // Instructions
-    commands.spawn((
-        Text::new(INSTRUCTIONS_TEXT),
-        TextFont {
-            font_size: FontSize::Px(UI_FONT_SIZE),
-            ..default()
-        },
-        Node {
-            position_type: PositionType::Absolute,
-            top: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            ..default()
-        },
-        UiTargetCamera(camera),
-    ));
-
     // Interrupt behavior hint (bottom-left)
     commands.spawn((
         Text::new(animation_controls::interrupt_behavior_hint_text(
@@ -66,7 +50,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
         UiTargetCamera(camera),
     ));
 
-    event_log::spawn_ui(commands, camera);
+    event_log::spawn_log_panel(commands);
 
     // Paused overlay (centered, hidden until Esc)
     commands.spawn((

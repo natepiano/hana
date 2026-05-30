@@ -32,7 +32,6 @@ use bevy_diegetic::StableTransparency;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToU8;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
@@ -41,6 +40,7 @@ use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
 
 // ── Colors ──────────────────────────────────────────────────────────
 const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
@@ -162,7 +162,7 @@ fn main() {
         .with_ground_plane()
         .size(0.35)
         .transform(Transform::from_xyz(0.0, -0.04, 0.0))
-        .with_orbit_cam(
+        .with_orbit_cam_preset_bundle(
             |cam| {
                 cam.focus = HOME_FOCUS;
                 cam.radius = Some(HOME_RADIUS);
@@ -171,8 +171,8 @@ fn main() {
                 cam.zoom_sensitivity = 1.0;
                 cam.zoom_lower_limit = 0.000_000_1;
             },
+            OrbitCamPreset::BlenderLike,
             (
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
                 Projection::Perspective(PerspectiveProjection {
                     near: 0.001,
                     near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),
@@ -189,20 +189,8 @@ fn main() {
         .margin(HOME_MARGIN)
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .with_title_bar(panel_rendering_title_bar(SCENE_ILLUMINANCE))
-        .wire_chip_to_state::<OitEnabled, _>(OIT_CONTROL, |oit| {
-            if oit.0 {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
-        })
-        .wire_chip_to_state::<TaaEnabled, _>(TAA_CONTROL, |taa| {
-            if taa.0 {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
-        })
+        .wire_chip_to_activation::<OitEnabled>(OIT_CONTROL)
+        .wire_chip_to_activation::<TaaEnabled>(TAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<LightingPreset>()
         .init_resource::<OitEnabled>()
@@ -549,12 +537,32 @@ fn sync_taa_msaa(
 #[derive(Resource, Default)]
 struct OitEnabled(bool);
 
+impl TitleChipActivation for OitEnabled {
+    fn activation(&self) -> ControlActivation {
+        if self.0 {
+            ControlActivation::Active
+        } else {
+            ControlActivation::Inactive
+        }
+    }
+}
+
 /// Whether TAA is currently enabled on the scene camera.
 #[derive(Resource)]
 struct TaaEnabled(bool);
 
 impl Default for TaaEnabled {
     fn default() -> Self { Self(true) }
+}
+
+impl TitleChipActivation for TaaEnabled {
+    fn activation(&self) -> ControlActivation {
+        if self.0 {
+            ControlActivation::Active
+        } else {
+            ControlActivation::Inactive
+        }
+    }
 }
 
 // ── Panel builders ──────────────────────────────────────────────────

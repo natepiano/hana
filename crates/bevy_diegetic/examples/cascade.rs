@@ -46,7 +46,6 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_diegetic::resolved_font_unit;
 use bevy_diegetic::resolved_text_alpha;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -151,10 +150,7 @@ fn main() {
                 GROUND_PLANE_DEPTH_SCALE,
             )),
         )
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)

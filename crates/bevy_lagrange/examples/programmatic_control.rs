@@ -12,7 +12,6 @@
 use bevy::prelude::*;
 use bevy_kana::event;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
@@ -22,12 +21,10 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
-        .with_orbit_cam(
+        .with_orbit_cam_preset_bundle(
             configure_camera,
-            (
-                ProgrammaticCamera,
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-            ),
+            OrbitCamPreset::BlenderLike,
+            ProgrammaticCamera,
         )
         .with_ground_plane()
         .size(GROUND_SIZE)
@@ -202,9 +199,9 @@ fn camera_at_home(camera: &OrbitCam) -> bool {
 // SCENE SCAFFOLDING — cube the camera homes onto, ground sized to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + 0.2, 0.0);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
+const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(0.2);
 
 const GROUND_SIZE: f32 = 8.0;
 

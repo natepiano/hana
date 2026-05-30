@@ -28,12 +28,12 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
 
 // Camera home pose.
 const HOME_YAW: f32 = 0.015;
@@ -49,12 +49,10 @@ const SMAA_CONTROL: &str = "S SMAA";
 const ROTATION_SPEED: f32 = 1.5;
 
 // Cube + per-face label styling.
-const CUBE_SIZE: f32 = 1.0;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(-2.5, 1.0, 2.5);
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
 const CUBE_YAW: f32 = 20.0;
-const FACE_LABEL_SIZE: f32 = 0.20;
-const FACE_LABEL_COLOR: Color = Color::srgb(0.9, 0.3, 0.1);
 
 // Translucent backdrop behind the anchor demo labels.
 const ANCHOR_FRAME_COLOR: Color = Color::srgba(0.08, 0.08, 0.08, 0.18);
@@ -77,16 +75,13 @@ fn main() {
                 .with_rotation(Quat::from_rotation_y(CUBE_YAW.to_radians())),
         )
         .insert((CameraHomeTarget, DemoCube))
-        .face_text(Face::Front, "FRONT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Back, "BACK", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Top, "TOP", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Bottom, "BOTTOM", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Left, "LEFT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .face_text(Face::Right, "RIGHT", FACE_LABEL_SIZE, FACE_LABEL_COLOR)
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .face_label(Face::Front, "FRONT")
+        .face_label(Face::Back, "BACK")
+        .face_label(Face::Top, "TOP")
+        .face_label(Face::Bottom, "BOTTOM")
+        .face_label(Face::Left, "LEFT")
+        .face_label(Face::Right, "RIGHT")
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)
@@ -115,10 +110,7 @@ fn main() {
             |e| e.axis == Vec3::Z,
             |e| e.axis == Vec3::Z,
         )
-        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
-            SmaaState::On => ControlActivation::Active,
-            SmaaState::Off => ControlActivation::Inactive,
-        })
+        .wire_chip_to_activation::<SmaaState>(SMAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<AnchorRotation>()
         .init_resource::<SmaaState>()
@@ -270,6 +262,15 @@ enum SmaaState {
     Off,
     /// SMAA on: mesh edges resolve while the OIT text stays stable.
     On,
+}
+
+impl TitleChipActivation for SmaaState {
+    fn activation(&self) -> ControlActivation {
+        match self {
+            Self::On => ControlActivation::Active,
+            Self::Off => ControlActivation::Inactive,
+        }
+    }
 }
 
 /// On `S`, flip [`SmaaState`] and add or remove [`Smaa`] on the scene camera.

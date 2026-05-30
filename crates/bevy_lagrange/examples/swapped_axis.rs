@@ -566,49 +566,55 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
             .with_color(PANEL_INACTIVE_COLOR)
             .no_wrap(),
     };
-    screen_panel_frame(builder, Sizing::FIT, DEFAULT_PANEL_BACKGROUND, |builder| {
-        builder.with(
-            El::new()
-                .width(Sizing::FIT)
-                .height(Sizing::FIT)
-                .direction(Direction::LeftToRight)
-                .child_gap(PANEL_COLUMN_GAP),
-            |builder| {
-                build_column(
-                    builder,
-                    "ENGINE",
-                    ENGINES
-                        .into_iter()
-                        .map(|(_, engine, name, ..)| (name, engine == selected)),
-                    &styles,
-                );
-                build_column(
-                    builder,
-                    "UP",
-                    ENGINES
-                        .into_iter()
-                        .map(|(_, engine, _, up, ..)| (up, engine == selected)),
-                    &styles,
-                );
-                build_column(
-                    builder,
-                    "FORWARD",
-                    ENGINES
-                        .into_iter()
-                        .map(|(_, engine, _, _, forward, _)| (forward, engine == selected)),
-                    &styles,
-                );
-                build_column(
-                    builder,
-                    "HANDED",
-                    ENGINES
-                        .into_iter()
-                        .map(|(_, engine, _, _, _, handed)| (handed, engine == selected)),
-                    &styles,
-                );
-            },
-        );
-    });
+    screen_panel_frame(
+        builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::LeftToRight)
+                    .child_gap(PANEL_COLUMN_GAP),
+                |builder| {
+                    build_column(
+                        builder,
+                        "ENGINE",
+                        ENGINES
+                            .into_iter()
+                            .map(|(_, engine, name, ..)| (name, engine == selected)),
+                        &styles,
+                    );
+                    build_column(
+                        builder,
+                        "UP",
+                        ENGINES
+                            .into_iter()
+                            .map(|(_, engine, _, up, ..)| (up, engine == selected)),
+                        &styles,
+                    );
+                    build_column(
+                        builder,
+                        "FORWARD",
+                        ENGINES
+                            .into_iter()
+                            .map(|(_, engine, _, _, forward, _)| (forward, engine == selected)),
+                        &styles,
+                    );
+                    build_column(
+                        builder,
+                        "HANDED",
+                        ENGINES
+                            .into_iter()
+                            .map(|(_, engine, _, _, _, handed)| (handed, engine == selected)),
+                        &styles,
+                    );
+                },
+            );
+        },
+    );
 }
 
 /// Draws one labeled column: a header followed by one chip per row, each chip

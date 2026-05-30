@@ -7,6 +7,8 @@ use bevy::prelude::Vec3;
 // camera home
 pub(super) const CAMERA_START_PITCH: f32 = 0.4;
 pub(super) const CAMERA_START_YAW: f32 = -0.2;
+/// Framing margin for the Home view — 10% looser than the scene-fit margin.
+pub(super) const HOME_MARGIN: f32 = ZOOM_MARGIN_SCENE * 1.1;
 
 // durations
 pub(super) const ANIMATE_FIT_DURATION_MILLIS: u64 = 1200;
@@ -56,21 +58,33 @@ pub(super) const ALL_EASINGS: &[EaseFunction] = &[
 ];
 
 // event log
-pub(super) const EVENT_LOG_AUTO_SCROLL_STEP_MULTIPLIER: f32 = 4.0;
 pub(super) const EVENT_LOG_CAMERA_MOVE_END: &str = "CameraMoveEnd";
-pub(super) const EVENT_LOG_COLOR: Color = Color::srgba(0.0, 1.0, 0.0, 0.9);
+pub(super) const EVENT_LOG_CHILD_GAP: f32 = 8.0;
+/// Normal log text — white, matching the panel title.
+pub(super) const EVENT_LOG_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
+/// Blue divider under the title and between the footer hints, matching the
+/// title bar's separators.
+pub(super) const EVENT_LOG_DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
+pub(super) const EVENT_LOG_DIVIDER_THICKNESS: f32 = 1.0;
 pub(super) const EVENT_LOG_EASING_RESET: &str = "Easing: reset to CubicOut";
+pub(super) const EVENT_LOG_ENTRY_GAP: f32 = 4.0;
 pub(super) const EVENT_LOG_ERROR_COLOR: Color = Color::srgba(1.0, 0.3, 0.3, 0.9);
-pub(super) const EVENT_LOG_FONT_SIZE: f32 = 14.0;
-pub(super) const EVENT_LOG_HINT_BOTTOM_PIXELS: f32 = 28.0;
-pub(super) const EVENT_LOG_PANEL_BOTTOM_PIXELS: f32 = 72.0;
-pub(super) const EVENT_LOG_SCROLL_SPEED: f32 = 120.0;
+pub(super) const EVENT_LOG_HINT_SEPARATOR_HEIGHT: f32 = 14.0;
+pub(super) const EVENT_LOG_HINT_SIZE: f32 = 11.0;
+/// Upper bound on a single entry's rendered height, used to cap how far the
+/// scrollback value may run past the real content extent.
+pub(super) const EVENT_LOG_MAX_ENTRY_HEIGHT: f32 = EVENT_LOG_TEXT_SIZE * 6.0;
+/// Event-log scroll speed in logical px per second (Up/Down arrows).
+pub(super) const EVENT_LOG_SCROLL_SPEED: f32 = 400.0;
+pub(super) const EVENT_LOG_TEXT_SIZE: f32 = 10.0;
 pub(super) const EVENT_LOG_SEPARATOR: &str = "- - - - - - - - - - - -";
-pub(super) const EVENT_LOG_WIDTH: f32 = 300.0;
+pub(super) const EVENT_LOG_TITLE: &str = "Event Log";
+/// Fixed panel width — 20% narrower than the camera control panel's ~340px.
+pub(super) const EVENT_LOG_WIDTH: f32 = 272.0;
 pub(super) const EVENT_LOG_ZOOM_CANCELLED: &str = "ZoomEnd\n  reason=Cancelled";
 pub(super) const EVENT_LOG_ZOOM_COMPLETED: &str = "ZoomEnd\n  reason=Completed";
-pub(super) const LOG_SCROLL_HINT_TEXT: &str = "Up/Down scroll log\n'C' clear log";
-pub(super) const LOG_TOGGLE_HINT_TEXT: &str = "'L' toggle log off and on";
+pub(super) const LOG_CLEAR_HINT_TEXT: &str = "clear";
+pub(super) const LOG_SCROLL_HINT_TEXT: &str = "↑↓ scroll log";
 
 // gizmos
 pub(super) const GIZMO_DEPTH_BIAS: f32 = -0.005;
@@ -80,8 +94,20 @@ pub(super) const GIZMO_SCALE: f32 = 1.001;
 // hints
 pub(super) const HINT_TEXT_COLOR: Color = Color::srgba(0.7, 0.7, 0.7, 0.7);
 
-// instructions
-pub(super) const INSTRUCTIONS_TEXT: &str = "Click a mesh to zoom-to-fit\nClick the ground to zoom back out\n\nPress:\n'Esc' pause / unpause\n'P' toggle projection\n'D' debug overlay\n'H' Home w/animate fit to scene\n'A' animate camera\n'F' look at hovered mesh\n'G' look at + zoom-to-fit hovered mesh\n'R' randomize easing\n'E' reset to 'CubicOut' easing\n'I' toggle interrupt behavior\n'Q' cycle conflict policy\n'W' toggle second window";
+// title bar controls
+pub(super) const ANIMATE_CONTROL: &str = "A Orbit";
+pub(super) const CONFLICT_CONTROL: &str = "Q Conflict";
+pub(super) const EASING_CONTROL: &str = "R Easing";
+pub(super) const EASING_RESET_CONTROL: &str = "E Reset";
+pub(super) const EVENT_LOG_CONTROL: &str = "L Log";
+pub(super) const INTERRUPT_CONTROL: &str = "I Interrupt";
+pub(super) const LOOK_AND_FIT_CONTROL: &str = "G LookAt+Fit";
+pub(super) const LOOK_AT_CONTROL: &str = "F LookAt";
+pub(super) const OVERLAY_CONTROL: &str = "D Bounds";
+pub(super) const PAUSE_CONTROL: &str = "Esc Pause";
+pub(super) const PROJECTION_CONTROL: &str = "P Projection";
+pub(super) const SECOND_WINDOW_CONTROL: &str = "W Window 2";
+pub(super) const SHOWCASE_TITLE: &str = "Showcase";
 
 // mesh settings
 pub(super) const MESH_CENTER_Y: f32 = 1.0;
@@ -113,7 +139,7 @@ pub(super) const THIRD_ORBIT_MOVE_QUARTER_TURNS: f32 = 3.0;
 
 // scene
 pub(super) const GROUND_ALPHA: f32 = 0.85;
-pub(super) const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
+pub(super) const GROUND_COLOR: Color = Color::srgb(0.125, 0.14, 0.16);
 pub(super) const GROUND_SIZE: f32 = 12.0;
 pub(super) const MESH_CUBOID_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 pub(super) const MESH_CUBOID_SIZE: Vec3 = Vec3::splat(1.0);
@@ -129,10 +155,6 @@ pub(super) const MESH_TORUS_MAJOR_RESOLUTION: usize = 64;
 pub(super) const MESH_TORUS_MINOR_RADIUS: f32 = 0.25;
 pub(super) const MESH_TORUS_MINOR_RESOLUTION: usize = 64;
 pub(super) const MESH_TORUS_TRANSLATION: Vec3 = Vec3::new(2.5, MESH_CENTER_Y, 0.0);
-pub(super) const SCENE_LIGHT_ILLUMINANCE: f32 = 3000.0;
-pub(super) const SCENE_LIGHT_ROTATION_X: f32 = -PI / 4.0;
-pub(super) const SCENE_LIGHT_ROTATION_Y: f32 = PI / 4.0;
-pub(super) const SCENE_LIGHT_ROTATION_Z: f32 = 0.0;
 pub(super) const UNDERSIDE_PLANE_COLOR: Color = Color::srgba(0.0, 0.0, 0.0, 0.0);
 pub(super) const UNDERSIDE_PLANE_ROTATION_X: f32 = PI;
 

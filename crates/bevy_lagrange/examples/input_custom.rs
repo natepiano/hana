@@ -13,23 +13,7 @@
 use std::f32::consts::TAU;
 
 use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Anchor as PanelAnchor;
-use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::InvalidSize;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextAlign;
-use bevy_diegetic::Unit;
-use bevy_diegetic::default_panel_material;
 use bevy_enhanced_input::prelude::ModKeys;
 use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraInputRoutingConfig;
@@ -38,6 +22,7 @@ use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamBindingsError;
+use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionStarted;
@@ -46,16 +31,25 @@ use bevy_lagrange::OrbitCamMouseDrag;
 use bevy_lagrange::OrbitCamMouseWheelZoom;
 use bevy_lagrange::OrbitCamPinchZoom;
 use bevy_lagrange::OrbitCamTrackpadScroll;
-use bevy_lagrange::UpsideDownPolicy;
 use bevy_lagrange::ZoomDirection;
+use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
+use fairy_dust::CubeFacePanelContent;
+use fairy_dust::CubeFacePanelStyle;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::Face;
 use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::HoldState;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::ReleaseHold;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
+use fairy_dust::apply_example_orbit_cam_limits;
+use fairy_dust::cube_face_panel;
+use fairy_dust::cube_face_panel_tree;
+use fairy_dust::cube_face_transform;
 
 fn main() {
     let Ok(bindings) = custom_bindings() else {
@@ -88,30 +82,16 @@ fn main() {
             TitleBar::new()
                 .with_title("Custom Bindings")
                 .with_anchor(Anchor::TopLeft)
-                .control(CUBE_SPIN_CONTROL)
                 .control(INPUT_DISABLED_CONTROL),
         )
-        .wire_chip_to_state::<CubeSpinState, _>(CUBE_SPIN_CONTROL, |state| {
-            state.cube_spin.control_activation()
-        })
-        .wire_chip_to_state::<InputDisabledState, _>(INPUT_DISABLED_CONTROL, |state| {
-            activation_for(state.disabled)
-        })
+        .wire_chip_to_activation::<InputDisabledState>(INPUT_DISABLED_CONTROL)
+        .with_cube_spin::<CustomInputCube>()
         .with_description_panel(description_panel())
         .with_camera_control_panel()
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
-        .init_resource::<CubeSpinState>()
         .insert_resource(FaceLabelHold::default())
-        .add_systems(
-            Update,
-            (
-                toggle_camera_controls,
-                toggle_cube_spin,
-                update_face_labels,
-                spin_cube,
-            ),
-        )
+        .add_systems(Update, (toggle_camera_controls, update_face_labels))
         .add_observer(capture_zoom_started)
         .run();
 }
@@ -132,12 +112,9 @@ const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
 const CAMERA_ORBIT_SENSITIVITY: f32 = 1.5;
 const CAMERA_PAN_SENSITIVITY: f32 = 0.5;
 const CAMERA_PITCH: f32 = TAU / 8.0;
-const CAMERA_PITCH_LIMIT: f32 = TAU / 3.0;
 const CAMERA_RADIUS: f32 = 5.0;
 const CAMERA_YAW: f32 = TAU / 8.0;
-const CAMERA_ZOOM_LOWER_LIMIT: f32 = 1.0;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.5;
-const CAMERA_ZOOM_UPPER_LIMIT: f32 = 8.0;
 const HOME_MARGIN: f32 = 0.5;
 const INPUT_DISABLED_CONTROL: &str = "T Disabled";
 
@@ -149,26 +126,27 @@ struct InputDisabledState {
     disabled: bool,
 }
 
+impl TitleChipActivation for InputDisabledState {
+    fn activation(&self) -> ControlActivation { activation_for(self.disabled) }
+}
+
 #[derive(Component)]
 struct CustomCamera;
 
 fn spawn_camera(mut commands: Commands, bindings: Res<CustomBindings>) {
+    let mut camera = OrbitCam {
+        focus: CAMERA_FOCUS,
+        yaw: Some(CAMERA_YAW),
+        pitch: Some(CAMERA_PITCH),
+        radius: Some(CAMERA_RADIUS),
+        orbit_sensitivity: CAMERA_ORBIT_SENSITIVITY,
+        pan_sensitivity: CAMERA_PAN_SENSITIVITY,
+        zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
+        ..default()
+    };
+    apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
-        OrbitCam {
-            focus: CAMERA_FOCUS,
-            yaw: Some(CAMERA_YAW),
-            pitch: Some(CAMERA_PITCH),
-            radius: Some(CAMERA_RADIUS),
-            pitch_upper_limit: Some(CAMERA_PITCH_LIMIT),
-            pitch_lower_limit: Some(-CAMERA_PITCH_LIMIT),
-            zoom_upper_limit: Some(CAMERA_ZOOM_UPPER_LIMIT),
-            zoom_lower_limit: CAMERA_ZOOM_LOWER_LIMIT,
-            orbit_sensitivity: CAMERA_ORBIT_SENSITIVITY,
-            pan_sensitivity: CAMERA_PAN_SENSITIVITY,
-            zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
-            upside_down_policy: UpsideDownPolicy::Allow,
-            ..default()
-        },
+        camera,
         OrbitCamInputMode::Bindings(bindings.0.clone()),
         CustomCamera,
         FairyDustOrbitCam,
@@ -221,19 +199,7 @@ const fn activation_for(active: bool) -> ControlActivation {
 // CUBE FACE PANELS — live face panels showing active custom input sources.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const FACE_LABEL_COLOR: Color = Color::srgb(0.1, 0.35, 1.0);
-const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.3;
-const FACE_PANEL_ACTIVE_SIZE: f32 = 46.0;
-const FACE_PANEL_BODY_SIZE: f32 = 40.0;
-const FACE_PANEL_OFFSET: f32 = CUBE_SIZE * 0.5 + 0.006;
-const FACE_PANEL_PADDING: f32 = 0.065;
-const FACE_PANEL_ROW_GAP: f32 = 0.025;
-const FACE_PANEL_SIZE: f32 = CUBE_SIZE * 0.88;
-const FACE_PANEL_TITLE_SIZE: f32 = 66.0;
-
-const ORBIT_LABELS: &[&str] = &["Middle mouse drag", "Trackpad scroll"];
-const PAN_LABELS: &[&str] = &["Right mouse drag", "Shift + trackpad"];
-const ZOOM_LABELS: &[&str] = &["Wheel", "Ctrl + trackpad", "Pinch"];
+const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle::for_cube(CUBE_SIZE);
 
 #[derive(Component)]
 struct CustomInputCube;
@@ -245,11 +211,34 @@ enum CustomFaceLabel {
     Zoom,
 }
 
+impl CustomFaceLabel {
+    const fn kind(self) -> OrbitCamInteractionKind {
+        match self {
+            Self::Orbit => OrbitCamInteractionKind::Orbit,
+            Self::Pan => OrbitCamInteractionKind::Pan,
+            Self::Zoom => OrbitCamInteractionKind::Zoom,
+        }
+    }
+
+    const fn title(self) -> &'static str {
+        match self {
+            Self::Orbit => "Orbit",
+            Self::Pan => "Pan",
+            Self::Zoom => "Zoom",
+        }
+    }
+}
+
+/// Holds the bindings' described controls so idle/active face labels share the
+/// camera control panel's vocabulary.
+#[derive(Resource)]
+struct FaceGuidance(OrbitCamControlSummary);
+
 #[derive(Resource, Default)]
 struct FaceLabelHold {
-    orbit: HeldFaceLabel,
-    pan:   HeldFaceLabel,
-    zoom:  HeldFaceLabel,
+    orbit: ReleaseHold<Vec<String>>,
+    pan:   ReleaseHold<Vec<String>>,
+    zoom:  ReleaseHold<Vec<String>>,
 }
 
 impl FaceLabelHold {
@@ -260,95 +249,35 @@ impl FaceLabelHold {
     }
 }
 
-#[derive(Default)]
-struct HeldFaceLabel {
-    remaining_secs: f32,
-    lines:          Option<Vec<String>>,
-}
-
-impl HeldFaceLabel {
-    fn clear(&mut self) {
-        self.remaining_secs = 0.0;
-        self.lines = None;
-    }
-
-    fn hold_sources(&mut self, sources: CameraInteractionSources) {
-        let Some(lines) = source_lines(sources) else {
-            return;
-        };
-        self.remaining_secs = FACE_LABEL_RELEASE_DELAY_SECS;
-        self.lines = Some(lines);
-    }
-}
-
-#[derive(Clone)]
-struct FacePanelContent {
-    title:    &'static str,
-    lines:    Vec<String>,
-    activity: FacePanelActivity,
-}
-
-#[derive(Clone, Copy)]
-enum FacePanelActivity {
-    Active,
-    Idle,
-}
-
-impl FacePanelContent {
-    fn idle(title: &'static str, lines: &'static [&'static str]) -> Self {
-        Self {
-            title,
-            lines: lines.iter().map(|line| (*line).to_string()).collect(),
-            activity: FacePanelActivity::Idle,
-        }
-    }
-
-    const fn active(title: &'static str, lines: Vec<String>) -> Self {
-        Self {
-            title,
-            lines,
-            activity: FacePanelActivity::Active,
-        }
-    }
-}
-
-fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<CustomInputCube>>) {
+fn spawn_face_labels(
+    mut commands: Commands,
+    bindings: Res<CustomBindings>,
+    cubes: Query<Entity, With<CustomInputCube>>,
+) {
     let Ok(cube) = cubes.single() else {
         return;
     };
 
+    let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings.0.clone()));
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
-            spawn_face_panel(
-                parent,
-                face,
-                CustomFaceLabel::Orbit,
-                FacePanelContent::idle("Orbit", ORBIT_LABELS),
-            );
+            spawn_face_panel(parent, face, CustomFaceLabel::Orbit, &summary);
         }
         for face in [Face::Left, Face::Right] {
-            spawn_face_panel(
-                parent,
-                face,
-                CustomFaceLabel::Pan,
-                FacePanelContent::idle("Pan", PAN_LABELS),
-            );
+            spawn_face_panel(parent, face, CustomFaceLabel::Pan, &summary);
         }
         for face in [Face::Top, Face::Bottom] {
-            spawn_face_panel(
-                parent,
-                face,
-                CustomFaceLabel::Zoom,
-                FacePanelContent::idle("Zoom", ZOOM_LABELS),
-            );
+            spawn_face_panel(parent, face, CustomFaceLabel::Zoom, &summary);
         }
     });
+    commands.insert_resource(FaceGuidance(summary));
 }
 
 fn update_face_labels(
     mut commands: Commands,
     time: Res<Time>,
     mut hold: ResMut<FaceLabelHold>,
+    guidance: Res<FaceGuidance>,
     cameras: Query<(&OrbitCamInteractionState, Option<&CameraInputDisabled>), With<CustomCamera>>,
     labels: Query<(Entity, &CustomFaceLabel)>,
 ) {
@@ -359,32 +288,44 @@ fn update_face_labels(
     let (orbit, pan, zoom) = if disabled.is_some() {
         hold.clear();
         (
-            FacePanelContent::active("Orbit", vec!["Disabled".to_string()]),
-            FacePanelContent::active("Pan", vec!["Disabled".to_string()]),
-            FacePanelContent::active("Zoom", vec!["Disabled".to_string()]),
+            CubeFacePanelContent::active("Orbit", ["Disabled"]),
+            CubeFacePanelContent::active("Pan", ["Disabled"]),
+            CubeFacePanelContent::active("Zoom", ["Disabled"]),
         )
     } else {
         (
             held_content(
                 &mut hold.orbit,
-                time.delta_secs(),
-                source_lines(interaction_state.orbit_sources()),
-                ORBIT_LABELS,
-                "Orbit",
+                time.delta(),
+                active_labels(
+                    &guidance.0,
+                    OrbitCamInteractionKind::Orbit,
+                    interaction_state.orbit_sources(),
+                ),
+                &guidance.0,
+                CustomFaceLabel::Orbit,
             ),
             held_content(
                 &mut hold.pan,
-                time.delta_secs(),
-                source_lines(interaction_state.pan_sources()),
-                PAN_LABELS,
-                "Pan",
+                time.delta(),
+                active_labels(
+                    &guidance.0,
+                    OrbitCamInteractionKind::Pan,
+                    interaction_state.pan_sources(),
+                ),
+                &guidance.0,
+                CustomFaceLabel::Pan,
             ),
             held_content(
                 &mut hold.zoom,
-                time.delta_secs(),
-                source_lines(interaction_state.zoom_sources()),
-                ZOOM_LABELS,
-                "Zoom",
+                time.delta(),
+                active_labels(
+                    &guidance.0,
+                    OrbitCamInteractionKind::Zoom,
+                    interaction_state.zoom_sources(),
+                ),
+                &guidance.0,
+                CustomFaceLabel::Zoom,
             ),
         )
     };
@@ -395,34 +336,40 @@ fn update_face_labels(
             CustomFaceLabel::Pan => pan.clone(),
             CustomFaceLabel::Zoom => zoom.clone(),
         };
-        commands.set_tree(entity, build_face_panel_tree(next));
+        commands.set_tree(entity, cube_face_panel_tree(FACE_PANEL_STYLE, next));
     }
 }
 
 fn capture_zoom_started(
     event: On<OrbitCamInteractionStarted>,
     cameras: Query<(), With<CustomCamera>>,
+    guidance: Res<FaceGuidance>,
     mut hold: ResMut<FaceLabelHold>,
 ) {
     if event.kind != OrbitCamInteractionKind::Zoom || cameras.get(event.camera).is_err() {
         return;
     }
-    hold.zoom.hold_sources(event.sources);
+    let Some(lines) = active_labels(&guidance.0, OrbitCamInteractionKind::Zoom, event.sources)
+    else {
+        return;
+    };
+    hold.zoom.update(std::time::Duration::ZERO, Some(lines));
 }
 
 fn spawn_face_panel(
     parent: &mut ChildSpawnerCommands,
     face: Face,
     kind: CustomFaceLabel,
-    content: FacePanelContent,
+    summary: &OrbitCamControlSummary,
 ) {
-    match face_panel(content) {
+    let content = CubeFacePanelContent::idle(kind.title(), idle_labels(summary, kind.kind()));
+    match cube_face_panel(FACE_PANEL_STYLE, content) {
         Ok(panel) => {
             parent.spawn((
                 Name::new("Custom input face panel"),
                 kind,
                 panel,
-                face_panel_transform(face),
+                cube_face_transform(face, CUBE_SIZE),
             ));
         },
         Err(error) => {
@@ -431,125 +378,46 @@ fn spawn_face_panel(
     }
 }
 
-fn face_panel_transform(face: Face) -> Transform {
-    match face {
-        Face::Front => Transform::from_xyz(0.0, 0.0, FACE_PANEL_OFFSET),
-        Face::Back => Transform::from_xyz(0.0, 0.0, -FACE_PANEL_OFFSET)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
-        Face::Right => Transform::from_xyz(FACE_PANEL_OFFSET, 0.0, 0.0)
-            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
-        Face::Left => Transform::from_xyz(-FACE_PANEL_OFFSET, 0.0, 0.0)
-            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
-        Face::Top => Transform::from_xyz(0.0, FACE_PANEL_OFFSET, 0.0)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
-        Face::Bottom => Transform::from_xyz(0.0, -FACE_PANEL_OFFSET, 0.0)
-            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
-    }
+/// All control labels configured for `kind`, shown while idle.
+fn idle_labels(summary: &OrbitCamControlSummary, kind: OrbitCamInteractionKind) -> Vec<String> {
+    summary
+        .rows
+        .iter()
+        .filter(|row| row.kind == kind)
+        .map(|row| row.label.clone())
+        .collect()
 }
 
-fn face_panel(content: FacePanelContent) -> Result<DiegeticPanel, InvalidSize> {
-    let transparent = face_panel_material();
-    DiegeticPanel::world()
-        .size(FACE_PANEL_SIZE, FACE_PANEL_SIZE)
-        .font_unit(Unit::Millimeters)
-        .anchor(PanelAnchor::Center)
-        .material(transparent.clone())
-        .text_material(transparent)
-        .with_tree(build_face_panel_tree(content))
-        .build()
-}
-
-fn face_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::NONE,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default_panel_material()
-    }
-}
-
-fn build_face_panel_tree(content: FacePanelContent) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::new()
-            .width(Sizing::fixed(FACE_PANEL_SIZE))
-            .height(Sizing::fixed(FACE_PANEL_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(FACE_PANEL_ROW_GAP)
-            .padding(Padding::all(FACE_PANEL_PADDING))
-            .clip(),
-    );
-
-    builder.text(
-        content.title,
-        LayoutTextStyle::new(FACE_PANEL_TITLE_SIZE)
-            .with_color(FACE_LABEL_COLOR)
-            .with_align(TextAlign::Center)
-            .with_shadow_mode(GlyphShadowMode::None),
-    );
-
-    let body_size = match content.activity {
-        FacePanelActivity::Active => FACE_PANEL_ACTIVE_SIZE,
-        FacePanelActivity::Idle => FACE_PANEL_BODY_SIZE,
-    };
-    let body = LayoutTextStyle::new(body_size)
-        .with_color(FACE_LABEL_COLOR)
-        .with_align(TextAlign::Center)
-        .with_shadow_mode(GlyphShadowMode::None);
-
-    for line in content.lines {
-        builder.text(line, body.clone());
-    }
-
-    builder.build()
-}
-
-fn source_lines(sources: CameraInteractionSources) -> Option<Vec<String>> {
-    let mut labels = Vec::new();
-    if sources.contains(CameraInteractionSources::MOUSE) {
-        labels.push("Mouse".to_string());
-    }
-    if sources.contains(CameraInteractionSources::WHEEL) {
-        labels.push("Wheel".to_string());
-    }
-    if sources.contains(CameraInteractionSources::SMOOTH_SCROLL) {
-        labels.push("Trackpad".to_string());
-    }
-    if sources.contains(CameraInteractionSources::PINCH) {
-        labels.push("Pinch".to_string());
-    }
-    if sources.contains(CameraInteractionSources::KEYBOARD) {
-        labels.push("Keyboard".to_string());
-    }
-    if sources.contains(CameraInteractionSources::GAMEPAD) {
-        labels.push("Gamepad".to_string());
-    }
-    if sources.contains(CameraInteractionSources::MANUAL) {
-        labels.push("Manual".to_string());
-    }
+/// The control labels for `kind` whose sources are live, or `None` when idle.
+fn active_labels(
+    summary: &OrbitCamControlSummary,
+    kind: OrbitCamInteractionKind,
+    sources: CameraInteractionSources,
+) -> Option<Vec<String>> {
+    let labels = summary
+        .rows
+        .iter()
+        .filter(|row| row.kind == kind && row.camera_interaction_sources.intersects(sources))
+        .map(|row| row.label.clone())
+        .collect::<Vec<_>>();
     (!labels.is_empty()).then_some(labels)
 }
 
 fn held_content(
-    hold: &mut HeldFaceLabel,
-    delta_secs: f32,
+    hold: &mut ReleaseHold<Vec<String>>,
+    delta: std::time::Duration,
     active_lines: Option<Vec<String>>,
-    idle_lines: &'static [&'static str],
-    title: &'static str,
-) -> FacePanelContent {
-    if let Some(lines) = active_lines {
-        hold.remaining_secs = FACE_LABEL_RELEASE_DELAY_SECS;
-        hold.lines = Some(lines);
-        return FacePanelContent::active(title, hold.lines.clone().unwrap_or_default());
+    summary: &OrbitCamControlSummary,
+    label: CustomFaceLabel,
+) -> CubeFacePanelContent {
+    match hold.update(delta, active_lines) {
+        HoldState::Active(lines) | HoldState::Held(lines) => {
+            CubeFacePanelContent::active(label.title(), lines.clone())
+        },
+        HoldState::Idle => {
+            CubeFacePanelContent::idle(label.title(), idle_labels(summary, label.kind()))
+        },
     }
-
-    hold.remaining_secs = (hold.remaining_secs - delta_secs).max(0.0);
-    if hold.remaining_secs > 0.0 {
-        return FacePanelContent::active(title, hold.lines.clone().unwrap_or_default());
-    }
-
-    hold.lines = None;
-    FacePanelContent::idle(title, idle_lines)
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -573,74 +441,16 @@ fn description_panel() -> DescriptionPanel {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUBE SPIN — decorative idle spin toggled by `R`; CubeSpinState drives the chip.
+// CUBE SPIN — decorative idle spin toggled by Fairy Dust's `P Pause` helper.
 // ═════════════════════════════════════════════════════════════════════════════
-
-const CUBE_SPIN_CONTROL: &str = "R Spin";
-const CUBE_SPIN_SPEED: f32 = 0.2;
-
-#[derive(Resource)]
-struct CubeSpinState {
-    cube_spin: CubeSpin,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CubeSpin {
-    Spinning,
-    Paused,
-}
-
-impl CubeSpin {
-    const fn control_activation(self) -> ControlActivation {
-        match self {
-            Self::Spinning => ControlActivation::Active,
-            Self::Paused => ControlActivation::Inactive,
-        }
-    }
-
-    const fn toggled(self) -> Self {
-        match self {
-            Self::Spinning => Self::Paused,
-            Self::Paused => Self::Spinning,
-        }
-    }
-}
-
-impl Default for CubeSpinState {
-    fn default() -> Self {
-        Self {
-            cube_spin: CubeSpin::Spinning,
-        }
-    }
-}
-
-fn toggle_cube_spin(key_input: Res<ButtonInput<KeyCode>>, mut spin: ResMut<CubeSpinState>) {
-    if key_input.just_pressed(KeyCode::KeyR) {
-        spin.cube_spin = spin.cube_spin.toggled();
-    }
-}
-
-fn spin_cube(
-    time: Res<Time>,
-    spin: Res<CubeSpinState>,
-    mut cubes: Query<&mut Transform, With<CustomInputCube>>,
-) {
-    match spin.cube_spin {
-        CubeSpin::Spinning => {},
-        CubeSpin::Paused => return,
-    }
-    for mut transform in &mut cubes {
-        transform.rotate_y(CUBE_SPIN_SPEED * time.delta_secs());
-    }
-}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // SCENE SCAFFOLDING — cube body and ground sized to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_GROUND_CLEARANCE: f32 = 0.1;
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + CUBE_GROUND_CLEARANCE, 0.0);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
+const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(CUBE_GROUND_CLEARANCE);
 
-const GROUND_SIZE: f32 = 5.0;
+const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;

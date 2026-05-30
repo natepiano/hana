@@ -32,7 +32,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 
@@ -157,10 +156,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

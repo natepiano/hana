@@ -44,21 +44,6 @@ pub(crate) fn spawn_scene_objects(
         ))
         .observe(pointer::on_below_clicked);
 
-    // Directional light
-    commands.spawn((
-        DirectionalLight {
-            illuminance: SCENE_LIGHT_ILLUMINANCE,
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        Transform::from_rotation(Quat::from_euler(
-            EulerRot::ZYX,
-            SCENE_LIGHT_ROTATION_Z,
-            SCENE_LIGHT_ROTATION_Y,
-            SCENE_LIGHT_ROTATION_X,
-        )),
-    ));
-
     // Cuboid
     commands
         .spawn((
@@ -70,6 +55,7 @@ pub(crate) fn spawn_scene_objects(
             MeshMaterial3d(materials.add(MESH_CUBOID_COLOR)),
             Transform::from_translation(MESH_CUBOID_TRANSLATION),
             MeshShape::Cuboid(MESH_CUBOID_SIZE),
+            CameraHomeTarget,
         ))
         .observe(pointer::on_mesh_clicked)
         .observe(pointer::on_mesh_dragged)
@@ -89,6 +75,7 @@ pub(crate) fn spawn_scene_objects(
             MeshMaterial3d(materials.add(MESH_SPHERE_COLOR)),
             Transform::from_translation(MESH_SPHERE_TRANSLATION),
             MeshShape::Sphere(MESH_SPHERE_RADIUS),
+            CameraHomeTarget,
         ))
         .observe(pointer::on_mesh_clicked)
         .observe(pointer::on_mesh_dragged)
@@ -112,6 +99,7 @@ pub(crate) fn spawn_scene_objects(
                 minor_radius: MESH_TORUS_MINOR_RADIUS,
                 major_radius: MESH_TORUS_MAJOR_RADIUS,
             },
+            CameraHomeTarget,
         ))
         .observe(pointer::on_mesh_clicked)
         .observe(pointer::on_mesh_dragged)

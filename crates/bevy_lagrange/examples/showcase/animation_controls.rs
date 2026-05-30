@@ -103,6 +103,7 @@ pub(crate) fn animate_fit_to_scene(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
+    home: Option<Res<CameraHomeEntity>>,
     second: Option<Res<second_window::SecondWindowEntities>>,
     easing: Res<ActiveEasing>,
     windows: Query<&Window>,
@@ -112,8 +113,12 @@ pub(crate) fn animate_fit_to_scene(
     }
 
     let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
+    if camera == scene.camera {
+        return;
+    }
+    let target = home.as_deref().map_or(scene.scene_bounds, |home| home.0);
     commands.trigger(
-        AnimateToFit::new(camera, scene.scene_bounds)
+        AnimateToFit::new(camera, target)
             .yaw(CAMERA_START_YAW)
             .pitch(CAMERA_START_PITCH)
             .margin(ZOOM_MARGIN_SCENE)

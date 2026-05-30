@@ -20,18 +20,19 @@ use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInputPhase;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamManualInputWriter;
-use bevy_lagrange::UpsideDownPolicy;
 use fairy_dust::Anchor;
 use fairy_dust::CameraGuidance;
 use fairy_dust::CameraGuidanceRow;
 use fairy_dust::CameraHomeTarget;
-use fairy_dust::ControlActivation;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::Face;
 use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::HoldState;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::ReleaseHold;
 use fairy_dust::TitleBar;
-use fairy_dust::cube_face_text;
+use fairy_dust::apply_example_orbit_cam_limits;
+use fairy_dust::cube_face_label;
 
 fn main() {
     fairy_dust::sprinkle_example()
@@ -52,17 +53,13 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_title("Manual Input")
-                .with_anchor(Anchor::TopLeft)
-                .control(CUBE_SPIN_CONTROL),
+                .with_anchor(Anchor::TopLeft),
         )
-        .wire_chip_to_state::<CubeSpinState, _>(CUBE_SPIN_CONTROL, |state| {
-            state.cube_spin.control_activation()
-        })
+        .with_cube_spin::<ManualInputCube>()
         .with_description_panel(description_panel())
         .with_camera_control_panel()
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
-        .init_resource::<CubeSpinState>()
         .insert_resource(FaceLabelHold::default())
         // `OrbitCamInputPhase::WriteManual` is the only schedule slot in which
         // `OrbitCamManualInputWriter` accepts writes.
@@ -70,7 +67,7 @@ fn main() {
             PreUpdate,
             write_manual_input.in_set(OrbitCamInputPhase::WriteManual),
         )
-        .add_systems(Update, (toggle_cube_spin, update_face_labels, spin_cube))
+        .add_systems(Update, update_face_labels)
         .run();
 }
 
@@ -91,11 +88,8 @@ fn main() {
 // Camera spawn.
 const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
 const CAMERA_PITCH: f32 = 0.45;
-const CAMERA_PITCH_LIMIT: f32 = std::f32::consts::TAU / 3.0;
 const CAMERA_RADIUS: f32 = 6.0;
 const CAMERA_YAW: f32 = 0.55;
-const CAMERA_ZOOM_LOWER_LIMIT: f32 = 1.0;
-const CAMERA_ZOOM_UPPER_LIMIT: f32 = 8.0;
 const HOME_MARGIN: f32 = 0.5;
 
 // Control-panel guidance labels.
@@ -112,19 +106,16 @@ const ZOOM_AMOUNT: f32 = 0.08;
 struct ManualCamera;
 
 fn spawn_camera(mut commands: Commands) {
+    let mut camera = OrbitCam {
+        focus: CAMERA_FOCUS,
+        yaw: Some(CAMERA_YAW),
+        pitch: Some(CAMERA_PITCH),
+        radius: Some(CAMERA_RADIUS),
+        ..default()
+    };
+    apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
-        OrbitCam {
-            focus: CAMERA_FOCUS,
-            yaw: Some(CAMERA_YAW),
-            pitch: Some(CAMERA_PITCH),
-            radius: Some(CAMERA_RADIUS),
-            pitch_upper_limit: Some(CAMERA_PITCH_LIMIT),
-            pitch_lower_limit: Some(-CAMERA_PITCH_LIMIT),
-            zoom_upper_limit: Some(CAMERA_ZOOM_UPPER_LIMIT),
-            zoom_lower_limit: CAMERA_ZOOM_LOWER_LIMIT,
-            upside_down_policy: UpsideDownPolicy::Allow,
-            ..default()
-        },
+        camera,
         OrbitCamInputMode::Manual,
         ManualCamera,
         manual_guidance(),
@@ -221,10 +212,6 @@ fn signed_vec2(
 // CUBE FACE LABELS — live WorldText labels showing which manual keys are down.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const FACE_LABEL_COLOR: Color = Color::srgb(0.1, 0.35, 1.0);
-const FACE_LABEL_RELEASE_DELAY_SECS: f32 = 0.3;
-const FACE_LABEL_SIZE: f32 = 0.095;
-
 const ORBIT_FACE_KEYS: [(KeyCode, &str); 4] = [
     (KeyCode::ArrowUp, "Up"),
     (KeyCode::ArrowDown, "Down"),
@@ -241,15 +228,9 @@ const ZOOM_FACE_KEYS: [(KeyCode, &str); 2] = [(KeyCode::Equal, "+"), (KeyCode::M
 
 #[derive(Resource, Default)]
 struct FaceLabelHold {
-    orbit: HeldFaceLabel,
-    pan:   HeldFaceLabel,
-    zoom:  HeldFaceLabel,
-}
-
-#[derive(Default)]
-struct HeldFaceLabel {
-    remaining_secs: f32,
-    pressed:        Option<String>,
+    orbit: ReleaseHold<String>,
+    pan:   ReleaseHold<String>,
+    zoom:  ReleaseHold<String>,
 }
 
 #[derive(Component, Clone, Copy)]
@@ -270,37 +251,19 @@ fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<ManualInp
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
             parent.spawn((
-                cube_face_text(
-                    face,
-                    orbit_face_label(&ButtonInput::default()),
-                    CUBE_SIZE,
-                    FACE_LABEL_SIZE,
-                    FACE_LABEL_COLOR,
-                ),
+                cube_face_label(face, orbit_face_label(&ButtonInput::default()), CUBE_SIZE),
                 ManualFaceLabel::Orbit,
             ));
         }
         for face in [Face::Left, Face::Right] {
             parent.spawn((
-                cube_face_text(
-                    face,
-                    pan_face_label(&ButtonInput::default()),
-                    CUBE_SIZE,
-                    FACE_LABEL_SIZE,
-                    FACE_LABEL_COLOR,
-                ),
+                cube_face_label(face, pan_face_label(&ButtonInput::default()), CUBE_SIZE),
                 ManualFaceLabel::Pan,
             ));
         }
         for face in [Face::Top, Face::Bottom] {
             parent.spawn((
-                cube_face_text(
-                    face,
-                    zoom_face_label(&ButtonInput::default()),
-                    CUBE_SIZE,
-                    FACE_LABEL_SIZE,
-                    FACE_LABEL_COLOR,
-                ),
+                cube_face_label(face, zoom_face_label(&ButtonInput::default()), CUBE_SIZE),
                 ManualFaceLabel::Zoom,
             ));
         }
@@ -315,21 +278,21 @@ fn update_face_labels(
 ) {
     let orbit = held_label(
         &mut hold.orbit,
-        time.delta_secs(),
+        time.delta(),
         pressed_key_label(&keys, &ORBIT_FACE_KEYS),
         ORBIT_LABEL,
         "Orbit",
     );
     let pan = held_label(
         &mut hold.pan,
-        time.delta_secs(),
+        time.delta(),
         pressed_key_label(&keys, &PAN_FACE_KEYS),
         PAN_LABEL,
         "Pan",
     );
     let zoom = held_label(
         &mut hold.zoom,
-        time.delta_secs(),
+        time.delta(),
         pressed_key_label(&keys, &ZOOM_FACE_KEYS),
         KEYBOARD_ZOOM_LABEL,
         "Zoom",
@@ -371,25 +334,18 @@ fn pressed_key_label(keys: &ButtonInput<KeyCode>, bindings: &[(KeyCode, &str)]) 
 }
 
 fn held_label(
-    hold: &mut HeldFaceLabel,
-    delta_secs: f32,
+    hold: &mut ReleaseHold<String>,
+    delta: std::time::Duration,
     pressed: Option<String>,
     idle: &str,
     action: &str,
 ) -> String {
-    if let Some(pressed) = pressed {
-        hold.remaining_secs = FACE_LABEL_RELEASE_DELAY_SECS;
-        hold.pressed = Some(pressed);
-        return action_face_label(action, idle, hold.pressed.as_deref());
+    match hold.update(delta, pressed) {
+        HoldState::Active(pressed) | HoldState::Held(pressed) => {
+            action_face_label(action, idle, Some(pressed))
+        },
+        HoldState::Idle => action_face_label(action, idle, None),
     }
-
-    hold.remaining_secs = (hold.remaining_secs - delta_secs).max(0.0);
-    if hold.remaining_secs > 0.0 {
-        return action_face_label(action, idle, hold.pressed.as_deref());
-    }
-
-    hold.pressed = None;
-    action_face_label(action, idle, None)
 }
 
 fn action_face_label(action: &str, idle: &str, pressed: Option<&str>) -> String {
@@ -421,74 +377,12 @@ fn description_panel() -> DescriptionPanel {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUBE SPIN — decorative idle spin toggled by `R`; CubeSpinState drives the chip.
-// ═════════════════════════════════════════════════════════════════════════════
-
-const CUBE_SPIN_CONTROL: &str = "R Spin";
-const CUBE_SPIN_SPEED: f32 = 0.2;
-
-#[derive(Resource)]
-struct CubeSpinState {
-    cube_spin: CubeSpin,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum CubeSpin {
-    Spinning,
-    Paused,
-}
-
-impl CubeSpin {
-    const fn control_activation(self) -> ControlActivation {
-        match self {
-            Self::Spinning => ControlActivation::Active,
-            Self::Paused => ControlActivation::Inactive,
-        }
-    }
-
-    const fn toggled(self) -> Self {
-        match self {
-            Self::Spinning => Self::Paused,
-            Self::Paused => Self::Spinning,
-        }
-    }
-}
-
-impl Default for CubeSpinState {
-    fn default() -> Self {
-        Self {
-            cube_spin: CubeSpin::Spinning,
-        }
-    }
-}
-
-fn toggle_cube_spin(key_input: Res<ButtonInput<KeyCode>>, mut spin: ResMut<CubeSpinState>) {
-    if key_input.just_pressed(KeyCode::KeyR) {
-        spin.cube_spin = spin.cube_spin.toggled();
-    }
-}
-
-fn spin_cube(
-    time: Res<Time>,
-    spin: Res<CubeSpinState>,
-    mut cubes: Query<&mut Transform, With<ManualInputCube>>,
-) {
-    match spin.cube_spin {
-        CubeSpin::Spinning => {},
-        CubeSpin::Paused => return,
-    }
-    for mut transform in &mut cubes {
-        transform.rotate_y(CUBE_SPIN_SPEED * time.delta_secs());
-    }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
 // SCENE SCAFFOLDING — cube body and ground sized to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 const CUBE_GROUND_CLEARANCE: f32 = 0.1;
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, CUBE_SIZE * 0.5 + CUBE_GROUND_CLEARANCE, 0.0);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
+const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(CUBE_GROUND_CLEARANCE);
 
-const GROUND_SIZE: f32 = 5.0;
+const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;

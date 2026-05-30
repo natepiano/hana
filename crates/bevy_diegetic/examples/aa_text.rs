@@ -46,15 +46,19 @@ use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
+use fairy_dust::CubeSpinConfig;
+use fairy_dust::CubeSpinMotion;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
+use fairy_dust::cube_face_panel_material;
+use fairy_dust::cube_face_transform;
 
 // =============================================================================
 // CONSTANTS -- static scene data, controls, copy, and panel geometry.
@@ -217,8 +221,6 @@ const CUBE_SIZE: f32 = 0.34;
 const CUBE_X: f32 = 2.05;
 const CUBE_COLOR: Color = Color::srgba(1.0, 0.08, 0.04, 1.0);
 const CUBE_SPIN_SPEED: f32 = 0.35;
-const CUBE_FACE_TEXT_OFFSET: f32 = 0.003;
-const CUBE_FACE_PANEL_OFFSET: f32 = CUBE_SIZE * 0.5 + CUBE_FACE_TEXT_OFFSET;
 const CUBE_COMPAT_PANEL_SIZE: f32 = CUBE_SIZE;
 const CUBE_COMPAT_PANEL_FONT_SIZE: f32 = 38.0;
 const CUBE_COMPAT_PANEL_PADDING: f32 = 0.01;
@@ -249,10 +251,7 @@ fn main() {
             )),
         )
         .insert(CameraHomeTarget)
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         // OIT keeps the coplanar blended geometry sorted stably as the camera
         // orbits, and forces `Msaa::Off` on the cameras it manages.
         .with_stable_transparency()
@@ -266,13 +265,16 @@ fn main() {
                 .with_title(EXAMPLE_TITLE)
                 .active_control(OIT_CONTROL),
         )
-        .wire_chip_to_state::<OitState, _>(OIT_CONTROL, |state| {
-            if state.0 {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
-        })
+        .wire_chip_to_activation::<OitState>(OIT_CONTROL)
+        .with_cube_spin_config::<SpinningCube>(
+            CubeSpinConfig::new()
+                .without_chip()
+                .without_key()
+                .with_motion(CubeSpinMotion::AxisAngle {
+                    axis:               Vec3::new(0.3, 1.0, 0.0),
+                    radians_per_second: CUBE_SPIN_SPEED,
+                }),
+        )
         .with_camera_control_panel()
         .init_resource::<PostAa>()
         .init_resource::<OitState>()
@@ -284,7 +286,6 @@ fn main() {
                 select_post_aa,
                 select_demo_view,
                 toggle_oit,
-                rotate_cube,
                 refresh_aa_panel,
                 refresh_demo_panel,
                 refresh_cube_status_panels,
@@ -321,6 +322,16 @@ struct OitState(bool);
 
 impl Default for OitState {
     fn default() -> Self { Self(true) }
+}
+
+impl TitleChipActivation for OitState {
+    fn activation(&self) -> ControlActivation {
+        if self.0 {
+            ControlActivation::Active
+        } else {
+            ControlActivation::Inactive
+        }
+    }
 }
 
 fn setup(
@@ -370,25 +381,17 @@ fn spawn_cube_status_panels(cube: &mut ChildSpawnerCommands, snapshot: CubeStatu
 
     match panel {
         Ok(panel) => {
-            let front_transform = Transform::from_xyz(0.0, 0.0, CUBE_FACE_PANEL_OFFSET);
-            let back_transform = Transform::from_xyz(0.0, 0.0, -CUBE_FACE_PANEL_OFFSET)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::PI));
-            let top_transform = Transform::from_xyz(0.0, CUBE_FACE_PANEL_OFFSET, 0.0)
-                .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2));
-            let bottom_transform = Transform::from_xyz(0.0, -CUBE_FACE_PANEL_OFFSET, 0.0)
-                .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2));
-
-            for transform in [
-                front_transform,
-                back_transform,
-                top_transform,
-                bottom_transform,
+            for face in [
+                fairy_dust::Face::Front,
+                fairy_dust::Face::Back,
+                fairy_dust::Face::Top,
+                fairy_dust::Face::Bottom,
             ] {
                 cube.spawn((
                     Name::new("Cube render status panel"),
                     CubeStatusPanel,
                     panel.clone(),
-                    transform,
+                    cube_face_transform(face, CUBE_SIZE),
                 ));
             }
         },
@@ -418,22 +421,17 @@ fn spawn_cube_compatibility_panels(
 
     match panel {
         Ok(panel) => {
-            let right_transform = Transform::from_xyz(CUBE_FACE_PANEL_OFFSET, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2));
-            let left_transform = Transform::from_xyz(-CUBE_FACE_PANEL_OFFSET, 0.0, 0.0)
-                .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2));
-
             cube.spawn((
                 Name::new("Cube compatibility panel"),
                 CubeCompatibilityPanel,
                 panel.clone(),
-                right_transform,
+                cube_face_transform(fairy_dust::Face::Right, CUBE_SIZE),
             ));
             cube.spawn((
                 Name::new("Cube compatibility panel"),
                 CubeCompatibilityPanel,
                 panel,
-                left_transform,
+                cube_face_transform(fairy_dust::Face::Left, CUBE_SIZE),
             ));
         },
         Err(error) => {
@@ -986,14 +984,7 @@ const fn post_label(post: PostAa) -> &'static str {
     }
 }
 
-fn cube_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::NONE,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default_panel_material()
-    }
-}
+fn cube_panel_material() -> StandardMaterial { cube_face_panel_material() }
 
 fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, InvalidSize> {
     let transparent = cube_panel_material();
@@ -1101,15 +1092,5 @@ fn refresh_cube_compatibility_panels(
             entity,
             build_cube_compatibility_tree(cube_compatibility_message(oit.0, *post)),
         );
-    }
-}
-
-/// Tumbles the cube slowly about a tilted axis so its edges sweep through a
-/// range of angles.
-fn rotate_cube(time: Res<Time>, mut cubes: Query<&mut Transform, With<SpinningCube>>) {
-    let angle = CUBE_SPIN_SPEED * time.delta_secs();
-    let axis = Vec3::new(0.3, 1.0, 0.0).normalize();
-    for mut transform in &mut cubes {
-        transform.rotate(Quat::from_axis_angle(axis, angle));
     }
 }

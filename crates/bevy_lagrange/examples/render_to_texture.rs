@@ -72,10 +72,6 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // INPUT ROUTING — CameraInputRoutingConfig::explicit + CameraInputSurfaceMetrics.
-// One offscreen OrbitCam renders into a 512x512 image; the window camera shows
-// that image on the outer cube. The routing config aims Bevy input at the
-// offscreen camera (which isn't attached to any window), and the input surface
-// metrics convert window-pixel mouse deltas to the 512x512 interaction surface.
 //
 // How it works (all wired in `setup`, Startup):
 //   1. Build a 512x512 `Image` with `RENDER_ATTACHMENT | TEXTURE_BINDING | COPY_DST` usages and add
@@ -258,9 +254,8 @@ fn setup(
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// OUTER CUBE ROTATION — decorative animation that spins the main-pass cube so
-// the rendered texture is visible from changing angles. Not part of the
-// routing API.
+// OUTER CUBE ROTATION — decorative spin of the main-pass cube so the rendered
+// texture is visible from changing angles.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const OUTER_CUBE_ROTATION_SPEED_X: f32 = 0.35;
@@ -275,8 +270,7 @@ fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Ma
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// INFO PANEL — top-right diegetic panel describing the demo in-app. Decorative
-// HUD; the routing API works without it.
+// INFO PANEL — top-right diegetic panel describing the demo in-app.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const INFO_PANEL_GAP: Px = Px(6.0);
@@ -320,6 +314,7 @@ fn build_info_panel_layout(builder: &mut LayoutBuilder) {
     screen_panel_frame(
         builder,
         Sizing::fixed(INFO_PANEL_WIDTH),
+        Sizing::FIT,
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(

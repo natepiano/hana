@@ -145,8 +145,7 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MULTI-CAMERA SETUP — composing OrbitCam with Camera::order, Camera::viewport,
-// RenderTarget::Window, and ResolvedOrbitCamInputRoute. This is the part to
-// read to learn the multi-viewport / multi-window pattern.
+// RenderTarget::Window, and ResolvedOrbitCamInputRoute.
 //
 // How it works:
 //   1. `setup` (Startup) spawns three OrbitCams. The main camera renders the whole primary window.

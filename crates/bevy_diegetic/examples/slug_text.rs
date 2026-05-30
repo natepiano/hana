@@ -16,11 +16,11 @@ use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
 
 const HEADLINE_TEXT: &str = "Typography";
 const HEADLINE_SIZE: f32 = 0.48;
@@ -65,6 +65,15 @@ enum SmaaState {
     On,
     /// SMAA off.
     Off,
+}
+
+impl TitleChipActivation for SmaaState {
+    fn activation(&self) -> ControlActivation {
+        match self {
+            Self::On => ControlActivation::Active,
+            Self::Off => ControlActivation::Inactive,
+        }
+    }
 }
 
 /// Seed SMAA on the orbit camera when it spawns so the example opens with edge
@@ -118,19 +127,13 @@ fn main() {
             )),
         )
         .color(GROUND_COLOR)
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_stable_transparency()
         .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .with_title_bar(TitleBar::new().control(SMAA_CONTROL))
-        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
-            SmaaState::On => ControlActivation::Active,
-            SmaaState::Off => ControlActivation::Inactive,
-        })
+        .wire_chip_to_activation::<SmaaState>(SMAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<FontHandles>()
         .init_resource::<SmaaState>()

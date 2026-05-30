@@ -22,7 +22,6 @@ use bevy_lagrange::AnimationSource;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
@@ -31,7 +30,7 @@ use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
-use fairy_dust::cube_face_text;
+use fairy_dust::cube_face_label;
 
 // Camera home pose.
 const HOME_PITCH: f32 = 0.46;
@@ -51,9 +50,6 @@ const TARGET_TRANSLATION: Vec3 = Vec3::new(CUBE_X_OFFSET, CUBE_Y, 0.0);
 // Cube-face labels.
 const REFERENCE_LABEL: &str = "Home";
 const TARGET_LABEL: &str = "Look At Me";
-const LABEL_SIZE: f32 = 0.15;
-const LABEL_COLOR: Color = Color::srgb(0.05, 0.05, 0.1);
-
 // HUD chip strings (also keyboard hints).
 const ZOOM_CONTROL: &str = "Z ZoomToFit";
 const LOOK_CONTROL: &str = "L LookAt";
@@ -74,12 +70,9 @@ fn main() {
         .size(CUBE_SIZE)
         .color(REFERENCE_CUBE_COLOR)
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
-        .face_text(Face::Front, REFERENCE_LABEL, LABEL_SIZE, LABEL_COLOR)
+        .face_label(Face::Front, REFERENCE_LABEL)
         .insert(CameraHomeTarget)
-        .with_orbit_cam(
-            |_| {},
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_camera_home()
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)
@@ -110,8 +103,7 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TRIGGERS — ZoomToFit / LookAt / LookAtAndZoomToFit. Each is constructed with
-// `(camera, target)` entities and fired through `Commands::trigger`. This is
-// the part to read to learn the API.
+// `(camera, target)` entities and fired through `Commands::trigger`.
 // ═════════════════════════════════════════════════════════════════════════════
 
 #[derive(Component)]
@@ -135,13 +127,7 @@ fn spawn_target(
             Target,
         ))
         .with_children(|parent| {
-            parent.spawn(cube_face_text(
-                Face::Front,
-                TARGET_LABEL,
-                CUBE_SIZE,
-                LABEL_SIZE,
-                LABEL_COLOR,
-            ));
+            parent.spawn(cube_face_label(Face::Front, TARGET_LABEL, CUBE_SIZE));
         })
         .id();
     commands.insert_resource(TargetEntity(entity));

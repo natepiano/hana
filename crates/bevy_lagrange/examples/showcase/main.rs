@@ -26,8 +26,8 @@ use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
 use bevy::ui::UiTargetCamera;
+use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
-use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_kana::ToUsize;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
@@ -41,7 +41,6 @@ use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
 use bevy_lagrange::CameraMoveEnd;
 use bevy_lagrange::FitOverlay;
-use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::LookAt;
 use bevy_lagrange::LookAtAndZoomToFit;
 use bevy_lagrange::OrbitCam;
@@ -53,8 +52,13 @@ use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomReason;
 use bevy_lagrange::ZoomToFit;
 use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::WindowManagerPlugin;
 use constants::*;
+use fairy_dust::Anchor;
+use fairy_dust::CameraHomeEntity;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::TitleBar;
+use fairy_dust::TitleBarOrientation;
 
 // ============================================================================
 // Types
@@ -85,26 +89,32 @@ impl Default for ActiveEasing {
 // ============================================================================
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins.set(WindowPlugin {
-                primary_window: Some(Window {
-                    title: PRIMARY_WINDOW_TITLE.into(),
-                    ..default()
-                }),
-                ..default()
-            }),
-            LagrangePlugin,
-            MeshPickingPlugin,
-            BrpExtrasPlugin::default(),
-            WindowManagerPlugin,
-        ))
-        .init_gizmo_group::<selection_gizmo::SelectionGizmo>()
-        .init_state::<AppState>()
-        .init_resource::<ActiveEasing>()
+    let mut app = fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_camera_home()
+        .yaw(CAMERA_START_YAW)
+        .pitch(CAMERA_START_PITCH)
+        .margin(HOME_MARGIN)
+        .with_title_bar(showcase_title_bar())
+        .with_camera_control_panel();
+
+    app.app_mut()
+        .init_gizmo_group::<selection_gizmo::SelectionGizmo>();
+    app.app_mut().init_state::<AppState>();
+
+    app.init_resource::<ActiveEasing>()
         .init_resource::<event_log::EventLog>()
         .init_resource::<pointer::HoveredEntity>()
-        .add_systems(Startup, (setup, selection_gizmo::init_selection_gizmo))
+        .add_systems(
+            Startup,
+            (
+                set_primary_window_title,
+                setup,
+                selection_gizmo::init_selection_gizmo,
+            ),
+        )
         .add_systems(
             Update,
             initial_fit_to_scene.run_if(in_state(AppState::Loading)),
@@ -119,7 +129,7 @@ fn main() {
                 selection_gizmo::draw_selection_gizmo,
                 selection_gizmo::draw_hover_gizmo,
                 selection_gizmo::sync_selection_gizmo_layers,
-                event_log::update_event_log_text,
+                event_log::rebuild_log_panel,
                 event_log::scroll_event_log,
                 (
                     second_window::toggle_second_window,
@@ -148,6 +158,25 @@ fn main() {
         .run();
 }
 
+fn showcase_title_bar() -> TitleBar {
+    TitleBar::new()
+        .with_title(SHOWCASE_TITLE)
+        .with_anchor(Anchor::TopLeft)
+        .with_orientation(TitleBarOrientation::Vertical)
+        .control(PAUSE_CONTROL)
+        .control(PROJECTION_CONTROL)
+        .control(OVERLAY_CONTROL)
+        .control(ANIMATE_CONTROL)
+        .control(LOOK_AT_CONTROL)
+        .control(LOOK_AND_FIT_CONTROL)
+        .control(EASING_CONTROL)
+        .control(EASING_RESET_CONTROL)
+        .control(INTERRUPT_CONTROL)
+        .control(CONFLICT_CONTROL)
+        .control(EVENT_LOG_CONTROL)
+        .control(SECOND_WINDOW_CONTROL)
+}
+
 // ============================================================================
 // Scene setup
 // ============================================================================
@@ -169,6 +198,7 @@ fn setup(
                 ..default()
             },
             OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            FairyDustOrbitCam,
         ))
         .id();
 
@@ -178,6 +208,13 @@ fn setup(
         camera,
         scene_bounds: ground,
     });
+}
+
+fn set_primary_window_title(mut windows: Query<&mut Window, With<PrimaryWindow>>) {
+    let Ok(mut window) = windows.single_mut() else {
+        return;
+    };
+    window.title = PRIMARY_WINDOW_TITLE.into();
 }
 
 fn initial_fit_to_scene(

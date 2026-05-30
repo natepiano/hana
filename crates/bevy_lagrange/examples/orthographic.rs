@@ -15,12 +15,12 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::OrbitCamSystemSet;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
+use fairy_dust::CubeFaceLabel;
 use fairy_dust::Face;
 use fairy_dust::FairyDustStudioLightingSet;
 use fairy_dust::TitleBar;
@@ -36,49 +36,17 @@ fn main() {
         .size(CUBE_SIZE)
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
-        .face_text(
-            Face::Front,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
-        .face_text(
-            Face::Back,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
-        .face_text(
-            Face::Left,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
-        .face_text(
-            Face::Right,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
-        .face_text(
-            Face::Top,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
-        .face_text(
-            Face::Bottom,
-            ORTHOGRAPHIC_LABEL,
-            FACE_LABEL_SIZE,
-            FACE_LABEL_COLOR,
-        )
+        .face_label(Face::Front, ORTHOGRAPHIC_LABEL)
+        .face_label(Face::Back, ORTHOGRAPHIC_LABEL)
+        .face_label(Face::Left, ORTHOGRAPHIC_LABEL)
+        .face_label(Face::Right, ORTHOGRAPHIC_LABEL)
+        .face_label(Face::Top, ORTHOGRAPHIC_LABEL)
+        .face_label(Face::Bottom, ORTHOGRAPHIC_LABEL)
         .insert(CameraHomeTarget)
-        .with_orbit_cam(
+        .with_orbit_cam_preset_bundle(
             |_| {},
-            (
-                orthographic_projection(),
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-            ),
+            OrbitCamPreset::BlenderLike,
+            orthographic_projection(),
         )
         .with_camera_home()
         .yaw(HOME_YAW)
@@ -156,7 +124,7 @@ fn switch_projection(
     key_input: Res<ButtonInput<KeyCode>>,
     mut choice: ResMut<ProjectionChoice>,
     mut camera_query: Query<(&mut OrbitCam, &mut Projection)>,
-    mut face_labels: Query<&mut WorldText>,
+    mut face_labels: Query<&mut WorldText, With<CubeFaceLabel>>,
 ) {
     let next_choice = if key_input.just_pressed(KeyCode::KeyO) {
         ProjectionChoice::Orthographic
@@ -201,23 +169,24 @@ fn perspective_projection() -> Projection {
 // SCENE SCAFFOLDING — cube body and ground sized to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CUBE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
-const CUBE_SIZE: f32 = 1.0;
-const CUBE_TRANSLATION: Vec3 = Vec3::new(0.0, 0.6, 0.0);
+const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
+const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(0.1);
 
-const GROUND_SIZE: f32 = 5.0;
+const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CUBE FACE LABELS — WorldText labels on every cube face that swap when the
 // projection mode changes.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const FACE_LABEL_COLOR: Color = Color::srgb(0.1, 0.35, 1.0);
-const FACE_LABEL_SIZE: f32 = 0.11;
 const ORTHOGRAPHIC_LABEL: &str = "Orthographic";
 const PERSPECTIVE_LABEL: &str = "Perspective";
 
-fn update_face_labels(face_labels: &mut Query<&mut WorldText>, choice: ProjectionChoice) {
+fn update_face_labels(
+    face_labels: &mut Query<&mut WorldText, With<CubeFaceLabel>>,
+    choice: ProjectionChoice,
+) {
     let label = match choice {
         ProjectionChoice::Orthographic => ORTHOGRAPHIC_LABEL,
         ProjectionChoice::Perspective => PERSPECTIVE_LABEL,

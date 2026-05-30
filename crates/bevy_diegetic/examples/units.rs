@@ -42,16 +42,16 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::TitleBar;
+use fairy_dust::TitleChipActivation;
 
 /// Title-bar control label for the SMAA toggle.
 const SMAA_CONTROL: &str = "S SMAA";
-use fairy_dust::TitleBar;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;
@@ -205,6 +205,15 @@ enum SmaaState {
     Off,
 }
 
+impl TitleChipActivation for SmaaState {
+    fn activation(&self) -> ControlActivation {
+        match self {
+            Self::On => ControlActivation::Active,
+            Self::Off => ControlActivation::Inactive,
+        }
+    }
+}
+
 /// Seed SMAA on the orbit camera when it spawns so the example opens with edge
 /// anti-aliasing on (matching [`SmaaState`]'s default).
 fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
@@ -259,11 +268,11 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_PLANE_SIZE)
-        .with_orbit_cam(
+        .with_orbit_cam_preset(
             |cam| {
                 cam.zoom_lower_limit = 0.000_000_1;
             },
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamPreset::BlenderLike,
         )
         .with_stable_transparency()
         .with_camera_home()
@@ -302,10 +311,7 @@ fn main() {
             |event| event.source == AnimationSource::ZoomToFit,
             |event| event.source == AnimationSource::ZoomToFit,
         )
-        .wire_chip_to_state::<SmaaState, _>(SMAA_CONTROL, |state| match state {
-            SmaaState::On => ControlActivation::Active,
-            SmaaState::Off => ControlActivation::Inactive,
-        })
+        .wire_chip_to_activation::<SmaaState>(SMAA_CONTROL)
         .with_camera_control_panel()
         .with_camera_control_panel_background_color(
             DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
