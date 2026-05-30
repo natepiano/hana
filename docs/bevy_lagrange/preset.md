@@ -545,11 +545,21 @@ Implementation should update examples so they teach the new tiers:
 | Example | Update |
 | --- | --- |
 | `input_preset_simple.rs` | Use `OrbitCam::simple_mouse()` |
-| `input_preset_blender_like.rs` | Use `OrbitCam::blender_like()` and document that CapsLock toggles slow orbit, pan, and zoom |
+| `input_preset_blender_like.rs` | Use tuned `OrbitCamBlenderLikePreset` bindings to demonstrate input modification, for example changing `slow_scale`, and document that CapsLock toggles slow orbit, pan, and zoom |
 | `input_gamepad.rs` | Use `OrbitCam::gamepad()` |
 | `input_keyboard.rs` | Use `OrbitCam::keyboard()` and fix stale text that says custom bindings |
 | `input_manual.rs` | Use `OrbitCam::manual()` |
 | `input_custom.rs` | Keep showing `OrbitCamBindings::builder()` and `OrbitCam::with_bindings(bindings)` |
+| `basic.rs` | Use the Fairy Dust preset bundle helper so the explicit camera `Transform` remains visible |
+| `focus_bounds.rs` | Use the Fairy Dust preset helper with the existing `OrbitCam` configuration hook |
+| `follow_target.rs` | Use the Fairy Dust preset helper with the existing `OrbitCam` configuration hook |
+| `animation.rs` | Use the Fairy Dust preset helper and keep animation chip wiring source-specific |
+| `pausing.rs` | Use the Fairy Dust preset helper while keeping `OrbitCam::time_source = TimeSource::Real` explicit |
+| `zoom_to_fit.rs` | Use the Fairy Dust preset helper for the canonical camera |
+| `orthographic.rs` | Use the Fairy Dust preset bundle helper so the `Projection` component remains explicit |
+| `programmatic_control.rs` | Use the Fairy Dust preset bundle helper so the example marker remains explicit |
+| `showcase/*` | Keep manual camera spawning when the example needs the camera entity; attach `FairyDustOrbitCam` explicitly |
+| `bevy_diegetic` Fairy Dust examples | Use Fairy Dust preset helpers for canonical `BlenderLike` cameras, including bundle helpers when examples add projection or render settings |
 
 Add or extend one example section for tuned presets. Include both a slow-scale tuning snippet and a disable-default snippet:
 
@@ -569,3 +579,55 @@ let bindings = OrbitCamBlenderLikePreset::default()
     .slow_toggle_key(None)
     .build()?;
 ```
+
+## Fairy Dust And Example Follow-Through
+
+Fold this preset plan through Fairy Dust after the core `bevy_lagrange` API lands.
+
+### Fairy Dust Docs
+
+Update `docs/fairy_dust/canonical_example.md` so the camera section teaches Fairy Dust as the normal front end for examples:
+
+- Default Fairy Dust camera: `.with_orbit_cam_preset(configure, OrbitCamPreset::BlenderLike)`.
+- Tuned preset camera: build bindings from a concrete preset config, then pass them to `.with_orbit_cam_bindings(configure, bindings)`.
+- Manual camera motion: `.with_orbit_cam_manual(configure)`.
+- Extra camera-side components: use the matching `_bundle` helper.
+- Low-level `.with_orbit_cam(configure, bundle)` stays an escape hatch, not the teaching path.
+
+The tuned preset example should show the slow amount explicitly:
+
+```rust
+let bindings = OrbitCamBlenderLikePreset::default()
+    .slow_scale(0.25)
+    .build()?;
+
+fairy_dust::sprinkle_example()
+    .with_orbit_cam_bindings(|_| {}, bindings);
+```
+
+That doc should also say tuned preset bindings display as custom bindings in the camera panel, because they become `OrbitCamInputMode::Bindings` after `build()`.
+
+### Fairy Dust API
+
+The current Fairy Dust builder shape already matches the plan:
+
+- `with_orbit_cam_preset` and `with_orbit_cam_preset_bundle`
+- `with_orbit_cam_bindings` and `with_orbit_cam_bindings_bundle`
+- `with_orbit_cam_manual` and `with_orbit_cam_manual_bundle`
+
+Keep that shape. Do not make Fairy Dust accept `OrbitCamPresetBundle` directly, because Fairy Dust owns the `OrbitCam` configuration hook and the bundle would bring a second `OrbitCam` component. If helper docs mention the old default from `with_orbit_cam_configured`, update the wording so canonical examples prefer the mode-specific helpers.
+
+Fairy Dust camera panel labeling should continue to derive from `OrbitCamInputMode`: presets show as preset input, tuned preset bindings show as custom bindings, and manual mode shows as manual input.
+
+### Example Validation
+
+Validated example categories:
+
+| Category | Examples | Plan |
+| --- | --- | --- |
+| Fairy Dust managed camera | `basic.rs`, `focus_bounds.rs`, `follow_target.rs`, `animation.rs`, `pausing.rs`, `zoom_to_fit.rs`, `orthographic.rs`, `programmatic_control.rs` | Keep using Fairy Dust orbit-camera helpers; use `_bundle` variants when examples add `Transform`, `Projection`, or marker components |
+| Raw Lagrange input examples | `input_preset_simple.rs`, `input_preset_blender_like.rs`, `input_gamepad.rs`, `input_keyboard.rs`, `input_manual.rs`, `input_custom.rs` | Keep explicit camera spawning because these examples teach camera input APIs; update them to the new `OrbitCam` helper and preset-config APIs |
+| Camera-system examples | `render_to_texture.rs`, `viewports_windows.rs`, `swapped_axis.rs`, `showcase/*` | Keep manual camera spawning where the example needs camera entities, render targets, multiple routed cameras, or unusual setup; still use Fairy Dust for app shell, HUD, lighting, home targets, and panels when possible |
+| Diegetic examples | `crates/bevy_diegetic/examples/*` using Fairy Dust | Prefer Fairy Dust preset helpers; use bindings helpers only for tuned preset input demonstrations |
+
+`input_preset_blender_like.rs` should be the primary example for preset input modification. It should build `OrbitCamBlenderLikePreset::default().slow_scale(...).build()?`, spawn with `OrbitCam::with_bindings(bindings)`, and explain that this is still BlenderLike-derived even though it displays as custom bindings at runtime.

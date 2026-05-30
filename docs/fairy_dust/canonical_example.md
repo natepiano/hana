@@ -27,13 +27,17 @@ fairy_dust::sprinkle_example()
     .with_save_window_position()
     .with_studio_lighting()
     .with_ground_plane()
+        .size(fairy_dust::EXAMPLE_GROUND_SIZE)
     .with_cube()
         .size(CUBE_SIZE)
-        .color(CUBE_COLOR)
+        .color(fairy_dust::EXAMPLE_CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
-        .face_text(Face::Front, "Label", LABEL_SIZE, LABEL_COLOR)
+        .face_label(Face::Front, "Label")
         .insert(CameraHomeTarget)
-    .with_orbit_cam(|cam| { /* per-example camera tweaks */ }, OrbitCamPreset::BlenderLike)
+    .with_orbit_cam_preset(
+        |cam| { /* per-example camera tweaks */ },
+        OrbitCamPreset::BlenderLike,
+    )
     .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -64,7 +68,9 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 - `.with_studio_lighting()` — key/fill/rim lights + clear color. Replaces
   manual `DirectionalLight`/`PointLight`/`GlobalAmbientLight` spawns.
 - `.with_ground_plane()` — default 8×8 translucent ground. Override `.size()`
-  or `.color()` per example, but do not hand-roll a plane. Do **not** wire a
+  or `.color()` per example, but do not hand-roll a plane. For canonical
+  cube-focused examples, use `.size(fairy_dust::EXAMPLE_GROUND_SIZE)` so the
+  ground footprint stays consistent across the suite. Do **not** wire a
   click-on-ground observer to re-home the camera — `H Home` (auto-added by
   `.with_camera_home()`) is the standard homing affordance. Click-to-home
   on the ground tends to fire on stray clicks and interferes with picking
@@ -80,21 +86,77 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 
 ### Cubes — use the builder
 
-Use `.with_cube().size().color().transform().face_text(...)` for every
-demo cube whose `Entity` ID is **not** needed elsewhere. The fairy_dust cube
-defaults match the canonical look (tan PBR material, single-mesh primitive).
+Use `.with_cube().size().color().transform().face_label(...)` for every
+demo cube whose `Entity` ID is **not** needed elsewhere. The canonical cube
+values are:
+
+- `fairy_dust::EXAMPLE_CUBE_SIZE`
+- `fairy_dust::EXAMPLE_CUBE_COLOR`
+- `fairy_dust::example_cube_on_ground(clearance)`
+
+Use `clearance = 0.1` for ordinary cube examples so the bottom face does not
+z-fight with the ground plane. Fairy Dust cube primitives automatically carry
+the `FairyDustCube` marker as identity metadata; still insert
+`CameraHomeTarget` explicitly when the cube defines the home region.
 
 Use `fairy_dust::cube_face_text(face, text, cube_size, text_size, color)` —
 returned as a child bundle on a `commands.spawn` — only when the cube must be
 spawned manually because its `Entity` is referenced later (e.g. as the target
 of `ZoomToFit::new(camera, target)`).
 
+Prefer `fairy_dust::cube_face_label(face, text, cube_size)` over
+`cube_face_text(...)` when the text is the canonical single-line blue cube
+label. Use cube face panels for multi-row content:
+
+- `CubeFacePanelStyle::for_cube(cube_size)` for balanced face-relative sizing.
+- `CubeFacePanelContent::idle(...)` / `.active(...)` for title and row text.
+- `cube_face_panel(...)`, `cube_face_panel_tree(...)`, and
+  `set_cube_face_panel_tree(...)` for spawn/update paths.
+- `CUBE_FACE_PANEL_RELEASE_HOLD` with `ReleaseHold<T>` when live input text
+  should remain visible briefly after release.
+
+### Canonical cube spin
+
+Use `.with_cube_spin::<Marker>(CubeSpinConfig::new())` for decorative cube
+rotation in input/preset examples. The default helper:
+
+- registers a `P Pause` title chip;
+- binds `KeyCode::KeyP`;
+- starts in `CubeSpinMode::Spinning`;
+- highlights the chip only in `CubeSpinMode::Paused`.
+
+So the visual default is paused off: the cube spins and the `P Pause` chip is
+inactive until the user presses `P`. Use `.cube_spin(config)` on the cube
+builder only for single Fairy Dust cube scenes. Use `.without_chip()` and
+`.without_key()` when an example needs spin motion without the title affordance.
+
 ### Camera
 
-Use `.with_orbit_cam(configure, OrbitCamPreset::BlenderLike)`. Default to
-`BlenderLike`; `SimpleMouse` only for examples specifically demonstrating
-that preset. The `configure` closure usually does nothing (`|_| {}`) — the
-home pose drives the starting view.
+Use `.with_orbit_cam_preset(configure, OrbitCamPreset::BlenderLike)` for a
+normal fairy_dust-managed preset camera. Default to `BlenderLike`; use another
+preset only when the example is specifically demonstrating that preset. The
+`configure` closure usually does nothing (`|_| {}`) — the home pose drives the
+starting view.
+
+Use the companion helpers when the input mode is part of the example:
+
+- `.with_orbit_cam_preset(...)` / `.with_orbit_cam_preset_bundle(...)` for
+  built-in presets.
+- `.with_orbit_cam_bindings(...)` / `.with_orbit_cam_bindings_bundle(...)` for
+  app-owned `OrbitCamBindings`.
+- `.with_orbit_cam_manual(...)` / `.with_orbit_cam_manual_bundle(...)` for
+  manually supplied camera motion.
+
+Use the `_bundle` variants when the camera also needs extra camera-side
+components such as `Transform`, `Projection`, render settings, or an
+example-specific marker. Use low-level `.with_orbit_cam(configure, bundle)`
+only when the mode-specific helpers cannot express the example.
+
+When an example spawns an `OrbitCam` manually to teach bindings, manual input,
+or input routing, call `fairy_dust::apply_example_orbit_cam_limits(&mut cam)`
+after setting the demonstrated `OrbitCamInputMode`. That keeps pitch limits,
+zoom limits, and upside-down behavior consistent without hiding the input mode
+being taught.
 
 ### Camera home — define the framed region
 
@@ -112,10 +174,17 @@ The startup framing is always instant; the `H` key animates back over
 
 Mark the visible scene entity or entities directly. For builder-spawned
 primitives, call `.insert(CameraHomeTarget)` on the primitive builder. For
-manual spawns, include `CameraHomeTarget` in the spawned bundle. If no target
-exists, Fairy Dust logs a warning once and the home camera waits for a target.
-`AnimateToFit` resolves the focus and radius so the target union fits the
-viewport given the margin.
+manual spawns, include `CameraHomeTarget` in the spawned bundle. Do not mark
+the ground plane just to create a large bound; in multi-object scenes, mark the
+visible objects whose AABBs define the subject, such as the showcase cuboid,
+sphere, and torus. If no target exists, Fairy Dust logs a warning once and the
+home camera waits for a target. `AnimateToFit` resolves the focus and radius so
+the target union fits the viewport given the margin.
+
+For canonical single-cube examples, put `CameraHomeTarget` on the cube and use
+`.margin(0.5)` when the face text/panels need comfortable framing. Marker
+placement defines the subject AABB; margin controls how much space the camera
+leaves around it.
 
 Lagrange examples that demonstrate camera behavior may spawn cameras manually
 or maintain multiple routed cameras. In those cases, still mark the home region
@@ -128,9 +197,9 @@ exception: camera setup is part of what they demonstrate, while
 
 ### Stable transparency
 
-Use `.with_stable_transparency()` (only valid after `.with_orbit_cam(...)`)
-when the scene contains coplanar `WorldText` or other translucent geometry
-that benefits from order-independent transparency.
+Use `.with_stable_transparency()` after installing a Fairy Dust OrbitCam helper
+when the scene contains coplanar `WorldText` or other translucent geometry that
+benefits from order-independent transparency.
 
 ### Custom screen-space panels
 
@@ -172,10 +241,12 @@ and camera control panel.
 ### `DiegeticUiPlugin`
 
 `DiegeticUiPlugin` is registered automatically inside `sprinkle_example`.
-Examples may spawn `WorldText` or `DiegeticPanel` directly without an
-explicit `add_plugins` call. Inside `crates/bevy_diegetic/examples/*`,
-include a one-line comment at the top of `fn main` noting this so readers
-don't go hunting for the registration:
+Examples may spawn `WorldText` or `DiegeticPanel` directly without an explicit
+`add_plugins` call. The `crates/bevy_diegetic/examples/*` examples follow the
+same Fairy Dust scene, OrbitCam, lighting, ground, and HUD conventions as
+`bevy_lagrange` examples. Inside those examples, include a one-line comment at
+the top of `fn main` noting this so readers don't go hunting for the
+registration:
 
 ```rust
 fn main() {
@@ -205,6 +276,9 @@ Even in these cases:
 
 - Chip labels read `<key> <Action>` — e.g. `Z ZoomToFit`, `L LookAt`,
   `H Home`. Single-letter key first, action word(s) after, space-separated.
+- `P Pause` is the canonical pause/spin-stop affordance. It starts inactive
+  when the example starts unpaused or spinning, and becomes active only while
+  the example is paused.
 - Multi-key modifiers use the literal characters (e.g. `^⇧R`) — but the
   hot-restart chip is intentionally hidden.
 - `H Home` is auto-prepended when `.with_camera_home()` is used; do not
@@ -224,10 +298,13 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 
 - Manual `setup` that spawns lighting → delete, use `.with_studio_lighting()`.
 - Manual ground plane spawn → delete, use `.with_ground_plane()`.
-- Manual `Camera3d`/`OrbitCam` spawn → delete, use `.with_orbit_cam(...)`.
+- Manual `Camera3d`/`OrbitCam` spawn → delete, use the matching Fairy Dust
+  OrbitCam helper, such as `.with_orbit_cam_preset(...)`,
+  `.with_orbit_cam_bindings(...)`, or `.with_orbit_cam_manual(...)`.
   Lagrange examples whose purpose is camera spawning, routing, render targets,
   or multi-camera behavior may keep manual camera spawns, but should still use
-  fairy_dust for the surrounding app plumbing, HUD, and home target markers.
+  fairy_dust for the surrounding app plumbing, HUD, and home target markers,
+  and should tag the Fairy Dust-controlled camera with `FairyDustOrbitCam`.
 - Custom `home_camera` keyboard system + `PlayAnimation::new(... ToOrbit ...)` →
   delete, use `.with_camera_home()` plus `CameraHomeTarget`.
 - Click-on-ground observer that triggers `ZoomToFit` / `AnimateToFit` back to
@@ -243,7 +320,9 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 - Debug-overlay toggle code that's not core to the example's intent →
   delete unless the example specifically demonstrates the overlay.
 
-## Open questions / future work
+## Future work
+
+Implemented shared APIs are tracked in `docs/fairy_dust/enhancements.md`.
 
 - Should `.with_camera_home()` optionally accept face-label config so
   the invisible home cube can carry visible text without needing a

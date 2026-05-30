@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Add `target: Option<Entity>` (the framed entity) to the `AnimationBegin`, `AnimationEnd`, and `AnimationRejected` observer events so consumers can distinguish which fit target an animation framed (breaking).
 - Collapse `AnimationEnd`/`AnimationCancelled` and `ZoomEnd`/`ZoomCancelled` into single `AnimationEnd` and `ZoomEnd` events with a `reason: AnimationReason`/`ZoomReason` field — observers that listen for `*End` now fire on both natural completion and cancellation, fixing chip-highlight bugs when one animation interrupts another (breaking).
 - Replace owned `bool` fields and accessors on `bevy_lagrange` input types with dedicated enums (`WheelZoomPolarity`, `PinchGestureZoom`, `CameraMotion`, `FocusFrame`); renames `EguiWantsFocus.prev`/`curr` to `previous`/`current` (breaking).
 - Replaced legacy raw `OrbitCam` input fields with input-mode components:
