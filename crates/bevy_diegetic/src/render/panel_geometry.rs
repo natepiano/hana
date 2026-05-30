@@ -32,9 +32,53 @@ use crate::panel::SurfaceShadow;
 #[derive(Component)]
 struct PanelSdfMesh;
 
-/// Marker for the invisible full-panel interaction mesh (Geometry mode only).
-#[derive(Component)]
-struct PanelInteractionMesh;
+/// What a [`PanelSdfMesh`] quad was built from. A panel rebuild compares this
+/// against the freshly gathered surface to decide whether the quad can stay
+/// untouched, be recolored in place, or must be respawned. All `f32` values are
+/// stored as raw bits so the component derives `Eq` and compares exactly.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct PanelSdfSurface {
+    /// Render-command index — the quad's stable key across rebuilds, and what
+    /// drives its layer/OIT depth ordering.
+    command_index: usize,
+    /// World-space transform center (x, y).
+    center:        [u32; 2],
+    /// World-space mesh size (full width, height).
+    mesh_size:     [u32; 2],
+    /// World-space per-corner radii [TL, TR, BR, BL].
+    corner_radii:  [u32; 4],
+    /// World-space border widths [top, right, bottom, left].
+    border_widths: [u32; 4],
+    /// Clip rect in local quad space [left, bottom, right, top].
+    clip_rect:     [u32; 4],
+    /// Fill color, linear RGBA.
+    fill_color:    [u32; 4],
+    /// Border color, linear RGBA.
+    border_color:  [u32; 4],
+}
+
+impl PanelSdfSurface {
+    /// True when two surfaces have identical geometry, ignoring color. Callers
+    /// match by `command_index` first, so that field is already known equal.
+    fn geometry_eq(&self, other: &Self) -> bool {
+        self.center == other.center
+            && self.mesh_size == other.mesh_size
+            && self.corner_radii == other.corner_radii
+            && self.border_widths == other.border_widths
+            && self.clip_rect == other.clip_rect
+    }
+}
+
+/// The invisible full-panel interaction quad (Geometry mode only), tagged with
+/// its world size and center so a rebuild can leave it untouched when the panel
+/// has not resized. Both pairs are `f32` bits, as in [`PanelSdfSurface`].
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+struct PanelInteractionMesh {
+    /// World size (width, height).
+    size:   [u32; 2],
+    /// World-space transform center (x, y).
+    center: [u32; 2],
+}
 
 /// Whether shadow casting is enabled or suppressed for panel meshes.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,8 +125,16 @@ struct ElementSurface {
     clip_rect:     Option<BoundingBox>,
 }
 
-/// Extracts render commands, gathers fill + border per element, and
-/// spawns one SDF quad per element.
+/// Reconciles each panel's SDF quads against its render commands.
+///
+/// `ComputedDiegeticPanel` is marked changed even for a color-only update (the
+/// layout fast path regenerates render commands in place), so this system runs
+/// on more than geometry moves. Rather than tear down and respawn every quad,
+/// it diffs each surface against the existing child by [`PanelSdfSurface`]:
+/// identical surfaces stay untouched, a color-only difference recolors the
+/// material in place, and a geometry difference (or a new/removed surface)
+/// respawns just that quad. A surface that changes only its text color thus
+/// leaves the background, border, and divider quads alone.
 fn build_panel_geometry(
     changed_panels: Query<
         (
@@ -93,8 +145,13 @@ fn build_panel_geometry(
         ),
         Changed<ComputedDiegeticPanel>,
     >,
-    old_sdf: Query<(Entity, &ChildOf), With<PanelSdfMesh>>,
-    old_interaction: Query<(Entity, &ChildOf), With<PanelInteractionMesh>>,
+    old_sdf: Query<(
+        Entity,
+        &ChildOf,
+        &PanelSdfSurface,
+        &MeshMaterial3d<SdfPanelMaterial>,
+    )>,
+    old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut sdf_materials: ResMut<Assets<SdfPanelMaterial>>,
@@ -105,81 +162,162 @@ fn build_panel_geometry(
             continue;
         };
 
-        let points_to_world = panel.points_to_world();
         let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let shadow_mode = if panel.surface_shadow() == SurfaceShadow::Off {
-            ShadowMode::Suppressed
-        } else {
-            ShadowMode::Enabled
+        let context = PanelReconcileContext {
+            panel_entity,
+            panel,
+            points_to_world: panel.points_to_world(),
+            anchor_x,
+            anchor_y,
+            shadow_mode: if panel.surface_shadow() == SurfaceShadow::Off {
+                ShadowMode::Suppressed
+            } else {
+                ShadowMode::Enabled
+            },
+            layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
         };
-        let layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
 
-        // ── Despawn old geometry ────────────────────────────────────
-        despawn_children_of(&old_sdf, panel_entity, &mut commands);
-        despawn_children_of(&old_interaction, panel_entity, &mut commands);
+        reconcile_sdf_quads(
+            &context,
+            &result.commands,
+            &old_sdf,
+            &mut meshes,
+            &mut sdf_materials,
+            &mut commands,
+        );
+        reconcile_interaction_mesh(
+            &context,
+            &old_interaction,
+            &mut meshes,
+            &mut standard_materials,
+            &mut commands,
+        );
+    }
+}
 
-        // ── Gather fill + border per element ────────────────────────
-        let gathered = gather_surfaces(panel, &result.commands);
+/// Shared per-panel inputs for one reconcile pass, derived once from the panel.
+struct PanelReconcileContext<'a> {
+    panel_entity:    Entity,
+    panel:           &'a DiegeticPanel,
+    points_to_world: f32,
+    anchor_x:        f32,
+    anchor_y:        f32,
+    shadow_mode:     ShadowMode,
+    layer:           RenderLayers,
+}
 
-        // ── Spawn SDF quads ─────────────────────────────────────────
-        {
-            let mut spawn_context = SdfElementSpawnContext {
-                panel,
-                shadow_mode,
-                points_to_world,
-                anchor_x,
-                anchor_y,
-                layer: &layer,
-                meshes: &mut meshes,
-                materials: &mut sdf_materials,
-                commands: &mut commands,
-                panel_entity,
-            };
-            for surface in gathered.surfaces.values() {
-                spawn_sdf_element(surface, &mut spawn_context);
-            }
+/// Reconciles a panel's SDF quads against its render commands: identical
+/// surfaces stay untouched, a color-only difference recolors the material in
+/// place, and a geometry difference (or a new/removed surface) respawns just
+/// that quad.
+fn reconcile_sdf_quads(
+    context: &PanelReconcileContext<'_>,
+    render_commands: &[RenderCommand],
+    old_sdf: &Query<(
+        Entity,
+        &ChildOf,
+        &PanelSdfSurface,
+        &MeshMaterial3d<SdfPanelMaterial>,
+    )>,
+    meshes: &mut Assets<Mesh>,
+    sdf_materials: &mut Assets<SdfPanelMaterial>,
+    commands: &mut Commands,
+) {
+    let gathered = gather_surfaces(context.panel, render_commands);
+    let desired = desired_surfaces(gathered);
 
-            // ── Spawn between-children dividers as SDF elements ─────────
-            for &(cmd_index, bounds, color, clip) in &gathered.dividers {
-                let divider_surface = ElementSurface {
-                    index: usize::MAX,
-                    bounds,
-                    fill_color: Some(color),
-                    border_widths: [0.0; 4],
-                    border_color: None,
-                    command_index: cmd_index,
-                    clip_rect: clip,
-                };
-                spawn_sdf_element(&divider_surface, &mut spawn_context);
-            }
+    let mut existing: HashMap<usize, (Entity, PanelSdfSurface, Handle<SdfPanelMaterial>)> = old_sdf
+        .iter()
+        .filter(|(_, child_of, ..)| child_of.parent() == context.panel_entity)
+        .map(|(entity, _, signature, material)| {
+            (
+                signature.command_index,
+                (entity, *signature, material.0.clone()),
+            )
+        })
+        .collect();
+
+    for surface in &desired {
+        let quad = build_sdf_quad(
+            surface,
+            context.panel,
+            context.points_to_world,
+            context.anchor_x,
+            context.anchor_y,
+        );
+        match existing.remove(&quad.signature.command_index) {
+            // Identical — leave the quad untouched.
+            Some((_, signature, _)) if signature == quad.signature => {},
+            // Geometry unchanged, color differs — recolor in place.
+            Some((entity, signature, material)) if signature.geometry_eq(&quad.signature) => {
+                if let Some(mut existing_material) = sdf_materials.get_mut(&material) {
+                    *existing_material = quad.material;
+                }
+                commands.entity(entity).insert(quad.signature);
+            },
+            // Geometry moved, or a brand-new surface — respawn this quad.
+            Some((entity, ..)) => {
+                commands.entity(entity).despawn();
+                spawn_sdf_quad(quad, context, meshes, sdf_materials, commands);
+            },
+            None => {
+                spawn_sdf_quad(quad, context, meshes, sdf_materials, commands);
+            },
         }
+    }
 
-        // ── Interaction mesh ────────────────────────────────────────
-        {
-            let world_width = panel.world_width();
-            let world_height = panel.world_height();
-            let center_x = world_width.mul_add(0.5, -anchor_x);
-            let center_y = world_height.mul_add(-0.5, anchor_y);
+    // Any quad whose surface disappeared between builds is now stale.
+    for (_, (entity, ..)) in existing {
+        commands.entity(entity).despawn();
+    }
+}
 
-            let interact_mat = standard_materials.add(StandardMaterial {
-                base_color: Color::NONE,
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                double_sided: true,
-                cull_mode: None,
-                depth_bias: -constants::LAYER_DEPTH_BIAS,
-                ..default()
-            });
-            commands.entity(panel_entity).with_child((
-                PanelInteractionMesh,
-                RayCastBackfaces,
-                NotShadowCaster,
-                Mesh3d(meshes.add(Rectangle::new(world_width, world_height))),
-                MeshMaterial3d(interact_mat),
-                Transform::from_xyz(center_x, center_y, 0.0),
-                layer,
-            ));
-        }
+/// Reconciles the invisible full-panel interaction quad: it is respawned only
+/// when the panel's world size or center changed, and left untouched otherwise.
+fn reconcile_interaction_mesh(
+    context: &PanelReconcileContext<'_>,
+    old_interaction: &Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    commands: &mut Commands,
+) {
+    let world_size = Vec2::new(context.panel.world_width(), context.panel.world_height());
+    let center = Vec2::new(
+        world_size.x.mul_add(0.5, -context.anchor_x),
+        world_size.y.mul_add(-0.5, context.anchor_y),
+    );
+    let interaction = PanelInteractionMesh {
+        size:   vec2_bits(world_size),
+        center: vec2_bits(center),
+    };
+    let existing = old_interaction
+        .iter()
+        .find(|(_, child_of, _)| child_of.parent() == context.panel_entity);
+    match existing {
+        Some((_, _, current)) if *current == interaction => {},
+        Some((entity, ..)) => {
+            commands.entity(entity).despawn();
+            spawn_interaction_mesh(
+                interaction,
+                world_size,
+                center,
+                context,
+                meshes,
+                materials,
+                commands,
+            );
+        },
+        None => {
+            spawn_interaction_mesh(
+                interaction,
+                world_size,
+                center,
+                context,
+                meshes,
+                materials,
+                commands,
+            );
+        },
     }
 }
 
@@ -254,22 +392,45 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
     GatheredCommands { surfaces, dividers }
 }
 
-struct SdfElementSpawnContext<'a, 'w, 's> {
-    panel:           &'a DiegeticPanel,
-    shadow_mode:     ShadowMode,
-    points_to_world: f32,
-    anchor_x:        f32,
-    anchor_y:        f32,
-    layer:           &'a RenderLayers,
-    meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<SdfPanelMaterial>,
-    commands:        &'a mut Commands<'w, 's>,
-    panel_entity:    Entity,
+/// Flattens the gathered surfaces and dividers into one list of surfaces to
+/// render, each keyed by its `command_index`.
+fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
+    let mut desired: Vec<ElementSurface> = gathered.surfaces.into_values().collect();
+    desired.extend(gathered.dividers.into_iter().map(
+        |(command_index, bounds, color, clip_rect)| ElementSurface {
+            index: usize::MAX,
+            bounds,
+            fill_color: Some(color),
+            border_widths: [0.0; 4],
+            border_color: None,
+            command_index,
+            clip_rect,
+        },
+    ));
+    desired
 }
 
-fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnContext<'_, '_, '_>) {
-    let element_mat = context.panel.tree().element_material(surface.index);
-    let corner_radius = context.panel.tree().element_corner_radius(surface.index);
+/// An SDF quad ready to spawn or recolor: its material, mesh size, world
+/// center, and the [`PanelSdfSurface`] signature describing what it was built
+/// from.
+struct BuiltSdfQuad {
+    material:  SdfPanelMaterial,
+    mesh_size: Vec2,
+    center:    Vec2,
+    signature: PanelSdfSurface,
+}
+
+/// Resolves a surface into a [`BuiltSdfQuad`] — pure computation, no asset or
+/// entity mutation. The caller decides whether to spawn, recolor, or skip.
+fn build_sdf_quad(
+    surface: &ElementSurface,
+    panel: &DiegeticPanel,
+    points_to_world: f32,
+    anchor_x: f32,
+    anchor_y: f32,
+) -> BuiltSdfQuad {
+    let element_mat = panel.tree().element_material(surface.index);
+    let corner_radius = panel.tree().element_corner_radius(surface.index);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -279,18 +440,16 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
             Some(Color::NONE)
         }
     });
-    let mut base =
-        constants::resolve_material(element_mat, context.panel.material(), effective_color);
+    let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
     base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
+    let fill_color = base.base_color;
 
-    let world_width = surface.bounds.width * context.points_to_world;
-    let world_height = surface.bounds.height * context.points_to_world;
+    let world_width = surface.bounds.width * points_to_world;
+    let world_height = surface.bounds.height * points_to_world;
     let world_radii = corner_radius
         .to_array()
-        .map(|radius| radius * context.points_to_world);
-    let world_borders = surface
-        .border_widths
-        .map(|width| width * context.points_to_world);
+        .map(|radius| radius * points_to_world);
+    let world_borders = surface.border_widths.map(|width| width * points_to_world);
 
     let half_width = world_width * 0.5;
     let half_height = world_height * 0.5;
@@ -327,7 +486,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
     // ──────────────────────────────────────────────────────────────────────
     let clip_rect = surface.clip_rect.map_or_else(
         || {
-            bevy::math::Vec4::new(
+            Vec4::new(
                 -mesh_half_width,
                 -mesh_half_height,
                 mesh_half_width,
@@ -336,12 +495,12 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         },
         |clip_rect| {
             let (cx, cy) = surface.bounds.center();
-            let left = (clip_rect.x - cx) * context.points_to_world;
-            let right = (clip_rect.x + clip_rect.width - cx) * context.points_to_world;
+            let left = (clip_rect.x - cx) * points_to_world;
+            let right = (clip_rect.x + clip_rect.width - cx) * points_to_world;
             // Layout Y-down → local Y-up.
-            let top = -(clip_rect.y - cy) * context.points_to_world;
-            let bottom = -(clip_rect.y + clip_rect.height - cy) * context.points_to_world;
-            bevy::math::Vec4::new(
+            let top = -(clip_rect.y - cy) * points_to_world;
+            let bottom = -(clip_rect.y + clip_rect.height - cy) * points_to_world;
+            Vec4::new(
                 left - pad,
                 bottom.min(top) - pad,
                 right + pad,
@@ -350,7 +509,7 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         },
     );
 
-    let sdf_mat = sdf_material::sdf_panel_material(
+    let material = sdf_material::sdf_panel_material(
         base,
         SdfPanelMaterialInput {
             half_size: Vec2::new(half_width, half_height),
@@ -363,51 +522,111 @@ fn spawn_sdf_element(surface: &ElementSurface, context: &mut SdfElementSpawnCont
         },
     );
 
-    let world_rect = bounds_to_world_rect(
-        &surface.bounds,
-        context.points_to_world,
-        context.anchor_x,
-        context.anchor_y,
-    );
+    let world_rect = bounds_to_world_rect(&surface.bounds, points_to_world, anchor_x, anchor_y);
+    let mesh_size = Vec2::new(mesh_half_width * 2.0, mesh_half_height * 2.0);
 
-    let mesh = context.meshes.add(Rectangle::new(
-        mesh_half_width * 2.0,
-        mesh_half_height * 2.0,
-    ));
-    let mat_handle = context.materials.add(sdf_mat);
+    let signature = PanelSdfSurface {
+        command_index: surface.command_index,
+        center:        vec2_bits(world_rect.center),
+        mesh_size:     vec2_bits(mesh_size),
+        corner_radii:  array4_bits(world_radii),
+        border_widths: array4_bits(world_borders),
+        clip_rect:     vec4_bits(clip_rect),
+        fill_color:    color_bits(fill_color),
+        border_color:  surface.border_color.map_or([0; 4], color_bits),
+    };
+
+    BuiltSdfQuad {
+        material,
+        mesh_size,
+        center: world_rect.center,
+        signature,
+    }
+}
+
+/// Spawns one SDF quad as a child of `panel_entity`, tagged with its signature.
+fn spawn_sdf_quad(
+    quad: BuiltSdfQuad,
+    context: &PanelReconcileContext<'_>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<SdfPanelMaterial>,
+    commands: &mut Commands,
+) {
+    let mesh = meshes.add(Rectangle::new(quad.mesh_size.x, quad.mesh_size.y));
+    let material = materials.add(quad.material);
     let base_components = (
         PanelSdfMesh,
+        quad.signature,
         Mesh3d(mesh),
-        MeshMaterial3d(mat_handle),
-        Transform::from_xyz(world_rect.center.x, world_rect.center.y, 0.0),
+        MeshMaterial3d(material),
+        Transform::from_xyz(quad.center.x, quad.center.y, 0.0),
         context.layer.clone(),
     );
     match context.shadow_mode {
         ShadowMode::Suppressed => {
-            context
-                .commands
+            commands
                 .entity(context.panel_entity)
                 .with_child((base_components, NotShadowCaster));
         },
         ShadowMode::Enabled => {
-            context
-                .commands
+            commands
                 .entity(context.panel_entity)
                 .with_child(base_components);
         },
     }
 }
 
-fn despawn_children_of<C: Component>(
-    query: &Query<(Entity, &ChildOf), With<C>>,
-    parent: Entity,
+/// Spawns the invisible full-panel interaction quad as a child of the panel.
+fn spawn_interaction_mesh(
+    interaction: PanelInteractionMesh,
+    size: Vec2,
+    center: Vec2,
+    context: &PanelReconcileContext<'_>,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
     commands: &mut Commands,
 ) {
-    for (entity, child_of) in query {
-        if child_of.parent() == parent {
-            commands.entity(entity).despawn();
-        }
-    }
+    let material = materials.add(StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        depth_bias: -constants::LAYER_DEPTH_BIAS,
+        ..default()
+    });
+    commands.entity(context.panel_entity).with_child((
+        interaction,
+        RayCastBackfaces,
+        NotShadowCaster,
+        Mesh3d(meshes.add(Rectangle::new(size.x, size.y))),
+        MeshMaterial3d(material),
+        Transform::from_xyz(center.x, center.y, 0.0),
+        context.layer.clone(),
+    ));
+}
+
+const fn vec2_bits(value: Vec2) -> [u32; 2] { [value.x.to_bits(), value.y.to_bits()] }
+
+fn vec4_bits(value: Vec4) -> [u32; 4] {
+    [
+        value.x.to_bits(),
+        value.y.to_bits(),
+        value.z.to_bits(),
+        value.w.to_bits(),
+    ]
+}
+
+fn array4_bits(value: [f32; 4]) -> [u32; 4] { value.map(f32::to_bits) }
+
+fn color_bits(color: Color) -> [u32; 4] {
+    let linear = color.to_linear();
+    [
+        linear.red.to_bits(),
+        linear.green.to_bits(),
+        linear.blue.to_bits(),
+        linear.alpha.to_bits(),
+    ]
 }
 
 struct WorldRect {

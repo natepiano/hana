@@ -29,6 +29,7 @@
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
+use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
 
 use super::AlignX;
@@ -44,6 +45,7 @@ use super::element::ChildOverflow;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
+use super::element::ScrollAnchor;
 use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
@@ -67,6 +69,8 @@ pub struct El {
     border:        Option<Border>,
     corner_radius: CornerRadius,
     overflow:      ChildOverflow,
+    scroll_offset: Vec2,
+    scroll_anchor: ScrollAnchor,
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
 }
@@ -175,6 +179,41 @@ impl El {
         self
     }
 
+    /// Scrolls children vertically by `offset` logical px from the top and clips
+    /// overflow.
+    ///
+    /// The offset is clamped during positioning to `[0, content - viewport]`;
+    /// pass `f32::MAX` to pin to the bottom.
+    pub const fn scroll_y(mut self, offset: f32) -> Self {
+        self.scroll_offset.y = offset;
+        self.scroll_anchor = ScrollAnchor::Start;
+        self.overflow = ChildOverflow::Clipped;
+        self
+    }
+
+    /// Scrolls children vertically by `scrollback` logical px measured from the
+    /// bottom and clips overflow.
+    ///
+    /// `0` pins to the bottom, so a log following a growing tail needs no
+    /// knowledge of its content height; increasing `scrollback` walks upward.
+    /// Clamped during positioning to `[0, content - viewport]`.
+    pub const fn scroll_y_from_end(mut self, scrollback: f32) -> Self {
+        self.scroll_offset.y = scrollback;
+        self.scroll_anchor = ScrollAnchor::End;
+        self.overflow = ChildOverflow::Clipped;
+        self
+    }
+
+    /// Scrolls children horizontally by `offset` logical px and clips overflow.
+    ///
+    /// The offset is clamped during positioning to `[0, content - viewport]`;
+    /// pass `f32::MAX` to pin to the right edge.
+    pub const fn scroll_x(mut self, offset: f32) -> Self {
+        self.scroll_offset.x = offset;
+        self.overflow = ChildOverflow::Clipped;
+        self
+    }
+
     /// Sets a PBR material override for this element.
     ///
     /// Controls surface properties (roughness, metallic, reflectance, etc.)
@@ -212,6 +251,8 @@ impl El {
             border: self.border,
             corner_radius: self.corner_radius,
             overflow: self.overflow,
+            scroll_offset: self.scroll_offset,
+            scroll_anchor: self.scroll_anchor,
             material: self.material,
             editable: self.editable,
             content,

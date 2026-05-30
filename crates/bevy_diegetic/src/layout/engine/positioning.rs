@@ -1,3 +1,4 @@
+use bevy::math::Vec2;
 use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
@@ -15,6 +16,7 @@ use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
+use crate::layout::element::ScrollAnchor;
 use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
@@ -171,6 +173,52 @@ fn line_x_for_alignment(align: TextAlign, bounds: BoundingBox, line_width: f32) 
     }
 }
 
+/// Resolves the clamped per-axis scroll offset for a scrolling parent, returning
+/// `(0, 0)` for the common non-scrolling case. Each axis clamps to
+/// `[0, content - viewport]`; `End`-anchored axes measure the offset from the
+/// far edge so `0` pins to the bottom/right.
+fn resolve_scroll_offset(
+    parent_el: &Element,
+    computed: &[ComputedLayout],
+    children: &[usize],
+    is_horizontal: bool,
+    main_available: f32,
+    cross_available: f32,
+    content_main: f32,
+) -> (f32, f32) {
+    // A zero `Start` offset is a no-op; a zero `End` offset still resolves
+    // (scrollback 0 pins to the end), so don't short-circuit it.
+    if parent_el.scroll_offset == Vec2::ZERO && parent_el.scroll_anchor == ScrollAnchor::Start {
+        return (0.0, 0.0);
+    }
+
+    let mut content_cross: f32 = 0.0;
+    for &idx in children {
+        let cross = if is_horizontal {
+            computed[idx].height
+        } else {
+            computed[idx].width
+        };
+        content_cross = content_cross.max(cross);
+    }
+
+    let max_main = (content_main - main_available).max(0.0);
+    let max_cross = (content_cross - cross_available).max(0.0);
+    let (max_x, max_y) = if is_horizontal {
+        (max_main, max_cross)
+    } else {
+        (max_cross, max_main)
+    };
+    let resolve = |offset: f32, max: f32| match parent_el.scroll_anchor {
+        ScrollAnchor::Start => offset.clamp(0.0, max),
+        ScrollAnchor::End => (max - offset).clamp(0.0, max),
+    };
+    (
+        resolve(parent_el.scroll_offset.x, max_x),
+        resolve(parent_el.scroll_offset.y, max_y),
+    )
+}
+
 /// Pushes children onto the DFS stack in reverse order with computed positions.
 ///
 /// Children are pushed in reverse so the first child is processed first during
@@ -219,7 +267,26 @@ fn push_children_to_stack(
         parent_height - parent_el.padding.vertical() - border_y
     };
 
-    let extra_main = (main_available - children_main_size - gap_total).max(0.0);
+    let content_main = children_main_size + gap_total;
+    let extra_main = (main_available - content_main).max(0.0);
+
+    let cross_available = if is_horizontal {
+        parent_height - parent_el.padding.vertical() - border_y
+    } else {
+        parent_width - parent_el.padding.horizontal() - border_x
+    };
+    // Offset subtracted from child positions so a clipping parent scrolls its
+    // children; the element's scissor rect stays fixed, so shifted-out content
+    // clips.
+    let (scroll_x, scroll_y) = resolve_scroll_offset(
+        parent_el,
+        computed,
+        children,
+        is_horizontal,
+        main_available,
+        cross_available,
+        content_main,
+    );
 
     let main_offset = if is_horizontal {
         match parent_el.child_align_x {
@@ -257,8 +324,8 @@ fn push_children_to_stack(
                 AlignY::Bottom => (cross_available - child_height).max(0.0),
             };
             (
-                x + parent_el.padding.left.value + border_left + reverse_cursor,
-                y + parent_el.padding.top.value + border_top + cross_offset,
+                x + parent_el.padding.left.value + border_left + reverse_cursor - scroll_x,
+                y + parent_el.padding.top.value + border_top + cross_offset - scroll_y,
             )
         } else {
             let cross_available = parent_width - parent_el.padding.horizontal() - border_x;
@@ -268,8 +335,8 @@ fn push_children_to_stack(
                 AlignX::Right => (cross_available - child_width).max(0.0),
             };
             (
-                x + parent_el.padding.left.value + border_left + cross_offset,
-                y + parent_el.padding.top.value + border_top + reverse_cursor,
+                x + parent_el.padding.left.value + border_left + cross_offset - scroll_x,
+                y + parent_el.padding.top.value + border_top + reverse_cursor - scroll_y,
             )
         };
 

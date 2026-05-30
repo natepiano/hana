@@ -15,6 +15,7 @@ use std::hash::Hasher;
 use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::image::Image;
+use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
@@ -53,6 +54,17 @@ pub(super) enum ChildOverflow {
     Clipped,
 }
 
+/// Which edge [`Element::scroll_offset`] measures from. `Start` is an absolute
+/// offset from the top/left (clamped to `[0, max]`); `End` is a distance from
+/// the bottom/right, so `0` pins to the end and following a growing tail needs
+/// no knowledge of the content size.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum ScrollAnchor {
+    #[default]
+    Start,
+    End,
+}
+
 /// A single element in the layout tree.
 ///
 /// Elements are either containers (with children) or text leaves. The tree
@@ -81,6 +93,12 @@ pub(super) struct Element {
     pub(super) corner_radius: CornerRadius,
     /// How this element handles overflowing children (`Visible` or `Clipped`).
     pub(super) overflow:      ChildOverflow,
+    /// Scroll offset (logical px) subtracted from child positions when this
+    /// element clips. Clamped during positioning to `[0, content - viewport]`
+    /// per axis. Interpreted relative to [`Self::scroll_anchor`].
+    pub(super) scroll_offset: Vec2,
+    /// Which edge `scroll_offset` measures from.
+    pub(super) scroll_anchor: ScrollAnchor,
     /// Optional PBR material override for this element's surface (backgrounds, borders).
     /// When present, the rendering system uses this instead of the panel-level default.
     /// `base_color` is overridden by the layout color if both are set.
@@ -147,6 +165,8 @@ impl Default for Element {
             border:        None,
             corner_radius: CornerRadius::ZERO,
             overflow:      ChildOverflow::Visible,
+            scroll_offset: Vec2::ZERO,
+            scroll_anchor: ScrollAnchor::Start,
             material:      None,
             editable:      None,
             content:       ElementContent::Empty,
@@ -455,6 +475,7 @@ impl LayoutTree {
                 *border = border.resolved(layout_scale);
             }
             element.corner_radius = element.corner_radius.resolved(layout_scale);
+            element.scroll_offset *= layout_scale;
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
                 // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to
@@ -480,6 +501,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         border,
         corner_radius,
         overflow,
+        scroll_offset,
+        scroll_anchor,
         material,
         editable,
         content,
@@ -496,6 +519,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         border: n_border,
         corner_radius: n_corner_radius,
         overflow: n_overflow,
+        scroll_offset: n_scroll_offset,
+        scroll_anchor: n_scroll_anchor,
         material: n_material,
         editable: n_editable,
         content: n_content,
@@ -509,6 +534,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         || child_align_x != n_child_align_x
         || child_align_y != n_child_align_y
         || overflow != n_overflow
+        || scroll_offset != n_scroll_offset
+        || scroll_anchor != n_scroll_anchor
     {
         return LayoutTreeChange::LayoutAffecting;
     }

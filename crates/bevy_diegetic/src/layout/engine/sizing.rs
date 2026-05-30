@@ -110,8 +110,19 @@ pub(super) fn propagate_fit_sizes(
     };
 
     let chrome = padding + border;
-    let content_size = content_acc + chrome + if is_along { gap_total } else { 0.0 };
-    let min_from_children = min_acc + chrome + if is_along { gap_total } else { 0.0 };
+
+    // A clipping container does not inflate to contain its children — they
+    // overflow (and may scroll), so it reports only its own chrome to ancestors.
+    // Without this, a scrollable container's min size equals its full content,
+    // forcing every ancestor to grow to the content instead of clipping it.
+    // Matches Clay's scroll-container rule.
+    let clipped = matches!(element.overflow, ChildOverflow::Clipped);
+    let content_acc = if clipped { 0.0 } else { content_acc };
+    let min_acc = if clipped { 0.0 } else { min_acc };
+    let gap_for_size = if clipped || !is_along { 0.0 } else { gap_total };
+
+    let content_size = content_acc + chrome + gap_for_size;
+    let min_from_children = min_acc + chrome + gap_for_size;
 
     // Clamp minDimensions to [sizing.min, sizing.max] — matches Clay.
     let clamped_min = min_from_children.clamp(sizing.min_size(), sizing.max_size());

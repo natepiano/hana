@@ -657,6 +657,154 @@ fn top_to_bottom_positioning() {
     assert!(approx_eq(second.y, 30.0));
 }
 
+// ── Scroll offset ────────────────────────────────────────────────────────────
+
+/// Builds a 200×100 clipping column of four 50px-tall children (content 200,
+/// viewport 100, so max scroll = 100) scrolled vertically by `offset`. The
+/// scroll container is index 1; the children are indices 2..=5.
+fn scroll_column(offset: f32) -> super::LayoutResult {
+    let mut b = LayoutBuilder::new(200.0, 120.0);
+    b.with(
+        El::new()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .direction(Direction::TopToBottom)
+            .scroll_y(offset),
+        |b| {
+            for _ in 0..4 {
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(50.0)),
+                    |_| {},
+                );
+            }
+        },
+    );
+    let tree = b.build();
+    LayoutEngine::new(monospace_measure()).compute(&tree, VIEWPORT, VIEWPORT, 1.0)
+}
+
+#[test]
+fn scroll_y_shifts_children_up_by_offset() {
+    let result = scroll_column(30.0);
+
+    // First child slides up by the offset; the rest follow at a 50px stride.
+    assert!(approx_eq(result.computed[2].bounds.y, -30.0));
+    assert!(approx_eq(result.computed[5].bounds.y, 120.0));
+}
+
+#[test]
+fn scroll_y_clamps_to_bottom_with_max() {
+    let result = scroll_column(f32::MAX);
+
+    // Clamped to max scroll (content 200 − viewport 100 = 100): the last child's
+    // bottom edge lands on the viewport bottom (−100 + 3·50 + 50 = 100).
+    assert!(approx_eq(result.computed[2].bounds.y, -100.0));
+    assert!(approx_eq(result.computed[5].bounds.y, 50.0));
+}
+
+#[test]
+fn clipped_container_fills_parent_not_content() {
+    // A clipping GROW column inside a fixed 100px-tall root must fill the root
+    // (100), not inflate to its 200px of children — otherwise it overflows every
+    // ancestor instead of clipping/scrolling its own content.
+    let mut b = LayoutBuilder::new(200.0, 100.0);
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::TopToBottom)
+            .clip(),
+        |b| {
+            for _ in 0..4 {
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(50.0)),
+                    |_| {},
+                );
+            }
+        },
+    );
+    let tree = b.build();
+    let result = LayoutEngine::new(monospace_measure()).compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[1].height, 100.0));
+}
+
+#[test]
+fn scroll_y_from_end_pins_to_bottom_at_zero() {
+    // A four-child column (content 200, viewport 100): scrollback 0 shows the
+    // bottom, walking the last child's bottom edge to the viewport bottom.
+    let mut b = LayoutBuilder::new(200.0, 120.0);
+    b.with(
+        El::new()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .direction(Direction::TopToBottom)
+            .scroll_y_from_end(0.0),
+        |b| {
+            for _ in 0..4 {
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(50.0)),
+                    |_| {},
+                );
+            }
+        },
+    );
+    let tree = b.build();
+    let result = LayoutEngine::new(monospace_measure()).compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    // Same as scroll_y(f32::MAX): pinned to the bottom.
+    assert!(approx_eq(result.computed[2].bounds.y, -100.0));
+    assert!(approx_eq(result.computed[5].bounds.y, 50.0));
+}
+
+#[test]
+fn scroll_y_from_end_walks_upward() {
+    // scrollback 40 from a max of 100 leaves an effective offset of 60.
+    let mut b = LayoutBuilder::new(200.0, 120.0);
+    b.with(
+        El::new()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .direction(Direction::TopToBottom)
+            .scroll_y_from_end(40.0),
+        |b| {
+            for _ in 0..4 {
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(50.0)),
+                    |_| {},
+                );
+            }
+        },
+    );
+    let tree = b.build();
+    let result = LayoutEngine::new(monospace_measure()).compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[2].bounds.y, -60.0));
+}
+
+#[test]
+fn scroll_y_clamps_to_zero_when_content_fits() {
+    // One 50px child in a 100px viewport: nothing to scroll, offset clamps to 0.
+    let mut b = LayoutBuilder::new(200.0, 120.0);
+    b.with(
+        El::new()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .direction(Direction::TopToBottom)
+            .scroll_y(40.0),
+        |b| {
+            b.with(
+                El::new().width(Sizing::GROW).height(Sizing::fixed(50.0)),
+                |_| {},
+            );
+        },
+    );
+    let tree = b.build();
+    let result = LayoutEngine::new(monospace_measure()).compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[2].bounds.y, 0.0));
+}
+
 // ── Overflow compression ─────────────────────────────────────────────────────
 
 #[test]
