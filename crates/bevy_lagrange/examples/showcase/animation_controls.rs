@@ -168,27 +168,13 @@ pub(crate) fn toggle_projection(
     }
 }
 
-pub(crate) fn interrupt_behavior_hint_text(behavior: CameraInputInterruptBehavior) -> String {
-    match behavior {
-        CameraInputInterruptBehavior::Ignore => {
-            "CameraInputInterruptBehavior::Ignore - camera input during animation is ignored".into()
-        },
-        CameraInputInterruptBehavior::Cancel => {
-            "CameraInputInterruptBehavior::Cancel - camera input during animation will cancel it".into()
-        },
-        CameraInputInterruptBehavior::Complete => {
-            "CameraInputInterruptBehavior::Complete - camera input during animation will jump to final position"
-                .into()
-        },
-    }
-}
-
 pub(crate) fn toggle_interrupt_behavior(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     mut behavior_query: Query<&mut CameraInputInterruptBehavior>,
-    mut hint_query: Query<&mut Text, With<ui::CameraInputInterruptBehaviorLabel>>,
+    mut display: ResMut<policy_panel::PolicyDisplay>,
+    mut flash: ResMut<policy_panel::KeyFlash>,
     mut log: ResMut<event_log::EventLog>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyI) {
@@ -213,22 +199,9 @@ pub(crate) fn toggle_interrupt_behavior(
         commands.entity(scene.camera).insert(new_behavior);
     }
 
-    for mut text in &mut hint_query {
-        **text = interrupt_behavior_hint_text(new_behavior);
-    }
+    display.interrupt_behavior = new_behavior;
+    flash.flash_interrupt();
     log.push(format!("CameraInputInterruptBehavior: {new_behavior:?}"));
-}
-
-pub(crate) fn conflict_policy_hint_text(policy: AnimationConflictPolicy) -> String {
-    match policy {
-        AnimationConflictPolicy::LastWins => {
-            "AnimationConflictPolicy::LastWins - new animation cancels current one".into()
-        },
-        AnimationConflictPolicy::FirstWins => {
-            "AnimationConflictPolicy::FirstWins - new animation is rejected while one is playing"
-                .into()
-        },
-    }
 }
 
 pub(crate) fn toggle_animation_conflict_policy(
@@ -236,7 +209,8 @@ pub(crate) fn toggle_animation_conflict_policy(
     mut commands: Commands,
     scene: Res<SceneEntities>,
     mut policy_query: Query<&mut AnimationConflictPolicy>,
-    mut hint_query: Query<&mut Text, With<ui::AnimationConflictPolicyLabel>>,
+    mut display: ResMut<policy_panel::PolicyDisplay>,
+    mut flash: ResMut<policy_panel::KeyFlash>,
     mut log: ResMut<event_log::EventLog>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyQ) {
@@ -257,8 +231,7 @@ pub(crate) fn toggle_animation_conflict_policy(
         commands.entity(scene.camera).insert(new_policy);
     }
 
-    for mut text in &mut hint_query {
-        **text = conflict_policy_hint_text(new_policy);
-    }
+    display.conflict_policy = new_policy;
+    flash.flash_conflict();
     log.push(format!("AnimationConflictPolicy: {new_policy:?}"));
 }

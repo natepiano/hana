@@ -1,54 +1,10 @@
 use super::*;
 
 #[derive(Component)]
-pub(crate) struct CameraInputInterruptBehaviorLabel;
-
-#[derive(Component)]
-pub(crate) struct AnimationConflictPolicyLabel;
-
-#[derive(Component)]
 pub(crate) struct PausedOverlay;
 
 pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
-    // Interrupt behavior hint (bottom-left)
-    commands.spawn((
-        Text::new(animation_controls::interrupt_behavior_hint_text(
-            CameraInputInterruptBehavior::Ignore,
-        )),
-        TextFont {
-            font_size: FontSize::Px(UI_FONT_SIZE),
-            ..default()
-        },
-        TextColor(HINT_TEXT_COLOR),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            ..default()
-        },
-        CameraInputInterruptBehaviorLabel,
-        UiTargetCamera(camera),
-    ));
-
-    // Conflict policy hint (bottom-left, above interrupt behavior)
-    commands.spawn((
-        Text::new(animation_controls::conflict_policy_hint_text(
-            AnimationConflictPolicy::LastWins,
-        )),
-        TextFont {
-            font_size: FontSize::Px(UI_FONT_SIZE),
-            ..default()
-        },
-        TextColor(HINT_TEXT_COLOR),
-        Node {
-            position_type: PositionType::Absolute,
-            bottom: Val::Px(CONFLICT_POLICY_HINT_BOTTOM_PIXELS),
-            left: Val::Px(UI_SCREEN_PADDING_PIXELS),
-            ..default()
-        },
-        AnimationConflictPolicyLabel,
-        UiTargetCamera(camera),
-    ));
+    policy_panel::spawn_policy_panel(commands);
 
     event_log::spawn_log_panel(commands);
 

@@ -83,7 +83,7 @@ pub(super) const EVENT_LOG_TITLE: &str = "Event Log";
 pub(super) const EVENT_LOG_WIDTH: f32 = 272.0;
 pub(super) const EVENT_LOG_ZOOM_CANCELLED: &str = "ZoomEnd\n  reason=Cancelled";
 pub(super) const EVENT_LOG_ZOOM_COMPLETED: &str = "ZoomEnd\n  reason=Completed";
-pub(super) const LOG_CLEAR_HINT_TEXT: &str = "clear";
+pub(super) const LOG_CLEAR_HINT_TEXT: &str = "C clear";
 pub(super) const LOG_SCROLL_HINT_TEXT: &str = "↑↓ scroll log";
 
 // gizmos
@@ -96,11 +96,9 @@ pub(super) const HINT_TEXT_COLOR: Color = Color::srgba(0.7, 0.7, 0.7, 0.7);
 
 // title bar controls
 pub(super) const ANIMATE_CONTROL: &str = "A Orbit";
-pub(super) const CONFLICT_CONTROL: &str = "Q Conflict";
 pub(super) const EASING_CONTROL: &str = "R Easing";
 pub(super) const EASING_RESET_CONTROL: &str = "E Reset";
 pub(super) const EVENT_LOG_CONTROL: &str = "L Log";
-pub(super) const INTERRUPT_CONTROL: &str = "I Interrupt";
 pub(super) const LOOK_AND_FIT_CONTROL: &str = "G LookAt+Fit";
 pub(super) const LOOK_AT_CONTROL: &str = "F LookAt";
 pub(super) const OVERLAY_CONTROL: &str = "D Bounds";
@@ -119,6 +117,32 @@ pub(super) const OVERLAY_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.4);
 pub(super) const PAUSED_OVERLAY_FONT_SIZE: f32 = 48.0;
 pub(super) const PAUSED_OVERLAY_TOP_PERCENT: f32 = 46.0;
 pub(super) const PAUSED_TEXT: &str = "PAUSED";
+
+// policy panel
+pub(super) const POLICY_PANEL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+pub(super) const POLICY_PANEL_ARROW: &str = "->";
+pub(super) const POLICY_PANEL_COLUMN_GAP: f32 = 8.0;
+pub(super) const POLICY_PANEL_CONFLICT_HEADER: &str = "AnimationConflictPolicy";
+pub(super) const POLICY_PANEL_CONFLICT_KEY: &str = "Q";
+pub(super) const POLICY_PANEL_GROUP_GAP: f32 = 10.0;
+pub(super) const POLICY_PANEL_HEADER_GAP: f32 = 6.0;
+pub(super) const POLICY_PANEL_HEADER_SIZE: f32 = 12.0;
+/// Panel fits its content but never grows taller than this fraction of the
+/// viewport height.
+pub(super) const POLICY_PANEL_HEIGHT_PERCENT: f32 = 0.30;
+pub(super) const POLICY_PANEL_INTERRUPT_HEADER: &str = "CameraInputInterruptBehavior";
+pub(super) const POLICY_PANEL_INTERRUPT_KEY: &str = "I";
+pub(super) const POLICY_PANEL_KEY_COLUMN_WIDTH: f32 = 40.0;
+/// Seconds the toggle key stays highlighted after a press, signaling the cycle.
+pub(super) const POLICY_PANEL_KEY_FLASH_SECONDS: f32 = 1.0;
+pub(super) const POLICY_PANEL_KEY_TEXT_SIZE: f32 = 12.0;
+pub(super) const POLICY_PANEL_NAME_COLUMN_WIDTH: f32 = 76.0;
+pub(super) const POLICY_PANEL_NAME_GAP: f32 = 8.0;
+pub(super) const POLICY_PANEL_ROW_GAP: f32 = 5.0;
+pub(super) const POLICY_PANEL_TEXT_SIZE: f32 = 10.0;
+/// Panel fits its content but never grows wider than this fraction of the
+/// viewport width.
+pub(super) const POLICY_PANEL_WIDTH_PERCENT: f32 = 0.50;
 
 // projection
 pub(super) const ORTHOGRAPHIC_FAR_PLANE: f32 = 40.0;
@@ -162,11 +186,6 @@ pub(super) const DRAG_SENSITIVITY: f32 = 0.02;
 
 // time
 pub(super) const SECONDS_TO_MILLIS: f32 = 1000.0;
-
-// ui layout
-pub(super) const CONFLICT_POLICY_HINT_BOTTOM_PIXELS: f32 = 32.0;
-pub(super) const UI_FONT_SIZE: f32 = 13.0;
-pub(super) const UI_SCREEN_PADDING_PIXELS: f32 = 12.0;
 
 // window
 pub(super) const PRIMARY_WINDOW_TITLE: &str = "showcase";

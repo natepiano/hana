@@ -10,6 +10,7 @@ mod animation_controls;
 mod constants;
 mod event_log;
 mod pointer;
+mod policy_panel;
 mod scene;
 mod selection_gizmo;
 mod ui;
@@ -101,6 +102,8 @@ fn main() {
 
     app.init_resource::<ActiveEasing>()
         .init_resource::<event_log::EventLog>()
+        .init_resource::<policy_panel::PolicyDisplay>()
+        .init_resource::<policy_panel::KeyFlash>()
         .init_resource::<pointer::HoveredEntity>()
         .add_systems(
             Startup,
@@ -124,6 +127,8 @@ fn main() {
                 selection_gizmo::sync_selection_gizmo_layers,
                 event_log::rebuild_log_panel,
                 event_log::scroll_event_log,
+                policy_panel::rebuild_policy_panel,
+                policy_panel::tick_key_flash,
                 (
                     animation_controls::toggle_debug_overlay,
                     animation_controls::toggle_projection,
@@ -161,8 +166,6 @@ fn showcase_title_bar() -> TitleBar {
         .control(LOOK_AND_FIT_CONTROL)
         .control(EASING_CONTROL)
         .control(EASING_RESET_CONTROL)
-        .control(INTERRUPT_CONTROL)
-        .control(CONFLICT_CONTROL)
         .control(EVENT_LOG_CONTROL)
 }
 
