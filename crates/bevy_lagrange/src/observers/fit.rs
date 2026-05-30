@@ -99,7 +99,11 @@ pub(super) fn on_zoom_to_fit(
 
         // `on_play_animation` handles conflict resolution, `ZoomBegin`, and
         // `ZoomAnimationMarker` insertion — all in one place after acceptance.
-        commands.trigger(PlayAnimation::new(camera, camera_moves).zoom_context(zoom_context));
+        commands.trigger(
+            PlayAnimation::new(camera, camera_moves)
+                .zoom_context(zoom_context)
+                .target(target),
+        );
     } else {
         snap_orbit::snap_to_orbit(
             &mut commands,
@@ -192,7 +196,9 @@ pub(super) fn on_animate_to_fit(
             easing,
         }]);
         commands.trigger(
-            PlayAnimation::new(camera, camera_moves).source(AnimationSource::AnimateToFit),
+            PlayAnimation::new(camera, camera_moves)
+                .source(AnimationSource::AnimateToFit)
+                .target(target),
         );
     } else {
         snap_orbit::snap_to_orbit(
@@ -206,10 +212,15 @@ pub(super) fn on_animate_to_fit(
             },
             |commands| {
                 let source = AnimationSource::AnimateToFit;
-                commands.trigger(AnimationBegin { camera, source });
+                commands.trigger(AnimationBegin {
+                    camera,
+                    source,
+                    target: Some(target),
+                });
                 commands.trigger(AnimationEnd {
                     camera,
                     source,
+                    target: Some(target),
                     reason: AnimationReason::Completed,
                 });
             },

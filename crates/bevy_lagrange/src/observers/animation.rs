@@ -100,6 +100,7 @@ pub(super) fn on_play_animation(
     } else {
         start.source
     };
+    let target = start.target;
 
     let Ok((mut camera, existing_stash, conflict_policy)) = camera_query.get_mut(entity) else {
         return;
@@ -114,13 +115,15 @@ pub(super) fn on_play_animation(
                 commands.trigger(AnimationRejected {
                     camera: entity,
                     source,
+                    target,
                 });
                 return;
             },
             AnimationConflictPolicy::LastWins => {
-                let in_flight_source = source_marker_query
-                    .get(entity)
-                    .map_or(AnimationSource::PlayAnimation, |marker| marker.0);
+                let in_flight = source_marker_query.get(entity).ok();
+                let in_flight_source =
+                    in_flight.map_or(AnimationSource::PlayAnimation, |marker| marker.source);
+                let in_flight_target = in_flight.and_then(|marker| marker.target);
                 if let Ok(queue) = move_list_query.get(entity) {
                     let camera_move =
                         queue
@@ -138,6 +141,7 @@ pub(super) fn on_play_animation(
                     commands.trigger(AnimationEnd {
                         camera: entity,
                         source: in_flight_source,
+                        target: in_flight_target,
                         reason: AnimationReason::Cancelled {
                             interrupted_move: camera_move,
                         },
@@ -165,6 +169,7 @@ pub(super) fn on_play_animation(
     commands.trigger(AnimationBegin {
         camera: entity,
         source,
+        target,
     });
 
     stash_camera_state(&mut commands, entity, &mut camera, existing_stash);
@@ -174,7 +179,7 @@ pub(super) fn on_play_animation(
         .insert(CameraMoveList::new(start.camera_moves.clone()));
     commands
         .entity(entity)
-        .insert(AnimationSourceMarker(source));
+        .insert(AnimationSourceMarker { source, target });
 }
 
 /// Observer for direct `CameraMoveList` insertion (bypassing `PlayAnimation`).

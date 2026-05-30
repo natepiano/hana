@@ -38,10 +38,15 @@ pub(crate) struct ZoomAnimationMarker(pub(crate) ZoomContext);
 /// Tracks which trigger source started the current animation.
 ///
 /// Records whether the animation was triggered by [`PlayAnimation`](crate::PlayAnimation),
-/// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit). Inserted alongside
-/// [`CameraMoveList`] and removed when the animation ends or is cancelled.
+/// [`ZoomToFit`](crate::ZoomToFit), or [`AnimateToFit`](crate::AnimateToFit), plus the entity it
+/// frames (if any). Inserted alongside [`CameraMoveList`] and removed when the animation ends or is
+/// cancelled. The recorded `target` lets the end events report the framed entity even though the
+/// queue no longer carries it.
 #[derive(Component)]
-pub(crate) struct AnimationSourceMarker(pub(crate) AnimationSource);
+pub(crate) struct AnimationSourceMarker {
+    pub(crate) source: AnimationSource,
+    pub(crate) target: Option<Entity>,
+}
 
 #[derive(Clone, Reflect, Debug)]
 struct OrbitSnapshot {
@@ -269,6 +274,7 @@ fn handle_empty_queue(
     commands: &mut Commands,
     entity: Entity,
     source: AnimationSource,
+    target: Option<Entity>,
     zoom_marker: Option<&ZoomAnimationMarker>,
 ) {
     // Remove components BEFORE triggering events — observers may re-insert
@@ -280,6 +286,7 @@ fn handle_empty_queue(
     commands.trigger(AnimationEnd {
         camera: entity,
         source,
+        target,
         reason: AnimationReason::Completed,
     });
     if let Some(marker) = zoom_marker {
@@ -300,6 +307,7 @@ struct InterruptContext<'a> {
     queue:              &'a CameraMoveList,
     interrupt_behavior: CameraInputInterruptBehavior,
     source:             AnimationSource,
+    target:             Option<Entity>,
     current_move:       &'a CameraMove,
     zoom_marker:        Option<&'a ZoomAnimationMarker>,
 }
@@ -314,6 +322,7 @@ fn handle_camera_input_interrupt(
 ) -> CameraInputInterruptBehavior {
     let interrupt_behavior = interrupt_context.interrupt_behavior;
     let source = interrupt_context.source;
+    let target = interrupt_context.target;
     let current_move = interrupt_context.current_move;
     let zoom_marker = interrupt_context.zoom_marker;
     match interrupt_behavior {
@@ -326,6 +335,7 @@ fn handle_camera_input_interrupt(
             commands.trigger(AnimationEnd {
                 camera: entity,
                 source,
+                target,
                 reason: AnimationReason::Cancelled {
                     interrupted_move: current_move.clone(),
                 },
@@ -359,6 +369,7 @@ fn handle_camera_input_interrupt(
             commands.trigger(AnimationEnd {
                 camera: entity,
                 source,
+                target,
                 reason: AnimationReason::Completed,
             });
             if let Some(marker) = zoom_marker {
@@ -543,10 +554,11 @@ pub(crate) fn process_camera_move_list(
         source_marker,
     ) in &mut camera_query
     {
-        let source = source_marker.map_or(AnimationSource::PlayAnimation, |m| m.0);
+        let source = source_marker.map_or(AnimationSource::PlayAnimation, |m| m.source);
+        let target = source_marker.and_then(|m| m.target);
 
         let Some(current_move) = queue.camera_moves.front().cloned() else {
-            handle_empty_queue(&mut commands, entity, source, zoom_marker);
+            handle_empty_queue(&mut commands, entity, source, target, zoom_marker);
             continue;
         };
 
@@ -559,6 +571,7 @@ pub(crate) fn process_camera_move_list(
                     queue: &queue,
                     interrupt_behavior: *interrupt_behavior,
                     source,
+                    target,
                     current_move: &current_move,
                     zoom_marker,
                 },

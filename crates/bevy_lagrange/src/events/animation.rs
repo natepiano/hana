@@ -36,6 +36,11 @@ pub struct PlayAnimation {
     pub camera_moves: VecDeque<CameraMove>,
     /// The source of this animation.
     pub source:       AnimationSource,
+    /// The entity this animation frames, when it frames one (`AnimateToFit`,
+    /// `LookAt`, `LookAtAndZoomToFit`, `ZoomToFit`); `None` for a raw
+    /// `PlayAnimation`. Surfaced on the lifecycle events so observers can tell
+    /// which target an animation was for.
+    pub target:       Option<Entity>,
     /// Optional zoom context when this animation originates from `ZoomToFit`.
     pub zoom_context: Option<ZoomContext>,
 }
@@ -48,6 +53,7 @@ impl PlayAnimation {
             camera,
             camera_moves: camera_moves.into_iter().collect(),
             source: AnimationSource::PlayAnimation,
+            target: None,
             zoom_context: None,
         }
     }
@@ -56,6 +62,15 @@ impl PlayAnimation {
     #[must_use]
     pub const fn source(mut self, source: AnimationSource) -> Self {
         self.source = source;
+        self
+    }
+
+    /// Sets the entity this animation frames. The target is surfaced on the
+    /// `AnimationBegin` / `AnimationEnd` / `AnimationRejected` events so
+    /// observers can distinguish which target an animation was for.
+    #[must_use]
+    pub const fn target(mut self, target: Entity) -> Self {
+        self.target = Some(target);
         self
     }
 
@@ -78,6 +93,8 @@ pub struct AnimationBegin {
     /// Whether this animation originated from `PlayAnimation`, `ZoomToFit`, `AnimateToFit`,
     /// `LookAt`, or `LookAtAndZoomToFit`.
     pub source: AnimationSource,
+    /// The entity this animation frames, or `None` for a raw `PlayAnimation`.
+    pub target: Option<Entity>,
 }
 
 /// Emitted when an animation stops running, either by completing naturally or
@@ -91,6 +108,8 @@ pub struct AnimationEnd {
     /// Whether this animation originated from `PlayAnimation`, `ZoomToFit`, `AnimateToFit`,
     /// `LookAt`, or `LookAtAndZoomToFit`.
     pub source: AnimationSource,
+    /// The entity this animation framed, or `None` for a raw `PlayAnimation`.
+    pub target: Option<Entity>,
     /// Why the animation stopped: completed naturally, or cancelled.
     pub reason: AnimationReason,
 }
@@ -118,6 +137,9 @@ pub struct AnimationRejected {
     pub camera: Entity,
     /// The source of the rejected request.
     pub source: AnimationSource,
+    /// The entity the rejected request would have framed, or `None` for a raw
+    /// `PlayAnimation`.
+    pub target: Option<Entity>,
 }
 
 /// Emitted when an individual `CameraMove` begins.

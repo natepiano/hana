@@ -58,7 +58,8 @@ pub(super) fn on_look_at(
                     easing,
                 }],
             )
-            .source(AnimationSource::LookAt),
+            .source(AnimationSource::LookAt)
+            .target(target),
         );
     } else {
         let (yaw, pitch, radius) = animation::orbital_parameters_from_offset(Displacement(
@@ -75,10 +76,15 @@ pub(super) fn on_look_at(
             },
             |commands| {
                 let source = AnimationSource::LookAt;
-                commands.trigger(AnimationBegin { camera, source });
+                commands.trigger(AnimationBegin {
+                    camera,
+                    source,
+                    target: Some(target),
+                });
                 commands.trigger(AnimationEnd {
                     camera,
                     source,
+                    target: Some(target),
                     reason: AnimationReason::Completed,
                 });
             },
@@ -160,7 +166,8 @@ pub(super) fn on_look_at_and_zoom_to_fit(
                     },
                 ],
             )
-            .source(AnimationSource::LookAtAndZoomToFit),
+            .source(AnimationSource::LookAtAndZoomToFit)
+            .target(target),
         );
     } else {
         snap_orbit::snap_to_orbit(
@@ -174,10 +181,15 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             },
             |commands| {
                 let source = AnimationSource::LookAtAndZoomToFit;
-                commands.trigger(AnimationBegin { camera, source });
+                commands.trigger(AnimationBegin {
+                    camera,
+                    source,
+                    target: Some(target),
+                });
                 commands.trigger(AnimationEnd {
                     camera,
                     source,
+                    target: Some(target),
                     reason: AnimationReason::Completed,
                 });
             },
@@ -329,7 +341,7 @@ mod tests {
         assert_eq!(
             app.world()
                 .get::<AnimationSourceMarker>(camera)
-                .map(|source| source.0),
+                .map(|marker| marker.source),
             Some(AnimationSource::LookAtAndZoomToFit)
         );
         assert!(app.world().get::<ZoomAnimationMarker>(camera).is_none());
