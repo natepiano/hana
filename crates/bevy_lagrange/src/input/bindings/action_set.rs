@@ -21,6 +21,7 @@ use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
 use crate::input::CameraInteractionSources;
 use crate::input::CameraSemanticAction;
+use crate::input::ControlSpeed;
 use crate::input::HeldCameraAction;
 use crate::input::OrbitCamOrbitAction;
 use crate::input::OrbitCamPanAction;
@@ -181,6 +182,7 @@ pub struct HeldActionBindingEntry<A: HeldCameraAction> {
     pub(super) gates:      BindingGates,
     pub(super) sources:    CameraInteractionSources,
     pub(super) route:      BindingRoutePolicy,
+    pub(super) speed:      ControlSpeed,
     pub(super) action:     PhantomData<A>,
 }
 
@@ -200,6 +202,7 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
             gates:      binding.gates,
             sources:    binding.sources,
             route:      binding.route,
+            speed:      binding.speed,
             action:     PhantomData,
         })
     }
@@ -215,6 +218,10 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
     /// Returns gates applied to both motion and engagement descriptors.
     #[must_use]
     pub const fn gates(&self) -> &BindingGates { &self.gates }
+
+    /// Returns the speed variant this binding represents.
+    #[must_use]
+    pub const fn speed(&self) -> ControlSpeed { self.speed }
 
     /// Returns source metadata for this binding.
     #[must_use]

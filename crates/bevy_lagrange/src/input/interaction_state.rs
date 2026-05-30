@@ -1,15 +1,19 @@
 use bevy::prelude::*;
 
 use super::CameraInteractionSources;
+use super::ControlSpeed;
 use super::OrbitCamInteractionKind;
 
 /// Read-only state describing the active interaction for an `OrbitCam`.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInteractionState {
-    orbit: CameraInteractionSources,
-    pan:   CameraInteractionSources,
-    zoom:  CameraInteractionSources,
+    orbit:       CameraInteractionSources,
+    pan:         CameraInteractionSources,
+    zoom:        CameraInteractionSources,
+    orbit_speed: ControlSpeed,
+    pan_speed:   ControlSpeed,
+    zoom_speed:  ControlSpeed,
 }
 
 impl OrbitCamInteractionState {
@@ -47,6 +51,16 @@ impl OrbitCamInteractionState {
     #[must_use]
     pub const fn zoom_sources(&self) -> CameraInteractionSources { self.zoom }
 
+    /// Returns the speed variant currently active for `kind`.
+    #[must_use]
+    pub const fn speed(&self, kind: OrbitCamInteractionKind) -> ControlSpeed {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit_speed,
+            OrbitCamInteractionKind::Pan => self.pan_speed,
+            OrbitCamInteractionKind::Zoom => self.zoom_speed,
+        }
+    }
+
     pub(crate) const fn set_sources(
         &mut self,
         kind: OrbitCamInteractionKind,
@@ -56,6 +70,14 @@ impl OrbitCamInteractionState {
             OrbitCamInteractionKind::Orbit => self.orbit = sources,
             OrbitCamInteractionKind::Pan => self.pan = sources,
             OrbitCamInteractionKind::Zoom => self.zoom = sources,
+        }
+    }
+
+    pub(crate) const fn set_speed(&mut self, kind: OrbitCamInteractionKind, speed: ControlSpeed) {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit_speed = speed,
+            OrbitCamInteractionKind::Pan => self.pan_speed = speed,
+            OrbitCamInteractionKind::Zoom => self.zoom_speed = speed,
         }
     }
 }

@@ -24,6 +24,7 @@ use super::inject::OrbitCamAdapterFrameSources;
 use super::install::OrbitCamInputActionEntities;
 use super::install::OrbitCamInstalledBindings;
 use crate::input::CameraInteractionSources;
+use crate::input::ControlSpeed;
 use crate::input::HeldActionBindingEntry;
 use crate::input::HeldCameraAction;
 use crate::input::OrbitCamBindings;
@@ -40,8 +41,11 @@ use crate::input::actions::OrbitCamAdapterPanAction;
 use crate::input::actions::OrbitCamAdapterZoomCoarseAction;
 use crate::input::actions::OrbitCamAdapterZoomSmoothAction;
 use crate::input::actions::OrbitCamOrbitEngagedAction;
+use crate::input::actions::OrbitCamOrbitSlowAction;
 use crate::input::actions::OrbitCamPanEngagedAction;
+use crate::input::actions::OrbitCamPanSlowAction;
 use crate::input::actions::OrbitCamZoomEngagedAction;
+use crate::input::actions::OrbitCamZoomSmoothSlowAction;
 
 #[allow(
     clippy::too_many_lines,
@@ -107,20 +111,22 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
         );
 
         if orbit_engaged && !pan_overrides_orbit {
-            input.orbit_pixels_with_sources(
-                action_value(actions.orbit, &vec2_actions.orbit),
-                orbit_sources,
-            );
+            let normal = action_value(actions.orbit, &vec2_actions.orbit);
+            let slow = action_value(actions.orbit_slow, &vec2_actions.orbit_slow);
+            input.orbit_pixels_with_sources(normal + slow, orbit_sources);
+            input.set_orbit_speed(vec2_speed(slow));
         }
         if pan_engaged {
-            input
-                .pan_pixels_with_sources(action_value(actions.pan, &vec2_actions.pan), pan_sources);
+            let normal = action_value(actions.pan, &vec2_actions.pan);
+            let slow = action_value(actions.pan_slow, &vec2_actions.pan_slow);
+            input.pan_pixels_with_sources(normal + slow, pan_sources);
+            input.set_pan_speed(vec2_speed(slow));
         }
         if zoom_engaged {
-            input.zoom_smooth_with_sources(
-                action_value(actions.zoom_smooth, &f32_actions.zoom_smooth),
-                zoom_smooth_sources,
-            );
+            let normal = action_value(actions.zoom_smooth, &f32_actions.zoom_smooth);
+            let slow = action_value(actions.zoom_smooth_slow, &f32_actions.zoom_smooth_slow);
+            input.zoom_smooth_with_sources(normal + slow, zoom_smooth_sources);
+            input.set_zoom_speed(f32_speed(slow));
         }
         if action_state_active(actions.zoom_coarse, &states) {
             input.zoom_coarse_with_sources(
@@ -165,7 +171,9 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
 #[derive(SystemParam)]
 pub(super) struct Vec2ActionQueries<'w, 's> {
     orbit:         Query<'w, 's, &'static Action<OrbitCamOrbitAction>>,
+    orbit_slow:    Query<'w, 's, &'static Action<OrbitCamOrbitSlowAction>>,
     pan:           Query<'w, 's, &'static Action<OrbitCamPanAction>>,
+    pan_slow:      Query<'w, 's, &'static Action<OrbitCamPanSlowAction>>,
     adapter_orbit: Query<'w, 's, &'static Action<OrbitCamAdapterOrbitAction>>,
     adapter_pan:   Query<'w, 's, &'static Action<OrbitCamAdapterPanAction>>,
 }
@@ -174,6 +182,7 @@ pub(super) struct Vec2ActionQueries<'w, 's> {
 pub(super) struct F32ActionQueries<'w, 's> {
     zoom_coarse:         Query<'w, 's, &'static Action<OrbitCamZoomCoarseAction>>,
     zoom_smooth:         Query<'w, 's, &'static Action<OrbitCamZoomSmoothAction>>,
+    zoom_smooth_slow:    Query<'w, 's, &'static Action<OrbitCamZoomSmoothSlowAction>>,
     adapter_zoom_coarse: Query<'w, 's, &'static Action<OrbitCamAdapterZoomCoarseAction>>,
     adapter_zoom_smooth: Query<'w, 's, &'static Action<OrbitCamAdapterZoomSmoothAction>>,
 }
@@ -263,6 +272,25 @@ fn bool_action_active<A: InputAction<Output = bool>>(
     states: &Query<&TriggerState>,
 ) -> bool {
     action_state_active(action, states) && actions.get(action).is_ok_and(|action| **action)
+}
+
+/// The active speed for a held kind: any contribution from the slow motion
+/// action means the slow variant is engaged. The normal and slow actions are
+/// mutually exclusive (BEI's gate conditions ensure only one carries a value).
+fn vec2_speed(slow: Vec2) -> ControlSpeed {
+    if slow == Vec2::ZERO {
+        ControlSpeed::Normal
+    } else {
+        ControlSpeed::Slow
+    }
+}
+
+fn f32_speed(slow: f32) -> ControlSpeed {
+    if slow == 0.0 {
+        ControlSpeed::Normal
+    } else {
+        ControlSpeed::Slow
+    }
 }
 
 fn action_state_active(action: Entity, states: &Query<&TriggerState>) -> bool {

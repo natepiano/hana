@@ -19,6 +19,7 @@ use super::action_set::BindingEngagement;
 use super::action_set::BindingRoutePolicy;
 use super::held_binding::BindingGates;
 use crate::input::CameraInteractionSources;
+use crate::input::ControlSpeed;
 
 #[derive(Clone, Debug, PartialEq, Reflect)]
 pub(super) struct HeldBindingDescriptor {
@@ -28,6 +29,7 @@ pub(super) struct HeldBindingDescriptor {
     pub(super) sources:            CameraInteractionSources,
     pub(super) engagement_sources: CameraInteractionSources,
     pub(super) route:              BindingRoutePolicy,
+    pub(super) speed:              ControlSpeed,
 }
 
 /// Reflectable descriptor for an impulse action binding.

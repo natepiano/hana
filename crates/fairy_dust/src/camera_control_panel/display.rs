@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionState;
 
@@ -31,6 +32,9 @@ pub(super) struct CameraGuidanceDisplayState {
     orbit:                   CameraGuidanceDisplaySlot,
     pan:                     CameraGuidanceDisplaySlot,
     zoom:                    CameraGuidanceDisplaySlot,
+    orbit_speed:             ControlSpeed,
+    pan_speed:               ControlSpeed,
+    zoom_speed:              ControlSpeed,
     pub(super) render_state: RenderState,
 }
 
@@ -44,15 +48,34 @@ impl CameraGuidanceDisplayState {
             orbit:        CameraGuidanceDisplaySlot::active(display.orbit),
             pan:          CameraGuidanceDisplaySlot::active(display.pan),
             zoom:         CameraGuidanceDisplaySlot::active(display.zoom),
+            orbit_speed:  display.orbit_speed,
+            pan_speed:    display.pan_speed,
+            zoom_speed:   display.zoom_speed,
             render_state: RenderState::Idle,
         }
     }
 
     pub(super) const fn display(self) -> CameraGuidanceDisplay {
         CameraGuidanceDisplay {
-            orbit: self.orbit.sources(),
-            pan:   self.pan.sources(),
-            zoom:  self.zoom.sources(),
+            orbit:       self.orbit.sources(),
+            pan:         self.pan.sources(),
+            zoom:        self.zoom.sources(),
+            orbit_speed: self.orbit_speed,
+            pan_speed:   self.pan_speed,
+            zoom_speed:  self.zoom_speed,
+        }
+    }
+
+    pub(super) fn set_speed(&mut self, kind: OrbitCamInteractionKind, speed: ControlSpeed) {
+        let slot = match kind {
+            OrbitCamInteractionKind::Orbit => &mut self.orbit_speed,
+            OrbitCamInteractionKind::Pan => &mut self.pan_speed,
+            OrbitCamInteractionKind::Zoom => &mut self.zoom_speed,
+            _ => return,
+        };
+        if *slot != speed {
+            *slot = speed;
+            self.render_state = RenderState::Pending;
         }
     }
 
@@ -182,17 +205,23 @@ impl CameraGuidanceDisplaySlot {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CameraGuidanceDisplay {
-    pub(super) orbit: CameraInteractionSources,
-    pub(super) pan:   CameraInteractionSources,
-    pub(super) zoom:  CameraInteractionSources,
+    pub(super) orbit:       CameraInteractionSources,
+    pub(super) pan:         CameraInteractionSources,
+    pub(super) zoom:        CameraInteractionSources,
+    pub(super) orbit_speed: ControlSpeed,
+    pub(super) pan_speed:   ControlSpeed,
+    pub(super) zoom_speed:  ControlSpeed,
 }
 
 impl CameraGuidanceDisplay {
     pub(super) const fn from_interaction_state(state: OrbitCamInteractionState) -> Self {
         Self {
-            orbit: state.orbit_sources(),
-            pan:   state.pan_sources(),
-            zoom:  state.zoom_sources(),
+            orbit:       state.orbit_sources(),
+            pan:         state.pan_sources(),
+            zoom:        state.zoom_sources(),
+            orbit_speed: state.speed(OrbitCamInteractionKind::Orbit),
+            pan_speed:   state.speed(OrbitCamInteractionKind::Pan),
+            zoom_speed:  state.speed(OrbitCamInteractionKind::Zoom),
         }
     }
 
@@ -205,8 +234,13 @@ impl CameraGuidanceDisplay {
         }
     }
 
-    pub(super) const fn all_sources(self) -> CameraInteractionSources {
-        self.orbit.union(self.pan).union(self.zoom)
+    pub(super) const fn speed(self, kind: OrbitCamInteractionKind) -> ControlSpeed {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit_speed,
+            OrbitCamInteractionKind::Pan => self.pan_speed,
+            OrbitCamInteractionKind::Zoom => self.zoom_speed,
+            _ => ControlSpeed::Normal,
+        }
     }
 }
 

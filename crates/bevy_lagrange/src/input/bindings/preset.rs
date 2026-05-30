@@ -19,6 +19,7 @@ use super::builder::OrbitCamTrackpadScroll;
 use super::error::OrbitCamBindingsError;
 use super::held_binding::OrbitCamHeldBinding;
 use super::held_binding::OrbitCamInputBinding;
+use crate::input::ControlSpeed;
 use crate::input::InputDeadZone;
 
 const GAMEPAD_ORBIT_SCALE: f32 = 1200.0;
@@ -458,10 +459,16 @@ fn add_gamepad_layer(
     builder
         .orbit(OrbitCamHeldBinding::same(fast_orbit).with_blocked_gate(GamepadButton::RightTrigger))
         .orbit(
-            OrbitCamHeldBinding::same(slow_orbit).with_required_gate(GamepadButton::RightTrigger),
+            OrbitCamHeldBinding::same(slow_orbit)
+                .with_required_gate(GamepadButton::RightTrigger)
+                .speed(ControlSpeed::Slow),
         )
         .pan(OrbitCamHeldBinding::same(fast_pan).with_blocked_gate(GamepadButton::LeftTrigger))
-        .pan(OrbitCamHeldBinding::same(slow_pan).with_required_gate(GamepadButton::LeftTrigger))
+        .pan(
+            OrbitCamHeldBinding::same(slow_pan)
+                .with_required_gate(GamepadButton::LeftTrigger)
+                .speed(ControlSpeed::Slow),
+        )
         .zoom(
             OrbitCamHeldBinding::same(gamepad_trigger(
                 GamepadButton::RightTrigger2,
@@ -481,14 +488,16 @@ fn add_gamepad_layer(
                 GamepadButton::RightTrigger2,
                 preset.slow_zoom_scale,
             ))
-            .with_required_gate(GamepadButton::RightTrigger),
+            .with_required_gate(GamepadButton::RightTrigger)
+            .speed(ControlSpeed::Slow),
         )
         .zoom(
             OrbitCamHeldBinding::same(gamepad_trigger(
                 GamepadButton::LeftTrigger2,
                 -preset.slow_zoom_scale,
             ))
-            .with_required_gate(GamepadButton::LeftTrigger),
+            .with_required_gate(GamepadButton::LeftTrigger)
+            .speed(ControlSpeed::Slow),
         )
         .gamepad(CameraInputGamepadSelectionPolicy::Active)
 }

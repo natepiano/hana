@@ -4,6 +4,7 @@
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
@@ -12,15 +13,13 @@ use bevy_lagrange::describe_orbit_cam_controls;
 use super::guidance::CameraGuidance;
 use super::guidance::CameraGuidanceContent;
 use super::guidance::CameraGuidanceRow;
-use super::guidance::SourceVisibility;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {
-    pub(super) camera_label:      String,
-    pub(super) mode_label:        String,
-    pub(super) mode_value:        String,
-    pub(super) rows:              Vec<CameraGuidanceRow>,
-    pub(super) source_visibility: SourceVisibility,
+    pub(super) camera_label: String,
+    pub(super) mode_label:   String,
+    pub(super) mode_value:   String,
+    pub(super) rows:         Vec<CameraGuidanceRow>,
 }
 
 pub(super) fn resolve_guidance_snapshot(
@@ -30,7 +29,6 @@ pub(super) fn resolve_guidance_snapshot(
 ) -> CameraGuidanceSnapshot {
     let name_label = name.map(|n| n.as_str().to_string());
     let title_label = guidance.and_then(|g| g.title.clone());
-    let source_visibility = guidance.map_or(SourceVisibility::Visible, |g| g.source_visibility);
     let explicit = guidance.and_then(|g| match &g.content {
         CameraGuidanceContent::Auto => None,
         CameraGuidanceContent::Rows(rows) => Some((g, rows.clone())),
@@ -45,7 +43,6 @@ pub(super) fn resolve_guidance_snapshot(
             mode_label: guidance.mode_label.clone().unwrap_or(mode_label),
             mode_value: guidance.mode_value.clone().unwrap_or(mode_value),
             rows,
-            source_visibility,
         };
     }
 
@@ -55,10 +52,9 @@ pub(super) fn resolve_guidance_snapshot(
     );
     CameraGuidanceSnapshot {
         camera_label: name_label.or(title_label).unwrap_or(summary.camera_label),
-        mode_label: summary.mode_label,
-        mode_value: summary.mode_value,
-        rows: summary.rows.into_iter().map(Into::into).collect(),
-        source_visibility,
+        mode_label:   summary.mode_label,
+        mode_value:   summary.mode_value,
+        rows:         summary.rows.into_iter().map(Into::into).collect(),
     }
 }
 
@@ -96,93 +92,17 @@ pub(super) const fn row_active(row: &CameraGuidanceRow, sources: CameraInteracti
     sources.intersects(row.camera_interaction_sources())
 }
 
-pub(super) fn source_label(sources: CameraInteractionSources) -> String {
-    let mut labels = Vec::new();
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::MOUSE,
-        "button-drag",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::WHEEL,
-        "wheel",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::SMOOTH_SCROLL,
-        "smooth-scroll",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::PINCH,
-        "pinch",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::TOUCH,
-        "touch",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::KEYBOARD,
-        "keyboard",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::GAMEPAD,
-        "gamepad",
-    );
-    push_source_label(
-        &mut labels,
-        sources,
-        CameraInteractionSources::MANUAL,
-        "manual",
-    );
-
-    if labels.is_empty() {
-        "idle".to_string()
-    } else {
-        labels.join(" + ")
-    }
-}
-
-pub(super) const fn kind_label(kind: OrbitCamInteractionKind) -> &'static str {
-    match kind {
-        OrbitCamInteractionKind::Orbit => "Orbit",
-        OrbitCamInteractionKind::Pan => "Pan",
-        OrbitCamInteractionKind::Zoom => "Zoom",
+pub(super) const fn group_label(
+    kind: OrbitCamInteractionKind,
+    speed: ControlSpeed,
+) -> &'static str {
+    match (kind, speed) {
+        (OrbitCamInteractionKind::Orbit, ControlSpeed::Normal) => "Orbit",
+        (OrbitCamInteractionKind::Orbit, ControlSpeed::Slow) => "Orbit Slow",
+        (OrbitCamInteractionKind::Pan, ControlSpeed::Normal) => "Pan",
+        (OrbitCamInteractionKind::Pan, ControlSpeed::Slow) => "Pan Slow",
+        (OrbitCamInteractionKind::Zoom, ControlSpeed::Normal) => "Zoom",
+        (OrbitCamInteractionKind::Zoom, ControlSpeed::Slow) => "Zoom Slow",
         _ => "",
-    }
-}
-
-fn push_source_label(
-    labels: &mut Vec<&'static str>,
-    sources: CameraInteractionSources,
-    source: CameraInteractionSources,
-    label: &'static str,
-) {
-    if sources.contains(source) {
-        labels.push(label);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn source_label_lists_sources_without_brackets() {
-        let sources = CameraInteractionSources::MOUSE.union(CameraInteractionSources::PINCH);
-
-        assert_eq!(source_label(sources), "button-drag + pinch");
-        assert_eq!(source_label(CameraInteractionSources::NONE), "idle");
     }
 }

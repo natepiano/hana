@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamControlRow;
 use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInputMode;
@@ -10,25 +11,15 @@ use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
 
-/// Whether active source labels are rendered in the guidance panel.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SourceVisibility {
-    /// Source labels are rendered.
-    Visible,
-    /// Source labels are hidden.
-    Hidden,
-}
-
 /// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidance {
-    pub(super) anchor:            Anchor,
-    pub(super) title:             Option<String>,
-    pub(super) mode_label:        Option<String>,
-    pub(super) mode_value:        Option<String>,
-    pub(super) content:           CameraGuidanceContent,
-    pub(super) source_visibility: SourceVisibility,
+    pub(super) anchor:     Anchor,
+    pub(super) title:      Option<String>,
+    pub(super) mode_label: Option<String>,
+    pub(super) mode_value: Option<String>,
+    pub(super) content:    CameraGuidanceContent,
 }
 
 impl Default for CameraGuidance {
@@ -40,12 +31,11 @@ impl CameraGuidance {
     #[must_use]
     pub const fn auto() -> Self {
         Self {
-            anchor:            Anchor::BottomRight,
-            title:             None,
-            mode_label:        None,
-            mode_value:        None,
-            content:           CameraGuidanceContent::Auto,
-            source_visibility: SourceVisibility::Visible,
+            anchor:     Anchor::BottomRight,
+            title:      None,
+            mode_label: None,
+            mode_value: None,
+            content:    CameraGuidanceContent::Auto,
         }
     }
 
@@ -61,12 +51,11 @@ impl CameraGuidance {
     #[must_use]
     pub fn custom(rows: impl IntoIterator<Item = CameraGuidanceRow>) -> Self {
         Self {
-            anchor:            Anchor::BottomRight,
-            title:             None,
-            mode_label:        None,
-            mode_value:        None,
-            content:           CameraGuidanceContent::Rows(rows.into_iter().collect()),
-            source_visibility: SourceVisibility::Visible,
+            anchor:     Anchor::BottomRight,
+            title:      None,
+            mode_label: None,
+            mode_value: None,
+            content:    CameraGuidanceContent::Rows(rows.into_iter().collect()),
         }
     }
 
@@ -84,13 +73,6 @@ impl CameraGuidance {
         self
     }
 
-    /// Controls whether active source labels are rendered.
-    #[must_use]
-    pub const fn with_source_visibility(mut self, source_visibility: SourceVisibility) -> Self {
-        self.source_visibility = source_visibility;
-        self
-    }
-
     /// Returns explicitly configured rows.
     ///
     /// Auto guidance is resolved when the panel binds to a camera.
@@ -104,14 +86,13 @@ impl CameraGuidance {
 
     fn from_summary(summary: OrbitCamControlSummary) -> Self {
         Self {
-            anchor:            Anchor::BottomRight,
-            title:             Some(summary.camera_label),
-            mode_label:        Some(summary.mode_label),
-            mode_value:        Some(summary.mode_value),
-            content:           CameraGuidanceContent::Rows(
+            anchor:     Anchor::BottomRight,
+            title:      Some(summary.camera_label),
+            mode_label: Some(summary.mode_label),
+            mode_value: Some(summary.mode_value),
+            content:    CameraGuidanceContent::Rows(
                 summary.rows.into_iter().map(Into::into).collect(),
             ),
-            source_visibility: SourceVisibility::Visible,
         }
     }
 }
@@ -128,6 +109,7 @@ pub struct CameraGuidanceRow {
     orbit_cam_interaction_kind: OrbitCamInteractionKind,
     label:                      String,
     camera_interaction_sources: CameraInteractionSources,
+    speed:                      ControlSpeed,
 }
 
 impl CameraGuidanceRow {
@@ -138,7 +120,15 @@ impl CameraGuidanceRow {
             orbit_cam_interaction_kind: kind,
             label:                      label.into(),
             camera_interaction_sources: CameraInteractionSources::NONE,
+            speed:                      ControlSpeed::Normal,
         }
+    }
+
+    /// Sets the binding speed variant.
+    #[must_use]
+    pub const fn with_speed(mut self, speed: ControlSpeed) -> Self {
+        self.speed = speed;
+        self
     }
 
     /// Highlights this row only when the active sources intersect `sources`.
@@ -164,11 +154,16 @@ impl CameraGuidanceRow {
     /// Returns the display label.
     #[must_use]
     pub fn label(&self) -> &str { &self.label }
+
+    /// Returns the binding speed variant.
+    #[must_use]
+    pub const fn speed(&self) -> ControlSpeed { self.speed }
 }
 
 impl From<OrbitCamControlRow> for CameraGuidanceRow {
     fn from(row: OrbitCamControlRow) -> Self {
         Self::new(row.kind, row.label)
             .with_camera_interaction_sources(row.camera_interaction_sources)
+            .with_speed(row.speed)
     }
 }

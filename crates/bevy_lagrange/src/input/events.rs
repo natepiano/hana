@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use super::CameraInputMetricKind;
 use super::CameraInteractionSources;
+use super::ControlSpeed;
 
 /// Semantic kind of an `OrbitCam` interaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
@@ -68,6 +69,21 @@ impl OrbitCamInteractionSourcesChanged {
     pub const fn removed_sources(&self) -> CameraInteractionSources {
         self.previous.difference(self.current)
     }
+}
+
+/// Emitted when an active `OrbitCam` interaction switches speed variant — for
+/// the gamepad preset, when the `rb`/`lb` modifier is pressed or released
+/// mid-interaction without changing the source set.
+#[derive(Clone, Copy, Debug, EntityEvent, Reflect)]
+#[reflect(Event, FromReflect)]
+pub struct OrbitCamInteractionSpeedChanged {
+    /// Camera entity whose interaction speed changed.
+    #[event_target]
+    pub camera: Entity,
+    /// Kind of interaction whose speed changed.
+    pub kind:   OrbitCamInteractionKind,
+    /// Speed variant active after the change.
+    pub speed:  ControlSpeed,
 }
 
 /// Emitted when logical input metrics are required but unavailable for a camera.

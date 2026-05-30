@@ -65,6 +65,28 @@ pub struct OrbitCamControlRow {
     pub label:                      String,
     /// Sources associated with this binding.
     pub camera_interaction_sources: CameraInteractionSources,
+    /// Whether this binding is the normal or the slow (precise) variant.
+    pub speed:                      ControlSpeed,
+}
+
+/// Distinguishes a normal binding from its slow, precise counterpart — for the
+/// gamepad preset, the slow variant is the one gated behind `rb`/`lb`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub enum ControlSpeed {
+    /// Default speed binding.
+    #[default]
+    Normal,
+    /// Slow, precise binding engaged while a modifier gate is held.
+    Slow,
+}
+
+impl OrbitCamControlRow {
+    /// Overrides the binding speed variant.
+    #[must_use]
+    pub const fn with_speed(mut self, speed: ControlSpeed) -> Self {
+        self.speed = speed;
+        self
+    }
 }
 
 /// Describes the effective `OrbitCam` controls for an input mode.
@@ -227,7 +249,7 @@ fn describe_held_entry<A: HeldCameraAction>(
     kind: OrbitCamInteractionKind,
 ) -> OrbitCamControlRow {
     let label = held_binding_stem(entry);
-    control_row(kind, label, entry.sources())
+    control_row(kind, label, entry.sources()).with_speed(entry.speed())
 }
 
 fn describe_action_entry<A: CameraSemanticAction>(
@@ -403,9 +425,9 @@ fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
             key_label(*positive),
             key_label(*negative)
         )),
-        keys if is_arrow_keys(keys) => Some("Arrow keys".to_string()),
-        keys if is_wasd(keys) => Some("WASD".to_string()),
-        _ => Some("Keyboard keys".to_string()),
+        keys if is_arrow_keys(keys) => Some("arrow keys".to_string()),
+        keys if is_wasd(keys) => Some("wasd".to_string()),
+        _ => Some("keyboard keys".to_string()),
     }
 }
 
@@ -428,11 +450,11 @@ fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
     match gamepad_axes.as_slice() {
         [] => None,
         [GamepadAxis::LeftStickX, GamepadAxis::LeftStickY]
-        | [GamepadAxis::LeftStickY, GamepadAxis::LeftStickX] => Some("LS".to_string()),
+        | [GamepadAxis::LeftStickY, GamepadAxis::LeftStickX] => Some("ls".to_string()),
         [GamepadAxis::RightStickX, GamepadAxis::RightStickY]
-        | [GamepadAxis::RightStickY, GamepadAxis::RightStickX] => Some("RS".to_string()),
+        | [GamepadAxis::RightStickY, GamepadAxis::RightStickX] => Some("rs".to_string()),
         [single_axis] => Some(gamepad_axis_label(*single_axis)),
-        _ => Some("Gamepad axes".to_string()),
+        _ => Some("gamepad axes".to_string()),
     }
 }
 
@@ -456,7 +478,7 @@ fn gamepad_button_stem(entries: &[InputBindingEntry]) -> Option<String> {
         [] => None,
         [GamepadButton::RightTrigger2, GamepadButton::LeftTrigger2]
         | [GamepadButton::LeftTrigger2, GamepadButton::RightTrigger2] => {
-            Some("RT / LT".to_string())
+            Some("rt / lt".to_string())
         },
         [positive, negative] => Some(format!(
             "{} / {}",
@@ -464,7 +486,7 @@ fn gamepad_button_stem(entries: &[InputBindingEntry]) -> Option<String> {
             gamepad_button_label(*negative)
         )),
         [button] => Some(gamepad_button_label(*button)),
-        _ => Some("Gamepad buttons".to_string()),
+        _ => Some("gamepad buttons".to_string()),
     }
 }
 
@@ -490,7 +512,7 @@ fn trackpad_stem(mod_keys: ModKeys) -> String {
     if mod_keys.is_empty() {
         TRACKPAD_SOURCE_LABEL.to_string()
     } else {
-        format!("{}+trackpad", compact_mod_keys(mod_keys))
+        format!("{}+{TRACKPAD_SOURCE_LABEL}", compact_mod_keys(mod_keys))
     }
 }
 
@@ -502,59 +524,61 @@ fn with_mod_keys(mod_keys: ModKeys, label: String) -> String {
     }
 }
 
-fn compact_mod_keys(mod_keys: ModKeys) -> String { mod_keys.to_string().replace(" + ", "+") }
+fn compact_mod_keys(mod_keys: ModKeys) -> String {
+    mod_keys.to_string().replace(" + ", "+").to_lowercase()
+}
 
 fn key_label(key: KeyCode) -> String {
     match key {
-        KeyCode::ArrowUp => "Up".to_string(),
-        KeyCode::ArrowRight => "Right".to_string(),
-        KeyCode::ArrowDown => "Down".to_string(),
-        KeyCode::ArrowLeft => "Left".to_string(),
+        KeyCode::ArrowUp => "up".to_string(),
+        KeyCode::ArrowRight => "right".to_string(),
+        KeyCode::ArrowDown => "down".to_string(),
+        KeyCode::ArrowLeft => "left".to_string(),
         KeyCode::Equal => "+".to_string(),
         KeyCode::Minus => "-".to_string(),
-        KeyCode::Space => "Space".to_string(),
-        KeyCode::KeyA => "A".to_string(),
-        KeyCode::KeyD => "D".to_string(),
-        KeyCode::KeyH => "H".to_string(),
-        KeyCode::KeyM => "M".to_string(),
-        KeyCode::KeyS => "S".to_string(),
-        KeyCode::KeyW => "W".to_string(),
+        KeyCode::Space => "space".to_string(),
+        KeyCode::KeyA => "a".to_string(),
+        KeyCode::KeyD => "d".to_string(),
+        KeyCode::KeyH => "h".to_string(),
+        KeyCode::KeyM => "m".to_string(),
+        KeyCode::KeyS => "s".to_string(),
+        KeyCode::KeyW => "w".to_string(),
         _ => debug_name(key, "Key"),
     }
 }
 
 fn mouse_button_label(button: MouseButton) -> String {
     match button {
-        MouseButton::Left => "Left".to_string(),
-        MouseButton::Right => "Right".to_string(),
-        MouseButton::Middle => "MMB".to_string(),
-        _ => format!("{button:?}"),
+        MouseButton::Left => "lmb".to_string(),
+        MouseButton::Right => "rmb".to_string(),
+        MouseButton::Middle => "mmb".to_string(),
+        _ => format!("{button:?}").to_lowercase(),
     }
 }
 
 fn gamepad_axis_label(axis: GamepadAxis) -> String {
     match axis {
-        GamepadAxis::LeftStickX => "LS X".to_string(),
-        GamepadAxis::LeftStickY => "LS Y".to_string(),
-        GamepadAxis::RightStickX => "RS X".to_string(),
-        GamepadAxis::RightStickY => "RS Y".to_string(),
+        GamepadAxis::LeftStickX => "ls x".to_string(),
+        GamepadAxis::LeftStickY => "ls y".to_string(),
+        GamepadAxis::RightStickX => "rs x".to_string(),
+        GamepadAxis::RightStickY => "rs y".to_string(),
         _ => debug_name(axis, ""),
     }
 }
 
 fn gamepad_button_label(button: GamepadButton) -> String {
     match button {
-        GamepadButton::LeftTrigger => "LB".to_string(),
-        GamepadButton::RightTrigger => "RB".to_string(),
-        GamepadButton::LeftTrigger2 => "LT".to_string(),
-        GamepadButton::RightTrigger2 => "RT".to_string(),
+        GamepadButton::LeftTrigger => "lb".to_string(),
+        GamepadButton::RightTrigger => "rb".to_string(),
+        GamepadButton::LeftTrigger2 => "lt".to_string(),
+        GamepadButton::RightTrigger2 => "rt".to_string(),
         _ => debug_name(button, ""),
     }
 }
 
 fn debug_name(value: impl std::fmt::Debug, prefix: &str) -> String {
     let name = format!("{value:?}");
-    name.strip_prefix(prefix).unwrap_or(&name).to_string()
+    name.strip_prefix(prefix).unwrap_or(&name).to_lowercase()
 }
 
 const fn source_stem(sources: CameraInteractionSources) -> &'static str {
@@ -599,6 +623,7 @@ fn control_row(
         kind,
         label: label.into(),
         camera_interaction_sources: sources,
+        speed: ControlSpeed::Normal,
     }
 }
 
@@ -618,13 +643,13 @@ mod tests {
         assert_eq!(summary.camera_label, "OrbitCam");
         assert_eq!(summary.mode_label, "Preset");
         assert_eq!(summary.mode_value, "BlenderLike");
-        assert!(labels.contains(&"MMB drag"));
-        assert!(labels.contains(&"Trackpad"));
-        assert!(labels.contains(&"Shift+MMB drag"));
-        assert!(labels.contains(&"Shift+trackpad"));
-        assert!(labels.contains(&"Wheel"));
-        assert!(labels.contains(&"Ctrl+trackpad"));
-        assert!(labels.contains(&"Pinch"));
+        assert!(labels.contains(&"mmb drag"));
+        assert!(labels.contains(&"smooth-scroll"));
+        assert!(labels.contains(&"shift+mmb drag"));
+        assert!(labels.contains(&"shift+smooth-scroll"));
+        assert!(labels.contains(&"wheel"));
+        assert!(labels.contains(&"ctrl+smooth-scroll"));
+        assert!(labels.contains(&"pinch"));
     }
 
     #[test]
@@ -637,8 +662,8 @@ mod tests {
 
         assert_eq!(summary.mode_label, "Bindings");
         assert_eq!(summary.mode_value, "Custom");
-        assert!(labels.contains(&"Right drag"));
-        assert!(!labels.contains(&"MMB drag"));
+        assert!(labels.contains(&"rmb drag"));
+        assert!(!labels.contains(&"mmb drag"));
 
         Ok(())
     }
@@ -666,8 +691,8 @@ mod tests {
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
         let labels = summary_labels(&summary);
 
-        assert!(labels.contains(&"Arrow keys"));
-        assert!(labels.contains(&"WASD"));
+        assert!(labels.contains(&"arrow keys"));
+        assert!(labels.contains(&"wasd"));
         assert!(labels.contains(&"+ / -"));
 
         Ok(())
@@ -680,14 +705,23 @@ mod tests {
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.mode_value, "Gamepad");
-        assert!(labels.contains(&"RS"));
-        assert!(labels.contains(&"RB+RS"));
-        assert!(labels.contains(&"LS"));
-        assert!(labels.contains(&"LB+LS"));
-        assert!(labels.contains(&"RT"));
-        assert!(labels.contains(&"LT"));
-        assert!(labels.contains(&"RB+RT"));
-        assert!(labels.contains(&"LB+LT"));
+        assert!(labels.contains(&"rs"));
+        assert!(labels.contains(&"rb+rs"));
+        assert!(labels.contains(&"ls"));
+        assert!(labels.contains(&"lb+ls"));
+        assert!(labels.contains(&"rt"));
+        assert!(labels.contains(&"lt"));
+        assert!(labels.contains(&"rb+rt"));
+        assert!(labels.contains(&"lb+lt"));
+
+        assert_eq!(row_speed(&summary, "rs"), Some(ControlSpeed::Normal));
+        assert_eq!(row_speed(&summary, "rb+rs"), Some(ControlSpeed::Slow));
+        assert_eq!(row_speed(&summary, "ls"), Some(ControlSpeed::Normal));
+        assert_eq!(row_speed(&summary, "lb+ls"), Some(ControlSpeed::Slow));
+        assert_eq!(row_speed(&summary, "rt"), Some(ControlSpeed::Normal));
+        assert_eq!(row_speed(&summary, "lt"), Some(ControlSpeed::Normal));
+        assert_eq!(row_speed(&summary, "rb+rt"), Some(ControlSpeed::Slow));
+        assert_eq!(row_speed(&summary, "lb+lt"), Some(ControlSpeed::Slow));
     }
 
     #[test]
@@ -697,7 +731,7 @@ mod tests {
 
         assert_eq!(summary.mode_label, "Input");
         assert_eq!(summary.mode_value, "Manual");
-        assert!(labels.contains(&"App-authored input"));
+        assert!(labels.contains(&"app-authored input"));
         assert!(summary.rows.iter().all(|row| {
             row.camera_interaction_sources
                 .contains(CameraInteractionSources::MANUAL)
@@ -706,5 +740,13 @@ mod tests {
 
     fn summary_labels(summary: &OrbitCamControlSummary) -> Vec<&str> {
         summary.rows.iter().map(|row| row.label.as_str()).collect()
+    }
+
+    fn row_speed(summary: &OrbitCamControlSummary, label: &str) -> Option<ControlSpeed> {
+        summary
+            .rows
+            .iter()
+            .find(|row| row.label == label)
+            .map(|row| row.speed)
     }
 }

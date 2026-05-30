@@ -288,6 +288,7 @@ mod tests {
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::MOUSE,
             route:              BindingRoutePolicy::CursorPosition,
+            speed:              crate::input::ControlSpeed::Normal,
         });
 
         assert_eq!(
@@ -308,6 +309,7 @@ mod tests {
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::KEYBOARD,
             route:              BindingRoutePolicy::CursorPosition,
+            speed:              crate::input::ControlSpeed::Normal,
         });
 
         assert_eq!(

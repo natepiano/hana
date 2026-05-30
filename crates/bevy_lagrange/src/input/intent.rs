@@ -1,6 +1,7 @@
 use bevy::prelude::*;
 
 use super::CameraInteractionSources;
+use super::ControlSpeed;
 use super::ManualInputSource;
 
 /// Orbit motion expressed in logical pixels.
@@ -131,6 +132,9 @@ pub struct OrbitCamInput {
     pan_sources:          CameraInteractionSources,
     zoom_sources:         CameraInteractionSources,
     zoom_impulse_sources: CameraInteractionSources,
+    orbit_speed:          ControlSpeed,
+    pan_speed:            ControlSpeed,
+    zoom_speed:           ControlSpeed,
     motion:               CameraMotion,
 }
 
@@ -170,6 +174,26 @@ impl OrbitCamInput {
     /// Returns active sources for zoom input this frame.
     #[must_use]
     pub const fn zoom_sources(&self) -> CameraInteractionSources { self.zoom_sources }
+
+    /// Returns the speed variant of the orbit input this frame.
+    #[must_use]
+    pub const fn orbit_speed(&self) -> ControlSpeed { self.orbit_speed }
+
+    /// Returns the speed variant of the pan input this frame.
+    #[must_use]
+    pub const fn pan_speed(&self) -> ControlSpeed { self.pan_speed }
+
+    /// Returns the speed variant of the zoom input this frame.
+    #[must_use]
+    pub const fn zoom_speed(&self) -> ControlSpeed { self.zoom_speed }
+
+    pub(crate) const fn set_orbit_speed(&mut self, speed: ControlSpeed) {
+        self.orbit_speed = speed;
+    }
+
+    pub(crate) const fn set_pan_speed(&mut self, speed: ControlSpeed) { self.pan_speed = speed; }
+
+    pub(crate) const fn set_zoom_speed(&mut self, speed: ControlSpeed) { self.zoom_speed = speed; }
 
     /// Returns the active motion flags for this frame.
     #[must_use]

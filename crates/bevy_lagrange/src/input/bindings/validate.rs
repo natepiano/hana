@@ -200,6 +200,7 @@ fn held_descriptor_to_entry<A: HeldCameraAction>(
         gates: descriptor.gates.clone(),
         sources: descriptor.sources,
         route: descriptor.route,
+        speed: descriptor.speed,
         action: PhantomData,
     })
 }

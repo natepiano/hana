@@ -49,6 +49,22 @@ pub(super) struct OrbitCamPanEngagedAction;
 #[action_output(bool)]
 pub(super) struct OrbitCamZoomEngagedAction;
 
+/// Slow (gated) orbit motion — routed separately so the active speed falls out
+/// of which motion action is firing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction, Reflect)]
+#[action_output(Vec2)]
+pub struct OrbitCamOrbitSlowAction;
+
+/// Slow (gated) pan motion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction, Reflect)]
+#[action_output(Vec2)]
+pub struct OrbitCamPanSlowAction;
+
+/// Slow (gated) smooth zoom motion.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction, Reflect)]
+#[action_output(f32)]
+pub struct OrbitCamZoomSmoothSlowAction;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
 #[action_output(bool)]
 pub(super) struct OrbitCamGateAction;
@@ -83,6 +99,9 @@ impl_camera_action!(OrbitCamZoomSmoothAction);
 impl_camera_action!(OrbitCamOrbitEngagedAction);
 impl_camera_action!(OrbitCamPanEngagedAction);
 impl_camera_action!(OrbitCamZoomEngagedAction);
+impl_camera_action!(OrbitCamOrbitSlowAction);
+impl_camera_action!(OrbitCamPanSlowAction);
+impl_camera_action!(OrbitCamZoomSmoothSlowAction);
 impl_camera_action!(OrbitCamAdapterOrbitAction);
 impl_camera_action!(OrbitCamAdapterPanAction);
 impl_camera_action!(OrbitCamAdapterZoomCoarseAction);

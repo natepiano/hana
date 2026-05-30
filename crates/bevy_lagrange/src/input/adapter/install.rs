@@ -56,6 +56,7 @@ use crate::input::BindingGates;
 use crate::input::CameraInputGamepadSelectionPolicy;
 use crate::input::CameraInteractionSources;
 use crate::input::CameraSemanticAction;
+use crate::input::ControlSpeed;
 use crate::input::HeldActionBindingEntry;
 use crate::input::HeldCameraAction;
 use crate::input::InputAxisTransform;
@@ -81,8 +82,11 @@ use crate::input::actions::OrbitCamAdapterZoomCoarseAction;
 use crate::input::actions::OrbitCamAdapterZoomSmoothAction;
 use crate::input::actions::OrbitCamGateAction;
 use crate::input::actions::OrbitCamOrbitEngagedAction;
+use crate::input::actions::OrbitCamOrbitSlowAction;
 use crate::input::actions::OrbitCamPanEngagedAction;
+use crate::input::actions::OrbitCamPanSlowAction;
 use crate::input::actions::OrbitCamZoomEngagedAction;
+use crate::input::actions::OrbitCamZoomSmoothSlowAction;
 use crate::input::modes;
 use crate::input::modes::OrbitCamInputInstallationOf;
 use crate::orbit_cam::OrbitCam;
@@ -93,11 +97,14 @@ pub(super) struct OrbitCamInstalledBindings(pub(super) OrbitCamBindings);
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OrbitCamInputActionEntities {
     pub(super) orbit:               Entity,
+    pub(super) orbit_slow:          Entity,
     pub(super) orbit_engaged:       Entity,
     pub(super) pan:                 Entity,
+    pub(super) pan_slow:            Entity,
     pub(super) pan_engaged:         Entity,
     pub(super) zoom_coarse:         Entity,
     pub(super) zoom_smooth:         Entity,
+    pub(super) zoom_smooth_slow:    Entity,
     pub(super) zoom_engaged:        Entity,
     pub(super) adapter_orbit:       Entity,
     pub(super) adapter_pan:         Entity,
@@ -286,11 +293,14 @@ struct SpawnedInputInstallation {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct SpawnedInputActions {
     orbit:               Entity,
+    orbit_slow:          Entity,
     orbit_engaged:       Entity,
     pan:                 Entity,
+    pan_slow:            Entity,
     pan_engaged:         Entity,
     zoom_coarse:         Entity,
     zoom_smooth:         Entity,
+    zoom_smooth_slow:    Entity,
     zoom_engaged:        Entity,
     adapter_orbit:       Entity,
     adapter_pan:         Entity,
@@ -302,11 +312,14 @@ impl SpawnedInputActions {
     fn entities(self) -> Vec<Entity> {
         vec![
             self.orbit,
+            self.orbit_slow,
             self.orbit_engaged,
             self.pan,
+            self.pan_slow,
             self.pan_engaged,
             self.zoom_coarse,
             self.zoom_smooth,
+            self.zoom_smooth_slow,
             self.zoom_engaged,
             self.adapter_orbit,
             self.adapter_pan,
@@ -335,11 +348,14 @@ impl SpawnedInputActions {
     fn with_sources(self, bindings: &OrbitCamBindings) -> OrbitCamInputActionEntities {
         OrbitCamInputActionEntities {
             orbit:               self.orbit,
+            orbit_slow:          self.orbit_slow,
             orbit_engaged:       self.orbit_engaged,
             pan:                 self.pan,
+            pan_slow:            self.pan_slow,
             pan_engaged:         self.pan_engaged,
             zoom_coarse:         self.zoom_coarse,
             zoom_smooth:         self.zoom_smooth,
+            zoom_smooth_slow:    self.zoom_smooth_slow,
             zoom_engaged:        self.zoom_engaged,
             adapter_orbit:       self.adapter_orbit,
             adapter_pan:         self.adapter_pan,
@@ -393,11 +409,14 @@ fn spawn_input_installation(
 fn spawn_input_actions(world: &mut World, camera: Entity) -> SpawnedInputActions {
     SpawnedInputActions {
         orbit:               spawn_action::<OrbitCamOrbitAction>(world, camera),
+        orbit_slow:          spawn_action::<OrbitCamOrbitSlowAction>(world, camera),
         orbit_engaged:       spawn_action::<OrbitCamOrbitEngagedAction>(world, camera),
         pan:                 spawn_action::<OrbitCamPanAction>(world, camera),
+        pan_slow:            spawn_action::<OrbitCamPanSlowAction>(world, camera),
         pan_engaged:         spawn_action::<OrbitCamPanEngagedAction>(world, camera),
         zoom_coarse:         spawn_action::<OrbitCamZoomCoarseAction>(world, camera),
         zoom_smooth:         spawn_action::<OrbitCamZoomSmoothAction>(world, camera),
+        zoom_smooth_slow:    spawn_action::<OrbitCamZoomSmoothSlowAction>(world, camera),
         zoom_engaged:        spawn_action::<OrbitCamZoomEngagedAction>(world, camera),
         adapter_orbit:       spawn_action::<OrbitCamAdapterOrbitAction>(world, camera),
         adapter_pan:         spawn_action::<OrbitCamAdapterPanAction>(world, camera),
@@ -417,7 +436,10 @@ fn spawn_camera_action_bindings(
     spawn_held_bindings(
         world,
         camera,
-        actions.orbit,
+        MotionActions {
+            normal: actions.orbit,
+            slow:   actions.orbit_slow,
+        },
         actions.orbit_engaged,
         bindings.orbit().entries(),
         &mut gate_actions,
@@ -426,7 +448,10 @@ fn spawn_camera_action_bindings(
     spawn_held_bindings(
         world,
         camera,
-        actions.pan,
+        MotionActions {
+            normal: actions.pan,
+            slow:   actions.pan_slow,
+        },
         actions.pan_engaged,
         bindings.pan().entries(),
         &mut gate_actions,
@@ -435,7 +460,10 @@ fn spawn_camera_action_bindings(
     spawn_held_bindings(
         world,
         camera,
-        actions.zoom_smooth,
+        MotionActions {
+            normal: actions.zoom_smooth,
+            slow:   actions.zoom_smooth_slow,
+        },
         actions.zoom_engaged,
         bindings.zoom_smooth().entries(),
         &mut gate_actions,
@@ -622,17 +650,20 @@ const fn action_settings() -> ActionSettings {
 fn spawn_held_bindings<A: HeldCameraAction>(
     world: &mut World,
     camera: Entity,
-    motion_action: Entity,
+    motion_actions: MotionActions,
     engagement_action: Entity,
     entries: &[HeldActionBindingEntry<A>],
     gate_actions: &mut GateActionCache,
     entities: &mut Vec<Entity>,
 ) {
     for entry in entries {
+        // Route the motion binding to the speed-specific action so BEI's gate
+        // conditions decide which one fires; the active speed then falls out of
+        // which motion action is firing — no gate logic is re-derived downstream.
         spawn_binding(
             world,
             camera,
-            motion_action,
+            motion_actions.for_speed(entry.speed()),
             entry.motion_descriptor(),
             entry.gates(),
             gate_actions,
@@ -647,6 +678,22 @@ fn spawn_held_bindings<A: HeldCameraAction>(
             gate_actions,
             entities,
         );
+    }
+}
+
+/// The normal/slow motion action pair a motion binding routes to by speed.
+#[derive(Clone, Copy)]
+struct MotionActions {
+    normal: Entity,
+    slow:   Entity,
+}
+
+impl MotionActions {
+    const fn for_speed(self, speed: ControlSpeed) -> Entity {
+        match speed {
+            ControlSpeed::Normal => self.normal,
+            ControlSpeed::Slow => self.slow,
+        }
     }
 }
 

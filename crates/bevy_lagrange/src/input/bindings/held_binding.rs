@@ -24,6 +24,7 @@ use super::descriptor::InputBindingOutputAxis;
 use super::descriptor::InputBindingScale;
 use super::descriptor::InputDeadZone;
 use crate::input::CameraInteractionSources;
+use crate::input::ControlSpeed;
 
 /// A held enhanced-input binding made from a value binding and an engagement binding.
 #[derive(Clone, Debug, PartialEq, Reflect)]
@@ -33,6 +34,7 @@ pub struct OrbitCamHeldBinding {
     pub(super) gates:      BindingGates,
     pub(super) sources:    CameraInteractionSources,
     pub(super) route:      BindingRoutePolicy,
+    pub(super) speed:      ControlSpeed,
 }
 
 impl OrbitCamHeldBinding {
@@ -52,6 +54,7 @@ impl OrbitCamHeldBinding {
             gates: BindingGates::default(),
             sources,
             route,
+            speed: ControlSpeed::Normal,
         }
     }
 
@@ -89,6 +92,13 @@ impl OrbitCamHeldBinding {
         self.gates = self.gates.with_blocked(input);
         self
     }
+
+    /// Tags this binding as the normal or slow (precise) speed variant.
+    #[must_use]
+    pub const fn speed(mut self, speed: ControlSpeed) -> Self {
+        self.speed = speed;
+        self
+    }
 }
 
 impl From<OrbitCamHeldBinding> for HeldBindingDescriptor {
@@ -100,6 +110,7 @@ impl From<OrbitCamHeldBinding> for HeldBindingDescriptor {
             sources:            binding.sources,
             engagement_sources: binding.sources,
             route:              binding.route,
+            speed:              binding.speed,
         }
     }
 }

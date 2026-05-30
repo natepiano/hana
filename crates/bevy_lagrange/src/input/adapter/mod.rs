@@ -83,6 +83,7 @@ mod tests {
     use crate::input::CameraInputGamepadSelectionPolicy;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
+    use crate::input::ControlSpeed;
     use crate::input::OrbitCamBindings;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
@@ -750,8 +751,15 @@ mod tests {
         }));
     }
 
+    /// Drives the gamepad preset's gated motion-split path with a real gamepad.
+    /// The `InputReader` resolves a `GamepadButton` gate through its analog
+    /// channel (`gamepad.get(button)`), so the gate button must have its analog
+    /// value set — a bare `digital_mut().press` reads as `0.0` and never
+    /// engages the gate. Right-stick orbit resolves `Normal`; adding the
+    /// RightTrigger gate must flip the resolved speed to `Slow` while orbit
+    /// stays active (fast is blocked by the same trigger, slow requires it).
     #[test]
-    fn gamepad_preset_fast_and_slow_orbit_are_exclusive() -> TestResult {
+    fn gamepad_preset_slow_orbit_gate_resolves_speed() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
@@ -772,26 +780,96 @@ mod tests {
             .resource_mut::<Time>()
             .advance_by(Duration::from_millis(16));
         app.update();
-        let fast_orbit = camera_input(&app, camera)?.orbit().pixels().x;
         assert!(camera_input(&app, camera)?.has_orbit());
-        assert!(fast_orbit > 0.0);
+        assert_eq!(
+            camera_input(&app, camera)?.orbit_speed(),
+            ControlSpeed::Normal
+        );
 
         {
             let mut gamepad = app
                 .world_mut()
                 .get_mut::<Gamepad>(gamepad_entity)
                 .ok_or("gamepad should exist")?;
+            gamepad.analog_mut().set(GamepadButton::RightTrigger, 1.0);
             gamepad.digital_mut().press(GamepadButton::RightTrigger);
         }
-        app.world_mut()
-            .resource_mut::<Time>()
-            .advance_by(Duration::from_millis(16));
-        app.update();
-        let slow_orbit = camera_input(&app, camera)?.orbit().pixels().x;
+        // The gate is a separate action the binding condition reads, so it
+        // settles a frame after the trigger registers; keep the stick deflected
+        // and advance time each frame so orbit stays active.
+        for _ in 0..2 {
+            {
+                let mut gamepad = app
+                    .world_mut()
+                    .get_mut::<Gamepad>(gamepad_entity)
+                    .ok_or("gamepad should exist")?;
+                gamepad.analog_mut().set(GamepadAxis::RightStickX, 1.0);
+            }
+            app.world_mut()
+                .resource_mut::<Time>()
+                .advance_by(Duration::from_millis(16));
+            app.update();
+        }
 
         assert!(camera_input(&app, camera)?.has_orbit());
-        assert!(slow_orbit > 0.0);
-        assert!(slow_orbit < fast_orbit);
+        assert_eq!(
+            camera_input(&app, camera)?.orbit_speed(),
+            ControlSpeed::Slow
+        );
+        Ok(())
+    }
+
+    /// Drives the gated motion-split path with a keyboard gate (gamepad digital
+    /// buttons don't propagate through this harness). Fast orbit is blocked by
+    /// Shift; the slow variant requires Shift and is tagged `Slow`, so pressing
+    /// Shift must flip the resolved speed without changing the source set.
+    #[test]
+    fn keyboard_gated_slow_orbit_resolves_speed() -> TestResult {
+        let bindings = OrbitCamBindings::builder()
+            .orbit(
+                OrbitCamHeldBinding::new(Binding::mouse_motion(), MouseButton::Left)
+                    .with_blocked_gate(KeyCode::ShiftLeft),
+            )
+            .orbit(
+                OrbitCamHeldBinding::new(Binding::mouse_motion(), MouseButton::Left)
+                    .with_required_gate(KeyCode::ShiftLeft)
+                    .speed(ControlSpeed::Slow),
+            )
+            .build()
+            .map_err(|_| "bindings should build")?;
+
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(4.0, -3.0);
+        app.update();
+        assert!(camera_input(&app, camera)?.has_orbit());
+        assert_eq!(
+            camera_input(&app, camera)?.orbit_speed(),
+            ControlSpeed::Normal
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        // The gate is a separate action the binding condition reads, so it
+        // settles a frame after the key registers; re-assert motion each frame.
+        for _ in 0..2 {
+            app.world_mut()
+                .resource_mut::<AccumulatedMouseMotion>()
+                .delta = Vec2::new(4.0, -3.0);
+            app.update();
+        }
+        assert!(camera_input(&app, camera)?.has_orbit());
+        assert_eq!(
+            camera_input(&app, camera)?.orbit_speed(),
+            ControlSpeed::Slow
+        );
         Ok(())
     }
 

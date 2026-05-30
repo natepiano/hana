@@ -5,11 +5,13 @@ use super::CameraInputMetricsMissing;
 use super::CameraInputSourceLatches;
 use super::CameraInputSurfaceMetrics;
 use super::CameraInteractionSources;
+use super::ControlSpeed;
 use super::OrbitCamInput;
 use super::OrbitCamInputBlockers;
 use super::OrbitCamInteractionEnded;
 use super::OrbitCamInteractionKind;
 use super::OrbitCamInteractionSourcesChanged;
+use super::OrbitCamInteractionSpeedChanged;
 use super::OrbitCamInteractionStarted;
 use super::OrbitCamInteractionState;
 use super::ResolvedOrbitCamInputRoute;
@@ -20,6 +22,7 @@ enum LifecycleEvent {
     Started(OrbitCamInteractionStarted),
     Ended(OrbitCamInteractionEnded),
     SourcesChanged(OrbitCamInteractionSourcesChanged),
+    SpeedChanged(OrbitCamInteractionSpeedChanged),
     MetricsMissing(CameraInputMetricsMissing),
 }
 
@@ -152,9 +155,38 @@ fn finalize_camera_input(
         &mut events,
     );
 
+    push_speed_transition(
+        camera,
+        OrbitCamInteractionKind::Orbit,
+        previous.speed(OrbitCamInteractionKind::Orbit),
+        input.orbit_speed(),
+        orbit_sources,
+        &mut events,
+    );
+    push_speed_transition(
+        camera,
+        OrbitCamInteractionKind::Pan,
+        previous.speed(OrbitCamInteractionKind::Pan),
+        input.pan_speed(),
+        pan_sources,
+        &mut events,
+    );
+    push_speed_transition(
+        camera,
+        OrbitCamInteractionKind::Zoom,
+        previous.speed(OrbitCamInteractionKind::Zoom),
+        input.zoom_speed(),
+        zoom_sources,
+        &mut events,
+    );
+
     state.set_sources(OrbitCamInteractionKind::Orbit, orbit_sources);
     state.set_sources(OrbitCamInteractionKind::Pan, pan_sources);
     state.set_sources(OrbitCamInteractionKind::Zoom, zoom_sources);
+
+    state.set_speed(OrbitCamInteractionKind::Orbit, input.orbit_speed());
+    state.set_speed(OrbitCamInteractionKind::Pan, input.pan_speed());
+    state.set_speed(OrbitCamInteractionKind::Zoom, input.zoom_speed());
 
     FinalizedInput {
         camera,
@@ -242,6 +274,28 @@ fn push_state_transition(
     }
 }
 
+/// Emits a speed-change event when an engaged kind switches speed variant
+/// without its source set changing (e.g. `rb`/`lb` pressed mid-orbit).
+fn push_speed_transition(
+    camera: Entity,
+    kind: OrbitCamInteractionKind,
+    previous: ControlSpeed,
+    current: ControlSpeed,
+    sources: CameraInteractionSources,
+    events: &mut Vec<LifecycleEvent>,
+) {
+    if sources.is_empty() || previous == current {
+        return;
+    }
+    events.push(LifecycleEvent::SpeedChanged(
+        OrbitCamInteractionSpeedChanged {
+            camera,
+            kind,
+            speed: current,
+        },
+    ));
+}
+
 fn push_impulse(
     camera: Entity,
     kind: OrbitCamInteractionKind,
@@ -285,6 +339,9 @@ fn apply_lifecycle_event(world: &mut World, camera: Entity, event: LifecycleEven
                 latches.release_sources(camera, removed);
                 latches.acquire_sources(camera, added);
             }
+            world.entity_mut(camera).trigger(|_| event);
+        },
+        LifecycleEvent::SpeedChanged(event) => {
             world.entity_mut(camera).trigger(|_| event);
         },
         LifecycleEvent::MetricsMissing(event) => {

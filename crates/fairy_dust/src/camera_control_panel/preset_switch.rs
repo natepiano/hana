@@ -18,6 +18,19 @@ use bevy_lagrange::ResolvedOrbitCamInputRoute;
 
 use crate::ensure_plugin;
 
+/// Whether the camera control panel's Shift+C preset cycling is wired up.
+///
+/// Defaults to [`Enabled`](Self::Enabled); the `lock_camera_preset` builder
+/// method sets [`Disabled`](Self::Disabled) to pin the camera to one preset.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum CameraPresetSwitching {
+    /// Shift+C cycles presets.
+    #[default]
+    Enabled,
+    /// Preset switching is suppressed.
+    Disabled,
+}
+
 #[derive(Component)]
 struct FairyDustPresetContext;
 
@@ -26,12 +39,16 @@ event!(CyclePresetEvent);
 
 pub(super) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
+    app.init_resource::<CameraPresetSwitching>();
     app.add_input_context::<FairyDustPresetContext>();
     app.add_systems(Startup, spawn_preset_action);
     bind_action_system!(app, CyclePreset, CyclePresetEvent, cycle_preset);
 }
 
-fn spawn_preset_action(mut commands: Commands) {
+fn spawn_preset_action(mut commands: Commands, switching: Res<CameraPresetSwitching>) {
+    if *switching == CameraPresetSwitching::Disabled {
+        return;
+    }
     commands.spawn((
         FairyDustPresetContext,
         actions!(FairyDustPresetContext[

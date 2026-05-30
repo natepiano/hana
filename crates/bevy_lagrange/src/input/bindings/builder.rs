@@ -68,6 +68,7 @@ pub(crate) fn invalid_bindings_descriptor_for_tests() -> OrbitCamBindingsDescrip
         sources:            CameraInteractionSources::MOUSE,
         engagement_sources: CameraInteractionSources::MOUSE,
         route:              BindingRoutePolicy::CursorPosition,
+        speed:              crate::input::ControlSpeed::Normal,
     });
     descriptor
 }

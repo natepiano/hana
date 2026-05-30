@@ -24,17 +24,17 @@ use bevy_diegetic::Fit;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
+use bevy_lagrange::OrbitCamInteractionSpeedChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
 pub use guidance::CameraGuidance;
 pub use guidance::CameraGuidanceRow;
-pub use guidance::SourceVisibility;
 use layout::build_guidance_tree;
+pub(crate) use preset_switch::CameraPresetSwitching;
 use snapshot::CameraGuidanceSnapshot;
 use snapshot::resolve_guidance_snapshot;
 
@@ -71,7 +71,8 @@ pub(crate) fn install(app: &mut App) {
     );
     app.add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
-        .add_observer(refresh_on_sources_changed);
+        .add_observer(refresh_on_sources_changed)
+        .add_observer(refresh_on_speed_changed);
 }
 
 fn ensure_panel_plugins(app: &mut App) {
@@ -107,13 +108,10 @@ fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackgro
     }
 }
 
-/// Placeholder snapshot rendered until the first route resolution completes.
+/// Placeholder snapshot rendered for the one frame before the panel binds to a
+/// camera. Uses the default input mode so it never claims an unrelated preset.
 fn default_snapshot() -> CameraGuidanceSnapshot {
-    resolve_guidance_snapshot(
-        None,
-        None,
-        Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)),
-    )
+    resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::default()))
 }
 
 /// Rebuilds the panel snapshot when the routed camera changes, or when the
@@ -127,6 +125,7 @@ fn rebind_panel_on_route_change(
         Option<&OrbitCamInteractionState>,
         Option<&OrbitCamInputMode>,
     )>,
+    orbit_cameras: Query<Entity, With<OrbitCamInputMode>>,
     changed_cameras: Query<Entity, Or<(Changed<CameraGuidance>, Changed<OrbitCamInputMode>)>>,
     panel: Single<(
         Entity,
@@ -135,7 +134,12 @@ fn rebind_panel_on_route_change(
     )>,
     background: Res<CameraControlPanelBackground>,
 ) {
-    let routed = route.routed_camera();
+    // Before the cursor routes to a camera, follow the sole orbit camera so the
+    // panel reflects the real preset instead of a placeholder. With more than
+    // one camera there is no unambiguous choice, so wait for routing.
+    let routed = route
+        .routed_camera()
+        .or_else(|| orbit_cameras.single().ok());
     let (panel_entity, mut panel_marker, mut display_state) = panel.into_inner();
 
     let route_changed = panel_marker.bound_camera != routed;
@@ -197,6 +201,17 @@ fn refresh_on_sources_changed(
         return;
     }
     display.activate(event.kind, event.current, time.elapsed_secs());
+}
+
+fn refresh_on_speed_changed(
+    event: On<OrbitCamInteractionSpeedChanged>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    display.set_speed(event.kind, event.speed);
 }
 
 /// Expires held source labels and rebuilds the panel tree when display state
