@@ -96,7 +96,7 @@ pub use bindings::OrbitCamZoomSmoothActionBindings;
 pub use bindings::PinchGestureZoom;
 pub use bindings::PresetLayerSet;
 pub use bindings::WheelZoomPolarity;
-pub use bindings::ZoomDirection;
+pub use bindings::ZoomInversion;
 pub(super) use bindings::mod_keys_pressed;
 pub use bindings::validate_bindings;
 pub use context::OrbitCamInputContext;

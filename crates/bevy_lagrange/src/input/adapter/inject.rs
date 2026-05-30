@@ -42,7 +42,7 @@ use crate::input::OrbitCamTrackpadScroll;
 use crate::input::PinchGestureZoom;
 use crate::input::ResolvedOrbitCamInputRoute;
 use crate::input::WheelZoomPolarity;
-use crate::input::ZoomDirection;
+use crate::input::ZoomInversion;
 use crate::input::modes::OrbitCamInputInstallationOf;
 use crate::touch::TouchGestures;
 use crate::touch::TouchTracker;
@@ -459,9 +459,9 @@ fn zoom_signed(value: f32, bindings: &OrbitCamBindings, polarity: WheelZoomPolar
         WheelZoomPolarity::Normal => 1.0,
         WheelZoomPolarity::Inverted => -1.0,
     };
-    let zoom_sign = match bindings.zoom_direction() {
-        ZoomDirection::Normal => 1.0,
-        ZoomDirection::Reversed => -1.0,
+    let zoom_sign = match bindings.zoom_inversion() {
+        ZoomInversion::Normal => 1.0,
+        ZoomInversion::Inverted => -1.0,
     };
     value * wheel_sign * zoom_sign
 }

@@ -47,7 +47,7 @@ pub struct OrbitCamBindingsDescriptor {
     pub(super) pinch_zoom:       super::PinchGestureZoom,
     pub(super) touch:            Option<OrbitCamTouchBinding>,
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
-    pub(super) zoom_direction:   ZoomDirection,
+    pub(super) zoom_inversion:   ZoomInversion,
     pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
     pub(super) profile:          OrbitCamBindingsProfile,
 }
@@ -139,8 +139,8 @@ impl OrbitCamBindingsBuilder {
 
     /// Sets the zoom direction policy.
     #[must_use]
-    pub const fn zoom_direction(mut self, zoom_direction: ZoomDirection) -> Self {
-        self.descriptor.zoom_direction = zoom_direction;
+    pub const fn zoom_inversion(mut self, zoom_inversion: ZoomInversion) -> Self {
+        self.descriptor.zoom_inversion = zoom_inversion;
         self
     }
 
@@ -351,14 +351,14 @@ pub enum OrbitCamTouchBinding {
     TwoFingerOrbit,
 }
 
-/// Direction of scroll/zoom input.
+/// Normal or inverted scroll/zoom input.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub enum ZoomDirection {
+pub enum ZoomInversion {
     /// Scrolling zooms in the default direction.
     #[default]
     Normal,
     /// Scrolling zooms in the opposite direction.
-    Reversed,
+    Inverted,
 }
 
 /// Axis used for button-drag zoom.

@@ -50,7 +50,7 @@ pub use builder::OrbitCamTouchBinding;
 pub use builder::OrbitCamTrackpadScroll;
 pub use builder::OrbitCamZoomBinding;
 pub use builder::WheelZoomPolarity;
-pub use builder::ZoomDirection;
+pub use builder::ZoomInversion;
 #[cfg(test)]
 pub(crate) use builder::invalid_bindings_descriptor_for_tests;
 pub use descriptor::ActionBindingDescriptor;
@@ -93,7 +93,7 @@ pub struct OrbitCamBindings {
     pub(super) pinch_zoom:       PinchGestureZoom,
     pub(super) touch:            Option<OrbitCamTouchBinding>,
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
-    pub(super) zoom_direction:   ZoomDirection,
+    pub(super) zoom_inversion:   ZoomInversion,
     pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
     pub(super) profile:          OrbitCamBindingsProfile,
 }
@@ -159,7 +159,7 @@ impl OrbitCamBindings {
 
     /// Returns zoom direction policy.
     #[must_use]
-    pub const fn zoom_direction(&self) -> ZoomDirection { self.zoom_direction }
+    pub const fn zoom_inversion(&self) -> ZoomInversion { self.zoom_inversion }
 
     /// Returns button-drag zoom policy.
     #[must_use]

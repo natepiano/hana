@@ -77,7 +77,7 @@ pub fn validate_bindings(
         pinch_zoom:       descriptor.pinch_zoom,
         touch:            descriptor.touch,
         gamepad:          descriptor.gamepad,
-        zoom_direction:   descriptor.zoom_direction,
+        zoom_inversion:   descriptor.zoom_inversion,
         button_drag_zoom: descriptor.button_drag_zoom,
         profile:          descriptor.profile,
     })

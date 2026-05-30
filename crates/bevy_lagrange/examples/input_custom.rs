@@ -31,7 +31,7 @@ use bevy_lagrange::OrbitCamMouseDrag;
 use bevy_lagrange::OrbitCamMouseWheelZoom;
 use bevy_lagrange::OrbitCamPinchZoom;
 use bevy_lagrange::OrbitCamTrackpadScroll;
-use bevy_lagrange::ZoomDirection;
+use bevy_lagrange::ZoomInversion;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
@@ -183,7 +183,7 @@ fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .zoom(OrbitCamMouseWheelZoom::default())
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
-        .zoom_direction(ZoomDirection::Reversed)
+        .zoom_inversion(ZoomInversion::Inverted)
         .build()
 }
 

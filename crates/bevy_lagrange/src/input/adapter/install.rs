@@ -75,7 +75,7 @@ use crate::input::OrbitCamResolvedBindings;
 use crate::input::OrbitCamTrackpadScroll;
 use crate::input::OrbitCamZoomCoarseAction;
 use crate::input::OrbitCamZoomSmoothAction;
-use crate::input::ZoomDirection;
+use crate::input::ZoomInversion;
 use crate::input::actions::OrbitCamAdapterOrbitAction;
 use crate::input::actions::OrbitCamAdapterPanAction;
 use crate::input::actions::OrbitCamAdapterZoomCoarseAction;
@@ -545,7 +545,6 @@ fn spawn_trackpad_custom_bindings(
             custom_inputs.trackpad,
             TrackpadScrollTarget::Orbit,
             *binding,
-            TrackpadZoomTransform::None,
         ));
     }
     for binding in bindings.trackpad_pan() {
@@ -556,38 +555,22 @@ fn spawn_trackpad_custom_bindings(
             custom_inputs.trackpad,
             TrackpadScrollTarget::Pan,
             *binding,
-            TrackpadZoomTransform::None,
         ));
     }
     for binding in bindings.trackpad_zoom() {
-        entities.push(spawn_trackpad_binding(
+        entities.push(spawn_trackpad_zoom_binding(
             world,
             camera,
             zoom_smooth,
             custom_inputs.trackpad,
-            TrackpadScrollTarget::Zoom,
             *binding,
-            TrackpadZoomTransform::from(bindings.zoom_direction()),
+            bindings.zoom_inversion(),
         ));
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TrackpadZoomTransform {
-    None,
-    Normal,
-    Reversed,
-}
-
-impl From<ZoomDirection> for TrackpadZoomTransform {
-    fn from(zoom_direction: ZoomDirection) -> Self {
-        match zoom_direction {
-            ZoomDirection::Normal => Self::Normal,
-            ZoomDirection::Reversed => Self::Reversed,
-        }
-    }
-}
-
+/// Spawns a trackpad scroll binding whose two scroll axes drive orbit or pan
+/// directly, with no zoom conversion.
 fn spawn_trackpad_binding(
     world: &mut World,
     camera: Entity,
@@ -595,33 +578,44 @@ fn spawn_trackpad_binding(
     input: CustomInput,
     target: TrackpadScrollTarget,
     binding: OrbitCamTrackpadScroll,
-    transform: TrackpadZoomTransform,
+) -> Entity {
+    let entity = spawn_single_binding(
+        world,
+        action,
+        OrbitCamInputInstallationOf(camera),
+        Binding::Custom(input),
+    );
+    insert_trackpad_condition(world, entity, target, binding)
+}
+
+/// Spawns a trackpad scroll binding that drives zoom: the vertical scroll axis
+/// is swizzled onto the zoom axis and scaled, then negated when the camera's
+/// zoom is inverted.
+fn spawn_trackpad_zoom_binding(
+    world: &mut World,
+    camera: Entity,
+    action: Entity,
+    input: CustomInput,
+    binding: OrbitCamTrackpadScroll,
+    zoom_inversion: ZoomInversion,
 ) -> Entity {
     let installation = OrbitCamInputInstallationOf(camera);
-    let entity = match transform {
-        TrackpadZoomTransform::None => {
-            spawn_single_binding(world, action, installation, Binding::Custom(input))
-        },
-        TrackpadZoomTransform::Normal => world
-            .spawn((
-                Binding::Custom(input),
-                BindingOf(action),
-                installation,
-                SwizzleAxis::YXZ,
-                Scale::splat(PIXEL_SCROLL_SCALE),
-            ))
-            .id(),
-        TrackpadZoomTransform::Reversed => world
-            .spawn((
-                Binding::Custom(input),
-                BindingOf(action),
-                installation,
-                SwizzleAxis::YXZ,
-                Scale::splat(PIXEL_SCROLL_SCALE),
-                Negate::all(),
-            ))
-            .id(),
-    };
+    let entity = spawn_single_binding(world, action, installation, Binding::Custom(input));
+    world
+        .entity_mut(entity)
+        .insert((SwizzleAxis::YXZ, Scale::splat(PIXEL_SCROLL_SCALE)));
+    if matches!(zoom_inversion, ZoomInversion::Inverted) {
+        world.entity_mut(entity).insert(Negate::all());
+    }
+    insert_trackpad_condition(world, entity, TrackpadScrollTarget::Zoom, binding)
+}
+
+fn insert_trackpad_condition(
+    world: &mut World,
+    entity: Entity,
+    target: TrackpadScrollTarget,
+    binding: OrbitCamTrackpadScroll,
+) -> Entity {
     world
         .entity_mut(entity)
         .insert(TrackpadBindingCondition::new(target, binding));

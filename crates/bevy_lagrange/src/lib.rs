@@ -148,7 +148,7 @@ pub use input::PresetLayerSet;
 pub use input::ResolvedOrbitCamInputRoute;
 pub use input::SmoothZoomDelta;
 pub use input::WheelZoomPolarity;
-pub use input::ZoomDirection;
+pub use input::ZoomInversion;
 pub use input::describe_orbit_cam_controls;
 pub use input::validate_bindings;
 use observers::ObserverPlugin;
