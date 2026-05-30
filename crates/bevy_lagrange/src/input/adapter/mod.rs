@@ -756,7 +756,7 @@ mod tests {
     /// channel (`gamepad.get(button)`), so the gate button must have its analog
     /// value set — a bare `digital_mut().press` reads as `0.0` and never
     /// engages the gate. Right-stick orbit resolves `Normal`; adding the
-    /// RightTrigger gate must flip the resolved speed to `Slow` while orbit
+    /// `RightTrigger` gate must flip the resolved speed to `Slow` while orbit
     /// stays active (fast is blocked by the same trigger, slow requires it).
     #[test]
     fn gamepad_preset_slow_orbit_gate_resolves_speed() -> TestResult {

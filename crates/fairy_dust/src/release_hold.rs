@@ -42,18 +42,19 @@ impl<T> ReleaseHold<T> {
     pub fn update(&mut self, delta: Duration, active: Option<T>) -> HoldState<'_, T> {
         if let Some(active) = active {
             self.remaining = self.hold;
-            self.value = Some(active);
-            return HoldState::Active(self.value.as_ref().expect("active value was just stored"));
+            return HoldState::Active(self.value.insert(active));
         }
 
         self.remaining = self.remaining.saturating_sub(delta);
-        if self.remaining > Duration::ZERO && self.value.is_some() {
-            return HoldState::Held(self.value.as_ref().expect("value was checked"));
+        if self.remaining == Duration::ZERO {
+            self.value = None;
+            return HoldState::Idle;
         }
 
-        self.remaining = Duration::ZERO;
-        self.value = None;
-        HoldState::Idle
+        match self.value.as_ref() {
+            Some(value) => HoldState::Held(value),
+            None => HoldState::Idle,
+        }
     }
 }
 

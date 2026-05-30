@@ -44,6 +44,7 @@ pub const EXAMPLE_CUBE_SIZE: f32 = CUBE_DEFAULT_SIZE;
 /// Canonical example ground-plane edge length in world units.
 pub const EXAMPLE_GROUND_SIZE: f32 = 5.0;
 /// Canonical cube transform for a cube sitting on the ground plane with extra clearance.
+#[must_use]
 pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
     Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
 }

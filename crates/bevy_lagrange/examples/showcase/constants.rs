@@ -7,8 +7,8 @@ use bevy::prelude::Vec3;
 // camera home
 pub(super) const CAMERA_START_PITCH: f32 = 0.4;
 pub(super) const CAMERA_START_YAW: f32 = -0.2;
-/// Framing margin for the Home view — 10% looser than the scene-fit margin.
-pub(super) const HOME_MARGIN: f32 = ZOOM_MARGIN_SCENE * 1.1;
+/// Framing margin for the Home view — 32% looser than the scene-fit margin.
+pub(super) const HOME_MARGIN: f32 = ZOOM_MARGIN_SCENE * 1.5;
 
 // durations
 pub(super) const ANIMATE_FIT_DURATION_MILLIS: u64 = 1200;
@@ -106,7 +106,6 @@ pub(super) const LOOK_AT_CONTROL: &str = "F LookAt";
 pub(super) const OVERLAY_CONTROL: &str = "D Bounds";
 pub(super) const PAUSE_CONTROL: &str = "Esc Pause";
 pub(super) const PROJECTION_CONTROL: &str = "P Projection";
-pub(super) const SECOND_WINDOW_CONTROL: &str = "W Window 2";
 pub(super) const SHOWCASE_TITLE: &str = "Showcase";
 
 // mesh settings
@@ -169,13 +168,5 @@ pub(super) const CONFLICT_POLICY_HINT_BOTTOM_PIXELS: f32 = 32.0;
 pub(super) const UI_FONT_SIZE: f32 = 13.0;
 pub(super) const UI_SCREEN_PADDING_PIXELS: f32 = 12.0;
 
-// window label
-pub(super) const PRIMARY_WINDOW_FOCUSED_LABEL: &str = "Window 1";
-pub(super) const PRIMARY_WINDOW_TITLE: &str = "showcase - window 1";
-pub(super) const SECOND_WINDOW_FOCUSED_LABEL: &str = "Window 2";
-pub(super) const SECOND_WINDOW_LOG_CLOSED: &str = "Window 2: closed";
-pub(super) const SECOND_WINDOW_LOG_OPENED: &str = "Window 2: opened";
-pub(super) const SECOND_WINDOW_MANAGED_NAME: &str = "window_2";
-pub(super) const SECOND_WINDOW_TITLE: &str = "showcase - window 2";
-pub(super) const SECOND_WINDOW_UI_LABEL: &str = "Window 2";
-pub(super) const WINDOW_LABEL_DURATION_SECS: f32 = 2.0;
+// window
+pub(super) const PRIMARY_WINDOW_TITLE: &str = "showcase";

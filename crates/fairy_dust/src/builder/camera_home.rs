@@ -23,6 +23,7 @@ use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
 use crate::cube_spin::CubeSpinConfig;
 use crate::restart_camera;
+use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 
@@ -169,7 +170,7 @@ impl<S> CameraHomeBuilder<S> {
 
     fn finish(mut self) -> SprinkleBuilder<S> {
         if matches!(self.config.title_bar_control, HomeTitleBarControl::Shown) {
-            crate::screen_panels::register_title_control(&mut self.parent.app, HOME_CONTROL);
+            screen_panels::register_title_control(&mut self.parent.app, HOME_CONTROL);
         }
         camera_home::install(&mut self.parent.app, self.config);
         self.parent

@@ -223,6 +223,10 @@ impl CubeFacePanelStyle {
 }
 
 /// Builds a cube face panel with the canonical transparent material and tree.
+///
+/// # Errors
+///
+/// Returns [`InvalidSize`] when `style.size` is not a positive, finite value.
 pub fn cube_face_panel(
     style: CubeFacePanelStyle,
     content: CubeFacePanelContent,
@@ -231,6 +235,10 @@ pub fn cube_face_panel(
 }
 
 /// Builds a transparent cube face panel from a caller-authored layout tree.
+///
+/// # Errors
+///
+/// Returns [`InvalidSize`] when `size` is not a positive, finite value.
 pub fn cube_face_panel_with_tree(
     size: f32,
     tree: LayoutTree,
@@ -302,9 +310,11 @@ enum PrimitiveKind {
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct FairyDustCube;
 
-/// Marker inserted on the per-face [`WorldText`] labels of a cube. Lets a caller
-/// retarget only the cube's face labels (e.g. `Query<&mut WorldText,
-/// With<CubeFaceLabel>>`) without also matching panel-child or other `WorldText`.
+/// Marker inserted on the per-face [`WorldText`] labels of a cube.
+///
+/// Lets a caller retarget only the cube's face labels (e.g. `Query<&mut
+/// WorldText, With<CubeFaceLabel>>`) without also matching panel-child or other
+/// `WorldText`.
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CubeFaceLabel;
 

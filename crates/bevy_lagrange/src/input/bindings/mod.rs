@@ -181,6 +181,7 @@ mod tests {
     use super::descriptor::HeldBindingDescriptor;
     use super::*;
     use crate::input::CameraInteractionSources;
+    use crate::input::ControlSpeed;
     use crate::input::constants::ORBIT_ACTION_NAME;
     use crate::input::constants::PAN_ACTION_NAME;
     use crate::input::constants::ZOOM_COARSE_ACTION_NAME;
@@ -288,7 +289,7 @@ mod tests {
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::MOUSE,
             route:              BindingRoutePolicy::CursorPosition,
-            speed:              crate::input::ControlSpeed::Normal,
+            speed:              ControlSpeed::Normal,
         });
 
         assert_eq!(
@@ -309,7 +310,7 @@ mod tests {
             sources:            CameraInteractionSources::MOUSE,
             engagement_sources: CameraInteractionSources::KEYBOARD,
             route:              BindingRoutePolicy::CursorPosition,
-            speed:              crate::input::ControlSpeed::Normal,
+            speed:              ControlSpeed::Normal,
         });
 
         assert_eq!(

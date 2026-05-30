@@ -123,9 +123,7 @@ pub(crate) fn look_at_hovered(
     mut commands: Commands,
     hovered: Res<HoveredEntity>,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     active_easing: Res<ActiveEasing>,
-    windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyF) {
         return;
@@ -133,7 +131,7 @@ pub(crate) fn look_at_hovered(
     let Some(target) = hovered.0 else {
         return;
     };
-    let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
+    let camera = scene.camera;
     commands.trigger(
         LookAt::new(camera, target)
             .duration(Duration::from_millis(LOOK_AT_DURATION_MILLIS))
@@ -146,9 +144,7 @@ pub(crate) fn look_at_and_zoom_to_fit_hovered(
     mut commands: Commands,
     hovered: Res<HoveredEntity>,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     active_easing: Res<ActiveEasing>,
-    windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyG) {
         return;
@@ -156,7 +152,7 @@ pub(crate) fn look_at_and_zoom_to_fit_hovered(
     let Some(target) = hovered.0 else {
         return;
     };
-    let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
+    let camera = scene.camera;
     commands.trigger(
         LookAtAndZoomToFit::new(camera, target)
             .margin(ZOOM_MARGIN_MESH)

@@ -62,10 +62,7 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     );
 }
 
-pub(crate) fn register_title_control(
-    app: &mut App,
-    control: impl Into<title_bar::TitleBarControl>,
-) {
+pub(crate) fn register_title_control(app: &mut App, control: impl Into<TitleBarControl>) {
     let mut registry = app
         .world_mut()
         .get_resource_or_insert_with(TitleBarControlRegistry::default);

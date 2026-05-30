@@ -11,6 +11,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextWrap;
 use bevy_kana::ToF32;
+use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TITLE_COLOR;
 use fairy_dust::TITLE_SIZE;
@@ -66,6 +67,15 @@ impl EventLog {
     fn clear(&mut self) {
         self.entries.clear();
         self.scrollback = 0.0;
+    }
+}
+
+impl fairy_dust::TitleChipActivation for EventLog {
+    fn activation(&self) -> ControlActivation {
+        match self.state {
+            EventLogState::Enabled => ControlActivation::Active,
+            EventLogState::Disabled => ControlActivation::Inactive,
+        }
     }
 }
 

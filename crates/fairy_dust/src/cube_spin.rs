@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 
 use bevy::prelude::*;
 
+use crate::screen_panels;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
 use crate::screen_panels::TitleChip;
@@ -215,7 +216,7 @@ impl<M: 'static> TitleChipActivation for CubeSpinControl<M> {
 
 pub(crate) fn install<M: Component>(app: &mut App, config: CubeSpinConfig) {
     if let Some(chip) = config.chip {
-        crate::screen_panels::register_title_control(app, chip);
+        screen_panels::register_title_control(app, chip);
     }
     app.insert_resource(CubeSpinControl::<M>::new(&config));
     app.add_systems(

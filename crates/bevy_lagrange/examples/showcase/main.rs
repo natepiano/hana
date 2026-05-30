@@ -11,13 +11,11 @@ mod constants;
 mod event_log;
 mod pointer;
 mod scene;
-mod second_window;
 mod selection_gizmo;
 mod ui;
 
 use std::time::Duration;
 
-use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::color::palettes::css::DEEP_SKY_BLUE;
@@ -25,9 +23,7 @@ use bevy::color::palettes::css::ORANGE;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
-use bevy::ui::UiTargetCamera;
 use bevy::window::PrimaryWindow;
-use bevy::window::WindowRef;
 use bevy_kana::ToUsize;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
@@ -51,10 +47,8 @@ use bevy_lagrange::ZoomBegin;
 use bevy_lagrange::ZoomEnd;
 use bevy_lagrange::ZoomReason;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::ManagedWindow;
 use constants::*;
 use fairy_dust::Anchor;
-use fairy_dust::CameraHomeEntity;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::TitleBar;
@@ -98,6 +92,7 @@ fn main() {
         .pitch(CAMERA_START_PITCH)
         .margin(HOME_MARGIN)
         .with_title_bar(showcase_title_bar())
+        .wire_chip_to_activation::<event_log::EventLog>(EVENT_LOG_CONTROL)
         .with_camera_control_panel();
 
     app.app_mut()
@@ -122,8 +117,6 @@ fn main() {
         .add_systems(
             Update,
             (
-                second_window::log_window_focus,
-                second_window::despawn_window_labels,
                 ui::toggle_pause,
                 event_log::toggle_event_log,
                 selection_gizmo::draw_selection_gizmo,
@@ -132,12 +125,10 @@ fn main() {
                 event_log::rebuild_log_panel,
                 event_log::scroll_event_log,
                 (
-                    second_window::toggle_second_window,
                     animation_controls::toggle_debug_overlay,
                     animation_controls::toggle_projection,
                     animation_controls::randomize_easing,
                     animation_controls::animate_camera,
-                    animation_controls::animate_fit_to_scene,
                     animation_controls::toggle_interrupt_behavior,
                     animation_controls::toggle_animation_conflict_policy,
                     pointer::look_at_hovered,
@@ -154,7 +145,6 @@ fn main() {
         .add_observer(event_log::log_zoom_begin)
         .add_observer(event_log::log_zoom_end)
         .add_observer(event_log::log_animation_rejected)
-        .add_observer(second_window::on_second_window_removed)
         .run();
 }
 
@@ -174,7 +164,6 @@ fn showcase_title_bar() -> TitleBar {
         .control(INTERRUPT_CONTROL)
         .control(CONFLICT_CONTROL)
         .control(EVENT_LOG_CONTROL)
-        .control(SECOND_WINDOW_CONTROL)
 }
 
 // ============================================================================

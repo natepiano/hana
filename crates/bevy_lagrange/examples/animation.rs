@@ -3,14 +3,14 @@
 //!
 //! - **Manual (M)** writes `OrbitCam` fields every frame for a continuous orbit loop — input
 //!   disabled, smoothing zeroed.
-//! - **PlayAnimation (P)** hands the camera a `VecDeque<CameraMove>`; each move eases over its own
-//!   duration, then advances to the next.
-//! - **AnimateToFit (A)** declaratively frames a target entity — here the cube wearing its
-//!   "AnimateToFit target" name on each face.
+//! - **`PlayAnimation` (P)** hands the camera a `VecDeque<CameraMove>`; each move eases over its
+//!   own duration, then advances to the next.
+//! - **`AnimateToFit` (A)** declaratively frames a target entity — here the cube wearing its
+//!   "`AnimateToFit` target" name on each face.
 //!
 //! Two cubes sit as a centered pair on the ground: the home cube and the
-//! AnimateToFit target. Both are `CameraHomeTarget`s, so `H` frames their union;
-//! `A` flies in to frame the AnimateToFit target alone.
+//! `AnimateToFit` target. Both are `CameraHomeTarget`s, so `H` frames their union;
+//! `A` flies in to frame the `AnimateToFit` target alone.
 //!
 //! `AnimateToFit` and Home both fit a target, so they would be
 //! indistinguishable by animation source alone. The `A AnimateToFit` chip is
@@ -335,7 +335,7 @@ fn stop_manual(
 // faces in emissive text.
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Key light dimmed well below the studio default (13_500 lux) so the emissive
+/// Key light dimmed well below the studio default (`13_500` lux) so the emissive
 /// face text reads against the lit cubes instead of being washed out.
 const KEY_LIGHT_ILLUMINANCE: f32 = 2_500.0;
 

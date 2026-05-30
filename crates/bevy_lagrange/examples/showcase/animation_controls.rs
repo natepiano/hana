@@ -4,15 +4,13 @@ pub(crate) fn toggle_debug_overlay(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     visualization_query: Query<(), With<FitOverlay>>,
-    windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyD) {
         return;
     }
 
-    let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
+    let camera = scene.camera;
     if visualization_query.get(camera).is_ok() {
         commands.entity(camera).remove::<FitOverlay>();
     } else {
@@ -24,16 +22,14 @@ pub(crate) fn animate_camera(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     easing: Res<ActiveEasing>,
     camera_query: Query<&OrbitCam>,
-    windows: Query<&Window>,
 ) {
     if !keyboard.just_pressed(KeyCode::KeyA) {
         return;
     }
 
-    let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
+    let camera = scene.camera;
     let Ok(orbit_camera) = camera_query.get(camera) else {
         return;
     };
@@ -99,34 +95,6 @@ pub(crate) fn randomize_easing(
     }
 }
 
-pub(crate) fn animate_fit_to_scene(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
-    scene: Res<SceneEntities>,
-    home: Option<Res<CameraHomeEntity>>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
-    easing: Res<ActiveEasing>,
-    windows: Query<&Window>,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-
-    let camera = second_window::focused_camera(&scene, second.as_deref(), &windows);
-    if camera == scene.camera {
-        return;
-    }
-    let target = home.as_deref().map_or(scene.scene_bounds, |home| home.0);
-    commands.trigger(
-        AnimateToFit::new(camera, target)
-            .yaw(CAMERA_START_YAW)
-            .pitch(CAMERA_START_PITCH)
-            .margin(ZOOM_MARGIN_SCENE)
-            .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
-            .easing(easing.0),
-    );
-}
-
 #[derive(Default, PartialEq, Eq)]
 pub(crate) enum DeferRefit {
     #[default]
@@ -149,7 +117,6 @@ pub(crate) fn toggle_projection(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     active_easing: Res<ActiveEasing>,
     mut camera_query: Query<(&mut Projection, &mut OrbitCam)>,
     mut log: ResMut<event_log::EventLog>,
@@ -158,52 +125,44 @@ pub(crate) fn toggle_projection(
     // Deferred fit: projection was changed last frame, `OrbitCam` has now synced.
     if *defer_refit == DeferRefit::WaitOneFrame {
         *defer_refit = DeferRefit::Continue;
-        for camera in second_window::all_cameras(&scene, second.as_deref()) {
-            commands.trigger(
-                AnimateToFit::new(camera, scene.scene_bounds)
-                    .yaw(CAMERA_START_YAW)
-                    .pitch(CAMERA_START_PITCH)
-                    .margin(ZOOM_MARGIN_SCENE)
-                    .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
-                    .easing(active_easing.0),
-            );
-        }
+        commands.trigger(
+            AnimateToFit::new(scene.camera, scene.scene_bounds)
+                .yaw(CAMERA_START_YAW)
+                .pitch(CAMERA_START_PITCH)
+                .margin(ZOOM_MARGIN_SCENE)
+                .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
+                .easing(active_easing.0),
+        );
         return;
     }
 
     if !keyboard.just_pressed(KeyCode::KeyP) {
         return;
     }
+    let Ok((mut projection, mut orbit_camera)) = camera_query.get_mut(scene.camera) else {
+        return;
+    };
     let mut projection_log = ProjectionLog::Unwritten;
-    for camera in second_window::all_cameras(&scene, second.as_deref()) {
-        let Ok((mut projection, mut orbit_camera)) = camera_query.get_mut(camera) else {
-            continue;
-        };
-        match *projection {
-            Projection::Perspective(_) => {
-                *projection = Projection::from(OrthographicProjection {
-                    scaling_mode: ScalingMode::FixedVertical {
-                        viewport_height: ORTHOGRAPHIC_VIEWPORT_HEIGHT,
-                    },
-                    far: ORTHOGRAPHIC_FAR_PLANE,
-                    ..OrthographicProjection::default_3d()
-                });
-                if projection_log == ProjectionLog::Unwritten {
-                    log.push(PROJECTION_LOG_ORTHOGRAPHIC.into());
-                    projection_log = ProjectionLog::Written;
-                }
-            },
-            Projection::Orthographic(_) => {
-                *projection = Projection::Perspective(PerspectiveProjection::default());
-                if projection_log == ProjectionLog::Unwritten {
-                    log.push(PROJECTION_LOG_PERSPECTIVE.into());
-                    projection_log = ProjectionLog::Written;
-                }
-            },
-            Projection::Custom(_) => {},
-        }
-        orbit_camera.force_update();
+    match *projection {
+        Projection::Perspective(_) => {
+            *projection = Projection::from(OrthographicProjection {
+                scaling_mode: ScalingMode::FixedVertical {
+                    viewport_height: ORTHOGRAPHIC_VIEWPORT_HEIGHT,
+                },
+                far: ORTHOGRAPHIC_FAR_PLANE,
+                ..OrthographicProjection::default_3d()
+            });
+            log.push(PROJECTION_LOG_ORTHOGRAPHIC.into());
+            projection_log = ProjectionLog::Written;
+        },
+        Projection::Orthographic(_) => {
+            *projection = Projection::Perspective(PerspectiveProjection::default());
+            log.push(PROJECTION_LOG_PERSPECTIVE.into());
+            projection_log = ProjectionLog::Written;
+        },
+        Projection::Custom(_) => {},
     }
+    orbit_camera.force_update();
     if projection_log == ProjectionLog::Written {
         *defer_refit = DeferRefit::WaitOneFrame;
     }
@@ -228,7 +187,6 @@ pub(crate) fn toggle_interrupt_behavior(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     mut behavior_query: Query<&mut CameraInputInterruptBehavior>,
     mut hint_query: Query<&mut Text, With<ui::CameraInputInterruptBehaviorLabel>>,
     mut log: ResMut<event_log::EventLog>,
@@ -237,7 +195,6 @@ pub(crate) fn toggle_interrupt_behavior(
         return;
     }
 
-    // Determine what the new behavior should be based on the primary camera.
     let new_behavior =
         behavior_query
             .get(scene.camera)
@@ -250,12 +207,10 @@ pub(crate) fn toggle_interrupt_behavior(
                 },
             );
 
-    for camera in second_window::all_cameras(&scene, second.as_deref()) {
-        if let Ok(mut behavior) = behavior_query.get_mut(camera) {
-            *behavior = new_behavior;
-        } else {
-            commands.entity(camera).insert(new_behavior);
-        }
+    if let Ok(mut behavior) = behavior_query.get_mut(scene.camera) {
+        *behavior = new_behavior;
+    } else {
+        commands.entity(scene.camera).insert(new_behavior);
     }
 
     for mut text in &mut hint_query {
@@ -280,7 +235,6 @@ pub(crate) fn toggle_animation_conflict_policy(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
-    second: Option<Res<second_window::SecondWindowEntities>>,
     mut policy_query: Query<&mut AnimationConflictPolicy>,
     mut hint_query: Query<&mut Text, With<ui::AnimationConflictPolicyLabel>>,
     mut log: ResMut<event_log::EventLog>,
@@ -289,7 +243,6 @@ pub(crate) fn toggle_animation_conflict_policy(
         return;
     }
 
-    // Determine what the new policy should be based on the primary camera.
     let new_policy =
         policy_query
             .get(scene.camera)
@@ -298,12 +251,10 @@ pub(crate) fn toggle_animation_conflict_policy(
                 AnimationConflictPolicy::FirstWins => AnimationConflictPolicy::LastWins,
             });
 
-    for camera in second_window::all_cameras(&scene, second.as_deref()) {
-        if let Ok(mut policy) = policy_query.get_mut(camera) {
-            *policy = new_policy;
-        } else {
-            commands.entity(camera).insert(new_policy);
-        }
+    if let Ok(mut policy) = policy_query.get_mut(scene.camera) {
+        *policy = new_policy;
+    } else {
+        commands.entity(scene.camera).insert(new_policy);
     }
 
     for mut text in &mut hint_query {

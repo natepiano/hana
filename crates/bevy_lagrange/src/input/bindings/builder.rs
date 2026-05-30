@@ -30,6 +30,8 @@ use super::held_binding::OrbitCamInputBinding;
 use super::preset::OrbitCamBindingsProfile;
 use super::validate;
 use crate::input::CameraInteractionSources;
+#[cfg(test)]
+use crate::input::ControlSpeed;
 
 /// Reflectable draft binding specification for editor and keymap tooling.
 #[derive(Clone, Debug, Default, PartialEq, Reflect)]
@@ -68,7 +70,7 @@ pub(crate) fn invalid_bindings_descriptor_for_tests() -> OrbitCamBindingsDescrip
         sources:            CameraInteractionSources::MOUSE,
         engagement_sources: CameraInteractionSources::MOUSE,
         route:              BindingRoutePolicy::CursorPosition,
-        speed:              crate::input::ControlSpeed::Normal,
+        speed:              ControlSpeed::Normal,
     });
     descriptor
 }
