@@ -12,9 +12,14 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Sizing;
+use bevy_enhanced_input::prelude::*;
+use bevy_kana::action;
+use bevy_kana::bind_action_system;
+use bevy_kana::event;
 
 use super::constants::BODY_COLOR;
 use super::constants::DIVIDER_COLOR;
+use super::constants::HELP_CLOSE_CONTEXT_PRIORITY;
 use super::constants::HELP_CLOSE_HINT_COLUMN_WIDTH;
 use super::constants::HELP_CLOSE_HINT_SIZE;
 use super::constants::HELP_KEY_COLUMN_WIDTH;
@@ -31,6 +36,7 @@ use crate::camera_home::CameraHomeMarker;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
+use crate::ensure_plugin;
 
 const HELP_TITLE: &str = "Keyboard Shortcuts";
 const CLOSE_HINT: &str = "Esc to close";
@@ -40,6 +46,41 @@ const SCREEN_PANEL_KEYS: &str = "ctrl-shift-L";
 const SCREEN_PANEL_LABEL: &str = "Toggle screen space panels off/on";
 const CAMERA_PRESET_KEYS: &str = "shift-C";
 const CAMERA_PRESET_LABEL: &str = "Cycle through camera presets";
+
+/// Always-active context holding the Shift+/ toggle.
+#[derive(Component)]
+struct HelpContext;
+
+/// Higher-priority context that rides on the open overlay entity and consumes
+/// Esc, so closing the overlay doesn't also fire a caller's Esc binding.
+#[derive(Component)]
+struct HelpCloseContext;
+
+action!(ShowHelp);
+event!(ShowHelpEvent);
+action!(CloseHelp);
+event!(CloseHelpEvent);
+
+pub(super) fn install(app: &mut App) {
+    ensure_plugin(app, EnhancedInputPlugin);
+    app.add_input_context::<HelpContext>();
+    app.add_input_context::<HelpCloseContext>();
+    app.add_systems(Startup, spawn_help_context);
+    bind_action_system!(app, ShowHelp, ShowHelpEvent, show_or_toggle_help);
+    bind_action_system!(app, CloseHelp, CloseHelpEvent, close_help);
+}
+
+fn spawn_help_context(mut commands: Commands) {
+    commands.spawn((
+        HelpContext,
+        Actions::<HelpContext>::spawn(SpawnWith(|spawner: &mut ActionSpawner<HelpContext>| {
+            spawner.spawn((
+                Action::<ShowHelp>::new(),
+                bindings![KeyCode::Slash.with_mod_keys(ModKeys::SHIFT)],
+            ));
+        })),
+    ));
+}
 
 #[derive(Component)]
 pub(super) struct KeyboardShortcutHelp;
@@ -55,29 +96,19 @@ struct HelpRow {
     label: &'static str,
 }
 
-pub(super) fn toggle_keyboard_shortcut_help(
-    keys: Res<ButtonInput<KeyCode>>,
+/// Toggles the overlay on Shift+/: despawns it when open, otherwise spawns it
+/// (reading which optional shortcuts apply).
+fn show_or_toggle_help(
     mut commands: Commands,
     overlay: Query<Entity, With<KeyboardShortcutHelp>>,
     home_markers: Query<Entity, With<CameraHomeMarker>>,
     camera_panels: Query<Entity, With<CameraGuidancePanel>>,
     preset_switching: Option<Res<CameraPresetSwitching>>,
 ) {
-    let question_mark = question_mark_pressed(&keys);
-    let escape = keys.just_pressed(KeyCode::Escape);
-    if !question_mark && !escape {
-        return;
-    }
-
-    let mut help_was_open = false;
-    for entity in &overlay {
-        commands.entity(entity).despawn();
-        help_was_open = true;
-    }
-    if help_was_open {
-        return;
-    }
-    if escape {
+    if !overlay.is_empty() {
+        for entity in &overlay {
+            commands.entity(entity).despawn();
+        }
         return;
     }
 
@@ -92,9 +123,12 @@ pub(super) fn toggle_keyboard_shortcut_help(
     );
 }
 
-fn question_mark_pressed(keys: &ButtonInput<KeyCode>) -> bool {
-    let shift = keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    shift && keys.just_pressed(KeyCode::Slash)
+/// Closes the overlay on Esc. Bound inside [`HelpCloseContext`], which consumes
+/// Esc so a caller's Esc binding doesn't also fire while the overlay is open.
+fn close_help(mut commands: Commands, overlay: Query<Entity, With<KeyboardShortcutHelp>>) {
+    for entity in &overlay {
+        commands.entity(entity).despawn();
+    }
 }
 
 fn spawn_help_overlay(commands: &mut Commands, shortcuts: HelpShortcuts) {
@@ -109,7 +143,25 @@ fn spawn_help_overlay(commands: &mut Commands, shortcuts: HelpShortcuts) {
 
     match panel {
         Ok(panel) => {
-            commands.spawn((KeyboardShortcutHelp, panel, Transform::default()));
+            commands.spawn((
+                KeyboardShortcutHelp,
+                panel,
+                Transform::default(),
+                HelpCloseContext,
+                ContextPriority::<HelpCloseContext>::new(HELP_CLOSE_CONTEXT_PRIORITY),
+                Actions::<HelpCloseContext>::spawn(SpawnWith(
+                    |spawner: &mut ActionSpawner<HelpCloseContext>| {
+                        spawner.spawn((
+                            Action::<CloseHelp>::new(),
+                            ActionSettings {
+                                consume_input: true,
+                                ..default()
+                            },
+                            bindings![KeyCode::Escape],
+                        ));
+                    },
+                )),
+            ));
         },
         Err(error) => {
             error!("fairy_dust: failed to build keyboard shortcut help: {error}");

@@ -231,14 +231,9 @@ pub(crate) fn enable_log_on_initial_fit(
 }
 
 pub(crate) fn toggle_event_log(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut log: ResMut<EventLog>,
     mut panels: Query<&mut Visibility, With<EventLogPanel>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyL) {
-        return;
-    }
-
     log.state = match log.state {
         EventLogState::Disabled => EventLogState::Enabled,
         EventLogState::Enabled => EventLogState::Disabled,
@@ -256,33 +251,22 @@ pub(crate) fn toggle_event_log(
     }
 }
 
-/// Scrolls the event log with Up/Down arrow keys, clears with `C`.
-pub(crate) fn scroll_event_log(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut log: ResMut<EventLog>,
-) {
+/// Clears the event log (bound to `C`).
+pub(crate) fn clear_event_log(mut log: ResMut<EventLog>) {
     if log.state == EventLogState::Disabled {
         return;
     }
+    log.clear();
+}
 
-    if keyboard.just_pressed(KeyCode::KeyC) {
-        log.clear();
+/// Applies a scroll delta (logical px) to the log, bounded to an upper estimate
+/// of the content height so holding a direction at the limit doesn't accumulate
+/// a value the other direction must then unwind. `delta` is already frame-rate
+/// scaled by the caller. Called every frame the `Up`/`Down` action fires.
+pub(crate) fn scroll_log(log: &mut EventLog, delta: f32) {
+    if log.state == EventLogState::Disabled {
         return;
     }
-
-    // Frame-rate-independent: `EVENT_LOG_SCROLL_SPEED` is px per second.
-    let step = EVENT_LOG_SCROLL_SPEED * time.delta_secs();
-    let delta = if keyboard.pressed(KeyCode::ArrowUp) {
-        step
-    } else if keyboard.pressed(KeyCode::ArrowDown) {
-        -step
-    } else {
-        return;
-    };
-
-    // Bound scrollback to an upper estimate of the content height so holding Up
-    // at the top doesn't accumulate a value that Down must then unwind.
     let cap = log.entries.len().to_f32() * EVENT_LOG_MAX_ENTRY_HEIGHT;
     log.scrollback = (log.scrollback + delta).clamp(0.0, cap);
 }

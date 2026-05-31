@@ -19,6 +19,10 @@ pub(super) const DESCRIPTION_WIDTH: Px = Px(330.0);
 pub(super) const DIVIDER_COLOR: Color = Color::srgba(0.35, 0.8, 1.0, 0.35);
 
 // help overlay
+/// One above the default context priority (0) so the help-close Esc is
+/// evaluated first and consumes Esc, keeping a caller's Esc binding (e.g. the
+/// showcase pause) from also firing while the overlay is open.
+pub(super) const HELP_CLOSE_CONTEXT_PRIORITY: usize = 1;
 pub(super) const HELP_CLOSE_HINT_COLUMN_WIDTH: Px = Px(120.0);
 pub(super) const HELP_CLOSE_HINT_SIZE: Pt = Pt(9.0);
 pub(super) const HELP_KEY_COLUMN_WIDTH: Px = Px(120.0);

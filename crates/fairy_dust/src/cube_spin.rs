@@ -3,7 +3,9 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::*;
 
+use crate::ensure_plugin;
 use crate::screen_panels;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
@@ -13,6 +15,21 @@ use crate::screen_panels::TitleChipActivation;
 /// Marker inserted by [`crate::PrimitiveBuilder::cube_spin`] for builder-owned spin.
 #[derive(Component)]
 pub struct FairyDustCubeSpinTarget;
+
+/// Input context scoping the cube-spin toggle to marker `M`, so each cube-spin
+/// instance owns an independent keybinding.
+#[derive(Component)]
+struct CubeSpinContext<M> {
+    marker: PhantomData<M>,
+}
+
+/// Toggle action for the cube-spin keybinding, scoped to marker `M`. Only ever
+/// used as the type parameter of `Action`/`Start`; never constructed.
+#[derive(InputAction)]
+#[action_output(bool)]
+struct ToggleCubeSpin<M: 'static> {
+    marker: PhantomData<M>,
+}
 
 /// Whether a cube spin helper is currently rotating its targets.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -218,25 +235,35 @@ pub(crate) fn install<M: Component>(app: &mut App, config: CubeSpinConfig) {
     if let Some(chip) = config.chip {
         screen_panels::register_title_control(app, chip);
     }
+    ensure_plugin(app, EnhancedInputPlugin);
     app.insert_resource(CubeSpinControl::<M>::new(&config));
-    app.add_systems(
-        Update,
-        (
-            toggle_cube_spin::<M>,
-            sync_cube_spin_chip::<M>,
-            spin_cube_targets::<M>,
-        ),
-    );
+    app.add_input_context::<CubeSpinContext<M>>();
+    app.add_systems(Startup, spawn_cube_spin_action::<M>);
+    app.add_systems(Update, (sync_cube_spin_chip::<M>, spin_cube_targets::<M>));
+    app.add_observer(toggle_cube_spin_on_start::<M>);
 }
 
-fn toggle_cube_spin<M: Component>(
-    key_input: Res<ButtonInput<KeyCode>>,
+fn spawn_cube_spin_action<M: Component>(mut commands: Commands, control: Res<CubeSpinControl<M>>) {
+    let Some(key) = control.key else {
+        return;
+    };
+    commands.spawn((
+        CubeSpinContext::<M> {
+            marker: PhantomData,
+        },
+        Actions::<CubeSpinContext<M>>::spawn(SpawnWith(
+            move |spawner: &mut ActionSpawner<CubeSpinContext<M>>| {
+                spawner.spawn((Action::<ToggleCubeSpin<M>>::new(), bindings![key]));
+            },
+        )),
+    ));
+}
+
+fn toggle_cube_spin_on_start<M: Component>(
+    _start: On<Start<ToggleCubeSpin<M>>>,
     mut control: ResMut<CubeSpinControl<M>>,
 ) {
-    let Some(key) = control.key else { return };
-    if key_input.just_pressed(key) {
-        control.mode = control.mode.toggled();
-    }
+    control.mode = control.mode.toggled();
 }
 
 fn sync_cube_spin_chip<M: Component>(

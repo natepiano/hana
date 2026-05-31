@@ -184,6 +184,15 @@ pub(super) const UNDERSIDE_PLANE_ROTATION_X: f32 = PI;
 // sensitivity
 pub(super) const DRAG_SENSITIVITY: f32 = 0.02;
 
+// shadows
+/// Far bound of the directional light's first shadow cascade.
+pub(super) const SHADOW_CASCADE_FIRST_BOUND: f32 = 12.0;
+/// Cascade coverage for the key light, wide enough that cast shadows aren't
+/// clipped either in perspective (framing the 12-unit ground) or in
+/// orthographic (whose far plane is `ORTHOGRAPHIC_FAR_PLANE`). `fairy_dust`'s
+/// default cascade is sized for smaller example grounds and clips here.
+pub(super) const SHADOW_CASCADE_MAX_DISTANCE: f32 = 60.0;
+
 // time
 pub(super) const SECONDS_TO_MILLIS: f32 = 1000.0;
 

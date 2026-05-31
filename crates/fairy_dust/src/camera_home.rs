@@ -18,6 +18,10 @@ use std::time::Duration;
 use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
+use bevy_enhanced_input::prelude::*;
+use bevy_kana::action;
+use bevy_kana::bind_action_system;
+use bevy_kana::event;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
@@ -27,11 +31,20 @@ use bevy_lagrange::OrbitCamInteractionStarted;
 
 use crate::constants::HOME_CONTROL;
 use crate::constants::HOME_KEY;
+use crate::ensure_plugin;
 use crate::orbit_cam::FairyDustOrbitCam;
 use crate::restart_camera::RestartCameraRestore;
 use crate::restart_camera::RestoreWindowAnimation;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
+
+#[derive(Component)]
+struct CameraHomeContext;
+
+action!(HomeCamera);
+event!(HomeCameraEvent);
+action!(ToggleHomeAabbGizmo);
+event!(ToggleHomeAabbGizmoEvent);
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum InitialAnimateState {
@@ -100,19 +113,10 @@ const HOME_AABB_GIZMO_COLOR: Color = Color::srgb(1.0, 0.5, 0.0);
 #[derive(Resource, Default)]
 struct HomeAabbGizmoVisible(bool);
 
-/// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. Both Control sides and
-/// both Shift sides count; the gizmo combo is a chord, not a single key, so
-/// it doesn't collide with bare-`A` bindings the caller may have.
-fn toggle_home_aabb_gizmo(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut visible: ResMut<HomeAabbGizmoVisible>,
-) {
-    let ctrl = keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    let shift = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    if ctrl && shift && keyboard.just_pressed(KeyCode::KeyA) {
-        visible.0 = !visible.0;
-    }
-}
+/// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. The gizmo combo is a chord,
+/// not a single key, so it doesn't collide with bare-`A` bindings the caller
+/// may have.
+fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) { visible.0 = !visible.0; }
 
 /// Draws a wireframe of the home cube — sized to the union of every
 /// [`CameraHomeTarget`] entity — while [`HomeAabbGizmoVisible`] is on. Lets
@@ -136,10 +140,12 @@ fn draw_home_aabb_gizmo(
 }
 
 pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
+    ensure_plugin(app, EnhancedInputPlugin);
     app.insert_resource(config);
     app.init_resource::<AtHome>();
     app.init_resource::<HomeAabbGizmoVisible>();
-    app.add_systems(Startup, spawn_home_marker);
+    app.add_input_context::<CameraHomeContext>();
+    app.add_systems(Startup, (spawn_home_marker, spawn_home_actions));
     // `update_home_cube` runs first so the cube reflects the current union of
     // `CameraHomeTarget` entities before any handler triggers `AnimateToFit`
     // off it.
@@ -148,17 +154,36 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
         (
             update_home_cube,
             snap_home_on_ready,
-            handle_home_key,
             refit_on_window_resized,
         )
             .chain(),
     );
     // Ctrl+Shift+A debug toggle — always available, opt-in by keypress.
-    app.add_systems(Update, (toggle_home_aabb_gizmo, draw_home_aabb_gizmo));
+    app.add_systems(Update, draw_home_aabb_gizmo);
+    bind_action_system!(app, HomeCamera, HomeCameraEvent, handle_home_key);
+    bind_action_system!(
+        app,
+        ToggleHomeAabbGizmo,
+        ToggleHomeAabbGizmoEvent,
+        toggle_home_aabb_gizmo
+    );
     app.add_observer(on_home_animation_begin);
     app.add_observer(on_home_animation_end);
     app.add_observer(on_non_home_animation_begin);
     app.add_observer(on_user_interaction_started);
+}
+
+fn spawn_home_actions(mut commands: Commands) {
+    commands.spawn((
+        CameraHomeContext,
+        actions!(CameraHomeContext[
+            (Action::<HomeCamera>::new(), bindings![HOME_KEY]),
+            (
+                Action::<ToggleHomeAabbGizmo>::new(),
+                bindings![KeyCode::KeyA.with_mod_keys(ModKeys::CONTROL | ModKeys::SHIFT)],
+            ),
+        ]),
+    ));
 }
 
 /// Minimum cube scale along any axis. Text and other planar geometry can give
@@ -330,7 +355,6 @@ fn snap_home_on_ready(
 }
 
 fn handle_home_key(
-    keys: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     home: Option<Res<CameraHomeEntity>>,
     config: Res<CameraHomeConfig>,
@@ -339,9 +363,6 @@ fn handle_home_key(
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
 ) {
-    if !keys.just_pressed(HOME_KEY) {
-        return;
-    }
     let Some(home) = home else {
         return;
     };

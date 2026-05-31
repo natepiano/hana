@@ -1,15 +1,10 @@
 use super::*;
 
 pub(crate) fn toggle_debug_overlay(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     visualization_query: Query<(), With<FitOverlay>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyD) {
-        return;
-    }
-
     let camera = scene.camera;
     if visualization_query.get(camera).is_ok() {
         commands.entity(camera).remove::<FitOverlay>();
@@ -19,16 +14,11 @@ pub(crate) fn toggle_debug_overlay(
 }
 
 pub(crate) fn animate_camera(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     easing: Res<ActiveEasing>,
     camera_query: Query<&OrbitCam>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyA) {
-        return;
-    }
-
     let camera = scene.camera;
     let Ok(orbit_camera) = camera_query.get(camera) else {
         return;
@@ -79,27 +69,33 @@ pub(crate) fn animate_camera(
 }
 
 pub(crate) fn randomize_easing(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut easing: ResMut<ActiveEasing>,
     time: Res<Time>,
     mut log: ResMut<event_log::EventLog>,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyR) {
-        let index = (time.elapsed_secs() * SECONDS_TO_MILLIS).to_usize() % ALL_EASINGS.len();
-        easing.0 = ALL_EASINGS[index];
-        log.push(format!("Easing: {:#?}", easing.0));
-    }
-    if keyboard.just_pressed(KeyCode::KeyE) {
-        easing.0 = EaseFunction::CubicOut;
-        log.push(EVENT_LOG_EASING_RESET.into());
-    }
+    let index = (time.elapsed_secs() * SECONDS_TO_MILLIS).to_usize() % ALL_EASINGS.len();
+    easing.0 = ALL_EASINGS[index];
+    log.push(format!("Easing: {:#?}", easing.0));
 }
 
-#[derive(Default, PartialEq, Eq)]
-pub(crate) enum DeferRefit {
+pub(crate) fn reset_easing(mut easing: ResMut<ActiveEasing>, mut log: ResMut<event_log::EventLog>) {
+    easing.0 = EaseFunction::CubicOut;
+    log.push(EVENT_LOG_EASING_RESET.into());
+}
+
+/// Tracks the one-frame-deferred scene re-fit after a projection toggle.
+///
+/// `OrbitCam` needs a frame to process the projection change (syncing radius ↔
+/// orthographic scale) before the fit math is correct. [`toggle_projection`]
+/// arms `Armed`; [`apply_projection_refit`] advances `Armed → Pending` on its
+/// next run and triggers the fit on the run after, so at least one full frame
+/// passes before the fit.
+#[derive(Resource, Default, PartialEq, Eq)]
+pub(crate) enum ProjectionRefit {
     #[default]
-    Continue,
-    WaitOneFrame,
+    Idle,
+    Armed,
+    Pending,
 }
 
 #[derive(PartialEq, Eq)]
@@ -108,37 +104,14 @@ enum ProjectionLog {
     Written,
 }
 
-/// Toggles between perspective and orthographic projection, then re-fits the scene.
-///
-/// The fit is deferred one frame via `defer_refit` because `OrbitCam` needs to
-/// process the projection change (syncing radius ↔ orthographic scale) before the
-/// fit calculation can produce correct results.
+/// Toggles between perspective and orthographic projection and arms a deferred
+/// scene re-fit applied by [`apply_projection_refit`].
 pub(crate) fn toggle_projection(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut commands: Commands,
     scene: Res<SceneEntities>,
-    active_easing: Res<ActiveEasing>,
     mut camera_query: Query<(&mut Projection, &mut OrbitCam)>,
     mut log: ResMut<event_log::EventLog>,
-    mut defer_refit: Local<DeferRefit>,
+    mut refit: ResMut<ProjectionRefit>,
 ) {
-    // Deferred fit: projection was changed last frame, `OrbitCam` has now synced.
-    if *defer_refit == DeferRefit::WaitOneFrame {
-        *defer_refit = DeferRefit::Continue;
-        commands.trigger(
-            AnimateToFit::new(scene.camera, scene.scene_bounds)
-                .yaw(CAMERA_START_YAW)
-                .pitch(CAMERA_START_PITCH)
-                .margin(ZOOM_MARGIN_SCENE)
-                .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
-                .easing(active_easing.0),
-        );
-        return;
-    }
-
-    if !keyboard.just_pressed(KeyCode::KeyP) {
-        return;
-    }
     let Ok((mut projection, mut orbit_camera)) = camera_query.get_mut(scene.camera) else {
         return;
     };
@@ -164,12 +137,36 @@ pub(crate) fn toggle_projection(
     }
     orbit_camera.force_update();
     if projection_log == ProjectionLog::Written {
-        *defer_refit = DeferRefit::WaitOneFrame;
+        *refit = ProjectionRefit::Armed;
+    }
+}
+
+/// Applies the deferred scene re-fit one frame after a projection toggle, once
+/// `OrbitCam` has synced radius ↔ orthographic scale.
+pub(crate) fn apply_projection_refit(
+    mut commands: Commands,
+    scene: Res<SceneEntities>,
+    active_easing: Res<ActiveEasing>,
+    mut refit: ResMut<ProjectionRefit>,
+) {
+    match *refit {
+        ProjectionRefit::Idle => {},
+        ProjectionRefit::Armed => *refit = ProjectionRefit::Pending,
+        ProjectionRefit::Pending => {
+            *refit = ProjectionRefit::Idle;
+            commands.trigger(
+                AnimateToFit::new(scene.camera, scene.scene_bounds)
+                    .yaw(CAMERA_START_YAW)
+                    .pitch(CAMERA_START_PITCH)
+                    .margin(ZOOM_MARGIN_SCENE)
+                    .duration(Duration::from_millis(ANIMATE_FIT_DURATION_MILLIS))
+                    .easing(active_easing.0),
+            );
+        },
     }
 }
 
 pub(crate) fn toggle_interrupt_behavior(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     mut behavior_query: Query<&mut CameraInputInterruptBehavior>,
@@ -177,10 +174,6 @@ pub(crate) fn toggle_interrupt_behavior(
     mut flash: ResMut<policy_panel::KeyFlash>,
     mut log: ResMut<event_log::EventLog>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyI) {
-        return;
-    }
-
     let new_behavior =
         behavior_query
             .get(scene.camera)
@@ -205,7 +198,6 @@ pub(crate) fn toggle_interrupt_behavior(
 }
 
 pub(crate) fn toggle_animation_conflict_policy(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     scene: Res<SceneEntities>,
     mut policy_query: Query<&mut AnimationConflictPolicy>,
@@ -213,10 +205,6 @@ pub(crate) fn toggle_animation_conflict_policy(
     mut flash: ResMut<policy_panel::KeyFlash>,
     mut log: ResMut<event_log::EventLog>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyQ) {
-        return;
-    }
-
     let new_policy =
         policy_query
             .get(scene.camera)

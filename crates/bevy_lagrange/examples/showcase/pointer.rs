@@ -119,15 +119,11 @@ pub(crate) fn on_mesh_unhover(hover: On<Pointer<Out>>, mut hovered: ResMut<Hover
 }
 
 pub(crate) fn look_at_hovered(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     hovered: Res<HoveredEntity>,
     scene: Res<SceneEntities>,
     active_easing: Res<ActiveEasing>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyF) {
-        return;
-    }
     let Some(target) = hovered.0 else {
         return;
     };
@@ -140,15 +136,11 @@ pub(crate) fn look_at_hovered(
 }
 
 pub(crate) fn look_at_and_zoom_to_fit_hovered(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     hovered: Res<HoveredEntity>,
     scene: Res<SceneEntities>,
     active_easing: Res<ActiveEasing>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyG) {
-        return;
-    }
     let Some(target) = hovered.0 else {
         return;
     };

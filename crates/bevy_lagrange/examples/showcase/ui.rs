@@ -30,13 +30,9 @@ pub(crate) fn spawn_ui(commands: &mut Commands, camera: Entity) {
 }
 
 pub(crate) fn toggle_pause(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut time: ResMut<Time<Virtual>>,
     mut overlay: Query<&mut Visibility, With<PausedOverlay>>,
 ) {
-    if !keyboard.just_pressed(KeyCode::Escape) {
-        return;
-    }
     if time.is_paused() {
         time.unpause();
         for mut visibility in &mut overlay {

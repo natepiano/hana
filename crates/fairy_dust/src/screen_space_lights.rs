@@ -1,8 +1,17 @@
 //! Capability: Ctrl+Shift+L toggles screen-space panel visibility.
+//!
+//! Wired through `bevy_enhanced_input` using the `bevy_kana` macros, modeled on
+//! [`crate::restart`].
 
 use bevy::prelude::*;
 use bevy_diegetic::ScreenSpaceCamera;
 use bevy_diegetic::ScreenSpaceLight;
+use bevy_enhanced_input::prelude::*;
+use bevy_kana::action;
+use bevy_kana::bind_action_system;
+use bevy_kana::event;
+
+use crate::ensure_plugin;
 
 #[derive(Resource)]
 struct ScreenSpacePanelsEnabled(bool);
@@ -10,6 +19,12 @@ struct ScreenSpacePanelsEnabled(bool);
 impl Default for ScreenSpacePanelsEnabled {
     fn default() -> Self { Self(true) }
 }
+
+#[derive(Component)]
+struct ScreenSpacePanelsContext;
+
+action!(ToggleScreenSpacePanels);
+event!(ToggleScreenSpacePanelsEvent);
 
 #[derive(Component)]
 struct ScreenSpaceCameraRestore {
@@ -22,21 +37,33 @@ struct ScreenSpaceLightRestore {
 }
 
 pub(crate) fn install(app: &mut App) {
-    app.init_resource::<ScreenSpacePanelsEnabled>().add_systems(
-        Update,
-        (toggle_screen_space_panels, apply_screen_space_panels).chain(),
+    ensure_plugin(app, EnhancedInputPlugin);
+    app.init_resource::<ScreenSpacePanelsEnabled>();
+    app.add_input_context::<ScreenSpacePanelsContext>();
+    app.add_systems(Startup, spawn_toggle_action);
+    app.add_systems(Update, apply_screen_space_panels);
+    bind_action_system!(
+        app,
+        ToggleScreenSpacePanels,
+        ToggleScreenSpacePanelsEvent,
+        toggle_screen_space_panels
     );
 }
 
-fn toggle_screen_space_panels(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut enabled: ResMut<ScreenSpacePanelsEnabled>,
-) {
-    let ctrl = keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight]);
-    let shift = keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]);
-    if ctrl && shift && keyboard.just_pressed(KeyCode::KeyL) {
-        enabled.0 = !enabled.0;
-    }
+fn spawn_toggle_action(mut commands: Commands) {
+    commands.spawn((
+        ScreenSpacePanelsContext,
+        actions!(ScreenSpacePanelsContext[
+            (
+                Action::<ToggleScreenSpacePanels>::new(),
+                bindings![KeyCode::KeyL.with_mod_keys(ModKeys::CONTROL | ModKeys::SHIFT)],
+            ),
+        ]),
+    ));
+}
+
+fn toggle_screen_space_panels(mut enabled: ResMut<ScreenSpacePanelsEnabled>) {
+    enabled.0 = !enabled.0;
 }
 
 fn apply_screen_space_panels(

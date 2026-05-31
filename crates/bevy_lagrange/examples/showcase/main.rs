@@ -9,6 +9,7 @@
 mod animation_controls;
 mod constants;
 mod event_log;
+mod input;
 mod pointer;
 mod policy_panel;
 mod scene;
@@ -21,6 +22,8 @@ use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::color::palettes::css::DEEP_SKY_BLUE;
 use bevy::color::palettes::css::ORANGE;
+use bevy::light::CascadeShadowConfig;
+use bevy::light::CascadeShadowConfigBuilder;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
@@ -52,6 +55,7 @@ use constants::*;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::FairyDustStudioLightingSet;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarOrientation;
 
@@ -100,11 +104,13 @@ fn main() {
         .init_gizmo_group::<selection_gizmo::SelectionGizmo>();
     app.app_mut().init_state::<AppState>();
 
-    app.init_resource::<ActiveEasing>()
+    app.add_plugins(input::ShowcaseInputPlugin)
+        .init_resource::<ActiveEasing>()
         .init_resource::<event_log::EventLog>()
         .init_resource::<policy_panel::PolicyDisplay>()
         .init_resource::<policy_panel::KeyFlash>()
         .init_resource::<pointer::HoveredEntity>()
+        .init_resource::<animation_controls::ProjectionRefit>()
         .add_systems(
             Startup,
             (
@@ -113,6 +119,11 @@ fn main() {
                 selection_gizmo::init_selection_gizmo,
             ),
         )
+        // Cascade widening runs after the studio rig spawns its directional light.
+        .add_systems(
+            Startup,
+            scene::widen_scene_shadows.after(FairyDustStudioLightingSet),
+        )
         .add_systems(
             Update,
             initial_fit_to_scene.run_if(in_state(AppState::Loading)),
@@ -120,26 +131,13 @@ fn main() {
         .add_systems(
             Update,
             (
-                ui::toggle_pause,
-                event_log::toggle_event_log,
                 selection_gizmo::draw_selection_gizmo,
                 selection_gizmo::draw_hover_gizmo,
                 selection_gizmo::sync_selection_gizmo_layers,
                 event_log::rebuild_log_panel,
-                event_log::scroll_event_log,
                 policy_panel::rebuild_policy_panel,
                 policy_panel::tick_key_flash,
-                (
-                    animation_controls::toggle_debug_overlay,
-                    animation_controls::toggle_projection,
-                    animation_controls::randomize_easing,
-                    animation_controls::animate_camera,
-                    animation_controls::toggle_interrupt_behavior,
-                    animation_controls::toggle_animation_conflict_policy,
-                    pointer::look_at_hovered,
-                    pointer::look_at_and_zoom_to_fit_hovered,
-                )
-                    .run_if(not_paused),
+                animation_controls::apply_projection_refit,
             ),
         )
         .add_observer(event_log::enable_log_on_initial_fit)
@@ -232,5 +230,3 @@ fn initial_fit_to_scene(
     );
     next_state.set(AppState::Running);
 }
-
-fn not_paused(time: Res<Time<Virtual>>) -> bool { !time.is_paused() }
