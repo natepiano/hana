@@ -212,9 +212,28 @@ impl Platform {
 
     /// Whether managed windows need scale strategy recalculation on creation.
     ///
-    /// On Windows, new windows may be placed on the OS primary display rather
-    /// than the monitor where the parent/launching window is, causing the
-    /// `starting_scale` assumption to be wrong.
+    /// A managed (secondary) window is created on the monitor where the focused
+    /// window currently is, not necessarily the monitor whose scale was sampled
+    /// when its `TargetPosition` was computed:
+    ///
+    /// - **Windows**: new windows may be placed on the OS primary display rather than the monitor
+    ///   where the parent/launching window is.
+    /// - **macOS / X11**: the primary window migrates to its own restore target during startup, so
+    ///   a secondary window spawned alongside it is born on the primary's post-move monitor — a
+    ///   different scale than the primary's launch monitor that `restore_managed_window` sampled
+    ///   for `starting_scale`.
+    ///
+    /// In all three cases the `starting_scale` assumption is wrong, so `restore_windows`
+    /// re-reads the window's actual `base_scale_factor()` and recomputes the strategy.
+    ///
+    /// Enabled for every non-Wayland platform. The recompute only runs when the
+    /// measured scale differs from `starting_scale`, so on setups where all
+    /// monitors share one scale factor (the common X11 case, where winit derives
+    /// a single global scale from `Xft.dpi`) the branch is unreachable and this is
+    /// a no-op. Wayland is excluded: it handles DPI natively and exposes no window
+    /// position, so the cross-DPI strategies never apply there.
     #[must_use]
-    pub const fn needs_managed_scale_fixup(self) -> bool { matches!(self, Self::Windows) }
+    pub const fn needs_managed_scale_fixup(self) -> bool {
+        matches!(self, Self::Windows | Self::MacOs | Self::X11)
+    }
 }

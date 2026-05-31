@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix managed (secondary) windows restoring to the wrong monitor and halving in size on each relaunch when their saved monitor has a different scale factor than the primary window's launch monitor. Restore now re-reads each managed window's actual scale factor after creation and recomputes its cross-DPI strategy. Applies to macOS and Linux X11 (previously Windows only); Wayland unaffected.
+
 ## [0.21.0-rc.1] - 2026-05-26
 
 ### Added
