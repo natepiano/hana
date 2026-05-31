@@ -6,7 +6,7 @@
 //! - [`preset`] — built-in [`OrbitCamPreset`] keymaps.
 //! - [`builder`] — [`OrbitCamBindingsBuilder`], [`OrbitCamBindingsDescriptor`], dispatch enums, and
 //!   the user-facing concrete binding kinds (mouse drag, trackpad, mouse wheel, pinch, button drag,
-//!   touch, gamepad policy, zoom direction).
+//!   touch, gamepad policy, zoom inversion).
 //! - [`held_binding`] — [`OrbitCamHeldBinding`] / [`OrbitCamInputBinding`] primitives.
 //! - [`action_set`] — per-action binding-set newtypes and entry types written by the validator and
 //!   read by the adapter.
@@ -49,7 +49,6 @@ pub use builder::OrbitCamPinchZoom;
 pub use builder::OrbitCamTouchBinding;
 pub use builder::OrbitCamTrackpadScroll;
 pub use builder::OrbitCamZoomBinding;
-pub use builder::WheelZoomPolarity;
 pub use builder::ZoomInversion;
 #[cfg(test)]
 pub(crate) use builder::invalid_bindings_descriptor_for_tests;
@@ -157,7 +156,7 @@ impl OrbitCamBindings {
     #[must_use]
     pub const fn gamepad(&self) -> CameraInputGamepadSelectionPolicy { self.gamepad }
 
-    /// Returns zoom direction policy.
+    /// Returns the zoom inversion policy.
     #[must_use]
     pub const fn zoom_inversion(&self) -> ZoomInversion { self.zoom_inversion }
 

@@ -34,3 +34,12 @@ pub(super) const PINCH_SOURCE_LABEL: &str = "pinch";
 pub(super) const TOUCH_SOURCE_LABEL: &str = "touch";
 pub(super) const TRACKPAD_SOURCE_LABEL: &str = "smooth-scroll";
 pub(super) const WHEEL_SOURCE_LABEL: &str = "wheel";
+
+// split zoom-direction row labels — each bidirectional zoom source shows one
+// row per direction, labeled by the physical gesture that drives it.
+pub(super) const WHEEL_ZOOM_IN_LABEL: &str = "wheel ↑";
+pub(super) const WHEEL_ZOOM_OUT_LABEL: &str = "wheel ↓";
+pub(super) const PINCH_ZOOM_IN_LABEL: &str = "pinch out";
+pub(super) const PINCH_ZOOM_OUT_LABEL: &str = "pinch in";
+pub(super) const SMOOTH_SCROLL_ZOOM_IN_LABEL: &str = "scroll ↑";
+pub(super) const SMOOTH_SCROLL_ZOOM_OUT_LABEL: &str = "scroll ↓";

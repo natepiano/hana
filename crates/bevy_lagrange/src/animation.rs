@@ -464,7 +464,7 @@ fn handle_in_progress(
     };
 
     // Update elapsed time
-    *elapsed_millis += delta_secs * MILLIS_PER_SECOND;
+    *elapsed_millis = delta_secs.mul_add(MILLIS_PER_SECOND, *elapsed_millis);
 
     // Calculate interpolation factor (0.0 to 1.0)
     let duration_ms = current_move.duration_ms();

@@ -303,7 +303,8 @@ fn manual_animate(
         return;
     }
     for mut cam in &mut query {
-        cam.target_yaw += MANUAL_ORBIT_YAW_RADIANS_PER_SECOND * time.delta_secs();
+        cam.target_yaw =
+            MANUAL_ORBIT_YAW_RADIANS_PER_SECOND.mul_add(time.delta_secs(), cam.target_yaw);
         cam.target_pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
         cam.radius = Some(
             (((time.elapsed_secs_wrapped() * MANUAL_ORBIT_RADIUS_FREQUENCY).cos() + 1.0) * 0.5)

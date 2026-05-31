@@ -12,13 +12,14 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInteractionKind;
+use bevy_lagrange::ZoomDirection;
 
-use super::constants::ACTION_COLUMN_MIN_WIDTH;
-use super::constants::ACTION_COLUMN_SLOW_WIDTH;
+use super::constants::ACTION_COLUMN_WIDTH;
 use super::constants::ACTIVE_COLOR;
 use super::constants::GUIDANCE_CHILD_GAP;
 use super::constants::HEADER_COLOR;
 use super::constants::LABEL_COLOR;
+use super::constants::SPEED_LABEL_COLUMN_WIDTH;
 use super::constants::TABLE_ACTION_ARROW;
 use super::constants::TABLE_COLUMN_GAP;
 use super::constants::TABLE_DIVIDER_WIDTH;
@@ -81,6 +82,13 @@ fn build_guidance_layout(
     });
 }
 
+/// Whether a speed block renders the `Normal` / `Slow` label column.
+#[derive(Clone, Copy)]
+enum SpeedColumn {
+    Shown,
+    Hidden,
+}
+
 fn build_guidance_table(
     builder: &mut LayoutBuilder,
     snapshot: &CameraGuidanceSnapshot,
@@ -88,16 +96,15 @@ fn build_guidance_table(
     label: &LayoutTextStyle,
     active: &LayoutTextStyle,
 ) {
-    // A single shared action-column width keeps the arrows aligned and the
-    // action labels left-aligned; widen it only when a slow variant is present.
-    let action_width = if snapshot
-        .rows
-        .iter()
-        .any(|row| row.speed() == ControlSpeed::Slow)
-    {
-        ACTION_COLUMN_SLOW_WIDTH
+    let speeds: Vec<ControlSpeed> = [ControlSpeed::Normal, ControlSpeed::Slow]
+        .into_iter()
+        .filter(|&speed| snapshot.rows.iter().any(|row| row.speed() == speed))
+        .collect();
+    // Single-speed presets (mouse, keyboard) drop the speed column entirely.
+    let speed_column = if speeds.len() > 1 {
+        SpeedColumn::Shown
     } else {
-        ACTION_COLUMN_MIN_WIDTH
+        SpeedColumn::Hidden
     };
 
     builder.with(
@@ -112,20 +119,13 @@ fn build_guidance_table(
                     .color(BORDER_DIM),
             ),
         |builder| {
-            for (kind, speed) in [
-                (OrbitCamInteractionKind::Orbit, ControlSpeed::Normal),
-                (OrbitCamInteractionKind::Orbit, ControlSpeed::Slow),
-                (OrbitCamInteractionKind::Pan, ControlSpeed::Normal),
-                (OrbitCamInteractionKind::Pan, ControlSpeed::Slow),
-                (OrbitCamInteractionKind::Zoom, ControlSpeed::Normal),
-                (OrbitCamInteractionKind::Zoom, ControlSpeed::Slow),
-            ] {
-                build_guidance_group(
+            for speed in speeds {
+                build_speed_block(
                     builder,
                     snapshot,
-                    (kind, speed),
+                    speed,
+                    speed_column,
                     display,
-                    action_width,
                     label,
                     active,
                 );
@@ -134,34 +134,101 @@ fn build_guidance_table(
     );
 }
 
-fn build_guidance_group(
+fn build_speed_block(
     builder: &mut LayoutBuilder,
     snapshot: &CameraGuidanceSnapshot,
-    group: (OrbitCamInteractionKind, ControlSpeed),
+    speed: ControlSpeed,
+    speed_column: SpeedColumn,
     display: CameraGuidanceDisplay,
-    action_width: Px,
     label: &LayoutTextStyle,
     active: &LayoutTextStyle,
 ) {
-    let (kind, speed) = group;
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(Px(TABLE_COLUMN_GAP))
+            .child_align_y(AlignY::Center),
+        |builder| {
+            if matches!(speed_column, SpeedColumn::Shown) {
+                let block_active = snapshot.rows.iter().any(|row| {
+                    row.speed() == speed
+                        && display.speed(row.kind()) == Some(speed)
+                        && snapshot::row_active(
+                            row,
+                            display.sources(row.kind()),
+                            display.zoom_direction(),
+                        )
+                });
+                let speed_style = if block_active { active } else { label };
+                builder.with(
+                    El::new()
+                        .width(Sizing::fit_min(SPEED_LABEL_COLUMN_WIDTH))
+                        .height(Sizing::FIT),
+                    |builder| {
+                        builder.text(snapshot::speed_label(speed), speed_style.clone());
+                    },
+                );
+            }
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(Px(TABLE_ROW_GAP)),
+                |builder| {
+                    for (kind, direction) in [
+                        (OrbitCamInteractionKind::Orbit, None),
+                        (OrbitCamInteractionKind::Pan, None),
+                        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)),
+                        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)),
+                        (OrbitCamInteractionKind::Zoom, None),
+                    ] {
+                        build_action_row(
+                            builder,
+                            snapshot,
+                            (kind, speed, direction),
+                            display,
+                            label,
+                            active,
+                        );
+                    }
+                },
+            );
+        },
+    );
+}
+
+fn build_action_row(
+    builder: &mut LayoutBuilder,
+    snapshot: &CameraGuidanceSnapshot,
+    group: (OrbitCamInteractionKind, ControlSpeed, Option<ZoomDirection>),
+    display: CameraGuidanceDisplay,
+    label: &LayoutTextStyle,
+    active: &LayoutTextStyle,
+) {
+    let (kind, speed, direction) = group;
     let active_sources = display.sources(kind);
-    // Only highlight when the live interaction's speed matches this group, so
-    // engaging the slow variant lights "Orbit Slow" without also lighting "Orbit".
-    let speed_matches = display.speed(kind) == speed;
+    let live_zoom_direction = display.zoom_direction();
+    // `speed_matches` gates highlight so the slow row stays dim at normal speed.
+    let speed_matches = display.speed(kind) == Some(speed);
     let rows = snapshot
         .rows
         .iter()
-        .filter(|row| row.kind() == kind && row.speed() == speed)
+        .filter(|row| {
+            row.kind() == kind && row.speed() == speed && row.zoom_direction() == direction
+        })
         .collect::<Vec<_>>();
     if rows.is_empty() {
         return;
     }
 
-    let group_active = speed_matches
+    let action_active = speed_matches
         && rows
             .iter()
-            .any(|row| snapshot::row_active(row, active_sources));
-    let action_style = if group_active { active } else { label };
+            .any(|row| snapshot::row_active(row, active_sources, live_zoom_direction));
+    let action_style = if action_active { active } else { label };
 
     builder.with(
         El::new()
@@ -179,12 +246,13 @@ fn build_guidance_group(
                     .child_gap(Px(TABLE_ROW_GAP)),
                 |builder| {
                     for row in rows {
-                        let binding_style =
-                            if speed_matches && snapshot::row_active(row, active_sources) {
-                                active
-                            } else {
-                                label
-                            };
+                        let binding_style = if speed_matches
+                            && snapshot::row_active(row, active_sources, live_zoom_direction)
+                        {
+                            active
+                        } else {
+                            label
+                        };
                         builder.text(row.label(), binding_style.clone());
                     }
                 },
@@ -192,10 +260,13 @@ fn build_guidance_group(
             builder.text(TABLE_ACTION_ARROW, action_style.clone());
             builder.with(
                 El::new()
-                    .width(Sizing::fit_min(action_width))
+                    .width(Sizing::fit_min(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(snapshot::group_label(kind, speed), action_style.clone());
+                    builder.text(
+                        snapshot::action_label(kind, direction),
+                        action_style.clone(),
+                    );
                 },
             );
         },

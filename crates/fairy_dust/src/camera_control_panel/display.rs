@@ -7,6 +7,7 @@ use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionState;
+use bevy_lagrange::ZoomDirection;
 
 use super::constants::SOURCE_HOLD_SECONDS;
 
@@ -32,9 +33,10 @@ pub(super) struct CameraGuidanceDisplayState {
     orbit:                   CameraGuidanceDisplaySlot,
     pan:                     CameraGuidanceDisplaySlot,
     zoom:                    CameraGuidanceDisplaySlot,
-    orbit_speed:             ControlSpeed,
-    pan_speed:               ControlSpeed,
-    zoom_speed:              ControlSpeed,
+    orbit_speed:             Option<ControlSpeed>,
+    pan_speed:               Option<ControlSpeed>,
+    zoom_speed:              Option<ControlSpeed>,
+    zoom_direction:          Option<ZoomDirection>,
     pub(super) render_state: RenderState,
 }
 
@@ -45,28 +47,43 @@ impl Default for CameraGuidanceDisplayState {
 impl CameraGuidanceDisplayState {
     pub(super) const fn from_display(display: CameraGuidanceDisplay) -> Self {
         Self {
-            orbit:        CameraGuidanceDisplaySlot::active(display.orbit),
-            pan:          CameraGuidanceDisplaySlot::active(display.pan),
-            zoom:         CameraGuidanceDisplaySlot::active(display.zoom),
-            orbit_speed:  display.orbit_speed,
-            pan_speed:    display.pan_speed,
-            zoom_speed:   display.zoom_speed,
-            render_state: RenderState::Idle,
+            orbit:          CameraGuidanceDisplaySlot::active(display.orbit),
+            pan:            CameraGuidanceDisplaySlot::active(display.pan),
+            zoom:           CameraGuidanceDisplaySlot::active(display.zoom),
+            orbit_speed:    display.orbit_speed,
+            pan_speed:      display.pan_speed,
+            zoom_speed:     display.zoom_speed,
+            zoom_direction: display.zoom_direction,
+            render_state:   RenderState::Idle,
         }
     }
 
     pub(super) const fn display(self) -> CameraGuidanceDisplay {
         CameraGuidanceDisplay {
-            orbit:       self.orbit.sources(),
-            pan:         self.pan.sources(),
-            zoom:        self.zoom.sources(),
-            orbit_speed: self.orbit_speed,
-            pan_speed:   self.pan_speed,
-            zoom_speed:  self.zoom_speed,
+            orbit:          self.orbit.sources(),
+            pan:            self.pan.sources(),
+            zoom:           self.zoom.sources(),
+            orbit_speed:    self.orbit_speed,
+            pan_speed:      self.pan_speed,
+            zoom_speed:     self.zoom_speed,
+            zoom_direction: self.zoom_direction,
         }
     }
 
-    pub(super) fn set_speed(&mut self, kind: OrbitCamInteractionKind, speed: ControlSpeed) {
+    /// Records the live zoom direction read from the camera input when a zoom
+    /// interaction begins or changes. A `None` argument (zero-delta frame) keeps
+    /// the last direction so the held row stays correct through the hold window.
+    pub(super) fn set_zoom_direction(&mut self, zoom_direction: Option<ZoomDirection>) {
+        let Some(zoom_direction) = zoom_direction else {
+            return;
+        };
+        if self.zoom_direction != Some(zoom_direction) {
+            self.zoom_direction = Some(zoom_direction);
+            self.render_state = RenderState::Pending;
+        }
+    }
+
+    pub(super) fn set_speed(&mut self, kind: OrbitCamInteractionKind, speed: Option<ControlSpeed>) {
         let slot = match kind {
             OrbitCamInteractionKind::Orbit => &mut self.orbit_speed,
             OrbitCamInteractionKind::Pan => &mut self.pan_speed,
@@ -205,23 +222,25 @@ impl CameraGuidanceDisplaySlot {
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CameraGuidanceDisplay {
-    pub(super) orbit:       CameraInteractionSources,
-    pub(super) pan:         CameraInteractionSources,
-    pub(super) zoom:        CameraInteractionSources,
-    pub(super) orbit_speed: ControlSpeed,
-    pub(super) pan_speed:   ControlSpeed,
-    pub(super) zoom_speed:  ControlSpeed,
+    pub(super) orbit:          CameraInteractionSources,
+    pub(super) pan:            CameraInteractionSources,
+    pub(super) zoom:           CameraInteractionSources,
+    pub(super) orbit_speed:    Option<ControlSpeed>,
+    pub(super) pan_speed:      Option<ControlSpeed>,
+    pub(super) zoom_speed:     Option<ControlSpeed>,
+    pub(super) zoom_direction: Option<ZoomDirection>,
 }
 
 impl CameraGuidanceDisplay {
     pub(super) const fn from_interaction_state(state: OrbitCamInteractionState) -> Self {
         Self {
-            orbit:       state.orbit_sources(),
-            pan:         state.pan_sources(),
-            zoom:        state.zoom_sources(),
-            orbit_speed: state.speed(OrbitCamInteractionKind::Orbit),
-            pan_speed:   state.speed(OrbitCamInteractionKind::Pan),
-            zoom_speed:  state.speed(OrbitCamInteractionKind::Zoom),
+            orbit:          state.orbit_sources(),
+            pan:            state.pan_sources(),
+            zoom:           state.zoom_sources(),
+            orbit_speed:    state.speed(OrbitCamInteractionKind::Orbit),
+            pan_speed:      state.speed(OrbitCamInteractionKind::Pan),
+            zoom_speed:     state.speed(OrbitCamInteractionKind::Zoom),
+            zoom_direction: None,
         }
     }
 
@@ -234,12 +253,14 @@ impl CameraGuidanceDisplay {
         }
     }
 
-    pub(super) const fn speed(self, kind: OrbitCamInteractionKind) -> ControlSpeed {
+    pub(super) const fn zoom_direction(self) -> Option<ZoomDirection> { self.zoom_direction }
+
+    pub(super) const fn speed(self, kind: OrbitCamInteractionKind) -> Option<ControlSpeed> {
         match kind {
             OrbitCamInteractionKind::Orbit => self.orbit_speed,
             OrbitCamInteractionKind::Pan => self.pan_speed,
             OrbitCamInteractionKind::Zoom => self.zoom_speed,
-            _ => ControlSpeed::Normal,
+            _ => None,
         }
     }
 }
@@ -247,6 +268,28 @@ impl CameraGuidanceDisplay {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_zoom_direction_updates_and_survives_zero_delta_frames() {
+        let mut display = CameraGuidanceDisplayState::default();
+
+        display.set_zoom_direction(Some(ZoomDirection::In));
+        assert_eq!(display.display().zoom_direction, Some(ZoomDirection::In));
+        assert_eq!(display.render_state, RenderState::Pending);
+
+        // A zero-delta frame reports `None` and must keep the captured direction
+        // so the held row stays correct through the hold window, with no rebuild.
+        display.render_state = RenderState::Idle;
+        display.set_zoom_direction(None);
+        assert_eq!(display.display().zoom_direction, Some(ZoomDirection::In));
+        assert_eq!(display.render_state, RenderState::Idle);
+
+        // Reversing direction (release zoom-in, press zoom-out) flips the tag and
+        // requests a rebuild even though the source bit is unchanged.
+        display.set_zoom_direction(Some(ZoomDirection::Out));
+        assert_eq!(display.display().zoom_direction, Some(ZoomDirection::Out));
+        assert_eq!(display.render_state, RenderState::Pending);
+    }
 
     #[test]
     fn ended_source_is_held_until_expiry() {

@@ -9,9 +9,9 @@
 //! - Dispatch enums consumed by `.orbit()` / `.pan()` / `.zoom()` builder methods:
 //!   [`OrbitCamOrbitBinding`] / [`OrbitCamPanBinding`] / [`OrbitCamZoomBinding`].
 //! - Concrete binding kinds: [`OrbitCamMouseDrag`], [`OrbitCamTrackpadScroll`],
-//!   [`OrbitCamMouseWheelZoom`] (+ [`WheelZoomPolarity`]), [`OrbitCamPinchZoom`],
-//!   [`OrbitCamButtonDragZoom`] (+ [`OrbitCamButtonDragZoomAxis`]), [`OrbitCamTouchBinding`],
-//!   [`ZoomDirection`], [`CameraInputGamepadSelectionPolicy`].
+//!   [`OrbitCamMouseWheelZoom`], [`OrbitCamPinchZoom`], [`OrbitCamButtonDragZoom`] (+
+//!   [`OrbitCamButtonDragZoomAxis`]), [`OrbitCamTouchBinding`], [`ZoomInversion`],
+//!   [`CameraInputGamepadSelectionPolicy`].
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::Binding;
@@ -137,7 +137,7 @@ impl OrbitCamBindingsBuilder {
         self
     }
 
-    /// Sets the zoom direction policy.
+    /// Sets the zoom inversion policy.
     #[must_use]
     pub const fn zoom_inversion(mut self, zoom_inversion: ZoomInversion) -> Self {
         self.descriptor.zoom_inversion = zoom_inversion;
@@ -311,22 +311,10 @@ impl OrbitCamTrackpadScroll {
     }
 }
 
-/// Mouse-wheel zoom binding.
+/// Mouse-wheel zoom binding. Zoom direction is governed by the camera's
+/// [`ZoomInversion`]; this binding only enables wheel zoom.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub struct OrbitCamMouseWheelZoom {
-    /// Wheel polarity applied before zoom direction.
-    pub polarity: WheelZoomPolarity,
-}
-
-/// Wheel polarity applied before zoom direction.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub enum WheelZoomPolarity {
-    /// Wheel value passes through unchanged.
-    #[default]
-    Normal,
-    /// Wheel value is negated before zoom direction is applied.
-    Inverted,
-}
+pub struct OrbitCamMouseWheelZoom;
 
 /// Pinch gesture zoom binding.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
@@ -351,13 +339,13 @@ pub enum OrbitCamTouchBinding {
     TwoFingerOrbit,
 }
 
-/// Normal or inverted scroll/zoom input.
+/// Whether scroll-based zoom (mouse wheel, pinch, smooth-scroll) is inverted.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum ZoomInversion {
-    /// Scrolling zooms in the default direction.
+    /// Scroll-based zoom runs in its default direction.
     #[default]
     Normal,
-    /// Scrolling zooms in the opposite direction.
+    /// Scroll-based zoom is inverted: each gesture zooms the opposite way.
     Inverted,
 }
 

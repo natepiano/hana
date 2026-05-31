@@ -180,7 +180,7 @@ fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .orbit(OrbitCamTrackpadScroll::default())
         .pan(OrbitCamMouseDrag::new(MouseButton::Right))
         .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
-        .zoom(OrbitCamMouseWheelZoom::default())
+        .zoom(OrbitCamMouseWheelZoom)
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
         .zoom_inversion(ZoomInversion::Inverted)

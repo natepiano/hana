@@ -16,7 +16,18 @@ use std::time::Duration;
 use bevy::input::gamepad::Gamepad;
 use bevy::input::gamepad::GamepadButton;
 use bevy::prelude::*;
+use bevy_diegetic::AlignX;
+use bevy_diegetic::AlignY;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::Direction;
+use bevy_diegetic::El;
+use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::LayoutBuilder;
+use bevy_diegetic::LayoutTextStyle;
+use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Padding;
+use bevy_diegetic::Sizing;
+use bevy_diegetic::TextAlign;
 use bevy_kana::event;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationEnd;
@@ -47,8 +58,8 @@ use fairy_dust::TitleBar;
 use fairy_dust::TitleChip;
 use fairy_dust::TitleChipActivation;
 use fairy_dust::apply_example_orbit_cam_limits;
-use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
+use fairy_dust::cube_face_panel_with_tree;
 use fairy_dust::cube_face_transform;
 
 fn main() {
@@ -88,6 +99,7 @@ fn main() {
         .init_resource::<GamepadHomeAnimation>()
         .insert_resource(FaceLabelHold::default())
         .with_camera_control_panel()
+        .lock_camera_preset()
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
         .add_systems(
@@ -265,6 +277,11 @@ const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle {
 };
 const STICK_ACTIVE_THRESHOLD: f32 = 0.18;
 const TRIGGER_ACTIVE_THRESHOLD: f32 = 0.05;
+/// Gap between the idle table's speed column and its controls column.
+const CONTROL_TABLE_COLUMN_GAP: f32 = CUBE_SIZE * 0.04;
+/// Width of the idle table's `normal` / `slow` speed column, as a fraction of
+/// the face width.
+const SPEED_COLUMN_FRACTION: f32 = 0.34;
 
 #[derive(Component)]
 struct GamepadInputCube;
@@ -294,8 +311,8 @@ impl GamepadFaceLabel {
     }
 }
 
-/// Holds the preset's described controls so idle face labels share the camera
-/// control panel's vocabulary; live labels still show the active stick/trigger.
+/// Holds the preset's described controls, read to build the idle face tables.
+/// Live faces still show the active stick or trigger.
 #[derive(Resource)]
 struct FaceGuidance(OrbitCamControlSummary);
 
@@ -347,31 +364,25 @@ fn update_face_labels(
         &mut hold.orbit,
         time.delta(),
         active_orbit_content(active_gamepad, state.speed(OrbitCamInteractionKind::Orbit)),
-        &guidance.0,
-        GamepadFaceLabel::Orbit,
     );
     let pan = held_content(
         &mut hold.pan,
         time.delta(),
         active_pan_content(active_gamepad, state.speed(OrbitCamInteractionKind::Pan)),
-        &guidance.0,
-        GamepadFaceLabel::Pan,
     );
     let zoom = held_content(
         &mut hold.zoom,
         time.delta(),
         active_zoom_content(active_gamepad, state.speed(OrbitCamInteractionKind::Zoom)),
-        &guidance.0,
-        GamepadFaceLabel::Zoom,
     );
 
     for (entity, label) in &labels {
-        let content = match label {
+        let active = match label {
             GamepadFaceLabel::Orbit => orbit.clone(),
             GamepadFaceLabel::Pan => pan.clone(),
             GamepadFaceLabel::Zoom => zoom.clone(),
         };
-        commands.set_tree(entity, cube_face_panel_tree(FACE_PANEL_STYLE, content));
+        commands.set_tree(entity, face_tree(*label, active, &guidance.0));
     }
 }
 
@@ -381,8 +392,7 @@ fn spawn_face_panel(
     kind: GamepadFaceLabel,
     summary: &OrbitCamControlSummary,
 ) {
-    let content = CubeFacePanelContent::idle(kind.title(), idle_labels(summary, kind.kind()));
-    match cube_face_panel(FACE_PANEL_STYLE, content) {
+    match cube_face_panel_with_tree(FACE_PANEL_STYLE.size, idle_grid_tree(kind, summary)) {
         Ok(panel) => {
             parent.spawn((
                 Name::new("Gamepad input face panel"),
@@ -407,53 +417,56 @@ fn gamepad_has_input(gamepad: &Gamepad) -> bool {
 
 fn active_orbit_content(
     gamepad: Option<&Gamepad>,
-    speed: ControlSpeed,
+    speed: Option<ControlSpeed>,
 ) -> Option<CubeFacePanelContent> {
     let gamepad = gamepad?;
+    let speed = speed?;
     let stick = gamepad.right_stick();
     if stick.length() <= STICK_ACTIVE_THRESHOLD {
         return None;
     }
 
     let slow = speed == ControlSpeed::Slow;
-    let control = if slow { "rb+rs" } else { "rs" };
+    let control = spell_out_control(if slow { "rb+rs" } else { "rs" });
     Some(CubeFacePanelContent::active(
         slow_title("Orbit", slow),
-        vec![control.to_string(), stick_direction(stick)],
+        vec![control, stick_direction(stick)],
     ))
 }
 
 fn active_pan_content(
     gamepad: Option<&Gamepad>,
-    speed: ControlSpeed,
+    speed: Option<ControlSpeed>,
 ) -> Option<CubeFacePanelContent> {
     let gamepad = gamepad?;
+    let speed = speed?;
     let stick = gamepad.left_stick();
     if stick.length() <= STICK_ACTIVE_THRESHOLD {
         return None;
     }
 
     let slow = speed == ControlSpeed::Slow;
-    let control = if slow { "lb+ls" } else { "ls" };
+    let control = spell_out_control(if slow { "lb+ls" } else { "ls" });
     Some(CubeFacePanelContent::active(
         slow_title("Pan", slow),
-        vec![control.to_string(), stick_direction(stick)],
+        vec![control, stick_direction(stick)],
     ))
 }
 
 fn active_zoom_content(
     gamepad: Option<&Gamepad>,
-    speed: ControlSpeed,
+    speed: Option<ControlSpeed>,
 ) -> Option<CubeFacePanelContent> {
     let gamepad = gamepad?;
+    let speed = speed?;
     let slow = speed == ControlSpeed::Slow;
 
     let mut lines = Vec::new();
     if trigger_value(gamepad, GamepadButton::RightTrigger2) > TRIGGER_ACTIVE_THRESHOLD {
-        lines.push(if slow { "rb+rt" } else { "rt" }.to_string());
+        lines.push(spell_out_control(if slow { "rb+rt" } else { "rt" }));
     }
     if trigger_value(gamepad, GamepadButton::LeftTrigger2) > TRIGGER_ACTIVE_THRESHOLD {
-        lines.push(if slow { "lb+lt" } else { "lt" }.to_string());
+        lines.push(spell_out_control(if slow { "lb+lt" } else { "lt" }));
     }
 
     if lines.is_empty() {
@@ -477,27 +490,130 @@ fn slow_title(base: &str, slow: bool) -> String {
 
 fn held_content(
     hold: &mut ReleaseHold<CubeFacePanelContent>,
-    delta: std::time::Duration,
+    delta: Duration,
     active: Option<CubeFacePanelContent>,
-    summary: &OrbitCamControlSummary,
-    label: GamepadFaceLabel,
-) -> CubeFacePanelContent {
+) -> Option<CubeFacePanelContent> {
     match hold.update(delta, active) {
-        HoldState::Active(content) | HoldState::Held(content) => content.clone(),
-        HoldState::Idle => {
-            CubeFacePanelContent::idle(label.title(), idle_labels(summary, label.kind()))
-        },
+        HoldState::Active(content) | HoldState::Held(content) => Some(content.clone()),
+        HoldState::Idle => None,
     }
 }
 
-/// All control labels configured for `kind`, shown while idle.
-fn idle_labels(summary: &OrbitCamControlSummary, kind: OrbitCamInteractionKind) -> Vec<String> {
-    summary
-        .rows
-        .iter()
-        .filter(|row| row.kind == kind)
-        .map(|row| row.label.clone())
+/// Builds a face's layout tree: the active readout when a control is engaged,
+/// otherwise the idle two-column control table.
+fn face_tree(
+    kind: GamepadFaceLabel,
+    active: Option<CubeFacePanelContent>,
+    summary: &OrbitCamControlSummary,
+) -> LayoutTree {
+    active.map_or_else(
+        || idle_grid_tree(kind, summary),
+        |content| cube_face_panel_tree(FACE_PANEL_STYLE, content),
+    )
+}
+
+/// Builds the idle control table: a left `normal` / `slow` column beside a
+/// column of spelled-out controls, each speed label centered against its rows.
+fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> LayoutTree {
+    let style = FACE_PANEL_STYLE;
+    let title_style = LayoutTextStyle::new(style.title_size)
+        .with_color(style.color)
+        .with_align(TextAlign::Center)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let label_style = LayoutTextStyle::new(style.body_size)
+        .with_color(style.color)
+        .with_align(TextAlign::Left)
+        .with_shadow_mode(GlyphShadowMode::None);
+
+    let mut builder = LayoutBuilder::with_root(
+        El::new()
+            .width(Sizing::fixed(style.size))
+            .height(Sizing::fixed(style.size))
+            .direction(Direction::TopToBottom)
+            .child_alignment(AlignX::Center, AlignY::Center)
+            .child_gap(style.row_gap)
+            .padding(Padding::all(style.padding))
+            .clip(),
+    );
+    builder.text(kind.title(), title_style);
+    for (speed_label, controls) in idle_speed_groups(summary, kind.kind()) {
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .direction(Direction::LeftToRight)
+                .child_alignment(AlignX::Left, AlignY::Center)
+                .child_gap(CONTROL_TABLE_COLUMN_GAP),
+            |group| {
+                group.with(
+                    El::new()
+                        .width(Sizing::percent(SPEED_COLUMN_FRACTION))
+                        .child_alignment(AlignX::Left, AlignY::Center),
+                    |cell| {
+                        cell.text(speed_label, label_style.clone());
+                    },
+                );
+                group.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .direction(Direction::TopToBottom)
+                        .child_alignment(AlignX::Left, AlignY::Center)
+                        .child_gap(style.row_gap),
+                    |column| {
+                        for control in &controls {
+                            column.text(control.clone(), label_style.clone());
+                        }
+                    },
+                );
+            },
+        );
+    }
+    builder.build()
+}
+
+/// Groups a kind's idle rows by speed, spelled out: `(speed label, controls)`
+/// in `normal`-then-`slow` order, skipping speeds with no bindings.
+fn idle_speed_groups(
+    summary: &OrbitCamControlSummary,
+    kind: OrbitCamInteractionKind,
+) -> Vec<(&'static str, Vec<String>)> {
+    [ControlSpeed::Normal, ControlSpeed::Slow]
+        .into_iter()
+        .filter_map(|speed| {
+            let controls: Vec<String> = summary
+                .rows
+                .iter()
+                .filter(|row| row.kind == kind && row.speed == speed)
+                .map(|row| spell_out_control(&row.label))
+                .collect();
+            (!controls.is_empty()).then_some((speed_prefix(speed), controls))
+        })
         .collect()
+}
+
+/// Spells out a gamepad control abbreviation for the cube faces. Compound labels
+/// like `rb+rs` expand each token: `right bumper + right stick`.
+fn spell_out_control(label: &str) -> String {
+    label
+        .split('+')
+        .map(|token| match token {
+            "ls" => "left stick",
+            "rs" => "right stick",
+            "lb" => "left bumper",
+            "rb" => "right bumper",
+            "lt" => "left trigger",
+            "rt" => "right trigger",
+            other => other,
+        })
+        .collect::<Vec<_>>()
+        .join(" + ")
+}
+
+/// Idle-row prefix that names the binding's speed variant.
+const fn speed_prefix(speed: ControlSpeed) -> &'static str {
+    match speed {
+        ControlSpeed::Normal => "normal",
+        ControlSpeed::Slow => "slow",
+    }
 }
 
 fn trigger_value(gamepad: &Gamepad, button: GamepadButton) -> f32 {

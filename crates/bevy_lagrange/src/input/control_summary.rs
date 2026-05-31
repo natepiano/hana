@@ -18,7 +18,9 @@ use super::OrbitCamPreset;
 use super::OrbitCamTouchBinding;
 use super::OrbitCamTrackpadScroll;
 use super::PinchGestureZoom;
+use super::ZoomInversion;
 use super::bindings::BindingGates;
+use super::bindings::InputAxisTransform;
 use super::bindings::InputBindingDescriptor;
 use super::bindings::InputBindingEntry;
 use super::constants::APP_AUTHORED_INPUT_ROW_LABEL;
@@ -37,11 +39,17 @@ use super::constants::MOUSE_DESCRIPTOR_LABEL;
 use super::constants::ONE_FINGER_TOUCH_ROW_LABEL;
 use super::constants::ORBIT_CAM_CAMERA_LABEL;
 use super::constants::PINCH_SOURCE_LABEL;
+use super::constants::PINCH_ZOOM_IN_LABEL;
+use super::constants::PINCH_ZOOM_OUT_LABEL;
 use super::constants::PRESET_MODE_LABEL;
+use super::constants::SMOOTH_SCROLL_ZOOM_IN_LABEL;
+use super::constants::SMOOTH_SCROLL_ZOOM_OUT_LABEL;
 use super::constants::TOUCH_SOURCE_LABEL;
 use super::constants::TRACKPAD_SOURCE_LABEL;
 use super::constants::TWO_FINGER_TOUCH_ROW_LABEL;
 use super::constants::WHEEL_SOURCE_LABEL;
+use super::constants::WHEEL_ZOOM_IN_LABEL;
+use super::constants::WHEEL_ZOOM_OUT_LABEL;
 
 /// Point-in-time display summary of the controls configured for an `OrbitCam`.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -67,6 +75,22 @@ pub struct OrbitCamControlRow {
     pub camera_interaction_sources: CameraInteractionSources,
     /// Whether this binding is the normal or the slow (precise) variant.
     pub speed:                      ControlSpeed,
+    /// The zoom direction this row drives, or `None` for rows that are not
+    /// direction-specific: orbit, pan, or a bidirectional zoom kept as one row.
+    pub zoom_direction:             Option<ZoomDirection>,
+}
+
+/// The direction a zoom affordance drives the camera.
+///
+/// Every zoom row from a built-in preset carries one of these so the control
+/// panel can highlight only the engaged direction — pressing the zoom-in
+/// trigger lights only the zoom-in row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
+pub enum ZoomDirection {
+    /// Moves the camera toward its target.
+    In,
+    /// Moves the camera away from its target.
+    Out,
 }
 
 /// Distinguishes a normal binding from its slow, precise counterpart — for the
@@ -85,6 +109,13 @@ impl OrbitCamControlRow {
     #[must_use]
     pub const fn with_speed(mut self, speed: ControlSpeed) -> Self {
         self.speed = speed;
+        self
+    }
+
+    /// Tags this row with the zoom direction it drives.
+    #[must_use]
+    pub const fn with_zoom_direction(mut self, zoom_direction: ZoomDirection) -> Self {
+        self.zoom_direction = Some(zoom_direction);
         self
     }
 }
@@ -176,13 +207,15 @@ fn describe_bindings(
             .map(|trackpad| describe_trackpad(trackpad, OrbitCamInteractionKind::Pan)),
     );
 
-    rows.extend(
-        bindings
-            .zoom_smooth()
-            .entries()
-            .iter()
-            .map(|entry| describe_held_entry(entry, OrbitCamInteractionKind::Zoom)),
-    );
+    // Every zoom source shows one row per direction so zoom in and zoom out read
+    // separately. `inversion_sign` flips the synthesized in/out tags for sources
+    // routed through the inverting zoom path (wheel, pinch, smooth-scroll); the
+    // native trigger/key bindings derive their direction from their own scale.
+    let inversion_sign = zoom_inversion_sign(bindings.zoom_inversion());
+
+    for entry in bindings.zoom_smooth().entries() {
+        rows.extend(describe_zoom_held_entry(entry));
+    }
     rows.extend(
         bindings
             .zoom_coarse()
@@ -192,31 +225,31 @@ fn describe_bindings(
     );
 
     if bindings.mouse_wheel_zoom().is_some() {
-        rows.push(control_row(
-            OrbitCamInteractionKind::Zoom,
-            WHEEL_SOURCE_LABEL,
+        push_zoom_pair(
+            &mut rows,
+            WHEEL_ZOOM_IN_LABEL,
+            WHEEL_ZOOM_OUT_LABEL,
             CameraInteractionSources::WHEEL,
-        ));
+            inversion_sign,
+        );
     }
 
-    rows.extend(
-        bindings
-            .trackpad_zoom()
-            .iter()
-            .copied()
-            .map(|trackpad| describe_trackpad(trackpad, OrbitCamInteractionKind::Zoom)),
-    );
+    for trackpad in bindings.trackpad_zoom() {
+        push_trackpad_zoom_pair(&mut rows, *trackpad, inversion_sign);
+    }
 
     if let Some(button_drag) = bindings.button_drag_zoom() {
         rows.push(describe_button_drag(button_drag));
     }
 
     if matches!(bindings.pinch_zoom(), PinchGestureZoom::Enabled) {
-        rows.push(control_row(
-            OrbitCamInteractionKind::Zoom,
-            PINCH_SOURCE_LABEL,
+        push_zoom_pair(
+            &mut rows,
+            PINCH_ZOOM_IN_LABEL,
+            PINCH_ZOOM_OUT_LABEL,
             CameraInteractionSources::PINCH,
-        ));
+            inversion_sign,
+        );
     }
 
     if let Some(touch) = bindings.touch() {
@@ -269,6 +302,130 @@ fn describe_trackpad(
         trackpad_stem(trackpad.mod_keys),
         CameraInteractionSources::SMOOTH_SCROLL,
     )
+}
+
+/// Describes one smooth-zoom held binding. A single signed binding (a gamepad
+/// trigger or one zoom key) stays one row tagged with its direction; a
+/// bidirectional binding (the keyboard `+`/`-` pair) splits into one row per
+/// signed entry so each direction displays on its own.
+fn describe_zoom_held_entry<A: HeldCameraAction>(
+    entry: &HeldActionBindingEntry<A>,
+) -> Vec<OrbitCamControlRow> {
+    let motion_entries = entry.motion_descriptor().entries_slice();
+
+    if motion_entries.len() == 1 {
+        let direction = zoom_direction_from_sign(entry_net_sign(&motion_entries[0]));
+        return vec![
+            control_row(
+                OrbitCamInteractionKind::Zoom,
+                held_binding_stem(entry),
+                entry.sources(),
+            )
+            .with_speed(entry.speed())
+            .with_zoom_direction(direction),
+        ];
+    }
+
+    let split = motion_entries
+        .iter()
+        .map(|motion_entry| {
+            zoom_entry_label(motion_entry).map(|stem| {
+                let direction = zoom_direction_from_sign(entry_net_sign(motion_entry));
+                control_row(
+                    OrbitCamInteractionKind::Zoom,
+                    with_required_gates(entry.gates(), stem),
+                    entry.sources(),
+                )
+                .with_speed(entry.speed())
+                .with_zoom_direction(direction)
+            })
+        })
+        .collect::<Option<Vec<_>>>();
+
+    split.unwrap_or_else(|| vec![describe_held_entry(entry, OrbitCamInteractionKind::Zoom)])
+}
+
+/// Pushes the zoom-in and zoom-out rows for a bidirectional zoom source whose
+/// two directions are synthesized rather than read from separate bindings
+/// (mouse wheel, pinch, smooth-scroll). `inversion_sign` is `-1.0` when the
+/// camera inverts zoom, which flips both tags so they keep matching the live
+/// zoom sign.
+fn push_zoom_pair(
+    rows: &mut Vec<OrbitCamControlRow>,
+    zoom_in_label: &str,
+    zoom_out_label: &str,
+    sources: CameraInteractionSources,
+    inversion_sign: f32,
+) {
+    rows.push(
+        control_row(OrbitCamInteractionKind::Zoom, zoom_in_label, sources)
+            .with_zoom_direction(zoom_direction_from_sign(inversion_sign)),
+    );
+    rows.push(
+        control_row(OrbitCamInteractionKind::Zoom, zoom_out_label, sources)
+            .with_zoom_direction(zoom_direction_from_sign(-inversion_sign)),
+    );
+}
+
+/// Pushes the smooth-scroll zoom-in and zoom-out rows, prefixing the gesture
+/// label with any required modifier keys (matching `trackpad_stem`).
+fn push_trackpad_zoom_pair(
+    rows: &mut Vec<OrbitCamControlRow>,
+    trackpad: OrbitCamTrackpadScroll,
+    inversion_sign: f32,
+) {
+    let zoom_in = with_mod_keys(trackpad.mod_keys, SMOOTH_SCROLL_ZOOM_IN_LABEL.to_string());
+    let zoom_out = with_mod_keys(trackpad.mod_keys, SMOOTH_SCROLL_ZOOM_OUT_LABEL.to_string());
+    push_zoom_pair(
+        rows,
+        &zoom_in,
+        &zoom_out,
+        CameraInteractionSources::SMOOTH_SCROLL,
+        inversion_sign,
+    );
+}
+
+/// Returns the net sign a binding entry contributes to its action, combining the
+/// scale modifier's sign with any negating axis transform. `+1.0` zooms in,
+/// `-1.0` zooms out.
+fn entry_net_sign(entry: &InputBindingEntry) -> f32 {
+    let scale_sign = entry.modifiers().scale().map_or(1.0, f32::signum);
+    let transform_sign = match entry.modifiers().axis_transform() {
+        InputAxisTransform::Negate | InputAxisTransform::SwizzleNegate => -1.0,
+        InputAxisTransform::None | InputAxisTransform::Swizzle => 1.0,
+    };
+    scale_sign * transform_sign
+}
+
+fn zoom_direction_from_sign(sign: f32) -> ZoomDirection {
+    if sign < 0.0 {
+        ZoomDirection::Out
+    } else {
+        ZoomDirection::In
+    }
+}
+
+const fn zoom_inversion_sign(inversion: ZoomInversion) -> f32 {
+    match inversion {
+        ZoomInversion::Normal => 1.0,
+        ZoomInversion::Inverted => -1.0,
+    }
+}
+
+/// Returns a per-entry label for a single binding entry of a bidirectional zoom
+/// binding, or `None` for an entry kind that has no standalone label.
+fn zoom_entry_label(entry: &InputBindingEntry) -> Option<String> {
+    match entry.binding() {
+        Binding::Keyboard { key, mod_keys } => Some(with_mod_keys(mod_keys, key_label(key))),
+        Binding::GamepadButton(button) => Some(gamepad_button_label(button)),
+        Binding::MouseButton { .. }
+        | Binding::MouseMotion { .. }
+        | Binding::MouseWheel { .. }
+        | Binding::GamepadAxis(_)
+        | Binding::AnyKey
+        | Binding::Custom(_)
+        | Binding::None => None,
+    }
 }
 
 fn describe_button_drag(button_drag: OrbitCamButtonDragZoom) -> OrbitCamControlRow {
@@ -624,6 +781,7 @@ fn control_row(
         label: label.into(),
         camera_interaction_sources: sources,
         speed: ControlSpeed::Normal,
+        zoom_direction: None,
     }
 }
 
@@ -647,9 +805,34 @@ mod tests {
         assert!(labels.contains(&"smooth-scroll"));
         assert!(labels.contains(&"shift+mmb drag"));
         assert!(labels.contains(&"shift+smooth-scroll"));
-        assert!(labels.contains(&"wheel"));
-        assert!(labels.contains(&"ctrl+smooth-scroll"));
-        assert!(labels.contains(&"pinch"));
+        // Zoom sources split into one row per direction.
+        assert!(labels.contains(&"wheel ↑"));
+        assert!(labels.contains(&"wheel ↓"));
+        assert!(labels.contains(&"ctrl+scroll ↑"));
+        assert!(labels.contains(&"ctrl+scroll ↓"));
+        assert!(labels.contains(&"pinch out"));
+        assert!(labels.contains(&"pinch in"));
+        assert_eq!(row_direction(&summary, "wheel ↑"), Some(ZoomDirection::In));
+        assert_eq!(row_direction(&summary, "wheel ↓"), Some(ZoomDirection::Out));
+        assert_eq!(
+            row_direction(&summary, "ctrl+scroll ↑"),
+            Some(ZoomDirection::In)
+        );
+        assert_eq!(
+            row_direction(&summary, "ctrl+scroll ↓"),
+            Some(ZoomDirection::Out)
+        );
+        assert_eq!(
+            row_direction(&summary, "pinch out"),
+            Some(ZoomDirection::In)
+        );
+        assert_eq!(
+            row_direction(&summary, "pinch in"),
+            Some(ZoomDirection::Out)
+        );
+        // Orbit and pan rows stay non-directional.
+        assert_eq!(row_direction(&summary, "mmb drag"), None);
+        assert_eq!(row_direction(&summary, "smooth-scroll"), None);
     }
 
     #[test]
@@ -693,7 +876,12 @@ mod tests {
 
         assert!(labels.contains(&"arrow keys"));
         assert!(labels.contains(&"wasd"));
-        assert!(labels.contains(&"+ / -"));
+        // The bidirectional zoom key pair splits into one row per direction.
+        assert!(labels.contains(&"+"));
+        assert!(labels.contains(&"-"));
+        assert!(!labels.contains(&"+ / -"));
+        assert_eq!(row_direction(&summary, "+"), Some(ZoomDirection::In));
+        assert_eq!(row_direction(&summary, "-"), Some(ZoomDirection::Out));
 
         Ok(())
     }
@@ -722,6 +910,16 @@ mod tests {
         assert_eq!(row_speed(&summary, "lt"), Some(ControlSpeed::Normal));
         assert_eq!(row_speed(&summary, "rb+rt"), Some(ControlSpeed::Slow));
         assert_eq!(row_speed(&summary, "lb+lt"), Some(ControlSpeed::Slow));
+
+        // The right triggers zoom in, the left triggers zoom out — the panel
+        // highlights only the engaged direction off these tags.
+        assert_eq!(row_direction(&summary, "rt"), Some(ZoomDirection::In));
+        assert_eq!(row_direction(&summary, "lt"), Some(ZoomDirection::Out));
+        assert_eq!(row_direction(&summary, "rb+rt"), Some(ZoomDirection::In));
+        assert_eq!(row_direction(&summary, "lb+lt"), Some(ZoomDirection::Out));
+        // Orbit and pan stick rows are not direction-specific.
+        assert_eq!(row_direction(&summary, "rs"), None);
+        assert_eq!(row_direction(&summary, "ls"), None);
     }
 
     #[test]
@@ -748,5 +946,13 @@ mod tests {
             .iter()
             .find(|row| row.label == label)
             .map(|row| row.speed)
+    }
+
+    fn row_direction(summary: &OrbitCamControlSummary, label: &str) -> Option<ZoomDirection> {
+        summary
+            .rows
+            .iter()
+            .find(|row| row.label == label)
+            .and_then(|row| row.zoom_direction)
     }
 }

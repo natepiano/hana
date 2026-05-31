@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
 
 use super::CameraInputMetricKind;
@@ -16,6 +18,23 @@ use super::OrbitCamInteractionStarted;
 use super::OrbitCamInteractionState;
 use super::ResolvedOrbitCamInputRoute;
 use crate::system_sets::OrbitCamInputPhase;
+
+/// Settle delay that smooths the reported gamepad interaction speed.
+///
+/// Holds back the one- or two-frame flicker when the `rb`/`lb` slow gate is
+/// pressed or released a frame apart from its stick or trigger. Affects only the
+/// reported [`OrbitCamInteractionState`] and the
+/// [`OrbitCamInteractionSpeedChanged`] event; camera motion reads
+/// `OrbitCamInput` directly and is never delayed. `Slow` is reported
+/// immediately — only the return to `Normal` waits. Insert your own value to
+/// override; `Duration::ZERO` disables the delay.
+#[derive(Resource, Clone, Copy, Debug, Reflect)]
+#[reflect(Resource, Default)]
+pub struct OrbitCamReportingDebounce(pub Duration);
+
+impl Default for OrbitCamReportingDebounce {
+    fn default() -> Self { Self(Duration::from_millis(100)) }
+}
 
 #[derive(Clone, Copy, Debug)]
 enum LifecycleEvent {
@@ -37,36 +56,84 @@ struct FinalizedInput {
     camera: Entity,
     input:  OrbitCamInput,
     state:  OrbitCamInteractionState,
+    settle: ReportedSpeedSettle,
     events: Vec<LifecycleEvent>,
+}
+
+/// Per-camera settle deadline (in `Time<Real>` seconds) at which each kind's
+/// reported speed may return to `Normal`. `None` means nothing is pending.
+#[derive(Component, Clone, Copy, Debug, Default)]
+struct ReportedSpeedSettle {
+    orbit: Option<f32>,
+    pan:   Option<f32>,
+    zoom:  Option<f32>,
+}
+
+impl ReportedSpeedSettle {
+    const fn deadline(self, kind: OrbitCamInteractionKind) -> Option<f32> {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit,
+            OrbitCamInteractionKind::Pan => self.pan,
+            OrbitCamInteractionKind::Zoom => self.zoom,
+        }
+    }
+
+    const fn set_deadline(&mut self, kind: OrbitCamInteractionKind, at: Option<f32>) {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit = at,
+            OrbitCamInteractionKind::Pan => self.pan = at,
+            OrbitCamInteractionKind::Zoom => self.zoom = at,
+        }
+    }
+}
+
+/// Transient inputs threaded into finalization for the reported-speed settle.
+#[derive(Clone, Copy)]
+struct SpeedSettleContext {
+    previous: ReportedSpeedSettle,
+    now:      f32,
+    window:   f32,
 }
 
 pub(crate) struct OrbitCamInputLifecyclePlugin;
 
 impl Plugin for OrbitCamInputLifecyclePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            PreUpdate,
-            finalize_orbit_cam_input.in_set(OrbitCamInputPhase::Finalize),
-        );
+        app.init_resource::<OrbitCamReportingDebounce>()
+            .add_systems(
+                PreUpdate,
+                finalize_orbit_cam_input.in_set(OrbitCamInputPhase::Finalize),
+            );
     }
 }
 
 fn finalize_orbit_cam_input(world: &mut World) {
     let route = world.get_resource::<ResolvedOrbitCamInputRoute>().cloned();
+    let window = world
+        .resource::<OrbitCamReportingDebounce>()
+        .0
+        .as_secs_f32();
+    let now = world.resource::<Time<Real>>().elapsed_secs();
     let mut query = world.query::<(
         Entity,
         &OrbitCamInput,
         Option<&OrbitCamInteractionState>,
+        Option<&ReportedSpeedSettle>,
         Option<&OrbitCamInputBlockers>,
         Option<&CameraInputSurfaceMetrics>,
     )>();
     let finalized = query
         .iter(world)
-        .map(|(camera, input, state, blockers, metrics)| {
+        .map(|(camera, input, state, settle, blockers, metrics)| {
             finalize_camera_input(
                 camera,
                 *input,
                 state.copied().unwrap_or_default(),
+                SpeedSettleContext {
+                    previous: settle.copied().unwrap_or_default(),
+                    now,
+                    window,
+                },
                 blockers.copied().unwrap_or_default(),
                 merged_surface_metrics(
                     route.as_ref().and_then(|route| route.metrics_for(camera)),
@@ -80,7 +147,9 @@ fn finalize_orbit_cam_input(world: &mut World) {
         if let Some(mut input) = world.get_mut::<OrbitCamInput>(finalized.camera) {
             *input = finalized.input;
         }
-        world.entity_mut(finalized.camera).insert(finalized.state);
+        world
+            .entity_mut(finalized.camera)
+            .insert((finalized.state, finalized.settle));
         for event in finalized.events {
             apply_lifecycle_event(world, finalized.camera, event);
         }
@@ -110,6 +179,7 @@ fn finalize_camera_input(
     camera: Entity,
     mut input: OrbitCamInput,
     previous: OrbitCamInteractionState,
+    settle_context: SpeedSettleContext,
     blockers: OrbitCamInputBlockers,
     metrics: Option<CameraInputSurfaceMetrics>,
 ) -> FinalizedInput {
@@ -155,43 +225,53 @@ fn finalize_camera_input(
         &mut events,
     );
 
-    push_speed_transition(
-        camera,
-        OrbitCamInteractionKind::Orbit,
-        previous.speed(OrbitCamInteractionKind::Orbit),
-        input.orbit_speed(),
-        orbit_sources,
-        &mut events,
-    );
-    push_speed_transition(
-        camera,
-        OrbitCamInteractionKind::Pan,
-        previous.speed(OrbitCamInteractionKind::Pan),
-        input.pan_speed(),
-        pan_sources,
-        &mut events,
-    );
-    push_speed_transition(
-        camera,
-        OrbitCamInteractionKind::Zoom,
-        previous.speed(OrbitCamInteractionKind::Zoom),
-        input.zoom_speed(),
-        zoom_sources,
-        &mut events,
-    );
-
     state.set_sources(OrbitCamInteractionKind::Orbit, orbit_sources);
     state.set_sources(OrbitCamInteractionKind::Pan, pan_sources);
     state.set_sources(OrbitCamInteractionKind::Zoom, zoom_sources);
 
-    state.set_speed(OrbitCamInteractionKind::Orbit, input.orbit_speed());
-    state.set_speed(OrbitCamInteractionKind::Pan, input.pan_speed());
-    state.set_speed(OrbitCamInteractionKind::Zoom, input.zoom_speed());
+    let mut settle = ReportedSpeedSettle::default();
+    for (kind, sources, live_speed) in [
+        (
+            OrbitCamInteractionKind::Orbit,
+            orbit_sources,
+            input.orbit_speed(),
+        ),
+        (OrbitCamInteractionKind::Pan, pan_sources, input.pan_speed()),
+        (
+            OrbitCamInteractionKind::Zoom,
+            zoom_sources,
+            input.zoom_speed(),
+        ),
+    ] {
+        let previous_speed = previous.speed(kind);
+        let (reported, deadline) = settled_speed(
+            previous_speed,
+            settle_context.previous.deadline(kind),
+            !sources.is_empty(),
+            live_speed,
+            sources,
+            settle_context.now,
+            settle_context.window,
+        );
+        state.set_speed(kind, reported);
+        settle.set_deadline(kind, deadline);
+        let settled_change = !sources.is_empty() && previous_speed != reported;
+        if let Some(speed) = reported.filter(|_| settled_change) {
+            events.push(LifecycleEvent::SpeedChanged(
+                OrbitCamInteractionSpeedChanged {
+                    camera,
+                    kind,
+                    speed,
+                },
+            ));
+        }
+    }
 
     FinalizedInput {
         camera,
         input,
         state,
+        settle,
         events,
     }
 }
@@ -274,26 +354,41 @@ fn push_state_transition(
     }
 }
 
-/// Emits a speed-change event when an engaged kind switches speed variant
-/// without its source set changing (e.g. `rb`/`lb` pressed mid-orbit).
-fn push_speed_transition(
-    camera: Entity,
-    kind: OrbitCamInteractionKind,
-    previous: ControlSpeed,
-    current: ControlSpeed,
+/// Computes the debounced reported speed and its pending-settle deadline.
+///
+/// `Slow` reports immediately. A return to `Normal` — a fresh engage or a chord
+/// release — is held back by `window` so the singular variant does not flash for
+/// the frame or two a gamepad slow-gate chord straddles. Only the gamepad has a
+/// slow gate, so non-gamepad sources report their live speed at once. A `None`
+/// report means active-but-unsettled (suppress the singular until it is real).
+fn settled_speed(
+    previous: Option<ControlSpeed>,
+    previous_deadline: Option<f32>,
+    active: bool,
+    live_speed: ControlSpeed,
     sources: CameraInteractionSources,
-    events: &mut Vec<LifecycleEvent>,
-) {
-    if sources.is_empty() || previous == current {
-        return;
+    now: f32,
+    window: f32,
+) -> (Option<ControlSpeed>, Option<f32>) {
+    if !active {
+        return (None, None);
     }
-    events.push(LifecycleEvent::SpeedChanged(
-        OrbitCamInteractionSpeedChanged {
-            camera,
-            kind,
-            speed: current,
-        },
-    ));
+    if window <= 0.0
+        || !sources.intersects(CameraInteractionSources::GAMEPAD)
+        || matches!(live_speed, ControlSpeed::Slow)
+    {
+        return (Some(live_speed), None);
+    }
+    if matches!(previous, Some(ControlSpeed::Normal)) {
+        return (Some(ControlSpeed::Normal), None);
+    }
+    // Active gamepad at `Normal`, not yet settled: hold the prior report (`Slow`
+    // on a chord release, `None` on a fresh engage) until the deadline elapses.
+    match previous_deadline {
+        None => (previous, Some(now + window)),
+        Some(deadline) if now >= deadline => (Some(ControlSpeed::Normal), None),
+        Some(_) => (previous, previous_deadline),
+    }
 }
 
 fn push_impulse(
@@ -576,5 +671,111 @@ mod tests {
         assert!(!input(&app, camera)?.has_input());
 
         Ok(())
+    }
+
+    const WINDOW: f32 = 0.5;
+
+    #[test]
+    fn fresh_gamepad_normal_stays_pending_until_window_then_settles() {
+        let gamepad = CameraInteractionSources::GAMEPAD;
+        // Fresh engage at Normal reports pending (None) and arms the deadline.
+        let (reported, deadline) =
+            settled_speed(None, None, true, ControlSpeed::Normal, gamepad, 1.0, WINDOW);
+        assert_eq!(reported, None);
+        assert_eq!(deadline, Some(1.5));
+        // Within the window it stays pending.
+        let (reported, _) = settled_speed(
+            None,
+            Some(1.5),
+            true,
+            ControlSpeed::Normal,
+            gamepad,
+            1.25,
+            WINDOW,
+        );
+        assert_eq!(reported, None);
+        // Once the deadline passes it settles to Normal.
+        let (reported, deadline) = settled_speed(
+            None,
+            Some(1.5),
+            true,
+            ControlSpeed::Normal,
+            gamepad,
+            1.5,
+            WINDOW,
+        );
+        assert_eq!(reported, Some(ControlSpeed::Normal));
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn gamepad_slow_reports_immediately() {
+        let gamepad = CameraInteractionSources::GAMEPAD;
+        let (reported, deadline) =
+            settled_speed(None, None, true, ControlSpeed::Slow, gamepad, 1.0, WINDOW);
+        assert_eq!(reported, Some(ControlSpeed::Slow));
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn chord_release_holds_slow_until_window_then_settles() {
+        let gamepad = CameraInteractionSources::GAMEPAD;
+        // Live drops to Normal on release; the prior Slow is held and armed.
+        let (reported, deadline) = settled_speed(
+            Some(ControlSpeed::Slow),
+            None,
+            true,
+            ControlSpeed::Normal,
+            gamepad,
+            2.0,
+            WINDOW,
+        );
+        assert_eq!(reported, Some(ControlSpeed::Slow));
+        assert_eq!(deadline, Some(2.5));
+        // After the deadline it settles to Normal.
+        let (reported, _) = settled_speed(
+            Some(ControlSpeed::Slow),
+            Some(2.5),
+            true,
+            ControlSpeed::Normal,
+            gamepad,
+            2.5,
+            WINDOW,
+        );
+        assert_eq!(reported, Some(ControlSpeed::Normal));
+    }
+
+    #[test]
+    fn non_gamepad_normal_reports_immediately() {
+        let mouse = CameraInteractionSources::MOUSE;
+        let (reported, deadline) =
+            settled_speed(None, None, true, ControlSpeed::Normal, mouse, 1.0, WINDOW);
+        assert_eq!(reported, Some(ControlSpeed::Normal));
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn zero_window_disables_the_settle_delay() {
+        let gamepad = CameraInteractionSources::GAMEPAD;
+        let (reported, deadline) =
+            settled_speed(None, None, true, ControlSpeed::Normal, gamepad, 1.0, 0.0);
+        assert_eq!(reported, Some(ControlSpeed::Normal));
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn inactive_kind_clears_report_and_deadline() {
+        let gamepad = CameraInteractionSources::GAMEPAD;
+        let (reported, deadline) = settled_speed(
+            Some(ControlSpeed::Slow),
+            Some(5.0),
+            false,
+            ControlSpeed::Normal,
+            gamepad,
+            1.0,
+            WINDOW,
+        );
+        assert_eq!(reported, None);
+        assert_eq!(deadline, None);
     }
 }

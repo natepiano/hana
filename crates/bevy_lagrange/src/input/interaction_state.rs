@@ -11,9 +11,9 @@ pub struct OrbitCamInteractionState {
     orbit:       CameraInteractionSources,
     pan:         CameraInteractionSources,
     zoom:        CameraInteractionSources,
-    orbit_speed: ControlSpeed,
-    pan_speed:   ControlSpeed,
-    zoom_speed:  ControlSpeed,
+    orbit_speed: Option<ControlSpeed>,
+    pan_speed:   Option<ControlSpeed>,
+    zoom_speed:  Option<ControlSpeed>,
 }
 
 impl OrbitCamInteractionState {
@@ -51,9 +51,12 @@ impl OrbitCamInteractionState {
     #[must_use]
     pub const fn zoom_sources(&self) -> CameraInteractionSources { self.zoom }
 
-    /// Returns the speed variant currently active for `kind`.
+    /// Returns the reported speed variant for `kind`, or `None` while a fresh
+    /// gamepad interaction has not yet settled under the reporting-speed
+    /// debounce. `Slow` is reported immediately; only the return to `Normal`
+    /// waits out the settle window.
     #[must_use]
-    pub const fn speed(&self, kind: OrbitCamInteractionKind) -> ControlSpeed {
+    pub const fn speed(&self, kind: OrbitCamInteractionKind) -> Option<ControlSpeed> {
         match kind {
             OrbitCamInteractionKind::Orbit => self.orbit_speed,
             OrbitCamInteractionKind::Pan => self.pan_speed,
@@ -73,7 +76,11 @@ impl OrbitCamInteractionState {
         }
     }
 
-    pub(crate) const fn set_speed(&mut self, kind: OrbitCamInteractionKind, speed: ControlSpeed) {
+    pub(crate) const fn set_speed(
+        &mut self,
+        kind: OrbitCamInteractionKind,
+        speed: Option<ControlSpeed>,
+    ) {
         match kind {
             OrbitCamInteractionKind::Orbit => self.orbit_speed = speed,
             OrbitCamInteractionKind::Pan => self.pan_speed = speed,

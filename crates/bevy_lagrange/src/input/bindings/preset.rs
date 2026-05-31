@@ -393,7 +393,7 @@ fn add_simple_mouse_layer(builder: OrbitCamBindingsBuilder) -> OrbitCamBindingsB
     builder
         .orbit(OrbitCamMouseDrag::new(MouseButton::Left))
         .pan(OrbitCamMouseDrag::new(MouseButton::Right))
-        .zoom(OrbitCamMouseWheelZoom::default())
+        .zoom(OrbitCamMouseWheelZoom)
         .zoom(OrbitCamTrackpadScroll::default())
         .zoom(OrbitCamPinchZoom)
 }
@@ -404,7 +404,7 @@ fn add_blender_like_layer(builder: OrbitCamBindingsBuilder) -> OrbitCamBindingsB
         .orbit(OrbitCamTrackpadScroll::default())
         .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
         .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
-        .zoom(OrbitCamMouseWheelZoom::default())
+        .zoom(OrbitCamMouseWheelZoom)
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
 }

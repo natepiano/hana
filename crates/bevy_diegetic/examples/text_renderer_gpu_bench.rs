@@ -169,7 +169,7 @@ impl RunningStats {
     fn push(&mut self, value: f64) {
         self.samples += 1;
         self.sum += value;
-        self.sum_sq += value * value;
+        self.sum_sq = value.mul_add(value, self.sum_sq);
         self.min = self.min.min(value);
         self.max = self.max.max(value);
     }

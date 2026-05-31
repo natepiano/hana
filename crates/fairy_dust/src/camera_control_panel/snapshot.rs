@@ -8,6 +8,7 @@ use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 
 use super::guidance::CameraGuidance;
@@ -85,24 +86,106 @@ const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
     }
 }
 
-pub(super) const fn row_active(row: &CameraGuidanceRow, sources: CameraInteractionSources) -> bool {
-    if sources.is_empty() {
+pub(super) fn row_active(
+    row: &CameraGuidanceRow,
+    sources: CameraInteractionSources,
+    live_zoom_direction: Option<ZoomDirection>,
+) -> bool {
+    if sources.is_empty() || !sources.intersects(row.camera_interaction_sources()) {
         return false;
     }
-    sources.intersects(row.camera_interaction_sources())
+    match row.zoom_direction() {
+        // Orbit, pan, and unsplit zoom rows match on source alone.
+        None => true,
+        // A directional zoom row lights only when the live zoom matches it. Until
+        // a direction is known (no zoom engaged yet) fall back to source-only so
+        // the row can still light rather than going dark.
+        Some(direction) => live_zoom_direction.is_none_or(|live| live == direction),
+    }
 }
 
-pub(super) const fn group_label(
+pub(super) const fn action_label(
     kind: OrbitCamInteractionKind,
-    speed: ControlSpeed,
+    direction: Option<ZoomDirection>,
 ) -> &'static str {
-    match (kind, speed) {
-        (OrbitCamInteractionKind::Orbit, ControlSpeed::Normal) => "Orbit",
-        (OrbitCamInteractionKind::Orbit, ControlSpeed::Slow) => "Orbit Slow",
-        (OrbitCamInteractionKind::Pan, ControlSpeed::Normal) => "Pan",
-        (OrbitCamInteractionKind::Pan, ControlSpeed::Slow) => "Pan Slow",
-        (OrbitCamInteractionKind::Zoom, ControlSpeed::Normal) => "Zoom",
-        (OrbitCamInteractionKind::Zoom, ControlSpeed::Slow) => "Zoom Slow",
+    match (kind, direction) {
+        (OrbitCamInteractionKind::Orbit, _) => "Orbit",
+        (OrbitCamInteractionKind::Pan, _) => "Pan",
+        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)) => "Zoom In",
+        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)) => "Zoom Out",
+        (OrbitCamInteractionKind::Zoom, None) => "Zoom",
         _ => "",
+    }
+}
+
+pub(super) const fn speed_label(speed: ControlSpeed) -> &'static str {
+    match speed {
+        ControlSpeed::Normal => "Normal",
+        ControlSpeed::Slow => "Slow",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn zoom_row(direction: Option<ZoomDirection>) -> CameraGuidanceRow {
+        let row = CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "rt")
+            .with_camera_interaction_sources(CameraInteractionSources::GAMEPAD);
+        match direction {
+            Some(direction) => row.with_zoom_direction(direction),
+            None => row,
+        }
+    }
+
+    #[test]
+    fn directional_zoom_row_lights_only_on_matching_live_direction() {
+        let row = zoom_row(Some(ZoomDirection::In));
+        assert!(row_active(
+            &row,
+            CameraInteractionSources::GAMEPAD,
+            Some(ZoomDirection::In)
+        ));
+        assert!(!row_active(
+            &row,
+            CameraInteractionSources::GAMEPAD,
+            Some(ZoomDirection::Out)
+        ));
+    }
+
+    #[test]
+    fn directional_zoom_row_lights_when_live_direction_unknown() {
+        let row = zoom_row(Some(ZoomDirection::Out));
+        assert!(row_active(&row, CameraInteractionSources::GAMEPAD, None));
+    }
+
+    #[test]
+    fn non_directional_row_lights_regardless_of_live_direction() {
+        let row = zoom_row(None);
+        assert!(row_active(
+            &row,
+            CameraInteractionSources::GAMEPAD,
+            Some(ZoomDirection::In)
+        ));
+        assert!(row_active(
+            &row,
+            CameraInteractionSources::GAMEPAD,
+            Some(ZoomDirection::Out)
+        ));
+    }
+
+    #[test]
+    fn row_inactive_without_source_overlap() {
+        let row = zoom_row(Some(ZoomDirection::In));
+        assert!(!row_active(
+            &row,
+            CameraInteractionSources::WHEEL,
+            Some(ZoomDirection::In)
+        ));
+        assert!(!row_active(
+            &row,
+            CameraInteractionSources::NONE,
+            Some(ZoomDirection::In)
+        ));
     }
 }

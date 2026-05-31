@@ -41,7 +41,6 @@ use crate::input::OrbitCamTouchBinding;
 use crate::input::OrbitCamTrackpadScroll;
 use crate::input::PinchGestureZoom;
 use crate::input::ResolvedOrbitCamInputRoute;
-use crate::input::WheelZoomPolarity;
 use crate::input::ZoomInversion;
 use crate::input::modes::OrbitCamInputInstallationOf;
 use crate::touch::TouchGestures;
@@ -167,14 +166,14 @@ fn apply_mouse_wheel_zoom_contribution(
     scroll: AccumulatedMouseScroll,
     contributions: &mut AdapterContributions,
 ) {
-    let Some(mouse_wheel_zoom) = bindings.mouse_wheel_zoom() else {
+    if bindings.mouse_wheel_zoom().is_none() {
         return;
-    };
+    }
     if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Line {
         return;
     }
 
-    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings, mouse_wheel_zoom.polarity);
+    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings);
     contributions.sources.zoom_coarse = contributions
         .sources
         .zoom_coarse
@@ -318,11 +317,7 @@ fn apply_pinch_contribution(
         return;
     }
 
-    contributions.zoom_smooth += zoom_signed(
-        pinch * PINCH_GESTURE_AMPLIFICATION,
-        bindings,
-        WheelZoomPolarity::Normal,
-    );
+    contributions.zoom_smooth += zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
@@ -414,7 +409,7 @@ fn apply_touch_contribution(
             .union(CameraInteractionSources::TOUCH);
     }
     if zoom != 0.0 {
-        contributions.zoom_smooth += zoom_signed(zoom, bindings, WheelZoomPolarity::Normal);
+        contributions.zoom_smooth += zoom_signed(zoom, bindings);
         contributions.sources.zoom_smooth = contributions
             .sources
             .zoom_smooth
@@ -443,27 +438,19 @@ fn apply_button_drag_zoom_contribution(
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,
     };
 
-    contributions.zoom_smooth += zoom_signed(
-        delta * BUTTON_ZOOM_SCALE,
-        bindings,
-        WheelZoomPolarity::Normal,
-    );
+    contributions.zoom_smooth += zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
         .union(CameraInteractionSources::MOUSE);
 }
 
-fn zoom_signed(value: f32, bindings: &OrbitCamBindings, polarity: WheelZoomPolarity) -> f32 {
-    let wheel_sign = match polarity {
-        WheelZoomPolarity::Normal => 1.0,
-        WheelZoomPolarity::Inverted => -1.0,
-    };
+fn zoom_signed(value: f32, bindings: &OrbitCamBindings) -> f32 {
     let zoom_sign = match bindings.zoom_inversion() {
         ZoomInversion::Normal => 1.0,
         ZoomInversion::Inverted => -1.0,
     };
-    value * wheel_sign * zoom_sign
+    value * zoom_sign
 }
 
 fn stage_adapter_inputs(

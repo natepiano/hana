@@ -9,6 +9,7 @@ use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 
 /// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
@@ -110,6 +111,7 @@ pub struct CameraGuidanceRow {
     label:                      String,
     camera_interaction_sources: CameraInteractionSources,
     speed:                      ControlSpeed,
+    zoom_direction:             Option<ZoomDirection>,
 }
 
 impl CameraGuidanceRow {
@@ -121,6 +123,7 @@ impl CameraGuidanceRow {
             label:                      label.into(),
             camera_interaction_sources: CameraInteractionSources::NONE,
             speed:                      ControlSpeed::Normal,
+            zoom_direction:             None,
         }
     }
 
@@ -128,6 +131,14 @@ impl CameraGuidanceRow {
     #[must_use]
     pub const fn with_speed(mut self, speed: ControlSpeed) -> Self {
         self.speed = speed;
+        self
+    }
+
+    /// Tags the row with the zoom direction it drives, so the panel highlights
+    /// only the row matching the live zoom direction.
+    #[must_use]
+    pub const fn with_zoom_direction(mut self, zoom_direction: ZoomDirection) -> Self {
+        self.zoom_direction = Some(zoom_direction);
         self
     }
 
@@ -158,12 +169,21 @@ impl CameraGuidanceRow {
     /// Returns the binding speed variant.
     #[must_use]
     pub const fn speed(&self) -> ControlSpeed { self.speed }
+
+    /// Returns the zoom direction this row drives, or `None` when the row is not
+    /// direction-specific (orbit, pan, or an unsplit bidirectional zoom).
+    #[must_use]
+    pub const fn zoom_direction(&self) -> Option<ZoomDirection> { self.zoom_direction }
 }
 
 impl From<OrbitCamControlRow> for CameraGuidanceRow {
     fn from(row: OrbitCamControlRow) -> Self {
-        Self::new(row.kind, row.label)
+        let base = Self::new(row.kind, row.label)
             .with_camera_interaction_sources(row.camera_interaction_sources)
-            .with_speed(row.speed)
+            .with_speed(row.speed);
+        match row.zoom_direction {
+            Some(direction) => base.with_zoom_direction(direction),
+            None => base,
+        }
     }
 }

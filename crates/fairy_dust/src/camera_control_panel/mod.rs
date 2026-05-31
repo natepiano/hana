@@ -21,13 +21,16 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
+use bevy_lagrange::OrbitCamInput;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
+use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
 use bevy_lagrange::OrbitCamInteractionSpeedChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
+use bevy_lagrange::ZoomDirection;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
@@ -170,6 +173,7 @@ fn rebind_panel_on_route_change(
 fn refresh_on_interaction_started(
     event: On<OrbitCamInteractionStarted>,
     time: Res<Time<Real>>,
+    cameras: Query<&OrbitCamInput>,
     panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
     let (panel_marker, mut display) = panel.into_inner();
@@ -177,6 +181,10 @@ fn refresh_on_interaction_started(
         return;
     }
     display.activate(event.kind, event.sources, time.elapsed_secs());
+    // A fresh interaction's speed is unsettled until lagrange reports it, so the
+    // singular variant does not flash before a slow-gate chord registers.
+    display.set_speed(event.kind, None);
+    capture_zoom_direction(&mut display, &cameras, event.camera, event.kind);
 }
 
 fn refresh_on_interaction_ended(
@@ -194,6 +202,7 @@ fn refresh_on_interaction_ended(
 fn refresh_on_sources_changed(
     event: On<OrbitCamInteractionSourcesChanged>,
     time: Res<Time<Real>>,
+    cameras: Query<&OrbitCamInput>,
     panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
     let (panel_marker, mut display) = panel.into_inner();
@@ -201,6 +210,36 @@ fn refresh_on_sources_changed(
         return;
     }
     display.activate(event.kind, event.current, time.elapsed_secs());
+    capture_zoom_direction(&mut display, &cameras, event.camera, event.kind);
+}
+
+/// Reads the camera's finalized zoom delta and records its direction on the
+/// panel display so only the engaged zoom row highlights. The input is finalized
+/// before the lifecycle event fires, so the sign is current. Non-zoom events and
+/// zero-delta frames leave the last captured direction untouched.
+fn capture_zoom_direction(
+    display: &mut CameraGuidanceDisplayState,
+    cameras: &Query<&OrbitCamInput>,
+    camera: Entity,
+    kind: OrbitCamInteractionKind,
+) {
+    if kind != OrbitCamInteractionKind::Zoom {
+        return;
+    }
+    if let Ok(input) = cameras.get(camera) {
+        display.set_zoom_direction(live_zoom_direction(input));
+    }
+}
+
+fn live_zoom_direction(input: &OrbitCamInput) -> Option<ZoomDirection> {
+    let amount = input.zoom_coarse().amount() + input.zoom_smooth().amount();
+    if amount > 0.0 {
+        Some(ZoomDirection::In)
+    } else if amount < 0.0 {
+        Some(ZoomDirection::Out)
+    } else {
+        None
+    }
 }
 
 fn refresh_on_speed_changed(
@@ -211,7 +250,7 @@ fn refresh_on_speed_changed(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.set_speed(event.kind, event.speed);
+    display.set_speed(event.kind, Some(event.speed));
 }
 
 /// Expires held source labels and rebuilds the panel tree when display state
