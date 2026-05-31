@@ -171,33 +171,46 @@ fn build_speed_block(
                     },
                 );
             }
-            builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Px(TABLE_ROW_GAP)),
-                |builder| {
-                    for (kind, direction) in [
-                        (OrbitCamInteractionKind::Orbit, None),
-                        (OrbitCamInteractionKind::Pan, None),
-                        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)),
-                        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)),
-                        (OrbitCamInteractionKind::Zoom, None),
-                    ] {
-                        build_action_row(
-                            builder,
-                            snapshot,
-                            (kind, speed, direction),
-                            display,
-                            label,
-                            active,
-                        );
-                    }
-                },
-            );
+            builder.with(action_rows_element(speed_column), |builder| {
+                for (kind, direction) in [
+                    (OrbitCamInteractionKind::Orbit, None),
+                    (OrbitCamInteractionKind::Pan, None),
+                    (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)),
+                    (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)),
+                    (OrbitCamInteractionKind::Zoom, None),
+                ] {
+                    build_action_row(
+                        builder,
+                        snapshot,
+                        (kind, speed, direction),
+                        display,
+                        label,
+                        active,
+                    );
+                }
+            });
         },
     );
+}
+
+/// The action-row column element. Single-speed presets (`SimpleMouse`,
+/// `BlenderLike`) divide their rows with a border line — Orbit / Pan / Zoom In /
+/// Zoom Out — while multi-speed presets keep the rows gap-separated and rely on
+/// the divider between their `Normal` / `Slow` blocks instead.
+fn action_rows_element(speed_column: SpeedColumn) -> El {
+    let element = El::new()
+        .width(Sizing::GROW)
+        .height(Sizing::FIT)
+        .direction(Direction::TopToBottom)
+        .child_gap(Px(TABLE_ROW_GAP));
+    match speed_column {
+        SpeedColumn::Hidden => element.border(
+            Border::new()
+                .between_children(TABLE_DIVIDER_WIDTH)
+                .color(BORDER_DIM),
+        ),
+        SpeedColumn::Shown => element,
+    }
 }
 
 fn build_action_row(

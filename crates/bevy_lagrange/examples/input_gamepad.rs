@@ -461,11 +461,15 @@ fn active_zoom_content(
     let speed = speed?;
     let slow = speed == ControlSpeed::Slow;
 
+    // The right trigger zooms in, the left zooms out.
+    let zoom_in_trigger = trigger_value(gamepad, GamepadButton::RightTrigger2);
+    let zoom_out_trigger = trigger_value(gamepad, GamepadButton::LeftTrigger2);
+
     let mut lines = Vec::new();
-    if trigger_value(gamepad, GamepadButton::RightTrigger2) > TRIGGER_ACTIVE_THRESHOLD {
+    if zoom_in_trigger > TRIGGER_ACTIVE_THRESHOLD {
         lines.push(spell_out_control(if slow { "rb+rt" } else { "rt" }));
     }
-    if trigger_value(gamepad, GamepadButton::LeftTrigger2) > TRIGGER_ACTIVE_THRESHOLD {
+    if zoom_out_trigger > TRIGGER_ACTIVE_THRESHOLD {
         lines.push(spell_out_control(if slow { "lb+lt" } else { "lt" }));
     }
 
@@ -473,7 +477,7 @@ fn active_zoom_content(
         None
     } else {
         Some(CubeFacePanelContent::active(
-            slow_title("Zoom", slow),
+            zoom_title(slow, zoom_in_trigger >= zoom_out_trigger),
             lines,
         ))
     }
@@ -485,6 +489,17 @@ fn slow_title(base: &str, slow: bool) -> String {
         format!("{base} Slow")
     } else {
         base.to_string()
+    }
+}
+
+/// The zoom face title, naming the direction the engaged trigger drives — the
+/// right trigger zooms in, the left zooms out — plus the `Slow` gate when held.
+fn zoom_title(slow: bool, zooming_in: bool) -> String {
+    let direction = if zooming_in { "In" } else { "Out" };
+    if slow {
+        format!("Zoom Slow {direction}")
+    } else {
+        format!("Zoom {direction}")
     }
 }
 

@@ -12,6 +12,7 @@ use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
@@ -181,6 +182,7 @@ fn update_face_labels(
             &guidance.0,
             OrbitCamInteractionKind::Orbit,
             interaction_state.orbit_sources(),
+            None,
         ),
         &guidance.0,
         FaceLabel::Orbit,
@@ -192,6 +194,7 @@ fn update_face_labels(
             &guidance.0,
             OrbitCamInteractionKind::Pan,
             interaction_state.pan_sources(),
+            None,
         ),
         &guidance.0,
         FaceLabel::Pan,
@@ -203,6 +206,7 @@ fn update_face_labels(
             &guidance.0,
             OrbitCamInteractionKind::Zoom,
             interaction_state.zoom_sources(),
+            interaction_state.zoom_direction(),
         ),
         &guidance.0,
         FaceLabel::Zoom,
@@ -220,15 +224,22 @@ fn update_face_labels(
 
 fn capture_zoom_started(
     event: On<OrbitCamInteractionStarted>,
-    cameras: Query<(), With<BlenderLikeCamera>>,
+    cameras: Query<&OrbitCamInteractionState, With<BlenderLikeCamera>>,
     guidance: Res<FaceGuidance>,
     mut hold: ResMut<FaceLabelHold>,
 ) {
-    if event.kind != OrbitCamInteractionKind::Zoom || cameras.get(event.camera).is_err() {
+    let Ok(interaction_state) = cameras.get(event.camera) else {
+        return;
+    };
+    if event.kind != OrbitCamInteractionKind::Zoom {
         return;
     }
-    let Some(lines) = active_labels(&guidance.0, OrbitCamInteractionKind::Zoom, event.sources)
-    else {
+    let Some(lines) = active_labels(
+        &guidance.0,
+        OrbitCamInteractionKind::Zoom,
+        event.sources,
+        interaction_state.zoom_direction(),
+    ) else {
         return;
     };
     hold.zoom.update(std::time::Duration::ZERO, Some(lines));
@@ -262,18 +273,34 @@ fn idle_labels(summary: &OrbitCamControlSummary, kind: OrbitCamInteractionKind) 
 }
 
 /// The control labels for `kind` whose sources are live, or `None` when idle.
+/// For zoom, `zoom_direction` keeps only the engaged direction's rows so a
+/// single wheel/scroll/pinch source does not light both its `↑` and `↓` rows at
+/// once. Pass `None` for orbit and pan — their rows are not direction-specific.
 fn active_labels(
     summary: &OrbitCamControlSummary,
     kind: OrbitCamInteractionKind,
     sources: CameraInteractionSources,
+    zoom_direction: Option<ZoomDirection>,
 ) -> Option<Vec<String>> {
     let labels = summary
         .rows
         .iter()
         .filter(|row| row.kind == kind && row.camera_interaction_sources.intersects(sources))
+        .filter(|row| row_matches_zoom_direction(row.zoom_direction, zoom_direction))
         .map(|row| row.label.clone())
         .collect::<Vec<_>>();
     (!labels.is_empty()).then_some(labels)
+}
+
+/// A row shows when it is non-directional (orbit, pan) or when its zoom
+/// direction matches the live one. While the live direction is unknown — a
+/// zero-delta frame before the sign resolves — directional rows are kept so the
+/// zoom face never blanks mid-gesture.
+fn row_matches_zoom_direction(row: Option<ZoomDirection>, live: Option<ZoomDirection>) -> bool {
+    match (row, live) {
+        (None, _) | (Some(_), None) => true,
+        (Some(row), Some(live)) => row == live,
+    }
 }
 
 fn spawn_face_panel(

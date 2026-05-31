@@ -3,17 +3,19 @@ use bevy::prelude::*;
 use super::CameraInteractionSources;
 use super::ControlSpeed;
 use super::OrbitCamInteractionKind;
+use super::ZoomDirection;
 
 /// Read-only state describing the active interaction for an `OrbitCam`.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInteractionState {
-    orbit:       CameraInteractionSources,
-    pan:         CameraInteractionSources,
-    zoom:        CameraInteractionSources,
-    orbit_speed: Option<ControlSpeed>,
-    pan_speed:   Option<ControlSpeed>,
-    zoom_speed:  Option<ControlSpeed>,
+    orbit:          CameraInteractionSources,
+    pan:            CameraInteractionSources,
+    zoom:           CameraInteractionSources,
+    orbit_speed:    Option<ControlSpeed>,
+    pan_speed:      Option<ControlSpeed>,
+    zoom_speed:     Option<ControlSpeed>,
+    zoom_direction: Option<ZoomDirection>,
 }
 
 impl OrbitCamInteractionState {
@@ -64,6 +66,13 @@ impl OrbitCamInteractionState {
         }
     }
 
+    /// Returns the direction of the active zoom interaction, or `None` when no
+    /// zoom is active. Held through the reporting-debounce window so a control
+    /// panel can light the engaged direction's row, and reversing direction
+    /// updates it immediately without waiting on the debounce.
+    #[must_use]
+    pub const fn zoom_direction(&self) -> Option<ZoomDirection> { self.zoom_direction }
+
     pub(crate) const fn set_sources(
         &mut self,
         kind: OrbitCamInteractionKind,
@@ -86,5 +95,9 @@ impl OrbitCamInteractionState {
             OrbitCamInteractionKind::Pan => self.pan_speed = speed,
             OrbitCamInteractionKind::Zoom => self.zoom_speed = speed,
         }
+    }
+
+    pub(crate) const fn set_zoom_direction(&mut self, zoom_direction: Option<ZoomDirection>) {
+        self.zoom_direction = zoom_direction;
     }
 }

@@ -124,18 +124,17 @@ impl CameraMotion {
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInput {
-    orbit:                OrbitDelta,
-    pan:                  PanDelta,
-    zoom_coarse:          CoarseZoomDelta,
-    zoom_smooth:          SmoothZoomDelta,
-    orbit_sources:        CameraInteractionSources,
-    pan_sources:          CameraInteractionSources,
-    zoom_sources:         CameraInteractionSources,
-    zoom_impulse_sources: CameraInteractionSources,
-    orbit_speed:          ControlSpeed,
-    pan_speed:            ControlSpeed,
-    zoom_speed:           ControlSpeed,
-    motion:               CameraMotion,
+    orbit:         OrbitDelta,
+    pan:           PanDelta,
+    zoom_coarse:   CoarseZoomDelta,
+    zoom_smooth:   SmoothZoomDelta,
+    orbit_sources: CameraInteractionSources,
+    pan_sources:   CameraInteractionSources,
+    zoom_sources:  CameraInteractionSources,
+    orbit_speed:   ControlSpeed,
+    pan_speed:     ControlSpeed,
+    zoom_speed:    ControlSpeed,
+    motion:        CameraMotion,
 }
 
 impl OrbitCamInput {
@@ -295,7 +294,6 @@ impl OrbitCamInput {
         self.zoom_coarse.0 += delta.0;
         self.motion = self.motion.union(CameraMotion::ZOOMING);
         self.zoom_sources = self.zoom_sources.union(sources);
-        self.zoom_impulse_sources = self.zoom_impulse_sources.union(sources);
         self
     }
 
@@ -326,10 +324,6 @@ impl OrbitCamInput {
         self.motion = self.motion.union(CameraMotion::ZOOMING);
         self.zoom_sources = self.zoom_sources.union(sources);
         self
-    }
-
-    pub(crate) const fn zoom_impulse_sources(&self) -> CameraInteractionSources {
-        self.zoom_impulse_sources
     }
 
     pub(crate) fn clear_orbit(&mut self) -> &mut Self {

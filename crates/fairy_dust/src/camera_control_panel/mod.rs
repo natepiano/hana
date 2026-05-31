@@ -21,16 +21,14 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
-use bevy_lagrange::OrbitCamInput;
+use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
-use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
 use bevy_lagrange::OrbitCamInteractionSpeedChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
-use bevy_lagrange::ZoomDirection;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
@@ -70,7 +68,12 @@ pub(crate) fn install(app: &mut App) {
     app.add_systems(Startup, spawn_panel);
     app.add_systems(
         PostUpdate,
-        (rebind_panel_on_route_change, repaint_panel_display),
+        (
+            rebind_panel_on_route_change,
+            track_live_zoom_direction,
+            repaint_panel_display,
+        )
+            .chain(),
     );
     app.add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
@@ -137,12 +140,11 @@ fn rebind_panel_on_route_change(
     )>,
     background: Res<CameraControlPanelBackground>,
 ) {
-    // Before the cursor routes to a camera, follow the sole orbit camera so the
-    // panel reflects the real preset instead of a placeholder. With more than
-    // one camera there is no unambiguous choice, so wait for routing.
-    let routed = route
-        .routed_camera()
-        .or_else(|| orbit_cameras.single().ok());
+    // Before the cursor routes to a camera, follow an orbit camera so the panel
+    // shows a real preset instead of the fabricated default. With one camera
+    // that is the only choice; with several, the lowest-entity camera (first
+    // spawned) stands in until the cursor routes input to a specific one.
+    let routed = route.routed_camera().or_else(|| orbit_cameras.iter().min());
     let (panel_entity, mut panel_marker, mut display_state) = panel.into_inner();
 
     let route_changed = panel_marker.bound_camera != routed;
@@ -172,73 +174,56 @@ fn rebind_panel_on_route_change(
 
 fn refresh_on_interaction_started(
     event: On<OrbitCamInteractionStarted>,
-    time: Res<Time<Real>>,
-    cameras: Query<&OrbitCamInput>,
     panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
     let (panel_marker, mut display) = panel.into_inner();
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.activate(event.kind, event.sources, time.elapsed_secs());
+    display.set_sources(event.kind, event.sources);
     // A fresh interaction's speed is unsettled until lagrange reports it, so the
     // singular variant does not flash before a slow-gate chord registers.
     display.set_speed(event.kind, None);
-    capture_zoom_direction(&mut display, &cameras, event.camera, event.kind);
 }
 
 fn refresh_on_interaction_ended(
     event: On<OrbitCamInteractionEnded>,
-    time: Res<Time<Real>>,
     panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
     let (panel_marker, mut display) = panel.into_inner();
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.hold(event.kind, event.sources, time.elapsed_secs());
+    // lagrange already held the reported sources through the debounce window, so
+    // the ended interaction clears immediately here.
+    display.set_sources(event.kind, CameraInteractionSources::NONE);
 }
 
 fn refresh_on_sources_changed(
     event: On<OrbitCamInteractionSourcesChanged>,
-    time: Res<Time<Real>>,
-    cameras: Query<&OrbitCamInput>,
     panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
     let (panel_marker, mut display) = panel.into_inner();
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.activate(event.kind, event.current, time.elapsed_secs());
-    capture_zoom_direction(&mut display, &cameras, event.camera, event.kind);
+    display.set_sources(event.kind, event.current);
 }
 
-/// Reads the camera's finalized zoom delta and records its direction on the
-/// panel display so only the engaged zoom row highlights. The input is finalized
-/// before the lifecycle event fires, so the sign is current. Non-zoom events and
-/// zero-delta frames leave the last captured direction untouched.
-fn capture_zoom_direction(
-    display: &mut CameraGuidanceDisplayState,
-    cameras: &Query<&OrbitCamInput>,
-    camera: Entity,
-    kind: OrbitCamInteractionKind,
+/// Mirrors the bound camera's reported zoom direction onto the panel display
+/// each frame. lagrange computes and holds the direction in
+/// [`OrbitCamInteractionState`], so reversing direction (zoom-in to zoom-out)
+/// flips the highlighted row at once without waiting on the source debounce.
+fn track_live_zoom_direction(
+    cameras: Query<&OrbitCamInteractionState>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
 ) {
-    if kind != OrbitCamInteractionKind::Zoom {
+    let (panel_marker, mut display) = panel.into_inner();
+    let Some(camera) = panel_marker.bound_camera else {
         return;
-    }
-    if let Ok(input) = cameras.get(camera) {
-        display.set_zoom_direction(live_zoom_direction(input));
-    }
-}
-
-fn live_zoom_direction(input: &OrbitCamInput) -> Option<ZoomDirection> {
-    let amount = input.zoom_coarse().amount() + input.zoom_smooth().amount();
-    if amount > 0.0 {
-        Some(ZoomDirection::In)
-    } else if amount < 0.0 {
-        Some(ZoomDirection::Out)
-    } else {
-        None
+    };
+    if let Ok(state) = cameras.get(camera) {
+        display.set_zoom_direction(state.zoom_direction());
     }
 }
 
@@ -253,10 +238,9 @@ fn refresh_on_speed_changed(
     display.set_speed(event.kind, Some(event.speed));
 }
 
-/// Expires held source labels and rebuilds the panel tree when display state
-/// changes between frames.
+/// Rebuilds the panel tree when the mirrored display state changes between
+/// frames.
 fn repaint_panel_display(
-    time: Res<Time<Real>>,
     mut commands: Commands,
     panel: Single<(
         Entity,
@@ -266,7 +250,6 @@ fn repaint_panel_display(
     background: Res<CameraControlPanelBackground>,
 ) {
     let (panel_entity, snapshot, mut display) = panel.into_inner();
-    display.expire_held_sources(time.elapsed_secs());
     if display.render_state == RenderState::Idle {
         return;
     }

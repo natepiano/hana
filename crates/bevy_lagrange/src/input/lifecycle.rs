@@ -17,16 +17,25 @@ use super::OrbitCamInteractionSpeedChanged;
 use super::OrbitCamInteractionStarted;
 use super::OrbitCamInteractionState;
 use super::ResolvedOrbitCamInputRoute;
+use super::ZoomDirection;
 use crate::system_sets::OrbitCamInputPhase;
 
-/// Settle delay that smooths the reported gamepad interaction speed.
+/// Settle delay that smooths the reported interaction state — both the active
+/// source set per kind and the gamepad speed variant.
 ///
-/// Holds back the one- or two-frame flicker when the `rb`/`lb` slow gate is
-/// pressed or released a frame apart from its stick or trigger. Affects only the
-/// reported [`OrbitCamInteractionState`] and the
-/// [`OrbitCamInteractionSpeedChanged`] event; camera motion reads
-/// `OrbitCamInput` directly and is never delayed. `Slow` is reported
-/// immediately — only the return to `Normal` waits. Insert your own value to
+/// Holds a kind's reported sources for this window after the live input goes
+/// quiet, bridging the per-frame gaps in bursty input (a trackpad emulating a
+/// mouse button as intermittent press/release, smooth-scroll arriving in
+/// bursts) so a control panel does not flicker. The same window holds the
+/// gamepad speed's return to `Normal`, so the singular variant does not flash
+/// when the `rb`/`lb` slow gate lands a frame apart from its stick or trigger.
+///
+/// Reporting-only: it affects the reported [`OrbitCamInteractionState`] and the
+/// [`OrbitCamInteractionStarted`] / [`OrbitCamInteractionEnded`] /
+/// [`OrbitCamInteractionSourcesChanged`] / [`OrbitCamInteractionSpeedChanged`]
+/// events. Camera motion reads `OrbitCamInput` directly and is never delayed. A
+/// newly-engaged source and `Slow` report immediately; only a source drop and
+/// the return to `Normal` wait out the window. Insert your own value to
 /// override; `Duration::ZERO` disables the delay.
 #[derive(Resource, Clone, Copy, Debug, Reflect)]
 #[reflect(Resource, Default)]
@@ -56,41 +65,67 @@ struct FinalizedInput {
     camera: Entity,
     input:  OrbitCamInput,
     state:  OrbitCamInteractionState,
-    settle: ReportedSpeedSettle,
+    settle: ReportedInteractionSettle,
     events: Vec<LifecycleEvent>,
 }
 
-/// Per-camera settle deadline (in `Time<Real>` seconds) at which each kind's
-/// reported speed may return to `Normal`. `None` means nothing is pending.
+/// Per-camera settle deadlines (in `Time<Real>` seconds) for the
+/// reported-interaction debounce: when each kind's held sources may leave the
+/// reported set, and when its gamepad speed may return to `Normal`. `None`
+/// means nothing is pending for that axis.
 #[derive(Component, Clone, Copy, Debug, Default)]
-struct ReportedSpeedSettle {
-    orbit: Option<f32>,
-    pan:   Option<f32>,
-    zoom:  Option<f32>,
+struct ReportedInteractionSettle {
+    orbit: KindSettle,
+    pan:   KindSettle,
+    zoom:  KindSettle,
 }
 
-impl ReportedSpeedSettle {
-    const fn deadline(self, kind: OrbitCamInteractionKind) -> Option<f32> {
+/// The source and speed settle deadlines tracked per interaction kind.
+#[derive(Clone, Copy, Debug, Default)]
+struct KindSettle {
+    source: Option<f32>,
+    speed:  Option<f32>,
+}
+
+impl ReportedInteractionSettle {
+    const fn source_deadline(self, kind: OrbitCamInteractionKind) -> Option<f32> {
         match kind {
-            OrbitCamInteractionKind::Orbit => self.orbit,
-            OrbitCamInteractionKind::Pan => self.pan,
-            OrbitCamInteractionKind::Zoom => self.zoom,
+            OrbitCamInteractionKind::Orbit => self.orbit.source,
+            OrbitCamInteractionKind::Pan => self.pan.source,
+            OrbitCamInteractionKind::Zoom => self.zoom.source,
         }
     }
 
-    const fn set_deadline(&mut self, kind: OrbitCamInteractionKind, at: Option<f32>) {
+    const fn speed_deadline(self, kind: OrbitCamInteractionKind) -> Option<f32> {
         match kind {
-            OrbitCamInteractionKind::Orbit => self.orbit = at,
-            OrbitCamInteractionKind::Pan => self.pan = at,
-            OrbitCamInteractionKind::Zoom => self.zoom = at,
+            OrbitCamInteractionKind::Orbit => self.orbit.speed,
+            OrbitCamInteractionKind::Pan => self.pan.speed,
+            OrbitCamInteractionKind::Zoom => self.zoom.speed,
+        }
+    }
+
+    const fn set_source_deadline(&mut self, kind: OrbitCamInteractionKind, at: Option<f32>) {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit.source = at,
+            OrbitCamInteractionKind::Pan => self.pan.source = at,
+            OrbitCamInteractionKind::Zoom => self.zoom.source = at,
+        }
+    }
+
+    const fn set_speed_deadline(&mut self, kind: OrbitCamInteractionKind, at: Option<f32>) {
+        match kind {
+            OrbitCamInteractionKind::Orbit => self.orbit.speed = at,
+            OrbitCamInteractionKind::Pan => self.pan.speed = at,
+            OrbitCamInteractionKind::Zoom => self.zoom.speed = at,
         }
     }
 }
 
-/// Transient inputs threaded into finalization for the reported-speed settle.
+/// Transient inputs threaded into finalization for the reported-interaction
+/// settle.
 #[derive(Clone, Copy)]
-struct SpeedSettleContext {
-    previous: ReportedSpeedSettle,
+struct SettleContext {
+    previous: ReportedInteractionSettle,
     now:      f32,
     window:   f32,
 }
@@ -118,7 +153,7 @@ fn finalize_orbit_cam_input(world: &mut World) {
         Entity,
         &OrbitCamInput,
         Option<&OrbitCamInteractionState>,
-        Option<&ReportedSpeedSettle>,
+        Option<&ReportedInteractionSettle>,
         Option<&OrbitCamInputBlockers>,
         Option<&CameraInputSurfaceMetrics>,
     )>();
@@ -129,7 +164,7 @@ fn finalize_orbit_cam_input(world: &mut World) {
                 camera,
                 *input,
                 state.copied().unwrap_or_default(),
-                SpeedSettleContext {
+                SettleContext {
                     previous: settle.copied().unwrap_or_default(),
                     now,
                     window,
@@ -179,7 +214,7 @@ fn finalize_camera_input(
     camera: Entity,
     mut input: OrbitCamInput,
     previous: OrbitCamInteractionState,
-    settle_context: SpeedSettleContext,
+    settle_context: SettleContext,
     blockers: OrbitCamInputBlockers,
     metrics: Option<CameraInputSurfaceMetrics>,
 ) -> FinalizedInput {
@@ -192,69 +227,128 @@ fn finalize_camera_input(
     }
 
     let mut state = OrbitCamInteractionState::default();
-    let zoom_impulse = input.zoom_impulse_sources();
     let orbit_sources = input.orbit_sources();
     let pan_sources = input.pan_sources();
-    let zoom_sources = input.zoom_sources().difference(zoom_impulse);
+    // The coarse-zoom (wheel) source is reported through the same debounce as
+    // every other source: it engages for the frame(s) the wheel fires and is
+    // held for the reporting window, so a control panel can light the wheel row.
+    let zoom_sources = input.zoom_sources();
+
+    let mut settle = ReportedInteractionSettle::default();
+    let orbit_reported = debounce_sources(
+        &mut settle,
+        OrbitCamInteractionKind::Orbit,
+        previous.orbit_sources(),
+        orbit_sources,
+        settle_context,
+    );
+    let pan_reported = debounce_sources(
+        &mut settle,
+        OrbitCamInteractionKind::Pan,
+        previous.pan_sources(),
+        pan_sources,
+        settle_context,
+    );
+    let zoom_reported = debounce_sources(
+        &mut settle,
+        OrbitCamInteractionKind::Zoom,
+        previous.zoom_sources(),
+        zoom_sources,
+        settle_context,
+    );
 
     push_state_transition(
         camera,
         OrbitCamInteractionKind::Orbit,
         previous.orbit_sources(),
-        orbit_sources,
+        orbit_reported,
         &mut events,
     );
     push_state_transition(
         camera,
         OrbitCamInteractionKind::Pan,
         previous.pan_sources(),
-        pan_sources,
+        pan_reported,
         &mut events,
     );
     push_state_transition(
         camera,
         OrbitCamInteractionKind::Zoom,
         previous.zoom_sources(),
-        zoom_sources,
+        zoom_reported,
         &mut events,
     );
-    push_impulse(
+
+    state.set_sources(OrbitCamInteractionKind::Orbit, orbit_reported);
+    state.set_sources(OrbitCamInteractionKind::Pan, pan_reported);
+    state.set_sources(OrbitCamInteractionKind::Zoom, zoom_reported);
+    state.set_zoom_direction(reported_zoom_direction(
+        &input,
+        zoom_reported,
+        previous.zoom_direction(),
+    ));
+
+    report_speeds(
         camera,
-        OrbitCamInteractionKind::Zoom,
-        zoom_impulse,
+        &input,
+        previous,
+        settle_context,
+        &mut state,
+        &mut settle,
         &mut events,
     );
 
-    state.set_sources(OrbitCamInteractionKind::Orbit, orbit_sources);
-    state.set_sources(OrbitCamInteractionKind::Pan, pan_sources);
-    state.set_sources(OrbitCamInteractionKind::Zoom, zoom_sources);
+    FinalizedInput {
+        camera,
+        input,
+        state,
+        settle,
+        events,
+    }
+}
 
-    let mut settle = ReportedSpeedSettle::default();
+/// Reports each kind's debounced speed from the reported sources already written
+/// to `state`, recording the speed-settle deadline and emitting a
+/// [`OrbitCamInteractionSpeedChanged`] event when an engaged kind settles to a
+/// new speed.
+fn report_speeds(
+    camera: Entity,
+    input: &OrbitCamInput,
+    previous: OrbitCamInteractionState,
+    context: SettleContext,
+    state: &mut OrbitCamInteractionState,
+    settle: &mut ReportedInteractionSettle,
+    events: &mut Vec<LifecycleEvent>,
+) {
     for (kind, sources, live_speed) in [
         (
             OrbitCamInteractionKind::Orbit,
-            orbit_sources,
+            state.orbit_sources(),
             input.orbit_speed(),
         ),
-        (OrbitCamInteractionKind::Pan, pan_sources, input.pan_speed()),
+        (
+            OrbitCamInteractionKind::Pan,
+            state.pan_sources(),
+            input.pan_speed(),
+        ),
         (
             OrbitCamInteractionKind::Zoom,
-            zoom_sources,
+            state.zoom_sources(),
             input.zoom_speed(),
         ),
     ] {
         let previous_speed = previous.speed(kind);
         let (reported, deadline) = settled_speed(
             previous_speed,
-            settle_context.previous.deadline(kind),
+            context.previous.speed_deadline(kind),
             !sources.is_empty(),
             live_speed,
             sources,
-            settle_context.now,
-            settle_context.window,
+            context.now,
+            context.window,
         );
         state.set_speed(kind, reported);
-        settle.set_deadline(kind, deadline);
+        settle.set_speed_deadline(kind, deadline);
         let settled_change = !sources.is_empty() && previous_speed != reported;
         if let Some(speed) = reported.filter(|_| settled_change) {
             events.push(LifecycleEvent::SpeedChanged(
@@ -265,14 +359,6 @@ fn finalize_camera_input(
                 },
             ));
         }
-    }
-
-    FinalizedInput {
-        camera,
-        input,
-        state,
-        settle,
-        events,
     }
 }
 
@@ -391,25 +477,74 @@ fn settled_speed(
     }
 }
 
-fn push_impulse(
-    camera: Entity,
+/// Computes a kind's debounced reported sources and records its source-settle
+/// deadline into `settle`. A thin wrapper over [`settled_sources`] that threads
+/// the kind's previous deadline in and the new one back out.
+fn debounce_sources(
+    settle: &mut ReportedInteractionSettle,
     kind: OrbitCamInteractionKind,
-    sources: CameraInteractionSources,
-    events: &mut Vec<LifecycleEvent>,
-) {
-    if sources.is_empty() {
-        return;
+    previous: CameraInteractionSources,
+    live: CameraInteractionSources,
+    context: SettleContext,
+) -> CameraInteractionSources {
+    let (reported, deadline) = settled_sources(
+        previous,
+        context.previous.source_deadline(kind),
+        live,
+        context.now,
+        context.window,
+    );
+    settle.set_source_deadline(kind, deadline);
+    reported
+}
+
+/// Computes the debounced reported source set and its pending-settle deadline.
+///
+/// A newly-engaged source reports at once, as does any frame the live set keeps
+/// everything it reported. When the live set drops a source, the dropped source
+/// stays in the reported set until `window` elapses, so the per-frame gaps in
+/// bursty input — a trackpad emulating a mouse button as intermittent
+/// press/release, or smooth-scroll arriving in bursts — do not blink the report
+/// off. `window <= 0.0` reports the live set verbatim.
+fn settled_sources(
+    previous: CameraInteractionSources,
+    previous_deadline: Option<f32>,
+    live: CameraInteractionSources,
+    now: f32,
+    window: f32,
+) -> (CameraInteractionSources, Option<f32>) {
+    let dropped = previous.difference(live);
+    if window <= 0.0 || dropped.is_empty() {
+        return (live, None);
     }
-    events.push(LifecycleEvent::Started(OrbitCamInteractionStarted {
-        camera,
-        kind,
-        sources,
-    }));
-    events.push(LifecycleEvent::Ended(OrbitCamInteractionEnded {
-        camera,
-        kind,
-        sources,
-    }));
+    let held = previous.union(live);
+    match previous_deadline {
+        None => (held, Some(now + window)),
+        Some(deadline) if now >= deadline => (live, None),
+        Some(_) => (held, previous_deadline),
+    }
+}
+
+/// The reported zoom direction from the live zoom sign. Held to the previous
+/// direction on a zero-delta frame so it persists through the reporting-debounce
+/// window, and cleared when no zoom is reported. Reading the live sign means a
+/// reversal (zoom-in to zoom-out) updates at once, without waiting on a settle.
+fn reported_zoom_direction(
+    input: &OrbitCamInput,
+    zoom_reported: CameraInteractionSources,
+    previous: Option<ZoomDirection>,
+) -> Option<ZoomDirection> {
+    if zoom_reported.is_empty() {
+        return None;
+    }
+    let amount = input.zoom_coarse().amount() + input.zoom_smooth().amount();
+    if amount > 0.0 {
+        Some(ZoomDirection::In)
+    } else if amount < 0.0 {
+        Some(ZoomDirection::Out)
+    } else {
+        previous
+    }
 }
 
 fn apply_lifecycle_event(world: &mut World, camera: Entity, event: LifecycleEvent) {
@@ -447,6 +582,8 @@ fn apply_lifecycle_event(world: &mut World, camera: Entity, event: LifecycleEven
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use bevy::camera::RenderTarget;
     use bevy::prelude::*;
     use bevy::window::WindowRef;
@@ -477,6 +614,9 @@ mod tests {
             OrbitCamInputLifecyclePlugin,
         ));
         app.init_resource::<LifecycleCounts>();
+        // The integration tests exercise the raw start/change/end lifecycle;
+        // disable the reporting debounce so a source drop ends in the same frame.
+        app.insert_resource(OrbitCamReportingDebounce(Duration::ZERO));
         app
     }
 
@@ -489,6 +629,7 @@ mod tests {
         ));
         app.init_resource::<LifecycleCounts>()
             .init_resource::<CameraInputSourceLatches>();
+        app.insert_resource(OrbitCamReportingDebounce(Duration::ZERO));
         app
     }
 
@@ -597,7 +738,7 @@ mod tests {
     }
 
     #[test]
-    fn coarse_zoom_impulse_starts_and_ends_same_frame() -> TestResult {
+    fn coarse_zoom_registers_then_ends_when_input_clears() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
@@ -610,10 +751,20 @@ mod tests {
             input.zoom_coarse_with_sources(1.0, CameraInteractionSources::WHEEL);
         })?;
         app.update();
+        assert_eq!(app.world().resource::<LifecycleCounts>().started, 1);
+        assert_eq!(
+            interaction_state(&app, camera)?.zoom_sources(),
+            CameraInteractionSources::WHEEL
+        );
 
-        let counts = app.world().resource::<LifecycleCounts>();
-        assert_eq!(counts.started, 1);
-        assert_eq!(counts.ended, 1);
+        // The wheel is a one-frame impulse: once its input clears, the zoom
+        // interaction ends — immediately here, since `test_app` disables the
+        // reporting debounce.
+        update_input(&mut app, camera, |input| {
+            input.clear();
+        })?;
+        app.update();
+        assert_eq!(app.world().resource::<LifecycleCounts>().ended, 1);
         assert!(interaction_state(&app, camera)?.zoom_sources().is_empty());
 
         Ok(())
@@ -776,6 +927,88 @@ mod tests {
             WINDOW,
         );
         assert_eq!(reported, None);
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn fresh_source_reports_immediately() {
+        let (reported, deadline) = settled_sources(
+            CameraInteractionSources::NONE,
+            None,
+            CameraInteractionSources::MOUSE,
+            1.0,
+            WINDOW,
+        );
+        assert_eq!(reported, CameraInteractionSources::MOUSE);
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn gaining_a_source_reports_immediately() {
+        let both = CameraInteractionSources::MOUSE.union(CameraInteractionSources::KEYBOARD);
+        let (reported, deadline) =
+            settled_sources(CameraInteractionSources::MOUSE, None, both, 1.0, WINDOW);
+        assert_eq!(reported, both);
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn dropped_source_holds_until_window_then_clears() {
+        let mouse = CameraInteractionSources::MOUSE;
+        // Live drops to nothing: the source is held and the deadline armed.
+        let (reported, deadline) =
+            settled_sources(mouse, None, CameraInteractionSources::NONE, 2.0, WINDOW);
+        assert_eq!(reported, mouse);
+        assert_eq!(deadline, Some(2.5));
+        // Within the window it stays held.
+        let (reported, _) = settled_sources(
+            mouse,
+            Some(2.5),
+            CameraInteractionSources::NONE,
+            2.25,
+            WINDOW,
+        );
+        assert_eq!(reported, mouse);
+        // Once the deadline passes the source clears.
+        let (reported, deadline) = settled_sources(
+            mouse,
+            Some(2.5),
+            CameraInteractionSources::NONE,
+            2.5,
+            WINDOW,
+        );
+        assert!(reported.is_empty());
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn re_engaging_during_hold_clears_the_deadline() {
+        let mouse = CameraInteractionSources::MOUSE;
+        let (reported, deadline) = settled_sources(mouse, Some(2.5), mouse, 2.25, WINDOW);
+        assert_eq!(reported, mouse);
+        assert_eq!(deadline, None);
+    }
+
+    #[test]
+    fn partial_drop_holds_the_union_until_the_window() {
+        let both = CameraInteractionSources::MOUSE.union(CameraInteractionSources::KEYBOARD);
+        // KEYBOARD drops while MOUSE stays live: the union is held.
+        let (reported, deadline) =
+            settled_sources(both, None, CameraInteractionSources::MOUSE, 1.0, WINDOW);
+        assert_eq!(reported, both);
+        assert_eq!(deadline, Some(1.5));
+    }
+
+    #[test]
+    fn zero_window_reports_live_sources_immediately() {
+        let (reported, deadline) = settled_sources(
+            CameraInteractionSources::MOUSE,
+            None,
+            CameraInteractionSources::NONE,
+            1.0,
+            0.0,
+        );
+        assert!(reported.is_empty());
         assert_eq!(deadline, None);
     }
 }

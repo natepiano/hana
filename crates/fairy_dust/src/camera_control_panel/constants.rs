@@ -8,9 +8,6 @@ pub(super) const ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 pub(super) const HEADER_COLOR: Color = Color::srgb(0.3, 1.0, 0.8);
 pub(super) const LABEL_COLOR: Color = Color::srgba(0.6, 0.65, 0.8, 0.85);
 
-// hold
-pub(super) const SOURCE_HOLD_SECONDS: f32 = 0.15;
-
 // table
 /// Sized so the longest action label (`Zoom Out`) shares one column with the
 /// shorter labels and the arrows stay aligned.
