@@ -4,7 +4,7 @@
 //! - Click the ground to deselect and zoom out to the full scene
 //! - Drag a mesh to rotate it
 //! - Selected meshes show a gizmo outline
-//! - Press 'D' to toggle debug overlay of zoom-to-fit bounds
+//! - Press 'O' to toggle the fit overlay of zoom-to-fit bounds
 
 mod animation_controls;
 mod constants;
@@ -22,8 +22,6 @@ use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
 use bevy::color::palettes::css::DEEP_SKY_BLUE;
 use bevy::color::palettes::css::ORANGE;
-use bevy::light::CascadeShadowConfig;
-use bevy::light::CascadeShadowConfigBuilder;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy::time::Virtual;
@@ -54,8 +52,8 @@ use bevy_lagrange::ZoomToFit;
 use constants::*;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
 use fairy_dust::FairyDustOrbitCam;
-use fairy_dust::FairyDustStudioLightingSet;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarOrientation;
 
@@ -98,6 +96,43 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(showcase_title_bar())
         .wire_chip_to_activation::<event_log::EventLog>(EVENT_LOG_CONTROL)
+        .wire_chip_to_activation::<animation_controls::FitOverlayActive>(OVERLAY_CONTROL)
+        .wire_chip_to_state::<Time<Virtual>, _>(PAUSE_CONTROL, |time| {
+            if time.is_paused() {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            ANIMATE_CONTROL,
+            |begin| begin.source == AnimationSource::PlayAnimation,
+            |end| end.source == AnimationSource::PlayAnimation,
+        )
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            LOOK_AT_CONTROL,
+            |begin| begin.source == AnimationSource::LookAt,
+            |end| end.source == AnimationSource::LookAt,
+        )
+        .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+            LOOK_AND_FIT_CONTROL,
+            |begin| begin.source == AnimationSource::LookAtAndZoomToFit,
+            |end| end.source == AnimationSource::LookAtAndZoomToFit,
+        )
+        .wire_chip_to_state::<animation_controls::EasingFlash, _>(EASING_CONTROL, |flash| {
+            if flash.random_active() {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
+        .wire_chip_to_state::<animation_controls::EasingFlash, _>(EASING_RESET_CONTROL, |flash| {
+            if flash.reset_active() {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
         .with_camera_control_panel();
 
     app.app_mut()
@@ -111,6 +146,8 @@ fn main() {
         .init_resource::<policy_panel::KeyFlash>()
         .init_resource::<pointer::HoveredEntity>()
         .init_resource::<animation_controls::ProjectionRefit>()
+        .init_resource::<animation_controls::FitOverlayActive>()
+        .init_resource::<animation_controls::EasingFlash>()
         .add_systems(
             Startup,
             (
@@ -118,11 +155,6 @@ fn main() {
                 setup,
                 selection_gizmo::init_selection_gizmo,
             ),
-        )
-        // Cascade widening runs after the studio rig spawns its directional light.
-        .add_systems(
-            Startup,
-            scene::widen_scene_shadows.after(FairyDustStudioLightingSet),
         )
         .add_systems(
             Update,
@@ -138,6 +170,7 @@ fn main() {
                 policy_panel::rebuild_policy_panel,
                 policy_panel::tick_key_flash,
                 animation_controls::apply_projection_refit,
+                animation_controls::tick_easing_flash,
             ),
         )
         .add_observer(event_log::enable_log_on_initial_fit)

@@ -5,7 +5,7 @@
 //!
 //! - [`ShowcaseUiInput`] (always active): `Esc` pause, `L` log toggle, `C` clear log, and
 //!   `Up`/`Down` log scroll.
-//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `D A R E P I Q F
+//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `O A R E P I Q F
 //!   G`.
 //!
 //! Single keys are spawned through [`Keybindings::spawn_key`], which attaches a
@@ -172,7 +172,7 @@ fn spawn_ui_actions(spawner: &mut ActionSpawner<ShowcaseUiInput>) {
 
 fn spawn_gameplay_actions(spawner: &mut ActionSpawner<ShowcaseGameplayInput>) {
     let keybindings = Keybindings::new::<ShowcaseShift>(spawner, ActionSettings::default());
-    keybindings.spawn_key::<ToggleDebugOverlay>(spawner, KeyCode::KeyD);
+    keybindings.spawn_key::<ToggleDebugOverlay>(spawner, KeyCode::KeyO);
     keybindings.spawn_key::<ToggleProjection>(spawner, KeyCode::KeyP);
     keybindings.spawn_key::<RandomizeEasing>(spawner, KeyCode::KeyR);
     keybindings.spawn_key::<ResetEasing>(spawner, KeyCode::KeyE);

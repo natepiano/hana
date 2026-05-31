@@ -16,6 +16,7 @@ use bevy_diegetic::Sizing;
 use super::constants::CONTROL_ACTIVE_COLOR;
 use super::constants::CONTROL_INACTIVE_COLOR;
 use super::constants::DIVIDER_COLOR;
+use super::constants::HELP_CONTROL;
 use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
@@ -28,8 +29,6 @@ use crate::constants::HOME_CONTROL;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
-
-const HELP_CONTROL: &str = "?";
 
 /// Stable identity plus visible label for a title-bar chip.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -380,7 +379,12 @@ fn build_title_bar_layout(
                 builder.text(&control.label, style);
             }
             title_separator(builder, orientation);
-            builder.text(HELP_CONTROL, inactive_control);
+            let help_style = if state.is_active(HELP_CONTROL) {
+                active_control
+            } else {
+                inactive_control
+            };
+            builder.text(HELP_CONTROL, help_style);
         });
     });
 }

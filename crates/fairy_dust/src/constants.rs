@@ -25,10 +25,24 @@ pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
 pub(crate) const CARGO_TARGET_DIR: &str = "target";
 
 // cascade shadow
-pub(crate) const CASCADE_COUNT: usize = 2;
+// Matches Bevy's non-webgl default. The auto-fit only narrows the cascade
+// distances; the count must stay constant after spawn, because changing the
+// number of cascades on a live light desyncs `bevy_light`'s per-cascade
+// visibility queues and panics.
+pub(crate) const CASCADE_COUNT: usize = 4;
 pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
 pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;
 pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;
+// Auto-fit cascade: once the scene's geometry exists, the key light's cascade
+// `maximum_distance` is set to (scene bounding-sphere radius * this multiple),
+// measured only over the meshes the key light actually shadows (those sharing
+// its render layers, so screen-space UI panels are excluded). The multiple
+// bakes in the studio camera's framing standoff; 5.0 gives ~18 for the
+// canonical ~5-unit grounds and scales up for larger scenes.
+pub(crate) const CASCADE_FIT_RADIUS_MULTIPLE: f32 = 5.0;
+// Far bound of the first (high-resolution) cascade as a fraction of the fitted
+// `maximum_distance`. 0.2 matches the proven 12/60 split.
+pub(crate) const CASCADE_FIRST_BOUND_RATIO: f32 = 0.2;
 
 // clear color
 pub(crate) const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);

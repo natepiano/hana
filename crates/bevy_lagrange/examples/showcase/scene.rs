@@ -1,22 +1,5 @@
 use super::*;
 
-/// Widens the studio key light's shadow cascade so cast shadows cover the
-/// showcase's 12-unit ground in perspective and its orthographic far plane,
-/// instead of being clipped by `fairy_dust`'s smaller default cascade. Runs at
-/// startup after the studio rig spawns the directional light.
-pub(crate) fn widen_scene_shadows(
-    mut lights: Query<&mut CascadeShadowConfig, With<DirectionalLight>>,
-) {
-    for mut cascade in &mut lights {
-        *cascade = CascadeShadowConfigBuilder {
-            maximum_distance: SHADOW_CASCADE_MAX_DISTANCE,
-            first_cascade_far_bound: SHADOW_CASCADE_FIRST_BOUND,
-            ..default()
-        }
-        .build();
-    }
-}
-
 #[derive(Component)]
 pub(crate) enum MeshShape {
     Cuboid(Vec3),

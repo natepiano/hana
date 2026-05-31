@@ -1,15 +1,36 @@
+use fairy_dust::ControlActivation;
+use fairy_dust::TitleChipActivation;
+
 use super::*;
+
+/// Mirrors whether the camera carries [`FitOverlay`], so the title bar's
+/// `O Fit Overlay` chip stays highlighted while the overlay is shown.
+#[derive(Resource, Default)]
+pub(crate) struct FitOverlayActive(bool);
+
+impl TitleChipActivation for FitOverlayActive {
+    fn activation(&self) -> ControlActivation {
+        if self.0 {
+            ControlActivation::Active
+        } else {
+            ControlActivation::Inactive
+        }
+    }
+}
 
 pub(crate) fn toggle_debug_overlay(
     mut commands: Commands,
     scene: Res<SceneEntities>,
     visualization_query: Query<(), With<FitOverlay>>,
+    mut active: ResMut<FitOverlayActive>,
 ) {
     let camera = scene.camera;
     if visualization_query.get(camera).is_ok() {
         commands.entity(camera).remove::<FitOverlay>();
+        active.0 = false;
     } else {
         commands.entity(camera).insert(FitOverlay);
+        active.0 = true;
     }
 }
 
@@ -72,15 +93,68 @@ pub(crate) fn randomize_easing(
     mut easing: ResMut<ActiveEasing>,
     time: Res<Time>,
     mut log: ResMut<event_log::EventLog>,
+    mut flash: ResMut<EasingFlash>,
 ) {
     let index = (time.elapsed_secs() * SECONDS_TO_MILLIS).to_usize() % ALL_EASINGS.len();
     easing.0 = ALL_EASINGS[index];
     log.push(format!("Easing: {:#?}", easing.0));
+    flash.flash_random();
 }
 
-pub(crate) fn reset_easing(mut easing: ResMut<ActiveEasing>, mut log: ResMut<event_log::EventLog>) {
+pub(crate) fn reset_easing(
+    mut easing: ResMut<ActiveEasing>,
+    mut log: ResMut<event_log::EventLog>,
+    mut flash: ResMut<EasingFlash>,
+) {
     easing.0 = EaseFunction::CubicOut;
     log.push(EVENT_LOG_EASING_RESET.into());
+    flash.flash_reset();
+}
+
+/// Briefly highlights the `R Random Easing` / `E Reset` title-bar chips after a
+/// press. Each press arms a one-shot timer; [`tick_easing_flash`] clears it when
+/// it elapses, and the title bar polls [`Self::random_active`] /
+/// [`Self::reset_active`] to drive the chip highlight.
+#[derive(Resource, Default)]
+pub(crate) struct EasingFlash {
+    random: Option<Timer>,
+    reset:  Option<Timer>,
+}
+
+impl EasingFlash {
+    fn flash_random(&mut self) {
+        self.random = Some(Timer::from_seconds(EASING_FLASH_SECONDS, TimerMode::Once));
+    }
+
+    fn flash_reset(&mut self) {
+        self.reset = Some(Timer::from_seconds(EASING_FLASH_SECONDS, TimerMode::Once));
+    }
+
+    pub(crate) const fn random_active(&self) -> bool { self.random.is_some() }
+
+    pub(crate) const fn reset_active(&self) -> bool { self.reset.is_some() }
+}
+
+/// Ticks the easing-chip flash timers, clearing each when it elapses so the
+/// title bar's `R Random Easing` / `E Reset` chips flip back to inactive.
+pub(crate) fn tick_easing_flash(time: Res<Time>, mut flash: ResMut<EasingFlash>) {
+    if flash.random.is_none() && flash.reset.is_none() {
+        return;
+    }
+    let random_ended = flash
+        .random
+        .as_mut()
+        .is_some_and(|timer| timer.tick(time.delta()).just_finished());
+    if random_ended {
+        flash.random = None;
+    }
+    let reset_ended = flash
+        .reset
+        .as_mut()
+        .is_some_and(|timer| timer.tick(time.delta()).just_finished());
+    if reset_ended {
+        flash.reset = None;
+    }
 }
 
 /// Tracks the one-frame-deferred scene re-fit after a projection toggle.

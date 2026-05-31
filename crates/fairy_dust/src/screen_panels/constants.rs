@@ -32,6 +32,9 @@ pub(super) const HELP_SEPARATOR_HEIGHT: Px = Px(1.0);
 pub(super) const HELP_TABLE_COLUMN_GAP: Px = Px(18.0);
 
 // title bar
+/// Identity and visible label of the always-present help chip. Highlighted
+/// while the keyboard-shortcut overlay is open.
+pub(super) const HELP_CONTROL: &str = "?";
 pub(super) const SEPARATOR_HEIGHT: Px = Px(18.0);
 pub(super) const SEPARATOR_WIDTH: Px = Px(1.0);
 pub(super) const TITLE_BAR_CHILD_GAP: Px = Px(10.0);

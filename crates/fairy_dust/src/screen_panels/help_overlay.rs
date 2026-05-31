@@ -17,11 +17,14 @@ use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
 
+use super::ControlActivation;
+use super::TitleBarControlState;
 use super::constants::BODY_COLOR;
 use super::constants::DIVIDER_COLOR;
 use super::constants::HELP_CLOSE_CONTEXT_PRIORITY;
 use super::constants::HELP_CLOSE_HINT_COLUMN_WIDTH;
 use super::constants::HELP_CLOSE_HINT_SIZE;
+use super::constants::HELP_CONTROL;
 use super::constants::HELP_KEY_COLUMN_WIDTH;
 use super::constants::HELP_PANEL_CHILD_GAP;
 use super::constants::HELP_ROW_GAP;
@@ -104,11 +107,13 @@ fn show_or_toggle_help(
     home_markers: Query<Entity, With<CameraHomeMarker>>,
     camera_panels: Query<Entity, With<CameraGuidancePanel>>,
     preset_switching: Option<Res<CameraPresetSwitching>>,
+    mut bars: Query<&mut TitleBarControlState>,
 ) {
     if !overlay.is_empty() {
         for entity in &overlay {
             commands.entity(entity).despawn();
         }
+        set_help_chip(&mut bars, ControlActivation::Inactive);
         return;
     }
 
@@ -121,13 +126,26 @@ fn show_or_toggle_help(
             camera_preset: !camera_panels.is_empty() && preset_switching_enabled,
         },
     );
+    set_help_chip(&mut bars, ControlActivation::Active);
 }
 
 /// Closes the overlay on Esc. Bound inside [`HelpCloseContext`], which consumes
 /// Esc so a caller's Esc binding doesn't also fire while the overlay is open.
-fn close_help(mut commands: Commands, overlay: Query<Entity, With<KeyboardShortcutHelp>>) {
+fn close_help(
+    mut commands: Commands,
+    overlay: Query<Entity, With<KeyboardShortcutHelp>>,
+    mut bars: Query<&mut TitleBarControlState>,
+) {
     for entity in &overlay {
         commands.entity(entity).despawn();
+    }
+    set_help_chip(&mut bars, ControlActivation::Inactive);
+}
+
+/// Highlights or clears the always-present `?` help chip on every title bar.
+fn set_help_chip(bars: &mut Query<&mut TitleBarControlState>, activation: ControlActivation) {
+    for mut bar in bars.iter_mut() {
+        bar.set_active(HELP_CONTROL, activation);
     }
 }
 
