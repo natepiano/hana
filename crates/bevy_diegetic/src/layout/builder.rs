@@ -459,7 +459,7 @@ impl LayoutBuilder {
     }
 
     /// Mints the next build-order [`PanelFieldId::Auto`] id for an unnamed run.
-    fn take_auto_id(&mut self) -> PanelFieldId {
+    const fn take_auto_id(&mut self) -> PanelFieldId {
         let id = PanelFieldId::auto(self.next_auto_id);
         self.next_auto_id += 1;
         id

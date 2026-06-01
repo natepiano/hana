@@ -248,6 +248,25 @@ impl DiegeticPanel {
         self.tree_revision = self.tree_revision.wrapping_add(1);
     }
 
+    /// Writes an out-of-flow run edit into the `El.text` layout cache and bumps
+    /// the tree revision so [`ScaledLayoutTreeCache`] rebuilds with the new
+    /// string. Returns whether the cache changed.
+    ///
+    /// The single physical copy of the string is the child's
+    /// [`TextContent`](crate::TextContent); `El.text` is a derived cache the
+    /// layout engine reads to measure and word-wrap. `sync_run_text_to_cache`
+    /// calls this when a child `TextContent` changes out of flow. Skips the
+    /// revision bump (and so the layout) when the string already matches, which
+    /// also keeps the measurer off an unchanged cached string.
+    pub(crate) fn sync_run_text_cache(&mut self, index: usize, text: &str) -> bool {
+        if self.tree.set_element_text(index, text) {
+            self.tree_revision = self.tree_revision.wrapping_add(1);
+            true
+        } else {
+            false
+        }
+    }
+
     /// Sets the panel width directly (in layout units).
     ///
     /// Used by the screen-space positioning system to resize panels

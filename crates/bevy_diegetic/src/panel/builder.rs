@@ -858,9 +858,6 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(
-            result,
-            Err(PanelBuildError::DuplicateFieldId(_))
-        ));
+        assert!(matches!(result, Err(PanelBuildError::DuplicateFieldId(_))));
     }
 }

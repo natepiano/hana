@@ -389,6 +389,26 @@ impl LayoutTree {
             })
     }
 
+    /// Overwrites the cached run string at `index`, returning whether it
+    /// changed. `TextContent` on the materialized child is the single source;
+    /// this keeps the `El.text` layout cache (which the engine measures and
+    /// word-wraps) current after an out-of-flow edit. Returns `false` (no write)
+    /// when `index` is not a text leaf or the string already matches, so the
+    /// caller can skip dirtying the panel.
+    pub(crate) fn set_element_text(&mut self, index: usize, text: &str) -> bool {
+        let Some(element) = self.elements.get_mut(index) else {
+            return false;
+        };
+        let ElementContent::Text { text: existing, .. } = &mut element.content else {
+            return false;
+        };
+        if existing == text {
+            return false;
+        }
+        text.clone_into(existing);
+        true
+    }
+
     /// Returns the panel-local id of the text run at `index`, if that element is
     /// a text leaf. Reconcile reads this to key a child by its run id instead of
     /// the former positional `(element_idx, command_index)` pair.

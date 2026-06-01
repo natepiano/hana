@@ -100,4 +100,3 @@ impl TextContent {
     /// Mutates the text contents.
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
 }
-
