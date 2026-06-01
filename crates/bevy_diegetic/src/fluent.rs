@@ -470,8 +470,9 @@ pub(crate) fn rebuild_fluent_text(
     panels: Query<(Entity, &TextContent, &FluentText), Changed<TextContent>>,
     mut commands: Commands,
 ) {
-    for (entity, content, spec) in &panels {
-        let tree = build_one_element_tree(content.text(), &spec.style, spec.wrap_width);
+    for (entity, content, fluent_text) in &panels {
+        let tree =
+            build_one_element_tree(content.text(), &fluent_text.style, fluent_text.wrap_width);
         commands.set_tree(entity, tree);
     }
 }

@@ -10,7 +10,7 @@ use crate::render::world_text::PanelTextChild;
 
 /// Spawn-time cascade seed for a panel label's glyph lighting and sidedness.
 ///
-/// Fires when a label first gains [`PanelChild`] and seeds its
+/// Fires when a label first gains [`PanelTextChild`] and seeds its
 /// `Resolved<TextLighting>` / `Resolved<TextSidedness>` via
 /// [`resolve_walk`](cascade::resolve_walk). The walk honors the label's own
 /// override first — `reconcile_panel_text_children` inserts one when the label

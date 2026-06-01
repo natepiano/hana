@@ -24,10 +24,10 @@ use bevy_diegetic::FontLoadFailed;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
@@ -193,7 +193,7 @@ fn build_status_panel(text: &str) -> LayoutTree {
         |b| {
             b.text(
                 text,
-                LayoutTextStyle::new(STATUS_FONT_SIZE)
+                TextStyle::new(STATUS_FONT_SIZE)
                     .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
                     .with_shadow_mode(GlyphShadowMode::None),
             );

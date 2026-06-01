@@ -32,7 +32,6 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
@@ -40,6 +39,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextAntiAlias;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::default_panel_material;
@@ -622,9 +622,9 @@ struct DemoPanel;
 /// The three text styles a control column draws with: its header, an active
 /// chip, and an inactive chip.
 struct ColumnStyles {
-    header:   LayoutTextStyle,
-    active:   LayoutTextStyle,
-    inactive: LayoutTextStyle,
+    header:   TextStyle,
+    active:   TextStyle,
+    inactive: TextStyle,
 }
 
 /// Spawns the bottom-left panel with the initial state of both AA settings.
@@ -714,13 +714,13 @@ fn build_aa_tree(aa: TextAntiAlias, post: PostAa) -> LayoutTree {
 
 fn build_aa_layout(builder: &mut LayoutBuilder, aa: TextAntiAlias, post: PostAa) {
     let styles = ColumnStyles {
-        header:   LayoutTextStyle::new(TITLE_SIZE)
+        header:   TextStyle::new(TITLE_SIZE)
             .with_color(HEADER_COLOR)
             .no_wrap(),
-        active:   LayoutTextStyle::new(LABEL_SIZE)
+        active:   TextStyle::new(LABEL_SIZE)
             .with_color(ACTIVE_COLOR)
             .no_wrap(),
-        inactive: LayoutTextStyle::new(LABEL_SIZE)
+        inactive: TextStyle::new(LABEL_SIZE)
             .with_color(INACTIVE_COLOR)
             .no_wrap(),
     };
@@ -794,13 +794,13 @@ fn build_demo_panel_tree(oit_enabled: bool, post: PostAa) -> LayoutTree {
 }
 
 fn build_demo_panel_layout(builder: &mut LayoutBuilder, oit_enabled: bool, post: PostAa) {
-    let title = LayoutTextStyle::new(TITLE_SIZE)
+    let title = TextStyle::new(TITLE_SIZE)
         .with_color(HEADER_COLOR)
         .no_wrap();
-    let key = LayoutTextStyle::new(LABEL_SIZE)
+    let key = TextStyle::new(LABEL_SIZE)
         .with_color(ACTIVE_COLOR)
         .no_wrap();
-    let body = LayoutTextStyle::new(LABEL_SIZE)
+    let body = TextStyle::new(LABEL_SIZE)
         .with_color(INACTIVE_COLOR)
         .no_wrap();
     // Fixed-width container plus GROW boxes line the three boxes up on both
@@ -825,9 +825,9 @@ fn build_demo_panel_layout(builder: &mut LayoutBuilder, oit_enabled: bool, post:
 fn build_demo_box(
     builder: &mut LayoutBuilder,
     demo: &DemoView,
-    title: &LayoutTextStyle,
-    key: &LayoutTextStyle,
-    body: &LayoutTextStyle,
+    title: &TextStyle,
+    key: &TextStyle,
+    body: &TextStyle,
 ) {
     builder.with(
         El::new()
@@ -861,14 +861,9 @@ fn build_demo_box(
 
 /// Draws the caption box: a title, a divider rule, then the OIT-state explainer,
 /// wrapped to the box width.
-fn build_info_box(
-    builder: &mut LayoutBuilder,
-    title: &LayoutTextStyle,
-    oit_enabled: bool,
-    post: PostAa,
-) {
+fn build_info_box(builder: &mut LayoutBuilder, title: &TextStyle, oit_enabled: bool, post: PostAa) {
     // Wrapped text lets each paragraph flow to the fixed box width.
-    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
+    let body = TextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
     let (info_title, paragraphs) = info_copy(oit_enabled, post);
     builder.with(
         El::new()
@@ -1012,7 +1007,7 @@ fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
             .padding(Padding::all(CUBE_COMPAT_PANEL_PADDING))
             .clip(),
     );
-    let style = LayoutTextStyle::new(CUBE_STATUS_PANEL_FONT_SIZE)
+    let style = TextStyle::new(CUBE_STATUS_PANEL_FONT_SIZE)
         .with_color(Color::WHITE)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
@@ -1039,7 +1034,7 @@ fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
     if let Some(message) = message {
         builder.text(
             message,
-            LayoutTextStyle::new(CUBE_COMPAT_PANEL_FONT_SIZE)
+            TextStyle::new(CUBE_COMPAT_PANEL_FONT_SIZE)
                 .with_color(Color::WHITE)
                 .with_align(TextAlign::Center)
                 .with_shadow_mode(GlyphShadowMode::None),

@@ -38,7 +38,7 @@ pub(super) struct DiegeticTextMesh;
 /// `On<Remove>` fires before the component is dropped, so the mesh's
 /// [`RunStorageKey`] is still readable. This observer is the sole run-storage
 /// freer: every mesh despawn — a per-run rebuild, an emptied run, or a
-/// recursively despawned `PanelChild` label — routes its cleanup through here,
+/// recursively despawned `PanelTextChild` label — routes its cleanup through here,
 /// so no inline `remove_run_storage` survives in the build systems.
 pub(super) fn free_run_storage_on_mesh_removal(
     trigger: On<Remove, DiegeticTextMesh>,
@@ -118,7 +118,7 @@ pub(super) fn update_panel_text_geometry(
     // R10: when a run's text empties, `shape_panel_text_children` removes its
     // `PanelText` (not `Changed`, so the loop above misses it). Despawn the
     // now-stale mesh so the observer frees the run storage. Idempotent against a
-    // recursively despawned `PanelChild` — that label's mesh is already gone, so
+    // recursively despawned `PanelTextChild` — that label's mesh is already gone, so
     // the lookup finds nothing and no double-despawn occurs.
     for label_entity in emptied_runs.read() {
         despawn_label_mesh(label_entity, &old_meshes, &mut commands);
@@ -142,7 +142,7 @@ pub(super) fn update_panel_text_geometry(
 /// value-guarded (R5) so a no-op resolution does not trip `Changed<TextMaterial>`.
 ///
 /// After Phase 4's reparent the material lives two hops down — on the
-/// `DiegeticTextMesh` child of the `PanelChild` — so the run's mesh is reached
+/// `DiegeticTextMesh` child of the `PanelTextChild` — so the run's mesh is reached
 /// through `ChildOf`, not on the label itself.
 pub(super) fn update_panel_text_alpha(
     changed_alphas: Query<
@@ -361,10 +361,10 @@ mod tests {
     use crate::cascade::CascadePlugin;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
-    use crate::layout::LayoutTextStyle;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::TextStyle;
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
@@ -435,20 +435,20 @@ mod tests {
 
     fn two_text_tree(first: Color, second: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", LayoutTextStyle::new(10.0).with_color(first));
-        builder.text("Beta", LayoutTextStyle::new(10.0).with_color(second));
+        builder.text("Alpha", TextStyle::new(10.0).with_color(first));
+        builder.text("Beta", TextStyle::new(10.0).with_color(second));
         builder.build()
     }
 
     fn single_text_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Hi", LayoutTextStyle::new(10.0));
+        builder.text("Hi", TextStyle::new(10.0));
         builder.build()
     }
 
     fn single_alpha_text_tree(alpha: AlphaMode) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Hi", LayoutTextStyle::new(10.0).with_alpha_mode(alpha));
+        builder.text("Hi", TextStyle::new(10.0).with_alpha_mode(alpha));
         builder.build()
     }
 
@@ -675,7 +675,7 @@ mod tests {
         // `RemovedComponents<PanelText>` reaction despawns the now-stale mesh
         // (R10); the observer frees its run storage. No stale glyph remains.
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("", LayoutTextStyle::new(10.0));
+        builder.text("", TextStyle::new(10.0));
         app.world_mut().commands().set_tree(panel, builder.build());
         settle(&mut app);
 

@@ -13,9 +13,9 @@ component primitives (`WorldText`, `ScreenText`) plus the existing `Panel`
 Panel text and standalone world text are styled by the **same struct**,
 `TextProps<C>`, parameterized by a zero-size marker `C`:
 
-- `LayoutTextStyle = TextProps<ForLayout>` — text laid out inside a panel
+- `TextStyle = TextProps<ForLayout>` — text laid out inside a panel
   element. Passed as the second argument to `LayoutBuilder::text(string, style)`.
-- `WorldTextStyle = TextProps<ForStandalone>` — the companion style for a
+- `TextStyle = TextProps<ForStandalone>` — the companion style for a
   standalone `WorldText` component, placed by `Transform` with its own render
   path (`Without<PanelTextChild>`).
 
@@ -98,7 +98,7 @@ context: which point of the box sits at its placement point. A run inside a
 multi-element panel has no independent pivot — the element's alignment positions
 it, which is why per-run anchor was inert and marker-gated. The rule that
 unifies it: **anchor lives on the text component / panel, never on the per-run
-`LayoutTextStyle`.** The sugar forwards `.anchor()` to the panel anchor, which
+`TextStyle`.** The sugar forwards `.anchor()` to the panel anchor, which
 already exists. It is on **both** sugars.
 
 **6. world_scale — world-only, at the component level.** This is the one knob
@@ -193,7 +193,7 @@ in-intent outcome) and surfaced decisions (genuine forks for the author).
 ### Recorded resolutions (auto-accepted)
 
 - **A. Keep `alpha_mode` on the unified `TextStyle`; do not make it cascade-only.**
-  Per-label alpha (`LayoutTextStyle::with_alpha_mode`) is documented, intentional
+  Per-label alpha (`TextStyle::with_alpha_mode`) is documented, intentional
   public API, and the panel-text reconcile path captures `config.alpha_mode()`
   before spawning the child label to insert `Override<TextAlpha>`. The doc's
   "unify — cascade fills default" line must not be read as removing the field:
@@ -299,7 +299,7 @@ Status legend: `proposed` = awaiting author choice.
 - **D3 — Construct: bare `f32` vs require `Dimension`. (important, proposed)**
   The doc lets a bare `f32` mean px on screen but cascade-meters in world, so
   the same literal `24.0` is two scales. Options: (a) keep bare `f32` with the
-  per-context rule (matches the current `WorldTextStyle::new(f32)`, terse); (b)
+  per-context rule (matches the current `TextStyle::new(f32)`, terse); (b)
   require `impl Into<Dimension>` (`Px`/`Pt`/`Mm`/`In`) so the unit is explicit at
   the call site and cannot silently flip.
   **→ DECIDED: (c) hybrid — bare `f32` on the sugar, unit resolved by context.**
@@ -334,8 +334,8 @@ Status legend: `proposed` = awaiting author choice.
   (scaling via `.world_height` / `.world_width`).
 
 - **D6 — Public naming + alias removal. (important, proposed)**
-  **→ DECIDED: unified type is `TextStyle`; remove `LayoutTextStyle` /
-  `WorldTextStyle` aliases outright (no deprecation — prerelease, no migration
+  **→ DECIDED: unified type is `TextStyle`; remove `TextStyle` /
+  `TextStyle` aliases outright (no deprecation — prerelease, no migration
   concern).** Not bare `Style`: the crate already has `ArrowStyle`, and `Style`
   is a glob-collision hazard (historic `bevy_ui::Style`). `TextStyle` is free —
   bevy 0.19 dropped the old `bevy::prelude::TextStyle` (now `TextFont` /
@@ -409,11 +409,11 @@ until the library crates do, since they consume the renamed/removed APIs.
 ### Prerequisite — library crates first
 
 - **`crates/bevy_diegetic/src`** and **`crates/fairy_dust/src`** use
-  `LayoutTextStyle` / `WorldTextStyle` and the deleted internals
+  `TextStyle` / `TextStyle` and the deleted internals
   (`as_standalone` / `as_layout_config`, the `Without<PanelTextChild>` standalone
   render path, `world_scale`). These change before any example.
 
-### Bucket 1 — `WorldTextStyle` / `LayoutTextStyle` → `TextStyle` (mechanical)
+### Bucket 1 — `TextStyle` / `TextStyle` → `TextStyle` (mechanical)
 
 Two global renames collapsing to one target; the bulk by line count, the
 cheapest by effort (editor-driven). `LayoutBuilder::text(s, style)` is covered
@@ -428,7 +428,7 @@ swapped_axis, showcase/event_log, showcase/policy_panel`.
 ### Bucket 2 — standalone `WorldText` spawn → fluent builder (substantive)
 
 D5 deletes the raw standalone render path, so every
-`(WorldText::new(..), WorldTextStyle::new(..), Transform)` tuple becomes the
+`(WorldText::new(..), TextStyle::new(..), Transform)` tuple becomes the
 fluent builder. Live `Query<&mut WorldText>` + `set_text` is unchanged (the
 component persists).
 
@@ -446,7 +446,7 @@ Single consumer in all examples: **`bevy_diegetic/cascade.rs`** — 4
 
 ### Bucket 4 — construct units (D3): transparent
 
-`WorldTextStyle::new(0.04)` → `TextStyle::new(0.04)`; a bare `f32` still resolves
+`TextStyle::new(0.04)` → `TextStyle::new(0.04)`; a bare `f32` still resolves
 through the cascade as before (world → meters). No behavioral edits — absorbed
 into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 
@@ -465,7 +465,7 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 
 1. Collapse `TextProps<ForLayout>` / `TextProps<ForStandalone>` into one public
    `TextStyle`; remove the `ForLayout` / `ForStandalone` markers and the
-   `LayoutTextStyle` / `WorldTextStyle` aliases (D6).
+   `TextStyle` / `TextStyle` aliases (D6).
 2. `TextStyle::new(impl Into<Dimension>)`; a bare `f32` maps to `unit: None`
    ("resolve from context") (D3).
 3. Keep the `alpha_mode` field and the panel-text reconcile per-label override
@@ -627,7 +627,7 @@ Single-correct-outcome refinements to the plan above (not user forks):
 
 - **R10 — Phase 0 step 1 itemized.** (a) collapse markers into `TextStyle`,
   (b) delete `ForLayout`/`ForStandalone`, (c) delete the
-  `LayoutTextStyle`/`WorldTextStyle` alias definitions, (d) export `TextStyle`,
+  `TextStyle`/`TextStyle` alias definitions, (d) export `TextStyle`,
   (e) update `lib.rs` exports.
 
 - **R11 — `world_text.rs` is the Phase 4 validation gate.** Rewrite it first;
@@ -663,8 +663,8 @@ Single-correct-outcome refinements to the plan above (not user forks):
 ## Team review — cycle 2 refinements (recorded)
 
 - **R16 — `WorldText`'s `#[require(...)]` must update in Phase 0 (compile gate).**
-  `WorldText` is declared `#[require(WorldTextStyle, Transform, Visibility)]`
-  (`render/world_text/mod.rs:132`). Deleting the `WorldTextStyle` alias breaks
+  `WorldText` is declared `#[require(TextStyle, Transform, Visibility)]`
+  (`render/world_text/mod.rs:132`). Deleting the `TextStyle` alias breaks
   this. Phase 0 step 1 gains substep (f): `#[require(TextStyle, Transform,
   Visibility)]`. `Transform`/`Visibility` stay (the spawned root entity needs
   them). NEW, both cycle-2 lenses.

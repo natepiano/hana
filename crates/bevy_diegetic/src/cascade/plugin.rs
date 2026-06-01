@@ -3,7 +3,7 @@
 //! per-frame propagation pass that keeps every `Resolved<A>` current.
 //!
 //! Spawn-time seeding is **not** done here: only the node-kind authoring
-//! observers (the `WorldTextStyle` / `DiegeticPanel` bridges and the panel-child
+//! observers (the `TextStyle` / `DiegeticPanel` bridges and the panel-child
 //! alpha seed) know which entities participate in a cascade and which
 //! `Resolved<A>` each one needs. They seed via [`resolve_walk`]; this plugin
 //! owns reflection registration and runtime propagation.

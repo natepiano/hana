@@ -7,10 +7,10 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TITLE_COLOR;
@@ -223,33 +223,33 @@ pub(crate) fn tick_key_flash(
 
 /// Bundles the text styles the panel reuses across rows and groups.
 struct PolicyTextStyles {
-    header:      LayoutTextStyle,
-    key:         LayoutTextStyle,
-    key_active:  LayoutTextStyle,
-    name:        LayoutTextStyle,
-    active:      LayoutTextStyle,
-    description: LayoutTextStyle,
+    header:      TextStyle,
+    key:         TextStyle,
+    key_active:  TextStyle,
+    name:        TextStyle,
+    active:      TextStyle,
+    description: TextStyle,
 }
 
 impl PolicyTextStyles {
     fn new() -> Self {
         Self {
-            header:      LayoutTextStyle::new(POLICY_PANEL_HEADER_SIZE)
+            header:      TextStyle::new(POLICY_PANEL_HEADER_SIZE)
                 .with_color(TITLE_COLOR)
                 .no_wrap(),
-            key:         LayoutTextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
+            key:         TextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
                 .with_color(HINT_TEXT_COLOR)
                 .no_wrap(),
-            key_active:  LayoutTextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
+            key_active:  TextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
                 .with_color(POLICY_PANEL_ACTIVE_COLOR)
                 .no_wrap(),
-            name:        LayoutTextStyle::new(POLICY_PANEL_TEXT_SIZE)
+            name:        TextStyle::new(POLICY_PANEL_TEXT_SIZE)
                 .with_color(HINT_TEXT_COLOR)
                 .no_wrap(),
-            active:      LayoutTextStyle::new(POLICY_PANEL_TEXT_SIZE)
+            active:      TextStyle::new(POLICY_PANEL_TEXT_SIZE)
                 .with_color(POLICY_PANEL_ACTIVE_COLOR)
                 .no_wrap(),
-            description: LayoutTextStyle::new(POLICY_PANEL_TEXT_SIZE)
+            description: TextStyle::new(POLICY_PANEL_TEXT_SIZE)
                 .with_color(HINT_TEXT_COLOR)
                 .wrap(TextWrap::Words),
         }
@@ -348,7 +348,7 @@ fn build_group(
     styles: &PolicyTextStyles,
     header: &str,
     key: &str,
-    key_style: &LayoutTextStyle,
+    key_style: &TextStyle,
     rows: impl FnOnce(&mut LayoutBuilder),
 ) {
     builder.with(
@@ -382,7 +382,7 @@ fn build_group(
     );
 }
 
-fn build_key_cell(builder: &mut LayoutBuilder, key: &str, key_style: &LayoutTextStyle) {
+fn build_key_cell(builder: &mut LayoutBuilder, key: &str, key_style: &TextStyle) {
     builder.with(
         El::new()
             .width(Sizing::fixed(Px(POLICY_PANEL_KEY_COLUMN_WIDTH)))

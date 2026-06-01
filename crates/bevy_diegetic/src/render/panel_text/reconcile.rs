@@ -15,7 +15,7 @@ use crate::layout::BoundingBox;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::RenderCommandKind;
-use crate::layout::WorldTextStyle;
+use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::render::clip;
@@ -31,7 +31,7 @@ use crate::render::world_text::TextContent;
 struct ReusableChild<'a> {
     entity:    Entity,
     text:      &'a TextContent,
-    style:     &'a WorldTextStyle,
+    style:     &'a TextStyle,
     layout:    &'a PanelTextLayout,
     alpha:     Option<&'a Override<TextAlpha>>,
     lighting:  Option<&'a Override<TextLighting>>,
@@ -47,7 +47,7 @@ pub(super) fn reconcile_panel_text_children(
     existing_children: Query<(
         Entity,
         &TextContent,
-        &WorldTextStyle,
+        &TextStyle,
         &PanelTextLayout,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextLighting>>,
@@ -182,7 +182,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     commands:        &'a mut Commands<'w, 's>,
     panel_entity:    Entity,
     text:            &'a str,
-    style:           WorldTextStyle,
+    style:           TextStyle,
     layout:          PanelTextLayout,
     label_alpha:     Option<AlphaMode>,
     label_lighting:  Option<GlyphLighting>,
@@ -229,7 +229,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     commands:        &'a mut Commands<'w, 's>,
     reusable:        ReusableChild<'a>,
     text:            &'a str,
-    style:           WorldTextStyle,
+    style:           TextStyle,
     layout:          PanelTextLayout,
     label_alpha:     Option<AlphaMode>,
     label_lighting:  Option<GlyphLighting>,
@@ -569,11 +569,10 @@ mod tests {
     use crate::layout::BoundingBox;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
-    use crate::layout::LayoutTextStyle;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
-    use crate::layout::WorldTextStyle;
+    use crate::layout::TextStyle;
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
@@ -601,7 +600,7 @@ mod tests {
         labels: Query<(
             Entity,
             Ref<TextContent>,
-            Ref<WorldTextStyle>,
+            Ref<TextStyle>,
             Ref<PanelTextLayout>,
             Option<Ref<Override<TextAlpha>>>,
         )>,
@@ -661,8 +660,8 @@ mod tests {
 
     fn two_text_tree(first: Color, second: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", LayoutTextStyle::new(10.0).with_color(first));
-        builder.text("Beta", LayoutTextStyle::new(10.0).with_color(second));
+        builder.text("Alpha", TextStyle::new(10.0).with_color(first));
+        builder.text("Beta", TextStyle::new(10.0).with_color(second));
         builder.build()
     }
 
@@ -670,7 +669,7 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(
             "Glow",
-            LayoutTextStyle::new(10.0)
+            TextStyle::new(10.0)
                 .with_color(color)
                 .with_alpha_mode(alpha),
         );

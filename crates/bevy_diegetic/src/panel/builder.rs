@@ -177,7 +177,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
 
     /// Sets the default PBR material for text.
     ///
-    /// `base_color` is overridden by `LayoutTextStyle::color` when set.
+    /// `base_color` is overridden by `TextStyle::color` when set.
     #[must_use]
     pub fn text_material(mut self, material: StandardMaterial) -> Self {
         self.data.text_material = Some(material);

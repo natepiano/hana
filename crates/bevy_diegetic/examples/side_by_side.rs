@@ -41,12 +41,12 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::ShowTextGizmos;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
@@ -454,9 +454,9 @@ fn update_dynamic_rows(
 fn build_controls_panel() -> LayoutTree {
     let border_color = Color::srgb(0.4, 0.4, 0.45);
     let divider_color = Color::srgb(0.45, 0.45, 0.5);
-    let control_text_style = LayoutTextStyle::new(CONTROL_FONT_SIZE);
-    let arrow_style = LayoutTextStyle::new(CONTROL_ARROW_SIZE);
-    let title_style = LayoutTextStyle::new(CONTROL_TITLE_FONT_SIZE);
+    let control_text_style = TextStyle::new(CONTROL_FONT_SIZE);
+    let arrow_style = TextStyle::new(CONTROL_ARROW_SIZE);
+    let title_style = TextStyle::new(CONTROL_TITLE_FONT_SIZE);
     let row_height = Sizing::fixed(CONTROL_ROW_HEIGHT);
     let dim_color = Color::srgba(0.6, 0.6, 0.6, 0.8);
 
@@ -710,7 +710,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
                 |b| {
                     // Title slot.
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", LayoutTextStyle::new(FONT_SIZE));
+                        b.text("STATUS", TextStyle::new(FONT_SIZE));
                     });
                     // Grow spacer.
                     b.with(
@@ -724,7 +724,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("DIEGETIC LAYOUT", LayoutTextStyle::new(SUBTITLE_FONT_SIZE));
+                            b.text("DIEGETIC LAYOUT", TextStyle::new(SUBTITLE_FONT_SIZE));
                         },
                     );
                 },
@@ -766,12 +766,12 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32)
                                 .height(Sizing::FIT)
                                 .direction(Direction::LeftToRight),
                             |b| {
-                                b.text(label, LayoutTextStyle::new(FONT_SIZE));
+                                b.text(label, TextStyle::new(FONT_SIZE));
                                 b.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
                                     |_| {},
                                 );
-                                b.text(value, LayoutTextStyle::new(FONT_SIZE));
+                                b.text(value, TextStyle::new(FONT_SIZE));
                             },
                         );
                     }
@@ -783,7 +783,7 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32)
                     );
 
                     // Word-wrap cell.
-                    b.text(WRAP_TEXT, LayoutTextStyle::new(FONT_SIZE));
+                    b.text(WRAP_TEXT, TextStyle::new(FONT_SIZE));
                 },
             );
         },

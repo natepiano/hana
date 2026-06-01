@@ -26,10 +26,10 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
@@ -287,7 +287,7 @@ fn build_status_panel(text: &str) -> LayoutTree {
         |b| {
             b.text(
                 text,
-                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                TextStyle::new(OVERLAY_FONT_SIZE)
                     .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
                     .with_shadow_mode(GlyphShadowMode::None),
             );
@@ -310,13 +310,13 @@ fn build_controls_panel() -> LayoutTree {
         |b| {
             b.text(
                 "'+' add  '-' remove",
-                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                TextStyle::new(OVERLAY_FONT_SIZE)
                     .with_color(Color::srgba(1.0, 1.0, 1.0, 0.7))
                     .with_shadow_mode(GlyphShadowMode::None),
             );
             b.text(
                 "(hold to accelerate)",
-                LayoutTextStyle::new(OVERLAY_FONT_SIZE)
+                TextStyle::new(OVERLAY_FONT_SIZE)
                     .with_color(Color::srgba(1.0, 1.0, 1.0, 0.5))
                     .with_shadow_mode(GlyphShadowMode::None),
             );
@@ -661,8 +661,7 @@ fn build_panel_tree(
                         if is_first {
                             b.text(
                                 "'+' add  '-' remove",
-                                LayoutTextStyle::new(FONT_SIZE)
-                                    .with_shadow_mode(GlyphShadowMode::None),
+                                TextStyle::new(FONT_SIZE).with_shadow_mode(GlyphShadowMode::None),
                             );
                             b.with(
                                 El::new()
@@ -682,7 +681,7 @@ fn build_panel_tree(
                             let color = Color::hsl(hue, 1.0, 0.7);
                             let label = format!("item {i}:");
                             let value = words[i % words.len()];
-                            let config = LayoutTextStyle::new(FONT_SIZE)
+                            let config = TextStyle::new(FONT_SIZE)
                                 .with_color(color)
                                 .with_shadow_mode(GlyphShadowMode::None);
                             b.with(

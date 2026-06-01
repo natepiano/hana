@@ -161,9 +161,9 @@ pub fn create_parley_measurer(
 )]
 mod tests {
     use super::create_parley_measurer;
-    use crate::LayoutTextStyle;
     use crate::MeasureTextFn;
     use crate::TextMeasure;
+    use crate::TextStyle;
     use crate::text::FontRegistry;
 
     fn measurer() -> MeasureTextFn {
@@ -171,7 +171,7 @@ mod tests {
         create_parley_measurer(font_registry.font_context(), font_registry.family_names())
     }
 
-    fn default_measure(size: f32) -> TextMeasure { LayoutTextStyle::new(size).as_measure() }
+    fn default_measure(size: f32) -> TextMeasure { TextStyle::new(size).as_measure() }
 
     #[test]
     fn measures_nonzero_dimensions() {
@@ -272,7 +272,7 @@ mod tests {
     fn bold_text_is_at_least_as_wide() {
         let measure = measurer();
         let normal = measure("Hello", &default_measure(16.0));
-        let bold_measure = LayoutTextStyle::new(16.0).bold().as_measure();
+        let bold_measure = TextStyle::new(16.0).bold().as_measure();
         let bold = measure("Hello", &bold_measure);
         assert!(
             bold.width >= normal.width - 0.5,

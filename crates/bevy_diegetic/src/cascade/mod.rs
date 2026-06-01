@@ -59,7 +59,7 @@
 //! component per attribute. An entity holds at most one of any component, so
 //! "two sources for one attribute on one node" has no representation and no
 //! exclusion marker is needed. Node *kind* (standalone / panel / label) is
-//! carried by the `TextContent` / `DiegeticPanel` / `PanelChild` markers and
+//! carried by the `TextContent` / `DiegeticPanel` / `PanelTextChild` markers and
 //! selects which render system draws the entity — orthogonal to the cascade.
 //!
 //! # Write paths
@@ -99,7 +99,7 @@
 //! whether the old plain accessors are deleted or kept as typed-verb sugar, and
 //! migrate callers. Text alpha is the worked example: standalone entities use
 //! `override_text_alpha`, while panel labels capture
-//! `LayoutTextStyle::with_alpha_mode` and insert `Override<TextAlpha>`.
+//! `TextStyle::with_alpha_mode` and insert `Override<TextAlpha>`.
 
 mod attributes;
 mod cascade_set;

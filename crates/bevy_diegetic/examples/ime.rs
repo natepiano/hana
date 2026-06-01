@@ -28,10 +28,10 @@ use bevy_diegetic::ImeStarted;
 use bevy_diegetic::ImeTarget;
 use bevy_diegetic::ImeValueRevision;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use fairy_dust::Face;
 use fairy_dust::OrbitCam;
 use fairy_dust::TitleBar;
@@ -231,15 +231,13 @@ fn editable_text_tree(builder: &mut LayoutBuilder, state: &EditableTextState) {
         if state.mode == EditMode::Idle {
             builder.text(
                 state.text.as_str(),
-                LayoutTextStyle::new(TEXT_SIZE)
-                    .with_color(TEXT_COLOR)
-                    .no_wrap(),
+                TextStyle::new(TEXT_SIZE).with_color(TEXT_COLOR).no_wrap(),
             );
         }
         if let Some(error) = &state.error {
             builder.text(
                 error.as_str(),
-                LayoutTextStyle::new(WARNING_SIZE).with_color(WARNING),
+                TextStyle::new(WARNING_SIZE).with_color(WARNING),
             );
         }
     });

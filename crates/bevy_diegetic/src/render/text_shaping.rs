@@ -18,13 +18,13 @@ use parley::style::LineHeight;
 use parley::style::StyleProperty;
 
 use crate::layout::FontSlant;
-use crate::layout::LayoutTextStyle;
 use crate::layout::LineMetricsSnapshot;
 use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
 use crate::layout::ShapedTextCache;
 use crate::layout::ShapedTextRun;
 use crate::layout::TextDimensions;
+use crate::layout::TextStyle;
 use crate::text::DEFAULT_FAMILY;
 use crate::text::FontId;
 use crate::text::FontRegistry;
@@ -130,7 +130,7 @@ pub(super) fn positioned_glyphs<'a>(
 /// Runs parley text shaping, using the cache when possible.
 pub(super) fn shape_text_cached(
     text: &str,
-    config: &LayoutTextStyle,
+    config: &TextStyle,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
@@ -172,7 +172,7 @@ pub(super) fn shape_text_cached(
     shaped_text_run
 }
 
-fn apply_text_style(builder: &mut RangedBuilder<'_, ()>, config: &LayoutTextStyle, family: &str) {
+fn apply_text_style(builder: &mut RangedBuilder<'_, ()>, config: &TextStyle, family: &str) {
     builder.push_default(StyleProperty::FontSize(config.size()));
     builder.push_default(StyleProperty::FontFamily(parley::style::FontFamily::named(
         family,
@@ -283,7 +283,7 @@ fn append_run_glyphs(
     }
 }
 
-fn text_dimensions(layout: &Layout<()>, config: &LayoutTextStyle) -> TextDimensions {
+fn text_dimensions(layout: &Layout<()>, config: &TextStyle) -> TextDimensions {
     TextDimensions {
         width:       layout.full_width(),
         height:      layout.height(),

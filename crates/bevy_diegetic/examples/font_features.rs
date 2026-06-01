@@ -22,10 +22,10 @@ use bevy_diegetic::FontFeatureFlags;
 use bevy_diegetic::FontFeatures;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_window_manager::WindowManagerPlugin;
@@ -323,7 +323,7 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
         |b| {
             b.text(
                 "Font Features",
-                LayoutTextStyle::new(SECTION_SIZE + 4.0).with_color(section_color),
+                TextStyle::new(SECTION_SIZE + 4.0).with_color(section_color),
             );
 
             let serif_font = serif_font_id.unwrap_or(0);
@@ -473,18 +473,18 @@ fn build_feature_column(
         FontFeatures::new()
     };
 
-    let on_config = LayoutTextStyle::new(SAMPLE_SIZE)
+    let on_config = TextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(on_color)
         .with_font_features(on_features);
 
-    let off_config = LayoutTextStyle::new(SAMPLE_SIZE)
+    let off_config = TextStyle::new(SAMPLE_SIZE)
         .with_font(font_id)
         .with_color(off_color)
         .with_font_features(off_features);
 
-    let label_config = LayoutTextStyle::new(ON_OFF_SIZE).with_color(label_color);
-    let font_name_config = LayoutTextStyle::new(FONT_NAME_SIZE)
+    let label_config = TextStyle::new(ON_OFF_SIZE).with_color(label_color);
+    let font_name_config = TextStyle::new(FONT_NAME_SIZE)
         .with_font(font_id)
         .with_color(label_color);
 
@@ -507,7 +507,7 @@ fn build_feature_column(
                 |b| {
                     b.text(
                         title,
-                        LayoutTextStyle::new(SECTION_SIZE).with_color(section_color),
+                        TextStyle::new(SECTION_SIZE).with_color(section_color),
                     );
                     b.with(
                         El::new()
@@ -530,9 +530,9 @@ fn build_feature_column(
 fn build_sample_rows(
     b: &mut LayoutBuilder,
     samples: &[&str],
-    label_config: &LayoutTextStyle,
-    on_config: &LayoutTextStyle,
-    off_config: &LayoutTextStyle,
+    label_config: &TextStyle,
+    on_config: &TextStyle,
+    off_config: &TextStyle,
 ) {
     b.with(
         El::new()

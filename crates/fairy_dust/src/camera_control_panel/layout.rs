@@ -6,10 +6,10 @@ use bevy_diegetic::Border;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::ZoomDirection;
@@ -50,16 +50,12 @@ fn build_guidance_layout(
     display: CameraGuidanceDisplay,
     background: Color,
 ) {
-    let title = LayoutTextStyle::new(TITLE_SIZE)
-        .with_color(TITLE_COLOR)
-        .no_wrap();
-    let header = LayoutTextStyle::new(LABEL_SIZE)
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
+    let header = TextStyle::new(LABEL_SIZE)
         .with_color(HEADER_COLOR)
         .no_wrap();
-    let label = LayoutTextStyle::new(LABEL_SIZE)
-        .with_color(LABEL_COLOR)
-        .no_wrap();
-    let active = LayoutTextStyle::new(LABEL_SIZE)
+    let label = TextStyle::new(LABEL_SIZE).with_color(LABEL_COLOR).no_wrap();
+    let active = TextStyle::new(LABEL_SIZE)
         .with_color(ACTIVE_COLOR)
         .no_wrap();
 
@@ -93,8 +89,8 @@ fn build_guidance_table(
     builder: &mut LayoutBuilder,
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
-    label: &LayoutTextStyle,
-    active: &LayoutTextStyle,
+    label: &TextStyle,
+    active: &TextStyle,
 ) {
     let speeds: Vec<ControlSpeed> = [ControlSpeed::Normal, ControlSpeed::Slow]
         .into_iter()
@@ -140,8 +136,8 @@ fn build_speed_block(
     speed: ControlSpeed,
     speed_column: SpeedColumn,
     display: CameraGuidanceDisplay,
-    label: &LayoutTextStyle,
-    active: &LayoutTextStyle,
+    label: &TextStyle,
+    active: &TextStyle,
 ) {
     builder.with(
         El::new()
@@ -218,8 +214,8 @@ fn build_action_row(
     snapshot: &CameraGuidanceSnapshot,
     group: (OrbitCamInteractionKind, ControlSpeed, Option<ZoomDirection>),
     display: CameraGuidanceDisplay,
-    label: &LayoutTextStyle,
-    active: &LayoutTextStyle,
+    label: &TextStyle,
+    active: &TextStyle,
 ) {
     let (kind, speed, direction) = group;
     let active_sources = display.sources(kind);

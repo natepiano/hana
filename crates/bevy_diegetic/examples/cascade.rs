@@ -33,7 +33,6 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::FontUnit;
 use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
@@ -41,6 +40,7 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::TextContent;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::default_panel_material;
@@ -395,19 +395,19 @@ fn build_hud_panel() -> Result<DiegeticPanel, InvalidSize> {
 }
 
 fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: Option<&HudSnapshot>) {
-    let title = LayoutTextStyle::new(PANEL_TITLE_SIZE)
+    let title = TextStyle::new(PANEL_TITLE_SIZE)
         .with_color(HUD_HEADER_COLOR)
         .no_wrap();
-    let inherited = LayoutTextStyle::new(PANEL_TEXT_SIZE)
+    let inherited = TextStyle::new(PANEL_TEXT_SIZE)
         .with_color(INHERITED_COLOR)
         .no_wrap();
-    let mut own = LayoutTextStyle::new(PANEL_TEXT_SIZE)
+    let mut own = TextStyle::new(PANEL_TEXT_SIZE)
         .with_color(OVERRIDE_COLOR)
         .no_wrap();
     if snapshot.is_none_or(|snapshot| snapshot.state.label_alpha.is_override()) {
         own = own.with_alpha_mode(LABEL_ALPHA);
     }
-    let unit = LayoutTextStyle::new(PANEL_TEXT_SIZE)
+    let unit = TextStyle::new(PANEL_TEXT_SIZE)
         .with_color(DEFAULT_COLOR)
         .no_wrap();
     let inherited_text = snapshot.map_or_else(
@@ -602,13 +602,13 @@ struct HudPanel;
 
 fn build_hud_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    let header = LayoutTextStyle::new(LABEL_SIZE)
+    let header = TextStyle::new(LABEL_SIZE)
         .with_color(HUD_HEADER_COLOR)
         .no_wrap();
-    let control_key = LayoutTextStyle::new(LABEL_SIZE)
+    let control_key = TextStyle::new(LABEL_SIZE)
         .with_color(HUD_KEY_COLOR)
         .no_wrap();
-    let control_text = LayoutTextStyle::new(LABEL_SIZE)
+    let control_text = TextStyle::new(LABEL_SIZE)
         .with_color(HUD_CONTROL_COLOR)
         .no_wrap();
 
@@ -651,9 +651,9 @@ fn build_hud_card(builder: &mut LayoutBuilder, build: impl FnOnce(&mut LayoutBui
 fn build_controls_table(
     builder: &mut LayoutBuilder,
     snapshot: &HudSnapshot,
-    header: &LayoutTextStyle,
-    control_key: &LayoutTextStyle,
-    control_text: &LayoutTextStyle,
+    header: &TextStyle,
+    control_key: &TextStyle,
+    control_text: &TextStyle,
 ) {
     builder.with(
         El::new()
@@ -720,8 +720,8 @@ fn controls_row(
     key: &str,
     label: &str,
     value: &str,
-    key_style: &LayoutTextStyle,
-    text_style: &LayoutTextStyle,
+    key_style: &TextStyle,
+    text_style: &TextStyle,
 ) {
     builder.with(
         El::new()

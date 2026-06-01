@@ -9,9 +9,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 
 use super::constants::CONTROL_ACTIVE_COLOR;
 use super::constants::CONTROL_INACTIVE_COLOR;
@@ -347,9 +347,9 @@ fn build_title_bar_layout(
     title_bar: &TitleBar,
     state: &TitleBarControlState,
 ) {
-    let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let inactive_control = LayoutTextStyle::new(LABEL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
-    let active_control = LayoutTextStyle::new(LABEL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
+    let inactive_control = TextStyle::new(LABEL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
+    let active_control = TextStyle::new(LABEL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
 
     let background = title_bar
         .background_color

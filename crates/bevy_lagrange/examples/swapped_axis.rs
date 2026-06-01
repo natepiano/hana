@@ -37,11 +37,11 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
@@ -509,9 +509,9 @@ struct EnginePanel;
 /// The three text styles the panel draws with: a column header, an active
 /// (highlighted) chip, and an inactive chip.
 struct ColumnStyles {
-    header:   LayoutTextStyle,
-    active:   LayoutTextStyle,
-    inactive: LayoutTextStyle,
+    header:   TextStyle,
+    active:   TextStyle,
+    inactive: TextStyle,
 }
 
 fn spawn_engine_panel(mut commands: Commands, engine: Res<Engine>) {
@@ -555,13 +555,11 @@ fn build_engine_tree(selected: Engine) -> LayoutTree {
 
 fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
     let styles = ColumnStyles {
-        header:   LayoutTextStyle::new(LABEL_SIZE)
-            .with_color(TITLE_COLOR)
-            .no_wrap(),
-        active:   LayoutTextStyle::new(LABEL_SIZE)
+        header:   TextStyle::new(LABEL_SIZE).with_color(TITLE_COLOR).no_wrap(),
+        active:   TextStyle::new(LABEL_SIZE)
             .with_color(PANEL_ACTIVE_COLOR)
             .no_wrap(),
-        inactive: LayoutTextStyle::new(LABEL_SIZE)
+        inactive: TextStyle::new(LABEL_SIZE)
             .with_color(PANEL_INACTIVE_COLOR)
             .no_wrap(),
     };

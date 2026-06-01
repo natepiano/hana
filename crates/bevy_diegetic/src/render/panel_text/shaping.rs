@@ -9,9 +9,8 @@ use super::PanelTextLayout;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
-use crate::layout::LayoutTextStyle;
 use crate::layout::ShapedTextCache;
-use crate::layout::WorldTextStyle;
+use crate::layout::TextStyle;
 use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
 use crate::render::text_shaping;
@@ -34,12 +33,12 @@ pub(super) fn shape_panel_text_children(
             With<TextContent>,
             Or<(
                 Changed<TextContent>,
-                Changed<WorldTextStyle>,
+                Changed<TextStyle>,
                 Changed<PanelTextLayout>,
             )>,
         ),
     >,
-    texts: Query<(&TextContent, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
+    texts: Query<(&TextContent, &TextStyle, &PanelTextLayout, &ChildOf)>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,
@@ -116,7 +115,7 @@ fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
 
 fn build_panel_text(
     text: &str,
-    config: &LayoutTextStyle,
+    config: &TextStyle,
     placement: &QuadPlacement,
     backend: &mut GlyphCache,
     font_registry: &FontRegistry,

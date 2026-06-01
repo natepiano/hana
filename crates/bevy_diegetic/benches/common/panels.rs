@@ -5,10 +5,10 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use clay_layout::ClayLayoutScope;
 use clay_layout::Declaration;
@@ -288,7 +288,7 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
                         |builder| {
                             builder.text(
                                 "STATUS",
-                                LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
+                                TextStyle::new(FONT_SIZE).with_color(style.text_color),
                             );
                         },
                     );
@@ -304,7 +304,7 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
                         |builder| {
                             builder.text(
                                 "BENCH",
-                                LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
+                                TextStyle::new(FONT_SIZE).with_color(style.text_color),
                             );
                         },
                     );
@@ -341,7 +341,7 @@ fn build_diegetic_body(
                             |builder| {
                                 builder.text(
                                     *label,
-                                    LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
+                                    TextStyle::new(FONT_SIZE).with_color(style.text_color),
                                 );
                                 builder.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -349,7 +349,7 @@ fn build_diegetic_body(
                                 );
                                 builder.text(
                                     *value,
-                                    LayoutTextStyle::new(FONT_SIZE).with_color(style.text_color),
+                                    TextStyle::new(FONT_SIZE).with_color(style.text_color),
                                 );
                             },
                         );

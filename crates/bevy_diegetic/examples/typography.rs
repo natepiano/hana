@@ -24,7 +24,6 @@ use bevy_diegetic::FontId;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::OverlayBoundingBox;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
@@ -32,9 +31,9 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextContent;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -444,7 +443,7 @@ fn build_font_key_cells(selected_font: usize) -> Vec<ColumnCell<'static>> {
         .map(|(idx, (label, _, _))| {
             ColumnCell::Text(
                 label,
-                LayoutTextStyle::new(Pt(12.0)).with_color(row_color(idx == selected_font)),
+                TextStyle::new(Pt(12.0)).with_color(row_color(idx == selected_font)),
             )
         })
         .collect()
@@ -464,7 +463,7 @@ fn build_font_name_cells(
                 .0;
             ColumnCell::Text(
                 name,
-                LayoutTextStyle::new(Pt(12.0))
+                TextStyle::new(Pt(12.0))
                     .with_font(font_id)
                     .with_color(row_color(idx == selected_font)),
             )
@@ -519,8 +518,7 @@ fn build_fonts_panel(
                         |b| {
                             b.text(
                                 "FONTS",
-                                LayoutTextStyle::new(fairy_dust::TITLE_SIZE)
-                                    .with_color(HUD_TITLE_COLOR),
+                                TextStyle::new(fairy_dust::TITLE_SIZE).with_color(HUD_TITLE_COLOR),
                             );
                             b.with(
                                 El::new()
@@ -565,7 +563,7 @@ fn build_fonts_panel(
 
 /// Cell content for a column.
 enum ColumnCell<'a> {
-    Text(&'a str, LayoutTextStyle),
+    Text(&'a str, TextStyle),
 }
 
 /// Builds a column of fixed-height rows.
@@ -682,7 +680,7 @@ fn switch_font(
     font_registry: Res<FontRegistry>,
     mut selected_font: ResMut<SelectedFont>,
     panels: Query<Entity, With<FontsPanel>>,
-    mut texts: Query<&mut WorldTextStyle, With<DisplayText>>,
+    mut texts: Query<&mut TextStyle, With<DisplayText>>,
     mut commands: Commands,
 ) {
     let pressed = FONT_KEYS
@@ -698,7 +696,7 @@ fn switch_font(
         .unwrap_or(FontId::MONOSPACE)
         .0;
     for mut style in &mut texts {
-        *style = WorldTextStyle::new(DISPLAY_SIZE)
+        *style = TextStyle::new(DISPLAY_SIZE)
             .with_font(font_id)
             .with_color(Color::srgb(0.9, 0.9, 0.9));
     }

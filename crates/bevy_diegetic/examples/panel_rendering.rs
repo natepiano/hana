@@ -21,7 +21,6 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
@@ -29,6 +28,7 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToU8;
 use bevy_lagrange::OrbitCam;
@@ -574,22 +574,22 @@ fn build_preset_panel_tree(preset: LightingPreset) -> LayoutTree {
 }
 
 fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset) {
-    let title = LayoutTextStyle::new(TITLE_SIZE)
+    let title = TextStyle::new(TITLE_SIZE)
         .with_color(PRESET_TITLE_COLOR)
         .no_wrap();
-    let header = LayoutTextStyle::new(LABEL_SIZE)
+    let header = TextStyle::new(LABEL_SIZE)
         .with_color(PRESET_HEADER_COLOR)
         .no_wrap();
-    let key_active = LayoutTextStyle::new(LABEL_SIZE)
+    let key_active = TextStyle::new(LABEL_SIZE)
         .with_color(PRESET_ACTIVE_COLOR)
         .no_wrap();
-    let key_inactive = LayoutTextStyle::new(LABEL_SIZE)
+    let key_inactive = TextStyle::new(LABEL_SIZE)
         .with_color(PRESET_INACTIVE_COLOR)
         .no_wrap();
-    let body_active = LayoutTextStyle::new(LABEL_SIZE)
+    let body_active = TextStyle::new(LABEL_SIZE)
         .with_color(PRESET_ACTIVE_COLOR)
         .no_wrap();
-    let body_inactive = LayoutTextStyle::new(LABEL_SIZE)
+    let body_inactive = TextStyle::new(LABEL_SIZE)
         .with_color(PRESET_INACTIVE_COLOR)
         .no_wrap();
 
@@ -628,9 +628,9 @@ fn build_preset_row(
     key: &str,
     material: &str,
     lights: &str,
-    key_style: &LayoutTextStyle,
-    material_style: &LayoutTextStyle,
-    lights_style: &LayoutTextStyle,
+    key_style: &TextStyle,
+    material_style: &TextStyle,
+    lights_style: &TextStyle,
 ) {
     builder.with(
         El::new()
@@ -678,8 +678,8 @@ fn panel_divider(builder: &mut LayoutBuilder) {
 }
 
 fn build_backgrounds_panel() -> LayoutTree {
-    let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
-    let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
+    let title_style = TextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
+    let body_style = TextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
 
     let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
     build_card_backgrounds(&mut builder, &title_style, &body_style);
@@ -687,8 +687,8 @@ fn build_backgrounds_panel() -> LayoutTree {
 }
 
 fn build_borders_panel() -> LayoutTree {
-    let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
-    let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
+    let title_style = TextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
+    let body_style = TextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
 
     let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
     build_card_borders(&mut builder, &title_style, &body_style);
@@ -696,19 +696,15 @@ fn build_borders_panel() -> LayoutTree {
 }
 
 fn build_combined_panel() -> LayoutTree {
-    let title_style = LayoutTextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
-    let body_style = LayoutTextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
+    let title_style = TextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
+    let body_style = TextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
 
     let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
     build_card_combined(&mut builder, &title_style, &body_style);
     builder.build()
 }
 
-fn build_card_backgrounds(
-    b: &mut LayoutBuilder,
-    title_style: &LayoutTextStyle,
-    body_style: &LayoutTextStyle,
-) {
+fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
         El::new()
             .direction(Direction::TopToBottom)
@@ -779,11 +775,7 @@ fn build_card_backgrounds(
     );
 }
 
-fn build_card_borders(
-    b: &mut LayoutBuilder,
-    title_style: &LayoutTextStyle,
-    body_style: &LayoutTextStyle,
-) {
+fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
         El::new()
             .direction(Direction::TopToBottom)
@@ -835,11 +827,7 @@ fn build_card_borders(
     );
 }
 
-fn build_card_combined(
-    b: &mut LayoutBuilder,
-    title_style: &LayoutTextStyle,
-    body_style: &LayoutTextStyle,
-) {
+fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
         El::new()
             .direction(Direction::TopToBottom)

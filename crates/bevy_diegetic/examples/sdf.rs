@@ -37,11 +37,11 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::FontId;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_lagrange::AnimateToFit;
@@ -334,10 +334,10 @@ fn spawn_controls_panel(commands: &mut Commands) {
 }
 
 fn build_controls_panel() -> bevy_diegetic::LayoutTree {
-    let title = LayoutTextStyle::new(CONTROLS_TITLE_SIZE)
+    let title = TextStyle::new(CONTROLS_TITLE_SIZE)
         .with_font(FontId::MONOSPACE.0)
         .with_color(CONTROLS_TITLE_COLOR);
-    let hint = LayoutTextStyle::new(CONTROLS_HINT_SIZE)
+    let hint = TextStyle::new(CONTROLS_HINT_SIZE)
         .with_font(FontId::MONOSPACE.0)
         .with_color(CONTROLS_HINT_COLOR);
 
@@ -414,13 +414,13 @@ fn hud_separator(b: &mut LayoutBuilder) {
 }
 
 fn build_camera_help(b: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(CAM_HELP_TITLE_SIZE)
+    let title = TextStyle::new(CAM_HELP_TITLE_SIZE)
         .with_font(FontId::MONOSPACE.0)
         .with_color(CONTROLS_TITLE_COLOR);
-    let header = LayoutTextStyle::new(CAM_HELP_HEADER_SIZE)
+    let header = TextStyle::new(CAM_HELP_HEADER_SIZE)
         .with_font(FontId::MONOSPACE.0)
         .with_color(CAMERA_HEADER_COLOR);
-    let label = LayoutTextStyle::new(CAM_HELP_LABEL_SIZE)
+    let label = TextStyle::new(CAM_HELP_LABEL_SIZE)
         .with_font(FontId::MONOSPACE.0)
         .with_color(CONTROLS_HINT_COLOR);
 

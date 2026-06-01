@@ -162,7 +162,6 @@ pub use layout::HasUnit;
 pub use layout::In;
 pub use layout::InvalidSize;
 pub use layout::LayoutBuilder;
-pub use layout::LayoutTextStyle;
 pub use layout::LayoutTree;
 /// Function signature for custom text measurement. Takes a text string and
 /// a [`TextMeasure`] describing the font configuration, returns
@@ -187,7 +186,6 @@ pub use layout::TextMeasure;
 pub use layout::TextStyle;
 pub use layout::TextWrap;
 pub use layout::Unit;
-pub use layout::WorldTextStyle;
 pub use panel::AnyUnit;
 pub use panel::CompatibleUnits;
 pub use panel::ComputedDiegeticPanel;

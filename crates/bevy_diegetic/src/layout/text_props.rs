@@ -164,16 +164,6 @@ pub enum GlyphLighting {
 
 // ── TextStyle ────────────────────────────────────────────────────────────────
 
-/// Transitional alias for layout-engine text styling.
-///
-/// Collapsed onto the unified [`TextStyle`]; kept while call sites are renamed.
-pub type LayoutTextStyle = TextStyle;
-
-/// Transitional alias for standalone text styling.
-///
-/// Collapsed onto the unified [`TextStyle`]; kept while call sites are renamed.
-pub type WorldTextStyle = TextStyle;
-
 /// Unified text styling for both layout (panel) text and standalone world text.
 ///
 /// One struct carries every typography, wrap-mode, and render field. Layout and

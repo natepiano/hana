@@ -35,7 +35,6 @@ use crate::DiegeticTextMeasurer;
 use crate::Direction;
 use crate::El;
 use crate::LayoutBuilder;
-use crate::LayoutTextStyle;
 use crate::LayoutTree;
 use crate::Padding;
 use crate::PanelFieldId;
@@ -43,6 +42,7 @@ use crate::PanelFieldRecord;
 use crate::Px;
 use crate::Sizing;
 use crate::TextMeasure;
+use crate::TextStyle;
 use crate::Unit;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
@@ -652,7 +652,7 @@ fn caret_prefix_text(snapshot: &ImeBufferSnapshot) -> Cow<'_, str> {
 
 fn editor_text_measure() -> TextMeasure { editor_text_style().as_measure() }
 
-fn editor_text_style() -> LayoutTextStyle { LayoutTextStyle::new(EDITOR_FONT_SIZE).no_wrap() }
+fn editor_text_style() -> TextStyle { TextStyle::new(EDITOR_FONT_SIZE).no_wrap() }
 
 fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(

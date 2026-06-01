@@ -23,11 +23,11 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
@@ -243,10 +243,10 @@ fn fit_camera_on_start(
 /// Each padding side is labeled with its unit. Inner content shows
 /// `child_gap` and fixed sizing.
 fn build_demo() -> bevy_diegetic::LayoutTree {
-    let code = LayoutTextStyle::new(Pt(7.0)).with_color(CODE_COLOR);
-    let label = LayoutTextStyle::new(Pt(6.0)).with_color(LABEL_COLOR);
-    let pad_label = LayoutTextStyle::new(Pt(5.5)).with_color(PAD_LABEL_COLOR);
-    let text = LayoutTextStyle::new(Pt(10.0)).with_color(SAMPLE_COLOR);
+    let code = TextStyle::new(Pt(7.0)).with_color(CODE_COLOR);
+    let label = TextStyle::new(Pt(6.0)).with_color(LABEL_COLOR);
+    let pad_label = TextStyle::new(Pt(5.5)).with_color(PAD_LABEL_COLOR);
+    let text = TextStyle::new(Pt(10.0)).with_color(SAMPLE_COLOR);
 
     let mut builder = LayoutBuilder::new(DEMO_WIDTH, DEMO_HEIGHT);
 
@@ -327,7 +327,7 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
 /// Commentary panel.
 fn build_commentary() -> bevy_diegetic::LayoutTree {
     let note_color = Color::srgba(0.72, 0.72, 0.72, 0.95);
-    let note = LayoutTextStyle::new(Pt(NOTE_FONT)).with_color(note_color);
+    let note = TextStyle::new(Pt(NOTE_FONT)).with_color(note_color);
 
     let mut builder = LayoutBuilder::new(NOTE_WIDTH, NOTE_HEIGHT);
     builder.with(

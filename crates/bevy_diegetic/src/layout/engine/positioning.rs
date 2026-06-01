@@ -10,8 +10,8 @@ use crate::layout::AlignY;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
-use crate::layout::LayoutTextStyle;
 use crate::layout::TextAlign;
+use crate::layout::TextStyle;
 use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
@@ -123,7 +123,7 @@ fn emit_down_traversal_commands(
 fn emit_text_commands(
     commands: &mut Vec<RenderCommand>,
     wrapped: Option<&WrappedText>,
-    config: &LayoutTextStyle,
+    config: &TextStyle,
     text: &str,
     bounds: BoundingBox,
     index: usize,

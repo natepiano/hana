@@ -3,7 +3,7 @@ use bevy::prelude::Component;
 use crate::layout::BoundingBox;
 
 /// Layout payload for a panel-text child (a [`TextContent`](crate::TextContent)
-/// entity also marked [`PanelChild`](crate::render::world_text::PanelChild)).
+/// entity also marked [`PanelTextChild`](crate::render::world_text::PanelTextChild)).
 ///
 /// Stores the layout-computed bounding box and panel scale factors needed to
 /// build panel-local glyph meshes.

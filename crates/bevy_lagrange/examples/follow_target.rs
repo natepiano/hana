@@ -21,11 +21,11 @@ use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCam;
@@ -316,7 +316,7 @@ fn build_story_panel_tree(lines: &'static [&'static str]) -> LayoutTree {
             .clip(),
     );
 
-    let text = LayoutTextStyle::new(FACE_PANEL_TEXT_SIZE)
+    let text = TextStyle::new(FACE_PANEL_TEXT_SIZE)
         .with_color(FACE_PANEL_COLOR)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);

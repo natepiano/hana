@@ -74,7 +74,7 @@ Pipeline for one update:
    → `ComputedDiegeticPanel` marked `Changed`.
 2. `reconcile_panel_text_children` (`reconcile.rs:96-131`) reuses the
    `PanelChild` entities by `(element_idx, command_index)` — good — but
-   **unconditionally re-inserts** `WorldText` / `WorldTextStyle` /
+   **unconditionally re-inserts** `WorldText` / `TextStyle` /
    `PanelTextLayout` on every child → all marked `Changed`.
 3. `shape_panel_text_children` processes every changed child and re-inserts
    `PanelText` on all → all `Changed<PanelText>`.
@@ -103,12 +103,12 @@ full-panel buffer re-upload on every update.
 
 ### Edit 1 — gate reconcile with conditional writes (`reconcile.rs`)
 
-- Widen the `existing_children` query to read `&WorldText`, `&WorldTextStyle`,
+- Widen the `existing_children` query to read `&WorldText`, `&TextStyle`,
   `&PanelTextLayout`.
 - On a reused child, compare incoming vs current and write only when something
   differs:
   - `WorldText` — compare `.text()`.
-  - `WorldTextStyle` (`= TextProps<ForStandalone>`) — has a manual `PartialEq`
+  - `TextStyle` (`= TextProps<ForStandalone>`) — has a manual `PartialEq`
     (`text_props.rs:224`).
   - `PanelTextLayout` — add `#[derive(PartialEq)]` (and to `BoundingBox` if it
     lacks one).
@@ -148,7 +148,7 @@ them → no `Changed<PanelText>`.
 ### Edit 2b — same alpha short-circuit on the world-text path
 
 `render_world_text` (`render/world_text/mod.rs:36-40`) triggers on
-`Or<(Changed<WorldText>, Changed<WorldTextStyle>, Changed<Resolved<TextAlpha>>,
+`Or<(Changed<WorldText>, Changed<TextStyle>, Changed<Resolved<TextAlpha>>,
 Changed<Resolved<FontUnit>>)>` and rebuilds the full mesh + buffers — including
 on an alpha-only change. Alpha only affects the material's `alpha_mode`; the
 glyph mesh and the three buffers are alpha-independent. Apply the same
@@ -327,7 +327,7 @@ frequently; lower priority if updates are rare.
   `build_panel_text_meshes` reads it. Verified safe; state it so a future change
   doesn't break it silently.
 - **M6 — `gating_eq` spans three components (sharpens R1).** The comparator
-  covers `WorldText` (`.text()`), `WorldTextStyle` (metric fields via `to_bits`,
+  covers `WorldText` (`.text()`), `TextStyle` (metric fields via `to_bits`,
   excluding `unit`/`world_scale`), **and** `PanelTextLayout`'s `bounds`/`scale_x`/
   `scale_y`/`anchor_x`/`anchor_y`/`clip_rect` (floats via `to_bits`).
   `command_index` is part of the reuse key `(element_idx, command_index)`, so it
@@ -365,7 +365,7 @@ Cycle 2 reconciled every entry against the code; sharpenings folded in.
   Problem: a derived `PartialEq` on `PanelTextLayout`/`BoundingBox` compares
   `f32`s with `==`, which mishandles `-0.0`/`+0.0` and NaN and diverges from the
   layout layer's own `to_bits()` comparison (`layout_eq_excluding_visuals`,
-  `text_props.rs:472`). And `WorldTextStyle`'s manual `PartialEq`
+  `text_props.rs:472`). And `TextStyle`'s manual `PartialEq`
   (`text_props.rs:224`) compares *more* than the layout decision — it includes
   `unit` and `world_scale`, which are render-context, not measurement inputs —
   so reusing it for gating false-rebuilds on changes the layout layer treats as
@@ -510,7 +510,7 @@ material builder, is already satisfied in this branch — see below.)
 
 ### Phase 1 — `gating_eq` comparator (R1, M6) — Done
 Pure addition, no behavior change (nothing calls it yet).
-- Add a bit-equality `gating_eq` spanning `WorldText.text()`, `WorldTextStyle`
+- Add a bit-equality `gating_eq` spanning `WorldText.text()`, `TextStyle`
   metric fields (via `to_bits`, excluding `unit`/`world_scale`), and
   `PanelTextLayout` `bounds`/`scale_x`/`scale_y`/`anchor_x`/`anchor_y`/`clip_rect`
   (via `to_bits`). Not a derived/manual `PartialEq`.
@@ -593,16 +593,16 @@ and `world_text/mesh_spawning.rs:116` both call it, with `alpha_mode` set on
 Phase numbers below are left stable to avoid churning the cross-references.
 
 ### Phase 3 — gate reconcile (Edit 1, R7) — Done
-- `reconcile_panel_text_children` reads the existing `WorldText`/`WorldTextStyle`/
+- `reconcile_panel_text_children` reads the existing `WorldText`/`TextStyle`/
   `PanelTextLayout` and writes only when `gating_eq` differs; same gate on the
   `Override<TextAlpha>` branch. Note the `(element_idx, command_index)` reorder
   limitation in a comment (R7).
 - Widen the query: `existing_children` is today `Query<(Entity, &PanelTextLayout,
   &ChildOf)>` (`reconcile.rs:25`) and the reused-child path re-inserts
   `(WorldText, style, panel_text_child, PanelChild)` as **one unconditional
-  tuple** (`reconcile.rs:96-101`). Add `&WorldText`/`&WorldTextStyle` to the
+  tuple** (`reconcile.rs:96-101`). Add `&WorldText`/`&TextStyle` to the
   query and split that tuple into conditional per-component writes: `WorldText`
-  by `.text()`, `WorldTextStyle` via `gating_eq`, `PanelTextLayout` via
+  by `.text()`, `TextStyle` via `gating_eq`, `PanelTextLayout` via
   `gating_eq`.
 - **Make the alpha write conditional (required, not optional).** The
   `Override<TextAlpha>` insert/remove (`reconcile.rs:102-118`) runs
@@ -619,7 +619,7 @@ Phase numbers below are left stable to avoid churning the cross-references.
 
 **What worked:**
 - The widened `existing_children` query + a private `ReusableChild<'a>` snapshot
-  struct (holds `&WorldText`/`&WorldTextStyle`/`&PanelTextLayout`/
+  struct (holds `&WorldText`/`&TextStyle`/`&PanelTextLayout`/
   `Option<&Override<TextAlpha>>` borrowed for one pass) let each reused child be
   compared and written component-by-component. The single unconditional
   `(WorldText, style, panel_text_child, PanelChild)` tuple insert is now four
@@ -630,9 +630,9 @@ Phase numbers below are left stable to avoid churning the cross-references.
 - Two integration tests over a real `HeadlessLayoutPlugin` app prove the gate
   with a `Ref`-based change probe chained after reconcile's command flush:
   `unchanged_run_is_not_rewritten_across_a_visual_only_rebuild` (recolor one of
-  two runs → only its `WorldTextStyle` is `Changed`; the byte-identical sibling
+  two runs → only its `TextStyle` is `Changed`; the byte-identical sibling
   is untouched) and `alpha_unchanged_reused_child_keeps_its_override` (recolor a
-  label whose alpha is unchanged → `WorldTextStyle` rewritten, `Override<TextAlpha>`
+  label whose alpha is unchanged → `TextStyle` rewritten, `Override<TextAlpha>`
   not re-touched). Full suite 181 green.
 
 **What deviated from the plan:**
@@ -644,10 +644,10 @@ Phase numbers below are left stable to avoid churning the cross-references.
   added; matches the Phase-1 decision that `WorldText` got no `gating_eq`.
 
 **Surprises:**
-- `WorldTextStyle::gating_eq` excludes `alpha_mode` (Phase-1 decision), so on an
-  alpha-only style change the reused `WorldTextStyle` component keeps its stale
+- `TextStyle::gating_eq` excludes `alpha_mode` (Phase-1 decision), so on an
+  alpha-only style change the reused `TextStyle` component keeps its stale
   `alpha_mode` field — by design: panel-label alpha rides the cascade
-  (`Override`/`Resolved<TextAlpha>`), not `WorldTextStyle.alpha_mode`. Nothing
+  (`Override`/`Resolved<TextAlpha>`), not `TextStyle.alpha_mode`. Nothing
   downstream reads that field for panel children, so the staleness is inert.
 - The change probe relies on a tick-ordering fact: reconcile's `with_child`
   spawns flush at the chained `ApplyDeferred` *before* the probe runs, so an
@@ -682,7 +682,7 @@ applied:
   perf-stat split (geometry system owns `mesh_build_ms`).
 - **Phase 6** — kept narrow (user decision): for standalone world text the only
   runtime alpha signal is the global-default `Changed<Resolved<TextAlpha>>`;
-  `WorldTextStyle.alpha_mode` is spawn-only and opacity rides with `color`.
+  `TextStyle.alpha_mode` is spawn-only and opacity rides with `color`.
   Phase 6 left as scoped, with a note added; the broader per-entity runtime
   blend-mode gap is split off to §10.
 - **Phase 7** — clarified that only `bounds` compares via `to_bits`; `tint`
@@ -892,14 +892,14 @@ Larger than a one-line guard: it mirrors Phase 5's two-signal split, because
 alpha branch — it always re-runs text shaping for the run, then on
 Ready/Invisible/Failed does `clear_run_storage()` + `despawn_mesh_children` +
 respawn, and its trigger already lumps alpha in with the rest
-(`Or<(Changed<WorldText>, Changed<WorldTextStyle>, Changed<Resolved<TextAlpha>>,
+(`Or<(Changed<WorldText>, Changed<TextStyle>, Changed<Resolved<TextAlpha>>,
 Changed<Resolved<FontUnit>>)>`, `mod.rs`).
 - **Scope kept narrow (Phase-3 review, user decision).** For standalone world
   text the *only* runtime alpha signal this short-circuit can fire on is a
   global `CascadeDefault<TextAlpha>` change arriving as
   `Changed<Resolved<TextAlpha>>`; standalone entity overrides now use
   `override_text_alpha` and hit the same alpha-only branch. Opacity rides with
-  `color` through the normal `Changed<WorldTextStyle>` rebuild — not through
+  `color` through the normal `Changed<TextStyle>` rebuild — not through
   this path.
 - **Scope expansion — fix the shared-`GlyphCache` wipe + add a remove-observer
   (Phase-4/5 review, user-approved).** `render_world_text`
@@ -922,7 +922,7 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   value-guarded (R5) — no re-run of text shaping, no `clear_run_storage`, no
   respawn.
 - Keep the full text-shaping re-run + clear + despawn + respawn for `WorldText`
-  / `WorldTextStyle` / `Resolved<FontUnit>` changes. World text is single-run per
+  / `TextStyle` / `Resolved<FontUnit>` changes. World text is single-run per
   entity, so no reparent needed. Depends on the Phase 5 pattern → stays after
   Phase 5.
 - **The value-guard is belt-and-suspenders; the cascade is the real no-op
@@ -949,7 +949,7 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
 - **Invariant (Phase 6–7 review): keep the geometry trigger and the alpha skip
   in sync.** `ChangedWorldTextQuery`'s `Or` (the trigger, duplicated in the
   `mod.rs` wrapper query) and `update_world_text_alpha`'s skip
-  (`WorldText` / `WorldTextStyle` / `Resolved<FontUnit>` `is_changed()`) are
+  (`WorldText` / `TextStyle` / `Resolved<FontUnit>` `is_changed()`) are
   three hand-maintained copies of the same signal set. The both-changed
   coordination — geometry owns the run, alpha no-ops — holds only while they
   match; adding a fourth geometry trigger without adding it to the skip reopens
@@ -959,7 +959,7 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
 - Files: `render/world_text/mod.rs`, `render/world_text/rendering.rs`,
   `render/world_text/mesh_spawning.rs`.
 - Tests: a world-text alpha-only change mutates `base.alpha_mode` and does not
-  respawn the mesh or re-touch run storage; a `WorldText`/`WorldTextStyle`/
+  respawn the mesh or re-touch run storage; a `WorldText`/`TextStyle`/
   `FontUnit` change still rebuilds; an alpha change on an entity with no mesh
   child (empty/pending) is a no-op; a world-text geometry rebuild frees only its
   own run's storage and leaves a co-existing panel run's storage intact (the
@@ -1059,7 +1059,7 @@ touch the wrong copy.
   `TextRenderPlugin` that registers them lives in the sibling `panel_text`
   module — the leaf-module-visibility pattern, matching `WorldTextMesh`.
 - The world-text alpha M7 skip needs three change-signals
-  (`Ref<WorldText>` + `Ref<WorldTextStyle>` + `Option<Ref<Resolved<FontUnit>>>`),
+  (`Ref<WorldText>` + `Ref<TextStyle>` + `Option<Ref<Resolved<FontUnit>>>`),
   not one, because the geometry trigger is a three-way `Or`. Panel text only
   needed `Ref<PanelText>`.
 
@@ -1103,7 +1103,7 @@ caller — all three text-despawn paths route through `On<Remove>` observers, an
 the shared-`GlyphCache` regression test proves the cross-path leak is closed;
 the both-changed coordination is sound on both text paths (geometry owns the
 run, alpha `Option`-guards `get_mut`); §10 stays a correctly-scoped separate
-track, with its gap-3 footgun (spawn-only `WorldTextStyle.alpha_mode`/`.unit`)
+track, with its gap-3 footgun (spawn-only `TextStyle.alpha_mode`/`.unit`)
 reinforced but unchanged by Phase 6.
 
 ---
@@ -1121,35 +1121,35 @@ later effort can design one uniform API.
 
 | Setting | Lives in | Per-entity runtime path | Notes |
 | --- | --- | --- | --- |
-| color (incl. opacity / the alpha channel) | `WorldTextStyle.color` | **yes** — `set_color` (standalone) or `set_tree` (panel label) → `Changed<WorldTextStyle>` rebuild | the renderer reads `style.color()` into the shader fill on each rebuild (`world_text/mesh_spawning.rs:118` → `material.rs:100`) |
-| size / weight / slant / line-height / letter+word spacing / align / anchor / font_features / render_mode / shadow_mode / sidedness / lighting / world_scale | `WorldTextStyle` | **yes** — direct `set_*` setter on standalone or `set_tree` for panel labels | re-read on the `Changed<WorldTextStyle>` rebuild |
-| blend mode (`AlphaMode`) | cascade `TextAlpha` | standalone: `override_text_alpha` / `inherit_text_alpha`; panel: `DiegeticPanel.text_alpha_mode`; labels can use `LayoutTextStyle::with_alpha_mode` | `Override`/`Resolved` stay crate-internal; public callers use typed verbs/readers |
+| color (incl. opacity / the alpha channel) | `TextStyle.color` | **yes** — `set_color` (standalone) or `set_tree` (panel label) → `Changed<TextStyle>` rebuild | the renderer reads `style.color()` into the shader fill on each rebuild (`world_text/mesh_spawning.rs:118` → `material.rs:100`) |
+| size / weight / slant / line-height / letter+word spacing / align / anchor / font_features / render_mode / shadow_mode / sidedness / lighting / world_scale | `TextStyle` | **yes** — direct `set_*` setter on standalone or `set_tree` for panel labels | re-read on the `Changed<TextStyle>` rebuild |
+| blend mode (`AlphaMode`) | cascade `TextAlpha` | standalone: `override_text_alpha` / `inherit_text_alpha`; panel: `DiegeticPanel.text_alpha_mode`; labels can use `TextStyle::with_alpha_mode` | `Override`/`Resolved` stay crate-internal; public callers use typed verbs/readers |
 | font unit | cascade `FontUnit` | standalone: `override_font_unit` / `inherit_font_unit`; panel labels inherit the panel font unit | standalone spawn seeds the global default, then typed overrides self-heal the target entity |
 | text content / layout (panel) | `DiegeticPanel` tree | `set_tree` → reconcile (Phase 3 gated) | coarse: rebuilds the tree; reconcile reuses unchanged runs |
 
 ### The ergonomic gaps
 
-1. **No granular setters.** `WorldTextStyle` exposes consuming `with_*` builders
+1. **No granular setters.** `TextStyle` exposes consuming `with_*` builders
    and a single mutable `set_color` (`text_props.rs:343`). Changing any other
    field in place means reconstructing the whole component.
 2. **Cascade attributes have no public per-entity setter.** `Override<A>` /
    `Resolved<A>` / `TextAlpha` / `FontUnit` are `pub(crate)`, so user code cannot
    change one standalone entity's blend mode or font unit at runtime — only the
    global default, or (for panels) the panel-level override the labels inherit.
-3. **Spawn-only fields silently no-op on mutation.** `WorldTextStyle.alpha_mode`
+3. **Spawn-only fields silently no-op on mutation.** `TextStyle.alpha_mode`
    and `.unit` are consumed once by the `On<Add>` seed; mutating them at runtime
    triggers a full rebuild that re-reads the *same* resolved value — wasted work
    with no visible change. A footgun until the seed re-runs on change or the
-   fields leave `WorldTextStyle`.
+   fields leave `TextStyle`.
 
 ### Sketch of a uniform API (to design later)
 
-- A mutable setter per `WorldTextStyle` field (or a `&mut`-editing closure), so
+- A mutable setter per `TextStyle` field (or a `&mut`-editing closure), so
   in-place tweaks don't reconstruct the component.
 - A public per-entity way to set the cascade attributes — a typed setter that
   writes `Override<A>` and lets the propagation pass re-resolve — giving
   standalone text the same runtime blend-mode / font-unit control panels already
   get through the tree.
-- Decide the fate of the spawn-only `WorldTextStyle.alpha_mode` / `.unit`
-  fields: either re-seed on `Changed<WorldTextStyle>`, or drop them from the
+- Decide the fate of the spawn-only `TextStyle.alpha_mode` / `.unit`
+  fields: either re-seed on `Changed<TextStyle>`, or drop them from the
   component now that the cascade owns those values, removing the gap-3 footgun.

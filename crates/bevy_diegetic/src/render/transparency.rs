@@ -81,8 +81,8 @@ use crate::screen_space::ScreenSpaceCamera;
 /// bypass OIT), configured via
 /// `CascadeDefault<TextAlpha>`, per-panel
 /// override ([`DiegeticPanel`](crate::DiegeticPanel)), or per-style
-/// override ([`WorldTextStyle`](crate::WorldTextStyle) /
-/// [`LayoutTextStyle`](crate::LayoutTextStyle)).
+/// override ([`TextStyle`](crate::TextStyle) /
+/// [`TextStyle`](crate::TextStyle)).
 #[derive(Component, Debug, Default, Clone, Copy)]
 pub struct StableTransparency;
 

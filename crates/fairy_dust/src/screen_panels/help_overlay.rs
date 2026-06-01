@@ -9,9 +9,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
@@ -194,15 +194,11 @@ fn build_help_tree(shortcuts: HelpShortcuts) -> LayoutTree {
 }
 
 fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
-    let title = LayoutTextStyle::new(TITLE_SIZE)
-        .with_color(TITLE_COLOR)
-        .no_wrap();
-    let hint = LayoutTextStyle::new(HELP_CLOSE_HINT_SIZE)
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
+    let hint = TextStyle::new(HELP_CLOSE_HINT_SIZE)
         .with_color(BODY_COLOR)
         .no_wrap();
-    let label = LayoutTextStyle::new(LABEL_SIZE)
-        .with_color(BODY_COLOR)
-        .no_wrap();
+    let label = TextStyle::new(LABEL_SIZE).with_color(BODY_COLOR).no_wrap();
 
     screen_panel_frame(
         builder,
@@ -226,7 +222,7 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
     );
 }
 
-fn build_title_row(builder: &mut LayoutBuilder, title: &LayoutTextStyle, hint: &LayoutTextStyle) {
+fn build_title_row(builder: &mut LayoutBuilder, title: &TextStyle, hint: &TextStyle) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
@@ -264,11 +260,7 @@ fn build_separator(builder: &mut LayoutBuilder) {
     );
 }
 
-fn build_shortcut_table(
-    builder: &mut LayoutBuilder,
-    shortcuts: HelpShortcuts,
-    label: &LayoutTextStyle,
-) {
+fn build_shortcut_table(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, label: &TextStyle) {
     builder.with(
         El::new()
             .width(Sizing::FIT)
@@ -283,7 +275,7 @@ fn build_shortcut_table(
     );
 }
 
-fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &LayoutTextStyle) {
+fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextStyle) {
     builder.with(
         El::new()
             .width(Sizing::FIT)

@@ -40,12 +40,12 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
@@ -481,7 +481,7 @@ fn face_label_tree(label: &str) -> LayoutTree {
     );
     builder.text(
         label,
-        LayoutTextStyle::new(FACE_LABEL_TEXT_SIZE)
+        TextStyle::new(FACE_LABEL_TEXT_SIZE)
             .with_color(FACE_LABEL_COLOR)
             .with_align(TextAlign::Center)
             .with_shadow_mode(GlyphShadowMode::None),
@@ -565,11 +565,11 @@ fn spawn_explainer_panel(mut commands: Commands) {
 
 fn build_explainer_tree() -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    let title = LayoutTextStyle::new(TITLE_SIZE)
+    let title = TextStyle::new(TITLE_SIZE)
         .with_color(EXPLAINER_HEADER_COLOR)
         .no_wrap();
     // Wrapped body text flows to the fixed box width.
-    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(EXPLAINER_BODY_COLOR);
+    let body = TextStyle::new(LABEL_SIZE).with_color(EXPLAINER_BODY_COLOR);
     builder.with(
         El::new()
             .width(Sizing::fixed(EXPLAINER_BOX_WIDTH))
@@ -588,8 +588,8 @@ fn build_explainer_tree() -> LayoutTree {
 fn build_explainer_box(
     builder: &mut LayoutBuilder,
     explainer: &Explainer,
-    title: &LayoutTextStyle,
-    body: &LayoutTextStyle,
+    title: &TextStyle,
+    body: &TextStyle,
 ) {
     builder.with(
         El::new()

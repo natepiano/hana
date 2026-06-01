@@ -31,7 +31,6 @@ use crate::layout::Direction;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutEngine;
-use crate::layout::LayoutTextStyle;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::Padding;
@@ -40,6 +39,7 @@ use crate::layout::RenderCommandKind;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
+use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
@@ -83,7 +83,7 @@ fn add_aligned_table_row(
     builder: &mut LayoutBuilder,
     bindings: &[&str],
     action: &str,
-    style: &LayoutTextStyle,
+    style: &TextStyle,
     action_min: f32,
 ) {
     builder.with(
@@ -247,7 +247,7 @@ fn fit_wraps_text_content() {
     let font_size = 16.0;
     let text = "Hello";
     // Expected text bounds come from the same monospace metrics as production.
-    b.text(text, LayoutTextStyle::new(font_size));
+    b.text(text, TextStyle::new(font_size));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -269,7 +269,7 @@ fn fit_with_min_respects_minimum() {
             .height(Sizing::fixed(20.0)),
         |b| {
             // Content is only 48px wide but min is 100.
-            b.text("Hello", LayoutTextStyle::new(16.0));
+            b.text("Hello", TextStyle::new(16.0));
         },
     );
     let tree = b.build();
@@ -297,10 +297,10 @@ fn fit_root_clamps_grow_children_content_under_max() {
             .direction(Direction::LeftToRight),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(text, LayoutTextStyle::new(font_size));
+        b.text(text, TextStyle::new(font_size));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(text, LayoutTextStyle::new(font_size));
+        b.text(text, TextStyle::new(font_size));
     });
     let tree = b.build();
 
@@ -327,10 +327,10 @@ fn fit_root_caps_grow_children_content_at_max() {
             .direction(Direction::LeftToRight),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, LayoutTextStyle::new(font_size));
+        b.text(wide, TextStyle::new(font_size));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, LayoutTextStyle::new(font_size));
+        b.text(wide, TextStyle::new(font_size));
     });
     let tree = b.build();
 
@@ -890,7 +890,7 @@ fn render_commands_include_rectangles() {
 #[test]
 fn render_commands_include_text() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.text("Hello", LayoutTextStyle::new(16.0));
+    b.text("Hello", TextStyle::new(16.0));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -956,7 +956,7 @@ fn nested_layout_header_body() {
                     .height(Sizing::fixed(20.0))
                     .background(Color::srgb_u8(52, 98, 90)),
                 |b| {
-                    b.text("STATUS", LayoutTextStyle::new(7.0));
+                    b.text("STATUS", TextStyle::new(7.0));
                 },
             );
             // Divider.
@@ -1075,8 +1075,8 @@ fn text_positioned_correctly() {
             .padding(Padding::all(10.0))
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello", LayoutTextStyle::new(16.0));
-            b.text("World", LayoutTextStyle::new(16.0));
+            b.text("Hello", TextStyle::new(16.0));
+            b.text("World", TextStyle::new(16.0));
         },
     );
     let tree = b.build();
@@ -1111,12 +1111,12 @@ fn key_value_row_layout() {
             .height(Sizing::GROW)
             .direction(Direction::LeftToRight),
         |b| {
-            b.text(label_text, LayoutTextStyle::new(font_size));
+            b.text(label_text, TextStyle::new(font_size));
             b.with(
                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                 |_| {},
             );
-            b.text(value_text, LayoutTextStyle::new(font_size));
+            b.text(value_text, TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1135,7 +1135,7 @@ fn key_value_row_layout() {
 #[test]
 fn fit_table_with_grow_rows_aligns_middle_column() {
     let font_size = 10.0;
-    let style = LayoutTextStyle::new(font_size).no_wrap();
+    let style = TextStyle::new(font_size).no_wrap();
     let action_min = text_width("Orbit", font_size);
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
@@ -1315,7 +1315,7 @@ fn text_wraps_at_word_boundaries() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", LayoutTextStyle::new(font_size));
+            b.text("Hello World Test", TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1348,7 +1348,7 @@ fn text_no_wrap_overflows() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World", LayoutTextStyle::new(16.0).no_wrap());
+            b.text("Hello World", TextStyle::new(16.0).no_wrap());
         },
     );
     let tree = b.build();
@@ -1381,7 +1381,7 @@ fn text_wraps_at_newlines_only() {
         |b| {
             b.text(
                 "Line1\nLine2\nLine3",
-                LayoutTextStyle::new(font_size).wrap(TextWrap::Newlines),
+                TextStyle::new(font_size).wrap(TextWrap::Newlines),
             );
         },
     );
@@ -1417,7 +1417,7 @@ fn word_wrap_long_word_does_not_break() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text(word, LayoutTextStyle::new(font_size));
+            b.text(word, TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1452,7 +1452,7 @@ fn word_wrap_preserves_explicit_newlines() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("AA BB\nCC DD", LayoutTextStyle::new(font_size));
+            b.text("AA BB\nCC DD", TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1484,7 +1484,7 @@ fn word_wrap_empty_string() {
             .height(Sizing::GROW)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("", LayoutTextStyle::new(font_size));
+            b.text("", TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1508,7 +1508,7 @@ fn word_wrap_updates_parent_fit_height() {
             .height(Sizing::FIT)
             .direction(Direction::TopToBottom),
         |b| {
-            b.text("Hello World Test", LayoutTextStyle::new(font_size));
+            b.text("Hello World Test", TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1541,7 +1541,7 @@ fn word_wrap_render_commands_per_line() {
             // one measured line height lower.
             assert!(first_line_width < 50.0);
             assert!(second_line_width < 50.0);
-            b.text("AA BB CC", LayoutTextStyle::new(font_size));
+            b.text("AA BB CC", TextStyle::new(font_size));
         },
     );
     let tree = b.build();
@@ -1599,14 +1599,14 @@ fn fit_parent_sees_grow_children_content_height() {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", LayoutTextStyle::new(title_font_size));
+                        b.text("STATUS", TextStyle::new(title_font_size));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                         |_| {},
                     );
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("SUB", LayoutTextStyle::new(subtitle_font_size));
+                        b.text("SUB", TextStyle::new(subtitle_font_size));
                     });
                 },
             );
@@ -1824,7 +1824,7 @@ fn grow_body_compression_20_rows() {
                     .direction(Direction::LeftToRight),
                 |b| {
                     b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", LayoutTextStyle::new(10.0));
+                        b.text("STATUS", TextStyle::new(10.0));
                     });
                     b.with(
                         El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -1836,7 +1836,7 @@ fn grow_body_compression_20_rows() {
                             .height(Sizing::GROW)
                             .child_align_x(AlignX::Right),
                         |b| {
-                            b.text("BENCH", LayoutTextStyle::new(10.0));
+                            b.text("BENCH", TextStyle::new(10.0));
                         },
                     );
                 },
@@ -1864,12 +1864,12 @@ fn grow_body_compression_20_rows() {
                             .height(Sizing::FIT)
                             .direction(Direction::LeftToRight),
                         |b| {
-                            b.text(*label, LayoutTextStyle::new(10.0));
+                            b.text(*label, TextStyle::new(10.0));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                 |_| {},
                             );
-                            b.text(*value, LayoutTextStyle::new(10.0));
+                            b.text(*value, TextStyle::new(10.0));
                         },
                     );
                 }
@@ -1911,10 +1911,7 @@ fn perf_element_sizes() {
         "ElementContent: {} bytes",
         std::mem::size_of::<ElementContent>()
     );
-    println!(
-        "TextConfig: {} bytes",
-        std::mem::size_of::<LayoutTextStyle>()
-    );
+    println!("TextConfig: {} bytes", std::mem::size_of::<TextStyle>());
     println!("Border: {} bytes", std::mem::size_of::<Border>());
     println!("Sizing: {} bytes", std::mem::size_of::<Sizing>());
     println!("Padding: {} bytes", std::mem::size_of::<Padding>());

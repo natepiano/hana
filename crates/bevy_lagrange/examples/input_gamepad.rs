@@ -23,11 +23,11 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
+use bevy_diegetic::TextStyle;
 use bevy_kana::event;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationEnd;
@@ -531,11 +531,11 @@ fn face_tree(
 /// column of spelled-out controls, each speed label centered against its rows.
 fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> LayoutTree {
     let style = FACE_PANEL_STYLE;
-    let title_style = LayoutTextStyle::new(style.title_size)
+    let title_style = TextStyle::new(style.title_size)
         .with_color(style.color)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
-    let label_style = LayoutTextStyle::new(style.body_size)
+    let label_style = TextStyle::new(style.body_size)
         .with_color(style.color)
         .with_align(TextAlign::Left)
         .with_shadow_mode(GlyphShadowMode::None);

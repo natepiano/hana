@@ -58,7 +58,7 @@ The `AlphaMode` you pick determines how that coverage is composited:
 
 Set the app-wide default via `CascadeDefault<TextAlpha>`, per-panel via
 `DiegeticPanel::text_alpha_mode`, per-label via
-`LayoutTextStyle::with_alpha_mode`, or per-standalone entity via
+`TextStyle::with_alpha_mode`, or per-standalone entity via
 `override_text_alpha`.
 
 ### Quick recipes
@@ -76,8 +76,8 @@ commands.spawn((Camera3d::default(), Msaa::Sample4));
 
 ```rust
 // Mix panel-label modes for creative effects:
-let neon = LayoutTextStyle::new(Pt(24.0)).with_alpha_mode(AlphaMode::Add);
-let tint = LayoutTextStyle::new(Pt(14.0)).with_alpha_mode(AlphaMode::Multiply);
+let neon = TextStyle::new(Pt(24.0)).with_alpha_mode(AlphaMode::Add);
+let tint = TextStyle::new(Pt(14.0)).with_alpha_mode(AlphaMode::Multiply);
 ```
 
 See the `text_alpha` example for an interactive walkthrough.

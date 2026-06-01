@@ -6,7 +6,7 @@ use bevy::image::Image;
 
 use super::Border;
 use super::BoundingBox;
-use super::LayoutTextStyle;
+use super::TextStyle;
 
 /// A single render command produced by the layout pass.
 ///
@@ -50,7 +50,7 @@ pub enum RenderCommandKind {
         /// The text content.
         text:   String,
         /// Text configuration (font, size, etc.).
-        config: LayoutTextStyle,
+        config: TextStyle,
     },
     /// A border outline.
     Border {

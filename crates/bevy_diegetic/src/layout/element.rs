@@ -25,9 +25,9 @@ use super::Border;
 use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
-use super::LayoutTextStyle;
 use super::Padding;
 use super::Sizing;
+use super::TextStyle;
 use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
@@ -119,7 +119,7 @@ pub(super) enum ElementContent {
         /// The text string.
         text:   String,
         /// Text configuration.
-        config: LayoutTextStyle,
+        config: TextStyle,
     },
     /// Image leaf — rendered as a textured quad.
     Image {
@@ -478,7 +478,7 @@ impl LayoutTree {
             element.scroll_offset *= layout_scale;
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
-                // `LayoutTextStyle::new(Mm(6.0))`), convert from that unit to
+                // `TextStyle::new(Mm(6.0))`), convert from that unit to
                 // points directly. Otherwise use the panel-wide font_scale.
                 let scale = config.unit().map_or(font_scale, Unit::to_points);
                 *config = config.scaled(scale);
@@ -666,12 +666,12 @@ mod tests {
     use crate::layout::Border;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
-    use crate::layout::LayoutTextStyle;
     use crate::layout::Padding;
     use crate::layout::Sizing;
+    use crate::layout::TextStyle;
     use crate::layout::TextWrap;
 
-    fn text_tree(text: &str, style: LayoutTextStyle) -> LayoutTree {
+    fn text_tree(text: &str, style: TextStyle) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(text, style);
         builder.build()
@@ -679,7 +679,7 @@ mod tests {
 
     fn root_tree(root: El) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
-        builder.text("child", LayoutTextStyle::new(10.0));
+        builder.text("child", TextStyle::new(10.0));
         builder.build()
     }
 
@@ -689,7 +689,7 @@ mod tests {
 
     #[test]
     fn identical_tree_classifies_as_identical() {
-        let tree = text_tree("same", LayoutTextStyle::new(10.0));
+        let tree = text_tree("same", TextStyle::new(10.0));
 
         assert_eq!(
             tree.classify_change(&tree.clone()),
@@ -699,8 +699,8 @@ mod tests {
 
     #[test]
     fn text_color_only_classifies_as_visual_only() {
-        let tree = text_tree("same", LayoutTextStyle::new(10.0).with_color(Color::WHITE));
-        let next = text_tree("same", LayoutTextStyle::new(10.0).with_color(Color::BLACK));
+        let tree = text_tree("same", TextStyle::new(10.0).with_color(Color::WHITE));
+        let next = text_tree("same", TextStyle::new(10.0).with_color(Color::BLACK));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
     }
@@ -720,8 +720,8 @@ mod tests {
 
     #[test]
     fn text_content_change_classifies_as_layout_affecting() {
-        let tree = text_tree("before", LayoutTextStyle::new(10.0));
-        let next = text_tree("after", LayoutTextStyle::new(10.0));
+        let tree = text_tree("before", TextStyle::new(10.0));
+        let next = text_tree("after", TextStyle::new(10.0));
 
         assert_eq!(
             tree.classify_change(&next),
@@ -731,8 +731,8 @@ mod tests {
 
     #[test]
     fn text_measurement_change_classifies_as_layout_affecting() {
-        let tree = text_tree("same", LayoutTextStyle::new(10.0));
-        let next = text_tree("same", LayoutTextStyle::new(11.0));
+        let tree = text_tree("same", TextStyle::new(10.0));
+        let next = text_tree("same", TextStyle::new(11.0));
 
         assert_eq!(
             tree.classify_change(&next),
@@ -781,7 +781,7 @@ mod tests {
     #[test]
     fn empty_to_populated_tree_classifies_as_layout_affecting() {
         let tree = LayoutTree::new();
-        let next = text_tree("child", LayoutTextStyle::new(10.0));
+        let next = text_tree("child", TextStyle::new(10.0));
 
         assert_eq!(
             tree.classify_change(&next),
@@ -806,8 +806,8 @@ mod tests {
 
     #[test]
     fn layout_text_ignores_standalone_only_world_scale() {
-        let tree = text_tree("same", LayoutTextStyle::new(10.0).wrap(TextWrap::Words));
-        let next = text_tree("same", LayoutTextStyle::new(10.0).wrap(TextWrap::Words));
+        let tree = text_tree("same", TextStyle::new(10.0).wrap(TextWrap::Words));
+        let next = text_tree("same", TextStyle::new(10.0).wrap(TextWrap::Words));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::Identical);
     }
@@ -816,7 +816,7 @@ mod tests {
     fn updates_field_display_text_descendant() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("10", LayoutTextStyle::new(10.0));
+            builder.text("10", TextStyle::new(10.0));
         });
         let mut tree = builder.build();
 
@@ -830,10 +830,10 @@ mod tests {
     fn rejects_duplicate_field_display_update() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("10", LayoutTextStyle::new(10.0));
+            builder.text("10", TextStyle::new(10.0));
         });
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("12", LayoutTextStyle::new(10.0));
+            builder.text("12", TextStyle::new(10.0));
         });
         let mut tree = builder.build();
 

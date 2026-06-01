@@ -29,8 +29,8 @@ use crate::layout::Anchor;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
 use crate::layout::TextDimensions;
+use crate::layout::TextStyle;
 use crate::layout::Unit;
-use crate::layout::WorldTextStyle;
 use crate::render::TextContent;
 
 /// Visual parameters shared across arrow-label spawners. Exists to reduce
@@ -108,7 +108,7 @@ fn measure_overlay_label(
     boost: f32,
     scale: f32,
 ) -> TextDimensions {
-    let measure = WorldTextStyle::new(size)
+    let measure = TextStyle::new(size)
         .for_shaping(Anchor::Center)
         .scaled(boost)
         .as_measure();
@@ -255,7 +255,7 @@ fn spawn_line_edge_labels(
         let line_world_y = scaling::layout_to_world_y(layout_y, ctx.anchor_y, ctx.scale);
         ctx.commands.entity(ctx.entity).with_child((
             TextContent::new(label),
-            WorldTextStyle::new(style.size)
+            TextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::CenterRight)
                 .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -278,7 +278,7 @@ fn spawn_left_arrow_labels(
     let label_y_mid_world = scaling::layout_to_world_y(label_y_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_ASCENT),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -289,7 +289,7 @@ fn spawn_left_arrow_labels(
     let descent_mid_world = scaling::layout_to_world_y(descent_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_DESCENT),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -298,7 +298,7 @@ fn spawn_left_arrow_labels(
 
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_LINE_HEIGHT),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -313,7 +313,7 @@ fn spawn_left_arrow_labels(
         scaling::layout_to_world_y(guides.baseline, ctx.anchor_y, ctx.scale) - label_descent_offset;
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_BASELINE),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -327,7 +327,7 @@ fn spawn_left_arrow_labels(
         let no_gap_label = format!("{NO_LINE_GAP_LABEL_PREFIX}{font_name}");
         ctx.commands.entity(ctx.entity).with_child((
             TextContent::new(no_gap_label),
-            WorldTextStyle::new(style.size)
+            TextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::BottomLeft)
                 .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -348,7 +348,7 @@ fn spawn_right_arrow_labels(
     let x_height_mid_world = scaling::layout_to_world_y(x_height_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_X_HEIGHT),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -359,7 +359,7 @@ fn spawn_right_arrow_labels(
     let cap_mid_world = scaling::layout_to_world_y(cap_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_CAP_HEIGHT),
-        WorldTextStyle::new(style.size)
+        TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),

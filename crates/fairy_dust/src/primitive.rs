@@ -19,11 +19,11 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::default_panel_material;
@@ -271,7 +271,7 @@ pub fn cube_face_panel_tree(
             .clip(),
     );
 
-    let title = LayoutTextStyle::new(style.title_size)
+    let title = TextStyle::new(style.title_size)
         .with_color(style.color)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
@@ -281,7 +281,7 @@ pub fn cube_face_panel_tree(
         CubeFacePanelActivity::Active => style.active_body_size,
         CubeFacePanelActivity::Idle => style.body_size,
     };
-    let body = LayoutTextStyle::new(body_size)
+    let body = TextStyle::new(body_size)
         .with_color(style.color)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);

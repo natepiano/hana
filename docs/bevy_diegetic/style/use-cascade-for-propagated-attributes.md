@@ -22,7 +22,7 @@ as fields on `CascadeDefaults`.
 ### Anti-patterns — flag in review
 
 - Inline cascade resolution (`child.or(panel).unwrap_or(default)`) at a reader site.
-- A cascade-owned standalone `WorldTextStyle` setter or builder. Use typed
+- A cascade-owned standalone `TextStyle` setter or builder. Use typed
   `EntityCommands` verbs such as `override_text_alpha` / `inherit_text_alpha`.
 - A per-attribute "stale" marker component plus a system that scans `Res::is_changed()` to stamp it. The cascade plugins handle change propagation via `Resolved<A>` and `CascadeSet::Propagate`.
 

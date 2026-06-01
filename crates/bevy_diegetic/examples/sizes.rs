@@ -23,14 +23,13 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -112,7 +111,7 @@ fn setup(
     let note_x = right_x + world_text_column_width + COLUMN_GAP;
 
     // All three headers top-align at this Y. Content sits below.
-    let header_style = WorldTextStyle::new(9.0)
+    let header_style = TextStyle::new(9.0)
         .with_color(HEADER_COLOR)
         .with_anchor(Anchor::TopLeft);
     let max_content_height = panel_height.max(note_height);
@@ -163,7 +162,7 @@ fn spawn_backdrop(
 
 fn spawn_headers(
     commands: &mut Commands,
-    header_style: &WorldTextStyle,
+    header_style: &TextStyle,
     left_x: f32,
     note_x: f32,
     header_y: f32,
@@ -215,7 +214,7 @@ fn spawn_panels(commands: &mut Commands, left_x: f32, note_x: f32, content_top: 
 
 fn spawn_world_text_column(
     commands: &mut Commands,
-    header_style: WorldTextStyle,
+    header_style: TextStyle,
     right_x: f32,
     header_y: f32,
 ) {
@@ -229,25 +228,25 @@ fn spawn_world_text_column(
         .override_font_unit(Unit::Points)
         .id();
 
-    let label_style = WorldTextStyle::new(8.0)
+    let label_style = TextStyle::new(8.0)
         .with_color(LABEL_COLOR)
         .with_anchor(Anchor::TopLeft);
 
-    let world_styles: &[(WorldTextStyle, Option<Unit>)] = &[
+    let world_styles: &[(TextStyle, Option<Unit>)] = &[
         (
-            WorldTextStyle::new(SIZE_PT).with_color(SAMPLE_COLOR),
+            TextStyle::new(SIZE_PT).with_color(SAMPLE_COLOR),
             Some(Unit::Points),
         ),
         (
-            WorldTextStyle::new(SIZE_MM).with_color(SAMPLE_COLOR),
+            TextStyle::new(SIZE_MM).with_color(SAMPLE_COLOR),
             Some(Unit::Millimeters),
         ),
         (
-            WorldTextStyle::new(SIZE_IN).with_color(SAMPLE_COLOR),
+            TextStyle::new(SIZE_IN).with_color(SAMPLE_COLOR),
             Some(Unit::Inches),
         ),
         (
-            WorldTextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
+            TextStyle::new(SIZE_BARE_WORLD).with_color(SAMPLE_COLOR),
             None,
         ),
     ];
@@ -336,24 +335,24 @@ fn fit_camera_on_start(
 
 /// Demo panel: four rows of label + sample. Title is external.
 fn build_demo_panel() -> bevy_diegetic::LayoutTree {
-    let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(LABEL_COLOR);
+    let label_style = TextStyle::new(Pt(8.0)).with_color(LABEL_COLOR);
 
-    let sample_styles: &[(&str, LayoutTextStyle)] = &[
+    let sample_styles: &[(&str, TextStyle)] = &[
         (
             "Pt(18)",
-            LayoutTextStyle::new(Pt(SIZE_PT)).with_color(SAMPLE_COLOR),
+            TextStyle::new(Pt(SIZE_PT)).with_color(SAMPLE_COLOR),
         ),
         (
             "Mm(6.35)",
-            LayoutTextStyle::new(Mm(SIZE_MM)).with_color(SAMPLE_COLOR),
+            TextStyle::new(Mm(SIZE_MM)).with_color(SAMPLE_COLOR),
         ),
         (
             "In(0.25)",
-            LayoutTextStyle::new(In(SIZE_IN)).with_color(SAMPLE_COLOR),
+            TextStyle::new(In(SIZE_IN)).with_color(SAMPLE_COLOR),
         ),
         (
             "18.0",
-            LayoutTextStyle::new(SIZE_BARE_PANEL).with_color(SAMPLE_COLOR),
+            TextStyle::new(SIZE_BARE_PANEL).with_color(SAMPLE_COLOR),
         ),
     ];
 
@@ -401,7 +400,7 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
 /// Commentary panel: word-wrapped explanation. Title is external.
 fn build_commentary() -> bevy_diegetic::LayoutTree {
     let note_color = Color::srgba(0.72, 0.72, 0.72, 0.95);
-    let note_style = LayoutTextStyle::new(Pt(NOTE_FONT)).with_color(note_color);
+    let note_style = TextStyle::new(Pt(NOTE_FONT)).with_color(note_color);
 
     let mut builder = LayoutBuilder::new(NOTE_WIDTH, NOTE_HEIGHT);
     builder.with(

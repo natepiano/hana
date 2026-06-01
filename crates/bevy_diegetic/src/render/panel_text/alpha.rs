@@ -9,14 +9,14 @@ use crate::render::world_text::PanelTextChild;
 
 /// Spawn-time cascade seed for a panel label's text alpha.
 ///
-/// A panel label (`PanelChild` + `TextContent`) is depth-2 under its panel. This
-/// observer fires when a label first gains [`PanelChild`] and seeds its
+/// A panel label (`PanelTextChild` + `TextContent`) is depth-2 under its panel. This
+/// observer fires when a label first gains [`PanelTextChild`] and seeds its
 /// [`Resolved<TextAlpha>`] via [`resolve_walk`](cascade::resolve_walk), which
 /// `update_panel_text_geometry` reads for the glyph material (and
 /// `update_panel_text_alpha` reads on a later alpha-only change). The walk honors the
 /// label's own `Override<TextAlpha>` first — `reconcile_panel_text_children`
 /// inserts one when the label authored its alpha
-/// (`LayoutTextStyle::with_alpha_mode`), in the same bundle as [`PanelChild`]
+/// (`TextStyle::with_alpha_mode`), in the same bundle as [`PanelTextChild`]
 /// so it is present here — then climbs `ChildOf` to the panel's
 /// `Override<TextAlpha>`, else the global default. The standalone
 /// `seed_world_text_overrides` bridge skips labels (its `Without<PanelTextChild>`
@@ -44,9 +44,9 @@ mod tests {
 
     use super::*;
     use crate::LayoutBuilder;
-    use crate::LayoutTextStyle;
     use crate::Mm;
     use crate::TextContent;
+    use crate::TextStyle;
     use crate::cascade::CascadePlugin;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
@@ -132,7 +132,7 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .text_alpha_mode(AlphaMode::Add)
             .layout(|b| {
-                b.text("Hi", LayoutTextStyle::new(Mm(6.0)));
+                b.text("Hi", TextStyle::new(Mm(6.0)));
             })
             .build()
             .expect("test panel should build");
@@ -171,7 +171,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|b| {
-                b.text("Hi", LayoutTextStyle::new(Mm(6.0)));
+                b.text("Hi", TextStyle::new(Mm(6.0)));
             })
             .build()
             .expect("test panel should build");
@@ -211,7 +211,7 @@ mod tests {
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
 
         // Panel sets `Add` for its labels; the one label authors its own
-        // `Multiply` via `LayoutTextStyle::with_alpha_mode`. `reconcile` inserts
+        // `Multiply` via `TextStyle::with_alpha_mode`. `reconcile` inserts
         // the label's `Override<TextAlpha>`, which the walk resolves ahead of
         // the panel's inherited alpha.
         let panel = DiegeticPanel::world()
@@ -220,7 +220,7 @@ mod tests {
             .layout(|b| {
                 b.text(
                     "Hi",
-                    LayoutTextStyle::new(Mm(6.0)).with_alpha_mode(AlphaMode::Multiply),
+                    TextStyle::new(Mm(6.0)).with_alpha_mode(AlphaMode::Multiply),
                 );
             })
             .build()
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn label_alpha_change_reinherits_panel_alpha_through_reconcile() {
         fn label_tree(alpha: Option<AlphaMode>) -> LayoutTree {
-            let mut style = LayoutTextStyle::new(13.0);
+            let mut style = TextStyle::new(13.0);
             if let Some(mode) = alpha {
                 style = style.with_alpha_mode(mode);
             }

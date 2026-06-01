@@ -20,11 +20,11 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -256,11 +256,11 @@ fn fit_camera_on_start(
 
 /// Builds the entire panel: outer border, 5 columns (4 groups + commentary).
 fn build_panel() -> bevy_diegetic::LayoutTree {
-    let col_header = LayoutTextStyle::new(24.0).with_color(HEADER_COLOR);
-    let name_style = LayoutTextStyle::new(16.0).with_color(LABEL_COLOR);
-    let dim_style = LayoutTextStyle::new(14.0).with_color(NOTE_COLOR);
-    let note_style = LayoutTextStyle::new(9.0).with_color(NOTE_COLOR);
-    let code_style = LayoutTextStyle::new(8.0).with_color(CODE_COLOR);
+    let col_header = TextStyle::new(24.0).with_color(HEADER_COLOR);
+    let name_style = TextStyle::new(16.0).with_color(LABEL_COLOR);
+    let dim_style = TextStyle::new(14.0).with_color(NOTE_COLOR);
+    let note_style = TextStyle::new(9.0).with_color(NOTE_COLOR);
+    let code_style = TextStyle::new(8.0).with_color(CODE_COLOR);
 
     // Column content width = (PANEL_WIDTH - padding*2 - gaps) / 5.
     let column_content_width =
@@ -375,8 +375,8 @@ struct PaperRowParams<'a> {
     landscape_slot: f32,
     pair_spacing:   f32,
     inches:         bool,
-    name_style:     &'a LayoutTextStyle,
-    dim_style:      &'a LayoutTextStyle,
+    name_style:     &'a TextStyle,
+    dim_style:      &'a TextStyle,
 }
 
 /// Adds one paper size row to the builder: name, dimensions, portrait + landscape pair.

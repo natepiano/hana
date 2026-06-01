@@ -38,9 +38,9 @@ use super::Border;
 use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
-use super::LayoutTextStyle;
 use super::Padding;
 use super::Sizing;
+use super::TextStyle;
 use super::element::ChildOverflow;
 use super::element::Element;
 use super::element::ElementContent;
@@ -394,7 +394,7 @@ impl LayoutBuilder {
     /// Text nodes are leaves, not containers, so they cannot receive children
     /// of their own. Use [`Self::with`] when you want to create another nested
     /// container instead of a text leaf.
-    pub fn text(&mut self, text: impl Into<String>, config: LayoutTextStyle) -> &mut Self {
+    pub fn text(&mut self, text: impl Into<String>, config: TextStyle) -> &mut Self {
         let parent = self.current_parent();
         self.tree.add_child(
             parent,

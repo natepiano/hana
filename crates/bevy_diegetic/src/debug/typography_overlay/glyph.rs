@@ -28,7 +28,7 @@ use crate::layout::Border;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::Sizing;
-use crate::layout::WorldTextStyle;
+use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
@@ -187,7 +187,7 @@ fn spawn_bounding_box_callout(
     let ascent_mid_world = scaling::layout_to_world_y(ascent_mid_layout, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_BOUNDING_BOX),
-        WorldTextStyle::new(label_size)
+        TextStyle::new(label_size)
             .with_color(bbox_color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -264,7 +264,7 @@ fn spawn_origin_and_advancement(
     );
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_ORIGIN),
-        WorldTextStyle::new(label_size)
+        TextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::Center)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
@@ -365,7 +365,7 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     let advance_label_y = geometry.spacing.mul_add(-0.5, arrow_y);
     ctx.commands.entity(ctx.entity).with_child((
         TextContent::new(LABEL_ADVANCEMENT),
-        WorldTextStyle::new(label_size)
+        TextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::TopCenter)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),

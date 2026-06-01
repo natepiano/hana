@@ -43,7 +43,7 @@ use crate::layout::Unit;
 ///         .size(Mm(210.0), Mm(297.0))
 ///         .world_height(0.5)
 ///         .layout(|b| {
-///             b.text("Hello", LayoutTextStyle::new(48.0));
+///             b.text("Hello", TextStyle::new(48.0));
 ///         })
 ///         .build()?,
 ///     Transform::from_xyz(0.0, 0.0, 0.0),
@@ -105,7 +105,7 @@ pub struct DiegeticPanel {
     pub(super) material:         Option<StandardMaterial>,
     /// Default PBR material for text. When `None`, uses the same default as
     /// `material`. Individual text elements can override.
-    /// `base_color` is overridden by `LayoutTextStyle::color` when set.
+    /// `base_color` is overridden by `TextStyle::color` when set.
     #[reflect(ignore)]
     pub(super) text_material:    Option<StandardMaterial>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
@@ -441,7 +441,7 @@ fn set_tree_command(
 /// `CascadeDefault<TextAlpha>` through the parent-walk. The panel needs no
 /// `Resolved<TextAlpha>` of its own — only its labels render text, and they
 /// walk up to this `Override<TextAlpha>` directly. The panel twin of the
-/// standalone `WorldTextStyle` authoring bridge.
+/// standalone `TextStyle` authoring bridge.
 pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
@@ -685,11 +685,11 @@ mod tests {
     use super::DiegeticPanel;
     use super::ScaledLayoutTreeCache;
     use crate::LayoutBuilder;
-    use crate::LayoutTextStyle;
+    use crate::TextStyle;
 
     fn test_tree(text: &str) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, LayoutTextStyle::new(10.0));
+        builder.text(text, TextStyle::new(10.0));
         builder.build()
     }
 

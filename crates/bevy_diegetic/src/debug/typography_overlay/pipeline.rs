@@ -12,8 +12,8 @@ use crate::layout::Anchor;
 use crate::layout::LineMetricsSnapshot;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
+use crate::layout::TextStyle;
 use crate::layout::Unit;
-use crate::layout::WorldTextStyle;
 use crate::render::ComputedWorldText;
 use crate::render::TextContent;
 use crate::text;
@@ -65,7 +65,7 @@ pub fn build_typography_overlay(
     query: Query<(
         Entity,
         &TextContent,
-        &WorldTextStyle,
+        &TextStyle,
         &TypographyOverlay,
         &ComputedWorldText,
     )>,
@@ -77,7 +77,7 @@ pub fn build_typography_overlay(
                 Added<TypographyOverlay>,
                 Changed<TypographyOverlay>,
                 Changed<TextContent>,
-                Changed<WorldTextStyle>,
+                Changed<TextStyle>,
                 Changed<ComputedWorldText>,
             )>,
         ),

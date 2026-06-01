@@ -14,11 +14,11 @@ use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::ScreenText;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_window_manager::WindowManagerPlugin;
@@ -147,7 +147,7 @@ fn spawn_hud(commands: &mut Commands) {
                             // Title.
                             b.text(
                                 "Mission Control",
-                                LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR),
+                                TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR),
                             );
                             divider(b);
 
@@ -240,10 +240,7 @@ fn column(b: &mut LayoutBuilder, title: &str, rows: &[(&str, &str, Color)]) {
             .direction(Direction::TopToBottom)
             .child_gap(4.0),
         |b| {
-            b.text(
-                title,
-                LayoutTextStyle::new(HEADER_SIZE).with_color(HEADER_COLOR),
-            );
+            b.text(title, TextStyle::new(HEADER_SIZE).with_color(HEADER_COLOR));
             for &(label, value, color) in rows {
                 b.with(
                     El::new()
@@ -252,15 +249,12 @@ fn column(b: &mut LayoutBuilder, title: &str, rows: &[(&str, &str, Color)]) {
                         .direction(Direction::LeftToRight)
                         .child_gap(4.0),
                     |b| {
-                        b.text(
-                            label,
-                            LayoutTextStyle::new(BODY_SIZE).with_color(BODY_COLOR),
-                        );
+                        b.text(label, TextStyle::new(BODY_SIZE).with_color(BODY_COLOR));
                         b.with(
                             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                             |_| {},
                         );
-                        b.text(value, LayoutTextStyle::new(BODY_SIZE).with_color(color));
+                        b.text(value, TextStyle::new(BODY_SIZE).with_color(color));
                     },
                 );
             }

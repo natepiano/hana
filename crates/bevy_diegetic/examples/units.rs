@@ -25,7 +25,6 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
@@ -33,6 +32,7 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
@@ -857,7 +857,7 @@ fn build_horizontal_ticks(
 
 fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> LayoutTree {
     let mut builder = LayoutBuilder::new(PANEL_RULER_WIDTH, Mm(height_millimeters.to_f32()));
-    let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
+    let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
     let last_centimeter_mark = height_millimeters / 10;
     // Top spacer: distance from top of ruler to center of topmost cm block.
     let top_spacer = last_centimeter_mark
@@ -978,7 +978,7 @@ fn build_imperial_panel_ruler(
     let last_label_inch = height_sixteenths / 16;
     let top_spacer = panel_height.0 - last_label_inch.to_f32() - 0.5;
     let mut builder = LayoutBuilder::new(PANEL_RULER_INCH_WIDTH, panel_height);
-    let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
+    let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
     let sixteenth_height = 1.0 / 16.0;
 
     builder.with(
@@ -1088,7 +1088,7 @@ const fn sixteenth_tick_size(sixteenth: i32) -> (f32, f32) {
 /// Horizontal metric ruler — spine on TOP, ticks extending DOWN, labels below.
 fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> LayoutTree {
     let mut builder = LayoutBuilder::new(Mm(width_millimeters.to_f32()), PANEL_RULER_WIDTH);
-    let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
+    let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
     // Labels go at centimeter 1 through the last label slot, each centered in
     // a 10mm block.
     // Skip the cm at the exact edge (it's just a tick, no room for a label).
@@ -1197,7 +1197,7 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
 fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) -> LayoutTree {
     let width_inches = width_sixteenths.to_f32() / 16.0;
     let mut builder = LayoutBuilder::new(In(width_inches), PANEL_RULER_INCH_WIDTH);
-    let label_style = LayoutTextStyle::new(Pt(8.0)).with_color(ruler_color);
+    let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
     let last_label_inch = width_sixteenths / 16;
     let right_spacer = width_inches - 0.5 - last_label_inch.to_f32();
     let sixteenth_width = 1.0 / 16.0;
@@ -1309,12 +1309,7 @@ fn debug_border(debug: bool, width: impl Into<bevy_diegetic::Dimension>) -> Bord
     Border::all(width, color)
 }
 
-fn debug_text(
-    b: &mut bevy_diegetic::LayoutBuilder,
-    text: &str,
-    style: LayoutTextStyle,
-    db: Border,
-) {
+fn debug_text(b: &mut bevy_diegetic::LayoutBuilder, text: &str, style: TextStyle, db: Border) {
     b.with(El::new().width(Sizing::GROW).border(db), |b| {
         b.text(text, style);
     });
@@ -1331,8 +1326,8 @@ fn build_a4_page(debug: bool) -> bevy_diegetic::LayoutTree {
 fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
     let db = debug_border(debug, DEBUG_OUTLINE);
 
-    let heading = LayoutTextStyle::new(Pt(18.0)).with_color(A4_TEXT_COLOR);
-    let body = LayoutTextStyle::new(Pt(12.0)).with_color(A4_TEXT_COLOR);
+    let heading = TextStyle::new(Pt(18.0)).with_color(A4_TEXT_COLOR);
+    let body = TextStyle::new(Pt(12.0)).with_color(A4_TEXT_COLOR);
 
     builder.with(
         El::new()
@@ -1374,7 +1369,7 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
                     b.with(El::new().border(db), |b| {
                         b.text(
                             "PaperSize::A4  |  layout: Millimeters  |  font: Points",
-                            LayoutTextStyle::new(Pt(14.0)).with_color(A4_DIM_COLOR),
+                            TextStyle::new(Pt(14.0)).with_color(A4_DIM_COLOR),
                         );
                     });
                 },
@@ -1400,12 +1395,7 @@ fn build_font_samples_row(b: &mut LayoutBuilder, db: Border) {
                 ("12pt", Pt(12.0)),
                 ("9pt", Pt(9.0)),
             ] {
-                debug_text(
-                    b,
-                    label,
-                    LayoutTextStyle::new(size).with_color(A4_TEXT_COLOR),
-                    db,
-                );
+                debug_text(b, label, TextStyle::new(size).with_color(A4_TEXT_COLOR), db);
             }
         },
     );
@@ -1413,8 +1403,8 @@ fn build_font_samples_row(b: &mut LayoutBuilder, db: Border) {
 
 fn build_two_column_article(
     b: &mut LayoutBuilder,
-    heading: &LayoutTextStyle,
-    body: &LayoutTextStyle,
+    heading: &TextStyle,
+    body: &TextStyle,
     db: Border,
 ) {
     b.with(
@@ -1541,25 +1531,25 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
             debug_text(
                 b,
                 "MARY JANE LOGICIELEUR",
-                LayoutTextStyle::new(CARD_NAME_SIZE).with_color(CARD_TEXT_COLOR),
+                TextStyle::new(CARD_NAME_SIZE).with_color(CARD_TEXT_COLOR),
                 db,
             );
             debug_text(
                 b,
                 "Software Engineer",
-                LayoutTextStyle::new(CARD_TITLE_SIZE).with_color(CARD_DIM_COLOR),
+                TextStyle::new(CARD_TITLE_SIZE).with_color(CARD_DIM_COLOR),
                 db,
             );
             debug_text(
                 b,
                 "mary-jane@example.com",
-                LayoutTextStyle::new(CARD_DETAIL_SIZE).with_color(CARD_TEXT_COLOR),
+                TextStyle::new(CARD_DETAIL_SIZE).with_color(CARD_TEXT_COLOR),
                 db,
             );
             debug_text(
                 b,
                 "+1 (555) 012-3456",
-                LayoutTextStyle::new(CARD_DETAIL_SIZE).with_color(CARD_TEXT_COLOR),
+                TextStyle::new(CARD_DETAIL_SIZE).with_color(CARD_TEXT_COLOR),
                 db,
             );
 
@@ -1570,7 +1560,7 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
             debug_text(
                 b,
                 "PaperSize::BusinessCard  |  layout: Inches  |  font: Points",
-                LayoutTextStyle::new(CARD_FOOTER_SIZE).with_color(CARD_DIM_COLOR),
+                TextStyle::new(CARD_FOOTER_SIZE).with_color(CARD_DIM_COLOR),
                 db,
             );
         },
@@ -1587,11 +1577,11 @@ fn build_index_page(debug: bool) -> bevy_diegetic::LayoutTree {
 /// Populates the 5×7 card with a units API reference table.
 fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
     let db = debug_border(debug, DEBUG_OUTLINE);
-    let heading = LayoutTextStyle::new(INDEX_HEADING_SIZE).with_color(INDEX_HEADING_COLOR);
-    let subheading = LayoutTextStyle::new(INDEX_SUBHEADING_SIZE).with_color(INDEX_HEADING_COLOR);
-    let label = LayoutTextStyle::new(INDEX_LABEL_SIZE).with_color(INDEX_LABEL_COLOR);
-    let code = LayoutTextStyle::new(INDEX_CODE_SIZE).with_color(INDEX_CODE_COLOR);
-    let footer = LayoutTextStyle::new(INDEX_FOOTER_SIZE).with_color(INDEX_LABEL_COLOR);
+    let heading = TextStyle::new(INDEX_HEADING_SIZE).with_color(INDEX_HEADING_COLOR);
+    let subheading = TextStyle::new(INDEX_SUBHEADING_SIZE).with_color(INDEX_HEADING_COLOR);
+    let label = TextStyle::new(INDEX_LABEL_SIZE).with_color(INDEX_LABEL_COLOR);
+    let code = TextStyle::new(INDEX_CODE_SIZE).with_color(INDEX_CODE_COLOR);
+    let footer = TextStyle::new(INDEX_FOOTER_SIZE).with_color(INDEX_LABEL_COLOR);
 
     builder.with(
         El::new()
@@ -1704,8 +1694,8 @@ fn index_row(
     b: &mut LayoutBuilder,
     label_text: &str,
     code_text: &str,
-    label: &LayoutTextStyle,
-    code: &LayoutTextStyle,
+    label: &TextStyle,
+    code: &TextStyle,
     db: Border,
 ) {
     b.with(

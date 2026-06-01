@@ -4,11 +4,11 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Percent;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
 use bevy_kana::ToF32;
 use fairy_dust::ControlActivation;
@@ -130,8 +130,8 @@ fn build_log_tree(log: &EventLog) -> LayoutTree {
 }
 
 fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
-    let title = LayoutTextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let hint = LayoutTextStyle::new(EVENT_LOG_HINT_SIZE).with_color(HINT_TEXT_COLOR);
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
+    let hint = TextStyle::new(EVENT_LOG_HINT_SIZE).with_color(HINT_TEXT_COLOR);
 
     screen_panel_frame(
         builder,
@@ -161,7 +161,7 @@ fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
                             for entry in &log.entries {
                                 builder.text(
                                     &entry.text,
-                                    LayoutTextStyle::new(EVENT_LOG_TEXT_SIZE)
+                                    TextStyle::new(EVENT_LOG_TEXT_SIZE)
                                         .with_color(entry.color)
                                         .wrap(TextWrap::Words),
                                 );
@@ -187,7 +187,7 @@ fn title_divider(builder: &mut LayoutBuilder) {
 }
 
 /// The two scroll/clear hints side by side, split by a vertical blue separator.
-fn footer_hints(builder: &mut LayoutBuilder, hint: &LayoutTextStyle) {
+fn footer_hints(builder: &mut LayoutBuilder, hint: &TextStyle) {
     builder.with(
         El::new()
             .width(Sizing::GROW)

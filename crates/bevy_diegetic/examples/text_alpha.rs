@@ -24,12 +24,12 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
+use bevy_diegetic::TextStyle;
 use bevy_diegetic::WorldText;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -310,8 +310,8 @@ fn spawn_info_panel(commands: &mut Commands, state: &ControlsState) {
     commands.spawn((InfoPanel, info_panel, Transform::default()));
 }
 
-fn hud_text_style(active: bool) -> LayoutTextStyle {
-    LayoutTextStyle::new(HUD_HINT_SIZE).with_color(if active {
+fn hud_text_style(active: bool) -> TextStyle {
+    TextStyle::new(HUD_HINT_SIZE).with_color(if active {
         HUD_ACTIVE_COLOR
     } else {
         HUD_INACTIVE_COLOR
@@ -319,7 +319,7 @@ fn hud_text_style(active: bool) -> LayoutTextStyle {
 }
 
 fn build_controls(b: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let title = TextStyle::new(HUD_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
 
     b.with(
         El::new()
@@ -363,9 +363,9 @@ fn hud_divider(b: &mut LayoutBuilder) {
 }
 
 fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
-    let title = LayoutTextStyle::new(INFO_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
-    let active_header = LayoutTextStyle::new(INFO_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
-    let body = LayoutTextStyle::new(INFO_BODY_SIZE).with_color(HUD_INACTIVE_COLOR);
+    let title = TextStyle::new(INFO_TITLE_SIZE).with_color(HUD_TITLE_COLOR);
+    let active_header = TextStyle::new(INFO_HEADER_SIZE).with_color(HUD_ACTIVE_COLOR);
+    let body = TextStyle::new(INFO_BODY_SIZE).with_color(HUD_INACTIVE_COLOR);
 
     b.with(
         El::new()

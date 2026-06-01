@@ -30,9 +30,9 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::CameraInputSurfaceMetrics;
@@ -306,10 +306,8 @@ fn spawn_info_panel(mut commands: Commands) {
 }
 
 fn build_info_panel_layout(builder: &mut LayoutBuilder) {
-    let title = LayoutTextStyle::new(TITLE_SIZE)
-        .with_color(TITLE_COLOR)
-        .no_wrap();
-    let body = LayoutTextStyle::new(LABEL_SIZE).with_color(INFO_TEXT_COLOR);
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
+    let body = TextStyle::new(LABEL_SIZE).with_color(INFO_TEXT_COLOR);
 
     screen_panel_frame(
         builder,

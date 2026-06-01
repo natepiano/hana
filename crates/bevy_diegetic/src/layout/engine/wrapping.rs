@@ -2,7 +2,7 @@ use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
 use super::layout_engine::MeasureTextFn;
-use crate::layout::LayoutTextStyle;
+use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
@@ -28,7 +28,7 @@ pub(super) struct WrappedText {
 /// own is placed on a single line without breaking.
 fn wrap_text_words(
     text: &str,
-    config: &LayoutTextStyle,
+    config: &TextStyle,
     max_width: f32,
     measure: &MeasureTextFn,
     font_scale: f32,
@@ -109,7 +109,7 @@ fn wrap_text_words(
 /// Splits text at explicit `\n` characters and measures each line as a single run.
 fn wrap_text_newlines(
     text: &str,
-    config: &LayoutTextStyle,
+    config: &TextStyle,
     measure: &MeasureTextFn,
     font_scale: f32,
 ) -> WrappedText {

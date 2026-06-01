@@ -2,7 +2,7 @@
 //!
 //! Holds [`TextContent`] (the text-source component carried by every panel-text
 //! label and by the one-element [`WorldText`](crate::WorldText) /
-//! [`ScreenText`](crate::ScreenText) panels) and the [`PanelChild`] marker that
+//! [`ScreenText`](crate::ScreenText) panels) and the [`PanelTextChild`] marker that
 //! distinguishes a panel's text-child
 //! labels from the panel root. The standalone world-text render path that once
 //! lived here was removed when [`WorldText`](crate::WorldText) /
@@ -19,7 +19,7 @@ pub(crate) use readiness::AwaitingReady;
 pub use readiness::WorldTextReady;
 pub(crate) use readiness::emit_world_text_ready;
 
-use crate::layout::WorldTextStyle;
+use crate::layout::TextStyle;
 
 /// Computed layout data for a [`TextContent`] entity, read by the typography
 /// debug overlay to draw glyph bounding boxes and metric lines aligned with the
@@ -67,7 +67,7 @@ pub struct ComputedGlyphMetrics {
 /// runtime. Style is controlled by the required [`TextStyle`](crate::TextStyle)
 /// component (added with defaults if not specified).
 #[derive(Component, Clone, Debug, Reflect)]
-#[require(WorldTextStyle, Transform, Visibility)]
+#[require(TextStyle, Transform, Visibility)]
 pub struct TextContent {
     text: String,
 }
