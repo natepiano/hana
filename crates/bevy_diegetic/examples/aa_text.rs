@@ -347,7 +347,7 @@ fn setup(
             .size(HEADLINE_SIZE)
             .color(TEXT_COLOR)
             .transform(Transform::from_xyz(SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
     commands.spawn((
         Name::new("Small line"),
@@ -356,7 +356,7 @@ fn setup(
             .size(SMALL_SIZE)
             .color(TEXT_COLOR)
             .transform(Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
     // Transparent hard-edged geometry gives the post-process passes and MSAA a
     // visible target that is independent from the text shader's coverage AA.

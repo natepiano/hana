@@ -35,7 +35,7 @@ use crate::text::PositionedGlyph;
 /// Avoids reallocating `LayoutContext` and `Layout` on every
 /// shaping call. Wrapped in `Mutex` for `Send + Sync`.
 #[derive(Resource)]
-pub(super) struct TextShapingContext {
+pub(crate) struct TextShapingContext {
     layout_cx: Mutex<LayoutContext<()>>,
     layout:    Mutex<Layout<()>>,
 }
@@ -277,6 +277,7 @@ fn append_run_glyphs(
                 x: run.offset() + advance_x + glyph.x,
                 y: glyph.y,
                 baseline: run.baseline(),
+                advance: glyph.advance,
             });
             advance_x += glyph.advance;
         }

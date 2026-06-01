@@ -27,8 +27,34 @@ pub(super) use lifecycle::on_overlay_removed;
 pub(super) use pipeline::build_typography_overlay;
 
 use super::constants::DEFAULT_LINE_WIDTH;
+use crate::WorldText;
 use crate::layout::GlyphShadowMode;
+use crate::layout::TextStyle;
 use crate::panel::SurfaceShadow;
+
+/// Spawns a world-space overlay label as a one-element [`WorldText`] panel child
+/// of `container`.
+///
+/// The label's [`TextStyle`] anchor becomes the panel anchor, so the text sits at
+/// `transform` exactly as the bare-[`TextContent`](crate::TextContent) spawns did
+/// before [`WorldText`] one-element panels replaced the standalone world-text
+/// render path (a bare `TextContent` no longer renders on its own).
+pub(super) fn spawn_overlay_label(
+    commands: &mut Commands,
+    container: Entity,
+    text: impl Into<String>,
+    style: TextStyle,
+    transform: Transform,
+) {
+    let anchor = style.anchor();
+    commands.entity(container).with_child(
+        WorldText::new(text)
+            .style(style)
+            .anchor(anchor)
+            .transform(transform)
+            .build(),
+    );
+}
 
 /// Whether per-glyph bounding box annotations are visible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]

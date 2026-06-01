@@ -36,6 +36,7 @@ use bevy::prelude::*;
 
 use crate::layout::Anchor;
 use crate::layout::Dimension;
+use crate::layout::El;
 use crate::layout::FontFeatures;
 use crate::layout::FontSlant;
 use crate::layout::FontWeight;
@@ -46,6 +47,7 @@ use crate::layout::GlyphSidedness;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
 use crate::layout::Px;
+use crate::layout::Sizing;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
@@ -56,15 +58,16 @@ use crate::panel::Fit;
 use crate::panel::PanelSystems;
 use crate::render::TextContent;
 
-/// Style and wrap width stored on a one-element panel spawned by
+/// Wrap width stored on a one-element panel spawned by
 /// [`WorldText`] / [`ScreenText`].
 ///
-/// [`rebuild_fluent_text`] reads these to rebuild the single-element layout tree
-/// whenever the panel's [`TextContent`] changes, so callers can change the
-/// string at runtime through the panel handle.
+/// [`rebuild_fluent_text`] reads this — together with the panel root's
+/// [`TextStyle`] and [`TextContent`] — to rebuild the single-element layout tree
+/// whenever either changes, so callers can change the string *or* the style at
+/// runtime through the panel handle. The style is the root [`TextStyle`]
+/// component, not stored here, so a `&mut TextStyle` write restyles the panel.
 #[derive(Component, Clone, Debug)]
 pub(crate) struct FluentText {
-    style:      TextStyle,
     wrap_width: Option<f32>,
 }
 
@@ -249,14 +252,15 @@ impl WorldText {
             wrap_width:   None,
             world_width:  None,
             world_height: None,
-            anchor:       None,
+            anchor:       Some(Anchor::Center),
             transform:    Transform::IDENTITY,
         }
     }
 
     /// Sets the anchor point that places the label box at its transform
-    /// (default [`Anchor::TopLeft`]). [`Anchor::Center`] centers the label on
-    /// the transform.
+    /// (default [`Anchor::Center`], so the label centers on the transform — a
+    /// world-space label sits *at* its point). Use e.g. [`Anchor::TopLeft`] to
+    /// hang the box from its top-left corner instead.
     #[must_use]
     pub const fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = Some(anchor);
@@ -294,7 +298,7 @@ impl WorldText {
     /// A degenerate size (unreachable while the height is always `Fit`) logs and
     /// falls back to a default panel rather than panicking.
     #[must_use]
-    pub fn bundle(self) -> impl Bundle {
+    pub fn build(self) -> impl Bundle {
         let tree = build_one_element_tree(&self.text, &self.style, self.wrap_width);
 
         let sized = match self.wrap_width {
@@ -322,8 +326,8 @@ impl WorldText {
         (
             panel,
             TextContent::new(self.text),
+            self.style,
             FluentText {
-                style:      self.style,
                 wrap_width: self.wrap_width,
             },
             self.transform,
@@ -332,7 +336,7 @@ impl WorldText {
 
     /// Spawns the one-element world panel, returning the panel entity (the
     /// handle callers query for [`TextContent`] to change the string later).
-    pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.bundle()).id() }
+    pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.build()).id() }
 }
 
 /// Fluent builder for a screen-space (overlay) text label.
@@ -404,7 +408,7 @@ impl ScreenText {
     /// A degenerate size (unreachable while the height is always `Fit`) logs and
     /// falls back to a default panel rather than panicking.
     #[must_use]
-    pub fn bundle(self) -> impl Bundle {
+    pub fn build(self) -> impl Bundle {
         let tree = build_one_element_tree(&self.text, &self.style, self.wrap_width);
 
         let sized = match self.wrap_width {
@@ -435,8 +439,8 @@ impl ScreenText {
         (
             panel,
             TextContent::new(self.text),
+            self.style,
             FluentText {
-                style:      self.style,
                 wrap_width: self.wrap_width,
             },
         )
@@ -444,7 +448,7 @@ impl ScreenText {
 
     /// Spawns the one-element screen panel, returning the panel entity (the
     /// handle callers query for [`TextContent`] to change the string later).
-    pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.bundle()).id() }
+    pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.build()).id() }
 }
 
 /// Builds the single-element layout tree for a [`WorldText`] / [`ScreenText`]
@@ -457,22 +461,34 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     } else {
         TextWrap::None
     });
-    let mut builder = LayoutBuilder::new(wrap_width.unwrap_or(0.0), 0.0);
+    // The root must carry the sizing the panel resolves to: `Fit` width
+    // (shrink-wrap to the text) when there is no wrap width, or a fixed wrap
+    // width; height is always `Fit`. `rebuild_fluent_text` re-runs this on every
+    // text change and `set_tree`s the result, so this root sizing must match
+    // what `DiegeticPanel::build` produces — a `Fixed(0, 0)` root (the old
+    // `LayoutBuilder::new(0.0, 0.0)`) overwrites the panel's `Fit` root and
+    // collapses the measured width to zero.
+    let width = wrap_width.map_or(Sizing::FIT, Sizing::fixed);
+    let mut builder = LayoutBuilder::with_root(El::new().width(width).height(Sizing::FIT));
     builder.text(text.to_string(), style);
     builder.build()
 }
 
 /// Rebuilds a [`WorldText`] / [`ScreenText`] panel's single-element tree when its
-/// [`TextContent`] changes, so callers can change the string at runtime through
-/// the panel handle. The deferred [`set_tree`](DiegeticPanelCommands::set_tree) flushes at
-/// [`PanelSystems::ApplyTreeChanges`], before layout reads the tree.
+/// [`TextContent`] or [`TextStyle`] changes, so callers can change the string or
+/// restyle (font, color, size, …) at runtime through the panel handle. The style
+/// is read from the panel root's [`TextStyle`] component, so a `&mut TextStyle`
+/// write takes effect. The deferred [`set_tree`](DiegeticPanelCommands::set_tree)
+/// flushes at [`PanelSystems::ApplyTreeChanges`], before layout reads the tree.
 pub(crate) fn rebuild_fluent_text(
-    panels: Query<(Entity, &TextContent, &FluentText), Changed<TextContent>>,
+    panels: Query<
+        (Entity, &TextContent, &TextStyle, &FluentText),
+        Or<(Changed<TextContent>, Changed<TextStyle>)>,
+    >,
     mut commands: Commands,
 ) {
-    for (entity, content, fluent_text) in &panels {
-        let tree =
-            build_one_element_tree(content.text(), &fluent_text.style, fluent_text.wrap_width);
+    for (entity, content, style, fluent_text) in &panels {
+        let tree = build_one_element_tree(content.text(), style, fluent_text.wrap_width);
         commands.set_tree(entity, tree);
     }
 }
@@ -485,6 +501,49 @@ impl Plugin for FluentTextPlugin {
         app.add_systems(
             Update,
             rebuild_fluent_text.before(PanelSystems::ApplyTreeChanges),
+        );
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests use expect for clearer failure messages"
+)]
+mod tests {
+    use std::sync::Arc;
+
+    use bevy_kana::ToF32;
+
+    use super::*;
+    use crate::layout::LayoutEngine;
+    use crate::layout::MeasureTextFn;
+    use crate::layout::TextDimensions;
+    use crate::layout::TextMeasure;
+
+    fn monospace_measure() -> MeasureTextFn {
+        Arc::new(|text: &str, m: &TextMeasure| TextDimensions {
+            width:       text.chars().count().to_f32() * m.size * 0.6,
+            height:      m.size,
+            line_height: m.size,
+        })
+    }
+
+    #[test]
+    fn one_element_tree_resolves_nonzero_width() {
+        // Regression: `build_one_element_tree` must produce a `Fit` (shrink-wrap)
+        // root, not a `Fixed(0, 0)` root. `rebuild_fluent_text` re-runs this and
+        // `set_tree`s the result on every text change, so a `Fixed(0, 0)` root
+        // overwrites the panel's `Fit` root and collapses the measured width to
+        // zero (no glyphs render).
+        let tree = build_one_element_tree("Hello", &TextStyle::new(16.0), None);
+        let engine = LayoutEngine::new(monospace_measure());
+        let result = engine.compute(&tree, 0.0, 0.0, 1.0);
+        let bounds = result.content_bounds().expect("content bounds");
+        assert!(
+            bounds.width > 0.0,
+            "one-element tree width collapsed to {}",
+            bounds.width
         );
     }
 }

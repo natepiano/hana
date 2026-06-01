@@ -12,13 +12,18 @@
 //! The readiness signal ([`WorldTextReady`] + the `AwaitingReady` gate) is shared
 //! infrastructure the panel-text path drives, kept here.
 
+#[cfg(feature = "typography_overlay")]
+mod overlay_metrics;
 mod readiness;
 
 use bevy::prelude::*;
+#[cfg(feature = "typography_overlay")]
+pub(crate) use overlay_metrics::emit_computed_world_text;
 pub(crate) use readiness::AwaitingReady;
 pub use readiness::WorldTextReady;
 pub(crate) use readiness::emit_world_text_ready;
 
+use crate::layout::LineMetricsSnapshot;
 use crate::layout::TextStyle;
 
 /// Computed layout data for a [`TextContent`] entity, read by the typography
@@ -27,17 +32,27 @@ use crate::layout::TextStyle;
 ///
 /// Only available when the `typography_overlay` feature is enabled.
 ///
-/// TODO(overlay-retarget): nothing populates this since the standalone render
-/// path was deleted (see `docs/bevy_diegetic/unify_text.md`, R8 SUPERSEDED). The
-/// overlay reads it and is dark until a follow-up emits the computed run from the
-/// panel-text path.
+/// Populated by
+/// [`emit_computed_world_text`](crate::render::emit_computed_world_text) from the
+/// panel child's [`PanelTextLayout`](crate::render::PanelTextLayout), so every
+/// field is in the same coordinate system the panel-text mesh was built in: the
+/// font size and line metrics are in layout points, `scale` converts those points
+/// to world meters, and the glyph rects are already in world meters. The overlay
+/// reads `scale` / `font_size` / `line_metrics` directly rather than recomputing
+/// them, which keeps its boxes and metric lines on the rendered glyphs.
 #[cfg(feature = "typography_overlay")]
 #[derive(Component, Clone, Debug)]
 pub struct ComputedWorldText {
-    /// `Anchor` offset Y in layout units (matches the renderer's anchor).
-    pub anchor_y: f32,
+    /// `Anchor` offset Y in layout points (the panel's layout-local anchor).
+    pub anchor_y:     f32,
+    /// Layout-points-to-world-meters scale (the panel's `points_to_world`).
+    pub scale:        f32,
+    /// Font size in layout points, matching the panel-text run.
+    pub font_size:    f32,
+    /// First-line metrics from the same shaping pass, in layout points.
+    pub line_metrics: LineMetricsSnapshot,
     /// Per-visible-glyph metrics aligned with the rendered text.
-    pub glyphs:   Vec<ComputedGlyphMetrics>,
+    pub glyphs:       Vec<ComputedGlyphMetrics>,
 }
 
 /// Overlay-only metrics for one visible glyph in a [`TextContent`] run.

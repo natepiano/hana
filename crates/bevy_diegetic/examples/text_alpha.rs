@@ -202,7 +202,7 @@ fn setup(
                     .color(Color::srgb(0.9, 0.3, 0.1))
                     .sidedness(GlyphSidedness::OneSided)
                     .transform(Transform::from_xyz(0.0, 0.0, 0.501))
-                    .bundle(),
+                    .build(),
             );
         });
 
@@ -216,7 +216,7 @@ fn setup(
                 Transform::from_xyz(0.0, 0.001, 1.125)
                     .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
             )
-            .bundle(),
+            .build(),
     ));
 
     // Lighting.

@@ -259,7 +259,7 @@ fn setup(mut commands: Commands) {
                 WORLD_TEXT_TITLE_Y,
                 SCENE_Z,
             ))
-            .bundle(),
+            .build(),
     );
 
     let default_alpha = commands
@@ -274,7 +274,7 @@ fn setup(mut commands: Commands) {
                     WORLD_TEXT_DEFAULT_Y,
                     SCENE_Z,
                 ))
-                .bundle(),
+                .build(),
         )
         .id();
 
@@ -290,7 +290,7 @@ fn setup(mut commands: Commands) {
                     WORLD_TEXT_ALPHA_Y,
                     SCENE_Z,
                 ))
-                .bundle(),
+                .build(),
         )
         .override_text_alpha(STANDALONE_ALPHA)
         .id();
@@ -307,7 +307,7 @@ fn setup(mut commands: Commands) {
                     WORLD_TEXT_UNIT_Y,
                     SCENE_Z,
                 ))
-                .bundle(),
+                .build(),
         )
         .id();
 

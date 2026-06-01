@@ -186,7 +186,7 @@ fn setup(
             .color(HEADER_COLOR)
             .anchor(Anchor::BottomCenter)
             .transform(Transform::from_xyz(0.0, world_height + 0.02, 0.0))
-            .bundle(),
+            .build(),
     );
 
     // ── Main panel ───────────────────────────────────────────────────

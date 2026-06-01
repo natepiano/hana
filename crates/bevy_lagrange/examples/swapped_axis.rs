@@ -751,7 +751,7 @@ fn spawn_label(root: &mut ChildSpawnerCommands, axis: usize, sign: f32, color: C
             .anchor(Anchor::Center)
             .unlit()
             .transform(Transform::default())
-            .bundle(),
+            .build(),
     ));
 }
 

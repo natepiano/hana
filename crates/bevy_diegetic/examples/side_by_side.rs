@@ -647,7 +647,7 @@ fn spawn_clay_text(
                         Transform::from_translation(world_pos)
                             .with_scale(Vec3::splat(text_entity_scale)),
                     )
-                    .bundle(),
+                    .build(),
             ));
         }
     }

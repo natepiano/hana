@@ -31,7 +31,6 @@ use crate::layout::ShapedTextCache;
 use crate::layout::TextDimensions;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
-use crate::render::TextContent;
 
 /// Visual parameters shared across arrow-label spawners. Exists to reduce
 /// helper parameter counts.
@@ -253,14 +252,16 @@ fn spawn_line_edge_labels(
             continue;
         }
         let line_world_y = scaling::layout_to_world_y(layout_y, ctx.anchor_y, ctx.scale);
-        ctx.commands.entity(ctx.entity).with_child((
-            TextContent::new(label),
+        super::spawn_overlay_label(
+            ctx.commands,
+            ctx.entity,
+            label,
             TextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::CenterRight)
                 .with_shadow_mode(ctx.overlay.label_shadow_mode()),
             Transform::from_xyz(label_x - style.gap, line_world_y, style.z_offset),
-        ));
+        );
     }
 }
 
@@ -276,34 +277,40 @@ fn spawn_left_arrow_labels(
 ) {
     let label_y_mid = f32::midpoint(guides.baseline, guides.x_height);
     let label_y_mid_world = scaling::layout_to_world_y(label_y_mid, ctx.anchor_y, ctx.scale);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_ASCENT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_ASCENT,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(left_1 - style.gap, label_y_mid_world, style.z_offset),
-    ));
+    );
 
     let descent_mid = f32::midpoint(guides.baseline, guides.descent);
     let descent_mid_world = scaling::layout_to_world_y(descent_mid, ctx.anchor_y, ctx.scale);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_DESCENT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_DESCENT,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(left_1 - style.gap, descent_mid_world, style.z_offset),
-    ));
+    );
 
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_LINE_HEIGHT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_LINE_HEIGHT,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(left_2 - style.gap, label_y_mid_world, style.z_offset),
-    ));
+    );
 
     // Baseline label: offset down by half the label's descent so the visual
     // center of the text sits on the red line.
@@ -311,28 +318,32 @@ fn spawn_left_arrow_labels(
     let label_descent_offset = line_metrics.descent * LABEL_SIZE_RATIO * ctx.scale / 2.0;
     let baseline_label_world =
         scaling::layout_to_world_y(guides.baseline, ctx.anchor_y, ctx.scale) - label_descent_offset;
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_BASELINE),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_BASELINE,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(left_2 - style.gap, baseline_label_world, style.z_offset),
-    ));
+    );
 
     let has_line_gap =
         (line_metrics.top - (line_metrics.baseline - line_metrics.ascent)).abs() > 0.5;
     if !has_line_gap {
         let ascent_world = scaling::layout_to_world_y(guides.ascent, ctx.anchor_y, ctx.scale);
         let no_gap_label = format!("{NO_LINE_GAP_LABEL_PREFIX}{font_name}");
-        ctx.commands.entity(ctx.entity).with_child((
-            TextContent::new(no_gap_label),
+        super::spawn_overlay_label(
+            ctx.commands,
+            ctx.entity,
+            no_gap_label,
             TextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::BottomLeft)
                 .with_shadow_mode(ctx.overlay.label_shadow_mode()),
             Transform::from_xyz(left_2, ascent_world, style.z_offset),
-        ));
+        );
     }
 }
 
@@ -346,23 +357,27 @@ fn spawn_right_arrow_labels(
 ) {
     let x_height_mid = f32::midpoint(guides.x_height, guides.baseline);
     let x_height_mid_world = scaling::layout_to_world_y(x_height_mid, ctx.anchor_y, ctx.scale);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_X_HEIGHT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_X_HEIGHT,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(right_1 + style.gap, x_height_mid_world, style.z_offset),
-    ));
+    );
 
     let cap_mid = f32::midpoint(guides.cap_height, guides.x_height);
     let cap_mid_world = scaling::layout_to_world_y(cap_mid, ctx.anchor_y, ctx.scale);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_CAP_HEIGHT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_CAP_HEIGHT,
         TextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(right_2 + style.gap, cap_mid_world, style.z_offset),
-    ));
+    );
 }

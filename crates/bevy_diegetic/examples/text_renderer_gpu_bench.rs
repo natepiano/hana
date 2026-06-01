@@ -237,7 +237,7 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
                     row.to_f32().mul_add(-GRID_SPACING_Y, origin_y),
                     0.0,
                 ))
-                .bundle(),
+                .build(),
         );
     }
 }

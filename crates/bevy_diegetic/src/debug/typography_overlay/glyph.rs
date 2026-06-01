@@ -32,7 +32,6 @@ use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
-use crate::render::TextContent;
 
 /// Geometry inputs for the horizontal advancement dimension arrow. Exists to
 /// reduce helper parameter counts.
@@ -185,8 +184,10 @@ fn spawn_bounding_box_callout(
     // Label at the top of the riser, to the left (CenterRight anchor).
     let ascent_mid_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let ascent_mid_world = scaling::layout_to_world_y(ascent_mid_layout, ctx.anchor_y, ctx.scale);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_BOUNDING_BOX),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_BOUNDING_BOX,
         TextStyle::new(label_size)
             .with_color(bbox_color)
             .with_anchor(Anchor::CenterRight)
@@ -196,7 +197,7 @@ fn spawn_bounding_box_callout(
             ascent_mid_world,
             z,
         ),
-    ));
+    );
 }
 
 /// Spawns origin dots, origin label, advancement end dot, and advancement arrow.
@@ -262,14 +263,16 @@ fn spawn_origin_and_advancement(
         ))
         .surface_shadow(ctx.overlay.surface_shadow),
     );
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_ORIGIN),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_ORIGIN,
         TextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::Center)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(first_mid_x, origin_label_y, z),
-    ));
+    );
 
     // Advancement end dot — filled circle at (origin + advance, baseline).
     let advance_end_x = origin_x + first.advance_x;
@@ -363,14 +366,16 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     // "Advancement" label centered below the arrow.
     let advance_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
     let advance_label_y = geometry.spacing.mul_add(-0.5, arrow_y);
-    ctx.commands.entity(ctx.entity).with_child((
-        TextContent::new(LABEL_ADVANCEMENT),
+    super::spawn_overlay_label(
+        ctx.commands,
+        ctx.entity,
+        LABEL_ADVANCEMENT,
         TextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::TopCenter)
             .with_shadow_mode(ctx.overlay.label_shadow_mode()),
         Transform::from_xyz(advance_mid_x, advance_label_y, geometry.z),
-    ));
+    );
 }
 
 fn spawn_overlay_dot(

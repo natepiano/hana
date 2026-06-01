@@ -145,7 +145,7 @@ fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f3
                 .color(HEADER_COLOR)
                 .anchor(Anchor::TopLeft)
                 .transform(Transform::from_xyz(left_x, header_y, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
     commands
@@ -155,7 +155,7 @@ fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f3
                 .color(HEADER_COLOR)
                 .anchor(Anchor::TopLeft)
                 .transform(Transform::from_xyz(note_x, header_y, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
 }

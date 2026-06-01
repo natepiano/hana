@@ -15,15 +15,16 @@ use std::time::Instant;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
+use bevy_diegetic::AlignX;
+use bevy_diegetic::AlignY;
+use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -31,16 +32,25 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
+use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::TitleBar;
+use fairy_dust::screen_panel_frame;
+use fairy_dust::screen_panel_material;
 
 // ── Text / layout constants (meters) ─────────────────────────────────────────
 
-/// Font size for content panel text (in millimeters, matched to `font_unit`).
-const FONT_SIZE: f32 = 2.1;
 const ROW_HEIGHT: f32 = 0.07;
+/// Font size for content panel text, in millimeters (matched to `font_unit`).
+///
+/// Coupled to `ROW_HEIGHT` (a layout-meters value) so glyphs fill most of the
+/// row they sit in rather than rendering sub-pixel: `0.07 m` → `70 mm` row,
+/// `* 0.6` → a `42 mm` cap height that reads cleanly at the framing distance.
+const FONT_SIZE: f32 = ROW_HEIGHT * 1000.0 * 0.6;
 const ROW_SPACING: f32 = 0.05;
 const COLUMN_GAP: f32 = 0.05;
 const HEADER_HEIGHT: f32 = ROW_HEIGHT + 0.01;
@@ -80,27 +90,33 @@ const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 // ── Colors ───────────────────────────────────────────────────────────────────
 
 const BORDER_COLOR: Color = Color::srgb(0.39, 0.43, 0.47);
-const BG_COLOR: Color = Color::srgb(0.157, 0.173, 0.204);
 const DIVIDER_COLOR: Color = Color::srgb(0.235, 0.51, 0.706);
 
-// ── Overlay panel constants ──────────────────────────────────────────────────
+// ── Diagnostic overlay (screen-space) constants ───────────────────────────────
 
-/// Background color for overlay panels.
-const OVERLAY_BG: Color = Color::srgba(0.1, 0.1, 0.12, 0.85);
+/// Font size for the diagnostic readout text (pixels).
+const OVERLAY_FONT_SIZE: f32 = 13.0;
 
-/// Border color for overlay panels.
-const OVERLAY_BORDER_COLOR: Color = Color::srgb(0.4, 0.4, 0.45);
+/// Value column color (the live numbers).
+const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
 
-/// Font size for overlay panel text (in millimeters).
-const OVERLAY_FONT_SIZE: f32 = 3.5;
+/// Label / header column color (dimmer than the values).
+const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
 
-/// Layout dimensions for the status panel (in meters).
-const STATUS_LAYOUT_WIDTH: f32 = 0.2;
-const STATUS_LAYOUT_HEIGHT: f32 = 0.03;
+/// Metric-label column width, in pixels.
+const LABEL_COLUMN_WIDTH: f32 = 56.0;
+/// Numeric value column width, in pixels (right-aligned cells).
+const VALUE_COLUMN_WIDTH: f32 = 60.0;
+/// Gap between table columns, in pixels.
+const TABLE_COL_GAP: f32 = 8.0;
+/// Gap between table rows, in pixels.
+const TABLE_ROW_GAP: f32 = 2.0;
 
-/// Layout dimensions for the controls panel (in meters).
-const CONTROLS_LAYOUT_WIDTH: f32 = 0.08;
-const CONTROLS_LAYOUT_HEIGHT: f32 = 0.02;
+/// Row labels for the diagnostic table, in display order.
+const METRIC_LABELS: [&str; 6] = ["fps", "ms", "upd", "tree", "layout", "text"];
+
+/// Placeholder values shown before the first perf sample arrives.
+const INITIAL_METRICS: [&str; 6] = ["--", "--", "--", "--", "--", "--"];
 
 /// Source text for row values.
 const SOURCE_TEXT: &str = "bevy diegetic layout engine text rendering msdf atlas glyph quad mesh \
@@ -133,10 +149,6 @@ struct GroundPlane;
 #[derive(Component)]
 struct StatusPanel;
 
-/// Marker for the controls help panel.
-#[derive(Component)]
-struct ControlsPanel;
-
 #[derive(Resource, Default)]
 struct StressPerfStats {
     panel_update_ms: f32,
@@ -165,11 +177,33 @@ struct LastDisplayedStatus {
 // ── App ──────────────────────────────────────────────────────────────────────
 
 fn main() {
-    App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugins(BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault))
-        .add_plugins(DiegeticUiPlugin)
-        .add_plugins(LagrangePlugin)
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`.
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_orbit_cam_preset(
+            |cam| {
+                cam.focus = Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25);
+                cam.radius = Some(8.0);
+                cam.yaw = Some(0.0);
+                cam.pitch = Some(0.35);
+            },
+            OrbitCamPreset::BlenderLike,
+        )
+        .with_stable_transparency()
+        .with_camera_home()
+        .yaw(0.0)
+        .pitch(0.35)
+        .with_title_bar(
+            TitleBar::new()
+                .with_title("Text Stress")
+                .with_anchor(Anchor::TopLeft)
+                .control("+ Add")
+                .control("- Remove"),
+        )
+        .with_camera_control_panel()
         .init_resource::<StressControls>()
         .init_resource::<StressPerfStats>()
         .init_resource::<LastDisplayedStatus>()
@@ -193,7 +227,9 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    // Ground plane.
+    // Ground plane. Resized per-frame as panels stack backward (see
+    // `resize_ground_plane`), so it is spawned manually rather than via
+    // `.with_ground_plane()`.
     commands.spawn((
         GroundPlane,
         Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, STACK_DEPTH))),
@@ -206,119 +242,152 @@ fn setup(
         })),
     ));
 
-    // Directional lights.
-    commands.spawn((
-        DirectionalLight {
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(0.5, 1.5, 1.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-    commands.spawn((
-        DirectionalLight {
-            shadow_maps_enabled: false,
-            ..default()
-        },
-        Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
-    ));
-
-    // Camera.
-    commands.spawn((
-        AmbientLight {
-            color: Color::WHITE,
-            brightness: 1000.0,
-            ..default()
-        },
-        OrbitCam {
-            focus: Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25),
-            radius: Some(8.0),
-            yaw: Some(0.0),
-            pitch: Some(0.35),
-            ..default()
-        },
-    ));
-
-    // Status panel (combined FPS + row/panel counts) — top-right area.
-    let status_panel = DiegeticPanel::world()
-        .size(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT)
-        .font_unit(Unit::Millimeters)
-        .with_tree(build_status_panel("fps: --  ms: --  rows: 0  panels: 0"))
-        .build();
-    let Ok(status_panel) = status_panel else {
-        error!("failed to build status panel dimensions");
-        return;
-    };
-
-    commands.spawn((
-        StatusPanel,
-        status_panel,
-        Transform::from_xyz(3.9, 5.015, 2.0),
-    ));
-
-    // Controls panel (static help text) — bottom-left area.
-    let controls_panel = DiegeticPanel::world()
-        .size(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT)
-        .font_unit(Unit::Millimeters)
-        .with_tree(build_controls_panel())
-        .build();
-    let Ok(controls_panel) = controls_panel else {
-        error!("failed to build controls panel dimensions");
-        return;
-    };
-
-    commands.spawn((
-        ControlsPanel,
-        controls_panel,
-        Transform::from_xyz(-4.04, 0.51, 3.0),
-    ));
+    spawn_status_overlay(&mut commands);
 }
 
-fn build_status_panel(text: &str) -> LayoutTree {
-    let mut builder = LayoutBuilder::new(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT);
+/// Spawns the diagnostic readout — a bottom-left screen-space overlay built with
+/// the canonical Fairy Dust panel frame. Rebuilt each second by
+/// [`update_status_panel`] (top-left is the title bar, bottom-right the camera
+/// control panel, so the readout sits bottom-left).
+fn spawn_status_overlay(commands: &mut Commands) {
+    let unlit = screen_panel_material();
+    let built = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_status_overlay_tree(
+            &INITIAL_METRICS.map(String::from),
+            &INITIAL_METRICS.map(String::from),
+            0,
+            0,
+        ))
+        .build();
+    match built {
+        Ok(built) => {
+            commands.spawn((StatusPanel, built, Transform::default()));
+        },
+        Err(error) => error!("text_stress: failed to build status overlay: {error}"),
+    }
+}
+
+/// Text style for the diagnostic table's dimmer label / header column.
+fn status_label_style() -> TextStyle {
+    TextStyle::new(OVERLAY_FONT_SIZE)
+        .with_color(STATUS_LABEL_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+/// Text style for the diagnostic table's live value columns.
+fn status_value_style() -> TextStyle {
+    TextStyle::new(OVERLAY_FONT_SIZE)
+        .with_color(STATUS_TEXT_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+/// A fixed-width left-aligned cell — used for the metric-label column.
+fn label_cell(builder: &mut LayoutBuilder, text: &str) {
     builder.with(
         El::new()
-            .width(Sizing::GROW)
+            .width(Sizing::fixed(LABEL_COLUMN_WIDTH))
             .height(Sizing::FIT)
-            .padding(Padding::all(0.002))
-            .direction(Direction::TopToBottom)
-            .child_gap(0.001)
-            .background(OVERLAY_BG)
-            .border(Border::all(0.0005, OVERLAY_BORDER_COLOR)),
-        |b| {
-            b.text(
-                text,
-                TextStyle::new(OVERLAY_FONT_SIZE)
-                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
-                    .with_shadow_mode(GlyphShadowMode::None),
-            );
+            .child_alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text(text, status_label_style());
         },
     );
-    builder.build()
 }
 
-fn build_controls_panel() -> LayoutTree {
-    let mut builder = LayoutBuilder::new(CONTROLS_LAYOUT_WIDTH, CONTROLS_LAYOUT_HEIGHT);
+/// Whether a value cell renders with the dimmer label color (headers, footer)
+/// or the brighter live-value color.
+#[derive(Clone, Copy)]
+enum CellEmphasis {
+    Normal,
+    Dim,
+}
+
+/// A fixed-width right-aligned cell — used for the numeric value columns, so the
+/// digits line up in a proportional font without space-padding.
+fn value_cell(builder: &mut LayoutBuilder, text: &str, emphasis: CellEmphasis) {
+    let style = match emphasis {
+        CellEmphasis::Dim => status_label_style(),
+        CellEmphasis::Normal => status_value_style(),
+    };
     builder.with(
         El::new()
-            .width(Sizing::GROW)
+            .width(Sizing::fixed(VALUE_COLUMN_WIDTH))
             .height(Sizing::FIT)
-            .padding(Padding::all(0.002))
-            .direction(Direction::TopToBottom)
-            .child_gap(0.001)
-            .background(OVERLAY_BG)
-            .border(Border::all(0.0005, OVERLAY_BORDER_COLOR)),
-        |b| {
-            b.text(
-                "'+' add  '-' remove",
-                TextStyle::new(OVERLAY_FONT_SIZE)
-                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.7))
-                    .with_shadow_mode(GlyphShadowMode::None),
-            );
-            b.text(
-                "(hold to accelerate)",
-                TextStyle::new(OVERLAY_FONT_SIZE)
-                    .with_color(Color::srgba(1.0, 1.0, 1.0, 0.5))
-                    .with_shadow_mode(GlyphShadowMode::None),
+            .child_alignment(AlignX::Right, AlignY::Center),
+        |builder| {
+            builder.text(text, style);
+        },
+    );
+}
+
+/// One table row: a left-aligned label cell and two right-aligned value cells.
+fn table_row(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    now: &str,
+    max: &str,
+    emphasis: CellEmphasis,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(TABLE_COL_GAP)
+            .child_alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            label_cell(builder, label);
+            value_cell(builder, now, emphasis);
+            value_cell(builder, max, emphasis);
+        },
+    );
+}
+
+/// Builds the diagnostic table inside the canonical panel frame: a `now` column
+/// and a `5s max` column of right-aligned numerics, one row per metric, with a
+/// panels/rows footer.
+fn build_status_overlay_tree(
+    now: &[String; 6],
+    max: &[String; 6],
+    panels: usize,
+    rows: usize,
+) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(TABLE_ROW_GAP),
+                |builder| {
+                    table_row(builder, "", "now", "5s max", CellEmphasis::Dim);
+                    for index in 0..METRIC_LABELS.len() {
+                        table_row(
+                            builder,
+                            METRIC_LABELS[index],
+                            &now[index],
+                            &max[index],
+                            CellEmphasis::Normal,
+                        );
+                    }
+                    table_row(
+                        builder,
+                        "panels",
+                        &panels.to_string(),
+                        &rows.to_string(),
+                        CellEmphasis::Dim,
+                    );
+                },
             );
         },
     );
@@ -427,30 +496,35 @@ fn update_status_panel(
         maximum_text_milliseconds = maximum_text_milliseconds.max(sample.text_ms);
     }
 
-    let new_text = format!(
-        "{tag_now:<7} fps: {fps:>4}  ms: {frame:>5}  upd: {upd:>5}ms  tree: {tree:>5}ms  layout: {layout:>5}ms  text: {text_ms:>5}ms\n{tag_max:<7} fps: {max_fps:>4}  ms: {max_frame:>5}  upd: {max_upd:>5}ms  tree: {max_tree:>5}ms  layout: {max_layout:>5}ms  text: {max_text:>5}ms\npanels: {}  rows: {}",
-        stress_perf.panel_count,
-        state.row_count,
-        tag_now = "now",
-        tag_max = "5s max",
-        fps = frames_per_second_string,
-        frame = frame_milliseconds_string,
-        upd = format!("{:.1}", stress_perf.panel_update_ms),
-        tree = format!("{:.1}", stress_perf.tree_build_ms),
-        layout = format!("{:.1}", diegetic_perf.compute_ms),
-        text_ms = format!("{:.1}", diegetic_perf.panel_text.total_ms),
-        max_fps = format!("{:.0}", maximum_frames_per_second),
-        max_frame = format!("{:.1}", maximum_frame_milliseconds),
-        max_upd = format!("{:.1}", maximum_update_milliseconds),
-        max_tree = format!("{:.1}", maximum_tree_milliseconds),
-        max_layout = format!("{:.1}", maximum_layout_milliseconds),
-        max_text = format!("{:.1}", maximum_text_milliseconds),
-    );
+    let now = [
+        frames_per_second_string,
+        frame_milliseconds_string,
+        format!("{:.1}", stress_perf.panel_update_ms),
+        format!("{:.1}", stress_perf.tree_build_ms),
+        format!("{:.1}", diegetic_perf.compute_ms),
+        format!("{:.1}", diegetic_perf.panel_text.total_ms),
+    ];
+    let max = [
+        format!("{maximum_frames_per_second:.0}"),
+        format!("{maximum_frame_milliseconds:.1}"),
+        format!("{maximum_update_milliseconds:.1}"),
+        format!("{maximum_tree_milliseconds:.1}"),
+        format!("{maximum_layout_milliseconds:.1}"),
+        format!("{maximum_text_milliseconds:.1}"),
+    ];
+    let panels_count = stress_perf.panel_count;
+    let rows = state.row_count;
 
-    if new_text != last_displayed.text {
-        last_displayed.text.clone_from(&new_text);
+    // Single-string key so the tree is only rebuilt when a displayed value
+    // actually changes.
+    let key = format!("{}|{}|{panels_count}|{rows}", now.join(","), max.join(","));
+    if key != last_displayed.text {
+        last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, build_status_panel(&new_text));
+            commands.set_tree(
+                entity,
+                build_status_overlay_tree(&now, &max, panels_count, rows),
+            );
         }
     }
 }
@@ -473,6 +547,17 @@ fn rows_per_panel() -> usize {
     let first = rows_per_column(true);
     let other = rows_per_column(false);
     first + (MAX_COLUMNS - 1) * other
+}
+
+/// Transparent background-quad material for a stress panel, so the scene shows
+/// through and only the borders + (PBR-lit) text read against the ground.
+fn transparent_panel_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default_panel_material()
+    }
 }
 
 fn update_panels(
@@ -521,10 +606,13 @@ fn update_panels(
         tree_builds += 1;
         commands.spawn((
             StressPanel(idx),
+            CameraHomeTarget,
             {
                 let panel = DiegeticPanel::world()
                     .size(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT)
                     .font_unit(Unit::Millimeters)
+                    .material(transparent_panel_material())
+                    .text_material(default_panel_material())
                     .with_tree(tree)
                     .build();
                 let Ok(panel) = panel else {
@@ -636,7 +724,6 @@ fn build_panel_tree(
             .direction(Direction::LeftToRight)
             .child_gap(COLUMN_GAP)
             .padding(Padding::all(0.03))
-            .background(BG_COLOR)
             .border(Border::all(0.01, BORDER_COLOR)),
         |b| {
             let mut row_cursor = panel_start;

@@ -513,7 +513,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
                 .size(0.14)
                 .color(Color::srgb(0.8, 0.9, 1.0))
                 .transform(Transform::from_xyz(0.0, TITLE_Y, DISPLAY_Z))
-                .bundle(),
+                .build(),
         );
 
         // Row labels: one per row, placed inline at ROW_LABEL_X so they
@@ -529,7 +529,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
                     .color(Color::srgb(0.9, 0.9, 0.95))
                     .shadow_mode(bevy_diegetic::GlyphShadowMode::Cast)
                     .transform(Transform::from_xyz(ROW_LABEL_X, y, ROW_Z))
-                    .bundle(),
+                    .build(),
             );
         }
 
@@ -542,7 +542,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
                     .size(0.07)
                     .color(Color::srgb(0.7, 0.75, 0.85))
                     .transform(Transform::from_xyz(x, WIDTH_LABEL_Y, ROW_Z))
-                    .bundle(),
+                    .build(),
             );
         }
     });

@@ -100,10 +100,15 @@ impl Dimension {
     /// (typically `layout_to_points` or `font_to_points`).
     #[must_use]
     pub fn to_points(self, default_scale: f32) -> f32 {
-        match self.unit {
+        let scaled = match self.unit {
             Some(unit) => self.value * unit.to_points(),
             None => self.value * default_scale,
-        }
+        };
+        // The `Sizing::Fit`/`Grow` unbounded sentinel is `f32::MAX`. Scaling it
+        // by a large factor (world meters->points is ~2835x) overflows to
+        // `inf`, which breaks downstream `Fit` width resolution (an unbounded
+        // axis collapses to zero). Saturate so "unbounded" stays representable.
+        scaled.min(f32::MAX)
     }
 
     /// Converts this dimension to world meters.

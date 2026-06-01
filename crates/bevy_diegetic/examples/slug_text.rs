@@ -159,7 +159,7 @@ fn setup(
             .size(HEADLINE_SIZE)
             .color(LATIN_COLOR)
             .transform(Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
     commands.spawn((
         Name::new("Small line"),
@@ -168,7 +168,7 @@ fn setup(
             .size(SMALL_SIZE)
             .color(LATIN_COLOR)
             .transform(Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
     // PunchOut fill: each glyph quad is painted everywhere except the letter,
     // so the word reads as solid blocks with the letters knocked out.
@@ -180,7 +180,7 @@ fn setup(
             .color(PUNCH_OUT_COLOR)
             .render_mode(GlyphRenderMode::PunchOut)
             .transform(Transform::from_xyz(0.0, PUNCH_OUT_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
 }
 
@@ -205,6 +205,6 @@ fn on_font_registered(
             .font(font_id.0)
             .color(CJK_COLOR)
             .transform(Transform::from_xyz(0.0, CJK_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
     ));
 }

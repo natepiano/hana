@@ -5,15 +5,10 @@ use super::OverlayContainer;
 use super::TypographyOverlay;
 use super::glyph;
 use super::metric_lines;
-use crate::cascade::CascadeDefault;
-use crate::cascade::FontUnit;
-use crate::cascade::Resolved;
-use crate::layout::Anchor;
 use crate::layout::LineMetricsSnapshot;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
 use crate::layout::TextStyle;
-use crate::layout::Unit;
 use crate::render::ComputedWorldText;
 use crate::render::TextContent;
 use crate::text;
@@ -83,10 +78,8 @@ pub fn build_typography_overlay(
         ),
     >,
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
-    resolved_units: Query<&Resolved<FontUnit>>,
     font_registry: Res<FontRegistry>,
     mut cache: ResMut<ShapedTextCache>,
-    font_default: Res<CascadeDefault<FontUnit>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -114,51 +107,23 @@ pub fn build_typography_overlay(
             continue;
         };
 
-        // Standalone world text is shaped in boosted point space, then the
-        // renderer scales the result back to world meters. Use the same
-        // boosted measure here so the overlay sees the same line metrics.
-        let points_to_world = Unit::Points.meters_per_unit();
-        let boost = if points_to_world > 0.0 {
-            1.0 / points_to_world
-        } else {
-            1.0
-        };
-        let font_size = style.size() * boost;
-        let font_metrics = font.metrics(font_size);
-
-        // Read the per-entity `Resolved<FontUnit>`, falling back to
-        // `CascadeDefault<FontUnit>`.
-        let unit_scale = resolved_units
-            .get(entity)
-            .map_or(font_default.0, |resolved| resolved.0)
-            .0
-            .meters_per_unit();
-        let scale = unit_scale * points_to_world;
-        let anchor_y = if scale > 0.0 {
-            computed.anchor_y / scale
-        } else {
-            0.0
-        };
-
-        let measure = style.for_shaping(Anchor::Center).scaled(boost).as_measure();
-        let Some(line_metrics) = cache
-            .get_shaped(world_text.text(), &measure)
-            .and_then(|s| s.line_metrics.first().copied())
-        else {
-            continue;
-        };
+        // `ComputedWorldText` already carries the panel child's render scale,
+        // point-space font size, anchor, and line metrics, so the overlay draws
+        // in the same coordinates as the rendered glyphs without re-deriving any
+        // of them. `font_size` is in layout points; `scale` converts to meters.
+        let font_metrics = font.metrics(computed.font_size);
 
         let mut ctx = OverlayContext {
             commands: &mut commands,
             entity: container_entity,
             overlay,
-            anchor_y,
-            font_size,
-            scale,
+            anchor_y: computed.anchor_y,
+            font_size: computed.font_size,
+            scale: computed.scale,
         };
         let font_context = FontContext {
             font: &font_metrics,
-            line: &line_metrics,
+            line: &computed.line_metrics,
         };
         let mut assets = OverlayAssets {
             meshes:    &mut meshes,

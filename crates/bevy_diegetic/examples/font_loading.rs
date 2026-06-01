@@ -227,7 +227,7 @@ fn on_font_registered(
                 .color(Color::srgb(0.2, 0.3, 0.9))
                 .shadow_mode(GlyphShadowMode::None)
                 .transform(Transform::from_xyz(0.0, y, 0.0))
-                .bundle(),
+                .build(),
         )
         .observe(on_text_clicked);
 

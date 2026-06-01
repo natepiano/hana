@@ -327,7 +327,7 @@ fn setup(
             .size(DISPLAY_SIZE)
             .color(Color::srgb(0.9, 0.9, 0.9))
             .transform(Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z))
-            .bundle(),
+            .build(),
         TypographyOverlay::default().with_shadow(SurfaceShadow::On),
     ));
 
@@ -343,7 +343,7 @@ fn setup(
                 rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
                 ..default()
             })
-            .bundle(),
+            .build(),
     ));
 
     spawn_hud_panels(&mut commands, &font_registry);

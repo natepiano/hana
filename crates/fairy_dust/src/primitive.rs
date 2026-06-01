@@ -106,7 +106,7 @@ pub fn cube_face_text(
             .color(color)
             .sidedness(GlyphSidedness::OneSided)
             .transform(face.local_transform(cube_size * 0.5))
-            .bundle(),
+            .build(),
     )
 }
 

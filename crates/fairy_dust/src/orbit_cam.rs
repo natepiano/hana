@@ -12,9 +12,9 @@ use bevy_lagrange::UpsideDownPolicy;
 /// Canonical pitch limit for examples that manually spawn an `OrbitCam`.
 pub(crate) const EXAMPLE_ORBIT_CAM_PITCH_LIMIT: f32 = std::f32::consts::TAU / 3.0;
 /// Canonical lower zoom/radius limit for examples that manually spawn an `OrbitCam`.
-pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT: f32 = 1.0;
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT: f32 = 0.1;
 /// Canonical upper zoom/radius limit for examples that manually spawn an `OrbitCam`.
-pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_UPPER_LIMIT: f32 = 8.0;
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_UPPER_LIMIT: f32 = 20.0;
 
 /// Marker identifying the `OrbitCam` that `fairy_dust` capabilities target.
 ///

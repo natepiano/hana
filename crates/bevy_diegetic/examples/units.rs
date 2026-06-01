@@ -427,7 +427,7 @@ fn spawn_a4_with_titles(
                 .color(Color::WHITE)
                 .anchor(Anchor::BottomCenter)
                 .transform(Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
     commands
@@ -437,7 +437,7 @@ fn spawn_a4_with_titles(
                 .color(Color::WHITE)
                 .anchor(Anchor::BottomCenter)
                 .transform(Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
 }
@@ -503,7 +503,7 @@ fn spawn_photo_panel_with_title(
                     index_y + index_height_m / 2.0 + title_gap,
                     0.0,
                 ))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
 }

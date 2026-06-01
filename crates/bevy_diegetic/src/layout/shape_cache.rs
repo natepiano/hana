@@ -52,6 +52,8 @@ pub struct ShapedGlyph {
     pub y:         f32,
     /// Baseline of the line this glyph belongs to.
     pub baseline:  f32,
+    /// Horizontal advance of this glyph, in the same units as `x`.
+    pub advance:   f32,
 }
 
 /// Snapshot of parley's per-line metrics, captured during text shaping.

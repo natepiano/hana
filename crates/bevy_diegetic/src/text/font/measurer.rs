@@ -164,6 +164,7 @@ mod tests {
     use crate::MeasureTextFn;
     use crate::TextMeasure;
     use crate::TextStyle;
+    use crate::Unit;
     use crate::text::FontRegistry;
 
     fn measurer() -> MeasureTextFn {
@@ -186,6 +187,20 @@ mod tests {
             dims.height > 0.0,
             "height should be positive, got {}",
             dims.height
+        );
+    }
+
+    #[test]
+    fn measures_nonzero_width_at_world_scale() {
+        // WorldText `.size(0.16)` is meters (bare f32); the panel scales it to
+        // points by `Unit::Meters.to_points()` (~2835x) before measuring.
+        let measure = measurer();
+        let size = 0.16 * Unit::Meters.to_points();
+        let dims = measure("Hello", &default_measure(size));
+        assert!(
+            dims.width > 0.0,
+            "width at {size}pt should be positive, got {}",
+            dims.width
         );
     }
 

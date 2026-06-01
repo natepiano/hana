@@ -172,7 +172,7 @@ fn spawn_headers(
             WorldText::new("DiegeticPanel")
                 .style(header_style.clone())
                 .transform(Transform::from_xyz(left_x, header_y, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
     commands
@@ -180,7 +180,7 @@ fn spawn_headers(
             WorldText::new("How font sizes work")
                 .style(header_style.clone())
                 .transform(Transform::from_xyz(note_x, header_y, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points);
 }
@@ -223,7 +223,7 @@ fn spawn_world_text_column(
             WorldText::new("WorldText")
                 .style(header_style)
                 .transform(Transform::from_xyz(right_x, header_y, 0.0))
-                .bundle(),
+                .build(),
         )
         .override_font_unit(Unit::Points)
         .id();
@@ -264,7 +264,7 @@ fn spawn_world_text_column(
                     WorldText::new(*label)
                         .style(label_style.clone())
                         .transform(Transform::from_xyz(0.0, dy, 0.0))
-                        .bundle(),
+                        .build(),
                 )
                 .override_font_unit(Unit::Points);
         });
@@ -273,7 +273,7 @@ fn spawn_world_text_column(
                 WorldText::new("Hello")
                     .style(style.clone().with_anchor(Anchor::TopLeft))
                     .transform(Transform::from_xyz(sample_dx, dy, 0.0))
-                    .bundle(),
+                    .build(),
             );
             if let Some(unit) = *unit {
                 sample.override_font_unit(unit);

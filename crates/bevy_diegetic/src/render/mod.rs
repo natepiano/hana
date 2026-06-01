@@ -28,6 +28,8 @@ pub use transparency::StableTransparency;
 pub use world_text::ComputedWorldText;
 pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
+#[cfg(feature = "typography_overlay")]
+pub(crate) use world_text::emit_computed_world_text;
 
 use crate::text::TextMaterial;
 

@@ -128,6 +128,7 @@ fn fixture_shaped_glyphs(font_data: &[u8], font_key: u64, text: &str) -> Vec<Sha
             x: origin_x,
             y: 0.0,
             baseline: 0.0,
+            advance,
         });
         origin_x += advance;
     }

@@ -182,7 +182,7 @@ fn spawn_anchor_demo(
                 Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
                     .with_rotation(demo_rotation),
             )
-            .bundle(),
+            .build(),
     );
 
     commands.spawn((
@@ -201,7 +201,7 @@ fn spawn_anchor_demo(
                 )
                 .with_rotation(demo_rotation),
             )
-            .bundle(),
+            .build(),
     );
 
     let anchor_demo = [
@@ -234,7 +234,7 @@ fn spawn_anchor_demo(
                 .color(Color::WHITE)
                 .anchor(anchor)
                 .transform(Transform::from_translation(world_pos).with_rotation(demo_rotation))
-                .bundle(),
+                .build(),
             AnchorDemoText {
                 position:      world_pos,
                 base_rotation: demo_rotation,
@@ -254,7 +254,7 @@ fn spawn_ground_text(commands: &mut Commands) {
                 Transform::from_xyz(0.0, 0.001, 0.0)
                     .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
             )
-            .bundle(),
+            .build(),
     ));
 }
 

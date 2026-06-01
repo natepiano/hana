@@ -41,6 +41,7 @@ use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
+use crate::layout::Unit;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 
@@ -258,6 +259,48 @@ fn fit_wraps_text_content() {
         text_width(text, font_size)
     ));
     assert!(approx_eq(result.computed[1].height, line_height(font_size)));
+}
+
+#[test]
+fn fit_root_with_direct_text_child_resolves_width() {
+    // Mirrors the WorldText / ScreenText one-element sugar: a Fit x Fit root
+    // holding a single Fit text child directly (no intermediate El). The other
+    // fit tests wrap text in a Grow/fixed El, so this direct-text-leaf case was
+    // never exercised — it produced a zero-width root.
+    let font_size = 16.0;
+    let text = "Hello";
+    let mut b = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    b.text(text, TextStyle::new(font_size));
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(
+        approx_eq(result.computed[0].width, text_width(text, font_size)),
+        "root width = {}, expected {}",
+        result.computed[0].width,
+        text_width(text, font_size)
+    );
+    assert!(
+        approx_eq(result.computed[0].height, line_height(font_size)),
+        "root height = {}, expected {}",
+        result.computed[0].height,
+        line_height(font_size)
+    );
+}
+
+#[test]
+fn fit_max_saturates_instead_of_overflowing_when_scaled() {
+    // The `Sizing::FIT` unbounded sentinel is `f32::MAX`. Scaling it by the
+    // world meters->points factor (~2835x) must saturate at `f32::MAX`, not
+    // overflow to `inf` — an `inf` max breaks Fit width resolution downstream.
+    let scaled = Sizing::FIT.resolved(Unit::Meters.to_points());
+    assert!(
+        scaled.max_size().is_finite(),
+        "scaled Fit max overflowed to {}",
+        scaled.max_size()
+    );
 }
 
 #[test]
