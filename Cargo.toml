@@ -26,7 +26,7 @@ ttf-parser = "0.25"
 # dev-dependencies
 bevy_brp_extras     = "0.20.0-rc.1"
 bevy_lagrange       = { path = "crates/bevy_lagrange" }
-bevy_window_manager = "0.21.0-rc.1"
+bevy_window_manager = "0.21.0-rc.2"
 clay-layout         = { path = "vendor/clay-layout" }
 criterion           = { version = "0.8.2", features = ["html_reports"] }
 float-cmp           = "0.10.0"
