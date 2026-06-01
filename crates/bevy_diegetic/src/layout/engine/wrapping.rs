@@ -170,6 +170,7 @@ pub(super) fn rewrap_text_elements(
         if let ElementContent::Text {
             ref text,
             ref config,
+            ..
         } = element.content
         {
             let result = match config.wrap_mode() {

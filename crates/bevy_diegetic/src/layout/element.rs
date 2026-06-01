@@ -116,6 +116,12 @@ pub(super) enum ElementContent {
     Children(SmallVec<[usize; INLINE_CHILDREN]>),
     /// Text leaf.
     Text {
+        /// Panel-local id for this run — an author-assigned
+        /// [`PanelFieldId::Named`] (addressable at runtime via
+        /// [`text_child`](crate::DiegeticPanel::text_child)) or a builder-minted
+        /// [`PanelFieldId::Auto`] for an unnamed run. Doubles as the reconcile
+        /// reuse identity, so a named run survives a sibling reorder.
+        id:     PanelFieldId,
         /// The text string.
         text:   String,
         /// Text configuration.
@@ -383,6 +389,43 @@ impl LayoutTree {
             })
     }
 
+    /// Returns the panel-local id of the text run at `index`, if that element is
+    /// a text leaf. Reconcile reads this to key a child by its run id instead of
+    /// the former positional `(element_idx, command_index)` pair.
+    #[must_use]
+    pub(crate) fn element_field_id(&self, index: usize) -> Option<&PanelFieldId> {
+        self.elements
+            .get(index)
+            .and_then(|element| match &element.content {
+                ElementContent::Text { id, .. } => Some(id),
+                _ => None,
+            })
+    }
+
+    /// Returns the first author-assigned [`PanelFieldId::Named`] id that appears
+    /// on more than one element, scanning text-run ids and editable-field ids
+    /// together — they share one panel-local namespace. Auto ids are skipped
+    /// (unforgeable and unique by construction), so this only flags a real
+    /// author collision. `DiegeticPanelBuilder::build` calls this to reject a
+    /// duplicate at build time.
+    #[must_use]
+    pub(crate) fn duplicate_named_field_id(&self) -> Option<&PanelFieldId> {
+        let mut seen: Vec<&PanelFieldId> = Vec::new();
+        for index in 0..self.elements.len() {
+            let text_id = self.element_field_id(index);
+            let field_id = self.editable_field(index).map(|field| &field.field_id);
+            for id in [text_id, field_id].into_iter().flatten() {
+                if id.is_named() {
+                    if seen.contains(&id) {
+                        return Some(id);
+                    }
+                    seen.push(id);
+                }
+            }
+        }
+        None
+    }
+
     /// Returns the first text string owned by `index` or one of its descendants.
     #[must_use]
     pub(crate) fn field_display_text(&self, index: usize) -> Option<&str> {
@@ -621,10 +664,11 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
             }
         },
         (
-            ElementContent::Text { text, config },
+            ElementContent::Text { text, config, .. },
             ElementContent::Text {
                 text: next_text,
                 config: next_config,
+                ..
             },
         ) => {
             if text != next_text || !config.layout_eq_excluding_visuals(next_config) {

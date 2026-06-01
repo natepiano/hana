@@ -1,13 +1,12 @@
 //! Shared text-entity components.
 //!
-//! Holds [`TextContent`] (the text-source component carried by every panel-text
-//! label and by the one-element [`WorldText`](crate::WorldText) /
-//! [`ScreenText`](crate::ScreenText) panels) and the [`PanelTextChild`] marker that
-//! distinguishes a panel's text-child
-//! labels from the panel root. The standalone world-text render path that once
-//! lived here was removed when [`WorldText`](crate::WorldText) /
-//! [`ScreenText`](crate::ScreenText) became one-element panels — all text now
-//! routes through the panel-text pipeline.
+//! Holds [`TextContent`] — the text-source component carried by every panel-text
+//! run, including the single run of a one-element [`DiegeticText`](crate::DiegeticText)
+//! label. `TextContent` is also the marker panel-text systems filter on
+//! (`With<TextContent>`) to act on run entities; a panel root carries no
+//! `TextContent`. The standalone world-text render path that once lived here was
+//! removed when fluent text became one-element panels — all text now routes
+//! through the panel-text pipeline.
 //!
 //! The readiness signal ([`WorldTextReady`] + the `AwaitingReady` gate) is shared
 //! infrastructure the panel-text path drives, kept here.
@@ -76,11 +75,13 @@ pub struct ComputedGlyphMetrics {
 
 /// The text-source string for a text entity.
 ///
-/// Carried by panel-text child labels and by the one-element panels that
-/// [`WorldText`](crate::WorldText) / [`ScreenText`](crate::ScreenText) spawn —
-/// querying such a panel's `TextContent` is how callers change the string at
-/// runtime. Style is controlled by the required [`TextStyle`](crate::TextStyle)
-/// component (added with defaults if not specified).
+/// Carried by every panel-text run, including the single run a one-element
+/// [`DiegeticText`](crate::DiegeticText) label spawns — mutating a run's
+/// `TextContent` is how callers change the string at runtime, which drives
+/// relayout. Its presence also marks an entity as a panel-text run
+/// (`With<TextContent>`). Style is controlled by the required
+/// [`TextStyle`](crate::TextStyle) component (added with defaults if not
+/// specified).
 #[derive(Component, Clone, Debug, Reflect)]
 #[require(TextStyle, Transform, Visibility)]
 pub struct TextContent {
@@ -100,14 +101,3 @@ impl TextContent {
     pub fn set_text(&mut self, text: impl Into<String>) { self.text = text.into(); }
 }
 
-/// Marker on a [`TextContent`] entity spawned as a child label of a
-/// [`DiegeticPanel`](crate::DiegeticPanel).
-///
-/// Panel-text systems filter `With<PanelTextChild>` to act on label entities. A
-/// panel root is `Without<PanelTextChild>` and is not rendered as text — including
-/// the one-element [`WorldText`](crate::WorldText) / [`ScreenText`](crate::ScreenText)
-/// panels, whose root carries [`TextContent`] only so callers can change the string
-/// at runtime. The layout payload lives in
-/// [`PanelTextLayout`](crate::render::panel_text::PanelTextLayout).
-#[derive(Component, Clone, Copy, Debug)]
-pub(crate) struct PanelTextChild;

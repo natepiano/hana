@@ -2,10 +2,10 @@
 //!
 //! Phase D deleted the standalone world-text render path that once produced this
 //! data, leaving the overlay dark (see `docs/bevy_diegetic/unify_text.md`, R8).
-//! [`WorldText`](crate::WorldText) / [`ScreenText`](crate::ScreenText) are now
-//! one-element panels: the root carries [`TextContent`](super::TextContent) and
-//! the user's [`TypographyOverlay`], while the actual run lives on a
-//! [`PanelTextChild`](super::PanelTextChild) child with a
+//! [`DiegeticText`](crate::DiegeticText) labels are now one-element panels: the
+//! root carries the [`DiegeticText`](crate::DiegeticText) marker and the user's
+//! [`TypographyOverlay`], while the actual run lives on a
+//! [`TextContent`](super::TextContent) child with a
 //! [`PanelTextLayout`](crate::render::PanelTextLayout).
 //!
 //! This system reads that child's layout — the same `points_to_world` scale and
@@ -23,7 +23,6 @@ use ttf_parser::GlyphId;
 
 use super::ComputedGlyphMetrics;
 use super::ComputedWorldText;
-use super::PanelTextChild;
 use super::TextContent;
 use crate::TypographyOverlay;
 use crate::layout::Anchor;
@@ -41,11 +40,11 @@ use crate::text::PositionedGlyph;
 pub(crate) fn emit_computed_world_text(
     overlay_roots: Query<(Entity, &Children), With<TypographyOverlay>>,
     added_overlays: Query<Entity, Added<TypographyOverlay>>,
-    text_children: Query<(&TextContent, &TextStyle, &PanelTextLayout), With<PanelTextChild>>,
+    text_children: Query<(&TextContent, &TextStyle, &PanelTextLayout), With<TextContent>>,
     changed_children: Query<
         &ChildOf,
         (
-            With<PanelTextChild>,
+            With<TextContent>,
             Or<(
                 Changed<PanelTextLayout>,
                 Changed<TextContent>,

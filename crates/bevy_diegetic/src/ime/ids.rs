@@ -57,30 +57,79 @@ impl ImeValueRevision {
     pub const fn value(self) -> u64 { self.0 }
 }
 
+/// Opaque, unforgeable identity for a text run that carries no author-assigned
+/// name.
+///
+/// Minted only by the layout builder's per-build order counter (see
+/// [`PanelFieldId::auto`]); the inner value is private, so code outside this
+/// crate cannot construct one. That makes an [`PanelFieldId::Auto`] id incapable
+/// of colliding with an author's [`PanelFieldId::Named`] id by construction.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub struct AutoFieldId(u32);
+
+impl AutoFieldId {
+    /// Returns the raw counter value (debug/diagnostics only).
+    #[must_use]
+    pub const fn value(self) -> u32 { self.0 }
+}
+
 /// Semantic field identity local to a diegetic panel or app-owned surface.
+///
+/// Either an author-assigned [`Named`](Self::Named) id — the only variant a
+/// caller can build, via [`PanelFieldId::named`] or the `From<&str>` /
+/// `From<String>` conversions — or an [`Auto`](Self::Auto) id the layout builder
+/// mints for an unnamed text run. Because every public constructor yields
+/// `Named`, no string can forge an `Auto`, so the two id families share one
+/// panel-local namespace without ever colliding.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct PanelFieldId(String);
+pub enum PanelFieldId {
+    /// Author-assigned, publicly addressable name.
+    Named(String),
+    /// Builder-minted positional id for an unnamed text run; not publicly
+    /// addressable.
+    Auto(AutoFieldId),
+}
 
 impl PanelFieldId {
-    /// Creates a panel-local field id.
+    /// Creates a named panel-local field id.
     #[must_use]
-    pub fn new(value: impl Into<String>) -> Self { Self(value.into()) }
+    pub fn named(value: impl Into<String>) -> Self { Self::Named(value.into()) }
 
-    /// Returns the field id as a string slice.
+    /// Mints a builder-order auto id for an unnamed text run.
+    ///
+    /// Crate-internal: the only path that produces an [`Auto`](Self::Auto)
+    /// variant, keeping it unforgeable from outside.
     #[must_use]
-    pub fn as_str(&self) -> &str { &self.0 }
+    pub(crate) const fn auto(value: u32) -> Self { Self::Auto(AutoFieldId(value)) }
+
+    /// Returns the author-assigned name, or `None` for an auto id.
+    #[must_use]
+    pub fn as_str(&self) -> Option<&str> {
+        match self {
+            Self::Named(name) => Some(name),
+            Self::Auto(_) => None,
+        }
+    }
+
+    /// Returns `true` when this id is an author-assigned, publicly addressable
+    /// [`Named`](Self::Named) id.
+    #[must_use]
+    pub const fn is_named(&self) -> bool { matches!(self, Self::Named(_)) }
 }
 
 impl Display for PanelFieldId {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        match self {
+            Self::Named(name) => formatter.write_str(name),
+            Self::Auto(auto) => write!(formatter, "#auto-{}", auto.value()),
+        }
     }
 }
 
 impl From<&str> for PanelFieldId {
-    fn from(value: &str) -> Self { Self::new(value) }
+    fn from(value: &str) -> Self { Self::Named(value.to_owned()) }
 }
 
 impl From<String> for PanelFieldId {
-    fn from(value: String) -> Self { Self::new(value) }
+    fn from(value: String) -> Self { Self::Named(value) }
 }

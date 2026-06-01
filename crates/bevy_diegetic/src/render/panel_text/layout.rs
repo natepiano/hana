@@ -1,14 +1,23 @@
 use bevy::prelude::Component;
 
+use crate::PanelFieldId;
 use crate::layout::BoundingBox;
 
-/// Layout payload for a panel-text child (a [`TextContent`](crate::TextContent)
-/// entity also marked [`PanelTextChild`](crate::render::world_text::PanelTextChild)).
+/// Layout payload for a panel-text run (a
+/// [`TextContent`](crate::TextContent) entity).
 ///
 /// Stores the layout-computed bounding box and panel scale factors needed to
 /// build panel-local glyph meshes.
 #[derive(Component, Clone, Debug)]
 pub struct PanelTextLayout {
+    /// Panel-local id of the source text run, plus the line ordinal within that
+    /// run (`0` for an unwrapped run). Together they form the reconcile reuse
+    /// key, replacing the former positional `(element_idx, command_index)` pair
+    /// so a named run survives a sibling reorder.
+    pub id:            PanelFieldId,
+    /// Line ordinal of this command within its run (`0`-based), so a wrapped
+    /// multi-line run reuses each line stably.
+    pub line_index:    usize,
     /// Index of the source element in the layout tree.
     pub element_idx:   usize,
     /// Index of the render command that produced this text child.
@@ -33,8 +42,9 @@ impl PanelTextLayout {
     /// used to gate per-run rebuilds.
     ///
     /// Compares `bounds`, `scale_x`, `scale_y`, `anchor_x`, `anchor_y`, and
-    /// `clip_rect` via `to_bits`. Excludes `element_idx`/`command_index`, which
-    /// form the reuse key and are constant within a reused slot.
+    /// `clip_rect` via `to_bits`. Excludes the reuse-identity fields
+    /// (`id`/`line_index`/`element_idx`/`command_index`), constant within a
+    /// reused slot.
     pub(super) fn gating_eq(&self, other: &Self) -> bool {
         let Self {
             bounds,
@@ -43,6 +53,8 @@ impl PanelTextLayout {
             anchor_x,
             anchor_y,
             clip_rect,
+            id: _,
+            line_index: _,
             element_idx: _,
             command_index: _,
         } = self;
@@ -81,6 +93,8 @@ mod tests {
 
     fn sample_layout() -> PanelTextLayout {
         PanelTextLayout {
+            id:            PanelFieldId::named("sample"),
+            line_index:    0,
             element_idx:   0,
             command_index: 0,
             bounds:        bbox(1.0, 2.0, 30.0, 12.0),

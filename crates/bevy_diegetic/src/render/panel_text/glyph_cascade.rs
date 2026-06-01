@@ -6,11 +6,11 @@ use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::TextContent;
 
 /// Spawn-time cascade seed for a panel label's glyph lighting and sidedness.
 ///
-/// Fires when a label first gains [`PanelTextChild`] and seeds its
+/// Fires when a label first gains [`TextContent`] and seeds its
 /// `Resolved<TextLighting>` / `Resolved<TextSidedness>` via
 /// [`resolve_walk`](cascade::resolve_walk). The walk honors the label's own
 /// override first — `reconcile_panel_text_children` inserts one when the label
@@ -21,7 +21,7 @@ use crate::render::world_text::PanelTextChild;
 /// material. Later changes flow through the propagation pass, not this observer.
 /// The glyph-render twin of `seed_panel_child_alpha`.
 pub(super) fn seed_panel_text_child_glyph(
-    trigger: On<Add, PanelTextChild>,
+    trigger: On<Add, TextContent>,
     lighting_overrides: Query<&Override<TextLighting>>,
     sidedness_overrides: Query<&Override<TextSidedness>>,
     parents: Query<&ChildOf>,

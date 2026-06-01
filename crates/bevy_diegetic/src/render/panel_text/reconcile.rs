@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::PanelTextLayout;
+use crate::PanelFieldId;
 use crate::cascade;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
@@ -21,7 +22,6 @@ use crate::panel::DiegeticPanel;
 use crate::render::clip;
 use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
-use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::TextContent;
 
 /// A reused panel-text child plus the components reconcile compares incoming
@@ -40,8 +40,8 @@ struct ReusableChild<'a> {
 
 /// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
 pub(super) fn reconcile_panel_text_children(
-    changed_panels: Query<
-        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+    mut changed_panels: Query<
+        (Entity, &mut DiegeticPanel, &ComputedDiegeticPanel),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_children: Query<(
@@ -56,7 +56,7 @@ pub(super) fn reconcile_panel_text_children(
     )>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed) in &changed_panels {
+    for (panel_entity, mut panel, computed) in &mut changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
@@ -67,7 +67,13 @@ pub(super) fn reconcile_panel_text_children(
         let (anchor_x, anchor_y) = panel.anchor_offsets();
 
         let clip_rects = clip::compute_clip_rects(&result.commands);
-        let viewport = clip::panel_viewport(panel);
+        let viewport = clip::panel_viewport(&panel);
+        // Each text command carries its source element's run id (from the tree)
+        // and a per-run line ordinal, so the reuse key is `(id, line_index)`:
+        // content-stable, unlike the former `(element_idx, command_index)` pair
+        // that a sibling reorder shifted (R7). Auto ids preserve that positional
+        // behavior; named ids survive the reorder.
+        let mut line_counter: HashMap<usize, usize> = HashMap::new();
         let text_commands: Vec<_> = result
             .commands
             .iter()
@@ -77,9 +83,19 @@ pub(super) fn reconcile_panel_text_children(
                     let active_clip =
                         clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)
                             .unwrap_or_else(clip::empty_clip);
+                    let id = panel
+                        .tree()
+                        .element_field_id(cmd.element_idx)
+                        .cloned()
+                        .unwrap_or_else(|| PanelFieldId::auto(cmd.element_idx.to_f32() as u32));
+                    let counter = line_counter.entry(cmd.element_idx).or_insert(0);
+                    let line_index = *counter;
+                    *counter += 1;
                     Some((
                         cmd.element_idx,
                         cmd_index,
+                        id,
+                        line_index,
                         text.clone(),
                         config.clone(),
                         cmd.bounds,
@@ -90,19 +106,13 @@ pub(super) fn reconcile_panel_text_children(
             })
             .collect();
 
-        // Children are reused by `(element_idx, command_index)`. That key is
-        // stable for a static layout but not content-stable: a row reorder
-        // changes the command index, so an unchanged run keyed to a moved slot
-        // respawns rather than reuses. Reuse holds across regenerate-only and
-        // re-measure passes that keep the command order, not across reorders
-        // (R7).
-        let mut existing_by_key: HashMap<(usize, usize), ReusableChild> = HashMap::new();
+        let mut existing_by_key: HashMap<(PanelFieldId, usize), ReusableChild> = HashMap::new();
         for (entity, text, style, layout, alpha, lighting, sidedness, child_of) in
             &existing_children
         {
             if child_of.parent() == panel_entity {
                 existing_by_key.insert(
-                    (layout.element_idx, layout.command_index),
+                    (layout.id.clone(), layout.line_index),
                     ReusableChild {
                         entity,
                         text,
@@ -116,8 +126,9 @@ pub(super) fn reconcile_panel_text_children(
             }
         }
 
-        let mut visited_keys: Vec<(usize, usize)> = Vec::new();
-        for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
+        let mut visited_keys: Vec<(PanelFieldId, usize)> = Vec::new();
+        let mut text_index: HashMap<PanelFieldId, Entity> = HashMap::new();
+        for (element_idx, cmd_index, id, line_index, text, config, bounds, clip) in &text_commands {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
             // `with_lighting` / `with_sidedness`) are captured before
             // `for_shaping()` clears them, then inserted as `Override<A>` on
@@ -127,6 +138,8 @@ pub(super) fn reconcile_panel_text_children(
             let label_sidedness = config.sidedness();
             let style = config.for_shaping(Anchor::TopLeft);
             let panel_text_child = PanelTextLayout {
+                id: id.clone(),
+                line_index: *line_index,
                 element_idx: *element_idx,
                 command_index: *cmd_index,
                 bounds: *bounds,
@@ -137,10 +150,10 @@ pub(super) fn reconcile_panel_text_children(
                 clip_rect: Some(*clip),
             };
 
-            let key = (*element_idx, *cmd_index);
-            visited_keys.push(key);
+            let key = (id.clone(), *line_index);
+            visited_keys.push(key.clone());
 
-            if let Some(&reusable) = existing_by_key.get(&key) {
+            let entity = if let Some(&reusable) = existing_by_key.get(&key) {
                 update_reused_panel_text_child(UpdateReusedChild {
                     commands: &mut commands,
                     reusable,
@@ -151,6 +164,7 @@ pub(super) fn reconcile_panel_text_children(
                     label_lighting,
                     label_sidedness,
                 });
+                reusable.entity
             } else {
                 spawn_panel_text_child(SpawnPanelTextChild {
                     commands: &mut commands,
@@ -161,17 +175,29 @@ pub(super) fn reconcile_panel_text_children(
                     label_alpha,
                     label_lighting,
                     label_sidedness,
-                });
+                })
+            };
+
+            // Address a run by its first line: `text_child(id)` resolves this
+            // entity. Auto-id runs land here too but are unreachable — no caller
+            // can build their `PanelFieldId::Auto`.
+            if *line_index == 0 {
+                text_index.insert(id.clone(), entity);
             }
         }
 
         for (entity, _, _, layout, _, _, _, child_of) in &existing_children {
             if child_of.parent() == panel_entity
-                && !visited_keys.contains(&(layout.element_idx, layout.command_index))
+                && !visited_keys.contains(&(layout.id.clone(), layout.line_index))
             {
                 commands.entity(entity).despawn();
             }
         }
+
+        // Rebuilt from scratch each pass. Write it without tripping
+        // `Changed<DiegeticPanel>`, or this `&mut DiegeticPanel` write would
+        // re-dirty the panel and loop layout → reconcile every frame.
+        panel.bypass_change_detection().text_index = text_index;
     }
 }
 
@@ -192,7 +218,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
 /// the three captured cascade overrides (alpha, lighting, sidedness) the label
 /// authored. `None` for an override means the label inherits the panel value.
-fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) {
+fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
     let SpawnPanelTextChild {
         commands,
         panel_entity,
@@ -203,13 +229,10 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) {
         label_lighting,
         label_sidedness,
     } = request;
+    let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
-        let mut child = children.spawn((
-            TextContent::new(text.to_owned()),
-            style,
-            layout,
-            PanelTextChild,
-        ));
+        let mut child = children.spawn((TextContent::new(text.to_owned()), style, layout));
+        spawned = child.id();
         if let Some(alpha_mode) = label_alpha {
             cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
         }
@@ -220,6 +243,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) {
             cascade::apply_cascade_override(&mut child, TextSidedness(sidedness));
         }
     });
+    spawned
 }
 
 /// Inputs to [`update_reused_panel_text_child`]. Grouped into a struct because
@@ -559,6 +583,8 @@ mod tests {
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
+    use crate::PanelFieldId;
+
     use super::PanelImageChild;
     use super::reconcile_panel_image_children;
     use super::reconcile_panel_text_children;
@@ -578,7 +604,6 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
-    use crate::render::world_text::PanelTextChild;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
 
@@ -691,7 +716,7 @@ mod tests {
     fn labels_by_text(app: &mut App) -> HashMap<String, Entity> {
         let mut state = app
             .world_mut()
-            .query_filtered::<(Entity, &TextContent), With<PanelTextChild>>();
+            .query_filtered::<(Entity, &TextContent), With<TextContent>>();
         state
             .iter(app.world())
             .map(|(entity, text)| (text.text().to_owned(), entity))
@@ -755,15 +780,21 @@ mod tests {
     }
 
     #[test]
-    fn reconcile_keys_by_element_and_command_index() {
+    fn reconcile_keys_by_run_id_and_line_index() {
+        // One wrapped run (shared id) across three lines: the `(id, line_index)`
+        // key distinguishes the three children, while keying by id alone would
+        // collapse them — the property reconcile relies on to reuse each line.
+        let id = PanelFieldId::named("run");
         let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
-            .map(|cmd| {
+            .map(|line| {
                 let panel_text_child = PanelTextLayout {
+                    id:            id.clone(),
+                    line_index:    line,
                     element_idx:   7,
-                    command_index: cmd,
+                    command_index: line,
                     bounds:        BoundingBox {
                         x:      0.0,
-                        y:      cmd.to_f32() * 10.0,
+                        y:      line.to_f32() * 10.0,
                         width:  100.0,
                         height: 10.0,
                     },
@@ -774,26 +805,23 @@ mod tests {
                     clip_rect:     None,
                 };
                 (
-                    Entity::from_raw_u32(cmd.try_into().expect("small")).expect("valid"),
+                    Entity::from_raw_u32(line.try_into().expect("small")).expect("valid"),
                     panel_text_child,
                 )
             })
             .collect();
 
-        let mut by_key: HashMap<(usize, usize), Entity> = HashMap::new();
-        for (entity, panel_text_child) in &existing {
-            by_key.insert(
-                (panel_text_child.element_idx, panel_text_child.command_index),
-                *entity,
-            );
+        let mut by_key: HashMap<(PanelFieldId, usize), Entity> = HashMap::new();
+        for (entity, layout) in &existing {
+            by_key.insert((layout.id.clone(), layout.line_index), *entity);
         }
         assert_eq!(by_key.len(), 3);
 
-        let mut by_element_only: HashMap<usize, Entity> = HashMap::new();
-        for (entity, panel_text_child) in &existing {
-            by_element_only.insert(panel_text_child.element_idx, *entity);
+        let mut by_id_only: HashMap<PanelFieldId, Entity> = HashMap::new();
+        for (entity, layout) in &existing {
+            by_id_only.insert(layout.id.clone(), *entity);
         }
-        assert_eq!(by_element_only.len(), 1);
+        assert_eq!(by_id_only.len(), 1);
     }
 
     /// Accumulates the `StandardMaterial` ids that fired `AssetEvent::Modified`,

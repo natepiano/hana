@@ -18,7 +18,6 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
-use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::TextContent;
 use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
@@ -29,7 +28,6 @@ pub(super) fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
         (
-            With<PanelTextChild>,
             With<TextContent>,
             Or<(
                 Changed<TextContent>,

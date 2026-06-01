@@ -5,25 +5,25 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::TextContent;
 
 /// Spawn-time cascade seed for a panel label's text alpha.
 ///
-/// A panel label (`PanelTextChild` + `TextContent`) is depth-2 under its panel. This
-/// observer fires when a label first gains [`PanelTextChild`] and seeds its
+/// A panel label (a `TextContent` run) is depth-2 under its panel. This
+/// observer fires when a label first gains [`TextContent`] and seeds its
 /// [`Resolved<TextAlpha>`] via [`resolve_walk`](cascade::resolve_walk), which
 /// `update_panel_text_geometry` reads for the glyph material (and
 /// `update_panel_text_alpha` reads on a later alpha-only change). The walk honors the
 /// label's own `Override<TextAlpha>` first — `reconcile_panel_text_children`
 /// inserts one when the label authored its alpha
-/// (`TextStyle::with_alpha_mode`), in the same bundle as [`PanelTextChild`]
-/// so it is present here — then climbs `ChildOf` to the panel's
+/// (`TextStyle::with_alpha_mode`), in the same bundle as the run's
+/// [`TextContent`] so it is present here — then climbs `ChildOf` to the panel's
 /// `Override<TextAlpha>`, else the global default. The standalone
-/// `seed_world_text_overrides` bridge skips labels (its `Without<PanelTextChild>`
+/// `seed_world_text_overrides` bridge skips labels (its `Without<TextContent>`
 /// filter), so they are seeded only here. Later alpha changes flow through the
 /// propagation pass, not this observer.
 pub(super) fn seed_panel_text_child_alpha(
-    trigger: On<Add, PanelTextChild>,
+    trigger: On<Add, TextContent>,
     overrides: Query<&Override<TextAlpha>>,
     parents: Query<&ChildOf>,
     default: Res<CascadeDefault<TextAlpha>>,
@@ -82,7 +82,7 @@ mod tests {
     fn spawn_label_once(
         panel: Res<TestPanel>,
         ready: Query<(), (With<DiegeticPanel>, With<Override<TextAlpha>>)>,
-        labels: Query<(), With<PanelTextChild>>,
+        labels: Query<(), With<TextContent>>,
         mut commands: Commands,
     ) {
         if !labels.is_empty() || ready.get(panel.0).is_err() {
@@ -90,7 +90,7 @@ mod tests {
         }
         commands
             .entity(panel.0)
-            .with_child((TextContent::new("label"), PanelTextChild));
+            .with_child(TextContent::new("label"));
     }
 
     /// Stand-in for `update_panel_text_geometry`'s alpha read: the cached
@@ -98,8 +98,8 @@ mod tests {
     /// first observation so the assertion sees the spawn frame, not a later
     /// settled one.
     fn read_label_alpha(
-        resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelTextChild>>,
-        labels: Query<Entity, With<PanelTextChild>>,
+        resolved_alphas: Query<&Resolved<TextAlpha>, With<TextContent>>,
+        labels: Query<Entity, With<TextContent>>,
         default: Res<CascadeDefault<TextAlpha>>,
         mut seen: ResMut<SeenLabelAlpha>,
     ) {
@@ -182,11 +182,7 @@ mod tests {
         // rule, not a stop-at-panel boundary.
         let label = app
             .world_mut()
-            .spawn((
-                TextContent::new("label"),
-                PanelTextChild,
-                ChildOf(panel_entity),
-            ))
+            .spawn((TextContent::new("label"), ChildOf(panel_entity)))
             .id();
         app.update();
 
@@ -284,7 +280,7 @@ mod tests {
     fn single_label_alpha(app: &mut App) -> AlphaMode {
         let mut query = app
             .world_mut()
-            .query_filtered::<&Resolved<TextAlpha>, With<PanelTextChild>>();
+            .query_filtered::<&Resolved<TextAlpha>, With<TextContent>>();
         let resolved: Vec<AlphaMode> = query.iter(app.world()).map(|r| r.0.0).collect();
         assert_eq!(resolved.len(), 1, "expected exactly one panel label");
         resolved[0]

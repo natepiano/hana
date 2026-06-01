@@ -101,6 +101,7 @@ fn emit_down_traversal_commands(
     if let ElementContent::Text {
         ref config,
         ref text,
+        ..
     } = element.content
     {
         emit_text_commands(commands, wrapped, config, text, bounds, index, font_scale);

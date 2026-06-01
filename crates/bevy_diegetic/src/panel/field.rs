@@ -111,7 +111,7 @@ mod tests {
 
         assert!(duplicates.is_empty());
         assert_eq!(records.len(), 1);
-        assert_eq!(records[0].field_id.as_str(), "name");
+        assert_eq!(records[0].field_id.as_str(), Some("name"));
         assert_eq!(records[0].display_text, "Gain");
         assert!(records[0].contains(Vec2::new(0.0, 0.0)));
     }
@@ -128,7 +128,7 @@ mod tests {
         let (records, duplicates) = collect_panel_field_records(&tree, &result);
 
         assert_eq!(duplicates.len(), 1);
-        assert_eq!(duplicates[0].as_str(), "value");
+        assert_eq!(duplicates[0].as_str(), Some("value"));
         assert!(records.iter().all(|record| record.duplicate_id));
     }
 }

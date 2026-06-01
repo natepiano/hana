@@ -94,9 +94,9 @@ pub use debug::OverlayBoundingBox;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
 use debug::TypographyOverlayPlugin;
-use fluent::FluentTextPlugin;
-pub use fluent::ScreenText;
-pub use fluent::WorldText;
+pub use fluent::DiegeticText;
+pub use fluent::DiegeticTextBuilder;
+use fluent::DiegeticTextPlugin;
 pub use ime::ImeAcceptCommit;
 pub use ime::ImeAppInputContext;
 pub use ime::ImeAppInputDisposition;
@@ -192,6 +192,7 @@ pub use panel::ComputedDiegeticPanel;
 pub use panel::CoordinateSpace;
 pub use panel::DiegeticPanel;
 pub use panel::DiegeticPanelBuilder;
+pub use panel::PanelBuildError;
 pub use panel::DiegeticPanelCommands;
 pub use panel::DiegeticPanelGizmoGroup;
 pub use panel::DiegeticPerfStats;
@@ -265,7 +266,7 @@ impl Plugin for DiegeticUiPlugin {
             ScreenSpacePlugin,
             RenderPlugin,
             CalloutPlugin,
-            FluentTextPlugin,
+            DiegeticTextPlugin,
             #[cfg(feature = "typography_overlay")]
             TypographyOverlayPlugin,
         ));

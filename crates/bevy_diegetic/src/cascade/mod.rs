@@ -59,7 +59,7 @@
 //! component per attribute. An entity holds at most one of any component, so
 //! "two sources for one attribute on one node" has no representation and no
 //! exclusion marker is needed. Node *kind* (standalone / panel / label) is
-//! carried by the `TextContent` / `DiegeticPanel` / `PanelTextChild` markers and
+//! carried by the `TextContent` / `DiegeticPanel` markers and
 //! selects which render system draws the entity — orthogonal to the cascade.
 //!
 //! # Write paths

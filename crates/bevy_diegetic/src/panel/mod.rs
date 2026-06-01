@@ -14,6 +14,7 @@ mod sizing;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
+pub use builder::PanelBuildError;
 pub use coordinate_space::CoordinateSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;

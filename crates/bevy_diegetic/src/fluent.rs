@@ -1,15 +1,22 @@
-//! Fluent text primitives: [`WorldText`] and [`ScreenText`].
+//! Fluent text primitive: [`DiegeticText`].
 //!
-//! Each builder produces a one-element [`DiegeticPanel`] holding a single text
-//! child, so wrapping, lighting, and the unified [`TextStyle`] come from the
-//! panel-text pipeline rather than a separate standalone render path. The chain
-//! ends in [`WorldText::spawn`] / [`ScreenText::spawn`], which builds the panel
-//! plus its text child and returns the **panel** entity — the handle callers
-//! query for [`TextContent`] to change the string at runtime.
+//! [`DiegeticText::world`] / [`DiegeticText::screen`] start a
+//! [`DiegeticTextBuilder`] that produces a one-element [`DiegeticPanel`] holding
+//! a single text child, so wrapping, lighting, and the unified [`TextStyle`] come
+//! from the panel-text pipeline rather than a separate standalone render path.
+//! This mirrors [`DiegeticPanel::world`] / [`DiegeticPanel::screen`]; the string
+//! is the constructor argument because, unlike a panel (a container sized later),
+//! a text label is a filled value whose string is its one required input.
+//!
+//! The chain ends in [`DiegeticTextBuilder::spawn`], which builds the panel plus
+//! its text child and returns the **panel** entity. That entity carries the
+//! [`DiegeticText`] marker, so a single label is addressable via
+//! `With<DiegeticText>`; the string itself lives once on the spawned run's
+//! [`TextContent`](crate::TextContent).
 //!
 //! ```ignore
 //! // World text, fit to content, anchored at its center:
-//! let panel = WorldText::new("Hello")
+//! let panel = DiegeticText::world("Hello")
 //!     .size(0.16)
 //!     .color(Color::WHITE)
 //!     .anchor(Anchor::Center)
@@ -17,18 +24,11 @@
 //!     .spawn(&mut commands);
 //!
 //! // Screen text, wrapped to 320 px, positioned in pixels:
-//! ScreenText::new("Paused")
+//! DiegeticText::screen("Paused")
 //!     .size(48.0)
 //!     .width(320.0)
 //!     .screen_position(40.0, 40.0)
 //!     .spawn(&mut commands);
-//!
-//! // Change the string later — query the panel handle:
-//! fn update(mut q: Query<&mut TextContent, With<DiegeticPanel>>) {
-//!     for mut content in &mut q {
-//!         content.set_text("new text");
-//!     }
-//! }
 //! ```
 
 use bevy::camera::visibility::RenderLayers;
@@ -53,22 +53,43 @@ use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::Unit;
 use crate::panel::DiegeticPanel;
-use crate::panel::DiegeticPanelCommands;
 use crate::panel::Fit;
-use crate::panel::PanelSystems;
-use crate::render::TextContent;
 
-/// Wrap width stored on a one-element panel spawned by
-/// [`WorldText`] / [`ScreenText`].
+/// Marker on the panel-root entity a [`DiegeticTextBuilder`] spawns.
 ///
-/// [`rebuild_fluent_text`] reads this — together with the panel root's
-/// [`TextStyle`] and [`TextContent`] — to rebuild the single-element layout tree
-/// whenever either changes, so callers can change the string *or* the style at
-/// runtime through the panel handle. The style is the root [`TextStyle`]
-/// component, not stored here, so a `&mut TextStyle` write restyles the panel.
-#[derive(Component, Clone, Debug)]
-pub(crate) struct FluentText {
-    wrap_width: Option<f32>,
+/// A one-element text panel — the runtime form of [`DiegeticText::world`] /
+/// [`DiegeticText::screen`] — carries this so a single label is queryable via
+/// `With<DiegeticText>`. The string lives on the spawned run's
+/// [`TextContent`](crate::TextContent), not here, and the coordinate space lives
+/// on the panel's `CoordinateSpace`; the marker holds no state of its own, so
+/// there is nothing on it to drift from the panel.
+#[derive(Component, Clone, Copy, Debug, Default, Reflect)]
+pub struct DiegeticText;
+
+impl DiegeticText {
+    /// Starts a world-space text builder with the given string and default
+    /// style. The string is the one required input; size/anchor/wrap default.
+    #[must_use]
+    pub fn world(text: impl Into<String>) -> DiegeticTextBuilder {
+        DiegeticTextBuilder::new(TextSpace::World, text)
+    }
+
+    /// Starts a screen-space (overlay) text builder with the given string and
+    /// default style.
+    #[must_use]
+    pub fn screen(text: impl Into<String>) -> DiegeticTextBuilder {
+        DiegeticTextBuilder::new(TextSpace::Screen, text)
+    }
+}
+
+/// Which coordinate space a [`DiegeticTextBuilder`] resolves to at build time.
+///
+/// Chosen by the `DiegeticText::world` / `screen` constructor and never mutated
+/// after; the space-specific setters take effect only for the matching space.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextSpace {
+    World,
+    Screen,
 }
 
 /// Generates the shared typography setters as inherent methods, so callers reach
@@ -78,7 +99,7 @@ macro_rules! text_style_setters {
         impl $ty {
             /// Sets the font size. Accepts [`Pt`](crate::Pt), [`Mm`](crate::Mm),
             /// [`In`](crate::In), [`Px`], or a bare `f32` (resolved from the
-            /// contextual unit: world meters here, pixels for [`ScreenText`]).
+            /// contextual unit: world meters for world text, pixels for screen).
             #[must_use]
             pub fn size(mut self, size: impl Into<Dimension>) -> Self {
                 self.style.set_dimension(size);
@@ -226,81 +247,135 @@ macro_rules! text_style_setters {
     };
 }
 
-/// Fluent builder for a world-space text label.
+/// Fluent builder for a one-element text label, world- or screen-space.
 ///
-/// Spawns a one-element world [`DiegeticPanel`] sized to fit (or to
-/// [`Self::width`]) and returns the panel entity from [`Self::spawn`].
-pub struct WorldText {
-    text:         String,
-    style:        TextStyle,
-    wrap_width:   Option<f32>,
-    world_width:  Option<f32>,
-    world_height: Option<f32>,
-    anchor:       Option<Anchor>,
-    transform:    Transform,
+/// Spawns a one-element [`DiegeticPanel`] sized to fit (or to [`Self::width`])
+/// and returns the panel entity from [`Self::spawn`]. Start it with
+/// [`DiegeticText::world`] or [`DiegeticText::screen`]. The world-only setters
+/// ([`Self::world_width`] / [`Self::world_height`] / [`Self::transform`]) and the
+/// screen-only setters ([`Self::screen_position`] / [`Self::camera_order`] /
+/// [`Self::render_layers`]) take effect only for the matching space; the other
+/// space ignores them.
+pub struct DiegeticTextBuilder {
+    space:         TextSpace,
+    text:          String,
+    style:         TextStyle,
+    wrap_width:    Option<f32>,
+    world_width:   Option<f32>,
+    world_height:  Option<f32>,
+    anchor:        Option<Anchor>,
+    transform:     Transform,
+    position:      Option<Vec2>,
+    render_layers: Option<RenderLayers>,
+    camera_order:  Option<isize>,
 }
 
-text_style_setters!(WorldText);
+text_style_setters!(DiegeticTextBuilder);
 
-impl WorldText {
-    /// Starts a world-text builder with the given string and default style.
-    #[must_use]
-    pub fn new(text: impl Into<String>) -> Self {
+impl DiegeticTextBuilder {
+    fn new(space: TextSpace, text: impl Into<String>) -> Self {
+        // World text sits *at* its point, so it centers on the transform by
+        // default; screen text pins to the window edge via its panel anchor, so
+        // it starts unanchored (the screen builder seeds `TopLeft`).
+        let anchor = match space {
+            TextSpace::World => Some(Anchor::Center),
+            TextSpace::Screen => None,
+        };
         Self {
-            text:         text.into(),
-            style:        TextStyle::default(),
-            wrap_width:   None,
-            world_width:  None,
+            space,
+            text: text.into(),
+            style: TextStyle::default(),
+            wrap_width: None,
+            world_width: None,
             world_height: None,
-            anchor:       Some(Anchor::Center),
-            transform:    Transform::IDENTITY,
+            anchor,
+            transform: Transform::IDENTITY,
+            position: None,
+            render_layers: None,
+            camera_order: None,
         }
     }
 
-    /// Sets the anchor point that places the label box at its transform
-    /// (default [`Anchor::Center`], so the label centers on the transform — a
-    /// world-space label sits *at* its point). Use e.g. [`Anchor::TopLeft`] to
-    /// hang the box from its top-left corner instead.
+    /// Sets the anchor point.
+    ///
+    /// For world text (default [`Anchor::Center`]) this places the label box at
+    /// its transform — [`Anchor::TopLeft`] hangs the box from its top-left corner
+    /// instead. For screen text it places the label within the window;
+    /// [`Anchor::Center`] centers it on screen.
     #[must_use]
     pub const fn anchor(mut self, anchor: Anchor) -> Self {
         self.anchor = Some(anchor);
         self
     }
 
-    /// Scales the label so its whole world width matches `meters`; height
-    /// follows the aspect ratio. Mutually combines with [`Self::world_height`]
-    /// for non-uniform scaling.
+    /// (World only) Scales the label so its whole world width matches `meters`;
+    /// height follows the aspect ratio. Combines with [`Self::world_height`] for
+    /// non-uniform scaling.
     #[must_use]
     pub const fn world_width(mut self, meters: f32) -> Self {
         self.world_width = Some(meters);
         self
     }
 
-    /// Scales the label so its whole world height matches `meters`; width
-    /// follows the aspect ratio.
+    /// (World only) Scales the label so its whole world height matches `meters`;
+    /// width follows the aspect ratio.
     #[must_use]
     pub const fn world_height(mut self, meters: f32) -> Self {
         self.world_height = Some(meters);
         self
     }
 
-    /// Places the label at this world transform.
+    /// (World only) Places the label at this world transform.
     #[must_use]
     pub const fn transform(mut self, transform: Transform) -> Self {
         self.transform = transform;
         self
     }
 
-    /// Builds the one-element world panel as a [`Bundle`], for composing with
-    /// marker components or spawning under `with_children`. [`Self::spawn`] is
-    /// the terminal one-liner over this.
+    /// (Screen only) Places the label at an explicit pixel position (top-left
+    /// origin, y-down).
+    #[must_use]
+    pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
+        self.position = Some(Vec2::new(x, y));
+        self
+    }
+
+    /// (Screen only) Sets the overlay camera render order (default `100`).
+    #[must_use]
+    pub const fn camera_order(mut self, order: isize) -> Self {
+        self.camera_order = Some(order);
+        self
+    }
+
+    /// (Screen only) Sets the render layers for camera isolation (default layer
+    /// 31).
+    #[must_use]
+    pub fn render_layers(mut self, layers: RenderLayers) -> Self {
+        self.render_layers = Some(layers);
+        self
+    }
+
+    /// Builds the one-element panel as a [`Bundle`], for composing with marker
+    /// components or spawning under `with_children`. [`Self::spawn`] is the
+    /// terminal one-liner over this.
     ///
     /// A degenerate size (unreachable while the height is always `Fit`) logs and
     /// falls back to a default panel rather than panicking.
     #[must_use]
     pub fn build(self) -> impl Bundle {
         let tree = build_one_element_tree(&self.text, &self.style, self.wrap_width);
+        let panel = match self.space {
+            TextSpace::World => self.build_world_panel(tree),
+            TextSpace::Screen => self.build_screen_panel(tree),
+        };
+        let transform = match self.space {
+            TextSpace::World => self.transform,
+            TextSpace::Screen => Transform::IDENTITY,
+        };
+        (panel, DiegeticText, self.style, transform)
+    }
 
+    fn build_world_panel(&self, tree: LayoutTree) -> DiegeticPanel {
         let sized = match self.wrap_width {
             Some(width) => DiegeticPanel::world().size(width, Fit),
             None => DiegeticPanel::world().size(Fit, Fit),
@@ -318,99 +393,13 @@ impl WorldText {
             Some(anchor) => scaled.anchor(anchor),
             None => scaled,
         };
-        let panel = anchored.with_tree(tree).build().unwrap_or_else(|error| {
-            error!("WorldText: {error}; falling back to a default panel");
+        anchored.with_tree(tree).build().unwrap_or_else(|error| {
+            error!("DiegeticText::world: {error}; falling back to a default panel");
             DiegeticPanel::default()
-        });
-
-        (
-            panel,
-            TextContent::new(self.text),
-            self.style,
-            FluentText {
-                wrap_width: self.wrap_width,
-            },
-            self.transform,
-        )
+        })
     }
 
-    /// Spawns the one-element world panel, returning the panel entity (the
-    /// handle callers query for [`TextContent`] to change the string later).
-    pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.build()).id() }
-}
-
-/// Fluent builder for a screen-space (overlay) text label.
-///
-/// Spawns a one-element screen [`DiegeticPanel`]; its construction bridge seeds
-/// unlit / front-facing / pixel defaults. Returns the panel entity from
-/// [`Self::spawn`].
-pub struct ScreenText {
-    text:          String,
-    style:         TextStyle,
-    wrap_width:    Option<f32>,
-    anchor:        Option<Anchor>,
-    position:      Option<Vec2>,
-    render_layers: Option<RenderLayers>,
-    camera_order:  Option<isize>,
-}
-
-text_style_setters!(ScreenText);
-
-impl ScreenText {
-    /// Starts a screen-text builder with the given string and default style.
-    #[must_use]
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text:          text.into(),
-            style:         TextStyle::default(),
-            wrap_width:    None,
-            anchor:        None,
-            position:      None,
-            render_layers: None,
-            camera_order:  None,
-        }
-    }
-
-    /// Sets the anchor that places the label within the window (default
-    /// [`Anchor::TopLeft`]). With no [`Self::screen_position`], the anchor
-    /// positions the label against the window edges — [`Anchor::Center`]
-    /// centers it on screen.
-    #[must_use]
-    pub const fn anchor(mut self, anchor: Anchor) -> Self {
-        self.anchor = Some(anchor);
-        self
-    }
-
-    /// Places the label at an explicit pixel position (top-left origin, y-down).
-    #[must_use]
-    pub const fn screen_position(mut self, x: f32, y: f32) -> Self {
-        self.position = Some(Vec2::new(x, y));
-        self
-    }
-
-    /// Sets the overlay camera render order (default `100`).
-    #[must_use]
-    pub const fn camera_order(mut self, order: isize) -> Self {
-        self.camera_order = Some(order);
-        self
-    }
-
-    /// Sets the render layers for camera isolation (default layer 31).
-    #[must_use]
-    pub fn render_layers(mut self, layers: RenderLayers) -> Self {
-        self.render_layers = Some(layers);
-        self
-    }
-
-    /// Builds the one-element screen panel as a [`Bundle`], for composing with
-    /// marker components. [`Self::spawn`] is the terminal one-liner over this.
-    ///
-    /// A degenerate size (unreachable while the height is always `Fit`) logs and
-    /// falls back to a default panel rather than panicking.
-    #[must_use]
-    pub fn build(self) -> impl Bundle {
-        let tree = build_one_element_tree(&self.text, &self.style, self.wrap_width);
-
+    fn build_screen_panel(&self, tree: LayoutTree) -> DiegeticPanel {
         let sized = match self.wrap_width {
             Some(width) => DiegeticPanel::screen().size(Px(width), Fit),
             None => DiegeticPanel::screen().size(Fit, Fit),
@@ -427,33 +416,23 @@ impl ScreenText {
             Some(order) => positioned.camera_order(order),
             None => positioned,
         };
-        let layered = match self.render_layers {
+        let layered = match self.render_layers.clone() {
             Some(layers) => ordered.render_layers(layers),
             None => ordered,
         };
-        let panel = layered.with_tree(tree).build().unwrap_or_else(|error| {
-            error!("ScreenText: {error}; falling back to a default panel");
+        layered.with_tree(tree).build().unwrap_or_else(|error| {
+            error!("DiegeticText::screen: {error}; falling back to a default panel");
             DiegeticPanel::default()
-        });
-
-        (
-            panel,
-            TextContent::new(self.text),
-            self.style,
-            FluentText {
-                wrap_width: self.wrap_width,
-            },
-        )
+        })
     }
 
-    /// Spawns the one-element screen panel, returning the panel entity (the
-    /// handle callers query for [`TextContent`] to change the string later).
+    /// Spawns the one-element panel, returning the panel entity (the handle
+    /// addressable via `With<DiegeticText>`).
     pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.build()).id() }
 }
 
-/// Builds the single-element layout tree for a [`WorldText`] / [`ScreenText`]
-/// panel. Applies [`TextWrap::Words`] when a wrap width is set and
-/// [`TextWrap::None`] otherwise.
+/// Builds the single-element layout tree for a [`DiegeticText`] panel. Applies
+/// [`TextWrap::Words`] when a wrap width is set and [`TextWrap::None`] otherwise.
 fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>) -> LayoutTree {
     let mut style = style.clone();
     style.set_wrap(if wrap_width.is_some() {
@@ -463,9 +442,8 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     });
     // The root must carry the sizing the panel resolves to: `Fit` width
     // (shrink-wrap to the text) when there is no wrap width, or a fixed wrap
-    // width; height is always `Fit`. `rebuild_fluent_text` re-runs this on every
-    // text change and `set_tree`s the result, so this root sizing must match
-    // what `DiegeticPanel::build` produces — a `Fixed(0, 0)` root (the old
+    // width; height is always `Fit`. This root sizing must match what
+    // `DiegeticPanel::build` produces — a `Fixed(0, 0)` root (the old
     // `LayoutBuilder::new(0.0, 0.0)`) overwrites the panel's `Fit` root and
     // collapses the measured width to zero.
     let width = wrap_width.map_or(Sizing::FIT, Sizing::fixed);
@@ -474,35 +452,11 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     builder.build()
 }
 
-/// Rebuilds a [`WorldText`] / [`ScreenText`] panel's single-element tree when its
-/// [`TextContent`] or [`TextStyle`] changes, so callers can change the string or
-/// restyle (font, color, size, …) at runtime through the panel handle. The style
-/// is read from the panel root's [`TextStyle`] component, so a `&mut TextStyle`
-/// write takes effect. The deferred [`set_tree`](DiegeticPanelCommands::set_tree)
-/// flushes at [`PanelSystems::ApplyTreeChanges`], before layout reads the tree.
-pub(crate) fn rebuild_fluent_text(
-    panels: Query<
-        (Entity, &TextContent, &TextStyle, &FluentText),
-        Or<(Changed<TextContent>, Changed<TextStyle>)>,
-    >,
-    mut commands: Commands,
-) {
-    for (entity, content, style, fluent_text) in &panels {
-        let tree = build_one_element_tree(content.text(), style, fluent_text.wrap_width);
-        commands.set_tree(entity, tree);
-    }
-}
+/// Registers [`DiegeticText`] reflection.
+pub(crate) struct DiegeticTextPlugin;
 
-/// Registers the runtime-text rebuild for [`WorldText`] / [`ScreenText`] panels.
-pub(crate) struct FluentTextPlugin;
-
-impl Plugin for FluentTextPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            rebuild_fluent_text.before(PanelSystems::ApplyTreeChanges),
-        );
-    }
+impl Plugin for DiegeticTextPlugin {
+    fn build(&self, app: &mut App) { app.register_type::<DiegeticText>(); }
 }
 
 #[cfg(test)]
@@ -532,10 +486,8 @@ mod tests {
     #[test]
     fn one_element_tree_resolves_nonzero_width() {
         // Regression: `build_one_element_tree` must produce a `Fit` (shrink-wrap)
-        // root, not a `Fixed(0, 0)` root. `rebuild_fluent_text` re-runs this and
-        // `set_tree`s the result on every text change, so a `Fixed(0, 0)` root
-        // overwrites the panel's `Fit` root and collapses the measured width to
-        // zero (no glyphs render).
+        // root, not a `Fixed(0, 0)` root, or the measured width collapses to zero
+        // (no glyphs render).
         let tree = build_one_element_tree("Hello", &TextStyle::new(16.0), None);
         let engine = LayoutEngine::new(monospace_measure());
         let result = engine.compute(&tree, 0.0, 0.0, 1.0);

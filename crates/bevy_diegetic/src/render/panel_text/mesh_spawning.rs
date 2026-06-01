@@ -20,7 +20,7 @@ use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
-use crate::render::world_text::PanelTextChild;
+use crate::render::world_text::TextContent;
 use crate::text;
 use crate::text::GlyphCache;
 use crate::text::RenderMode;
@@ -38,7 +38,7 @@ pub(super) struct DiegeticTextMesh;
 /// `On<Remove>` fires before the component is dropped, so the mesh's
 /// [`RunStorageKey`] is still readable. This observer is the sole run-storage
 /// freer: every mesh despawn — a per-run rebuild, an emptied run, or a
-/// recursively despawned `PanelTextChild` label — routes its cleanup through here,
+/// recursively despawned `TextContent` label — routes its cleanup through here,
 /// so no inline `remove_run_storage` survives in the build systems.
 pub(super) fn free_run_storage_on_mesh_removal(
     trigger: On<Remove, DiegeticTextMesh>,
@@ -62,14 +62,14 @@ pub(super) fn free_run_storage_on_mesh_removal(
 pub(super) fn update_panel_text_geometry(
     changed_runs: Query<
         (Entity, &PanelText, &PanelTextLayout, &ChildOf),
-        (With<PanelTextChild>, Changed<PanelText>),
+        (With<TextContent>, Changed<PanelText>),
     >,
     mut emptied_runs: RemovedComponents<PanelText>,
     old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
-    resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelTextChild>>,
-    resolved_lightings: Query<&Resolved<TextLighting>, With<PanelTextChild>>,
-    resolved_sidednesses: Query<&Resolved<TextSidedness>, With<PanelTextChild>>,
+    resolved_alphas: Query<&Resolved<TextAlpha>, With<TextContent>>,
+    resolved_lightings: Query<&Resolved<TextLighting>, With<TextContent>>,
+    resolved_sidednesses: Query<&Resolved<TextSidedness>, With<TextContent>>,
     alpha_default: Res<CascadeDefault<TextAlpha>>,
     lighting_default: Res<CascadeDefault<TextLighting>>,
     sidedness_default: Res<CascadeDefault<TextSidedness>>,
@@ -118,7 +118,7 @@ pub(super) fn update_panel_text_geometry(
     // R10: when a run's text empties, `shape_panel_text_children` removes its
     // `PanelText` (not `Changed`, so the loop above misses it). Despawn the
     // now-stale mesh so the observer frees the run storage. Idempotent against a
-    // recursively despawned `PanelTextChild` — that label's mesh is already gone, so
+    // recursively despawned `TextContent` — that label's mesh is already gone, so
     // the lookup finds nothing and no double-despawn occurs.
     for label_entity in emptied_runs.read() {
         despawn_label_mesh(label_entity, &old_meshes, &mut commands);
@@ -142,12 +142,12 @@ pub(super) fn update_panel_text_geometry(
 /// value-guarded (R5) so a no-op resolution does not trip `Changed<TextMaterial>`.
 ///
 /// After Phase 4's reparent the material lives two hops down — on the
-/// `DiegeticTextMesh` child of the `PanelTextChild` — so the run's mesh is reached
+/// `DiegeticTextMesh` child of the `TextContent` run — so the run's mesh is reached
 /// through `ChildOf`, not on the label itself.
 pub(super) fn update_panel_text_alpha(
     changed_alphas: Query<
         (Entity, Ref<PanelText>, &Resolved<TextAlpha>),
-        (With<PanelTextChild>, Changed<Resolved<TextAlpha>>),
+        (With<TextContent>, Changed<Resolved<TextAlpha>>),
     >,
     run_meshes: Query<(&ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -475,7 +475,7 @@ mod tests {
     fn labels_by_text(app: &mut App) -> HashMap<String, Entity> {
         let mut state = app
             .world_mut()
-            .query_filtered::<(Entity, &TextContent), With<PanelTextChild>>();
+            .query_filtered::<(Entity, &TextContent), With<TextContent>>();
         state
             .iter(app.world())
             .map(|(entity, text)| (text.text().to_owned(), entity))

@@ -265,6 +265,12 @@ pub struct LayoutBuilder {
     tree:         LayoutTree,
     /// Stack of parent indices for nesting.
     parent_stack: Vec<usize>,
+    /// Per-build counter that mints [`PanelFieldId::Auto`] ids for unnamed text
+    /// runs in build order. It starts at `0` for every builder, so auto ids are
+    /// stable only within one build (`set_tree` rebuilds restart it) and never
+    /// persisted or compared across panels — the positional identity an unnamed
+    /// run keeps from the old `(element_idx, command_index)` reuse key.
+    next_auto_id: u32,
 }
 
 impl LayoutBuilder {
@@ -299,6 +305,7 @@ impl LayoutBuilder {
         Self {
             tree,
             parent_stack: vec![root],
+            next_auto_id: 0,
         }
     }
 
@@ -323,6 +330,7 @@ impl LayoutBuilder {
         Self {
             tree,
             parent_stack: vec![root],
+            next_auto_id: 0,
         }
     }
 
@@ -352,6 +360,7 @@ impl LayoutBuilder {
         Self {
             tree,
             parent_stack: vec![root],
+            next_auto_id: 0,
         }
     }
 
@@ -394,12 +403,52 @@ impl LayoutBuilder {
     /// Text nodes are leaves, not containers, so they cannot receive children
     /// of their own. Use [`Self::with`] when you want to create another nested
     /// container instead of a text leaf.
+    ///
+    /// The run is given a builder-minted [`PanelFieldId::Auto`] id, so it renders
+    /// but is not addressable at runtime. Use [`Self::text_id`] when a run needs
+    /// to be looked up or retexted later.
     pub fn text(&mut self, text: impl Into<String>, config: TextStyle) -> &mut Self {
+        let id = self.take_auto_id();
+        self.add_text(id, text, config)
+    }
+
+    /// Adds a text leaf with an author-assigned id, so it can be addressed at
+    /// runtime via [`text_child`](crate::DiegeticPanel::text_child).
+    ///
+    /// The id is passed by value (mirroring
+    /// [`editable_field`](El::editable_field)), so a caller binds it once and
+    /// reuses the same value at the lookup site:
+    ///
+    /// ```ignore
+    /// let id = PanelFieldId::named("title");
+    /// builder.text_id(id.clone(), "Hello", TextStyle::new(16.0));
+    /// // …later…
+    /// let entity = panel.text_child(&id);
+    /// ```
+    ///
+    /// Text-run ids share one panel-local namespace with editable-field ids; a
+    /// duplicate author-assigned id is rejected by `DiegeticPanelBuilder::build`.
+    pub fn text_id(
+        &mut self,
+        id: impl Into<PanelFieldId>,
+        text: impl Into<String>,
+        config: TextStyle,
+    ) -> &mut Self {
+        self.add_text(id.into(), text, config)
+    }
+
+    fn add_text(
+        &mut self,
+        id: PanelFieldId,
+        text: impl Into<String>,
+        config: TextStyle,
+    ) -> &mut Self {
         let parent = self.current_parent();
         self.tree.add_child(
             parent,
             Element {
                 content: ElementContent::Text {
+                    id,
                     text: text.into(),
                     config,
                 },
@@ -407,6 +456,13 @@ impl LayoutBuilder {
             },
         );
         self
+    }
+
+    /// Mints the next build-order [`PanelFieldId::Auto`] id for an unnamed run.
+    fn take_auto_id(&mut self) -> PanelFieldId {
+        let id = PanelFieldId::auto(self.next_auto_id);
+        self.next_auto_id += 1;
+        id
     }
 
     /// Adds an image leaf as a child of the current parent.

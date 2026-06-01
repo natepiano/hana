@@ -162,6 +162,7 @@ impl LayoutEngine {
             if let ElementContent::Text {
                 ref text,
                 ref config,
+                ..
             } = element.content
             {
                 let dims = (self.measure_text)(text, &config.as_measure().scaled(font_scale));

@@ -1,5 +1,7 @@
 //! [`DiegeticPanel`] — the main panel component and its computed companion.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 
 use super::builder::DiegeticPanelBuilder;
@@ -114,6 +116,16 @@ pub struct DiegeticPanel {
     pub(super) text_alpha_mode:  Option<AlphaMode>,
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space: CoordinateSpace,
+    /// Maps each text run's [`PanelFieldId`](crate::PanelFieldId) to the entity
+    /// reconcile materialized for it, so
+    /// [`text_child`](Self::text_child) resolves a named run in O(1).
+    ///
+    /// `reconcile_panel_text_children` rebuilds this from scratch every pass and
+    /// writes it without tripping change detection, so it never re-triggers
+    /// layout; [`set_tree`](DiegeticPanelCommands::set_tree) clears it so a stale
+    /// id stops resolving immediately.
+    #[reflect(ignore)]
+    pub(crate) text_index:       HashMap<crate::PanelFieldId, Entity>,
 }
 
 impl Default for DiegeticPanel {
@@ -133,6 +145,7 @@ impl Default for DiegeticPanel {
             text_material:    None,
             text_alpha_mode:  None,
             coordinate_space: CoordinateSpace::default(),
+            text_index:       HashMap::new(),
         }
     }
 }
@@ -423,6 +436,9 @@ fn set_tree_command(
     classification.record(change);
     panel.tree = next_tree;
     panel.tree_revision = panel.tree_revision.wrapping_add(1);
+    // Drop stale id → entity mappings so a lookup for a run the new tree no
+    // longer contains returns `None` before reconcile rebuilds the index.
+    panel.text_index.clear();
 }
 
 /// Spawn-time authoring bridge for panel cascade overrides.

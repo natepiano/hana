@@ -27,17 +27,17 @@ pub(super) use lifecycle::on_overlay_removed;
 pub(super) use pipeline::build_typography_overlay;
 
 use super::constants::DEFAULT_LINE_WIDTH;
-use crate::WorldText;
+use crate::DiegeticText;
 use crate::layout::GlyphShadowMode;
 use crate::layout::TextStyle;
 use crate::panel::SurfaceShadow;
 
-/// Spawns a world-space overlay label as a one-element [`WorldText`] panel child
-/// of `container`.
+/// Spawns a world-space overlay label as a one-element [`DiegeticText`] panel
+/// child of `container`.
 ///
 /// The label's [`TextStyle`] anchor becomes the panel anchor, so the text sits at
 /// `transform` exactly as the bare-[`TextContent`](crate::TextContent) spawns did
-/// before [`WorldText`] one-element panels replaced the standalone world-text
+/// before [`DiegeticText`] one-element panels replaced the standalone world-text
 /// render path (a bare `TextContent` no longer renders on its own).
 pub(super) fn spawn_overlay_label(
     commands: &mut Commands,
@@ -48,7 +48,7 @@ pub(super) fn spawn_overlay_label(
 ) {
     let anchor = style.anchor();
     commands.entity(container).with_child(
-        WorldText::new(text)
+        DiegeticText::world(text)
             .style(style)
             .anchor(anchor)
             .transform(transform)

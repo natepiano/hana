@@ -17,6 +17,7 @@ use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
+use crate::PanelFieldId;
 use crate::layout;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
@@ -29,6 +30,38 @@ use crate::layout::Pt;
 use crate::layout::Px;
 use crate::layout::Sizing;
 use crate::layout::Unit;
+
+/// Error returned by [`DiegeticPanelBuilder::build`].
+///
+/// Either a sizing error or a duplicate author-assigned [`PanelFieldId`]: a
+/// build-time `Result` so a repeated id is rejected up front instead of
+/// silently shadowing one run with another at runtime.
+#[derive(Debug)]
+pub enum PanelBuildError {
+    /// A fixed-size axis was zero or negative.
+    InvalidSize(InvalidSize),
+    /// Two elements share the same author-assigned [`PanelFieldId`]. Text-run
+    /// ids and editable-field ids share one panel-local namespace, so a name
+    /// reused across either kind is a build error.
+    DuplicateFieldId(PanelFieldId),
+}
+
+impl core::fmt::Display for PanelBuildError {
+    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::InvalidSize(error) => write!(formatter, "{error}"),
+            Self::DuplicateFieldId(id) => {
+                write!(formatter, "duplicate panel field id `{id}`")
+            },
+        }
+    }
+}
+
+impl core::error::Error for PanelBuildError {}
+
+impl From<InvalidSize> for PanelBuildError {
+    fn from(error: InvalidSize) -> Self { Self::InvalidSize(error) }
+}
 
 // ── Typestate marker types ──────────────────────────────────────────────────
 
@@ -546,14 +579,15 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
     ///
     /// Returns [`InvalidSize`] if both axes are fixed-size and width or
     /// height is zero or negative.
-    pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
+    pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let (w_sizing, h_sizing) = match self.data.coordinate_space {
             CoordinateSpace::World { width, height } => (width, height),
             CoordinateSpace::Screen { .. } => {
                 return Err(InvalidSize {
                     width:  self.data.width,
                     height: self.data.height,
-                });
+                }
+                .into());
             },
         };
 
@@ -577,7 +611,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
             return Err(InvalidSize {
                 width:  self.data.width,
                 height: self.data.height,
-            });
+            }
+            .into());
         }
 
         if let Some(ref mut tree) = self.data.tree {
@@ -595,6 +630,12 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
                 },
                 Sizing::Percent(_) | Sizing::Fixed(_) => {},
             }
+        }
+
+        if let Some(tree) = self.data.tree.as_ref()
+            && let Some(duplicate) = tree.duplicate_named_field_id()
+        {
+            return Err(PanelBuildError::DuplicateFieldId(duplicate.clone()));
         }
 
         Ok(build_panel(self.data))
@@ -618,7 +659,7 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
     ///
     /// Returns [`InvalidSize`] if width or height is zero or negative
     /// and no dynamic sizing will fill it later.
-    pub fn build(mut self) -> Result<DiegeticPanel, InvalidSize> {
+    pub fn build(mut self) -> Result<DiegeticPanel, PanelBuildError> {
         let CoordinateSpace::Screen {
             width: w_sizing,
             height: h_sizing,
@@ -628,7 +669,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             return Err(InvalidSize {
                 width:  self.data.width,
                 height: self.data.height,
-            });
+            }
+            .into());
         };
         let has_dynamic_width = !matches!(w_sizing, Sizing::Fixed(_));
         let has_dynamic_height = !matches!(h_sizing, Sizing::Fixed(_));
@@ -640,7 +682,8 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
             return Err(InvalidSize {
                 width:  self.data.width,
                 height: self.data.height,
-            });
+            }
+            .into());
         }
 
         // Freeze `world_height` for fixed screen panels so 1 layout pixel
@@ -708,6 +751,12 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         }
         let _ = (has_dynamic_width, has_dynamic_height);
 
+        if let Some(tree) = self.data.tree.as_ref()
+            && let Some(duplicate) = tree.duplicate_named_field_id()
+        {
+            return Err(PanelBuildError::DuplicateFieldId(duplicate.clone()));
+        }
+
         Ok(build_panel(self.data))
     }
 }
@@ -728,5 +777,90 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
         text_material:    data.text_material,
         text_alpha_mode:  data.text_alpha_mode,
         coordinate_space: data.coordinate_space,
+        text_index:       std::collections::HashMap::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PanelBuildError;
+    use crate::DiegeticPanel;
+    use crate::El;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
+    use crate::ImeEditableFieldSpec;
+    use crate::Mm;
+    use crate::PanelFieldId;
+    use crate::TextStyle;
+
+    fn style() -> TextStyle { TextStyle::new(Mm(6.0)) }
+
+    fn field_spec() -> ImeEditableFieldSpec {
+        ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
+    }
+
+    #[test]
+    fn duplicate_named_text_ids_error_at_build() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.text_id("title", "A", style());
+                builder.text_id("title", "B", style());
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::DuplicateFieldId(ref id)) if *id == PanelFieldId::named("title")
+        ));
+    }
+
+    #[test]
+    fn distinct_named_text_ids_build_ok() {
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.text_id("a", "A", style());
+                builder.text_id("b", "B", style());
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn many_unnamed_runs_never_collide() {
+        // Auto ids are minted per build; eight unnamed runs must not read as a
+        // duplicate.
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                for _ in 0..8 {
+                    builder.text("x", style());
+                }
+            })
+            .build();
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn text_id_colliding_with_editable_field_errors() {
+        // Text-run ids and editable-field ids share one namespace (TR-O): a text
+        // run named `name` collides with an editable field of the same id.
+        let result = DiegeticPanel::world()
+            .size(Mm(50.0), Mm(30.0))
+            .layout(|builder| {
+                builder.with(El::new().editable_field("name", field_spec()), |builder| {
+                    builder.text("v", style());
+                });
+                builder.text_id("name", "dup", style());
+            })
+            .build();
+
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::DuplicateFieldId(_))
+        ));
     }
 }

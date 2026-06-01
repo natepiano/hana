@@ -17,7 +17,7 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::GlyphSidedness;
-use bevy_diegetic::InvalidSize;
+use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
@@ -25,7 +25,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::default_panel_material;
 
 use crate::constants::CUBE_DEFAULT_COLOR;
@@ -101,7 +101,7 @@ pub fn cube_face_text(
 ) -> impl Bundle {
     (
         CubeFaceLabel,
-        WorldText::new(text)
+        DiegeticText::world(text)
             .size(text_size)
             .color(color)
             .sidedness(GlyphSidedness::OneSided)
@@ -226,11 +226,11 @@ impl CubeFacePanelStyle {
 ///
 /// # Errors
 ///
-/// Returns [`InvalidSize`] when `style.size` is not a positive, finite value.
+/// Returns [`PanelBuildError`] when `style.size` is not a positive, finite value.
 pub fn cube_face_panel(
     style: CubeFacePanelStyle,
     content: CubeFacePanelContent,
-) -> Result<DiegeticPanel, InvalidSize> {
+) -> Result<DiegeticPanel, PanelBuildError> {
     cube_face_panel_with_tree(style.size, cube_face_panel_tree(style, content))
 }
 
@@ -238,11 +238,11 @@ pub fn cube_face_panel(
 ///
 /// # Errors
 ///
-/// Returns [`InvalidSize`] when `size` is not a positive, finite value.
+/// Returns [`PanelBuildError`] when `size` is not a positive, finite value.
 pub fn cube_face_panel_with_tree(
     size: f32,
     tree: LayoutTree,
-) -> Result<DiegeticPanel, InvalidSize> {
+) -> Result<DiegeticPanel, PanelBuildError> {
     let transparent = cube_face_panel_material();
     DiegeticPanel::world()
         .size(size, size)
