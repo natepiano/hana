@@ -11,8 +11,12 @@ use super::PanelTextLayout;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextLighting;
+use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
+use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
@@ -64,7 +68,11 @@ pub(super) fn update_panel_text_geometry(
     old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
+    resolved_lightings: Query<&Resolved<TextLighting>, With<PanelChild>>,
+    resolved_sidednesses: Query<&Resolved<TextSidedness>, With<PanelChild>>,
     alpha_default: Res<CascadeDefault<TextAlpha>>,
+    lighting_default: Res<CascadeDefault<TextLighting>>,
+    sidedness_default: Res<CascadeDefault<TextSidedness>>,
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -84,12 +92,20 @@ pub(super) fn update_panel_text_geometry(
         let resolved_alpha = resolved_alphas
             .get(label_entity)
             .map_or(alpha_default.0.0, |resolved| resolved.0.0);
+        let resolved_lighting = resolved_lightings
+            .get(label_entity)
+            .map_or(lighting_default.0.0, |resolved| resolved.0.0);
+        let resolved_sidedness = resolved_sidednesses
+            .get(label_entity)
+            .map_or(sidedness_default.0.0, |resolved| resolved.0.0);
         spawn_panel_text_run(PanelTextSpawnRequest {
             mesh_parent: label_entity,
             panel_run,
             panel_text_child,
             text_base: &text_base,
             resolved_alpha,
+            resolved_lighting,
+            resolved_sidedness,
             content_layer: &scene_layer,
             backend: &mut backend,
             meshes: &mut meshes,
@@ -170,17 +186,19 @@ fn despawn_label_mesh(
 }
 
 struct PanelTextSpawnRequest<'a, 'w, 's> {
-    mesh_parent:      Entity,
-    panel_run:        &'a PanelText,
-    panel_text_child: &'a PanelTextLayout,
-    text_base:        &'a StandardMaterial,
-    resolved_alpha:   AlphaMode,
-    content_layer:    &'a RenderLayers,
-    backend:          &'a mut GlyphCache,
-    meshes:           &'a mut Assets<Mesh>,
-    materials:        &'a mut Assets<TextMaterial>,
-    storage_buffers:  &'a mut Assets<ShaderBuffer>,
-    commands:         &'a mut Commands<'w, 's>,
+    mesh_parent:        Entity,
+    panel_run:          &'a PanelText,
+    panel_text_child:   &'a PanelTextLayout,
+    text_base:          &'a StandardMaterial,
+    resolved_alpha:     AlphaMode,
+    resolved_lighting:  GlyphLighting,
+    resolved_sidedness: GlyphSidedness,
+    content_layer:      &'a RenderLayers,
+    backend:            &'a mut GlyphCache,
+    meshes:             &'a mut Assets<Mesh>,
+    materials:          &'a mut Assets<TextMaterial>,
+    storage_buffers:    &'a mut Assets<ShaderBuffer>,
+    commands:           &'a mut Commands<'w, 's>,
 }
 
 fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
@@ -190,6 +208,8 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
         panel_text_child,
         text_base,
         resolved_alpha,
+        resolved_lighting,
+        resolved_sidedness,
         content_layer,
         backend,
         meshes,
@@ -215,15 +235,17 @@ fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
     // moving the fragment depth.
     let text_oit_depth_offset = 0.0;
 
-    let material = materials.add(panel_material(
-        text_base,
-        text_depth_bias,
-        text_oit_depth_offset,
-        resolved_alpha,
-        panel_run.fill_color,
-        panel_run.render_mode.into(),
-        &storage,
-    ));
+    let material = materials.add(panel_material(PanelMaterialInput {
+        base:             text_base,
+        depth_bias:       text_depth_bias,
+        oit_depth_offset: text_oit_depth_offset,
+        alpha_mode:       resolved_alpha,
+        lighting:         resolved_lighting,
+        sidedness:        resolved_sidedness,
+        fill_color:       panel_run.fill_color,
+        render_mode:      panel_run.render_mode.into(),
+        storage:          &storage,
+    }));
     spawn_visible_mesh(
         mesh_parent,
         storage.mesh,
@@ -241,23 +263,40 @@ fn panel_base_material(panel: &DiegeticPanel) -> StandardMaterial {
         .cloned()
         .unwrap_or_else(constants::default_panel_material);
     base.alpha_mode = AlphaMode::Blend;
-    base.double_sided = true;
-    base.cull_mode = None;
     base
 }
 
-fn panel_material(
-    base: &StandardMaterial,
-    depth_bias: f32,
+/// Inputs to [`panel_material`]. The lighting and sidedness fields carry the
+/// label's resolved [`TextLighting`] / [`TextSidedness`] cascade values.
+struct PanelMaterialInput<'a> {
+    base:             &'a StandardMaterial,
+    depth_bias:       f32,
     oit_depth_offset: f32,
-    alpha_mode: AlphaMode,
-    fill_color: Color,
-    render_mode: RenderMode,
-    storage: &RunStorage,
-) -> TextMaterial {
+    alpha_mode:       AlphaMode,
+    lighting:         GlyphLighting,
+    sidedness:        GlyphSidedness,
+    fill_color:       Color,
+    render_mode:      RenderMode,
+    storage:          &'a RunStorage,
+}
+
+fn panel_material(input: PanelMaterialInput<'_>) -> TextMaterial {
+    let PanelMaterialInput {
+        base,
+        depth_bias,
+        oit_depth_offset,
+        alpha_mode,
+        lighting,
+        sidedness,
+        fill_color,
+        render_mode,
+        storage,
+    } = input;
     let mut base = base.clone();
     base.depth_bias = depth_bias;
     base.alpha_mode = alpha_mode;
+    base.unlit = matches!(lighting, GlyphLighting::Unlit);
+    constants::apply_glyph_sidedness(&mut base, sidedness);
     text::text_material(TextMaterialInput {
         base,
         fill_color,
@@ -333,7 +372,7 @@ mod tests {
     use crate::render::panel_text::reconcile;
     use crate::render::panel_text::shaping;
     use crate::render::text_shaping::TextShapingContext;
-    use crate::render::world_text::WorldText;
+    use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
 
@@ -366,6 +405,8 @@ mod tests {
             .insert_resource(monospace_measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(CascadePlugin::<TextLighting>::default())
+            .add_plugins(CascadePlugin::<TextSidedness>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
@@ -373,6 +414,7 @@ mod tests {
             .init_asset::<ShaderBuffer>()
             .init_asset::<TextMaterial>()
             .add_observer(alpha::seed_panel_child_alpha)
+            .add_observer(super::super::glyph_cascade::seed_panel_child_glyph)
             .add_observer(free_run_storage_on_mesh_removal)
             .add_systems(
                 PostUpdate,
@@ -433,7 +475,7 @@ mod tests {
     fn labels_by_text(app: &mut App) -> HashMap<String, Entity> {
         let mut state = app
             .world_mut()
-            .query_filtered::<(Entity, &WorldText), With<PanelChild>>();
+            .query_filtered::<(Entity, &TextContent), With<PanelChild>>();
         state
             .iter(app.world())
             .map(|(entity, text)| (text.text().to_owned(), entity))

@@ -46,7 +46,7 @@ pub struct DiegeticPerfStats {
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
 /// crate's control.
 ///
-/// Only panel text is covered. Standalone `WorldText` entities not parented to a
+/// Only panel text is covered. Standalone `TextContent` entities not parented to a
 /// panel run through a separate path (`render_world_text`) and are not included.
 #[derive(Clone, Debug, Default, Reflect)]
 pub struct PanelTextPerfStats {

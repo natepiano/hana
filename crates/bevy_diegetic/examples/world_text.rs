@@ -26,7 +26,6 @@ use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -174,28 +173,36 @@ fn spawn_anchor_demo(
     });
 
     // Title.
-    commands.spawn((
-        WorldText::new("Text Anchors"),
-        WorldTextStyle::new(0.16)
-            .with_color(Color::srgb(0.7, 0.8, 1.0))
-            .with_anchor(Anchor::TopCenter),
-        Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
-            .with_rotation(demo_rotation),
-    ));
+    commands.spawn(
+        WorldText::new("Text Anchors")
+            .size(0.16)
+            .color(Color::srgb(0.7, 0.8, 1.0))
+            .anchor(Anchor::TopCenter)
+            .transform(
+                Transform::from_translation(demo_center + demo_rotation * Vec3::new(0.0, 1.4, 0.0))
+                    .with_rotation(demo_rotation),
+            )
+            .bundle(),
+    );
 
     commands.spawn((
         Mesh3d(sphere_mesh.clone()),
         MeshMaterial3d(sphere_material.clone()),
         Transform::from_translation(demo_center + demo_rotation * Vec3::new(-0.60, 1.10, 0.01)),
     ));
-    commands.spawn((
-        WorldText::new(" = Transform translation"),
-        WorldTextStyle::new(0.10)
-            .with_color(Color::WHITE)
-            .with_anchor(Anchor::TopLeft),
-        Transform::from_translation(demo_center + demo_rotation * Vec3::new(-0.55, 1.15, 0.0))
-            .with_rotation(demo_rotation),
-    ));
+    commands.spawn(
+        WorldText::new(" = Transform translation")
+            .size(0.10)
+            .color(Color::WHITE)
+            .anchor(Anchor::TopLeft)
+            .transform(
+                Transform::from_translation(
+                    demo_center + demo_rotation * Vec3::new(-0.55, 1.15, 0.0),
+                )
+                .with_rotation(demo_rotation),
+            )
+            .bundle(),
+    );
 
     let anchor_demo = [
         (Anchor::TopLeft, "TopLeft", -1.3, 0.5),
@@ -222,11 +229,12 @@ fn spawn_anchor_demo(
 
         // Text with the given anchor.
         commands.spawn((
-            WorldText::new(text),
-            WorldTextStyle::new(0.125)
-                .with_color(Color::WHITE)
-                .with_anchor(anchor),
-            Transform::from_translation(world_pos).with_rotation(demo_rotation),
+            WorldText::new(text)
+                .size(0.125)
+                .color(Color::WHITE)
+                .anchor(anchor)
+                .transform(Transform::from_translation(world_pos).with_rotation(demo_rotation))
+                .bundle(),
             AnchorDemoText {
                 position:      world_pos,
                 base_rotation: demo_rotation,
@@ -239,10 +247,14 @@ fn spawn_anchor_demo(
 fn spawn_ground_text(commands: &mut Commands) {
     commands.spawn((
         CameraHomeTarget,
-        WorldText::new("GROUND PLANE"),
-        WorldTextStyle::new(0.48).with_color(Color::srgb(0.9, 0.9, 0.1)),
-        Transform::from_xyz(0.0, 0.001, 0.0)
-            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        WorldText::new("GROUND PLANE")
+            .size(0.48)
+            .color(Color::srgb(0.9, 0.9, 0.1))
+            .transform(
+                Transform::from_xyz(0.0, 0.001, 0.0)
+                    .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+            )
+            .bundle(),
     ));
 }
 

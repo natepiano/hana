@@ -35,7 +35,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
 use bevy_lagrange::AnimationBegin;
@@ -421,22 +420,25 @@ fn spawn_a4_with_titles(
         ))
         .observe(on_panel_clicked);
 
-    let title_style = WorldTextStyle::new(18.0)
-        .with_color(Color::WHITE)
-        .with_anchor(Anchor::BottomCenter);
     commands
-        .spawn((
-            WorldText::new("A4 Paper — 210 × 297 mm"),
-            title_style.clone(),
-            Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0),
-        ))
+        .spawn(
+            WorldText::new("A4 Paper — 210 × 297 mm")
+                .size(18.0)
+                .color(Color::WHITE)
+                .anchor(Anchor::BottomCenter)
+                .transform(Transform::from_xyz(a4_page_x, a4_page_top + title_gap, 0.0))
+                .bundle(),
+        )
         .override_font_unit(Unit::Points);
     commands
-        .spawn((
-            WorldText::new("US Business Card — 3½ × 2 in"),
-            title_style,
-            Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0),
-        ))
+        .spawn(
+            WorldText::new("US Business Card — 3½ × 2 in")
+                .size(18.0)
+                .color(Color::WHITE)
+                .anchor(Anchor::BottomCenter)
+                .transform(Transform::from_xyz(card_x, a4_page_top + title_gap, 0.0))
+                .bundle(),
+        )
         .override_font_unit(Unit::Points);
 }
 
@@ -491,13 +493,18 @@ fn spawn_photo_panel_with_title(
         ))
         .observe(on_panel_clicked);
     commands
-        .spawn((
-            WorldText::new("Photo — 5 × 7 in"),
-            WorldTextStyle::new(18.0)
-                .with_color(Color::WHITE)
-                .with_anchor(Anchor::BottomCenter),
-            Transform::from_xyz(index_x, index_y + index_height_m / 2.0 + title_gap, 0.0),
-        ))
+        .spawn(
+            WorldText::new("Photo — 5 × 7 in")
+                .size(18.0)
+                .color(Color::WHITE)
+                .anchor(Anchor::BottomCenter)
+                .transform(Transform::from_xyz(
+                    index_x,
+                    index_y + index_height_m / 2.0 + title_gap,
+                    0.0,
+                ))
+                .bundle(),
+        )
         .override_font_unit(Unit::Points);
 }
 

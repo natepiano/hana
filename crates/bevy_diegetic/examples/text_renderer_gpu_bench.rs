@@ -30,7 +30,6 @@ use bevy::winit::WinitSettings;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToF64;
 
@@ -228,17 +227,18 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
     for index in 0..config.instances {
         let column = index % GRID_COLUMNS;
         let row = index / GRID_COLUMNS;
-        commands.spawn((
-            WorldText::new(BENCH_TEXT),
-            WorldTextStyle::new(TEXT_SIZE)
-                .with_color(Color::WHITE)
-                .with_shadow_mode(GlyphShadowMode::None),
-            Transform::from_xyz(
-                column.to_f32().mul_add(GRID_SPACING_X, origin_x),
-                row.to_f32().mul_add(-GRID_SPACING_Y, origin_y),
-                0.0,
-            ),
-        ));
+        commands.spawn(
+            WorldText::new(BENCH_TEXT)
+                .size(TEXT_SIZE)
+                .color(Color::WHITE)
+                .shadow_mode(GlyphShadowMode::None)
+                .transform(Transform::from_xyz(
+                    column.to_f32().mul_add(GRID_SPACING_X, origin_x),
+                    row.to_f32().mul_add(-GRID_SPACING_Y, origin_y),
+                    0.0,
+                ))
+                .bundle(),
+        );
     }
 }
 

@@ -373,8 +373,30 @@ Status legend: `proposed` = awaiting author choice.
     `reconcile.rs` child-spawn pattern; encapsulates the two-entity structure.
     e.g. `WorldText::new("hi").size(Px(200.0)).bold().anchor(Center).spawn(&mut commands)`.
 
-  Remaining choice: **(a) vs (b)** — a bundle the caller spawns themselves, vs a
-  terminal `.spawn(&mut Commands)`. Team leans (b). Surfaced for the author.
+  **→ DECIDED: (b) terminal `.spawn(&mut Commands) -> Entity`.** The chain ends
+  in `.spawn(&mut commands)`, which builds the one-element panel + text child
+  internally and returns the **text entity** (the child) — the handle callers
+  need for `set_text`, marker components, and visibility toggles. `.transform()`
+  / `.screen_position()` are part of the chain. (a) was rejected: it leaks the
+  panel/child split to the call site and forces every live-updating label to
+  descend into `with_children` and fish the child id back out. Acceptable
+  tradeoff: the sugar is spawned via `.spawn()`, not dropped into a larger
+  `commands.spawn((…))` tuple — fine, since it's always the top-level spawn.
+
+  **→ REVISED (Phase E, user-approved): add `.bundle() -> impl Bundle`; keep
+  `.spawn()` as a one-liner over it.** D9's rejection of the bundle form rested
+  on the sugar spawning a parent panel *plus* a `ChildOf`-linked child. The
+  implementation does not: `.spawn()` creates only the single panel entity, and
+  reconcile builds the text child later from the layout tree. So the sugar *is* a
+  single-entity bundle — `(DiegeticPanel, TextContent, SugarText, Transform)` —
+  and `WorldText::bundle()` / `ScreenText::bundle()` return it as `impl Bundle`.
+  `.spawn()` is now `commands.spawn(self.bundle()).id()`. This keeps fairy_dust's
+  `cube_face_text`/`cube_face_label` returning `impl Bundle` (composable with the
+  `CubeFaceLabel` marker and `with_children`), and live-update examples keep
+  `Query<&mut TextContent, With<CubeFaceLabel>>` + `set_text` (the panel root
+  carries `TextContent`; `rebuild_sugar_text` propagates). The build `Result`
+  (unreachable for the always-`Fit`-height sugar) falls back to
+  `DiegeticPanel::default()` with a logged error — no `unwrap`.
 
 ---
 
@@ -491,6 +513,14 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 13. Replace the showcase `PAUSED` bevy_ui overlay with `ScreenText`
     (`ui.rs`); add a `ScreenText` demo to `screen_space.rs`.
 
+### Status (in progress)
+
+Phases 0–4 done: unified `TextStyle`, lighting/sidedness cascade, `WorldText`/
+`ScreenText` sugar (`.bundle()` + `.spawn()`), standalone path + `world_scale`
+deleted (overlay dark), fairy_dust + all ~46 example files migrated. Workspace
+builds; 225 `bevy_diegetic` tests pass; `cargo +nightly fmt` clean. Remaining:
+Phase 5 (new `ScreenText` usage) and Phase 6 (clippy, perf gate, rename handoff).
+
 ### Phase 6 — verify
 
 14. `cargo build && cargo +nightly fmt`, `/clippy`. Run the heavy examples
@@ -558,6 +588,22 @@ Single-correct-outcome refinements to the plan above (not user forks):
   run from the panel-text path (a `ComputedPanelTextRun`, or unify the computed
   component) and retarget the overlay to read it. Critical — do not drop the
   feature silently.
+
+  **→ SUPERSEDED (user decision, Phase D): defer the overlay retarget.** Rather
+  than retarget first, the deletion lands now and the overlay goes dark in the
+  interim: the standalone systems that populated `ComputedWorldText` are deleted,
+  the `ComputedWorldText` / `ComputedGlyphMetrics` types stay (so the overlay
+  still compiles), and the overlay draws nothing until a follow-up populates the
+  computed run from the panel-text path. Tracked by `TODO(overlay-retarget)` at
+  the overlay read sites. Not silent — the dark state and follow-up are recorded
+  here and in code.
+
+  Two dead-code warnings remain from the deletion, both glyph-metric data the
+  overlay retarget will likely re-use: `ShapedGlyph.advance` (write-only now) and
+  `BASELINE_DEDUP_EPSILON`. Left for the Phase F clippy gate (user-approved
+  delete-vs-keep) rather than deleted speculatively. The standalone-only debris
+  (`prepare_positioned_run` wrapper, `WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS`) was
+  removed.
 
 - **R9 — Phases 1b→4 land contiguously.** Deleting the standalone path + field
   (step 9) leaves the workspace uncompilable until the examples migrate (Bucket
@@ -652,6 +698,28 @@ Single-correct-outcome refinements to the plan above (not user forks):
   `input_keyboard`/`orthographic`/`pausing` pattern) in release, not just the
   static demos. If per-label per-frame overhead is large, D1 option (c)
   (lightweight single-element path) is the recorded fallback.
+
+- **R23 — Lighting/sidedness are optional fields + per-context cascade
+  defaults (implementation refinement of D2/R17).** The code reality the plan
+  didn't capture: panel-text lighting came from the panel's `text_material`
+  (not the per-label style), and panel-text sidedness was hardcoded
+  `double_sided = true`; only the standalone path read `style.lighting()` /
+  `sidedness()`. So R17's literal "unconditionally capture the `TextStyle`
+  field into `Override`" would force every existing panel (whose styles default
+  `Lit`) to `Lit`, regressing the unlit HUD panels. Resolution (user-approved):
+  make `TextStyle` lighting/sidedness `Option` (mirroring `alpha_mode`) —
+  `None` = inherit. Global `CascadeDefault` = `Lit` / `DoubleSided` (world);
+  `seed_panel_overrides` stamps `Override<TextLighting>(Unlit)` /
+  `Override<TextSidedness>(OneSided)` for **screen** panels and
+  `Override<TextLighting>(Unlit)` for any panel whose `text_material` is unlit;
+  a label that sets `.with_lighting`/`.with_unlit`/`.with_sidedness` is captured
+  as its own `Override` in `reconcile_panel_text_children` (spawn + reuse) and
+  wins. Cascade attributes are newtypes `TextLighting(GlyphLighting)` /
+  `TextSidedness(GlyphSidedness)` (the enum names can't be reused — the
+  `cascade_attr!` macro wraps the value, as `FontUnit(Unit)` does). Both render
+  paths now read `Resolved<_>`; the forced `double_sided` and the
+  material-driven unlit are gone. Per-context default **and** per-label override
+  both work; no existing panel regresses. 241 `bevy_diegetic` tests pass.
 
 - **R22 — `WorldText` keeps `Visibility` in `#[require]`.** Minor: the
   builder-spawned root still needs `Transform`/`Visibility`; child labels keep

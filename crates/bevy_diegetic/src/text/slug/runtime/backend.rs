@@ -69,24 +69,6 @@ pub(crate) struct GlyphCache {
 }
 
 impl GlyphCache {
-    /// Prepares one run from already-positioned production glyphs.
-    pub fn prepare_positioned_run(
-        &mut self,
-        glyphs: &[PositionedGlyph<'_>],
-        anchor: Vec2,
-        layout_font_size: f32,
-        world_scale: f32,
-        band_count: usize,
-    ) -> Result<PreparedTextRun, OutlineError> {
-        self.prepare_positioned_run_with_scale(
-            glyphs,
-            anchor,
-            layout_font_size,
-            Vec2::splat(world_scale),
-            band_count,
-        )
-    }
-
     /// Prepares one run from already-positioned production glyphs with
     /// caller-provided X/Y placement scale.
     pub fn prepare_positioned_run_with_scale(

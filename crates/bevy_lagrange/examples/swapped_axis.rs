@@ -43,7 +43,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::CameraMove;
@@ -748,12 +747,13 @@ fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>, mut meshes: ResMut<A
 fn spawn_label(root: &mut ChildSpawnerCommands, axis: usize, sign: f32, color: Color, glyph: &str) {
     root.spawn((
         AxisLabel { axis, sign },
-        WorldText::new(glyph),
-        WorldTextStyle::new(AXIS_LABEL_SIZE)
-            .with_color(color)
-            .with_anchor(Anchor::Center)
-            .with_unlit(),
-        Transform::default(),
+        WorldText::new(glyph)
+            .size(AXIS_LABEL_SIZE)
+            .color(color)
+            .anchor(Anchor::Center)
+            .unlit()
+            .transform(Transform::default())
+            .bundle(),
     ));
 }
 

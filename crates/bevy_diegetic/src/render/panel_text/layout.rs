@@ -2,7 +2,7 @@ use bevy::prelude::Component;
 
 use crate::layout::BoundingBox;
 
-/// Layout payload for a panel-text child (a [`WorldText`](crate::WorldText)
+/// Layout payload for a panel-text child (a [`TextContent`](crate::TextContent)
 /// entity also marked [`PanelChild`](crate::render::world_text::PanelChild)).
 ///
 /// Stores the layout-computed bounding box and panel scale factors needed to

@@ -6,6 +6,8 @@ use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
 
 use super::constants::CASCADE_DEPTH_CAP;
+use crate::layout::GlyphLighting;
+use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
 
 mod private {
@@ -56,6 +58,21 @@ cascade_attr!(
     /// Font-unit cascade attribute.
     FontUnit(Unit),
     default = Unit::Meters
+);
+cascade_attr!(
+    /// Glyph-lighting cascade attribute. Global default is `Lit` (world text);
+    /// the screen-panel construction bridge overrides it to `Unlit`.
+    TextLighting(GlyphLighting),
+    default = GlyphLighting::Lit,
+    eq
+);
+cascade_attr!(
+    /// Glyph-sidedness cascade attribute. Global default is `DoubleSided`
+    /// (world text); the screen-panel construction bridge overrides it to
+    /// `OneSided`.
+    TextSidedness(GlyphSidedness),
+    default = GlyphSidedness::DoubleSided,
+    eq
 );
 
 #[cfg(test)]

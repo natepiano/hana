@@ -13,6 +13,7 @@ use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
 use super::constants::SLUG_TEXT_SHADER_PATH;
+use crate::layout::GlyphRenderMode;
 
 /// Visible render mode for the text shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -27,6 +28,15 @@ pub(crate) enum RenderMode {
 
 impl From<RenderMode> for u32 {
     fn from(mode: RenderMode) -> Self { mode as Self }
+}
+
+impl From<GlyphRenderMode> for RenderMode {
+    fn from(render_mode: GlyphRenderMode) -> Self {
+        match render_mode {
+            GlyphRenderMode::Text => Self::Text,
+            GlyphRenderMode::PunchOut => Self::PunchOut,
+        }
+    }
 }
 
 /// Material used by the text renderer.

@@ -31,6 +31,7 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::TextContent;
 use bevy_diegetic::TypographyOverlay;
 use bevy_diegetic::WorldText;
 use bevy_diegetic::WorldTextStyle;
@@ -323,23 +324,27 @@ fn setup(
     // overlay bounds entity that is spawned for the rebuilt overlay.
     commands.spawn((
         DisplayText,
-        WorldText::new(initial_word),
-        WorldTextStyle::new(DISPLAY_SIZE).with_color(Color::srgb(0.9, 0.9, 0.9)),
+        WorldText::new(initial_word)
+            .size(DISPLAY_SIZE)
+            .color(Color::srgb(0.9, 0.9, 0.9))
+            .transform(Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z))
+            .bundle(),
         TypographyOverlay::default().with_shadow(SurfaceShadow::On),
-        Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z),
     ));
 
     // Comment text — lies flat in the ground plane, in front of the word,
     // reading toward the camera so the overlay never overlaps it.
     commands.spawn((
         CommentText,
-        WorldText::new(initial_comment),
-        WorldTextStyle::new(COMMENT_SIZE).with_color(COMMENT_COLOR),
-        Transform {
-            translation: Vec3::new(0.0, COMMENT_GROUND_LIFT, COMMENT_Z),
-            rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
-            ..default()
-        },
+        WorldText::new(initial_comment)
+            .size(COMMENT_SIZE)
+            .color(COMMENT_COLOR)
+            .transform(Transform {
+                translation: Vec3::new(0.0, COMMENT_GROUND_LIFT, COMMENT_Z),
+                rotation: Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2),
+                ..default()
+            })
+            .bundle(),
     ));
 
     spawn_hud_panels(&mut commands, &font_registry);
@@ -635,8 +640,8 @@ fn cycle_word(
     time: Res<Time>,
     mut cycle: ResMut<WordCycle>,
     mut cycle_state: ResMut<CycleState>,
-    mut texts: Query<&mut WorldText, (With<DisplayText>, Without<CommentText>)>,
-    mut comments: Query<&mut WorldText, (With<CommentText>, Without<DisplayText>)>,
+    mut texts: Query<&mut TextContent, (With<DisplayText>, Without<CommentText>)>,
+    mut comments: Query<&mut TextContent, (With<CommentText>, Without<DisplayText>)>,
 ) {
     let forward = keyboard.pressed(KeyCode::ArrowRight);
     let backward = keyboard.pressed(KeyCode::ArrowLeft);

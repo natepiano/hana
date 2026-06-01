@@ -32,7 +32,7 @@ use crate::layout::WorldTextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
-use crate::render::WorldText;
+use crate::render::TextContent;
 
 /// Geometry inputs for the horizontal advancement dimension arrow. Exists to
 /// reduce helper parameter counts.
@@ -186,7 +186,7 @@ fn spawn_bounding_box_callout(
     let ascent_mid_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let ascent_mid_world = scaling::layout_to_world_y(ascent_mid_layout, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_BOUNDING_BOX),
+        TextContent::new(LABEL_BOUNDING_BOX),
         WorldTextStyle::new(label_size)
             .with_color(bbox_color)
             .with_anchor(Anchor::CenterRight)
@@ -263,7 +263,7 @@ fn spawn_origin_and_advancement(
         .surface_shadow(ctx.overlay.surface_shadow),
     );
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_ORIGIN),
+        TextContent::new(LABEL_ORIGIN),
         WorldTextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::Center)
@@ -364,7 +364,7 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     let advance_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
     let advance_label_y = geometry.spacing.mul_add(-0.5, arrow_y);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_ADVANCEMENT),
+        TextContent::new(LABEL_ADVANCEMENT),
         WorldTextStyle::new(label_size)
             .with_color(ctx.overlay.color)
             .with_anchor(Anchor::TopCenter)

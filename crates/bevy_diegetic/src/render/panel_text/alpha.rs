@@ -9,7 +9,7 @@ use crate::render::world_text::PanelChild;
 
 /// Spawn-time cascade seed for a panel label's text alpha.
 ///
-/// A panel label (`PanelChild` + `WorldText`) is depth-2 under its panel. This
+/// A panel label (`PanelChild` + `TextContent`) is depth-2 under its panel. This
 /// observer fires when a label first gains [`PanelChild`] and seeds its
 /// [`Resolved<TextAlpha>`] via [`resolve_walk`](cascade::resolve_walk), which
 /// `update_panel_text_geometry` reads for the glyph material (and
@@ -46,7 +46,7 @@ mod tests {
     use crate::LayoutBuilder;
     use crate::LayoutTextStyle;
     use crate::Mm;
-    use crate::WorldText;
+    use crate::TextContent;
     use crate::cascade::CascadePlugin;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
@@ -90,7 +90,7 @@ mod tests {
         }
         commands
             .entity(panel.0)
-            .with_child((WorldText::new("label"), PanelChild));
+            .with_child((TextContent::new("label"), PanelChild));
     }
 
     /// Stand-in for `update_panel_text_geometry`'s alpha read: the cached
@@ -182,7 +182,7 @@ mod tests {
         // rule, not a stop-at-panel boundary.
         let label = app
             .world_mut()
-            .spawn((WorldText::new("label"), PanelChild, ChildOf(panel_entity)))
+            .spawn((TextContent::new("label"), PanelChild, ChildOf(panel_entity)))
             .id();
         app.update();
 

@@ -8,6 +8,10 @@ pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
 pub use super::resolved::TextAlpha;
+pub use super::resolved::TextLighting;
+pub use super::resolved::TextSidedness;
+use crate::layout::GlyphLighting;
+use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
 
 /// Typed cascade commands for entity-local authored values.
@@ -30,6 +34,18 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored font unit.
     fn inherit_font_unit(&mut self) -> &mut Self;
+
+    /// Author this entity's glyph lighting.
+    fn override_text_lighting(&mut self, lighting: GlyphLighting) -> &mut Self;
+
+    /// Remove this entity's authored glyph lighting.
+    fn inherit_text_lighting(&mut self) -> &mut Self;
+
+    /// Author this entity's glyph sidedness.
+    fn override_text_sidedness(&mut self, sidedness: GlyphSidedness) -> &mut Self;
+
+    /// Remove this entity's authored glyph sidedness.
+    fn inherit_text_sidedness(&mut self) -> &mut Self;
 }
 
 impl CascadeEntityCommandsExt for EntityCommands<'_> {
@@ -44,6 +60,22 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
     }
 
     fn inherit_font_unit(&mut self) -> &mut Self { remove_cascade_override::<FontUnit>(self) }
+
+    fn override_text_lighting(&mut self, lighting: GlyphLighting) -> &mut Self {
+        apply_cascade_override(self, TextLighting(lighting))
+    }
+
+    fn inherit_text_lighting(&mut self) -> &mut Self {
+        remove_cascade_override::<TextLighting>(self)
+    }
+
+    fn override_text_sidedness(&mut self, sidedness: GlyphSidedness) -> &mut Self {
+        apply_cascade_override(self, TextSidedness(sidedness))
+    }
+
+    fn inherit_text_sidedness(&mut self) -> &mut Self {
+        remove_cascade_override::<TextSidedness>(self)
+    }
 }
 
 /// Resolve an entity's current text alpha mode.
@@ -62,6 +94,24 @@ pub fn resolved_text_alpha(world: &World, entity: Entity) -> AlphaMode {
 #[must_use]
 pub fn resolved_font_unit(world: &World, entity: Entity) -> Unit {
     resolved_cascade::<FontUnit>(world, entity).0
+}
+
+/// Resolve an entity's current glyph lighting.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_text_lighting(world: &World, entity: Entity) -> GlyphLighting {
+    resolved_cascade::<TextLighting>(world, entity).0
+}
+
+/// Resolve an entity's current glyph sidedness.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness {
+    resolved_cascade::<TextSidedness>(world, entity).0
 }
 
 pub(crate) fn apply_cascade_override<'a, 'w, A>(

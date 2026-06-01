@@ -31,7 +31,7 @@ use crate::layout::ShapedTextCache;
 use crate::layout::TextDimensions;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
-use crate::render::WorldText;
+use crate::render::TextContent;
 
 /// Visual parameters shared across arrow-label spawners. Exists to reduce
 /// helper parameter counts.
@@ -254,7 +254,7 @@ fn spawn_line_edge_labels(
         }
         let line_world_y = scaling::layout_to_world_y(layout_y, ctx.anchor_y, ctx.scale);
         ctx.commands.entity(ctx.entity).with_child((
-            WorldText::new(label),
+            TextContent::new(label),
             WorldTextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::CenterRight)
@@ -277,7 +277,7 @@ fn spawn_left_arrow_labels(
     let label_y_mid = f32::midpoint(guides.baseline, guides.x_height);
     let label_y_mid_world = scaling::layout_to_world_y(label_y_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_ASCENT),
+        TextContent::new(LABEL_ASCENT),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
@@ -288,7 +288,7 @@ fn spawn_left_arrow_labels(
     let descent_mid = f32::midpoint(guides.baseline, guides.descent);
     let descent_mid_world = scaling::layout_to_world_y(descent_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_DESCENT),
+        TextContent::new(LABEL_DESCENT),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
@@ -297,7 +297,7 @@ fn spawn_left_arrow_labels(
     ));
 
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_LINE_HEIGHT),
+        TextContent::new(LABEL_LINE_HEIGHT),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
@@ -312,7 +312,7 @@ fn spawn_left_arrow_labels(
     let baseline_label_world =
         scaling::layout_to_world_y(guides.baseline, ctx.anchor_y, ctx.scale) - label_descent_offset;
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_BASELINE),
+        TextContent::new(LABEL_BASELINE),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterRight)
@@ -326,7 +326,7 @@ fn spawn_left_arrow_labels(
         let ascent_world = scaling::layout_to_world_y(guides.ascent, ctx.anchor_y, ctx.scale);
         let no_gap_label = format!("{NO_LINE_GAP_LABEL_PREFIX}{font_name}");
         ctx.commands.entity(ctx.entity).with_child((
-            WorldText::new(no_gap_label),
+            TextContent::new(no_gap_label),
             WorldTextStyle::new(style.size)
                 .with_color(style.color)
                 .with_anchor(Anchor::BottomLeft)
@@ -347,7 +347,7 @@ fn spawn_right_arrow_labels(
     let x_height_mid = f32::midpoint(guides.x_height, guides.baseline);
     let x_height_mid_world = scaling::layout_to_world_y(x_height_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_X_HEIGHT),
+        TextContent::new(LABEL_X_HEIGHT),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)
@@ -358,7 +358,7 @@ fn spawn_right_arrow_labels(
     let cap_mid = f32::midpoint(guides.cap_height, guides.x_height);
     let cap_mid_world = scaling::layout_to_world_y(cap_mid, ctx.anchor_y, ctx.scale);
     ctx.commands.entity(ctx.entity).with_child((
-        WorldText::new(LABEL_CAP_HEIGHT),
+        TextContent::new(LABEL_CAP_HEIGHT),
         WorldTextStyle::new(style.size)
             .with_color(style.color)
             .with_anchor(Anchor::CenterLeft)

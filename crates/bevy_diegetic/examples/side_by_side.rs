@@ -49,7 +49,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_window_manager::WindowManagerPlugin;
@@ -641,10 +640,14 @@ fn spawn_clay_text(
 
             commands.spawn((
                 ClayTextEntity,
-                WorldText::new(text),
-                WorldTextStyle::new(font_size * WORLD_TEXT_SCALE)
-                    .with_anchor(bevy_diegetic::Anchor::TopLeft),
-                Transform::from_translation(world_pos).with_scale(Vec3::splat(text_entity_scale)),
+                WorldText::new(text)
+                    .size(font_size * WORLD_TEXT_SCALE)
+                    .anchor(bevy_diegetic::Anchor::TopLeft)
+                    .transform(
+                        Transform::from_translation(world_pos)
+                            .with_scale(Vec3::splat(text_entity_scale)),
+                    )
+                    .bundle(),
             ));
         }
     }

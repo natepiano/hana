@@ -42,7 +42,6 @@ use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
@@ -344,16 +343,20 @@ fn setup(
     commands.spawn((
         Name::new("Headline"),
         CameraHomeTarget,
-        WorldText::new(HEADLINE_TEXT),
-        WorldTextStyle::new(HEADLINE_SIZE).with_color(TEXT_COLOR),
-        Transform::from_xyz(SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
+        WorldText::new(HEADLINE_TEXT)
+            .size(HEADLINE_SIZE)
+            .color(TEXT_COLOR)
+            .transform(Transform::from_xyz(SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z))
+            .bundle(),
     ));
     commands.spawn((
         Name::new("Small line"),
         CameraHomeTarget,
-        WorldText::new(SMALL_TEXT),
-        WorldTextStyle::new(SMALL_SIZE).with_color(TEXT_COLOR),
-        Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z),
+        WorldText::new(SMALL_TEXT)
+            .size(SMALL_SIZE)
+            .color(TEXT_COLOR)
+            .transform(Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z))
+            .bundle(),
     ));
     // Transparent hard-edged geometry gives the post-process passes and MSAA a
     // visible target that is independent from the text shader's coverage AA.

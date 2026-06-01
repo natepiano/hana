@@ -14,7 +14,7 @@
 //!
 //! ```ignore
 //! commands
-//!     .spawn(WorldText::new("hi"))
+//!     .spawn(TextContent::new("hi"))
 //!     .override_text_alpha(AlphaMode::Add)
 //!     .override_font_unit(Unit::Millimeters);
 //!
@@ -50,6 +50,8 @@
 //! | --- | --- | --- |
 //! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
+//! | [`TextLighting`] | `CascadeDefault<TextLighting>` | `override_text_lighting`, `inherit_text_lighting`, [`resolved_text_lighting`] |
+//! | [`TextSidedness`] | `CascadeDefault<TextSidedness>` | `override_text_sidedness`, `inherit_text_sidedness`, [`resolved_text_sidedness`] |
 //!
 //! # Membership is a property of the tree, not of a shared component
 //!
@@ -57,7 +59,7 @@
 //! component per attribute. An entity holds at most one of any component, so
 //! "two sources for one attribute on one node" has no representation and no
 //! exclusion marker is needed. Node *kind* (standalone / panel / label) is
-//! carried by the `WorldText` / `DiegeticPanel` / `PanelChild` markers and
+//! carried by the `TextContent` / `DiegeticPanel` / `PanelChild` markers and
 //! selects which render system draws the entity — orthogonal to the cascade.
 //!
 //! # Write paths
@@ -109,10 +111,14 @@ mod resolved;
 pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
+pub use attributes::TextLighting;
+pub use attributes::TextSidedness;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_text_alpha;
+pub use attributes::resolved_text_lighting;
+pub use attributes::resolved_text_sidedness;
 pub use cascade_set::CascadeSet;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;

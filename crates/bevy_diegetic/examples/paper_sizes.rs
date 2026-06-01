@@ -26,7 +26,6 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
@@ -181,13 +180,14 @@ fn setup(
     commands.insert_resource(Backdrop(backdrop));
 
     // ── Title ────────────────────────────────────────────────────────
-    commands.spawn((
-        WorldText::new("PaperSize — Portrait & Landscape"),
-        WorldTextStyle::new(0.04)
-            .with_color(HEADER_COLOR)
-            .with_anchor(Anchor::BottomCenter),
-        Transform::from_xyz(0.0, world_height + 0.02, 0.0),
-    ));
+    commands.spawn(
+        WorldText::new("PaperSize — Portrait & Landscape")
+            .size(0.04)
+            .color(HEADER_COLOR)
+            .anchor(Anchor::BottomCenter)
+            .transform(Transform::from_xyz(0.0, world_height + 0.02, 0.0))
+            .bundle(),
+    );
 
     // ── Main panel ───────────────────────────────────────────────────
     let panel = DiegeticPanel::world()

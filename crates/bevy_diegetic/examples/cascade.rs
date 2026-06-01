@@ -40,9 +40,9 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
+use bevy_diegetic::TextContent;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_diegetic::resolved_font_unit;
 use bevy_diegetic::resolved_text_alpha;
@@ -248,51 +248,67 @@ fn setup(mut commands: Commands) {
             .id()
     });
 
-    commands.spawn((
-        WorldText::new(STANDALONE_TITLE_TEXT),
-        WorldTextStyle::new(WORLD_TITLE_SIZE)
-            .with_color(HUD_HEADER_COLOR)
-            .with_world_scale(1.0)
-            .with_anchor(Anchor::TopLeft)
-            .with_unlit(),
-        Transform::from_xyz(WORLD_TEXT_X, WORLD_TEXT_TITLE_Y, SCENE_Z),
-    ));
+    commands.spawn(
+        WorldText::new(STANDALONE_TITLE_TEXT)
+            .size(WORLD_TITLE_SIZE)
+            .color(HUD_HEADER_COLOR)
+            .anchor(Anchor::TopLeft)
+            .unlit()
+            .transform(Transform::from_xyz(
+                WORLD_TEXT_X,
+                WORLD_TEXT_TITLE_Y,
+                SCENE_Z,
+            ))
+            .bundle(),
+    );
 
     let default_alpha = commands
-        .spawn((
-            WorldText::new(alpha_line(DEFAULT_ALPHA_PREFIX, GLOBAL_ALPHA_A, "global")),
-            WorldTextStyle::new(WORLD_TEXT_SIZE)
-                .with_color(DEFAULT_COLOR)
-                .with_world_scale(1.0)
-                .with_anchor(Anchor::TopLeft)
-                .with_unlit(),
-            Transform::from_xyz(WORLD_TEXT_X, WORLD_TEXT_DEFAULT_Y, SCENE_Z),
-        ))
+        .spawn(
+            WorldText::new(alpha_line(DEFAULT_ALPHA_PREFIX, GLOBAL_ALPHA_A, "global"))
+                .size(WORLD_TEXT_SIZE)
+                .color(DEFAULT_COLOR)
+                .anchor(Anchor::TopLeft)
+                .unlit()
+                .transform(Transform::from_xyz(
+                    WORLD_TEXT_X,
+                    WORLD_TEXT_DEFAULT_Y,
+                    SCENE_Z,
+                ))
+                .bundle(),
+        )
         .id();
 
     let standalone_alpha = commands
-        .spawn((
-            WorldText::new(alpha_line(STANDALONE_ALPHA_PREFIX, STANDALONE_ALPHA, "own")),
-            WorldTextStyle::new(WORLD_TEXT_SIZE)
-                .with_color(OVERRIDE_COLOR)
-                .with_world_scale(1.0)
-                .with_anchor(Anchor::TopLeft)
-                .with_unlit(),
-            Transform::from_xyz(WORLD_TEXT_X, WORLD_TEXT_ALPHA_Y, SCENE_Z),
-        ))
+        .spawn(
+            WorldText::new(alpha_line(STANDALONE_ALPHA_PREFIX, STANDALONE_ALPHA, "own"))
+                .size(WORLD_TEXT_SIZE)
+                .color(OVERRIDE_COLOR)
+                .anchor(Anchor::TopLeft)
+                .unlit()
+                .transform(Transform::from_xyz(
+                    WORLD_TEXT_X,
+                    WORLD_TEXT_ALPHA_Y,
+                    SCENE_Z,
+                ))
+                .bundle(),
+        )
         .override_text_alpha(STANDALONE_ALPHA)
         .id();
 
     let standalone_unit = commands
-        .spawn((
-            WorldText::new(unit_line(STANDALONE_UNIT_PREFIX, GLOBAL_UNIT_A, "global")),
-            WorldTextStyle::new(WORLD_TEXT_SIZE)
-                .with_color(DEFAULT_COLOR)
-                .with_world_scale(1.0)
-                .with_anchor(Anchor::TopLeft)
-                .with_unlit(),
-            Transform::from_xyz(WORLD_TEXT_X, WORLD_TEXT_UNIT_Y, SCENE_Z),
-        ))
+        .spawn(
+            WorldText::new(unit_line(STANDALONE_UNIT_PREFIX, GLOBAL_UNIT_A, "global"))
+                .size(WORLD_TEXT_SIZE)
+                .color(DEFAULT_COLOR)
+                .anchor(Anchor::TopLeft)
+                .unlit()
+                .transform(Transform::from_xyz(
+                    WORLD_TEXT_X,
+                    WORLD_TEXT_UNIT_Y,
+                    SCENE_Z,
+                ))
+                .bundle(),
+        )
         .id();
 
     let hud =
@@ -442,7 +458,7 @@ fn handle_cascade_keys(
     mut state: ResMut<CascadeDemoState>,
     mut alpha_default: ResMut<CascadeDefault<TextAlpha>>,
     mut unit_default: ResMut<CascadeDefault<FontUnit>>,
-    labels: Query<(Entity, &WorldText)>,
+    labels: Query<(Entity, &TextContent)>,
     mut commands: Commands,
 ) {
     let Some(entities) = entities else {
@@ -515,7 +531,7 @@ fn next_unit_default(current: Unit) -> Unit {
     }
 }
 
-fn find_label_by_prefix(labels: &Query<(Entity, &WorldText)>, prefix: &str) -> Option<Entity> {
+fn find_label_by_prefix(labels: &Query<(Entity, &TextContent)>, prefix: &str) -> Option<Entity> {
     labels
         .iter()
         .find_map(|(entity, text)| text.text().starts_with(prefix).then_some(entity))
@@ -566,14 +582,14 @@ fn refresh_hud(world: &mut World) {
 }
 
 fn find_text_entity_by_prefix(world: &mut World, prefix: &str) -> Option<Entity> {
-    let mut labels = world.query::<(Entity, &WorldText)>();
+    let mut labels = world.query::<(Entity, &TextContent)>();
     labels
         .iter(world)
         .find_map(|(entity, text)| text.text().starts_with(prefix).then_some(entity))
 }
 
 fn update_world_text(world: &mut World, entity: Entity, text: String) {
-    let Some(mut world_text) = world.get_mut::<WorldText>(entity) else {
+    let Some(mut world_text) = world.get_mut::<TextContent>(entity) else {
         return;
     };
     if world_text.text() != text {

@@ -30,7 +30,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -221,14 +220,15 @@ fn on_font_registered(
         trigger.id.0, trigger.name, trigger.source
     );
     commands
-        .spawn((
-            WorldText::new(label),
-            WorldTextStyle::new(SAMPLE_SIZE)
-                .with_font(trigger.id.0)
-                .with_color(Color::srgb(0.2, 0.3, 0.9))
-                .with_shadow_mode(GlyphShadowMode::None),
-            Transform::from_xyz(0.0, y, 0.0),
-        ))
+        .spawn(
+            WorldText::new(label)
+                .size(SAMPLE_SIZE)
+                .font(trigger.id.0)
+                .color(Color::srgb(0.2, 0.3, 0.9))
+                .shadow_mode(GlyphShadowMode::None)
+                .transform(Transform::from_xyz(0.0, y, 0.0))
+                .bundle(),
+        )
         .observe(on_text_clicked);
 
     // Update status panel.

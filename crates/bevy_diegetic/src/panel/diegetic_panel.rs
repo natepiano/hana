@@ -15,8 +15,12 @@ use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextLighting;
+use crate::cascade::TextSidedness;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
+use crate::layout::GlyphLighting;
+use crate::layout::GlyphSidedness;
 use crate::layout::InvalidSize;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -449,11 +453,29 @@ pub(super) fn seed_panel_overrides(
         return;
     };
     let font_unit = panel.font_unit().unwrap_or(defaults.panel_font_unit);
+    // Per-context glyph defaults: screen panels are unlit, front-facing HUD
+    // surfaces; world panels stay lit and double-sided (the global cascade
+    // default). A world panel whose text material is explicitly unlit also seeds
+    // an unlit override so its labels inherit the look its material implied
+    // before lighting moved onto the cascade. Labels still override per-label
+    // via `TextStyle::with_lighting` / `with_sidedness` (captured in
+    // `reconcile_panel_text_children`).
+    let is_screen = panel.coordinate_space().is_screen();
+    let material_unlit = panel.text_material().is_some_and(|material| material.unlit);
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert(Resolved(FontUnit(font_unit)));
     cascade::apply_cascade_override(&mut entity_commands, FontUnit(font_unit));
     if let Some(alpha_mode) = panel.text_alpha_mode() {
         cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
+    }
+    if is_screen {
+        cascade::apply_cascade_override(&mut entity_commands, TextLighting(GlyphLighting::Unlit));
+        cascade::apply_cascade_override(
+            &mut entity_commands,
+            TextSidedness(GlyphSidedness::OneSided),
+        );
+    } else if material_unlit {
+        cascade::apply_cascade_override(&mut entity_commands, TextLighting(GlyphLighting::Unlit));
     }
 }
 

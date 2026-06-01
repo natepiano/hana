@@ -30,7 +30,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
@@ -139,23 +138,25 @@ fn spawn_backdrop(
 }
 
 fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f32) {
-    let header_style = WorldTextStyle::new(9.0)
-        .with_color(HEADER_COLOR)
-        .with_anchor(Anchor::TopLeft);
-
     commands
-        .spawn((
-            WorldText::new("Dimension in layout properties"),
-            header_style.clone(),
-            Transform::from_xyz(left_x, header_y, 0.0),
-        ))
+        .spawn(
+            WorldText::new("Dimension in layout properties")
+                .size(9.0)
+                .color(HEADER_COLOR)
+                .anchor(Anchor::TopLeft)
+                .transform(Transform::from_xyz(left_x, header_y, 0.0))
+                .bundle(),
+        )
         .override_font_unit(Unit::Points);
     commands
-        .spawn((
-            WorldText::new("How it works"),
-            header_style,
-            Transform::from_xyz(note_x, header_y, 0.0),
-        ))
+        .spawn(
+            WorldText::new("How it works")
+                .size(9.0)
+                .color(HEADER_COLOR)
+                .anchor(Anchor::TopLeft)
+                .transform(Transform::from_xyz(note_x, header_y, 0.0))
+                .bundle(),
+        )
         .override_font_unit(Unit::Points);
 }
 

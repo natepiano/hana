@@ -31,7 +31,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 
@@ -197,23 +196,27 @@ fn setup(
             Transform::from_xyz(0.0, 0.51, 0.0),
         ))
         .with_children(|parent| {
-            let style = WorldTextStyle::new(0.22)
-                .with_color(Color::srgb(0.9, 0.3, 0.1))
-                .with_sidedness(GlyphSidedness::OneSided);
-            parent.spawn((
-                WorldText::new("HELLO"),
-                style,
-                Transform::from_xyz(0.0, 0.0, 0.501),
-            ));
+            parent.spawn(
+                WorldText::new("HELLO")
+                    .size(0.22)
+                    .color(Color::srgb(0.9, 0.3, 0.1))
+                    .sidedness(GlyphSidedness::OneSided)
+                    .transform(Transform::from_xyz(0.0, 0.0, 0.501))
+                    .bundle(),
+            );
         });
 
     // WorldText floating on the ground (coplanar reproducer).
     commands.spawn((
         CameraHomeTarget,
-        WorldText::new("GROUND"),
-        WorldTextStyle::new(0.45).with_color(Color::srgb(1.0, 0.85, 0.1)),
-        Transform::from_xyz(0.0, 0.001, 1.125)
-            .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+        WorldText::new("GROUND")
+            .size(0.45)
+            .color(Color::srgb(1.0, 0.85, 0.1))
+            .transform(
+                Transform::from_xyz(0.0, 0.001, 1.125)
+                    .with_rotation(Quat::from_rotation_x(-core::f32::consts::FRAC_PI_2)),
+            )
+            .bundle(),
     ));
 
     // Lighting.

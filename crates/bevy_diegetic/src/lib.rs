@@ -52,6 +52,7 @@ mod layout;
 mod panel;
 mod render;
 mod screen_space;
+mod sugar;
 mod text;
 
 #[cfg(feature = "bench_support")]
@@ -80,8 +81,12 @@ pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
 pub use cascade::FontUnit;
 pub use cascade::TextAlpha;
+pub use cascade::TextLighting;
+pub use cascade::TextSidedness;
 pub use cascade::resolved_font_unit;
 pub use cascade::resolved_text_alpha;
+pub use cascade::resolved_text_lighting;
+pub use cascade::resolved_text_sidedness;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -146,8 +151,6 @@ pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
-pub use layout::ForLayout;
-pub use layout::ForStandalone;
 pub use layout::GlyphLighting;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
@@ -178,7 +181,7 @@ pub use layout::TextDimensions;
 /// for a real-world custom measurer that bridges clay-layout to our
 /// parley-backed measurement via this type.
 pub use layout::TextMeasure;
-pub use layout::TextProps;
+pub use layout::TextStyle;
 pub use layout::TextWrap;
 pub use layout::Unit;
 pub use layout::WorldTextStyle;
@@ -215,12 +218,15 @@ pub use render::PanelTextLayout;
 use render::RenderPlugin;
 pub use render::StableTransparency;
 pub use render::TextAntiAlias;
-pub use render::WorldText;
+pub use render::TextContent;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
+pub use sugar::ScreenText;
+use sugar::SugarPlugin;
+pub use sugar::WorldText;
 pub use text::DiegeticTextMeasurer;
 pub use text::Font;
 pub use text::FontId;
@@ -261,6 +267,7 @@ impl Plugin for DiegeticUiPlugin {
             ScreenSpacePlugin,
             RenderPlugin,
             CalloutPlugin,
+            SugarPlugin,
             #[cfg(feature = "typography_overlay")]
             TypographyOverlayPlugin,
         ));

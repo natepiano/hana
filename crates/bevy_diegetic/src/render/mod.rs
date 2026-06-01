@@ -26,7 +26,7 @@ pub(crate) use sdf_material::sdf_primitive_material;
 pub use transparency::StableTransparency;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
-pub use world_text::WorldText;
+pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
 
 use crate::text::TextMaterial;

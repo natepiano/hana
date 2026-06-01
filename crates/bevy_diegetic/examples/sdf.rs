@@ -43,7 +43,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_kana::ToF32;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::LagrangePlugin;
@@ -509,11 +508,13 @@ fn build_camera_help(b: &mut LayoutBuilder) {
 fn spawn_labels(commands: &mut Commands, parent: Entity) {
     commands.entity(parent).with_children(|parent| {
         // Title sits above all three rows.
-        parent.spawn((
-            WorldText::new("SDF Line Lab"),
-            WorldTextStyle::new(0.14).with_color(Color::srgb(0.8, 0.9, 1.0)),
-            Transform::from_xyz(0.0, TITLE_Y, DISPLAY_Z),
-        ));
+        parent.spawn(
+            WorldText::new("SDF Line Lab")
+                .size(0.14)
+                .color(Color::srgb(0.8, 0.9, 1.0))
+                .transform(Transform::from_xyz(0.0, TITLE_Y, DISPLAY_Z))
+                .bundle(),
+        );
 
         // Row labels: one per row, placed inline at ROW_LABEL_X so they
         // sit at the same height as the strokes they describe.
@@ -522,24 +523,27 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
             ("stretched rect sdf_kind=0", ROW_Y[1]),
             ("border edge", ROW_Y[2]),
         ] {
-            parent.spawn((
-                WorldText::new(text),
-                WorldTextStyle::new(0.06)
-                    .with_color(Color::srgb(0.9, 0.9, 0.95))
-                    .with_shadow_mode(bevy_diegetic::GlyphShadowMode::Cast),
-                Transform::from_xyz(ROW_LABEL_X, y, ROW_Z),
-            ));
+            parent.spawn(
+                WorldText::new(text)
+                    .size(0.06)
+                    .color(Color::srgb(0.9, 0.9, 0.95))
+                    .shadow_mode(bevy_diegetic::GlyphShadowMode::Cast)
+                    .transform(Transform::from_xyz(ROW_LABEL_X, y, ROW_Z))
+                    .bundle(),
+            );
         }
 
         // Column width labels: one per column, placed below the bottom
         // row but above the ground plane.
         for (index, pt) in WIDTHS_PT.iter().enumerate() {
             let x = X_STEP.mul_add(index.to_f32(), START_X);
-            parent.spawn((
-                WorldText::new(format!("{pt}pt")),
-                WorldTextStyle::new(0.07).with_color(Color::srgb(0.7, 0.75, 0.85)),
-                Transform::from_xyz(x, WIDTH_LABEL_Y, ROW_Z),
-            ));
+            parent.spawn(
+                WorldText::new(format!("{pt}pt"))
+                    .size(0.07)
+                    .color(Color::srgb(0.7, 0.75, 0.85))
+                    .transform(Transform::from_xyz(x, WIDTH_LABEL_Y, ROW_Z))
+                    .bundle(),
+            );
         }
     });
 }

@@ -14,7 +14,7 @@ use crate::layout::ShapedTextCache;
 use crate::layout::Unit;
 use crate::layout::WorldTextStyle;
 use crate::render::ComputedWorldText;
-use crate::render::WorldText;
+use crate::render::TextContent;
 use crate::text;
 use crate::text::FontId;
 use crate::text::FontMetrics;
@@ -63,7 +63,7 @@ pub(super) struct GlyphExtents {
 pub fn build_typography_overlay(
     query: Query<(
         Entity,
-        &WorldText,
+        &TextContent,
         &WorldTextStyle,
         &TypographyOverlay,
         &ComputedWorldText,
@@ -75,7 +75,7 @@ pub fn build_typography_overlay(
             Or<(
                 Added<TypographyOverlay>,
                 Changed<TypographyOverlay>,
-                Changed<WorldText>,
+                Changed<TextContent>,
                 Changed<WorldTextStyle>,
                 Changed<ComputedWorldText>,
             )>,
@@ -125,16 +125,13 @@ pub fn build_typography_overlay(
         let font_size = style.size() * boost;
         let font_metrics = font.metrics(font_size);
 
-        // `world_scale` is a raw meters-per-unit override that bypasses the
-        // cascade. Otherwise read the per-entity `Resolved<FontUnit>`, falling
-        // back to `CascadeDefault<FontUnit>`.
-        let unit_scale = style.world_scale().unwrap_or_else(|| {
-            resolved_units
-                .get(entity)
-                .map_or(font_default.0, |resolved| resolved.0)
-                .0
-                .meters_per_unit()
-        });
+        // Read the per-entity `Resolved<FontUnit>`, falling back to
+        // `CascadeDefault<FontUnit>`.
+        let unit_scale = resolved_units
+            .get(entity)
+            .map_or(font_default.0, |resolved| resolved.0)
+            .0
+            .meters_per_unit();
         let scale = unit_scale * points_to_world;
         let anchor_y = if scale > 0.0 {
             computed.anchor_y / scale

@@ -19,26 +19,26 @@ use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::PanelChild;
-use crate::render::world_text::WorldText;
+use crate::render::world_text::TextContent;
 use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
 use crate::text::GlyphCache;
 
-/// Shapes text for panel [`WorldText`] children that are changed or pending.
+/// Shapes text for panel [`TextContent`] children that are changed or pending.
 pub(super) fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
         (
             With<PanelChild>,
-            With<WorldText>,
+            With<TextContent>,
             Or<(
-                Changed<WorldText>,
+                Changed<TextContent>,
                 Changed<WorldTextStyle>,
                 Changed<PanelTextLayout>,
             )>,
         ),
     >,
-    texts: Query<(&WorldText, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
+    texts: Query<(&TextContent, &WorldTextStyle, &PanelTextLayout, &ChildOf)>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     mut cache: ResMut<ShapedTextCache>,

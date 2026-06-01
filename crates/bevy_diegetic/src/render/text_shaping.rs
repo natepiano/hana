@@ -277,7 +277,6 @@ fn append_run_glyphs(
                 x: run.offset() + advance_x + glyph.x,
                 y: glyph.y,
                 baseline: run.baseline(),
-                advance: glyph.advance,
             });
             advance_x += glyph.advance;
         }

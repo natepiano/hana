@@ -3,7 +3,10 @@
 use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
+
+use crate::layout::GlyphSidedness;
 
 // layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
@@ -50,9 +53,6 @@ pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");
 
 // text rendering
-/// Tolerance used when deduplicating glyph baselines during line-count
-/// estimation in world text.
-pub(super) const BASELINE_DEDUP_EPSILON: f32 = 0.01;
 /// Fixed panel-local Z for text and image meshes.
 ///
 /// Layering is handled by `StandardMaterial::depth_bias`, so panel-local
@@ -61,9 +61,22 @@ pub(super) const TEXT_Z_OFFSET: f32 = 0.0;
 /// Default clip rect for unclipped text: effectively infinite panel-local
 /// bounds so the shader clip test becomes a no-op.
 pub(super) const UNCLIPPED_TEXT_CLIP_RECT: Vec4 = Vec4::new(-1e6, -1e6, 1e6, 1e6);
-/// Slow-frame debug log threshold for `render_world_text` total time, in
-/// milliseconds.
-pub(super) const WORLD_TEXT_DEBUG_LOG_THRESHOLD_MS: f32 = 5.0;
+
+/// Configures a `StandardMaterial`'s `double_sided` and `cull_mode` fields from
+/// a [`GlyphSidedness`] choice. Shared by the panel-text and world-text glyph
+/// material builders.
+pub(crate) const fn apply_glyph_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness) {
+    match sidedness {
+        GlyphSidedness::DoubleSided => {
+            base.double_sided = true;
+            base.cull_mode = None;
+        },
+        GlyphSidedness::OneSided => {
+            base.double_sided = false;
+            base.cull_mode = Some(Face::Back);
+        },
+    }
+}
 
 /// Returns the library's default matte `StandardMaterial`.
 #[must_use]

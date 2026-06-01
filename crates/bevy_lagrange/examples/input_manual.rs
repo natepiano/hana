@@ -12,7 +12,7 @@
 //!   +/-    — zoom
 
 use bevy::prelude::*;
-use bevy_diegetic::WorldText;
+use bevy_diegetic::TextContent;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::ManualInputSource;
 use bevy_lagrange::OrbitCam;
@@ -274,7 +274,7 @@ fn update_face_labels(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mut hold: ResMut<FaceLabelHold>,
-    mut labels: Query<(&ManualFaceLabel, &mut WorldText)>,
+    mut labels: Query<(&ManualFaceLabel, &mut TextContent)>,
 ) {
     let orbit = held_label(
         &mut hold.orbit,

@@ -14,7 +14,6 @@ use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::GlyphRenderMode;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -156,27 +155,32 @@ fn setup(
     commands.spawn((
         Name::new("Headline"),
         CameraHomeTarget,
-        WorldText::new(HEADLINE_TEXT),
-        WorldTextStyle::new(HEADLINE_SIZE).with_color(LATIN_COLOR),
-        Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z),
+        WorldText::new(HEADLINE_TEXT)
+            .size(HEADLINE_SIZE)
+            .color(LATIN_COLOR)
+            .transform(Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z))
+            .bundle(),
     ));
     commands.spawn((
         Name::new("Small line"),
         CameraHomeTarget,
-        WorldText::new(SMALL_TEXT),
-        WorldTextStyle::new(SMALL_SIZE).with_color(LATIN_COLOR),
-        Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z),
+        WorldText::new(SMALL_TEXT)
+            .size(SMALL_SIZE)
+            .color(LATIN_COLOR)
+            .transform(Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z))
+            .bundle(),
     ));
     // PunchOut fill: each glyph quad is painted everywhere except the letter,
     // so the word reads as solid blocks with the letters knocked out.
     commands.spawn((
         Name::new("PunchOut row"),
         CameraHomeTarget,
-        WorldText::new(PUNCH_OUT_TEXT),
-        WorldTextStyle::new(PUNCH_OUT_SIZE)
-            .with_color(PUNCH_OUT_COLOR)
-            .with_render_mode(GlyphRenderMode::PunchOut),
-        Transform::from_xyz(0.0, PUNCH_OUT_Y, DISPLAY_Z),
+        WorldText::new(PUNCH_OUT_TEXT)
+            .size(PUNCH_OUT_SIZE)
+            .color(PUNCH_OUT_COLOR)
+            .render_mode(GlyphRenderMode::PunchOut)
+            .transform(Transform::from_xyz(0.0, PUNCH_OUT_Y, DISPLAY_Z))
+            .bundle(),
     ));
 }
 
@@ -196,10 +200,11 @@ fn on_font_registered(
     commands.spawn((
         Name::new("CJK row"),
         CameraHomeTarget,
-        WorldText::new(CJK_TEXT),
-        WorldTextStyle::new(CJK_SIZE)
-            .with_font(font_id.0)
-            .with_color(CJK_COLOR),
-        Transform::from_xyz(0.0, CJK_Y, DISPLAY_Z),
+        WorldText::new(CJK_TEXT)
+            .size(CJK_SIZE)
+            .font(font_id.0)
+            .color(CJK_COLOR)
+            .transform(Transform::from_xyz(0.0, CJK_Y, DISPLAY_Z))
+            .bundle(),
     ));
 }

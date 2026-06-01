@@ -13,7 +13,7 @@ use bevy::camera::ScalingMode;
 use bevy::light::CascadeShadowConfig;
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
-use bevy_diegetic::WorldText;
+use bevy_diegetic::TextContent;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::OrbitCamSystemSet;
@@ -124,7 +124,7 @@ fn switch_projection(
     key_input: Res<ButtonInput<KeyCode>>,
     mut choice: ResMut<ProjectionChoice>,
     mut camera_query: Query<(&mut OrbitCam, &mut Projection)>,
-    mut face_labels: Query<&mut WorldText, With<CubeFaceLabel>>,
+    mut face_labels: Query<&mut TextContent, With<CubeFaceLabel>>,
 ) {
     let next_choice = if key_input.just_pressed(KeyCode::KeyO) {
         ProjectionChoice::Orthographic
@@ -184,7 +184,7 @@ const ORTHOGRAPHIC_LABEL: &str = "Orthographic";
 const PERSPECTIVE_LABEL: &str = "Perspective";
 
 fn update_face_labels(
-    face_labels: &mut Query<&mut WorldText, With<CubeFaceLabel>>,
+    face_labels: &mut Query<&mut TextContent, With<CubeFaceLabel>>,
     choice: ProjectionChoice,
 ) {
     let label = match choice {

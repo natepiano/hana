@@ -1,5 +1,5 @@
 //! Typography overlay — renders font-level metric lines and per-glyph
-//! bounding boxes as retained gizmos on any [`WorldText`](crate::WorldText)
+//! bounding boxes as retained gizmos on any [`TextContent`](crate::TextContent)
 //! entity.
 //!
 //! Uses [`ComputedWorldText`](crate::render::ComputedWorldText) data
@@ -8,7 +8,7 @@
 //!
 //! Metric lines are drawn using Bevy's retained [`GizmoAsset`](bevy::prelude::GizmoAsset)
 //! (spawned once, not redrawn every frame). Labels are spawned as
-//! [`WorldText`](crate::WorldText) children.
+//! [`TextContent`](crate::TextContent) children.
 
 mod constants;
 mod glyph;
@@ -39,19 +39,21 @@ pub enum GlyphMetricVisibility {
     Hidden,
 }
 
-/// Attach to a [`WorldText`](crate::WorldText) entity to render typography
-/// metric annotations. Built into the library as a debug tool — only
-/// available when the `typography_overlay` feature is enabled.
+/// Attach to a [`TextContent`](crate::TextContent) entity to render typography
+/// metric annotations.
+///
+/// Built into the library as a debug tool — only available when the
+/// `typography_overlay` feature is enabled.
 ///
 /// Metric lines are rendered as retained gizmos (spawned once, not
-/// redrawn every frame). Labels are spawned as [`WorldText`](crate::WorldText)
+/// redrawn every frame). Labels are spawned as [`TextContent`](crate::TextContent)
 /// children.
 ///
 /// # Example
 ///
 /// ```ignore
 /// commands.spawn((
-///     WorldText::new("Typography"),
+///     TextContent::new("Typography"),
 ///     TextStyle::new(48.0),
 ///     TypographyOverlay::default(),
 ///     Transform::from_xyz(0.0, 2.0, 0.0),

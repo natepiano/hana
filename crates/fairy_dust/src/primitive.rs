@@ -26,7 +26,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::Unit;
 use bevy_diegetic::WorldText;
-use bevy_diegetic::WorldTextStyle;
 use bevy_diegetic::default_panel_material;
 
 use crate::constants::CUBE_DEFAULT_COLOR;
@@ -102,11 +101,12 @@ pub fn cube_face_text(
 ) -> impl Bundle {
     (
         CubeFaceLabel,
-        WorldText::new(text),
-        WorldTextStyle::new(text_size)
-            .with_color(color)
-            .with_sidedness(GlyphSidedness::OneSided),
-        face.local_transform(cube_size * 0.5),
+        WorldText::new(text)
+            .size(text_size)
+            .color(color)
+            .sidedness(GlyphSidedness::OneSided)
+            .transform(face.local_transform(cube_size * 0.5))
+            .bundle(),
     )
 }
 
