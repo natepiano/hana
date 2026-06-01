@@ -20,7 +20,7 @@ use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
-use crate::render::world_text::PanelChild;
+use crate::render::world_text::PanelTextChild;
 use crate::text;
 use crate::text::GlyphCache;
 use crate::text::RenderMode;
@@ -62,14 +62,14 @@ pub(super) fn free_run_storage_on_mesh_removal(
 pub(super) fn update_panel_text_geometry(
     changed_runs: Query<
         (Entity, &PanelText, &PanelTextLayout, &ChildOf),
-        (With<PanelChild>, Changed<PanelText>),
+        (With<PanelTextChild>, Changed<PanelText>),
     >,
     mut emptied_runs: RemovedComponents<PanelText>,
     old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
-    resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelChild>>,
-    resolved_lightings: Query<&Resolved<TextLighting>, With<PanelChild>>,
-    resolved_sidednesses: Query<&Resolved<TextSidedness>, With<PanelChild>>,
+    resolved_alphas: Query<&Resolved<TextAlpha>, With<PanelTextChild>>,
+    resolved_lightings: Query<&Resolved<TextLighting>, With<PanelTextChild>>,
+    resolved_sidednesses: Query<&Resolved<TextSidedness>, With<PanelTextChild>>,
     alpha_default: Res<CascadeDefault<TextAlpha>>,
     lighting_default: Res<CascadeDefault<TextLighting>>,
     sidedness_default: Res<CascadeDefault<TextSidedness>>,
@@ -147,7 +147,7 @@ pub(super) fn update_panel_text_geometry(
 pub(super) fn update_panel_text_alpha(
     changed_alphas: Query<
         (Entity, Ref<PanelText>, &Resolved<TextAlpha>),
-        (With<PanelChild>, Changed<Resolved<TextAlpha>>),
+        (With<PanelTextChild>, Changed<Resolved<TextAlpha>>),
     >,
     run_meshes: Query<(&ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -413,8 +413,8 @@ mod tests {
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
             .init_asset::<TextMaterial>()
-            .add_observer(alpha::seed_panel_child_alpha)
-            .add_observer(super::super::glyph_cascade::seed_panel_child_glyph)
+            .add_observer(alpha::seed_panel_text_child_alpha)
+            .add_observer(super::super::glyph_cascade::seed_panel_text_child_glyph)
             .add_observer(free_run_storage_on_mesh_removal)
             .add_systems(
                 PostUpdate,
@@ -475,7 +475,7 @@ mod tests {
     fn labels_by_text(app: &mut App) -> HashMap<String, Entity> {
         let mut state = app
             .world_mut()
-            .query_filtered::<(Entity, &TextContent), With<PanelChild>>();
+            .query_filtered::<(Entity, &TextContent), With<PanelTextChild>>();
         state
             .iter(app.world())
             .map(|(entity, text)| (text.text().to_owned(), entity))

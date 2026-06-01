@@ -117,10 +117,8 @@ pub(super) const ZOOM_MARGIN_MESH: f32 = 0.15;
 pub(super) const ZOOM_MARGIN_SCENE: f32 = 0.08;
 
 // paused overlay
-pub(super) const FULL_WIDTH_PERCENT: f32 = 100.0;
 pub(super) const OVERLAY_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.4);
 pub(super) const PAUSED_OVERLAY_FONT_SIZE: f32 = 48.0;
-pub(super) const PAUSED_OVERLAY_TOP_PERCENT: f32 = 46.0;
 pub(super) const PAUSED_TEXT: &str = "PAUSED";
 
 // policy panel

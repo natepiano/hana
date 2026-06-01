@@ -514,7 +514,7 @@ impl TextStyle {
     /// Sets the per-label text [`AlphaMode`] override.
     ///
     /// The panel-text reconciler captures this value before converting via
-    /// [`as_standalone`](Self::as_standalone) and inserts `Override<TextAlpha>`
+    /// [`for_shaping`](Self::for_shaping) and inserts `Override<TextAlpha>`
     /// on the label.
     #[must_use]
     pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
@@ -579,7 +579,7 @@ impl TextStyle {
     ///
     /// A bare `f32` records no unit (`None`) and resolves from the contextual
     /// `FontUnit` cascade attribute; an explicit `Px`/`Pt`/`Mm`/`In` records
-    /// its unit and always wins. Used by the `WorldText` / `ScreenText` sugar
+    /// its unit and always wins. Used by the `WorldText` / `ScreenText`
     /// builders, whose `.size(..)` takes any `Into<Dimension>`.
     pub fn set_dimension(&mut self, size: impl Into<Dimension>) {
         let dimension = size.into();
@@ -612,62 +612,22 @@ impl TextStyle {
         copy
     }
 
-    /// Returns a copy prepared for standalone world-text shaping.
+    /// Returns a copy prepared for text shaping at the given anchor.
     ///
-    /// Forces [`TextWrap::None`] and [`TextAlign::Left`], anchors at
-    /// [`Anchor::TopLeft`], and clears the unit / alpha-mode authoring fields
-    /// (those route through the cascade). Crate-internal helper; renamed during
-    /// the unification migration.
+    /// Forces [`TextWrap::None`] and [`TextAlign::Left`] and clears the unit /
+    /// alpha-mode authoring fields (those route through the cascade). The two
+    /// contexts differ only in anchor: world text uses [`Anchor::TopLeft`] (the
+    /// command origin), layout-engine text uses [`Anchor::Center`].
+    /// Crate-internal helper.
     #[must_use]
-    pub const fn as_standalone(&self) -> Self {
+    pub fn for_shaping(&self, anchor: Anchor) -> Self {
         Self {
-            font_id:        self.font_id,
-            size:           self.size,
-            weight:         self.weight,
-            slant:          self.slant,
-            line_height:    self.line_height,
-            letter_spacing: self.letter_spacing,
-            word_spacing:   self.word_spacing,
-            wrap:           TextWrap::None,
-            color:          self.color,
-            align:          TextAlign::Left,
-            anchor:         Anchor::TopLeft,
-            render_mode:    self.render_mode,
-            shadow_mode:    self.shadow_mode,
-            sidedness:      self.sidedness,
-            lighting:       self.lighting,
-            font_features:  self.font_features,
-            unit:           None,
-            alpha_mode:     None,
-        }
-    }
-
-    /// Returns a copy prepared for layout-engine shaping.
-    ///
-    /// Forces [`TextWrap::None`] and [`TextAlign::Left`], anchors at
-    /// [`Anchor::Center`], and clears the unit / alpha-mode authoring fields.
-    /// Crate-internal helper; renamed during the unification migration.
-    #[must_use]
-    pub const fn as_layout_config(&self) -> Self {
-        Self {
-            font_id:        self.font_id,
-            size:           self.size,
-            weight:         self.weight,
-            slant:          self.slant,
-            line_height:    self.line_height,
-            letter_spacing: self.letter_spacing,
-            word_spacing:   self.word_spacing,
-            wrap:           TextWrap::None,
-            color:          self.color,
-            align:          TextAlign::Left,
-            anchor:         Anchor::Center,
-            render_mode:    self.render_mode,
-            shadow_mode:    self.shadow_mode,
-            sidedness:      self.sidedness,
-            lighting:       self.lighting,
-            font_features:  self.font_features,
-            unit:           None,
-            alpha_mode:     None,
+            wrap: TextWrap::None,
+            align: TextAlign::Left,
+            anchor,
+            unit: None,
+            alpha_mode: None,
+            ..self.clone()
         }
     }
 
@@ -898,32 +858,28 @@ mod tests {
     use crate::layout::BoundingBox;
 
     #[test]
-    fn as_standalone_preserves_size() {
+    fn for_shaping_preserves_size() {
         let style = TextStyle::new(24.0);
-        let standalone = style.as_standalone();
+        let prepared = style.for_shaping(Anchor::TopLeft);
         assert!(
-            (standalone.size() - 24.0).abs() < f32::EPSILON,
+            (prepared.size() - 24.0).abs() < f32::EPSILON,
             "size should be preserved"
         );
     }
 
     #[test]
-    fn as_standalone_defaults_to_top_left_anchor() {
-        // Panel text is positioned by layout coordinates, so the converted
-        // standalone text must start at the command origin.
+    fn for_shaping_applies_given_anchor() {
+        // World text anchors at the command origin (TopLeft); layout-engine
+        // text anchors at Center. The anchor is the one per-context difference.
         let style = TextStyle::new(12.0);
-        let standalone = style.as_standalone();
-        assert_eq!(
-            standalone.anchor(),
-            Anchor::TopLeft,
-            "as_standalone() should default to TopLeft for layout-positioned text"
-        );
+        assert_eq!(style.for_shaping(Anchor::TopLeft).anchor(), Anchor::TopLeft);
+        assert_eq!(style.for_shaping(Anchor::Center).anchor(), Anchor::Center);
     }
 
     #[test]
     fn with_anchor_overrides_default() {
         let standalone = TextStyle::new(12.0)
-            .as_standalone()
+            .for_shaping(Anchor::TopLeft)
             .with_anchor(Anchor::TopLeft);
         assert_eq!(standalone.anchor(), Anchor::TopLeft);
     }
@@ -954,18 +910,18 @@ mod tests {
     }
 
     #[test]
-    fn as_standalone_drops_layout_unit_and_alpha_authoring() {
-        let standalone = TextStyle::new(crate::Pt(24.0))
+    fn for_shaping_drops_layout_unit_and_alpha_authoring() {
+        let prepared = TextStyle::new(crate::Pt(24.0))
             .with_alpha_mode(AlphaMode::Add)
-            .as_standalone();
+            .for_shaping(Anchor::TopLeft);
 
         assert_eq!(
-            standalone.unit, None,
-            "unit authoring routes through FontUnit, not the standalone view"
+            prepared.unit, None,
+            "unit authoring routes through FontUnit, not the per-run view"
         );
         assert_eq!(
-            standalone.alpha_mode, None,
-            "alpha authoring routes through TextAlpha, not the standalone view"
+            prepared.alpha_mode, None,
+            "alpha authoring routes through TextAlpha, not the per-run view"
         );
     }
 

@@ -1,7 +1,9 @@
 //! Shared text-entity components.
 //!
-//! Holds [`TextContent`] (the text-source component every label and sugar panel
-//! carries) and the [`PanelChild`] marker that distinguishes a panel's text-child
+//! Holds [`TextContent`] (the text-source component carried by every panel-text
+//! label and by the one-element [`WorldText`](crate::WorldText) /
+//! [`ScreenText`](crate::ScreenText) panels) and the [`PanelChild`] marker that
+//! distinguishes a panel's text-child
 //! labels from the panel root. The standalone world-text render path that once
 //! lived here was removed when [`WorldText`](crate::WorldText) /
 //! [`ScreenText`](crate::ScreenText) became one-element panels — all text now
@@ -61,7 +63,7 @@ pub struct ComputedGlyphMetrics {
 ///
 /// Carried by panel-text child labels and by the one-element panels that
 /// [`WorldText`](crate::WorldText) / [`ScreenText`](crate::ScreenText) spawn —
-/// querying a sugar panel's `TextContent` is how callers change the string at
+/// querying such a panel's `TextContent` is how callers change the string at
 /// runtime. Style is controlled by the required [`TextStyle`](crate::TextStyle)
 /// component (added with defaults if not specified).
 #[derive(Component, Clone, Debug, Reflect)]
@@ -86,9 +88,11 @@ impl TextContent {
 /// Marker on a [`TextContent`] entity spawned as a child label of a
 /// [`DiegeticPanel`](crate::DiegeticPanel).
 ///
-/// Panel-text systems filter `With<PanelChild>` to act on label entities; the
-/// panel root (which also carries [`TextContent`] for the sugar) is
-/// `Without<PanelChild>` and is not rendered as text. The layout payload lives
-/// in [`PanelTextLayout`](crate::render::panel_text::PanelTextLayout).
+/// Panel-text systems filter `With<PanelTextChild>` to act on label entities. A
+/// panel root is `Without<PanelTextChild>` and is not rendered as text — including
+/// the one-element [`WorldText`](crate::WorldText) / [`ScreenText`](crate::ScreenText)
+/// panels, whose root carries [`TextContent`] only so callers can change the string
+/// at runtime. The layout payload lives in
+/// [`PanelTextLayout`](crate::render::panel_text::PanelTextLayout).
 #[derive(Component, Clone, Copy, Debug)]
-pub(crate) struct PanelChild;
+pub(crate) struct PanelTextChild;

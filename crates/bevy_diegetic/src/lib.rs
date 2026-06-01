@@ -47,12 +47,12 @@ mod cascade;
 mod constants;
 #[cfg(feature = "typography_overlay")]
 mod debug;
+mod fluent;
 mod ime;
 mod layout;
 mod panel;
 mod render;
 mod screen_space;
-mod sugar;
 mod text;
 
 #[cfg(feature = "bench_support")]
@@ -94,6 +94,9 @@ pub use debug::OverlayBoundingBox;
 #[cfg(feature = "typography_overlay")]
 pub use debug::TypographyOverlay;
 use debug::TypographyOverlayPlugin;
+use fluent::FluentTextPlugin;
+pub use fluent::ScreenText;
+pub use fluent::WorldText;
 pub use ime::ImeAcceptCommit;
 pub use ime::ImeAppInputContext;
 pub use ime::ImeAppInputDisposition;
@@ -224,9 +227,6 @@ pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
-pub use sugar::ScreenText;
-use sugar::SugarPlugin;
-pub use sugar::WorldText;
 pub use text::DiegeticTextMeasurer;
 pub use text::Font;
 pub use text::FontId;
@@ -267,7 +267,7 @@ impl Plugin for DiegeticUiPlugin {
             ScreenSpacePlugin,
             RenderPlugin,
             CalloutPlugin,
-            SugarPlugin,
+            FluentTextPlugin,
             #[cfg(feature = "typography_overlay")]
             TypographyOverlayPlugin,
         ));

@@ -56,14 +56,14 @@ use crate::panel::Fit;
 use crate::panel::PanelSystems;
 use crate::render::TextContent;
 
-/// Style and wrap width stored on a one-element panel spawned by the
-/// [`WorldText`] / [`ScreenText`] sugar.
+/// Style and wrap width stored on a one-element panel spawned by
+/// [`WorldText`] / [`ScreenText`].
 ///
-/// [`rebuild_sugar_text`] reads these to rebuild the single-element layout tree
+/// [`rebuild_fluent_text`] reads these to rebuild the single-element layout tree
 /// whenever the panel's [`TextContent`] changes, so callers can change the
 /// string at runtime through the panel handle.
 #[derive(Component, Clone, Debug)]
-pub(crate) struct SugarText {
+pub(crate) struct FluentText {
     style:      TextStyle,
     wrap_width: Option<f32>,
 }
@@ -152,13 +152,6 @@ macro_rules! text_style_setters {
                 self
             }
 
-            /// Sets the anchor point that places the text box at its transform.
-            #[must_use]
-            pub const fn anchor(mut self, anchor: Anchor) -> Self {
-                self.style.set_anchor(anchor);
-                self
-            }
-
             /// Sets the glyph render mode.
             #[must_use]
             pub const fn render_mode(mut self, mode: GlyphRenderMode) -> Self {
@@ -240,6 +233,7 @@ pub struct WorldText {
     wrap_width:   Option<f32>,
     world_width:  Option<f32>,
     world_height: Option<f32>,
+    anchor:       Option<Anchor>,
     transform:    Transform,
 }
 
@@ -255,8 +249,18 @@ impl WorldText {
             wrap_width:   None,
             world_width:  None,
             world_height: None,
+            anchor:       None,
             transform:    Transform::IDENTITY,
         }
+    }
+
+    /// Sets the anchor point that places the label box at its transform
+    /// (default [`Anchor::TopLeft`]). [`Anchor::Center`] centers the label on
+    /// the transform.
+    #[must_use]
+    pub const fn anchor(mut self, anchor: Anchor) -> Self {
+        self.anchor = Some(anchor);
+        self
     }
 
     /// Scales the label so its whole world width matches `meters`; height
@@ -287,7 +291,7 @@ impl WorldText {
     /// marker components or spawning under `with_children`. [`Self::spawn`] is
     /// the terminal one-liner over this.
     ///
-    /// A degenerate size (unreachable for the always-`Fit`-height sugar) logs and
+    /// A degenerate size (unreachable while the height is always `Fit`) logs and
     /// falls back to a default panel rather than panicking.
     #[must_use]
     pub fn bundle(self) -> impl Bundle {
@@ -306,7 +310,11 @@ impl WorldText {
             Some(meters) => scaled_width.world_height(meters),
             None => scaled_width,
         };
-        let panel = scaled.with_tree(tree).build().unwrap_or_else(|error| {
+        let anchored = match self.anchor {
+            Some(anchor) => scaled.anchor(anchor),
+            None => scaled,
+        };
+        let panel = anchored.with_tree(tree).build().unwrap_or_else(|error| {
             error!("WorldText: {error}; falling back to a default panel");
             DiegeticPanel::default()
         });
@@ -314,7 +322,7 @@ impl WorldText {
         (
             panel,
             TextContent::new(self.text),
-            SugarText {
+            FluentText {
                 style:      self.style,
                 wrap_width: self.wrap_width,
             },
@@ -336,6 +344,7 @@ pub struct ScreenText {
     text:          String,
     style:         TextStyle,
     wrap_width:    Option<f32>,
+    anchor:        Option<Anchor>,
     position:      Option<Vec2>,
     render_layers: Option<RenderLayers>,
     camera_order:  Option<isize>,
@@ -351,10 +360,21 @@ impl ScreenText {
             text:          text.into(),
             style:         TextStyle::default(),
             wrap_width:    None,
+            anchor:        None,
             position:      None,
             render_layers: None,
             camera_order:  None,
         }
+    }
+
+    /// Sets the anchor that places the label within the window (default
+    /// [`Anchor::TopLeft`]). With no [`Self::screen_position`], the anchor
+    /// positions the label against the window edges — [`Anchor::Center`]
+    /// centers it on screen.
+    #[must_use]
+    pub const fn anchor(mut self, anchor: Anchor) -> Self {
+        self.anchor = Some(anchor);
+        self
     }
 
     /// Places the label at an explicit pixel position (top-left origin, y-down).
@@ -381,7 +401,7 @@ impl ScreenText {
     /// Builds the one-element screen panel as a [`Bundle`], for composing with
     /// marker components. [`Self::spawn`] is the terminal one-liner over this.
     ///
-    /// A degenerate size (unreachable for the always-`Fit`-height sugar) logs and
+    /// A degenerate size (unreachable while the height is always `Fit`) logs and
     /// falls back to a default panel rather than panicking.
     #[must_use]
     pub fn bundle(self) -> impl Bundle {
@@ -391,9 +411,13 @@ impl ScreenText {
             Some(width) => DiegeticPanel::screen().size(Px(width), Fit),
             None => DiegeticPanel::screen().size(Fit, Fit),
         };
-        let positioned = match self.position {
-            Some(pos) => sized.screen_position(pos.x, pos.y),
+        let anchored = match self.anchor {
+            Some(anchor) => sized.anchor(anchor),
             None => sized,
+        };
+        let positioned = match self.position {
+            Some(pos) => anchored.screen_position(pos.x, pos.y),
+            None => anchored,
         };
         let ordered = match self.camera_order {
             Some(order) => positioned.camera_order(order),
@@ -411,7 +435,7 @@ impl ScreenText {
         (
             panel,
             TextContent::new(self.text),
-            SugarText {
+            FluentText {
                 style:      self.style,
                 wrap_width: self.wrap_width,
             },
@@ -423,8 +447,9 @@ impl ScreenText {
     pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.bundle()).id() }
 }
 
-/// Builds the single-element layout tree for a sugar panel. Applies
-/// [`TextWrap::Words`] when a wrap width is set and [`TextWrap::None`] otherwise.
+/// Builds the single-element layout tree for a [`WorldText`] / [`ScreenText`]
+/// panel. Applies [`TextWrap::Words`] when a wrap width is set and
+/// [`TextWrap::None`] otherwise.
 fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>) -> LayoutTree {
     let mut style = style.clone();
     style.set_wrap(if wrap_width.is_some() {
@@ -437,29 +462,28 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     builder.build()
 }
 
-/// Rebuilds a sugar panel's single-element tree when its [`TextContent`]
-/// changes, so callers can change the string at runtime through the panel
-/// handle. The deferred [`set_tree`](DiegeticPanelCommands::set_tree) flushes at
+/// Rebuilds a [`WorldText`] / [`ScreenText`] panel's single-element tree when its
+/// [`TextContent`] changes, so callers can change the string at runtime through
+/// the panel handle. The deferred [`set_tree`](DiegeticPanelCommands::set_tree) flushes at
 /// [`PanelSystems::ApplyTreeChanges`], before layout reads the tree.
-pub(crate) fn rebuild_sugar_text(
-    panels: Query<(Entity, &TextContent, &SugarText), Changed<TextContent>>,
+pub(crate) fn rebuild_fluent_text(
+    panels: Query<(Entity, &TextContent, &FluentText), Changed<TextContent>>,
     mut commands: Commands,
 ) {
-    for (entity, content, sugar) in &panels {
-        let tree = build_one_element_tree(content.text(), &sugar.style, sugar.wrap_width);
+    for (entity, content, spec) in &panels {
+        let tree = build_one_element_tree(content.text(), &spec.style, spec.wrap_width);
         commands.set_tree(entity, tree);
     }
 }
 
-/// Registers the runtime-text rebuild for the [`WorldText`] / [`ScreenText`]
-/// sugar.
-pub(crate) struct SugarPlugin;
+/// Registers the runtime-text rebuild for [`WorldText`] / [`ScreenText`] panels.
+pub(crate) struct FluentTextPlugin;
 
-impl Plugin for SugarPlugin {
+impl Plugin for FluentTextPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
-            rebuild_sugar_text.before(PanelSystems::ApplyTreeChanges),
+            rebuild_fluent_text.before(PanelSystems::ApplyTreeChanges),
         );
     }
 }

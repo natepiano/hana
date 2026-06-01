@@ -17,7 +17,7 @@ Panel text and standalone world text are styled by the **same struct**,
   element. Passed as the second argument to `LayoutBuilder::text(string, style)`.
 - `WorldTextStyle = TextProps<ForStandalone>` — the companion style for a
   standalone `WorldText` component, placed by `Transform` with its own render
-  path (`Without<PanelChild>`).
+  path (`Without<PanelTextChild>`).
 
 Every field lives on both: `font_id, size, weight, slant, line_height,
 letter_spacing, word_spacing, wrap, color, align, anchor, render_mode,
@@ -211,7 +211,7 @@ in-intent outcome) and surfaced decisions (genuine forks for the author).
 
 - **C. Disambiguate the `PanelChild` marker.** A sugar `WorldText`/`ScreenText`
   is a one-element panel, so its text child carries `PanelChild` and the
-  standalone `render_world_text` path (`Without<PanelChild>`) skips it. Rename
+  standalone `render_world_text` path (`Without<PanelTextChild>`) skips it. Rename
   `PanelChild` → `PanelTextChild` (and/or add a zero-size `SugarText` marker) and
   comment the two meanings so the filter intent is explicit.
 
@@ -275,7 +275,7 @@ Status legend: `proposed` = awaiting author choice.
   the central architectural fork.
   **→ DECIDED: (a) internal one-element panel.** The sugar spawns a one-element
   `DiegeticPanel`; wrapping is the layout engine's. The standalone
-  `render_world_text` (`Without<PanelChild>`) path is unused for sugar text.
+  `render_world_text` (`Without<PanelTextChild>`) path is unused for sugar text.
 
 - **D2 — Per-context defaults mechanism. (critical, proposed)** One struct
   cannot carry two default sets, yet world text must default Lit/double-sided
@@ -328,7 +328,7 @@ Status legend: `proposed` = awaiting author choice.
   - `.world_height(m)` → whole label is `m` tall, fonts/spacing scale with it,
     aspect preserved; `.world_width(m)` → scale by width, aspect preserved;
     both → non-uniform.
-  Removes the `Without<PanelChild>` standalone render path, the `world_scale`
+  Removes the `Without<PanelTextChild>` standalone render path, the `world_scale`
   field, and its `with_world_scale`/`set_world_scale`/`world_scale` accessors;
   current standalone-`WorldText` users migrate to the panel-backed sugar
   (scaling via `.world_height` / `.world_width`).
@@ -410,7 +410,7 @@ until the library crates do, since they consume the renamed/removed APIs.
 
 - **`crates/bevy_diegetic/src`** and **`crates/fairy_dust/src`** use
   `LayoutTextStyle` / `WorldTextStyle` and the deleted internals
-  (`as_standalone` / `as_layout_config`, the `Without<PanelChild>` standalone
+  (`as_standalone` / `as_layout_config`, the `Without<PanelTextChild>` standalone
   render path, `world_scale`). These change before any example.
 
 ### Bucket 1 — `WorldTextStyle` / `LayoutTextStyle` → `TextStyle` (mechanical)
@@ -489,7 +489,7 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
    `Override<GlyphLighting>(Unlit)`, `Override<GlyphSidedness>(OneSided)` —
    one bridge covering D2 + D3 screen defaults.
 9. Delete `world_scale` (field + `with_world_scale` / `set_world_scale` /
-   `world_scale`) and the `Without<PanelChild>` standalone render path; world
+   `world_scale`) and the `Without<PanelTextChild>` standalone render path; world
    sizing flows through panel `world_width` / `world_height` (D5).
 
 ### Phase 2 — `fairy_dust` library
@@ -515,11 +515,26 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 
 ### Status (in progress)
 
-Phases 0–4 done: unified `TextStyle`, lighting/sidedness cascade, `WorldText`/
+Phases 0–5 done: unified `TextStyle`, lighting/sidedness cascade, `WorldText`/
 `ScreenText` sugar (`.bundle()` + `.spawn()`), standalone path + `world_scale`
-deleted (overlay dark), fairy_dust + all ~46 example files migrated. Workspace
-builds; 225 `bevy_diegetic` tests pass; `cargo +nightly fmt` clean. Remaining:
-Phase 5 (new `ScreenText` usage) and Phase 6 (clippy, perf gate, rename handoff).
+deleted (overlay dark), fairy_dust + all ~46 example files migrated. Phase 5:
+showcase `PAUSED` overlay now spawns via `ScreenText` (centered, `PausedOverlay`
++ Esc visibility-toggle preserved); `screen_space.rs` gains a `spawn_caption`
+`ScreenText` demo. Workspace builds; 225 `bevy_diegetic` tests pass;
+`cargo +nightly fmt` clean.
+
+While wiring Phase 5, found Phase C had wired the sugar's `.anchor()` to the
+per-run glyph anchor (inert for a one-element fit panel) rather than the panel
+anchor the design specifies (R14, and the "anchor forwards to the panel anchor"
+rule above). Fixed: `.anchor()` on both `WorldText`/`ScreenText` now sets the
+panel anchor, restoring standalone-style centering and enabling the centered
+`PAUSED` overlay. The inert glyph-anchor setter was removed from the shared
+`text_style_setters!` macro.
+
+Remaining: Phase 6 — clippy, the two deferred dead-code decisions, perf gate,
+and the rename handoff. Visual confirmation (centering/positioning of the new
+`ScreenText` labels, and the migrated `WorldText` anchor placement) is still
+pending a run of the heavy examples.
 
 ### Phase 6 — verify
 

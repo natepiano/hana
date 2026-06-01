@@ -91,7 +91,7 @@
 //! Promoting an existing plain field is a migration, not just a declaration.
 //! Add the attribute, then inventory every consumer before editing: standalone
 //! render reads, panel-label shaping/render reads, spawn-seed bridges, label
-//! authoring capture before `as_standalone()`, examples, README/docs, and the
+//! authoring capture before `for_shaping()`, examples, README/docs, and the
 //! first-frame tests that prove `Resolved<A>` and rendered materials agree. Each
 //! promoted attribute may participate in a different subset of consumers: text
 //! alpha affects standalone text and panel labels, while font unit is seeded for

@@ -322,7 +322,7 @@ frequently; lower priority if updates are rare.
   newly-inserted row has a non-identity `GlobalTransform` by the second frame
   (the R6 regression test).
 - **M5 — Note the seed/observer ordering (§4).** `seed_panel_child_alpha` fires
-  on `Add<PanelChild>` during the reconcile command flush, after the label's
+  on `Add<PanelTextChild>` during the reconcile command flush, after the label's
   `ChildOf` is inserted, so `Resolved<TextAlpha>` is seeded before
   `build_panel_text_meshes` reads it. Verified safe; state it so a future change
   doesn't break it silently.
@@ -882,7 +882,7 @@ applied:
   comparison is the real tint guard (no cascade for image tint), so the whole
   tint branch must be skipped on an unchanged input, not just the field write.
 
-One confirmation finding (world text's `Without<PanelChild>` filtering and its
+One confirmation finding (world text's `Without<PanelTextChild>` filtering and its
 distinct `WorldTextMesh` marker are unaffected by the Phase-4 reparent) needed no
 change.
 

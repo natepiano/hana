@@ -109,7 +109,7 @@ fn measure_overlay_label(
     scale: f32,
 ) -> TextDimensions {
     let measure = WorldTextStyle::new(size)
-        .as_layout_config()
+        .for_shaping(Anchor::Center)
         .scaled(boost)
         .as_measure();
     if let Some(dims) = cache.get_measurement(text, &measure) {

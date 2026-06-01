@@ -10,6 +10,7 @@ use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
+use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
@@ -20,7 +21,7 @@ use crate::panel::DiegeticPanel;
 use crate::render::clip;
 use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
-use crate::render::world_text::PanelChild;
+use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::TextContent;
 
 /// A reused panel-text child plus the components reconcile compares incoming
@@ -119,12 +120,12 @@ pub(super) fn reconcile_panel_text_children(
         for (element_idx, cmd_index, text, config, bounds, clip) in &text_commands {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
             // `with_lighting` / `with_sidedness`) are captured before
-            // `as_standalone()` clears them, then inserted as `Override<A>` on
+            // `for_shaping()` clears them, then inserted as `Override<A>` on
             // the label. `None` means the label inherits the panel value.
             let label_alpha = config.alpha_mode();
             let label_lighting = config.lighting();
             let label_sidedness = config.sidedness();
-            let style = config.as_standalone();
+            let style = config.for_shaping(Anchor::TopLeft);
             let panel_text_child = PanelTextLayout {
                 element_idx: *element_idx,
                 command_index: *cmd_index,
@@ -203,8 +204,12 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) {
         label_sidedness,
     } = request;
     commands.entity(panel_entity).with_children(|children| {
-        let mut child =
-            children.spawn((TextContent::new(text.to_owned()), style, layout, PanelChild));
+        let mut child = children.spawn((
+            TextContent::new(text.to_owned()),
+            style,
+            layout,
+            PanelTextChild,
+        ));
         if let Some(alpha_mode) = label_alpha {
             cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
         }
@@ -574,7 +579,7 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
-    use crate::render::world_text::PanelChild;
+    use crate::render::world_text::PanelTextChild;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
 
@@ -687,7 +692,7 @@ mod tests {
     fn labels_by_text(app: &mut App) -> HashMap<String, Entity> {
         let mut state = app
             .world_mut()
-            .query_filtered::<(Entity, &TextContent), With<PanelChild>>();
+            .query_filtered::<(Entity, &TextContent), With<PanelTextChild>>();
         state
             .iter(app.world())
             .map(|(entity, text)| (text.text().to_owned(), entity))

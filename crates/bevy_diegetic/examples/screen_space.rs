@@ -17,6 +17,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTextStyle;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
+use bevy_diegetic::ScreenText;
 use bevy_diegetic::Sizing;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -28,6 +29,9 @@ const TITLE_SIZE: f32 = 22.0;
 const HEADER_SIZE: f32 = 16.0;
 const BODY_SIZE: f32 = 15.0;
 const PANEL_PADDING: f32 = 12.0;
+const CAPTION_SIZE: f32 = 14.0;
+const CAPTION_INSET: f32 = 16.0;
+const CAPTION_COLOR: Color = Color::srgba(0.7, 0.8, 1.0, 0.85);
 
 const PANEL_BACKGROUND: Color = Color::srgba(0.08, 0.08, 0.12, 0.85);
 const BORDER_COLOR: Color = Color::srgba(0.3, 0.5, 0.9, 0.6);
@@ -62,6 +66,7 @@ fn setup(
 ) {
     spawn_scene(&mut commands, &mut meshes, &mut materials);
     spawn_hud(&mut commands);
+    spawn_caption(&mut commands);
     spawn_camera(&mut commands);
 }
 
@@ -204,6 +209,17 @@ fn spawn_hud(commands: &mut Commands) {
     };
 
     commands.spawn((hud_panel, Transform::from_xyz(-250.0, 150.0, 0.0)));
+}
+
+/// Demonstrates the [`ScreenText`] builder: a one-line, pixel-positioned overlay
+/// label spawned with a single fluent chain, in contrast to the hand-built
+/// multi-element HUD panel above. Inset from the window's top-left corner.
+fn spawn_caption(commands: &mut Commands) {
+    ScreenText::new("ScreenText \u{2014} one fluent call, pixel-positioned")
+        .size(CAPTION_SIZE)
+        .color(CAPTION_COLOR)
+        .screen_position(CAPTION_INSET, CAPTION_INSET)
+        .spawn(commands);
 }
 
 fn divider(b: &mut LayoutBuilder) {

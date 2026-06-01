@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use super::PanelText;
 use super::PanelTextLayout;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutTextStyle;
 use crate::layout::ShapedTextCache;
@@ -18,7 +19,7 @@ use crate::render::text_shaping::GlyphReadiness;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
-use crate::render::world_text::PanelChild;
+use crate::render::world_text::PanelTextChild;
 use crate::render::world_text::TextContent;
 use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
@@ -29,7 +30,7 @@ pub(super) fn shape_panel_text_children(
     changed_texts: Query<
         Entity,
         (
-            With<PanelChild>,
+            With<PanelTextChild>,
             With<TextContent>,
             Or<(
                 Changed<TextContent>,
@@ -70,7 +71,7 @@ pub(super) fn shape_panel_text_children(
             continue;
         }
 
-        let config = style.as_layout_config();
+        let config = style.for_shaping(Anchor::Center);
         let placement = QuadPlacement {
             bounds:    panel_text_child.bounds,
             scale:     Vec2::new(panel_text_child.scale_x, panel_text_child.scale_y),

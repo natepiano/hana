@@ -6,7 +6,7 @@ use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
-use crate::render::world_text::PanelChild;
+use crate::render::world_text::PanelTextChild;
 
 /// Spawn-time cascade seed for a panel label's glyph lighting and sidedness.
 ///
@@ -20,8 +20,8 @@ use crate::render::world_text::PanelChild;
 /// `DoubleSided`). `update_panel_text_geometry` reads these for the glyph
 /// material. Later changes flow through the propagation pass, not this observer.
 /// The glyph-render twin of `seed_panel_child_alpha`.
-pub(super) fn seed_panel_child_glyph(
-    trigger: On<Add, PanelChild>,
+pub(super) fn seed_panel_text_child_glyph(
+    trigger: On<Add, PanelTextChild>,
     lighting_overrides: Query<&Override<TextLighting>>,
     sidedness_overrides: Query<&Override<TextSidedness>>,
     parents: Query<&ChildOf>,

@@ -8,6 +8,7 @@ use super::metric_lines;
 use crate::cascade::CascadeDefault;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
+use crate::layout::Anchor;
 use crate::layout::LineMetricsSnapshot;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
@@ -139,7 +140,7 @@ pub fn build_typography_overlay(
             0.0
         };
 
-        let measure = style.as_layout_config().scaled(boost).as_measure();
+        let measure = style.for_shaping(Anchor::Center).scaled(boost).as_measure();
         let Some(line_metrics) = cache
             .get_shaped(world_text.text(), &measure)
             .and_then(|s| s.line_metrics.first().copied())

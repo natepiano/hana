@@ -10,8 +10,8 @@ mod shaping;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
-use self::alpha::seed_panel_child_alpha;
-use self::glyph_cascade::seed_panel_child_glyph;
+use self::alpha::seed_panel_text_child_alpha;
+use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
 use self::mesh_spawning::free_run_storage_on_mesh_removal;
 use self::mesh_spawning::update_panel_text_alpha;
@@ -58,8 +58,8 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
         app.add_plugins(CascadePlugin::<TextLighting>::default());
         app.add_plugins(CascadePlugin::<TextSidedness>::default());
-        app.add_observer(seed_panel_child_alpha);
-        app.add_observer(seed_panel_child_glyph);
+        app.add_observer(seed_panel_text_child_alpha);
+        app.add_observer(seed_panel_text_child_glyph);
         app.add_observer(free_run_storage_on_mesh_removal);
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
