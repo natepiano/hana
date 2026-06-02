@@ -424,7 +424,7 @@ impl DiegeticPanel {
     ///
     /// Multiply a font size by this value to convert from font units
     /// to layout units. Callers pass the panel's resolved font unit —
-    /// read from [`Resolved<FontUnit>`](crate::cascade::Resolved) on the panel
+    /// read from `Resolved<FontUnit>` on the panel
     /// entity (every panel carries one, seeded from `font_unit` or
     /// [`CascadeDefaults::panel_font_unit`]).
     #[must_use]

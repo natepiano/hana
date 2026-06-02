@@ -49,20 +49,20 @@ use crate::layout::ShapedTextCache;
 
 /// System sets for ordering panel work and its cross-module dependencies.
 ///
-/// Other plugins (e.g., [`ScreenSpacePlugin`](crate::screen_space::ScreenSpacePlugin))
+/// Other plugins (e.g., `ScreenSpacePlugin`)
 /// use `.before(PanelSystems::ComputeLayout)` / `.after(PanelSystems::ComputeLayout)`
 /// rather than referencing concrete system symbols.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum PanelSystems {
     /// Applies deferred tree replacement commands before layout responds.
     ApplyTreeChanges,
-    /// Runs [`compute_panel_layouts`](compute_layout::compute_panel_layouts).
+    /// Runs `compute_panel_layouts`.
     ComputeLayout,
-    /// Runs [`resolve_world_panel_fit`](compute_layout::resolve_world_panel_fit)
+    /// Runs `resolve_world_panel_fit`
     /// — shrinks world panels with `Fit` axes to their content bounds.
     ResolveWorldFit,
     /// Runs gizmo reconciliation
-    /// ([`render_debug_gizmos`](gizmos::render_debug_gizmos)).
+    /// (`render_debug_gizmos`).
     RenderGizmos,
 }
 

@@ -31,7 +31,7 @@
 //!
 //! Capabilities that share infrastructure (for example a `DiegeticUiPlugin` for
 //! HUD panels) ensure the required plugin is registered exactly once via
-//! [`ensure_plugin`], regardless of how many capabilities pull it in.
+//! `ensure_plugin`, regardless of how many capabilities pull it in.
 
 mod brp_extras;
 mod builder;

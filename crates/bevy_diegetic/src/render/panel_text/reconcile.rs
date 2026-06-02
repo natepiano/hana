@@ -682,6 +682,8 @@ const fn bounds_bits(bounds: &BoundingBox) -> [u32; 4] {
 mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
 
     use bevy::asset::AssetPlugin;
     use bevy::prelude::*;
@@ -712,6 +714,7 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
+    use crate::render::panel_text::PanelTextRuns;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
 
@@ -1034,6 +1037,274 @@ mod tests {
         assert!(
             app.world().get::<ReconcileOwned>(child).is_none(),
             "the marker should be cleared the next frame"
+        );
+    }
+
+    // ── Panel↔run relationship lifecycle (Phase 4 `TextRunOf`/`PanelTextRuns`) ──
+
+    /// Records whether any panel's [`PanelTextRuns`] changed since the probe last
+    /// ran, so a test can assert a reuse-only reconcile leaves the set untouched.
+    #[derive(Resource, Default)]
+    struct RunsChangedProbe {
+        changed: bool,
+    }
+
+    fn probe_runs_changed(
+        mut probe: ResMut<RunsChangedProbe>,
+        changed: Query<(), Changed<PanelTextRuns>>,
+    ) {
+        probe.changed = !changed.is_empty();
+    }
+
+    /// Like [`reconcile_app`], but probes [`PanelTextRuns`] change detection
+    /// instead of the per-component change probe.
+    fn relationship_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(monospace_measurer());
+        app.add_plugins(HeadlessLayoutPlugin);
+        app.init_resource::<RunsChangedProbe>();
+        app.add_systems(
+            PostUpdate,
+            (
+                reconcile_panel_text_children,
+                ApplyDeferred,
+                probe_runs_changed,
+            )
+                .chain(),
+        );
+        app
+    }
+
+    fn empty_tree() -> LayoutTree { LayoutBuilder::new(100.0, 50.0).build() }
+
+    fn two_named_tree(first: &str, second: &str) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_id(PanelFieldId::named("a"), first, TextStyle::new(10.0));
+        builder.text_id(PanelFieldId::named("b"), second, TextStyle::new(10.0));
+        builder.build()
+    }
+
+    #[test]
+    fn two_no_op_reconcile_passes_leave_panel_text_runs_unchanged() {
+        let mut app = relationship_app();
+        let panel = spawn_panel(&mut app, two_text_tree(Color::WHITE, Color::WHITE));
+
+        // Frame 1 spawns both runs, which mutates the relationship set.
+        app.update();
+        assert!(
+            app.world().resource::<RunsChangedProbe>().changed,
+            "the spawn pass populates PanelTextRuns"
+        );
+        // Frame 2 settles: nothing dirties the panel, so the set is left alone.
+        app.update();
+
+        // Two further visual-only rebuilds: recolor only, same auto ids, so
+        // reconcile reuses every run entity. `TextRunOf` is never re-inserted, so
+        // the relationship set must not register a change on either pass.
+        for color in [Color::BLACK, Color::srgb(0.5, 0.5, 0.5)] {
+            app.world_mut()
+                .commands()
+                .set_tree(panel, two_text_tree(color, Color::WHITE));
+            app.update();
+            assert!(
+                !app.world().resource::<RunsChangedProbe>().changed,
+                "a reuse-only reconcile must not mutate PanelTextRuns",
+            );
+        }
+    }
+
+    #[test]
+    fn set_tree_empties_the_run_set_then_reconcile_repopulates_it() {
+        let mut app = relationship_app();
+        let panel = spawn_panel(&mut app, two_named_tree("Alpha", "Beta"));
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<PanelTextRuns>(panel)
+                .map(RelationshipTarget::len),
+            Some(2),
+            "two named runs spawn under the panel",
+        );
+
+        // Swap to a text-less tree: every run is unvisited this pass, so reconcile
+        // despawns them and the relationship set empties.
+        app.world_mut().commands().set_tree(panel, empty_tree());
+        app.update();
+        let emptied = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .map_or(0, RelationshipTarget::len);
+        assert_eq!(emptied, 0, "set_tree to an empty tree drops every run");
+
+        // Swap back to a multi-run tree: reconcile repopulates the set and the
+        // named index resolves each run by a single O(1) `text_child` lookup.
+        app.world_mut()
+            .commands()
+            .set_tree(panel, two_named_tree("Gamma", "Delta"));
+        app.update();
+        let runs = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("the set repopulates from the new tree");
+        assert_eq!(runs.len(), 2, "both new runs re-enter the set");
+
+        let data = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .expect("panel exists");
+        assert!(
+            data.text_child(&PanelFieldId::named("a")).is_some(),
+            "named run 'a' resolves O(1) after repopulate",
+        );
+        assert!(
+            data.text_child(&PanelFieldId::named("b")).is_some(),
+            "named run 'b' resolves O(1) after repopulate",
+        );
+    }
+
+    #[test]
+    fn panel_despawn_drops_all_runs_without_double_despawn() {
+        let mut app = relationship_app();
+        let panel = spawn_panel(&mut app, two_named_tree("Alpha", "Beta"));
+        app.update();
+
+        let runs: Vec<Entity> = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel carries its runs")
+            .iter()
+            .collect();
+        assert_eq!(runs.len(), 2, "both runs are tracked before despawn");
+
+        // `ChildOf`'s `linked_spawn` is the sole recursive despawn path;
+        // `PanelTextRuns` deliberately omits `linked_spawn`, so despawning the
+        // panel must drop every run exactly once with no second recursive pass.
+        app.world_mut().entity_mut(panel).despawn();
+        app.update();
+
+        for run in runs {
+            assert!(
+                !app.world().entities().contains(run),
+                "every run despawns with its panel",
+            );
+        }
+        assert!(
+            !app.world().entities().contains(panel),
+            "the panel itself is gone",
+        );
+    }
+
+    /// A run of auto text elements followed by one named run. Auto ids come from
+    /// a per-build counter over `text()` calls in build order (`text_id` does not
+    /// consume it), so an auto run's id is its position among the autos; the named
+    /// run's id is fixed.
+    fn autos_then_named_tree(autos: &[&str], named: &str) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        for text in autos {
+            builder.text(*text, TextStyle::new(10.0));
+        }
+        builder.text_id(PanelFieldId::named("keep"), named, TextStyle::new(10.0));
+        builder.build()
+    }
+
+    #[test]
+    fn a_structural_edit_keeps_named_runs_but_repositions_auto_runs() {
+        let mut app = reconcile_app();
+        // One auto run ("first") and one named run ("keep").
+        let panel = spawn_panel(&mut app, autos_then_named_tree(&["first"], "keep"));
+        app.update();
+
+        let before = labels_by_text(&mut app);
+        let named_before = before["keep"];
+        let first_before = before["first"];
+
+        // Insert an auto sibling ahead of "first". The named run's key is
+        // `(Named("keep"), 0)` — id-stable, so it keeps its entity (TR-D). The
+        // auto ids are positional: "inserted" takes `Auto(0)` and reuses the old
+        // entity, so "first" shifts to `Auto(1)` and lands on a fresh entity —
+        // content identity does not follow an auto run across the edit.
+        app.world_mut()
+            .commands()
+            .set_tree(panel, autos_then_named_tree(&["inserted", "first"], "keep"));
+        app.update();
+
+        let after = labels_by_text(&mut app);
+        assert_eq!(
+            after["keep"], named_before,
+            "the named run keeps its entity across the structural edit",
+        );
+        assert_ne!(
+            after["first"], first_before,
+            "the auto run is positional: \"first\" shifts to a new entity when a sibling is inserted ahead",
+        );
+    }
+
+    /// Monospace measurer that counts every call, so a test can assert a no-op
+    /// edit re-measures nothing.
+    fn counting_measurer(counter: Arc<AtomicUsize>) -> DiegeticTextMeasurer {
+        DiegeticTextMeasurer {
+            measure_fn: Arc::new(move |text: &str, measure: &TextMeasure| {
+                counter.fetch_add(1, Ordering::Relaxed);
+                let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
+                let width = text
+                    .lines()
+                    .map(|line| line.chars().count().to_f32() * char_width)
+                    .fold(0.0_f32, f32::max);
+                let line_count = text.lines().count().max(1).to_f32();
+                TextDimensions {
+                    width,
+                    height: measure.size * line_count,
+                    line_height: measure.size,
+                }
+            }),
+        }
+    }
+
+    /// [`text_source_app`] with a call-counting measurer in place of the plain
+    /// monospace one.
+    fn counting_text_source_app(counter: Arc<AtomicUsize>) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(counting_measurer(counter));
+        app.add_plugins(HeadlessLayoutPlugin);
+        app.add_systems(
+            Update,
+            (
+                sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges),
+                clear_reconcile_owned.after(sync_run_text_to_cache),
+            ),
+        );
+        app.add_systems(PostUpdate, reconcile_panel_text_children);
+        app
+    }
+
+    #[test]
+    fn an_unchanged_set_text_fires_no_measure() {
+        let counter = Arc::new(AtomicUsize::new(0));
+        let mut app = counting_text_source_app(Arc::clone(&counter));
+        spawn_panel(&mut app, one_text_tree("Hi"));
+        // Frame 1 spawns + measures; frame 2 clears `ReconcileOwned` so the next
+        // edit is seen as out-of-flow.
+        app.update();
+        app.update();
+        let baseline = counter.load(Ordering::Relaxed);
+        assert!(baseline > 0, "the initial layout measures the run");
+
+        // Rewrite the byte-identical string. `sync_run_text_to_cache` compares
+        // before writing, so an unchanged string never reaches the `El.text`
+        // cache, never dirties `DiegeticPanel`, and never re-runs the layout —
+        // so `MeasureTextFn` fires zero more times (TR-L).
+        let child = first_text_child(&mut app);
+        *app.world_mut()
+            .get_mut::<TextContent>(child)
+            .expect("child carries TextContent") = TextContent::new("Hi".to_owned());
+        app.update();
+
+        assert_eq!(
+            counter.load(Ordering::Relaxed),
+            baseline,
+            "a no-op set_text must not re-invoke MeasureTextFn",
         );
     }
 

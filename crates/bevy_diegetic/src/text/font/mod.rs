@@ -77,7 +77,7 @@ pub struct FontMetrics {
     /// Font-recommended inter-line spacing, also called "leading" in
     /// traditional typography. In parley's half-leading model this value
     /// is split in half and absorbed into the `top` and `bottom` of
-    /// each line box — see [`LineMetricsSnapshot`](crate::LineMetricsSnapshot).
+    /// each line box — see `LineMetricsSnapshot`.
     pub line_gap:            f32,
     /// Total line height: `ascent + descent + line_gap`.
     pub line_height:         f32,
@@ -276,7 +276,7 @@ impl Font {
     /// Returns per-glyph typographic metrics by glyph ID at `size`.
     ///
     /// Like [`glyph_metrics`](Self::glyph_metrics) but takes a glyph index
-    /// directly (as stored in [`ShapedGlyph`](crate::render::text_renderer::ShapedGlyph))
+    /// directly (as stored in `ShapedGlyph`)
     /// rather than a character.
     #[cfg(feature = "typography_overlay")]
     #[must_use]

@@ -19,7 +19,7 @@ use crate::layout::render::RenderCommand;
 /// dimensions in layout units. The layout engine calls this during sizing to
 /// determine how much space text elements need.
 ///
-/// Takes [`TextMeasure`] (a generic-free extraction from [`TextConfig`]) to
+/// Takes [`TextMeasure`] (a generic-free extraction from [`TextStyle`](crate::TextStyle)) to
 /// avoid leaking the typestate generic into the measurement function.
 ///
 /// Uses `Arc` so the function can be shared across threads and cloned cheaply

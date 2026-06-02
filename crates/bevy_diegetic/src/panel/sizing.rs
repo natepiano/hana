@@ -243,7 +243,7 @@ impl PanelSizing<super::builder::Screen> for GrowRange {
 // ── CompatibleUnits ──────────────────────────────────────────────────────────
 
 /// Pairs of physical-unit markers that may legally coexist on the two
-/// axes of a [`World`](super::builder::World) panel.
+/// axes of a `World` panel.
 ///
 /// Implementations cover: same concrete unit on both axes, and any mix
 /// of a concrete unit with [`AnyUnit`]. Concrete × different-concrete

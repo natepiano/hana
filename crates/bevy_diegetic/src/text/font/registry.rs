@@ -77,8 +77,7 @@ use crate::layout::ResolvedFontFace;
 
 /// Unique identifier for a loaded font family.
 ///
-/// Used with [`TextConfig::with_font`](crate::TextConfig::with_font) and
-/// [`TextStyle::with_font`](crate::TextStyle::with_font) to select which
+/// Used with [`TextStyle::with_font`](crate::TextStyle::with_font) to select which
 /// font a text element uses.
 ///
 /// Currently the only available font is [`MONOSPACE`](Self::MONOSPACE)

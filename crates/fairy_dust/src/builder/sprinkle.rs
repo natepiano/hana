@@ -7,6 +7,9 @@ use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
+use bevy::window::PresentMode;
+use bevy::window::PrimaryWindow;
+use bevy::winit::WinitSettings;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamInputMode;
@@ -57,11 +60,33 @@ impl<S> SprinkleBuilder<S> {
         self
     }
 
+    /// Uncap the frame rate so a stress example reports its true per-frame
+    /// cost. Sets the primary window to [`PresentMode::AutoNoVsync`] and swaps
+    /// [`WinitSettings`] to [`continuous`](WinitSettings::continuous).
+    ///
+    /// The Bevy defaults hide real cost two ways: vsync (`Fifo`) pins frame
+    /// time to display-refresh steps (120 / 60 / 40 fps on a 120 Hz panel),
+    /// and the default [`WinitSettings::game`] throttles an unfocused window to
+    /// 60 Hz reactive-low-power. With both removed, the on-screen overlay and a
+    /// background BRP reader both see un-throttled frame time.
+    #[must_use]
+    pub fn with_perf_mode(mut self) -> Self {
+        self.app.insert_resource(WinitSettings::continuous());
+        let mut windows = self
+            .app
+            .world_mut()
+            .query_filtered::<&mut Window, With<PrimaryWindow>>();
+        if let Ok(mut window) = windows.single_mut(self.app.world_mut()) {
+            window.present_mode = PresentMode::AutoNoVsync;
+        }
+        self
+    }
+
     /// Enable smart screen-space camera control panels for `OrbitCam` cameras.
     ///
-    /// Cameras without an explicit [`CameraGuidance`] component get
-    /// [`CameraGuidance::auto()`], so the panel reflects the effective preset
-    /// or binding configuration and highlights active interactions.
+    /// Cameras without an explicit [`CameraGuidance`](crate::CameraGuidance) component get
+    /// [`CameraGuidance::auto()`](crate::CameraGuidance::auto), so the panel reflects the effective
+    /// preset or binding configuration and highlights active interactions.
     #[must_use]
     pub fn with_camera_control_panel(mut self) -> Self {
         camera_control_panel::install(&mut self.app);
@@ -251,7 +276,7 @@ impl SprinkleBuilder<NoOrbitCam> {
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
     /// insert extra camera-side components such as `OrbitCamInputMode` or
-    /// [`CameraGuidance`].
+    /// [`CameraGuidance`](crate::CameraGuidance).
     pub fn with_orbit_cam<F, B>(mut self, configure: F, bundle: B) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,

@@ -7,12 +7,12 @@
 //!
 //! Clay is immediate-mode: the tree is rebuilt from scratch every frame and layout is computed
 //! inline as you build it. `bevy_diegetic` is retained-mode: the [`LayoutTree`] is built once
-//! via [`LayoutBuilder`], stored on a component, and the [`LayoutEngine`] only recomputes
-//! positions when the tree changes. This is the natural fit for Bevy — the entire ECS is built
-//! around doing nothing unless something changed (`Changed<T>`, `Res::is_changed()`,
-//! observers). An immediate-mode engine would fight the framework by recomputing
-//! unconditionally every frame; retained mode lets Bevy's change detection skip layout
-//! entirely on frames where the tree hasn't been touched.
+//! via [`LayoutBuilder`], stored on a component, and the
+//! `LayoutEngine` only recomputes positions when the tree changes.
+//! This is the natural fit for Bevy — the entire ECS is built around doing nothing unless something
+//! changed (`Changed<T>`, `Res::is_changed()`, observers). An immediate-mode engine would fight the
+//! framework by recomputing unconditionally every frame; retained mode lets Bevy's change detection
+//! skip layout entirely on frames where the tree hasn't been touched.
 //!
 //! # Quick start
 //!

@@ -302,6 +302,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::layout::TextWrap;
     use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
     use crate::panel::HeadlessLayoutPlugin;
@@ -357,6 +358,27 @@ mod tests {
     fn named_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text_id(id.clone(), text, TextStyle::new(10.0));
+        builder.build()
+    }
+
+    /// Two distinct top-level text elements: two runs, each its own line-0, so
+    /// the lone-run path is ambiguous.
+    fn two_text_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("Alpha", TextStyle::new(10.0));
+        builder.text("Beta", TextStyle::new(10.0));
+        builder.build()
+    }
+
+    /// A tree with no text element at all, so the panel never gains a run.
+    fn empty_tree() -> LayoutTree { LayoutBuilder::new(100.0, 50.0).build() }
+
+    /// One text element that wraps at explicit newlines into `n` visual lines,
+    /// so its run materializes as `n` entities sharing one id (`line_index`
+    /// 0..n).
+    fn wrapped_tree(text: &str) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(text, TextStyle::new(10.0).wrap(TextWrap::Newlines));
         builder.build()
     }
 
@@ -654,5 +676,251 @@ mod tests {
             .expect("system runs");
         assert_eq!(front_text.as_deref(), Some("face 0"));
         assert_eq!(back_text.as_deref(), Some("face 1"));
+    }
+
+    #[test]
+    fn sole_resolution_is_none_for_a_multi_run_panel() {
+        let mut app = access_app();
+        let panel = spawn_panel(&mut app, two_text_tree());
+        app.world_mut().entity_mut(panel).insert(Label);
+        app.update();
+        app.update();
+
+        // Raw count contract (`relationship.rs`): two distinct runs, so the
+        // count-based `sole()` declines.
+        let runs = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel should carry PanelTextRuns");
+        assert_eq!(runs.len(), 2, "two distinct elements spawn two runs");
+        assert!(runs.sole().is_none(), "a two-run set has no lone run");
+
+        // Access-layer contract (`access.rs` `sole_run_entity`): two line-0 runs
+        // are ambiguous, so the lone-run read resolves to None.
+        let sole = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(panel).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert!(
+            sole.is_none(),
+            "sole_text is None when two distinct runs make the call ambiguous"
+        );
+
+        // The marker mutator hits the same `lone_run` guard and writes nothing.
+        let written = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Label>| labels.set("ignored"))
+            .expect("system runs");
+        assert_eq!(written, 0, "an ambiguous multi-run label is not written");
+    }
+
+    #[test]
+    fn sole_resolution_is_none_for_a_zero_run_panel() {
+        let mut app = access_app();
+        let panel = spawn_panel(&mut app, empty_tree());
+        app.world_mut().entity_mut(panel).insert(Label);
+        app.update();
+        app.update();
+
+        // No `TextRunOf` source ever points at the panel, so it gains no
+        // `PanelTextRuns` target at all.
+        assert!(
+            app.world().get::<PanelTextRuns>(panel).is_none(),
+            "a panel with no run gains no relationship target"
+        );
+
+        let sole = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(panel).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert!(
+            sole.is_none(),
+            "sole_text is None when the panel has no run"
+        );
+
+        let written = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Label>| labels.set("ignored"))
+            .expect("system runs");
+        assert_eq!(written, 0, "a run-less label is not written");
+    }
+
+    #[test]
+    fn a_wrapped_label_resolves_through_sole_text_and_diegetic_text_mut() {
+        let mut app = access_app();
+        let panel = spawn_panel(&mut app, wrapped_tree("Line1\nLine2\nLine3"));
+        app.world_mut().entity_mut(panel).insert(Label);
+        app.update();
+        app.update();
+
+        // A wrapped run is one entity per visual line, so the count-based
+        // `sole()` sees three entities and declines.
+        let runs = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel should carry PanelTextRuns");
+        assert_eq!(
+            runs.len(),
+            3,
+            "three wrapped lines spawn three run entities"
+        );
+        assert!(
+            runs.sole().is_none(),
+            "the count-based sole() sees three entities for one logical run"
+        );
+
+        // The access layer filters `line_index == 0`, so the lone logical run
+        // still resolves and reads back its whole string from the cache.
+        let before = content_width(&app, panel);
+        let sole = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(panel).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert_eq!(sole.as_deref(), Some("Line1\nLine2\nLine3"));
+
+        // `DiegeticTextMut::set` retexts that line-0 entity; the reactor re-wraps
+        // from the new string, collapsing the run back to a single narrow line.
+        let written = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Label>| labels.set("X"))
+            .expect("system runs");
+        assert_eq!(written, 1, "the wrapped label's lone run is written once");
+        app.update();
+
+        let after_text = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(panel).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert_eq!(after_text.as_deref(), Some("X"));
+        let after = content_width(&app, panel);
+        assert!(
+            after < before,
+            "the narrower replacement should relayout: width {before} -> {after}",
+        );
+    }
+
+    /// A named run that wraps at explicit newlines, so it materializes as one
+    /// entity per line while staying id-addressable.
+    fn named_wrapped_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_id(
+            id.clone(),
+            text,
+            TextStyle::new(10.0).wrap(TextWrap::Newlines),
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn set_text_on_a_named_wrapped_run_replaces_the_whole_string() {
+        let mut app = access_app();
+        let id = PanelFieldId::named("body");
+        let panel = settled_panel(&mut app, named_wrapped_tree(&id, "one\ntwo"));
+
+        // Two wrapped lines materialize as two run entities sharing the id.
+        let runs = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel should carry PanelTextRuns");
+        assert_eq!(runs.len(), 2, "two wrapped lines, two run entities");
+
+        // Write a three-line replacement through the id-addressed `set_text`. It
+        // resolves the `line_index == 0` child; the reactor re-wraps from the new
+        // whole string.
+        let target = id.clone();
+        let wrote = app
+            .world_mut()
+            .run_system_once(move |mut text: PanelText| {
+                text.set_text(panel, &target, "alpha\nbeta\ngamma")
+            })
+            .expect("system runs");
+        assert!(wrote, "the named wrapped run accepts the write");
+        app.update();
+
+        // `text` reads the full `El.text` cache, never a line slice, so the whole
+        // new string round-trips with no line dropped.
+        let read = id;
+        let after_text = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.text(panel, &read).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert_eq!(after_text.as_deref(), Some("alpha\nbeta\ngamma"));
+
+        // The replacement re-wrapped into three line runs.
+        let runs_after = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel should carry PanelTextRuns");
+        assert_eq!(
+            runs_after.len(),
+            3,
+            "the three-line replacement re-wraps into three run entities",
+        );
+    }
+
+    /// Counts the frames in which any panel's [`ComputedDiegeticPanel`] changed,
+    /// so a test can assert a `set_text` edit drives exactly one relayout pass.
+    #[derive(Resource, Default)]
+    struct ComputedChanges(usize);
+
+    fn count_computed_changes(
+        mut probe: ResMut<ComputedChanges>,
+        changed: Query<(), Changed<ComputedDiegeticPanel>>,
+    ) {
+        if !changed.is_empty() {
+            probe.0 += 1;
+        }
+    }
+
+    /// [`access_app`] plus a `Last`-schedule probe that counts relayout passes.
+    fn single_pass_app() -> App {
+        let mut app = access_app();
+        app.init_resource::<ComputedChanges>();
+        app.add_systems(Last, count_computed_changes);
+        app
+    }
+
+    #[test]
+    fn a_set_text_edit_fires_exactly_one_relayout_pass() {
+        let mut app = single_pass_app();
+        let id = PanelFieldId::named("title");
+        let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
+        // One more frame so the panel is fully quiescent before the edit.
+        app.update();
+
+        // Discard the spawn/settle passes; count only what the edit triggers.
+        app.world_mut().resource_mut::<ComputedChanges>().0 = 0;
+
+        let target = id;
+        let wrote = app
+            .world_mut()
+            .run_system_once(move |mut text: PanelText| {
+                text.set_text(panel, &target, "Hello World")
+            })
+            .expect("system runs");
+        assert!(wrote, "the edit is accepted");
+
+        // Run several frames. The edit must drive exactly one relayout — the
+        // `ReconcileOwned` gate (DTX-2) keeps reconcile's own tree→child write from
+        // re-triggering the sync into a second pass, and nothing oscillates after.
+        app.update();
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<ComputedChanges>().0,
+            1,
+            "a single set_text edit fires exactly one ComputedDiegeticPanel change",
+        );
     }
 }

@@ -1,4 +1,10 @@
-//! Text stress test — add/remove rows to measure per-element rendering cost.
+//! Panel stress test — add/remove rows to measure `DiegeticPanel` tree-build and
+//! `set_tree` churn cost as panel content grows.
+//!
+//! The companion `diegetic_text_stress` example profiles the other axis — the
+//! per-frame `DiegeticTextMut` / `TextContent` write path on standalone labels.
+//! This one drives the panel/tree-rebuild path: each row-count change rebuilds
+//! the active panel's tree.
 //!
 //! Press '+' to add rows, '-' to remove (hold for accelerating repeat).
 //! Performance stats shown via `DiegeticPanel` overlays.
@@ -181,6 +187,7 @@ fn main() {
     // `fairy_dust::sprinkle_example`.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
+        .with_perf_mode()
         .with_save_window_position()
         .with_studio_lighting()
         .with_orbit_cam_preset(
@@ -198,7 +205,7 @@ fn main() {
         .pitch(0.35)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Text Stress")
+                .with_title("Panel Stress")
                 .with_anchor(Anchor::TopLeft)
                 .control("+ Add")
                 .control("- Remove"),
@@ -267,7 +274,7 @@ fn spawn_status_overlay(commands: &mut Commands) {
         Ok(built) => {
             commands.spawn((StatusPanel, built, Transform::default()));
         },
-        Err(error) => error!("text_stress: failed to build status overlay: {error}"),
+        Err(error) => error!("diegetic_panel_stress: failed to build status overlay: {error}"),
     }
 }
 

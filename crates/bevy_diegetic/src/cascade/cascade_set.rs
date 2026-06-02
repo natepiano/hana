@@ -9,7 +9,7 @@ use bevy::prelude::*;
 #[derive(SystemSet, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CascadeSet {
     /// All systems that keep per-entity
-    /// [`Resolved`](crate::cascade::Resolved) values current. One propagation
+    /// `Resolved` values current. One propagation
     /// system per cascade attribute re-resolves a node when its own
     /// `Override<A>` changes or is removed, its `ChildOf` changes, or
     /// `CascadeDefault<A>` changes — fanning ancestor

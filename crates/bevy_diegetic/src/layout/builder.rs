@@ -53,7 +53,7 @@ use crate::PanelFieldId;
 
 /// Shorthand element declaration for the builder API.
 ///
-/// This is a temporary configuration object that gets converted into an [`Element`]
+/// This is a temporary configuration object that gets converted into an `Element`
 /// when added to the tree.
 #[must_use]
 #[derive(Clone, Debug, Default)]
@@ -366,7 +366,7 @@ impl LayoutBuilder {
 
     /// Adds a child container under the current parent, then fills it in.
     ///
-    /// The passed `El` is converted into an [`Element`] and inserted as a
+    /// The passed `El` is converted into an `Element` and inserted as a
     /// child of whatever the current parent is:
     ///
     /// - after [`Self::new`], the initial current parent is the implicit fixed-size root inserted

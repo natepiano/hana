@@ -107,8 +107,8 @@ pub(super) struct BuilderData {
 /// Constructed via [`DiegeticPanel::world()`] or [`DiegeticPanel::screen()`].
 /// The type parameters enforce the correct method call order at compile time:
 ///
-/// - `Mode`: [`World`] or [`Screen`] — determines which methods are available
-/// - `State`: [`NeedsSize`] → [`HasSize`] → [`Ready`] — enforces `.size()` before `.layout()`, and
+/// - `Mode`: `World` or `Screen` — determines which methods are available
+/// - `State`: `NeedsSize` → `HasSize` → `Ready` — enforces `.size()` before `.layout()`, and
 ///   `.layout()` before or instead of `.build()`
 ///
 /// # State machine
@@ -127,7 +127,7 @@ pub(super) struct BuilderData {
 ///
 /// | Value | `PanelSizing<Screen>` | `PanelSizing<World>` | Rationale |
 /// |---|:-:|:-:|---|
-/// | [`Px`] / [`Mm`] / [`Pt`] / [`In`](crate::layout::In) / bare `f32` | ✅ | ✅ | physical sizes — legal anywhere |
+/// | [`Px`] / [`Mm`](crate::Mm) / [`Pt`] / [`In`](crate::layout::In) / bare `f32` | ✅ | ✅ | physical sizes — legal anywhere |
 /// | [`Sizing`] (engine enum — escape hatch) | ✅ | ✅ | both modes share one engine |
 /// | [`Fit`](super::sizing::Fit) / [`FitMax`](super::sizing::FitMax) / [`FitRange`](super::sizing::FitRange) | ✅ | ✅ | shrink-to-content works on both |
 /// | [`Percent`](super::sizing::Percent) | ✅ | ❌ compile error | world has no parent |
@@ -256,7 +256,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
     /// Sets the panel dimensions and layout unit.
     ///
     /// Each axis may use any value implementing
-    /// [`PanelSizing<World>`](super::sizing::PanelSizing): [`Px`], [`Mm`],
+    /// [`PanelSizing<World>`](super::sizing::PanelSizing): [`Px`], [`Mm`](crate::Mm),
     /// [`Pt`], [`In`](crate::layout::In), bare `f32`,
     /// [`Fit`](super::sizing::Fit), [`FitMax`](super::sizing::FitMax),
     /// [`FitRange`](super::sizing::FitRange), or the engine [`Sizing`]
@@ -269,7 +269,7 @@ impl DiegeticPanelBuilder<World, NeedsSize> {
     /// Cross-axis physical-unit consistency is enforced at compile time
     /// via [`CompatibleUnits`](super::sizing::CompatibleUnits): two
     /// concrete physical units must match (e.g. `(Mm, Mm)` is fine;
-    /// `(Mm, Px)` is a compile error). Unit-less values like [`Fit`] or
+    /// `(Mm, Px)` is a compile error). Unit-less values like [`Fit`](crate::Fit) or
     /// bare `f32` adopt the other axis's unit, or fall back to
     /// [`Unit::Meters`] when both axes are unit-less.
     ///
@@ -335,7 +335,7 @@ impl DiegeticPanelBuilder<Screen, NeedsSize> {
     /// Sets the panel dimensions on each axis.
     ///
     /// Each axis may use any value implementing
-    /// [`PanelSizing<Screen>`](super::sizing::PanelSizing): [`Px`], [`Mm`],
+    /// [`PanelSizing<Screen>`](super::sizing::PanelSizing): [`Px`], [`Mm`](crate::Mm),
     /// [`Pt`], [`In`](crate::layout::In), bare `f32`,
     /// [`Fit`](super::sizing::Fit), [`FitMax`](super::sizing::FitMax),
     /// [`FitRange`](super::sizing::FitRange),
