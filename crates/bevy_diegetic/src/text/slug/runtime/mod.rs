@@ -1,11 +1,11 @@
-mod backend;
+mod glyph_cache;
 mod input;
 mod run;
 
-pub(crate) use backend::GlyphCache;
-pub(crate) use backend::PreparedTextRun;
-pub(crate) use backend::RunStorage;
-pub(crate) use backend::RunStorageKey;
+pub(crate) use glyph_cache::GlyphCache;
+pub(crate) use glyph_cache::PreparedTextRun;
+pub(crate) use glyph_cache::RunStorage;
+pub(crate) use glyph_cache::RunStorageKey;
 pub(crate) use input::PositionedGlyph;
 pub(super) use run::BuiltTextRun;
 pub(super) use run::FontKey;
