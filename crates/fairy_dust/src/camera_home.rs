@@ -37,6 +37,7 @@ use crate::restart_camera::RestartCameraRestore;
 use crate::restart_camera::RestoreWindowAnimation;
 use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
+use crate::shortcuts;
 
 #[derive(Component)]
 struct CameraHomeContext;
@@ -145,6 +146,7 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.init_resource::<AtHome>();
     app.init_resource::<HomeAabbGizmoVisible>();
     app.add_input_context::<CameraHomeContext>();
+    shortcuts::reserve_key(app, HOME_KEY, HOME_CONTROL);
     app.add_systems(Startup, (spawn_home_marker, spawn_home_actions));
     // `update_home_cube` runs first so the cube reflects the current union of
     // `CameraHomeTarget` entities before any handler triggers `AnimateToFit`

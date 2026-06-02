@@ -48,6 +48,7 @@ mod restart_camera;
 mod save_window_position;
 mod screen_panels;
 mod screen_space_lights;
+mod shortcuts;
 mod transparency;
 
 use std::marker::PhantomData;

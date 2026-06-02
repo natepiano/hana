@@ -97,7 +97,9 @@ fn main() {
         )
         .with_camera_control_panel()
         .add_systems(Startup, spawn_target)
-        .add_systems(Update, keyboard_input)
+        .with_shortcut(KeyCode::KeyZ, zoom_to_fit_target)
+        .with_shortcut(KeyCode::KeyL, look_at_target)
+        .with_shortcut(KeyCode::KeyK, look_at_and_zoom_to_fit_target)
         .run();
 }
 
@@ -133,10 +135,9 @@ fn spawn_target(
     commands.insert_resource(TargetEntity(entity));
 }
 
-// Z fires ZoomToFit (radius only), L fires LookAt (rotation only), K fires
-// LookAtAndZoomToFit (rotation + radius + focus move).
-fn keyboard_input(
-    keys: Res<ButtonInput<KeyCode>>,
+// Z fires ZoomToFit (radius only). Each handler is a plain system wired to its
+// key by `with_shortcut`, which only fires it while no modifier is held.
+fn zoom_to_fit_target(
     mut commands: Commands,
     camera_query: Query<Entity, With<OrbitCam>>,
     target: Res<TargetEntity>,
@@ -144,24 +145,37 @@ fn keyboard_input(
     let Ok(camera) = camera_query.single() else {
         return;
     };
+    commands.trigger(
+        ZoomToFit::new(camera, target.0)
+            .margin(FIT_MARGIN)
+            .duration(FIT_DURATION),
+    );
+}
 
-    if keys.just_pressed(KeyCode::KeyZ) {
-        commands.trigger(
-            ZoomToFit::new(camera, target.0)
-                .margin(FIT_MARGIN)
-                .duration(FIT_DURATION),
-        );
-    }
+// L fires LookAt (rotation only).
+fn look_at_target(
+    mut commands: Commands,
+    camera_query: Query<Entity, With<OrbitCam>>,
+    target: Res<TargetEntity>,
+) {
+    let Ok(camera) = camera_query.single() else {
+        return;
+    };
+    commands.trigger(LookAt::new(camera, target.0).duration(LOOK_AT_DURATION));
+}
 
-    if keys.just_pressed(KeyCode::KeyL) {
-        commands.trigger(LookAt::new(camera, target.0).duration(LOOK_AT_DURATION));
-    }
-
-    if keys.just_pressed(KeyCode::KeyK) {
-        commands.trigger(
-            LookAtAndZoomToFit::new(camera, target.0)
-                .margin(FIT_MARGIN)
-                .duration(FIT_DURATION),
-        );
-    }
+// K fires LookAtAndZoomToFit (rotation + radius + focus move).
+fn look_at_and_zoom_to_fit_target(
+    mut commands: Commands,
+    camera_query: Query<Entity, With<OrbitCam>>,
+    target: Res<TargetEntity>,
+) {
+    let Ok(camera) = camera_query.single() else {
+        return;
+    };
+    commands.trigger(
+        LookAtAndZoomToFit::new(camera, target.0)
+            .margin(FIT_MARGIN)
+            .duration(FIT_DURATION),
+    );
 }

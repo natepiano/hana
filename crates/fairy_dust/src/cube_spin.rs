@@ -11,6 +11,7 @@ use crate::screen_panels::ControlActivation;
 use crate::screen_panels::TitleBarControlState;
 use crate::screen_panels::TitleChip;
 use crate::screen_panels::TitleChipActivation;
+use crate::shortcuts;
 
 /// Marker inserted by [`crate::PrimitiveBuilder::cube_spin`] for builder-owned spin.
 #[derive(Component)]
@@ -232,6 +233,9 @@ impl<M: 'static> TitleChipActivation for CubeSpinControl<M> {
 }
 
 pub(crate) fn install<M: Component>(app: &mut App, config: CubeSpinConfig) {
+    if let Some(key) = config.key {
+        shortcuts::reserve_key(app, key, "cube spin");
+    }
     if let Some(chip) = config.chip {
         screen_panels::register_title_control(app, chip);
     }

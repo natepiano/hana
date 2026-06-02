@@ -39,6 +39,7 @@ use crate::save_window_position;
 use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
+use crate::shortcuts;
 use crate::transparency;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
@@ -111,6 +112,56 @@ impl<S> SprinkleBuilder<S> {
     pub fn with_camera_control_panel_background_color(mut self, color: Color) -> Self {
         self.app
             .insert_resource(CameraControlPanelBackground(color));
+        self
+    }
+
+    /// Wire a one-shot keyboard shortcut: pressing `key` runs `system` once.
+    /// The example writes only a plain Bevy system — no input macros, no input
+    /// crate import:
+    ///
+    /// ```ignore
+    /// fairy_dust::sprinkle_example()
+    ///     .with_shortcut(KeyCode::KeyL, look_at)
+    ///     .run();
+    ///
+    /// fn look_at(camera: Query<Entity, With<OrbitCam>>, /* ... */) { /* ... */ }
+    /// ```
+    ///
+    /// The shortcut fires only while no modifier is held, so a bare key stays
+    /// quiet during `Ctrl`/`Shift`/`Alt`/`Cmd` and Fairy Dust's modifier chords
+    /// (`Ctrl+Shift+L` and friends) reach only their own action.
+    ///
+    /// Reusing a key Fairy Dust already binds bare (`H` home with
+    /// [`with_camera_home`](Self::with_camera_home), `P` with
+    /// [`with_cube_spin`](Self::with_cube_spin)) fails at startup — use the
+    /// matching capability instead of a manual shortcut.
+    #[must_use]
+    pub fn with_shortcut<Sys, M>(mut self, key: KeyCode, system: Sys) -> Self
+    where
+        Sys: IntoSystem<(), (), M> + 'static,
+    {
+        shortcuts::install(&mut self.app);
+        let system_id = self.app.world_mut().register_system(system);
+        shortcuts::register_press(&mut self.app, key, system_id);
+        self
+    }
+
+    /// Wire a continuous keyboard shortcut: while `key` is held, `system` runs
+    /// every frame. Use this for held motion such as a light brighten/dim or a
+    /// log scroll; the `system` reads `Res<Time>` itself and scales by
+    /// `delta_secs`.
+    ///
+    /// Modifier guarding and the reserved-key check match
+    /// [`with_shortcut`](Self::with_shortcut); only the firing cadence differs
+    /// (every held frame instead of once per press).
+    #[must_use]
+    pub fn with_held_shortcut<Sys, M>(mut self, key: KeyCode, system: Sys) -> Self
+    where
+        Sys: IntoSystem<(), (), M> + 'static,
+    {
+        shortcuts::install(&mut self.app);
+        let system_id = self.app.world_mut().register_system(system);
+        shortcuts::register_held(&mut self.app, key, system_id);
         self
     }
 
