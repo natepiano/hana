@@ -36,7 +36,7 @@ pub(super) const FIXTURE_SCALE: f32 = 0.001;
 
 /// Builds one prepared text run from `text` using the production path: glyph
 /// IDs and advances come straight from the font face, mirroring what parley
-/// shaping feeds [`Backend::prepare_positioned_run_with_scale`].
+/// shaping feeds [`GlyphCache::prepare_positioned_run_with_scale`].
 pub fn prepare_fixture_run(
     backend: &mut GlyphCache,
     font_data: &[u8],

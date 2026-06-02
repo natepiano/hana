@@ -1,3 +1,4 @@
+use std::time::Duration;
 use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
@@ -50,22 +51,25 @@ pub(super) fn free_run_storage_on_mesh_removal(
     }
 }
 
-/// Rebuilds the glyph mesh for each panel-text run whose geometry changed, and
+/// Updates the glyph geometry for each panel-text run whose layout changed, and
 /// despawns the mesh of a run whose text emptied.
 ///
-/// One run, one mesh: a rebuild touches only the changed run's mesh and GPU
-/// buffers, leaving every sibling run on the panel untouched. Each despawn
-/// frees its run storage through the `On<Remove, DiegeticTextMesh>` observer —
-/// the geometry system never frees storage inline. Depth bias still derives
-/// from `command_index` (stable across element reorder), so per-run rebuild
-/// keeps Geometry-mode layering correct (M2).
+/// A run owns one mesh child and one storage slot keyed by its label entity
+/// through [`RunStorageKey`]. When the run already has that mesh child, its
+/// geometry is overwritten in place behind stable handles and only the material
+/// is refreshed — no asset reallocation, no mesh-entity respawn. The first frame
+/// a run appears it has no child, so this allocates its storage and spawns the
+/// child. Each despawn frees the run's storage through the
+/// `On<Remove, DiegeticTextMesh>` observer. Depth bias still derives from
+/// `command_index` (stable across element reorder), so per-run update keeps
+/// Geometry-mode layering correct (M2).
 pub(super) fn update_panel_text_geometry(
     changed_runs: Query<
         (Entity, &PreparedPanelText, &PanelTextLayout, &ChildOf),
         (With<TextContent>, Changed<PreparedPanelText>),
     >,
     mut emptied_runs: RemovedComponents<PreparedPanelText>,
-    old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
+    run_meshes: Query<(Entity, &ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<TextAlpha>, With<TextContent>>,
     resolved_lightings: Query<&Resolved<TextLighting>, With<TextContent>>,
@@ -81,14 +85,37 @@ pub(super) fn update_panel_text_geometry(
     mut commands: Commands,
 ) {
     let mesh_build_start = Instant::now();
+    // Sub-stage accumulators across the run loop, surfaced as the indented
+    // `pack` / `upload` / `material` rows under `mesh`.
+    let mut pack_time = Duration::ZERO;
+    let mut upload_time = Duration::ZERO;
+    let mut material_time = Duration::ZERO;
 
     for (label_entity, panel_run, panel_text_child, child_of) in &changed_runs {
         let Ok((panel, panel_layers)) = panels.get(child_of.parent()) else {
             continue;
         };
-        despawn_label_mesh(label_entity, &old_meshes, &mut commands);
-        let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let text_base = panel_base_material(panel);
+        let storage_key = RunStorageKey::from(label_entity);
+
+        // pack: assemble this run's render data from cached glyph outlines.
+        let pack_start = Instant::now();
+        let render_data = backend.build_run_render_data(&panel_run.prepared, panel_run.clip_rect);
+        pack_time += pack_start.elapsed();
+        let Ok(render_data) = render_data else {
+            // Clipping removed every quad: drop any stale mesh child so its
+            // storage frees and nothing renders.
+            despawn_label_mesh(label_entity, &run_meshes, &mut commands);
+            continue;
+        };
+
+        // upload: write the mesh and three GPU buffers in place.
+        let upload_start = Instant::now();
+        let storage =
+            backend.commit_run_storage(storage_key, render_data, &mut meshes, &mut storage_buffers);
+        upload_time += upload_start.elapsed();
+
+        // material: build and write this run's material.
+        let material_start = Instant::now();
         let resolved_alpha = resolved_alphas
             .get(label_entity)
             .map_or(alpha_default.0.0, |resolved| resolved.0.0);
@@ -98,21 +125,38 @@ pub(super) fn update_panel_text_geometry(
         let resolved_sidedness = resolved_sidednesses
             .get(label_entity)
             .map_or(sidedness_default.0.0, |resolved| resolved.0.0);
-        spawn_panel_text_run(PanelTextSpawnRequest {
-            mesh_parent: label_entity,
+        let material = panel_run_material(PanelRunMaterial {
+            panel,
             panel_run,
             panel_text_child,
-            text_base: &text_base,
             resolved_alpha,
             resolved_lighting,
             resolved_sidedness,
-            content_layer: &scene_layer,
-            backend: &mut backend,
-            meshes: &mut meshes,
-            materials: &mut materials,
-            storage_buffers: &mut storage_buffers,
-            commands: &mut commands,
+            storage: &storage,
         });
+
+        // The run already has its mesh child: its geometry was overwritten in
+        // place above, so refresh only the material behind its handle. The first
+        // frame a run appears it has no child, so allocate the material and spawn
+        // the mesh.
+        if let Some(handle) = existing_run_material(label_entity, &run_meshes) {
+            if let Some(mut slot) = materials.get_mut(&handle) {
+                *slot = material;
+            }
+        } else {
+            let scene_layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
+            let material = materials.add(material);
+            spawn_visible_mesh(
+                label_entity,
+                storage.mesh,
+                storage_key,
+                material,
+                panel_run.shadow_mode,
+                &scene_layer,
+                &mut commands,
+            );
+        }
+        material_time += material_start.elapsed();
     }
 
     // R10: when a run's text empties, `shape_panel_text_children` removes its
@@ -121,11 +165,14 @@ pub(super) fn update_panel_text_geometry(
     // recursively despawned `TextContent` — that label's mesh is already gone, so
     // the lookup finds nothing and no double-despawn occurs.
     for label_entity in emptied_runs.read() {
-        despawn_label_mesh(label_entity, &old_meshes, &mut commands);
+        despawn_label_mesh(label_entity, &run_meshes, &mut commands);
     }
 
     perf.panel_text.mesh_build_ms =
         mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.mesh_pack_ms = pack_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.mesh_upload_ms = upload_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
+    perf.panel_text.mesh_material_ms = material_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 
@@ -175,86 +222,69 @@ pub(super) fn update_panel_text_alpha(
 /// cleanup runs through the `On<Remove, DiegeticTextMesh>` observer.
 fn despawn_label_mesh(
     label: Entity,
-    old_meshes: &Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
+    run_meshes: &Query<(Entity, &ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
     commands: &mut Commands,
 ) {
-    for (mesh_entity, child_of) in old_meshes {
+    for (mesh_entity, child_of, _) in run_meshes {
         if child_of.parent() == label {
             commands.entity(mesh_entity).despawn();
         }
     }
 }
 
-struct PanelTextSpawnRequest<'a, 'w, 's> {
-    mesh_parent:        Entity,
+/// Material handle of the [`DiegeticTextMesh`] child parented under `label`, if
+/// it has one.
+fn existing_run_material(
+    label: Entity,
+    run_meshes: &Query<(Entity, &ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
+) -> Option<Handle<TextMaterial>> {
+    run_meshes
+        .iter()
+        .find(|(_, child_of, _)| child_of.parent() == label)
+        .map(|(_, _, material)| material.0.clone())
+}
+
+/// Inputs for building one panel-text run's material from its resolved cascade
+/// values and storage handles.
+struct PanelRunMaterial<'a> {
+    panel:              &'a DiegeticPanel,
     panel_run:          &'a PreparedPanelText,
     panel_text_child:   &'a PanelTextLayout,
-    text_base:          &'a StandardMaterial,
     resolved_alpha:     AlphaMode,
     resolved_lighting:  GlyphLighting,
     resolved_sidedness: GlyphSidedness,
-    content_layer:      &'a RenderLayers,
-    backend:            &'a mut GlyphCache,
-    meshes:             &'a mut Assets<Mesh>,
-    materials:          &'a mut Assets<TextMaterial>,
-    storage_buffers:    &'a mut Assets<ShaderBuffer>,
-    commands:           &'a mut Commands<'w, 's>,
+    storage:            &'a RunStorage,
 }
 
-fn spawn_panel_text_run(request: PanelTextSpawnRequest<'_, '_, '_>) {
-    let PanelTextSpawnRequest {
-        mesh_parent,
+fn panel_run_material(request: PanelRunMaterial<'_>) -> TextMaterial {
+    let PanelRunMaterial {
+        panel,
         panel_run,
         panel_text_child,
-        text_base,
         resolved_alpha,
         resolved_lighting,
         resolved_sidedness,
-        content_layer,
-        backend,
-        meshes,
-        materials,
-        storage_buffers,
-        commands,
+        storage,
     } = request;
-    let Ok(storage) = backend.ensure_run_storage(
-        &panel_run.prepared,
-        panel_run.clip_rect,
-        meshes,
-        storage_buffers,
-    ) else {
-        return;
-    };
-
+    let base = panel_base_material(panel);
     let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
     let text_depth_bias = command_depth * constants::LAYER_DEPTH_BIAS;
-    // Keep panel text at its real clip-space depth in OIT. A positive manual
-    // offset here can pull glyph fragments in front of opaque occluders, making
-    // text show through solid geometry. Normal/non-OIT layering still comes
-    // from `depth_bias`; panel-local OIT text ordering should be solved without
-    // moving the fragment depth.
-    let text_oit_depth_offset = 0.0;
-
-    let material = materials.add(panel_material(PanelMaterialInput {
-        base:             text_base,
-        depth_bias:       text_depth_bias,
-        oit_depth_offset: text_oit_depth_offset,
-        alpha_mode:       resolved_alpha,
-        lighting:         resolved_lighting,
-        sidedness:        resolved_sidedness,
-        fill_color:       panel_run.fill_color,
-        render_mode:      panel_run.render_mode.into(),
-        storage:          &storage,
-    }));
-    spawn_visible_mesh(
-        mesh_parent,
-        storage.mesh,
-        panel_run.prepared.storage_key(),
-        material,
-        panel_run.shadow_mode,
-        content_layer,
-        commands,
-    );
+    panel_material(PanelMaterialInput {
+        base: &base,
+        depth_bias: text_depth_bias,
+        // Keep panel text at its real clip-space depth in OIT. A positive manual
+        // offset here can pull glyph fragments in front of opaque occluders,
+        // making text show through solid geometry. Normal/non-OIT layering still
+        // comes from `depth_bias`; panel-local OIT text ordering should be solved
+        // without moving the fragment depth.
+        oit_depth_offset: 0.0,
+        alpha_mode: resolved_alpha,
+        lighting: resolved_lighting,
+        sidedness: resolved_sidedness,
+        fill_color: panel_run.fill_color,
+        render_mode: panel_run.render_mode.into(),
+        storage,
+    })
 }
 
 fn panel_base_material(panel: &DiegeticPanel) -> StandardMaterial {
@@ -512,6 +542,22 @@ mod tests {
             .alpha_mode
     }
 
+    fn material_fill_color(app: &App, mesh: Entity) -> Vec4 {
+        let handle = app
+            .world()
+            .get::<MeshMaterial3d<TextMaterial>>(mesh)
+            .expect("text mesh should carry its material")
+            .0
+            .clone();
+        app.world()
+            .resource::<Assets<TextMaterial>>()
+            .get(&handle)
+            .expect("material asset should exist")
+            .extension
+            .uniforms
+            .fill_color
+    }
+
     #[test]
     fn each_label_gets_a_mesh_child_not_the_panel() {
         let mut app = pipeline_app();
@@ -531,7 +577,7 @@ mod tests {
     }
 
     #[test]
-    fn recolor_rebuilds_only_the_changed_runs_mesh() {
+    fn recolor_updates_the_changed_run_in_place() {
         let mut app = pipeline_app();
         let panel = spawn_panel(&mut app, two_text_tree(Color::WHITE, Color::WHITE));
         settle(&mut app);
@@ -545,7 +591,7 @@ mod tests {
             mesh_of_label(&mut app, untouched).expect("Beta mesh should exist");
 
         // Recolor only "Alpha". Color rides in PreparedPanelText.fill_color, so its run
-        // is a geometry rebuild; "Beta" is byte-identical and must be left alone.
+        // is a geometry update; "Beta" is byte-identical and must be left alone.
         app.world_mut()
             .commands()
             .set_tree(panel, two_text_tree(Color::BLACK, Color::WHITE));
@@ -555,13 +601,31 @@ mod tests {
             mesh_of_label(&mut app, recolored).expect("Alpha mesh should still exist");
         let untouched_mesh_after =
             mesh_of_label(&mut app, untouched).expect("Beta mesh should still exist");
-        assert_ne!(
+        // Both runs keep their mesh entity: the changed run overwrites its mesh
+        // and material in place instead of respawning a new entity.
+        assert_eq!(
             recolored_mesh_before, recolored_mesh_after,
-            "the recolored run's mesh should be rebuilt (a new entity)"
+            "the recolored run reuses its mesh entity"
         );
         assert_eq!(
             untouched_mesh_before, untouched_mesh_after,
-            "the unchanged run's mesh should be preserved"
+            "the unchanged run keeps its mesh entity"
+        );
+        // The recolor reached the changed run's material and left the other alone.
+        assert_eq!(
+            material_fill_color(&app, recolored_mesh_after),
+            Vec4::new(0.0, 0.0, 0.0, 1.0),
+            "Alpha's fill color is now black"
+        );
+        assert_eq!(
+            material_fill_color(&app, untouched_mesh_after),
+            Vec4::new(1.0, 1.0, 1.0, 1.0),
+            "Beta's fill color stays white"
+        );
+        assert_eq!(
+            run_storage_len(&app),
+            2,
+            "recolor reuses both runs' storage with no churn"
         );
     }
 

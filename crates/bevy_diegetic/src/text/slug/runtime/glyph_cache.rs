@@ -1,9 +1,10 @@
-//! Backend state: glyph cache, prepared runs, and GPU storage handles.
+//! Glyph cache: positioned-glyph input, prepared runs, and GPU storage handles.
 
 use std::collections::HashMap;
 
 use bevy::prelude::Assets;
 use bevy::prelude::Component;
+use bevy::prelude::Entity;
 use bevy::prelude::Handle;
 use bevy::prelude::Mesh;
 use bevy::prelude::Resource;
@@ -16,37 +17,47 @@ use super::FontKey;
 use super::GlyphInstance;
 use super::GlyphKey;
 use super::GlyphOutlineCache;
-use super::PositionedGlyph;
 use super::TextRun;
+use crate::layout::ShapedGlyph;
+use crate::text::Font;
 use crate::text::slug::RunRenderError;
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::render;
+use crate::text::slug::render::RunRenderData;
+
+/// One production glyph positioned for run preparation: a `ShapedGlyph` plus
+/// the `Font` and collection index needed to extract its outline.
+#[derive(Clone, Copy)]
+pub(crate) struct PositionedGlyph<'a> {
+    pub glyph:            &'a ShapedGlyph,
+    pub font:             &'a Font,
+    pub collection_index: u32,
+}
 
 /// Result of preparing one text run.
 #[derive(Clone, Debug)]
 pub(crate) struct PreparedTextRun {
     /// Prepared text run.
-    run:         BuiltTextRun,
-    /// Backend-owned storage key for this run.
-    storage_key: RunStorageKey,
+    run: BuiltTextRun,
 }
 
 impl PreparedTextRun {
     /// Number of visible glyph quads in this prepared run.
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.run.run.glyphs().len() }
-
-    /// Backend storage key assigned to this run.
-    #[must_use]
-    pub const fn storage_key(&self) -> RunStorageKey { self.storage_key }
 }
 
-/// Backend key for one prepared run's GPU storage handles.
+/// Stable per-label key for one run's GPU storage handles, derived from the
+/// label entity so the same label addresses the same storage every frame.
 #[derive(Clone, Copy, Component, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RunStorageKey(u64);
 
-/// Backend-owned GPU handles for one prepared run.
+impl From<Entity> for RunStorageKey {
+    fn from(label: Entity) -> Self { Self(label.to_bits()) }
+}
+
+/// GPU storage handles for one prepared run.
 #[derive(Clone, Debug)]
 pub(crate) struct RunStorage {
     /// One quad per glyph instance.
@@ -59,12 +70,11 @@ pub(crate) struct RunStorage {
     pub glyphs: Handle<ShaderBuffer>,
 }
 
-/// `GlyphCache` resource: owns the glyph cache and prepared-run GPU storage.
+/// `GlyphCache` resource: owns the glyph cache and per-run GPU storage.
 #[derive(Debug, Default, Resource)]
 pub(crate) struct GlyphCache {
     outline_cache:      GlyphOutlineCache,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
-    next_storage_key:   u64,
     preprocess_version: u32,
 }
 
@@ -111,23 +121,33 @@ impl GlyphCache {
             ));
         }
 
-        Ok(self.finish_prepared_run(BuiltTextRun {
-            run: TextRun::new(instances),
-        }))
+        Ok(PreparedTextRun {
+            run: BuiltTextRun {
+                run: TextRun::new(instances),
+            },
+        })
     }
 
-    /// Ensures this prepared run has backend-owned mesh and storage handles.
-    pub fn ensure_run_storage(
-        &mut self,
+    /// Builds this run's geometry and writes it to the storage keyed by
+    /// `storage_key`, overwriting the existing mesh and buffers in place when the
+    /// key is already present and allocating new assets the first time it is
+    /// seen.
+    ///
+    /// In-place writes keep the same `Handle<Mesh>` / `Handle<ShaderBuffer>`, so
+    /// the render world re-uploads only the changed bytes — no per-frame asset
+    /// allocate-and-drop, and the run's mesh entity is never respawned. A run
+    /// with no visible glyph quads (fully clipped) writes nothing and returns
+    /// `NoVisibleGlyphs`.
+    /// Builds this run's GPU-ready render data from cached glyph outlines,
+    /// clipped to `clip_rect`. Returns `NoVisibleGlyphs` when clipping leaves no
+    /// quad. Pair it with [`Self::commit_run_storage`] to build then upload a
+    /// run; the two are split so a caller can time the build and upload halves
+    /// separately.
+    pub fn build_run_render_data(
+        &self,
         prepared: &PreparedTextRun,
         clip_rect: Option<[f32; 4]>,
-        meshes: &mut Assets<Mesh>,
-        storage_buffers: &mut Assets<ShaderBuffer>,
-    ) -> Result<RunStorage, RunRenderError> {
-        if let Some(storage) = self.run_storage.get(&prepared.storage_key) {
-            return Ok(storage.clone());
-        }
-
+    ) -> Result<RunRenderData, RunRenderError> {
         let render_data = render::build_run_render_data_with_clip(
             &prepared.run,
             &self.outline_cache,
@@ -140,43 +160,66 @@ impl GlyphCache {
         if render_data.mesh.count_vertices() == 0 {
             return Err(RunRenderError::NoVisibleGlyphs);
         }
+        Ok(render_data)
+    }
+
+    /// Writes `render_data` to the storage keyed by `storage_key`, overwriting
+    /// the existing mesh and buffers in place when the key is present and
+    /// allocating new assets the first time it is seen. Pair it with
+    /// [`Self::build_run_render_data`]; the two are split so a caller can time
+    /// the build and upload halves separately.
+    ///
+    /// In-place writes keep the same `Handle<Mesh>` / `Handle<ShaderBuffer>`, so
+    /// the render world re-uploads only the changed bytes — no per-frame asset
+    /// allocate-and-drop, and the run's mesh entity is never respawned.
+    pub fn commit_run_storage(
+        &mut self,
+        storage_key: RunStorageKey,
+        render_data: RunRenderData,
+        meshes: &mut Assets<Mesh>,
+        storage_buffers: &mut Assets<ShaderBuffer>,
+    ) -> RunStorage {
+        if let Some(storage) = self.run_storage.get(&storage_key) {
+            // Same label, changed text: overwrite the existing assets behind
+            // their stable handles. `get_mut` marks each asset modified, so the
+            // render world re-uploads the new bytes without a handle swap.
+            if let Some(mut mesh) = meshes.get_mut(&storage.mesh) {
+                *mesh = render_data.mesh;
+            }
+            if let Some(mut curves) = storage_buffers.get_mut(&storage.curves) {
+                curves.set_data(render_data.curves);
+            }
+            if let Some(mut bands) = storage_buffers.get_mut(&storage.bands) {
+                bands.set_data(render_data.bands);
+            }
+            if let Some(mut glyphs) = storage_buffers.get_mut(&storage.glyphs) {
+                glyphs.set_data(render_data.glyphs);
+            }
+            return storage.clone();
+        }
         let storage = RunStorage {
             mesh:   meshes.add(render_data.mesh),
             curves: storage_buffers.add(ShaderBuffer::from(render_data.curves)),
             bands:  storage_buffers.add(ShaderBuffer::from(render_data.bands)),
             glyphs: storage_buffers.add(ShaderBuffer::from(render_data.glyphs)),
         };
-        self.run_storage
-            .insert(prepared.storage_key, storage.clone());
-        Ok(storage)
+        self.run_storage.insert(storage_key, storage.clone());
+        storage
     }
 
-    /// Removes one prepared run's backend-owned GPU handles.
+    /// Removes one run's GPU storage handles.
     pub fn remove_run_storage(&mut self, key: RunStorageKey) -> Option<RunStorage> {
         self.run_storage.remove(&key)
     }
 
-    /// Number of prepared runs that currently hold backend GPU storage.
+    /// Number of runs that currently hold GPU storage.
     #[cfg(test)]
     pub fn run_storage_len(&self) -> usize { self.run_storage.len() }
 
-    /// Stable key for a glyph in the current backend preprocessing profile.
+    /// Stable key for a glyph in the current preprocessing profile.
     #[must_use]
     pub const fn glyph_key(&self, font: FontKey, glyph_id: u16) -> GlyphKey {
         GlyphKey::with_preprocess_version(font, glyph_id, self.preprocess_version)
-    }
-
-    const fn finish_prepared_run(&mut self, run: BuiltTextRun) -> PreparedTextRun {
-        PreparedTextRun {
-            run,
-            storage_key: self.next_run_storage_key(),
-        }
-    }
-
-    const fn next_run_storage_key(&mut self) -> RunStorageKey {
-        let key = RunStorageKey(self.next_storage_key);
-        self.next_storage_key = self.next_storage_key.saturating_add(1);
-        key
     }
 }
 
@@ -205,32 +248,32 @@ mod tests {
         include_bytes!("../../../../assets/fonts/NotoSansCJKsc-Regular.otf");
 
     #[test]
-    fn prepared_runs_receive_distinct_storage_keys() {
-        let mut backend = GlyphCache::default();
-        let first = prepare(&mut backend, "Typography");
-        let second = prepare(&mut backend, "Typography");
-
-        assert_ne!(first.storage_key, second.storage_key);
-    }
-
-    #[test]
     fn ensure_run_storage_reuses_existing_handles() {
         let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let key = RunStorageKey(1);
 
-        let first = backend
-            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
+        let first_data = backend
+            .build_run_render_data(&prepared, None)
             .expect("fixture storage should build");
-        let second = backend
-            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
-            .expect("fixture storage should be reused");
+        let first = backend.commit_run_storage(key, first_data, &mut meshes, &mut storage_buffers);
+        let second_data = backend
+            .build_run_render_data(&prepared, None)
+            .expect("fixture storage should build");
+        let second =
+            backend.commit_run_storage(key, second_data, &mut meshes, &mut storage_buffers);
 
         assert_eq!(first.mesh, second.mesh);
         assert_eq!(first.curves, second.curves);
         assert_eq!(first.bands, second.bands);
         assert_eq!(first.glyphs, second.glyphs);
+        assert_eq!(
+            meshes.len(),
+            1,
+            "the second write reuses the mesh asset instead of allocating another"
+        );
     }
 
     #[test]
@@ -239,29 +282,26 @@ mod tests {
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let key = RunStorageKey(1);
 
-        backend
-            .ensure_run_storage(&prepared, None, &mut meshes, &mut storage_buffers)
+        let render_data = backend
+            .build_run_render_data(&prepared, None)
             .expect("fixture storage should build");
+        backend.commit_run_storage(key, render_data, &mut meshes, &mut storage_buffers);
 
-        assert!(backend.remove_run_storage(prepared.storage_key()).is_some());
-        assert!(backend.remove_run_storage(prepared.storage_key()).is_none());
+        assert!(backend.remove_run_storage(key).is_some());
+        assert!(backend.remove_run_storage(key).is_none());
     }
 
     #[test]
     fn fully_clipped_run_does_not_allocate_zero_vertex_mesh() {
         let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
-        let mut meshes = Assets::<Mesh>::default();
-        let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let meshes = Assets::<Mesh>::default();
+        let storage_buffers = Assets::<ShaderBuffer>::default();
 
         let err = backend
-            .ensure_run_storage(
-                &prepared,
-                Some([f32::MAX - 2.0, 0.0, f32::MAX - 1.0, 1.0]),
-                &mut meshes,
-                &mut storage_buffers,
-            )
+            .build_run_render_data(&prepared, Some([f32::MAX - 2.0, 0.0, f32::MAX - 1.0, 1.0]))
             .expect_err("fully clipped text should not allocate render storage");
 
         assert_eq!(err, RunRenderError::NoVisibleGlyphs);

@@ -33,6 +33,7 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
+use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
@@ -64,16 +65,77 @@ const LABEL_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 const OVERLAY_FONT_SIZE: f32 = 13.0;
 const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
 const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
-const LABEL_COLUMN_WIDTH: f32 = 56.0;
-const VALUE_COLUMN_WIDTH: f32 = 60.0;
+/// Wide enough to contain the longest label (`remainder`) and the indented
+/// sub-stage labels without colliding into the value columns.
+const LABEL_COLUMN_WIDTH: f32 = 92.0;
+/// Left indent applied to a `mesh` sub-stage row's label cell.
+const SUB_ROW_INDENT: f32 = 10.0;
+/// Wide enough to contain the `5s max` header on one line.
+const VALUE_COLUMN_WIDTH: f32 = 72.0;
 const TABLE_COL_GAP: f32 = 8.0;
 const TABLE_ROW_GAP: f32 = 2.0;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
-/// Row labels for the diagnostic table, in display order.
-const METRIC_LABELS: [&str; 4] = ["fps", "ms", "layout", "text"];
-const INITIAL_METRICS: [&str; 4] = ["--", "--", "--", "--"];
+/// Whether a diagnostic row sits at the left margin or is indented beneath the
+/// `mesh` row as one of its sub-stages.
+#[derive(Clone, Copy)]
+enum RowIndent {
+    TopLevel,
+    SubStage,
+}
+
+/// One row in the diagnostic table. `indent` marks the `mesh` sub-stage rows so
+/// they render indented underneath `mesh`.
+#[derive(Clone, Copy)]
+struct MetricRow {
+    label:  &'static str,
+    indent: RowIndent,
+}
+
+/// Diagnostic table rows, in display order. `mesh` = `pack` + `upload` +
+/// `material` (its indented sub-stages); `remainder` = `ms` − (`layout` +
+/// `shaping` + `mesh`), the per-frame time not covered by the diegetic CPU rows
+/// above (render, present, other systems).
+const METRIC_ROWS: [MetricRow; 9] = [
+    MetricRow {
+        label:  "fps",
+        indent: RowIndent::TopLevel,
+    },
+    MetricRow {
+        label:  "ms",
+        indent: RowIndent::TopLevel,
+    },
+    MetricRow {
+        label:  "layout",
+        indent: RowIndent::TopLevel,
+    },
+    MetricRow {
+        label:  "shaping",
+        indent: RowIndent::TopLevel,
+    },
+    MetricRow {
+        label:  "mesh",
+        indent: RowIndent::TopLevel,
+    },
+    MetricRow {
+        label:  "pack",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "upload",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "material",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "remainder",
+        indent: RowIndent::TopLevel,
+    },
+];
+const INITIAL_METRICS: [&str; 9] = ["--"; 9];
 
 // ── Components / resources ────────────────────────────────────────────────────
 
@@ -101,11 +163,31 @@ impl Default for Mutating {
 
 #[derive(Clone, Copy)]
 struct PerfSnapshot {
-    timestamp: f32,
-    fps:       f32,
-    frame_ms:  f32,
-    layout_ms: f32,
-    text_ms:   f32,
+    timestamp:    f32,
+    fps:          f32,
+    frame_ms:     f32,
+    layout_ms:    f32,
+    shaping_ms:   f32,
+    mesh_ms:      f32,
+    pack_ms:      f32,
+    upload_ms:    f32,
+    material_ms:  f32,
+    remainder_ms: f32,
+}
+
+impl PerfSnapshot {
+    const ZERO: Self = Self {
+        timestamp:    0.0,
+        fps:          0.0,
+        frame_ms:     0.0,
+        layout_ms:    0.0,
+        shaping_ms:   0.0,
+        mesh_ms:      0.0,
+        pack_ms:      0.0,
+        upload_ms:    0.0,
+        material_ms:  0.0,
+        remainder_ms: 0.0,
+    };
 }
 
 /// Last displayed overlay string, so the overlay tree is rebuilt only when a
@@ -274,16 +356,17 @@ enum CellEmphasis {
     Dim,
 }
 
-fn label_cell(builder: &mut LayoutBuilder, text: &str) {
-    builder.with(
-        El::new()
-            .width(Sizing::fixed(LABEL_COLUMN_WIDTH))
-            .height(Sizing::FIT)
-            .child_alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            builder.text(text, status_label_style());
-        },
-    );
+fn label_cell(builder: &mut LayoutBuilder, text: &str, indent: RowIndent) {
+    let mut element = El::new()
+        .width(Sizing::fixed(LABEL_COLUMN_WIDTH))
+        .height(Sizing::FIT)
+        .child_alignment(AlignX::Left, AlignY::Center);
+    if matches!(indent, RowIndent::SubStage) {
+        element = element.padding(Padding::new(SUB_ROW_INDENT, 0.0, 0.0, 0.0));
+    }
+    builder.with(element, |builder| {
+        builder.text(text, status_label_style());
+    });
 }
 
 fn value_cell(builder: &mut LayoutBuilder, text: &str, emphasis: CellEmphasis) {
@@ -308,6 +391,7 @@ fn table_row(
     now: &str,
     max: &str,
     emphasis: CellEmphasis,
+    indent: RowIndent,
 ) {
     builder.with(
         El::new()
@@ -317,7 +401,7 @@ fn table_row(
             .child_gap(TABLE_COL_GAP)
             .child_alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            label_cell(builder, label);
+            label_cell(builder, label, indent);
             value_cell(builder, now, emphasis);
             value_cell(builder, max, emphasis);
         },
@@ -326,7 +410,7 @@ fn table_row(
 
 /// Builds the overlay: a `now` and a `5s max` column of right-aligned numerics,
 /// one row per metric, with a labels / state footer.
-fn build_overlay_tree(now: &[String; 4], max: &[String; 4], mutating: bool) -> LayoutTree {
+fn build_overlay_tree(now: &[String; 9], max: &[String; 9], mutating: bool) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -341,14 +425,23 @@ fn build_overlay_tree(now: &[String; 4], max: &[String; 4], mutating: bool) -> L
                     .direction(Direction::TopToBottom)
                     .child_gap(TABLE_ROW_GAP),
                 |builder| {
-                    table_row(builder, "", "now", "5s max", CellEmphasis::Dim);
-                    for index in 0..METRIC_LABELS.len() {
+                    table_row(
+                        builder,
+                        "",
+                        "now",
+                        "5s max",
+                        CellEmphasis::Dim,
+                        RowIndent::TopLevel,
+                    );
+                    for index in 0..METRIC_ROWS.len() {
+                        let row = METRIC_ROWS[index];
                         table_row(
                             builder,
-                            METRIC_LABELS[index],
+                            row.label,
                             &now[index],
                             &max[index],
                             CellEmphasis::Normal,
+                            row.indent,
                         );
                     }
                     let state = if mutating { "moving" } else { "paused" };
@@ -358,6 +451,7 @@ fn build_overlay_tree(now: &[String; 4], max: &[String; 4], mutating: bool) -> L
                         &LABEL_COUNT.to_string(),
                         state,
                         CellEmphasis::Dim,
+                        RowIndent::TopLevel,
                     );
                 },
             );
@@ -377,13 +471,6 @@ fn update_status_panel(
     mut timer: Local<Option<Timer>>,
     mut history: Local<VecDeque<PerfSnapshot>>,
 ) {
-    let timer =
-        timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
-    timer.tick(time.delta());
-    if !timer.just_finished() {
-        return;
-    }
-
     let frames_per_second = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
@@ -391,12 +478,30 @@ fn update_status_panel(
         .get(&FrameTimeDiagnosticsPlugin::FRAME_TIME)
         .and_then(bevy::diagnostic::Diagnostic::smoothed);
 
+    // Sample every frame so the smoothed `now` mean and the 5-second peak see
+    // every value, not one arbitrary frame per second. The diegetic rows read
+    // the per-frame `DiegeticPerfStats` resource: `layout` (`compute_ms`) only
+    // runs on alternating frames, so its window mean is the true per-frame
+    // average rather than a once-per-second coin flip onto 0 or the spike.
+    let frame_ms = frame_milliseconds.unwrap_or(0.0).to_f32();
+    let layout_ms = diegetic_perf.compute_ms;
+    let shaping_ms = diegetic_perf.panel_text.shape_ms;
+    let mesh_ms = diegetic_perf.panel_text.mesh_build_ms;
+    // remainder = the per-frame time not covered by the measured diegetic CPU
+    // rows (render, present, other systems). Clamped at zero: the smoothed frame
+    // time can momentarily sit below the instantaneous diegetic sum on a spike.
+    let remainder_ms = (frame_ms - layout_ms - shaping_ms - mesh_ms).max(0.0);
     history.push_back(PerfSnapshot {
         timestamp: time.elapsed_secs(),
-        fps:       frames_per_second.unwrap_or(0.0).to_f32(),
-        frame_ms:  frame_milliseconds.unwrap_or(0.0).to_f32(),
-        layout_ms: diegetic_perf.compute_ms,
-        text_ms:   diegetic_perf.panel_text.total_ms,
+        fps: frames_per_second.unwrap_or(0.0).to_f32(),
+        frame_ms,
+        layout_ms,
+        shaping_ms,
+        mesh_ms,
+        pack_ms: diegetic_perf.panel_text.mesh_pack_ms,
+        upload_ms: diegetic_perf.panel_text.mesh_upload_ms,
+        material_ms: diegetic_perf.panel_text.mesh_material_ms,
+        remainder_ms,
     });
 
     let cutoff = time.elapsed_secs() - PERF_PEAK_WINDOW_SECS;
@@ -407,31 +512,42 @@ fn update_status_panel(
         history.pop_front();
     }
 
-    let mut peak = PerfSnapshot {
-        timestamp: 0.0,
-        fps:       0.0,
-        frame_ms:  0.0,
-        layout_ms: 0.0,
-        text_ms:   0.0,
-    };
-    for sample in &history {
-        peak.fps = peak.fps.max(sample.fps);
-        peak.frame_ms = peak.frame_ms.max(sample.frame_ms);
-        peak.layout_ms = peak.layout_ms.max(sample.layout_ms);
-        peak.text_ms = peak.text_ms.max(sample.text_ms);
+    // Rebuild the overlay tree at most once per second. The overlay is itself a
+    // panel, so rebuilding it every frame would add its own shaping / mesh work
+    // to the very numbers being measured.
+    let timer =
+        timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
+    timer.tick(time.delta());
+    if !timer.just_finished() {
+        return;
     }
 
+    let mean = window_mean(&history);
+    let peak = window_peak(&history);
+
+    // Every row's `now` is the window mean, so the column is internally
+    // consistent: `ms` = `layout` + `shaping` + `mesh` + `remainder`.
     let now = [
-        frames_per_second.map_or_else(|| "--".to_string(), |value| format!("{value:.0}")),
-        frame_milliseconds.map_or_else(|| "--".to_string(), |value| format!("{value:.1}")),
-        format!("{:.2}", diegetic_perf.compute_ms),
-        format!("{:.2}", diegetic_perf.panel_text.total_ms),
+        format!("{:.0}", mean.fps),
+        format!("{:.1}", mean.frame_ms),
+        format!("{:.2}", mean.layout_ms),
+        format!("{:.2}", mean.shaping_ms),
+        format!("{:.2}", mean.mesh_ms),
+        format!("{:.2}", mean.pack_ms),
+        format!("{:.2}", mean.upload_ms),
+        format!("{:.2}", mean.material_ms),
+        format!("{:.2}", mean.remainder_ms),
     ];
     let max = [
         format!("{:.0}", peak.fps),
         format!("{:.1}", peak.frame_ms),
         format!("{:.2}", peak.layout_ms),
-        format!("{:.2}", peak.text_ms),
+        format!("{:.2}", peak.shaping_ms),
+        format!("{:.2}", peak.mesh_ms),
+        format!("{:.2}", peak.pack_ms),
+        format!("{:.2}", peak.upload_ms),
+        format!("{:.2}", peak.material_ms),
+        format!("{:.2}", peak.remainder_ms),
     ];
 
     let key = format!("{}|{}|{}", now.join(","), max.join(","), mutating.0);
@@ -441,4 +557,54 @@ fn update_status_panel(
             commands.set_tree(entity, build_overlay_tree(&now, &max, mutating.0));
         }
     }
+}
+
+/// Per-frame mean of each metric across the sample window — the smoothed `now`
+/// column. Returns [`PerfSnapshot::ZERO`] for an empty window.
+fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
+    let count = history.len().to_f32();
+    if count == 0.0 {
+        return PerfSnapshot::ZERO;
+    }
+    let mut sum = PerfSnapshot::ZERO;
+    for sample in history {
+        sum.fps += sample.fps;
+        sum.frame_ms += sample.frame_ms;
+        sum.layout_ms += sample.layout_ms;
+        sum.shaping_ms += sample.shaping_ms;
+        sum.mesh_ms += sample.mesh_ms;
+        sum.pack_ms += sample.pack_ms;
+        sum.upload_ms += sample.upload_ms;
+        sum.material_ms += sample.material_ms;
+        sum.remainder_ms += sample.remainder_ms;
+    }
+    PerfSnapshot {
+        timestamp:    0.0,
+        fps:          sum.fps / count,
+        frame_ms:     sum.frame_ms / count,
+        layout_ms:    sum.layout_ms / count,
+        shaping_ms:   sum.shaping_ms / count,
+        mesh_ms:      sum.mesh_ms / count,
+        pack_ms:      sum.pack_ms / count,
+        upload_ms:    sum.upload_ms / count,
+        material_ms:  sum.material_ms / count,
+        remainder_ms: sum.remainder_ms / count,
+    }
+}
+
+/// Per-metric peak across the sample window — the `5s max` column.
+fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
+    let mut peak = PerfSnapshot::ZERO;
+    for sample in history {
+        peak.fps = peak.fps.max(sample.fps);
+        peak.frame_ms = peak.frame_ms.max(sample.frame_ms);
+        peak.layout_ms = peak.layout_ms.max(sample.layout_ms);
+        peak.shaping_ms = peak.shaping_ms.max(sample.shaping_ms);
+        peak.mesh_ms = peak.mesh_ms.max(sample.mesh_ms);
+        peak.pack_ms = peak.pack_ms.max(sample.pack_ms);
+        peak.upload_ms = peak.upload_ms.max(sample.upload_ms);
+        peak.material_ms = peak.material_ms.max(sample.material_ms);
+        peak.remainder_ms = peak.remainder_ms.max(sample.remainder_ms);
+    }
+    peak
 }

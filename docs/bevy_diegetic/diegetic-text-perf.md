@@ -6,23 +6,47 @@ Conditions: `diegetic_text_stress`, 100 world labels each restrung every frame,
 M2 Max, release, `with_perf_mode` (AutoNoVsync + `WinitSettings::continuous`).
 Add a column after each phase lands.
 
-| Metric (moving unless noted)        | Baseline (2026-06-02) | After A | After D | After C | After B |
-| ----------------------------------- | --------------------- | ------- | ------- | ------- | ------- |
-| Frame time                          | ~25 ms                |         |         |         |         |
-| FPS                                 | 40                    |         |         |         |         |
-| Layout `compute_ms` (alt. frames)   | 0 / 5.8 ms            |         |         |         |         |
-| Text `panel_text.total_ms`          | 2.4 ms                |         |         |         |         |
-| — of which `mesh_build_ms`          | 1.8 ms                |         |         |         |         |
-| Diegetic CPU subtotal               | ~5–8 ms               |         |         |         |         |
-| GPU asset churn (derived remainder) | ~7–10 ms              |         |         |         |         |
-| Paused frame time                   | ~10 ms                |         |         |         |         |
-| Paused FPS                          | 98                    |         |         |         |         |
+| Metric (moving unless noted)       | Baseline (2026-06-02) | After A     | After D | After C | After B |
+| ---------------------------------- | --------------------- | ----------- | ------- | ------- | ------- |
+| Frame time ‡                       | ~25 ms                | ~24 ms      |         |         |         |
+| FPS ‡                              | 40                    | 42          |         |         |         |
+| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  |         |         |         |
+| Text `panel_text.total_ms`         | 2.4 ms                | 1.6 ms      |         |         |         |
+| — of which `mesh_build_ms`         | 1.8 ms                | **1.29 ms** |         |         |         |
+| Diegetic CPU subtotal              | ~5–8 ms               | ~1.6 / 7 ms |         |         |         |
+| Render floor (paused, diegetic ≈0) | ~10 ms ‡              | ~18 ms ‡    |         |         |         |
+| Paused FPS ‡                       | 98                    | ~55         |         |         |         |
 
-The derived remainder = moving frame time − measured diegetic CPU; it's the
-per-frame GPU asset churn in the panel-text mesh build (`meshes.add()` +
-3× `storage_buffers.add()` for every label every frame). The ~10 ms paused floor
-is the static render of 600 glyph quads under OIT + shadows + 3-light studio
-lighting.
+‡ The frame-time, FPS, and paused rows are fill-rate-bound and scale with window
+size. `with_save_window_position` restored a larger window this session, so those
+absolute numbers are **not** comparable across the Baseline and After-A columns —
+the window grew, not the cost. The window-independent A/B is the CPU rows, where
+`mesh_build_ms` (1.8 → 1.29 ms) is the clean measure of A's effect.
+
+## Finding — A is CPU-only; this stress test is render-bound
+
+A landed correctly and all 255 tests pass: runs now overwrite their mesh and
+three GPU buffers in place behind stable handles keyed by the label entity
+(`RunStorageKey::from(entity)`), and the mesh child + material persist instead of
+being despawned and re-added every frame. The measured effect is
+`mesh_build_ms` 1.8 → 1.29 ms — the per-frame `meshes.add()` + 3×
+`storage_buffers.add()` + mesh-entity respawn + `materials.add()` are gone.
+
+But the moving frame time barely moved, and that corrects the earlier model. The
+paused frame — text not changing, diegetic CPU ≈ 0 — is still ~18 ms, so that
+entire floor is GPU render: OIT transparency + shadows + 3-light studio lighting
+over ~600 glyph quads, which A does not touch. Diegetic CPU is only ~1.6–7 ms of
+the frame (alternating with the layout toggle), **not** the ~7–10 ms the prior
+note attributed to "asset churn." The per-frame text mutation costs ~6 ms
+(moving − paused); A optimizes a ~0.5–1 ms slice of it, and the ~18 ms render
+floor is the dominant, untouched cost.
+
+Implication for ordering: to move *this* test's frame time, attack the render
+(transparency / OIT / shadow / fill-rate) and per-frame upload volume
+(instancing — **B**), not CPU churn. **D** still removes the alternating ~5.8 ms
+layout CPU. A remains the right foundation — stable per-label identity is what a
+later content-hash skip would build on — it just isn't where this test's wall
+clock goes.
 
 ## Options
 

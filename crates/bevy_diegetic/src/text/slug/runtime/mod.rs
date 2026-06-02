@@ -1,12 +1,11 @@
 mod glyph_cache;
-mod input;
 mod run;
 
 pub(crate) use glyph_cache::GlyphCache;
+pub(crate) use glyph_cache::PositionedGlyph;
 pub(crate) use glyph_cache::PreparedTextRun;
 pub(crate) use glyph_cache::RunStorage;
 pub(crate) use glyph_cache::RunStorageKey;
-pub(crate) use input::PositionedGlyph;
 pub(super) use run::BuiltTextRun;
 pub(super) use run::FontKey;
 pub(super) use run::GlyphInstance;
