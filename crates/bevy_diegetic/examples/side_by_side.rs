@@ -36,6 +36,7 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
@@ -48,7 +49,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextDimensions;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_window_manager::WindowManagerPlugin;
@@ -640,7 +640,7 @@ fn spawn_clay_text(
 
             commands.spawn((
                 ClayTextEntity,
-                WorldText::new(text)
+                DiegeticText::world(text)
                     .size(font_size * WORLD_TEXT_SCALE)
                     .anchor(bevy_diegetic::Anchor::TopLeft)
                     .transform(

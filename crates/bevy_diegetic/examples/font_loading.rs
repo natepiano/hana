@@ -16,6 +16,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -29,7 +30,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -221,7 +221,7 @@ fn on_font_registered(
     );
     commands
         .spawn(
-            WorldText::new(label)
+            DiegeticText::world(label)
                 .size(SAMPLE_SIZE)
                 .font(trigger.id.0)
                 .color(Color::srgb(0.2, 0.3, 0.9))

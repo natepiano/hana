@@ -27,9 +27,9 @@ use bevy::window::PresentMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowResolution;
 use bevy::winit::WinitSettings;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_kana::ToF64;
 
@@ -228,7 +228,7 @@ fn setup(mut commands: Commands, config: Res<BenchConfig>) {
         let column = index % GRID_COLUMNS;
         let row = index / GRID_COLUMNS;
         commands.spawn(
-            WorldText::new(BENCH_TEXT)
+            DiegeticText::world(BENCH_TEXT)
                 .size(TEXT_SIZE)
                 .color(Color::WHITE)
                 .shadow_mode(GlyphShadowMode::None)

@@ -1,6 +1,9 @@
 //! [`DiegeticPanelBuilder`] with compile-time state machine enforcing call
 //! order on panel construction.
 
+use core::error::Error;
+use core::fmt::Display;
+use core::fmt::Formatter;
 use std::marker::PhantomData;
 
 use bevy::camera::visibility::RenderLayers;
@@ -46,8 +49,8 @@ pub enum PanelBuildError {
     DuplicateFieldId(PanelFieldId),
 }
 
-impl core::fmt::Display for PanelBuildError {
-    fn fmt(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+impl Display for PanelBuildError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::InvalidSize(error) => write!(formatter, "{error}"),
             Self::DuplicateFieldId(id) => {
@@ -57,7 +60,7 @@ impl core::fmt::Display for PanelBuildError {
     }
 }
 
-impl core::error::Error for PanelBuildError {}
+impl Error for PanelBuildError {}
 
 impl From<InvalidSize> for PanelBuildError {
     fn from(error: InvalidSize) -> Self { Self::InvalidSize(error) }

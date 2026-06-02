@@ -32,6 +32,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -42,7 +43,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
-use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::LagrangePlugin;
@@ -509,7 +509,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
     commands.entity(parent).with_children(|parent| {
         // Title sits above all three rows.
         parent.spawn(
-            WorldText::new("SDF Line Lab")
+            DiegeticText::world("SDF Line Lab")
                 .size(0.14)
                 .color(Color::srgb(0.8, 0.9, 1.0))
                 .transform(Transform::from_xyz(0.0, TITLE_Y, DISPLAY_Z))
@@ -524,7 +524,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
             ("border edge", ROW_Y[2]),
         ] {
             parent.spawn(
-                WorldText::new(text)
+                DiegeticText::world(text)
                     .size(0.06)
                     .color(Color::srgb(0.9, 0.9, 0.95))
                     .shadow_mode(bevy_diegetic::GlyphShadowMode::Cast)
@@ -538,7 +538,7 @@ fn spawn_labels(commands: &mut Commands, parent: Entity) {
         for (index, pt) in WIDTHS_PT.iter().enumerate() {
             let x = X_STEP.mul_add(index.to_f32(), START_X);
             parent.spawn(
-                WorldText::new(format!("{pt}pt"))
+                DiegeticText::world(format!("{pt}pt"))
                     .size(0.07)
                     .color(Color::srgb(0.7, 0.75, 0.85))
                     .transform(Transform::from_xyz(x, WIDTH_LABEL_Y, ROW_Z))

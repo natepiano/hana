@@ -20,6 +20,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeDefault;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphSidedness;
@@ -30,7 +31,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::TextStyle;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 
@@ -197,7 +197,7 @@ fn setup(
         ))
         .with_children(|parent| {
             parent.spawn(
-                WorldText::new("HELLO")
+                DiegeticText::world("HELLO")
                     .size(0.22)
                     .color(Color::srgb(0.9, 0.3, 0.1))
                     .sidedness(GlyphSidedness::OneSided)
@@ -209,7 +209,7 @@ fn setup(
     // WorldText floating on the ground (coplanar reproducer).
     commands.spawn((
         CameraHomeTarget,
-        WorldText::new("GROUND")
+        DiegeticText::world("GROUND")
             .size(0.45)
             .color(Color::srgb(1.0, 0.85, 0.1))
             .transform(

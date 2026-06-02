@@ -18,10 +18,10 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
@@ -232,7 +232,7 @@ fn face_panel_transform(face: Face) -> Transform {
     }
 }
 
-fn story_panel(lines: &'static [&'static str]) -> Result<DiegeticPanel, InvalidSize> {
+fn story_panel(lines: &'static [&'static str]) -> Result<DiegeticPanel, PanelBuildError> {
     let transparent = transparent_panel_material();
     DiegeticPanel::world()
         .size(FACE_PANEL_SIZE, FACE_PANEL_SIZE)

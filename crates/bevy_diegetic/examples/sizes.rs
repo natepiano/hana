@@ -18,6 +18,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -29,7 +30,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -169,7 +169,7 @@ fn spawn_headers(
 ) {
     commands
         .spawn(
-            WorldText::new("DiegeticPanel")
+            DiegeticText::world("DiegeticPanel")
                 .style(header_style.clone())
                 .transform(Transform::from_xyz(left_x, header_y, 0.0))
                 .build(),
@@ -177,7 +177,7 @@ fn spawn_headers(
         .override_font_unit(Unit::Points);
     commands
         .spawn(
-            WorldText::new("How font sizes work")
+            DiegeticText::world("How font sizes work")
                 .style(header_style.clone())
                 .transform(Transform::from_xyz(note_x, header_y, 0.0))
                 .build(),
@@ -220,7 +220,7 @@ fn spawn_world_text_column(
 ) {
     let wt_title = commands
         .spawn(
-            WorldText::new("WorldText")
+            DiegeticText::world("WorldText")
                 .style(header_style)
                 .transform(Transform::from_xyz(right_x, header_y, 0.0))
                 .build(),
@@ -261,7 +261,7 @@ fn spawn_world_text_column(
         commands.entity(wt_title).with_children(|parent| {
             parent
                 .spawn(
-                    WorldText::new(*label)
+                    DiegeticText::world(*label)
                         .style(label_style.clone())
                         .transform(Transform::from_xyz(0.0, dy, 0.0))
                         .build(),
@@ -270,7 +270,7 @@ fn spawn_world_text_column(
         });
         commands.entity(wt_title).with_children(|parent| {
             let mut sample = parent.spawn(
-                WorldText::new("Hello")
+                DiegeticText::world("Hello")
                     .style(style.clone().with_anchor(Anchor::TopLeft))
                     .transform(Transform::from_xyz(sample_dx, dy, 0.0))
                     .build(),

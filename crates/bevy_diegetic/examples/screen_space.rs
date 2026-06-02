@@ -10,13 +10,13 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Px;
-use bevy_diegetic::ScreenText;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_lagrange::LagrangePlugin;
@@ -215,7 +215,7 @@ fn spawn_hud(commands: &mut Commands) {
 /// label spawned with a single fluent chain, in contrast to the hand-built
 /// multi-element HUD panel above. Inset from the window's top-left corner.
 fn spawn_caption(commands: &mut Commands) {
-    ScreenText::new("ScreenText \u{2014} one fluent call, pixel-positioned")
+    DiegeticText::screen("ScreenText \u{2014} one fluent call, pixel-positioned")
         .size(CAPTION_SIZE)
         .color(CAPTION_COLOR)
         .screen_position(CAPTION_INSET, CAPTION_INSET)

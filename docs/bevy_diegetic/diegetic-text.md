@@ -120,6 +120,16 @@ uniformly for single- and multi-element panels — today the flow is tree→chil
 so mutating a child `TextContent` does not propagate back. **The mechanics of the
 resolve path and the reconcile inversion are the central forks — see OQ1, OQ2.**
 
+> **Caveat (as built, DT1=(b)).** The bullets above describe DT1=(a), which drops
+> `El.text`. The DECIDED variant is DT1=(b): `El.text` is **kept as a derived
+> cache** (see *Team review — cycle 1*). So the single-source claim is exact only
+> for a **single-line** run, where the line-0 child's `TextContent` equals the
+> run string. A **wrapped** run materializes as one child per visual line, each
+> holding a per-line *slice*; the authoritative full run string is then `El.text`
+> (the cache), not any child. The Phase 3 mutation API accounts for this:
+> `set_text` writes the line-0 child (reactor → `El.text` → re-wrap); `text` reads
+> `El.text`. See Phase 3 step 11.
+
 ### D3 — Element identifiers reuse `PanelFieldId`
 
 `El::text(text, config).id("title")` assigns a panel-local id, reusing
@@ -318,6 +328,8 @@ Each phase below cites the decision it implements.
    from scratch each reconcile; clear it on `set_tree`.
 
 ### Phase 2 — `TextContent` as the source (DT1=b, DT2=a)
+**Status: ✅ complete.**
+
 8. **`El.text` becomes a synced cache (DT1-b).** Add a sync step that writes
    `TextContent → El.text` before layout, ordered `.before(ApplyTreeChanges)`
    (the ordering `rebuild_fluent_text` already uses). The engine's read sites
@@ -334,31 +346,281 @@ Each phase below cites the decision it implements.
    and the observer filters it out; the marker is cleared the next frame (DTX-2=a).
    First-frame bootstrap is trivial — the string is in the cache at build time.
 
+### Retrospective
+
+**What worked:**
+- The cache+gate model landed exactly as DT1=(b)/DT2=(a)/DTX-2=(a) specified: a
+  `Changed<TextContent>` reactor writes `El.text` and dirties the panel; a
+  `ReconcileOwned` marker keeps reconcile's own writes from re-firing it.
+- The relayout property (edit a child `TextContent` → tree re-wraps) is proven by
+  `editing_child_text_content_relayouts_and_syncs_the_cache`.
+
+**What deviated from the plan:**
+- Steps 8 and 10 collapsed into **one** system, not two. They describe the same
+  mechanism (cache sync + dirty) from two angles; there is no separate per-frame
+  sync walk — that would be the O(n_elements) pass TR-L forbids.
+- "Observer" is a **regular system with a `Changed<TextContent>` query filter**,
+  not a Bevy `On<…>` observer. A `&mut TextContent` deref-mutation (how `PanelText`
+  will edit in Phase 3) sets the `Changed` flag but fires no `Insert` lifecycle
+  event, so an `On<Insert>` observer would miss the edit. Scheduled
+  `sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges)` +
+  `clear_reconcile_owned.after(sync_run_text_to_cache)` in `Update`.
+
+**Surprises:**
+- The cache write **must bump `tree_revision`** or `ScaledLayoutTreeCache` serves a
+  stale scaled tree (keyed on revision). Added `DiegeticPanel::sync_run_text_cache`
+  to pair the `El.text` write with the bump; `LayoutTree::set_element_text` returns
+  whether it changed so an equal string skips the bump (and the re-measure, per
+  TR-L).
+- `ReconcileOwned` must survive into the **next frame's** sync pass: reconcile
+  writes in `PostUpdate`, sync reads in the following `Update`, so the marker is
+  cleared `.after(sync)`, not eagerly.
+- `clippy::pedantic` surfaced latent Phase 0/1 debt (a lossy `f32 as u32` auto-id
+  cast, a non-`const` `take_auto_id`, and `reconcile_panel_text_children` over 100
+  lines). Fixed in passing — the >100-line function was split via
+  `collect_text_commands`. Phases 0/1 had been built/tested but not clippy-gated.
+
+**Implications for remaining phases:**
+- **Phase 3** mutates via `PanelText`'s `Query<&mut TextContent>` — a deref write,
+  which the Phase 2 reactor already observes. The relayout wiring Phase 3 depends on
+  is in place; Phase 3 adds only the lookup (`text_child`) and the write ergonomics.
+- The `text_index` (line-0 only) means `text_child(id)` returns the run's **first
+  line**; the Phase 2 reactor reads that child's full string into `El.text`, so a
+  multi-line run is edited by setting the whole run text on the line-0 entity. Phase
+  3's `set_text` helper and docs should say so.
+- **Phase 5** should run `cargo clippy` as a first-class gate (not only `build` +
+  tests), since pedantic catches what `build` does not.
+
+### Phase 2 Review
+
+Remaining phases reviewed against the Phase 2 retrospective by a `Plan` subagent.
+Outcomes folded in:
+
+- **Phase 3 step 12 — `PanelText` name collision.** The crate already has a
+  private `pub(super) struct PanelText`; rename it (`PreparedPanelText`) and keep
+  the public SystemParam named `PanelText`. Scope reader/writer queries
+  `With<PanelTextLayout>`, not bare `With<TextContent>`.
+- **Phase 3 step 11 — liveness re-scoped.** `DiegeticPanel::text_child` is an
+  unchecked `&self` index lookup (no `World` access); the TR-Q liveness `None`
+  lives in the SystemParam's `Query::get`. Phase 5's orphan test drives through
+  the SystemParam, not the bare method.
+- **Phase 3 step 11 — wrapped-run read/write semantics decided.** A wrapped run is
+  one child per line; `set_text` writes the line-0 child (reactor re-wraps),
+  `text` reads `El.text`. D2 got a matching caveat. The per-line-vs-per-run model
+  was raised by the user and left as a separate future investigation (per-line
+  keeps wrapping in the pure layout pass and gives per-line culling for scroll).
+- **Phase 3 step 11 — same-frame `set_tree` window.** `set_text` in the same frame
+  as `set_tree` no-ops until reconcile rebuilds the index; documented.
+- **Phase 4 step 13 — crate boundary.** The migration spans `bevy_lagrange`'s
+  examples (a sibling crate); build/verify each crate separately.
+- **Phase 5 step 14 — added gates/tests.** Clippy is a first-class gate; added a
+  wrapped multi-line `set_text` test and a single-pass assertion (exactly one
+  `ComputedDiegeticPanel` change per edit, proving the `ReconcileOwned` gate).
+
 ### Phase 3 — lookup + mutation API
+**Status: ✅ complete.**
+
 11. **`text_child` + helper (DT5, DT6-ii, DT4-ii).**
-    `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>`, backed by the
-    Phase-1 index, validating liveness (a despawned child returns `None`) with a
-    debug-only `warn!` on miss. `DiegeticText` gets a single-string helper
-    (`text()` / `set_text(…)`) for the one-run case — no id needed.
+    `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>` is an
+    **unchecked** index lookup — it returns the stored `Entity`, which may be
+    dead (the method takes `&self` and has no `World`/`Entities` access, so it
+    cannot validate liveness). The TR-Q liveness guarantee ("a despawned child
+    returns `None`") therefore lives one layer up, in the SystemParam (step 12):
+    its layout-query check (`self.layouts.contains(child)`) fails on a
+    dead/despawned entity, yielding `None`.
+    *Miss diagnostic (DT6-ii, discriminated).* A `text_index` miss is ambiguous —
+    a genuine typo vs. the id not yet materialized (first frame / post-`set_tree`,
+    while reconcile has not rebuilt the index). The index alone cannot tell them
+    apart, so a blind `warn!` on every miss would spam the not-ready window. The
+    **authoritative** oracle is the layout tree, which holds every valid id at
+    build time independent of reconcile timing. So on a miss the SystemParam
+    consults `panel.tree().contains_text_id(id)`: id absent from the tree → genuine
+    typo → debug-only `warn!`; id present in the tree (just not in the index yet,
+    or its entity died mid-frame) → silent. The `warn!` is `#[cfg(debug_assertions)]`
+    (zero release cost); `contains_text_id` is an O(elements) walk that runs only on
+    a miss. The one-run helper shipped as
+    `PanelText::sole_text(panel)` / `set_sole_text(panel, …)` (**not** the
+    originally-planned `text()`/`set_text()`: those names are the id-addressed
+    methods and Rust has no overloading) — no id needed; the helper resolves the
+    panel-root marker to its lone run via the SystemParam (`Query<&Children>` +
+    `With<PanelTextLayout>`, the `line_index == 0` child), since the run's `Auto`
+    id is not caller-addressable.
+    *Wrapped-run read/write semantics (decided).* A wrapped run materializes as
+    **one child per visual line** (the engine emits one `RenderCommandKind::Text`
+    per line, `positioning.rs`), and `text_index` keeps only the `line_index == 0`
+    child; the authoritative full run string is `El.text`
+    (`tree().element_text(idx)`), not any single child slice. Therefore:
+    `set_text(id, s)` **writes the line-0 child's `TextContent`** — the Phase 2
+    reactor syncs it to `El.text` and re-wraps (works single- and multi-line, the
+    caller passes the whole string); `text(id)` **reads `El.text`**, never the
+    line-0 slice (or a wrapped run's getter returns only its first line). The
+    per-line-entity model is pre-existing layout-engine architecture (wrapping is
+    resolved in the pure pass so the engine can size the container); a per-run
+    single-entity model was considered and left as a separate future
+    investigation, not a Phase 3 change.
+    *Same-frame caveat:* `set_tree` clears `text_index` immediately
+    (`diegetic_panel.rs` `set_tree_command`) but reconcile only repopulates it on
+    the next `Changed<ComputedDiegeticPanel>`, so a `text_child`/`set_text` call
+    in the same frame as a `set_tree` returns `None`/no-ops until the rebuild —
+    document this.
 12. **`PanelText` SystemParam + reader (TR-B).** `PanelText` bundles the panel +
     run queries for get/set by id; add a read-only `PanelTextReader` so reader
     systems don't serialize on `&mut TextContent`. The deferred
     `commands.set_panel_text(…)` extension is deferred until a consumer needs it
-    (TR-F).
+    (TR-F). **Name collision:** `render/panel_text/mod.rs` already has a private
+    `pub(super) struct PanelText` (the prepared-run component used by shaping /
+    mesh spawning). Free the name for the public SystemParam by renaming the
+    internal struct (e.g. `PreparedPanelText`); keep the public API named
+    `PanelText`. Scope the reader/writer run queries `With<PanelTextLayout>`
+    (not bare `With<TextContent>`) so they match only reconcile-spawned run
+    children, never a future standalone `TextContent`.
+
+### Retrospective
+
+**What worked:**
+- `PanelText`/`PanelTextReader` landed as one nested SystemParam pair
+  (`render/panel_text/access.rs`): `PanelText` embeds `PanelTextReader` as a field
+  and delegates every read to it, so the read logic exists once. Reads come from
+  the `El.text` cache (`tree().element_text(element_idx)`); the writer adds only
+  `Query<&mut TextContent, With<PanelTextLayout>>`.
+- TR-Q liveness is the SystemParam's layout-query check, not the bare lookup:
+  `entity()` does `text_child(id)` then `self.layouts.contains(child)`, so a run
+  despawned out of flow (before the next reconcile rebuilds `text_index`) reads
+  back `None`. Proven by `orphaned_run_resolves_to_none_through_the_system_param`.
+- The `PreparedPanelText` rename was confined to three files
+  (`mod.rs`/`shaping.rs`/`mesh_spawning.rs`), all `pub(super)`; done with
+  token-anchored edits, not a substring replace (which would have hit
+  `PanelTextLayout`).
+
+**What deviated from the plan:**
+- The one-run `DiegeticText` helper is `sole_text(panel)` / `set_sole_text(panel,
+  s)`, **not** the planned `text()` / `set_text()`. Rust has no overloading and
+  those names are the id-addressed methods (`text(panel, id)` /
+  `set_text(panel, id, s)`); a no-id overload is impossible, so the one-run path
+  got distinct names.
+- The liveness comment in step 11 promised a "debug-only `warn!`" on a lookup
+  miss. Not implemented: a miss is a quiet `None` (the `then_some` / `Query::get`
+  path). DT6-ii's `warn!` was never wired; left out to avoid log spam on the
+  legitimate "panel not built yet" case. Plan text overstates current behavior.
+- The named-run authoring API is `LayoutBuilder::text_id(id, text, config)`
+  (built in Phase 1), not the `El::text(..).id(..)` chain the prose still
+  references in places.
+
+**Surprises:**
+- Reading `text(id)` needs the run's `element_idx`, which lives on the child's
+  `PanelTextLayout`, not in `text_index` (id → Entity only). So a read is
+  id → Entity (index) → `element_idx` (layout query) → `El.text` (tree). Three
+  hops, all O(1).
+- `bevy_diegetic`'s **own** examples don't compile: Phase 1's `build() ->
+  Result<_, PanelBuildError>` broke `font_features.rs` (and others) that still
+  match `InvalidSize`. `cargo build -p bevy_diegetic` hides this (examples aren't
+  built); `cargo nextest`/`--examples` surfaces it. This is Phase 4 work but it
+  means the crate's example target is currently red.
+
+**Implications for remaining phases:**
+- **Phase 4** must fix the `InvalidSize` → `PanelBuildError` example breakage in
+  *this* crate's examples too, not only adopt the new API in `bevy_lagrange`. The
+  step 13 "crate boundary" note already says build/verify each crate separately;
+  the concrete first task is un-breaking `bevy_diegetic/examples/*`.
+- **Phase 5** test list (step 14) still references `DiegeticPanel::text_child` for
+  the orphan case and `set_text` for the wrapped case — the orphan test must go
+  through `PanelText`/`PanelTextReader` (it does, in `access.rs`); the wrapped
+  multi-line `set_text` test and the single-pass `ComputedDiegeticPanel`
+  assertion are **not yet written** (Phase 3 added single-line coverage only).
+- Plan prose mentioning `text()`/`set_text()` for the one-run case and the
+  debug-`warn!` on miss should be reconciled with the shipped `sole_text` /
+  quiet-`None` reality.
+
+### Phase 3 Review
+
+Remaining phases (4, 5) reviewed against the Phase 3 retrospective by a `Plan`
+subagent. Outcomes folded in:
+
+- **Phase 5 step 14 — re-scoped.** Six listed tests already shipped in
+  `access.rs` (named resolve, unknown-id, auto-not-addressable, mutate-relayouts,
+  orphan-through-SystemParam, `set_sole_text`); marked done so they aren't
+  re-authored. Genuinely open: duplicate-id-at-build, reorder (named survives /
+  auto respawns), `set_tree`-clears-index, wrapped multi-line `set_text`, and the
+  single-pass `ComputedDiegeticPanel` assertion.
+- **Phase 4 step 13 — split required/optional + scope corrected.** New 13a
+  (**required**): un-break the `InvalidSize`→`PanelBuildError` example breakage
+  from Phase 1, confirmed across `bevy_diegetic/examples/{font_features,units,
+  aa_text,cascade}.rs` and `bevy_lagrange/examples/{focus_bounds,follow_target,
+  animation}.rs`. 13b (optional): adopt `text_id` + `PanelText`. The old inventory
+  claim that examples "keep working" was wrong.
+- **Phase 5 step 15 — sequencing + path preconditions.** The perf gate can't run
+  until 13a makes `cascade` (et al.) compile; and since `PanelText` adoption is
+  optional (TR-I), at least one cube-face example must adopt it so the gate
+  profiles the new write path, not the old marker-query path.
+- **Prose corrected** in step 11 / step 13: `sole_text`/`set_sole_text` (not
+  `text`/`set_text`) for the one-run helper; `LayoutBuilder::text_id(id, …)` (not
+  a `.text(..).id(..)` chain) for named-run authoring.
+- **DT6-ii `warn!` decision (user-approved, option c).** The promised debug `warn!`
+  was not implemented (shipped a quiet `None`). Rather than strike it, wire it
+  *correctly*: discriminate a real typo from the not-yet-materialized window via
+  `LayoutTree::contains_text_id` (the tree is authoritative at build time; the
+  index is a reconcile-timed cache). `warn!` only when the id is absent from the
+  tree, `#[cfg(debug_assertions)]`-gated. Implemented as a Phase 3 follow-up (one
+  tree method + the debug check in `access.rs` + a test).
 
 ### Phase 4 — examples migration (separate pass)
-13. Apply the migration inventory (TR-I): auto-id leaves static `.text()` calls
-    unchanged; runtime-mutation sites keep their marker + `Query<&mut TextContent>`
-    pattern **or** adopt `.id()` + `PanelText`.
+13. Two tasks, **required** then **optional**:
+
+    **13a (required) — un-break the example targets.** Phase 1's
+    `build() -> Result<_, PanelBuildError>` (was `InvalidSize`) left several
+    examples red; `cargo build -p <crate>` hides this (examples are not built),
+    but `cargo nextest` / `--examples` surfaces it. Confirmed broken in this crate:
+    `font_features.rs` (a helper types a field `Result<DiegeticPanel,
+    InvalidSize>`), `units.rs`, `aa_text.rs`, `cascade.rs`; and in the sibling
+    crate: `bevy_lagrange/examples/{focus_bounds,follow_target,animation}.rs`.
+    Replace each `InvalidSize` match/annotation with `PanelBuildError`. This is
+    mechanical, not optional — Phase 5's perf gate (step 15) profiles `cascade`
+    and cannot run while it is red. A compile-green pass over both crates is a
+    valid Phase 4 stopping point.
+
+    **13b (optional) — adopt the new API.** Apply the migration inventory (TR-I):
+    auto-id leaves static `LayoutBuilder::text(...)` calls unchanged;
+    runtime-mutation sites keep their marker + `Query<&mut TextContent>` pattern
+    **or** adopt `LayoutBuilder::text_id(id, …)` + the `PanelText` / `PanelTextReader`
+    SystemParams (per step 12). Note: authoring a named run is
+    `text_id(id, text, config)` (Phase 1, `builder.rs:431`), **not** a `.text(..).id(..)`
+    chain; the one-run convenience is `sole_text` / `set_sole_text`, not
+    `text` / `set_text`.
+
+    **Crate boundary:** the inventory spans both this crate's examples and
+    `bevy_lagrange/examples/*` (a sibling crate with its own `Cargo.toml`); treat
+    them as one migration but build/verify each crate separately.
 
 ### Phase 5 — verify
-14. `cargo build && cargo +nightly fmt`, `/clippy`. Tests:
-    `text_child(id)` resolves a named run; an auto-id'd run is not addressable;
-    duplicate explicit ids error at build; mutating a run's `TextContent`
-    relayouts (the property D2 buys); a reorder keeps named runs and respawns auto
-    runs (TR-D); `set_tree` clears stale index entries and an orphaned id returns
-    `None` (TR-A).
-15. **Perf gate with criteria (TR-C, TR-L, TR-M).** Target < 16.7 ms/frame
+14. `cargo build && cargo +nightly fmt`, `/clippy` — clippy is a **first-class
+    gate**, not implied by `build`: pedantic caught latent Phase 0/1 debt that a
+    plain build passed (see the Phase 2 retrospective).
+    *Already shipped in Phase 3 (`access.rs` tests, do not re-author):*
+    `text_child(id)` resolves a named run
+    (`reader_resolves_a_named_run_and_reads_its_text`); an auto-id'd run is not
+    addressable (`auto_id_run_is_not_addressable_but_sole_text_reads_it`); an
+    unknown id resolves to `None` (`unknown_id_resolves_to_none`); mutating a run's
+    `TextContent` relayouts, the property D2 buys
+    (`set_text_through_panel_text_relayouts`); the orphan/liveness case **through
+    the SystemParam** (`orphaned_run_resolves_to_none_through_the_system_param`,
+    not the unchecked `DiegeticPanel::text_child`); `set_sole_text` retexts a
+    one-element panel (`set_sole_text_retexts_a_one_element_panel`).
+    *Still to write:* duplicate explicit ids error at build; a reorder keeps named
+    runs and respawns auto runs (TR-D); `set_tree` clears stale index entries; a
+    **wrapped multi-line run** edited via `set_text` — assert the full new string
+    relayouts and no line is dropped (the line-0-index edge, step 11; extend
+    `set_text_through_panel_text_relayouts` with a wrapping width); a **single-pass**
+    assertion that a `set_text` edit fires exactly one `ComputedDiegeticPanel`
+    change (the `ReconcileOwned` gate).
+15. **Perf gate with criteria (TR-C, TR-L, TR-M).** *Precondition:* this gate
+    cannot run until Phase 4 step 13 makes every cited example compile — several
+    are currently red on the `InvalidSize`→`PanelBuildError` break (`cascade`,
+    `units`, `aa_text`, `font_features`), and a red example cannot be profiled.
+    *Path caveat:* TR-I leaves `PanelText` adoption optional, so the cube-face
+    examples may still mutate via the old marker + `Query<&mut TextContent>` path;
+    to perf-gate the **new** `PanelText` write path, force `PanelText` adoption in
+    at least one cube-face example (or profile whichever path Phase 4 leaves in
+    place and say which). Target < 16.7 ms/frame
     release; flag > 5% over a `main` baseline. Profile the per-frame-`set_text`
     cube-face examples (`input_keyboard`, `orthographic`, `pausing`) — not only the
     static `cascade`/`paper_sizes`/`world_text` panels, **and** add a resize pass

@@ -38,10 +38,10 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
@@ -432,7 +432,7 @@ fn spawn_face_label_panels(parent: &mut ChildSpawnerCommands, label: &'static st
     }
 }
 
-fn face_label_panel(label: &str) -> Result<DiegeticPanel, InvalidSize> {
+fn face_label_panel(label: &str) -> Result<DiegeticPanel, PanelBuildError> {
     DiegeticPanel::world()
         .size(FACE_LABEL_PANEL_SIZE, FACE_LABEL_PANEL_SIZE)
         .font_unit(Unit::Millimeters)

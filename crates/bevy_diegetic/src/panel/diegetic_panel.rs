@@ -209,6 +209,24 @@ impl DiegeticPanel {
     /// The panel's coordinate space (world or screen).
     #[must_use]
     pub const fn coordinate_space(&self) -> &CoordinateSpace { &self.coordinate_space }
+
+    /// Resolves a text run's [`PanelFieldId`](crate::PanelFieldId) to the entity
+    /// reconcile materialized for it (its `line_index == 0` child), or `None` if
+    /// no run carries that id.
+    ///
+    /// This is an **unchecked** index read: it returns the stored `Entity` as-is.
+    /// The method takes `&self` with no `World`/`Entities` access, so it cannot
+    /// confirm the entity is still alive — an out-of-flow `despawn` would leave a
+    /// stale mapping until the next reconcile rebuilds the index. Liveness is
+    /// validated one layer up by the [`PanelText`](crate::PanelText) `SystemParam`,
+    /// whose `Query::get` on the returned entity yields `None` for a dead child.
+    ///
+    /// A `set_tree` in the same frame clears the index immediately, so a lookup
+    /// before the next reconcile pass returns `None`.
+    #[must_use]
+    pub fn text_child(&self, id: &crate::PanelFieldId) -> Option<Entity> {
+        self.text_index.get(id).copied()
+    }
 }
 
 // ── Public mutators ─────────────────────────────────────────────────────────

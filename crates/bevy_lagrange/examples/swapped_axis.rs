@@ -33,6 +33,7 @@ use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
@@ -42,7 +43,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextStyle;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::CameraMove;
@@ -745,7 +745,7 @@ fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>, mut meshes: ResMut<A
 fn spawn_label(root: &mut ChildSpawnerCommands, axis: usize, sign: f32, color: Color, glyph: &str) {
     root.spawn((
         AxisLabel { axis, sign },
-        WorldText::new(glyph)
+        DiegeticText::world(glyph)
             .size(AXIS_LABEL_SIZE)
             .color(color)
             .anchor(Anchor::Center)

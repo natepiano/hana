@@ -9,11 +9,11 @@
 
 use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
 use bevy_diegetic::GlyphRenderMode;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -155,7 +155,7 @@ fn setup(
     commands.spawn((
         Name::new("Headline"),
         CameraHomeTarget,
-        WorldText::new(HEADLINE_TEXT)
+        DiegeticText::world(HEADLINE_TEXT)
             .size(HEADLINE_SIZE)
             .color(LATIN_COLOR)
             .transform(Transform::from_xyz(0.0, HEADLINE_Y, DISPLAY_Z))
@@ -164,7 +164,7 @@ fn setup(
     commands.spawn((
         Name::new("Small line"),
         CameraHomeTarget,
-        WorldText::new(SMALL_TEXT)
+        DiegeticText::world(SMALL_TEXT)
             .size(SMALL_SIZE)
             .color(LATIN_COLOR)
             .transform(Transform::from_xyz(0.0, SMALL_Y, DISPLAY_Z))
@@ -175,7 +175,7 @@ fn setup(
     commands.spawn((
         Name::new("PunchOut row"),
         CameraHomeTarget,
-        WorldText::new(PUNCH_OUT_TEXT)
+        DiegeticText::world(PUNCH_OUT_TEXT)
             .size(PUNCH_OUT_SIZE)
             .color(PUNCH_OUT_COLOR)
             .render_mode(GlyphRenderMode::PunchOut)
@@ -200,7 +200,7 @@ fn on_font_registered(
     commands.spawn((
         Name::new("CJK row"),
         CameraHomeTarget,
-        WorldText::new(CJK_TEXT)
+        DiegeticText::world(CJK_TEXT)
             .size(CJK_SIZE)
             .font(font_id.0)
             .color(CJK_COLOR)

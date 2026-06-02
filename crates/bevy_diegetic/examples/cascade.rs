@@ -27,22 +27,22 @@ use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::FontUnit;
-use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::TextContent;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_diegetic::default_panel_material;
 use bevy_diegetic::resolved_font_unit;
 use bevy_diegetic::resolved_text_alpha;
@@ -249,7 +249,7 @@ fn setup(mut commands: Commands) {
     });
 
     commands.spawn(
-        WorldText::new(STANDALONE_TITLE_TEXT)
+        DiegeticText::world(STANDALONE_TITLE_TEXT)
             .size(WORLD_TITLE_SIZE)
             .color(HUD_HEADER_COLOR)
             .anchor(Anchor::TopLeft)
@@ -264,7 +264,7 @@ fn setup(mut commands: Commands) {
 
     let default_alpha = commands
         .spawn(
-            WorldText::new(alpha_line(DEFAULT_ALPHA_PREFIX, GLOBAL_ALPHA_A, "global"))
+            DiegeticText::world(alpha_line(DEFAULT_ALPHA_PREFIX, GLOBAL_ALPHA_A, "global"))
                 .size(WORLD_TEXT_SIZE)
                 .color(DEFAULT_COLOR)
                 .anchor(Anchor::TopLeft)
@@ -280,7 +280,7 @@ fn setup(mut commands: Commands) {
 
     let standalone_alpha = commands
         .spawn(
-            WorldText::new(alpha_line(STANDALONE_ALPHA_PREFIX, STANDALONE_ALPHA, "own"))
+            DiegeticText::world(alpha_line(STANDALONE_ALPHA_PREFIX, STANDALONE_ALPHA, "own"))
                 .size(WORLD_TEXT_SIZE)
                 .color(OVERRIDE_COLOR)
                 .anchor(Anchor::TopLeft)
@@ -297,7 +297,7 @@ fn setup(mut commands: Commands) {
 
     let standalone_unit = commands
         .spawn(
-            WorldText::new(unit_line(STANDALONE_UNIT_PREFIX, GLOBAL_UNIT_A, "global"))
+            DiegeticText::world(unit_line(STANDALONE_UNIT_PREFIX, GLOBAL_UNIT_A, "global"))
                 .size(WORLD_TEXT_SIZE)
                 .color(DEFAULT_COLOR)
                 .anchor(Anchor::TopLeft)
@@ -333,7 +333,7 @@ fn setup(mut commands: Commands) {
     }
 }
 
-fn build_scene_frame_panel() -> Result<DiegeticPanel, InvalidSize> {
+fn build_scene_frame_panel() -> Result<DiegeticPanel, PanelBuildError> {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
@@ -380,7 +380,7 @@ fn build_scene_frame_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
     builder.build()
 }
 
-fn build_hud_panel() -> Result<DiegeticPanel, InvalidSize> {
+fn build_hud_panel() -> Result<DiegeticPanel, PanelBuildError> {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()

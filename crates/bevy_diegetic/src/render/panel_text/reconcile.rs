@@ -15,6 +15,7 @@ use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
+use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
@@ -67,7 +68,7 @@ type PendingTextChild = (
 /// rather than the former positional `(element_idx, command_index)`.
 fn collect_text_commands(
     panel: &DiegeticPanel,
-    commands: &[crate::layout::RenderCommand],
+    commands: &[RenderCommand],
     clip_rects: &[Option<BoundingBox>],
     viewport: BoundingBox,
 ) -> Vec<PendingTextChild> {
@@ -690,6 +691,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
@@ -921,8 +923,8 @@ mod tests {
         builder.build()
     }
 
-    /// App with headless layout, the gated reconcile (PostUpdate), and the Phase
-    /// 2 `El.text` cache sync + marker clear (Update) wired in their real
+    /// App with headless layout, the gated reconcile (`PostUpdate`), and the Phase
+    /// 2 `El.text` cache sync + marker clear (`Update`) wired in their real
     /// ordering, so a test can exercise a child `TextContent` edit end to end.
     fn text_source_app() -> App {
         let mut app = App::new();
@@ -951,7 +953,7 @@ mod tests {
 
     fn content_width(app: &App, panel: Entity) -> f32 {
         app.world()
-            .get::<crate::panel::ComputedDiegeticPanel>(panel)
+            .get::<ComputedDiegeticPanel>(panel)
             .expect("computed panel should exist")
             .content_bounds()
             .expect("content bounds should exist")

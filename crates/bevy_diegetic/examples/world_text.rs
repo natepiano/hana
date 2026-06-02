@@ -25,7 +25,7 @@ use bevy::anti_alias::smaa::Smaa;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::WorldText;
+use bevy_diegetic::DiegeticText;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -174,7 +174,7 @@ fn spawn_anchor_demo(
 
     // Title.
     commands.spawn(
-        WorldText::new("Text Anchors")
+        DiegeticText::world("Text Anchors")
             .size(0.16)
             .color(Color::srgb(0.7, 0.8, 1.0))
             .anchor(Anchor::TopCenter)
@@ -191,7 +191,7 @@ fn spawn_anchor_demo(
         Transform::from_translation(demo_center + demo_rotation * Vec3::new(-0.60, 1.10, 0.01)),
     ));
     commands.spawn(
-        WorldText::new(" = Transform translation")
+        DiegeticText::world(" = Transform translation")
             .size(0.10)
             .color(Color::WHITE)
             .anchor(Anchor::TopLeft)
@@ -229,7 +229,7 @@ fn spawn_anchor_demo(
 
         // Text with the given anchor.
         commands.spawn((
-            WorldText::new(text)
+            DiegeticText::world(text)
                 .size(0.125)
                 .color(Color::WHITE)
                 .anchor(anchor)
@@ -247,7 +247,7 @@ fn spawn_anchor_demo(
 fn spawn_ground_text(commands: &mut Commands) {
     commands.spawn((
         CameraHomeTarget,
-        WorldText::new("GROUND PLANE")
+        DiegeticText::world("GROUND PLANE")
             .size(0.48)
             .color(Color::srgb(0.9, 0.9, 0.1))
             .transform(

@@ -1,4 +1,4 @@
-use bevy_diegetic::ScreenText;
+use bevy_diegetic::DiegeticText;
 
 use super::*;
 
@@ -12,7 +12,7 @@ pub(crate) fn spawn_ui(commands: &mut Commands) {
 
     // Paused overlay: a screen-space text label centered on the window, hidden
     // until Esc toggles the pause state.
-    let overlay = ScreenText::new(PAUSED_TEXT)
+    let overlay = DiegeticText::screen(PAUSED_TEXT)
         .size(PAUSED_OVERLAY_FONT_SIZE)
         .color(OVERLAY_TEXT_COLOR)
         .anchor(Anchor::Center)

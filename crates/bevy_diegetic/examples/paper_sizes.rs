@@ -16,6 +16,7 @@ use bevy_brp_extras::PortDisplay;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -25,7 +26,6 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
@@ -181,7 +181,7 @@ fn setup(
 
     // ── Title ────────────────────────────────────────────────────────
     commands.spawn(
-        WorldText::new("PaperSize — Portrait & Landscape")
+        DiegeticText::world("PaperSize — Portrait & Landscape")
             .size(0.04)
             .color(HEADER_COLOR)
             .anchor(Anchor::BottomCenter)

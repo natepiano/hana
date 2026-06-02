@@ -79,7 +79,7 @@ struct FontHandles(Vec<Handle<Font>>);
 struct SerifFontId(Option<u16>);
 
 fn build_panel_or_log(
-    panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
+    panel: Result<DiegeticPanel, bevy_diegetic::PanelBuildError>,
     label: &str,
 ) -> Option<DiegeticPanel> {
     match panel {

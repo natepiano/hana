@@ -1,5 +1,6 @@
 //! Text rendering systems for panel and world-space glyph meshes.
 
+mod access;
 mod alpha;
 mod glyph_cascade;
 mod layout;
@@ -10,6 +11,8 @@ mod shaping;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
+pub use self::access::PanelText;
+pub use self::access::PanelTextReader;
 use self::alpha::seed_panel_text_child_alpha;
 use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
@@ -36,8 +39,12 @@ use crate::panel::PanelSystems;
 use crate::text::PreparedTextRun;
 
 /// Stores a prepared text run for a panel [`TextContent`](crate::TextContent) child.
+///
+/// Internal render-pipeline component, distinct from the public
+/// [`PanelText`](crate::PanelText) `SystemParam` callers use to get/set run text
+/// by id.
 #[derive(Component)]
-pub(super) struct PanelText {
+pub(super) struct PreparedPanelText {
     /// Prepared text run.
     pub prepared:    PreparedTextRun,
     /// Glyph render mode for this text element.

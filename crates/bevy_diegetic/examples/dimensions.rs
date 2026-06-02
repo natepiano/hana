@@ -18,6 +18,7 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
@@ -29,7 +30,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
@@ -140,7 +140,7 @@ fn spawn_backdrop(
 fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f32) {
     commands
         .spawn(
-            WorldText::new("Dimension in layout properties")
+            DiegeticText::world("Dimension in layout properties")
                 .size(9.0)
                 .color(HEADER_COLOR)
                 .anchor(Anchor::TopLeft)
@@ -150,7 +150,7 @@ fn spawn_headers(commands: &mut Commands, left_x: f32, note_x: f32, header_y: f3
         .override_font_unit(Unit::Points);
     commands
         .spawn(
-            WorldText::new("How it works")
+            DiegeticText::world("How it works")
                 .size(9.0)
                 .color(HEADER_COLOR)
                 .anchor(Anchor::TopLeft)

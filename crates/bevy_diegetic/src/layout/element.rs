@@ -422,6 +422,18 @@ impl LayoutTree {
             })
     }
 
+    /// Whether any text-run element in the tree carries `id`.
+    ///
+    /// The tree is the authoritative list of valid run ids at build time,
+    /// independent of reconcile timing, so a lookup that misses the panel's
+    /// `text_index` consults this to tell a genuine typo (`id` absent here) from a
+    /// run not yet materialized into an entity (`id` present here, index just not
+    /// rebuilt). See [`PanelText`](crate::PanelText).
+    #[must_use]
+    pub(crate) fn contains_text_id(&self, id: &PanelFieldId) -> bool {
+        (0..self.elements.len()).any(|index| self.element_field_id(index) == Some(id))
+    }
+
     /// Returns the first author-assigned [`PanelFieldId::Named`] id that appears
     /// on more than one element, scanning text-run ids and editable-field ids
     /// together — they share one panel-local namespace. Auto ids are skipped
@@ -727,6 +739,7 @@ mod tests {
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
+    use crate::PanelFieldId;
     use crate::layout::Border;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -739,6 +752,25 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(text, style);
         builder.build()
+    }
+
+    #[test]
+    fn contains_text_id_discriminates_named_typo_from_present() {
+        let present = PanelFieldId::named("title");
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_id(present.clone(), "Hi", TextStyle::new(10.0));
+        let tree = builder.build();
+
+        // A present named id is found; a typo is not — this is the discriminator a
+        // `PanelText` lookup miss consults to tell a real typo from a not-yet-built
+        // run, so it only warns on the former.
+        assert!(tree.contains_text_id(&present));
+        assert!(!tree.contains_text_id(&PanelFieldId::named("typo")));
+
+        // An auto-id run (plain `.text`) is not name-addressable, so a named query
+        // never matches it.
+        let auto = text_tree("Hi", TextStyle::new(10.0));
+        assert!(!auto.contains_text_id(&PanelFieldId::named("Hi")));
     }
 
     fn root_tree(root: El) -> LayoutTree {

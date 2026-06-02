@@ -17,6 +17,7 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
@@ -33,7 +34,6 @@ use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextContent;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
-use bevy_diegetic::WorldText;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
@@ -323,7 +323,7 @@ fn setup(
     // overlay bounds entity that is spawned for the rebuilt overlay.
     commands.spawn((
         DisplayText,
-        WorldText::new(initial_word)
+        DiegeticText::world(initial_word)
             .size(DISPLAY_SIZE)
             .color(Color::srgb(0.9, 0.9, 0.9))
             .transform(Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z))
@@ -335,7 +335,7 @@ fn setup(
     // reading toward the camera so the overlay never overlaps it.
     commands.spawn((
         CommentText,
-        WorldText::new(initial_comment)
+        DiegeticText::world(initial_comment)
             .size(COMMENT_SIZE)
             .color(COMMENT_COLOR)
             .transform(Transform {

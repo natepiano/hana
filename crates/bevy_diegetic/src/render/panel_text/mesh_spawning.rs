@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToF32;
 
-use super::PanelText;
 use super::PanelTextLayout;
+use super::PreparedPanelText;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
@@ -61,10 +61,10 @@ pub(super) fn free_run_storage_on_mesh_removal(
 /// keeps Geometry-mode layering correct (M2).
 pub(super) fn update_panel_text_geometry(
     changed_runs: Query<
-        (Entity, &PanelText, &PanelTextLayout, &ChildOf),
-        (With<TextContent>, Changed<PanelText>),
+        (Entity, &PreparedPanelText, &PanelTextLayout, &ChildOf),
+        (With<TextContent>, Changed<PreparedPanelText>),
     >,
-    mut emptied_runs: RemovedComponents<PanelText>,
+    mut emptied_runs: RemovedComponents<PreparedPanelText>,
     old_meshes: Query<(Entity, &ChildOf), With<DiegeticTextMesh>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
     resolved_alphas: Query<&Resolved<TextAlpha>, With<TextContent>>,
@@ -116,7 +116,7 @@ pub(super) fn update_panel_text_geometry(
     }
 
     // R10: when a run's text empties, `shape_panel_text_children` removes its
-    // `PanelText` (not `Changed`, so the loop above misses it). Despawn the
+    // `PreparedPanelText` (not `Changed`, so the loop above misses it). Despawn the
     // now-stale mesh so the observer frees the run storage. Idempotent against a
     // recursively despawned `TextContent` — that label's mesh is already gone, so
     // the lookup finds nothing and no double-despawn occurs.
@@ -135,7 +135,7 @@ pub(super) fn update_panel_text_geometry(
 ///
 /// A run that also changed geometry this frame is rebuilt by
 /// [`update_panel_text_geometry`] with the resolved alpha already baked in, so
-/// this system skips it via `Ref<PanelText>::is_changed()` (M7). With that skip
+/// this system skips it via `Ref<PreparedPanelText>::is_changed()` (M7). With that skip
 /// the two systems need no ordering edge: in any run order the geometry rebuild
 /// owns a both-changed run, and the skip keeps this system off the material
 /// handle the geometry system may have just despawned. The write is
@@ -146,7 +146,7 @@ pub(super) fn update_panel_text_geometry(
 /// through `ChildOf`, not on the label itself.
 pub(super) fn update_panel_text_alpha(
     changed_alphas: Query<
-        (Entity, Ref<PanelText>, &Resolved<TextAlpha>),
+        (Entity, Ref<PreparedPanelText>, &Resolved<TextAlpha>),
         (With<TextContent>, Changed<Resolved<TextAlpha>>),
     >,
     run_meshes: Query<(&ChildOf, &MeshMaterial3d<TextMaterial>), With<DiegeticTextMesh>>,
@@ -187,7 +187,7 @@ fn despawn_label_mesh(
 
 struct PanelTextSpawnRequest<'a, 'w, 's> {
     mesh_parent:        Entity,
-    panel_run:          &'a PanelText,
+    panel_run:          &'a PreparedPanelText,
     panel_text_child:   &'a PanelTextLayout,
     text_base:          &'a StandardMaterial,
     resolved_alpha:     AlphaMode,
@@ -544,7 +544,7 @@ mod tests {
         let untouched_mesh_before =
             mesh_of_label(&mut app, untouched).expect("Beta mesh should exist");
 
-        // Recolor only "Alpha". Color rides in PanelText.fill_color, so its run
+        // Recolor only "Alpha". Color rides in PreparedPanelText.fill_color, so its run
         // is a geometry rebuild; "Beta" is byte-identical and must be left alone.
         app.world_mut()
             .commands()
@@ -614,7 +614,7 @@ mod tests {
         assert_eq!(material_alpha(&app, mesh_before), AlphaMode::Blend);
 
         // Change only the global default alpha: the label has no override, so
-        // its Resolved<TextAlpha> changes while PanelText does not — an
+        // its Resolved<TextAlpha> changes while PreparedPanelText does not — an
         // alpha-only update.
         app.world_mut()
             .resource_mut::<CascadeDefault<TextAlpha>>()
@@ -670,9 +670,9 @@ mod tests {
         assert!(mesh_of_label(&mut app, label).is_some());
         assert_eq!(run_storage_len(&app), 1);
 
-        // Empty the run's text. `shape_panel_text_children` removes `PanelText`
+        // Empty the run's text. `shape_panel_text_children` removes `PreparedPanelText`
         // (not `Changed`), and the geometry system's
-        // `RemovedComponents<PanelText>` reaction despawns the now-stale mesh
+        // `RemovedComponents<PreparedPanelText>` reaction despawns the now-stale mesh
         // (R10); the observer frees its run storage. No stale glyph remains.
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text("", TextStyle::new(10.0));

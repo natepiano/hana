@@ -21,6 +21,7 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
@@ -34,7 +35,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
 use bevy_lagrange::AnimationBegin;
@@ -248,7 +248,7 @@ fn toggle_smaa(
 }
 
 fn build_panel_or_log(
-    panel: Result<DiegeticPanel, bevy_diegetic::InvalidSize>,
+    panel: Result<DiegeticPanel, bevy_diegetic::PanelBuildError>,
     label: &str,
 ) -> Option<DiegeticPanel> {
     match panel {
@@ -422,7 +422,7 @@ fn spawn_a4_with_titles(
 
     commands
         .spawn(
-            WorldText::new("A4 Paper — 210 × 297 mm")
+            DiegeticText::world("A4 Paper — 210 × 297 mm")
                 .size(18.0)
                 .color(Color::WHITE)
                 .anchor(Anchor::BottomCenter)
@@ -432,7 +432,7 @@ fn spawn_a4_with_titles(
         .override_font_unit(Unit::Points);
     commands
         .spawn(
-            WorldText::new("US Business Card — 3½ × 2 in")
+            DiegeticText::world("US Business Card — 3½ × 2 in")
                 .size(18.0)
                 .color(Color::WHITE)
                 .anchor(Anchor::BottomCenter)
@@ -494,7 +494,7 @@ fn spawn_photo_panel_with_title(
         .observe(on_panel_clicked);
     commands
         .spawn(
-            WorldText::new("Photo — 5 × 7 in")
+            DiegeticText::world("Photo — 5 × 7 in")
                 .size(18.0)
                 .color(Color::WHITE)
                 .anchor(Anchor::BottomCenter)

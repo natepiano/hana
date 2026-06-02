@@ -26,14 +26,15 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::InvalidSize;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
@@ -41,7 +42,6 @@ use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
-use bevy_diegetic::WorldText;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
@@ -343,7 +343,7 @@ fn setup(
     commands.spawn((
         Name::new("Headline"),
         CameraHomeTarget,
-        WorldText::new(HEADLINE_TEXT)
+        DiegeticText::world(HEADLINE_TEXT)
             .size(HEADLINE_SIZE)
             .color(TEXT_COLOR)
             .transform(Transform::from_xyz(SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z))
@@ -352,7 +352,7 @@ fn setup(
     commands.spawn((
         Name::new("Small line"),
         CameraHomeTarget,
-        WorldText::new(SMALL_TEXT)
+        DiegeticText::world(SMALL_TEXT)
             .size(SMALL_SIZE)
             .color(TEXT_COLOR)
             .transform(Transform::from_xyz(SCENE_X_OFFSET, SMALL_Y, DISPLAY_Z))
@@ -984,7 +984,7 @@ const fn post_label(post: PostAa) -> &'static str {
 
 fn cube_panel_material() -> StandardMaterial { cube_face_panel_material() }
 
-fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, InvalidSize> {
+fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, PanelBuildError> {
     let transparent = cube_panel_material();
     DiegeticPanel::world()
         .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)

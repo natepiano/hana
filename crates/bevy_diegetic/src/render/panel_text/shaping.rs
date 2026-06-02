@@ -4,8 +4,8 @@ use std::time::Instant;
 use bevy::math::Vec4;
 use bevy::prelude::*;
 
-use super::PanelText;
 use super::PanelTextLayout;
+use super::PreparedPanelText;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -108,7 +108,7 @@ struct QuadPlacement {
 fn clear_panel_text_output(entity: Entity, commands: &mut Commands) {
     commands
         .entity(entity)
-        .remove::<(PanelText, AwaitingReady)>();
+        .remove::<(PreparedPanelText, AwaitingReady)>();
 }
 
 fn build_panel_text(
@@ -119,7 +119,7 @@ fn build_panel_text(
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
     cache: &mut ShapedTextCache,
-) -> (Option<PanelText>, TextBuildStats) {
+) -> (Option<PreparedPanelText>, TextBuildStats) {
     let mut stats = TextBuildStats {
         texts: 1,
         ..Default::default()
@@ -171,7 +171,7 @@ fn build_panel_text(
         .to_array()
     });
     (
-        Some(PanelText {
+        Some(PreparedPanelText {
             prepared,
             render_mode: config.render_mode(),
             shadow_mode: config.shadow_mode(),
@@ -213,7 +213,7 @@ fn panel_clip_rect_local(
 /// no longer where the label's alpha is computed.
 fn apply_panel_result(
     entity: Entity,
-    panel_text: Option<PanelText>,
+    panel_text: Option<PreparedPanelText>,
     readiness: GlyphReadiness,
     commands: &mut Commands,
 ) {
