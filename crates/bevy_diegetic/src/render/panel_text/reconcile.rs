@@ -5,6 +5,8 @@ use bevy::prelude::*;
 use bevy_kana::ToF32;
 
 use super::PanelTextLayout;
+use super::PanelTextRuns;
+use super::TextRunOf;
 use crate::PanelFieldId;
 use crate::cascade;
 use crate::cascade::Override;
@@ -109,22 +111,25 @@ fn collect_text_commands(
 /// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
 pub(super) fn reconcile_panel_text_children(
     mut changed_panels: Query<
-        (Entity, &mut DiegeticPanel, &ComputedDiegeticPanel),
+        (
+            Entity,
+            &mut DiegeticPanel,
+            &ComputedDiegeticPanel,
+            Option<&PanelTextRuns>,
+        ),
         Changed<ComputedDiegeticPanel>,
     >,
-    existing_children: Query<(
-        Entity,
+    existing_runs: Query<(
         &TextContent,
         &TextStyle,
         &PanelTextLayout,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextLighting>>,
         Option<&Override<TextSidedness>>,
-        &ChildOf,
     )>,
     mut commands: Commands,
 ) {
-    for (panel_entity, mut panel, computed) in &mut changed_panels {
+    for (panel_entity, mut panel, computed, panel_runs) in &mut changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
@@ -143,24 +148,28 @@ pub(super) fn reconcile_panel_text_children(
         // behavior; named ids survive the reorder.
         let text_commands = collect_text_commands(&panel, &result.commands, &clip_rects, viewport);
 
+        // Source the panel's existing runs from `PanelTextRuns` (the typed
+        // text-run index) rather than scanning every `TextContent` child and
+        // filtering by parent. `None` means no run has spawned yet (first pass).
+        let existing_run_entities: &[Entity] = panel_runs.map_or(&[][..], |runs| &**runs);
         let mut existing_by_key: HashMap<(PanelFieldId, usize), ReusableChild> = HashMap::new();
-        for (entity, text, style, layout, alpha, lighting, sidedness, child_of) in
-            &existing_children
-        {
-            if child_of.parent() == panel_entity {
-                existing_by_key.insert(
-                    (layout.id.clone(), layout.line_index),
-                    ReusableChild {
-                        entity,
-                        text,
-                        style,
-                        layout,
-                        alpha,
-                        lighting,
-                        sidedness,
-                    },
-                );
-            }
+        for &entity in existing_run_entities {
+            let Ok((text, style, layout, alpha, lighting, sidedness)) = existing_runs.get(entity)
+            else {
+                continue;
+            };
+            existing_by_key.insert(
+                (layout.id.clone(), layout.line_index),
+                ReusableChild {
+                    entity,
+                    text,
+                    style,
+                    layout,
+                    alpha,
+                    lighting,
+                    sidedness,
+                },
+            );
         }
 
         let mut visited_keys: Vec<(PanelFieldId, usize)> = Vec::new();
@@ -223,10 +232,11 @@ pub(super) fn reconcile_panel_text_children(
             }
         }
 
-        for (entity, _, _, layout, _, _, _, child_of) in &existing_children {
-            if child_of.parent() == panel_entity
-                && !visited_keys.contains(&(layout.id.clone(), layout.line_index))
-            {
+        for &entity in existing_run_entities {
+            let Ok((_, _, layout, _, _, _)) = existing_runs.get(entity) else {
+                continue;
+            };
+            if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
                 commands.entity(entity).despawn();
             }
         }
@@ -315,11 +325,16 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
     } = request;
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
+        // `TextRunOf` is inserted only here, on a newly spawned run; the reuse
+        // branch must never re-insert it (a reused run already carries it, and
+        // re-inserting would fire the relationship hook and mutate
+        // `PanelTextRuns` on a no-op). `with_children` already adds `ChildOf`.
         let mut child = children.spawn((
             TextContent::new(text.to_owned()),
             style,
             layout,
             ReconcileOwned,
+            TextRunOf(panel_entity),
         ));
         spawned = child.id();
         if let Some(alpha_mode) = label_alpha {

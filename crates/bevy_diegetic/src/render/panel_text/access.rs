@@ -1,17 +1,25 @@
-//! Public get/set access to a panel's text runs, addressed by
-//! [`PanelFieldId`].
+//! Public get/set access to a panel's text runs.
 //!
-//! [`PanelText`] is the read-write `SystemParam`; [`PanelTextReader`] is the
-//! read-only variant a reader system uses so it does not serialize on the
-//! `&mut TextContent` claim. Both resolve a run through the panel's
-//! `id → Entity` index ([`DiegeticPanel::text_child`]) and validate liveness via
-//! their `PanelTextLayout` query, so a despawned run reads back as `None` rather
-//! than a dangling `Entity` (TR-Q).
+//! Two ways to address a run divide the public surface:
+//! - **By user marker** — [`DiegeticTextMut`] retexts standalone
+//!   [`DiegeticText`](crate::DiegeticText) labels: name a marker `M`, call `set`/`for_each_mut`. It
+//!   hops the panel→run relationship internally, the ergonomic path for "retext my labels".
+//! - **By [`PanelFieldId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
+//!   multi-run panel; [`PanelTextReader`] is the read-only variant a reader system uses so it does
+//!   not serialize on the `&mut TextContent` claim.
+//!
+//! The id-addressed pair resolve a run through the panel's `id → Entity` index
+//! ([`DiegeticPanel::text_child`]) and validate liveness via their
+//! `PanelTextLayout` query, so a despawned run reads back as `None` rather than
+//! a dangling `Entity` (TR-Q). The lone-run helpers ([`PanelTextReader::sole_text`],
+//! [`PanelText::set_sole_text`], and [`DiegeticTextMut`]) resolve a label's run
+//! through its [`PanelTextRuns`] set.
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use super::PanelTextLayout;
+use super::PanelTextRuns;
 use crate::PanelFieldId;
 use crate::panel::DiegeticPanel;
 use crate::render::world_text::TextContent;
@@ -25,7 +33,7 @@ use crate::render::world_text::TextContent;
 /// parallel with other text readers.
 #[derive(SystemParam)]
 pub struct PanelTextReader<'w, 's> {
-    panels:  Query<'w, 's, (&'static DiegeticPanel, Option<&'static Children>)>,
+    panels:  Query<'w, 's, (&'static DiegeticPanel, Option<&'static PanelTextRuns>)>,
     layouts: Query<'w, 's, &'static PanelTextLayout>,
 }
 
@@ -85,23 +93,28 @@ impl PanelTextReader<'_, '_> {
         data.tree().element_text(layout.element_idx)
     }
 
-    /// Resolves a one-element panel's lone `line_index == 0` run entity. The
-    /// run's `Auto` id is not caller-addressable, so the lone run is found by
-    /// walking the panel's children rather than the id index. Returns `None` when
-    /// the panel has no run or more than one (the call is ambiguous then).
+    /// Resolves a one-element panel's lone `line_index == 0` run entity from its
+    /// [`PanelTextRuns`] set. The run's `Auto` id is not caller-addressable, so
+    /// the lone run is found through the relationship rather than the id index.
+    ///
+    /// Filters `line_index == 0` rather than taking [`PanelTextRuns::sole`]: a
+    /// wrapped run materializes as one entity per visual line, so its set holds
+    /// several entities yet still has one logical run (its line-0 entity).
+    /// Returns `None` when the panel has no run or more than one distinct run
+    /// (the call is ambiguous then).
     fn sole_run_entity(&self, panel: Entity) -> Option<Entity> {
-        let (_, children) = self.panels.get(panel).ok()?;
-        let children = children?;
+        let (_, runs) = self.panels.get(panel).ok()?;
+        let runs = runs?;
         let mut found = None;
-        for child in children {
-            let Ok(layout) = self.layouts.get(*child) else {
+        for run in runs.iter() {
+            let Ok(layout) = self.layouts.get(run) else {
                 continue;
             };
             if layout.line_index == 0 {
                 if found.is_some() {
                     return None;
                 }
-                found = Some(*child);
+                found = Some(run);
             }
         }
         found
@@ -174,6 +187,97 @@ impl PanelText<'_, '_> {
     }
 }
 
+/// The `line_index == 0` entity of a label's lone run, or `None` when the set
+/// has no run or more than one distinct run.
+///
+/// Shared by [`DiegeticTextMut`]; the same rule
+/// [`PanelTextReader::sole_run_entity`] applies, so a wrapped label (one entity
+/// per visual line) resolves to its line-0 entity rather than `None`.
+fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<Entity> {
+    let mut found = None;
+    for run in runs.iter() {
+        let Ok(layout) = layouts.get(run) else {
+            continue;
+        };
+        if layout.line_index == 0 {
+            if found.is_some() {
+                return None;
+            }
+            found = Some(run);
+        }
+    }
+    found
+}
+
+/// Ergonomic mutation of standalone [`DiegeticText`](crate::DiegeticText) labels
+/// addressed by a user marker `M` — the public path for "retext my labels".
+///
+/// A standalone label is a one-element panel: the marker `M` sits on the panel
+/// entity, but the editable [`TextContent`] sits on the run child, so a naive
+/// `Query<&mut TextContent, With<M>>` matches nothing. This `SystemParam` hops
+/// the panel→run relationship internally, so a caller names only its own marker
+/// and never touches [`PanelTextRuns`] / [`TextContent`] / `sole()`:
+///
+/// ```ignore
+/// fn rename(mut labels: DiegeticTextMut<CubeFaceLabel>) {
+///     labels.set("hello");
+/// }
+/// ```
+///
+/// [`set`](Self::set) writes one string to every `M`-marked label (a single
+/// label or a uniform update); [`for_each_mut`](Self::for_each_mut) yields each
+/// label's marker and editable text for per-label strings. Both resolve a
+/// label's lone run by its `line_index == 0` entity, so a wrapped label is
+/// editable too.
+///
+/// Monomorphizes per distinct marker type used in a system (a handful),
+/// independent of label count; an unused marker costs nothing. For an
+/// id-addressed run on a multi-run panel, use [`PanelText`] instead.
+#[derive(SystemParam)]
+pub struct DiegeticTextMut<'w, 's, M: Component> {
+    runs:    Query<'w, 's, (&'static M, &'static PanelTextRuns)>,
+    layouts: Query<'w, 's, &'static PanelTextLayout>,
+    content: Query<'w, 's, &'static mut TextContent>,
+}
+
+impl<M: Component> DiegeticTextMut<'_, '_, M> {
+    /// Writes `text` to every `M`-marked label's lone run, returning how many
+    /// labels were written.
+    pub fn set(&mut self, text: impl Into<String>) -> usize {
+        let text = text.into();
+        let mut written = 0;
+        for (_marker, runs) in &self.runs {
+            let Some(run) = lone_run(runs, &self.layouts) else {
+                continue;
+            };
+            let Ok(mut content) = self.content.get_mut(run) else {
+                continue;
+            };
+            content.set_text(text.clone());
+            written += 1;
+        }
+        written
+    }
+
+    /// Calls `f` with each `M`-marked label's marker and its editable
+    /// [`TextContent`], for setting a different string per label. Returns how
+    /// many labels were visited.
+    pub fn for_each_mut(&mut self, mut f: impl FnMut(&M, &mut TextContent)) -> usize {
+        let mut visited = 0;
+        for (marker, runs) in &self.runs {
+            let Some(run) = lone_run(runs, &self.layouts) else {
+                continue;
+            };
+            let Ok(mut content) = self.content.get_mut(run) else {
+                continue;
+            };
+            f(marker, &mut content);
+            visited += 1;
+        }
+        visited
+    }
+}
+
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -186,6 +290,7 @@ mod tests {
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
+    use super::DiegeticTextMut;
     use super::PanelText;
     use super::PanelTextReader;
     use crate::Mm;
@@ -201,6 +306,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::panel_text::PanelTextLayout;
+    use crate::render::panel_text::PanelTextRuns;
     use crate::render::panel_text::reconcile;
     use crate::text::DiegeticTextMeasurer;
 
@@ -458,5 +564,95 @@ mod tests {
             })
             .expect("system runs");
         assert_eq!(sole.as_deref(), Some("Bye"));
+    }
+
+    /// Marks a panel as a single retextable label for [`DiegeticTextMut`].
+    #[derive(Component)]
+    struct Label;
+
+    /// Marks a panel and carries which face it is, so a per-label update can set
+    /// a different string per marked panel.
+    #[derive(Component)]
+    struct Face(u8);
+
+    #[test]
+    fn panel_text_runs_populates_and_sole_returns_the_lone_run() {
+        let mut app = access_app();
+        let panel = settled_panel(&mut app, auto_tree("Hi"));
+
+        let runs = app
+            .world()
+            .get::<PanelTextRuns>(panel)
+            .expect("a reconciled panel should carry PanelTextRuns");
+        assert_eq!(runs.len(), 1, "a single-line label has exactly one run");
+        assert!(
+            runs.sole().is_some(),
+            "a one-run set resolves through sole()"
+        );
+    }
+
+    #[test]
+    fn diegetic_text_mut_set_retexts_a_marked_label() {
+        let mut app = access_app();
+        let panel = spawn_panel(&mut app, auto_tree("Hi"));
+        app.world_mut().entity_mut(panel).insert(Label);
+        app.update();
+        app.update();
+        let before = content_width(&app, panel);
+
+        let written = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Label>| labels.set("Hello World"))
+            .expect("system runs");
+        assert_eq!(written, 1, "one marked label is written");
+        app.update();
+
+        let sole = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(panel).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert_eq!(sole.as_deref(), Some("Hello World"));
+        let after = content_width(&app, panel);
+        assert!(
+            after > before,
+            "the wider string should relayout: width {before} -> {after}",
+        );
+    }
+
+    #[test]
+    fn diegetic_text_mut_for_each_mut_sets_per_label_strings() {
+        let mut app = access_app();
+        let front = spawn_panel(&mut app, auto_tree("A"));
+        let back = spawn_panel(&mut app, auto_tree("B"));
+        app.world_mut().entity_mut(front).insert(Face(0));
+        app.world_mut().entity_mut(back).insert(Face(1));
+        app.update();
+        app.update();
+
+        let visited = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Face>| {
+                labels.for_each_mut(|face, content| content.set_text(format!("face {}", face.0)))
+            })
+            .expect("system runs");
+        assert_eq!(visited, 2, "both marked labels are visited");
+        app.update();
+
+        let front_text = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(front).map(str::to_owned)
+            })
+            .expect("system runs");
+        let back_text = app
+            .world_mut()
+            .run_system_once(move |reader: PanelTextReader| {
+                reader.sole_text(back).map(str::to_owned)
+            })
+            .expect("system runs");
+        assert_eq!(front_text.as_deref(), Some("face 0"));
+        assert_eq!(back_text.as_deref(), Some("face 1"));
     }
 }

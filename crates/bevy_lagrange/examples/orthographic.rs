@@ -13,7 +13,7 @@ use bevy::camera::ScalingMode;
 use bevy::light::CascadeShadowConfig;
 use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
-use bevy_diegetic::TextContent;
+use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::OrbitCamSystemSet;
@@ -124,7 +124,7 @@ fn switch_projection(
     key_input: Res<ButtonInput<KeyCode>>,
     mut choice: ResMut<ProjectionChoice>,
     mut camera_query: Query<(&mut OrbitCam, &mut Projection)>,
-    mut face_labels: Query<&mut TextContent, With<CubeFaceLabel>>,
+    mut face_labels: DiegeticTextMut<CubeFaceLabel>,
 ) {
     let next_choice = if key_input.just_pressed(KeyCode::KeyO) {
         ProjectionChoice::Orthographic
@@ -176,24 +176,19 @@ const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(0.1);
 const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUBE FACE LABELS — WorldText labels on every cube face that swap when the
+// CUBE FACE LABELS — world-space DiegeticText labels on every cube face that swap when the
 // projection mode changes.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const ORTHOGRAPHIC_LABEL: &str = "Orthographic";
 const PERSPECTIVE_LABEL: &str = "Perspective";
 
-fn update_face_labels(
-    face_labels: &mut Query<&mut TextContent, With<CubeFaceLabel>>,
-    choice: ProjectionChoice,
-) {
+fn update_face_labels(face_labels: &mut DiegeticTextMut<CubeFaceLabel>, choice: ProjectionChoice) {
     let label = match choice {
         ProjectionChoice::Orthographic => ORTHOGRAPHIC_LABEL,
         ProjectionChoice::Perspective => PERSPECTIVE_LABEL,
     };
-    for mut face_label in face_labels {
-        face_label.set_text(label);
-    }
+    face_labels.set(label);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

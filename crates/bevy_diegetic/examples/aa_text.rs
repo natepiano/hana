@@ -35,6 +35,8 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelBuildError;
+use bevy_diegetic::PanelFieldId;
+use bevy_diegetic::PanelText;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
@@ -996,6 +998,14 @@ fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, Pane
         .build()
 }
 
+/// Field ids for the cube status panel's three runs. The panel's structure is
+/// fixed — these three rows always exist, only their text changes — so each row
+/// is a named run that [`refresh_cube_status_panels`] retexts in place via
+/// [`PanelText`] rather than rebuilding the whole tree with `set_tree`.
+const STATUS_FIELD_MSAA: &str = "msaa";
+const STATUS_FIELD_OIT: &str = "oit";
+const STATUS_FIELD_POST: &str = "post";
+
 fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
         El::new()
@@ -1011,12 +1021,12 @@ fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
         .with_color(Color::WHITE)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
-    for label in [
-        msaa_label(snapshot.msaa),
-        oit_label(snapshot.oit_enabled),
-        post_label(snapshot.post),
+    for (field, label) in [
+        (STATUS_FIELD_MSAA, msaa_label(snapshot.msaa)),
+        (STATUS_FIELD_OIT, oit_label(snapshot.oit_enabled)),
+        (STATUS_FIELD_POST, post_label(snapshot.post)),
     ] {
-        builder.text(label, style.clone());
+        builder.text_id(PanelFieldId::named(field), label, style.clone());
     }
     builder.build()
 }
@@ -1051,7 +1061,7 @@ fn refresh_cube_status_panels(
     post: Res<PostAa>,
     panels: Query<Entity, With<CubeStatusPanel>>,
     mut last_snapshot: Local<Option<CubeStatusSnapshot>>,
-    mut commands: Commands,
+    mut panel_text: PanelText,
 ) {
     let fallback_msaa = if oit.0 || *post == PostAa::Taa {
         Msaa::Off
@@ -1069,8 +1079,24 @@ fn refresh_cube_status_panels(
         return;
     }
     *last_snapshot = Some(snapshot);
+    // The tree built at spawn already named these three runs, so each row is
+    // retext in place — only the changed strings relayout, no tree rebuild.
     for entity in &panels {
-        commands.set_tree(entity, build_cube_status_tree(snapshot));
+        panel_text.set_text(
+            entity,
+            &PanelFieldId::named(STATUS_FIELD_MSAA),
+            msaa_label(snapshot.msaa),
+        );
+        panel_text.set_text(
+            entity,
+            &PanelFieldId::named(STATUS_FIELD_OIT),
+            oit_label(snapshot.oit_enabled),
+        );
+        panel_text.set_text(
+            entity,
+            &PanelFieldId::named(STATUS_FIELD_POST),
+            post_label(snapshot.post),
+        );
     }
 }
 

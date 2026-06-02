@@ -43,8 +43,8 @@ use crate::constants::GROUND_PLANE_ROUGHNESS;
 /// Names a single face of an axis-aligned cube.
 ///
 /// Used by [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text)
-/// and [`cube_face_text`] to place a centered `WorldText` label on one face
-/// of a cube.
+/// and [`cube_face_text`] to place a centered [`DiegeticText`] label on one
+/// face of a cube.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Face {
     /// +Z face.
@@ -84,9 +84,9 @@ impl Face {
     }
 }
 
-/// Bundle that renders a single line of [`WorldText`] centered on one face of
-/// a cube. Spawn as a child of the cube entity (or independently using the
-/// cube's transform as a parent).
+/// Bundle that renders a single line of world-space [`DiegeticText`] centered on
+/// one face of a cube. Spawn as a child of the cube entity (or independently
+/// using the cube's transform as a parent).
 ///
 /// Use this when you spawn a cube manually with `commands.spawn`. For cubes
 /// built through [`PrimitiveBuilder`](crate::PrimitiveBuilder), prefer
@@ -310,11 +310,18 @@ enum PrimitiveKind {
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct FairyDustCube;
 
-/// Marker inserted on the per-face [`WorldText`] labels of a cube.
+/// Marker inserted on the per-face [`DiegeticText`] labels of a cube.
 ///
-/// Lets a caller retarget only the cube's face labels (e.g. `Query<&mut
-/// WorldText, With<CubeFaceLabel>>`) without also matching panel-child or other
-/// `WorldText`.
+/// Lets a caller retarget only the cube's face labels without also matching
+/// panel-child or other text. The label's editable string lives in a
+/// `TextContent` run child, so address it through `DiegeticTextMut<M>` keyed on
+/// this marker rather than a direct `TextContent` query:
+///
+/// ```ignore
+/// fn relabel_faces(mut labels: DiegeticTextMut<CubeFaceLabel>) {
+///     labels.set("Orthographic");
+/// }
+/// ```
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CubeFaceLabel;
 

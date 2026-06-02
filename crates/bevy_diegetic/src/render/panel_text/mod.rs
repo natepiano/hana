@@ -6,11 +6,13 @@ mod glyph_cascade;
 mod layout;
 mod mesh_spawning;
 mod reconcile;
+mod relationship;
 mod shaping;
 
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
+pub use self::access::DiegeticTextMut;
 pub use self::access::PanelText;
 pub use self::access::PanelTextReader;
 use self::alpha::seed_panel_text_child_alpha;
@@ -23,6 +25,8 @@ use self::reconcile::clear_reconcile_owned;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 use self::reconcile::sync_run_text_to_cache;
+pub use self::relationship::PanelTextRuns;
+pub use self::relationship::TextRunOf;
 use self::shaping::shape_panel_text_children;
 use super::PanelChildSystems;
 use super::text_shaping::TextShapingContext;
@@ -74,6 +78,10 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
+        // Reflection parity only; the `#[relationship]` derive installs the
+        // maintenance hooks, so the set populates without these registrations.
+        app.register_type::<TextRunOf>();
+        app.register_type::<PanelTextRuns>();
         // The `El.text` cache sync runs before layout consumes the tree; the
         // marker clear runs after, so a reconcile-owned write stays filtered for
         // exactly the one sync pass that would otherwise re-fire on it.

@@ -6,7 +6,7 @@
 //!   +/-    — zoom
 
 use bevy::prelude::*;
-use bevy_diegetic::TextContent;
+use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
@@ -95,7 +95,7 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUBE FACE LABELS — live WorldText labels showing which bound keys are down.
+// CUBE FACE LABELS — live world-space DiegeticText labels showing which bound keys are down.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const ORBIT_FACE_KEYS: [(KeyCode, &str); 4] = [
@@ -189,7 +189,7 @@ fn update_face_labels(
     keys: Res<ButtonInput<KeyCode>>,
     mut hold: ResMut<FaceLabelHold>,
     guidance: Res<FaceGuidance>,
-    mut labels: Query<(&KeyboardFaceLabel, &mut TextContent)>,
+    mut labels: DiegeticTextMut<KeyboardFaceLabel>,
 ) {
     let orbit = held_label(
         &mut hold.orbit,
@@ -213,7 +213,7 @@ fn update_face_labels(
         "Zoom",
     );
 
-    for (kind, mut label) in &mut labels {
+    labels.for_each_mut(|kind, label| {
         let next = match kind {
             KeyboardFaceLabel::Orbit => orbit.as_str(),
             KeyboardFaceLabel::Pan => pan.as_str(),
@@ -222,7 +222,7 @@ fn update_face_labels(
         if label.text() != next {
             label.set_text(next);
         }
-    }
+    });
 }
 
 /// The control labels configured for `kind`, joined for the idle face display.

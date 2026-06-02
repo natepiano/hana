@@ -162,47 +162,95 @@ have one — it is no longer optional addressing sugar. Therefore:
   are positional-stable and not publicly addressable. *Name it to address it* —
   unnamed text still renders, you just cannot grab it later.
 
-### D5 — Lookup and mutation API
+### D5 — Lookup and mutation API (relationship-based; revised by D7)
 
-- **Primitive**: `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>`,
-  backed by an `id → Entity` index the panel holds and reconcile maintains (O(1);
-  reconcile already walks the children, so upkeep is negligible). For a
-  `DiegeticText` (single element) it resolves the one child.
-- **SystemParam** for synchronous get/set inside a system:
+> The original D5 (a SystemParam-only `PanelText` over `text_index`) shipped in
+> Phase 3. A post-Phase-3 design pass replaced its traversal with the D7
+> relationship; the revised three-layer API is below. All three layers read or
+> write a single source string — `TextContent` on the run child (D2).
+
+- **Traversal — the `TextRunOf` / `PanelTextRuns` relationship (D7).** Each run
+  child carries `TextRunOf(panel)`; the panel carries the Bevy-maintained
+  `PanelTextRuns(Vec<Entity>)`. A system reaches a panel's runs by querying the
+  component: `Query<&PanelTextRuns, With<Marker>>`. For a `DiegeticText` (one
+  run) `PanelTextRuns::sole() -> Option<Entity>` returns it with no id — this is
+  what makes a standalone label addressable from a marker on the panel entity.
+- **Named lookup — `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>`,**
+  the O(1) `id → Entity` map the panel retains, for a multi-run panel where a
+  scan over `PanelTextRuns` would be O(n) (a large, possibly hidden panel must
+  not table-scan). Unchecked: it returns the stored entity, which may be dead;
+  the caller's content query or relationship membership confirms liveness.
+- **Mutation — `DiegeticTextMut<M>` (the ergonomic public path; see Phase 4
+  step 15).** A crate user retexts a marked label with one SystemParam and one
+  call — `fn rename(mut labels: DiegeticTextMut<CubeFaceLabel>) { labels.set("hi"); }`
+  — never touching `PanelTextRuns`/`TextContent`/`sole()`. The two-query form below
+  is the mechanism `DiegeticTextMut` wraps internally, shown for understanding, not
+  as the API users are expected to write:
 
   ```rust
-  #[derive(SystemParam)]
-  pub struct PanelText<'w, 's> {
-      panels:  Query<'w, 's, &'static DiegeticPanel>,
-      content: Query<'w, 's, &'static mut TextContent, With<PanelTextChild>>,
-  }
-
-  impl PanelText<'_, '_> {
-      pub fn entity(&self, panel: Entity, id: &PanelFieldId) -> Option<Entity> {
-          self.panels.get(panel).ok()?.text_child(id)
-      }
-      pub fn set(&mut self, panel: Entity, id: &PanelFieldId, text: impl Into<String>) -> bool {
-          let Some(child) = self.entity(panel, id) else { return false };
-          self.content.get_mut(child).map(|mut c| c.set_text(text)).is_ok()
+  fn rename(
+      labels: Query<&PanelTextRuns, With<MyLabelMarker>>,
+      mut content: Query<&mut TextContent>,
+  ) {
+      for runs in &labels {
+          let Some(run) = runs.sole() else { continue };
+          let Ok(mut text) = content.get_mut(run) else { continue };
+          text.set_text("hello world");
       }
   }
   ```
 
-  Cost is exactly the two queries plus the O(1) index hit — synchronous, no
-  deferral. Scoping `With<PanelTextChild>` limits the mutable-access claim.
+  `PanelText` / `PanelTextReader` stay as the id-addressed convenience for
+  multi-run panels (`set_text(panel, &id, …)`) and for `sole_text` /
+  `set_sole_text`; their internals resolve through the relationship + the
+  `text_child` map rather than the old `Children` walk.
 
-- **Deferred write convenience (optional)**: a `Commands` extension mirroring
-  `DiegeticPanelCommands::set_tree` (`diegetic_panel.rs:400-411`, which runs via
-  `run_system_cached_with`), e.g. `commands.set_panel_text(panel, id, "new")`,
-  queuing a one-shot that resolves via the index and writes. A getter can **not**
-  be a command — commands are deferred and return nothing; reads must be the
-  SystemParam/method above. See OQ4.
+No string duplication: the relationship and the map both store entity
+references, never text. The string lives in one `TextContent`. (A deferred
+`Commands` write extension — `commands.set_panel_text(panel, id, "new")` — stays
+optional, deferred until a consumer needs it; reads must be the query/method
+forms above, since commands return nothing. See OQ4.)
 
 ### D6 — `TextStyle` unchanged
 
 `TextStyle` stays exactly as `unify_text.md` left it: the authoring config
 (`El::text(.., TextStyle)`, held by `DiegeticText`) and the per-child component
 (`#[require]` on `PanelTextChild`) are deliberately the same type. No change.
+
+### D7 — Panel↔run relationship (`TextRunOf` / `PanelTextRuns`)
+
+A typed Bevy 0.19 relationship links a panel to its text runs, alongside the
+`ChildOf` hierarchy the runs already sit in (syntax mirrors `ChildOf`/`Children`,
+`bevy_ecs-0.19.0-rc.2/src/hierarchy.rs:105-152`):
+
+```rust
+#[derive(Component)]
+#[relationship(relationship_target = PanelTextRuns)]
+pub struct TextRunOf(#[entities] pub Entity);
+
+#[derive(Component)]
+#[relationship_target(relationship = TextRunOf)]
+pub struct PanelTextRuns(Vec<Entity>);
+```
+
+- **Why this, not just `Children`.** `Children` mixes text runs with a panel's
+  other children (SDF geometry, images). `PanelTextRuns` holds only text runs, so
+  traversal needs no `With<PanelTextLayout>` filter and the lone run of a
+  `DiegeticText` is found with `PanelTextRuns::sole()`.
+- **The problem it fixes.** A standalone `DiegeticText` is a one-element panel: a
+  user marker sits on the **panel** entity, but `TextContent` sits on the run
+  **child**, so `Query<&mut TextContent, With<Marker>>` matches nothing (the
+  cube-face label path `orthographic`/`input_keyboard` is broken by exactly this).
+  The relationship gives a marker query on the panel a typed hop to its run.
+- **What it replaces.** The hand-built `text_index` full rebuild every reconcile
+  pass (reconcile.rs:167-237) for the *liveness + traversal* job; Bevy maintains
+  `PanelTextRuns` as runs spawn/despawn. The `id → Entity` map is retained **only**
+  for O(1) `PanelFieldId` lookup — a relationship target is an ordered `Vec`, not
+  keyed by id.
+- **No duplication.** Entity references only; the string stays single-homed in the
+  run child's `TextContent` (D2). The run keeps `ChildOf(panel)` too (transform
+  propagation, despawn); `TextRunOf` is an additive typed index over the text-run
+  subset.
 
 ## Open questions — resolved in cycle 1
 
@@ -269,9 +317,13 @@ substantive work:
   (the sugar is new); effectively nothing to migrate.
 - **Runtime mutation sites** — `bevy_lagrange/examples/input_manual.rs:277`,
   `input_keyboard.rs:192`, `orthographic.rs:127`, `bevy_diegetic/examples/`
-  `typography.rs:641-642`. These keep working (`TextContent` stays the source
-  under D2); optionally adopt named ids + the `PanelText` SystemParam where it
-  reads cleaner than the current marker-component queries.
+  `typography.rs:641-642`. **Correction (D7):** the three cube-face sites
+  (`input_manual`, `input_keyboard`, `orthographic`) do **not** keep working — a
+  `DiegeticText` marker sits on the panel entity while `TextContent` sits on the
+  run child, so their `&mut TextContent` queries match nothing. They are migrated
+  to `DiegeticTextMut<M>` in Phase 5 step 16c (this is required, not optional).
+  Sites that mutate a run they already hold the `Entity`/id for (panel-internal
+  cases) still work via `TextContent` directly.
 - **`.text()` callers that get mutated** — add explicit `.id(...)` to just those
   few runs.
 - **Standalone `TextContent` spawn docs** (`render/world_text/readiness.rs:15`) —
@@ -562,39 +614,406 @@ subagent. Outcomes folded in:
   index is a reconcile-timed cache). `warn!` only when the id is absent from the
   tree, `#[cfg(debug_assertions)]`-gated. Implemented as a Phase 3 follow-up (one
   tree method + the debug check in `access.rs` + a test).
+- **Plan revised after Phase 3 — Panel↔run relationship inserted (D7).** A
+  design pass found that the marker-on-panel + `TextContent`-on-child split
+  leaves a standalone `DiegeticText` unaddressable by the natural
+  `Query<&mut TextContent, With<Marker>>` (marker and text on different entities;
+  the cube-face label path is broken by it). The fix is a typed
+  `TextRunOf`/`PanelTextRuns` relationship — it becomes the new **Phase 4**,
+  pushing examples → **Phase 5** and verify → **Phase 6**. Phase 3's
+  `PanelText`/`text_index` access still stands; Phase 4 re-homes its traversal
+  onto the relationship.
 
-### Phase 4 — examples migration (separate pass)
-13. Two tasks, **required** then **optional**:
+### Phase 4 — Panel↔run relationship (D7)
+**Status: ✅ complete.**
 
-    **13a (required) — un-break the example targets.** Phase 1's
-    `build() -> Result<_, PanelBuildError>` (was `InvalidSize`) left several
-    examples red; `cargo build -p <crate>` hides this (examples are not built),
-    but `cargo nextest` / `--examples` surfaces it. Confirmed broken in this crate:
-    `font_features.rs` (a helper types a field `Result<DiegeticPanel,
-    InvalidSize>`), `units.rs`, `aa_text.rs`, `cascade.rs`; and in the sibling
-    crate: `bevy_lagrange/examples/{focus_bounds,follow_target,animation}.rs`.
-    Replace each `InvalidSize` match/annotation with `PanelBuildError`. This is
-    mechanical, not optional — Phase 5's perf gate (step 15) profiles `cascade`
-    and cannot run while it is red. A compile-green pass over both crates is a
-    valid Phase 4 stopping point.
+Inserted after Phase 3. Delivers the simple `DiegeticText` mutation API and fixes
+the broken marker path before any example migration depends on it.
 
-    **13b (optional) — adopt the new API.** Apply the migration inventory (TR-I):
-    auto-id leaves static `LayoutBuilder::text(...)` calls unchanged;
-    runtime-mutation sites keep their marker + `Query<&mut TextContent>` pattern
-    **or** adopt `LayoutBuilder::text_id(id, …)` + the `PanelText` / `PanelTextReader`
-    SystemParams (per step 12). Note: authoring a named run is
-    `text_id(id, text, config)` (Phase 1, `builder.rs:431`), **not** a `.text(..).id(..)`
-    chain; the one-run convenience is `sole_text` / `set_sole_text`, not
-    `text` / `set_text`.
+13. **Introduce the relationship pair.** Add `TextRunOf` (on each run child,
+    `#[relationship(relationship_target = PanelTextRuns)]`, `#[entities] pub Entity`)
+    and `PanelTextRuns` (on the panel, `#[relationship_target(relationship = TextRunOf)]`,
+    `Vec<Entity>`). In `spawn_panel_text_child` (reconcile.rs:305-336), insert
+    `TextRunOf(panel_entity)` on the spawned child so Bevy maintains
+    `PanelTextRuns` automatically. The run keeps `ChildOf(panel)` for
+    transform/despawn — `TextRunOf` is an additive typed index over the text-run
+    subset. Add `PanelTextRuns::sole() -> Option<Entity>` (the lone run iff the set
+    has exactly one), plus a thin `iter()` passthrough.
 
-    **Crate boundary:** the inventory spans both this crate's examples and
-    `bevy_lagrange/examples/*` (a sibling crate with its own `Cargo.toml`); treat
-    them as one migration but build/verify each crate separately.
+    *Verified setup details (Phase 4-6 review, grounded in `bevy_ecs-0.19.0-rc.2/src/hierarchy.rs`):*
+    - **Module home + exports.** Define both in a new
+      `render/panel_text/relationship.rs`; re-export from `panel_text/mod.rs` and
+      `lib.rs`. `PanelTextRuns` is part of the public API — a consumer writes
+      `Query<&PanelTextRuns, With<Marker>>`, so it must be nameable.
+    - **No `linked_spawn` on `PanelTextRuns`.** `ChildOf`/`Children` already
+      `linked_spawn`-despawns the runs when the panel dies (hierarchy.rs:148); a
+      second `linked_spawn` on `PanelTextRuns` would be a second recursive-despawn
+      path (double-despawn). Without it, `PanelTextRuns` still auto-empties when a
+      run despawns — the relationship's on-remove hook drops it from the `Vec`
+      regardless. `ChildOf` owns despawn; `TextRunOf` is a typed traversal index.
+    - **Field form matches `ChildOf`.** `ChildOf(#[entities] pub Entity)` ships a
+      public field plus a `parent()` accessor (hierarchy.rs:107, :112); mirror it —
+      `TextRunOf(#[entities] pub Entity)` with a `panel()` accessor. The TR-K
+      unforgeability rule is for the `PanelFieldId::Auto` value variant, not a
+      relationship source; the relationship machinery is the writer here.
+    - **`Deref<[Entity]>` for `PanelTextRuns`.** `Children` impls it
+      (hierarchy.rs:255); do the same so `sole()` reads the private `Vec` via
+      `len()`/indexing and consumers get `len()`/`iter()`/`for run in runs` free.
+    - **Reuse path must not re-insert `TextRunOf`.** Insert it only on *newly
+      spawned* runs (the `with_children` spawn). The reconcile reuse branch
+      (reconcile.rs:~200-244) must skip it — a reused run already carries it, and
+      re-inserting fires the relationship hook and mutates `PanelTextRuns` on a
+      no-op, breaking the "mutates only on spawn/despawn" perf invariant (step 18).
+    - **`register_type` is reflection-only.** The `#[relationship]` derive registers
+      the maintenance hooks; `app.register_type::<TextRunOf>()` /
+      `::<PanelTextRuns>()` is needed only for inspector/reflection parity, not for
+      the relationship to populate. Add it for parity; correctness does not depend
+      on it.
 
-### Phase 5 — verify
-14. `cargo build && cargo +nightly fmt`, `/clippy` — clippy is a **first-class
-    gate**, not implied by `build`: pedantic caught latent Phase 0/1 debt that a
-    plain build passed (see the Phase 2 retrospective).
+14. **Rewire reconcile + retain the named map.** Reconcile's reuse pass scans
+    `existing_children` filtered by `child_of.parent() == panel_entity`
+    (reconcile.rs:147-164); source the panel's existing runs from `PanelTextRuns`
+    instead. Keep the `text_index` (`id → Entity`) map for O(1) `PanelFieldId`
+    lookup — the relationship target is an unkeyed `Vec`, and a large (possibly
+    hidden) multi-run panel must not table-scan. Division of labor: the
+    relationship owns liveness + traversal + single-run findability; the map owns
+    named O(1) lookup. `set_tree` still empties `text_index` immediately
+    (diegetic_panel.rs:478), but the old runs stay alive — and stay in
+    `PanelTextRuns` — until reconcile despawns them next pass. So in the
+    same-frame-after-`set_tree` window, `sole()`/`text_child(id)` can hand back a
+    run about to be despawned; this is a wasted write, not corruption (the
+    documented Phase 3 same-frame caveat), and the SystemParam's liveness check
+    (`self.layouts.contains(child)`, access.rs) resolves a genuinely-dead entity to
+    `None`. `PanelTextRuns` and `text_index` can transiently disagree across this
+    window; neither is authoritative outside reconcile.
+
+15. **Re-home sole-run access on the relationship.** `PanelTextReader::sole_text`
+    / `PanelText::set_sole_text` resolve the lone run via `Query<&PanelTextRuns>` +
+    `sole()` instead of the `Query<&Children>` walk filtered by
+    `With<PanelTextLayout>` (access.rs:92-108). Named `text`/`set_text` keep
+    `text_child(id)`. Document the canonical `DiegeticText` retext as the two-query
+    marker form (D5): `Query<&PanelTextRuns, With<Marker>>` + `Query<&mut
+    TextContent>`, `runs.sole()` → `content.get_mut(run)` → `set_text`. Add a
+    `PanelTextRuns::sole()` helper test and the end-to-end marker-retext test
+    (Phase 6).
+
+    *Marker-driven convenience SystemParam — `DiegeticTextMut<M>` (Phase 4-6
+    review, user-decided).* The bare two-query `sole()` form is the wrong public
+    ergonomics for "retext a label": no crate user should hand-write a `sole()` +
+    `get_mut()` + loop to set one string. Add a marker-generic SystemParam that owns
+    both queries so the caller names only its own marker:
+
+    ```rust
+    #[derive(SystemParam)]
+    pub struct DiegeticTextMut<'w, 's, M: Component> {
+        runs:    Query<'w, 's, (Entity, &'static PanelTextRuns), With<M>>,
+        content: Query<'w, 's, &'static mut TextContent>,
+    }
+    impl<M: Component> DiegeticTextMut<'_, '_, M> {
+        pub fn set(&mut self, text: impl Into<String>) -> usize;       // every M: same string
+        pub fn iter_mut(&mut self) -> impl Iterator<Item = (Entity, Mut<TextContent>)>;
+    }
+    ```
+
+    Caller: `fn rename(mut labels: DiegeticTextMut<CubeFaceLabel>) { labels.set("hi"); }`
+    — one param, one call, no `PanelTextRuns`/`TextContent`/`sole()` in user code.
+    `set` covers the single-label and uniform cases; `iter_mut` covers per-entity
+    different strings (cube faces) while still hiding the `sole()`/`get_mut()` hop.
+    Internally `set`/`iter_mut` resolve each matching panel's lone run via
+    `PanelTextRuns::sole()`. Monomorphization is per *distinct marker type used in a
+    system* (a handful), independent of label-entity count; an unused marker costs
+    nothing.
+    *Keep `PanelText`/`PanelTextReader`* for the entity-addressed named-multi-run
+    case (`set_text(panel, &id, …)` via `text_index`). Division of the public
+    surface: marker → `DiegeticTextMut<M>`; named id on a multi-run panel →
+    `PanelText`. Document both in the `access.rs` module doc and link from D5.
+
+    *As built (Phase 4 review — supersedes the snippets above on three points).*
+    - **`DiegeticTextMut` holds three queries, not two.** Resolving a label's lone
+      run filters `line_index == 0` (so a *wrapped* label still resolves), which
+      needs `PanelTextLayout`: `runs: Query<(&M, &PanelTextRuns)>`,
+      `layouts: Query<&PanelTextLayout>`, `content: Query<&mut TextContent>`. The
+      marker `&M` is read directly, so there is no `With<M>` filter.
+    - **`for_each_mut`, not `iter_mut`.** The shipped per-label method is
+      `for_each_mut(&mut self, impl FnMut(&M, &mut TextContent)) -> usize` — a Bevy
+      mutable many-entity query is a lending iterator and cannot be an
+      `impl Iterator`. It yields the marker `&M` (more useful than the run entity
+      for per-label dispatch). `set(text) -> usize` is unchanged.
+    - **The lone run is resolved by the `line_index == 0` helper, not
+      `PanelTextRuns::sole()`.** `sole()` is count-based (`Some` only for a
+      one-entity set), so it returns `None` for a wrapped label. The two-query
+      `runs.sole()` → `get_mut` snippet (D5) is therefore correct *only for a
+      single-line label* — treat it as illustration, not the canonical pattern.
+      The canonical retext is `DiegeticTextMut<M>::set` / `for_each_mut`; the
+      `access.rs` `lone_run` helper does the wrapped-safe resolution behind it.
+
+### Retrospective
+
+**What worked:**
+- The relationship pair landed in a new `render/panel_text/relationship.rs`
+  (`TextRunOf` / `PanelTextRuns`), re-exported through `panel_text/mod.rs`,
+  `render/mod.rs`, and `lib.rs`. `PanelTextRuns` auto-populates from the
+  `#[relationship]` derive's hooks — the plugin only `register_type`s the pair
+  for reflection parity. Proven by `panel_text_runs_populates_and_sole_returns_the_lone_run`.
+- `DiegeticTextMut<M>` retexts marked labels end to end: `set` (uniform) and the
+  per-label form both relayout. Proven by `diegetic_text_mut_set_retexts_a_marked_label`
+  and `diegetic_text_mut_for_each_mut_sets_per_label_strings`.
+- Reconcile now sources a panel's existing runs from `PanelTextRuns` (reuse pass
+  + despawn pass), not a world-wide `TextContent` scan filtered by parent.
+- 246 `bevy_diegetic` tests pass (+3 new), `cargo build --workspace --examples`
+  is green, and clippy (pedantic/nursery) is clean.
+
+**What deviated from the plan:**
+- **`iter_mut` → `for_each_mut`.** The planned
+  `iter_mut() -> impl Iterator<Item = (Entity, Mut<TextContent>)>` is not
+  implementable: a Bevy mutable many-entity query is a *lending* iterator
+  (`QueryManyIter` / `fetch_next`) and cannot be returned as `impl Iterator`, and
+  collecting `Vec<Mut<_>>` aliases the query. Shipped
+  `for_each_mut(&mut self, impl FnMut(&M, &mut TextContent)) -> usize`. It yields
+  the **marker `&M`** (not the run `Entity`), which is strictly more useful for
+  per-label dispatch — a cube face maps its string off the marker, which the run
+  entity cannot provide.
+- **`sole_run_entity` keeps the `line_index == 0` filter** instead of calling
+  `PanelTextRuns::sole()`. A wrapped `DiegeticText` materializes as one run entity
+  per visual line, so its set holds >1 entity and count-based `sole()` returns
+  `None` — using it would regress wrapped-label resolution that the old `Children`
+  walk supported. `sole()` (exactly-one-entity) is kept for the genuinely-single
+  case (tests, simple labels). `DiegeticTextMut` shares the same `line_index == 0`
+  helper (`lone_run`), so it is wrapped-correct too — at the cost of an internal
+  third query (`PanelTextLayout`) the plan's two-query snippet did not show. The
+  public surface is unchanged: the caller still names only `M`.
+- **`existing_runs` reconcile query dropped `Entity` + `&ChildOf`** — runs now
+  arrive from `PanelTextRuns`, so the query is random-access (`get(run)`) and
+  needs neither the entity column nor the parent filter.
+
+**Surprises:**
+- The `#[relationship_target]` derive generates an inherent
+  `iter(&self) -> impl Iterator<Item = Entity>` (by value). My own inherent
+  `iter()` returning `slice::Iter<&Entity>` shadowed it with different item
+  semantics and broke the `for &run` loops; removed it and rely on the derive's
+  `iter()` (yields `Entity`) plus `Deref<[Entity]>` for `len()`/indexing. Loops
+  bind `for run in runs.iter()` with `run: Entity`.
+- `Reflect` registration needs `FromWorld` for `TextRunOf` (mirrors `ChildOf`):
+  Reflect deserialize constructs-then-patches, so a relationship source needs a
+  placeholder ctor. Added `impl FromWorld for TextRunOf` returning
+  `Entity::PLACEHOLDER`.
+
+**Implications for remaining phases:**
+- **Phase 5 step 16c/16d** must use `for_each_mut(|face, content| …)` (not the
+  planned `iter_mut`) for per-label strings, and `set` for uniform updates. The
+  marker `M` must carry the face/label identity (cube-face marker already does),
+  since `for_each_mut` yields `&M`, not the run entity.
+- **Phase 6 step 17** — some relationship tests shipped early in `access.rs`
+  (`PanelTextRuns` populate + `sole`, `DiegeticTextMut::set`,
+  `for_each_mut` per-label). Still to write: panel despawn drops all runs with no
+  panic/double-despawn; two no-op reconcile passes mutate `PanelTextRuns` zero
+  times (the per-frame-free invariant); `set_tree` empties then repopulates;
+  `sole()` is `None` for a multi-run panel.
+
+### Phase 4 Review
+
+Remaining phases (5, 6) reviewed against the Phase 4 retrospective by a `Plan`
+subagent. All twelve findings had a single in-intent outcome (align the plan with
+the shipped API or cover a test/site gap) — none was a user decision, so all were
+applied straight into the plan:
+
+- **Step 16c — third broken site added.** `input_manual.rs:277`
+  (`Query<(&ManualFaceLabel, &mut TextContent)>`) is broken by D7 exactly like
+  `input_keyboard`; added as a required migration target →
+  `DiegeticTextMut<ManualFaceLabel>::for_each_mut`. Migration inventory's "keeps
+  working" claim corrected.
+- **Step 16c — per-face identity source clarified.** The per-face dispatch keys on
+  the example-local enum (`KeyboardFaceLabel`/`ManualFaceLabel`), not on
+  `fairy_dust::CubeFaceLabel` (a unit struct with no identity — only
+  `orthographic`'s uniform `set` keys on it). Audit grep widened to bare
+  `&mut TextContent` (markers sit in the query tuple, not a `With<>` filter).
+- **Step 16c / step 15 — canonical doc-example corrected.** The `CubeFaceLabel`
+  doc-example must show a `DiegeticTextMut::set` call, never the two-query
+  `sole()` form (wrong for a wrapped label). Step 15 gained an *As built* note:
+  `DiegeticTextMut` holds three queries, ships `for_each_mut` (not `iter_mut`),
+  and resolves the lone run by `line_index == 0`, not `PanelTextRuns::sole()`.
+- **Step 16d — distinct marker types are required, not stylistic.**
+  `DiegeticTextMut<M>` is type-keyed, so the two standalone texts need distinct
+  markers (`WorldLabel`/`ScreenLabel`); the two panels address by `PanelFieldId`.
+- **Step 17 — `iter_mut` test struck (already shipped as `for_each_mut`).** Added
+  the wrapped-label resolution test through `DiegeticTextMut`/`sole_text` (a new
+  untested path — all existing tests are single-line). Specified the no-op
+  reconcile probe (settle, then force a `ComputedDiegeticPanel` change without a
+  run spawn/despawn, assert `Changed<PanelTextRuns>` is false) since a literal
+  no-op never runs the reuse branch and the spawn pass would false-positive.
+- **Step 18 — `pausing` re-bucketed** from per-frame-`set_text` to the tree-swap
+  churn group (it mutates via `set_tree`); stale `PanelText` → `DiegeticTextMut`;
+  added the precondition that the perf gate waits on 16c landing.
+
+### Phase 5 — examples migration (rewritten on the relationship)
+**Status: ✅ complete.**
+
+16. **Three tasks:**
+
+    **16a (required, ✅ done) — un-break the example targets.** Phase 1's
+    `build() -> Result<_, PanelBuildError>` (was `InvalidSize`) is already
+    resolved across both crates — `cargo build --workspace --examples` is green.
+    No `InvalidSize` references remain in any example. Kept as the record; no work
+    left. (Phase 3's retrospective predates this fix landing.)
+
+    **16b (✅ done) — `aa_text` status panel → named runs.** `cube_status_panel`'s
+    three fixed rows are now `text_id`-named (`STATUS_FIELD_{MSAA,OIT,POST}`) and
+    `refresh_cube_status_panels` retexts them via `PanelText::set_text` instead of
+    a full `set_tree` rebuild. This is the named multi-run case; it stays as-is.
+    Structural panels where a run appears/disappears
+    (`refresh_cube_compatibility_panels`, message is `Option`) keep `set_tree` —
+    `set_text` can neither add nor remove a run.
+
+    **16c (required) — cube-face labels → the relationship path.** Three example
+    sites mutate cube-face `DiegeticText` labels via a `&mut TextContent` query
+    that no longer matches (marker on the panel entity, `TextContent` on the run
+    child):
+    - `orthographic.rs` — `Query<&mut TextContent, With<CubeFaceLabel>>`; every
+      face gets the **same** string → `DiegeticTextMut<CubeFaceLabel>::set(text)`.
+    - `input_keyboard.rs:192` — `Query<(&KeyboardFaceLabel, &mut TextContent)>`;
+      **per-face** strings keyed on the `KeyboardFaceLabel` enum (Orbit/Pan/Zoom)
+      → `DiegeticTextMut<KeyboardFaceLabel>::for_each_mut(|kind, content| …)`.
+    - `input_manual.rs:277` — `Query<(&ManualFaceLabel, &mut TextContent)>`,
+      structurally identical to `input_keyboard` →
+      `DiegeticTextMut<ManualFaceLabel>::for_each_mut(…)`. **This third site was
+      omitted from earlier drafts** (the migration inventory wrongly called it a
+      "keeps working" site); it is broken by D7 exactly like the other two.
+
+    Use `for_each_mut` (not the planned `iter_mut`) for the per-face cases — it
+    yields the marker `&M`, which is where the face identity lives. Note the
+    identity is on the **example-local enum** (`KeyboardFaceLabel`/`ManualFaceLabel`),
+    *not* on `fairy_dust::CubeFaceLabel` (a unit struct with no identity — only
+    `orthographic`'s uniform `set` keys on it). Rewrite the stale `CubeFaceLabel`
+    doc (`fairy_dust/primitive.rs`, still names the removed `WorldText` and shows
+    the now-broken `Query<&mut WorldText, With<CubeFaceLabel>>`): name
+    `DiegeticText`, and show a **`DiegeticTextMut<CubeFaceLabel>::set`** call as the
+    doc example (never the bare two-query `sole()` form — it is wrong for a wrapped
+    label, see step 15 *As built*), so a copy-paste compiles, runs, and is
+    wrapped-safe.
+    *Audit precision.* The marker sits in the query *tuple*
+    (`(&KeyboardFaceLabel, &mut TextContent)`), not a `With<>` filter, so a
+    `&mut TextContent.*With<` grep finds only `orthographic`. Audit with a bare
+    `rg -n '&mut TextContent'` across `bevy_lagrange`/`fairy_dust` **and**
+    cross-check every `cube_face_label`/`cube_face_text`/`DiegeticText` spawn; list
+    the migrated sites with line numbers in the PR so coverage is explicit.
+
+    **16d (required) — canonical four-flavor mutation example.** Add a new
+    `crates/fairy_dust/examples/diegetic_mutation.rs` (fairy_dust has no `examples/`
+    dir yet) whose sole purpose is to make runtime text mutation unambiguous across
+    all four diegetic flavors: `DiegeticText::world` (world-space text),
+    `DiegeticText::screen` (screen-space text), `DiegeticPanel::world` (world-space
+    panel), `DiegeticPanel::screen` (screen-space panel). Each gets a distinct
+    marker and a system that retexts it every frame (e.g. a ticking counter), so a
+    reader sees the exact call for each case side by side:
+    - **The two standalone texts** mutate through `DiegeticTextMut<M>` (step 15) —
+      `labels.set(format!("world {n}"))` — proving the one-param/one-call path is the
+      same whether the text is world- or screen-space (only the constructor differs).
+      The two texts **must use distinct marker types** (e.g. `WorldLabel`,
+      `ScreenLabel`): `DiegeticTextMut<M>` is keyed by one marker type, so a shared
+      marker's single `set` would rewrite both with one string and defeat the
+      side-by-side demo. The two *panels* address by `PanelFieldId`, not a marker,
+      so they need no distinct marker types.
+    - **The two panels** carry a named field (`PanelFieldId`) and mutate through
+      `PanelText::set_text(panel, &id, …)` — the named-run path — proving the panel
+      case uses the id-addressed SystemParam, not `DiegeticTextMut`.
+    This makes the step-15 "which API when" split concrete and runnable: marker →
+    `DiegeticTextMut<M>`; named field on a panel → `PanelText`. Organize the file
+    per `/apply_example_layout`: module doc names `DiegeticTextMut<M>` and
+    `PanelText`/`PanelFieldId` as the demonstrated API; `main()`; a primary
+    banner-section holding the four spawns + four mutation systems (lead with a
+    short "How it works" paragraph naming the order they fire); camera/scene
+    scaffolding last. Gate it in Phase 6 (build + clippy + fmt like every example).
+
+    **Crate boundary:** build/verify `bevy_diegetic` and `bevy_lagrange`
+    separately (sibling crates, own `Cargo.toml`s).
+
+### Retrospective
+
+**What worked:**
+- All three 16c sites converted exactly as planned: `orthographic.rs` → `DiegeticTextMut<CubeFaceLabel>::set` (uniform); `input_keyboard.rs` + `input_manual.rs` → `for_each_mut(|kind, label| …)` (per-face). The `for_each_mut` closure yielding `&M` mapped one-to-one onto the existing `match kind { … }` body — the loop became a closure with no logic change.
+- The 16d four-flavor example built first try once the cast was fixed; the `DiegeticTextMut<M>` (marker) vs `PanelText::set_text` + `PanelFieldId` (id) split read cleanly side by side, which was the example's whole purpose.
+
+**What deviated from the plan:**
+- `time.elapsed_secs() as u64` tripped `clippy::cast_possible_truncation` + `cast_sign_loss` (workspace denies pedantic). Switched to `time.elapsed().as_secs()` (Duration → `u64`, no cast). The new example needs no `#[allow]`.
+- 16c named one stale-`WorldText` doc site (the `CubeFaceLabel` marker). `cargo doc -D warnings` surfaced **three more** broken `[`WorldText`]` intra-doc links for the same labels: `Face` doc and `cube_face_text` doc (`src/primitive.rs`), and `PrimitiveBuilder::face_text` (`builder/primitive.rs:75`). All four fixed. Also updated the three migrated examples' `CUBE FACE LABELS` banner comments (`WorldText` → world-space `DiegeticText`) for in-file consistency.
+
+**Surprises:**
+- A standalone `DiegeticText` panel carries its marker **and** `PanelTextRuns` on the same (panel-root) entity, so `DiegeticTextMut<M>`'s `Query<(&M, &PanelTextRuns)>` matches directly — no child indirection in the example. Confirmed the Phase 4 design end-to-end through real call sites.
+- One pre-existing broken doc-link remains out of scope: `builder/primitive.rs:55` links `SprinkleBuilder::with_camera_control_panel_background_color`, unrelated to text. `cargo doc -D warnings` is **not** a stated Phase 6 gate; it only surfaced here because I ran it to verify my doc edits.
+
+**Implications for remaining phases:**
+- Phase 6 step 18's 16c precondition is satisfied: `orthographic` (uniform `set`), `input_keyboard` + `input_manual` (`for_each_mut`) all profile the `DiegeticTextMut` write path now. The perf gate is unblocked.
+- Phase 6 now also has a fourth `DiegeticTextMut`/`PanelText` call site to profile if desired: `fairy_dust/examples/diegetic_mutation.rs` (per-second, gated on a `Tick` resource — not per-frame, so a light load, but it exercises all four flavors).
+
+### Phase 5 Review
+
+- **Step 18 perf gate re-scoped (findings 1, 2, 8).** Corrected the "per-frame-`DiegeticTextMut` cube-face examples" framing: `orthographic` mutates only on keypress and `input_keyboard`/`input_manual` relayout only on string change, so their relayout load is on-input, not per-frame. Named `diegetic_mutation.rs` (16d) the canonical write-path subject and collapsed the now-satisfied 16c precondition to one line.
+- **Step 17 gained `--examples` (per crate) and a `cargo doc -D warnings` gate (findings 10, 4).** Plain `cargo build` skips examples, so `fairy_dust`'s new `examples/` dir would never be gated; the rename churn makes intra-doc-link rot a live defect class. Noted the one pre-existing out-of-scope broken link (`builder/primitive.rs` → `SprinkleBuilder::…`) that must be fixed for the doc gate to pass.
+- **Step 17 test list sharpened (findings 3, 6, 9).** The multi-run/zero-run `sole()` test must name the access-layer `sole_run_entity` (`line_index == 0`) vs raw `PanelTextRuns::sole`; added a TR-L assertion that an unchanged-string `set_text` re-invokes no `MeasureTextFn`; noted that `PanelFieldId` duplicate detection is panel-local, with `diegetic_mutation.rs`'s shared `"counter"` id across two panels as the proof no test may assert global id uniqueness.
+- **No-change confirmations (findings 5, 7):** the wrapped-label resolution tests (step 17) are genuinely absent and correctly scoped; the `text.as_str()`-in-loop borrow pattern in the panel mutators is correct as shipped and needs no test.
+
+### Phase 6 — verify
+17. `cargo build --examples && cargo +nightly fmt`, `/clippy` — clippy is a
+    **first-class gate**, not implied by `build`: pedantic caught latent Phase 0/1
+    debt that a plain build passed (see the Phase 2 retrospective).
+    - **`--examples` is required, per crate.** Plain `cargo build` skips examples;
+      gate `bevy_diegetic`, `bevy_lagrange`, **and** `fairy_dust` separately with
+      `--examples` (crate boundary, step 16's note). `fairy_dust` gained its first
+      `examples/` dir in 16d (`diegetic_mutation.rs`) — without `--examples` on
+      `fairy_dust` that example is never compiled and 16d's "gate it in Phase 6"
+      silently no-ops.
+    - **`cargo doc -D warnings`, per crate, as a doc-link gate.** The whole plan
+      renamed `WorldText` → `DiegeticText` and deleted `PanelTextChild`, so
+      intra-doc-link rot is a live defect class — Phase 5 ran `cargo doc -D warnings`
+      ad-hoc and it caught three broken `[`WorldText`]` links beyond the one 16c
+      planned for (`Face` doc, `cube_face_text`, `PrimitiveBuilder::face_text`).
+      One pre-existing out-of-scope break remains and must be fixed for the gate to
+      pass: `builder/primitive.rs` links `SprinkleBuilder::with_camera_control_panel_background_color`
+      with no `SprinkleBuilder` in scope at that doc site (fix the path or drop the
+      link when Phase 6 runs).
+    *Relationship tests already shipped in Phase 4 (`access.rs`, do not
+    re-author):* `PanelTextRuns` populates on run spawn and `sole()` returns the
+    lone run for a single-line `DiegeticText`
+    (`panel_text_runs_populates_and_sole_returns_the_lone_run`); a
+    `DiegeticTextMut<M>::set` call retexts a marked label end-to-end
+    (`diegetic_text_mut_set_retexts_a_marked_label`); `for_each_mut` (the shipped
+    per-label method — **not** the planned `iter_mut`) updates two marked labels to
+    different strings (`diegetic_text_mut_for_each_mut_sets_per_label_strings`).
+    *Relationship tests still to write (Phase 6):*
+    - **`sole()` is `None` for a multi-run panel** (two distinct elements) and for
+      a zero-run panel — the count-based contract. Target the **access-layer**
+      `sole_run_entity` (the `line_index == 0` filter, `access.rs:196`), not just
+      `PanelTextRuns::sole` (raw slice count, `relationship.rs`): the two diverge on
+      wrapped runs, so naming which layer the assertion pins keeps the two contracts
+      from being conflated in one test.
+    - **Sync skips `MeasureTextFn` for an unchanged cached string (TR-L).** The
+      `Changed<TextContent> → El.text` sync (step 8) must not re-measure a string
+      that did not change. `unchanged_run_is_not_rewritten_across_a_visual_only_rebuild`
+      (reconcile.rs) covers reuse-on-rebuild, not this sync-skip path — add a named
+      assertion that a no-op `set_text` (same string) fires no measure.
+    - **Wrapped-label resolution through `DiegeticTextMut`/`sole_text`.** A
+      *wrapped* `DiegeticText` materializes as one run entity per line, so its
+      `PanelTextRuns` set holds >1 entity; assert `DiegeticTextMut::set` /
+      `PanelTextReader::sole_text` still resolve the `line_index == 0` entity and
+      relayout (the `lone_run` helper's wrapped path, `access.rs`). This is
+      distinct from the `PanelText::set_text` wrapped test below — every existing
+      test uses single-line `auto_tree`, so this code path is currently untested.
+    - **Panel despawn drops all runs, no panic / no double-despawn** — proves
+      `ChildOf` `linked_spawn` is the sole despawn path and `PanelTextRuns` adds
+      none.
+    - **Two no-op reconcile passes mutate `PanelTextRuns` zero times** — the
+      per-frame-free invariant (step 18). Probe: settle the panel (≥2 frames),
+      then on each of two further passes force a `ComputedDiegeticPanel` change
+      *without* adding/removing a run (e.g. a visual-only `set_tree` that recolors
+      but keeps the same run ids — the existing
+      `unchanged_run_is_not_rewritten_across_a_visual_only_rebuild` pattern), and
+      assert `Changed<PanelTextRuns>` is **false** across both. Forcing the
+      `ComputedDiegeticPanel` change is required because reconcile is gated on it —
+      a literal no-op never runs the reuse branch the invariant is about. (A plain
+      `Changed<PanelTextRuns>` check on the *spawn* pass would false-positive, so
+      the settle step matters.)
+    - **`set_tree` empties the run set and reconcile repopulates it** next pass;
+      O(1) named `text_child` lookup is unchanged on a multi-run panel.
     *Already shipped in Phase 3 (`access.rs` tests, do not re-author):*
     `text_child(id)` resolves a named run
     (`reader_resolves_a_named_run_and_reads_its_text`); an auto-id'd run is not
@@ -602,36 +1021,54 @@ subagent. Outcomes folded in:
     unknown id resolves to `None` (`unknown_id_resolves_to_none`); mutating a run's
     `TextContent` relayouts, the property D2 buys
     (`set_text_through_panel_text_relayouts`); the orphan/liveness case **through
-    the SystemParam** (`orphaned_run_resolves_to_none_through_the_system_param`,
-    not the unchecked `DiegeticPanel::text_child`); `set_sole_text` retexts a
-    one-element panel (`set_sole_text_retexts_a_one_element_panel`).
-    *Still to write:* duplicate explicit ids error at build; a reorder keeps named
-    runs and respawns auto runs (TR-D); `set_tree` clears stale index entries; a
+    the SystemParam** (`orphaned_run_resolves_to_none_through_the_system_param`);
+    `set_sole_text` retexts a one-element panel
+    (`set_sole_text_retexts_a_one_element_panel`).
+    *Still to write:* duplicate explicit ids error at build (the duplicate check is
+    **panel-local** per DT3 — the same `PanelFieldId` on two *different* panels is
+    legal, as `diegetic_mutation.rs` now demonstrates with `"counter"` on both its
+    world and screen panels; no test may assert global id uniqueness); a reorder
+    keeps named runs and respawns auto runs (TR-D); `set_tree` clears stale index
+    entries; a
     **wrapped multi-line run** edited via `set_text` — assert the full new string
     relayouts and no line is dropped (the line-0-index edge, step 11; extend
     `set_text_through_panel_text_relayouts` with a wrapping width); a **single-pass**
     assertion that a `set_text` edit fires exactly one `ComputedDiegeticPanel`
     change (the `ReconcileOwned` gate).
-15. **Perf gate with criteria (TR-C, TR-L, TR-M).** *Precondition:* this gate
-    cannot run until Phase 4 step 13 makes every cited example compile — several
-    are currently red on the `InvalidSize`→`PanelBuildError` break (`cascade`,
-    `units`, `aa_text`, `font_features`), and a red example cannot be profiled.
-    *Path caveat:* TR-I leaves `PanelText` adoption optional, so the cube-face
-    examples may still mutate via the old marker + `Query<&mut TextContent>` path;
-    to perf-gate the **new** `PanelText` write path, force `PanelText` adoption in
-    at least one cube-face example (or profile whichever path Phase 4 leaves in
-    place and say which). Target < 16.7 ms/frame
-    release; flag > 5% over a `main` baseline. Profile the per-frame-`set_text`
-    cube-face examples (`input_keyboard`, `orthographic`, `pausing`) — not only the
-    static `cascade`/`paper_sizes`/`world_text` panels, **and** add a resize pass
-    on a complex-font panel (the known freeze path,
+18. **Perf gate with criteria (TR-C, TR-L, TR-M).** *Precondition met (16c
+    landed):* `orthographic` (uniform `set`), `input_keyboard` + `input_manual`
+    (`for_each_mut`) all run the `DiegeticTextMut` write path now, so the gate
+    profiles it directly. Target < 16.7 ms/frame release; flag > 5% over a `main`
+    baseline.
+    **Pick the workload that actually exercises the write path.** The three
+    cube-face examples are weaker subjects than the plan first assumed: `orthographic`
+    mutates only on an O/P keypress (`switch_projection`), and
+    `input_keyboard`/`input_manual` iterate `for_each_mut` every frame but call
+    `set_text` only on an actual string change (`if label.text() != next`) — so the
+    **relayout** (`Changed<TextContent>`) fires on input, not per frame; only the
+    cheap `(&M, &PanelTextRuns)` iteration is per-frame. The canonical write-path
+    subject is **`diegetic_mutation.rs`** (16d): it drives all four flavors and both
+    APIs (`DiegeticTextMut<M>::set` and `PanelText::set_text`) on a fixed cadence,
+    and its per-second `Tick` gate converts trivially to per-frame for a stress run.
+    Profile it first, then the input examples as the realistic on-change load — not
+    only the static `cascade`/`paper_sizes`/`world_text` panels. `pausing` belongs in
+    the **tree-swap churn** bucket below, not here: it mutates via `set_tree`
+    (despawn/respawn every run), not `DiegeticTextMut`/`set_text`. Add a resize
+    pass on a complex-font panel (the known freeze path,
     `project_diegetic_panel_freeze.md`, which DTX-2's double-layout would amplify
     if the `ReconcileOwned` gate regressed). Criterion restated for DT1=(b)
     (TR-L): there is no OQ1(a) gather — the `TextContent → El.text` sync (step 8)
     must be **O(n_changed)** (driven off `Changed<TextContent>`, never a full
     `n_elements` walk) and must not re-invoke `MeasureTextFn` for an unchanged
-    cached string; target < 0.5 ms on the 100-label panels. Regression fallback:
-    the `unify_text.md` D1(c) lightweight single-element path.
+    cached string; target < 0.5 ms on the 100-label panels. Confirm the
+    relationship adds no per-frame cost — `PanelTextRuns` mutates only on run
+    spawn/despawn, not on a layout pass — by asserting two consecutive no-op
+    reconcile passes mutate it zero times (step 17), which holds only if the reuse
+    branch skips re-inserting `TextRunOf` (step 13). Add a `set_tree`-on-a-complex-font-panel
+    edit to the resize scenario, not only per-frame `set_text`: a tree swap
+    despawns every run and respawns it, the heaviest relationship-churn path and an
+    amplifier for the known freeze. Regression fallback: the `unify_text.md`
+    D1(c) lightweight single-element path.
 
 ## Risks
 
