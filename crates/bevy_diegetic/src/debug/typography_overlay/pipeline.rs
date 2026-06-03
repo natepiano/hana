@@ -8,9 +8,7 @@ use super::metric_lines;
 use crate::layout::LineMetricsSnapshot;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
-use crate::layout::TextStyle;
 use crate::render::ComputedWorldText;
-use crate::render::TextContent;
 use crate::text;
 use crate::text::FontId;
 use crate::text::FontMetrics;
@@ -57,13 +55,7 @@ pub(super) struct GlyphExtents {
 }
 
 pub fn build_typography_overlay(
-    query: Query<(
-        Entity,
-        &TextContent,
-        &TextStyle,
-        &TypographyOverlay,
-        &ComputedWorldText,
-    )>,
+    query: Query<(Entity, &TypographyOverlay, &ComputedWorldText)>,
     text_changed: Query<
         Entity,
         (
@@ -71,8 +63,6 @@ pub fn build_typography_overlay(
             Or<(
                 Added<TypographyOverlay>,
                 Changed<TypographyOverlay>,
-                Changed<TextContent>,
-                Changed<TextStyle>,
                 Changed<ComputedWorldText>,
             )>,
         ),
@@ -88,11 +78,11 @@ pub fn build_typography_overlay(
     let measure_text =
         text::create_parley_measurer(font_registry.font_context(), font_registry.family_names());
 
-    for (entity, world_text, style, overlay, computed) in &query {
+    for (entity, overlay, computed) in &query {
         if !changed_entities.contains(&entity) {
             continue;
         }
-        if world_text.text().is_empty() {
+        if computed.glyphs.is_empty() {
             continue;
         }
 
@@ -102,7 +92,7 @@ pub fn build_typography_overlay(
 
         despawn_overlay_children(&mut commands, &containers, container_entity);
 
-        let font_id = FontId(style.font_id());
+        let font_id = FontId(computed.font_id);
         let Some(font) = font_registry.font(font_id) else {
             continue;
         };

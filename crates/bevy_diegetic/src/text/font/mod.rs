@@ -246,20 +246,18 @@ impl Font {
     pub fn glyph_metrics(&self, ch: char, size: f32) -> Option<GlyphTypographyMetrics> {
         let face = Face::parse(&self.data, 0).ok()?;
         let glyph_id = face.glyph_index(ch)?;
-
-        let scale = size / f32::from(self.units_per_em);
+        let ink = glyph_ink_extents(&face, glyph_id.0)?;
+        let scale = size / ink.units_per_em;
 
         let advance_width = face
             .glyph_hor_advance(glyph_id)
             .map_or(0.0, |a| f32::from(a) * scale);
 
-        let rect = face.glyph_bounding_box(glyph_id)?;
-
         let bounds = GlyphBounds {
-            min_x: f32::from(rect.x_min) * scale,
-            min_y: f32::from(rect.y_min) * scale,
-            max_x: f32::from(rect.x_max) * scale,
-            max_y: f32::from(rect.y_max) * scale,
+            min_x: ink.min_x * scale,
+            min_y: ink.min_y * scale,
+            max_x: ink.max_x * scale,
+            max_y: ink.max_y * scale,
         };
 
         let bearing_x = bounds.min_x;
@@ -282,21 +280,18 @@ impl Font {
     #[must_use]
     pub fn glyph_metrics_by_id(&self, glyph_id: u16, size: f32) -> Option<GlyphTypographyMetrics> {
         let face = Face::parse(&self.data, 0).ok()?;
-        let gid = GlyphId(glyph_id);
-
-        let scale = size / f32::from(self.units_per_em);
+        let ink = glyph_ink_extents(&face, glyph_id)?;
+        let scale = size / ink.units_per_em;
 
         let advance_width = face
-            .glyph_hor_advance(gid)
+            .glyph_hor_advance(GlyphId(glyph_id))
             .map_or(0.0, |a| f32::from(a) * scale);
 
-        let rect = face.glyph_bounding_box(gid)?;
-
         let bounds = GlyphBounds {
-            min_x: f32::from(rect.x_min) * scale,
-            min_y: f32::from(rect.y_min) * scale,
-            max_x: f32::from(rect.x_max) * scale,
-            max_y: f32::from(rect.y_max) * scale,
+            min_x: ink.min_x * scale,
+            min_y: ink.min_y * scale,
+            max_x: ink.max_x * scale,
+            max_y: ink.max_y * scale,
         };
 
         let bearing_x = bounds.min_x;
@@ -309,6 +304,39 @@ impl Font {
             bearing_y,
         })
     }
+}
+
+/// A glyph's ink bounding box in font design units, paired with the font's
+/// units-per-em so a caller can scale it to a font size.
+///
+/// Read straight from the glyph outline, so it is the glyph's true drawn extent
+/// — which, for some fonts, reaches past the declared ascent/descent line
+/// metrics (a CJK font's Latin descenders, for one). Sizing a box to the line
+/// box alone clips that ink; sizing it to these extents does not.
+pub(crate) struct GlyphInkExtents {
+    /// Left edge in design units.
+    pub min_x:        f32,
+    /// Bottom edge in design units — negative below the baseline.
+    pub min_y:        f32,
+    /// Right edge in design units.
+    pub max_x:        f32,
+    /// Top edge in design units.
+    pub max_y:        f32,
+    /// Design units per em, for scaling to a font size.
+    pub units_per_em: f32,
+}
+
+/// Reads a glyph's ink bounding box from its outline, or `None` when the glyph
+/// has no outline (a space, say) or the id is absent from the face.
+pub(crate) fn glyph_ink_extents(face: &Face<'_>, glyph_id: u16) -> Option<GlyphInkExtents> {
+    let bbox = face.glyph_bounding_box(GlyphId(glyph_id))?;
+    Some(GlyphInkExtents {
+        min_x:        f32::from(bbox.x_min),
+        min_y:        f32::from(bbox.y_min),
+        max_x:        f32::from(bbox.x_max),
+        max_y:        f32::from(bbox.y_max),
+        units_per_em: f32::from(face.units_per_em()),
+    })
 }
 
 /// Returns the top of a glyph's bounding box in design units, or `None`.

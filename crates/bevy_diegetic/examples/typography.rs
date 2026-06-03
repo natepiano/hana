@@ -18,6 +18,7 @@ use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
+use bevy_diegetic::DiegeticTextMut;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
@@ -31,7 +32,6 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
-use bevy_diegetic::TextContent;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_lagrange::OrbitCam;
@@ -640,8 +640,7 @@ fn cycle_word(
     time: Res<Time>,
     mut cycle: ResMut<WordCycle>,
     mut cycle_state: ResMut<CycleState>,
-    mut texts: Query<&mut TextContent, (With<DisplayText>, Without<CommentText>)>,
-    mut comments: Query<&mut TextContent, (With<CommentText>, Without<DisplayText>)>,
+    mut labels: ParamSet<(DiegeticTextMut<DisplayText>, DiegeticTextMut<CommentText>)>,
 ) {
     let forward = keyboard.pressed(KeyCode::ArrowRight);
     let backward = keyboard.pressed(KeyCode::ArrowLeft);
@@ -665,12 +664,8 @@ fn cycle_word(
         cycle.index = (cycle.index + len - 1) % len;
     }
     let (word, comment) = DISPLAY_WORDS[cycle.index];
-    for mut text in &mut comments {
-        text.set_text(comment);
-    }
-    for mut text in &mut texts {
-        text.set_text(word);
-    }
+    labels.p0().set(word);
+    labels.p1().set(comment);
     *cycle_state = CycleState::Cycling {
         started_at:    time.elapsed(),
         overlay_ready: false,
@@ -698,7 +693,7 @@ fn switch_font(
     font_registry: Res<FontRegistry>,
     mut selected_font: ResMut<SelectedFont>,
     panels: Query<Entity, With<FontsPanel>>,
-    mut texts: Query<&mut TextStyle, With<DisplayText>>,
+    mut display_text: DiegeticTextMut<DisplayText>,
     mut commands: Commands,
 ) {
     let Some(idx) = requested.0.take() else {
@@ -710,11 +705,7 @@ fn switch_font(
         .font_id_by_name(name)
         .unwrap_or(FontId::MONOSPACE)
         .0;
-    for mut style in &mut texts {
-        *style = TextStyle::new(DISPLAY_SIZE)
-            .with_font(font_id)
-            .with_color(Color::srgb(0.9, 0.9, 0.9));
-    }
+    display_text.for_each_style_mut(|style| style.set_font_id(font_id));
     for entity in &panels {
         commands.set_tree(entity, build_fonts_panel(&font_registry, selected_font.0));
     }

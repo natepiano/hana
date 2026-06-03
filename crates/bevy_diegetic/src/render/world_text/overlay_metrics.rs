@@ -19,7 +19,6 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 use ttf_parser::Face;
-use ttf_parser::GlyphId;
 
 use super::ComputedGlyphMetrics;
 use super::ComputedWorldText;
@@ -32,6 +31,7 @@ use crate::render::PanelTextLayout;
 use crate::render::text_shaping;
 use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
+use crate::text;
 use crate::text::FontRegistry;
 use crate::text::PositionedGlyph;
 
@@ -124,6 +124,7 @@ fn compute_world_text(
         anchor_y: anchor.y,
         scale,
         font_size,
+        font_id: style.font_id(),
         line_metrics,
         glyphs,
     })
@@ -176,14 +177,13 @@ fn ink_rect(
     scale: f32,
 ) -> Option<[f32; 4]> {
     let face = Face::parse(font_data, collection_index).ok()?;
-    let bbox = face.glyph_bounding_box(GlyphId(glyph_id))?;
-    let upm = f32::from(face.units_per_em());
-    let font_scale = font_size / upm;
+    let ink = text::glyph_ink_extents(&face, glyph_id)?;
+    let font_scale = font_size / ink.units_per_em;
 
-    let ink_width = f32::from(bbox.x_max - bbox.x_min) * font_scale;
-    let ink_height = f32::from(bbox.y_max - bbox.y_min) * font_scale;
-    let ink_x = f32::from(bbox.x_min).mul_add(font_scale, glyph_x) - anchor.x;
-    let ink_top = f32::from(bbox.y_max).mul_add(-font_scale, baseline_offset) - anchor.y;
+    let ink_width = (ink.max_x - ink.min_x) * font_scale;
+    let ink_height = (ink.max_y - ink.min_y) * font_scale;
+    let ink_x = ink.min_x.mul_add(font_scale, glyph_x) - anchor.x;
+    let ink_top = ink.max_y.mul_add(-font_scale, baseline_offset) - anchor.y;
 
     Some([
         ink_x * scale,

@@ -118,7 +118,7 @@ Side effects of the marker:
 
 `TextContent` was made a directly-mutable ECS component on the run child so
 "retext my label" is a normal component mutation reached through a marker
-(`access.rs:212-235`). The marker `M` sits on the panel and `TextContent` on the
+(`access.rs:213-243`). The marker `M` sits on the panel and `TextContent` on the
 child, so `DiegeticTextMut<M>` hops the panel→run relationship — a naive
 `Query<&mut TextContent, With<M>>` matches nothing. That mutate-the-component
 ergonomic forced the sync-back-to-tree, which forced `ReconcileOwned`.
@@ -126,10 +126,10 @@ ergonomic forced the sync-back-to-tree, which forced `ReconcileOwned`.
 ### The de-risking asymmetry (verified in code)
 
 Reads already go to the TREE: `PanelTextReader::text` / `sole_text` return
-`tree().element_text(layout.element_idx)` (`access.rs:56,93`); the `resolve` doc
+`tree().element_text(layout.element_idx)` (`access.rs:57,94`); the `resolve` doc
 calls the tree "authoritative for valid ids at build time." The builder authors
 text into the tree. ONLY the four writers detour through `&mut TextContent`
-(`access.rs:171,185,256,274`). So the tree is already the single source for
+(`access.rs:172,186,258,276`). So the tree is already the single source for
 everything except writes.
 
 ### The fix — route writes to the tree too
@@ -188,7 +188,7 @@ today's count). The skip keeps the common case free: on a text edit, re-measure
 that element (the cheap per-element measure via `ShapedTextCache`, NOT the
 whole-tree solve); if the measured width/height equals the cached size, route to
 the existing cheap `LayoutTreeChange::VisualOnly` regenerate-commands path
-(`compute_layout.rs:108-127`) and skip the engine solve; else full solve. Stress
+(`compute_layout.rs:121-127`) and skip the engine solve; else full solve. Stress
 labels (`"NN MMM"`, fixed 6 chars) measure identical every frame → always
 skippable. This is content-agnostic — works whether the width is fixed by
 declaration or stable by content.
@@ -223,15 +223,17 @@ the per-element measured size is the runtime skip decision.
 
 ### Step 0 handoff — fresh-agent start guide
 
-Everything below is verified against the code at HEAD `7f8cb0f` (option C / glyph
-atlas). A fresh agent should re-confirm line numbers with `rg` before editing —
+Everything below is verified against the code at HEAD `bb51603` (option C / glyph
+atlas, after `enh/showcase-example` merged into `update/0.19.0-rc.2`). A fresh
+agent should re-confirm line numbers with `rg` before editing —
 they drift. No Phase-D code has been written yet; only this doc and the two memory
 notes exist. Options A and C are landed and committed; Step 0 is the next edit.
 
-**Orientation.** This work lives on `enh/showcase-example`, which diverged from
-`update/0.19.0-rc.2` at `8d5f2d1`. Step 0 is pure instrumentation — it adds and
-removes perf rows and changes no runtime behavior, so it is safe to land and
-measure before the structural Step 1.
+**Orientation.** This work is on `update/0.19.0-rc.2`. The `enh/showcase-example`
+line — where options A and C landed (it diverged at `8d5f2d1`) — has been merged
+back in, so there is no separate branch to track. Step 0 is pure instrumentation —
+it adds and removes perf rows and changes no runtime behavior, so it is safe to
+land and measure before the structural Step 1.
 
 **Run & measure.**
 - Release is required (the Baseline conditions): `cargo run --release --example
@@ -302,10 +304,11 @@ measure before the structural Step 1.
    - mean (`:535-539`, `:587-591`), peak (`:546-550`, `:603-607`), and the window
      accumulate (`:575-579`): swap the three fields for four.
    - Retarget the doc comments that say sub-stages sit under `mesh` to `layout`:
-     `RowIndent` (`:80-86`), `MetricRow` (`:88-94`), `METRIC_ROWS` (`:96-99`),
-     `SUB_ROW_INDENT` (`:71-72`), and the module-level note (`:6`). `remainder`
-     (8 chars) stays the longest label, so `LABEL_COLUMN_WIDTH` (`:70`) needs no
-     change.
+     `RowIndent` (`:80-86`), `MetricRow` (`:88-94`), `METRIC_ROWS` (`:96-99`), and
+     `SUB_ROW_INDENT` (`:71-72`). (The module-level doc comment was rewritten in the
+     merge and no longer describes mesh sub-stages, so it needs no retarget.)
+     `remainder` (8 chars) stays the longest label, so `LABEL_COLUMN_WIDTH` (`:70`)
+     needs no change.
 
 **The timing detail that will trip you.** `setup` is measured once with a single
 `Instant`, but `scale` / `solve` / `commit` run per panel inside the loop, so each

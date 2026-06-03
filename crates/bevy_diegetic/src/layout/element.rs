@@ -409,6 +409,41 @@ impl LayoutTree {
         true
     }
 
+    /// Returns the authored [`TextStyle`] of the text run at `index`, if that
+    /// element is a text leaf. The tree config — not the run child's
+    /// `for_shaping`-derived style — is authoritative for measurement, so a
+    /// restyle reads it here, applies its edit, and writes back via
+    /// [`set_element_style`](Self::set_element_style).
+    #[must_use]
+    pub(crate) fn element_style(&self, index: usize) -> Option<&TextStyle> {
+        self.elements
+            .get(index)
+            .and_then(|element| match &element.content {
+                ElementContent::Text { config, .. } => Some(config),
+                _ => None,
+            })
+    }
+
+    /// Overwrites the authored run style at `index`, returning whether it
+    /// changed. The tree config is the single source the layout engine measures
+    /// and reconcile re-derives the run from; writing it here is how a font /
+    /// size restyle reaches both measurement and rendering. Returns `false` (no
+    /// write) when `index` is not a text leaf or the style already matches, so
+    /// the caller can skip dirtying the panel.
+    pub(crate) fn set_element_style(&mut self, index: usize, style: TextStyle) -> bool {
+        let Some(element) = self.elements.get_mut(index) else {
+            return false;
+        };
+        let ElementContent::Text { config, .. } = &mut element.content else {
+            return false;
+        };
+        if *config == style {
+            return false;
+        }
+        *config = style;
+        true
+    }
+
     /// Returns the panel-local id of the text run at `index`, if that element is
     /// a text leaf. Reconcile reads this to key a child by its run id instead of
     /// the former positional `(element_idx, command_index)` pair.

@@ -28,6 +28,7 @@ use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 use crate::layout::LayoutTreeChange;
 use crate::layout::PanelSize;
+use crate::layout::TextStyle;
 use crate::layout::Unit;
 
 /// A diegetic UI panel attached to a 3D entity.
@@ -278,6 +279,25 @@ impl DiegeticPanel {
     /// also keeps the measurer off an unchanged cached string.
     pub(crate) fn sync_run_text_cache(&mut self, index: usize, text: &str) -> bool {
         if self.tree.set_element_text(index, text) {
+            self.tree_revision = self.tree_revision.wrapping_add(1);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Writes a restyle into the authored `El.config` and bumps the tree
+    /// revision so [`ScaledLayoutTreeCache`] rebuilds and the layout engine
+    /// re-measures with the new style. Returns whether the style changed.
+    ///
+    /// Unlike text — whose physical copy lives on the run child and syncs back
+    /// here — the tree config is the single authoritative style. A label
+    /// restyle (font, size) mutates it through this method; the relayout it
+    /// triggers flows the new config to the run via reconcile, so measurement
+    /// and rendering stay on the same source. Skips the revision bump (and so
+    /// the layout) when the style already matches.
+    pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
+        if self.tree.set_element_style(index, style) {
             self.tree_revision = self.tree_revision.wrapping_add(1);
             true
         } else {

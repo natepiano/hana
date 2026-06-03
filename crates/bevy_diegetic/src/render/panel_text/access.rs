@@ -21,6 +21,7 @@ use bevy::prelude::*;
 use super::PanelTextLayout;
 use super::PanelTextRuns;
 use crate::PanelFieldId;
+use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
 use crate::render::world_text::TextContent;
 
@@ -235,9 +236,10 @@ fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<E
 /// id-addressed run on a multi-run panel, use [`PanelText`] instead.
 #[derive(SystemParam)]
 pub struct DiegeticTextMut<'w, 's, M: Component> {
-    runs:    Query<'w, 's, (&'static M, &'static PanelTextRuns)>,
+    runs:    Query<'w, 's, (Entity, &'static M, &'static PanelTextRuns)>,
     layouts: Query<'w, 's, &'static PanelTextLayout>,
     content: Query<'w, 's, &'static mut TextContent>,
+    panels:  Query<'w, 's, &'static mut DiegeticPanel>,
 }
 
 impl<M: Component> DiegeticTextMut<'_, '_, M> {
@@ -246,7 +248,7 @@ impl<M: Component> DiegeticTextMut<'_, '_, M> {
     pub fn set(&mut self, text: impl Into<String>) -> usize {
         let text = text.into();
         let mut written = 0;
-        for (_marker, runs) in &self.runs {
+        for (.., runs) in &self.runs {
             let Some(run) = lone_run(runs, &self.layouts) else {
                 continue;
             };
@@ -264,7 +266,7 @@ impl<M: Component> DiegeticTextMut<'_, '_, M> {
     /// many labels were visited.
     pub fn for_each_mut(&mut self, mut f: impl FnMut(&M, &mut TextContent)) -> usize {
         let mut visited = 0;
-        for (marker, runs) in &self.runs {
+        for (_, marker, runs) in &self.runs {
             let Some(run) = lone_run(runs, &self.layouts) else {
                 continue;
             };
@@ -272,6 +274,40 @@ impl<M: Component> DiegeticTextMut<'_, '_, M> {
                 continue;
             };
             f(marker, &mut content);
+            visited += 1;
+        }
+        visited
+    }
+
+    /// Calls `f` with each `M`-marked label's authored [`TextStyle`], for
+    /// restyling a label (font, color, size) at runtime. Returns how many labels
+    /// were visited.
+    ///
+    /// Unlike text, the authoritative style is the panel tree's `El.config`, not
+    /// the run child — the run's style is a `for_shaping`-derived projection the
+    /// layout engine never measures. So this edits the tree config in place and
+    /// relayouts: the new style reaches both measurement (the panel re-fits to
+    /// the new font) and rendering (reconcile re-derives the run from the config).
+    /// Mutating the run style alone would render the new font while measuring the
+    /// old one, the exact mismatch this routes around.
+    pub fn for_each_style_mut(&mut self, mut f: impl FnMut(&mut TextStyle)) -> usize {
+        let mut visited = 0;
+        for (panel_entity, _, runs) in &self.runs {
+            let Some(run) = lone_run(runs, &self.layouts) else {
+                continue;
+            };
+            let Ok(layout) = self.layouts.get(run) else {
+                continue;
+            };
+            let element_idx = layout.element_idx;
+            let Ok(mut panel) = self.panels.get_mut(panel_entity) else {
+                continue;
+            };
+            let Some(mut style) = panel.tree().element_style(element_idx).cloned() else {
+                continue;
+            };
+            f(&mut style);
+            panel.restyle_run(element_idx, style);
             visited += 1;
         }
         visited
@@ -329,14 +365,34 @@ mod tests {
         }
     }
 
+    /// A measurer whose height encodes the `font_id`, so a restyle that changes
+    /// the font produces an observably different measured size. Bug 1 was that
+    /// `for_each_style_mut` wrote the run's derived style instead of the
+    /// authoritative tree config, so the layout engine never saw the new font;
+    /// a font-id-sensitive height makes that omission a test failure.
+    fn font_id_height_measurer() -> DiegeticTextMeasurer {
+        DiegeticTextMeasurer {
+            measure_fn: Arc::new(|text: &str, measure: &TextMeasure| {
+                let char_width = measure.size * MONOSPACE_WIDTH_RATIO;
+                let width = text.chars().count().to_f32() * char_width;
+                TextDimensions {
+                    width,
+                    height: measure.size * (1.0 + f32::from(measure.font_id)),
+                    line_height: measure.size,
+                }
+            }),
+        }
+    }
+
     /// Headless layout plus the Phase 2 cache sync + marker clear (`Update`) and
     /// the reconcile pass (`PostUpdate`) in their real ordering, so the public
     /// `PanelText` get/set is exercised against a live index and the relayout
-    /// reactor.
-    fn access_app() -> App {
+    /// reactor. Parameterized by measurer so a test can choose one whose output
+    /// depends on the font.
+    fn app_with_measurer(measurer: DiegeticTextMeasurer) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
-        app.insert_resource(monospace_measurer());
+        app.insert_resource(measurer);
         app.add_plugins(HeadlessLayoutPlugin);
         app.add_systems(
             Update,
@@ -348,6 +404,10 @@ mod tests {
         app.add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
         app
     }
+
+    /// Headless layout with the monospace approximation measurer — the default
+    /// for tests that do not care which font measures.
+    fn access_app() -> App { app_with_measurer(monospace_measurer()) }
 
     fn auto_tree(text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -411,6 +471,15 @@ mod tests {
             .content_bounds()
             .expect("content bounds should exist")
             .width
+    }
+
+    fn content_height(app: &App, panel: Entity) -> f32 {
+        app.world()
+            .get::<ComputedDiegeticPanel>(panel)
+            .expect("computed panel should exist")
+            .content_bounds()
+            .expect("content bounds should exist")
+            .height
     }
 
     fn first_run_entity(app: &mut App) -> Entity {
@@ -676,6 +745,37 @@ mod tests {
             .expect("system runs");
         assert_eq!(front_text.as_deref(), Some("face 0"));
         assert_eq!(back_text.as_deref(), Some("face 1"));
+    }
+
+    #[test]
+    fn restyle_through_diegetic_text_mut_refits_the_panel() {
+        // The measurer's height grows with `font_id`, so re-fitting the panel
+        // after a restyle is observable as a height change. Before Bug 1 was
+        // fixed, `for_each_style_mut` mutated only the run's derived style, the
+        // tree config the engine measures kept font 0, and the height held —
+        // the new font rendered but the panel never resized to it.
+        let mut app = app_with_measurer(font_id_height_measurer());
+        let panel = spawn_panel(&mut app, auto_tree("Hi"));
+        app.world_mut().entity_mut(panel).insert(Label);
+        app.update();
+        app.update();
+        let before = content_height(&app, panel);
+
+        let visited = app
+            .world_mut()
+            .run_system_once(|mut labels: DiegeticTextMut<Label>| {
+                labels.for_each_style_mut(|style| style.set_font_id(1))
+            })
+            .expect("system runs");
+        assert_eq!(visited, 1, "one marked label is restyled");
+        app.update();
+
+        let after = content_height(&app, panel);
+        assert!(
+            after > before,
+            "a font restyle must re-fit the panel through the authoritative tree \
+             config the layout engine measures: height {before} -> {after}",
+        );
     }
 
     #[test]

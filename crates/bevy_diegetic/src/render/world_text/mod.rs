@@ -48,6 +48,9 @@ pub struct ComputedWorldText {
     pub scale:        f32,
     /// Font size in layout points, matching the panel-text run.
     pub font_size:    f32,
+    /// Font identifier of the run, so the overlay draws the rendered font's
+    /// metric lines and name rather than reading the panel root's `TextStyle`.
+    pub font_id:      u16,
     /// First-line metrics from the same shaping pass, in layout points.
     pub line_metrics: LineMetricsSnapshot,
     /// Per-visible-glyph metrics aligned with the rendered text.
