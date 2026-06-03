@@ -100,13 +100,20 @@ fn main() {
         .wire_chip_to_fit_target::<FitTarget>(FIT_CONTROL)
         .with_camera_control_panel()
         .init_resource::<ManualAnimationState>()
-        // `keyboard_input` runs before `manual_animate` so a key press toggles the
-        // mode before the per-frame writer reads it the same frame.
         .add_systems(
             Startup,
             (spawn_target, spawn_fit_target, spawn_explainer_panel),
         )
-        .add_systems(Update, (keyboard_input, manual_animate).chain())
+        // M / A / P run through Fairy Dust's shortcut binding, which fires each
+        // only when no modifier is held — so the `Ctrl+Shift+A` home-gizmo chord
+        // no longer also triggers the bare-`A` AnimateToFit. `H` is bound by
+        // Fairy Dust's camera home; `stop_manual_on_animation_begin` lets manual
+        // orbit yield to that fit (and to A / P) without the example reading `H`.
+        .with_shortcut(KeyCode::KeyM, toggle_manual)
+        .with_shortcut(KeyCode::KeyA, animate_to_fit)
+        .with_shortcut(KeyCode::KeyP, play_animation)
+        .add_observer(stop_manual_on_animation_begin)
+        .add_systems(Update, manual_animate)
         .run();
 }
 
@@ -115,18 +122,18 @@ fn main() {
 // and AnimateToFit.
 // ═════════════════════════════════════════════════════════════════════════════
 //
-// How it works: `main` wires one HUD chip per mechanism and registers
-// `keyboard_input` + `manual_animate` as a chained `Update` pair. `keyboard_input`
-// dispatches the keys, and every branch first calls `stop_manual` so manual mode
-// never fights a triggered animation:
-//   - `M` toggles `ManualAnimationState`. While active, `manual_animate` writes `OrbitCam` targets
-//     every frame with camera input disabled and smoothing zeroed, so the writes apply with no
-//     easing lag.
-//   - `P` triggers `PlayAnimation`, handing the camera a `VecDeque<CameraMove>` built from
-//     `PLAY_ANIMATION_STEPS`; bevy_lagrange interpolates it move by move.
-//   - `A` triggers `AnimateToFit` on the `FitTarget` cube.
-//   - `H` only stops manual here; `fairy_dust`'s camera-home wiring runs the actual return-to-home
-//     animation.
+// How it works: `main` wires one HUD chip per mechanism and binds M / A / P
+// through Fairy Dust's shortcut API. `manual_animate` is the only per-frame
+// `Update` system; the rest are one-shot handlers and an observer:
+//   - `M` (`toggle_manual`) flips `ManualAnimationState`. While active, `manual_animate` writes
+//     `OrbitCam` targets every frame with camera input disabled and smoothing zeroed, so the writes
+//     apply with no easing lag.
+//   - `P` (`play_animation`) triggers `PlayAnimation`, handing the camera a `VecDeque<CameraMove>`
+//     built from `PLAY_ANIMATION_STEPS`; bevy_lagrange interpolates it move by move.
+//   - `A` (`animate_to_fit`) triggers `AnimateToFit` on the `FitTarget` cube.
+//   - `stop_manual_on_animation_begin` observes `AnimationBegin` and leaves manual mode whenever
+//     any animation starts — A, P, or Fairy Dust's `H` home fit — so manual writes never fight it.
+//     `H` itself is bound by `fairy_dust`'s camera home, not this example.
 
 // HUD chip strings
 const FIT_CONTROL: &str = "A AnimateToFit";
@@ -153,7 +160,7 @@ const HOME_MARGIN: f32 = 0.5;
 const HOME_PITCH: f32 = ANIMATE_TO_FIT_PITCH;
 const HOME_YAW: f32 = ANIMATE_TO_FIT_YAW;
 
-/// One step of the `P` sequence; `keyboard_input` maps each to a `CameraMove::ToOrbit`.
+/// One step of the `P` sequence; `play_animation` maps each to a `CameraMove::ToOrbit`.
 #[derive(Clone, Copy)]
 struct OrbitAnimationStep {
     duration: Duration,
@@ -229,68 +236,90 @@ struct ManualAnimationState {
 #[derive(Component)]
 struct FitTarget;
 
-fn keyboard_input(
-    keys: Res<ButtonInput<KeyCode>>,
+/// `M` — toggles manual orbit. Turning it on disables camera input and zeroes
+/// smoothing so `manual_animate`'s per-frame writes apply with no easing lag;
+/// turning it off restores both via `stop_manual`.
+fn toggle_manual(
     mut commands: Commands,
     mut manual: ResMut<ManualAnimationState>,
+    mut orbit_cam_query: Query<(Entity, &mut OrbitCam)>,
+) {
+    let Ok((camera, mut cam)) = orbit_cam_query.single_mut() else {
+        return;
+    };
+
+    if manual.mode == ManualAnimationMode::Active {
+        stop_manual(&mut commands, &mut manual, camera, &mut cam);
+    } else {
+        manual.mode = ManualAnimationMode::Active;
+        commands.entity(camera).insert(CameraInputDisabled);
+        cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        if let (Some(yaw), Some(pitch)) = (cam.yaw, cam.pitch) {
+            cam.target_yaw = yaw;
+            cam.target_pitch = pitch;
+        }
+    }
+}
+
+/// `A` — frames the `FitTarget` cube with `AnimateToFit`. Manual orbit, if
+/// active, yields through `stop_manual_on_animation_begin`.
+fn animate_to_fit(
+    mut commands: Commands,
     camera_query: Query<Entity, With<OrbitCam>>,
     fit_target_query: Query<Entity, With<FitTarget>>,
-    mut orbit_cam_query: Query<&mut OrbitCam>,
 ) {
     let Ok(camera) = camera_query.single() else {
         return;
     };
-    let Ok(mut cam) = orbit_cam_query.get_mut(camera) else {
+    let Ok(fit_target) = fit_target_query.single() else {
         return;
     };
+    commands.trigger(
+        AnimateToFit::new(camera, fit_target)
+            .yaw(ANIMATE_TO_FIT_YAW)
+            .pitch(ANIMATE_TO_FIT_PITCH)
+            .margin(ANIMATE_TO_FIT_MARGIN)
+            .duration(ANIMATE_TO_FIT_DURATION),
+    );
+}
 
-    if keys.just_pressed(KeyCode::KeyM) {
-        if manual.mode == ManualAnimationMode::Active {
-            stop_manual(&mut commands, &mut manual, camera, &mut cam);
-        } else {
-            manual.mode = ManualAnimationMode::Active;
-            commands.entity(camera).insert(CameraInputDisabled);
-            cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-            cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-            cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-            if let (Some(yaw), Some(pitch)) = (cam.yaw, cam.pitch) {
-                cam.target_yaw = yaw;
-                cam.target_pitch = pitch;
-            }
-        }
+/// `P` — plays the five-step `PLAY_ANIMATION_STEPS` sequence as one queued
+/// `PlayAnimation`. Manual orbit yields through `stop_manual_on_animation_begin`.
+fn play_animation(mut commands: Commands, camera_query: Query<Entity, With<OrbitCam>>) {
+    let Ok(camera) = camera_query.single() else {
+        return;
+    };
+    let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbit {
+        focus:    PLAY_ANIMATION_FOCUS,
+        yaw:      step.yaw,
+        pitch:    step.pitch,
+        radius:   step.radius,
+        duration: step.duration,
+        easing:   step.easing,
+    });
+
+    commands.trigger(PlayAnimation::new(camera, moves));
+}
+
+/// Leaves manual orbit when any camera animation starts, so the per-frame
+/// manual writes never fight a triggered fly. This is what handles `H`: Fairy
+/// Dust's camera home triggers the home fit, whose `AnimationBegin` lands here
+/// — the example never reads the reserved `H` key itself.
+fn stop_manual_on_animation_begin(
+    _begin: On<AnimationBegin>,
+    mut commands: Commands,
+    mut manual: ResMut<ManualAnimationState>,
+    mut orbit_cam_query: Query<(Entity, &mut OrbitCam)>,
+) {
+    if manual.mode != ManualAnimationMode::Active {
+        return;
     }
-
-    if keys.just_pressed(KeyCode::KeyH) {
-        stop_manual(&mut commands, &mut manual, camera, &mut cam);
-    }
-
-    if keys.just_pressed(KeyCode::KeyA) {
-        stop_manual(&mut commands, &mut manual, camera, &mut cam);
-        let Ok(fit_target) = fit_target_query.single() else {
-            return;
-        };
-        commands.trigger(
-            AnimateToFit::new(camera, fit_target)
-                .yaw(ANIMATE_TO_FIT_YAW)
-                .pitch(ANIMATE_TO_FIT_PITCH)
-                .margin(ANIMATE_TO_FIT_MARGIN)
-                .duration(ANIMATE_TO_FIT_DURATION),
-        );
-    }
-
-    if keys.just_pressed(KeyCode::KeyP) {
-        stop_manual(&mut commands, &mut manual, camera, &mut cam);
-        let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbit {
-            focus:    PLAY_ANIMATION_FOCUS,
-            yaw:      step.yaw,
-            pitch:    step.pitch,
-            radius:   step.radius,
-            duration: step.duration,
-            easing:   step.easing,
-        });
-
-        commands.trigger(PlayAnimation::new(camera, moves));
-    }
+    let Ok((camera, mut cam)) = orbit_cam_query.single_mut() else {
+        return;
+    };
+    stop_manual(&mut commands, &mut manual, camera, &mut cam);
 }
 
 /// Per-frame manual animation; only runs when the resource flag is active.

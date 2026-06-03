@@ -83,14 +83,10 @@ fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
 
 /// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
 fn toggle_smaa(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<SmaaState>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyS) {
-        return;
-    }
     *state = match *state {
         SmaaState::On => SmaaState::Off,
         SmaaState::Off => SmaaState::On,
@@ -139,7 +135,9 @@ fn main() {
         .add_systems(Startup, setup)
         .add_observer(on_font_registered)
         .add_observer(seed_smaa)
-        .add_systems(Update, toggle_smaa)
+        // `S` toggles SMAA through Fairy Dust's shortcut binding, which fires it
+        // only when no modifier is held.
+        .with_shortcut(KeyCode::KeyS, toggle_smaa)
         .run();
 }
 

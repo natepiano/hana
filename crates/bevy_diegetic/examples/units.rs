@@ -223,14 +223,10 @@ fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
 /// SMAA runs on the composited image after the OIT pass, so it anti-aliases
 /// mesh edges without disturbing the OIT text composite.
 fn toggle_smaa(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<SmaaState>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyS) {
-        return;
-    }
     *state = match *state {
         SmaaState::On => SmaaState::Off,
         SmaaState::Off => SmaaState::On,
@@ -321,10 +317,13 @@ fn main() {
         .init_resource::<SmaaState>()
         .add_observer(seed_smaa)
         .add_systems(Startup, setup)
-        .add_systems(Update, toggle_debug_outlines)
-        .add_systems(Update, toggle_rulers)
-        .add_systems(Update, toggle_projection)
-        .add_systems(Update, toggle_smaa)
+        // S / D / R toggles and the P / O projection switch all run through Fairy
+        // Dust's shortcut binding, which fires each only when no modifier is held.
+        .with_shortcut(KeyCode::KeyS, toggle_smaa)
+        .with_shortcut(KeyCode::KeyD, toggle_debug_outlines)
+        .with_shortcut(KeyCode::KeyR, toggle_rulers)
+        .with_shortcut(KeyCode::KeyP, to_perspective_projection)
+        .with_shortcut(KeyCode::KeyO, to_orthographic_projection)
         .run();
 }
 
@@ -679,17 +678,31 @@ fn perspective_to_orthographic_radius(r: f32) -> f32 { r * (PERSPECTIVE_FOV / 2.
 
 fn orthographic_to_perspective_radius(r: f32) -> f32 { r / ((PERSPECTIVE_FOV / 2.0).tan() * 2.0) }
 
-/// P key: switch to perspective. O key: switch to orthographic.
-fn toggle_projection(
-    keys: Res<ButtonInput<KeyCode>>,
+/// `P` switches to perspective, `O` to orthographic, through Fairy Dust's
+/// shortcut binding. Each fires only when no modifier is held.
+fn to_perspective_projection(
+    cameras: Query<(&mut Projection, &mut OrbitCam)>,
+    projection_state: ResMut<CameraProjection>,
+) {
+    switch_projection(CameraProjection::Perspective, cameras, projection_state);
+}
+
+fn to_orthographic_projection(
+    cameras: Query<(&mut Projection, &mut OrbitCam)>,
+    projection_state: ResMut<CameraProjection>,
+) {
+    switch_projection(CameraProjection::Orthographic, cameras, projection_state);
+}
+
+/// Switches every camera to `next` (perspective or orthographic), converting
+/// orbit radius so the framed scene keeps its apparent size.
+fn switch_projection(
+    next: CameraProjection,
     mut cameras: Query<(&mut Projection, &mut OrbitCam)>,
     mut projection_state: ResMut<CameraProjection>,
 ) {
-    let to_perspective = keys.just_pressed(KeyCode::KeyP);
-    let to_ortho = keys.just_pressed(KeyCode::KeyO);
-    if !to_perspective && !to_ortho {
-        return;
-    }
+    let to_ortho = next == CameraProjection::Orthographic;
+    let to_perspective = next == CameraProjection::Perspective;
     for (mut proj, mut poc) in &mut cameras {
         if to_ortho && matches!(&*proj, Projection::Perspective(_)) {
             let r = poc.radius.unwrap_or(1.0);
@@ -725,16 +738,12 @@ fn toggle_projection(
 // ── Toggle systems ───────────────────────────────────────────────────
 
 fn toggle_debug_outlines(
-    keys: Res<ButtonInput<KeyCode>>,
     mut debug: ResMut<DebugOutlines>,
     a4_panels: Query<Entity, With<A4Panel>>,
     card_panels: Query<Entity, (With<CardPanel>, Without<A4Panel>, Without<IndexPanel>)>,
     index_panels: Query<Entity, (With<IndexPanel>, Without<A4Panel>, Without<CardPanel>)>,
     mut commands: Commands,
 ) {
-    if !keys.just_pressed(KeyCode::KeyD) {
-        return;
-    }
     debug.toggle();
     let on = debug.is_on();
     bevy::log::info!("debug outlines: {on}");
@@ -751,13 +760,9 @@ fn toggle_debug_outlines(
 }
 
 fn toggle_rulers(
-    keys: Res<ButtonInput<KeyCode>>,
     mut rulers_state: ResMut<Rulers>,
     mut rulers: Query<&mut Visibility, With<PanelRuler>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyR) {
-        return;
-    }
     rulers_state.toggle();
     let vis = match *rulers_state {
         Rulers::Visible => Visibility::Inherited,

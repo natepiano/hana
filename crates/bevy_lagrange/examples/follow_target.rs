@@ -65,7 +65,10 @@ fn main() {
         .init_resource::<AnimationPause>()
         .add_systems(Startup, spawn_track_ring)
         .add_systems(PostStartup, spawn_story_panels)
-        .add_systems(Update, (toggle_pause, animate_cube, camera_follow).chain())
+        // `P` toggles the cube motion through Fairy Dust's shortcut binding,
+        // which fires only when no modifier is held.
+        .with_shortcut(KeyCode::KeyP, toggle_pause)
+        .add_systems(Update, (animate_cube, camera_follow).chain())
         .run();
 }
 
@@ -122,11 +125,7 @@ const fn configure_camera(camera: &mut OrbitCam) {
     camera.pan_smoothness = CAMERA_PAN_SMOOTHNESS;
 }
 
-fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut pause: ResMut<AnimationPause>) {
-    if keys.just_pressed(KeyCode::KeyP) {
-        pause.paused = !pause.paused;
-    }
-}
+fn toggle_pause(mut pause: ResMut<AnimationPause>) { pause.paused = !pause.paused; }
 
 fn animate_cube(
     time: Res<Time>,

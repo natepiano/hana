@@ -66,16 +66,14 @@ fn main() {
         .init_resource::<AnimationPause>()
         .init_resource::<FocusBounds>()
         .add_systems(PostStartup, spawn_story_panels)
+        // `P` and the arrow keys run through Fairy Dust's shortcut binding,
+        // which fires each only when no modifier is held.
+        .with_shortcut(KeyCode::KeyP, toggle_pause)
+        .with_shortcut(KeyCode::ArrowLeft, shrink_focus_bounds)
+        .with_shortcut(KeyCode::ArrowRight, grow_focus_bounds)
         .add_systems(
             Update,
-            (
-                toggle_pause,
-                resize_focus_bounds,
-                sync_focus_bounds,
-                rotate_cube,
-                draw_focus_gizmos,
-            )
-                .chain(),
+            (sync_focus_bounds, rotate_cube, draw_focus_gizmos).chain(),
         )
         .run();
 }
@@ -85,10 +83,11 @@ fn main() {
 // ═════════════════════════════════════════════════════════════════════════════
 //
 // How it works: configure_camera writes focus_bounds_shape and
-// focus_bounds_origin onto the OrbitCam at startup. resize_focus_bounds reads
-// Left/Right input into the FocusBounds resource; sync_focus_bounds writes the
-// updated size back to every OrbitCam each frame. draw_focus_gizmos draws the
-// bounds cuboid and a sphere at the camera's clamped focus point.
+// focus_bounds_origin onto the OrbitCam at startup. shrink_focus_bounds /
+// grow_focus_bounds (bound to ← / → through Fairy Dust's shortcut binding)
+// adjust the FocusBounds resource; sync_focus_bounds writes the updated size
+// back to every OrbitCam each frame. draw_focus_gizmos draws the bounds cuboid
+// and a sphere at the camera's clamped focus point.
 
 const BOUNDS_GIZMO_COLOR: Color = Color::linear_rgb(1.6, 1.6, 1.5);
 const BOUNDS_LARGER_CONTROL: &str = "→ Increase";
@@ -126,15 +125,15 @@ fn apply_focus_bounds(camera: &mut OrbitCam, size: f32) {
     camera.focus_bounds_origin = FOCUS_BOUNDS_ORIGIN;
 }
 
-fn resize_focus_bounds(keys: Res<ButtonInput<KeyCode>>, mut bounds: ResMut<FocusBounds>) {
-    let step = match (
-        keys.just_pressed(KeyCode::ArrowLeft),
-        keys.just_pressed(KeyCode::ArrowRight),
-    ) {
-        (true, false) => -FOCUS_BOUNDS_STEP,
-        (false, true) => FOCUS_BOUNDS_STEP,
-        _ => return,
-    };
+fn shrink_focus_bounds(mut bounds: ResMut<FocusBounds>) {
+    resize_focus_bounds(&mut bounds, -FOCUS_BOUNDS_STEP);
+}
+
+fn grow_focus_bounds(mut bounds: ResMut<FocusBounds>) {
+    resize_focus_bounds(&mut bounds, FOCUS_BOUNDS_STEP);
+}
+
+fn resize_focus_bounds(bounds: &mut FocusBounds, step: f32) {
     bounds.size = (bounds.size + step).clamp(FOCUS_BOUNDS_MIN_SIZE, FOCUS_BOUNDS_MAX_SIZE);
 }
 
@@ -331,11 +330,7 @@ impl TitleChipActivation for AnimationPause {
     fn activation(&self) -> ControlActivation { self.control_activation() }
 }
 
-fn toggle_pause(keys: Res<ButtonInput<KeyCode>>, mut pause: ResMut<AnimationPause>) {
-    if keys.just_pressed(KeyCode::KeyP) {
-        pause.paused = !pause.paused;
-    }
-}
+fn toggle_pause(mut pause: ResMut<AnimationPause>) { pause.paused = !pause.paused; }
 
 fn rotate_cube(
     time: Res<Time>,

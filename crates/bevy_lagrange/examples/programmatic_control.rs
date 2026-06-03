@@ -43,10 +43,12 @@ fn main() {
         .with_description_panel(description_panel())
         .with_camera_control_panel()
         .init_resource::<HomeReset>()
-        // `home_camera` writes the targets and starts the smoothness override;
-        // `update_home_reset` polls each frame for arrival or user takeover, so
-        // it must run after the write in the same frame.
-        .add_systems(Update, (home_camera, update_home_reset).chain())
+        // `H` runs `home_camera` through Fairy Dust's shortcut binding, which
+        // fires it only when no modifier is held. `home_camera` writes the
+        // targets and starts the smoothness override; `update_home_reset` then
+        // polls each frame for arrival or user takeover.
+        .with_shortcut(KeyCode::KeyH, home_camera)
+        .add_systems(Update, update_home_reset)
         .run();
 }
 
@@ -140,14 +142,9 @@ const fn configure_camera(camera: &mut OrbitCam) {
 
 fn home_camera(
     mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
     mut reset: ResMut<HomeReset>,
     mut camera: Single<&mut OrbitCam, With<ProgrammaticCamera>>,
 ) {
-    if !keys.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-
     reset.start(&mut camera);
     camera.target_focus = HOME_FOCUS;
     camera.target_yaw = HOME_YAW;

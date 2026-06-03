@@ -162,7 +162,16 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<ControlsState>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (handle_hotkeys, apply_state_and_rebuild_hud))
+        .add_systems(Update, apply_state_and_rebuild_hud)
+        // 1..7 select the active AlphaMode through Fairy Dust's shortcut binding,
+        // which fires each only when no modifier is held.
+        .with_shortcut(KeyCode::Digit1, select_alpha_blend)
+        .with_shortcut(KeyCode::Digit2, select_alpha_premultiplied)
+        .with_shortcut(KeyCode::Digit3, select_alpha_coverage)
+        .with_shortcut(KeyCode::Digit4, select_alpha_add)
+        .with_shortcut(KeyCode::Digit5, select_alpha_multiply)
+        .with_shortcut(KeyCode::Digit6, select_alpha_mask)
+        .with_shortcut(KeyCode::Digit7, select_alpha_opaque)
         .run();
 }
 
@@ -237,24 +246,24 @@ fn setup(
     // the first frame (via `Res::is_changed()` on initial resource insert).
 }
 
-fn handle_hotkeys(keyboard: Res<ButtonInput<KeyCode>>, mut state: ResMut<ControlsState>) {
-    // Digit1..Digit7 → ALPHA_MODES[0..7].
-    let digits = [
-        KeyCode::Digit1,
-        KeyCode::Digit2,
-        KeyCode::Digit3,
-        KeyCode::Digit4,
-        KeyCode::Digit5,
-        KeyCode::Digit6,
-        KeyCode::Digit7,
-    ];
-    for (i, key) in digits.iter().enumerate() {
-        if keyboard.just_pressed(*key) {
-            state.alpha_mode = ALPHA_MODES[i].0;
-            break;
-        }
-    }
+// Digit 1..7 → ALPHA_MODES[0..7], each bound through Fairy Dust's shortcut
+// binding. Setting `alpha_mode` flips `ControlsState`, which
+// `apply_state_and_rebuild_hud` picks up via change detection.
+fn select_alpha_blend(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[0].0; }
+
+fn select_alpha_premultiplied(mut state: ResMut<ControlsState>) {
+    state.alpha_mode = ALPHA_MODES[1].0;
 }
+
+fn select_alpha_coverage(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[2].0; }
+
+fn select_alpha_add(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[3].0; }
+
+fn select_alpha_multiply(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[4].0; }
+
+fn select_alpha_mask(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[5].0; }
+
+fn select_alpha_opaque(mut state: ResMut<ControlsState>) { state.alpha_mode = ALPHA_MODES[6].0; }
 
 fn apply_state_and_rebuild_hud(
     state: Res<ControlsState>,

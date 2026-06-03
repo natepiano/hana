@@ -114,7 +114,13 @@ fn main() {
         .init_resource::<AnchorRotation>()
         .init_resource::<SmaaState>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (rotate_anchor_demo, toggle_smaa))
+        .add_systems(Update, rotate_anchor_demo)
+        // S / X / Y / Z run through Fairy Dust's shortcut binding, which fires
+        // each only when no modifier is held.
+        .with_shortcut(KeyCode::KeyS, toggle_smaa)
+        .with_shortcut(KeyCode::KeyX, rotate_x)
+        .with_shortcut(KeyCode::KeyY, rotate_y)
+        .with_shortcut(KeyCode::KeyZ, rotate_z)
         .run();
 }
 
@@ -290,14 +296,10 @@ impl TitleChipActivation for SmaaState {
 /// resolves, so it anti-aliases the mesh edges that `Msaa::Off` leaves jagged
 /// without disturbing the OIT text composite.
 fn toggle_smaa(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<SmaaState>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyS) {
-        return;
-    }
     *state = match *state {
         SmaaState::Off => SmaaState::On,
         SmaaState::On => SmaaState::Off,
@@ -345,22 +347,33 @@ struct AnchorDemoText {
 #[derive(Resource, Default)]
 struct AnchorRotation {
     /// Current rotation angle in radians (0..TAU). `None` = not rotating.
-    angle: Option<f32>,
+    angle:     Option<f32>,
     /// Which local axis to rotate around.
-    axis:  Vec3,
+    axis:      Vec3,
+    /// Axis a shortcut asked to rotate around, consumed by `rotate_anchor_demo`
+    /// on the next frame it is idle.
+    requested: Option<Vec3>,
 }
 
 /// Marker for the cube entity so the rotation system can find it.
 #[derive(Component)]
 struct DemoCube;
 
-/// Press X, Y, or Z to start a full rotation around that local axis.
-/// `Anchor` demo texts rotate around their anchor point (red dot stays fixed).
-/// The cube rotates around its own center on the same axis simultaneously.
-/// Fires [`RotationBegin`]/[`RotationEnd`] events so the title bar chips can
-/// highlight while the rotation runs.
+/// `X` / `Y` / `Z` request a full rotation around that local axis through Fairy
+/// Dust's shortcut binding; `rotate_anchor_demo` starts it on the next idle
+/// frame. Each fires only when no modifier is held.
+fn rotate_x(mut state: ResMut<AnchorRotation>) { state.requested = Some(Vec3::X); }
+
+fn rotate_y(mut state: ResMut<AnchorRotation>) { state.requested = Some(Vec3::Y); }
+
+fn rotate_z(mut state: ResMut<AnchorRotation>) { state.requested = Some(Vec3::Z); }
+
+/// Starts a full rotation around the requested local axis, then drives it each
+/// frame. `Anchor` demo texts rotate around their anchor point (red dot stays
+/// fixed); the cube rotates around its own center on the same axis. Fires
+/// [`RotationBegin`]/[`RotationEnd`] so the title bar chips highlight while it
+/// runs. A request that arrives mid-rotation is dropped.
 fn rotate_anchor_demo(
-    keyboard: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut commands: Commands,
     mut state: ResMut<AnchorRotation>,
@@ -368,24 +381,16 @@ fn rotate_anchor_demo(
     mut cube: Query<&mut Transform, With<DemoCube>>,
     mut cube_base_rotation: Local<Option<Quat>>,
 ) {
-    if state.angle.is_none() {
-        let axis = if keyboard.just_pressed(KeyCode::KeyX) {
-            Some(Vec3::X)
-        } else if keyboard.just_pressed(KeyCode::KeyY) {
-            Some(Vec3::Y)
-        } else if keyboard.just_pressed(KeyCode::KeyZ) {
-            Some(Vec3::Z)
-        } else {
-            None
-        };
-        if let Some(axis) = axis {
-            state.angle = Some(0.0);
-            state.axis = axis;
-            if let Ok(cube_t) = cube.single() {
-                *cube_base_rotation = Some(cube_t.rotation);
-            }
-            commands.trigger(RotationBegin { axis });
+    let requested = state.requested.take();
+    if state.angle.is_none()
+        && let Some(axis) = requested
+    {
+        state.angle = Some(0.0);
+        state.axis = axis;
+        if let Ok(cube_t) = cube.single() {
+            *cube_base_rotation = Some(cube_t.rotation);
         }
+        commands.trigger(RotationBegin { axis });
     }
 
     let Some(angle) = state.angle.as_mut() else {

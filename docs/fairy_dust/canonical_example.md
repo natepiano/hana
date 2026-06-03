@@ -15,6 +15,9 @@ The current best example of this structure is
   intent (e.g. an entity whose `Entity` ID must be captured for later events).
 - The HUD (top-left title bar) uses fairy_dust `TitleBar` and reflects
   example-specific controls. Its title is the example's display name.
+- Example keyboard shortcuts are registered with `.with_shortcut(...)` /
+  `.with_held_shortcut(...)` so they never collide with Fairy Dust's own
+  modifier chords.
 - Custom screen-space panels use fairy_dust's shared screen-panel frame and
   material helpers so examples do not copy panel styling.
 - `Ctrl+Shift+R` hot-restart works in every example automatically.
@@ -50,7 +53,8 @@ fairy_dust::sprinkle_example()
     )
     .with_camera_control_panel()
     .add_systems(Startup, spawn_example_specific_entities)
-    .add_systems(Update, keyboard_input)
+    .with_shortcut(KeyCode::KeyZ, zoom_to_fit_target)
+    .with_shortcut(KeyCode::KeyL, look_at_target)
     .add_observer(on_zoom_begin)
     .add_observer(on_zoom_end)
     .run();
@@ -195,6 +199,37 @@ with `FairyDustOrbitCam` or trigger `AnimateToFit` against
 exception: camera setup is part of what they demonstrate, while
 `CameraHomeTarget` still defines the AABB.
 
+### Keyboard shortcuts — use the builder
+
+Bind example keyboard shortcuts with `.with_shortcut(key, system)` (runs once
+per press) or `.with_held_shortcut(key, system)` (runs every frame the key is
+held) instead of a hand-rolled `Res<ButtonInput<KeyCode>>` system. Each handler
+is a plain Bevy system; the example never imports `bevy_enhanced_input` for
+input.
+
+The builder fires a shortcut only when **no modifier is held**, so a bare key
+never also fires when the user presses a Fairy Dust chord on the same letter —
+e.g. `Ctrl+Shift+A` toggles the home-AABB gizmo without also triggering a
+bare-`A` shortcut. That modifier guard is the one thing a raw `ButtonInput`
+reader is missing.
+
+Rules:
+
+- One key per handler. For "key 1–N selects variant N", register one thin
+  handler per key (or have each set a small request resource that a single
+  system reads), rather than one system that reads every key.
+- Two keys, one behavior (e.g. `P` and `Space` both pause) — register the same
+  system under both keys.
+- `H` (home) and `P` (cube spin) are **reserved** by `.with_camera_home()` and
+  `.with_cube_spin()`. Registering a shortcut on a reserved key fails at
+  startup with a clear panic. Drive home/pause through those capabilities; if
+  an example must run extra logic on home, observe the home fit's
+  `AnimationBegin` (an `AnimateToFit` whose target is the home cube) rather than
+  reading `H`. `animation.rs` and `swapped_axis.rs` do exactly this.
+- A modifier chord an example genuinely demonstrates can't be a bare shortcut
+  (it fires only when no modifier is held) — leave that as its own input
+  system.
+
 ### Stable transparency
 
 Use `.with_stable_transparency()` after installing a Fairy Dust OrbitCam helper
@@ -307,6 +342,11 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
   and should tag the Fairy Dust-controlled camera with `FairyDustOrbitCam`.
 - Custom `home_camera` keyboard system + `PlayAnimation::new(... ToOrbit ...)` →
   delete, use `.with_camera_home()` plus `CameraHomeTarget`.
+- Raw `Res<ButtonInput<KeyCode>>` systems that read bare keys for incidental HUD
+  shortcuts → replace with `.with_shortcut(key, system)` /
+  `.with_held_shortcut(key, system)`. Keep raw input only where it is the point:
+  the input-teaching examples (`input_*`, `ime`) or a demonstrated modifier
+  chord that can't be a bare key.
 - Click-on-ground observer that triggers `ZoomToFit` / `AnimateToFit` back to
   the scene bounds → delete. The `SceneBounds` resource and the ground
   observer go with it. `H Home` is the standard homing affordance.

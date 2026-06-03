@@ -131,7 +131,6 @@ const WING_VIEW_ROWS: [(&str, &str); 4] = [
 /// The two stacked instruction boxes, top to bottom.
 const DEMO_VIEWS: [DemoView; 2] = [
     DemoView {
-        key:    KeyCode::KeyA,
         title:  "STEEP GRAZING ANGLE",
         focus:  Vec3::new(-0.965 + SCENE_X_OFFSET, 0.051, -0.026),
         yaw:    1.069,
@@ -140,7 +139,6 @@ const DEMO_VIEWS: [DemoView; 2] = [
         rows:   &STEEP_VIEW_ROWS,
     },
     DemoView {
-        key:    KeyCode::KeyB,
         title:  "SHARP-CORNER WINGS",
         focus:  Vec3::new(-1.413 + SCENE_X_OFFSET, 0.039, 0.007),
         yaw:    1.651,
@@ -278,21 +276,35 @@ fn main() {
         )
         .with_camera_control_panel()
         .init_resource::<PostAa>()
+        .init_resource::<RequestedPost>()
         .init_resource::<OitState>()
         .add_systems(Startup, (setup, spawn_aa_panel, spawn_demo_panel))
+        // `select_post_aa` consumes the N/S/F/T request; the refreshers repaint
+        // the panels from the current state each frame.
         .add_systems(
             Update,
             (
-                select_text_aa,
                 select_post_aa,
-                select_demo_view,
-                toggle_oit,
                 refresh_aa_panel,
                 refresh_demo_panel,
                 refresh_cube_status_panels,
                 refresh_cube_compatibility_panels,
             ),
         )
+        // Every key runs through Fairy Dust's shortcut binding, which fires each
+        // only when no modifier is held — so bare `A` no longer also fires on the
+        // `Ctrl+Shift+A` home-gizmo chord.
+        .with_shortcut(KeyCode::Digit1, select_text_aa_off)
+        .with_shortcut(KeyCode::Digit2, select_text_aa_anisotropic)
+        .with_shortcut(KeyCode::Digit3, select_text_aa_supersample)
+        .with_shortcut(KeyCode::Digit4, select_text_aa_both)
+        .with_shortcut(KeyCode::KeyN, select_post_aa_none)
+        .with_shortcut(KeyCode::KeyS, select_post_aa_smaa)
+        .with_shortcut(KeyCode::KeyF, select_post_aa_fxaa)
+        .with_shortcut(KeyCode::KeyT, select_post_aa_taa)
+        .with_shortcut(KeyCode::KeyO, toggle_oit)
+        .with_shortcut(KeyCode::KeyA, view_a)
+        .with_shortcut(KeyCode::KeyB, view_b)
         .add_systems(PostUpdate, sync_taa_msaa)
         .run();
 }
@@ -316,6 +328,10 @@ enum PostAa {
     /// TAA: temporal blend across frames; adds the depth/motion prepasses.
     Taa,
 }
+
+/// A post-process mode a shortcut asked for, consumed by `select_post_aa`.
+#[derive(Resource, Default)]
+struct RequestedPost(Option<PostAa>);
 
 /// Source of truth for the OIT toggle, mirrored into the `O OIT` title-bar chip.
 #[derive(Resource, Clone, Copy, PartialEq, Eq)]
@@ -445,37 +461,52 @@ fn spawn_cube_compatibility_panels(
     }
 }
 
-/// On `1`-`4`, select the matching [`TextAntiAlias`] mode.
-fn select_text_aa(keyboard: Res<ButtonInput<KeyCode>>, mut aa: ResMut<TextAntiAlias>) {
-    for (key, _, mode) in TEXT_MODES {
-        if keyboard.just_pressed(key) {
-            if *aa != mode {
-                *aa = mode;
-            }
-            return;
-        }
+/// 1..4 select the matching [`TextAntiAlias`] mode through Fairy Dust's shortcut
+/// binding. Each fires only when no modifier is held; setting the resource only
+/// when it changes avoids needless panel rebuilds.
+fn set_text_aa(aa: &mut TextAntiAlias, mode: TextAntiAlias) {
+    if *aa != mode {
+        *aa = mode;
     }
 }
 
-/// On `N`/`S`/`F`/`T`, select that post-process mode and reconcile the camera's
-/// components.
+fn select_text_aa_off(mut aa: ResMut<TextAntiAlias>) { set_text_aa(&mut aa, TextAntiAlias::Off); }
+
+fn select_text_aa_anisotropic(mut aa: ResMut<TextAntiAlias>) {
+    set_text_aa(&mut aa, TextAntiAlias::Anisotropic);
+}
+
+fn select_text_aa_supersample(mut aa: ResMut<TextAntiAlias>) {
+    set_text_aa(&mut aa, TextAntiAlias::Supersample);
+}
+
+fn select_text_aa_both(mut aa: ResMut<TextAntiAlias>) { set_text_aa(&mut aa, TextAntiAlias::Both); }
+
+/// N/S/F/T request a post-process mode through Fairy Dust's shortcut binding;
+/// `select_post_aa` applies it. Each fires only when no modifier is held.
+fn select_post_aa_none(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::None); }
+
+fn select_post_aa_smaa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Smaa); }
+
+fn select_post_aa_fxaa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Fxaa); }
+
+fn select_post_aa_taa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Taa); }
+
+/// Applies a requested post-process mode and reconciles the camera's components.
 fn select_post_aa(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    mut requested: ResMut<RequestedPost>,
     mut mode: ResMut<PostAa>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    for (key, _, selected) in POST_MODES {
-        if !keyboard.just_pressed(key) {
-            continue;
-        }
-        if *mode != selected {
-            *mode = selected;
-            for camera in &cameras {
-                apply_post_aa(&mut commands, camera, selected);
-            }
-        }
+    let Some(selected) = requested.0.take() else {
         return;
+    };
+    if *mode != selected {
+        *mode = selected;
+        for camera in &cameras {
+            apply_post_aa(&mut commands, camera, selected);
+        }
     }
 }
 
@@ -507,14 +538,10 @@ fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
 /// On `O`, toggle OIT on the scene camera. Inserting [`StableTransparency`]
 /// turns OIT on; removing it lets the observer restore default MSAA.
 fn toggle_oit(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<OitState>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyO) {
-        return;
-    }
     state.0 = !state.0;
     for camera in &cameras {
         if state.0 {
@@ -557,8 +584,6 @@ fn sync_taa_msaa(
 /// A camera viewpoint `A` / `B` can fly to, paired with the instruction box that
 /// names the comparison to run once you arrive.
 struct DemoView {
-    /// Key that flies the camera to this view.
-    key:    KeyCode,
     /// Heading of this view's instruction box.
     title:  &'static str,
     /// Target orbit focus point (world units).
@@ -585,27 +610,26 @@ impl DemoView {
     }
 }
 
-/// On `A` / `B`, animate every orbit camera to that demo's viewpoint. Skipped
-/// while Ctrl+Shift are both held so the gizmo chord does not also trigger `A`.
+/// `A` / `B` animate every orbit camera to that demo's viewpoint through Fairy
+/// Dust's shortcut binding. The binding fires each only when no modifier is
+/// held, so the `Ctrl+Shift+A` gizmo chord no longer also triggers `A` — the
+/// hand-rolled Ctrl+Shift guard this used to need is gone.
 fn select_demo_view(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
+    view: &DemoView,
+    cameras: &Query<Entity, With<OrbitCam>>,
+    commands: &mut Commands,
 ) {
-    if keyboard.any_pressed([KeyCode::ControlLeft, KeyCode::ControlRight])
-        && keyboard.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
-    {
-        return;
+    for camera in cameras {
+        commands.trigger(PlayAnimation::new(camera, [view.camera_move()]));
     }
-    for demo in &DEMO_VIEWS {
-        if !keyboard.just_pressed(demo.key) {
-            continue;
-        }
-        for camera in &cameras {
-            commands.trigger(PlayAnimation::new(camera, [demo.camera_move()]));
-        }
-        return;
-    }
+}
+
+fn view_a(cameras: Query<Entity, With<OrbitCam>>, mut commands: Commands) {
+    select_demo_view(&DEMO_VIEWS[0], &cameras, &mut commands);
+}
+
+fn view_b(cameras: Query<Entity, With<OrbitCam>>, mut commands: Commands) {
+    select_demo_view(&DEMO_VIEWS[1], &cameras, &mut commands);
 }
 
 // =============================================================================

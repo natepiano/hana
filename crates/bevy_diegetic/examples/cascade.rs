@@ -163,7 +163,15 @@ fn main() {
         .init_resource::<CascadeDemoState>()
         .init_resource::<HudSnapshotCache>()
         .add_systems(Startup, setup)
-        .add_systems(Update, handle_cascade_keys)
+        // Each cascade toggle runs through Fairy Dust's shortcut binding, which
+        // fires only when no modifier is held — so bare `L` no longer also fires
+        // on the `Ctrl+Shift+L` screen-panel chord.
+        .with_shortcut(KeyCode::KeyG, cycle_global_alpha)
+        .with_shortcut(KeyCode::KeyU, cycle_global_unit)
+        .with_shortcut(KeyCode::KeyP, toggle_panel_alpha)
+        .with_shortcut(KeyCode::KeyS, toggle_standalone_alpha)
+        .with_shortcut(KeyCode::KeyF, toggle_standalone_unit)
+        .with_shortcut(KeyCode::KeyL, toggle_label_alpha)
         .add_systems(PostUpdate, refresh_hud)
         .run();
 }
@@ -452,66 +460,94 @@ fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: Option<&HudSnapshot
     );
 }
 
-fn handle_cascade_keys(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    entities: Option<Res<CascadeDemoEntities>>,
+/// `G` — cycles the global `TextAlpha` default every entity inherits.
+fn cycle_global_alpha(
     mut state: ResMut<CascadeDemoState>,
     mut alpha_default: ResMut<CascadeDefault<TextAlpha>>,
+) {
+    state.global_alpha = next_alpha_default(state.global_alpha);
+    alpha_default.0 = TextAlpha(state.global_alpha);
+}
+
+/// `U` — cycles the global `FontUnit` default every entity inherits.
+fn cycle_global_unit(
+    mut state: ResMut<CascadeDemoState>,
     mut unit_default: ResMut<CascadeDefault<FontUnit>>,
-    labels: Query<(Entity, &TextContent)>,
+) {
+    state.global_unit = next_unit_default(state.global_unit);
+    unit_default.0 = FontUnit(state.global_unit);
+}
+
+/// `P` — toggles whether the panel overrides or inherits text alpha.
+fn toggle_panel_alpha(
+    entities: Option<Res<CascadeDemoEntities>>,
+    mut state: ResMut<CascadeDemoState>,
     mut commands: Commands,
 ) {
     let Some(entities) = entities else {
         return;
     };
+    state.panel_alpha = state.panel_alpha.toggled();
+    let mut panel = commands.entity(entities.panel);
+    if state.panel_alpha.is_override() {
+        panel.override_text_alpha(PANEL_ALPHA);
+    } else {
+        panel.inherit_text_alpha();
+    }
+}
 
-    if keyboard.just_pressed(KeyCode::KeyG) {
-        state.global_alpha = next_alpha_default(state.global_alpha);
-        alpha_default.0 = TextAlpha(state.global_alpha);
+/// `S` — toggles whether the standalone text overrides or inherits text alpha.
+fn toggle_standalone_alpha(
+    entities: Option<Res<CascadeDemoEntities>>,
+    mut state: ResMut<CascadeDemoState>,
+    mut commands: Commands,
+) {
+    let Some(entities) = entities else {
+        return;
+    };
+    state.standalone_alpha = state.standalone_alpha.toggled();
+    let mut standalone = commands.entity(entities.standalone_alpha);
+    if state.standalone_alpha.is_override() {
+        standalone.override_text_alpha(STANDALONE_ALPHA);
+    } else {
+        standalone.inherit_text_alpha();
     }
-    if keyboard.just_pressed(KeyCode::KeyU) {
-        state.global_unit = next_unit_default(state.global_unit);
-        unit_default.0 = FontUnit(state.global_unit);
+}
+
+/// `F` — toggles whether the standalone text overrides or inherits font unit.
+fn toggle_standalone_unit(
+    entities: Option<Res<CascadeDemoEntities>>,
+    mut state: ResMut<CascadeDemoState>,
+    mut commands: Commands,
+) {
+    let Some(entities) = entities else {
+        return;
+    };
+    state.standalone_unit = state.standalone_unit.toggled();
+    let mut standalone = commands.entity(entities.standalone_unit);
+    if state.standalone_unit.is_override() {
+        standalone.override_font_unit(STANDALONE_UNIT);
+    } else {
+        standalone.inherit_font_unit();
     }
-    if keyboard.just_pressed(KeyCode::KeyP) {
-        state.panel_alpha = state.panel_alpha.toggled();
-        let mut panel = commands.entity(entities.panel);
-        if state.panel_alpha.is_override() {
-            panel.override_text_alpha(PANEL_ALPHA);
-        } else {
-            panel.inherit_text_alpha();
-        }
-    }
-    if keyboard.just_pressed(KeyCode::KeyS) {
-        state.standalone_alpha = state.standalone_alpha.toggled();
-        let mut standalone = commands.entity(entities.standalone_alpha);
-        if state.standalone_alpha.is_override() {
-            standalone.override_text_alpha(STANDALONE_ALPHA);
-        } else {
-            standalone.inherit_text_alpha();
-        }
-    }
-    if keyboard.just_pressed(KeyCode::KeyF) {
-        state.standalone_unit = state.standalone_unit.toggled();
-        let mut standalone = commands.entity(entities.standalone_unit);
-        if state.standalone_unit.is_override() {
-            standalone.override_font_unit(STANDALONE_UNIT);
-        } else {
-            standalone.inherit_font_unit();
-        }
-    }
-    if keyboard.just_pressed(KeyCode::KeyL) {
-        let Some(label) = find_label_by_prefix(&labels, PANEL_LOCAL_PREFIX) else {
-            warn!("cascade: panel label is not spawned yet");
-            return;
-        };
-        state.label_alpha = state.label_alpha.toggled();
-        let mut label_commands = commands.entity(label);
-        if state.label_alpha.is_override() {
-            label_commands.override_text_alpha(LABEL_ALPHA);
-        } else {
-            label_commands.inherit_text_alpha();
-        }
+}
+
+/// `L` — toggles whether the panel's local label overrides or inherits alpha.
+fn toggle_label_alpha(
+    mut state: ResMut<CascadeDemoState>,
+    labels: Query<(Entity, &TextContent)>,
+    mut commands: Commands,
+) {
+    let Some(label) = find_label_by_prefix(&labels, PANEL_LOCAL_PREFIX) else {
+        warn!("cascade: panel label is not spawned yet");
+        return;
+    };
+    state.label_alpha = state.label_alpha.toggled();
+    let mut label_commands = commands.entity(label);
+    if state.label_alpha.is_override() {
+        label_commands.override_text_alpha(LABEL_ALPHA);
+    } else {
+        label_commands.inherit_text_alpha();
     }
 }
 

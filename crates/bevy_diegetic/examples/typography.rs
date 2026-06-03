@@ -182,6 +182,10 @@ struct FontHandles(Vec<Handle<Font>>);
 #[derive(Resource)]
 struct SelectedFont(usize);
 
+/// A font index a digit shortcut asked for, consumed by `switch_font`.
+#[derive(Resource, Default)]
+struct RequestedFont(Option<usize>);
+
 #[derive(Resource, Default)]
 struct HomeOverlayTarget(Option<Entity>);
 
@@ -233,17 +237,23 @@ fn main() {
         .init_resource::<OverlayState>()
         .init_resource::<CycleState>()
         .init_resource::<SmaaState>()
+        .init_resource::<RequestedFont>()
         .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                toggle_overlay,
-                switch_font,
-                cycle_word,
-                tick_cycle_state,
-                toggle_smaa,
-            ),
-        )
+        // `switch_font` consumes the digit request; `cycle_word` is a held
+        // arrow-key word scrubber (press-to-advance, hold-to-repeat) that the
+        // shortcut binding can't express, so it stays a raw per-frame reader.
+        .add_systems(Update, (switch_font, cycle_word, tick_cycle_state))
+        // T / S and the font digits run through Fairy Dust's shortcut binding,
+        // which fires each only when no modifier is held.
+        .with_shortcut(KeyCode::KeyT, toggle_overlay)
+        .with_shortcut(KeyCode::KeyS, toggle_smaa)
+        .with_shortcut(KeyCode::Digit1, request_font_1)
+        .with_shortcut(KeyCode::Digit2, request_font_2)
+        .with_shortcut(KeyCode::Digit3, request_font_3)
+        .with_shortcut(KeyCode::Digit4, request_font_4)
+        .with_shortcut(KeyCode::Digit5, request_font_5)
+        .with_shortcut(KeyCode::Digit6, request_font_6)
+        .with_shortcut(KeyCode::Digit7, request_font_7)
         .add_observer(on_font_registered)
         .add_observer(on_overlay_bounds_added)
         .add_observer(seed_smaa)
@@ -285,14 +295,10 @@ fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
 
 /// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
 fn toggle_smaa(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut state: ResMut<SmaaState>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyS) {
-        return;
-    }
     *state = match *state {
         SmaaState::On => SmaaState::Off,
         SmaaState::Off => SmaaState::On,
@@ -609,15 +615,11 @@ fn on_font_registered(
 }
 
 fn toggle_overlay(
-    keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut overlay_state: ResMut<OverlayState>,
     with_overlay: Query<Entity, (With<DisplayText>, With<TypographyOverlay>)>,
     without_overlay: Query<Entity, (With<DisplayText>, Without<TypographyOverlay>)>,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyT) {
-        return;
-    }
     if with_overlay.is_empty() {
         for entity in &without_overlay {
             commands
@@ -675,22 +677,35 @@ fn cycle_word(
     };
 }
 
+/// 1..7 request a font through Fairy Dust's shortcut binding; `switch_font`
+/// applies the request. Each fires only when no modifier is held.
+fn request_font_1(mut requested: ResMut<RequestedFont>) { requested.0 = Some(0); }
+
+fn request_font_2(mut requested: ResMut<RequestedFont>) { requested.0 = Some(1); }
+
+fn request_font_3(mut requested: ResMut<RequestedFont>) { requested.0 = Some(2); }
+
+fn request_font_4(mut requested: ResMut<RequestedFont>) { requested.0 = Some(3); }
+
+fn request_font_5(mut requested: ResMut<RequestedFont>) { requested.0 = Some(4); }
+
+fn request_font_6(mut requested: ResMut<RequestedFont>) { requested.0 = Some(5); }
+
+fn request_font_7(mut requested: ResMut<RequestedFont>) { requested.0 = Some(6); }
+
 fn switch_font(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    mut requested: ResMut<RequestedFont>,
     font_registry: Res<FontRegistry>,
     mut selected_font: ResMut<SelectedFont>,
     panels: Query<Entity, With<FontsPanel>>,
     mut texts: Query<&mut TextStyle, With<DisplayText>>,
     mut commands: Commands,
 ) {
-    let pressed = FONT_KEYS
-        .iter()
-        .enumerate()
-        .find(|(_, (_, _, key))| keyboard.just_pressed(*key));
-    let Some((idx, (_, name, _))) = pressed else {
+    let Some(idx) = requested.0.take() else {
         return;
     };
     selected_font.0 = idx;
+    let name = FONT_KEYS[idx].1;
     let font_id = font_registry
         .font_id_by_name(name)
         .unwrap_or(FontId::MONOSPACE)

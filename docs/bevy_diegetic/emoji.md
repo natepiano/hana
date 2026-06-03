@@ -1,7 +1,8 @@
 # Analytic color emoji (COLR) for the slug text renderer
 
-Status: design / not started. Owner: TBD. Related: [slug_fx.md](slug_fx.md),
-[diegetic-text-perf.md](diegetic-text-perf.md).
+Status: planned / not started. Related: [slug_fx.md](slug_fx.md),
+[diegetic-text-perf.md](diegetic-text-perf.md),
+[../fairy_dust/canonical_example.md](../fairy_dust/canonical_example.md).
 
 ## Goal
 
@@ -12,9 +13,13 @@ glyph is a stack of vector outlines, each with a color or gradient; those
 outlines are the same kind the renderer already fills analytically, so the
 geometry path is reuse, not a second renderer.
 
-Non-goal: bitmap emoji (sbix / CBDT+CBLC) and SVG-table glyphs. Those are raster
-or full-SVG and do not fit the curve/band coverage model. A COLR font (Noto
-Color Emoji, Twemoji) is required.
+## Non-goals
+
+- Bitmap emoji (sbix / CBDT+CBLC) and SVG-table glyphs. Those are raster or
+  full-SVG and do not fit the curve/band coverage model. A COLR font (Noto Color
+  Emoji, Twemoji) is required.
+- COLRv1 variable-font deltas (gradient/transform deltas at a variation
+  instance). Pin to the font's default instance.
 
 ## Background: what COLR is
 
@@ -22,14 +27,15 @@ OpenType color via the `COLR` + `CPAL` tables. A color glyph is a back-to-front
 list of layers (COLRv0) or a paint graph (COLRv1):
 
 - **COLRv0** — a flat list of `(glyph id, palette index)` layers, each a solid
-  fill. Simple. Covers older Microsoft emoji and many flat-color icon fonts.
+  fill. Covers older Microsoft emoji and many flat-color icon fonts.
 - **COLRv1** — a paint graph: `PaintColrLayers`, `PaintGlyph` (clip to an
   outline, then paint a child), `PaintColrGlyph` (reference another color
   glyph), solid fills, linear / radial / sweep gradients with color-stop ramps
   and extend modes, per-subtree affine transforms, and `PaintComposite`
   (Porter-Duff / blend modes). Noto Color Emoji and Twemoji are COLRv1.
 - **CPAL** — the palette table holding the actual colors that solid fills and
-  gradient stops index into. Palette 0 is the default.
+  gradient stops index into. Palette 0 is the default. The special foreground
+  index (0xFFFF) means "use the run's text color".
 
 `ttf-parser` 0.25 (already in the tree, the same crate `outline.rs` uses)
 exposes this through `Face::paint_color_glyph(glyph_id, palette, foreground,
@@ -52,11 +58,12 @@ Today's monochrome path (all under `crates/bevy_diegetic/src/text/slug/`):
   quad per glyph instance, combined curve/band/glyph buffers for the run.
 - `render/material.rs` — `TextExtension` binds `uniforms` (100, a single
   `fill_color` + `render_mode` + AA flags), `curves` (101), `bands` (102),
-  `glyphs` (103).
+  `glyphs` (103). `RenderMode` is an enum (`Text` / `PunchOut`).
 - `shaders/slug_text.wgsl` — each quad reads its glyph index from `UV_1.x`,
   evaluates non-zero winding `render_coverage(uv, glyph)` from the curves via the
   bands, then `final_alpha = coverage * fill_color.a`, `base_color =
-  fill_color.rgb`, runs PBR lighting, and writes through OIT (`oit_draw`).
+  fill_color.rgb`, runs PBR lighting, and writes through OIT (`oit_draw`). A
+  prepass fragment uses a fixed 0.5 coverage cutoff and reads only `glyphs`.
 - `runtime/glyph_cache.rs` — `GlyphCache` owns `GlyphOutlineCache` (per-glyph
   packed curves/bands, keyed by `GlyphKey`) and per-run `RunStorage`;
   `build_run_render_data` + `commit_run_storage` build then upload a run.
@@ -81,235 +88,284 @@ color glyph: glyph  -> N quads (one per layer)
                        each quad: coverage * its own brush (solid or gradient)
 ```
 
-## Architecture changes
+## Data model (decided)
 
-### 1. Color extraction (`glyph/` — new `color.rs`)
+These are the types and the GPU layout the phases below build toward.
 
-Implement `ttf_parser::colr::Painter`, accumulating a flat layer list:
+- **`CachedGlyph` enum** — the glyph cache returns
+  `Monochrome(GlyphOutline) | Color(ColorGlyph)`. `ColorGlyph { layers:
+  Vec<ColorLayer> }`; `ColorLayer { outline: Glyph, transform: Affine2, brush:
+  Brush }`. Color status is marked on `PositionedGlyph` at the shaping→build
+  boundary so run build never re-queries the font.
+- **`Brush`** — `Solid(PaletteEntry) | LinearGradient {…} | RadialGradient {…}
+  | SweepGradient {…}`. `PaletteEntry = Static(LinearRgba) | Foreground`. A
+  gradient cannot be `Foreground`, so that state is unrepresentable. Extraction
+  never bakes a color for the 0xFFFF foreground index — it stores `Foreground`,
+  resolved in-shader from `uniforms.fill_color` (both color and alpha).
+- **`GlyphKey`** — gains a `Palette` newtype field so a color glyph's identity
+  includes its palette (palette 0 only until a multi-palette / dark-mode need
+  appears). The palette, brush, and layer indices are newtypes mirroring the
+  existing `FontKey` / `GlyphKey` pattern, and their ranges are validated at pack
+  time so an out-of-range index cannot reach the GPU.
+- **`QuadRecord { glyph_outline_index, brush_index, layer_index }`** — one
+  storage entry per layer-quad, a `ShaderType` struct at binding 106. The mesh
+  keeps a single per-quad index in `UV_1.x` that addresses it;
+  `glyph_outline_index` points into the deduped `glyphs` buffer. The main
+  fragment takes one indirection
+  (`glyphs[quad_records[i].glyph_outline_index]`); the prepass does not — color
+  runs are `AlphaMode::Blend` (below) and so are excluded from the opaque depth
+  prepass, which keeps its direct `glyph_index(uv)` coverage path. Pure-mono runs
+  never address a `QuadRecord`. `GlyphRecord` stays monochrome-only — per-layer
+  data lives in `QuadRecord`, not a widened glyph record.
+- **`BrushRecord` / `StopRecord`** — `Brush` → `BrushRecord` via an explicit
+  `impl From<&Brush>` with `#[repr(u32)]` tags (`BrushTag`, `ExtendMode`,
+  `CompositeMode`). A `ShaderType` layout test asserts size+offsets match the
+  WGSL structs, mirroring the `packing.rs` record tests.
+- **GPU bindings** — `brushes` (104), `gradient_stops` (105), `quad_records`
+  (106), all per-run buffers like curves/bands/glyphs. Confirm 104–106 are free
+  against StandardMaterial + OIT bindings.
+- **`RenderMode::ColorLayer`** — a new variant on the existing `RenderMode` enum
+  (not a separate `has_color` bool). One discriminant routes the shader per-run;
+  keep the WGSL render-mode constant in sync with the Rust discriminant through
+  the existing `From<u32>` mapping, and assert the pairing in a test.
+- **Layer depth** — the main fragment adds `f32(layer_index) * stride` to
+  `oit_pos.z` before `oit_draw`, layer 0 nearest. There is no separate
+  `base_offset`: the per-run `command_index` depth bias already rides in
+  `uniforms.oit_depth_offset`, and the per-layer term composes with it rather
+  than overwriting it, so emoji layering and element layering stack correctly.
+  Define the stride as a named constant with a max-layer cap and documented
+  precision headroom, and verify ordering with a 40+-layer emoji.
+- **Blend mode** — a color run sets `AlphaMode::Blend` at material build so it
+  routes through OIT (where prepass depth is not authoritative). `text_material`
+  currently leaves `base.alpha_mode` defaulting to `Opaque`; color runs must set
+  Blend explicitly. Color glyphs are never opaque-prepass.
+- **Mixed runs** — a run with ≥1 color glyph routes every quad through a brush:
+  monochrome letters in the run get a `Solid(Foreground)` brush at layer index
+  0. A pure-monochrome run (the common case, every stress-test label) stays on
+  the single-`fill_color` fast path with zero extra per-fragment work, and its
+  mesh+buffers stay byte-identical to today.
+- **Color space** — CPAL colors and gradient stops are sRGB; convert to linear
+  at extraction (reuse the `LinearRgba` conversion in `text_material`), store and
+  interpolate stops in linear, consistent with the PBR `base_color` path.
+- **Transforms** — the painter keeps a transform stack; when a layer is emitted
+  it composes the stack into one `bevy::math::Affine2` (left-multiply), applies
+  it to the outline control points, and transforms any gradient endpoints by the
+  same affine so the shader evaluates the gradient parameter in post-transform
+  design space. A layer whose transformed bounds have zero width or height is
+  skipped (`packing.rs` divides by extent → NaN otherwise).
+- **Lighting** — emoji layers render PBR-lit like the rest of the text, since
+  diegetic panels are physically lit by design. A per-run opt-out to emissive is
+  available if a flat self-lit look is wanted.
 
-```text
-ColorGlyph { layers: Vec<ColorLayer> }
-ColorLayer { outline: Glyph,            // quadratics, via the existing OutlineBuilder
-             transform: Affine2,        // baked from push/pop_transform
-             brush: Brush }
-Brush      = Solid { rgba_linear }
-           | LinearGradient { p0, p1, stops, extend }
-           | RadialGradient { c0, r0, c1, r1, stops, extend }
-           | SweepGradient  { center, start_angle, end_angle, stops, extend }
-```
+## Plan of record
 
-Painter callbacks map directly: `outline_glyph` feeds the existing
-`OutlineBuilder`; `push_transform` / `pop_transform` maintain a transform stack
-baked into each layer's outline at emit time; `paint` resolves a `Paint` into a
-`Brush`; `push_layer` / `pop_layer` carry the composite mode (subset: alpha-over
-only at first). Detect a color glyph by `paint_color_glyph(...)` returning
-`Some`; otherwise fall through to the monochrome `load_glyph_by_id_from_face`.
+Sequential phases. Each builds on the previous; the example in Phase 7 is the
+first user-visible result.
 
-CPAL: resolve palette index 0; map the special foreground index (0xFFFF) to the
-run's text color so monochrome-on-color emoji honor the cascade.
+### Phase 1 — Bump parley 0.10 / harfrust 0.8
 
-### 2. Caching (`runtime/` — extend `GlyphOutlineCache`)
+Update `parley` in the workspace `Cargo.toml` from 0.9.0 to 0.10.0 and let
+`harfrust` follow to 0.8. Build, run the existing text examples, confirm no
+visual regression in monochrome text. This is the one external prerequisite:
+color-emoji matching with variation selectors (U+FE0F) is broken on 0.9 (#617),
+so "❤️" would miss or fall back to monochrome until this lands. Guard the bump
+with a shaping-output regression check — assert glyph ids and advances are
+unchanged across 0.9→0.10 on a diverse string set (ASCII, CJK, RTL Arabic,
+ligatures, a U+FE0F sequence), not just a visual pass, since a parley minor bump
+can move glyph selection or line breaking.
 
-Color-glyph layers are static per `(font, glyph id, palette)`, so cache the
-flattened, packed layers the same way `GlyphOutlineCache` caches monochrome
-packed glyphs. Keyed off `GlyphKey` plus a palette discriminator. This keeps the
-per-frame in-place update cheap (see diegetic-text-perf.md) — a moving emoji
-re-packs nothing.
+### Phase 2 — Verify the ttf-parser COLR API and add a cycle guard
 
-### 3. Run build (`render/run_data.rs`)
+Confirm `Face::paint_color_glyph`'s signature (including the foreground
+argument), the `colr::Painter` callbacks the data model assumes, and whether
+ttf-parser bounds `PaintColrGlyph` recursion. If it does not, the painter adds a
+depth cap (≈16) that logs and skips on overflow, so a cyclic or adversarial COLR
+font cannot hang extraction. Verify against a real COLR font (Noto Color Emoji
+or a fixture) with a minimal probe painter that records the callback sequence,
+the foreground index value, and whether a transform stack is pushed. Track
+recursion depth as a field on the painter, increment/decrement on push/pop, and
+on overflow log a warning naming font + glyph and return the partially
+accumulated layers (best-effort, never a hang).
 
-Expand a color glyph instance into one quad per layer. Extend `RunRenderData`
-with per-layer brush data:
+### Phase 3 — Color extraction (`glyph/color.rs`)
+
+Implement `ttf_parser::colr::Painter`, accumulating a flat layer list into
+`ColorGlyph`. Callbacks map directly:
+
+- `outline_glyph` feeds the existing `OutlineBuilder`.
+- `push_transform` / `pop_transform` maintain the transform stack baked into
+  each layer's outline at emit time (per the transform rule above).
+- A solid paint's palette index `0xFFFF` → `PaletteEntry::Foreground`; any other
+  index → CPAL lookup → sRGB→linear `PaletteEntry::Static`.
+- `paint` resolves a `Paint` into a `Brush`; gradients capture endpoints, stops,
+  and `ExtendMode`.
+- `push_layer` / `pop_layer` carry the composite mode (alpha-over only at
+  first).
+
+Detect a color glyph by `paint_color_glyph(...)` returning `Some`; otherwise
+fall through to the monochrome `load_glyph_by_id_from_face`. Unsupported `Paint`
+variants log and skip rather than panicking. An out-of-range palette index falls
+back to palette 0 (or skips the layer with a warning); a `PaintColrGlyph`
+reference to a missing glyph skips that subtree. Every fallback logs once and
+never panics.
+
+### Phase 4 — Glyph cache (`runtime/glyph_cache.rs`)
+
+Cache the flattened, packed color layers the same way `GlyphOutlineCache` caches
+monochrome packed glyphs, keyed off `GlyphKey` plus the new `Palette` field.
+Return the `CachedGlyph` enum. Adding the `Palette` field to `GlyphKey` and
+widening the cache accessor from `&GlyphOutline` to `&CachedGlyph` migrates the
+monochrome call sites in the same change (an `outline_ref()` helper keeps the
+mono path terse). Color-glyph layers are static per `(font, glyph id, palette)`,
+so a moving emoji re-packs nothing and the per-frame in-place update stays cheap
+(see diegetic-text-perf.md).
+
+### Phase 5 — Run build (`render/run_data.rs`)
+
+Expand a color glyph instance into one quad per layer. `RunPacker` adds one
+glyph record per layer to the run's deduped `glyphs` buffer, emits N
+layer-quads, and returns a per-layer index range (not a single index). Extend
+`RunRenderData` with the per-run brush/quad/stop buffers:
 
 ```text
 RunRenderData {
-    mesh, curves, bands, glyphs,        // unchanged; glyphs now include layer outlines
-    brushes: Vec<BrushRecord>,          // one per layer-quad, indexed like glyphs
-    gradient_stops: Vec<StopRecord>,    // referenced by gradient brushes
+    mesh, curves, bands, glyphs,        // glyphs now include layer outlines
+    brushes: Vec<BrushRecord>,          // one per distinct brush in the run
+    quad_records: Vec<QuadRecord>,      // one per layer-quad
+    gradient_stops: Vec<StopRecord>,    // referenced by gradient brushes (Phase 8+)
 }
 ```
 
-Each quad already indexes its `GlyphRecord` via `UV_1.x`; add a parallel brush
-index (a second `UV_1` channel or `UV_2`) so the shader can look up the layer's
-brush.
+curves/bands/glyphs keep the stable-handle in-place re-upload; the brush / quad
+/ stop buffers are sized to the run's layer-quad count and may realloc on
+rebuild. The quad↔brush pairing is modeled structurally (one `QuadRecord` per
+layer-quad), not as length-correlated parallel `Vec`s.
 
-### 4. Material + shader (`render/material.rs`, `shaders/slug_text.wgsl`)
+When a layer's baked transform collapses its bounds to zero width or height, the
+quad is dropped with a warning before packing (`packing.rs` divides by extent).
+In a color or mixed run every quad carries a `QuadRecord`; a monochrome glyph in
+such a run emits one quad with a `Solid(Foreground)` brush at layer 0.
 
-Add two read-only storage bindings: `brushes` (104) and `gradient_stops` (105).
-`BrushRecord` holds a kind tag + solid color, or gradient geometry + a
-`(stop_start, stop_count)` range into `gradient_stops`. In the fragment shader,
-after `render_coverage`:
+### Phase 6 — Material + shader (`render/material.rs`, `shaders/slug_text.wgsl`)
 
-- **Solid** — `rgb = brush.color.rgb` (constant). Identical cost to today.
-- **Gradient** — compute the gradient parameter `t` at the design-space point
-  (`design_position(uv, glyph)` already exists), apply the extend mode, sample
-  the stop ramp, get `rgb`. Linear and radial first; sweep later.
+Add the `brushes` (104), `gradient_stops` (105), and `quad_records` (106)
+storage bindings and the `RenderMode::ColorLayer` discriminant. Color runs set
+`AlphaMode::Blend`. In the fragment shader, after `render_coverage`:
 
-Then `final_alpha = coverage * brush.color.a`, feed `base_color`, and the PBR +
-OIT tail is unchanged. The single `fill_color` uniform stays as the fallback for
-monochrome runs.
+- Read the quad's `QuadRecord` for its glyph outline, brush, and layer index.
+- **Solid brush** — `rgb = brush.color.rgb`; a `Foreground` brush reads
+  `uniforms.fill_color` (color and alpha). Identical cost to today for the
+  constant case.
+- Apply the per-layer depth term `oit_pos.z += f32(layer_index) * stride` before
+  `oit_draw` (the per-run bias already rides in `uniforms.oit_depth_offset`).
 
-### 5. Shaping route (`render/text_shaping.rs`)
+`final_alpha = coverage * brush_alpha`, feed `base_color`, PBR + OIT tail
+unchanged. Phase 6 lands solid brushes only; the gradient branch is Phase 8.
+Pure-monochrome runs stay on the `RenderMode::Text` single-`fill_color` path.
 
-No change to parley itself. After shaping, when an instance's glyph is a color
-glyph, mark it so run build expands it into layers. parley 0.10 / harfrust 0.8
-is the matching prerequisite (fixes color-emoji matching with non-printing
-variation selectors, #617).
+Add a test that bindings 104–106 do not collide with StandardMaterial + OIT, and
+one that a color run's material is built with `AlphaMode::Blend`. Color runs
+(Blend) and monochrome runs (Opaque) land in different render phases, so they do
+not batch together — measure the bind-group / draw-call impact in Phase 7.
 
-## Milestones
+### Phase 7 — Flat color (COLRv0) + the `color_emoji` example
 
-- **M1 — COLRv0 flat color.** Layered solid fills, no gradients or transforms.
-  Proves the painter → multi-layer expand → palette → per-layer solid brush path
-  end-to-end on the existing coverage shader. Validate with a COLRv0 font (or a
-  COLRv1 font's v0 fallback) in a new example.
-- **M2 — COLRv1 solid + linear/radial gradients.** Covers the bulk of Noto Color
-  Emoji / Twemoji. Adds the gradient `BrushRecord` + stop buffer + shader
-  evaluation; transforms baked into the outline at extraction.
-- **M3 — sweep gradients, nested `PaintColrGlyph`, composite/blend modes.** The
-  conformance tail. OIT alpha-over already handles the common overlap case, so
-  non-alpha-over composite modes are last and optional.
+First end-to-end color: layered solid fills, no gradients or transforms beyond
+the baked affine. Proves painter → multi-layer expand → palette → per-layer
+solid brush on the existing coverage shader. Ships the `color_emoji` example
+(below) and the acceptance gates (below). Validate with a COLRv0 font or a
+COLRv1 font's v0 fallback.
 
-## Design decisions
+### Phase 8 — Gradients (COLRv1 solid + linear/radial)
 
-- **Lighting.** Diegetic panels are physically lit by design, so emoji layers
-  render PBR-lit like the rest of the text by default — consistent, not a
-  special case. Provide a per-run opt-out to emissive if a flat, self-lit emoji
-  look is wanted. Decide before M2 (gradients under lighting need the look
-  confirmed).
-- **Color space.** CPAL colors and gradient stops are sRGB; convert to linear at
-  extraction, reusing the `LinearRgba` conversion already in `text_material`.
-- **Layer paint order.** Layers paint back-to-front. Enforce order with
-  per-layer `oit_depth_offset` increments, mirroring how `command_index` already
-  drives the run depth bias, so overlapping opaque-over layers composite in the
-  right order under OIT.
-- **Clipping.** Color layers route through the existing
-  `build_run_render_data_with_clip` so panel `clip_rect` applies to emoji too.
-- **Perf / buffer sizing.** A detailed emoji is dozens of layers → more
-  curves/bands/quads per glyph. Caching per glyph id keeps it static, so this is
-  buffer-capacity and fill-rate, not re-pack cost. Track emoji-heavy frames in
-  diegetic-text-perf.md once M1 lands.
+Covers the bulk of Noto Color Emoji / Twemoji. Adds the gradient `BrushRecord`
+fields, the `StopRecord` buffer, and shader evaluation: compute the gradient
+parameter `t` at the design-space point (`design_position(uv, glyph)` exists),
+apply the extend mode, sample the stop ramp. Linear and radial first. Decide
+stop-ramp storage here: a buffer of stops with in-shader interpolation (simpler,
+more ALU) versus a baked 1D ramp texture (less ALU, one more texture binding);
+`StopRecord` and the `(stop_start, stop_count)` range are defined either way.
+Phase 7 extracts `ExtendMode` but treats it as Pad and warns on Repeat/Reflect;
+full extend handling lands here. A layer with a non-uniform or shear affine
+breaks the assumption that the gradient direction stays perpendicular to the
+outline — handle it by evaluating the gradient in pre-transform space or storing
+the inverse affine in the brush record. Survey Noto / Twemoji for non-uniform
+layer transforms first; defer the handling if no target font uses them.
 
-## Open questions
+### Phase 9 — Conformance tail
 
-- COLRv1 + variable fonts (gradient/transform deltas at a variation instance) —
-  out of scope initially; pin to the default instance.
-- `PaintComposite` modes beyond alpha-over — do any target fonts actually use
-  them? Survey Noto Color Emoji before committing M3.
-- Brush index transport: second channel on `UV_1` vs a new `UV_2` vs folding the
-  brush index into the `GlyphRecord` — pick during M1 based on vertex layout.
-- Does any target emoji rely on the foreground (text-color) palette entry? If
-  so, the cascade fill color must reach the brush resolve.
+Sweep gradients, nested `PaintColrGlyph`, and `PaintComposite` / blend modes
+beyond alpha-over. OIT alpha-over already handles the common overlap case, so
+non-alpha-over composite modes are last and optional. Survey Noto Color Emoji
+first to confirm which composite modes any target font actually uses before
+implementing them.
 
-## Testing / validation
+## Example: `color_emoji`
 
-- Unit: painter flattening against a known COLR font fixture — assert layer
-  count, per-layer palette colors, gradient stop ranges.
-- Render: a `color_emoji` example showing a row of emoji at several zoom levels
-  next to a bitmap reference, to demonstrate the any-zoom crispness claim.
-- Regression: confirm monochrome text is byte-identical (the color path is
+`crates/bevy_diegetic/examples/color_emoji.rs`, following
+[canonical_example.md](../fairy_dust/canonical_example.md): a slowly spinning
+cube whose six faces demonstrate every combination of {WorldText, panel} ×
+{emoji-only, mixed with text}, plus a single-large hero and an any-zoom
+demonstration. It is the Phase 7 deliverable and the standing visual regression
+for the feature.
+
+### Face matrix
+
+| Face   | Surface           | Content                                                            |
+|--------|-------------------|--------------------------------------------------------------------|
+| Front  | WorldText         | One large emoji (e.g. 🚀) — hero shot, the any-zoom claim up close   |
+| Back   | WorldText         | A row of several emoji (e.g. 😀 🎉 🌍 🔥) — emoji-only in world space  |
+| Right  | WorldText         | Inline text + emoji ("Ship it 🚀") — mixed run in world space        |
+| Left   | DiegeticPanel     | Emoji picker grid (rows × columns of emoji) — emoji-only in a panel |
+| Top    | DiegeticPanel     | Mixed text+emoji rows ("Build ✅", "Tests 🧪", "Deploy 🚀")            |
+| Bottom | WorldText         | One emoji repeated small → large — any-zoom crispness within a face |
+
+This covers: emoji as WorldText alone (Front, Back) and mixed (Right); emoji in
+a panel alone (Left) and mixed (Top); a single large emoji (Front); an emoji
+picker panel (Left); and the resolution-independence claim made visible without
+orbiting (Bottom).
+
+### Conventions
+
+Standard canonical builder chain — `fairy_dust::sprinkle_example()` with
+`.with_brp_extras()`, `.with_save_window_position()`, `.with_studio_lighting()`,
+`.with_ground_plane().size(fairy_dust::EXAMPLE_GROUND_SIZE)`, the cube via
+`.with_cube()` carrying `CameraHomeTarget`, `.with_orbit_cam_preset(|_| {},
+OrbitCamPreset::BlenderLike)`, `.with_camera_home().pitch(..).yaw(..)`, a
+`TitleBar`, and `.with_camera_control_panel()`. The lead `fn main` comment notes
+that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
+
+- **Rotation** — `.with_cube_spin::<…>(CubeSpinConfig::new())`, which registers
+  the `P Pause` chip and starts spinning. The slow spin is what shows every face
+  and lets the orbit camera demonstrate crispness across distances.
+- **Panels** (Left, Top) — `CubeFacePanelStyle::for_cube(cube_size)` with
+  `cube_face_panel_tree(...)`; the emoji picker is a grid of emoji cells, the Top
+  panel is title + text/emoji rows.
+- **WorldText faces** (Front, Back, Right, Bottom) — `fairy_dust::cube_face_text`
+  (or a WorldText child bundle) sized per face.
+- **`.with_stable_transparency()`** after the OrbitCam helper, since the faces
+  carry coplanar translucent color-glyph layers under OIT.
+- Add `.with_title("Color Emoji")` and a chip listing any example-specific
+  control; `H Home` and `P Pause` are auto-added by their capabilities.
+- Use both simple (few-layer, e.g. 🎉) and complex (many-layer, e.g. 😀) emoji so
+  the example exercises the light and heavy fill-rate cases; note it raises the
+  render floor on an already render-bound path.
+
+## Acceptance gates (Phase 7)
+
+- The painter flattens a named emoji into the expected layer count and per-layer
+  palette colors (unit test against a known COLR font fixture).
+- The `color_emoji` example shows no pixelation or color bleed at 1× / 5× / 10×
+  zoom.
+- A `Foreground`-index glyph resolves to two different run fill colors (proves
+  the in-shader cascade, color and alpha).
+- Monochrome text mesh + buffers stay byte-identical (the color path is
   additive; the single-`fill_color` route must not change).
-
-## Team review — cycle 1 (2026-06-02)
-
-Five lenses (correctness, architecture, risk, type-system, GPU/shader), each
-grounded in the slug renderer source. No premise-challenge survived: two lenses
-framed the layer-ordering and parley-version items as "blockers", but both are
-fixable within the committed analytic-COLR approach, so they are recorded as
-refinements (R6/R11), not challenges to the design.
-
-### Recorded refinements (determined — fold into M1/M2 work)
-
-- **R1 — Cache key needs a palette discriminator.** `GlyphKey` (runtime/run.rs:27)
-  carries only `font` / `glyph_id` / `preprocess_version`. Add a `Palette`
-  newtype field so a color glyph's identity includes its palette. M1 uses palette
-  0 only; multi-palette / dark-mode deferred to M2+ via a per-run palette
-  selector. (all 5 lenses)
-- **R2 — Model monochrome-vs-color as an enum, not a flag.** Cache returns
-  `CachedGlyph = Monochrome(GlyphOutline) | Color(ColorGlyph)`, with `ColorGlyph
-  { layers: Vec<ColorLayer> }` and `ColorLayer { outline, transform: Affine2,
-  brush: Brush }`. Mark color status on `PositionedGlyph` at the shaping→build
-  boundary so run-build never re-queries the font. (type-system, correctness)
-- **R3 — `Brush` ↔ `BrushRecord` via explicit `From` + `#[repr(u32)]` tags.**
-  `BrushTag`, `ExtendMode::{Pad,Repeat,Reflect}`, `CompositeMode` as enums;
-  `impl From<&Brush> for BrushRecord` is the single source of truth for the GPU
-  tag mapping. Add a `ShaderType` layout test asserting `BrushRecord` /
-  `StopRecord` size+offsets match the WGSL structs (mirroring the existing
-  packing.rs records). (type-system)
-- **R4 — `PaletteEntry::{Static(LinearRgba), Foreground}`.** Extraction never
-  bakes a color for the 0xFFFF foreground index; it stores a `Foreground` marker
-  so a cached layer stays correct under any run fill color. (ties to DEC-2)
-- **R5 — Brush-index transport = `UV_1.y`.** `.y` is hardcoded `0.0`
-  (run_data.rs:243) and unread by the shader; pack the per-quad brush index
-  there. Monochrome quads keep `.y = 0`. Avoids a new `UV_2` attribute and the
-  prepass change it would force. (closes the doc's open question)
-- **R6 — Brush/stop buffers are per-run, quad-indexed.** Keep two update
-  semantics: curves/bands/glyphs ride the stable-handle in-place re-upload
-  (diegetic-text-perf.md); `brushes` / `gradient_stops` are sized to the run's
-  layer-quad count and may realloc on rebuild. Model the quad↔brush pairing
-  structurally (one record per layer-quad), not as length-correlated parallel
-  `Vec`s. (architecture, type-system — critical)
-- **R7 — Transform and gradient geometry in one space.** When a layer's affine
-  is baked into its outline, transform the gradient endpoints (`p0`/`p1`,
-  center/radii) by the same affine so the shader evaluates `t` in post-transform
-  design space. Guard degenerate transforms: skip a layer whose transformed
-  bounds have zero width/height (packing.rs divides by extent → NaN otherwise).
-  (risk, GPU, correctness)
-- **R8 — Gradient color in linear space.** Convert CPAL / stop colors sRGB→linear
-  at extraction (reuse `LinearRgba`, material.rs:118); store and interpolate stops
-  in linear, consistent with the PBR `base_color` path. (risk, GPU)
-- **R9 — Verify ttf-parser 0.25 API + cycle handling (M1 prerequisite).** Confirm
-  `Face::paint_color_glyph` signature (incl. foreground), the `colr::Painter`
-  callbacks the design assumes, and that `PaintColrGlyph` recursion/cycles are
-  bounded; add a depth cap in the painter if ttf-parser does not guard. (correctness, risk)
-- **R10 — M1 scope clarifications.** M1 excludes `PaintGlyph` per-layer clip paths
-  and non-alpha-over `PaintComposite` modes; the painter matches all `Paint`
-  variants and logs+skips unsupported ones rather than panicking. Panel
-  `clip_rect` still applies via `build_run_render_data_with_clip`. (correctness)
-- **R11 — parley 0.10 / harfrust 0.8 is a hard M1 blocker.** Color-emoji matching
-  with variation selectors (U+FE0F) is broken on 0.9 (#617); "❤️" would miss or
-  monochrome-fall-back. Land the bump first. (risk — reframed from a premise-challenge)
-- **R12 — Binding + perf notes.** `brushes` (104) / `gradient_stops` (105) are
-  per-run buffers like curves/bands/glyphs; audit that 104/105 are free against
-  StandardMaterial + OIT bindings. Add a color-emoji overdraw stress case to
-  diegetic-text-perf.md once M1 lands (dozens of coplanar layers under OIT add
-  fill-rate to an already render-bound test). (GPU, risk)
-- **R13 — Stop-ramp storage (M2 open).** Choose buffer-of-stops + in-shader
-  interpolation (simple, more ALU) vs a baked 1D ramp texture (less ALU, one more
-  texture binding); define `StopRecord` and the `(stop_start, stop_count)` range
-  either way. Radial/sweep `t` math and extend-mode handling specified at M2/M3. (GPU)
-
-### Proposed user decisions
-
-- **DEC-1 — Layer paint-ordering mechanism.** *(critical; GPU / risk / type /
-  architecture)* status: proposed.
-  Problem: the "Layer paint order" decision says to enforce order with per-layer
-  `oit_depth_offset` increments. But `oit_depth_offset` is a single per-run
-  uniform (material.rs:54; `oit_pos.z += uniforms.oit_depth_offset`,
-  slug_text.wgsl:537), and a color glyph's layer-quads are coplanar in one mesh
-  with identical `in.position.z` — a per-run offset cannot separate them, so
-  overlapping layers composite in undefined order under OIT.
-  Recommendation: carry a per-quad layer index (in the `BrushRecord` / alongside
-  R5's `UV_1.y`) and apply `oit_pos.z += base_offset + layer_index * stride`
-  per-fragment before `oit_draw`, layer 0 nearest. This supersedes the doc's
-  stated mechanism — approve the structural correction.
-- **DEC-2 — Foreground-color cascade: M1 scope.** *(critical; all lenses)*
-  status: proposed.
-  Problem: the doc commits to mapping the 0xFFFF foreground index to the run's
-  text color so mono-on-color emoji honor the cascade. Baking at extraction
-  cannot do that (the cached layer would freeze one color). Honoring it needs an
-  in-shader `Brush::Foreground` kind reading `uniforms.fill_color` plus the cache
-  storing a `Foreground` marker (R4).
-  Choice: (a) M1 honors the cascade (add `Brush::Foreground` + in-shader resolve)
-  — matches the doc's stated intent, more work; or (b) M1 ships with palette-0
-  colors baked (no foreground cascade) and adds it in M2 — faster M1, a temporary
-  behavior gap. Recommend (a).
-- **DEC-3 — Monochrome fast-path vs unified brush path.** *(important; GPU /
-  architecture)* status: proposed.
-  Problem: adding the brush lookup risks taxing the monochrome path, which
-  carries the bulk of text on an already render-bound test
-  (diegetic-text-perf.md).
-  Choice: (a) keep monochrome runs entirely on the current single-`fill_color`
-  uniform path, gated by a run-level has-color flag, so they emit zero extra
-  color-path work (protects the render floor); or (b) route all quads through a
-  brush record (sentinel `brushes[0]` = `fill_color`) for one uniform code path
-  at a small per-fragment cost. Recommend (a) given the perf posture.
+- An N-layer emoji composites top-to-bottom under OIT, not shuffled. Verify OIT
+  linked-list ordering with a 40+-layer emoji.
+- The Phase 1 shaping-output regression (glyph ids + advances across the parley
+  bump) stays green.
+- Extracting a cyclic or adversarial COLR font terminates without hanging and
+  logs the skipped subtree.
+- The example's frame cost is measured against the monochrome render floor; the
+  added fill-rate from coplanar layers is recorded, not treated as a regression.

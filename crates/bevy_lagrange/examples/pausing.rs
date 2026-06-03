@@ -55,12 +55,13 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<PauseState>()
         .add_systems(PostStartup, spawn_face_panels)
-        // Chained so the pause toggle, panel refresh, and cube rotation all
-        // observe the same `Time<Virtual>` state within a single frame.
-        .add_systems(
-            Update,
-            (pause_game_system, update_game_panels, cube_rotator_system).chain(),
-        )
+        // `P` and `Space` both run `toggle_pause` through Fairy Dust's shortcut
+        // binding, which fires it only when no modifier is held.
+        .with_shortcut(KeyCode::KeyP, toggle_pause)
+        .with_shortcut(KeyCode::Space, toggle_pause)
+        // Chained so the panel refresh and cube rotation observe the same
+        // `Time<Virtual>` state within a single frame.
+        .add_systems(Update, (update_game_panels, cube_rotator_system).chain())
         .run();
 }
 
@@ -72,7 +73,8 @@ fn main() {
 // How it works:
 //   1. `configure_camera` runs when the OrbitCam spawns and sets `time_source = TimeSource::Real`
 //      so the camera's smoothing reads wall-clock time.
-//   2. `pause_game_system` toggles `Time<Virtual>` on P / Space.
+//   2. `toggle_pause` toggles `Time<Virtual>`, bound to P / Space through Fairy Dust's shortcut
+//      binding.
 //   3. `cube_rotator_system` reads the default `Res<Time>`, which resolves to `Time<Virtual>`
 //      inside `Update`, so its delta is zero while paused and the cube stops spinning. The camera,
 //      reading real time, keeps lerping.
@@ -106,23 +108,17 @@ impl TitleChipActivation for PauseState {
 
 const fn configure_camera(camera: &mut OrbitCam) { camera.time_source = TimeSource::Real; }
 
-fn pause_game_system(
-    key_input: Res<ButtonInput<KeyCode>>,
-    mut time: ResMut<Time<Virtual>>,
-    mut pause_state: ResMut<PauseState>,
-) {
-    if key_input.just_pressed(KeyCode::KeyP) || key_input.just_pressed(KeyCode::Space) {
-        if time.is_paused() {
-            time.unpause();
-        } else {
-            time.pause();
-        }
-        *pause_state = if time.is_paused() {
-            PauseState::Paused
-        } else {
-            PauseState::Running
-        };
+fn toggle_pause(mut time: ResMut<Time<Virtual>>, mut pause_state: ResMut<PauseState>) {
+    if time.is_paused() {
+        time.unpause();
+    } else {
+        time.pause();
     }
+    *pause_state = if time.is_paused() {
+        PauseState::Paused
+    } else {
+        PauseState::Running
+    };
 }
 
 // `Res<Time>` resolves to `Time<Virtual>` in `Update`, so this freezes while

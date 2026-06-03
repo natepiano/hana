@@ -43,8 +43,10 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextStyle;
+use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
+use bevy_lagrange::AnimationSource;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
@@ -86,18 +88,28 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<Engine>()
         .init_resource::<PendingEngine>()
+        .init_resource::<RequestedEngine>()
         // The fly's second leg fires from this observer when the first leg lands.
         .add_observer(advance_engine_fly)
+        // `H` is bound by Fairy Dust's camera home; `reset_home_state` observes
+        // the home fit it triggers and resets the example's engine state to match.
+        .add_observer(reset_home_state)
         .add_systems(Startup, (spawn_camera, spawn_gizmo, spawn_engine_panel))
         // After the ground spawns, fade its default material to mostly transparent.
         .add_systems(PostStartup, fade_ground)
+        // 1 / 2 / 3 / 4 record an engine request through Fairy Dust's shortcut
+        // binding, which fires each only when no modifier is held; `select_engine`
+        // applies the request inside the chain below.
+        .with_shortcut(KeyCode::Digit1, request_bevy)
+        .with_shortcut(KeyCode::Digit2, request_blender)
+        .with_shortcut(KeyCode::Digit3, request_unity)
+        .with_shortcut(KeyCode::Digit4, request_unreal)
         .add_systems(
             Update,
             (
                 // Chained so the gizmo draws and billboards against the camera
                 // pose this frame's input produced.
                 (
-                    reset_home_state,
                     select_engine,
                     drive_gizmo_motion,
                     orient_ground,
@@ -123,7 +135,8 @@ fn main() {
 //      engines about Z via `SWAPPED_AXIS`); `yaw`/`pitch`/`radius` are `Some(...)` so
 //      initialization keeps them and skips any opening fit. `UpsideDownPolicy::Allow` removes the
 //      pitch clamp; `FairyDustOrbitCam` tags the camera for the shared panel and home logic.
-//   2. `select_engine` (Update) reads number keys. Re-pressing the current engine fires one
+//   2. Number keys 1–4 record a `RequestedEngine` through Fairy Dust's shortcut binding;
+//      `select_engine` (Update) applies it. Re-pressing the current engine fires one
 //      `PlayAnimation` straight back to its home view. A new engine starts a two-leg fly: it
 //      records the switch in `PendingEngine`, seeds the gizmo arc tweens, and fires the first
 //      `PlayAnimation` to `yaw=0, pitch=0` — the shared front pose where every basis renders
@@ -134,9 +147,10 @@ fn main() {
 //      to the new basis, and fires the second `PlayAnimation` out to the new engine's home angles.
 //      Cancelled or second-leg `AnimationEnd`s short-circuit because `PendingEngine` is already
 //      empty.
-//   4. `reset_home_state` (Update) handles `H Home` by resetting the resource state, swapping
-//      `OrbitCam::axis` back to the default engine's basis, and re-seeding gizmo + ground tweens —
-//      without firing an animation, because Fairy Dust's own `H` handler flies the camera.
+//   4. `reset_home_state` (observer on `AnimationBegin`) wakes when Fairy Dust's home fit starts —
+//      the only `AnimateToFit` in the example — resets the resource state, swaps `OrbitCam::axis`
+//      back to the default engine's basis, and re-seeds gizmo + ground tweens. Fairy Dust's own `H`
+//      handler flies the camera; this only realigns the example's state to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // The Z-up engines' (Blender, Unreal) orbit basis: a right-handed Z-up frame
@@ -148,8 +162,6 @@ const SWAPPED_AXIS: [Vec3; 3] = [Vec3::X, Vec3::Z, Vec3::NEG_Y];
 // labels with a little margin.
 const HOME_RADIUS: f32 = 6.5;
 const HOME_FIT_MARGIN: f32 = 0.1;
-// Resets the whole scene to the default engine's startup home view.
-const HOME_KEY: KeyCode = KeyCode::KeyH;
 
 // Home `(yaw, pitch)` for the Y-up engines (Bevy, Unity) on the `[X, Y, Z]` orbit
 // basis — a 3/4 view with world Y standing vertical, framed to present the ground
@@ -179,42 +191,20 @@ enum Engine {
     Unreal,
 }
 
-/// One row of the engine selector: the key that picks it, the engine, then the
-/// name / up-axis / forward / handedness shown one per panel column. Single
-/// source of truth for both the key bindings and the panel columns.
-const ENGINES: [(KeyCode, Engine, &str, &str, &str, &str); 4] = [
+/// One row of the engine selector: the engine, then the name / up-axis /
+/// forward / handedness shown one per panel column. Single source of truth for
+/// the panel columns; the keys that pick each engine are bound in `main`.
+const ENGINES: [(Engine, &str, &str, &str, &str); 4] = [
+    (Engine::Bevy, "1 Bevy", "Y-up", "+Z toward", "right-handed"),
     (
-        KeyCode::Digit1,
-        Engine::Bevy,
-        "1 Bevy",
-        "Y-up",
-        "+Z toward",
-        "right-handed",
-    ),
-    (
-        KeyCode::Digit2,
         Engine::Blender,
         "2 Blender",
         "Z-up",
         "+Y away",
         "right-handed",
     ),
-    (
-        KeyCode::Digit3,
-        Engine::Unity,
-        "3 Unity",
-        "Y-up",
-        "+Z away",
-        "left-handed",
-    ),
-    (
-        KeyCode::Digit4,
-        Engine::Unreal,
-        "4 Unreal",
-        "Z-up",
-        "+X away",
-        "left-handed",
-    ),
+    (Engine::Unity, "3 Unity", "Y-up", "+Z away", "left-handed"),
+    (Engine::Unreal, "4 Unreal", "Z-up", "+X away", "left-handed"),
 ];
 
 impl Engine {
@@ -286,16 +276,20 @@ const fn engine_camera_axis(engine: Engine) -> [Vec3; 3] {
     }
 }
 
-/// Resets the example-owned state when Fairy Dust handles `H Home`.
+/// Resets the example-owned state when Fairy Dust handles `H Home`. The only
+/// `AnimateToFit` in this example is that home fit (the startup snap and `H`);
+/// the example's own flies are `PlayAnimation`. So an `AnimateToFit` begin is
+/// the home press — reset the engine, gizmo, and ground to the default engine
+/// to match the camera Fairy Dust is flying home, without firing an animation.
 fn reset_home_state(
-    keys: Res<ButtonInput<KeyCode>>,
+    begin: On<AnimationBegin>,
     mut current: ResMut<Engine>,
     mut pending: ResMut<PendingEngine>,
     mut camera: Query<&mut OrbitCam, With<FairyDustOrbitCam>>,
     mut gizmo: Query<&mut GizmoMotion, With<GizmoRoot>>,
     mut ground: Query<&mut Transform, With<GroundPlane>>,
 ) {
-    if !keys.just_pressed(HOME_KEY) {
+    if begin.source != AnimationSource::AnimateToFit {
         return;
     }
 
@@ -322,23 +316,29 @@ fn reset_home_state(
     }
 }
 
-/// Reads the engine number keys and starts the camera moving. Re-pressing the
-/// current engine re-homes it directly; switching to a new one routes through
-/// the shared front pose so the orbit-axis swap stays invisible.
+/// An engine the number-key shortcuts have asked for but `select_engine` has
+/// not yet applied. Set by `request_bevy` and friends, consumed once per frame.
+#[derive(Resource, Default)]
+struct RequestedEngine(Option<Engine>);
+
+fn request_bevy(mut requested: ResMut<RequestedEngine>) { requested.0 = Some(Engine::Bevy); }
+fn request_blender(mut requested: ResMut<RequestedEngine>) { requested.0 = Some(Engine::Blender); }
+fn request_unity(mut requested: ResMut<RequestedEngine>) { requested.0 = Some(Engine::Unity); }
+fn request_unreal(mut requested: ResMut<RequestedEngine>) { requested.0 = Some(Engine::Unreal); }
+
+/// Applies a pending engine request (recorded by the number-key shortcuts) and
+/// starts the camera moving. Re-pressing the current engine re-homes it directly;
+/// switching to a new one routes through the shared front pose so the orbit-axis
+/// swap stays invisible.
 fn select_engine(
-    keys: Res<ButtonInput<KeyCode>>,
+    mut requested: ResMut<RequestedEngine>,
     mut current: ResMut<Engine>,
     mut pending: ResMut<PendingEngine>,
     camera: Query<(Entity, &OrbitCam), With<FairyDustOrbitCam>>,
     mut gizmo: Query<&mut GizmoMotion, With<GizmoRoot>>,
     mut commands: Commands,
 ) {
-    let requested = ENGINES
-        .iter()
-        .copied()
-        .find(|(key, ..)| keys.just_pressed(*key))
-        .map(|(_, engine, ..)| engine);
-    let Some(requested) = requested else {
+    let Some(requested) = requested.0.take() else {
         return;
     };
     let Ok((entity, orbit)) = camera.single() else {
@@ -581,7 +581,7 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
                         "ENGINE",
                         ENGINES
                             .into_iter()
-                            .map(|(_, engine, name, ..)| (name, engine == selected)),
+                            .map(|(engine, name, ..)| (name, engine == selected)),
                         &styles,
                     );
                     build_column(
@@ -589,7 +589,7 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
                         "UP",
                         ENGINES
                             .into_iter()
-                            .map(|(_, engine, _, up, ..)| (up, engine == selected)),
+                            .map(|(engine, _, up, ..)| (up, engine == selected)),
                         &styles,
                     );
                     build_column(
@@ -597,7 +597,7 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
                         "FORWARD",
                         ENGINES
                             .into_iter()
-                            .map(|(_, engine, _, _, forward, _)| (forward, engine == selected)),
+                            .map(|(engine, _, _, forward, _)| (forward, engine == selected)),
                         &styles,
                     );
                     build_column(
@@ -605,7 +605,7 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
                         "HANDED",
                         ENGINES
                             .into_iter()
-                            .map(|(_, engine, _, _, _, handed)| (handed, engine == selected)),
+                            .map(|(engine, _, _, _, handed)| (handed, engine == selected)),
                         &styles,
                     );
                 },

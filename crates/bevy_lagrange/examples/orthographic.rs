@@ -16,7 +16,6 @@ use bevy::prelude::*;
 use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::OrbitCamSystemSet;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -72,8 +71,10 @@ fn main() {
             Startup,
             widen_shadow_cascade.after(FairyDustStudioLightingSet),
         )
-        // Swap the Projection before OrbitCam reads it for the frame.
-        .add_systems(Update, switch_projection.before(OrbitCamSystemSet))
+        // `O` / `P` run through Fairy Dust's shortcut binding, which fires each
+        // only when no modifier is held.
+        .with_shortcut(KeyCode::KeyO, select_orthographic)
+        .with_shortcut(KeyCode::KeyP, select_perspective)
         .run();
 }
 
@@ -87,10 +88,10 @@ fn main() {
 //   2. `widen_shadow_cascade` runs once at startup, after the studio lighting rig spawns, to extend
 //      the directional light's cascade `maximum_distance` so shadows survive across the wider
 //      orthographic far plane.
-//   3. On **O** or **P**, `switch_projection` (ordered `.before(OrbitCamSystemSet)` so the swap is
-//      visible to the camera this frame) overwrites the `Projection` component with the
-//      orthographic or perspective variant, refreshes the cube-face labels via
-//      `update_face_labels`, and calls `OrbitCam::force_update()` so the camera re-derives its
+//   3. On **O** or **P**, Fairy Dust's shortcut binding runs `select_orthographic` /
+//      `select_perspective`, which call `switch_projection` to overwrite the `Projection` component
+//      with the orthographic or perspective variant, refresh the cube-face labels via
+//      `update_face_labels`, and call `OrbitCam::force_update()` so the camera re-derives its
 //      cached state under the new projection.
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -120,20 +121,41 @@ fn widen_shadow_cascade(mut lights: Query<&mut CascadeShadowConfig, With<Directi
     }
 }
 
+fn select_orthographic(
+    choice: ResMut<ProjectionChoice>,
+    camera_query: Query<(&mut OrbitCam, &mut Projection)>,
+    face_labels: DiegeticTextMut<CubeFaceLabel>,
+) {
+    switch_projection(
+        ProjectionChoice::Orthographic,
+        choice,
+        camera_query,
+        face_labels,
+    );
+}
+
+fn select_perspective(
+    choice: ResMut<ProjectionChoice>,
+    camera_query: Query<(&mut OrbitCam, &mut Projection)>,
+    face_labels: DiegeticTextMut<CubeFaceLabel>,
+) {
+    switch_projection(
+        ProjectionChoice::Perspective,
+        choice,
+        camera_query,
+        face_labels,
+    );
+}
+
+/// Swaps the camera's `Projection` to `next_choice` (unless already there),
+/// refreshes the cube-face labels, and calls `force_update` so `OrbitCam`
+/// re-derives its cached state under the new projection.
 fn switch_projection(
-    key_input: Res<ButtonInput<KeyCode>>,
+    next_choice: ProjectionChoice,
     mut choice: ResMut<ProjectionChoice>,
     mut camera_query: Query<(&mut OrbitCam, &mut Projection)>,
     mut face_labels: DiegeticTextMut<CubeFaceLabel>,
 ) {
-    let next_choice = if key_input.just_pressed(KeyCode::KeyO) {
-        ProjectionChoice::Orthographic
-    } else if key_input.just_pressed(KeyCode::KeyP) {
-        ProjectionChoice::Perspective
-    } else {
-        return;
-    };
-
     if *choice == next_choice {
         return;
     }

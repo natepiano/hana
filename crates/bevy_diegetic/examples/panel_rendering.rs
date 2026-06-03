@@ -123,6 +123,10 @@ impl Default for LightingPreset {
     }
 }
 
+/// A preset index a digit shortcut asked for, consumed by `cycle_lighting_preset`.
+#[derive(Resource, Default)]
+struct RequestedPreset(Option<u8>);
+
 /// Marker for the three world panels under test.
 #[derive(Component)]
 struct RenderPanel;
@@ -193,6 +197,7 @@ fn main() {
         .wire_chip_to_activation::<TaaEnabled>(TAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<LightingPreset>()
+        .init_resource::<RequestedPreset>()
         .init_resource::<OitEnabled>()
         .init_resource::<TaaEnabled>()
         .insert_resource(bevy::light::GlobalAmbientLight {
@@ -202,17 +207,28 @@ fn main() {
         })
         .add_systems(Startup, (setup, spawn_preset_panel))
         .add_systems(PostStartup, capture_scene_lights)
+        // `cycle_lighting_preset` consumes the digit request; `adjust_illuminance`
+        // is a held +/- (and R) brightness control that reads the physical keys
+        // regardless of Shift, which the modifier-guarded shortcut binding can't
+        // reproduce, so it stays a raw per-frame reader.
         .add_systems(
             Update,
             (
                 cycle_lighting_preset,
                 adjust_illuminance,
-                toggle_oit,
-                toggle_taa,
                 refresh_preset_panel,
                 refresh_title_bar_light_readout,
             ),
         )
+        // 1..4 select a lighting preset, O toggles OIT, T toggles TAA — all
+        // through Fairy Dust's shortcut binding, which fires each only when no
+        // modifier is held.
+        .with_shortcut(KeyCode::Digit1, request_preset_1)
+        .with_shortcut(KeyCode::Digit2, request_preset_2)
+        .with_shortcut(KeyCode::Digit3, request_preset_3)
+        .with_shortcut(KeyCode::Digit4, request_preset_4)
+        .with_shortcut(KeyCode::KeyO, toggle_oit)
+        .with_shortcut(KeyCode::KeyT, toggle_taa)
         .add_systems(PostUpdate, sync_taa_msaa)
         .run();
 }
@@ -231,27 +247,27 @@ fn panel_rendering_title_bar(lux: f32) -> TitleBar {
 
 fn light_readout_control(lux: f32) -> String { format!("{LIGHT_READOUT_LABEL} {lux:.0}") }
 
-/// Cycles through lighting presets with keys 1-4.
+/// 1..4 request a lighting preset through Fairy Dust's shortcut binding; this
+/// system applies the request. Each fires only when no modifier is held.
+fn request_preset_1(mut requested: ResMut<RequestedPreset>) { requested.0 = Some(0); }
+
+fn request_preset_2(mut requested: ResMut<RequestedPreset>) { requested.0 = Some(1); }
+
+fn request_preset_3(mut requested: ResMut<RequestedPreset>) { requested.0 = Some(2); }
+
+fn request_preset_4(mut requested: ResMut<RequestedPreset>) { requested.0 = Some(3); }
+
+/// Applies a requested lighting preset.
 fn cycle_lighting_preset(
-    keyboard: Res<ButtonInput<KeyCode>>,
+    mut requested: ResMut<RequestedPreset>,
     mut preset: ResMut<LightingPreset>,
     mut panels: Query<&mut DiegeticPanel, With<RenderPanel>>,
     mut lights: Query<(&mut DirectionalLight, &SceneLight)>,
     mut point_lights: Query<(&mut PointLight, &ScenePointLight)>,
 ) {
-    let new = if keyboard.just_pressed(KeyCode::Digit1) {
-        Some(0)
-    } else if keyboard.just_pressed(KeyCode::Digit2) {
-        Some(1)
-    } else if keyboard.just_pressed(KeyCode::Digit3) {
-        Some(2)
-    } else if keyboard.just_pressed(KeyCode::Digit4) {
-        Some(3)
-    } else {
-        None
+    let Some(idx) = requested.0.take() else {
+        return;
     };
-
-    let Some(idx) = new else { return };
 
     // Save current illuminance before switching away from lights-on.
     if preset.lights_on() {
@@ -470,14 +486,10 @@ fn current_light_intensity(lights: &Query<&DirectionalLight, With<SceneLight>>) 
 
 /// Toggles OIT on/off with the `O` key.
 fn toggle_oit(
-    keyboard: Res<ButtonInput<KeyCode>>,
     cameras: Query<Entity, With<OrbitCam>>,
     mut oit_enabled: ResMut<OitEnabled>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyO) {
-        return;
-    }
     oit_enabled.0 = !oit_enabled.0;
     for camera in &cameras {
         if oit_enabled.0 {
@@ -490,14 +502,10 @@ fn toggle_oit(
 
 /// Toggles TAA on/off with the `T` key.
 fn toggle_taa(
-    keyboard: Res<ButtonInput<KeyCode>>,
     cameras: Query<(Entity, Has<TemporalAntiAliasing>), With<OrbitCam>>,
     mut taa_enabled: ResMut<TaaEnabled>,
     mut commands: Commands,
 ) {
-    if !keyboard.just_pressed(KeyCode::KeyT) {
-        return;
-    }
     for (entity, has_taa) in &cameras {
         if has_taa {
             commands
