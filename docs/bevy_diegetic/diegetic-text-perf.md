@@ -1,5 +1,10 @@
 # Diegetic text performance — options
 
+> **Status: RETIRED 2026-06-03.** Options A, C, and D are landed and measured;
+> the one remaining option, **B (true instancing)**, now has its own plan in
+> [`glyph_instancing.md`](glyph_instancing.md). This file stays as the record
+> of phases A / C / D and of the waterfall overlay design.
+
 ## Baseline
 
 Conditions: `diegetic_text_stress`, 100 world labels each restrung every frame,
@@ -219,12 +224,14 @@ Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-m
   text changes, instead of allocating a new asset and dropping the old one.
 - Removes the ~400-per-frame allocate/upload/discard churn.
 
-**B. True instancing (one shared quad)**
+**B. True instancing (one shared quad)** — MOVED to
+[`glyph_instancing.md`](glyph_instancing.md)
 - Stop storing a quad per glyph. Keep one unit quad and draw it N times, feeding a
   per-glyph table (position + glyph id) the GPU expands.
 - No per-label meshes; moving text just updates a small table. Also removes the
   duplicate quads.
-- Big change — needs a custom instanced render pipeline. The eventual destination.
+- Big change — needs a custom instanced render pipeline. The eventual destination;
+  the implementation plan lives in the new doc.
 
 **C. Share glyph outlines across labels** — DONE 2026-06-02
 - Store each glyph's outline once; labels point at the shared copy. See Finding — C.
@@ -548,8 +555,8 @@ needs no name decision.)
 
 ## Suggested order
 
-A (done) → C (done) → D (current phase: Step 0 done; next 1a clone fix → 1b
-flip-flop removal → 2 measure → 3 skip → 4 measure) → B.
+A (done) → C (done) → D (done: Steps 0 / 1a / 1b / 2 / 3 / 4 all landed
+2026-06-03) → B ([`glyph_instancing.md`](glyph_instancing.md), current).
 
 Detail also in the memory notes `project_diegetic_text_single_source`,
 `project_diegetic_text_perf_targets`, and `project_perf_mode_measurement`.

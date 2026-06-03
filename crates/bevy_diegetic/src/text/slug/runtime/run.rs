@@ -128,10 +128,23 @@ impl TextRun {
     pub fn glyphs(&self) -> &[GlyphInstance] { &self.glyphs }
 }
 
+/// One glyph's cached preparation result: packed curve data for a glyph that
+/// draws, or the recorded fact that it has no visible outline (a space or
+/// other blank glyph). Caching the invisible answer too means a repeat
+/// sighting resolves from one map hit, with no font re-parse either way.
+#[derive(Clone, Debug)]
+pub enum CachedGlyphOutline {
+    /// Packed curve/band outline for a glyph that draws.
+    Visible(GlyphOutline),
+    /// The glyph has no visible outline; runs skip it without atlas work.
+    Invisible,
+}
+
 /// Cache of reusable packed glyph data, plus the shared glyph atlas every text
 /// run indexes into.
 ///
-/// `glyphs` holds each glyph's CPU outline keyed for reuse. The atlas fields
+/// `glyphs` holds each glyph's CPU outline keyed for reuse (or its cached
+/// invisibility — see [`CachedGlyphOutline`]). The atlas fields
 /// (`curves` / `bands` / `glyph_records`) are the append-only GPU tables: the
 /// first time a glyph is packed, its records are appended here with global
 /// offsets and its slot recorded in `record_indices`, so every run that draws
@@ -141,7 +154,7 @@ impl TextRun {
 /// evicted.
 #[derive(Clone, Debug, Default)]
 pub struct GlyphOutlineCache {
-    glyphs:         HashMap<GlyphKey, GlyphOutline>,
+    glyphs:         HashMap<GlyphKey, CachedGlyphOutline>,
     record_indices: HashMap<GlyphKey, u32>,
     curves:         Vec<CurveRecord>,
     bands:          Vec<BandRecord>,
@@ -173,7 +186,9 @@ impl GlyphOutlineCache {
     pub const fn atlas_revision(&self) -> u32 { self.revision }
 
     /// Loads, packs, and caches one glyph from a specific collection face,
-    /// appending its records to the shared atlas the first time it is seen.
+    /// appending its records to the shared atlas the first time it is seen. A
+    /// glyph with no visible outline (a space) caches as
+    /// [`CachedGlyphOutline::Invisible`] without touching the atlas.
     pub fn get_or_insert_packed_from_face(
         &mut self,
         key: GlyphKey,
@@ -181,10 +196,13 @@ impl GlyphOutlineCache {
         face_index: u32,
         character: char,
         band_count: usize,
-    ) -> Result<&GlyphOutline, OutlineError> {
+    ) -> Result<&CachedGlyphOutline, OutlineError> {
         match self.glyphs.entry(key) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
+                if !glyph::font_glyph_id_has_visible_outline(font_data, face_index, key.glyph_id)? {
+                    return Ok(entry.insert(CachedGlyphOutline::Invisible));
+                }
                 let glyph = glyph::load_glyph_by_id_from_face(
                     font_data,
                     face_index,
@@ -216,7 +234,7 @@ impl GlyphOutlineCache {
                 self.record_indices.insert(key, record_index);
                 self.revision = self.revision.wrapping_add(1);
 
-                Ok(entry.insert(outline))
+                Ok(entry.insert(CachedGlyphOutline::Visible(outline)))
             },
         }
     }

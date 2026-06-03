@@ -105,6 +105,17 @@ pub fn glyph_id_has_visible_outline(face: &Face<'_>, glyph_id: u16) -> bool {
     glyph_id < face.number_of_glyphs() && face.glyph_bounding_box(GlyphId(glyph_id)).is_some()
 }
 
+/// Parses the face and returns whether `glyph_id` can produce visible curve
+/// data, for callers without an already-parsed [`Face`].
+pub fn font_glyph_id_has_visible_outline(
+    font_data: &[u8],
+    face_index: u32,
+    glyph_id: u16,
+) -> Result<bool, OutlineError> {
+    let face = Face::parse(font_data, face_index).map_err(|_| OutlineError::InvalidFont)?;
+    Ok(glyph_id_has_visible_outline(&face, glyph_id))
+}
+
 fn load_glyph_from_face(
     face: &Face<'_>,
     glyph_id: GlyphId,

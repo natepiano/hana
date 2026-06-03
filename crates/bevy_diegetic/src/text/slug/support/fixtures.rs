@@ -15,6 +15,7 @@ use crate::text::Font;
 use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::runtime::BuiltTextRun;
+use crate::text::slug::runtime::CachedGlyphOutline;
 use crate::text::slug::runtime::FontKey;
 use crate::text::slug::runtime::GlyphCache;
 use crate::text::slug::runtime::GlyphInstance;
@@ -80,7 +81,7 @@ pub fn fixture_run_with_cache(
             .glyph_hor_advance(GlyphId(glyph_id))
             .map_or(0.0, f32::from);
         let key = GlyphKey::with_preprocess_version(key_seed, glyph_id, 0);
-        let bounds = cache
+        let outline = cache
             .get_or_insert_packed_from_face(
                 key,
                 font_data,
@@ -88,14 +89,15 @@ pub fn fixture_run_with_cache(
                 FIXTURE_DIAGNOSTIC_CHAR,
                 DEFAULT_BAND_COUNT,
             )
-            .expect("fixture glyph should pack")
-            .bounds();
-        instances.push(GlyphInstance::new_non_uniform(
-            key,
-            Vec2::new(origin_x * FIXTURE_SCALE, 0.0),
-            bounds,
-            Vec2::splat(FIXTURE_SCALE),
-        ));
+            .expect("fixture glyph should pack");
+        if let CachedGlyphOutline::Visible(outline) = outline {
+            instances.push(GlyphInstance::new_non_uniform(
+                key,
+                Vec2::new(origin_x * FIXTURE_SCALE, 0.0),
+                outline.bounds(),
+                Vec2::splat(FIXTURE_SCALE),
+            ));
+        }
         origin_x += advance;
     }
     (

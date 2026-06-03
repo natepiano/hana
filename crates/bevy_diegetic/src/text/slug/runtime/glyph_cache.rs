@@ -1,6 +1,7 @@
 //! Glyph cache: positioned-glyph input, prepared runs, and GPU storage handles.
 
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use bevy::prelude::Assets;
 use bevy::prelude::Component;
@@ -13,6 +14,7 @@ use bevy::render::storage::ShaderBuffer;
 use ttf_parser::Face;
 
 use super::BuiltTextRun;
+use super::CachedGlyphOutline;
 use super::FontKey;
 use super::GlyphInstance;
 use super::GlyphKey;
@@ -21,7 +23,6 @@ use super::TextRun;
 use crate::layout::ShapedGlyph;
 use crate::text::Font;
 use crate::text::slug::RunRenderError;
-use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::render;
 use crate::text::slug::render::RunRenderData;
@@ -83,6 +84,9 @@ pub(crate) struct GlyphAtlasHandles {
 #[derive(Debug, Default, Resource)]
 pub(crate) struct GlyphCache {
     outline_cache:      GlyphOutlineCache,
+    /// Per-font design-space scale (`units_per_em`), parsed from the face once
+    /// per font so run preparation never re-parses font tables per glyph.
+    units_per_em:       HashMap<FontKey, f32>,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
     preprocess_version: u32,
     atlas:              Option<GlyphAtlasHandles>,
@@ -92,6 +96,10 @@ pub(crate) struct GlyphCache {
 impl GlyphCache {
     /// Prepares one run from already-positioned production glyphs with
     /// caller-provided X/Y placement scale.
+    ///
+    /// The steady-state per-glyph cost is two map hits (the packed outline /
+    /// cached invisibility, and the font's `units_per_em`) plus the instance
+    /// math; font tables are parsed only on each cache's first sighting.
     pub fn prepare_positioned_run_with_scale(
         &mut self,
         glyphs: &[PositionedGlyph<'_>],
@@ -102,24 +110,19 @@ impl GlyphCache {
     ) -> Result<PreparedTextRun, OutlineError> {
         let mut instances = Vec::with_capacity(glyphs.len());
         for positioned in glyphs {
-            let face = Face::parse(positioned.font.data(), positioned.collection_index)
-                .map_err(|_| OutlineError::InvalidFont)?;
-            if !glyph::glyph_id_has_visible_outline(&face, positioned.glyph.id) {
-                continue;
-            }
-            let bounds_scale =
-                placement_scale * (layout_font_size / f32::from(face.units_per_em()));
-            let key = self.glyph_key(
-                FontKey::new(positioned.glyph.font_face.blob_id),
-                positioned.glyph.id,
-            );
-            let packed_glyph = self.outline_cache.get_or_insert_packed_from_face(
+            let font_key = FontKey::new(positioned.glyph.font_face.blob_id);
+            let key = self.glyph_key(font_key, positioned.glyph.id);
+            let bounds = match self.outline_cache.get_or_insert_packed_from_face(
                 key,
                 positioned.font.data(),
                 positioned.collection_index,
                 POSITIONED_GLYPH_DIAGNOSTIC_CHAR,
                 band_count,
-            )?;
+            )? {
+                CachedGlyphOutline::Invisible => continue,
+                CachedGlyphOutline::Visible(outline) => outline.bounds(),
+            };
+            let units_per_em = self.font_units_per_em(font_key, positioned)?;
             instances.push(GlyphInstance::new_non_uniform(
                 key,
                 Vec2::new(
@@ -127,8 +130,8 @@ impl GlyphCache {
                     -(positioned.glyph.baseline + positioned.glyph.y - anchor.y)
                         * placement_scale.y,
                 ),
-                packed_glyph.bounds(),
-                bounds_scale,
+                bounds,
+                placement_scale * (layout_font_size / units_per_em),
             ));
         }
 
@@ -137,6 +140,23 @@ impl GlyphCache {
                 run: TextRun::new(instances),
             },
         })
+    }
+
+    /// Design-space scale (`units_per_em`) for `font_key`, parsed from the
+    /// face on its first sighting and answered from the cache afterward.
+    fn font_units_per_em(
+        &mut self,
+        font_key: FontKey,
+        positioned: &PositionedGlyph<'_>,
+    ) -> Result<f32, OutlineError> {
+        match self.units_per_em.entry(font_key) {
+            Entry::Occupied(entry) => Ok(*entry.get()),
+            Entry::Vacant(entry) => {
+                let face = Face::parse(positioned.font.data(), positioned.collection_index)
+                    .map_err(|_| OutlineError::InvalidFont)?;
+                Ok(*entry.insert(f32::from(face.units_per_em())))
+            },
+        }
     }
 
     /// Builds this run's GPU-ready render data from the shared glyph atlas,
