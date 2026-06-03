@@ -2,10 +2,14 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use bevy::math::Vec2;
+use bevy_kana::ToU32;
 
 use crate::text::slug::glyph;
+use crate::text::slug::glyph::BandRecord;
 use crate::text::slug::glyph::Bounds;
+use crate::text::slug::glyph::CurveRecord;
 use crate::text::slug::glyph::GlyphOutline;
+use crate::text::slug::glyph::GlyphRecord;
 use crate::text::slug::glyph::OutlineError;
 
 /// Stable identity for the resolved font face used by shaping.
@@ -124,18 +128,52 @@ impl TextRun {
     pub fn glyphs(&self) -> &[GlyphInstance] { &self.glyphs }
 }
 
-/// Cache of reusable packed glyph data.
+/// Cache of reusable packed glyph data, plus the shared glyph atlas every text
+/// run indexes into.
+///
+/// `glyphs` holds each glyph's CPU outline keyed for reuse. The atlas fields
+/// (`curves` / `bands` / `glyph_records`) are the append-only GPU tables: the
+/// first time a glyph is packed, its records are appended here with global
+/// offsets and its slot recorded in `record_indices`, so every run that draws
+/// the glyph stores that one global index in its mesh instead of copying the
+/// glyph's curves per run. `revision` bumps on every append so the GPU upload
+/// knows when the tables grew. The atlas is append-only — glyphs are never
+/// evicted.
 #[derive(Clone, Debug, Default)]
 pub struct GlyphOutlineCache {
-    glyphs: HashMap<GlyphKey, GlyphOutline>,
+    glyphs:         HashMap<GlyphKey, GlyphOutline>,
+    record_indices: HashMap<GlyphKey, u32>,
+    curves:         Vec<CurveRecord>,
+    bands:          Vec<BandRecord>,
+    glyph_records:  Vec<GlyphRecord>,
+    revision:       u32,
 }
 
 impl GlyphOutlineCache {
-    /// Returns the cached packed glyph for `key`, if it exists.
+    /// Global atlas slot for `key`, if the glyph has been packed.
     #[must_use]
-    pub fn get(&self, key: GlyphKey) -> Option<&GlyphOutline> { self.glyphs.get(&key) }
+    pub fn global_index(&self, key: GlyphKey) -> Option<u32> {
+        self.record_indices.get(&key).copied()
+    }
 
-    /// Loads, packs, and caches one glyph from a specific collection face.
+    /// Shared curve table for every packed glyph.
+    #[must_use]
+    pub fn atlas_curves(&self) -> &[CurveRecord] { &self.curves }
+
+    /// Shared band table for every packed glyph.
+    #[must_use]
+    pub fn atlas_bands(&self) -> &[BandRecord] { &self.bands }
+
+    /// Shared glyph-record table indexed by each run's mesh.
+    #[must_use]
+    pub fn atlas_glyph_records(&self) -> &[GlyphRecord] { &self.glyph_records }
+
+    /// Append counter; bumps whenever a new glyph grows the atlas tables.
+    #[must_use]
+    pub const fn atlas_revision(&self) -> u32 { self.revision }
+
+    /// Loads, packs, and caches one glyph from a specific collection face,
+    /// appending its records to the shared atlas the first time it is seen.
     pub fn get_or_insert_packed_from_face(
         &mut self,
         key: GlyphKey,
@@ -153,7 +191,32 @@ impl GlyphOutlineCache {
                     key.glyph_id,
                     character,
                 )?;
-                Ok(entry.insert(glyph::build_packed_glyph(glyph, band_count)))
+                let outline = glyph::build_packed_glyph(glyph, band_count);
+
+                // First sighting of this glyph: append its packed records to the
+                // shared atlas with global offsets and record its slot, so runs
+                // index in by one number rather than copying curves per run.
+                let record_index = self.glyph_records.len().to_u32();
+                let curve_start = self.curves.len().to_u32();
+                let band_start = self.bands.len().to_u32();
+                let axis_band_count = outline.bands().len().to_u32() / 2;
+                self.curves.extend_from_slice(outline.curves());
+                self.bands
+                    .extend(outline.bands().iter().map(|band| BandRecord {
+                        start: band.start + curve_start,
+                        ..*band
+                    }));
+                self.glyph_records.push(GlyphRecord::new(
+                    outline.bounds(),
+                    band_start,
+                    axis_band_count,
+                    band_start + axis_band_count,
+                    axis_band_count,
+                ));
+                self.record_indices.insert(key, record_index);
+                self.revision = self.revision.wrapping_add(1);
+
+                Ok(entry.insert(outline))
             },
         }
     }

@@ -122,8 +122,14 @@ These are the types and the GPU layout the phases below build toward.
   `CompositeMode`). A `ShaderType` layout test asserts size+offsets match the
   WGSL structs, mirroring the `packing.rs` record tests.
 - **GPU bindings** — `brushes` (104), `gradient_stops` (105), `quad_records`
-  (106), all per-run buffers like curves/bands/glyphs. Confirm 104–106 are free
-  against StandardMaterial + OIT bindings.
+  (106) are declared on the single shared `TextExtension`, so every run supplies
+  them (a StandardMaterial extension is one bind-group layout, and wgpu requires
+  the bound group to match it). A monochrome run binds one app-global
+  `ColorBindings::empty()` — shared zero-length brush / stop / quad tables,
+  reached through the `RenderMode::Text` arm and never read by the shader's mono
+  path. `ColorBindings::empty()`'s name and doc comment are the canonical
+  explanation for why a mono run carries empty color tables. Confirm 104–106 are
+  free against StandardMaterial + OIT bindings.
 - **`RenderMode::ColorLayer`** — a new variant on the existing `RenderMode` enum
   (not a separate `has_color` bool). One discriminant routes the shader per-run;
   keep the WGSL render-mode constant in sync with the Rust discriminant through
@@ -236,10 +242,12 @@ RunRenderData {
 }
 ```
 
-curves/bands/glyphs keep the stable-handle in-place re-upload; the brush / quad
-/ stop buffers are sized to the run's layer-quad count and may realloc on
-rebuild. The quad↔brush pairing is modeled structurally (one `QuadRecord` per
-layer-quad), not as length-correlated parallel `Vec`s.
+All run buffers — curves/bands/glyphs and the brush / quad / stop buffers — ride
+the same stable `Handle<ShaderBuffer>` with in-place `set_data()` re-upload
+(stored in `RunStorage`, overwritten in `commit_run_storage` on rebuild), so a
+per-frame-updated color run allocates nothing. The quad↔brush pairing is modeled
+structurally (one `QuadRecord` per layer-quad), not as length-correlated parallel
+`Vec`s.
 
 When a layer's baked transform collapses its bounds to zero width or height, the
 quad is dropped with a warning before packing (`packing.rs` divides by extent).
@@ -263,10 +271,13 @@ storage bindings and the `RenderMode::ColorLayer` discriminant. Color runs set
 unchanged. Phase 6 lands solid brushes only; the gradient branch is Phase 8.
 Pure-monochrome runs stay on the `RenderMode::Text` single-`fill_color` path.
 
-Add a test that bindings 104–106 do not collide with StandardMaterial + OIT, and
-one that a color run's material is built with `AlphaMode::Blend`. Color runs
-(Blend) and monochrome runs (Opaque) land in different render phases, so they do
-not batch together — measure the bind-group / draw-call impact in Phase 7.
+Add a test that bindings 104–106 do not collide with StandardMaterial + OIT, one
+that a color run's material is built with `AlphaMode::Blend`, and one that a
+monochrome run resolves to the shared `ColorBindings::empty()` (so a later
+cleanup that drops the empty tables fails the bind-group layout loudly). Color
+runs (Blend) and monochrome runs (Opaque) land in different render phases, so
+they do not batch together — measure the bind-group / draw-call impact in
+Phase 7.
 
 ### Phase 7 — Flat color (COLRv0) + the `color_emoji` example
 
@@ -359,8 +370,10 @@ that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
   zoom.
 - A `Foreground`-index glyph resolves to two different run fill colors (proves
   the in-shader cascade, color and alpha).
-- Monochrome text mesh + buffers stay byte-identical (the color path is
-  additive; the single-`fill_color` route must not change).
+- Monochrome text mesh + its 100–103 buffers stay byte-identical (the color path
+  is additive). Mono runs bind the shared `ColorBindings::empty()` for 104–106,
+  which the `RenderMode::Text` path never reads; the single-`fill_color` route
+  must not change.
 - An N-layer emoji composites top-to-bottom under OIT, not shuffled. Verify OIT
   linked-list ordering with a 40+-layer emoji.
 - The Phase 1 shaping-output regression (glyph ids + advances across the parley
@@ -369,3 +382,310 @@ that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
   logs the skipped subtree.
 - The example's frame cost is measured against the monochrome render floor; the
   added fill-rate from coplanar layers is recorded, not treated as a regression.
+
+## Team review (cycle 1) — auto-recorded refinements
+
+Five-lens review (correctness, architecture, risk, type system, implementation
+quality). No premise-challenge surfaced: no lens argued the layer-as-N-coverage
+approach cannot achieve the intent. The items below converged to a single
+in-intent outcome and are accepted; the three genuine choices are under
+**Proposed user decisions**.
+
+- **M1 — Pin the layer-depth stride (5-lens consensus). Accepted.** Define
+  `LAYER_DEPTH_STRIDE` as a named constant with documented precision headroom;
+  choose `LayerIndex` width as `u8` (≤255 layers, truncate-and-warn beyond) so
+  the depth term cannot exhaust f32 precision; add the per-layer term *additively*
+  to `uniforms.oit_depth_offset` (compose, never overwrite). The OIT-ordering gate
+  (line 378) must run the 40+-layer fixture across several `oit_depth_offset`
+  depth ranges (e.g. 0, 1, 10, 100), not one, since mis-sort only appears at
+  certain depths.
+- **M2 — Bindings 104–106 audit is a hard go/no-go. Accepted.** Keep the existing
+  Phase 6 gate (line 274) but run it *first*, before any Phase 6 implementation:
+  instantiate `TextExtension` with dummy 104–106 buffers + OIT and confirm the
+  material compiles. Record the verified Bevy version in a `material.rs` comment.
+- **M3 — Intern brushes and stops per run. Accepted.** `RunPacker` deduplicates
+  identical `Brush` (and `StopRecord`) values within a run via a hash map;
+  `QuadRecord` indexes the deduped set. Bound and document the per-run
+  brush/stop/quad counts and the overflow path so a pathological run is a named
+  internal error, not silent truncation.
+- **M4 — Indices are checked newtypes. Accepted.** `Palette`, `BrushIndex`,
+  `LayerIndex`, `GlyphOutlineIndex` are newtypes with constructors that validate
+  against the run's buffer lengths at pack time (this is what makes
+  "an out-of-range index cannot reach the GPU" true rather than aspirational).
+  Pin `Palette` as `u16` (CPAL palette-index width), palette 0 only for now.
+  Run-overflow (internal invariant) uses `debug_assert`/error; font-data issues
+  keep the log-and-skip path.
+- **M5 — Widen the parley 0.9→0.10 regression gate. Accepted.** The glyph-id +
+  advance check (line 179) misses line-break/bidi/cluster regressions. Add a
+  mesh-level snapshot on the multi-line RTL/CJK sample asserting cluster
+  boundaries and line-break positions, so reflow changes cannot pass green.
+- **M6 — Correct the "gradient cannot be Foreground" claim. Accepted (factual
+  correction).** COLRv1 gradient color stops *can* use the 0xFFFF foreground
+  index, so the line-100–104 claim that the state is unrepresentable is
+  inaccurate about COLR. The factual correction is recorded here; whether to
+  *support* foreground stops or warn-and-fallback is **Decision D2**, and the
+  `StopRecord` layout follows from that choice.
+- **M7 — `RenderMode::ColorLayer` discriminant. Accepted.** Keep the
+  test-asserted Rust↔WGSL pairing (consistent with the existing `Text`/`PunchOut`
+  `From<u32>`); single-source the discriminant value if convenient. The existing
+  pattern is sufficient.
+- **M8 — Mixed-run monochrome glyph spelled out. Accepted.** A mono glyph in a
+  color/mixed run emits exactly one quad: `Solid(Foreground)` brush,
+  `layer_index` 0, alpha `= coverage * uniforms.fill_color.a`, depth at the run's
+  nominal offset. Add a mixed-run OIT-ordering gate (one mono letter + one
+  40+-layer emoji in the same run).
+- **M9 — Zero-extent layer guard before packing. Accepted.** A layer whose
+  baked-transform bounds collapse to zero width or height is skipped with a
+  `warn!` *before* packing — `packing.rs` clamps `extent.max(1.0)` and so would
+  emit degenerate bands rather than NaN, wasting shader work, if a collapsed
+  layer slipped through (sharpens lines 160–161, 252–253).
+- **M10 — Font-fallback logging is deduplicated. Accepted.** Out-of-range palette
+  index, missing `PaintColrGlyph` target, and unsupported `Paint` each log once
+  per `(font, issue)` via a dedup set to avoid per-frame spam; the cyclic-font
+  termination fixture (gate line 381) covers the recursion cap.
+- **M11 — sRGB→linear at extraction, verified. Accepted.** CPAL colors and stops
+  convert to linear at extraction; the shader consumes linear directly (no second
+  conversion). Add a Phase 3 unit test asserting a known sRGB color maps to its
+  linear value.
+- **M12 — Non-uniform/shear affine survey is a Phase 8 prerequisite. Accepted.**
+  Survey Noto Color Emoji / Twemoji for non-uniform or shear layer affines before
+  Phase 8 ships (already noted lines 300–304); record the survey result in the
+  Phase 8 commit so the deferral is evidence-backed.
+- **M13 — Measure mixed-run fragment cost separately. Accepted.** Phase 7 records
+  pure-mono, pure-color, and 50/50 mixed fragment cost separately, since a mixed
+  run routes every quad through `quad_records` (one indirection on the mono quads
+  too).
+- **M14 — Pin the example builder-chain order. Accepted.** Document
+  `.with_stable_transparency()` placement (after the OrbitCam helper, before
+  panels) and which faces set `AlphaMode::Blend`; mono panels keep their current
+  alpha mode.
+
+## Team review (cycle 2) — auto-recorded refinements
+
+Second five-lens review (correctness, architecture, risk, type system,
+implementation quality), building on cycle 1. No premise-challenge surfaced
+again. One genuine new choice (clip handling) is added below as **D4**; the rest
+converged to a single in-intent outcome and are accepted. Items that sharpen a
+cycle-1 entry name it.
+
+- **M15 — Painter transform-stack timing + per-layer outline builder. Accepted.**
+  Phase 2's probe painter must record *when* `push_transform`/`pop_transform`
+  fire relative to `outline_glyph` (the transform stack is live at outline
+  emission). Phase 3 instantiates a fresh `QuadraticOutlineBuilder` per
+  `outline_glyph` (one builder per layer, never reused across layers) and applies
+  the composed affine to the extracted control points after extraction. Sharpens
+  Phase 2/3 (lines 156–161, 201).
+- **M16 — Pin the actual `LAYER_DEPTH_STRIDE` value with an f32 formula. Accepted
+  (sharpens M1).** Define `max_z = max(command_index · per_run_stride) + 255 ·
+  LAYER_DEPTH_STRIDE` and require it to stay inside the f32 mantissa window;
+  choose a small stride (≈1e-5, not 1.0) so the per-layer term keeps distinct
+  ULPs. Add a unit test asserting layers 0..255 stay distinctly ordered across
+  `oit_depth_offset` ∈ {0, 1, 10, 100, 1000}; the OIT gate uses a named 40+-layer
+  fixture and a programmatic depth-order readback, not visual inspection alone.
+- **M17 — OIT linked-list capacity stress (NEW, critical). Accepted.** The
+  ordering gate verifies *sort order* but never *capacity*. A picker-grid-scale
+  run (e.g. 100 emoji × 40 coplanar layers ≈ 4000 transparent quads) can exceed
+  Bevy's per-pixel OIT layer budget and silently drop/corrupt fragments. Add a
+  Phase 7 stress gate at picker scale; document the assumed OIT max-per-pixel
+  layer count and the Bevy version it was verified against; record the fill-rate
+  floor. Cross-references the diegetic-text-perf OIT-dominant-cost note.
+- **M18 — Prepass exclusion verified, not assumed (critical). Accepted.** Confirm
+  (and comment in `slug_text.wgsl`) that the `#ifdef PREPASS_PIPELINE` path reads
+  only `RenderMode::Text` + binding 103 and never references 104–106, so a
+  Blend-excluded color run cannot reach the prepass with an unbound 106. Add a
+  side-by-side mono+color prepass test. Folds in the prepass doc note (cycle-2
+  correctness C6).
+- **M19 — Bindings 104–106 audit gets a CI gate + version comment (sharpens
+  M2). Accepted.** Beyond running the compile probe first, record the verified
+  binding layout in a `material.rs` doc comment naming the Bevy version, the
+  StandardMaterial binding ceiling, and the OIT bindings in use; run the M2 probe
+  in CI as a required gate before any Phase 6 merge.
+- **M20 — `ColorBindings::empty()` ownership, injection point, live test.
+  Accepted.** It is a startup-initialized resource holding one shared zero-length
+  brush/stop/quad handle set (created once with size-0 buffers, app lifetime).
+  Document which module selects it for mono runs (the run-build caller, before
+  `text_material`). Replace the comment-only guard (line 276) with a live test
+  asserting mono runs bind the shared handle and that mono and color materials
+  produce an identical bind-group layout.
+- **M21 — `RunRenderData` buffer ownership + byte-identical check. Accepted.**
+  Each of curves/bands/glyphs/brushes/stops/quad_records is its own stable
+  `Handle<ShaderBuffer>` in `RunStorage` (or, if concatenated, with documented
+  offsets); a pure-mono run never creates the color buffers. The Phase 7
+  byte-identical gate (line 373) snapshots only the 100–103 buffers.
+- **M22 — `GlyphKey::Palette` lands before Phase 3 extraction. Accepted.** Move
+  the field addition out of Phase 4 into Phase 2 / early Phase 3, since extraction
+  must key the cache by `(font, glyph id, palette)`. Sharpens Phase 4 (line 222).
+- **M23 — Interning bounds, fallible packer, validated-index boundary (sharpens
+  M3/M4). Accepted.** Index width `u16` (≤65535 distinct brushes/stops per run);
+  `RunPacker::push_*` returns `Result<_, RunPackError::{BrushesExceeded,
+  StopsExceeded}>` — a named error, never silent truncation or a bare panic;
+  `finish()` asserts the brush/stop/quad_record lengths agree. Keep the
+  GPU-serialized `u32` distinct from the validated newtype so a deserialize path
+  cannot bypass the pack-time check. Add layout tests and invalid-`#[repr(u32)]`-
+  discriminant-rejection tests for `BrushRecord`/`StopRecord`/`QuadRecord`.
+- **M24 — `AlphaMode::Blend` enforced structurally (sharpens M14). Accepted.** A
+  typed color-run material constructor (or an assertion inside `text_material`)
+  makes a color run un-buildable without `Blend`, so a future refactor that
+  bypasses the builder cannot silently route a color run through the opaque pass;
+  mono keeps `Opaque`.
+- **M25 — `layer_iter()` is an `ExactSizeIterator` (sharpens D1). Accepted.** The
+  total accessor reports its length; `Monochrome` yields exactly one synthetic
+  `ColorLayer { outline, brush: Solid(Foreground), layer_index: 0, transform:
+  Affine2::IDENTITY }`. Phase 5 asserts the reported count before emitting quads.
+- **M26 — `StopRecord` layout for foreground stops (sharpens D2). Accepted.**
+  `StopRecord { color: vec4<f32>, is_foreground: u32 }`; when `is_foreground` the
+  shader reads `uniforms.fill_color` (rgb *and* a). Static stops keep their CPAL
+  color+alpha; a foreground stop follows the run color and alpha by COLR
+  definition (resolves cycle-2 risk R9). Add the `From<&GradientStop>` impl plus a
+  layout test in Phase 8.
+- **M27 — Foreground brush alpha cascade spelled out. Accepted.** For a
+  `Solid(Foreground)` brush, `final_alpha = coverage · uniforms.fill_color.a`,
+  identical to `Solid(Static)`; coverage always multiplies the foreground alpha
+  (sharpens lines 264–265).
+- **M28 — Non-uniform/shear survey precedes `BrushRecord` layout + a transform
+  marker (sharpens M12). Accepted.** Run the Noto/Twemoji shear survey *before*
+  locking the `BrushRecord` layout (not after Phase 8 starts), since a shear find
+  widens the record. Add a `TransformKind { Uniform | Affine }` (or `has_shear`)
+  marker so Phase 7 warns on shear and Phase 8 cannot silently mis-render a
+  sheared gradient; document `BrushRecord`'s current uniform-affine assumption.
+- **M29 — Concrete cyclic-font fixture + cap aligned to `LayerIndex` (sharpens
+  M10 / Phase 2). Accepted.** Build a real cyclic/adversarial COLR fixture (TTX or
+  synthetic) for gate line 381; set the recursion cap to `u8::MAX` to match
+  `LayerIndex`; Phase 2's probe records whether ttf-parser already bounds
+  `PaintColrGlyph` recursion.
+- **M30 — Enumerate Paint-variant support + structured dedup logging. Accepted.**
+  Phase 3 classifies every COLRv1 `Paint` as supported-now / deferred-Phase-8 /
+  deferred-Phase-9, warns once per `(font, variant)`, and a Phase 7 test asserts a
+  font using a deferred paint extracts with a reduced layer count and a warning
+  (sharpens line 212).
+- **M31 — Out-of-range palette index → skip-with-warning. Accepted.** Resolve the
+  "fall back to palette 0 *or* skip" ambiguity (lines 213–216) to skip the layer
+  with a dedup warning, consistent with the other log-once-and-skip font-data
+  fallbacks (M10).
+- **M32 — Parley bump: pinned pair, rollback note, shaping-output snapshot
+  (sharpens M5). Accepted.** Pin `parley` and `harfrust` versions together in
+  `Cargo.toml`; record the rollback cost (is `outline.rs` API-coupled to parley?)
+  in the Phase 1 commit. M5's "mesh-level snapshot" is a structured shaping-output
+  snapshot — glyph ids, advances, `glyph.cluster` boundaries, line-break positions
+  serialized as JSON — not a brittle mesh-vertex byte compare.
+- **M33 — `sRGB→linear` test concretized (sharpens M11). Accepted.** Assert
+  `srgb_u8(255,255,255).to_linear()` → `1.0` per channel and a mid-tone
+  (`0x808080` → ≈0.216) via Bevy's conversion, covering both ends of the curve.
+- **M34 — D3 perf gate pinned + M13 reframed. Accepted.** D3's whole-frame budget
+  is measurable, but its terms are not pinned: set `k`, define `mono_floor` (a
+  pure-mono 40+-emoji run under the same lighting/OIT settings, captured per Bevy
+  version + machine), and state the gate is run manually via fairy_dust
+  `with_perf_mode` (continuous + `AutoNoVsync`) with fixed, focused window
+  geometry. M13's per-fragment isolation is not measurable with current tooling,
+  so reframe it as visual correctness of pure-mono / pure-color / 50-50 runs plus
+  a documented ≈≤5% indirection hypothesis; note that a future instancing path
+  would remove the mixed-run per-quad indirection entirely.
+- **M35 — Example spec concreteness (sharpens M14). Accepted.** Add an
+  alpha-mode column to the face matrix (which faces are `Blend`); pin
+  `CameraHomeTarget` to the Front hero; start the cube spin paused (P to spin) so
+  each face screenshots cleanly; confirm `.with_stable_transparency()` is an
+  existing fairy_dust capability or add it in this PR.
+- **M36 — Implementation-notes section + minor type notes. Accepted.** Add an
+  "Implementation notes" subsection: dedup happens before index assignment; the
+  shader indirection path is `quad_index(uv) → quad_records → brush_index →
+  brushes`, and mono runs skip the indirection. Add a `TODO` plus a multi-palette
+  cache-separation test for the `Palette` newtype against a future dark-mode need;
+  note why the `CachedGlyph` enum alone suffices versus a run-build typestate.
+- **M37 — Zero-extent guard scope clarified (sharpens M9). Accepted.** The layer
+  guard fires after the affine, before packing; separately, the run builder's
+  `clipped()` returns `None` for a zero-extent *quad*. Document both as distinct
+  layer-level and quad-level filters so neither is mistaken for the other.
+- **M7 reaffirmed.** The type lens proposed compile-time `RenderMode`↔WGSL
+  discriminant enforcement; M7 already accepts the test-asserted pairing with
+  "single-source the value if convenient," which covers it. No new action.
+
+## Proposed user decisions
+
+Genuine choices the review could not settle to one answer. Each must be ruled on;
+the rest above is accepted.
+
+- **D1 — Cache return type and mono-path accessor.**
+  Severity: important. Source: Architecture + Type system (conflicting
+  recommendations). Class: design-improvement. Status: proposed.
+  *Problem:* the plan returns `CachedGlyph = Monochrome | Color` and adds an
+  `outline_ref()` helper for the mono call sites. Two lenses object for opposite
+  reasons: the type lens says `outline_ref()` re-introduces a partial accessor
+  that panics on the `Color` variant (defeating the enum's exhaustiveness); the
+  architecture lens says the enum itself adds a branch to the per-glyph mono hot
+  path that today returns `&GlyphOutline` directly.
+  *Impact:* sets the Phase 4 cache API and the Phase 5 expansion loop; wrong
+  choice means a rewrite at integration or a latent panic.
+  *Options:* (A) keep enum + `outline_ref()` as written; (B) keep the enum but
+  replace `outline_ref()` with a total accessor (e.g. `layer_iter()` that yields
+  one synthetic `Solid(Foreground)` layer for mono) so callers handle both
+  variants uniformly and Phase 5 iterates layers identically; (C) drop the enum —
+  keep `get()` returning `&GlyphOutline` with an optional color-layer payload, so
+  the mono hot path keeps zero branching at the cost of the enum's explicitness.
+  **Decision: B — keep `CachedGlyph` but replace `outline_ref()` with a total
+  `layer_iter()` accessor (one synthetic `Solid(Foreground)` layer for mono); no
+  partial accessor to panic, and Phase 5 iterates layers uniformly.**
+
+- **D2 — Foreground-indexed gradient color stops.**
+  Severity: important. Source: Type system + Correctness. Class: design-improvement
+  (scope/behavior). Status: proposed.
+  *Problem:* COLRv1 gradient stops may reference the 0xFFFF foreground index
+  (resolved from the run's text color), which the current data model cannot
+  represent (M6). The fix changes intended behavior and `StopRecord` layout.
+  *Impact:* fonts that use a foreground stop render with a wrong color if
+  unsupported; supporting it adds per-stop foreground resolution (a little shader
+  ALU) and a `Foreground` case in `StopRecord`.
+  *Options:* (A) support it — `StopRecord` carries `Static | Foreground`, shader
+  resolves per stop (correct per COLR, slightly more ALU); (B) pin stops to
+  Static-only, warn-and-fallback on a foreground stop, defer real support to the
+  Phase 9 conformance tail.
+  **Decision: A — support it. `StopRecord` carries `Static | Foreground`; the
+  Phase 8 shader resolves a foreground stop from `uniforms.fill_color` per stop.
+  Update the line-100–104 data-model text accordingly (per M6).**
+
+- **D3 — `color_emoji` perf-gate methodology.**
+  Severity: minor. Source: Implementation quality. Class: design-improvement.
+  Status: proposed.
+  *Problem:* the Phase 7 gate (line 384) records the example's frame cost "not
+  treated as a regression." With a 40+-layer picker grid the example can become
+  its own bottleneck, so the gate cannot catch a per-layer regression later.
+  *Impact:* a standing visual regression that does not actually gate performance.
+  *Options:* (A) keep one comprehensive example, frame cost recorded as an
+  informational floor (as written); (B) add a normalized per-layer budget
+  (`frame_time ≤ mono_floor × (1 + k · layer_ratio)`) so the gate tracks per-layer
+  cost; (C) split a lightweight single-emoji example as the perf gate and keep the
+  full picker as a visual-only check.
+  **Decision: B — gate on a normalized per-layer budget
+  `frame_time ≤ mono_floor × (1 + k · layer_ratio)` (with `layer_ratio =
+  color_layers / mono_quads`), so a per-layer regression trips the gate without
+  splitting the example.**
+
+- **D4 — COLRv1 clip handling and nested-clip scope.**
+  Severity: important. Source: Correctness + Architecture. Class: design-improvement
+  (data model + scope/behavior). Status: proposed.
+  *Problem:* the data model and phases never address clipping. ttf-parser's
+  `colr::Painter` surfaces `push_clip` / `push_clip_box` / `pop_clip` alongside
+  the transform callbacks; the design's painter handles transforms but says
+  nothing about clips. The common `PaintGlyph(glyph_id, fill/gradient)` maps
+  directly to one `(outline, brush)` layer — the referenced outline *is* the fill
+  region, so no separate clip field is needed. The gap is *nested* clipping: a
+  `PaintGlyph`/`PaintClip` whose child is itself multi-layer (e.g.
+  `PaintColrLayers`), where the outer outline must clip several inner layers. The
+  flat-layer model has no way to express "this layer is also intersected with that
+  clip outline." Noto Color Emoji and Twemoji use clip regions for parts.
+  *Impact:* a glyph that nests a multi-layer child under a clip renders with color
+  spilling past the intended region; the choice sets the Phase 3 data model
+  (whether `ColorLayer` carries clip data) and the feature's scope.
+  *Options:* (A) model clipping now — add a clip representation to `ColorLayer` (a
+  clip-outline index or pre-intersected coverage) and handle nested clips in
+  Phase 8 with gradients (most correct, most data-model + shader work); (B)
+  confirm the common `PaintGlyph→fill/gradient` case is already covered by the
+  `(outline, brush)` layer, survey Noto/Twemoji for nested-clip glyphs, and defer
+  genuine nested-clip handling to the Phase 9 conformance tail — warn-and-skip the
+  clipped subtree until then so nothing renders *wrong*, only incomplete; (C)
+  reject (warn + skip) any glyph that pushes a clip beyond its immediate
+  `PaintGlyph` fill region until full clip support lands (safest visually, drops
+  whole glyphs that use nested clips).
+  *Recommendation:* B — it matches the existing conformance-tail structure, ships
+  Phase 7/8 for the overwhelming-majority case, records the nested-clip count from
+  the survey so the deferral is evidence-backed, and never renders a wrong color
+  in the meantime.

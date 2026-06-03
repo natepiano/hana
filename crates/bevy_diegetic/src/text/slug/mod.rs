@@ -20,10 +20,10 @@ pub(crate) use render::RunRenderError;
 pub(crate) use render::TextMaterial;
 pub(crate) use render::TextMaterialInput;
 pub(crate) use render::text_material;
+pub(crate) use runtime::GlyphAtlasHandles;
 pub(crate) use runtime::GlyphCache;
 pub(crate) use runtime::PositionedGlyph;
 pub(crate) use runtime::PreparedTextRun;
-pub(crate) use runtime::RunStorage;
 pub(crate) use runtime::RunStorageKey;
 
 pub(super) struct SlugPlugin;

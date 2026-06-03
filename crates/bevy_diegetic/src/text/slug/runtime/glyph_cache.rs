@@ -57,16 +57,25 @@ impl From<Entity> for RunStorageKey {
     fn from(label: Entity) -> Self { Self(label.to_bits()) }
 }
 
-/// GPU storage handles for one prepared run.
+/// GPU storage handle for one prepared run. Only the run's glyph-quad mesh is
+/// per-run; the curve/band/glyph records it indexes live in the shared atlas
+/// ([`GlyphAtlasHandles`]).
 #[derive(Clone, Debug)]
-pub(crate) struct RunStorage {
-    /// One quad per glyph instance.
-    pub mesh:   Handle<Mesh>,
-    /// Band-packed quadratic curve records.
+pub struct RunStorage {
+    /// One quad per glyph instance; each quad indexes the shared glyph atlas.
+    pub mesh: Handle<Mesh>,
+}
+
+/// Stable handles for the shared glyph atlas buffers every run's material binds.
+/// One set for the whole cache, re-uploaded only when a new glyph grows the
+/// atlas (see [`GlyphCache::commit_glyph_atlas`]).
+#[derive(Clone, Debug)]
+pub(crate) struct GlyphAtlasHandles {
+    /// Shared band-packed quadratic curve records.
     pub curves: Handle<ShaderBuffer>,
-    /// Horizontal band records.
+    /// Shared horizontal/vertical band records.
     pub bands:  Handle<ShaderBuffer>,
-    /// Unique glyph records.
+    /// Shared glyph records, indexed by each run's mesh through `UV_1.x`.
     pub glyphs: Handle<ShaderBuffer>,
 }
 
@@ -76,6 +85,8 @@ pub(crate) struct GlyphCache {
     outline_cache:      GlyphOutlineCache,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
     preprocess_version: u32,
+    atlas:              Option<GlyphAtlasHandles>,
+    uploaded_revision:  u32,
 }
 
 impl GlyphCache {
@@ -128,17 +139,7 @@ impl GlyphCache {
         })
     }
 
-    /// Builds this run's geometry and writes it to the storage keyed by
-    /// `storage_key`, overwriting the existing mesh and buffers in place when the
-    /// key is already present and allocating new assets the first time it is
-    /// seen.
-    ///
-    /// In-place writes keep the same `Handle<Mesh>` / `Handle<ShaderBuffer>`, so
-    /// the render world re-uploads only the changed bytes — no per-frame asset
-    /// allocate-and-drop, and the run's mesh entity is never respawned. A run
-    /// with no visible glyph quads (fully clipped) writes nothing and returns
-    /// `NoVisibleGlyphs`.
-    /// Builds this run's GPU-ready render data from cached glyph outlines,
+    /// Builds this run's GPU-ready render data from the shared glyph atlas,
     /// clipped to `clip_rect`. Returns `NoVisibleGlyphs` when clipping leaves no
     /// quad. Pair it with [`Self::commit_run_storage`] to build then upload a
     /// run; the two are split so a caller can time the build and upload halves
@@ -156,55 +157,91 @@ impl GlyphCache {
         )?;
         // Bevy's mesh allocator skips allocation for zero-vertex meshes, but
         // the extracted mesh asset can still be processed for upload. Fully
-        // clipped text runs should therefore not create mesh/storage assets.
+        // clipped text runs should therefore not create a mesh asset.
         if render_data.mesh.count_vertices() == 0 {
             return Err(RunRenderError::NoVisibleGlyphs);
         }
         Ok(render_data)
     }
 
-    /// Writes `render_data` to the storage keyed by `storage_key`, overwriting
-    /// the existing mesh and buffers in place when the key is present and
-    /// allocating new assets the first time it is seen. Pair it with
+    /// Writes `render_data`'s mesh to the storage keyed by `storage_key`,
+    /// overwriting the existing mesh in place when the key is present and
+    /// allocating a new mesh asset the first time it is seen. Pair it with
     /// [`Self::build_run_render_data`]; the two are split so a caller can time
     /// the build and upload halves separately.
     ///
-    /// In-place writes keep the same `Handle<Mesh>` / `Handle<ShaderBuffer>`, so
-    /// the render world re-uploads only the changed bytes — no per-frame asset
-    /// allocate-and-drop, and the run's mesh entity is never respawned.
+    /// The in-place write keeps the same `Handle<Mesh>`, so the render world
+    /// re-uploads only the changed vertices without a handle swap and the run's
+    /// mesh entity is never respawned. The curve/band/glyph records are not
+    /// per-run — they live in the shared atlas committed by
+    /// [`Self::commit_glyph_atlas`].
     pub fn commit_run_storage(
         &mut self,
         storage_key: RunStorageKey,
         render_data: RunRenderData,
         meshes: &mut Assets<Mesh>,
-        storage_buffers: &mut Assets<ShaderBuffer>,
     ) -> RunStorage {
         if let Some(storage) = self.run_storage.get(&storage_key) {
-            // Same label, changed text: overwrite the existing assets behind
-            // their stable handles. `get_mut` marks each asset modified, so the
-            // render world re-uploads the new bytes without a handle swap.
+            // Same label, changed text: overwrite the existing mesh behind its
+            // stable handle. `get_mut` marks it modified, so the render world
+            // re-uploads the new vertices without a handle swap.
             if let Some(mut mesh) = meshes.get_mut(&storage.mesh) {
                 *mesh = render_data.mesh;
-            }
-            if let Some(mut curves) = storage_buffers.get_mut(&storage.curves) {
-                curves.set_data(render_data.curves);
-            }
-            if let Some(mut bands) = storage_buffers.get_mut(&storage.bands) {
-                bands.set_data(render_data.bands);
-            }
-            if let Some(mut glyphs) = storage_buffers.get_mut(&storage.glyphs) {
-                glyphs.set_data(render_data.glyphs);
             }
             return storage.clone();
         }
         let storage = RunStorage {
-            mesh:   meshes.add(render_data.mesh),
-            curves: storage_buffers.add(ShaderBuffer::from(render_data.curves)),
-            bands:  storage_buffers.add(ShaderBuffer::from(render_data.bands)),
-            glyphs: storage_buffers.add(ShaderBuffer::from(render_data.glyphs)),
+            mesh: meshes.add(render_data.mesh),
         };
         self.run_storage.insert(storage_key, storage.clone());
         storage
+    }
+
+    /// Uploads the shared glyph atlas to its GPU buffers when new glyphs have
+    /// been packed since the last upload, returning the stable handles every
+    /// run's material binds. The three buffers are created the first time this
+    /// runs and then overwritten in place behind their handles, so a frame that
+    /// packs no new glyph re-uploads nothing. Returns `None` before any glyph is
+    /// packed, so no zero-length buffer is ever created.
+    pub fn commit_glyph_atlas(
+        &mut self,
+        storage_buffers: &mut Assets<ShaderBuffer>,
+    ) -> Option<GlyphAtlasHandles> {
+        if self.outline_cache.atlas_glyph_records().is_empty() {
+            return None;
+        }
+        let revision = self.outline_cache.atlas_revision();
+        if let Some(handles) = self.atlas.clone() {
+            // The atlas only grows; re-serialize the three buffers in place when
+            // a new glyph bumped the revision, otherwise reuse them untouched.
+            if self.uploaded_revision != revision {
+                if let Some(mut curves) = storage_buffers.get_mut(&handles.curves) {
+                    curves.set_data(self.outline_cache.atlas_curves().to_vec());
+                }
+                if let Some(mut bands) = storage_buffers.get_mut(&handles.bands) {
+                    bands.set_data(self.outline_cache.atlas_bands().to_vec());
+                }
+                if let Some(mut glyphs) = storage_buffers.get_mut(&handles.glyphs) {
+                    glyphs.set_data(self.outline_cache.atlas_glyph_records().to_vec());
+                }
+                self.uploaded_revision = revision;
+            }
+            return Some(handles);
+        }
+        let handles = GlyphAtlasHandles {
+            curves: storage_buffers.add(ShaderBuffer::from(
+                self.outline_cache.atlas_curves().to_vec(),
+            )),
+            bands:  storage_buffers.add(ShaderBuffer::from(
+                self.outline_cache.atlas_bands().to_vec(),
+            )),
+            glyphs: storage_buffers.add(ShaderBuffer::from(
+                self.outline_cache.atlas_glyph_records().to_vec(),
+            )),
+        };
+        self.uploaded_revision = revision;
+        self.atlas = Some(handles.clone());
+        Some(handles)
     }
 
     /// Removes one run's GPU storage handles.
@@ -248,27 +285,22 @@ mod tests {
         include_bytes!("../../../../assets/fonts/NotoSansCJKsc-Regular.otf");
 
     #[test]
-    fn ensure_run_storage_reuses_existing_handles() {
+    fn commit_run_storage_reuses_the_mesh_handle() {
         let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
-        let mut storage_buffers = Assets::<ShaderBuffer>::default();
         let key = RunStorageKey(1);
 
         let first_data = backend
             .build_run_render_data(&prepared, None)
             .expect("fixture storage should build");
-        let first = backend.commit_run_storage(key, first_data, &mut meshes, &mut storage_buffers);
+        let first = backend.commit_run_storage(key, first_data, &mut meshes);
         let second_data = backend
             .build_run_render_data(&prepared, None)
             .expect("fixture storage should build");
-        let second =
-            backend.commit_run_storage(key, second_data, &mut meshes, &mut storage_buffers);
+        let second = backend.commit_run_storage(key, second_data, &mut meshes);
 
         assert_eq!(first.mesh, second.mesh);
-        assert_eq!(first.curves, second.curves);
-        assert_eq!(first.bands, second.bands);
-        assert_eq!(first.glyphs, second.glyphs);
         assert_eq!(
             meshes.len(),
             1,
@@ -281,13 +313,12 @@ mod tests {
         let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let mut meshes = Assets::<Mesh>::default();
-        let mut storage_buffers = Assets::<ShaderBuffer>::default();
         let key = RunStorageKey(1);
 
         let render_data = backend
             .build_run_render_data(&prepared, None)
             .expect("fixture storage should build");
-        backend.commit_run_storage(key, render_data, &mut meshes, &mut storage_buffers);
+        backend.commit_run_storage(key, render_data, &mut meshes);
 
         assert!(backend.remove_run_storage(key).is_some());
         assert!(backend.remove_run_storage(key).is_none());
@@ -298,7 +329,6 @@ mod tests {
         let mut backend = GlyphCache::default();
         let prepared = prepare(&mut backend, "Typography");
         let meshes = Assets::<Mesh>::default();
-        let storage_buffers = Assets::<ShaderBuffer>::default();
 
         let err = backend
             .build_run_render_data(&prepared, Some([f32::MAX - 2.0, 0.0, f32::MAX - 1.0, 1.0]))
@@ -307,6 +337,42 @@ mod tests {
         assert_eq!(err, RunRenderError::NoVisibleGlyphs);
         assert_eq!(backend.run_storage_len(), 0);
         assert_eq!(meshes.len(), 0);
+    }
+
+    #[test]
+    fn commit_glyph_atlas_uploads_one_buffer_each_then_reuses_them() {
+        let mut backend = GlyphCache::default();
+        prepare(&mut backend, "Typography");
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
+
+        let first = backend
+            .commit_glyph_atlas(&mut storage_buffers)
+            .expect("packed glyphs should produce atlas handles");
+        assert_eq!(
+            storage_buffers.len(),
+            3,
+            "the atlas is one curves, one bands, and one glyphs buffer"
+        );
+
+        let second = backend
+            .commit_glyph_atlas(&mut storage_buffers)
+            .expect("atlas handles persist across commits");
+        assert_eq!(first.curves, second.curves);
+        assert_eq!(first.bands, second.bands);
+        assert_eq!(first.glyphs, second.glyphs);
+        assert_eq!(
+            storage_buffers.len(),
+            3,
+            "no newly packed glyph means no new atlas buffer"
+        );
+    }
+
+    #[test]
+    fn commit_glyph_atlas_with_no_packed_glyphs_creates_no_buffer() {
+        let mut backend = GlyphCache::default();
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
+
+        assert!(backend.commit_glyph_atlas(&mut storage_buffers).is_none());
         assert_eq!(storage_buffers.len(), 0);
     }
 

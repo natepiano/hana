@@ -67,13 +67,13 @@ pub struct TextExtension {
     /// Shader uniforms.
     #[uniform(100)]
     pub uniforms: TextUniform,
-    /// Band-packed quadratic curve records.
+    /// Shared glyph-atlas band-packed quadratic curve records.
     #[storage(101, read_only)]
     pub curves:   Handle<ShaderBuffer>,
-    /// Horizontal band records.
+    /// Shared glyph-atlas horizontal/vertical band records.
     #[storage(102, read_only)]
     pub bands:    Handle<ShaderBuffer>,
-    /// Unique glyph records for this run.
+    /// Shared glyph-atlas records, indexed by each run's mesh through `UV_1.x`.
     #[storage(103, read_only)]
     pub glyphs:   Handle<ShaderBuffer>,
 }
@@ -94,16 +94,16 @@ pub(crate) struct TextMaterialInput {
     pub render_mode:      RenderMode,
     /// Per-layer depth offset for coplanar OIT layer ordering.
     pub oit_depth_offset: f32,
-    /// Band-packed quadratic curve records.
+    /// Shared glyph-atlas band-packed quadratic curve records.
     pub curves:           Handle<ShaderBuffer>,
-    /// Horizontal band records.
+    /// Shared glyph-atlas horizontal/vertical band records.
     pub bands:            Handle<ShaderBuffer>,
-    /// Unique glyph records.
+    /// Shared glyph-atlas records, indexed by each run's mesh through `UV_1.x`.
     pub glyphs:           Handle<ShaderBuffer>,
 }
 
-/// Creates a `TextMaterial` from one run's color, render mode, and
-/// band-packed curve/band/glyph buffers.
+/// Creates a `TextMaterial` from one run's color and render mode, binding the
+/// shared glyph-atlas curve/band/glyph buffers.
 #[must_use]
 pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
     let TextMaterialInput {

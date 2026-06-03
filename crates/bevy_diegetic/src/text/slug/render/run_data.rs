@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
@@ -11,9 +10,6 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
-use crate::text::slug::glyph::BandRecord;
-use crate::text::slug::glyph::CurveRecord;
-use crate::text::slug::glyph::GlyphRecord;
 use crate::text::slug::runtime::BuiltTextRun;
 use crate::text::slug::runtime::GlyphInstance;
 use crate::text::slug::runtime::GlyphKey;
@@ -21,17 +17,13 @@ use crate::text::slug::runtime::GlyphOutlineCache;
 
 const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
 
-/// GPU-ready data for one text run.
+/// GPU-ready data for one text run: a glyph-quad mesh whose every quad indexes
+/// the shared glyph atlas through `UV_1.x`. The curve, band, and glyph records
+/// live once in the atlas (`GlyphOutlineCache`), not per run.
 #[derive(Clone, Debug)]
 pub struct RunRenderData {
     /// One quad per glyph instance in the run.
-    pub mesh:   Mesh,
-    /// Combined curve records for all unique glyphs in this run.
-    pub curves: Vec<CurveRecord>,
-    /// Combined band records for all unique glyphs in this run.
-    pub bands:  Vec<BandRecord>,
-    /// Unique glyph table indexed by each quad through `UV_1.x`.
-    pub glyphs: Vec<GlyphRecord>,
+    pub mesh: Mesh,
 }
 
 /// Error while building run-level render data.
@@ -60,74 +52,28 @@ impl Display for RunRenderError {
 
 impl Error for RunRenderError {}
 
-/// Builds one run-level mesh and packed storage set clipped to a local rect.
+/// Builds one run-level glyph-quad mesh clipped to a local rect. Each quad's
+/// `UV_1.x` carries the glyph's shared-atlas index, looked up from
+/// `glyph_outline_cache`; the curve/band/glyph records themselves live in the
+/// atlas and are not rebuilt per run.
 pub fn build_run_render_data_with_clip(
     preview: &BuiltTextRun,
     glyph_outline_cache: &GlyphOutlineCache,
     scale: f32,
     clip_rect: Option<[f32; 4]>,
 ) -> Result<RunRenderData, RunRenderError> {
-    let mut packer = RunPacker::default();
     let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
 
     for glyph in preview.run.glyphs() {
-        let record_index = packer.record_index(*glyph, glyph_outline_cache)?;
+        let record_index = glyph_outline_cache
+            .global_index(glyph.key())
+            .ok_or_else(|| RunRenderError::MissingPackedGlyph(glyph.key()))?;
         mesh_builder.push_glyph(*glyph, record_index, scale, clip_rect);
     }
 
     Ok(RunRenderData {
-        mesh:   mesh_builder.finish(),
-        curves: packer.curves,
-        bands:  packer.bands,
-        glyphs: packer.glyphs,
+        mesh: mesh_builder.finish(),
     })
-}
-
-#[derive(Default)]
-struct RunPacker {
-    record_indices: HashMap<GlyphKey, u32>,
-    curves:         Vec<CurveRecord>,
-    bands:          Vec<BandRecord>,
-    glyphs:         Vec<GlyphRecord>,
-}
-
-impl RunPacker {
-    fn record_index(
-        &mut self,
-        glyph: GlyphInstance,
-        glyph_cache: &GlyphOutlineCache,
-    ) -> Result<u32, RunRenderError> {
-        if let Some(index) = self.record_indices.get(&glyph.key()).copied() {
-            return Ok(index);
-        }
-
-        let packed = glyph_cache
-            .get(glyph.key())
-            .ok_or_else(|| RunRenderError::MissingPackedGlyph(glyph.key()))?;
-        let record_index = self.glyphs.len().to_u32();
-        let curve_start = self.curves.len().to_u32();
-        let band_start = self.bands.len().to_u32();
-        let band_count = packed.bands().len().to_u32() / 2;
-
-        self.curves.extend_from_slice(packed.curves());
-        self.bands
-            .extend(packed.bands().iter().map(|band| BandRecord {
-                start: band.start + curve_start,
-                count: band.count,
-                y_min: band.y_min,
-                y_max: band.y_max,
-            }));
-        self.glyphs.push(GlyphRecord::new(
-            packed.bounds(),
-            band_start,
-            band_count,
-            band_start + band_count,
-            band_count,
-        ));
-        self.record_indices.insert(glyph.key(), record_index);
-
-        Ok(record_index)
-    }
 }
 
 struct RunMeshBuilder {
@@ -291,7 +237,7 @@ mod tests {
     const FONT_DATA: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
     #[test]
-    fn render_data_counts_unique_glyph_storage_once() {
+    fn run_mesh_indexes_shared_atlas_with_one_record_per_unique_glyph() {
         let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "Typography");
         let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, None)
             .expect("fixture run should render");
@@ -300,11 +246,14 @@ mod tests {
         let mesh_indices = render_data.mesh.indices().map_or(0, Indices::len);
         assert_eq!(render_data.mesh.count_vertices(), glyph_instances * 4);
         assert_eq!(mesh_indices, glyph_instances * 6);
+        // "Typography" repeats letters, so the shared atlas holds fewer glyph
+        // records than the run has glyph instances, and every run indexes that
+        // one table rather than copying curves per run.
         assert!(
-            render_data.glyphs.len() < glyph_instances,
-            "repeated letters should share packed glyph storage"
+            cache.atlas_glyph_records().len() < glyph_instances,
+            "repeated letters should share one atlas record"
         );
-        assert!(!render_data.curves.is_empty());
+        assert!(!cache.atlas_curves().is_empty());
     }
 
     #[test]

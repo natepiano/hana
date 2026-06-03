@@ -1,10 +1,10 @@
 mod glyph_cache;
 mod run;
 
+pub(crate) use glyph_cache::GlyphAtlasHandles;
 pub(crate) use glyph_cache::GlyphCache;
 pub(crate) use glyph_cache::PositionedGlyph;
 pub(crate) use glyph_cache::PreparedTextRun;
-pub(crate) use glyph_cache::RunStorage;
 pub(crate) use glyph_cache::RunStorageKey;
 pub(super) use run::BuiltTextRun;
 pub(super) use run::FontKey;

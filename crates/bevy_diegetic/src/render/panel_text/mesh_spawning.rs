@@ -23,9 +23,9 @@ use crate::panel::DiegeticPerfStats;
 use crate::render::constants;
 use crate::render::world_text::TextContent;
 use crate::text;
+use crate::text::GlyphAtlasHandles;
 use crate::text::GlyphCache;
 use crate::text::RenderMode;
-use crate::text::RunStorage;
 use crate::text::RunStorageKey;
 use crate::text::TextMaterial;
 use crate::text::TextMaterialInput;
@@ -91,13 +91,25 @@ pub(super) fn update_panel_text_geometry(
     let mut upload_time = Duration::ZERO;
     let mut material_time = Duration::ZERO;
 
+    // Upload the shared glyph atlas once before the run loop: any glyph packed
+    // this frame by shaping grew it, and every run's material binds these
+    // handles. Counted under `upload`. `None` until the first glyph is packed.
+    let atlas = if changed_runs.is_empty() {
+        None
+    } else {
+        let upload_start = Instant::now();
+        let handles = backend.commit_glyph_atlas(&mut storage_buffers);
+        upload_time += upload_start.elapsed();
+        handles
+    };
+
     for (label_entity, panel_run, panel_text_child, child_of) in &changed_runs {
         let Ok((panel, panel_layers)) = panels.get(child_of.parent()) else {
             continue;
         };
         let storage_key = RunStorageKey::from(label_entity);
 
-        // pack: assemble this run's render data from cached glyph outlines.
+        // pack: build this run's glyph-quad mesh, indexing the shared atlas.
         let pack_start = Instant::now();
         let render_data = backend.build_run_render_data(&panel_run.prepared, panel_run.clip_rect);
         pack_time += pack_start.elapsed();
@@ -107,14 +119,17 @@ pub(super) fn update_panel_text_geometry(
             despawn_label_mesh(label_entity, &run_meshes, &mut commands);
             continue;
         };
+        // A built run has every glyph packed, so the atlas was committed above.
+        let Some(atlas) = atlas.as_ref() else {
+            continue;
+        };
 
-        // upload: write the mesh and three GPU buffers in place.
+        // upload: write the run's mesh in place.
         let upload_start = Instant::now();
-        let storage =
-            backend.commit_run_storage(storage_key, render_data, &mut meshes, &mut storage_buffers);
+        let storage = backend.commit_run_storage(storage_key, render_data, &mut meshes);
         upload_time += upload_start.elapsed();
 
-        // material: build and write this run's material.
+        // material: build and write this run's material, binding the shared atlas.
         let material_start = Instant::now();
         let resolved_alpha = resolved_alphas
             .get(label_entity)
@@ -132,7 +147,7 @@ pub(super) fn update_panel_text_geometry(
             resolved_alpha,
             resolved_lighting,
             resolved_sidedness,
-            storage: &storage,
+            atlas,
         });
 
         // The run already has its mesh child: its geometry was overwritten in
@@ -253,7 +268,7 @@ struct PanelRunMaterial<'a> {
     resolved_alpha:     AlphaMode,
     resolved_lighting:  GlyphLighting,
     resolved_sidedness: GlyphSidedness,
-    storage:            &'a RunStorage,
+    atlas:              &'a GlyphAtlasHandles,
 }
 
 fn panel_run_material(request: PanelRunMaterial<'_>) -> TextMaterial {
@@ -264,7 +279,7 @@ fn panel_run_material(request: PanelRunMaterial<'_>) -> TextMaterial {
         resolved_alpha,
         resolved_lighting,
         resolved_sidedness,
-        storage,
+        atlas,
     } = request;
     let base = panel_base_material(panel);
     let command_depth = panel_text_child.command_index.saturating_add(1).to_f32();
@@ -283,7 +298,7 @@ fn panel_run_material(request: PanelRunMaterial<'_>) -> TextMaterial {
         sidedness: resolved_sidedness,
         fill_color: panel_run.fill_color,
         render_mode: panel_run.render_mode.into(),
-        storage,
+        atlas,
     })
 }
 
@@ -307,7 +322,7 @@ struct PanelMaterialInput<'a> {
     sidedness:        GlyphSidedness,
     fill_color:       Color,
     render_mode:      RenderMode,
-    storage:          &'a RunStorage,
+    atlas:            &'a GlyphAtlasHandles,
 }
 
 fn panel_material(input: PanelMaterialInput<'_>) -> TextMaterial {
@@ -320,7 +335,7 @@ fn panel_material(input: PanelMaterialInput<'_>) -> TextMaterial {
         sidedness,
         fill_color,
         render_mode,
-        storage,
+        atlas,
     } = input;
     let mut base = base.clone();
     base.depth_bias = depth_bias;
@@ -332,9 +347,9 @@ fn panel_material(input: PanelMaterialInput<'_>) -> TextMaterial {
         fill_color,
         render_mode,
         oit_depth_offset,
-        curves: storage.curves.clone(),
-        bands: storage.bands.clone(),
-        glyphs: storage.glyphs.clone(),
+        curves: atlas.curves.clone(),
+        bands: atlas.bands.clone(),
+        glyphs: atlas.glyphs.clone(),
     })
 }
 
