@@ -372,7 +372,10 @@ impl DiegeticTextBuilder {
             TextSpace::World => self.transform,
             TextSpace::Screen => Transform::IDENTITY,
         };
-        (panel, DiegeticText, self.style, transform)
+        // The authoritative style lives in the tree's `El.config` (built above)
+        // and reconcile derives the run from it; the root carries no `TextStyle`,
+        // so there is no stale copy a query could mutate to no effect.
+        (panel, DiegeticText, transform)
     }
 
     fn build_world_panel(&self, tree: LayoutTree) -> DiegeticPanel {
