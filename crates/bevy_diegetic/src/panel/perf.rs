@@ -29,11 +29,24 @@ use super::constants::DIAG_PANEL_TEXT_TOTAL_MS;
 pub struct DiegeticPerfStats {
     /// Stage 1 — `compute_panel_layouts` wall time in milliseconds.
     /// Layout math: element positions and sizes for every dirty panel.
-    pub compute_ms:     f32,
+    pub compute_ms:        f32,
+    /// Inside [`Self::compute_ms`] — the once-per-frame `ShapedTextCache` clone
+    /// and measure-closure build, before the panel loop. Runs every frame layout
+    /// is dirty regardless of panel count.
+    pub compute_setup_ms:  f32,
+    /// Inside [`Self::compute_ms`] — `ScaledLayoutTreeCache::get_or_update`,
+    /// summed across panels. Rescales the layout tree into points.
+    pub compute_scale_ms:  f32,
+    /// Inside [`Self::compute_ms`] — the layout-engine solve plus the
+    /// `VisualOnly` regenerate-commands path, summed across panels.
+    pub compute_solve_ms:  f32,
+    /// Inside [`Self::compute_ms`] — field-record collection and the
+    /// `set_result_with_fields` write-back, summed across panels.
+    pub compute_commit_ms: f32,
     /// Stage 1 — panels processed by the most recent layout run.
-    pub compute_panels: usize,
+    pub compute_panels:    usize,
     /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
-    pub panel_text:     PanelTextPerfStats,
+    pub panel_text:        PanelTextPerfStats,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -61,33 +74,23 @@ pub struct PanelTextPerfStats {
     /// leave `total_ms` stale by one frame. `update_panel_text_alpha` touches
     /// no mesh and adds nothing to `mesh_build_ms`, so an alpha-only frame
     /// reports ~0 mesh-build time.
-    pub total_ms:         f32,
+    pub total_ms:      f32,
     /// Stage 2 — wall time of `shape_panel_text_children` this frame.
     /// Covers turning strings into positioned glyphs for every panel-text
     /// entity that changed or is waiting on glyph loading.
-    pub shape_ms:         f32,
+    pub shape_ms:      f32,
     /// Inside [`Self::shape_ms`] — time spent in parley text shaping,
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
-    pub parley_ms:        f32,
+    pub parley_ms:     f32,
     /// Stage 3 — wall time of `update_panel_text_geometry` this frame.
-    /// Covers building glyph meshes and despawning stale meshes. Equals
-    /// [`Self::mesh_pack_ms`] + [`Self::mesh_upload_ms`] +
-    /// [`Self::mesh_material_ms`] plus per-run loop overhead.
-    pub mesh_build_ms:    f32,
-    /// Inside [`Self::mesh_build_ms`] — assembling each run's render data:
-    /// copying cached curve/band records into per-run buffers and building the
-    /// glyph-quad mesh (`build_run_render_data`).
-    pub mesh_pack_ms:     f32,
-    /// Inside [`Self::mesh_build_ms`] — writing each run's mesh and three GPU
-    /// buffers in place (`commit_run_storage`): the `set_data` serialize and the
-    /// change-detection mark that triggers re-upload.
-    pub mesh_upload_ms:   f32,
-    /// Inside [`Self::mesh_build_ms`] — building and writing each run's
-    /// `TextMaterial`.
-    pub mesh_material_ms: f32,
+    /// Covers building glyph meshes and despawning stale meshes. After the
+    /// shared-atlas change (option C) the per-run pack / upload / material work
+    /// is sub-millisecond, so its sub-breakdown was retired; the layout solve is
+    /// now the cost worth splitting out (see `DiegeticPerfStats::compute_*_ms`).
+    pub mesh_build_ms: f32,
     /// Number of panels whose text shaping ran this frame.
-    pub shaped_panels:    usize,
+    pub shaped_panels: usize,
 }
 
 #[derive(Resource, Default)]

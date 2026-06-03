@@ -10,7 +10,11 @@ Add a column after each phase lands.
 | ---------------------------------- | --------------------- | ----------- | ------------ | ------- | ------- |
 | Frame time ‡                       | ~25 ms                | ~24 ms      | ~18.5 ms ‡   |         |         |
 | FPS ‡                              | 40                    | 42          | 55 ‡         |         |         |
-| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms   |         |         |
+| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ |         |         |
+| — `setup` (5s max)                 | —                     | —           | ~3 ms ⊕      |         |         |
+| — `scale` (5s max)                 | —                     | —           | <0.2 ms ⊕    |         |         |
+| — `solve` (5s max)                 | —                     | —           | <0.8 ms ⊕    |         |         |
+| — `commit` (5s max)                | —                     | —           | <0.1 ms ⊕    |         |         |
 | Text `panel_text.total_ms`         | 2.4 ms                | 1.6 ms      | ~0.45 ms     |         |         |
 | — of which `mesh_build_ms`         | 1.8 ms                | **1.29 ms** | **0.12 ms**  |         |         |
 | Render floor (remainder, moving)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   |         |         |
@@ -20,6 +24,21 @@ Add a column after each phase lands.
 with window size, and the A and C columns were captured in separate sessions; the
 absolute numbers are **not** comparable across columns. The window-independent
 measure is the CPU `mesh_build_ms` row: 1.8 → 1.29 (A) → **0.12** (C).
+
+⊕ Step-0 instrumentation (2026-06-03) split `compute_ms` into `setup` / `scale` /
+`solve` / `commit`. `setup` (the per-frame `ShapedTextCache` clone) is the dominant
+share of `compute_ms`, and it is **bounded**: `label_text` is
+`format!("{index:02} {:03}", frame % 1000)`, so the distinct-string set caps at
+100 indices × 1000 counter values = 100 000 entries. The cache fills over the first
+~1000 frames, then every string is a hit and the clone plateaus — **steady ~2 ms,
+5s-max ~3 ms** (observed uncontended in prior runs). A live BRP sample during this
+session read `setup` climbing to ~13 ms, but that was concurrent-compile CPU
+contention inflating the clone, not the cache growing — discard those magnitudes.
+`scale` / `solve` / `commit` stay sub-millisecond (the cells below are contended-
+sample upper bounds; a clean run will lower them). The split is the point: `setup`
+is the largest single layout cost, so removing the clone (share the cache behind its
+`Arc<Mutex>` instead of cloning) is the real win — paired with removing the flip-flop
+for correctness. See Step 1a / Step 1b.
 
 ## Finding — A is CPU-only; this stress test is render-bound
 
@@ -86,7 +105,11 @@ Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-m
 - Started as "skip full layout on a text-only change," but the right fix is to
   remove the model that forces the every-other-frame toggle. See the phase plan
   below.
-- Saves the alternating ~5.8 ms layout CPU and removes a 1-frame reflow lag.
+- Step 0 (instrumentation) done 2026-06-03; it surfaced a second cost — the per-frame
+  `ShapedTextCache` clone (`setup`, ~2 ms) — so the plan now also kills the clone
+  (Step 1a) before removing the flip-flop (Step 1b).
+- Saves the alternating layout-solve CPU, removes the per-frame cache clone, and
+  removes a 1-frame reflow lag.
 
 ## Phase D (current) — tree as single source of truth, paired with a geometry-stable skip
 
@@ -132,7 +155,30 @@ text into the tree. ONLY the four writers detour through `&mut TextContent`
 (`access.rs:172,186,258,276`). So the tree is already the single source for
 everything except writes.
 
-### The fix — route writes to the tree too
+### The clone fix (Step 1a) — share the cache, stop discarding measurements
+
+Independent of the tree-authoritative work and sequenced first, because removing the
+flip-flop (1b) makes `setup` run every frame instead of every other — doubling the
+clone's per-frame cost right as 1b lands. Fixing the clone first means 1b's
+regression is measured against a `setup`-free layout, and the fix is measurable on
+its own against today's flip-flop baseline.
+
+Today `compute_panel_layouts` does `cache.clone()` of the whole `ShapedTextCache`
+(`compute_layout.rs:61`), the measure-closure inserts cache misses into that *clone*,
+and the clone is dropped at end of system — so every measurement computed during
+layout is **thrown away** and the ~2 ms full-map copy repeats next frame. Move
+`ShapedTextCache`'s maps behind an internal `Arc<Mutex<…>>` (interior mutability) so
+that:
+- `cache.clone()` (or a cheap `.handle()`) becomes a refcount bump, not a map copy →
+  `setup` drops toward ~0;
+- the measure-closure's inserts persist into the shared cache instead of being
+  discarded → layout-side measurements are reused, not recomputed.
+
+The closure already needs `'static + Send + Sync` to live inside `MeasureTextFn`; an
+`Arc<Mutex>`-backed cache satisfies that without the per-frame clone. Expect `setup`
+~2 ms → ~0; `compute_ms` drops by the `setup` share; behavior unchanged.
+
+### The fix — route writes to the tree too (Step 1b)
 
 `TextContent` becomes pure derived output (reconcile writes it tree→child; shaping
 reads it). Delete `sync_run_text_to_cache`, `clear_reconcile_owned`,
@@ -181,7 +227,7 @@ except the binding name: `for_each_mut(|label, edit| edit.set_text(...))`.
 internal change). The single visible change is `for_each_mut`'s closure parameter
 type: `&mut TextContent` → `&mut TextEdit`.
 
-### The geometry-stable skip (runtime decision)
+### The geometry-stable skip (Step 3, runtime decision)
 
 Without the toggle, the layout solve would run every frame text changes (twice
 today's count). The skip keeps the common case free: on a text edit, re-measure
@@ -198,42 +244,55 @@ the per-element measured size is the runtime skip decision.
 
 ### Incremental plan (measure as you go)
 
-- **Step 0 — Layout breakdown instrumentation.** Add `setup` / `scale` / `solve`
-  / `commit` sub-rows under `layout` in `DiegeticPerfStats` + the
-  `diegetic_text_stress` overlay; remove the now-tiny `mesh` pack/upload/material
-  sub-rows. This is the measuring instrument for the rest. Baseline WITH the
-  flip-flop still in place. (Decisions settled: remove mesh sub-instrumentation
-  entirely; zero the layout sub-rows on skipped frames like `compute_ms` — read
-  `setup` off the `5s max` column.)
+- **Step 0 — Layout breakdown instrumentation.** DONE 2026-06-03. Added `setup` /
+  `scale` / `solve` / `commit` sub-rows under `layout` in `DiegeticPerfStats` + the
+  `diegetic_text_stress` overlay; removed the now-tiny `mesh` pack/upload/material
+  sub-rows. 375 tests pass. Baseline recorded WITH the flip-flop still in place (see
+  the ⊕ note on the table). Result: `setup` (the per-frame cache clone) is the
+  dominant share of `compute_ms` — bounded (the 3-digit wrap caps distinct strings
+  at ~100k), plateauing ~2 ms steady / ~3 ms 5s-max. Confirms the prime suspect:
+  Step 1a removes the clone (`Arc<Mutex>`-share the cache); Step 1b removes the
+  flip-flop for correctness.
   - `setup` = `Arc::new(Mutex::new(cache.clone()))` + measure-closure
-    (`compute_layout.rs:61-77`); prime suspect — the `ShapedTextCache` deep-clone
-    runs every frame and the maps grow unbounded under the per-frame counter.
+    (`compute_layout.rs:61-77`); confirmed dominant cost — the `ShapedTextCache`
+    clone runs every frame over a cache that fills to its bounded steady size (the
+    3-digit wrap caps distinct strings) then plateaus.
   - `scale` = `scaled_tree_cache.get_or_update` (`:114-119`).
   - `solve` = `engine.compute` + the VisualOnly regen (`:121-135`).
   - `commit` = field collection + `set_result_with_fields` (`:137-151`).
-- **Step 1 — Remove the flip-flop** (tree-authoritative + the `TextEdit` API).
+- **Step 1a — Kill the clone** (`Arc<Mutex>`-share `ShapedTextCache`). Independent of
+  the flip-flop; sequenced first so 1b's every-frame regression is measured against a
+  `setup`-free layout. See "The clone fix" above. Expect `setup` ~2 ms → ~0 with the
+  flip-flop still in place; `compute_ms` drops by the `setup` share; 375 tests still
+  green. Measure, then proceed.
+- **Step 1b — Remove the flip-flop** (tree-authoritative + the `TextEdit` API). The
+  correctness fix: delete `ReconcileOwned` + `sync_run_text_to_cache` +
+  `clear_reconcile_owned` and route the four writers to the tree. See "The fix" above.
   Expect `compute_panels` 100 / 0 → steady 100; `solve` every frame.
 - **Step 2 — Measure the regression.** Confirm `solve` runs every frame (layout
-  CPU ~2×). Quantifies what the skip must recover.
+  CPU ~2× the flip-flop's per-frame solve). Quantifies what the skip must recover.
+  With Step 1a already done, `setup` is no longer the dominant term, so this isolates
+  the solve cost cleanly.
 - **Step 3 — Geometry-stable skip.** Route text-only edits with unchanged
-  measured size to the cheap path. Measure: `solve` should drop to firing only on
-  genuine reflow.
+  measured size to the cheap `VisualOnly` path. Measure: `solve` should drop to
+  firing only on genuine reflow.
 - **Step 4 — Measure the win.** Layout CPU at or below the flip-flop baseline,
-  now with no reflow lag and no marker.
+  now with no reflow lag, no marker, and no per-frame cache clone.
 
-### Step 0 handoff — fresh-agent start guide
+### Step 0 handoff — fresh-agent start guide (Step 0 is now DONE — kept as the record of what was edited)
 
 Everything below is verified against the code at HEAD `bb51603` (option C / glyph
 atlas, after `enh/showcase-example` merged into `update/0.19.0-rc.2`). A fresh
 agent should re-confirm line numbers with `rg` before editing —
-they drift. No Phase-D code has been written yet; only this doc and the two memory
-notes exist. Options A and C are landed and committed; Step 0 is the next edit.
+they drift. Options A and C are landed and committed; **Step 0 landed 2026-06-03**
+(uncommitted working-tree edits at the time of writing) — the edit map below is the
+record of those changes, and Step 1a is the next edit.
 
 **Orientation.** This work is on `update/0.19.0-rc.2`. The `enh/showcase-example`
 line — where options A and C landed (it diverged at `8d5f2d1`) — has been merged
 back in, so there is no separate branch to track. Step 0 is pure instrumentation —
 it adds and removes perf rows and changes no runtime behavior, so it is safe to
-land and measure before the structural Step 1.
+land and measure before the structural Step 1b.
 
 **Run & measure.**
 - Release is required (the Baseline conditions): `cargo run --release --example
@@ -330,16 +389,19 @@ or skip-heavy frames undercount.
 `commit`) to the Baseline table above and fill the current column from the
 `5s max` overlay values. Because Step 0 changes only instrumentation, that column
 is the After-C runtime state with the flip-flop still in place — the baseline the
-rest of Phase D measures against. Then STOP for user review before Step 1.
+rest of Phase D measures against. Then STOP for user review before Step 1a.
+(Done 2026-06-03: baseline recorded, plan split into 1a/1b, reviewed and approved.)
 
-**Open question carried into Step 1 (not Step 0).** The tree-edit handle name is
-still unsettled — `TextEdit` / `TextCursor` / `PanelTextEdit`. The user picks
-before Step 1 lands. It is a new public type, so this is the user's editor-global
-rename to make.
+**Open question carried into Step 1b (the API change, not Step 0 or 1a).** The
+tree-edit handle name is still unsettled — `TextEdit` / `TextCursor` /
+`PanelTextEdit`. The user picks before Step 1b lands. It is a new public type, so
+this is the user's editor-global rename to make. (Step 1a touches no public type and
+needs no name decision.)
 
 ## Suggested order
 
-A (done) → C (done) → D (current phase, steps above) → B.
+A (done) → C (done) → D (current phase: Step 0 done; next 1a clone fix → 1b
+flip-flop removal → 2 measure → 3 skip → 4 measure) → B.
 
 Detail also in the memory notes `project_diegetic_text_single_source`,
 `project_diegetic_text_perf_targets`, and `project_perf_mode_measurement`.

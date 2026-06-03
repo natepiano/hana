@@ -1,4 +1,3 @@
-use std::time::Duration;
 use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
@@ -85,22 +84,14 @@ pub(super) fn update_panel_text_geometry(
     mut commands: Commands,
 ) {
     let mesh_build_start = Instant::now();
-    // Sub-stage accumulators across the run loop, surfaced as the indented
-    // `pack` / `upload` / `material` rows under `mesh`.
-    let mut pack_time = Duration::ZERO;
-    let mut upload_time = Duration::ZERO;
-    let mut material_time = Duration::ZERO;
 
     // Upload the shared glyph atlas once before the run loop: any glyph packed
     // this frame by shaping grew it, and every run's material binds these
-    // handles. Counted under `upload`. `None` until the first glyph is packed.
+    // handles. `None` until the first glyph is packed.
     let atlas = if changed_runs.is_empty() {
         None
     } else {
-        let upload_start = Instant::now();
-        let handles = backend.commit_glyph_atlas(&mut storage_buffers);
-        upload_time += upload_start.elapsed();
-        handles
+        backend.commit_glyph_atlas(&mut storage_buffers)
     };
 
     for (label_entity, panel_run, panel_text_child, child_of) in &changed_runs {
@@ -109,11 +100,10 @@ pub(super) fn update_panel_text_geometry(
         };
         let storage_key = RunStorageKey::from(label_entity);
 
-        // pack: build this run's glyph-quad mesh, indexing the shared atlas.
-        let pack_start = Instant::now();
-        let render_data = backend.build_run_render_data(&panel_run.prepared, panel_run.clip_rect);
-        pack_time += pack_start.elapsed();
-        let Ok(render_data) = render_data else {
+        // Build this run's glyph-quad mesh, indexing the shared atlas.
+        let Ok(render_data) =
+            backend.build_run_render_data(&panel_run.prepared, panel_run.clip_rect)
+        else {
             // Clipping removed every quad: drop any stale mesh child so its
             // storage frees and nothing renders.
             despawn_label_mesh(label_entity, &run_meshes, &mut commands);
@@ -124,13 +114,10 @@ pub(super) fn update_panel_text_geometry(
             continue;
         };
 
-        // upload: write the run's mesh in place.
-        let upload_start = Instant::now();
+        // Write the run's mesh in place.
         let storage = backend.commit_run_storage(storage_key, render_data, &mut meshes);
-        upload_time += upload_start.elapsed();
 
-        // material: build and write this run's material, binding the shared atlas.
-        let material_start = Instant::now();
+        // Build and write this run's material, binding the shared atlas.
         let resolved_alpha = resolved_alphas
             .get(label_entity)
             .map_or(alpha_default.0.0, |resolved| resolved.0.0);
@@ -171,7 +158,6 @@ pub(super) fn update_panel_text_geometry(
                 &mut commands,
             );
         }
-        material_time += material_start.elapsed();
     }
 
     // R10: when a run's text empties, `shape_panel_text_children` removes its
@@ -185,9 +171,6 @@ pub(super) fn update_panel_text_geometry(
 
     perf.panel_text.mesh_build_ms =
         mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
-    perf.panel_text.mesh_pack_ms = pack_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
-    perf.panel_text.mesh_upload_ms = upload_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
-    perf.panel_text.mesh_material_ms = material_time.as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 

@@ -5,6 +5,7 @@
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::PoisonError;
+use std::time::Duration;
 use std::time::Instant;
 
 use bevy::prelude::*;
@@ -22,6 +23,8 @@ use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::LayoutEngine;
+use crate::layout::LayoutResult;
+use crate::layout::LayoutTree;
 use crate::layout::LayoutTreeChange;
 use crate::layout::MeasureTextFn;
 use crate::layout::ShapedTextCache;
@@ -58,23 +61,15 @@ pub(super) fn compute_panel_layouts(
         *trace_remaining = 30;
     }
 
-    let cache_ref = Arc::new(Mutex::new(cache.clone()));
-    let parley_fn = Arc::clone(&measurer.measure_fn);
+    let setup_start = Instant::now();
+    let cached_measure = build_cached_measure(&cache, &measurer);
+    let setup_time = setup_start.elapsed();
 
-    let cached_measure: MeasureTextFn = Arc::new(move |text: &str, measure: &TextMeasure| {
-        {
-            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(dims) = cache_guard.get_measurement(text, measure) {
-                return dims;
-            }
-        }
-        let dims = parley_fn(text, measure);
-        {
-            let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-            cache_guard.insert_measurement(text, measure, dims);
-        }
-        dims
-    });
+    // Per-panel stage timings accumulated across the loop, surfaced as the
+    // indented `scale` / `solve` / `commit` rows under `layout`.
+    let mut scale_time = Duration::ZERO;
+    let mut solve_time = Duration::ZERO;
+    let mut commit_time = Duration::ZERO;
 
     for (entity, panel_ref, mut tree_change, mut scaled_tree_cache) in &mut panels {
         let panel_changed = panel_ref.is_changed();
@@ -111,21 +106,26 @@ pub(super) fn compute_panel_layouts(
             continue;
         }
 
+        let scale_start = Instant::now();
         let scaled_tree = scaled_tree_cache.get_or_update(
             panel_ref.tree(),
             panel_ref.tree_revision(),
             layout_to_points,
             font_to_points,
         );
+        scale_time += scale_start.elapsed();
 
         if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
             && let Some(result) = computed.result_mut()
         {
+            let solve_start = Instant::now();
             result.regenerate_commands(scaled_tree);
+            solve_time += solve_start.elapsed();
             panel_count += 1;
             continue;
         }
 
+        let solve_start = Instant::now();
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
         let result = engine.compute(
             scaled_tree,
@@ -133,30 +133,82 @@ pub(super) fn compute_panel_layouts(
             panel_ref.height() * layout_to_points,
             1.0,
         );
+        solve_time += solve_start.elapsed();
 
-        if let Some(bounds) = result.content_bounds() {
-            let s = panel_ref.points_to_world();
-            computed.set_content_size(bounds.width * s, bounds.height * s);
-        }
-
-        let (field_records, field_id_conflicts) =
-            field::collect_panel_field_records(scaled_tree, &result);
-        if !field_id_conflicts.is_empty() {
-            bevy::log::warn!(
-                target: "bevy_diegetic::ime",
-                "panel {entity:?} has duplicate editable field ids: {field_id_conflicts:?}"
-            );
-        }
-        computed.set_result_with_fields(result, field_records, field_id_conflicts);
+        let commit_start = Instant::now();
+        commit_layout_result(&mut computed, &panel_ref, scaled_tree, result, entity);
+        commit_time += commit_start.elapsed();
         panel_count += 1;
     }
 
-    perf.compute_ms = if panel_count == 0 {
-        0.0
-    } else {
-        start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND
+    // Each stage zeroes on an empty frame, exactly like `compute_ms`.
+    let to_ms = |elapsed: Duration| {
+        if panel_count == 0 {
+            0.0
+        } else {
+            elapsed.as_secs_f32() * MILLISECONDS_PER_SECOND
+        }
     };
+    perf.compute_ms = to_ms(start.elapsed());
+    perf.compute_setup_ms = to_ms(setup_time);
+    perf.compute_scale_ms = to_ms(scale_time);
+    perf.compute_solve_ms = to_ms(solve_time);
+    perf.compute_commit_ms = to_ms(commit_time);
     perf.compute_panels = panel_count;
+}
+
+/// Builds the cache-backed text measurer for one layout pass.
+///
+/// Looks each string up in a clone of [`ShapedTextCache`]; on a miss it falls
+/// back to the parley-backed [`DiegeticTextMeasurer`] and inserts the result
+/// into the clone. The returned closure is the `setup`-stage cost surfaced in
+/// [`DiegeticPerfStats::compute_setup_ms`](super::perf::DiegeticPerfStats).
+fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer) -> MeasureTextFn {
+    let cache_ref = Arc::new(Mutex::new(cache.clone()));
+    let parley_fn = Arc::clone(&measurer.measure_fn);
+
+    Arc::new(move |text: &str, measure: &TextMeasure| {
+        {
+            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            if let Some(dims) = cache_guard.get_measurement(text, measure) {
+                return dims;
+            }
+        }
+        let dims = parley_fn(text, measure);
+        {
+            let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
+            cache_guard.insert_measurement(text, measure, dims);
+        }
+        dims
+    })
+}
+
+/// Writes a finished layout result back onto the panel.
+///
+/// Records content bounds (converted to world units) and the editable-field
+/// records, warning on duplicate field ids. This is the `commit`-stage cost
+/// surfaced in [`DiegeticPerfStats::compute_commit_ms`](super::perf::DiegeticPerfStats).
+fn commit_layout_result(
+    computed: &mut ComputedDiegeticPanel,
+    panel_ref: &DiegeticPanel,
+    scaled_tree: &LayoutTree,
+    result: LayoutResult,
+    entity: Entity,
+) {
+    if let Some(bounds) = result.content_bounds() {
+        let s = panel_ref.points_to_world();
+        computed.set_content_size(bounds.width * s, bounds.height * s);
+    }
+
+    let (field_records, field_id_conflicts) =
+        field::collect_panel_field_records(scaled_tree, &result);
+    if !field_id_conflicts.is_empty() {
+        bevy::log::warn!(
+            target: "bevy_diegetic::ime",
+            "panel {entity:?} has duplicate editable field ids: {field_id_conflicts:?}"
+        );
+    }
+    computed.set_result_with_fields(result, field_records, field_id_conflicts);
 }
 
 /// Resolves `Fit`-axis world panels to their content bounds.

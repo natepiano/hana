@@ -68,7 +68,7 @@ const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
 /// Wide enough to contain the longest label (`remainder`) and the indented
 /// sub-stage labels without colliding into the value columns.
 const LABEL_COLUMN_WIDTH: f32 = 92.0;
-/// Left indent applied to a `mesh` sub-stage row's label cell.
+/// Left indent applied to a `layout` sub-stage row's label cell.
 const SUB_ROW_INDENT: f32 = 10.0;
 /// Wide enough to contain the `5s max` header on one line.
 const VALUE_COLUMN_WIDTH: f32 = 72.0;
@@ -78,26 +78,26 @@ const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 
 /// Whether a diagnostic row sits at the left margin or is indented beneath the
-/// `mesh` row as one of its sub-stages.
+/// `layout` row as one of its sub-stages.
 #[derive(Clone, Copy)]
 enum RowIndent {
     TopLevel,
     SubStage,
 }
 
-/// One row in the diagnostic table. `indent` marks the `mesh` sub-stage rows so
-/// they render indented underneath `mesh`.
+/// One row in the diagnostic table. `indent` marks the `layout` sub-stage rows so
+/// they render indented underneath `layout`.
 #[derive(Clone, Copy)]
 struct MetricRow {
     label:  &'static str,
     indent: RowIndent,
 }
 
-/// Diagnostic table rows, in display order. `mesh` = `pack` + `upload` +
-/// `material` (its indented sub-stages); `remainder` = `ms` − (`layout` +
+/// Diagnostic table rows, in display order. `layout` = `setup` + `scale` +
+/// `solve` + `commit` (its indented sub-stages); `remainder` = `ms` − (`layout` +
 /// `shaping` + `mesh`), the per-frame time not covered by the diegetic CPU rows
 /// above (render, present, other systems).
-const METRIC_ROWS: [MetricRow; 9] = [
+const METRIC_ROWS: [MetricRow; 10] = [
     MetricRow {
         label:  "fps",
         indent: RowIndent::TopLevel,
@@ -111,6 +111,22 @@ const METRIC_ROWS: [MetricRow; 9] = [
         indent: RowIndent::TopLevel,
     },
     MetricRow {
+        label:  "setup",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "scale",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "solve",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
+        label:  "commit",
+        indent: RowIndent::SubStage,
+    },
+    MetricRow {
         label:  "shaping",
         indent: RowIndent::TopLevel,
     },
@@ -119,23 +135,11 @@ const METRIC_ROWS: [MetricRow; 9] = [
         indent: RowIndent::TopLevel,
     },
     MetricRow {
-        label:  "pack",
-        indent: RowIndent::SubStage,
-    },
-    MetricRow {
-        label:  "upload",
-        indent: RowIndent::SubStage,
-    },
-    MetricRow {
-        label:  "material",
-        indent: RowIndent::SubStage,
-    },
-    MetricRow {
         label:  "remainder",
         indent: RowIndent::TopLevel,
     },
 ];
-const INITIAL_METRICS: [&str; 9] = ["--"; 9];
+const INITIAL_METRICS: [&str; 10] = ["--"; 10];
 
 // ── Components / resources ────────────────────────────────────────────────────
 
@@ -167,11 +171,12 @@ struct PerfSnapshot {
     fps:          f32,
     frame_ms:     f32,
     layout_ms:    f32,
+    setup_ms:     f32,
+    scale_ms:     f32,
+    solve_ms:     f32,
+    commit_ms:    f32,
     shaping_ms:   f32,
     mesh_ms:      f32,
-    pack_ms:      f32,
-    upload_ms:    f32,
-    material_ms:  f32,
     remainder_ms: f32,
 }
 
@@ -181,11 +186,12 @@ impl PerfSnapshot {
         fps:          0.0,
         frame_ms:     0.0,
         layout_ms:    0.0,
+        setup_ms:     0.0,
+        scale_ms:     0.0,
+        solve_ms:     0.0,
+        commit_ms:    0.0,
         shaping_ms:   0.0,
         mesh_ms:      0.0,
-        pack_ms:      0.0,
-        upload_ms:    0.0,
-        material_ms:  0.0,
         remainder_ms: 0.0,
     };
 }
@@ -410,7 +416,7 @@ fn table_row(
 
 /// Builds the overlay: a `now` and a `5s max` column of right-aligned numerics,
 /// one row per metric, with a labels / state footer.
-fn build_overlay_tree(now: &[String; 9], max: &[String; 9], mutating: bool) -> LayoutTree {
+fn build_overlay_tree(now: &[String; 10], max: &[String; 10], mutating: bool) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -496,11 +502,12 @@ fn update_status_panel(
         fps: frames_per_second.unwrap_or(0.0).to_f32(),
         frame_ms,
         layout_ms,
+        setup_ms: diegetic_perf.compute_setup_ms,
+        scale_ms: diegetic_perf.compute_scale_ms,
+        solve_ms: diegetic_perf.compute_solve_ms,
+        commit_ms: diegetic_perf.compute_commit_ms,
         shaping_ms,
         mesh_ms,
-        pack_ms: diegetic_perf.panel_text.mesh_pack_ms,
-        upload_ms: diegetic_perf.panel_text.mesh_upload_ms,
-        material_ms: diegetic_perf.panel_text.mesh_material_ms,
         remainder_ms,
     });
 
@@ -526,27 +533,30 @@ fn update_status_panel(
     let peak = window_peak(&history);
 
     // Every row's `now` is the window mean, so the column is internally
-    // consistent: `ms` = `layout` + `shaping` + `mesh` + `remainder`.
+    // consistent: `ms` = `layout` + `shaping` + `mesh` + `remainder`, and
+    // `layout` = `setup` + `scale` + `solve` + `commit`.
     let now = [
         format!("{:.0}", mean.fps),
         format!("{:.1}", mean.frame_ms),
         format!("{:.2}", mean.layout_ms),
+        format!("{:.2}", mean.setup_ms),
+        format!("{:.2}", mean.scale_ms),
+        format!("{:.2}", mean.solve_ms),
+        format!("{:.2}", mean.commit_ms),
         format!("{:.2}", mean.shaping_ms),
         format!("{:.2}", mean.mesh_ms),
-        format!("{:.2}", mean.pack_ms),
-        format!("{:.2}", mean.upload_ms),
-        format!("{:.2}", mean.material_ms),
         format!("{:.2}", mean.remainder_ms),
     ];
     let max = [
         format!("{:.0}", peak.fps),
         format!("{:.1}", peak.frame_ms),
         format!("{:.2}", peak.layout_ms),
+        format!("{:.2}", peak.setup_ms),
+        format!("{:.2}", peak.scale_ms),
+        format!("{:.2}", peak.solve_ms),
+        format!("{:.2}", peak.commit_ms),
         format!("{:.2}", peak.shaping_ms),
         format!("{:.2}", peak.mesh_ms),
-        format!("{:.2}", peak.pack_ms),
-        format!("{:.2}", peak.upload_ms),
-        format!("{:.2}", peak.material_ms),
         format!("{:.2}", peak.remainder_ms),
     ];
 
@@ -571,11 +581,12 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         sum.fps += sample.fps;
         sum.frame_ms += sample.frame_ms;
         sum.layout_ms += sample.layout_ms;
+        sum.setup_ms += sample.setup_ms;
+        sum.scale_ms += sample.scale_ms;
+        sum.solve_ms += sample.solve_ms;
+        sum.commit_ms += sample.commit_ms;
         sum.shaping_ms += sample.shaping_ms;
         sum.mesh_ms += sample.mesh_ms;
-        sum.pack_ms += sample.pack_ms;
-        sum.upload_ms += sample.upload_ms;
-        sum.material_ms += sample.material_ms;
         sum.remainder_ms += sample.remainder_ms;
     }
     PerfSnapshot {
@@ -583,11 +594,12 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         fps:          sum.fps / count,
         frame_ms:     sum.frame_ms / count,
         layout_ms:    sum.layout_ms / count,
+        setup_ms:     sum.setup_ms / count,
+        scale_ms:     sum.scale_ms / count,
+        solve_ms:     sum.solve_ms / count,
+        commit_ms:    sum.commit_ms / count,
         shaping_ms:   sum.shaping_ms / count,
         mesh_ms:      sum.mesh_ms / count,
-        pack_ms:      sum.pack_ms / count,
-        upload_ms:    sum.upload_ms / count,
-        material_ms:  sum.material_ms / count,
         remainder_ms: sum.remainder_ms / count,
     }
 }
@@ -599,11 +611,12 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         peak.fps = peak.fps.max(sample.fps);
         peak.frame_ms = peak.frame_ms.max(sample.frame_ms);
         peak.layout_ms = peak.layout_ms.max(sample.layout_ms);
+        peak.setup_ms = peak.setup_ms.max(sample.setup_ms);
+        peak.scale_ms = peak.scale_ms.max(sample.scale_ms);
+        peak.solve_ms = peak.solve_ms.max(sample.solve_ms);
+        peak.commit_ms = peak.commit_ms.max(sample.commit_ms);
         peak.shaping_ms = peak.shaping_ms.max(sample.shaping_ms);
         peak.mesh_ms = peak.mesh_ms.max(sample.mesh_ms);
-        peak.pack_ms = peak.pack_ms.max(sample.pack_ms);
-        peak.upload_ms = peak.upload_ms.max(sample.upload_ms);
-        peak.material_ms = peak.material_ms.max(sample.material_ms);
         peak.remainder_ms = peak.remainder_ms.max(sample.remainder_ms);
     }
     peak
