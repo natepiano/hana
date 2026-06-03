@@ -44,7 +44,7 @@ pub(super) struct OverlayAssets<'a> {
 /// overlay labels. Exists to reduce helper parameter counts.
 pub(super) struct TextServices<'a> {
     pub(super) measure_text: &'a MeasureTextFn,
-    pub(super) cache:        &'a mut ShapedTextCache,
+    pub(super) cache:        &'a ShapedTextCache,
 }
 
 /// Horizontal extents of the glyph run and the uniform arrow column spacing.
@@ -69,7 +69,7 @@ pub fn build_typography_overlay(
     >,
     containers: Query<(Entity, &ChildOf, Option<&Children>), With<OverlayContainer>>,
     font_registry: Res<FontRegistry>,
-    mut cache: ResMut<ShapedTextCache>,
+    cache: Res<ShapedTextCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut dot_materials: ResMut<Assets<StandardMaterial>>,
     mut commands: Commands,
@@ -119,9 +119,9 @@ pub fn build_typography_overlay(
             meshes:    &mut meshes,
             materials: &mut dot_materials,
         };
-        let mut text_services = TextServices {
+        let text_services = TextServices {
             measure_text: &measure_text,
-            cache:        &mut cache,
+            cache:        &cache,
         };
 
         if overlay.font_metrics == GlyphMetricVisibility::Shown {
@@ -130,7 +130,7 @@ pub fn build_typography_overlay(
                 font.name(),
                 &font_context,
                 computed,
-                &mut text_services,
+                &text_services,
                 &mut assets,
             );
         }

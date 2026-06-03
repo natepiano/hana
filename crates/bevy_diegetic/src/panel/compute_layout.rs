@@ -3,8 +3,6 @@
 //! content bounds after layout runs.
 
 use std::sync::Arc;
-use std::sync::Mutex;
-use std::sync::PoisonError;
 use std::time::Duration;
 use std::time::Instant;
 
@@ -159,26 +157,23 @@ pub(super) fn compute_panel_layouts(
 
 /// Builds the cache-backed text measurer for one layout pass.
 ///
-/// Looks each string up in a clone of [`ShapedTextCache`]; on a miss it falls
-/// back to the parley-backed [`DiegeticTextMeasurer`] and inserts the result
-/// into the clone. The returned closure is the `setup`-stage cost surfaced in
-/// [`DiegeticPerfStats::compute_setup_ms`](super::perf::DiegeticPerfStats).
+/// Clones the shared [`ShapedTextCache`] handle (a refcount bump, not a map
+/// copy) into the returned `'static` closure. Each lookup hits the shared cache;
+/// on a miss it falls back to the parley-backed [`DiegeticTextMeasurer`] and
+/// inserts the result back into the shared cache, so measurements computed
+/// during layout persist for the renderer instead of being discarded each frame.
+/// The handle clone plus closure allocation is the `setup`-stage cost surfaced
+/// in [`DiegeticPerfStats::compute_setup_ms`](super::perf::DiegeticPerfStats).
 fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer) -> MeasureTextFn {
-    let cache_ref = Arc::new(Mutex::new(cache.clone()));
+    let cache_handle = cache.clone();
     let parley_fn = Arc::clone(&measurer.measure_fn);
 
     Arc::new(move |text: &str, measure: &TextMeasure| {
-        {
-            let cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-            if let Some(dims) = cache_guard.get_measurement(text, measure) {
-                return dims;
-            }
+        if let Some(dims) = cache_handle.get_measurement(text, measure) {
+            return dims;
         }
         let dims = parley_fn(text, measure);
-        {
-            let mut cache_guard = cache_ref.lock().unwrap_or_else(PoisonError::into_inner);
-            cache_guard.insert_measurement(text, measure, dims);
-        }
+        cache_handle.insert_measurement(text, measure, dims);
         dims
     })
 }

@@ -100,7 +100,7 @@ pub(super) fn spawn_metric_labels(
 }
 
 fn measure_overlay_label(
-    cache: &mut ShapedTextCache,
+    cache: &ShapedTextCache,
     measure_text: &MeasureTextFn,
     text: &str,
     size: f32,
@@ -132,7 +132,7 @@ pub(super) fn spawn_overlay_bounds_target(
     font_name: &str,
     font_context: &FontContext<'_>,
     extents: &GlyphExtents,
-    text_services: &mut TextServices<'_>,
+    text_services: &TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
 ) -> Entity {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;

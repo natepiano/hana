@@ -48,7 +48,7 @@ pub(super) fn spawn_font_metric_gizmos(
     font_name: &str,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
-    text_services: &mut TextServices<'_>,
+    text_services: &TextServices<'_>,
     assets: &mut OverlayAssets<'_>,
 ) {
     let first_glyph = computed.glyphs.first();

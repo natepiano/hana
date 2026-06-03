@@ -133,12 +133,12 @@ pub(super) fn shape_text_cached(
     config: &TextStyle,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
-    cache: &mut ShapedTextCache,
+    cache: &ShapedTextCache,
 ) -> ShapedTextRun {
     let measure = config.as_measure();
 
     if let Some(cached) = cache.get_shaped(text, &measure) {
-        return cached.clone();
+        return cached;
     }
 
     let font_context = font_registry.font_context();

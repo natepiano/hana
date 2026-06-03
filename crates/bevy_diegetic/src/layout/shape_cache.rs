@@ -16,6 +16,9 @@ use std::collections::HashMap;
 use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 
 use bevy::prelude::Resource;
 use bevy_kana::ToI32;
@@ -119,14 +122,25 @@ impl ShapedCacheKey {
     }
 }
 
-/// Caches shaped text runs and measurement results to avoid redundant parley
-/// shaping.
+/// Caches text-shaping output — glyph runs and measurements — to avoid
+/// redundant parley shaping.
 ///
-/// Shared between the layout engine's `MeasureTextFn` (measurement half) and
-/// the renderer's text shaper (run + measurement halves) via
-/// `Arc<Mutex<>>`.
+/// The two maps live behind a shared `Arc<Mutex<…>>`, so the cache is a cheap
+/// refcount bump to clone and every clone reads and writes the same maps. The
+/// layout engine's `MeasureTextFn` (measurement half) clones the handle into its
+/// `'static` measure closure; the renderer's text shaper (run + measurement
+/// halves) holds it as a `Res`. All methods take `&self` and lock internally, so
+/// an insert through any handle is visible to every other handle — the layout
+/// pass no longer copies the maps each frame or discards the misses it computes.
 #[derive(Resource, Clone, Default)]
 pub struct ShapedTextCache {
+    inner: Arc<Mutex<ShapedTextCacheMaps>>,
+}
+
+/// The cache's two maps — glyph runs and measurements — guarded together by one
+/// mutex so a single lock covers both.
+#[derive(Default)]
+struct ShapedTextCacheMaps {
     entries:      HashMap<ShapedCacheKey, ShapedTextRun>,
     measurements: HashMap<ShapedCacheKey, TextDimensions>,
 }
@@ -137,34 +151,39 @@ impl ShapedTextCache {
     #[must_use]
     pub fn get_measurement(&self, text: &str, measure: &TextMeasure) -> Option<TextDimensions> {
         let key = ShapedCacheKey::new(text, measure);
-        self.measurements.get(&key).copied()
+        let maps = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        maps.measurements.get(&key).copied()
     }
 
-    /// Returns the cached shaped text run for the given text + config,
-    /// or `None` if not yet cached.
+    /// Returns a clone of the cached glyph run for the given text + config, or
+    /// `None` if not yet cached. Returns an owned value because the run lives
+    /// behind the cache's mutex and cannot be borrowed past the lock.
     #[must_use]
-    pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<&ShapedTextRun> {
+    pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<ShapedTextRun> {
         let key = ShapedCacheKey::new(text, measure);
-        self.entries.get(&key)
+        let maps = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        maps.entries.get(&key).cloned()
     }
 
     /// Inserts a measurement result into the cache.
-    pub fn insert_measurement(&mut self, text: &str, measure: &TextMeasure, dims: TextDimensions) {
+    pub fn insert_measurement(&self, text: &str, measure: &TextMeasure, dims: TextDimensions) {
         let key = ShapedCacheKey::new(text, measure);
-        self.measurements.insert(key, dims);
+        let mut maps = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        maps.measurements.insert(key, dims);
     }
 
-    /// Inserts a shaped run alongside its measurement. Used by the renderer
+    /// Inserts a glyph run alongside its measurement. Used by the renderer
     /// after parley shaping so subsequent layout-engine lookups hit.
     pub fn insert_shaped(
-        &mut self,
+        &self,
         text: &str,
         measure: &TextMeasure,
         run: ShapedTextRun,
         dims: TextDimensions,
     ) {
         let key = ShapedCacheKey::new(text, measure);
-        self.measurements.insert(key.clone(), dims);
-        self.entries.insert(key, run);
+        let mut maps = self.inner.lock().unwrap_or_else(PoisonError::into_inner);
+        maps.measurements.insert(key.clone(), dims);
+        maps.entries.insert(key, run);
     }
 }

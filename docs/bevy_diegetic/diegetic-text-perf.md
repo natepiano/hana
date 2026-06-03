@@ -6,19 +6,19 @@ Conditions: `diegetic_text_stress`, 100 world labels each restrung every frame,
 M2 Max, release, `with_perf_mode` (AutoNoVsync + `WinitSettings::continuous`).
 Add a column after each phase lands.
 
-| Metric (moving unless noted)       | Baseline (2026-06-02) | After A     | After C      | After D | After B |
-| ---------------------------------- | --------------------- | ----------- | ------------ | ------- | ------- |
-| Frame time ‡                       | ~25 ms                | ~24 ms      | ~18.5 ms ‡   |         |         |
-| FPS ‡                              | 40                    | 42          | 55 ‡         |         |         |
-| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ |         |         |
-| — `setup` (5s max)                 | —                     | —           | ~3 ms ⊕      |         |         |
-| — `scale` (5s max)                 | —                     | —           | <0.2 ms ⊕    |         |         |
-| — `solve` (5s max)                 | —                     | —           | <0.8 ms ⊕    |         |         |
-| — `commit` (5s max)                | —                     | —           | <0.1 ms ⊕    |         |         |
-| Text `panel_text.total_ms`         | 2.4 ms                | 1.6 ms      | ~0.45 ms     |         |         |
-| — of which `mesh_build_ms`         | 1.8 ms                | **1.29 ms** | **0.12 ms**  |         |         |
-| Render floor (remainder, moving)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   |         |         |
-| Paused FPS ‡                       | 98                    | ~55         |              |         |         |
+| Metric (moving unless noted)       | Baseline (2026-06-02) | After A     | After C      | After 1a ⊗      | After D | After B |
+| ---------------------------------- | --------------------- | ----------- | ------------ | --------------- | ------- | ------- |
+| Frame time ‡                       | ~25 ms                | ~24 ms      | ~18.5 ms ‡   | —               |         |         |
+| FPS ‡                              | 40                    | 42          | 55 ‡         | —               |         |         |
+| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ | 0 / 0.21 ms ⊗   |         |         |
+| — `setup` (5s max)                 | —                     | —           | ~3 ms ⊕      | ~0 (0.001 ms) ⊗ |         |         |
+| — `scale` (5s max)                 | —                     | —           | <0.2 ms ⊕    | 0.04 ms ⊗       |         |         |
+| — `solve` (5s max)                 | —                     | —           | <0.8 ms ⊕    | 0.08 ms ⊗       |         |         |
+| — `commit` (5s max)                | —                     | —           | <0.1 ms ⊕    | 0.02 ms ⊗       |         |         |
+| Text `panel_text.total_ms`         | 2.4 ms                | 1.6 ms      | ~0.45 ms     | ~0.46 ms        |         |         |
+| — of which `mesh_build_ms`         | 1.8 ms                | **1.29 ms** | **0.12 ms**  | 0.11 ms         |         |         |
+| Render floor (remainder, moving)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —               |         |         |
+| Paused FPS ‡                       | 98                    | ~55         |              | —               |         |         |
 
 ‡ The frame-time, FPS, paused, and render-floor rows are fill-rate-bound and scale
 with window size, and the A and C columns were captured in separate sessions; the
@@ -39,6 +39,20 @@ sample upper bounds; a clean run will lower them). The split is the point: `setu
 is the largest single layout cost, so removing the clone (share the cache behind its
 `Arc<Mutex>` instead of cloning) is the real win — paired with removing the flip-flop
 for correctness. See Step 1a / Step 1b.
+
+⊗ Step-1a result (2026-06-03, this session, uncontended). Moved `ShapedTextCache`'s
+two maps behind one internal `Arc<Mutex<…>>`, so `cache.clone()` in
+`compute_panel_layouts` is now a refcount bump (not a map copy) and the measure
+closure's cache-miss inserts persist into the shared cache instead of being thrown
+away. Sampled 73 active frames over ~5 s (flip-flop still alternating, so the other
+half of frames skip layout and read 0). `setup` dropped from ~2 ms steady / ~3 ms
+5s-max to **mean 0.0003 ms, max 0.0011 ms** — gone. `compute_ms` fell to **mean
+0.14 ms, max 0.21 ms** (the whole `setup` share removed). `scale` / `solve` /
+`commit` are unchanged — the layout work itself did not change; the values here are
+clean means, below C's contended upper bounds. 259 crate tests pass; clippy
+(nursery + pedantic) clean. The `Res<ShapedTextCache>` clones the handle into the
+`'static` measure closure; the renderer and overlay paths now hold it as `Res` and
+mutate through `&self`. Flip-flop still in place — Step 1b removes it next.
 
 ## Finding — A is CPU-only; this stress test is render-bound
 
@@ -260,11 +274,14 @@ the per-element measured size is the runtime skip decision.
   - `scale` = `scaled_tree_cache.get_or_update` (`:114-119`).
   - `solve` = `engine.compute` + the VisualOnly regen (`:121-135`).
   - `commit` = field collection + `set_result_with_fields` (`:137-151`).
-- **Step 1a — Kill the clone** (`Arc<Mutex>`-share `ShapedTextCache`). Independent of
-  the flip-flop; sequenced first so 1b's every-frame regression is measured against a
-  `setup`-free layout. See "The clone fix" above. Expect `setup` ~2 ms → ~0 with the
-  flip-flop still in place; `compute_ms` drops by the `setup` share; 375 tests still
-  green. Measure, then proceed.
+- **Step 1a — Kill the clone** (`Arc<Mutex>`-share `ShapedTextCache`). DONE
+  2026-06-03. Moved the cache's two maps behind one internal `Arc<Mutex<…>>`; the
+  layout pass clones the handle (refcount bump) into the `'static` measure closure
+  and its cache-miss inserts now persist; methods are `&self`, and the renderer +
+  overlay paths hold the cache as `Res`. Measured (see ⊗ on the table): `setup`
+  ~2 ms → ~0 (max 0.001 ms), `compute_ms` 0.14 ms mean / 0.21 ms max, flip-flop
+  still in place. 259 crate tests pass; clippy (nursery + pedantic) clean. STOP for
+  user review before Step 1b.
 - **Step 1b — Remove the flip-flop** (tree-authoritative + the `TextEdit` API). The
   correctness fix: delete `ReconcileOwned` + `sync_run_text_to_cache` +
   `clear_reconcile_owned` and route the four writers to the tree. See "The fix" above.

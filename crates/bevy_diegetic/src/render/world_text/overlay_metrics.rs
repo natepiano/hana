@@ -54,7 +54,7 @@ pub(crate) fn emit_computed_world_text(
     >,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
-    mut cache: ResMut<ShapedTextCache>,
+    cache: Res<ShapedTextCache>,
     mut commands: Commands,
 ) {
     // A just-registered font can change the run, so a font registration recomputes
@@ -81,7 +81,7 @@ pub(crate) fn emit_computed_world_text(
             layout,
             &font_registry,
             &shaping_cx,
-            &mut cache,
+            &cache,
         ) {
             commands.entity(root).insert(computed);
         }
@@ -97,7 +97,7 @@ fn compute_world_text(
     layout: &PanelTextLayout,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
-    cache: &mut ShapedTextCache,
+    cache: &ShapedTextCache,
 ) -> Option<ComputedWorldText> {
     // Match `shape_panel_text_children`, which lays out the child style at
     // `Anchor::Center`.

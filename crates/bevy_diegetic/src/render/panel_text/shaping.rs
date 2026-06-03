@@ -39,7 +39,7 @@ pub(super) fn shape_panel_text_children(
     texts: Query<(&TextContent, &TextStyle, &PanelTextLayout, &ChildOf)>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
-    mut cache: ResMut<ShapedTextCache>,
+    cache: Res<ShapedTextCache>,
     mut backend: ResMut<GlyphCache>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
@@ -83,7 +83,7 @@ pub(super) fn shape_panel_text_children(
             &mut backend,
             &font_registry,
             &shaping_cx,
-            &mut cache,
+            &cache,
         );
         aggregate.accumulate(&stats);
         shaped_panels.insert(child_of.parent());
@@ -118,7 +118,7 @@ fn build_panel_text(
     backend: &mut GlyphCache,
     font_registry: &FontRegistry,
     shaping_cx: &TextShapingContext,
-    cache: &mut ShapedTextCache,
+    cache: &ShapedTextCache,
 ) -> (Option<PreparedPanelText>, TextBuildStats) {
     let mut stats = TextBuildStats {
         texts: 1,
