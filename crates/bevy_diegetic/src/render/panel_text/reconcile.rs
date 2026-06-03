@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
@@ -13,6 +14,7 @@ use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
+use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::GlyphLighting;
@@ -22,6 +24,7 @@ use crate::layout::RenderCommandKind;
 use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::DiegeticPerfStats;
 use crate::render::clip;
 use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
@@ -100,6 +103,9 @@ fn collect_text_commands(
 }
 
 /// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
+///
+/// Resets [`DiegeticPerfStats::reconcile_ms`] to this pass's wall time each
+/// frame; the image reconcile (ordered after) accumulates onto it.
 pub(super) fn reconcile_panel_text_children(
     mut changed_panels: Query<
         (
@@ -119,7 +125,9 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextSidedness>>,
     )>,
     mut commands: Commands,
+    mut perf: ResMut<DiegeticPerfStats>,
 ) {
+    let reconcile_start = Instant::now();
     for (panel_entity, mut panel, computed, panel_runs) in &mut changed_panels {
         let Some(result) = computed.result() else {
             continue;
@@ -237,6 +245,7 @@ pub(super) fn reconcile_panel_text_children(
         // re-dirty the panel and loop layout → reconcile every frame.
         panel.bypass_change_detection().text_index = text_index;
     }
+    perf.reconcile_ms = reconcile_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
 }
 
 /// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reconcile
@@ -417,6 +426,9 @@ struct ImageVisuals {
 }
 
 /// Reconciles image children for each changed [`ComputedDiegeticPanel`].
+///
+/// Accumulates onto [`DiegeticPerfStats::reconcile_ms`]; the text reconcile
+/// (ordered first) resets it each frame.
 pub(super) fn reconcile_panel_image_children(
     changed_panels: Query<
         (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
@@ -431,7 +443,9 @@ pub(super) fn reconcile_panel_image_children(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut perf: ResMut<DiegeticPerfStats>,
 ) {
+    let reconcile_start = Instant::now();
     for (panel_entity, panel, computed) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
@@ -513,6 +527,10 @@ pub(super) fn reconcile_panel_image_children(
             }
         }
     }
+    perf.reconcile_ms = reconcile_start
+        .elapsed()
+        .as_secs_f32()
+        .mul_add(MILLISECONDS_PER_SECOND, perf.reconcile_ms);
 }
 
 /// Panel-to-world placement factors for one reconcile pass.

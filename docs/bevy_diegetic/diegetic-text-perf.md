@@ -18,14 +18,16 @@ recovers the 1b regression and is the current state.
 | `ms` (frame) ‡               | ~25 ms                | ~24 ms      | ~18.5 ms ‡   | —                | —                         | —               |         |
 | `fps` ‡                      | 40                    | 42          | 55 ‡         | —                | —                         | —               |         |
 | `layout` †                   | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ | 0.14 ⊗           | 0.15 / 0.69 ⊘             | **~0.10** ⊙     |         |
-| — `setup`                    | —                     | —           | ~3 ms ⊕      | ~0 ⊗             | ~0 / 0.001 ⊘              | ~0 ⊙            |         |
-| — `scale`                    | —                     | —           | <0.2 ms ⊕    | 0.04 ⊗           | 0.04 / 0.32 ⊘            | ~0.03 ⊙         |         |
-| — `solve`                    | —                     | —           | <0.8 ms ⊕    | 0.08 ⊗           | 0.08 / 0.24 ⊘            | **~0.02** ⊙     |         |
-| — `commit`                   | —                     | —           | <0.1 ms ⊕    | 0.02 ⊗           | 0.02 / 0.10 ⊘            | **~0** ⊙        |         |
 | `shaping`                    | ~0.6 ms               | ~0.31 ms    | ~0.33 ms     | 0.39             | 0.39 / 0.95 ⊘            | ~0.37 ⊙         |         |
 | `mesh`                       | 1.8 ms                | **1.29 ms** | **0.12 ms**  | 0.12             | 0.12 / 0.37 ⊘            | ~0.12 ⊙         |         |
-| `remainder` ‡                | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —                | —                         | —               |         |
+| `remainder` ‡ (now `rest`)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —                | —                         | —               |         |
 | Paused `fps` ‡ (not on HUD)  | 98                    | ~55         |              | —                | —                         | —               |         |
+
+The `setup` / `scale` / `solve` / `commit` layout sub-rows were retired after
+Step 3 — the breakdown's job was finding the dominant share inside `compute_ms`,
+and with `setup` deleted (1a) and `solve` / `commit` skipped on geometry-stable
+edits (3) there is nothing left inside it worth a per-frame `Instant` each. Their
+historical values live in the ⊕ / ⊗ / ⊘ / ⊙ notes below.
 
 † Pre-1b the `layout` row reads `min / max` over alternate frames — the flip-flop
 zeroed it every other frame, so the moving mean is halved. From 1b on, layout runs
@@ -117,12 +119,54 @@ never renders stale geometry. `can_reuse_geometry`'s three guards (same-width sw
 newline rejection, wrapped-leaf rejection) are covered by engine unit tests; full
 crate suite + clippy (nursery + pedantic) green.
 
-The four sub-rows (`setup`+`scale`+`solve`+`commit` ≈ 0.05) do not sum to the
-`layout` total (~0.10): the total is the whole system's wall-clock, the sub-rows
-only their own timed spans. The ~0.05 remainder is un-instrumented per-panel loop
-work (change-detection reads, two query `get`s) plus the new `can_reuse_geometry`
-probe (100 cache-backed re-measures/frame), left outside `solve`. Folding the probe
-into the `solve` span would close most of the gap — deferred as cosmetic.
+At the time the sub-rows were live, `setup`+`scale`+`solve`+`commit` ≈ 0.05 did
+not sum to the `layout` total (~0.10): the total is the whole system's wall-clock,
+the sub-rows only their own timed spans. The ~0.05 gap was un-instrumented
+per-panel loop work (change-detection reads, two query `get`s) plus the new
+`can_reuse_geometry` probe (100 cache-backed re-measures/frame), left outside
+`solve`. Known and small; the sub-row instrumentation was removed rather than
+closed.
+
+## Overlay rows since Step 3 — a per-thread waterfall
+
+After Step 3 the overlay was restructured into two additive blocks, one per
+thread, indented rows summing exactly to their block header
+(`crates/bevy_diegetic/examples/diegetic_text_stress.rs`):
+
+- **Main-thread block** — `ms` (raw frame delta) = `layout` (`compute_ms`) +
+  **`reconcile`** (new `DiegeticPerfStats::reconcile_ms` —
+  `reconcile_panel_text_children` + `reconcile_panel_image_children`, published
+  as `bevy_diegetic/panel/reconcile_ms`) + `shaping` + `mesh` + **`other`**
+  (the measured `First`→`Last` main-schedule span minus the four diegetic rows:
+  cascade, transform propagation, every other main system) + **`wait`** (`ms` −
+  the main-schedule span: the main thread blocked handing off to the render
+  thread, plus the extract copy).
+- **Render-thread block**, overlaps `ms` (pipelined rendering — the render
+  thread works on frame N while the main world runs N+1, so `ms` ≈ max(main,
+  render+GPU), not the sum): **`render`** (the whole `Render` schedule,
+  bracketed with `Instant` marks at set boundaries) = **`assets`** (the
+  `PrepareAssets` stage — re-uploading every mesh / image / buffer asset
+  modified this frame; with 100 label meshes rewritten per frame this is the
+  prime suspect for render-thread weight) + **`prep`** (extract-commands
+  apply, prepare meshes and views, specialize, queue, sort, bind groups,
+  cleanup) + **`gpu wait`** (the `PrepareViews` stage containing the swapchain
+  acquire — where the render thread blocks when the GPU is behind) +
+  **`graph`** (render-graph execution: pass encoding, submit, present).
+
+Reading it: `gpu wait` ≈ `render` ≈ `ms` with small `prep` / `graph` means the
+GPU paces the frame — the case Option B's instancing targets (fewer draws →
+less encode CPU *and* less vertex/overdraw work). On the main side, `wait` is
+the same pacing seen from the other thread: main blocked on render, render
+blocked on GPU.
+
+Platform caveat: per-pass **GPU** times are unobtainable in-app on this
+machine. Bevy 0.19 disables encoder GPU timestamps on macOS outright
+(bevy#22257), Apple-silicon Metal only supports stage-boundary counter sampling
+(no `TIMESTAMP_QUERY_INSIDE_PASSES`), and the shadow pass records no diagnostic
+span at all. `RenderDiagnosticsPlugin` is still registered, so per-pass *CPU*
+encode spans (`render/*/elapsed_cpu`) are readable from the `DiagnosticsStore`
+over BRP. For a true per-pass GPU breakdown (shadow / opaque / transparent /
+OIT), use Instruments' Metal System Trace (`xctrace`) against a release run.
 
 ## Finding — A is CPU-only; this stress test is render-bound
 

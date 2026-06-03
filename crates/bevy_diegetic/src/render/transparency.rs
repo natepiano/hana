@@ -43,6 +43,22 @@ use bevy::render::view::Msaa;
 
 use crate::screen_space::ScreenSpaceCamera;
 
+/// Sizing factor for Bevy's shared OIT fragment pool: the GPU node buffer holds
+/// `viewport_pixels × this` transparent fragments, and every fragment past that
+/// budget is **discarded** for the rest of the frame — visible as randomly
+/// flashing black blocks wherever the rasterizer tiles lost their fragments.
+///
+/// Bevy's 4.0 default is too small for diegetic scenes: a close-up camera with
+/// the typography overlay stacks glyph quads, overlay boxes, and panels on most
+/// pixels, and live-tuning over BRP put that view's demand between 4 and 6
+/// fragments per pixel. 8.0 keeps a ~2× margin over the worst observed view and
+/// costs 96 bytes of GPU memory per viewport pixel (12-byte nodes, double the
+/// default's 48), allocated once and resized with the window. The pool is a
+/// GPU-private storage buffer with no CPU copy; on Apple Silicon that is wired
+/// unified memory — it counts toward the process footprint (Activity Monitor's
+/// Memory column, `footprint`'s graphics category) but never appears in RSS.
+const OIT_FRAGMENTS_PER_PIXEL_AVERAGE: f32 = 8.0;
+
 /// Camera marker that opts a `Camera3d` into **Order Independent
 /// Transparency** for view-angle-stable compositing of [`AlphaMode::Blend`]
 /// (and [`AlphaMode::Premultiplied`]) text.
@@ -96,9 +112,13 @@ pub(super) fn on_stable_transparency_added(
     if let Ok(mut camera_3d) = cameras.get_mut(cam) {
         camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
     }
-    commands
-        .entity(cam)
-        .insert((OrderIndependentTransparencySettings::default(), Msaa::Off));
+    commands.entity(cam).insert((
+        OrderIndependentTransparencySettings {
+            fragments_per_pixel_average: OIT_FRAGMENTS_PER_PIXEL_AVERAGE,
+            ..default()
+        },
+        Msaa::Off,
+    ));
     for overlay in &mut msaa_overlays {
         commands.entity(overlay).insert(Msaa::Off);
     }

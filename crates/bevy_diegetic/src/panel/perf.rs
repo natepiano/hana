@@ -8,6 +8,7 @@ use bevy_kana::ToF64;
 
 use super::constants::DIAG_LAYOUT_COMPUTE_MS;
 use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
+use super::constants::DIAG_PANEL_RECONCILE_MS;
 use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
 use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
@@ -32,13 +33,18 @@ pub struct DiegeticPerfStats {
     pub compute_ms:     f32,
     /// Stage 1 — panels processed by the most recent layout run.
     pub compute_panels: usize,
+    /// Between stages 1 and 2 — `reconcile_panel_text_children` plus
+    /// `reconcile_panel_image_children` wall time in milliseconds: re-deriving
+    /// text / image child entities from each changed panel's render commands.
+    pub reconcile_ms:   f32,
     /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
     pub panel_text:     PanelTextPerfStats,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
 ///
-/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`]
+/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then the child reconcile →
+///    [`DiegeticPerfStats::reconcile_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
 /// 3. `update_panel_text_geometry` → [`Self::mesh_build_ms`] (glyphs → meshes)
 ///
@@ -97,6 +103,7 @@ impl Plugin for DiagnosticsPlugin {
         for diagnostic in [
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
+            Diagnostic::new(DIAG_PANEL_RECONCILE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_TOTAL_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
@@ -113,6 +120,7 @@ impl Plugin for DiagnosticsPlugin {
 fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagnostics) {
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || perf.compute_panels.to_f64());
+    diagnostics.add_measurement(&DIAG_PANEL_RECONCILE_MS, || f64::from(perf.reconcile_ms));
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_TOTAL_MS, || {
         f64::from(perf.panel_text.total_ms)
     });

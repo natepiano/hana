@@ -84,7 +84,12 @@ impl Plugin for TextRenderPlugin {
             PostUpdate,
             (
                 reconcile_panel_text_children.in_set(PanelChildSystems::Build),
-                reconcile_panel_image_children.in_set(PanelChildSystems::Build),
+                // After the text reconcile so the two passes' shared
+                // `DiegeticPerfStats::reconcile_ms` reset-then-accumulate
+                // sequence is deterministic.
+                reconcile_panel_image_children
+                    .in_set(PanelChildSystems::Build)
+                    .after(reconcile_panel_text_children),
                 shape_panel_text_children.after(reconcile_panel_text_children),
                 update_panel_text_geometry
                     .after(shape_panel_text_children)

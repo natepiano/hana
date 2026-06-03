@@ -9,6 +9,7 @@ mod text_shaping;
 mod transparency;
 mod world_text;
 
+use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
@@ -130,6 +131,10 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((TextRenderPlugin, PanelGeometryPlugin))
             .init_resource::<TextAntiAlias>()
+            // Bevy registers the OIT type without `ReflectComponent`; adding it
+            // enables reflection-based (BRP) edits of OIT settings on a live camera.
+            .register_type::<OrderIndependentTransparencySettings>()
+            .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
             .add_systems(Update, sync_text_anti_alias)
             .add_observer(transparency::on_stable_transparency_added)
             .add_observer(transparency::on_stable_transparency_removed)
