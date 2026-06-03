@@ -20,6 +20,7 @@ pub use panel_text::PanelText;
 pub use panel_text::PanelTextLayout;
 pub use panel_text::PanelTextReader;
 pub use panel_text::PanelTextRuns;
+pub use panel_text::TextEdit;
 use panel_text::TextRenderPlugin;
 pub use panel_text::TextRunOf;
 pub(crate) use sdf_material::SdfPanelMaterial;

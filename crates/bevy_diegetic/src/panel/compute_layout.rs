@@ -3,7 +3,6 @@
 //! content bounds after layout runs.
 
 use std::sync::Arc;
-use std::time::Duration;
 use std::time::Instant;
 
 use bevy::prelude::*;
@@ -59,15 +58,7 @@ pub(super) fn compute_panel_layouts(
         *trace_remaining = 30;
     }
 
-    let setup_start = Instant::now();
     let cached_measure = build_cached_measure(&cache, &measurer);
-    let setup_time = setup_start.elapsed();
-
-    // Per-panel stage timings accumulated across the loop, surfaced as the
-    // indented `scale` / `solve` / `commit` rows under `layout`.
-    let mut scale_time = Duration::ZERO;
-    let mut solve_time = Duration::ZERO;
-    let mut commit_time = Duration::ZERO;
 
     for (entity, panel_ref, mut tree_change, mut scaled_tree_cache) in &mut panels {
         let panel_changed = panel_ref.is_changed();
@@ -104,54 +95,52 @@ pub(super) fn compute_panel_layouts(
             continue;
         }
 
-        let scale_start = Instant::now();
         let scaled_tree = scaled_tree_cache.get_or_update(
             panel_ref.tree(),
             panel_ref.tree_revision(),
             layout_to_points,
             font_to_points,
         );
-        scale_time += scale_start.elapsed();
 
+        let viewport_width = panel_ref.width() * layout_to_points;
+        let viewport_height = panel_ref.height() * layout_to_points;
+
+        // Geometry-stable skip: a text-only edit (recorded as `VisualOnly`)
+        // whose changed leaves still measure to the same box can reuse the
+        // cached geometry and only regenerate the render-command stream, leaving
+        // the engine solve for genuine reflow. `can_reuse_geometry` re-measures
+        // the leaves and rejects anything the reuse would render wrong.
         if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
+            && computed.result().is_some_and(|result| {
+                result.can_reuse_geometry(
+                    scaled_tree,
+                    &cached_measure,
+                    viewport_width,
+                    viewport_height,
+                    1.0,
+                )
+            })
             && let Some(result) = computed.result_mut()
         {
-            let solve_start = Instant::now();
             result.regenerate_commands(scaled_tree);
-            solve_time += solve_start.elapsed();
             panel_count += 1;
             continue;
         }
 
-        let solve_start = Instant::now();
         let engine = LayoutEngine::new(Arc::clone(&cached_measure));
-        let result = engine.compute(
-            scaled_tree,
-            panel_ref.width() * layout_to_points,
-            panel_ref.height() * layout_to_points,
-            1.0,
-        );
-        solve_time += solve_start.elapsed();
+        let result = engine.compute(scaled_tree, viewport_width, viewport_height, 1.0);
 
-        let commit_start = Instant::now();
         commit_layout_result(&mut computed, &panel_ref, scaled_tree, result, entity);
-        commit_time += commit_start.elapsed();
         panel_count += 1;
     }
 
-    // Each stage zeroes on an empty frame, exactly like `compute_ms`.
-    let to_ms = |elapsed: Duration| {
-        if panel_count == 0 {
-            0.0
-        } else {
-            elapsed.as_secs_f32() * MILLISECONDS_PER_SECOND
-        }
+    // Zeroes on an empty frame so the `layout` row reads 0 when no panel relaid
+    // out, rather than the bare loop overhead.
+    perf.compute_ms = if panel_count == 0 {
+        0.0
+    } else {
+        start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND
     };
-    perf.compute_ms = to_ms(start.elapsed());
-    perf.compute_setup_ms = to_ms(setup_time);
-    perf.compute_scale_ms = to_ms(scale_time);
-    perf.compute_solve_ms = to_ms(solve_time);
-    perf.compute_commit_ms = to_ms(commit_time);
     perf.compute_panels = panel_count;
 }
 
@@ -162,8 +151,8 @@ pub(super) fn compute_panel_layouts(
 /// on a miss it falls back to the parley-backed [`DiegeticTextMeasurer`] and
 /// inserts the result back into the shared cache, so measurements computed
 /// during layout persist for the renderer instead of being discarded each frame.
-/// The handle clone plus closure allocation is the `setup`-stage cost surfaced
-/// in [`DiegeticPerfStats::compute_setup_ms`](super::perf::DiegeticPerfStats).
+/// The handle clone plus closure allocation is part of the layout wall time in
+/// [`DiegeticPerfStats::compute_ms`](super::perf::DiegeticPerfStats).
 fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer) -> MeasureTextFn {
     let cache_handle = cache.clone();
     let parley_fn = Arc::clone(&measurer.measure_fn);
@@ -181,8 +170,8 @@ fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer
 /// Writes a finished layout result back onto the panel.
 ///
 /// Records content bounds (converted to world units) and the editable-field
-/// records, warning on duplicate field ids. This is the `commit`-stage cost
-/// surfaced in [`DiegeticPerfStats::compute_commit_ms`](super::perf::DiegeticPerfStats).
+/// records, warning on duplicate field ids. This is part of the layout wall time
+/// in [`DiegeticPerfStats::compute_ms`](super::perf::DiegeticPerfStats).
 fn commit_layout_result(
     computed: &mut ComputedDiegeticPanel,
     panel_ref: &DiegeticPanel,

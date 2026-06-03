@@ -27,15 +27,6 @@ use crate::render::constants;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::world_text::TextContent;
 
-/// Marks a child whose [`TextContent`] reconcile wrote this frame, so
-/// [`sync_run_text_to_cache`] does not mistake reconcile's own tree→child copy
-/// for an out-of-flow edit and trigger a second layout pass (DTX-2). Cleared the
-/// next frame by [`clear_reconcile_owned`], after the sync pass that frame has
-/// filtered it.
-#[doc(hidden)]
-#[derive(Component)]
-pub(super) struct ReconcileOwned;
-
 /// A reused panel-text child plus the components reconcile compares incoming
 /// values against before deciding whether to write. The references borrow the
 /// `existing_children` query for one reconcile pass.
@@ -248,53 +239,6 @@ pub(super) fn reconcile_panel_text_children(
     }
 }
 
-/// Syncs an out-of-flow child [`TextContent`] edit back into the parent panel's
-/// `El.text` layout cache, the inverse of reconcile's tree→child copy.
-///
-/// `TextContent` on the child is the single source; `El.text` is the derived
-/// cache the layout engine measures and word-wraps. When a caller mutates a
-/// run's `TextContent` (e.g. through `PanelText`), this writes the new string
-/// into the cache and bumps the tree revision, so layout reruns and reconcile
-/// re-wraps — the property that makes "mutate `TextContent`" drive relayout.
-///
-/// `Without<ReconcileOwned>` skips reconcile's own writes (which would otherwise
-/// re-fire this and double the layout cost per edit). The immutable
-/// [`tree`](DiegeticPanel::tree) read before the mutable
-/// [`sync_run_text_cache`](DiegeticPanel::sync_run_text_cache) keeps an
-/// already-matching string from tripping `Changed<DiegeticPanel>`. Ordered
-/// `.before(PanelSystems::ApplyTreeChanges)` so the cache is current before
-/// layout reads it.
-pub(super) fn sync_run_text_to_cache(
-    runs: Query<
-        (&TextContent, &PanelTextLayout, &ChildOf),
-        (Changed<TextContent>, Without<ReconcileOwned>),
-    >,
-    mut panels: Query<&mut DiegeticPanel>,
-) {
-    for (content, layout, child_of) in &runs {
-        let Ok(mut panel) = panels.get_mut(child_of.parent()) else {
-            continue;
-        };
-        if panel.tree().element_text(layout.element_idx) == Some(content.text()) {
-            continue;
-        }
-        panel.sync_run_text_cache(layout.element_idx, content.text());
-    }
-}
-
-/// Removes the [`ReconcileOwned`] marker reconcile inserted on its own
-/// `TextContent` writes. Ordered `.after(sync_run_text_to_cache)` so the marker
-/// is still present while that frame's sync pass filters reconcile's write, then
-/// cleared so a genuine later edit to the same child is observed.
-pub(super) fn clear_reconcile_owned(
-    owned: Query<Entity, With<ReconcileOwned>>,
-    mut commands: Commands,
-) {
-    for entity in &owned {
-        commands.entity(entity).remove::<ReconcileOwned>();
-    }
-}
-
 /// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reconcile
 /// threads text, style, layout, and three captured cascade overrides through to
 /// a freshly spawned child.
@@ -333,7 +277,6 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             TextContent::new(text.to_owned()),
             style,
             layout,
-            ReconcileOwned,
             TextRunOf(panel_entity),
         ));
         spawned = child.id();
@@ -386,7 +329,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     } = request;
     let mut child = commands.entity(reusable.entity);
     if reusable.text.text() != text {
-        child.insert((TextContent::new(text.to_owned()), ReconcileOwned));
+        child.insert(TextContent::new(text.to_owned()));
     }
     if !reusable.style.gating_eq(&style) {
         child.insert(style);
@@ -686,18 +629,16 @@ mod tests {
     use std::sync::atomic::Ordering;
 
     use bevy::asset::AssetPlugin;
+    use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
     use super::PanelImageChild;
-    use super::ReconcileOwned;
-    use super::clear_reconcile_owned;
     use super::reconcile_panel_image_children;
     use super::reconcile_panel_text_children;
-    use super::sync_run_text_to_cache;
     use crate::Mm;
     use crate::PanelFieldId;
-    use crate::PanelSystems;
+    use crate::PanelText;
     use crate::cascade::Override;
     use crate::cascade::TextAlpha;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -941,21 +882,14 @@ mod tests {
         builder.build()
     }
 
-    /// App with headless layout, the gated reconcile (`PostUpdate`), and the Phase
-    /// 2 `El.text` cache sync + marker clear (`Update`) wired in their real
-    /// ordering, so a test can exercise a child `TextContent` edit end to end.
+    /// App with headless layout and the gated reconcile (`PostUpdate`), so a test
+    /// can edit the authoritative tree and watch the layout pipeline relayout and
+    /// reconcile re-derive the run child end to end.
     fn text_source_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(monospace_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(
-            Update,
-            (
-                sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges),
-                clear_reconcile_owned.after(sync_run_text_to_cache),
-            ),
-        );
         app.add_systems(PostUpdate, reconcile_panel_text_children);
         app
     }
@@ -979,11 +913,9 @@ mod tests {
     }
 
     #[test]
-    fn editing_child_text_content_relayouts_and_syncs_the_cache() {
+    fn editing_run_text_in_the_tree_relayouts_and_re_derives_the_child() {
         let mut app = text_source_app();
         let panel = spawn_panel(&mut app, one_text_tree("Hi"));
-        // Frame 1 spawns the child (with `ReconcileOwned`); frame 2 clears the
-        // marker so the next edit is seen as out-of-flow.
         app.update();
         app.update();
 
@@ -995,14 +927,15 @@ mod tests {
             .element_idx;
         let before = content_width(&app, panel);
 
-        // Out-of-flow edit: mutate the child `TextContent` directly, as a caller
-        // would through `PanelText`.
-        *app.world_mut()
-            .get_mut::<TextContent>(child)
-            .expect("child should carry TextContent") = TextContent::new("Hello World".to_owned());
+        // Tree-authoritative edit — exactly what `PanelText` / `DiegeticTextMut`
+        // do internally: write `El.text` and bump the tree revision.
+        app.world_mut()
+            .get_mut::<DiegeticPanel>(panel)
+            .expect("panel should exist")
+            .sync_run_text_cache(element_idx, "Hello World");
         app.update();
 
-        // The edit reached the `El.text` cache (single source → derived cache).
+        // The tree carries the new string ...
         assert_eq!(
             app.world()
                 .get::<DiegeticPanel>(panel)
@@ -1011,32 +944,20 @@ mod tests {
                 .element_text(element_idx),
             Some("Hello World"),
         );
-        // And drove a relayout: the wider string grows the content bounds.
+        // ... reconcile re-derived the run child from it ...
+        let child = first_text_child(&mut app);
+        assert_eq!(
+            app.world()
+                .get::<TextContent>(child)
+                .expect("child should carry TextContent")
+                .text(),
+            "Hello World",
+        );
+        // ... and the wider string grew the content bounds.
         let after = content_width(&app, panel);
         assert!(
             after > before,
             "editing the run should relayout: width {before} -> {after}",
-        );
-    }
-
-    #[test]
-    fn reconcile_owned_marker_gates_then_clears() {
-        let mut app = text_source_app();
-        spawn_panel(&mut app, one_text_tree("Hi"));
-        app.update();
-
-        // Reconcile tagged its own spawn so the sync pass skips it.
-        let child = first_text_child(&mut app);
-        assert!(
-            app.world().get::<ReconcileOwned>(child).is_some(),
-            "reconcile should mark the child it spawned"
-        );
-
-        // The clear runs the next frame, after that frame's sync filtered it.
-        app.update();
-        assert!(
-            app.world().get::<ReconcileOwned>(child).is_none(),
-            "the marker should be cleared the next frame"
         );
     }
 
@@ -1268,13 +1189,6 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.insert_resource(counting_measurer(counter));
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(
-            Update,
-            (
-                sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges),
-                clear_reconcile_owned.after(sync_run_text_to_cache),
-            ),
-        );
         app.add_systems(PostUpdate, reconcile_panel_text_children);
         app
     }
@@ -1283,22 +1197,21 @@ mod tests {
     fn an_unchanged_set_text_fires_no_measure() {
         let counter = Arc::new(AtomicUsize::new(0));
         let mut app = counting_text_source_app(Arc::clone(&counter));
-        spawn_panel(&mut app, one_text_tree("Hi"));
-        // Frame 1 spawns + measures; frame 2 clears `ReconcileOwned` so the next
-        // edit is seen as out-of-flow.
+        let panel = spawn_panel(&mut app, one_text_tree("Hi"));
         app.update();
         app.update();
         let baseline = counter.load(Ordering::Relaxed);
         assert!(baseline > 0, "the initial layout measures the run");
 
-        // Rewrite the byte-identical string. `sync_run_text_to_cache` compares
-        // before writing, so an unchanged string never reaches the `El.text`
-        // cache, never dirties `DiegeticPanel`, and never re-runs the layout —
-        // so `MeasureTextFn` fires zero more times (TR-L).
-        let child = first_text_child(&mut app);
-        *app.world_mut()
-            .get_mut::<TextContent>(child)
-            .expect("child carries TextContent") = TextContent::new("Hi".to_owned());
+        // Rewrite the byte-identical string through the public edit path.
+        // `TextEdit::set_text` read-compares before taking the `&mut DiegeticPanel`
+        // borrow, so an unchanged string never dirties the panel, never relayouts,
+        // and so `MeasureTextFn` fires zero more times (TR-L).
+        let wrote = app
+            .world_mut()
+            .run_system_once(move |mut text: PanelText| text.set_sole_text(panel, "Hi"))
+            .expect("system runs");
+        assert!(wrote, "the lone run resolves");
         app.update();
 
         assert_eq!(

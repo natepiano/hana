@@ -29,24 +29,11 @@ use super::constants::DIAG_PANEL_TEXT_TOTAL_MS;
 pub struct DiegeticPerfStats {
     /// Stage 1 — `compute_panel_layouts` wall time in milliseconds.
     /// Layout math: element positions and sizes for every dirty panel.
-    pub compute_ms:        f32,
-    /// Inside [`Self::compute_ms`] — the once-per-frame `ShapedTextCache` clone
-    /// and measure-closure build, before the panel loop. Runs every frame layout
-    /// is dirty regardless of panel count.
-    pub compute_setup_ms:  f32,
-    /// Inside [`Self::compute_ms`] — `ScaledLayoutTreeCache::get_or_update`,
-    /// summed across panels. Rescales the layout tree into points.
-    pub compute_scale_ms:  f32,
-    /// Inside [`Self::compute_ms`] — the layout-engine solve plus the
-    /// `VisualOnly` regenerate-commands path, summed across panels.
-    pub compute_solve_ms:  f32,
-    /// Inside [`Self::compute_ms`] — field-record collection and the
-    /// `set_result_with_fields` write-back, summed across panels.
-    pub compute_commit_ms: f32,
+    pub compute_ms:     f32,
     /// Stage 1 — panels processed by the most recent layout run.
-    pub compute_panels:    usize,
+    pub compute_panels: usize,
     /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
-    pub panel_text:        PanelTextPerfStats,
+    pub panel_text:     PanelTextPerfStats,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -86,8 +73,7 @@ pub struct PanelTextPerfStats {
     /// Stage 3 — wall time of `update_panel_text_geometry` this frame.
     /// Covers building glyph meshes and despawning stale meshes. After the
     /// shared-atlas change (option C) the per-run pack / upload / material work
-    /// is sub-millisecond, so its sub-breakdown was retired; the layout solve is
-    /// now the cost worth splitting out (see `DiegeticPerfStats::compute_*_ms`).
+    /// is sub-millisecond, so its sub-breakdown was retired.
     pub mesh_build_ms: f32,
     /// Number of panels whose text shaping ran this frame.
     pub shaped_panels: usize,

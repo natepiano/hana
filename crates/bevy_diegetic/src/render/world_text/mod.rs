@@ -76,15 +76,17 @@ pub struct ComputedGlyphMetrics {
     pub advance_x: f32,
 }
 
-/// The text-source string for a text entity.
+/// The per-run text string for a text entity.
 ///
 /// Carried by every panel-text run, including the single run a one-element
-/// [`DiegeticText`](crate::DiegeticText) label spawns — mutating a run's
-/// `TextContent` is how callers change the string at runtime, which drives
-/// relayout. Its presence also marks an entity as a panel-text run
-/// (`With<TextContent>`). Style is controlled by the required
-/// [`TextStyle`](crate::TextStyle) component (added with defaults if not
-/// specified).
+/// [`DiegeticText`](crate::DiegeticText) label spawns. For a panel run this is
+/// derived output: reconcile rewrites it from the panel's authoritative `El.text`
+/// tree, and shaping reads it. To change a run's string at runtime, write the
+/// tree through [`PanelText`](crate::PanelText) / [`DiegeticTextMut`](crate::DiegeticTextMut),
+/// not this component — a direct edit is overwritten on the next reconcile pass.
+/// Its presence also marks an entity as a panel-text run (`With<TextContent>`).
+/// Style is controlled by the required [`TextStyle`](crate::TextStyle) component
+/// (added with defaults if not specified).
 #[derive(Component, Clone, Debug, Reflect)]
 #[require(TextStyle, Transform, Visibility)]
 pub struct TextContent {

@@ -1946,6 +1946,88 @@ fn grow_body_compression_20_rows() {
     );
 }
 
+/// A one-element Fit text panel at the standard viewport — the one-element panel
+/// a standalone label becomes at runtime, the geometry-stable skip's main subject.
+fn fit_text_tree(text: &str) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
+    builder.text(text, TextStyle::new(10.0));
+    builder.build()
+}
+
+#[test]
+fn can_reuse_geometry_holds_for_a_same_width_text_swap_only() {
+    let measure = monospace_measure();
+    let engine = LayoutEngine::new(Arc::clone(&measure));
+    let result = engine.compute(&fit_text_tree("AAA"), VIEWPORT, VIEWPORT, 1.0);
+
+    // A same-char-count monospace swap measures bit-identical, so the cached
+    // geometry still describes the box — the skip is allowed.
+    assert!(
+        result.can_reuse_geometry(&fit_text_tree("BBB"), &measure, VIEWPORT, VIEWPORT, 1.0),
+        "an equal-width retext should reuse geometry",
+    );
+
+    // A wider string measures differently, so the box would move — solve.
+    assert!(
+        !result.can_reuse_geometry(&fit_text_tree("AAAA"), &measure, VIEWPORT, VIEWPORT, 1.0),
+        "a wider retext must not reuse geometry",
+    );
+
+    // A viewport change re-positions content even at identical text — solve.
+    assert!(
+        !result.can_reuse_geometry(
+            &fit_text_tree("BBB"),
+            &measure,
+            VIEWPORT + 1.0,
+            VIEWPORT,
+            1.0
+        ),
+        "a viewport change must not reuse geometry",
+    );
+}
+
+#[test]
+fn can_reuse_geometry_rejects_a_newline_even_at_the_same_natural_width() {
+    let measure = monospace_measure();
+    let engine = LayoutEngine::new(Arc::clone(&measure));
+    let result = engine.compute(&fit_text_tree("AAA"), VIEWPORT, VIEWPORT, 1.0);
+
+    // "AAA\nA" has the same widest-line width as "AAA", so the width check alone
+    // would pass — but the newline forces a second line, which the unwrapped
+    // single-command reuse cannot render. The explicit newline guard rejects it.
+    assert!(
+        !result.can_reuse_geometry(&fit_text_tree("AAA\nA"), &measure, VIEWPORT, VIEWPORT, 1.0),
+        "new text with a newline must not reuse single-line geometry",
+    );
+}
+
+#[test]
+fn can_reuse_geometry_rejects_a_wrapped_leaf() {
+    let measure = monospace_measure();
+    let engine = LayoutEngine::new(Arc::clone(&measure));
+    // A fixed-width element narrower than the text forces word wrapping, so the
+    // result caches per-line breaks for the old string.
+    let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
+    builder.with(
+        El::new().width(Sizing::fixed(40.0)).height(Sizing::FIT),
+        |builder| {
+            builder.text(
+                "alpha beta gamma delta",
+                TextStyle::new(10.0).wrap(TextWrap::Words),
+            );
+        },
+    );
+    let tree = builder.build();
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    // Even re-checking the identical tree must decline: the cached lines belong
+    // to the prior string and cannot carry a new one through `regenerate`.
+    assert!(
+        !result.can_reuse_geometry(&tree, &measure, VIEWPORT, VIEWPORT, 1.0),
+        "a wrapped leaf can never reuse its stale line breaks",
+    );
+}
+
 #[test]
 #[ignore = "manual perf benchmark — run with --ignored"]
 fn perf_element_sizes() {

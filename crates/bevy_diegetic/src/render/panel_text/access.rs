@@ -6,7 +6,7 @@
 //!   hops the panel→run relationship internally, the ergonomic path for "retext my labels".
 //! - **By [`PanelFieldId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
 //!   multi-run panel; [`PanelTextReader`] is the read-only variant a reader system uses so it does
-//!   not serialize on the `&mut TextContent` claim.
+//!   not serialize on the `&mut DiegeticPanel` write claim.
 //!
 //! The id-addressed pair resolve a run through the panel's `id → Entity` index
 //! ([`DiegeticPanel::text_child`]) and validate liveness via their
@@ -23,7 +23,7 @@ use super::PanelTextRuns;
 use crate::PanelFieldId;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
-use crate::render::world_text::TextContent;
+use crate::panel::DiegeticPanelChangeClassification;
 
 /// Read-only access to panel text runs by [`PanelFieldId`].
 ///
@@ -58,29 +58,11 @@ impl PanelTextReader<'_, '_> {
     }
 
     /// Resolves a run id to a live entity, the shared chokepoint for `entity` /
-    /// `text` / `set_text`.
-    ///
-    /// `text_child` is an unchecked index read; a despawned child fails the
-    /// layout query and resolves to `None` (TR-Q liveness). On a miss, the tree —
-    /// authoritative for valid ids at build time, unlike the reconcile-timed
-    /// index — discriminates a genuine typo from a run not yet materialized: a
-    /// `#[cfg(debug_assertions)]` `warn!` fires only when the id is absent from
-    /// the tree, so the first-frame / post-`set_tree` window stays quiet.
+    /// `text`. Delegates to the free [`resolve_run_entity`] so [`PanelText`]
+    /// (which holds a `&mut DiegeticPanel` query that cannot coexist with this
+    /// reader's `&DiegeticPanel` one) shares the same resolution.
     fn resolve(&self, data: &DiegeticPanel, id: &PanelFieldId) -> Option<Entity> {
-        // `text_child` is an unchecked index read; the layout query confirms the
-        // entity is still a live run (TR-Q). A stale index entry (entity despawned
-        // out of flow before reconcile rebuilt the index) falls to the miss path
-        // below, but its id is still valid in the tree, so it stays silent.
-        if let Some(child) = data.text_child(id)
-            && self.layouts.contains(child)
-        {
-            return Some(child);
-        }
-        #[cfg(debug_assertions)]
-        if !data.tree().contains_text_id(id) {
-            warn!("no text run with id {id}");
-        }
-        None
+        resolve_run_entity(data, id, &self.layouts)
     }
 
     /// Reads the lone run of a one-element panel (the runtime form of a
@@ -124,19 +106,30 @@ impl PanelTextReader<'_, '_> {
 
 /// Read-write access to panel text runs by [`PanelFieldId`].
 ///
-/// `set_text` writes the run's `line_index == 0` child `TextContent`; the
-/// `Changed<TextContent>` reactor then syncs it into the `El.text` cache and
-/// relayout re-wraps it, so passing the whole string works for both single-line
-/// and wrapped runs. Reads delegate to the embedded [`PanelTextReader`] and so
-/// come from the `El.text` cache.
+/// `set_text` writes the run's string into the panel's authoritative `El.text`
+/// cache (via `DiegeticPanel::sync_run_text_cache`) and bumps the tree
+/// revision, so the next layout re-wraps it and reconcile re-derives the child —
+/// passing the whole string works for both single-line and wrapped runs. Reads
+/// also come from the `El.text` cache. Both go through a single
+/// `&mut DiegeticPanel` query, so this cannot embed a [`PanelTextReader`] (its
+/// `&DiegeticPanel` query would conflict); the resolution helpers are shared as
+/// free functions instead.
 ///
-/// The `&mut TextContent` claim serializes against any other `TextContent`
-/// accessor: one system should own the `PanelText` writes per frame; reader
-/// systems take [`PanelTextReader`] instead.
+/// The `&mut DiegeticPanel` claim serializes against other panel writers: one
+/// system should own the `PanelText` writes per frame; reader systems take
+/// [`PanelTextReader`] instead.
 #[derive(SystemParam)]
 pub struct PanelText<'w, 's> {
-    reader:  PanelTextReader<'w, 's>,
-    content: Query<'w, 's, &'static mut TextContent, With<PanelTextLayout>>,
+    panels: Query<
+        'w,
+        's,
+        (
+            &'static mut DiegeticPanel,
+            Option<&'static PanelTextRuns>,
+            &'static mut DiegeticPanelChangeClassification,
+        ),
+    >,
+    layouts: Query<'w, 's, &'static PanelTextLayout>,
 }
 
 impl PanelText<'_, '_> {
@@ -144,54 +137,120 @@ impl PanelText<'_, '_> {
     /// [`PanelTextReader::entity`].
     #[must_use]
     pub fn entity(&self, panel: Entity, id: &PanelFieldId) -> Option<Entity> {
-        self.reader.entity(panel, id)
+        let (data, _, _) = self.panels.get(panel).ok()?;
+        resolve_run_entity(data, id, &self.layouts)
     }
 
-    /// Reads a named run's full string. See [`PanelTextReader::text`].
+    /// Reads a named run's full string from the `El.text` cache. See
+    /// [`PanelTextReader::text`].
     #[must_use]
     pub fn text(&self, panel: Entity, id: &PanelFieldId) -> Option<&str> {
-        self.reader.text(panel, id)
+        let (data, _, _) = self.panels.get(panel).ok()?;
+        let child = resolve_run_entity(data, id, &self.layouts)?;
+        let layout = self.layouts.get(child).ok()?;
+        data.tree().element_text(layout.element_idx)
     }
 
     /// Reads the lone run of a one-element panel. See
     /// [`PanelTextReader::sole_text`].
     #[must_use]
-    pub fn sole_text(&self, panel: Entity) -> Option<&str> { self.reader.sole_text(panel) }
+    pub fn sole_text(&self, panel: Entity) -> Option<&str> {
+        let child = self.sole_run_entity(panel)?;
+        let (data, _, _) = self.panels.get(panel).ok()?;
+        let layout = self.layouts.get(child).ok()?;
+        data.tree().element_text(layout.element_idx)
+    }
 
-    /// Sets a named run's text, returning whether a run was found and written.
-    ///
-    /// Writes the `line_index == 0` child; the reactor re-wraps from the new
-    /// string, so a wrapped run is retext by passing the whole replacement.
+    /// The lone `line_index == 0` run of a one-element panel, or `None` when the
+    /// panel has no run or more than one distinct run. See
+    /// [`PanelTextReader::sole_run_entity`].
+    fn sole_run_entity(&self, panel: Entity) -> Option<Entity> {
+        let (_, runs, _) = self.panels.get(panel).ok()?;
+        lone_run(runs?, &self.layouts)
+    }
+
+    /// Sets a named run's text, returning whether a run was found. Writes the
+    /// whole string into the tree, so a wrapped run is retext by passing the
+    /// whole replacement; an unchanged string leaves the panel un-dirtied (no
+    /// relayout) via [`TextEdit::set_text`].
     pub fn set_text(&mut self, panel: Entity, id: &PanelFieldId, text: impl Into<String>) -> bool {
-        let Some(child) = self.reader.entity(panel, id) else {
+        let Some(child) = self.entity(panel, id) else {
             return false;
         };
-        let Ok(mut content) = self.content.get_mut(child) else {
+        let Ok(layout) = self.layouts.get(child) else {
             return false;
         };
-        content.set_text(text);
+        let element_idx = layout.element_idx;
+        let Ok((data, _, classification)) = self.panels.get_mut(panel) else {
+            return false;
+        };
+        TextEdit {
+            panel: data,
+            classification,
+            element_idx,
+        }
+        .set_text(text);
         true
     }
 
     /// Sets the lone run of a one-element panel (a
     /// [`DiegeticText`](crate::DiegeticText)), no id needed. Returns whether a
-    /// single run was found and written.
+    /// single run was found.
     pub fn set_sole_text(&mut self, panel: Entity, text: impl Into<String>) -> bool {
-        let Some(child) = self.reader.sole_run_entity(panel) else {
+        let Some(child) = self.sole_run_entity(panel) else {
             return false;
         };
-        let Ok(mut content) = self.content.get_mut(child) else {
+        let Ok(layout) = self.layouts.get(child) else {
             return false;
         };
-        content.set_text(text);
+        let element_idx = layout.element_idx;
+        let Ok((data, _, classification)) = self.panels.get_mut(panel) else {
+            return false;
+        };
+        TextEdit {
+            panel: data,
+            classification,
+            element_idx,
+        }
+        .set_text(text);
         true
     }
+}
+
+/// Resolves a run `id` to a live entity against `data`'s `id → Entity` index,
+/// the shared chokepoint behind [`PanelTextReader::entity`] / `text` and
+/// [`PanelText::set_text`]. A free function (not a method) because [`PanelText`]
+/// resolves through a `&mut DiegeticPanel` query that cannot coexist with
+/// [`PanelTextReader`]'s `&DiegeticPanel` one, so neither can embed the other.
+///
+/// `text_child` is an unchecked index read; the `layouts` query confirms the
+/// entity is still a live run (TR-Q). A stale index entry (entity despawned out
+/// of flow before reconcile rebuilt the index) falls to the miss path, but its
+/// id is still valid in the tree — authoritative for valid ids at build time,
+/// unlike the reconcile-timed index — so a `#[cfg(debug_assertions)]` `warn!`
+/// fires only on a genuine typo, leaving the first-frame / post-`set_tree`
+/// window quiet.
+fn resolve_run_entity(
+    data: &DiegeticPanel,
+    id: &PanelFieldId,
+    layouts: &Query<&PanelTextLayout>,
+) -> Option<Entity> {
+    if let Some(child) = data.text_child(id)
+        && layouts.contains(child)
+    {
+        return Some(child);
+    }
+    #[cfg(debug_assertions)]
+    if !data.tree().contains_text_id(id) {
+        warn!("no text run with id {id}");
+    }
+    None
 }
 
 /// The `line_index == 0` entity of a label's lone run, or `None` when the set
 /// has no run or more than one distinct run.
 ///
-/// Shared by [`DiegeticTextMut`]; the same rule
+/// Shared by [`DiegeticTextMut`] and [`PanelText`]; the same rule
 /// [`PanelTextReader::sole_run_entity`] applies, so a wrapped label (one entity
 /// per visual line) resolves to its line-0 entity rather than `None`.
 fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<Entity> {
@@ -210,14 +269,68 @@ fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<E
     found
 }
 
+/// A tree-routed edit handle for one panel text run.
+///
+/// Handed to the [`DiegeticTextMut::for_each_mut`] closure and used internally by
+/// [`PanelText`]. Keeps the `text()` / `set_text()` ergonomics callers had on
+/// `&mut TextContent`, but forwards them to the panel's authoritative `El.text`
+/// cache instead of the derived run child.
+///
+/// `set_text` read-compares against the current tree string first, so an
+/// unchanged write never takes the `&mut DiegeticPanel` path and never dirties
+/// the panel — a no-op edit drives no relayout and no measure (TR-L). It holds a
+/// [`Mut`] (not a `&mut`) for the same reason: reads go through `Deref` and do
+/// not flag the panel changed.
+///
+/// A real write also records a `VisualOnly` change on the panel's
+/// `DiegeticPanelChangeClassification` sibling, so `compute_panel_layouts`
+/// re-measures only the edited leaf and takes the geometry-stable skip (reuse
+/// cached geometry, regenerate commands) when the box did not move — leaving the
+/// full engine solve for a genuine reflow.
+pub struct TextEdit<'a> {
+    panel:          Mut<'a, DiegeticPanel>,
+    classification: Mut<'a, DiegeticPanelChangeClassification>,
+    element_idx:    usize,
+}
+
+impl TextEdit<'_> {
+    /// The run's current string from the `El.text` cache, or `""` if the element
+    /// index no longer resolves.
+    #[must_use]
+    pub fn text(&self) -> &str {
+        self.panel
+            .tree()
+            .element_text(self.element_idx)
+            .unwrap_or_default()
+    }
+
+    /// Writes the whole run string into the `El.text` cache, bumping the tree
+    /// revision so layout re-wraps and reconcile re-derives the child, and
+    /// recording the edit as `VisualOnly` for the geometry-stable skip. An
+    /// unchanged string is skipped before the `&mut` access, so it neither
+    /// dirties the panel, records a change, nor triggers a relayout.
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        let text = text.into();
+        // Read through `Deref` (no change flag) and bail on a no-op, mirroring
+        // the equality guard the deleted `sync_run_text_to_cache` held.
+        if self.panel.tree().element_text(self.element_idx) == Some(text.as_str()) {
+            return;
+        }
+        if self.panel.sync_run_text_cache(self.element_idx, &text) {
+            self.classification.note_text_edit();
+        }
+    }
+}
+
 /// Ergonomic mutation of standalone [`DiegeticText`](crate::DiegeticText) labels
 /// addressed by a user marker `M` — the public path for "retext my labels".
 ///
 /// A standalone label is a one-element panel: the marker `M` sits on the panel
-/// entity, but the editable [`TextContent`] sits on the run child, so a naive
-/// `Query<&mut TextContent, With<M>>` matches nothing. This `SystemParam` hops
-/// the panel→run relationship internally, so a caller names only its own marker
-/// and never touches [`PanelTextRuns`] / [`TextContent`] / `sole()`:
+/// entity, while the run text lives in the panel's authoritative `El.text` tree
+/// cache (the run child's `TextContent` is derived output reconcile rewrites).
+/// This `SystemParam` hops the panel→run relationship internally, so a caller
+/// names only its own marker and never touches [`PanelTextRuns`] / the tree /
+/// `sole()`:
 ///
 /// ```ignore
 /// fn rename(mut labels: DiegeticTextMut<CubeFaceLabel>) {
@@ -227,8 +340,8 @@ fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<E
 ///
 /// [`set`](Self::set) writes one string to every `M`-marked label (a single
 /// label or a uniform update); [`for_each_mut`](Self::for_each_mut) yields each
-/// label's marker and editable text for per-label strings. Both resolve a
-/// label's lone run by its `line_index == 0` entity, so a wrapped label is
+/// label's marker and a [`TextEdit`] handle for per-label strings. Both resolve
+/// a label's lone run by its `line_index == 0` entity, so a wrapped label is
 /// editable too.
 ///
 /// Monomorphizes per distinct marker type used in a system (a handful),
@@ -238,42 +351,66 @@ fn lone_run(runs: &PanelTextRuns, layouts: &Query<&PanelTextLayout>) -> Option<E
 pub struct DiegeticTextMut<'w, 's, M: Component> {
     runs:    Query<'w, 's, (Entity, &'static M, &'static PanelTextRuns)>,
     layouts: Query<'w, 's, &'static PanelTextLayout>,
-    content: Query<'w, 's, &'static mut TextContent>,
-    panels:  Query<'w, 's, &'static mut DiegeticPanel>,
+    panels: Query<
+        'w,
+        's,
+        (
+            &'static mut DiegeticPanel,
+            &'static mut DiegeticPanelChangeClassification,
+        ),
+    >,
 }
 
 impl<M: Component> DiegeticTextMut<'_, '_, M> {
     /// Writes `text` to every `M`-marked label's lone run, returning how many
-    /// labels were written.
+    /// labels resolved. An unchanged string leaves a label un-dirtied.
     pub fn set(&mut self, text: impl Into<String>) -> usize {
         let text = text.into();
         let mut written = 0;
-        for (.., runs) in &self.runs {
+        for (panel_entity, _, runs) in &self.runs {
             let Some(run) = lone_run(runs, &self.layouts) else {
                 continue;
             };
-            let Ok(mut content) = self.content.get_mut(run) else {
+            let Ok(layout) = self.layouts.get(run) else {
                 continue;
             };
-            content.set_text(text.clone());
+            let element_idx = layout.element_idx;
+            let Ok((panel, classification)) = self.panels.get_mut(panel_entity) else {
+                continue;
+            };
+            TextEdit {
+                panel,
+                classification,
+                element_idx,
+            }
+            .set_text(text.clone());
             written += 1;
         }
         written
     }
 
-    /// Calls `f` with each `M`-marked label's marker and its editable
-    /// [`TextContent`], for setting a different string per label. Returns how
-    /// many labels were visited.
-    pub fn for_each_mut(&mut self, mut f: impl FnMut(&M, &mut TextContent)) -> usize {
+    /// Calls `f` with each `M`-marked label's marker and a [`TextEdit`] handle,
+    /// for setting a different string per label. Returns how many labels were
+    /// visited.
+    pub fn for_each_mut(&mut self, mut f: impl FnMut(&M, &mut TextEdit)) -> usize {
         let mut visited = 0;
-        for (_, marker, runs) in &self.runs {
+        for (panel_entity, marker, runs) in &self.runs {
             let Some(run) = lone_run(runs, &self.layouts) else {
                 continue;
             };
-            let Ok(mut content) = self.content.get_mut(run) else {
+            let Ok(layout) = self.layouts.get(run) else {
                 continue;
             };
-            f(marker, &mut content);
+            let element_idx = layout.element_idx;
+            let Ok((panel, classification)) = self.panels.get_mut(panel_entity) else {
+                continue;
+            };
+            let mut edit = TextEdit {
+                panel,
+                classification,
+                element_idx,
+            };
+            f(marker, &mut edit);
             visited += 1;
         }
         visited
@@ -300,7 +437,10 @@ impl<M: Component> DiegeticTextMut<'_, '_, M> {
                 continue;
             };
             let element_idx = layout.element_idx;
-            let Ok(mut panel) = self.panels.get_mut(panel_entity) else {
+            // A restyle changes `El.config`, which can affect measurement, so it
+            // is left to the full engine solve — the classification slot stays at
+            // its default (no `VisualOnly` skip recorded here).
+            let Ok((mut panel, _)) = self.panels.get_mut(panel_entity) else {
                 continue;
             };
             let Some(mut style) = panel.tree().element_style(element_idx).cloned() else {
@@ -331,7 +471,6 @@ mod tests {
     use super::PanelTextReader;
     use crate::Mm;
     use crate::PanelFieldId;
-    use crate::PanelSystems;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
@@ -384,23 +523,16 @@ mod tests {
         }
     }
 
-    /// Headless layout plus the Phase 2 cache sync + marker clear (`Update`) and
-    /// the reconcile pass (`PostUpdate`) in their real ordering, so the public
-    /// `PanelText` get/set is exercised against a live index and the relayout
-    /// reactor. Parameterized by measurer so a test can choose one whose output
-    /// depends on the font.
+    /// Headless layout plus the reconcile pass (`PostUpdate`), so the public
+    /// `PanelText` / `DiegeticTextMut` get/set is exercised against a live index:
+    /// a write goes straight to the authoritative tree (`El.text`), the layout
+    /// pipeline relayouts, and reconcile re-derives the run child. Parameterized
+    /// by measurer so a test can choose one whose output depends on the font.
     fn app_with_measurer(measurer: DiegeticTextMeasurer) -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.insert_resource(measurer);
         app.add_plugins(HeadlessLayoutPlugin);
-        app.add_systems(
-            Update,
-            (
-                reconcile::sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges),
-                reconcile::clear_reconcile_owned.after(reconcile::sync_run_text_to_cache),
-            ),
-        );
         app.add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
         app
     }
@@ -454,9 +586,8 @@ mod tests {
             .id()
     }
 
-    /// Spawns and runs two frames: frame 1 materializes the run (tagged
-    /// `ReconcileOwned`), frame 2 clears the marker so a later edit reads as
-    /// out-of-flow.
+    /// Spawns and runs two frames so the run materializes and the layout settles
+    /// before a test edits it.
     fn settled_panel(app: &mut App, tree: LayoutTree) -> Entity {
         let panel = spawn_panel(app, tree);
         app.update();
@@ -1010,9 +1141,9 @@ mod tests {
             .expect("system runs");
         assert!(wrote, "the edit is accepted");
 
-        // Run several frames. The edit must drive exactly one relayout — the
-        // `ReconcileOwned` gate (DTX-2) keeps reconcile's own tree→child write from
-        // re-triggering the sync into a second pass, and nothing oscillates after.
+        // Run several frames. The edit must drive exactly one relayout: the write
+        // lands once in the authoritative tree, reconcile re-derives the run child
+        // from it, and — with no child→tree sync-back — nothing oscillates after.
         app.update();
         app.update();
         app.update();

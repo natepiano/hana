@@ -20,6 +20,7 @@ pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
+pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;

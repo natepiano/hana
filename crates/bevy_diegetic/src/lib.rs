@@ -225,6 +225,7 @@ use render::RenderPlugin;
 pub use render::StableTransparency;
 pub use render::TextAntiAlias;
 pub use render::TextContent;
+pub use render::TextEdit;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
 pub use render::default_panel_material;

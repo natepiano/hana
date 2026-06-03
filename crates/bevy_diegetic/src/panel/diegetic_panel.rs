@@ -267,16 +267,16 @@ impl DiegeticPanel {
         self.tree_revision = self.tree_revision.wrapping_add(1);
     }
 
-    /// Writes an out-of-flow run edit into the `El.text` layout cache and bumps
-    /// the tree revision so [`ScaledLayoutTreeCache`] rebuilds with the new
-    /// string. Returns whether the cache changed.
+    /// Writes a run-text edit into the authoritative `El.text` tree and bumps the
+    /// tree revision so [`ScaledLayoutTreeCache`] rebuilds with the new string.
+    /// Returns whether the cache changed.
     ///
-    /// The single physical copy of the string is the child's
-    /// [`TextContent`](crate::TextContent); `El.text` is a derived cache the
-    /// layout engine reads to measure and word-wrap. `sync_run_text_to_cache`
-    /// calls this when a child `TextContent` changes out of flow. Skips the
-    /// revision bump (and so the layout) when the string already matches, which
-    /// also keeps the measurer off an unchanged cached string.
+    /// `El.text` is the single source for run text; the child
+    /// [`TextContent`](crate::TextContent) is derived output reconcile rewrites
+    /// from the tree. The public edit path (`PanelText` / `DiegeticTextMut` via
+    /// `TextEdit`) calls this to change a run's string. Skips the revision bump
+    /// (and so the layout) when the string already matches, which also keeps the
+    /// measurer off an unchanged cached string.
     pub(crate) fn sync_run_text_cache(&mut self, index: usize, text: &str) -> bool {
         if self.tree.set_element_text(index, text) {
             self.tree_revision = self.tree_revision.wrapping_add(1);
@@ -290,12 +290,13 @@ impl DiegeticPanel {
     /// revision so [`ScaledLayoutTreeCache`] rebuilds and the layout engine
     /// re-measures with the new style. Returns whether the style changed.
     ///
-    /// Unlike text — whose physical copy lives on the run child and syncs back
-    /// here — the tree config is the single authoritative style. A label
-    /// restyle (font, size) mutates it through this method; the relayout it
-    /// triggers flows the new config to the run via reconcile, so measurement
-    /// and rendering stay on the same source. Skips the revision bump (and so
-    /// the layout) when the style already matches.
+    /// Like run text (see [`sync_run_text_cache`](Self::sync_run_text_cache)),
+    /// the tree is the single authoritative source: `El.config` for style,
+    /// `El.text` for the string, while the run child is derived output reconcile
+    /// rewrites. A label restyle (font, size) mutates `El.config` through this
+    /// method; the relayout it triggers flows the new config to the run via
+    /// reconcile, so measurement and rendering stay on the same source. Skips the
+    /// revision bump (and so the layout) when the style already matches.
     pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
         if self.tree.set_element_style(index, style) {
             self.tree_revision = self.tree_revision.wrapping_add(1);
@@ -554,7 +555,7 @@ pub(super) fn seed_panel_overrides(
 
 /// Per-frame tree-change classification consumed by the panel layout system.
 #[derive(Component, Default)]
-pub(super) struct DiegeticPanelChangeClassification {
+pub(crate) struct DiegeticPanelChangeClassification {
     pending: Option<LayoutTreeChange>,
 }
 
@@ -565,6 +566,12 @@ impl DiegeticPanelChangeClassification {
             Some(prior) => prior.combine(change),
         });
     }
+
+    /// Records a run-text edit as `VisualOnly`: a text change moves no other
+    /// element, so `compute_panel_layouts` re-measures only the edited leaf and
+    /// takes the geometry-stable skip when its box is unchanged. Combining with a
+    /// same-frame `LayoutAffecting` change still resolves to a full solve.
+    pub(crate) fn note_text_edit(&mut self) { self.record(LayoutTreeChange::VisualOnly); }
 
     pub(super) const fn take(&mut self) -> Option<LayoutTreeChange> { self.pending.take() }
 

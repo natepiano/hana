@@ -234,4 +234,58 @@ impl LayoutResult {
             self.font_scale,
         );
     }
+
+    /// Returns whether reusing this result's cached geometry via
+    /// [`regenerate_commands`](Self::regenerate_commands) for `tree` would
+    /// produce the same layout a fresh [`compute`](LayoutEngine::compute) would.
+    ///
+    /// This is the geometry-stable skip's correctness gate. After a per-frame
+    /// text edit, the caller re-measures the changed leaves: if their box did
+    /// not move, only the glyphs changed, so the engine solve can be skipped and
+    /// the render commands regenerated from the unchanged geometry. The command
+    /// stream re-reads text and visual-only config (color, alignment) live from
+    /// `tree`, so those flow through without a solve.
+    ///
+    /// Conservative — any of these returns `false`, so the caller runs a full
+    /// solve: a structural change (element count / kinds / nesting), a viewport
+    /// or `font_scale` change, a text leaf that was word-wrapped in this result
+    /// (its cached line breaks belong to the old string and cannot carry a new
+    /// one), a newline in the new text (which would wrap), or a changed measured
+    /// width.
+    #[must_use]
+    pub fn can_reuse_geometry(
+        &self,
+        tree: &LayoutTree,
+        measure: &MeasureTextFn,
+        viewport_width: f32,
+        viewport_height: f32,
+        font_scale: f32,
+    ) -> bool {
+        if self.computed.len() != tree.len()
+            || self.wrapped.len() != tree.len()
+            || self.structure_hash != tree.structure_hash()
+            || self.viewport_width.to_bits() != viewport_width.to_bits()
+            || self.viewport_height.to_bits() != viewport_height.to_bits()
+            || self.font_scale.to_bits() != font_scale.to_bits()
+        {
+            return false;
+        }
+
+        tree.elements.iter().enumerate().all(|(index, element)| {
+            let ElementContent::Text { text, config, .. } = &element.content else {
+                return true;
+            };
+            // A wrapped leaf's cached lines hold the old string, and a newline in
+            // the new text would itself force wrapping; in either case the reused
+            // command stream cannot carry the new glyphs, so a full solve runs.
+            if self.wrapped[index].is_some() || text.contains('\n') {
+                return false;
+            }
+            // Bit-exact: the same cache-backed measure over the same text and
+            // measure inputs returns the same value the prior solve stored, so an
+            // unchanged box compares equal without an epsilon.
+            let dims = measure(text, &config.as_measure().scaled(font_scale));
+            dims.width.to_bits() == self.computed[index].natural_text_width.to_bits()
+        })
+    }
 }

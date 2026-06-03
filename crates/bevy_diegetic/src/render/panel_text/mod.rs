@@ -15,16 +15,15 @@ use bevy::prelude::*;
 pub use self::access::DiegeticTextMut;
 pub use self::access::PanelText;
 pub use self::access::PanelTextReader;
+pub use self::access::TextEdit;
 use self::alpha::seed_panel_text_child_alpha;
 use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
 use self::mesh_spawning::free_run_storage_on_mesh_removal;
 use self::mesh_spawning::update_panel_text_alpha;
 use self::mesh_spawning::update_panel_text_geometry;
-use self::reconcile::clear_reconcile_owned;
 use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
-use self::reconcile::sync_run_text_to_cache;
 pub use self::relationship::PanelTextRuns;
 pub use self::relationship::TextRunOf;
 use self::shaping::shape_panel_text_children;
@@ -39,7 +38,6 @@ use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
 use crate::layout::ShapedTextCache;
 use crate::panel::DiegeticPerfStats;
-use crate::panel::PanelSystems;
 use crate::text::PreparedTextRun;
 
 /// Stores a prepared text run for a panel [`TextContent`](crate::TextContent) child.
@@ -82,16 +80,6 @@ impl Plugin for TextRenderPlugin {
         // maintenance hooks, so the set populates without these registrations.
         app.register_type::<TextRunOf>();
         app.register_type::<PanelTextRuns>();
-        // The `El.text` cache sync runs before layout consumes the tree; the
-        // marker clear runs after, so a reconcile-owned write stays filtered for
-        // exactly the one sync pass that would otherwise re-fire on it.
-        app.add_systems(
-            Update,
-            (
-                sync_run_text_to_cache.before(PanelSystems::ApplyTreeChanges),
-                clear_reconcile_owned.after(sync_run_text_to_cache),
-            ),
-        );
         app.add_systems(
             PostUpdate,
             (

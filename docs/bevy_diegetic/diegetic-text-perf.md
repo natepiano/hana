@@ -6,19 +6,30 @@ Conditions: `diegetic_text_stress`, 100 world labels each restrung every frame,
 M2 Max, release, `with_perf_mode` (AutoNoVsync + `WinitSettings::continuous`).
 Add a column after each phase lands.
 
-| Metric (moving unless noted)       | Baseline (2026-06-02) | After A     | After C      | After 1a ⊗      | After D | After B |
-| ---------------------------------- | --------------------- | ----------- | ------------ | --------------- | ------- | ------- |
-| Frame time ‡                       | ~25 ms                | ~24 ms      | ~18.5 ms ‡   | —               |         |         |
-| FPS ‡                              | 40                    | 42          | 55 ‡         | —               |         |         |
-| Layout `compute_ms` (alt. frames)  | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ | 0 / 0.21 ms ⊗   |         |         |
-| — `setup` (5s max)                 | —                     | —           | ~3 ms ⊕      | ~0 (0.001 ms) ⊗ |         |         |
-| — `scale` (5s max)                 | —                     | —           | <0.2 ms ⊕    | 0.04 ms ⊗       |         |         |
-| — `solve` (5s max)                 | —                     | —           | <0.8 ms ⊕    | 0.08 ms ⊗       |         |         |
-| — `commit` (5s max)                | —                     | —           | <0.1 ms ⊕    | 0.02 ms ⊗       |         |         |
-| Text `panel_text.total_ms`         | 2.4 ms                | 1.6 ms      | ~0.45 ms     | ~0.46 ms        |         |         |
-| — of which `mesh_build_ms`         | 1.8 ms                | **1.29 ms** | **0.12 ms**  | 0.11 ms         |         |         |
-| Render floor (remainder, moving)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —               |         |         |
-| Paused FPS ‡                       | 98                    | ~55         |              | —               |         |         |
+Rows match the `diegetic_text_stress` overlay labels. The layout-area cells for
+the instrumented columns (1a / 1b) read `now / 5s-max` to mirror the overlay's two
+value columns; the `now` (moving mean) is the stable number, `5s-max` is peak-hold
+and spiky (a single hitch spikes it). Where a column lacks a separately-captured
+peak, only `now` is shown. The `After 3 ⊙` column is the geometry-stable skip — it
+recovers the 1b regression and is the current state.
+
+| Overlay row                  | Baseline (2026-06-02) | After A     | After C      | After 1a ⊗ (now) | After 1b ⊘ (now / 5s-max) | After 3 ⊙ (now) | After B |
+| ---------------------------- | --------------------- | ----------- | ------------ | ---------------- | ------------------------- | --------------- | ------- |
+| `ms` (frame) ‡               | ~25 ms                | ~24 ms      | ~18.5 ms ‡   | —                | —                         | —               |         |
+| `fps` ‡                      | 40                    | 42          | 55 ‡         | —                | —                         | —               |         |
+| `layout` †                   | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ | 0.14 ⊗           | 0.15 / 0.69 ⊘             | **~0.10** ⊙     |         |
+| — `setup`                    | —                     | —           | ~3 ms ⊕      | ~0 ⊗             | ~0 / 0.001 ⊘              | ~0 ⊙            |         |
+| — `scale`                    | —                     | —           | <0.2 ms ⊕    | 0.04 ⊗           | 0.04 / 0.32 ⊘            | ~0.03 ⊙         |         |
+| — `solve`                    | —                     | —           | <0.8 ms ⊕    | 0.08 ⊗           | 0.08 / 0.24 ⊘            | **~0.02** ⊙     |         |
+| — `commit`                   | —                     | —           | <0.1 ms ⊕    | 0.02 ⊗           | 0.02 / 0.10 ⊘            | **~0** ⊙        |         |
+| `shaping`                    | ~0.6 ms               | ~0.31 ms    | ~0.33 ms     | 0.39             | 0.39 / 0.95 ⊘            | ~0.37 ⊙         |         |
+| `mesh`                       | 1.8 ms                | **1.29 ms** | **0.12 ms**  | 0.12             | 0.12 / 0.37 ⊘            | ~0.12 ⊙         |         |
+| `remainder` ‡                | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —                | —                         | —               |         |
+| Paused `fps` ‡ (not on HUD)  | 98                    | ~55         |              | —                | —                         | —               |         |
+
+† Pre-1b the `layout` row reads `min / max` over alternate frames — the flip-flop
+zeroed it every other frame, so the moving mean is halved. From 1b on, layout runs
+every frame (steady 100 panels), so the `now` column is the true per-frame mean.
 
 ‡ The frame-time, FPS, paused, and render-floor rows are fill-rate-bound and scale
 with window size, and the A and C columns were captured in separate sessions; the
@@ -53,6 +64,65 @@ clean means, below C's contended upper bounds. 259 crate tests pass; clippy
 (nursery + pedantic) clean. The `Res<ShapedTextCache>` clones the handle into the
 `'static` measure closure; the renderer and overlay paths now hold it as `Res` and
 mutate through `&self`. Flip-flop still in place — Step 1b removes it next.
+
+⊘ Step-1b result (2026-06-03, this session) — the deliberate regression Step 3
+recovers. Deleted the flip-flop: removed `ReconcileOwned`, `sync_run_text_to_cache`,
+and `clear_reconcile_owned`; routed the four writers to the authoritative tree
+through a new `TextEdit` cursor (`PanelText` / `DiegeticTextMut::for_each_mut`),
+making the tree the single source and `TextContent` pure derived output reconcile
+rewrites. `compute_panels` went from alternating 100 / 0 to **steady 100 every
+frame** (147 / 150 sampled frames at 100; the 3 at 101 are the FPS overlay panel),
+so layout now runs every frame instead of every other.
+
+Quiet-machine readout (overlay `now / 5s-max`, ms): `layout` **0.15 / 0.69**,
+`setup` ~0 / 0.001, `scale` 0.04 / 0.32, `solve` **0.08 / 0.24**, `commit`
+0.02 / 0.10. The clean per-frame layout cost is **essentially the same as 1a's**
+(layout `now` 0.15 vs 0.14, `solve` 0.08 vs 0.08) — removing the flip-flop did not
+make each pass heavier; the regression is **frequency**: layout now runs every
+frame instead of every other, so per-frame-averaged layout CPU roughly doubled
+(~0.07 → ~0.15 ms) while the per-active-frame `solve` is unchanged. (An earlier
+sample this session read `solve` 0.31 / `layout` 0.38; that was concurrent-build
+CPU contention inflating it — same effect as the original `setup` misread —
+discard those magnitudes.) `setup`, `scale`, `commit`, and the text path
+(`shaping` ~0.39, `mesh` ~0.12) are unchanged.
+
+258 crate tests pass (the two `ReconcileOwned` / sync-back lifecycle tests were
+retired; the "no-op set_text fires no measure" and "one edit = one relayout"
+properties were rewritten to drive the public tree path and still hold); clippy
+(nursery + pedantic) clean, full workspace builds. `TextEdit::set_text`
+read-compares before the `&mut DiegeticPanel` borrow, so the no-op-no-relayout
+guard the deleted sync held is preserved. Step 3 (the geometry-stable skip) routes
+text-only edits whose measured size is unchanged to the cheap `VisualOnly` path —
+every stress label is fixed-width `"NN MMM"`, so it should drop the full `solve` to
+genuine-reflow only and pull `compute_panels` back down from steady 100.
+
+⊙ Step-3 result (2026-06-03, this session, quiet machine, port 12000 release).
+The text-edit path now records `VisualOnly` on the change-classification sibling
+(via `TextEdit` → `DiegeticPanelChangeClassification::note_text_edit`), and
+`compute_panel_layouts` gates the existing `VisualOnly` → `regenerate_commands`
+branch on a new `LayoutResult::can_reuse_geometry` probe: it re-measures each text
+leaf (cache-backed) and reuses the cached geometry only when structure, viewport,
+and every leaf's measured width are bit-identical and no leaf is wrapped. Every
+`"NN MMM"` label measures identical frame to frame, so all 100 take the cheap path.
+Three live samples: `layout` **~0.10** (was 0.15), `solve` **~0.02** (was 0.08 —
+the full `engine.compute` is replaced by `regenerate_commands`), `commit` **~0**
+(was 0.02 — the cheap path `continue`s before `commit_layout_result`); `scale`
+~0.03, `setup` ~0, text path unchanged (`shaping` ~0.37, `mesh` ~0.12). Layout is
+now **below the flip-flop-era per-frame cost** with no marker, no every-other-frame
+gating, and no reflow lag. One correction to the 1b prediction: `compute_panels`
+**stays 100**, not lower — the regenerate path still counts each panel
+(`panel_count += 1`); the win is in `solve` / `commit` per pass, not in the count.
+A real reflow (a width-changing edit) still classifies as a full solve, so the skip
+never renders stale geometry. `can_reuse_geometry`'s three guards (same-width swap,
+newline rejection, wrapped-leaf rejection) are covered by engine unit tests; full
+crate suite + clippy (nursery + pedantic) green.
+
+The four sub-rows (`setup`+`scale`+`solve`+`commit` ≈ 0.05) do not sum to the
+`layout` total (~0.10): the total is the whole system's wall-clock, the sub-rows
+only their own timed spans. The ~0.05 remainder is un-instrumented per-panel loop
+work (change-detection reads, two query `get`s) plus the new `can_reuse_geometry`
+probe (100 cache-backed re-measures/frame), left outside `solve`. Folding the probe
+into the `solve` span would close most of the gap — deferred as cosmetic.
 
 ## Finding — A is CPU-only; this stress test is render-bound
 
@@ -282,19 +352,36 @@ the per-element measured size is the runtime skip decision.
   ~2 ms → ~0 (max 0.001 ms), `compute_ms` 0.14 ms mean / 0.21 ms max, flip-flop
   still in place. 259 crate tests pass; clippy (nursery + pedantic) clean. STOP for
   user review before Step 1b.
-- **Step 1b — Remove the flip-flop** (tree-authoritative + the `TextEdit` API). The
-  correctness fix: delete `ReconcileOwned` + `sync_run_text_to_cache` +
-  `clear_reconcile_owned` and route the four writers to the tree. See "The fix" above.
-  Expect `compute_panels` 100 / 0 → steady 100; `solve` every frame.
-- **Step 2 — Measure the regression.** Confirm `solve` runs every frame (layout
-  CPU ~2× the flip-flop's per-frame solve). Quantifies what the skip must recover.
-  With Step 1a already done, `setup` is no longer the dominant term, so this isolates
-  the solve cost cleanly.
-- **Step 3 — Geometry-stable skip.** Route text-only edits with unchanged
-  measured size to the cheap `VisualOnly` path. Measure: `solve` should drop to
-  firing only on genuine reflow.
-- **Step 4 — Measure the win.** Layout CPU at or below the flip-flop baseline,
-  now with no reflow lag, no marker, and no per-frame cache clone.
+- **Step 1b — Remove the flip-flop** (tree-authoritative + the `TextEdit` API). DONE
+  2026-06-03. Deleted `ReconcileOwned` + `sync_run_text_to_cache` +
+  `clear_reconcile_owned`; added the `TextEdit` cursor (kept the public API — option A,
+  not a return-based closure) and routed `PanelText` / `DiegeticTextMut` writes to the
+  tree through it. `PanelText` dropped its embedded `PanelTextReader` to avoid a
+  `&DiegeticPanel` / `&mut DiegeticPanel` conflict; run resolution moved to the free
+  `resolve_run_entity`. The no-op-no-relayout guard moved into `TextEdit::set_text`
+  (read-compare before the `&mut` borrow). 258 crate tests pass; clippy clean;
+  workspace builds; lagrange examples compile unchanged (closure binds `&mut TextEdit`
+  by inference).
+- **Step 2 — Measure the regression.** DONE 2026-06-03 (see ⊘ on the table).
+  `compute_panels` 100 / 0 → **steady 100 every frame**. Quiet-machine readout
+  (overlay `now / 5s-max`): `layout` 0.15 / 0.69 ms, `solve` 0.08 / 0.24 ms. The
+  per-frame cost is essentially unchanged from 1a (layout `now` 0.15 vs 0.14) — the
+  regression is purely **frequency** (every frame vs every other), so per-frame-
+  averaged layout CPU roughly doubled. An earlier same-session reading (`solve` 0.31,
+  `layout` 0.38) was concurrent-build contention; discard it. This is what the Step 3
+  skip must recover. STOP for user review before Step 3.
+- **Step 3 — Geometry-stable skip.** DONE 2026-06-03 (see ⊙ on the table). The
+  text-edit path records `VisualOnly` (`TextEdit` →
+  `DiegeticPanelChangeClassification::note_text_edit`); `compute_panel_layouts`
+  gates the `VisualOnly` → `regenerate_commands` branch on a new
+  `LayoutResult::can_reuse_geometry` probe (structure + viewport + per-leaf
+  measured width bit-identical, no wrapped leaf, no new newline). Restyle / resize
+  stay full solves, so the skip never renders stale geometry. Engine unit tests
+  cover the three guards; full crate suite + clippy (nursery + pedantic) green.
+- **Step 4 — Measure the win.** DONE 2026-06-03 (see ⊙ on the table). `solve`
+  0.08 → ~0.02, `commit` 0.02 → ~0, `layout` 0.15 → ~0.10 — below the flip-flop-era
+  per-frame cost, with no reflow lag, no marker, and no per-frame cache clone.
+  `compute_panels` stays 100 (the cheap path is still counted; the win is per-pass).
 
 ### Step 0 handoff — fresh-agent start guide (Step 0 is now DONE — kept as the record of what was edited)
 
