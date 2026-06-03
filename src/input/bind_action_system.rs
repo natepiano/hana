@@ -9,7 +9,8 @@
 /// via `commands.trigger(MyEvent)`, or through the Bevy Remote Protocol's
 /// `world.trigger_event`.
 ///
-/// Use with [`action!`] and [`event!`] to generate the action and event structs.
+/// Use with [`action!`](crate::action) and [`event!`](crate::event) to generate the action and
+/// event structs.
 ///
 /// # Examples
 ///
