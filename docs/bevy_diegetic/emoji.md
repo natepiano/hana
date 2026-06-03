@@ -76,11 +76,13 @@ One run = one mesh + curve/band/glyph buffers + one material with one
 ## The insight: a color glyph is N monochrome layers
 
 Each COLR layer is one outline + one brush + a draw order (and, in v1, a baked
-transform). An outline is exactly what `packing.rs` already turns into
-curves/bands, and coverage is exactly what the shader already evaluates. So a
-color glyph expands into N layer-quads in the run mesh; the only genuinely new
-pieces are (a) a per-layer **brush** (solid color or gradient) replacing the
-single per-run `fill_color`, and (b) gradient evaluation in the shader.
+transform and an optional clip region). An outline is exactly what `packing.rs`
+already turns into curves/bands, and coverage is exactly what the shader already
+evaluates. So a color glyph expands into N layer-quads in the run mesh; the only
+genuinely new pieces are (a) a per-layer **brush** (solid color or gradient)
+replacing the single per-run `fill_color`, (b) gradient evaluation in the shader,
+and (c) clip evaluation — a clipped layer multiplies its coverage by a clip
+outline's coverage, reusing the same analytic band path a second time.
 
 ```
 monochrome:  glyph  -> 1 quad -> coverage * one run fill_color
@@ -95,28 +97,40 @@ These are the types and the GPU layout the phases below build toward.
 - **`CachedGlyph` enum** — the glyph cache returns
   `Monochrome(GlyphOutline) | Color(ColorGlyph)`. `ColorGlyph { layers:
   Vec<ColorLayer> }`; `ColorLayer { outline: Glyph, transform: Affine2, brush:
-  Brush }`. Color status is marked on `PositionedGlyph` at the shaping→build
-  boundary so run build never re-queries the font.
+  Brush, clip: Option<Glyph> }`. `clip` is a COLRv1 `PaintGlyph` /
+  `PaintClipBox` region captured as an outline (a clip box is converted to a
+  four-segment rectangle outline at capture; `None` = unclipped), so box and
+  outline clips reduce to one mechanism. Color status is marked on
+  `PositionedGlyph` at the shaping→build boundary so run build never re-queries
+  the font.
 - **`Brush`** — `Solid(PaletteEntry) | LinearGradient {…} | RadialGradient {…}
-  | SweepGradient {…}`. `PaletteEntry = Static(LinearRgba) | Foreground`. A
-  gradient cannot be `Foreground`, so that state is unrepresentable. Extraction
-  never bakes a color for the 0xFFFF foreground index — it stores `Foreground`,
-  resolved in-shader from `uniforms.fill_color` (both color and alpha).
+  | SweepGradient {…}`. `PaletteEntry = Static(LinearRgba) | Foreground`. A whole
+  gradient brush has no top-level `Foreground` state, but its individual color
+  stops do: COLRv1 stops may reference the 0xFFFF foreground index, so
+  `StopRecord = Static(LinearRgba) | Foreground` and the shader resolves a
+  foreground stop per stop (decision D2; corrects the earlier "unrepresentable"
+  claim, M6). Extraction never bakes a color for the 0xFFFF foreground index — it
+  stores `Foreground`, resolved in-shader from `uniforms.fill_color` (both color
+  and alpha).
 - **`GlyphKey`** — gains a `Palette` newtype field so a color glyph's identity
   includes its palette (palette 0 only until a multi-palette / dark-mode need
   appears). The palette, brush, and layer indices are newtypes mirroring the
   existing `FontKey` / `GlyphKey` pattern, and their ranges are validated at pack
   time so an out-of-range index cannot reach the GPU.
-- **`QuadRecord { glyph_outline_index, brush_index, layer_index }`** — one
-  storage entry per layer-quad, a `ShaderType` struct at binding 106. The mesh
-  keeps a single per-quad index in `UV_1.x` that addresses it;
-  `glyph_outline_index` points into the deduped `glyphs` buffer. The main
-  fragment takes one indirection
+- **`QuadRecord { glyph_outline_index, brush_index, layer_index,
+  clip_outline_index }`** — one storage entry per layer-quad, a `ShaderType`
+  struct at binding 106. The mesh keeps a single per-quad index in `UV_1.x` that
+  addresses it; `glyph_outline_index` points into the deduped `glyphs` buffer. The
+  main fragment takes one indirection
   (`glyphs[quad_records[i].glyph_outline_index]`); the prepass does not — color
   runs are `AlphaMode::Blend` (below) and so are excluded from the opaque depth
   prepass, which keeps its direct `glyph_index(uv)` coverage path. Pure-mono runs
-  never address a `QuadRecord`. `GlyphRecord` stays monochrome-only — per-layer
-  data lives in `QuadRecord`, not a widened glyph record.
+  never address a `QuadRecord`. `clip_outline_index` points into the same deduped
+  `glyphs` buffer (a clip outline packs exactly like a glyph outline); a no-clip
+  sentinel marks an unclipped layer, and a clipped layer costs one extra
+  indirection (`glyphs[quad_records[i].clip_outline_index]`) plus a second
+  coverage evaluation. `GlyphRecord` stays monochrome-only — per-layer data lives
+  in `QuadRecord`, not a widened glyph record.
 - **`BrushRecord` / `StopRecord`** — `Brush` → `BrushRecord` via an explicit
   `impl From<&Brush>` with `#[repr(u32)]` tags (`BrushTag`, `ExtendMode`,
   `CompositeMode`). A `ShaderType` layout test asserts size+offsets match the
@@ -159,6 +173,19 @@ These are the types and the GPU layout the phases below build toward.
   same affine so the shader evaluates the gradient parameter in post-transform
   design space. A layer whose transformed bounds have zero width or height is
   skipped (`packing.rs` divides by extent → NaN otherwise).
+- **Clipping** — the painter keeps a clip stack alongside the transform stack:
+  `push_clip` pushes a glyph outline, `push_clip_box` an axis-aligned rectangle,
+  `pop_clip` pops. When a layer is emitted under one or more clips it captures the
+  composed clip (transformed by the same affine as its outline, a box reduced to a
+  rectangle outline) into `ColorLayer.clip`; each clip outline packs into the
+  deduped `glyphs` buffer and the layer's `QuadRecord` carries its
+  `clip_outline_index`. The fragment evaluates the clip's coverage through the
+  band path and multiplies it into the layer coverage (`coverage *=
+  clip_coverage`), so color cannot spill past the clip region; nested clips
+  compose by multiplying each enclosing clip's coverage. An unclipped layer stores
+  `None` / the no-clip sentinel and pays nothing. COLRv0 carries no clips, so this
+  path is dormant for Phase 7 and the shader-side multiply lands with the COLRv1
+  work in Phase 8.
 - **Lighting** — emoji layers render PBR-lit like the rest of the text, since
   diegetic panels are physically lit by design. A per-run opt-out to emissive is
   available if a flat self-lit look is wanted.
@@ -201,6 +228,10 @@ Implement `ttf_parser::colr::Painter`, accumulating a flat layer list into
 - `outline_glyph` feeds the existing `OutlineBuilder`.
 - `push_transform` / `pop_transform` maintain the transform stack baked into
   each layer's outline at emit time (per the transform rule above).
+- `push_clip` / `push_clip_box` / `pop_clip` maintain the clip stack; the
+  composed clip is captured into `ColorLayer.clip` at emit time (per the clipping
+  rule above). COLRv0 fonts emit no clip callbacks, so the field is always `None`
+  for Phase 7 fonts.
 - A solid paint's palette index `0xFFFF` → `PaletteEntry::Foreground`; any other
   index → CPAL lookup → sRGB→linear `PaletteEntry::Static`.
 - `paint` resolves a `Paint` into a `Brush`; gradients capture endpoints, stops,
@@ -210,10 +241,10 @@ Implement `ttf_parser::colr::Painter`, accumulating a flat layer list into
 
 Detect a color glyph by `paint_color_glyph(...)` returning `Some`; otherwise
 fall through to the monochrome `load_glyph_by_id_from_face`. Unsupported `Paint`
-variants log and skip rather than panicking. An out-of-range palette index falls
-back to palette 0 (or skips the layer with a warning); a `PaintColrGlyph`
-reference to a missing glyph skips that subtree. Every fallback logs once and
-never panics.
+variants log and skip rather than panicking. An out-of-range palette index skips
+the layer with a dedup warning (decision M31, consistent with the other
+log-once-and-skip font-data fallbacks); a `PaintColrGlyph` reference to a missing
+glyph skips that subtree. Every fallback logs once and never panics.
 
 ### Phase 4 — Glyph cache (`runtime/glyph_cache.rs`)
 
@@ -221,8 +252,10 @@ Cache the flattened, packed color layers the same way `GlyphOutlineCache` caches
 monochrome packed glyphs, keyed off `GlyphKey` plus the new `Palette` field.
 Return the `CachedGlyph` enum. Adding the `Palette` field to `GlyphKey` and
 widening the cache accessor from `&GlyphOutline` to `&CachedGlyph` migrates the
-monochrome call sites in the same change (an `outline_ref()` helper keeps the
-mono path terse). Color-glyph layers are static per `(font, glyph id, palette)`,
+monochrome call sites in the same change. The accessor is a total `layer_iter()`
+(decision D1): `Color` yields its layers, `Monochrome` yields one synthetic
+`Solid(Foreground)` layer, so Phase 5 iterates both uniformly with no partial
+accessor to panic. Color-glyph layers are static per `(font, glyph id, palette)`,
 so a moving emoji re-packs nothing and the per-frame in-place update stays cheap
 (see diegetic-text-perf.md).
 
@@ -254,13 +287,20 @@ quad is dropped with a warning before packing (`packing.rs` divides by extent).
 In a color or mixed run every quad carries a `QuadRecord`; a monochrome glyph in
 such a run emits one quad with a `Solid(Foreground)` brush at layer 0.
 
+A clipped layer's clip outline packs into the same deduped `glyphs` buffer as the
+layer outlines, and the layer's `QuadRecord` records its `clip_outline_index`; an
+unclipped layer records the no-clip sentinel. COLRv0 (Phase 7) emits only the
+sentinel, so the `glyphs` buffer gains no clip entries until COLRv1 layers arrive
+in Phase 8.
+
 ### Phase 6 — Material + shader (`render/material.rs`, `shaders/slug_text.wgsl`)
 
 Add the `brushes` (104), `gradient_stops` (105), and `quad_records` (106)
 storage bindings and the `RenderMode::ColorLayer` discriminant. Color runs set
 `AlphaMode::Blend`. In the fragment shader, after `render_coverage`:
 
-- Read the quad's `QuadRecord` for its glyph outline, brush, and layer index.
+- Read the quad's `QuadRecord` for its glyph outline, brush, layer index, and
+  clip outline index.
 - **Solid brush** — `rgb = brush.color.rgb`; a `Foreground` brush reads
   `uniforms.fill_color` (color and alpha). Identical cost to today for the
   constant case.
@@ -269,7 +309,10 @@ storage bindings and the `RenderMode::ColorLayer` discriminant. Color runs set
 
 `final_alpha = coverage * brush_alpha`, feed `base_color`, PBR + OIT tail
 unchanged. Phase 6 lands solid brushes only; the gradient branch is Phase 8.
-Pure-monochrome runs stay on the `RenderMode::Text` single-`fill_color` path.
+Phase 6 plumbs `clip_outline_index` through the `QuadRecord`, but COLRv0/solid
+layers only ever carry the no-clip sentinel, so the clip-coverage multiply itself
+lands with the COLRv1 work in Phase 8. Pure-monochrome runs stay on the
+`RenderMode::Text` single-`fill_color` path.
 
 Add a test that bindings 104–106 do not collide with StandardMaterial + OIT, one
 that a color run's material is built with `AlphaMode::Blend`, and one that a
@@ -303,13 +346,21 @@ outline — handle it by evaluating the gradient in pre-transform space or stori
 the inverse affine in the brush record. Survey Noto / Twemoji for non-uniform
 layer transforms first; defer the handling if no target font uses them.
 
+Clip handling lands here too (decision D4: model clipping now, not deferred to
+the conformance tail). The shader reads `clip_outline_index`, evaluates the clip
+outline's coverage through the band path, and multiplies it into the layer
+coverage; nested clips compose by multiplying each enclosing clip. Gate: a
+`PaintGlyph` clipping a multi-layer child (e.g. a Noto/Twemoji part) renders with
+no color past the clip outline at 1× / 5× / 10× zoom.
+
 ### Phase 9 — Conformance tail
 
 Sweep gradients, nested `PaintColrGlyph`, and `PaintComposite` / blend modes
-beyond alpha-over. OIT alpha-over already handles the common overlap case, so
-non-alpha-over composite modes are last and optional. Survey Noto Color Emoji
-first to confirm which composite modes any target font actually uses before
-implementing them.
+beyond alpha-over. Clip regions (`PaintGlyph` / `PaintClipBox`) are not here —
+they land in Phase 8 (decision D4). OIT alpha-over already handles the common
+overlap case, so non-alpha-over composite modes are last and optional. Survey
+Noto Color Emoji first to confirm which composite modes any target font actually
+uses before implementing them.
 
 ## Example: `color_emoji`
 
@@ -380,8 +431,11 @@ that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
   bump) stays green.
 - Extracting a cyclic or adversarial COLR font terminates without hanging and
   logs the skipped subtree.
-- The example's frame cost is measured against the monochrome render floor; the
-  added fill-rate from coplanar layers is recorded, not treated as a regression.
+- The example's frame cost is gated against the monochrome render floor by a
+  normalized per-layer budget `frame_time ≤ mono_floor × (1 + k · layer_ratio)`
+  (`layer_ratio = color_layers / mono_quads`; decision D3), so a per-layer
+  regression trips the gate. The added fill-rate from coplanar layers is recorded
+  alongside the budget.
 
 ## Team review (cycle 1) — auto-recorded refinements
 
@@ -661,7 +715,7 @@ the rest above is accepted.
 
 - **D4 — COLRv1 clip handling and nested-clip scope.**
   Severity: important. Source: Correctness + Architecture. Class: design-improvement
-  (data model + scope/behavior). Status: proposed.
+  (data model + scope/behavior). Status: resolved.
   *Problem:* the data model and phases never address clipping. ttf-parser's
   `colr::Painter` surfaces `push_clip` / `push_clip_box` / `pop_clip` alongside
   the transform callbacks; the design's painter handles transforms but says
@@ -689,3 +743,8 @@ the rest above is accepted.
   Phase 7/8 for the overwhelming-majority case, records the nested-clip count from
   the survey so the deferral is evidence-backed, and never renders a wrong color
   in the meantime.
+  **Decision: A — model clipping now. Add a clip representation to `ColorLayer` (a
+  clip-outline index or pre-intersected coverage) and handle nested clips in
+  Phase 8 alongside gradients. The painter tracks the `push_clip` / `push_clip_box`
+  / `pop_clip` stack; the data model carries clip data from Phase 3, not deferred
+  to the Phase 9 conformance tail.**
