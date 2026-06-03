@@ -4,7 +4,7 @@
 //! - Click the ground to deselect and zoom out to the full scene
 //! - Drag a mesh to rotate it
 //! - Selected meshes show a gizmo outline
-//! - Press 'O' to toggle the fit overlay of zoom-to-fit bounds
+//! - Press 'Y' to toggle the fit overlay of zoom-to-fit bounds
 
 mod animation_controls;
 mod constants;
@@ -34,6 +34,7 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationRejected;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraInputInterruptBehavior;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::CameraMoveBegin;
@@ -98,11 +99,19 @@ fn main() {
         .wire_chip_to_activation::<event_log::EventLog>(EVENT_LOG_CONTROL)
         .wire_chip_to_activation::<animation_controls::FitOverlayActive>(OVERLAY_CONTROL)
         .wire_chip_to_state::<Time<Virtual>, _>(PAUSE_CONTROL, |time| {
-            if time.is_paused() {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
+            chip_activation(time.is_paused())
+        })
+        .wire_chip_to_state::<animation_controls::ProjectionMode, _>(PERSPECTIVE_CONTROL, |mode| {
+            chip_activation(matches!(
+                mode,
+                animation_controls::ProjectionMode::Perspective
+            ))
+        })
+        .wire_chip_to_state::<animation_controls::ProjectionMode, _>(ORTHOGRAPHIC_CONTROL, |mode| {
+            chip_activation(matches!(
+                mode,
+                animation_controls::ProjectionMode::Orthographic
+            ))
         })
         .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
             ANIMATE_CONTROL,
@@ -120,18 +129,10 @@ fn main() {
             |end| end.source == AnimationSource::LookAtAndZoomToFit,
         )
         .wire_chip_to_state::<animation_controls::EasingFlash, _>(EASING_CONTROL, |flash| {
-            if flash.random_active() {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
+            chip_activation(flash.random_active())
         })
         .wire_chip_to_state::<animation_controls::EasingFlash, _>(EASING_RESET_CONTROL, |flash| {
-            if flash.reset_active() {
-                ControlActivation::Active
-            } else {
-                ControlActivation::Inactive
-            }
+            chip_activation(flash.reset_active())
         })
         .with_camera_control_panel();
 
@@ -146,6 +147,7 @@ fn main() {
         .init_resource::<policy_panel::KeyFlash>()
         .init_resource::<pointer::HoveredEntity>()
         .init_resource::<animation_controls::ProjectionRefit>()
+        .init_resource::<animation_controls::ProjectionMode>()
         .init_resource::<animation_controls::FitOverlayActive>()
         .init_resource::<animation_controls::EasingFlash>()
         .add_systems(
@@ -184,13 +186,23 @@ fn main() {
         .run();
 }
 
+/// Maps a boolean activation condition onto a title-bar chip highlight.
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
+
 fn showcase_title_bar() -> TitleBar {
     TitleBar::new()
         .with_title(SHOWCASE_TITLE)
         .with_anchor(Anchor::TopLeft)
         .with_orientation(TitleBarOrientation::Vertical)
         .control(PAUSE_CONTROL)
-        .control(PROJECTION_CONTROL)
+        .control(PERSPECTIVE_CONTROL)
+        .control(ORTHOGRAPHIC_CONTROL)
         .control(OVERLAY_CONTROL)
         .control(ANIMATE_CONTROL)
         .control(LOOK_AT_CONTROL)

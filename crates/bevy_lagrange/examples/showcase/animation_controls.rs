@@ -111,7 +111,7 @@ pub(crate) fn reset_easing(
     flash.flash_reset();
 }
 
-/// Briefly highlights the `R Random Easing` / `E Reset` title-bar chips after a
+/// Briefly highlights the `R Random Easing` / `E Reset Easing` title-bar chips after a
 /// press. Each press arms a one-shot timer; [`tick_easing_flash`] clears it when
 /// it elapses, and the title bar polls [`Self::random_active`] /
 /// [`Self::reset_active`] to drive the chip highlight.
@@ -136,7 +136,7 @@ impl EasingFlash {
 }
 
 /// Ticks the easing-chip flash timers, clearing each when it elapses so the
-/// title bar's `R Random Easing` / `E Reset` chips flip back to inactive.
+/// title bar's `R Random Easing` / `E Reset Easing` chips flip back to inactive.
 pub(crate) fn tick_easing_flash(time: Res<Time>, mut flash: ResMut<EasingFlash>) {
     if flash.random.is_none() && flash.reset.is_none() {
         return;
@@ -157,13 +157,13 @@ pub(crate) fn tick_easing_flash(time: Res<Time>, mut flash: ResMut<EasingFlash>)
     }
 }
 
-/// Tracks the one-frame-deferred scene re-fit after a projection toggle.
+/// Tracks the one-frame-deferred scene re-fit after a projection change.
 ///
 /// `OrbitCam` needs a frame to process the projection change (syncing radius ↔
-/// orthographic scale) before the fit math is correct. [`toggle_projection`]
-/// arms `Armed`; [`apply_projection_refit`] advances `Armed → Pending` on its
-/// next run and triggers the fit on the run after, so at least one full frame
-/// passes before the fit.
+/// orthographic scale) before the fit math is correct. [`set_perspective`] /
+/// [`set_orthographic`] arm `Armed`; [`apply_projection_refit`] advances
+/// `Armed → Pending` on its next run and triggers the fit on the run after, so
+/// at least one full frame passes before the fit.
 #[derive(Resource, Default, PartialEq, Eq)]
 pub(crate) enum ProjectionRefit {
     #[default]
@@ -172,26 +172,80 @@ pub(crate) enum ProjectionRefit {
     Pending,
 }
 
-#[derive(PartialEq, Eq)]
-enum ProjectionLog {
-    Unwritten,
-    Written,
+/// Which projection the camera currently uses, so the title bar can highlight
+/// the matching `P Perspective` / `O Orthographic` row via
+/// [`wire_chip_to_state`](fairy_dust::TitleBarBuilder::wire_chip_to_state).
+#[derive(Resource, Clone, Copy, Default)]
+pub(crate) enum ProjectionMode {
+    #[default]
+    Perspective,
+    Orthographic,
 }
 
-/// Toggles between perspective and orthographic projection and arms a deferred
-/// scene re-fit applied by [`apply_projection_refit`].
-pub(crate) fn toggle_projection(
+/// Switches the camera to perspective projection, a no-op when already there.
+pub(crate) fn set_perspective(
+    scene: Res<SceneEntities>,
+    camera_query: Query<(&mut Projection, &mut OrbitCam)>,
+    log: ResMut<event_log::EventLog>,
+    refit: ResMut<ProjectionRefit>,
+    mode: ResMut<ProjectionMode>,
+) {
+    switch_projection(
+        scene,
+        camera_query,
+        log,
+        refit,
+        mode,
+        ProjectionMode::Perspective,
+    );
+}
+
+/// Switches the camera to orthographic projection, a no-op when already there.
+pub(crate) fn set_orthographic(
+    scene: Res<SceneEntities>,
+    camera_query: Query<(&mut Projection, &mut OrbitCam)>,
+    log: ResMut<event_log::EventLog>,
+    refit: ResMut<ProjectionRefit>,
+    mode: ResMut<ProjectionMode>,
+) {
+    switch_projection(
+        scene,
+        camera_query,
+        log,
+        refit,
+        mode,
+        ProjectionMode::Orthographic,
+    );
+}
+
+/// Applies `target` to the camera, logs the change, records the active mode for
+/// the title-bar highlight, and arms a deferred scene re-fit. Returns early
+/// when the camera already uses `target`, so re-pressing the active row does
+/// nothing.
+fn switch_projection(
     scene: Res<SceneEntities>,
     mut camera_query: Query<(&mut Projection, &mut OrbitCam)>,
     mut log: ResMut<event_log::EventLog>,
     mut refit: ResMut<ProjectionRefit>,
+    mut mode: ResMut<ProjectionMode>,
+    target: ProjectionMode,
 ) {
     let Ok((mut projection, mut orbit_camera)) = camera_query.get_mut(scene.camera) else {
         return;
     };
-    let mut projection_log = ProjectionLog::Unwritten;
-    match *projection {
-        Projection::Perspective(_) => {
+    let already_active = match target {
+        ProjectionMode::Perspective => matches!(*projection, Projection::Perspective(_)),
+        ProjectionMode::Orthographic => matches!(*projection, Projection::Orthographic(_)),
+    };
+    if already_active {
+        return;
+    }
+    match target {
+        ProjectionMode::Perspective => {
+            *projection = Projection::Perspective(PerspectiveProjection::default());
+            log.push(PROJECTION_LOG_PERSPECTIVE.into());
+        },
+        ProjectionMode::Orthographic => {
             *projection = Projection::from(OrthographicProjection {
                 scaling_mode: ScalingMode::FixedVertical {
                     viewport_height: ORTHOGRAPHIC_VIEWPORT_HEIGHT,
@@ -200,19 +254,11 @@ pub(crate) fn toggle_projection(
                 ..OrthographicProjection::default_3d()
             });
             log.push(PROJECTION_LOG_ORTHOGRAPHIC.into());
-            projection_log = ProjectionLog::Written;
         },
-        Projection::Orthographic(_) => {
-            *projection = Projection::Perspective(PerspectiveProjection::default());
-            log.push(PROJECTION_LOG_PERSPECTIVE.into());
-            projection_log = ProjectionLog::Written;
-        },
-        Projection::Custom(_) => {},
     }
+    *mode = target;
     orbit_camera.force_update();
-    if projection_log == ProjectionLog::Written {
-        *refit = ProjectionRefit::Armed;
-    }
+    *refit = ProjectionRefit::Armed;
 }
 
 /// Applies the deferred scene re-fit one frame after a projection toggle, once

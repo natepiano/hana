@@ -95,20 +95,21 @@ pub(super) const GIZMO_SCALE: f32 = 1.001;
 pub(super) const HINT_TEXT_COLOR: Color = Color::srgba(0.7, 0.7, 0.7, 0.7);
 
 // easing flash
-/// Seconds the `R Random Easing` / `E Reset` title-bar chips stay highlighted
+/// Seconds the `R Random Easing` / `E Reset Easing` title-bar chips stay highlighted
 /// after a press.
 pub(super) const EASING_FLASH_SECONDS: f32 = 0.5;
 
 // title bar controls
 pub(super) const ANIMATE_CONTROL: &str = "A Animate";
 pub(super) const EASING_CONTROL: &str = "R Random Easing";
-pub(super) const EASING_RESET_CONTROL: &str = "E Reset";
-pub(super) const EVENT_LOG_CONTROL: &str = "L Log";
-pub(super) const LOOK_AND_FIT_CONTROL: &str = "G LookAt+Fit";
-pub(super) const LOOK_AT_CONTROL: &str = "F LookAt";
-pub(super) const OVERLAY_CONTROL: &str = "O Fit Overlay";
+pub(super) const EASING_RESET_CONTROL: &str = "E Reset Easing";
+pub(super) const EVENT_LOG_CONTROL: &str = "G Log";
+pub(super) const LOOK_AND_FIT_CONTROL: &str = "L LookAt+Fit";
+pub(super) const LOOK_AT_CONTROL: &str = "K LookAt";
+pub(super) const ORTHOGRAPHIC_CONTROL: &str = "O Orthographic";
+pub(super) const OVERLAY_CONTROL: &str = "Y Fit Overlay";
 pub(super) const PAUSE_CONTROL: &str = "Esc Pause";
-pub(super) const PROJECTION_CONTROL: &str = "P Projection";
+pub(super) const PERSPECTIVE_CONTROL: &str = "P Perspective";
 pub(super) const SHOWCASE_TITLE: &str = "Showcase";
 
 // mesh settings

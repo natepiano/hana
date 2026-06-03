@@ -3,10 +3,10 @@
 //!
 //! Every showcase shortcut lives in one of two input contexts:
 //!
-//! - [`ShowcaseUiInput`] (always active): `Esc` pause, `L` log toggle, `C` clear log, and
+//! - [`ShowcaseUiInput`] (always active): `Esc` pause, `G` log toggle, `C` clear log, and
 //!   `Up`/`Down` log scroll.
-//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `O A R E P I Q F
-//!   G`.
+//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `Y P O R E A I Q
+//!   K L`.
 //!
 //! Single keys are spawned through [`Keybindings::spawn_key`], which attaches a
 //! `BlockBy` on every modifier. A bare key therefore stays quiet while a
@@ -42,20 +42,22 @@ action!(LookAtAndFitHovered);
 action!(LookAtHovered);
 action!(RandomizeEasing);
 action!(ResetEasing);
+action!(SetOrthographic);
+action!(SetPerspective);
 action!(ToggleConflictPolicy);
 action!(ToggleDebugOverlay);
 action!(ToggleInterruptBehavior);
-action!(ToggleProjection);
 
 event!(AnimateCameraEvent);
 event!(LookAtAndFitHoveredEvent);
 event!(LookAtHoveredEvent);
 event!(RandomizeEasingEvent);
 event!(ResetEasingEvent);
+event!(SetOrthographicEvent);
+event!(SetPerspectiveEvent);
 event!(ToggleConflictPolicyEvent);
 event!(ToggleDebugOverlayEvent);
 event!(ToggleInterruptBehaviorEvent);
-event!(ToggleProjectionEvent);
 
 // Modifier marker the `Keybindings` builder binds to `Shift`; the showcase
 // never reads its state, it only drives the `BlockBy` wiring.
@@ -82,7 +84,7 @@ impl Plugin for ShowcaseInputPlugin {
         app.add_input_context::<ShowcaseUiInput>()
             .add_input_context::<ShowcaseGameplayInput>()
             .add_systems(Startup, (spawn_ui_context, spawn_gameplay_context))
-            .add_systems(Update, gate_gameplay_on_pause)
+            .add_systems(Update, (gate_gameplay_on_pause, gate_camera_input_on_pause))
             .add_observer(scroll_log_up_on_fire)
             .add_observer(scroll_log_down_on_fire);
 
@@ -98,9 +100,15 @@ impl Plugin for ShowcaseInputPlugin {
         );
         bind_action_system!(
             app,
-            ToggleProjection,
-            ToggleProjectionEvent,
-            animation_controls::toggle_projection
+            SetPerspective,
+            SetPerspectiveEvent,
+            animation_controls::set_perspective
+        );
+        bind_action_system!(
+            app,
+            SetOrthographic,
+            SetOrthographicEvent,
+            animation_controls::set_orthographic
         );
         bind_action_system!(
             app,
@@ -164,7 +172,7 @@ fn spawn_gameplay_context(mut commands: Commands) {
 fn spawn_ui_actions(spawner: &mut ActionSpawner<ShowcaseUiInput>) {
     let keybindings = Keybindings::new::<ShowcaseShift>(spawner, ActionSettings::default());
     keybindings.spawn_key::<TogglePause>(spawner, KeyCode::Escape);
-    keybindings.spawn_key::<ToggleLog>(spawner, KeyCode::KeyL);
+    keybindings.spawn_key::<ToggleLog>(spawner, KeyCode::KeyG);
     keybindings.spawn_key::<ClearLog>(spawner, KeyCode::KeyC);
     keybindings.spawn_key::<ScrollLogUp>(spawner, KeyCode::ArrowUp);
     keybindings.spawn_key::<ScrollLogDown>(spawner, KeyCode::ArrowDown);
@@ -172,15 +180,16 @@ fn spawn_ui_actions(spawner: &mut ActionSpawner<ShowcaseUiInput>) {
 
 fn spawn_gameplay_actions(spawner: &mut ActionSpawner<ShowcaseGameplayInput>) {
     let keybindings = Keybindings::new::<ShowcaseShift>(spawner, ActionSettings::default());
-    keybindings.spawn_key::<ToggleDebugOverlay>(spawner, KeyCode::KeyO);
-    keybindings.spawn_key::<ToggleProjection>(spawner, KeyCode::KeyP);
+    keybindings.spawn_key::<ToggleDebugOverlay>(spawner, KeyCode::KeyY);
+    keybindings.spawn_key::<SetPerspective>(spawner, KeyCode::KeyP);
+    keybindings.spawn_key::<SetOrthographic>(spawner, KeyCode::KeyO);
     keybindings.spawn_key::<RandomizeEasing>(spawner, KeyCode::KeyR);
     keybindings.spawn_key::<ResetEasing>(spawner, KeyCode::KeyE);
     keybindings.spawn_key::<AnimateCamera>(spawner, KeyCode::KeyA);
     keybindings.spawn_key::<ToggleInterruptBehavior>(spawner, KeyCode::KeyI);
     keybindings.spawn_key::<ToggleConflictPolicy>(spawner, KeyCode::KeyQ);
-    keybindings.spawn_key::<LookAtHovered>(spawner, KeyCode::KeyF);
-    keybindings.spawn_key::<LookAtAndFitHovered>(spawner, KeyCode::KeyG);
+    keybindings.spawn_key::<LookAtHovered>(spawner, KeyCode::KeyK);
+    keybindings.spawn_key::<LookAtAndFitHovered>(spawner, KeyCode::KeyL);
 }
 
 /// Mirrors the pause state onto the gameplay context. `ContextActivity` is an
@@ -200,6 +209,28 @@ fn gate_gameplay_on_pause(
             .insert(ContextActivity::<ShowcaseGameplayInput>::new(
                 should_be_active,
             ));
+    }
+}
+
+/// Mirrors the pause state onto the camera's input. While paused the camera
+/// carries [`CameraInputDisabled`] so orbit/pan/zoom input is dropped instead
+/// of writing into the target and replaying on unpause.
+fn gate_camera_input_on_pause(
+    time: Res<Time<Virtual>>,
+    mut commands: Commands,
+    cameras: Query<(Entity, Has<CameraInputDisabled>), With<OrbitCam>>,
+) {
+    let paused = time.is_paused();
+    for (entity, disabled) in &cameras {
+        match (paused, disabled) {
+            (true, false) => {
+                commands.entity(entity).insert(CameraInputDisabled);
+            },
+            (false, true) => {
+                commands.entity(entity).remove::<CameraInputDisabled>();
+            },
+            (true, true) | (false, false) => {},
+        }
     }
 }
 
