@@ -1,17 +1,14 @@
 //! Swaps an `OrbitCam`'s `Projection` between `OrthographicProjection` and
 //! `PerspectiveProjection` at runtime. `switch_projection` swaps the component,
 //! calls `OrbitCam::force_update()` so the camera re-derives its cached state,
-//! and updates the cube-face labels. `widen_shadow_cascade` (ordered after
-//! `FairyDustStudioLightingSet`) enlarges the directional light's cascade so
-//! the orthographic far plane stays within shadow range.
+//! and updates the cube-face labels. Fairy Dust's studio lighting fits the
+//! shadow cascade to the active projection, so shadows hold in both modes.
 //!
 //! Controls:
 //!   O — orthographic projection
 //!   P — perspective projection
 
 use bevy::camera::ScalingMode;
-use bevy::light::CascadeShadowConfig;
-use bevy::light::CascadeShadowConfigBuilder;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::OrbitCam;
@@ -21,7 +18,6 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::CubeFaceLabel;
 use fairy_dust::Face;
-use fairy_dust::FairyDustStudioLightingSet;
 use fairy_dust::TitleBar;
 
 fn main() {
@@ -66,11 +62,6 @@ fn main() {
         })
         .init_resource::<ProjectionChoice>()
         .with_camera_control_panel()
-        // Cascade widening runs after the studio rig spawns its directional light.
-        .add_systems(
-            Startup,
-            widen_shadow_cascade.after(FairyDustStudioLightingSet),
-        )
         // `O` / `P` run through Fairy Dust's shortcut binding, which fires each
         // only when no modifier is held.
         .with_shortcut(KeyCode::KeyO, select_orthographic)
@@ -79,28 +70,23 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// PROJECTION SWAP — Projection component + OrbitCam::force_update + cascade
-// widening for the orthographic far plane.
+// PROJECTION SWAP — Projection component + OrbitCam::force_update.
 //
 // How it works:
 //   1. `orthographic_projection()` is passed into `with_orbit_cam` so the camera spawns with an
 //      `OrthographicProjection` (fixed vertical viewport, 40-unit far plane).
-//   2. `widen_shadow_cascade` runs once at startup, after the studio lighting rig spawns, to extend
-//      the directional light's cascade `maximum_distance` so shadows survive across the wider
-//      orthographic far plane.
-//   3. On **O** or **P**, Fairy Dust's shortcut binding runs `select_orthographic` /
+//   2. On **O** or **P**, Fairy Dust's shortcut binding runs `select_orthographic` /
 //      `select_perspective`, which call `switch_projection` to overwrite the `Projection` component
 //      with the orthographic or perspective variant, refresh the cube-face labels via
 //      `update_face_labels`, and call `OrbitCam::force_update()` so the camera re-derives its
-//      cached state under the new projection.
+//      cached state under the new projection. Fairy Dust's studio lighting re-fits the shadow
+//      cascade to the new projection automatically.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const HOME_PITCH: f32 = 0.42;
 const HOME_YAW: f32 = -0.28;
 const HOME_MARGIN: f32 = 0.6;
 const ORTHOGRAPHIC_FAR_PLANE: f32 = 40.0;
-const ORTHOGRAPHIC_SHADOW_FIRST_CASCADE: f32 = 12.0;
-const ORTHOGRAPHIC_SHADOW_MAX_DISTANCE: f32 = 60.0;
 const ORTHOGRAPHIC_VIEWPORT_HEIGHT: f32 = 1.0;
 
 #[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
@@ -108,17 +94,6 @@ enum ProjectionChoice {
     #[default]
     Orthographic,
     Perspective,
-}
-
-fn widen_shadow_cascade(mut lights: Query<&mut CascadeShadowConfig, With<DirectionalLight>>) {
-    for mut cascade in &mut lights {
-        *cascade = CascadeShadowConfigBuilder {
-            maximum_distance: ORTHOGRAPHIC_SHADOW_MAX_DISTANCE,
-            first_cascade_far_bound: ORTHOGRAPHIC_SHADOW_FIRST_CASCADE,
-            ..default()
-        }
-        .build();
-    }
 }
 
 fn select_orthographic(

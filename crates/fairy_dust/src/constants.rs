@@ -43,6 +43,16 @@ pub(crate) const CASCADE_FIT_RADIUS_MULTIPLE: f32 = 5.0;
 // Far bound of the first (high-resolution) cascade as a fraction of the fitted
 // `maximum_distance`. 0.2 matches the proven 12/60 split.
 pub(crate) const CASCADE_FIRST_BOUND_RATIO: f32 = 0.2;
+// An orthographic `OrbitCam` parks at a fixed `(near + far) / 2` distance that a
+// small scene's radius-based fit can't reach, so the cascade also extends to
+// cover the camera. This headroom keeps the scene's far edge inside the last
+// cascade rather than exactly on its boundary; it must stay small enough that
+// larger scenes (where the radius term already dominates) are left untouched.
+pub(crate) const CASCADE_CAMERA_HEADROOM: f32 = 1.2;
+// The auto-fit re-runs each frame so the cascade re-adjusts when the projection
+// toggles; it rewrites the config only when `maximum_distance` moves by more
+// than this, so a steady camera costs nothing.
+pub(crate) const CASCADE_REFIT_EPSILON: f32 = 0.01;
 
 // clear color
 pub(crate) const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);

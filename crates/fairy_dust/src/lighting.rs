@@ -7,12 +7,14 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 
+use crate::constants::CASCADE_CAMERA_HEADROOM;
 use crate::constants::CASCADE_COUNT;
 use crate::constants::CASCADE_FIRST_BOUND_RATIO;
 use crate::constants::CASCADE_FIRST_FAR_BOUND;
 use crate::constants::CASCADE_FIT_RADIUS_MULTIPLE;
 use crate::constants::CASCADE_MAX_DISTANCE;
 use crate::constants::CASCADE_MIN_DISTANCE;
+use crate::constants::CASCADE_REFIT_EPSILON;
 use crate::constants::CLEAR_COLOR;
 use crate::constants::FILL_LIGHT_ILLUMINANCE;
 use crate::constants::FILL_LIGHT_POS;
@@ -26,13 +28,15 @@ use crate::constants::POINT_LIGHT_POS;
 use crate::constants::POINT_LIGHT_RANGE;
 use crate::constants::SHADOW_MAP_SIZE;
 use crate::constants::TARGET;
+use crate::orbit_cam::FairyDustOrbitCam;
 
 #[derive(Component)]
 struct FairyDustStudioLight;
 
-/// Marks the key directional light whose shadow cascade is fitted to the scene
-/// the first time the scene's geometry exists. Removed once the fit runs, so
-/// [`fit_cascade_to_scene`] is a one-shot.
+/// Marks the key directional light whose shadow cascade [`fit_cascade_to_scene`]
+/// keeps fitted to the scene and the active camera. The marker is permanent: the
+/// fit re-runs so the cascade re-adjusts when the projection toggles between
+/// perspective and orthographic.
 #[derive(Component)]
 struct FairyDustAutoCascade;
 
@@ -131,31 +135,57 @@ const AABB_CORNER_SIGNS: [Vec3; 8] = [
     Vec3::new(1.0, 1.0, 1.0),
 ];
 
-/// Fits the key light's shadow cascade to the scene the first time its meshes
-/// have an [`Aabb`], then removes [`FairyDustAutoCascade`] so it runs exactly
-/// once. The cascade is sized to the bounding sphere of only the meshes the key
-/// light actually shadows — those sharing its [`RenderLayers`] — so screen-space
-/// UI panels (which live on other layers, far out in world space) are excluded.
-/// Keeping `maximum_distance` to what the scene needs packs the shadow map over
-/// less area, so shadows stay sharp instead of being either clipped (cascade too
-/// small) or coarse (cascade too large). [`Aabb`]s are computed in `PostUpdate`,
-/// so this can't run at startup.
+/// Fits the key light's shadow cascade to the scene and the active camera,
+/// re-running each frame so the cascade re-adjusts when the projection toggles.
+/// The fit is the larger of two terms:
+///
+/// - **Geometry** — the bounding-sphere radius of only the meshes the key light actually shadows
+///   (those sharing its [`RenderLayers`], so screen-space UI panels on other layers are excluded)
+///   times [`CASCADE_FIT_RADIUS_MULTIPLE`]. This covers a perspective camera, which frames the
+///   scene proportionally.
+/// - **Camera** — the [`FairyDustOrbitCam`], when orthographic, parks at a fixed `(near + far) / 2`
+///   distance (see `bevy_lagrange`'s `update_orbit_transform`) that a small scene's geometry term
+///   can't reach, so the far cascade must extend to it. Perspective projections leave this term at
+///   zero.
+///
+/// Taking the larger of the two only ever holds or raises the cascade, so a
+/// scene already covered by its geometry term (e.g. a large ground plane) is
+/// left untouched — shadows can never shrink away. Keeping `maximum_distance` to
+/// what is needed packs the shadow map over less area, so shadows stay sharp.
+/// [`Aabb`]s are computed in `PostUpdate`, so this can't run at startup.
 fn fit_cascade_to_scene(
-    mut commands: Commands,
-    mut light: Query<
-        (Entity, &mut CascadeShadowConfig, Option<&RenderLayers>),
-        With<FairyDustAutoCascade>,
-    >,
+    mut light: Query<(&mut CascadeShadowConfig, Option<&RenderLayers>), With<FairyDustAutoCascade>>,
+    camera: Query<&Projection, With<FairyDustOrbitCam>>,
     meshes: Query<(&Aabb, &GlobalTransform, Option<&RenderLayers>), With<Mesh3d>>,
 ) {
-    let Ok((light_entity, mut cascade, light_layers)) = light.single_mut() else {
+    let Ok((mut cascade, light_layers)) = light.single_mut() else {
         return;
     };
     let light_layers = light_layers.cloned().unwrap_or_default();
     let Some(radius) = scene_bounding_radius(&meshes, &light_layers) else {
         return;
     };
-    let maximum_distance = radius * CASCADE_FIT_RADIUS_MULTIPLE;
+
+    let geometry_distance = radius * CASCADE_FIT_RADIUS_MULTIPLE;
+    let camera_distance = match camera.single() {
+        Ok(Projection::Orthographic(ortho)) => {
+            (f32::midpoint(ortho.near, ortho.far) + radius) * CASCADE_CAMERA_HEADROOM
+        },
+        _ => 0.0,
+    };
+    let maximum_distance = geometry_distance.max(camera_distance);
+
+    // Re-running every frame keeps the cascade re-adjusting across projection
+    // toggles; rewrite the config only when the fit actually moves so a steady
+    // camera costs nothing.
+    if cascade
+        .bounds
+        .last()
+        .is_some_and(|current| (current - maximum_distance).abs() < CASCADE_REFIT_EPSILON)
+    {
+        return;
+    }
+
     *cascade = CascadeShadowConfigBuilder {
         num_cascades: CASCADE_COUNT,
         minimum_distance: CASCADE_MIN_DISTANCE,
@@ -164,9 +194,6 @@ fn fit_cascade_to_scene(
         ..default()
     }
     .build();
-    commands
-        .entity(light_entity)
-        .remove::<FairyDustAutoCascade>();
 }
 
 /// World-space bounding-sphere radius of the meshes whose [`RenderLayers`]
