@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::Actions;
 
 use super::OrbitCamBindings;
 #[cfg(feature = "reflect-input-modes")]
@@ -6,6 +7,7 @@ use super::OrbitCamBindingsDescriptor;
 #[cfg(feature = "reflect-input-modes")]
 use super::OrbitCamBindingsError;
 use super::OrbitCamInput;
+use super::OrbitCamInputContext;
 use super::OrbitCamPreset;
 use crate::orbit_cam::OrbitCam;
 use crate::system_sets::OrbitCamInputInternalSet;
@@ -318,9 +320,16 @@ fn clear_orbit_cam_input(world: &mut World, camera: Entity) {
 }
 
 fn replace_input_installation(world: &mut World, camera: Entity, mode: RuntimeInputMode) {
-    for installed_entity in installed_input_entities(world, camera) {
-        let _ = world.despawn(installed_entity);
-    }
+    // Drop the previous installation through the `Actions` relationship rather
+    // than iterating `installed_input_entities`. That flat list holds both the
+    // action entities and their `BindingOf` children; despawning an action
+    // already despawns its bindings through `linked_spawn`, so iterating the list
+    // despawned each binding a second time after its action was gone — which
+    // `World::despawn` reports as despawning an absent entity. `despawn_related`
+    // walks each action subtree exactly once and skips entities already despawned.
+    world
+        .entity_mut(camera)
+        .despawn_related::<Actions<OrbitCamInputContext>>();
 
     let entities = match mode {
         RuntimeInputMode::Bindings => {
