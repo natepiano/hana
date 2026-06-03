@@ -101,7 +101,7 @@ pub fn load_glyph_by_id_from_face(
 
 /// Returns whether `glyph_id` can produce visible curve data.
 #[must_use]
-pub fn glyph_id_has_visible_outline(face: &Face<'_>, glyph_id: u16) -> bool {
+fn glyph_id_has_visible_outline(face: &Face<'_>, glyph_id: u16) -> bool {
     glyph_id < face.number_of_glyphs() && face.glyph_bounding_box(GlyphId(glyph_id)).is_some()
 }
 
