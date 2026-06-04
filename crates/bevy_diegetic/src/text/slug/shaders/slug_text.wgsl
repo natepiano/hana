@@ -73,8 +73,46 @@ struct CoverageTerms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<BandRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<GlyphRecord>;
 
+#ifdef GLYPH_VERTEX_PULL
+// Mirrors `RunRecord` in `glyph/packing.rs` (std430, 96 B stride). Under the
+// vertex-pulling route a batch holds many runs, so the per-run values move
+// out of the material uniform into this table, indexed by the run index the
+// vertex stage forwards in `uv_b.y`.
+struct RunRecord {
+    transform: mat4x4<f32>,
+    fill_color: vec4<f32>,
+    render_mode: u32,
+    depth_nudge: f32,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
+
+fn run_index(glyph_uv: vec2<f32>) -> u32 {
+    return u32(floor(glyph_uv.y));
+}
+#endif
+
 fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
     return u32(floor(glyph_uv.x));
+}
+
+// Per-run fill color: the run table under vertex pulling, the material
+// uniform on the per-run path.
+fn run_fill_color(glyph_uv: vec2<f32>) -> vec4<f32> {
+#ifdef GLYPH_VERTEX_PULL
+    return run_records[run_index(glyph_uv)].fill_color;
+#else
+    return uniforms.fill_color;
+#endif
+}
+
+// Per-run render mode (Text / PunchOut), sourced like `run_fill_color`.
+fn run_render_mode(glyph_uv: vec2<f32>) -> u32 {
+#ifdef GLYPH_VERTEX_PULL
+    return run_records[run_index(glyph_uv)].render_mode;
+#else
+    return uniforms.render_mode;
+#endif
 }
 
 fn glyph_bounds_min(glyph: GlyphRecord) -> vec2<f32> {
@@ -427,7 +465,7 @@ fn aniso_band_coverage(
     return sum * inv_count;
 }
 
-fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
+fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
     // Derivatives stay at the top, in uniform control flow: every branch below
     // switches on a uniform value, so the fwidth/dpdx calls are never gated by a
     // per-fragment condition.
@@ -469,7 +507,7 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord) -> f32 {
         coverage = distance_coverage(point, pixel, glyph);
     }
 
-    if uniforms.render_mode == RENDER_MODE_PUNCH_OUT {
+    if render_mode == RENDER_MODE_PUNCH_OUT {
         return 1.0 - coverage;
     }
     return coverage;
@@ -481,7 +519,7 @@ fn fragment(in: VertexOutput) {
 #ifdef VERTEX_UVS_A
 #ifdef VERTEX_UVS_B
     let glyph = glyphs[glyph_index(in.uv_b)];
-    if render_coverage(in.uv, glyph) < 0.5 {
+    if render_coverage(in.uv, glyph, run_render_mode(in.uv_b)) < 0.5 {
         discard;
     }
 #else
@@ -505,15 +543,16 @@ fn fragment(
 #endif
 
     let glyph = glyphs[glyph_index(in.uv_b)];
-    let coverage = render_coverage(in.uv, glyph);
-    let final_alpha = coverage * uniforms.fill_color.a;
+    let fill_color = run_fill_color(in.uv_b);
+    let coverage = render_coverage(in.uv, glyph, run_render_mode(in.uv_b));
+    let final_alpha = coverage * fill_color.a;
     if final_alpha < DISCARD_ALPHA {
         discard;
     }
 
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = vec4<f32>(
-        uniforms.fill_color.rgb,
+        fill_color.rgb,
         final_alpha,
     );
     pbr_input.material.base_color = alpha_discard(

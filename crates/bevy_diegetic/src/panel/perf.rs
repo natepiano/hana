@@ -14,6 +14,11 @@ use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPED_PANELS;
 use super::constants::DIAG_PANEL_TEXT_TOTAL_MS;
+use super::constants::DIAG_TEXT_BATCH_GLYPHS;
+use super::constants::DIAG_TEXT_BATCH_INSTANCE_UPLOADS;
+use super::constants::DIAG_TEXT_BATCH_RUN_TABLE_UPLOADS;
+use super::constants::DIAG_TEXT_BATCH_RUNS;
+use super::constants::DIAG_TEXT_BATCHES;
 
 /// Lightweight timing data for diegetic UI systems.
 ///
@@ -39,6 +44,30 @@ pub struct DiegeticPerfStats {
     pub reconcile_ms:   f32,
     /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
     pub panel_text:     PanelTextPerfStats,
+    /// Glyph-batch counters, written by the batched-records geometry path
+    /// (`TextGeometryPath::BatchedRecords`); zeroed while the per-run path is
+    /// active.
+    pub batch:          BatchPerfStats,
+}
+
+/// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
+///
+/// The Step-2 proof counters of `docs/bevy_diegetic/glyph_instancing.md`. The
+/// two upload counters are split to match the store's per-buffer dirty flags:
+/// a transform-only frame uploads only run tables, a same-count text edit
+/// only instance buffers, an unchanged frame nothing.
+#[derive(Clone, Debug, Default, Reflect)]
+pub struct BatchPerfStats {
+    /// Live batch count (one render entity + one draw per pass each).
+    pub batches:           usize,
+    /// Text runs routed across all batches.
+    pub runs:              usize,
+    /// Glyph instance records across all batches.
+    pub glyph_records:     usize,
+    /// Glyph-instance buffer uploads this frame.
+    pub instance_uploads:  usize,
+    /// Run-table buffer uploads this frame.
+    pub run_table_uploads: usize,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -52,8 +81,8 @@ pub struct DiegeticPerfStats {
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
 /// crate's control.
 ///
-/// Only panel text is covered. Standalone `TextContent` entities not parented to a
-/// panel run through a separate path (`render_world_text`) and are not included.
+/// All text is covered: standalone `DiegeticText` labels are one-element
+/// panels, so every `TextContent` run flows through this pipeline.
 #[derive(Clone, Debug, Default, Reflect)]
 pub struct PanelTextPerfStats {
     /// End-to-end panel-text wall time this frame, in milliseconds.
@@ -109,6 +138,11 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_MESH_BUILD_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPED_PANELS),
+            Diagnostic::new(DIAG_TEXT_BATCHES),
+            Diagnostic::new(DIAG_TEXT_BATCH_RUNS),
+            Diagnostic::new(DIAG_TEXT_BATCH_GLYPHS),
+            Diagnostic::new(DIAG_TEXT_BATCH_INSTANCE_UPLOADS),
+            Diagnostic::new(DIAG_TEXT_BATCH_RUN_TABLE_UPLOADS),
         ] {
             app.register_diagnostic(diagnostic);
         }
@@ -135,5 +169,16 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_SHAPED_PANELS, || {
         perf.panel_text.shaped_panels.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_TEXT_BATCHES, || perf.batch.batches.to_f64());
+    diagnostics.add_measurement(&DIAG_TEXT_BATCH_RUNS, || perf.batch.runs.to_f64());
+    diagnostics.add_measurement(&DIAG_TEXT_BATCH_GLYPHS, || {
+        perf.batch.glyph_records.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_TEXT_BATCH_INSTANCE_UPLOADS, || {
+        perf.batch.instance_uploads.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_TEXT_BATCH_RUN_TABLE_UPLOADS, || {
+        perf.batch.run_table_uploads.to_f64()
     });
 }

@@ -15,6 +15,8 @@ mod font;
 mod slug;
 
 use bevy::asset::AssetLoadFailedEvent;
+use bevy::pbr::ExtendedMaterial;
+use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 pub(crate) use font::DEFAULT_FAMILY;
 pub use font::DiegeticTextMeasurer;
@@ -32,16 +34,37 @@ pub use font::GlyphBounds;
 pub use font::GlyphTypographyMetrics;
 pub use font::create_parley_measurer;
 pub(crate) use font::glyph_ink_extents;
+pub(crate) use slug::BatchGpu;
+pub(crate) use slug::BatchKey;
+pub(crate) use slug::BatchRenderLayers;
+pub(crate) use slug::BatchTextMaterialInput;
 pub(crate) use slug::DEFAULT_BAND_COUNT;
 pub(crate) use slug::GlyphAtlasHandles;
 pub(crate) use slug::GlyphCache;
+pub(crate) use slug::GlyphInstanceRecord;
 pub(crate) use slug::PositionedGlyph;
 pub(crate) use slug::PreparedTextRun;
 pub(crate) use slug::RenderMode;
+pub(crate) use slug::RunRecord;
 pub(crate) use slug::RunStorageKey;
-pub(crate) use slug::TextMaterial;
+pub(crate) use slug::TextExtension;
+#[expect(
+    unused_imports,
+    reason = "the AsBindGroup derive exposes this key through TextExtension's generated interface"
+)]
+pub(crate) use slug::TextExtensionKey;
 pub(crate) use slug::TextMaterialInput;
+pub(crate) use slug::batch_text_material;
+pub(crate) use slug::glyph_quad_extents;
+pub(crate) use slug::set_batch_text_material_buffers;
+pub(crate) use slug::set_text_material_anti_alias;
 pub(crate) use slug::text_material;
+#[cfg(test)]
+pub(crate) use slug::text_material_fill_color;
+#[cfg(feature = "batch_proof")]
+pub(crate) use slug::toggle_text_material_debug_glyph_index;
+
+pub(crate) type TextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>;
 
 use self::slug::SlugPlugin;
 

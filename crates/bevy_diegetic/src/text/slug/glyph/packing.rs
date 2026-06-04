@@ -1,5 +1,8 @@
+use bevy::math::Mat4;
 use bevy::math::UVec4;
+use bevy::math::Vec2;
 use bevy::math::Vec4;
+use bevy::render::render_resource::ShaderSize;
 use bevy::render::render_resource::ShaderType;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
@@ -106,6 +109,47 @@ impl GlyphRecord {
         }
     }
 }
+
+/// GPU record for one batched glyph quad. The vertex-pulling shader expands
+/// each record into four corners: positions from `rect_min`/`rect_size` in run
+/// layout space, padded glyph UVs from `uv_min`/`uv_size`, the shared-atlas
+/// slot through `atlas_index`, and the owning run through `run_index`.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
+pub(crate) struct GlyphInstanceRecord {
+    /// Quad minimum corner (left, bottom) in run layout space, clipped.
+    pub rect_min:    Vec2,
+    /// Quad size (width, height) in run layout space.
+    pub rect_size:   Vec2,
+    /// Padded glyph UV at the quad's (left, top) corner.
+    pub uv_min:      Vec2,
+    /// Padded glyph UV extent from `uv_min` toward (right, bottom).
+    pub uv_size:     Vec2,
+    /// Shared-atlas [`GlyphRecord`] index.
+    pub atlas_index: u32,
+    /// [`RunRecord`] index within the same batch.
+    pub run_index:   u32,
+}
+
+/// GPU record for one text run inside a batch: world placement plus the
+/// per-run values that batching moves out of the material uniform.
+#[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
+pub(crate) struct RunRecord {
+    /// Label world matrix (run layout space → world).
+    pub transform:   Mat4,
+    /// Linear fill color.
+    pub fill_color:  Vec4,
+    /// Visible render mode (`RenderMode` as `u32`).
+    pub render_mode: u32,
+    /// Depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`); the
+    /// shader zeroes it under OIT.
+    pub depth_nudge: f32,
+}
+
+// GPU-layout assertions against the std430 sizes the shaders index by — the
+// WGSL mirror structs in `slug_text_vertex_pull.wgsl` assume these strides.
+// `ShaderSize` measures the encase layout, not the Rust layout.
+const _: () = assert!(GlyphInstanceRecord::SHADER_SIZE.get() == 40);
+const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
 
 /// One glyph's packed curve and band data for the text shader.
 #[derive(Clone, Debug, PartialEq)]
@@ -291,5 +335,72 @@ const fn descending_band_sort_value(segment: &QuadraticSegment, axis: Axis) -> f
     match axis {
         Axis::Horizontal => segment.start.x.max(segment.control.x).max(segment.end.x),
         Axis::Vertical => segment.start.y.max(segment.control.y).max(segment.end.y),
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should fail loudly when encase encoding breaks"
+)]
+mod tests {
+    use bevy::render::render_resource::encase::StorageBuffer;
+
+    use super::*;
+
+    fn glyph_record(seed: f32, atlas_index: u32, run_index: u32) -> GlyphInstanceRecord {
+        GlyphInstanceRecord {
+            rect_min: Vec2::new(seed, seed + 0.5),
+            rect_size: Vec2::new(seed + 1.0, seed + 1.5),
+            uv_min: Vec2::new(-0.0625, -0.0625),
+            uv_size: Vec2::new(1.125, 1.125),
+            atlas_index,
+            run_index,
+        }
+    }
+
+    fn run_record(seed: f32) -> RunRecord {
+        RunRecord {
+            transform:   Mat4::from_translation(bevy::math::Vec3::new(seed, -seed, seed * 2.0)),
+            fill_color:  Vec4::new(0.25, 0.5, 0.75, 1.0),
+            render_mode: 1,
+            depth_nudge: seed,
+        }
+    }
+
+    #[test]
+    fn glyph_instance_records_round_trip_through_encase_at_40_byte_stride() {
+        let records = vec![glyph_record(1.0, 7, 0), glyph_record(-2.0, 11, 1)];
+        let mut encoded = StorageBuffer::new(Vec::<u8>::new());
+        encoded.write(&records).expect("records should encode");
+        assert_eq!(
+            encoded.as_ref().len(),
+            80,
+            "two records at a 40-byte stride"
+        );
+
+        let mut decoded: Vec<GlyphInstanceRecord> = Vec::new();
+        StorageBuffer::new(encoded.as_ref().clone())
+            .read(&mut decoded)
+            .expect("records should decode");
+        assert_eq!(decoded, records);
+    }
+
+    #[test]
+    fn run_records_round_trip_through_encase_at_96_byte_stride() {
+        let records = vec![run_record(0.0), run_record(3.5)];
+        let mut encoded = StorageBuffer::new(Vec::<u8>::new());
+        encoded.write(&records).expect("records should encode");
+        assert_eq!(
+            encoded.as_ref().len(),
+            192,
+            "two records at a 96-byte stride"
+        );
+
+        let mut decoded: Vec<RunRecord> = Vec::new();
+        StorageBuffer::new(encoded.as_ref().clone())
+            .read(&mut decoded)
+            .expect("records should decode");
+        assert_eq!(decoded, records);
     }
 }

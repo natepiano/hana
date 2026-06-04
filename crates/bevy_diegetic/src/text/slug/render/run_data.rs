@@ -84,19 +84,22 @@ struct RunMeshBuilder {
     indices:       Vec<u32>,
 }
 
-struct GlyphQuadExtents {
-    left:          f32,
-    right:         f32,
-    bottom:        f32,
-    top:           f32,
-    source_left:   f32,
-    source_right:  f32,
-    source_bottom: f32,
-    source_top:    f32,
-    uv_left:       f32,
-    uv_right:      f32,
-    uv_top:        f32,
-    uv_bottom:     f32,
+/// Padded, optionally clipped quad rect and UVs for one glyph instance — the
+/// extents [`RunMeshBuilder::push_glyph`] bakes into per-run mesh vertices and
+/// the batch record path packs into `GlyphInstanceRecord`s.
+pub struct GlyphQuadExtents {
+    pub(crate) left:      f32,
+    pub(crate) right:     f32,
+    pub(crate) bottom:    f32,
+    pub(crate) top:       f32,
+    source_left:          f32,
+    source_right:         f32,
+    source_bottom:        f32,
+    source_top:           f32,
+    pub(crate) uv_left:   f32,
+    pub(crate) uv_right:  f32,
+    pub(crate) uv_top:    f32,
+    pub(crate) uv_bottom: f32,
 }
 
 impl GlyphQuadExtents {
@@ -152,6 +155,25 @@ impl GlyphQuadExtents {
     }
 }
 
+/// Padded quad rect and UVs for one glyph instance, clipped to `clip_rect`.
+/// Returns `None` when clipping removes the whole quad.
+pub(crate) fn glyph_quad_extents(
+    glyph: GlyphInstance,
+    scale: f32,
+    clip_rect: Option<[f32; 4]>,
+) -> Option<GlyphQuadExtents> {
+    let bounds = glyph.bounds();
+    let bounds_scale = glyph.bounds_scale();
+    let origin = glyph.origin();
+    let left = bounds.min.x.mul_add(bounds_scale.x, origin.x) * scale;
+    let right = bounds.max.x.mul_add(bounds_scale.x, origin.x) * scale;
+    let bottom = bounds.min.y.mul_add(bounds_scale.y, origin.y) * scale;
+    let top = bounds.max.y.mul_add(bounds_scale.y, origin.y) * scale;
+    let padding_x = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.x.abs() * scale;
+    let padding_y = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.y.abs() * scale;
+    GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y).clipped(clip_rect)
+}
+
 impl RunMeshBuilder {
     fn new(glyph_count: usize) -> Self {
         Self {
@@ -170,18 +192,7 @@ impl RunMeshBuilder {
         scale: f32,
         clip_rect: Option<[f32; 4]>,
     ) {
-        let bounds = glyph.bounds();
-        let bounds_scale = glyph.bounds_scale();
-        let origin = glyph.origin();
-        let left = bounds.min.x.mul_add(bounds_scale.x, origin.x) * scale;
-        let right = bounds.max.x.mul_add(bounds_scale.x, origin.x) * scale;
-        let bottom = bounds.min.y.mul_add(bounds_scale.y, origin.y) * scale;
-        let top = bounds.max.y.mul_add(bounds_scale.y, origin.y) * scale;
-        let padding_x = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.x.abs() * scale;
-        let padding_y = GLYPH_PADDING_DESIGN_UNITS * bounds_scale.y.abs() * scale;
-        let Some(extents) = GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y)
-            .clipped(clip_rect)
-        else {
+        let Some(extents) = glyph_quad_extents(glyph, scale, clip_rect) else {
             return;
         };
 

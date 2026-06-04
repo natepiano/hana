@@ -15,6 +15,7 @@ version.workspace    = true
 workspace = true
 
 [features]
+batch_proof        = []
 bench_support      = []
 default            = ["typography_overlay"]
 trace_chrome       = ["bevy/trace_chrome"]
@@ -98,3 +99,7 @@ name = "screen_space"
 
 [[example]]
 name = "slug_text"
+
+[[example]]
+name              = "glyph_batch_proof"
+required-features = ["batch_proof"]

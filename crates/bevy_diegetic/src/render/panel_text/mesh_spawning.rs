@@ -401,6 +401,7 @@ mod tests {
     use crate::render::panel_text::shaping;
     use crate::render::text_shaping::TextShapingContext;
     use crate::render::world_text::TextContent;
+    use crate::text;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
 
@@ -547,13 +548,12 @@ mod tests {
             .expect("text mesh should carry its material")
             .0
             .clone();
-        app.world()
+        let material = app
+            .world()
             .resource::<Assets<TextMaterial>>()
             .get(&handle)
-            .expect("material asset should exist")
-            .extension
-            .uniforms
-            .fill_color
+            .expect("material asset should exist");
+        text::text_material_fill_color(material)
     }
 
     #[test]

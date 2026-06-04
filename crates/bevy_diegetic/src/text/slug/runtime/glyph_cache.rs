@@ -20,10 +20,14 @@ use super::GlyphInstance;
 use super::GlyphKey;
 use super::GlyphOutlineCache;
 use super::TextRun;
+use super::batch_store::BatchKey;
+use super::batch_store::GlyphBatchStore;
 use crate::layout::ShapedGlyph;
 use crate::text::Font;
 use crate::text::slug::RunRenderError;
+use crate::text::slug::glyph::GlyphInstanceRecord;
 use crate::text::slug::glyph::OutlineError;
+use crate::text::slug::glyph::RunRecord;
 use crate::text::slug::render;
 use crate::text::slug::render::RunRenderData;
 
@@ -47,6 +51,10 @@ impl PreparedTextRun {
     /// Number of visible glyph quads in this prepared run.
     #[must_use]
     pub fn glyph_count(&self) -> usize { self.run.run.glyphs().len() }
+
+    /// Positioned glyph instances in run order.
+    #[must_use]
+    pub fn glyphs(&self) -> &[GlyphInstance] { self.run.run.glyphs() }
 }
 
 /// Stable per-label key for one run's GPU storage handles, derived from the
@@ -88,6 +96,8 @@ pub(crate) struct GlyphCache {
     /// per font so run preparation never re-parses font tables per glyph.
     units_per_em:       HashMap<FontKey, f32>,
     run_storage:        HashMap<RunStorageKey, RunStorage>,
+    /// Batched-records routing state (`TextGeometryPath::BatchedRecords`).
+    batch_store:        GlyphBatchStore,
     preprocess_version: u32,
     atlas:              Option<GlyphAtlasHandles>,
     uploaded_revision:  u32,
@@ -201,6 +211,10 @@ impl GlyphCache {
         render_data: RunRenderData,
         meshes: &mut Assets<Mesh>,
     ) -> RunStorage {
+        debug_assert!(
+            !self.batch_store.is_routed(storage_key),
+            "per-run mesh path claiming a storage key the batch path holds"
+        );
         if let Some(storage) = self.run_storage.get(&storage_key) {
             // Same label, changed text: overwrite the existing mesh behind its
             // stable handle. `get_mut` marks it modified, so the render world
@@ -262,6 +276,34 @@ impl GlyphCache {
         self.uploaded_revision = revision;
         self.atlas = Some(handles.clone());
         Some(handles)
+    }
+
+    /// Shared-atlas record index for `key`, if the glyph has been packed.
+    #[must_use]
+    pub fn atlas_index(&self, key: GlyphKey) -> Option<u32> { self.outline_cache.global_index(key) }
+
+    /// The glyph batch store (records, batch keys, GPU handles per batch).
+    #[must_use]
+    pub const fn batch_store(&self) -> &GlyphBatchStore { &self.batch_store }
+
+    /// The glyph batch store, mutable.
+    pub const fn batch_store_mut(&mut self) -> &mut GlyphBatchStore { &mut self.batch_store }
+
+    /// Routes a run into the batch store —
+    /// [`GlyphBatchStore::upsert_run`] behind the toggle-era safety check
+    /// that the per-run path does not also hold this storage key.
+    pub fn upsert_batch_run(
+        &mut self,
+        key: BatchKey,
+        run: RunStorageKey,
+        glyphs: Vec<GlyphInstanceRecord>,
+        record: RunRecord,
+    ) {
+        debug_assert!(
+            !self.run_storage.contains_key(&run),
+            "batch path claiming a storage key the per-run mesh path holds"
+        );
+        self.batch_store.upsert_run(key, run, glyphs, record);
     }
 
     /// Removes one run's GPU storage handles.

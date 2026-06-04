@@ -44,3 +44,13 @@ pub(super) const DIAG_PANEL_TEXT_SHAPE_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/shape_ms");
 pub(super) const DIAG_PANEL_TEXT_TOTAL_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/total_ms");
+pub(super) const DIAG_TEXT_BATCHES: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/text_batch/batches");
+pub(super) const DIAG_TEXT_BATCH_RUNS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/text_batch/runs");
+pub(super) const DIAG_TEXT_BATCH_GLYPHS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/text_batch/glyph_records");
+pub(super) const DIAG_TEXT_BATCH_INSTANCE_UPLOADS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/text_batch/instance_uploads");
+pub(super) const DIAG_TEXT_BATCH_RUN_TABLE_UPLOADS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/text_batch/run_table_uploads");

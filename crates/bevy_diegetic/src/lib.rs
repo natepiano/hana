@@ -187,6 +187,7 @@ pub use layout::TextStyle;
 pub use layout::TextWrap;
 pub use layout::Unit;
 pub use panel::AnyUnit;
+pub use panel::BatchPerfStats;
 pub use panel::CompatibleUnits;
 pub use panel::ComputedDiegeticPanel;
 pub use panel::CoordinateSpace;
@@ -216,6 +217,7 @@ pub use panel::Points;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
+pub use render::DiegeticTextBatch;
 pub use render::DiegeticTextMut;
 pub use render::PanelText;
 pub use render::PanelTextLayout;
@@ -226,8 +228,17 @@ pub use render::StableTransparency;
 pub use render::TextAntiAlias;
 pub use render::TextContent;
 pub use render::TextEdit;
+pub use render::TextGeometryPath;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
+#[cfg(feature = "batch_proof")]
+pub use render::batch_proof::GlyphBatchProof;
+#[cfg(feature = "batch_proof")]
+pub use render::batch_proof::GlyphBatchProofPlugin;
+#[cfg(feature = "batch_proof")]
+pub use render::batch_proof::force_capacity_growth;
+#[cfg(feature = "batch_proof")]
+pub use render::batch_proof::toggle_debug_index;
 pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;

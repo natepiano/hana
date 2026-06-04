@@ -1,5 +1,0 @@
-[visibility]
-allow_pub_items = [
-  "crates/bevy_diegetic/src/text/slug/render/material.rs::TextExtension",
-  "crates/bevy_diegetic/src/text/slug/render/material.rs::TextUniform",
-]

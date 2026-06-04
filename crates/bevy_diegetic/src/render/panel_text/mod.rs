@@ -2,6 +2,7 @@
 
 mod access;
 mod alpha;
+mod batching;
 mod glyph_cascade;
 mod layout;
 mod mesh_spawning;
@@ -17,6 +18,17 @@ pub use self::access::PanelText;
 pub use self::access::PanelTextReader;
 pub use self::access::TextEdit;
 use self::alpha::seed_panel_text_child_alpha;
+pub use self::batching::DiegeticTextBatch;
+pub use self::batching::TextGeometryPath;
+use self::batching::apply_text_geometry_path;
+#[cfg(feature = "batch_proof")]
+pub(crate) use self::batching::build_glyph_records;
+use self::batching::commit_batch_buffers;
+#[cfg(feature = "batch_proof")]
+pub(crate) use self::batching::inert_batch_mesh;
+use self::batching::update_batch_bounds;
+use self::batching::update_panel_text_batches;
+use self::batching::write_batch_run_transforms;
 use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
 use self::mesh_spawning::free_run_storage_on_mesh_removal;
@@ -76,6 +88,9 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
+        app.init_resource::<TextGeometryPath>();
+        app.register_type::<TextGeometryPath>();
+        app.register_type::<DiegeticTextBatch>();
         // Reflection parity only; the `#[relationship]` derive installs the
         // maintenance hooks, so the set populates without these registrations.
         app.register_type::<TextRunOf>();
@@ -91,15 +106,45 @@ impl Plugin for TextRenderPlugin {
                     .in_set(PanelChildSystems::Build)
                     .after(reconcile_panel_text_children),
                 shape_panel_text_children.after(reconcile_panel_text_children),
+                // Toggle-flip teardown despawns the outgoing path's products
+                // (mesh children one way, batch entities the other) before
+                // either geometry system rebuilds the incoming path's world.
+                apply_text_geometry_path
+                    .after(shape_panel_text_children)
+                    .before(update_panel_text_geometry)
+                    .before(update_panel_text_batches)
+                    .in_set(PanelChildSystems::Build),
                 update_panel_text_geometry
                     .after(shape_panel_text_children)
-                    .before(TransformSystems::Propagate),
+                    .before(TransformSystems::Propagate)
+                    .run_if(resource_equals(TextGeometryPath::PerRunMeshes)),
                 update_panel_text_alpha
                     .after(shape_panel_text_children)
                     .before(TransformSystems::Propagate)
-                    .in_set(PanelChildSystems::Build),
+                    .in_set(PanelChildSystems::Build)
+                    .run_if(resource_equals(TextGeometryPath::PerRunMeshes)),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
+        );
+        // The batched-records path on its frame-flow anchors (glyph_instancing
+        // plan, frame flow steps 2-5). Exactly one geometry path runs per
+        // frame, gated on TextGeometryPath.
+        app.add_systems(
+            PostUpdate,
+            (
+                update_panel_text_batches
+                    .after(shape_panel_text_children)
+                    .before(TransformSystems::Propagate),
+                write_batch_run_transforms.after(TransformSystems::Propagate),
+                update_batch_bounds
+                    .after(write_batch_run_transforms)
+                    .after(VisibilitySystems::CalculateBounds)
+                    .before(VisibilitySystems::CheckVisibility),
+                commit_batch_buffers
+                    .after(update_panel_text_batches)
+                    .after(write_batch_run_transforms),
+            )
+                .run_if(resource_equals(TextGeometryPath::BatchedRecords)),
         );
     }
 }

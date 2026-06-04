@@ -25,6 +25,7 @@ pub use diegetic_panel::DiegeticPanelCommands;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
+pub use perf::BatchPerfStats;
 use perf::DiagnosticsPlugin;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelTextPerfStats;

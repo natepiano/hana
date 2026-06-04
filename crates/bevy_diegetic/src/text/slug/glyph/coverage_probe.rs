@@ -638,7 +638,7 @@ fn stride_does_not_alias_straight_edge() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../shaders/slug_text.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0x2def_34cc_71a4_572f;
+    const EXPECTED_SHADER_FNV1A: u64 = 0x74e7_1913_85f9_dd9d;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,

@@ -24,14 +24,18 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::pbr::Shadow;
 use bevy::prelude::*;
 use bevy::render::Render;
 use bevy::render::RenderApp;
 use bevy::render::RenderSystems;
 use bevy::render::diagnostic::RenderDiagnosticsPlugin;
+use bevy::render::render_phase::ViewBinnedRenderPhases;
+use bevy::render::render_phase::ViewSortedRenderPhases;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -48,8 +52,10 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextGeometryPath;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
+use bevy_kana::ToU32;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
@@ -143,6 +149,11 @@ struct StressLabel(usize);
 #[derive(Component)]
 struct StatusPanel;
 
+/// Marker for the upper-right glyph-batch stats panel (Step-2 proof
+/// counters), separate from the waterfall so its wide rows don't stretch it.
+#[derive(Component)]
+struct BatchStatsPanel;
+
 /// Monotonic frame counter driving the per-label text; wrapped to three digits so
 /// label widths stay bounded.
 #[derive(Resource, Default)]
@@ -197,6 +208,13 @@ impl PerfSnapshot {
 /// shown value changes.
 #[derive(Resource, Default)]
 struct LastDisplayedStatus {
+    text: String,
+}
+
+/// Last displayed batch-stats string, so the batch panel rebuilds only when a
+/// shown value changes.
+#[derive(Resource, Default)]
+struct LastDisplayedBatchStats {
     text: String,
 }
 
@@ -352,6 +370,80 @@ fn publish_render_spans(marks: Res<RenderMarks>, spans: Res<RenderThreadSpans>) 
 /// One shared segment value, decoded from its `f32` bits.
 fn span_ms(bits: &AtomicU32) -> f32 { f32::from_bits(bits.load(Ordering::Relaxed)) }
 
+// ── Phase-item counts (render thread) ─────────────────────────────────────────
+
+/// Latest per-frame phase-item counts, written on the render thread after
+/// `PhaseSort` and read by the overlay on the main thread. Path-agnostic — it
+/// counts whichever toggle state is active — so toggle-off vs toggle-on reads
+/// come from one session.
+#[derive(Default)]
+struct DrawCountBits {
+    /// `Transparent3d` items summed across views. Text always renders here
+    /// (blend or OIT — OIT reuses this phase; the resolve pass adds none).
+    transparent: AtomicU32,
+    /// Shadow-phase entities summed across light views (batchable +
+    /// unbatchable bins, plus one per multidrawable batch set).
+    shadow:      AtomicU32,
+}
+
+/// Main-world handle to the shared [`DrawCountBits`].
+#[derive(Resource, Clone)]
+struct DrawCounts(Arc<DrawCountBits>);
+
+/// Counts per-view phase items after `RenderSystems::PhaseSort` into the same
+/// shared-atomics channel the waterfall uses — the draws-per-pass number on
+/// screen.
+struct DrawCountPlugin;
+
+impl Plugin for DrawCountPlugin {
+    fn build(&self, app: &mut App) {
+        let shared = DrawCounts(Arc::new(DrawCountBits::default()));
+        app.insert_resource(shared.clone());
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
+        render_app.insert_resource(shared);
+        render_app.add_systems(
+            Render,
+            count_phase_items
+                .after(RenderSystems::PhaseSort)
+                .before(RenderSystems::Render),
+        );
+    }
+}
+
+fn count_phase_items(
+    transparent_phases: Res<ViewSortedRenderPhases<Transparent3d>>,
+    shadow_phases: Res<ViewBinnedRenderPhases<Shadow>>,
+    counts: Res<DrawCounts>,
+) {
+    let transparent: usize = transparent_phases
+        .values()
+        .map(|phase| phase.items.len())
+        .sum();
+    let shadow: usize = shadow_phases
+        .values()
+        .map(|phase| {
+            phase
+                .batchable_meshes
+                .values()
+                .map(|bin| bin.entities().len())
+                .sum::<usize>()
+                + phase
+                    .unbatchable_meshes
+                    .values()
+                    .map(|bin| bin.entities.len())
+                    .sum::<usize>()
+                + phase.multidrawable_meshes.len()
+        })
+        .sum();
+    counts
+        .0
+        .transparent
+        .store(transparent.to_u32(), Ordering::Relaxed);
+    counts.0.shadow.store(shadow.to_u32(), Ordering::Relaxed);
+}
+
 // ── App ───────────────────────────────────────────────────────────────────────
 
 fn main() {
@@ -384,25 +476,40 @@ fn main() {
             TitleBar::new()
                 .with_title("Text Stress")
                 .with_anchor(Anchor::TopLeft)
-                .control("Space pause"),
+                .control("Space pause")
+                .control("B batch path"),
         )
         .with_camera_control_panel()
-        .add_plugins((RenderDiagnosticsPlugin, RenderThreadTimingPlugin))
+        .add_plugins((
+            RenderDiagnosticsPlugin,
+            RenderThreadTimingPlugin,
+            DrawCountPlugin,
+        ))
         .init_resource::<FrameCounter>()
         .init_resource::<Mutating>()
         .init_resource::<LastDisplayedStatus>()
+        .init_resource::<LastDisplayedBatchStats>()
         .insert_resource(MainSpanStart(Instant::now()))
         .init_resource::<MainThreadMs>()
         .add_systems(First, mark_main_span_start)
         .add_systems(Last, publish_main_span)
-        .add_systems(Startup, (spawn_labels, spawn_status_overlay))
+        .add_systems(
+            Startup,
+            (
+                spawn_labels,
+                spawn_status_overlay,
+                spawn_batch_stats_overlay,
+            ),
+        )
         .add_systems(
             Update,
             (
                 toggle_mutation,
+                toggle_geometry_path,
                 advance_frame,
                 mutate_labels,
                 update_status_panel,
+                update_batch_stats_panel,
             )
                 .chain(),
         )
@@ -451,6 +558,18 @@ fn toggle_mutation(keyboard: Res<ButtonInput<KeyCode>>, mut mutating: ResMut<Mut
     }
 }
 
+/// Flips between the per-run mesh path and the batched-records path (B), the
+/// Step-2 parity-gate comparison in one session.
+fn toggle_geometry_path(keyboard: Res<ButtonInput<KeyCode>>, mut path: ResMut<TextGeometryPath>) {
+    if keyboard.just_pressed(KeyCode::KeyB) {
+        *path = match *path {
+            TextGeometryPath::PerRunMeshes => TextGeometryPath::BatchedRecords,
+            TextGeometryPath::BatchedRecords => TextGeometryPath::PerRunMeshes,
+        };
+        info!("text geometry path: {:?}", *path);
+    }
+}
+
 fn advance_frame(mutating: Res<Mutating>, mut frame: ResMut<FrameCounter>) {
     if mutating.0 {
         frame.0 = frame.0.wrapping_add(1);
@@ -494,6 +613,26 @@ fn spawn_status_overlay(mut commands: Commands) {
             commands.spawn((StatusPanel, built, Transform::default()));
         },
         Err(error) => error!("diegetic_text_stress: failed to build status overlay: {error}"),
+    }
+}
+
+fn spawn_batch_stats_overlay(mut commands: Commands) {
+    let unlit = screen_panel_material();
+    let built = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopRight)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_batch_stats_tree(&batch_stats_rows(
+            TextGeometryPath::PerRunMeshes,
+            &BatchStatsValues::default(),
+        )))
+        .build();
+    match built {
+        Ok(built) => {
+            commands.spawn((BatchStatsPanel, built, Transform::default()));
+        },
+        Err(error) => error!("diegetic_text_stress: failed to build batch stats overlay: {error}"),
     }
 }
 
@@ -608,6 +747,44 @@ fn build_overlay_tree(
                         state,
                         CellEmphasis::Dim,
                     );
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+/// Builds the upper-right batch-stats panel: one label/value row per Step-2
+/// proof counter.
+fn build_batch_stats_tree(rows: &[(&str, String)]) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(TABLE_ROW_GAP),
+                |builder| {
+                    for (label, value) in rows {
+                        builder.with(
+                            El::new()
+                                .width(Sizing::FIT)
+                                .height(Sizing::FIT)
+                                .direction(Direction::LeftToRight)
+                                .child_gap(TABLE_COL_GAP)
+                                .child_alignment(AlignX::Left, AlignY::Center),
+                            |builder| {
+                                label_cell(builder, label, false);
+                                value_cell(builder, value, CellEmphasis::Normal);
+                            },
+                        );
+                    }
                 },
             );
         },
@@ -732,6 +909,82 @@ fn update_status_panel(
         last_displayed.text.clone_from(&key);
         for entity in &panels {
             commands.set_tree(entity, build_overlay_tree(&now, &max, mutating.0));
+        }
+    }
+}
+
+/// The Step-2 proof-counter values shown in the upper-right panel.
+#[derive(Default)]
+struct BatchStatsValues {
+    batches:           usize,
+    runs:              usize,
+    glyphs:            usize,
+    instance_uploads:  usize,
+    run_table_uploads: usize,
+    transparent_items: u32,
+    shadow_items:      u32,
+}
+
+/// Label/value rows for the batch-stats panel.
+fn batch_stats_rows(path: TextGeometryPath, values: &BatchStatsValues) -> Vec<(&str, String)> {
+    let path_label = match path {
+        TextGeometryPath::PerRunMeshes => "per-run",
+        TextGeometryPath::BatchedRecords => "batched",
+    };
+    vec![
+        ("path", path_label.to_string()),
+        ("batches", values.batches.to_string()),
+        ("runs", values.runs.to_string()),
+        ("glyphs", values.glyphs.to_string()),
+        ("upload i", values.instance_uploads.to_string()),
+        ("upload rt", values.run_table_uploads.to_string()),
+        ("t3d", values.transparent_items.to_string()),
+        ("shadow", values.shadow_items.to_string()),
+    ]
+}
+
+/// Refreshes the upper-right batch-stats panel: batch store contents (zero on
+/// the per-run path) and per-pass phase items, live in whichever toggle state
+/// is active so before/after reads come from one session.
+fn update_batch_stats_panel(
+    diegetic_perf: Res<DiegeticPerfStats>,
+    draw_counts: Res<DrawCounts>,
+    geometry_path: Res<TextGeometryPath>,
+    panels: Query<Entity, With<BatchStatsPanel>>,
+    mut last_displayed: ResMut<LastDisplayedBatchStats>,
+    mut commands: Commands,
+    mut timer: Local<Option<Timer>>,
+    time: Res<Time>,
+) {
+    let timer =
+        timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
+    timer.tick(time.delta());
+    if !timer.just_finished() {
+        return;
+    }
+
+    let batch = &diegetic_perf.batch;
+    let values = BatchStatsValues {
+        batches:           batch.batches,
+        runs:              batch.runs,
+        glyphs:            batch.glyph_records,
+        instance_uploads:  batch.instance_uploads,
+        run_table_uploads: batch.run_table_uploads,
+        transparent_items: draw_counts.0.transparent.load(Ordering::Relaxed),
+        shadow_items:      draw_counts.0.shadow.load(Ordering::Relaxed),
+    };
+    let rows = batch_stats_rows(*geometry_path, &values);
+    let mut key = String::new();
+    for (label, value) in &rows {
+        key.push_str(label);
+        key.push('=');
+        key.push_str(value);
+        key.push('|');
+    }
+    if key != last_displayed.text {
+        last_displayed.text.clone_from(&key);
+        for entity in &panels {
+            commands.set_tree(entity, build_batch_stats_tree(&rows));
         }
     }
 }

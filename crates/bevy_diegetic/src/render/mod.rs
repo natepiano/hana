@@ -1,5 +1,7 @@
 //! Rendering systems for diegetic UI panels and text.
 
+#[cfg(feature = "batch_proof")]
+pub(crate) mod batch_proof;
 mod clip;
 mod constants;
 mod panel_geometry;
@@ -16,12 +18,14 @@ pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
+pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
 pub use panel_text::PanelTextLayout;
 pub use panel_text::PanelTextReader;
 pub use panel_text::PanelTextRuns;
 pub use panel_text::TextEdit;
+pub use panel_text::TextGeometryPath;
 use panel_text::TextRenderPlugin;
 pub use panel_text::TextRunOf;
 pub(crate) use sdf_material::SdfPanelMaterial;
@@ -38,6 +42,7 @@ pub use world_text::WorldTextReady;
 #[cfg(feature = "typography_overlay")]
 pub(crate) use world_text::emit_computed_world_text;
 
+use crate::text;
 use crate::text::TextMaterial;
 
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
@@ -115,11 +120,8 @@ fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Asset
     if !setting.is_changed() {
         return;
     }
-    let supersample = u32::from(setting.supersamples());
-    let aa_band = u32::from(setting.anisotropic());
     for (_, material) in materials.iter_mut() {
-        material.extension.uniforms.supersample = supersample;
-        material.extension.uniforms.aa_band = aa_band;
+        text::set_text_material_anti_alias(material, setting.supersamples(), setting.anisotropic());
     }
 }
 
