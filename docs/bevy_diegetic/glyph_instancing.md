@@ -90,25 +90,30 @@ shadow passes.
 Two GPU tables plus a per-batch entity:
 
 ```text
-GlyphInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B)
+GlyphInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B stride)
   rect_min:  vec2<f32>   // layout space, clipped   transform:   mat4x4<f32> // label world matrix
   rect_size: vec2<f32>                              fill_color:  vec4<f32>
   uv_min:    vec2<f32>   // padded quad UVs         render_mode: u32         // Text / PunchOut
   uv_size:   vec2<f32>                              depth_nudge: f32
-  atlas_idx: u32         // GlyphRecord index       _pad:        vec2<f32>
+  atlas_idx: u32         // GlyphRecord index
   run_idx:   u32         // RunRecord index
 ```
 
 GlyphInstanceRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
-40, already stride-aligned — no padding field). RunRecord: 64 + 16 + 4 + 4 +
-8 explicit pad = 96, 16-aligned. Transform encoding: `Mat4` — glam has no
+40, already stride-aligned). RunRecord: 64 + 16 + 4 + 4 = 88, rounded to a
+96 array stride by encase (struct alignment 16) — **no explicit pad field**;
+encase owns the padding, same as the existing `CurveRecord` / `BandRecord` /
+`GlyphRecord` declarations. Transform encoding: `Mat4` — glam has no
 `Mat3x4` and the existing record structs only use `Vec4` / `UVec4` through
 `ShaderType`, so `Mat4` is the no-surprises choice; pack to 3×`Vec4` only if
 measurement justifies it. Both structs live in
 `src/text/slug/render/packing.rs` next to `CurveRecord` / `BandRecord` /
 `GlyphRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
-size assertions (`const _: () = assert!(size_of::<GlyphInstanceRecord>() ==
-40)`, RunRecord `== 96`) and a ShaderType round-trip check.
+layout assertions against the **GPU layout, not the Rust layout** —
+`size_of` measures the wrong thing; assert via `ShaderSize::SHADER_SIZE`
+(`GlyphInstanceRecord` 40, RunRecord 96 — encase rounds struct size to its
+16-byte alignment per WGSL rules; confirmed against encase 0.12's
+`METADATA.min_size()`), plus a write-and-readback round-trip check.
 
 If `MotionVectorPrepass` is ever enabled (no bevy_diegetic example uses it
 today), the run table grows a `previous_transform` column and the prepass
@@ -121,12 +126,51 @@ column does not exist.
   buffer; the run table holds everything per-run that varies inside a batch.
 - **Vertex pulling, not step-mode instancing.** The batch mesh is inert: a
   capacity-sized vertex buffer (zeroed positions, written only when capacity
-  grows) and a static `6 × capacity` index pattern. The vertex shader derives
-  `glyph = vertex_index / 4`, `corner = vertex_index % 4`, reads the two
-  tables, and computes world position = `run.transform × (rect corner)`. The
-  fragment shader is today's `slug_text.wgsl` unchanged below the record
-  lookup (atlas index now arrives from the instance record instead of
-  `UV_1.x`).
+  grows) and a static `6 × capacity` index pattern, **`Indices::U32`** (u16
+  caps a batch at 16 384 glyphs — a silent ceiling; rule it out at creation)
+  and **`POSITION` + `UV_0` + `UV_1` as the attribute set** — all zeroed;
+  the shader ignores the *values*, but the attributes must be present: bevy
+  sets the `VERTEX_UVS_A` / `VERTEX_UVS_B` shader defs from the mesh layout
+  in both pipelines (`bevy_pbr/src/render/mesh.rs:3309`,
+  `prepass/mod.rs:470,475`), and `slug_text.wgsl`'s fragment reads `in.uv` /
+  `in.uv_b` behind those defs (`:481-505`) — a POSITION-only mesh would
+  discard every fragment.
+  The vertex shader derives glyph and corner from the vertex index — but
+  bevy's mesh allocator packs meshes into shared slab buffers and draws with
+  a nonzero `base_vertex`, which `@builtin(vertex_index)` **includes** on
+  wgpu, so the derivation must subtract the slab base:
+  `glyph = (vertex_index - mesh[instance_index].first_vertex_index) / 4`,
+  `corner = ... % 4` — the same correction bevy's own wireframe shader makes
+  (`wireframe.wgsl:67-68`). The index buffer is capacity-sized while the
+  instance buffer is live-sized, so the shader guards
+  `glyph >= arrayLength(&instances)` and emits a degenerate quad: the
+  capacity tail draws as no-ops, and out-of-bounds robustness clamping
+  (which would re-read the *last* record and re-blend its glyph once per
+  spare slot) can never fire. It then reads the two tables and computes
+  world position = `run.transform × (rect corner)`. Records carry no normal: the
+  shader rotates layout-space +z by the run transform's rotation for the lit
+  fragment path.
+- **What the fragment receives, and its one bounded change.** The vertex
+  stage forwards per-glyph data through the *existing* def-gated outputs —
+  `uv` = the glyph-local quad UVs, `uv_b.x` = atlas record index as f32
+  (exactly today's `UV_1.x` mechanism), `uv_b.y` = the run index as f32
+  (recovered with `u32(floor(..))` — the same recovery today's
+  `glyph_index` uses, `slug_text.wgsl:76-78`; quad-uniform float values
+  interpolate exactly,
+  the same invariant today's `uv_b.x` already relies on; integers are exact
+  below 2²⁴). The fragment's per-run uniform reads (`fill_color`,
+  `render_mode` — `slug_text.wgsl:472,509,516`) become run-table reads:
+  `run_records[u32(floor(in.uv_b.y))]`, which requires binding 105 to be
+  `visibility(vertex, fragment)` (104 stays vertex-only). Below that lookup
+  the fragment is unchanged — the prepass fragment reads no per-run values
+  at all (it discards on coverage only, `:483-486`), and the AA
+  screen-space derivative logic is untouched (same UV values, new source).
+- **Extension uniform keeps the globals.** Binding 100 retains `supersample`
+  and `aa_band` (global AA settings mirrored from the `TextAntiAlias`
+  resource by `sync_text_anti_alias`) and the `oit_depth_offset` policy
+  field (always 0.0) — per-batch uniform, unchanged. Only `fill_color`,
+  `render_mode`, and the depth nudge leave the uniform for the per-run
+  record.
 
 Why vertex pulling instead of hardware instancing: bevy's `Material` path
 owns the draw call (instance ranges come from its batching of entities), so a
@@ -142,7 +186,10 @@ Frame flow in steady state (stress test), with schedule anchors:
 2. geometry write — `update_panel_text_geometry` (PostUpdate,
    `.before(TransformSystems::Propagate)`, unchanged slot) writes the run's
    glyph records into its batch range + the non-transform `RunRecord`
-   fields; atlas commit stays inside it (records only index the atlas)
+   fields; atlas commit stays inside it (records only index the atlas);
+   capacity growth is detected here — the replacement mesh/buffers are
+   created, written, and swapped onto the batch entity in the same frame
+   (D4: a same-frame-created asset is prepared before queue)
 3. transform write — new system, PostUpdate
    `.after(TransformSystems::Propagate)`, copies each label's
    `GlobalTransform` into its `RunRecord` slot, gated on
@@ -150,9 +197,11 @@ Frame flow in steady state (stress test), with schedule anchors:
 4. Aabb union — new system `.after(transform write)`,
    `.after(VisibilitySystems::CalculateBounds)`,
    `.before(VisibilitySystems::CheckVisibility)` (decision 5)
-5. buffer commit — new system `.after(geometry write).after(transform
-   write)`, one `ShaderBuffer` write per dirty batch, still in PostUpdate so
-   extraction sees this frame's data
+5. buffer commit — new system (`commit_batch_buffers`) `.after(geometry
+   write).after(transform write)`, one `ShaderBuffer` write per dirty
+   buffer (instances and/or run table) per batch, still in PostUpdate so
+   extraction sees this frame's data; this system also writes the
+   `DiegeticPerfStats` batch counters
 6. render → per batch: one entity extracted, one draw per pass
 
 Text edit = a range write. Label move = one `RunRecord` write. Neither
@@ -170,10 +219,11 @@ them mid-implementation:
 
 - An unchanged frame writes nothing (dirty flag never set) — the Phase D
   property holds.
-- One edited run dirties **its batch's** record buffer (whole-buffer upload),
-  never other batches, never any mesh asset.
-- A scrolled clip rect changes that run's records every scrolled frame —
-  scroll frames upload the batch buffer. Known, bounded, measured in Step 2.
+- One edited run dirties **its batch's instance buffer** (whole-buffer
+  upload), never other batches, never any mesh asset.
+- A scrolled clip rect changes that run's glyph records every scrolled
+  frame — scroll frames upload the batch's instance buffer. Known, bounded,
+  measured in Step 2.
 - Sub-buffer range writes are a later optimization, justified only by a
   measured cost.
 
@@ -181,12 +231,21 @@ them mid-implementation:
 
 ### 1. Pipeline route — vertex pulling inside `ExtendedMaterial` (verified)
 
-`TextExtension` grows two storage bindings (instances at 104, runs at 105).
-`impl MaterialExtension for TextExtension` today overrides only the two
+`TextExtension` grows two storage bindings: instances at 104,
+`#[storage(104, read_only, visibility(vertex))]`, and runs at 105,
+`#[storage(105, read_only, visibility(vertex, fragment))]` — the fragment
+indexes the run table for `fill_color` / `render_mode` (Target model). No
+binding collision: `StandardMaterial` stops far below 100, the extension
+uses 100–103 today. `impl MaterialExtension for TextExtension` today
+overrides only the two
 fragment stages (`material.rs:81-85`); Step 1 adds `vertex_shader()` and
 `prepass_vertex_shader()`, both returning a new
 `src/text/slug/shaders/slug_text_vertex_pull.wgsl` (one file, one shared
-nudge/expand function — the prepass and main stages must not drift).
+nudge/expand function — the prepass and main stages must not drift). The
+file follows `slug_text.wgsl`'s own dual-pipeline pattern (`:13-19`):
+`#ifdef PREPASS_PIPELINE` selects the `prepass_io` vs `forward_io`
+`VertexOutput` import, the vertex entry point is gated the same way, and
+the shared helper does the pull/expand/nudge work for both.
 Verified against bevy 0.19 source: `MaterialExtension` declares both
 (`bevy_pbr/src/extended_material.rs:36,66`) and `ExtendedMaterial` routes
 them into the main, prepass, and shadow pipelines (`:317-370`), with
@@ -203,6 +262,17 @@ measured cost; revisit only if the Material route hits a wall in Step 1.
 ```text
 (BaseMaterialId, alpha_mode, lighting, sidedness, shadow_mode, RenderLayers)
 ```
+
+**`BatchKey` is a dedicated struct, not a tuple of bevy types** — the bevy
+types don't qualify as map keys: `AlphaMode` has a manual `Eq` impl but no
+`Hash` (`Mask(f32)`; `alpha.rs:64`), `RenderLayers` derives `Eq` but not
+`Hash`, and the cascade
+wrappers (`TextAlpha` / `TextLighting` / `TextSidedness`) don't derive
+`Hash`. The key stores encodings instead: alpha mode as a local enum whose
+`Mask` carries `f32::to_bits`, lighting / sidedness / shadow as their
+discriminants, `RenderLayers` behind a local newtype that hashes its blocks
+(it is already `Eq`). `BaseMaterialId` is a `u32` newtype minted by the
+interner below.
 
 Everything that is a pipeline/material/entity-level property today. The three
 per-label cascade overrides survive as batch splits — they are deliberate
@@ -224,7 +294,13 @@ value* (`diegetic_panel.rs:113`). A small interner compares the fields panel
 text materials actually carry — `base_color`, texture handles (by
 `AssetId`), `emissive`, `metallic`, `perceptual_roughness`, `reflectance`,
 `unlit`, `double_sided`, `cull_mode`; floats bitwise — and assigns a
-`BaseMaterialId`. Panels that never customize share the default id (the
+`BaseMaterialId`. Concretely: an `InternedMaterialKey` struct (the compared
+fields — floats stored as `to_bits` u32s, textures as `AssetId` — so
+`derive(Hash, Eq)` is mechanical) in a
+`HashMap<InternedMaterialKey, BaseMaterialId>` plus a `Vec` for reverse
+lookup, living as a `GlyphBatchStore` field; entries are never freed
+(bounded by distinct text materials per session — a handful). Panels that
+never customize share the default id (the
 common case batches automatically; the codebase survey found ~30
 `text_material` call sites, all cloning the default and overriding at most
 `unlit`). Any future setter that widens the customizable surface must extend
@@ -250,8 +326,29 @@ vertex stage; if only the main pass nudges, main-pass fragment depth diverges
 from prepass depth and depth-equal testing rejects the fragments. Both
 stages read the same `RunRecord.depth_nudge` through the shared WGSL
 function in `slug_text_vertex_pull.wgsl` (decision 1), so this is one code
-path, not duplicated logic. Step 3 verifies Geometry-mode layering against
+path, not duplicated logic. Step 3b verifies Geometry-mode layering against
 the `panel_rendering` example before the old path is removed.
+
+Pass reality in bevy 0.19, so the parity rule is precise about where it
+fires: blend and OIT materials are **excluded from the depth prepass**
+entirely — for today's text (always blend or OIT) prepass *depth* never
+exists, so main-vs-prepass divergence cannot occur for it. The overridden
+prepass vertex stage still executes for the **shadow pass** (blend casters
+render as silhouettes via `MAY_DISCARD`), where the nudge rides along
+through the shared function — harmless from a light's view, and it keeps
+the one-code-path property. The parity requirement protects any future
+mask/opaque text, where prepass depth is real and divergence would reject
+fragments under depth-equal testing.
+
+The nudge *value* is computed exactly as today's bias:
+`depth_nudge = command_index as f32 × LAYER_DEPTH_BIAS` for the non-OIT
+path, `0.0` under OIT. Naming kept straight: `depth_nudge` (per-run,
+`RunRecord`, vertex-applied) is a different field from `oit_depth_offset`
+(global policy in the binding-100 uniform, always 0.0, read by the OIT
+fragment branch) — the two never merge. Punch-out is also unaffected in
+the prepass: the prepass fragment discards on coverage only and never
+reads `render_mode`; the punch-out inversion lives in the main fragment's
+alpha check.
 
 ### 4. Buffer ownership and range allocation
 
@@ -268,12 +365,13 @@ struct GlyphBatch {
     entity:        Option<Entity>,               // the batch render entity
     glyph_records: Vec<GlyphInstanceRecord>,
     run_records:   Vec<RunRecord>,
-    runs:          Vec<(RunStorageKey, Range<u32>)>, // derived ranges
+    runs:          Vec<(RunStorageKey, Range<u32>)>, // written ONLY by rebuild()
     instances:     Handle<ShaderBuffer>,
     run_table:     Handle<ShaderBuffer>,
     mesh:          Handle<Mesh>,                 // inert, capacity-sized
     capacity:      u32,
-    dirty:         bool,
+    instances_dirty: bool,                       // glyph records changed
+    run_table_dirty: bool,                       // run records changed
 }
 ```
 
@@ -288,16 +386,61 @@ First cut — rebuild, don't allocate:
   class of bug: a despawn-plus-spawn in one frame is just two inputs to the
   same rebuild.
 - A same-count edit (the stress case: "07 412" → "07 413") writes the run's
-  range in the CPU vector and marks the batch dirty — no rebuild.
+  range in the CPU vector and marks `instances_dirty` — no rebuild.
 - A fully clipped glyph **emits no record** (matching today's silent skip at
   `run_data.rs:134`); the count change triggers the rebuild path. No
   degenerate placeholder records in the first cut — revisit only if rebuild
   frequency measures hot.
 - Capacity: the inert mesh and record buffers are allocated with headroom
   (start at the scene's initial glyph count rounded up, grow by doubling).
-  A capacity crossing re-creates buffer + mesh — a hitch candidate; Step 1
-  measures one doubling so the cost is a known number, and Step 2's
-  label-add stress watches hitch frequency.
+  A capacity crossing re-creates buffer + mesh and **swaps the entity's
+  handles the same frame** (D4, resolved 2026-06-03 — no double-buffer):
+  `PrepareAssets` (including the mesh allocator's
+  `allocate_and_free_meshes`) is chained before `Queue` in the render
+  schedule (`bevy_render/src/lib.rs:317-322`, `allocator.rs:201`), so an
+  asset created in PostUpdate frame N is drawable in frame N — no blink,
+  no swap protocol, no content latency. The no-blink requirement is
+  binding, and the schedule assumption is *tested*, not trusted: Step 1's
+  gate frame-steps a forced growth, and the same check re-runs on bevy
+  upgrades. The crossing remains a hitch candidate — Step 1 measures one
+  doubling so the cost is a known number; Step 2's label-add stress watches
+  hitch frequency.
+- Membership has a single mutation point: `insert_run` / `move_run` /
+  `remove_run` update `run_index` and the batch's run set together, then
+  trigger the rebuild — a despawn plus a batch-move in one frame is
+  order-independent because every operation leaves both structures
+  consistent.
+- Batch-entity lifecycle: the geometry write's batch path spawns the batch
+  entity (with `DiegeticTextBatch`, its `Mesh3d`, and the per-batch
+  material) on the first run insert for a key, and despawns it + removes
+  the store entry when the last run leaves (the batch analogue of the R10
+  empty-run path). The per-batch `TextMaterial` is built once at batch
+  creation: interned base material + the key's cascade values + the shared
+  atlas handles; `sync_text_anti_alias` already iterates
+  `Assets<TextMaterial>` generically, so batch materials pick up
+  `TextAntiAlias` changes with no new code (one-frame latency — it runs in
+  Update).
+- Storage keys are never held by the batch path: `run_index` keys are
+  routing entries, not `run_storage` allocations, so a toggle flip cannot
+  double-free — the decision-4 debug assertion plus the Step-2
+  flip-both-directions gate item verify it.
+- Ranges have a single writer: `rebuild()` recomputes `runs` as it rebuilds
+  the record vectors — no other code path writes ranges, so they cannot go
+  stale relative to the buffers they index.
+- Records are always fully stamped: `GlyphInstanceRecord` / `RunRecord`
+  deliberately derive no `Default`, and `RenderMode` discriminants start
+  at 1 (`Text = 1`, `PunchOut = 2`), so a forgotten `render_mode` stamp
+  (0) would render as neither mode — `rebuild()` stamps every field from
+  the run's prepared data.
+- Two dirty flags, one per buffer: a transform-only frame uploads only the
+  run table (96 B × runs), never the glyph instance buffer; a same-count
+  text edit uploads only the instance buffer. The Phase D property and the
+  Step-2 upload counter both read sharper for it.
+- `RunStorageKey` is minted from `Entity::to_bits()`
+  (`glyph_cache.rs:55-59`) — the entity allocator is the minting authority,
+  untouched by Step 4's `RunStorage` deletion, and generational entity bits
+  rule out reuse collisions when a label despawns and a new one lands in the
+  same slot.
 - A debug assertion guards against two writers claiming one storage key
   (toggle-era safety, decision 10).
 
@@ -308,8 +451,9 @@ Glyph records stay in layout space; world placement is the per-run `Mat4`.
 (`panel_text/mod.rs:94-96`), so it cannot read this frame's
 `GlobalTransform` — the **transform-write system** (frame-flow step 3) runs
 `.after(TransformSystems::Propagate)` in PostUpdate, copies each routed
-label's `GlobalTransform` into its `RunRecord` slot, and marks the batch
-dirty only when the matrix actually changed (`Ref::is_changed` gating).
+label's `GlobalTransform` into its `RunRecord` slot, and marks the batch's
+`run_table_dirty` only when the matrix actually changed (`Ref::is_changed`
+gating).
 The buffer commit (frame-flow step 5) runs after both writers, still in
 PostUpdate, so extraction sees this frame's records. Step 2's gate includes
 a moving-label case (orbiting or scrolled panel) to prove there is no
@@ -332,6 +476,20 @@ distant label inflates the union so the batch never culls — if that case
 turns real, split the batch key by a coarse spatial bucket. Per-glyph
 culling is the GPU's problem (degenerate quads cost nothing after the
 vertex stage).
+
+**Sort distance and the Aabb's frame.** `Transparent3d` sorts phase items
+by view distance to the entity (rangefinder over the mesh instance's
+translation / aabb center). A batch entity left at the origin sorts as if
+*at the origin* — wrong against other transparent geometry in the scene. So
+the Aabb-union system also writes the batch entity's translation to the
+union's world center, and the `Aabb` component it installs is **local
+space**: center zero, the union's half-extents (bevy interprets `Aabb` in
+the entity's frame). The batch entity has no parent, so writing `Transform`
++ `GlobalTransform` directly after propagation is safe. The vertex shader
+ignores the entity transform entirely (placement comes from run records;
+the mesh uniform is read only for `first_vertex_index` — Target model), so
+this translation is sort/culling metadata, not geometry. Ordering *within*
+a batch under non-OIT remains the depth nudge's job (decision 3).
 
 ### 6. Clipping
 
@@ -359,8 +517,11 @@ change *moves the run between batches*: one operation
 batch and adds it to the destination — both sides take the decision-4
 rebuild path, so no range bookkeeping. A novel destination key specializes
 its pipeline once and caches it (bevy's normal amortization); note it in
-Step 2 measurements, don't fear it. Alpha *value* changes (the common case —
-fades via `TextAlpha`) ride in `fill_color.a` per record and stay in-batch.
+Step 2 measurements, don't fear it. Terminology kept straight: `TextAlpha`
+carries an `AlphaMode`, not an opacity — its changes are *mode* changes and
+take the batch-move path above (`update_panel_text_alpha` today mutates only
+`base.alpha_mode`, never a color). Opacity *fades* are color-alpha edits:
+they ride in the per-run record's `fill_color.a` and stay in-batch.
 
 ### 9. Empty runs and despawn
 
@@ -374,98 +535,639 @@ corrupt them — the rebuild sees only the live run set.
 ### 10. The Step-2 toggle — what it gates
 
 The toggle is a resource —
-`enum TextGeometryPath { PerRunMeshes, BatchedRecords }` — gating **which
-geometry path runs, whole-system**: `PerRunMeshes` → today's
+`enum TextGeometryPath { PerRunMeshes, BatchedRecords }`, deriving
+`Resource, Reflect, Clone, Copy, Default, PartialEq` with
+`#[reflect(Resource)]` and `#[default] PerRunMeshes` (the per-run path stays
+the default through Step 3b; gates flip it explicitly, BRP can flip it
+live) — gating **which geometry path runs, whole-system**: `PerRunMeshes` → today's
 `update_panel_text_geometry` mesh path; `BatchedRecords` → the batch path
 plus the transform-write / Aabb / commit systems. Exactly one path executes
-per frame — never per-run routing, so cascade observers, storage keys, and
-despawn observers act on one world model at a time. Under `BatchedRecords`
+per frame — never per-run toggling, so cascade observers, storage keys, and
+despawn observers act on one world model at a time.
+`update_panel_text_alpha` is gated to `PerRunMeshes` in Step 2 (it mutates
+per-run materials that don't exist under batching); a runtime alpha-mode
+change while `BatchedRecords` is active warns/debug-asserts until Step 3a's
+`move_run` lands — the Step-2 gate examples don't change alpha modes at
+runtime. Under `BatchedRecords`
 **all** panel-text runs route through the batch store (world labels are
 one-element panels; there is no separate kind to filter on) — what Step 2
 defers to Step 3 is not routing but dynamics and verification: re-keying on
 a later cascade change, the depth nudge, punch-out verification, and the
-examples sweep. Until Step 3, flip the toggle only in the Step-2 gate
-examples. Flipping at runtime tears down the inactive path's products
+examples sweep. Until Step 3a lands, flip the toggle only in the Step-2
+gate examples. Flipping at runtime tears down the inactive path's products
 (per-run mesh children one way, batch entities the other — the existing
 `On<Remove, DiegeticTextMesh>` observer handles the former, verified safe).
+The batch direction is a system, not an observer: when the toggle leaves
+`BatchedRecords`, the batch-path gating system despawns all
+`DiegeticTextBatch` entities and clears `GlyphBatchStore` (batches +
+`run_index`; the interner may persist — it is keying state only).
 Batch entities carry a marker component (`DiegeticTextBatch`) so BRP
-inspection can tell the two paths apart.
+inspection can tell the two paths apart (Reflect-registered as of the
+Step-2 review — a bare `Component` cannot be used as a BRP query filter).
 
 ## What must not regress (acceptance checklist)
 
 | Feature | Verified by |
 | --- | --- |
-| Per-label `TextAlpha` / `TextLighting` / `TextSidedness` (memory: `project_labels_control_own_alpha` — deleted twice as "unused"; they are features) | cascade-override example/tests + Step 3 batch-move test |
+| Per-label `TextAlpha` / `TextLighting` / `TextSidedness` (memory: `project_labels_control_own_alpha` — deleted twice as "unused"; they are features) | `cascade` + `text_alpha` examples + Step 3a batch-move test |
 | `GlyphShadowMode::None` / `Cast` + ghost text (alpha-0 cast) | `diegetic_text_stress` (casting labels) + shadow screenshot |
-| Punch-out render mode | punch-out usage sweep (`GlyphRenderMode::PunchOut` call sites) |
-| Clip rects | scroll example: glyphs clip at rect while scrolling, no stale/missing glyphs |
+| Punch-out render mode | rg sweep of `GlyphRenderMode::PunchOut` call sites — all must read `render_mode` from records — plus a visual check in an example that renders punch-out (Step 3b) |
+| Clip rects + scrolling | `bevy_lagrange` `showcase` (event-log panel scrolls via `scroll_y_from_end`, `event_log.rs:159`): glyphs clip at rect while scrolling, no stale/missing glyphs |
 | OIT on (`StableTransparency`) and off; PBR lighting (panels are physical — never unlit-by-default) | `side_by_side` + stress test with OIT toggled |
 | Geometry-mode coplanar layering (M2) | `panel_rendering` |
-| Per-panel `RenderLayers` | `viewports` |
-| Dynamic text edits route as range writes | `typography` arrow-key word scrubber + stress test |
+| Per-panel `RenderLayers` | `viewports_windows` (bevy_lagrange) + `screen_space` |
+| Dynamic text edits route as range writes | `typography` arrow-key word scrubber + stress test + Step-2 upload counters (the split dirty flags prove the routing) |
 | Typography debug overlay still draws (reads `PanelTextLayout` via `ComputedWorldText`, not meshes) | `typography` overlay compared before/after Step 4 |
 | The Phase D no-op-no-work property, restated for batching: unchanged frame → zero buffer writes; one edited run → only its batch's record buffer uploads, no mesh assets ever | Step 2 instrumentation |
+
+Rows not claimed by a 3a/3b/4 gate (clip+scroll, OIT/PBR, `RenderLayers`,
+dynamic edits) are owned by **Step 2's parity gate** — they run with the
+toggle flipped in the gate examples.
 
 ## Incremental plan (measure as you go; STOP for review at each gate)
 
 - **Step 0 — Plan review.** DONE 2026-06-03 (two-cycle team review; see the
   Review log). Baseline column above is captured.
-- **Step 1 — Vertex-pulling proof.** `slug_text_vertex_pull.wgsl` + the two
+- **Step 1 — Vertex-pulling proof.** DONE 2026-06-03; gate evidence and
+  implementation notes follow the gate description below.
+  `slug_text_vertex_pull.wgsl` + the two
   storage bindings and vertex-stage overrides on `TextExtension`; the two
   record structs in `packing.rs`; a minimal proof example (e.g.
   `examples/glyph_batch_proof.rs`, removed or repurposed at Step 4) spawns
   one hard-coded batch entity directly — `Mesh3d` (inert mesh) +
   `MeshMaterial3d<TextMaterial>` with hand-written records, beside the
-  existing renderer. Gate: correct position/UV/atlas lookup, lit, OIT
-  on/off, casts a shadow, prepass compiles **with the depth nudge applied in
-  both vertex stages**; `ShaderType` round-trip + compile-time size
-  assertions (40 / 96) pass; one capacity-doubling reallocation measured
-  (the hitch number). No batching logic yet, nothing routed. Verifies the
+  existing renderer. Atlas content comes from a real panel: the example
+  spawns one ordinary panel with a fixed string so shaping populates
+  `GlyphOutlineCache`, then reads the cache's records to hand-build
+  instance records with live atlas indices (the *records* are hand-written,
+  including the `RunRecord` transforms — fixed placements; the atlas is
+  not). Gate (operational): screenshots verify glyph placement/UVs against
+  the hand-written records; shading responds to a moved light; OIT toggled
+  per camera both ways; shadow silhouettes match glyph outlines; the depth
+  nudge lives in **one shared function called by both vertex entry points**
+  (identical by construction) and its prepass-pipeline consumer — the
+  shadow pass — renders correctly; nonzero-`first_vertex_index` derivation
+  verified by a Metal frame capture of the draw's `base_vertex` (spawn a
+  second mesh to encourage a nonzero base) or a debug-color emit of the
+  recovered glyph index;
+  GPU-layout assertions (40 / 96 via `ShaderSize::SHADER_SIZE`, not
+  `size_of` — encase rounds struct size to alignment per WGSL rules, so 96
+  is what it returns for RunRecord; verified against encase 0.12 source) +
+  a CPU-side encase encode/decode round-trip; one
+  capacity-doubling reallocation measured (the hitch number) **and** the
+  no-blink requirement verified by frame-stepped screenshots at N / N+1 /
+  N+2 around a forced growth (direct same-frame swap — D4; this gate also
+  re-runs on bevy upgrades to keep the prepare-before-queue assumption
+  tested). No batching logic yet, nothing routed. Verifies the
   real unknowns (Material-framework vertex override +
   mesh-with-inert-vertices + `Mat4`-in-record) before structural work.
-- **Step 2 — Batch store + routing.** `GlyphBatchStore` in `GlyphCache`;
+
+  **Step 1 gate results (2026-06-03, all items pass).** Records land in
+  `text/slug/glyph/packing.rs` (the actual packing-record home; the doc's
+  `render/packing.rs` path was stale) with compile-time
+  `SHADER_SIZE` asserts (40 / 96 confirmed) plus two nextest encase
+  round-trip tests. Proof scaffolding: `src/render/batch_proof.rs` +
+  `examples/glyph_batch_proof.rs`, both behind a `batch_proof` cargo
+  feature (the `bench_support` pattern) so the default build carries none
+  of it; Step 4 deletes the feature. Gate evidence
+  (`/private/tmp/glyph_batch_proof/`): per-run source label and two
+  hand-placed batch runs (one yawed, distinct depth nudges) render
+  glyph-identical side by side; shadow silhouettes glyph-accurate via the
+  overridden prepass vertex stage; OIT toggled off/on per camera, both
+  correct; light swing changes glyph shading + shadows (322 k pixels);
+  `first_vertex_index` logged **4** at spawn (decoy mesh forces a nonzero
+  slab base) and **76** post-growth, with the `GLYPH_PULL_DEBUG_INDEX`
+  staircase starting at index 0 — the slab-base subtraction is exercised
+  and correct; forced growth 18 → 36 records cost **0.043 ms CPU** (the
+  hitch number) and the frame-stepped N / N+1 / N+2 captures are
+  **byte-identical** (ImageMagick AE = 0) — the swapped mesh drew the same
+  frame it was created, no blink (D4 confirmed on bevy 0.19.0-rc.2).
+
+  **Implementation note (mechanical deviation, single correct outcome).**
+  `vertex_shader()` / `prepass_vertex_shader()` are material-type-wide, so
+  overriding them would route *per-run* materials through the pull shader
+  too — Step 1 requires coexistence. Instead `TextExtension` carries a
+  `vertex_pull` flag (plus `debug_glyph_index`) in new
+  `#[bind_group_data(TextExtensionKey)]` key data, and
+  `MaterialExtension::specialize` swaps `descriptor.vertex.shader` to the
+  pull shader (loaded behind a `uuid_handle!` via `load_internal_asset!`)
+  when the flag is set — one WGSL file still serves main, prepass, and
+  shadow pipelines through `#ifdef PREPASS_PIPELINE`, and `specialize` runs
+  for all three. Per-run materials bind the atlas `glyphs` buffer as a
+  placeholder at 104/105 (their pipelines never read those bindings, but
+  the bind group must be preparable). The depth nudge is applied in clip
+  space (`clip.z += nudge × 2e-6 × clip.w`, `#ifndef OIT_ENABLED`);
+  magnitude is provisional until Step 3b's `panel_rendering` check.
+
+  **Retrospective.**
+  *What worked:* every Step-1 unknown held — `ExtendedMaterial` vertex
+  override (via `specialize`), inert mesh through the pipeline, `Mat4`
+  records, same-frame mesh swap (D4), shadow pass through the shared
+  vertex function. Buffer growth (`set_data` to a larger size) propagated
+  to the material bind group with no staleness — render-asset dependency
+  tracking covers it, no manual invalidation needed.
+  *What deviated:* per-material `specialize` swap instead of the planned
+  `vertex_shader()` overrides (those are type-wide and would have broken
+  per-run coexistence); records in `glyph/packing.rs` (the doc's
+  `render/packing.rs` path was stale); proof scaffolding behind a
+  `batch_proof` cargo feature; record building reuses a new
+  `glyph_quad_extents` extraction shared with `push_glyph` rather than
+  duplicating the rect/UV math.
+  *Surprises:* every `TextMaterial` must bind *something* at 104/105 —
+  the bind-group layout is material-type-wide — so per-run materials carry
+  placeholder handles for as long as both paths coexist;
+  `TextExtensionKey` bind-group data now exists and re-specializes on
+  material mutation (the debug staircase toggles live).
+  *Implications for remaining phases:* Step 2's batch-material
+  construction must set `vertex_pull: true` + real record buffers (and
+  `text_material()`'s placeholder wiring stays for the per-run path until
+  Step 4); Step 2's record building should call `glyph_quad_extents`;
+  Step 4 additionally deletes the `batch_proof` feature, module, example,
+  and the placeholder bindings (with the per-run path gone, 104/105 are
+  always real); the `#[cfg(feature = "batch_proof")]` gates on the record
+  re-exports come off in Step 2 when production code consumes them.
+
+  **Step 1 review (architect re-evaluation of remaining phases).**
+  - Fragment run-table read moved Step 3b → Step 2 (user-approved; D2
+    amended) — Step 2's parity gate needs it for multi-color batches.
+  - Step 2 gained the Step-1 carry-over block: promote `inert_batch_mesh`
+    + the record-building loop from `batch_proof.rs`, model the batch
+    entity on `spawn_proof_batch`, batch material sets `vertex_pull: true`
+    with real buffers, and the explicit un-gating list for the
+    `batch_proof` cfg surface.
+  - Decision 4 gained the record-stamping rule (no `Default` on records;
+    `RenderMode` starts at 1, a zero `render_mode` renders as neither
+    mode).
+  - Step 2's parity gate now names the provisional depth-nudge constant:
+    coplanar Geometry-mode stacks are excluded until Step 3b verifies the
+    magnitude.
+  - Step 2's `perf.rs` task greps for `render_world_text` instead of
+    trusting the stale `:55-56` line ref.
+- **Step 2 — Batch store + routing.** DONE 2026-06-03; gate results,
+  implementation notes, and the retrospective follow the gate description
+  below. `GlyphBatchStore` in `GlyphCache`;
   the transform-write, Aabb-union, and buffer-commit systems on the
   frame-flow anchors; all runs routed behind the decision-10 toggle (full
   batch key from day one — cascade *values* are read at insert; only
   re-keying on later changes waits for Step 3); `Aabb` or
-  `NoFrustumCulling` scaffolding. **Proof counters land here too** (they are
+  `NoFrustumCulling` scaffolding. Step-1 carry-overs: promote
+  `inert_batch_mesh` and the `glyph_quad_extents`-based record-building
+  loop from `render/batch_proof.rs` (production-ready — don't re-derive
+  the rect/UV math), and model the batch-entity spawn on
+  `spawn_proof_batch`'s composition (`Mesh3d` + `MeshMaterial3d` + the
+  record-buffer/material trio). Batch-material construction sets
+  `vertex_pull: true` with real `instances` / `run_records` buffers;
+  per-run `text_material()` keeps its placeholder 104/105 wiring untouched
+  until Step 4. Un-gate the `batch_proof` cfg surface production code now
+  consumes: `PreparedTextRun::glyphs`, `GlyphCache::atlas_index`, and the
+  `GlyphInstanceRecord` / `RunRecord` / `TextExtension` / `TextUniform` /
+  `glyph_quad_extents` re-export chain (glyph / render / slug / text
+  `mod.rs`). **The fragment run-table read lands here** (moved from Step
+  3b, user-approved 2026-06-03): `specialize` pushes a def (e.g.
+  `GLYPH_VERTEX_PULL`) into the fragment defs when `vertex_pull` is set,
+  and `slug_text.wgsl`'s fragment sources `fill_color` / `render_mode`
+  from `run_records[u32(floor(in.uv_b.y))]` under that def (uniform path
+  otherwise — per-run materials unchanged). Without it a batch renders
+  every run with one material's color/mode and the parity gate below can
+  only pass for single-color scenes; Step 1 proved per-run delivery of
+  transform/nudge but could not prove color/mode (its runs share one
+  color). Step 3b keeps the *verification* (punch-out visual check,
+  examples sweep). **Proof counters land here too** (they are
   how the gate and the results table get their numbers):
   - *Library:* `DiegeticPerfStats` gains batch stats — batch count, total
-    runs, total glyph records, buffer uploads this frame — published as
-    diagnostics like `reconcile_ms`, so they read over BRP.
+    runs, total glyph records, buffer uploads this frame (instance and
+    run-table uploads counted separately, matching the two dirty flags) —
+    published as diagnostics like `reconcile_ms`, so they read over BRP.
+    (While in `perf.rs`: correct the stale doc comment claiming a separate
+    `render_world_text` path — grep for `render_world_text` rather than
+    trusting a line number; that path was removed when fluent text became
+    one-element panels, `world_text/mod.rs:7-9`.)
   - *Example:* the stress overlay gains a row showing them
     (`batches 2 · runs 100 · glyphs ~600 · uploads N`), and the example's
-    render-app plugin counts per-view phase items (Transparent3d / OIT /
-    shadow) after `RenderSystems::PhaseSort` into the same shared-atomics
-    channel the waterfall uses — the draws-per-pass number on screen.
-    Expected: ~130 phase items toggle-off → 2 toggle-on.
+    render-app plugin counts per-view phase items (Transparent3d — OIT
+    reuses that phase, the resolve pass adds none — and the shadow phases)
+    after `RenderSystems::PhaseSort` into the same shared-atomics
+    channel the waterfall uses — the draws-per-pass number on screen. The
+    counter is path-agnostic (it counts phase items in whichever toggle
+    state is active), so before/after comes from one session. Expected per
+    counted pass: ~100+ items toggle-off → 1–2 toggle-on (the world batch in
+    every pass; the overlay batch only in the screen-space view).
 
   Gate: **parity** = BRP screenshots at
   identical camera/window across a toggle flip for the stress test and one
   scroll example, compared visually plus a diff-image sanity check
-  (byte-exact is not expected — OIT accumulation order and float paths
-  differ; document any visible delta and treat it as a finding); a
-  moving-label case shows no one-frame transform lag; scrolled-clip frames
-  upload only the expected batch buffer; label add/remove/re-add under both
-  toggle states leaks no storage (debug assertion from decision 4);
-  slab-error log watch (memory: `project_text_alpha_slab_errors`);
+  (ImageMagick `compare`, or the repo's screenshot-diff script if one
+  exists; byte-exact is not expected — OIT accumulation order and float
+  paths
+  differ; document any visible delta and treat it as a finding; the
+  depth-nudge constant is provisional until Step 3b's `panel_rendering`
+  verification, so parity examples must avoid coplanar Geometry-mode
+  stacks — a nudge-ordering delta there is a Step-3b item, not a Step-2
+  parity failure); a
+  moving-label case shows no one-frame transform lag (constant-velocity
+  label, screenshots from both toggle states at the same timestamps,
+  overlaid — lag shows as a one-frame positional offset); scrolled-clip
+  frames
+  upload only the expected instance buffer; label add/remove/re-add under
+  both
+  toggle states leaks no storage (debug assertion from decision 4); toggle
+  flipped both directions (per-run → batched → per-run) with no storage
+  leaks and no stale meshes; the screen-space overlay's batch key is stable
+  from frame 1 of the overlay's life (`RenderLayers` present at run insert
+  — `setup_screen_space_view` is an observer, so the panel has layers
+  before its first run lands);
+  slab-error log watch — grep the app log for the wgpu slab/allocation
+  error spam from the `text_alpha` incident during a ~60 s toggled-on
+  stress run (memory: `project_text_alpha_slab_errors`);
   waterfall measured both ways in the same session, deltas recorded in the
-  table below.
-- **Step 3a — Batch-membership dynamics.** Cascade re-keying via the
-  decision-8 `move_run` path; shadow modes. Gate: cascade/batch-move tests
-  (alpha-mode change moves the run, value-only change stays in-batch) +
-  shadow screenshots against baseline.
-- **Step 3b — Per-record fields and shaders.** Punch-out verification; clip
+  table below. Verified-by-review notes that ride this gate: one
+  transparent batch serves OIT and non-OIT views simultaneously (phase
+  items are per-view); batch-entity spawn timing matches today's per-run
+  child spawn (Commands in the same PostUpdate system) — no new first-frame
+  visibility behavior; the idle-floor capture uses a stationary camera
+  (screen-space overlay transforms are camera-relative — a moving camera
+  legitimately dirties the overlay batch's run table even with the grid
+  paused).
+
+  **Step 2 gate results (2026-06-03, all items pass).** Same-session toggle
+  flip on `diegetic_text_stress` (release, perf mode, M2 Max; window smaller
+  than the doc baseline's — compare within the session). Artifacts in
+  `/private/tmp/glyph_step2/`.
+  - *Parity:* title bar, camera control panel, and the static grid index
+    digits are **byte-identical** across the flip (ImageMagick AE = 0);
+    glyph weight / AA / lighting indistinguishable at 3× zoom.
+  - *Counters (batched):* batches 3 (world labels + two screen-panel
+    groups), runs 185, glyph records ~958. Phase items: `Transparent3d`
+    307 → 125 (Δ −182 ≈ 185 runs collapsing to 3 batch items; the
+    remaining ~122 are SDF panel-backing meshes, not text), shadow
+    370 → 8 (2 casters × 4 cascade views).
+  - *Waterfall (same session, full mutation):* ms 18.9 → 15.2, fps
+    53 → 66, `assets` 1.94 → 0.12, `prep` 8.94 → 1.41, `graph`
+    6.51 → 2.21, `gpu wait` 0.96 → 10.98 — the render thread now blocks
+    on swapchain acquire instead of pacing the frame. That is the success
+    criterion (render at the GPU-bound floor); fragment cost was never
+    this plan's lever, so the GPU's ~14 ms is the new floor.
+  - *Idle floor (paused, stationary camera):* ms 14.0 / 72 fps, uploads
+    0 / 0 across every sample — the Phase D no-op property holds.
+  - *Upload split:* steady mutation = exactly 1 instance-buffer upload per
+    frame (the world batch), 0 run-table uploads; screen-panel refreshes
+    add their batch's upload only on their change frames.
+  - *Toggle both directions:* flipped live with full restore each way; plus
+    headless pipeline tests (`render/panel_text/batching.rs::tests`) cover
+    routing, hand-written bounds, transform parity, both-direction flips
+    with zero storage leaks (the decision-4 debug assertions run in every
+    nextest pass), despawn-empties-batch, and in-batch text edits.
+  - *Slab watch:* 60 s toggled-on soak — zero slab / allocation /
+    validation errors in the app log.
+  - *Scroll:* `bevy_lagrange` `showcase` flipped over BRP
+    (`TextGeometryPath` is reflect-registered); the event log appends and
+    clips correctly under batching; menu, camera panel, and world panels
+    all render.
+
+  **Implementation notes (Step-2 discoveries).**
+  - **Buffer rebind hazard — the gate's one found-and-fixed bug.** bevy
+    re-creates a `ShaderBuffer`'s wgpu buffer when `set_data` changes the
+    byte length (`bevy_render/src/storage.rs`, `prepare_asset`: equal
+    size/usage/label → `write_buffer` in place, otherwise a new buffer),
+    and a material's bind group does not follow the new buffer — whether a
+    same-frame material re-prepare sees it is a prepare-order race (a stale
+    `RenderAssets` entry binds without retrying). The per-run path masks
+    this everywhere by rewriting its material asset on every change; the
+    batch path exposed it as screen panels frozen at flip-time content
+    while the store and uploads stayed live. Fix: record buffers are
+    **padded to capacity on every upload** (zero-size padding quads
+    rasterize nothing; padding run slots are never referenced), so the
+    byte length never changes between growths and every upload writes the
+    existing buffer in place; a capacity growth creates new buffer assets
+    and rewrites the material's `instances` / `run_records` handles, which
+    re-prepares reliably (a *missing* render asset retries next frame; the
+    old buffers keep drawing pre-growth content for at most one frame —
+    no blink).
+  - The above corrects a Step-1 gate hole: the growth check compared
+    post-growth frames N / N+1 / N+2 to *each other* (no blink — still
+    true) but not against expected post-growth content; the appended run's
+    visibility was masked by the staircase toggle's material mutation. D4
+    is amended accordingly: the mesh swap draws same-frame; the record
+    buffers' rebind on growth may lag one frame with pre-growth content,
+    never a blank.
+  - The plan's "prepass fragment reads no per-run values" was stale:
+    `render_coverage` applies the punch-out inversion and the prepass
+    fragment calls it, so it does read `render_mode`. `render_coverage`
+    now takes `render_mode` as a parameter, sourced from the run table
+    under `GLYPH_VERTEX_PULL` and from the uniform otherwise — shadow
+    silhouettes of punch-out runs stay correct per run.
+  - Batch entities carry `NoAutoAabb` (bevy 0.19) so `CalculateBounds`
+    never installs a zero-extent box from the inert mesh; the union
+    system's ordering defense remains as belt and braces.
+  - `update_panel_text_batches` is self-healing — it processes runs that
+    changed *or* are unrouted — which is the same mechanism a toggle flip
+    and a not-yet-packed glyph use to retry.
+  - The stress example gained a `B` shortcut for the flip and a separate
+    top-right batch-stats panel (path, batches, runs, glyphs, split
+    uploads, per-pass phase items via a render-app counter after
+    `PhaseSort`).
+
+  ### Step 2 Retrospective
+
+  **What worked:** the store + four systems landed on the planned
+  frame-flow anchors unchanged; parity is byte-identical on static
+  content; counter predictions held exactly (185 runs → 3 batches; t3d
+  Δ −182); the render-thread rows collapsed (`prep` 8.94 → 1.41, `assets`
+  → ~0.1, `graph` 6.51 → 2.21) and the frame went GPU-bound at fps
+  53 → 66 under full mutation.
+  **What deviated from the plan:** record buffers are capacity-padded and
+  growth rewrites the material's buffer handles (the rebind hazard — not
+  in the plan); the padding constants exist solely for that (live records
+  are still always fully stamped); `render_coverage` gained a
+  `render_mode` parameter (the prepass punch-out path was not
+  per-run-free); the batch counters live on a second screen panel instead
+  of rows in the waterfall overlay.
+  **Surprises:** the material-vs-buffer prepare-order race, and that the
+  per-run path's material rewrites had been masking it everywhere;
+  phase-item counts include non-text transparent items (~122 SDF
+  backings), so "draws per pass (text)" reads as a delta; `NoAutoAabb`
+  exists in bevy 0.19 and is exactly the right tool for the hand-written
+  union Aabb.
+  **Implications for remaining phases:** Step 3a's `move_run` mechanics
+  already exist (`upsert_run` re-keys when a run arrives with a changed
+  key) — 3a wires cascade-change detection into the batch path and adds
+  the store-level tests; Step 4 must keep the padding/growth mechanism
+  when it deletes the per-run path — with per-run material rewrites gone,
+  nothing masks the rebind hazard anywhere, so the `BatchGpu` doc comment
+  is the contract; Step 4's placeholder-binding removal (104/105 always
+  real) is unaffected.
+
+  ### Step 2 Review (architect re-evaluation of remaining phases)
+
+  - Step 3a re-scoped to what actually remains: the store's re-keying
+    landed in Step 2; 3a wires `Changed<Resolved<…>>` detection on routed
+    runs into `upsert_run`, covers all three cascades, then deletes
+    `warn_batched_alpha_change` (which covers only alpha today —
+    lighting/sidedness changes are silently stale until 3a). Shadow- and
+    render-mode changes already re-route (they ride `PreparedPanelText`).
+  - Step 3a's gate gained the same-frame move+despawn consistency test —
+    the decision-4/9 order-independence claim becomes exercisable only
+    once mid-frame moves exist.
+  - Step 3b's punch-out item scoped to visual check + rg sweep (the
+    shader plumbing, including prepass punch-out via `render_coverage`'s
+    `render_mode` parameter, landed in Step 2); depth-nudge protocol
+    pinned — per-run reference of `panel_rendering` captured before any
+    flip or magnitude tuning, since Step 2's parity deliberately excluded
+    coplanar stacks.
+  - Step 4 gained: an explicit dependency on 3a's re-routing (deleting
+    `update_panel_text_alpha` removes the only alpha handler otherwise);
+    a forced-growth gate comparing against expected post-growth content
+    (closing the Step-1 gate hole permanently); the `NoFrustumCulling`
+    deliverable corrected (production never used it — only
+    `batch_proof.rs`, deleted with the feature); the scene-wide counter
+    caveat on the final waterfall column.
+  - `DiegeticTextBatch` is now `Reflect`-registered (decision-10's BRP
+    -inspectability promise was unmet — a bare `Component` cannot filter a
+    BRP query); applied as a Step-2 completion fix, tests green.
+  - The "draws per pass (text)" acceptance row annotated as a delta
+    reading in the 3b and 4 gates (the phase-item counter is scene-wide;
+    SDF panel backings ride in `Transparent3d`).
+  - D5 (split Step 4 into 4a flip-default / 4b delete) — approved
+    2026-06-03 with flip-first ordering; Step 4 above now reads 4a (flip
+    default + bake, depends on 3a) and 4b (delete per-run path + toggle).
+- **Step 3a — Batch-membership dynamics.** DONE 2026-06-03; gate results
+  and implementation notes below. The store's move mechanics
+  landed in Step 2 (`upsert_run` re-keys when a run arrives with a changed
+  key, unit-tested); what 3a adds is the **trigger**: detect
+  `Changed<Resolved<TextAlpha / TextLighting / TextSidedness>>` on
+  already-routed runs and feed them back through `upsert_run` — today a
+  live cascade change on a routed run with unchanged text never re-routes
+  (`update_panel_text_batches` short-circuits on
+  `!prepared.is_changed() && is_routed`). Shadow-mode and render-mode
+  changes already re-route (both ride in `PreparedPanelText`, so they pass
+  the `is_changed` gate) — for those only the tests and screenshots
+  remain. Delete `warn_batched_alpha_change` (and its registration) once
+  all three cascades re-route; until then note it covers only alpha — a
+  live lighting/sidedness change under `BatchedRecords` is silently stale.
+  Gate: `GlyphBatchStore` + pipeline tests via cargo nextest — an
+  alpha-mode change moves the run to the new key's batch; a value-only
+  `fill_color` change stays in-batch as a record write; a shadow-mode
+  change lands the run in the `NotShadowCaster`-keyed batch; a run that
+  changes cascade key AND despawns in the same frame leaves both store
+  maps consistent (the decision-4/9 order-independence claim, first
+  exercisable when mid-frame moves exist) — plus shadow screenshots
+  against baseline.
+
+  ### Step 3a gate results (2026-06-03)
+
+  - **Implementation:** `BatchKeyCascades` `SystemParam` in `batching.rs`
+    bundles the three `Resolved<…>` queries + defaults + a
+    `Changed<Resolved<…>>`-filtered run set (`Or<…>` over all three
+    cascades; the bundling also kept `update_panel_text_batches` under
+    bevy's 16-param system limit). The run loop's short-circuit now passes
+    runs whose cascade value transitioned; `commit_glyph_atlas` fires when
+    the changed set is non-empty so a re-key that spawns a new batch has
+    atlas handles. The consumed-`Changed`-tick hazard (re-route skipped on
+    atlas-miss, tick already spent) cannot trip: the glyph atlas is
+    append-only, so an already-routed run's glyphs are always packed.
+    `warn_batched_alpha_change` deleted with its registration.
+  - **Tests:** 283 pass (5 new). Store: move-then-remove in one pass
+    leaves both maps consistent. Pipeline: alpha override re-keys the run
+    into a second batch (records conserved); fill-color edit stays
+    in-batch on the same entity with the record rewritten; shadow-mode
+    edit lands the run in the `NotShadowCaster`-keyed batch entity;
+    same-frame override + panel despawn ends at `(0, 0, 0)` with no
+    routing leak. Clippy (workspace lints) clean.
+  - **Shadow screenshots:** per-run vs batched paused captures
+    (`/private/tmp/glyph_3a/`), central grid + floor crop (960×1280@440+80,
+    excludes the four overlay panels): **AE=0**, with glyph shadows
+    visibly present on the floor in the compared region (not vacuous).
+  - **Live BRP exercise:** `Override<TextAlpha>` = Opaque inserted on a
+    routed grid label over BRP → batches 3 → 4, the overridden run
+    renders opaque through its own batch, log clean. Caveat discovered:
+    on the *animating* grid, reconcile re-authors label alpha from
+    `TextStyle` each edit (style `alpha_mode: None` → inherit), so a
+    BRP-inserted override is stripped on the next text edit — pause
+    first (Space) to observe a persistent override on grid labels.
+
+  ### Step 3a implementation notes (bugs found by the live exercise)
+
+  - **Opaque batches crashed pipeline creation** (wgpu validation:
+    `'pbr_prepass_pipeline'` — "Shader global ResourceBinding { group: 3,
+    binding: 104 } is not available in the pipeline layout"). bevy's
+    depth-only pipelines (camera depth prepass via
+    `is_depth_only_opaque_prepass`, and shadow views for non-discard
+    casters via `light.rs` `is_depth_only_opaque`) replace the material
+    bind group with an empty layout — and the vertex-pull vertex stage
+    reads bindings 104/105 from that group. Step 2 never hit this: every
+    batch key so far was Blend (`MAY_DISCARD` set → material layout
+    kept), and headless tests have no render world. Two fixes:
+    1. `TextExtension::enable_prepass() -> false` — text contributes
+       nothing to the camera depth prepass (main opaque pass writes its
+       own depth, `GreaterEqual` + write; prepass was early-z only), and
+       per-run materials never read material data in the prepass either.
+    2. `batch_material` maps resolved `Opaque` → `Mask(0.0)` on the GPU
+       material only (the `BatchKey` keeps the user's `Opaque` identity).
+       Cutoff 0 never discards by alpha; the coverage discards cut the
+       glyph outlines; depth writes, nothing blends — same main-pass
+       pixels. `MAY_DISCARD` pipelines keep the material bind group, so
+       shadow vertex pulling works.
+  - **Parity note for the 3b/4a gates:** batched Opaque text casts
+    glyph-silhouette shadows (the masked shadow pipeline runs the
+    coverage fragment); per-run Opaque text casts full-quad rectangle
+    shadows (depth-only shadow pipelines run no fragment at all). The
+    batched output is the correct one — treat this as an accepted
+    per-run/batched difference when comparing Opaque-text scenes (e.g.
+    `text_alpha` mode 7), not a regression.
+
+  ### Step 3a Retrospective
+
+  **What worked:**
+  - The trigger really was pure wiring: `BatchKeyCascades` (one
+    `SystemParam`: three `Resolved<…>` queries + defaults + one
+    `Or<Changed<…>>` run set); the short-circuit and `any_work` each
+    gained one membership check. Step 2's store move mechanics needed
+    zero changes.
+  - The live BRP exercise (insert `Override<TextAlpha>` on a routed run)
+    caught a render-world crash that headless tests structurally cannot
+    see — worth repeating for every remaining gate.
+
+  **What deviated from the plan:**
+  - Two unplanned code fixes shipped with the phase:
+    `TextExtension::enable_prepass() -> false` and `batch_material`
+    mapping resolved `Opaque` → `Mask(0.0)` (GPU material only; the
+    `BatchKey` keeps `Opaque`) — see implementation notes above.
+  - `update_panel_text_batches` hit bevy's 16-system-param limit; the
+    cascade inputs were going to be grouped anyway, the limit just made
+    it mandatory.
+
+  **Surprises:**
+  - Opaque was a never-exercised batch key: every batch until 3a was
+    Blend, and the per-run path masks the engine constraint (its standard
+    vertex stage reads no material data, so depth-only pipelines with an
+    empty material layout build fine).
+  - Per-run Opaque text has been casting full-quad rectangle shadows all
+    along (depth-only shadow pipelines run no fragment, so coverage never
+    cuts the quad) — the batched path is the first to render Opaque text
+    shadows correctly.
+  - On the animating grid, reconcile re-authors label alpha from
+    `TextStyle` on every text edit, so an externally-inserted override is
+    stripped one frame later — live cascade experiments need the pause
+    key first.
+
+  **Implications for remaining phases:**
+  - 3b/4a screenshot gates: Opaque-text scenes (`text_alpha` mode 7)
+    legitimately differ per-run vs batched in shadows — annotated above
+    as accepted, not a regression.
+  - 4a's bake should drive `text_alpha` through every alpha mode live —
+    its mode switcher is exactly the cascade re-key path 3a built.
+  - Text no longer appears in the camera depth prepass at all
+    (`enable_prepass = false`, both paths). Any future prepass consumer
+    (SSAO, TAA motion vectors) will not see text until that decision is
+    revisited.
+
+  ### Step 3a Review (architect re-evaluation of remaining phases)
+
+  - Step 3b gained a fix-first work item (user-approved 2026-06-03): the
+    depth-only empty-material-layout guard in `TextExtension::specialize`
+    — `Multiply` batches otherwise reproduce the Opaque shadow-pipeline
+    crash (bevy's shadow path grants `MAY_DISCARD` to every non-opaque
+    alpha mode except `Multiply`); batched Multiply casts no shadow
+    (accepted parity difference — per-run casts full-quad rectangles),
+    and the alpha remap consolidates into one named function.
+  - Step 3b's depth-nudge protocol verifies at two camera distances (the
+    constant is a fixed clip-space epsilon independent of view depth);
+    the `text_alpha` sweep records the alpha-mode × MSAA validation
+    matrix (`AlphaToCoverage` is MSAA-dependent).
+  - Step 4a's gate: explicit path-assumption audit of every pipeline test
+    (a default flip changes which path a no-explicit-set test exercises
+    without failing it); `text_alpha`'s on-screen mode descriptions
+    updated for batched behavior; prepass absence attributed to
+    3a-on-both-paths, not to the flip.
+  - Step 4b's gate gained a headless constant-byte-length test for the
+    padding contract (previously guarded only by the `BatchGpu` doc
+    comment and parity screenshots).
+  - Confirmed, no change needed: punch-out is verification-only (shader
+    plumbing fully landed); 4a's dependency on 3a's re-routing is
+    satisfied in code; the remaining phases are otherwise correctly
+    scoped.
+- **Step 3b — Per-record fields and shaders.** Fix-first (3a review,
+  user-approved 2026-06-03): guard `TextExtension::specialize` — when the
+  descriptor's material bind-group slot is the empty layout (a depth-only
+  pipeline), skip the vertex-pull shader swap, so alpha modes bevy routes
+  depth-only (currently `Multiply`; Opaque is remapped to `Mask(0.0)`)
+  build a valid pipeline and cast no shadow instead of failing wgpu
+  validation. Annotate as an accepted parity difference: per-run Multiply
+  casts full-quad rectangle shadows; batches have no real quad geometry,
+  so no-shadow is the only achievable batched output. The guard is also
+  the catch-all for any future mode or engine change that strips the
+  material group. Rider: consolidate the alpha remapping into one named
+  function with the invariant documented (`BatchKey.alpha` keeps the
+  user's authored mode; the GPU material may differ). Then:
+  punch-out verification; clip
   move; depth-nudge layering verified against `panel_rendering`; the
-  acceptance-table examples sweep. Gate: acceptance checklist above, full
-  test suite, clippy (nursery + pedantic).
-- **Step 4 — Delete the per-run mesh path.** `RunMeshBuilder`,
+  acceptance-table examples sweep. (The fragment run-table read itself
+  moved to Step 2 — user-approved 2026-06-03 — so this step verifies
+  per-record `render_mode` / color behavior rather than implementing it.
+  The shader plumbing is fully landed, including punch-out delivery
+  through the prepass — `render_coverage` takes `render_mode` as a
+  parameter — so the punch-out item reduces to the visual check in a
+  punch-out example plus the rg sweep of `GlyphRenderMode::PunchOut` call
+  sites.) Depth-nudge protocol: capture the per-run-path reference
+  screenshot of `panel_rendering` **before** flipping the toggle or
+  tuning the magnitude — Step 2's parity examples deliberately excluded
+  coplanar Geometry-mode stacks, so no baseline exists yet; if the
+  provisional `2e-6` clip-space constant changes, the shared
+  `slug_text_vertex_pull.wgsl` constant is the single site (both entry
+  points read it). The nudge is a fixed clip-space epsilon independent of
+  view depth, so verify layering at two camera distances (near + far),
+  not just `panel_rendering`'s default framing — or record the constant
+  as calibrated for that depth range only (3a review). The `text_alpha`
+  sweep records which of the 7 alpha modes were validated under batching
+  and at what MSAA setting — `AlphaToCoverage` is MSAA-dependent
+  (`Msaa::Off` routes it to `MAY_DISCARD`, MSAA-on to
+  `BLEND_ALPHA_TO_COVERAGE`; the example runs `Sample4`) (3a review).
+  Gate: acceptance checklist above, full test suite,
+  clippy (nursery + pedantic). Counter caveat for the sweep: the
+  phase-item counter is scene-wide — SDF panel backings ride in
+  `Transparent3d` — so text draw counts read as deltas, not absolutes.
+- **Step 4a — Flip the default to `BatchedRecords` and bake.** (Split per
+  D5, approved 2026-06-03.) Flip `TextGeometryPath::default()` to
+  `BatchedRecords`; the per-run path and the toggle stay as the one-key
+  fallback through the bake window. **Depends on Step 3a's re-routing
+  being complete:** under a batched default `update_panel_text_alpha`
+  never runs, so cascade changes must already re-route through
+  `upsert_run`. Gate: full test suite green batched-by-default — and an
+  explicit audit of every pipeline test's path assumption, not just
+  failures: the default flip silently changes which path a test exercises
+  when it never sets `TextGeometryPath`, so each test should state its
+  path (3a review). The acceptance-table examples sweep run
+  batched-by-default, waterfall captured under the new default.
+  `text_alpha`'s on-screen mode descriptions updated for batched
+  behavior — Opaque renders glyph silhouettes under batching, not the
+  "colored rectangle, no silhouette" the per-run copy describes (3a
+  review). Note: text's absence from the camera depth prepass is a 3a
+  property of BOTH paths (`TextExtension::enable_prepass` is type-wide),
+  not something this flip introduces. Bake = daily use across examples
+  until confidence is established; any surprise still has the `B`-key
+  fallback.
+- **Step 4b — Delete the per-run mesh path.** `RunMeshBuilder`,
   `RunRenderData`, per-run materials, the per-run mesh child spawn/despawn,
-  the toggle, `NoFrustumCulling` scaffolding (real `Aabb` required from here
-  on). `RunStorage` (the struct) is deleted; `RunStorageKey` stays — it is
-  the run identifier in `GlyphBatchStore.run_index`. Gate: tests green,
+  the toggle. (The production batch path never used `NoFrustumCulling` —
+  batch entities carry a real hand-written `Aabb` + `NoAutoAabb` from
+  Step 2; the only `NoFrustumCulling` is in `batch_proof.rs`, deleted
+  wholesale with the feature.) `RunStorage` (the struct) is deleted;
+  `RunStorageKey` stays — it is the run identifier in
+  `GlyphBatchStore.run_index`. Deleting the per-run path also deletes the
+  per-change material rewrites that masked the buffer rebind hazard — the
+  capacity-padding / growth-handle-rewrite mechanism (Step 2, `BatchGpu`
+  doc contract) must survive untouched, and the contract gains a headless
+  test: padded commit payloads keep a constant byte length between
+  growths (`padded_glyph_records` / `padded_run_records` length equals
+  capacity regardless of record count), so a future refactor that drops
+  the padding fails a test rather than a parity screenshot (3a review).
+  Gate: tests green,
   typography overlay compared before/after (it reads `PanelTextLayout` via
-  `ComputedWorldText`, not meshes), final waterfall column recorded, doc
+  `ComputedWorldText`, not meshes), final waterfall column recorded
+  (phase-item counts read as deltas — the counter is scene-wide), a
+  forced-growth frame-step compared against **expected post-growth
+  content** (not just frame-to-frame identity — closing the Step-1 gate
+  hole now that growth has no per-run fallback), doc
   updated, `emoji.md` annotated that color-glyph layers land as records
   with a brush field, not layer-quads in run meshes.
 
@@ -473,22 +1175,38 @@ inspection can tell the two paths apart.
 
 | Measure | Baseline (2026-06-03) | After 2 (toggle on) | After 4 |
 | ------- | --------------------- | ------------------- | ------- |
-| `ms`    | 20.2                  |                     |         |
-| `fps`   | 51                    |                     |         |
-| `ms` paused (idle floor) | (capture at Step 2) |       |         |
-| `wait`  | 17.65                 |                     |         |
-| `render`| 19.7                  |                     |         |
-| `assets`| 2.01 / 11.07          |                     |         |
-| `prep`  | 8.70 / 18.31          |                     |         |
-| `gpu wait` | 2.60 / 14.83       |                     |         |
-| `graph` | 6.36 / 10.30          |                     |         |
-| render entities (text) | ~100 world + overlay runs |       |         |
-| draws per pass (text)  | ~100 world + overlay runs |       |         |
-| batches / runs / glyphs | — (no batch store yet)   |       |         |
+| `ms`    | 20.2                  | 15.2 ¹              |         |
+| `fps`   | 51                    | 66 ¹                |         |
+| `ms` paused (idle floor) | (capture at Step 2) | 14.0 / 72 fps |         |
+| `wait`  | 17.65                 | 13.37               |         |
+| `render`| 19.7                  | 14.7                |         |
+| `assets`| 2.01 / 11.07          | 0.12 / 0.24         |         |
+| `prep`  | 8.70 / 18.31          | 1.41 / 1.97         |         |
+| `gpu wait` | 2.60 / 14.83       | 10.98 / 26.13 ²     |         |
+| `graph` | 6.36 / 10.30          | 2.21 / 2.32         |         |
+| render entities (text) | ~100 world + overlay runs | 3 batches (185 runs) |         |
+| draws per pass (text)  | ~100 world + overlay runs | t3d items 307 → 125 ³; shadow 370 → 8 |         |
+| batches / runs / glyphs | — (no batch store yet)   | 3 / 185 / ~958 |         |
 
-The last three rows come from the Step-2 proof counters: batch stats from
-`DiegeticPerfStats` (BRP-readable, shown on the overlay), phase-item counts
-from the example's render-app plugin.
+¹ Captured in a smaller window than the doc baseline; the same-session
+per-run reference was ms 18.9 / 53 fps (`assets` 1.94, `prep` 8.94,
+`gpu wait` 0.96, `graph` 6.51) — compare After-2 against that column, not
+the baseline row.
+² `gpu wait` is swapchain-acquire blocking, not work: with the render
+thread's CPU rows collapsed, the GPU's ~14 ms (unchanged by this plan)
+is exposed as visible waiting instead of hiding inside `prep`/`graph`.
+³ The phase-item counter is scene-wide; the surviving ~122 items are SDF
+panel-backing meshes, not text. The text delta is −182 ≈ 185 runs → 3
+batch items.
+
+The last three rows come from the Step-2 proof counters: `render entities
+(text)` = run count (per-run path) vs batch count (batched path), both from
+`DiegeticPerfStats`; `draws per pass (text)` = the render-app plugin's
+phase-item count; `batches / runs / glyphs` = the `DiegeticPerfStats` batch
+stats shown on the overlay. The table deliberately drops the baseline
+overlay's main-thread sub-rows (`layout`, `reconcile`, `shaping`, `mesh`,
+`other`) — instancing is expected not to move them; it keeps the render
+rows it attacks.
 
 Success = the render block stops pacing the frame: `assets` near zero steady,
 `prep` and `graph` cut hard enough that `render` approaches the GPU-bound
@@ -565,6 +1283,133 @@ spelled out (decision 1); `RunStorageKey` kept as the batch-store run id,
 `RunStorage` struct deleted (Step 4); typography-overlay claim turned into a
 before/after comparison gate; emoji.md note assigned to Step 4.
 
+**Review 2, cycle 1.** Verified: all text routes through the panel-text
+pipeline (the standalone world-text path was removed when fluent text became
+one-element panels — `world_text/mod.rs:7-9`; `perf.rs:55-56` comment is
+stale, fix queued in Step 2); bindings 104/105 collision-free; decision-1
+fallback wording adequate; phase counter usable in both toggle states.
+Determined fixes incorporated: `Indices::U32` + POSITION-only inert mesh +
+in-shader normal from run rotation (Target model); `first_vertex_index`
+subtraction for slab-allocated meshes — `@builtin(vertex_index)` includes
+`base_vertex` (Target model + Step 1 gate); `visibility(vertex)` on the new
+storage bindings (decision 1); `BatchKey` dedicated struct — `AlphaMode` not
+`Eq`/`Hash`, `RenderLayers` and cascade wrappers not `Hash` (decision 2);
+interner concretized (`InternedMaterialKey`, map + vec, never freed)
+(decision 2); prepass-parity scope made precise — blend/OIT text skips the
+depth prepass; the overridden prepass vertex stage serves the shadow pass;
+parity protects future mask/opaque text (decision 3); RunRecord explicit
+`_pad` dropped — encase owns padding; layout assertions via `ShaderType`
+metadata, not `size_of` (Target model + Step 1); split dirty flags
+(instances vs run table) + single-writer rule for ranges + `RunStorageKey`
+minting authority = `Entity::to_bits` (decision 4); batch-entity translation
+written to the Aabb-union center for `Transparent3d` sort distance, `Aabb`
+component is local-space (decision 5); decision-8 alpha terminology
+corrected — `TextAlpha` is an `AlphaMode` cascade, mode changes move
+batches, opacity fades ride `fill_color.a`; toggle derives + default
+`PerRunMeshes` named (decision 10); uniform split pinned — `supersample` /
+`aa_band` / `oit_depth_offset` stay in binding 100 (Target model); Step 1
+atlas-population recipe (one real panel seeds the atlas); acceptance-table
+example names corrected to artifacts that exist (`cascade`, `text_alpha`,
+`bevy_lagrange` `showcase` event log for scroll, `viewports_windows`,
+`screen_space`); punch-out sweep made operational; results-table rows mapped
+to measurement sources; per-pass phase-item expectation restated.
+
+**Review 2, cycle 2.** Adversarial verification against bevy 0.19.0-rc.2
+source confirmed: the `first_vertex_index` pattern (`wireframe.wgsl:67-68`,
+`mesh_types.wgsl:19`); blend/OIT prepass exclusion (`prepass/mod.rs:
+1023-1030`) and shadow-via-prepass-specialize with `MAY_DISCARD`
+(`light.rs:2401-2458`); `AlphaMode`/`RenderLayers` derive gaps (with one
+correction: `AlphaMode` has a manual `Eq`, `alpha.rs:64`); `Transparent3d`
+sort = world-space mesh aabb center, so the batch-translation fix is the
+right lever (`core_3d/mod.rs:485-491`, `material.rs:1228-1238`); all
+frame-flow schedule anchors real and orderable (`visibility/mod.rs:504-522`;
+`TransformSystems::Propagate` naming correct); PostUpdate asset writes
+extracted same-frame (proven by the existing atlas commit); auto-inserted
+command flushes cover same-frame spawn visibility. **One cycle-1 claim
+refuted and corrected**: a POSITION-only inert mesh would discard every
+fragment — `VERTEX_UVS_A`/`VERTEX_UVS_B` defs come from the mesh layout
+(`mesh.rs:3307-3316`) and `slug_text.wgsl` reads `in.uv`/`in.uv_b` behind
+them; the mesh must carry POSITION + UV_0 + UV_1, all zeroed. New
+determined fixes: live-count vs capacity draw resolved with an
+`arrayLength(&instances)` degenerate-quad guard (capacity-sized index
+buffer + live-sized instance buffer; robustness clamping would otherwise
+re-blend the last glyph per spare slot); capacity growth documented as a
+one-frame visual gap (new mesh not yet prepared at queue time) — measured
+at Step 1, mitigation surfaced as D3; batched→per-run toggle teardown named
+(gating system despawns `DiegeticTextBatch` entities, clears the store);
+membership single-mutation-point rule (insert/move/remove update
+`run_index` + run set together); `SHADER_SIZE` named as the assertion API
+with write-readback as the stride backstop; split-dirty-flag wording
+propagated through frame-flow step 5, buffer-write granularity, decisions
+4/5, and the Step-2 gate; "Until Step 3" → "Until Step 3a"; Step-2 gate
+gained per-view OIT, first-frame parity, and stationary-camera idle-floor
+notes. Verified safe, no doc change: per-view OIT phase routing for one
+batch; frame-1 spawn parity with the per-run path.
+
+**Review 3, cycle 1.** Adversarial verification: arrayLength guard
+implementable (atlas bindings are already runtime-sized `array<T>`);
+double-buffer handle-drop safe (wgpu defers destruction past in-flight
+work); shadow-via-prepass re-confirmed; `SHADER_SIZE` settled definitively
+(encase 0.12 `METADATA.min_size()` rounds to alignment → 40 / 96, hedges
+removed); UV-def cite kept (`bevy_pbr/src/render/mesh.rs:3309` — an agent's
+"refutation" looked in the wrong crate) and extended with the prepass site
+(`prepass/mod.rs:470,475`). **One refutation, orchestrator-verified: the D3
+blink premise is wrong** — `PrepareAssets` (incl. the mesh allocator) is
+chained before `Queue` (`bevy_render/src/lib.rs:317-322`,
+`allocator.rs:201`), so a same-frame-created mesh draws that frame; decision
+4 corrected, re-decision surfaced as D4. Shader data-flow completeness
+(the pass's largest find): the fragment reads `fill_color` / `render_mode`
+per run (`slug_text.wgsl:472,509,516`) — delivery committed: binding 105
+becomes `visibility(vertex, fragment)`, vertex forwards atlas index in
+`uv_b.x` (today's mechanism) and run index in `uv_b.y` (quad-uniform f32,
+round to recover), fragment's uniform reads become run-table reads, all
+recorded in the new Target-model bullet; prepass fragment confirmed
+per-run-free (coverage-only discard); `depth_nudge` formula pinned
+(`command_index × LAYER_DEPTH_BIAS`, 0 under OIT) and disambiguated from
+`oit_depth_offset`; punch-out is prepass-blind (noted in decision 3).
+Integration: `update_panel_text_alpha` gated to `PerRunMeshes` until 3a
+(decision 10); batch-entity lifecycle pinned (spawn on first insert,
+despawn on empty — the batch R10 analogue); per-batch material construction
++ generic `sync_text_anti_alias` coverage recorded (decision 4); batch path
+never holds storage keys (no flip double-free) + flip-both-directions and
+overlay-key-stable-from-frame-1 gate items (Step 2);
+`commit_batch_buffers` named, owns pending-set writes, the D3 swap, and
+the perf counters (frame flow step 5); `PendingBuffers` defined at the
+sketch. Consistency: acceptance rows not owned by 3a/3b/4 assigned to the
+Step-2 parity gate; results-table row aggregation explained; "per-run
+routing" → "per-run toggling". Deferred-by-design confirmations: emoji.md
+note stays a Step-4 task; slug_fx.md terminology already covered by this
+doc's Terminology paragraph; perf.rs stale comment already queued in
+Step 2.
+
+**Review 3, cycle 2.** Adversarial verification of cycle-1 additions:
+prepass IO carries `uv_b` under the same mesh-layout defs
+(`prepass_io.wgsl:13-14,49-50`, `prepass/mod.rs:473-476`) — the
+POSITION+UV_0+UV_1 inert mesh switches the defs on in both pipelines;
+`visibility(vertex, fragment)` syntax confirmed; `setup_screen_space_view`
+is an `On<Add, DiegeticPanel>` observer inserting `RenderLayers` at spawn
+(`screen_space/mod.rs:49,196-222`) — the Step-2 frame-1 key-stability claim
+holds; neither gate example mutates alpha modes at runtime; the
+one-WGSL-file dual-vertex plan confirmed implementable via
+`slug_text.wgsl`'s own `#ifdef PREPASS_PIPELINE` import pattern (`:13-19`),
+now spelled out in decision 1. **One correction**: index recovery is
+`u32(floor(..))` (today's `glyph_index`, `slug_text.wgsl:76-78`), not a
+round — Target-model bullet fixed. **One phase-naming correction**: OIT
+reuses `Transparent3d` (no separate OIT phase; the resolve pass adds no
+items) — Step-2 counter description fixed. D3/D4 coherence repaired:
+decision 4 no longer asserts the double-buffer as settled ("D3 chose...
+D4 pending decides... no-blink binding either way"); pending-set creation
+point pinned to the geometry write (frame-flow step 2), swap in step 5 one
+frame later. Gates operationalized: Step 1 (screenshot criteria, shared
+nudge function by construction + shadow-pass render check, Metal-capture
+or debug-color first_vertex verification, CPU-side encase encode/decode
+round-trip named, N/N+1/N+2 frame-stepped no-blink capture, hand-written
+RunRecord transforms); Step 2 (ImageMagick `compare` for the diff,
+constant-velocity overlay for transform lag, slab-watch grep recipe);
+Step 3a (store-level unit tests via cargo nextest with the three named
+cases); dynamic-edits acceptance row wired to the split-dirty-flag
+counters.
+
 ## Proposed user decisions
 
 ### D1 — Base-material batch key strategy (status: resolved, cycle 2)
@@ -576,6 +1421,49 @@ Converged on **intern by value** and recorded in decision 2. Evidence: ~30
 alternatives (Handle-based authoring API change; silent field-subset hash)
 solve a problem the codebase doesn't have. Not surfaced for user review.
 
+### D4 — D3's factual premise was refuted (status: resolved — approved 2026-06-03)
+
+User chose **direct same-frame swap — no double-buffer**. Background: D3
+chose double-buffer based on review 2's claim that a capacity growth
+blinks the batch for one frame. Review 3 refuted the claim,
+orchestrator-verified: `PrepareAssets` — including the mesh allocator — is
+chained before `Queue` in the render schedule
+(`bevy_render/src/lib.rs:317-322`, `allocator.rs:201`), so a mesh +
+buffers created in PostUpdate frame N are prepared and drawable in frame
+N; there is no blink to prevent on the current schedule. Recorded in
+decision 4 and the frame flow: growth creates, writes, and swaps the
+replacement assets in the same frame; no `pending` slot, no swap protocol,
+no content latency. The **no-blink requirement remains binding**: Step 1's
+gate frame-steps a forced growth (N / N+1 / N+2 screenshots) and re-runs
+on bevy upgrades, so the prepare-before-queue assumption is tested, not
+trusted. The rejected alternative (keep the double-buffer as insurance
+against schedule reordering) is preserved here so a future review doesn't
+relitigate it.
+
+### D3 — Capacity-growth one-frame gap (status: superseded by D4, 2026-06-03)
+
+User chose **double-buffer from day one** on the premise that a capacity
+growth blinks the batch for one frame. Review 3 refuted that premise and
+D4 (above) reverted the mechanism to a direct same-frame swap. D3's
+requirement — any blink is incorrect rendering — survives as the binding
+no-blink gate in Step 1. The originally rejected alternative
+(measure-first, mitigate only if visible) stays rejected: the requirement
+is verified by gate, not deferred to measurement.
+
+### D5 — Split Step 4 into 4a (flip default) / 4b (delete per-run path) (status: resolved — approved 2026-06-03)
+
+User approved the split, with the flip-first ordering explicit: "first flip
+it to batch default to see how it works." The plan above now reads Step 4a
+(flip `TextGeometryPath::default()` to `BatchedRecords` and bake — full
+suite + examples run batched-by-default while the toggle still offers the
+per-run fallback) and Step 4b (delete the per-run path, the toggle, and the
+scaffolding). Rationale preserved: bundling both into one change means the
+default switch and the fallback's removal are never validated separately —
+and a default still reading `PerRunMeshes` while the per-run systems are
+deleted would point at removed code. Alternative (rejected by the review,
+preserved here): keep Step 4 atomic and rely on the Step-2/3 gates having
+proven the batch path.
+
 ### D2 — Split Step 3 into 3a / 3b (status: resolved — approved 2026-06-03)
 
 User approved the split; the plan above now reads Step 3a (batch-membership
@@ -584,3 +1472,9 @@ dynamics: cascade re-keying, `move_run`, shadow modes) and Step 3b
 examples sweep), each with its own gate. Rationale preserved: the two
 clusters fail independently and have different validation targets
 (batch-move correctness vs shader/depth parity).
+
+Amended 2026-06-03 (Step-1 phase review, user-approved): the fragment
+run-table read (`fill_color` / `render_mode` from
+`run_records[u32(floor(in.uv_b.y))]`) moved from 3b's scope into Step 2,
+because Step 2's parity gate cannot pass for multi-color batches without
+it. The 3a/3b split itself stands; 3b keeps the verification work.
