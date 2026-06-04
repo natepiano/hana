@@ -95,14 +95,15 @@ pub(crate) fn init_winit_info(
                 .current_monitor()
                 .and_then(|current_monitor| {
                     let physical_monitor_position = current_monitor.position();
-                    let info = monitors.at(physical_monitor_position.x, physical_monitor_position.y);
+                    let monitor_info =
+                        monitors.at(physical_monitor_position.x, physical_monitor_position.y);
                     debug!(
                         "[init_winit_info] current_monitor() position=({}, {}) -> index={:?}",
                         physical_monitor_position.x,
                         physical_monitor_position.y,
-                        info.map(|monitor| monitor.index)
+                        monitor_info.map(|monitor| monitor.index)
                     );
-                    info.copied()
+                    monitor_info.copied()
                 })
                 .unwrap_or_else(|| {
                     debug!(

@@ -59,7 +59,7 @@ pub struct WindowRestored {
 ///
 /// ## Sources
 ///
-/// **Expected values** come from [`TargetPosition`](super::TargetPosition), which is computed
+/// **Expected values** come from `TargetPosition`, which is computed
 /// from the saved RON state file at startup. These represent what the restore *intended* to
 /// achieve.
 ///

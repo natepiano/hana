@@ -121,8 +121,8 @@ pub(crate) fn save_active_window_state(
 
         let window_key = if primary_query.get(entity).is_ok() {
             WindowKey::Primary
-        } else if let Some(m) = managed {
-            WindowKey::Managed(m.name.clone())
+        } else if let Some(managed_window) = managed {
+            WindowKey::Managed(managed_window.name.clone())
         } else {
             continue;
         };
@@ -282,8 +282,8 @@ pub(crate) fn save_window_state(
         // Determine the key for this window in the state file
         let window_key = if primary_query.get(window_entity).is_ok() {
             WindowKey::Primary
-        } else if let Some(m) = managed {
-            WindowKey::Managed(m.name.clone())
+        } else if let Some(managed_window) = managed {
+            WindowKey::Managed(managed_window.name.clone())
         } else {
             continue;
         };

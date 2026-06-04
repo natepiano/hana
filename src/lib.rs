@@ -43,6 +43,7 @@ mod monitors;
 mod persistence;
 mod platform;
 mod restore;
+mod visibility;
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
 mod windows_dpi_fix;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
@@ -138,26 +139,6 @@ impl Plugin for WindowManagerPlugin {
     }
 }
 
-/// Hide the primary window when created, before winit creates the OS window.
-///
-/// Uses an observer on `PrimaryWindow` component addition, so it works regardless
-/// of plugin order. The window will be shown after restore completes or immediately
-/// if no saved state.
-///
-/// Note: We observe `Add<PrimaryWindow>` rather than `Add<Window>` because when
-/// `Window` is added, `PrimaryWindow` may not exist yet. By observing `PrimaryWindow`,
-/// we know the `Window` component already exists on the entity.
-fn hide_window_on_creation(add: On<Add, PrimaryWindow>, mut windows: Query<&mut Window>) {
-    debug!(
-        "[hide_window_on_creation] Observer fired for entity {:?}",
-        add.entity
-    );
-    if let Ok(mut window) = windows.get_mut(add.entity) {
-        debug!("[hide_window_on_creation] Setting window.visible = false");
-        window.visible = false;
-    }
-}
-
 /// Plugin variant with a custom state file path.
 struct WindowManagerPluginCustomPath {
     path:                       PathBuf,
@@ -193,7 +174,7 @@ impl Plugin for WindowManagerPluginCustomPath {
                 window.visible = false;
             } else {
                 debug!("[build] Window doesn't exist yet, registering observer");
-                app.add_observer(hide_window_on_creation);
+                app.add_observer(visibility::hide_window_on_creation);
             }
         } else {
             debug!("[build] Linux X11: skipping window hide for frame extent compensation");

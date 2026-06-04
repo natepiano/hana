@@ -51,8 +51,8 @@ pub(crate) fn update_current_monitor(
         };
 
         let (monitor_info, source) = match (winit_result, position_result, existing) {
-            (Some(info), _, _) => (info, MONITOR_SOURCE_WINIT),
-            (_, Some(info), _) => (info, MONITOR_SOURCE_POSITION),
+            (Some(monitor_info), _, _) => (monitor_info, MONITOR_SOURCE_WINIT),
+            (_, Some(monitor_info), _) => (monitor_info, MONITOR_SOURCE_POSITION),
             (_, _, Some(current_monitor)) => {
                 (current_monitor.monitor_info, MONITOR_SOURCE_EXISTING)
             },
@@ -166,7 +166,11 @@ mod tests {
         }
     }
 
-    fn monitors_with(info: MonitorInfo) -> Monitors { Monitors { list: vec![info] } }
+    fn monitors_with(monitor_info: MonitorInfo) -> Monitors {
+        Monitors {
+            list: vec![monitor_info],
+        }
+    }
 
     fn window_at(physical_position: IVec2, physical_width: u32, physical_height: u32) -> Window {
         let mut window = Window {
