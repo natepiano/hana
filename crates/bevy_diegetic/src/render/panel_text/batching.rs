@@ -744,22 +744,13 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
         run_table,
         anti_alias,
     } = input;
-    base.alpha_mode = match AlphaMode::from(key.alpha) {
-        // Opaque casters take bevy's depth-only shadow pipelines, which strip
-        // the material bind group from the pipeline layout — and the
-        // vertex-pull stage reads bindings 104/105 from that group, so
-        // pipeline creation fails wgpu validation. `Mask(0.0)` renders the
-        // same pixels (cutoff 0 never discards by alpha; the coverage
-        // discards cut the glyph outlines; depth writes, nothing blends) and
-        // its `MAY_DISCARD` pipelines keep the material bind group.
-        AlphaMode::Opaque => AlphaMode::Mask(0.0),
-        other => other,
-    };
+    base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, GlyphLighting::Unlit);
     constants::apply_glyph_sidedness(&mut base, key.sidedness);
-    // Layering moved into the per-run depth nudge; a per-material sort bias
-    // is meaningless inside a single batched draw.
-    base.depth_bias = 0.0;
+    // One sort bias for the whole batch: text after every backing layer in
+    // sorted (non-OIT) views. Per-run order inside the batch comes from the
+    // per-record depth nudge, which a per-material bias cannot express.
+    base.depth_bias = constants::BATCH_TEXT_DEPTH_BIAS;
     text::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
@@ -774,6 +765,24 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
         run_records: run_table,
         debug_glyph_index: false,
     })
+}
+
+/// Maps a batch's authored alpha mode to the one written on the GPU material.
+/// Invariant: [`BatchKey::alpha`] always keeps the user's authored mode — only
+/// the material differs, and only where bevy's pipeline routing requires it.
+///
+/// `Opaque` becomes `Mask(0.0)`: opaque casters take bevy's depth-only shadow
+/// pipelines, which strip the material bind group from the pipeline layout —
+/// and the vertex-pull stage reads bindings 104/105 from that group, so
+/// pipeline creation fails wgpu validation. `Mask(0.0)` renders the same
+/// pixels (cutoff 0 never discards by alpha; the coverage discards cut the
+/// glyph outlines; depth writes, nothing blends) and its `MAY_DISCARD`
+/// pipelines keep the material bind group.
+const fn batch_gpu_alpha_mode(authored: AlphaMode) -> AlphaMode {
+    match authored {
+        AlphaMode::Opaque => AlphaMode::Mask(0.0),
+        other => other,
+    }
 }
 
 #[cfg(test)]
@@ -1136,6 +1145,51 @@ mod tests {
         assert_eq!(
             opaque_runs, 1,
             "exactly the overridden run lives under the new key"
+        );
+    }
+
+    /// Mirrors `text_alpha`'s `apply_state_and_rebuild_hud`: one frame both
+    /// changes the global alpha default and despawns + respawns a panel whose
+    /// alpha is pinned by a panel-level override. The respawned runs must key
+    /// by the pin, not by the default that was active while they routed.
+    #[test]
+    fn respawned_pinned_panel_keys_by_its_override_not_the_default() {
+        fn spawn_pinned_panel(app: &mut App) -> Entity {
+            app.world_mut()
+                .spawn(
+                    DiegeticPanel::world()
+                        .size(Mm(100.0), Mm(50.0))
+                        .text_alpha_mode(AlphaMode::Blend)
+                        .with_tree(two_text_tree())
+                        .build()
+                        .expect("panel should build"),
+                )
+                .id()
+        }
+
+        let mut app = pipeline_app();
+        set_path(&mut app, TextGeometryPath::BatchedRecords);
+        let panel = spawn_pinned_panel(&mut app);
+        settle(&mut app);
+        assert_eq!(store_stats(&app), (1, 2, 9));
+
+        // The live sequence: default change + rebuild in the same frame.
+        app.world_mut()
+            .resource_mut::<CascadeDefault<TextAlpha>>()
+            .0 = TextAlpha(AlphaMode::Multiply);
+        app.world_mut().entity_mut(panel).despawn();
+        spawn_pinned_panel(&mut app);
+        settle(&mut app);
+
+        let (batches, runs, glyphs) = store_stats(&app);
+        assert_eq!(runs, 2, "the respawned panel's runs are routed");
+        assert_eq!(glyphs, 9);
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let keys: Vec<AlphaMode> = store.batches().map(|(key, _)| key.alpha.into()).collect();
+        assert_eq!(
+            (batches, keys.as_slice()),
+            (1, &[AlphaMode::Blend][..]),
+            "pinned runs key by the panel override, not the changed default"
         );
     }
 

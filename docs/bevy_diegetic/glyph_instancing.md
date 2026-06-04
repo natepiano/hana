@@ -1086,7 +1086,9 @@ toggle flipped in the gate examples.
     plumbing fully landed); 4a's dependency on 3a's re-routing is
     satisfied in code; the remaining phases are otherwise correctly
     scoped.
-- **Step 3b — Per-record fields and shaders.** Fix-first (3a review,
+- **Step 3b — Per-record fields and shaders.** DONE 2026-06-04; gate
+  results and implementation notes follow the step description.
+  Fix-first (3a review,
   user-approved 2026-06-03): guard `TextExtension::specialize` — when the
   descriptor's material bind-group slot is the empty layout (a depth-only
   pipeline), skip the vertex-pull shader swap, so alpha modes bevy routes
@@ -1126,6 +1128,137 @@ toggle flipped in the gate examples.
   clippy (nursery + pedantic). Counter caveat for the sweep: the
   phase-item counter is scene-wide — SDF panel backings ride in
   `Transparent3d` — so text draw counts read as deltas, not absolutes.
+
+  **Step 3b gate results (2026-06-04, all items pass).** Artifacts in
+  `/private/tmp/glyph_3b/`.
+  - *Multiply guard:* `TextExtension::specialize` skips the vertex-pull
+    swap when `descriptor.layout[MATERIAL_BIND_GROUP_INDEX]` has no
+    entries (`material_group_is_stripped`) — bevy's empty-layout
+    substitution for depth-only pipelines is detectable directly because
+    rc.2 descriptors carry `BindGroupLayoutDescriptor` values. Live:
+    Multiply (mode 5) on `text_alpha` under `BatchedRecords` builds its
+    pipelines, renders correctly, casts no shadow, zero log errors — the
+    pre-fix wgpu validation crash is gone. Rider landed:
+    `batch_gpu_alpha_mode` is the one named remap site (invariant in its
+    doc comment: `BatchKey.alpha` keeps the authored mode).
+  - *Alpha-mode × MSAA matrix (`text_alpha`, `Msaa::Sample4`, batched):*
+    all 7 modes validated live — Blend, Premultiplied, AlphaToCoverage
+    (MSAA-on routing), Add, Multiply (no shadow — accepted parity
+    difference), Mask, Opaque (renders glyph silhouettes via the
+    `Mask(0.0)` material remap; glyph-silhouette shadows). `Msaa::Off`
+    `AlphaToCoverage` (the `MAY_DISCARD` routing) not exercised — the
+    example pins `Sample4`.
+  - *Punch-out:* rg sweep clean — the batched path reads `render_mode`
+    per record from `prepared.render_mode` (`batching.rs` record build);
+    the material uniform is a placeholder under `GLYPH_VERTEX_PULL`.
+    Visual: `slug_text`'s PunchOut row byte-identical across the flip
+    (ImageMagick AE = 0 on the row crop), inverted coverage rendering.
+  - *Depth-nudge layering (`panel_rendering`):* per-run reference
+    captured first at an identical pose per pair; compared at default
+    framing plus near (`OrbitCam.radius` 0.08 via BRP mutation) and far
+    (0.6). Layering and clip identical across the flip at all three
+    distances — diffs are glyph-edge AA + TAA jitter speckle only, no
+    inversions. The provisional `2e-6` clip-space constant stands
+    unchanged. (Scroll/pinch over BRP did not reach the orbit camera;
+    `.target_radius` mutation is the working pose control.)
+  - *Tests / lints:* 400 nextest pass (new pin:
+    `respawned_pinned_panel_keys_by_its_override_not_the_default` —
+    same-frame default change + pinned-panel respawn keys by the pin),
+    clippy (workspace nursery + pedantic) clean, fmt run.
+
+  **Step 3b implementation notes (found-and-fixed).**
+  - **Batch sort-bias bug — the gate's found-and-fixed bug.** Per-run
+    text materials sort after their panel's SDF backing layers in
+    `Transparent3d` via `command_depth × LAYER_DEPTH_BIAS`
+    (`sort_distance = rangefinder.distance(mesh_center) + depth_bias`);
+    `batch_material` zeroed `depth_bias`, so on sorted (non-OIT) views —
+    the screen-space overlay camera has no OIT — a panel's translucent
+    backing could composite over the whole batch: text uniformly dimmed
+    behind smoked glass, history-dependent (the batch's union
+    Aabb/translation shifts as runs re-route, flipping the equal-key
+    sort). Symptom chain on `text_alpha`: pinned-Blend HUD panels went
+    dim after a rebuild + mode change; resolved cascade values were
+    confirmed correct over BRP (the dim was *not* a cascade or re-key
+    failure — the headless respawn test passes). Fix:
+    `BATCH_TEXT_DEPTH_BIAS` (64 × `LAYER_DEPTH_BIAS`) on every batch
+    material — one bias for the whole batch, above every backing bias;
+    within-batch order stays with the per-record depth nudge. Per-batch
+    max-command-depth was rejected: it would rewrite the material asset
+    on record changes, re-introducing the per-change material churn
+    Step 2 eliminated.
+  - **All-white renderer wedge — gone with the same fix.** Pre-fix,
+    flipping `BatchedRecords → PerRunMeshes` while Multiply was the
+    cascade default produced a permanent all-white frame (no log
+    errors, BRP alive, unrecoverable by mode change or flip-back).
+    Post-fix the exact sequence renders correctly and repeated flip
+    bounces stay clean. Root cause not separately isolated; recorded in
+    the attempts log (`project_3b_text_alpha_findings`) in case it
+    resurfaces.
+  - The example-driven dimming exposed that `text_alpha`'s controls bar
+    and fairy_dust's camera panel intentionally follow the global
+    default (only the two `.text_alpha_mode(Blend)` panels are pinned) —
+    so under Multiply they legitimately render dark. Not a bug; noted so
+    the sweep's expected imagery is documented.
+
+  **Step 3b Retrospective.**
+  *What worked:* the empty-layout detection is direct — rc.2
+  `RenderPipelineDescriptor.layout` holds `BindGroupLayoutDescriptor`
+  values with inspectable `entries`, so the guard is three lines and
+  needs no engine patch; the alpha-mode sweep doubled as the bug-finder
+  (the Multiply frames exposed the sort-bias bug); BRP cascade queries
+  (`Resolved`/`Override` on `TextContent`) cleanly separated cascade
+  state from render state during diagnosis; `.target_radius` mutation
+  gave exact repeatable camera poses for the two-distance check.
+  *What deviated:* the plan's depth-nudge item anticipated retuning the
+  `2e-6` constant; instead the layering risk materialized one level up —
+  the `Transparent3d` SORT (material `depth_bias`), which the nudge
+  cannot influence. The fix is a batch-material constant
+  (`BATCH_TEXT_DEPTH_BIAS`), not a shader change.
+  *Surprises:* batched text had no sort relation to panel backings at
+  all on non-OIT views — Step 2's parity gate never caught it because
+  its examples ran OIT-on main cameras and the screen-space overlay's
+  sort happened to win; the white flip-wedge appeared and disappeared
+  with the sort bias without separate isolation; the old
+  `force_update: Pending` OrbitCam BRP payload is stale (now
+  `update_request: None/ForceUpdate`, and mutation beats full insert).
+  *Implications for remaining phases:* 4a's bake runs more scenes on
+  sorted views — watch for text-vs-backing composition regressions
+  (anything dim-behind-glass is the sort, not the cascade); 4b deletes
+  the per-run path that motivated `BATCH_TEXT_DEPTH_BIAS`'s
+  parity framing, so its doc comment should survive as the only record
+  of why 64; the `Msaa::Off` `AlphaToCoverage` routing
+  (`MAY_DISCARD`) remains unexercised by any example.
+
+  **Step 3b Review (architect re-evaluation of remaining phases).**
+  - Step 4a's bake is now an explicit sorted-view composition checklist:
+    only 2 of 21 examples run OIT main cameras and the screen-space
+    overlay camera is always sorted, so the sorted-camera examples are
+    enumerated in the gate, including a two-screen-panels-at-different-
+    depths case (the batch's one bias rides its union-center distance).
+  - Step 4a gained two while-the-toggle-exists items: flip-bounce stress
+    on `text_alpha` under each alpha default (the unisolated white-wedge's
+    repro context), and one `Msaa::Off` run so `AlphaToCoverage`'s
+    `MAY_DISCARD` routing compiles the vertex-pull pipelines before 4b
+    deletes the per-run A/B.
+  - Step 4a's test-path audit narrowed to the non-`batching.rs` test
+    modules (those never set `TextGeometryPath` and silently switch at
+    the flip); `batching.rs` already pins the path in every test.
+  - Step 4a's `text_alpha` copy update extended beyond Opaque: the Blend
+    copy describes per-run meshes + depth_bias ordering, and the Multiply
+    copy should explain the intentionally dark unpinned panels.
+  - Step 4a code rider: state the <64-backing-layers-per-panel assumption
+    on `BATCH_TEXT_DEPTH_BIAS`'s doc comment.
+  - Step 4b's doc update records `enable_prepass() -> false` as a
+    standing contract of the surviving path (re-enabling the prepass
+    re-enters the `material_group_is_stripped`-guarded territory).
+  - Risks updated: the non-OIT sort risk records its 3b outcome (the
+    batch-vs-backing case fell through and is fixed; coarse-layer-key
+    escalation still available), and translucent world geometry near text
+    is recorded as an accepted limitation (per-run had the same window;
+    no example exercises it; OIT views immune).
+  - Confirmed, no change needed: 4a → 4b ordering stands; neither phase
+    is redundant; the 4b padding-contract test remains necessary; the
+    pinned-respawn test already locks the case the 4a flip makes default.
 - **Step 4a — Flip the default to `BatchedRecords` and bake.** (Split per
   D5, approved 2026-06-03.) Flip `TextGeometryPath::default()` to
   `BatchedRecords`; the per-run path and the toggle stay as the one-key
@@ -1136,12 +1269,38 @@ toggle flipped in the gate examples.
   explicit audit of every pipeline test's path assumption, not just
   failures: the default flip silently changes which path a test exercises
   when it never sets `TextGeometryPath`, so each test should state its
-  path (3a review). The acceptance-table examples sweep run
-  batched-by-default, waterfall captured under the new default.
+  path (3a review). `batching.rs`'s tests already set the path
+  explicitly on every test; the audit targets the other test modules
+  that build a panel-text app and never set it (`mesh_spawning.rs`,
+  `alpha.rs`, `diegetic_panel.rs`, `screen_space/mod.rs`,
+  `batch_store.rs`, and the like) — those silently switch paths at the
+  flip (3b review). The acceptance-table examples sweep run
+  batched-by-default, waterfall captured under the new default. The
+  sweep doubles as the **sorted-view composition check** (3b review):
+  only `aa_text` and `panel_rendering` put OIT on the main camera, and
+  the screen-space overlay camera is always sorted (it never gets OIT —
+  `render/transparency.rs`), so the bake explicitly checks
+  text-over-backing composition in the sorted-camera examples
+  (`cascade`, `side_by_side`, `world_text`, `slug_text`, `screen_space`,
+  `typography`, `diegetic_panel_stress`) — anything dim-behind-glass is
+  the `Transparent3d` sort (`BATCH_TEXT_DEPTH_BIAS`), not the cascade —
+  including one case with two screen panels at clearly different depths
+  (the batch's one bias rides its union-center distance, so per-panel
+  depth separation is the untested axis). Also in the bake, while the
+  toggle still exists (3b review): a flip-bounce stress on `text_alpha`
+  under each alpha default — the original white-wedge repro context —
+  and one `text_alpha` run forced to `Msaa::Off` so `AlphaToCoverage`'s
+  `MAY_DISCARD` routing compiles the vertex-pull pipelines once before
+  4b removes the per-run A/B. Code rider (3b review): state the
+  "backing layers per panel stay below 64" assumption on
+  `BATCH_TEXT_DEPTH_BIAS`'s doc comment.
   `text_alpha`'s on-screen mode descriptions updated for batched
   behavior — Opaque renders glyph silhouettes under batching, not the
   "colored rectangle, no silhouette" the per-run copy describes (3a
-  review). Note: text's absence from the camera depth prepass is a 3a
+  review); the Blend copy's "one mesh per text run ordered with
+  depth_bias" is per-run prose too, and the Multiply copy should say the
+  unpinned HUD/camera panels legitimately go dark (3b review). Note:
+  text's absence from the camera depth prepass is a 3a
   property of BOTH paths (`TextExtension::enable_prepass` is type-wide),
   not something this flip introduces. Bake = daily use across examples
   until confidence is established; any surprise still has the `B`-key
@@ -1169,7 +1328,12 @@ toggle flipped in the gate examples.
   content** (not just frame-to-frame identity — closing the Step-1 gate
   hole now that growth has no per-run fallback), doc
   updated, `emoji.md` annotated that color-glyph layers land as records
-  with a brush field, not layer-quads in run meshes.
+  with a brush field, not layer-quads in run meshes. Doc-update rider
+  (3b review): record that `TextExtension::enable_prepass() -> false`
+  becomes a standing contract of the only path — re-enabling the camera
+  depth prepass re-enters the depth-only empty-layout territory that
+  `material_group_is_stripped` guards, so any future prepass change must
+  keep (or consciously extend) that guard.
 
 ## Results table (fill as steps land)
 
@@ -1224,7 +1388,19 @@ expected not to move.
 - **Non-OIT transparent sort** — within one batched draw there is no per-run
   sort; OIT makes order irrelevant, the non-OIT path leans on the depth
   nudge (decision 3). If a real ordering case falls through, the batch key
-  can grow a coarse layer field — measured, in Step 3.
+  can grow a coarse layer field — measured, in Step 3. *Step 3b outcome:*
+  the batch-vs-backing case DID fall through (one sort key per batch, bias
+  was 0) and is fixed by `BATCH_TEXT_DEPTH_BIAS` on every batch material;
+  the coarse-layer-key escalation stays available if a per-panel ordering
+  case surfaces in the 4a bake.
+- **Translucent world geometry near text (accepted limitation, 3b
+  review)** — a Blend world mesh within `BATCH_TEXT_DEPTH_BIAS` (64 world
+  units, view-distance terms) of a text batch can mis-sort against it. The
+  per-run path had the same wrong-window (its text biases were
+  `command_depth × LAYER_DEPTH_BIAS`), no example places translucent world
+  geometry near text, and OIT views are immune — so this is recorded, not
+  gated. If a real scene hits it, the fix space is the coarse layer key
+  above or OIT on that camera.
 - **Atlas interaction** — records reference atlas indices, so a mid-frame
   atlas append must commit before batch buffers (same ordering
   `update_panel_text_geometry` enforces today at `mesh_spawning.rs:88-95`;

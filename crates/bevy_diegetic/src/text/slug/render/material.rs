@@ -4,6 +4,7 @@ use bevy::color::LinearRgba;
 use bevy::math::Vec4;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::ExtendedMaterial;
+use bevy::pbr::MATERIAL_BIND_GROUP_INDEX;
 use bevy::pbr::MaterialExtension;
 use bevy::pbr::MaterialExtensionKey;
 use bevy::pbr::MaterialExtensionPipeline;
@@ -130,8 +131,9 @@ impl MaterialExtension for TextExtension {
     // reads bindings 104/105 from that group — pipeline creation fails with
     // a wgpu validation error. The main opaque pass writes its own depth
     // (`GreaterEqual`, write enabled), so skipping the prepass is an early-z
-    // loss only. Shadow views are unaffected (`enable_shadows`, and their
-    // pipelines keep the material layout).
+    // loss only. Shadow views still queue (`enable_shadows`); the ones bevy
+    // routes depth-only fall back to the standard vertex stage in
+    // `specialize` (see `material_group_is_stripped`).
     fn enable_prepass() -> bool { false }
 
     fn specialize(
@@ -140,7 +142,7 @@ impl MaterialExtension for TextExtension {
         _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        if key.bind_group_data.vertex_pull {
+        if key.bind_group_data.vertex_pull && !material_group_is_stripped(descriptor) {
             // One WGSL file serves the main, prepass, and shadow pipelines;
             // its `#ifdef PREPASS_PIPELINE` gate picks the entry point. The
             // swap happens here rather than in `vertex_shader()` /
@@ -162,6 +164,21 @@ impl MaterialExtension for TextExtension {
         }
         Ok(())
     }
+}
+
+/// Whether bevy substituted the empty layout for the material bind group in
+/// this pipeline. Depth-only pipelines do this — shadow views for alpha modes
+/// without `MAY_DISCARD` (e.g. `Multiply`) — and the vertex-pull stage reads
+/// bindings 104/105 from the material group, so swapping it in would fail
+/// wgpu validation. Such pipelines keep the standard vertex stage instead:
+/// the inert batch mesh's all-zero positions rasterize nothing, so the batch
+/// casts no shadow there. This also catches any future mode or engine change
+/// that strips the material group.
+fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
+    descriptor
+        .layout
+        .get(MATERIAL_BIND_GROUP_INDEX)
+        .is_none_or(|material_layout| material_layout.entries.is_empty())
 }
 
 /// Inputs for one text material instance.

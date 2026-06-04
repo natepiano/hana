@@ -24,6 +24,18 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Reverse-Z: positive = closer to camera = composited in front.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 
+/// `Transparent3d` sort bias for batched-text entities.
+///
+/// Per-run text materials sort after their panel's SDF backing layers via
+/// `command_depth × LAYER_DEPTH_BIAS`; a batch is one phase item covering
+/// runs across many panels, so it carries one bias that puts text after
+/// every backing layer (backing biases are `command_index ×
+/// LAYER_DEPTH_BIAS`, far below this constant). Without it, a sorted
+/// (non-OIT) view can composite a panel's translucent backing over the
+/// whole batch — text dimmed behind smoked glass. Within the batch,
+/// coplanar glyph order comes from the per-record depth nudge instead.
+pub(crate) const BATCH_TEXT_DEPTH_BIAS: f32 = 64.0 * LAYER_DEPTH_BIAS;
+
 /// OIT depth offset for non-text panel layers.
 ///
 /// Panel text stays at `0.0` so unrelated opaque geometry keeps real depth
