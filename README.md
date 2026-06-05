@@ -65,12 +65,12 @@ Automatically maintained on all managed windows. Query it to get monitor info an
 fn my_system(q: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
     let (window, monitor) = q.single();
     println!("Monitor {}, scale {}", monitor.index, monitor.scale);
-    println!("Effective mode: {:?}", monitor.effective_mode);
+    println!("Effective mode: {:?}", monitor.effective_window_mode);
 }
 ```
 
 - `monitor.index`, `monitor.scale`, `monitor.position`, `monitor.size` – Monitor info (via `Deref<Target = MonitorInfo>`)
-- `monitor.effective_mode` – The actual window mode, even when `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed` but the window is actually fullscreen)
+- `monitor.effective_window_mode` – The actual window mode, even when `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed` but the window is actually fullscreen)
 
 ### Plugin Configuration
 

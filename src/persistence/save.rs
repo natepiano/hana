@@ -138,7 +138,7 @@ pub(crate) fn save_active_window_state(
         );
         let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
             || (&window.mode).into(),
-            |current_monitor| (&current_monitor.effective_mode).into(),
+            |current_monitor| (&current_monitor.effective_window_mode).into(),
         );
         let logical_position = physical_position.map(|physical_position| {
             let logical_x = (f64::from(physical_position.x) / monitor_scale)
@@ -308,7 +308,7 @@ pub(crate) fn save_window_state(
         );
         let saved_window_mode: SavedWindowMode = existing_monitor.map_or_else(
             || (&window.mode).into(),
-            |current_monitor| (&current_monitor.effective_mode).into(),
+            |current_monitor| (&current_monitor.effective_window_mode).into(),
         );
 
         let entry = cached.0.entry(window_entity).or_default();
@@ -381,8 +381,11 @@ pub(super) fn get_window_position(entity: Entity, window: &Window) -> Option<IVe
         WINIT_WINDOWS.with(|winit_windows| {
             let winit_windows = winit_windows.borrow();
             let winit_window = winit_windows.get_window(entity)?;
-            let outer_position = winit_window.outer_position().ok()?;
-            Some(IVec2::new(outer_position.x, outer_position.y))
+            let physical_outer_position = winit_window.outer_position().ok()?;
+            Some(IVec2::new(
+                physical_outer_position.x,
+                physical_outer_position.y,
+            ))
         })
     }
     #[cfg(not(any(

@@ -92,8 +92,8 @@ pub(crate) fn resolve_current_monitor(
     monitors: &Monitors,
 ) -> CurrentMonitor {
     current_monitor.copied().unwrap_or_else(|| CurrentMonitor {
-        monitor_info:   *monitors.first(),
-        effective_mode: window.mode,
+        monitor_info:          *monitors.first(),
+        effective_window_mode: window.mode,
     })
 }
 
@@ -116,9 +116,9 @@ pub(crate) fn handle_window_mode_input(
 
     let is_fullscreen = !matches!(window.mode, WindowMode::Windowed);
     let restore_complete = restored_states.by_entity.contains_key(&entity);
-    let mode_desynced = window.mode != current_monitor.effective_mode;
+    let mode_desynced = window.mode != current_monitor.effective_window_mode;
     if restore_complete && !is_fullscreen && mode_desynced {
-        window.mode = current_monitor.effective_mode;
+        window.mode = current_monitor.effective_window_mode;
     }
 
     let video_modes: Vec<VideoMode> = bevy_monitors

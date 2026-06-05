@@ -97,7 +97,7 @@ fn check_settle_matches(
     target_position: &TargetPosition,
     target_physical_position: Option<IVec2>,
     target_physical_size: UVec2,
-    target_mode: WindowMode,
+    target_window_mode: WindowMode,
     target_monitor: usize,
     settle_snapshot: &SettleSnapshot,
     platform: Platform,
@@ -114,7 +114,7 @@ fn check_settle_matches(
     let position_matches =
         skip_position || target_physical_position == settle_snapshot.physical_position;
     let size_match = is_fullscreen || target_physical_size == settle_snapshot.physical_size;
-    let mode_match = platform.modes_match(target_mode, settle_snapshot.window_mode);
+    let mode_match = platform.modes_match(target_window_mode, settle_snapshot.window_mode);
     let monitor_match = target_monitor == settle_snapshot.monitor;
     SettleComparison {
         position: position_matches.into(),
@@ -236,7 +236,7 @@ pub(crate) fn check_restore_settling(
     platform: Res<Platform>,
 ) {
     for (entity, mut target_position, window, current_monitor) in &mut windows {
-        let target_mode = target_position
+        let target_window_mode = target_position
             .saved_window_mode
             .to_window_mode(target_position.monitor_index);
         let target_physical_size = target_position.physical_size;
@@ -287,7 +287,7 @@ pub(crate) fn check_restore_settling(
             &target_position,
             target_physical_position,
             target_physical_size,
-            target_mode,
+            target_window_mode,
             target_monitor,
             &current_snapshot,
             *platform,
@@ -296,7 +296,7 @@ pub(crate) fn check_restore_settling(
             "[check_restore_settling] [{window_key}] {total_elapsed_ms:.0}ms (stable: {stability_elapsed_ms:.0}ms): \
              position={} size={} mode={} monitor={} | \
              size: {target_physical_size} vs {}, \
-             mode: {target_mode:?} vs {:?}, \
+             mode: {target_window_mode:?} vs {:?}, \
              monitor: {target_monitor} vs {}, \
              scale: {expected_scale} vs {actual_scale}",
             comparison.position.is_match(),
@@ -313,7 +313,7 @@ pub(crate) fn check_restore_settling(
             logical_position:  target_logical_position,
             physical_size:     target_physical_size,
             logical_size:      target_logical_size,
-            window_mode:       target_mode,
+            window_mode:       target_window_mode,
             monitor:           target_monitor,
             scale:             expected_scale,
         };
@@ -394,7 +394,7 @@ fn emit_settle_success(
             logical_position: target.logical_position,
             logical_size: target.logical_size,
             physical_size: target.physical_size,
-            mode: target.window_mode,
+            window_mode: target.window_mode,
             monitor_index: target.monitor,
         })
         .remove::<TargetPosition>()
@@ -455,8 +455,8 @@ fn emit_settle_mismatch(
             actual_physical_size: settle_actual.settle_snapshot.physical_size,
             expected_logical_size: target.logical_size,
             actual_logical_size: settle_actual.logical_size,
-            expected_mode: target.window_mode,
-            actual_mode: settle_actual.settle_snapshot.window_mode,
+            expected_window_mode: target.window_mode,
+            actual_window_mode: settle_actual.settle_snapshot.window_mode,
             expected_monitor: target.monitor,
             actual_monitor: settle_actual.settle_snapshot.monitor,
             expected_scale: target.scale,

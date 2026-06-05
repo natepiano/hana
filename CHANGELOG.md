@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** Rename window mode API fields for consistency: `WindowRestored.mode` → `window_mode`, `WindowRestoreMismatch.expected_mode`/`actual_mode` → `expected_window_mode`/`actual_window_mode`, and `CurrentMonitor.effective_mode` → `effective_window_mode`.
+
 ## [0.21.0-rc.2] - 2026-05-31
 
 ### Fixed

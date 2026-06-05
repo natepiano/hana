@@ -125,7 +125,7 @@ pub(crate) fn init_winit_info(
 
             commands.entity(*window_entity).insert(CurrentMonitor {
                 monitor_info:   starting_monitor,
-                effective_mode: WindowMode::Windowed,
+                effective_window_mode: WindowMode::Windowed,
             });
 
             commands.insert_resource(WinitInfo {

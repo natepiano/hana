@@ -71,7 +71,7 @@ fn update_info_text(
     mut text: Single<&mut Text, With<InfoText>>,
 ) {
     let (window, current_monitor) = *window_query;
-    let effective_mode = current_monitor.effective_mode;
+    let effective_window_mode = current_monitor.effective_window_mode;
 
     // Find refresh rate from Bevy's `Monitor` by matching position.
     let refresh_rate = bevy_monitors
@@ -98,7 +98,7 @@ fn update_info_text(
         window.physical_width(),
         window.physical_height(),
         window.mode,
-        effective_mode,
+        effective_window_mode,
         current_monitor.index,
         current_monitor.physical_position.x,
         current_monitor.physical_position.y,

@@ -81,7 +81,7 @@ impl From<&CachedRestoredState> for RestoredValues {
             physical_size:     format!("{}x{}", physical_size.x, physical_size.y),
             logical_size:      format!("{}x{}", logical_size.x, logical_size.y),
             monitor:           cached_restored_state.monitor.to_string(),
-            mode:              format!("{:?}", cached_restored_state.mode),
+            mode:              format!("{:?}", cached_restored_state.window_mode),
         }
     }
 }
@@ -112,7 +112,7 @@ pub(super) fn build_comparison_spans(
     current_monitor: &CurrentMonitor,
     font: &TextFont,
 ) {
-    let effective_mode = current_monitor.effective_mode;
+    let effective_window_mode = current_monitor.effective_window_mode;
     let scale = window.resolution.scale_factor();
 
     let current_values = CurrentValues {
@@ -136,7 +136,7 @@ pub(super) fn build_comparison_spans(
         ),
         scale:             format!("{scale}"),
         monitor:           format!("{}", current_monitor.index),
-        mode:              format!("{effective_mode:?}"),
+        mode:              format!("{effective_window_mode:?}"),
     };
 
     if let Some(cached_restored_state) = cached_restored_state {
@@ -154,7 +154,7 @@ pub(super) fn build_comparison_spans(
     add_span(
         child_spawner,
         font,
-        &format!("\n{EFFECTIVE_MODE_LABEL} {effective_mode:?}\n"),
+        &format!("\n{EFFECTIVE_MODE_LABEL} {effective_window_mode:?}\n"),
         DEFAULT_COLOR,
     );
 }
@@ -261,15 +261,18 @@ fn add_position_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: cached_mismatch_state
                     .physical_position
-                    .expected
+                    .expected_physical_position
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
                     ),
-                actual:   cached_mismatch_state.physical_position.actual.map_or_else(
-                    || NONE_TEXT.to_string(),
-                    |position| format!("({}, {})", position.x, position.y),
-                ),
+                actual:   cached_mismatch_state
+                    .physical_position
+                    .actual_physical_position
+                    .map_or_else(
+                        || NONE_TEXT.to_string(),
+                        |position| format!("({}, {})", position.x, position.y),
+                    ),
             }),
         },
         column_width,
@@ -282,14 +285,20 @@ fn add_position_rows(
             restored: restored_values.logical_position.clone(),
             current:  current_values.logical_position.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
-                expected: cached_mismatch_state.logical_position.expected.map_or_else(
-                    || NONE_TEXT.to_string(),
-                    |position| format!("({}, {})", position.x, position.y),
-                ),
-                actual:   cached_mismatch_state.logical_position.actual.map_or_else(
-                    || NONE_TEXT.to_string(),
-                    |position| format!("({}, {})", position.x, position.y),
-                ),
+                expected: cached_mismatch_state
+                    .logical_position
+                    .expected_logical_position
+                    .map_or_else(
+                        || NONE_TEXT.to_string(),
+                        |position| format!("({}, {})", position.x, position.y),
+                    ),
+                actual:   cached_mismatch_state
+                    .logical_position
+                    .actual_logical_position
+                    .map_or_else(
+                        || NONE_TEXT.to_string(),
+                        |position| format!("({}, {})", position.x, position.y),
+                    ),
             }),
         },
         column_width,
@@ -314,13 +323,13 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state.physical_size.expected.x,
-                    cached_mismatch_state.physical_size.expected.y
+                    cached_mismatch_state.physical_size.expected_physical_size.x,
+                    cached_mismatch_state.physical_size.expected_physical_size.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state.physical_size.actual.x,
-                    cached_mismatch_state.physical_size.actual.y
+                    cached_mismatch_state.physical_size.actual_physical_size.x,
+                    cached_mismatch_state.physical_size.actual_physical_size.y
                 ),
             }),
         },
@@ -336,13 +345,13 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state.logical_size.expected.x,
-                    cached_mismatch_state.logical_size.expected.y
+                    cached_mismatch_state.logical_size.expected_logical_size.x,
+                    cached_mismatch_state.logical_size.expected_logical_size.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state.logical_size.actual.x,
-                    cached_mismatch_state.logical_size.actual.y
+                    cached_mismatch_state.logical_size.actual_logical_size.x,
+                    cached_mismatch_state.logical_size.actual_logical_size.y
                 ),
             }),
         },

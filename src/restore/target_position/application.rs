@@ -69,15 +69,15 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
             )
         },
         MonitorScaleStrategy::CompensateSizeOnly(_) => {
-            let compensated_size = target_position.compensated_size();
+            let physical_compensated_size = target_position.compensated_size();
             debug!(
                 "[apply_initial_move] CompensateSizeOnly: position={:?} compensated_size={}x{} (ratio={})",
                 physical_position,
-                compensated_size.x,
-                compensated_size.y,
+                physical_compensated_size.x,
+                physical_compensated_size.y,
                 target_position.ratio()
             );
-            (physical_position, compensated_size)
+            (physical_position, physical_compensated_size)
         },
         _ => (physical_position, target_position.physical_size),
     };

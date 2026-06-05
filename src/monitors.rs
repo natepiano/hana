@@ -50,23 +50,23 @@ pub struct Monitors {
 /// effective display mode. Updated automatically by the plugin's unified monitor
 /// detection system.
 ///
-/// The `effective_mode` field reflects what the user actually sees, even when
+/// The `effective_window_mode` field reflects what the user actually sees, even when
 /// `window.mode` is stale (e.g., macOS green button fullscreen reports `Windowed`).
 ///
 /// Derefs to [`MonitorInfo`] for convenient access to monitor fields:
 /// ```ignore
 /// fn my_system(query: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
 ///     let (window, monitor) = query.single();
-///     println!("Monitor {} at scale {}, mode: {:?}", monitor.index, monitor.scale, monitor.effective_mode);
+///     println!("Monitor {} at scale {}, mode: {:?}", monitor.index, monitor.scale, monitor.effective_window_mode);
 /// }
 /// ```
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 pub struct CurrentMonitor {
     /// The monitor this window is currently on.
-    pub monitor_info:   MonitorInfo,
+    pub monitor_info:          MonitorInfo,
     /// The effective window mode, accounting for OS-level fullscreen changes.
-    pub effective_mode: WindowMode,
+    pub effective_window_mode: WindowMode,
 }
 
 impl Deref for CurrentMonitor {

@@ -8,7 +8,7 @@ use super::WindowKey;
 /// Event fired when a window restore completes and the window becomes visible.
 ///
 /// This is an [`EntityEvent`] triggered on the window entity at the end of the restore
-/// process, after position, size, and mode have been applied. Dependent crates can
+/// process, after position, size, and window mode have been applied. Dependent crates can
 /// observe this event to know the final restored window state.
 ///
 /// Use an observer to receive this event:
@@ -16,7 +16,7 @@ use super::WindowKey;
 /// // For all windows
 /// app.add_observer(|trigger: On<WindowRestored>| {
 ///     let event = trigger.event();
-///     // Use `event.entity`, `event.physical_size`, `event.mode`, etc.
+///     // Use `event.entity`, `event.physical_size`, `event.window_mode`, etc.
 /// });
 ///
 /// // For primary window only - check event.entity against PrimaryWindow query
@@ -46,7 +46,7 @@ pub struct WindowRestored {
     /// Target logical size that was applied (content area).
     pub logical_size:      UVec2,
     /// Window mode that was applied.
-    pub mode:              WindowMode,
+    pub window_mode:       WindowMode,
     /// Monitor index the window was restored to.
     pub monitor_index:     usize,
 }
@@ -69,13 +69,13 @@ pub struct WindowRestored {
 ///   `update_current_monitor`, which queries winit's `current_monitor()` and maps it to the
 ///   `Monitors` list. This updates quickly when the compositor moves the window.
 ///
-/// - **`physical_position`, `logical_position`, `physical_size`, `logical_size`, `mode`, `scale`**
-///   → the [`Window`](bevy::window::Window) component. Position and size reflect `Window.position`
-///   / `Window.resolution`, and scale comes from `Window.resolution.scale_factor()`. These lag
-///   behind the compositor because they only update when winit fires corresponding events
-///   (`ScaleFactorChanged`, `Resized`, `Moved`). A common mismatch is the scale factor still
-///   reflecting the launch monitor while `CurrentMonitor` has already updated to the target
-///   monitor.
+/// - **`physical_position`, `logical_position`, `physical_size`, `logical_size`, `window_mode`,
+///   `scale`** → the [`Window`](bevy::window::Window) component. Position and size reflect
+///   `Window.position` / `Window.resolution`, and scale comes from
+///   `Window.resolution.scale_factor()`. These lag behind the compositor because they only update
+///   when winit fires corresponding events (`ScaleFactorChanged`, `Resized`, `Moved`). A common
+///   mismatch is the scale factor still reflecting the launch monitor while `CurrentMonitor` has
+///   already updated to the target monitor.
 ///
 /// This intentional split means a mismatch signals that the window hasn't fully settled
 /// — the compositor accepted the request but winit hasn't yet delivered all the
@@ -113,9 +113,9 @@ pub struct WindowRestoreMismatch {
     /// Actual logical size from `Window.resolution.width()`/`height()`.
     pub actual_logical_size:        UVec2,
     /// Target window mode from `TargetPosition`.
-    pub expected_mode:              WindowMode,
+    pub expected_window_mode:       WindowMode,
     /// Actual window mode from `Window.mode`.
-    pub actual_mode:                WindowMode,
+    pub actual_window_mode:         WindowMode,
     /// Target monitor index from `TargetPosition`.
     pub expected_monitor:           usize,
     /// Actual monitor index from `CurrentMonitor` (winit `current_monitor()`).

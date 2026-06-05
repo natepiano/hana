@@ -60,7 +60,7 @@ pub(crate) struct CachedWindowDebug {
     physical_position: Option<WindowPosition>,
     physical_width:    u32,
     physical_height:   u32,
-    mode:              Option<WindowMode>,
+    window_mode:       Option<WindowMode>,
     focus_state:       FocusState,
 }
 
@@ -73,7 +73,7 @@ pub(crate) fn debug_window_changed(
     let position_changed = cached.physical_position.as_ref() != Some(&window.position);
     let size_changed = cached.physical_width != window.physical_width()
         || cached.physical_height != window.physical_height();
-    let mode_changed = cached.mode.as_ref() != Some(&window.mode);
+    let mode_changed = cached.window_mode.as_ref() != Some(&window.mode);
     let focus_state = FocusState::from(window.focused);
     let focused_changed = cached.focus_state != focus_state;
 
@@ -94,7 +94,10 @@ pub(crate) fn debug_window_changed(
         ));
     }
     if mode_changed {
-        changes.push(format!("mode: {:?} -> {:?}", cached.mode, window.mode));
+        changes.push(format!(
+            "mode: {:?} -> {:?}",
+            cached.window_mode, window.mode
+        ));
     }
     if focused_changed {
         changes.push(format!(
@@ -110,7 +113,7 @@ pub(crate) fn debug_window_changed(
     cached.physical_position = Some(window.position);
     cached.physical_width = window.physical_width();
     cached.physical_height = window.physical_height();
-    cached.mode = Some(window.mode);
+    cached.window_mode = Some(window.mode);
     cached.focus_state = focus_state;
 }
 
