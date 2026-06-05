@@ -39,10 +39,10 @@ pub(crate) fn setup(mut commands: Commands) {
 pub(crate) fn on_spawn_managed_window(
     _trigger: On<SpawnManagedWindow>,
     mut commands: Commands,
-    mut counter: ResMut<WindowCounter>,
+    mut window_counter: ResMut<WindowCounter>,
 ) {
-    counter.next += 1;
-    let name = format!("{MANAGED_WINDOW_NAME_PREFIX}{}", counter.next);
+    window_counter.next += 1;
+    let name = format!("{MANAGED_WINDOW_NAME_PREFIX}{}", window_counter.next);
     let title = format!("{MANAGED_WINDOW_TITLE_PREFIX}{name}");
 
     commands.spawn((

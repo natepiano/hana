@@ -102,7 +102,7 @@ pub(crate) fn handle_window_mode_input(
     mut windows: Query<(Entity, &mut Window, Option<&CurrentMonitor>)>,
     monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
-    mut selected: ResMut<SelectedVideoModes>,
+    mut selected_video_modes: ResMut<SelectedVideoModes>,
     restored_states: Res<RestoredStates>,
     mut commands: Commands,
 ) {
@@ -129,12 +129,12 @@ pub(crate) fn handle_window_mode_input(
         .map(|(_, bevy_monitor)| bevy_monitor.video_modes.clone())
         .unwrap_or_default();
 
-    let current_idx = selected.get(current_monitor.index);
+    let current_idx = selected_video_modes.get(current_monitor.index);
     if keys.just_pressed(KeyCode::ArrowUp) && current_idx > 0 {
-        selected.set(current_monitor.index, current_idx - 1);
+        selected_video_modes.set(current_monitor.index, current_idx - 1);
     }
     if keys.just_pressed(KeyCode::ArrowDown) && current_idx < video_modes.len().saturating_sub(1) {
-        selected.set(current_monitor.index, current_idx + 1);
+        selected_video_modes.set(current_monitor.index, current_idx + 1);
     }
 
     if keys.just_pressed(KeyCode::Enter) {
@@ -197,18 +197,18 @@ pub(crate) fn sync_selected_to_active(
     window: &Window,
     current_monitor: &CurrentMonitor,
     active_mode_idx: Option<usize>,
-    selected: &mut SelectedVideoModes,
+    selected_video_modes: &mut SelectedVideoModes,
 ) {
     if let WindowMode::Fullscreen(_, VideoModeSelection::Specific(active)) = &window.mode {
         let current_mode = (active.physical_size, active.refresh_rate_millihertz);
-        if selected.last_sync != Some(current_mode)
+        if selected_video_modes.last_sync != Some(current_mode)
             && let Some(active_idx) = active_mode_idx
         {
-            selected.set(current_monitor.index, active_idx);
-            selected.last_sync = Some(current_mode);
+            selected_video_modes.set(current_monitor.index, active_idx);
+            selected_video_modes.last_sync = Some(current_mode);
         }
     } else {
-        selected.last_sync = None;
+        selected_video_modes.last_sync = None;
     }
 }
 

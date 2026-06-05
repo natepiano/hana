@@ -377,7 +377,7 @@ fn emit_settle_success(
     commands: &mut Commands,
     entity: Entity,
     window_key: WindowKey,
-    target: &SettleTarget,
+    settle_target: &SettleTarget,
     total_elapsed_ms: f32,
     stability_elapsed_ms: f32,
 ) {
@@ -390,12 +390,12 @@ fn emit_settle_success(
         .trigger(|entity| WindowRestored {
             entity,
             window_key,
-            physical_position: target.physical_position,
-            logical_position: target.logical_position,
-            logical_size: target.logical_size,
-            physical_size: target.physical_size,
-            window_mode: target.window_mode,
-            monitor_index: target.monitor,
+            physical_position: settle_target.physical_position,
+            logical_position: settle_target.logical_position,
+            logical_size: settle_target.logical_size,
+            physical_size: settle_target.physical_size,
+            window_mode: settle_target.window_mode,
+            monitor_index: settle_target.monitor,
         })
         .remove::<TargetPosition>()
         .remove::<X11FrameCompensated>();
@@ -406,7 +406,7 @@ fn emit_settle_mismatch(
     commands: &mut Commands,
     entity: Entity,
     window_key: WindowKey,
-    target: &SettleTarget,
+    settle_target: &SettleTarget,
     settle_actual: &SettleActual,
     total_elapsed_ms: f32,
 ) {
@@ -418,15 +418,15 @@ fn emit_settle_mismatch(
          mode: {:?} vs {:?}, \
          monitor: {} vs {}, \
          scale: {} vs {}",
-        target.physical_position,
+        settle_target.physical_position,
         settle_actual.settle_snapshot.physical_position,
-        target.physical_size,
+        settle_target.physical_size,
         settle_actual.settle_snapshot.physical_size,
-        target.window_mode,
+        settle_target.window_mode,
         settle_actual.settle_snapshot.window_mode,
-        target.monitor,
+        settle_target.monitor,
         settle_actual.settle_snapshot.monitor,
-        target.scale,
+        settle_target.scale,
         settle_actual.scale,
     );
     let actual_logical_position = settle_actual
@@ -447,19 +447,19 @@ fn emit_settle_mismatch(
         .trigger(|entity| WindowRestoreMismatch {
             entity,
             window_key,
-            expected_physical_position: target.physical_position,
+            expected_physical_position: settle_target.physical_position,
             actual_physical_position: settle_actual.settle_snapshot.physical_position,
-            expected_logical_position: target.logical_position,
+            expected_logical_position: settle_target.logical_position,
             actual_logical_position,
-            expected_physical_size: target.physical_size,
+            expected_physical_size: settle_target.physical_size,
             actual_physical_size: settle_actual.settle_snapshot.physical_size,
-            expected_logical_size: target.logical_size,
+            expected_logical_size: settle_target.logical_size,
             actual_logical_size: settle_actual.logical_size,
-            expected_window_mode: target.window_mode,
+            expected_window_mode: settle_target.window_mode,
             actual_window_mode: settle_actual.settle_snapshot.window_mode,
-            expected_monitor: target.monitor,
+            expected_monitor: settle_target.monitor,
             actual_monitor: settle_actual.settle_snapshot.monitor,
-            expected_scale: target.scale,
+            expected_scale: settle_target.scale,
             actual_scale: settle_actual.scale,
         })
         .remove::<TargetPosition>()

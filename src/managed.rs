@@ -78,8 +78,8 @@ pub(crate) struct ManagedWindowRegistry {
 pub(crate) fn on_managed_window_added(
     add: On<Add, ManagedWindow>,
     mut managed: Query<&mut ManagedWindow>,
-    mut registry: ResMut<ManagedWindowRegistry>,
-    config: Res<RestoreWindowConfig>,
+    mut managed_window_registry: ResMut<ManagedWindowRegistry>,
+    restore_window_config: Res<RestoreWindowConfig>,
     monitors: Res<Monitors>,
     windows: Query<&Window>,
     primary_query: Query<(), With<PrimaryWindow>>,
@@ -100,12 +100,12 @@ pub(crate) fn on_managed_window_added(
         return;
     }
 
-    let unique_name = if registry.names.contains(&name) {
+    let unique_name = if managed_window_registry.names.contains(&name) {
         debug_assert!(false, "Duplicate ManagedWindow name: \"{name}\"");
         let mut suffix = FIRST_DUPLICATE_SUFFIX;
         loop {
             let candidate = format!("{name}{MANAGED_WINDOW_NAME_SEPARATOR}{suffix}");
-            if !registry.names.contains(&candidate) {
+            if !managed_window_registry.names.contains(&candidate) {
                 break candidate;
             }
             suffix += 1;
@@ -121,14 +121,16 @@ pub(crate) fn on_managed_window_added(
         managed_window.name.clone_from(&unique_name);
     }
 
-    registry.names.insert(unique_name.clone());
-    registry.entities.insert(entity, unique_name.clone());
+    managed_window_registry.names.insert(unique_name.clone());
+    managed_window_registry
+        .entities
+        .insert(entity, unique_name.clone());
     debug!(
         "[on_managed_window_added] Registered managed window \"{unique_name}\" on entity {entity:?}"
     );
 
     // If no saved state exists for this window, save its current position/size immediately
-    let existing = persistence::load_all_states(&config.path);
+    let existing = persistence::load_all_states(&restore_window_config.path);
     let already_saved = existing
         .as_ref()
         .is_some_and(|states| states.contains_key(&WindowKey::Managed(unique_name.clone())));
@@ -166,7 +168,7 @@ pub(crate) fn on_managed_window_added(
 
         let mut states = existing.unwrap_or_default();
         states.insert(WindowKey::Managed(unique_name.clone()), window_state);
-        persistence::save_all_states(&config.path, &states);
+        persistence::save_all_states(&restore_window_config.path, &states);
         debug!("[on_managed_window_added] Saved initial state for \"{unique_name}\"");
     }
 }
@@ -174,9 +176,9 @@ pub(crate) fn on_managed_window_added(
 /// Observer: unregister a `ManagedWindow` name when removed, and update state file if `ActiveOnly`.
 pub(crate) fn on_managed_window_removed(
     remove: On<Remove, ManagedWindow>,
-    mut registry: ResMut<ManagedWindowRegistry>,
-    config: Res<RestoreWindowConfig>,
-    persistence: Res<ManagedWindowPersistence>,
+    mut managed_window_registry: ResMut<ManagedWindowRegistry>,
+    restore_window_config: Res<RestoreWindowConfig>,
+    managed_window_persistence: Res<ManagedWindowPersistence>,
     monitors: Res<Monitors>,
     all_windows: Query<
         (
@@ -190,13 +192,13 @@ pub(crate) fn on_managed_window_removed(
     primary_query: Query<(), With<PrimaryWindow>>,
 ) {
     let entity = remove.entity;
-    if let Some(name) = registry.entities.remove(&entity) {
+    if let Some(name) = managed_window_registry.entities.remove(&entity) {
         // If `ActiveOnly`, rebuild state from all remaining active windows.
         // The removed entity's `ManagedWindow` is being removed, so the query
         // naturally excludes it — but guard against it just in case.
-        if *persistence == ManagedWindowPersistence::ActiveOnly {
+        if *managed_window_persistence == ManagedWindowPersistence::ActiveOnly {
             persistence::save_active_window_state(
-                &config,
+                &restore_window_config,
                 &monitors,
                 &all_windows,
                 &primary_query,
@@ -207,7 +209,7 @@ pub(crate) fn on_managed_window_removed(
             );
         }
 
-        registry.names.remove(&name);
+        managed_window_registry.names.remove(&name);
         debug!(
             "[on_managed_window_removed] Unregistered managed window \"{name}\" from entity {entity:?}"
         );
@@ -218,8 +220,8 @@ pub(crate) fn on_managed_window_removed(
 /// file from the currently-active windows so that any previously-remembered-but-closed
 /// window entries are pruned.
 pub(crate) fn on_persistence_changed(
-    persistence: Res<ManagedWindowPersistence>,
-    config: Res<RestoreWindowConfig>,
+    managed_window_persistence: Res<ManagedWindowPersistence>,
+    restore_window_config: Res<RestoreWindowConfig>,
     monitors: Res<Monitors>,
     all_windows: Query<
         (
@@ -232,9 +234,9 @@ pub(crate) fn on_persistence_changed(
     >,
     primary_query: Query<(), With<PrimaryWindow>>,
 ) {
-    if *persistence == ManagedWindowPersistence::ActiveOnly {
+    if *managed_window_persistence == ManagedWindowPersistence::ActiveOnly {
         persistence::save_active_window_state(
-            &config,
+            &restore_window_config,
             &monitors,
             &all_windows,
             &primary_query,
@@ -251,7 +253,7 @@ pub(crate) fn on_managed_window_load(
     managed: Query<&ManagedWindow>,
     monitors: Res<Monitors>,
     winit_info: Option<Res<WinitInfo>>,
-    config: Res<RestoreWindowConfig>,
+    restore_window_config: Res<RestoreWindowConfig>,
     mut windows: Query<&mut Window>,
     primary_monitor: Query<&CurrentMonitor, With<PrimaryWindow>>,
     platform: Res<Platform>,
@@ -272,7 +274,11 @@ pub(crate) fn on_managed_window_load(
     // Check the startup snapshot — not the file, which may have been modified by
     // `on_managed_window_added` saving initial state for brand-new windows.
     let window_key = WindowKey::Managed((*name).clone());
-    let Some(saved_state) = config.loaded_states.get(&window_key).cloned() else {
+    let Some(saved_state) = restore_window_config
+        .loaded_states
+        .get(&window_key)
+        .cloned()
+    else {
         debug!("[on_managed_window_load] No saved state for \"{name}\", showing window");
         if let Ok(mut window) = windows.get_mut(entity) {
             window.visible = true;

@@ -48,7 +48,7 @@ pub(crate) fn on_set_exclusive_fullscreen(
     mut windows: Query<(&mut Window, Option<&CurrentMonitor>)>,
     monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
-    selected: Res<SelectedVideoModes>,
+    selected_video_modes: Res<SelectedVideoModes>,
 ) {
     let Some((mut window, maybe_current_monitor)) =
         windows.iter_mut().find(|(window, _)| window.focused)
@@ -65,7 +65,7 @@ pub(crate) fn on_set_exclusive_fullscreen(
         .map(|(_, bevy_monitor)| bevy_monitor.video_modes.clone())
         .unwrap_or_default();
 
-    let selected_idx = selected
+    let selected_idx = selected_video_modes
         .get(current_monitor.monitor_info.index)
         .min(video_modes.len().saturating_sub(1));
     let video_mode_selection = video_modes
@@ -82,13 +82,16 @@ pub(crate) fn on_set_exclusive_fullscreen(
 
 pub(crate) fn on_toggle_persistence(
     _trigger: On<TogglePersistence>,
-    mut persistence: ResMut<ManagedWindowPersistence>,
+    mut managed_window_persistence: ResMut<ManagedWindowPersistence>,
 ) {
-    *persistence = match *persistence {
+    *managed_window_persistence = match *managed_window_persistence {
         ManagedWindowPersistence::RememberAll => ManagedWindowPersistence::ActiveOnly,
         ManagedWindowPersistence::ActiveOnly => ManagedWindowPersistence::RememberAll,
     };
-    info!("[restore_window] Persistence mode: {:?}", *persistence);
+    info!(
+        "[restore_window] Persistence mode: {:?}",
+        *managed_window_persistence
+    );
 }
 
 pub(crate) fn on_clear_state_and_quit(

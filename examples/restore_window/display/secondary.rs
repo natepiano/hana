@@ -30,7 +30,7 @@ pub(crate) fn update_secondary_displays(
     managed_query: Query<&ManagedWindow>,
     monitors: Res<Monitors>,
     bevy_monitors: Query<(Entity, &Monitor)>,
-    mut selected: ResMut<SelectedVideoModes>,
+    mut selected_video_modes: ResMut<SelectedVideoModes>,
     restored_states: Res<RestoredStates>,
     mismatch_states: Res<MismatchStates>,
     mut commands: Commands,
@@ -54,8 +54,13 @@ pub(crate) fn update_secondary_displays(
             input::get_video_modes_for_monitor(&bevy_monitors, &current_monitor);
         let refresh_display = input::format_refresh_rate(window, refresh_rate);
         let active_mode_idx = input::find_active_video_mode_index(window, &video_modes);
-        input::sync_selected_to_active(window, &current_monitor, active_mode_idx, &mut selected);
-        let selected_idx = selected.get(current_monitor.index);
+        input::sync_selected_to_active(
+            window,
+            &current_monitor,
+            active_mode_idx,
+            &mut selected_video_modes,
+        );
+        let selected_idx = selected_video_modes.get(current_monitor.index);
         let video_modes_display =
             input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 

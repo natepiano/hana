@@ -13,9 +13,12 @@ use super::strategy::MonitorScaleStrategy;
 use super::strategy::WindowRestoreState;
 use super::target::TargetPosition;
 use crate::Platform;
+use crate::constants::MILLIS_PER_SECOND;
 use crate::constants::RESTORE_STRATEGY_APPLY_UNCHANGED;
 use crate::constants::RESTORE_STRATEGY_LOWER_TO_HIGHER;
 use crate::constants::SCALE_FACTOR_EPSILON;
+use crate::constants::SETTLE_STABILITY_SECS;
+use crate::constants::SETTLE_TIMEOUT_SECS;
 use crate::persistence::SavedWindowMode;
 use crate::restore::settle_state::SettleState;
 use crate::restore::winit_info::X11FrameCompensated;
@@ -244,8 +247,9 @@ pub(crate) fn restore_windows(
             RestoreStatus::Complete
         ) && target_position.settle_state.is_none()
         {
+            let settle_stability_ms = SETTLE_STABILITY_SECS * MILLIS_PER_SECOND;
             debug!(
-                "[restore_windows] Restore applied, starting settle (200ms stability / 2s timeout)"
+                "[restore_windows] Restore applied, starting settle ({settle_stability_ms:.0}ms stability / {SETTLE_TIMEOUT_SECS:.0}s timeout)"
             );
             target_position.settle_state = Some(SettleState::new());
         }

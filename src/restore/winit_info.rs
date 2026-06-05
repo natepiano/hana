@@ -142,14 +142,18 @@ pub(crate) fn load_target_position(
     window_entity: Single<Entity, With<PrimaryWindow>>,
     monitors: Res<Monitors>,
     winit_info: Res<WinitInfo>,
-    mut config: ResMut<RestoreWindowConfig>,
+    mut restore_window_config: ResMut<RestoreWindowConfig>,
     platform: Res<Platform>,
 ) {
-    if let Some(all_states) = persistence::load_all_states(&config.path) {
-        config.loaded_states = all_states;
+    if let Some(all_states) = persistence::load_all_states(&restore_window_config.path) {
+        restore_window_config.loaded_states = all_states;
     }
 
-    let Some(state) = config.loaded_states.get(&WindowKey::Primary).cloned() else {
+    let Some(state) = restore_window_config
+        .loaded_states
+        .get(&WindowKey::Primary)
+        .cloned()
+    else {
         debug!("[load_target_position] No saved bevy_window_manager state, showing window");
         commands.queue(|world: &mut World| {
             let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();

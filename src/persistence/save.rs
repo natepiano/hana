@@ -243,9 +243,9 @@ fn persist_remember_all(
 /// Handles both the primary window and any `ManagedWindow` entities. Uses
 /// `ManagedWindowPersistence` to decide whether closed windows keep their saved state.
 pub(crate) fn save_window_state(
-    config: Res<RestoreWindowConfig>,
+    restore_window_config: Res<RestoreWindowConfig>,
     monitors: Res<Monitors>,
-    persistence: Res<ManagedWindowPersistence>,
+    managed_window_persistence: Res<ManagedWindowPersistence>,
     windows: Query<
         (
             Entity,
@@ -355,13 +355,25 @@ pub(crate) fn save_window_state(
         return;
     }
 
-    match *persistence {
+    match *managed_window_persistence {
         ManagedWindowPersistence::ActiveOnly => {
             // Build state from all active windows and write in one shot
-            save_active_window_state(&config, &monitors, &all_windows, &primary_query, None);
+            save_active_window_state(
+                &restore_window_config,
+                &monitors,
+                &all_windows,
+                &primary_query,
+                None,
+            );
         },
         ManagedWindowPersistence::RememberAll => {
-            persist_remember_all(&config, &monitors, &cached, &all_windows, &primary_query);
+            persist_remember_all(
+                &restore_window_config,
+                &monitors,
+                &cached,
+                &all_windows,
+                &primary_query,
+            );
         },
     }
 }
