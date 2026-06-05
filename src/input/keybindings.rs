@@ -35,26 +35,26 @@ impl PlatformShortcutMode {
 }
 
 struct ModifierBlockers {
-    all_modifiers:       Vec<Entity>,
-    non_shift_modifiers: Vec<Entity>,
+    all:       Vec<Entity>,
+    non_shift: Vec<Entity>,
 }
 
 impl ModifierBlockers {
     fn new(shift_entity: Entity, primary_entity: Entity, alt_entity: Entity) -> Self {
         Self {
-            all_modifiers:       vec![shift_entity, primary_entity, alt_entity],
-            non_shift_modifiers: vec![primary_entity, alt_entity],
+            all:       vec![shift_entity, primary_entity, alt_entity],
+            non_shift: vec![primary_entity, alt_entity],
         }
     }
 
     fn add_non_shift_modifier(&mut self, entity: Entity) {
-        self.all_modifiers.push(entity);
-        self.non_shift_modifiers.push(entity);
+        self.all.push(entity);
+        self.non_shift.push(entity);
     }
 
-    fn all_modifiers(&self) -> Vec<Entity> { self.all_modifiers.clone() }
+    fn all(&self) -> Vec<Entity> { self.all.clone() }
 
-    fn non_shift_modifiers(&self) -> Vec<Entity> { self.non_shift_modifiers.clone() }
+    fn non_shift(&self) -> Vec<Entity> { self.non_shift.clone() }
 }
 
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
@@ -84,11 +84,11 @@ impl ModifierBlockers {
 /// ```ignore
 /// use bevy_kana::Keybindings;
 ///
-/// fn setup_bindings(spawner: &mut ActionSpawner<MyContext>) {
-///     let keybindings = Keybindings::new::<ShiftAction>(spawner, ActionSettings::default());
-///     keybindings.spawn_key::<JumpAction>(spawner, KeyCode::Space);
-///     keybindings.spawn_platform_key::<SaveAction>(spawner, KeyCode::KeyS);
-///     keybindings.spawn_shift_key::<RunAction>(spawner, KeyCode::KeyR);
+/// fn setup_bindings(action_spawner: &mut ActionSpawner<MyContext>) {
+///     let keybindings = Keybindings::new::<ShiftAction>(action_spawner, ActionSettings::default());
+///     keybindings.spawn_key::<JumpAction>(action_spawner, KeyCode::Space);
+///     keybindings.spawn_platform_key::<SaveAction>(action_spawner, KeyCode::KeyS);
+///     keybindings.spawn_shift_key::<RunAction>(action_spawner, KeyCode::KeyR);
 /// }
 /// ```
 pub struct Keybindings<C: Component> {
@@ -104,7 +104,7 @@ impl<C: Component> Keybindings<C> {
     /// This allows the caller to query `Action<S>` to check shift state
     /// (for example, for shift-click selection).
     pub fn new<S: InputAction>(
-        spawner: &mut ActionSpawner<C>,
+        action_spawner: &mut ActionSpawner<C>,
         action_settings: ActionSettings,
     ) -> Self {
         let non_consuming_modifier_settings = ActionSettings {
@@ -119,21 +119,21 @@ impl<C: Component> Keybindings<C> {
             },
         };
 
-        let shift_entity = spawner
+        let shift_entity = action_spawner
             .spawn((
                 Action::<S>::new(),
                 non_consuming_modifier_settings,
                 bindings![KeyCode::ShiftLeft, KeyCode::ShiftRight],
             ))
             .id();
-        let primary_entity = spawner
+        let primary_entity = action_spawner
             .spawn((
                 Action::<PrimaryShortcutsModifier>::new(),
                 non_consuming_modifier_settings,
                 primary_modifier_bindings,
             ))
             .id();
-        let alt_entity = spawner
+        let alt_entity = action_spawner
             .spawn((
                 Action::<AltModifier>::new(),
                 non_consuming_modifier_settings,
@@ -146,7 +146,7 @@ impl<C: Component> Keybindings<C> {
         match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => {
                 // On macOS, `Ctrl` is a separate physical key from `Cmd`, so block it too.
-                let control_entity = spawner
+                let control_entity = action_spawner
                     .spawn((
                         Action::<ControlModifier>::new(),
                         non_consuming_modifier_settings,
@@ -166,21 +166,25 @@ impl<C: Component> Keybindings<C> {
     }
 
     /// Spawns an action bound to a single key, blocked by all modifiers.
-    pub fn spawn_key<A: InputAction>(&self, spawner: &mut ActionSpawner<C>, key: KeyCode) {
-        spawner.spawn((
+    pub fn spawn_key<A: InputAction>(&self, action_spawner: &mut ActionSpawner<C>, key: KeyCode) {
+        action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.all_modifiers()),
+            BlockBy::new(self.modifier_blockers.all()),
             bindings![key],
         ));
     }
 
     /// Spawns an action bound to `Shift + key`, blocked by non-shift modifiers only.
-    pub fn spawn_shift_key<A: InputAction>(&self, spawner: &mut ActionSpawner<C>, key: KeyCode) {
-        spawner.spawn((
+    pub fn spawn_shift_key<A: InputAction>(
+        &self,
+        action_spawner: &mut ActionSpawner<C>,
+        key: KeyCode,
+    ) {
+        action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.non_shift_modifiers()),
+            BlockBy::new(self.modifier_blockers.non_shift()),
             bindings![key.with_mod_keys(ModKeys::SHIFT)],
         ));
     }
@@ -188,24 +192,28 @@ impl<C: Component> Keybindings<C> {
     /// Spawns an action with arbitrary bindings, blocked by all modifiers.
     pub fn spawn_binding<A: InputAction, B: Bundle>(
         &self,
-        spawner: &mut ActionSpawner<C>,
+        action_spawner: &mut ActionSpawner<C>,
         bindings: B,
     ) {
-        spawner.spawn((
+        action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.all_modifiers()),
+            BlockBy::new(self.modifier_blockers.all()),
             bindings,
         ));
     }
 
     /// Spawns an action with the platform `Cmd`/`Ctrl` modifier. No `BlockBy`
     /// is needed because the modifier key itself is the disambiguator.
-    pub fn spawn_platform_key<A: InputAction>(&self, spawner: &mut ActionSpawner<C>, key: KeyCode) {
+    pub fn spawn_platform_key<A: InputAction>(
+        &self,
+        action_spawner: &mut ActionSpawner<C>,
+        key: KeyCode,
+    ) {
         let platform_bindings = match PlatformShortcutMode::current() {
             PlatformShortcutMode::Command => bindings![key.with_mod_keys(ModKeys::SUPER)],
             PlatformShortcutMode::Control => bindings![key.with_mod_keys(ModKeys::CONTROL)],
         };
-        spawner.spawn((Action::<A>::new(), self.action_settings, platform_bindings));
+        action_spawner.spawn((Action::<A>::new(), self.action_settings, platform_bindings));
     }
 }
