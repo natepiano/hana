@@ -1,5 +1,9 @@
 use bevy::prelude::*;
 
+use super::constants::MERGED_OVERLAP_SHADER_FACTOR;
+use super::constants::NON_SCREEN_HULL_SHELL_MODE_SHADER_FACTOR;
+use super::constants::SCREEN_HULL_SHELL_MODE_SHADER_FACTOR;
+use super::constants::SEPARATED_OVERLAP_SHADER_FACTOR;
 use super::outline_builder::JumpFloodState;
 use super::outline_builder::OutlineBuilder;
 use super::outline_builder::ScreenHullState;
@@ -171,8 +175,8 @@ impl OverlapMode {
     #[must_use]
     pub const fn as_shader_factor(self) -> f32 {
         match self {
-            Self::Merged => 0.0,
-            Self::Grouped | Self::PerMesh => 1.0,
+            Self::Merged => MERGED_OVERLAP_SHADER_FACTOR,
+            Self::Grouped | Self::PerMesh => SEPARATED_OVERLAP_SHADER_FACTOR,
         }
     }
 }
@@ -183,8 +187,8 @@ impl OutlineMethod {
     #[must_use]
     pub(crate) const fn as_shell_mode_factor(self) -> f32 {
         match self {
-            Self::ScreenHull => 1.0,
-            Self::JumpFlood | Self::WorldHull => 0.0,
+            Self::ScreenHull => SCREEN_HULL_SHELL_MODE_SHADER_FACTOR,
+            Self::JumpFlood | Self::WorldHull => NON_SCREEN_HULL_SHELL_MODE_SHADER_FACTOR,
         }
     }
 }

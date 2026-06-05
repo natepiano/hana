@@ -51,6 +51,9 @@ use super::constants::GET_BINNED_BATCH_DATA_GPU_MODE_ERROR;
 use super::constants::GET_BINNED_INDEX_CPU_MODE_ERROR;
 use super::constants::GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR;
 use super::constants::HAS_OUTLINE_NORMALS_SHADER_DEF;
+use super::constants::HULL_DEPTH_BIAS_CLAMP;
+use super::constants::HULL_DEPTH_BIAS_CONSTANT;
+use super::constants::HULL_DEPTH_BIAS_SLOPE_SCALE;
 use super::constants::HULL_DEPTH_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::HULL_OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::HULL_OUTLINE_PIPELINE_LABEL;
@@ -83,14 +86,14 @@ pub(crate) enum OutlineNormalPresence {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) struct HullPipelineKey {
-    pub(crate) mesh:                    MeshPipelineKey,
+    pub(crate) mesh_pipeline_key:       MeshPipelineKey,
     pub(crate) dynamic_range:           DynamicRange,
     pub(crate) outline_normal_presence: OutlineNormalPresence,
 }
 
 #[derive(Resource)]
 pub(crate) struct HullPipeline {
-    pub(crate) mesh:                         MeshPipeline,
+    pub(crate) mesh_pipeline:                MeshPipeline,
     pub(crate) outline_layout:               BindGroupLayoutDescriptor,
     pub(crate) depth_layout:                 BindGroupLayoutDescriptor,
     pub(crate) per_object_buffer_batch_size: Option<u32>,
@@ -125,7 +128,7 @@ impl FromWorld for HullPipeline {
             GpuArrayBuffer::<OutlineUniform>::batch_size(&render_device.limits());
 
         Self {
-            mesh: MeshPipeline::from_world(world),
+            mesh_pipeline: MeshPipeline::from_world(world),
             outline_layout,
             depth_layout,
             per_object_buffer_batch_size,
@@ -142,7 +145,9 @@ impl SpecializedMeshPipeline for HullPipeline {
         key: Self::Key,
         layout: &MeshVertexBufferLayoutRef,
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
-        let mut descriptor = self.mesh.specialize(key.mesh, layout)?;
+        let mut descriptor = self
+            .mesh_pipeline
+            .specialize(key.mesh_pipeline_key, layout)?;
 
         descriptor.vertex.shader = HULL_SHADER_HANDLE;
 
@@ -201,9 +206,9 @@ impl SpecializedMeshPipeline for HullPipeline {
             depth_stencil.depth_write_enabled = true;
             depth_stencil.depth_compare = CompareFunction::GreaterEqual;
             depth_stencil.bias = DepthBiasState {
-                constant:    0,
-                slope_scale: 0.0,
-                clamp:       0.0,
+                constant:    HULL_DEPTH_BIAS_CONSTANT,
+                slope_scale: HULL_DEPTH_BIAS_SLOPE_SCALE,
+                clamp:       HULL_DEPTH_BIAS_CLAMP,
             };
         }
         descriptor.label = Some(HULL_OUTLINE_PIPELINE_LABEL.into());

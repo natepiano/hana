@@ -35,6 +35,7 @@ use super::constants::MESH_VIEW_BIND_GROUP_SLOT;
 use super::constants::MESH_VIEW_BINDING_ARRAY_BIND_GROUP_SLOT;
 use super::constants::OUTLINE_BIND_GROUP_LABEL;
 use super::constants::OUTLINE_BIND_GROUP_SLOT;
+use super::constants::OUTLINE_UNIFORM_BIND_GROUP_ENTRY_BINDING;
 use super::extract::ActiveOutlineModes;
 use super::extract::ExtractedOutlineUniforms;
 use super::hull_pipeline::HullPipeline;
@@ -181,7 +182,7 @@ pub(crate) fn prepare_outline_bind_group(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
-    outline_pipeline: Res<MeshMaskPipeline>,
+    mesh_mask_pipeline: Res<MeshMaskPipeline>,
     mut outline_buffer: ResMut<OutlineUniformBuffer>,
     mut outline_bind_group: ResMut<OutlineBindGroup>,
 ) {
@@ -190,9 +191,9 @@ pub(crate) fn prepare_outline_bind_group(
     if let Some(binding) = outline_buffer.0.binding() {
         let bind_group = render_device.create_bind_group(
             Some(OUTLINE_BIND_GROUP_LABEL),
-            &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_bind_group_layout),
+            &pipeline_cache.get_bind_group_layout(&mesh_mask_pipeline.outline_bind_group_layout),
             &[BindGroupEntry {
-                binding:  0,
+                binding:  OUTLINE_UNIFORM_BIND_GROUP_ENTRY_BINDING,
                 resource: binding,
             }],
         );
@@ -255,7 +256,7 @@ pub(crate) fn prepare_hull_depth_view_bind_groups(
     mut commands: Commands,
     render_device: Res<RenderDevice>,
     pipeline_cache: Res<PipelineCache>,
-    pipeline: Res<HullPipeline>,
+    hull_pipeline: Res<HullPipeline>,
     views: Query<(Entity, &FloodTextures)>,
 ) {
     if !active.methods.has_hull() {
@@ -274,9 +275,9 @@ pub(crate) fn prepare_hull_depth_view_bind_groups(
 
         let bind_group = render_device.create_bind_group(
             Some(HULL_DEPTH_BIND_GROUP_LABEL),
-            &pipeline_cache.get_bind_group_layout(&pipeline.depth_layout),
+            &pipeline_cache.get_bind_group_layout(&hull_pipeline.depth_layout),
             &BindGroupEntries::sequential((
-                &pipeline.occlusion_sampler,
+                &hull_pipeline.occlusion_sampler,
                 &outline_depth_view,
                 owner_view,
             )),
@@ -358,7 +359,7 @@ pub(crate) fn prepare_hull_outline_bind_group(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     pipeline_cache: Res<PipelineCache>,
-    outline_pipeline: Res<HullPipeline>,
+    hull_pipeline: Res<HullPipeline>,
     mut outline_buffer: ResMut<HullOutlineUniformBuffer>,
     mut outline_bind_group: ResMut<HullOutlineBindGroup>,
 ) {
@@ -372,9 +373,9 @@ pub(crate) fn prepare_hull_outline_bind_group(
     if let Some(binding) = outline_buffer.0.binding() {
         let bind_group = render_device.create_bind_group(
             Some(HULL_OUTLINE_BIND_GROUP_LABEL),
-            &pipeline_cache.get_bind_group_layout(&outline_pipeline.outline_layout),
+            &pipeline_cache.get_bind_group_layout(&hull_pipeline.outline_layout),
             &[BindGroupEntry {
-                binding:  0,
+                binding:  OUTLINE_UNIFORM_BIND_GROUP_ENTRY_BINDING,
                 resource: binding,
             }],
         );

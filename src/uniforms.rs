@@ -3,6 +3,7 @@ use bevy::render::render_resource::ShaderType;
 use bytemuck::Pod;
 use bytemuck::Zeroable;
 
+use super::constants::OWNER_DATA_RESERVED_CHANNEL;
 use super::extract::ExtractedOutline;
 
 #[derive(Debug, Clone, ShaderType, Pod, Zeroable, Copy)]
@@ -20,7 +21,12 @@ impl OutlineUniform {
     /// Builds the `owner_data` channel layout: x = owner ID, y = shell-mode
     /// shader factor, z/w = reserved padding.
     const fn owner_data_for(owner_id: f32, shell_mode: f32) -> Vec4 {
-        Vec4::new(owner_id, shell_mode, 0.0, 0.0)
+        Vec4::new(
+            owner_id,
+            shell_mode,
+            OWNER_DATA_RESERVED_CHANNEL,
+            OWNER_DATA_RESERVED_CHANNEL,
+        )
     }
 }
 

@@ -4,6 +4,7 @@ use bevy_render::Extract;
 use bevy_render::sync_world::MainEntity;
 use bevy_render::sync_world::MainEntityHashMap;
 
+use super::constants::DEFAULT_OUTLINE_DRAW_PRIORITY;
 use super::constants::OWNER_ID_OFFSET;
 use super::outline::Outline;
 use super::outline::OutlineMethod;
@@ -142,7 +143,7 @@ impl ExtractedOutline {
         Self {
             intensity: outline.intensity,
             width:     outline.width,
-            priority:  0.0,
+            priority:  DEFAULT_OUTLINE_DRAW_PRIORITY,
             overlap:   outline.overlap_mode.as_shader_factor(),
             owner_id:  owner_entity.index().index().to_f32() + OWNER_ID_OFFSET,
             color:     linear_color.to_vec4(),

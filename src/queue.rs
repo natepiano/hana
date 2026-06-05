@@ -43,8 +43,8 @@ pub(crate) fn queue_outline(
     extracted_outlines: Res<ExtractedOutlineUniforms>,
     draw_functions: Res<DrawFunctions<JumpFloodOutlinePhase>>,
     mut outline_phases: ResMut<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>,
-    mesh_outline_pipeline: Res<MeshMaskPipeline>,
-    mut mesh_outline_pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
+    mesh_mask_pipeline: Res<MeshMaskPipeline>,
+    mut mesh_mask_pipelines: ResMut<SpecializedMeshPipelines<MeshMaskPipeline>>,
     pipeline_cache: Res<PipelineCache>,
     mesh_allocator: Res<MeshAllocator>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
@@ -107,15 +107,16 @@ pub(crate) fn queue_outline(
                 continue;
             };
 
-            let mut mesh_key = view_key;
-            mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
-                | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
+            let mut mesh_pipeline_key = view_key;
+            mesh_pipeline_key |=
+                MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
+                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
 
-            let Ok(pipeline_id) = mesh_outline_pipelines.specialize(
+            let Ok(pipeline_id) = mesh_mask_pipelines.specialize(
                 &pipeline_cache,
-                &mesh_outline_pipeline,
+                &mesh_mask_pipeline,
                 MaskPipelineKey {
-                    mesh:          mesh_key,
+                    mesh_pipeline_key,
                     hull_presence: if active.methods.has_hull() {
                         HullPresence::Present
                     } else {
@@ -230,16 +231,17 @@ pub(crate) fn queue_hull_outline(
                 continue;
             };
 
-            let mut mesh_key = view_key;
-            mesh_key |= MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
-                | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
+            let mut mesh_pipeline_key = view_key;
+            mesh_pipeline_key |=
+                MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
+                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
 
             let Ok(pipeline_id) = hull_pipelines.specialize(
                 &pipeline_cache,
                 &hull_pipeline,
                 HullPipelineKey {
-                    mesh:                    mesh_key,
-                    dynamic_range:           view.hdr.into(),
+                    mesh_pipeline_key,
+                    dynamic_range: view.hdr.into(),
                     outline_normal_presence: if mesh.layout.0.contains(ATTRIBUTE_OUTLINE_NORMAL) {
                         OutlineNormalPresence::Present
                     } else {

@@ -62,7 +62,7 @@ impl HullPresence {
 
 #[derive(Resource)]
 pub(crate) struct MeshMaskPipeline {
-    pub(crate) mesh:                         MeshPipeline,
+    pub(crate) mesh_pipeline:                MeshPipeline,
     pub(crate) outline_bind_group_layout:    BindGroupLayoutDescriptor,
     /// `Some(N)` on WebGL2 where only fixed-size uniform arrays are available,
     /// `None` on native GPU where unbounded storage buffer arrays are supported.
@@ -88,10 +88,10 @@ impl FromWorld for MeshMaskPipeline {
         let per_object_buffer_batch_size =
             GpuArrayBuffer::<OutlineUniform>::batch_size(&render_device.limits());
 
-        let mesh = MeshPipeline::from_world(world);
+        let mesh_pipeline = MeshPipeline::from_world(world);
 
         Self {
-            mesh,
+            mesh_pipeline,
             outline_bind_group_layout: outline_instance_bind_group_layout,
             per_object_buffer_batch_size,
         }
@@ -100,8 +100,8 @@ impl FromWorld for MeshMaskPipeline {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct MaskPipelineKey {
-    pub(crate) mesh:          MeshPipelineKey,
-    pub(crate) hull_presence: HullPresence,
+    pub(crate) mesh_pipeline_key: MeshPipelineKey,
+    pub(crate) hull_presence:     HullPresence,
 }
 
 impl SpecializedMeshPipeline for MeshMaskPipeline {
@@ -112,7 +112,9 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
         key: Self::Key,
         layout: &MeshVertexBufferLayoutRef,
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
-        let mut descriptor = self.mesh.specialize(key.mesh, layout)?;
+        let mut descriptor = self
+            .mesh_pipeline
+            .specialize(key.mesh_pipeline_key, layout)?;
 
         // Force single-sample rendering. The mask pass renders data (UV coords, depth,
         // width, color) into `Rgba32Float` textures, not visual output. Multisampling

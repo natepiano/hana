@@ -36,9 +36,15 @@ use bevy_render::render_resource::TextureView;
 use super::camera::OutlineCamera;
 use super::constants::FLOOD_SHADER_HANDLE;
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
+use super::constants::FULL_SCREEN_DRAW_INSTANCE_COUNT;
 use super::constants::JUMP_FLOOD_BIND_GROUP_LABEL;
 use super::constants::JUMP_FLOOD_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::JUMP_FLOOD_BIND_GROUP_SLOT;
+use super::constants::JUMP_FLOOD_DIAMETER_SCALE;
+use super::constants::JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT;
+use super::constants::JUMP_FLOOD_RADIUS_DIVISOR;
+use super::constants::NO_FLOOD_PASS_COUNT;
+use super::constants::NO_FLOOD_WIDTH_THRESHOLD;
 use super::constants::OUTLINE_JUMP_FLOOD_PASS_LABEL;
 use super::constants::OUTLINE_JUMP_FLOOD_PIPELINE_LABEL;
 use super::constants::TRIANGLE_VERTEX_COUNT;
@@ -74,13 +80,15 @@ pub(crate) fn prepare_flood_settings(
 /// diameter → next-power-of-two radius, plus one final compose pass.
 /// Returns 0 when no flood is needed.
 pub(super) fn jump_flood_pass_count(width: f32) -> u32 {
-    if width <= 0.0 {
-        return 0;
+    if width <= NO_FLOOD_WIDTH_THRESHOLD {
+        return NO_FLOOD_PASS_COUNT;
     }
-    ((width * 2.0).ceil().to_u32() / 2 + 1)
+
+    ((width * JUMP_FLOOD_DIAMETER_SCALE).ceil().to_u32() / JUMP_FLOOD_RADIUS_DIVISOR
+        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT)
         .next_power_of_two()
         .trailing_zeros()
-        + 1
+        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT
 }
 
 #[derive(Resource)]
@@ -236,6 +244,6 @@ impl<'w> JumpFloodPass<'w> {
             &bind_group,
             &[self.pipeline.lookup_offsets[size.to_usize()]],
         );
-        render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..1);
+        render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..FULL_SCREEN_DRAW_INSTANCE_COUNT);
     }
 }

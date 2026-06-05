@@ -9,6 +9,8 @@ use bevy_kana::ToUsize;
 use super::Outline;
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
 use super::constants::DEGENERATE_EDGE_THRESHOLD;
+use super::constants::OUTLINE_NORMAL_COSINE_CLAMP_MAX;
+use super::constants::OUTLINE_NORMAL_COSINE_CLAMP_MIN;
 use super::constants::TRIANGLE_VERTEX_COUNT;
 
 /// Computes angle-weighted smoothed outline normals and stores them as
@@ -159,7 +161,10 @@ fn accumulate_weighted_normal(
     if len_a < DEGENERATE_EDGE_THRESHOLD || len_b < DEGENERATE_EDGE_THRESHOLD {
         return;
     }
-    let cos_angle = (edge_a / len_a).dot(edge_b / len_b).clamp(-1.0, 1.0);
+    let cos_angle = (edge_a / len_a).dot(edge_b / len_b).clamp(
+        OUTLINE_NORMAL_COSINE_CLAMP_MIN,
+        OUTLINE_NORMAL_COSINE_CLAMP_MAX,
+    );
     let angle = cos_angle.acos();
 
     let entry = accumulated_normals

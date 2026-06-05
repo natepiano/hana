@@ -29,12 +29,14 @@ const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
 // Scene
+const GLOW_SINE_REMAP_OFFSET: f32 = 0.5;
+const GLOW_SINE_REMAP_SCALE: f32 = 0.5;
 const GROUND_SIZE: f32 = 50.0;
 const GROUND_SUBDIVISIONS: u32 = 10;
 const INITIAL_OUTLINE_WIDTH: f32 = 10.0;
-const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const OUTLINE_GLOW_INTENSITY: f32 = 20.0;
 const OUTLINE_GLOW_PERIOD: f32 = 0.2;
+const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
 fn main() {
     App::new()
@@ -131,7 +133,9 @@ fn oscillate_intensity(
     time: Res<Time>,
 ) {
     for (mut outline, glow) in &mut outline_glow_query {
-        let t = (time.elapsed_secs() / glow.period).sin().mul_add(0.5, 0.5); // Normalize to [0, 1]
+        let t = (time.elapsed_secs() / glow.period)
+            .sin()
+            .mul_add(GLOW_SINE_REMAP_SCALE, GLOW_SINE_REMAP_OFFSET);
 
         outline.intensity = glow.intensity * t;
     }

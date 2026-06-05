@@ -30,6 +30,7 @@ use super::compose::SampleMode;
 use super::constants::COMPOSE_BIND_GROUP_SLOT;
 use super::constants::COMPOSE_OUTPUT_BIND_GROUP_LABEL;
 use super::constants::FLOOD_INIT_RENDER_ERROR;
+use super::constants::FULL_SCREEN_DRAW_INSTANCE_COUNT;
 use super::constants::HULL_OUTLINE_PASS_LABEL;
 use super::constants::HULL_OUTLINE_RENDER_ERROR;
 use super::constants::JUMP_FLOOD_NO_SEED_CLEAR_COLOR;
@@ -392,5 +393,5 @@ fn run_jump_flood_composite(
 
     render_pass.set_render_pipeline(pipeline);
     render_pass.set_bind_group(COMPOSE_BIND_GROUP_SLOT, &bind_group, &[]);
-    render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..1);
+    render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..FULL_SCREEN_DRAW_INSTANCE_COUNT);
 }

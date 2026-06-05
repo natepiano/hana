@@ -8,6 +8,9 @@ use bevy::render::render_resource::VertexFormat;
 // batching
 pub(super) const MISSING_BATCH_SET_INDEX: u32 = !0;
 
+// bind group entries
+pub(super) const OUTLINE_UNIFORM_BIND_GROUP_ENTRY_BINDING: u32 = 0;
+
 // bind group labels
 pub(super) const COMPOSE_OUTPUT_BIND_GROUP_LABEL: &str = "compose_output_bind_group";
 pub(super) const HULL_DEPTH_BIND_GROUP_LABEL: &str = "hull_depth_bind_group";
@@ -69,6 +72,8 @@ pub(super) const NO_MESH_INSTANCE_FOUND_WARNING: &str = "No mesh instance found 
 pub const ATTRIBUTE_OUTLINE_NORMAL: MeshVertexAttribute =
     MeshVertexAttribute::new("Outline_Normal", 988_540_917, VertexFormat::Float32x3);
 
+pub(super) const DEFAULT_OUTLINE_DRAW_PRIORITY: f32 = 0.0;
+
 /// Multiplicative identity — no scaling applied to the outline color.
 pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;
 
@@ -76,30 +81,50 @@ pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;
 /// and its angle-weighted normal contribution is skipped.
 pub(super) const DEGENERATE_EDGE_THRESHOLD: f32 = 1e-10;
 
+pub(super) const FULL_SCREEN_DRAW_INSTANCE_COUNT: u32 = 1;
+pub(super) const HULL_DEPTH_BIAS_CLAMP: f32 = 0.0;
+pub(super) const HULL_DEPTH_BIAS_CONSTANT: i32 = 0;
+pub(super) const HULL_DEPTH_BIAS_SLOPE_SCALE: f32 = 0.0;
+pub(super) const JUMP_FLOOD_DIAMETER_SCALE: f32 = 2.0;
+pub(super) const JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT: u32 = 1;
+
 /// Clear color for the `JumpFlood` seed texture. Negative coordinates signal
 /// "no seed" to the flood-fill shader.
 pub(super) const JUMP_FLOOD_NO_SEED_CLEAR_COLOR: LinearRgba =
     LinearRgba::new(-1.0, -1.0, -1.0, 0.0);
 
+pub(super) const JUMP_FLOOD_RADIUS_DIVISOR: u32 = 2;
+pub(super) const MERGED_OVERLAP_SHADER_FACTOR: f32 = 0.0;
 pub(super) const MSAA_DISABLED_SAMPLE_COUNT: u32 = 1;
+pub(super) const NO_FLOOD_PASS_COUNT: u32 = 0;
+pub(super) const NO_FLOOD_WIDTH_THRESHOLD: f32 = 0.0;
+pub(super) const NON_SCREEN_HULL_SHELL_MODE_SHADER_FACTOR: f32 = 0.0;
 
 /// Reverse-Z far-plane sentinel used when clearing the outline depth texture.
 /// Cleared to 0.0 so that any rendered outline fragment (closer than the far
 /// plane) will pass the depth comparison.
 pub(super) const OUTLINE_DEPTH_FAR_PLANE_CLEAR: f32 = 0.0;
 
+pub(super) const OUTLINE_NORMAL_COSINE_CLAMP_MAX: f32 = 1.0;
+pub(super) const OUTLINE_NORMAL_COSINE_CLAMP_MIN: f32 = -1.0;
+
 /// Shader binding location for the outline normal vertex attribute.
 pub(super) const OUTLINE_NORMAL_SHADER_LOCATION: u32 = 8;
+
+/// Outline render targets use only the base mip level — no mipmap chain.
+pub(super) const OUTLINE_TEXTURE_BASE_MIP_ONLY: u32 = 1;
+
+/// Outline render targets are 2D textures with a single (non-array) layer.
+pub(super) const OUTLINE_TEXTURE_SINGLE_LAYER: u32 = 1;
+
+pub(super) const OWNER_DATA_RESERVED_CHANNEL: f32 = 0.0;
 
 /// Offset added to entity indices when computing owner IDs. Zero is reserved as
 /// "no owner" in the shader, so all valid owner IDs start at 1.0.
 pub(super) const OWNER_ID_OFFSET: f32 = 1.0;
 
-/// Outline render targets are 2D textures with a single (non-array) layer.
-pub(super) const OUTLINE_TEXTURE_SINGLE_LAYER: u32 = 1;
-
-/// Outline render targets use only the base mip level — no mipmap chain.
-pub(super) const OUTLINE_TEXTURE_BASE_MIP_ONLY: u32 = 1;
+pub(super) const SCREEN_HULL_SHELL_MODE_SHADER_FACTOR: f32 = 1.0;
+pub(super) const SEPARATED_OVERLAP_SHADER_FACTOR: f32 = 1.0;
 
 /// Number of vertices in each triangle primitive (mesh indices, draw counts).
 pub(super) const TRIANGLE_VERTEX_COUNT: u32 = 3;
