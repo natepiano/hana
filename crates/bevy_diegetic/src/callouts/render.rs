@@ -42,8 +42,8 @@ use crate::render::SdfPrimitiveMaterialInput;
 
 /// Shared rendering parameters that every callout spawn helper threads through.
 /// Exists to keep helper argument lists under the "context struct when > 7
-/// parameters" style threshold. Depth ordering lives on `order`, which each
-/// leaf spawn advances so callers do not thread it by hand.
+/// parameters" style threshold. Depth ordering is tracked by `order`, which
+/// each leaf spawn advances so callers do not thread it by hand.
 struct CalloutRender<'w, 's, 'a> {
     commands:       &'a mut Commands<'w, 's>,
     parent:         Entity,

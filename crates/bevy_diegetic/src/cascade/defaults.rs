@@ -18,7 +18,7 @@ pub struct CascadeDefault<A: CascadeProperty>(pub A);
 
 /// Non-cascade construction defaults.
 ///
-/// Runtime-propagated cascade defaults live in [`CascadeDefault<A>`] resources.
+/// Runtime-propagated cascade defaults are stored in [`CascadeDefault<A>`] resources.
 /// The fields here are read when panels are built or seeded and are not
 /// propagated by the cascade plugin.
 #[derive(Resource, Clone, Copy, Debug, Reflect)]

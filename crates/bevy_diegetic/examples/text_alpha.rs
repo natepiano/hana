@@ -4,10 +4,10 @@
 //! Slug renders glyph coverage as per-pixel alpha; this example shows how each
 //! `AlphaMode` composites that coverage. The scene launches in the library
 //! default (`AlphaMode::Blend` with MSAA on). Coplanar text such as the
-//! floating "GROUND" label stays stable as the camera moves because slug emits
-//! one mesh per run and orders it with `depth_bias`. To see the view-angle
-//! color shift that order-independent transparency fixes, and the MSAA trade
-//! it makes, run the `oit_msaa` example.
+//! floating "GROUND" label stays stable as the camera moves because coplanar
+//! runs are ordered by a per-record depth nudge inside the text batch. To see
+//! the view-angle color shift that order-independent transparency fixes, and
+//! the MSAA trade it makes, run the `oit_msaa` example.
 //!
 //! Hotkeys:
 //! - `H` — home the camera.
@@ -102,8 +102,8 @@ const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
              alpha, and Blend composites each fragment with the background: \
              interiors render fully opaque when the color's alpha is 1.0, \
              edges blend smoothly.\n\n\
-             Routes through the transparent queue. Slug emits one mesh per \
-             text run and orders coplanar text with depth_bias, so it stays \
+             Routes through the transparent queue. Batched text orders \
+             coplanar runs with a per-record depth nudge, so it stays \
              stable as the camera angle changes."
         },
         AlphaMode::Premultiplied => {
@@ -129,7 +129,10 @@ const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
         AlphaMode::Multiply => {
             "Multiplicative blending — glyph color multiplies into the \
              background. Good for ink or tint effects over light \
-             backgrounds; disappears on dark ones."
+             backgrounds; disappears on dark ones.\n\n\
+             The world text and the camera panel follow this global default \
+             and go dark over the dark scene — expected, not a bug. The mode \
+             bar and this info panel pin Blend to stay readable."
         },
         AlphaMode::Mask(_) => {
             "Hard alpha test at the configured threshold (0.5 here). \
@@ -140,10 +143,11 @@ const fn alpha_mode_description(mode: AlphaMode) -> &'static str {
              look jagged. Use only for retro / pixel-art looks."
         },
         AlphaMode::Opaque => {
-            "Disables alpha handling entirely. Each glyph renders as a \
-             colored rectangle with no glyph silhouette.\n\n\
-             Not useful for text. Included here only for completeness \
-             — try it and you'll see colored squares instead of letters."
+            "Disables alpha blending. Batched text routes Opaque through \
+             Mask(0.0) on the GPU material, so coverage discards still cut \
+             the glyph outline: glyphs render as hard-edged, depth-writing \
+             silhouettes.\n\n\
+             Edges are aliased — prefer Blend or Coverage for readable text."
         },
     }
 }

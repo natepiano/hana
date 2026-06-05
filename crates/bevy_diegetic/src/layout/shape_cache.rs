@@ -3,14 +3,14 @@
 //! Stores two parallel maps:
 //! - **measurements** — `TextDimensions` used by the layout engine's `MeasureTextFn`. This is the
 //!   only half the headless layout path needs.
-//! - **entries** — shaped glyph runs used by the renderer to avoid repeating parley shaping after
-//!   measurement has already happened.
+//! - **entries** — glyph runs from text shaping, reused by the renderer so parley shaping is not
+//!   repeated after measurement has already happened.
 //!
-//! The cache lives in `layout/` because its key and value types (`TextMeasure`,
-//! `TextDimensions`) are layout-domain types and the measurement half is
-//! load-bearing for headless panel layout. The renderer populates both halves
-//! whenever it shapes text, so measurement lookups hit when shaping has
-//! already run.
+//! The cache is defined in `layout/` because its key and value types
+//! (`TextMeasure`, `TextDimensions`) are layout-domain types and headless
+//! panel layout depends on the measurement half. The renderer populates both
+//! halves whenever it runs text shaping, so measurement lookups hit when
+//! shaping has already run.
 
 use std::collections::HashMap;
 use std::hash::DefaultHasher;
@@ -125,7 +125,7 @@ impl ShapedCacheKey {
 /// Caches text-shaping output — glyph runs and measurements — to avoid
 /// redundant parley shaping.
 ///
-/// The two maps live behind a shared `Arc<Mutex<…>>`, so the cache is a cheap
+/// The two maps are stored behind a shared `Arc<Mutex<…>>`, so the cache is a cheap
 /// refcount bump to clone and every clone reads and writes the same maps. The
 /// layout engine's `MeasureTextFn` (measurement half) clones the handle into its
 /// `'static` measure closure; the renderer's text shaper (run + measurement
@@ -156,8 +156,8 @@ impl ShapedTextCache {
     }
 
     /// Returns a clone of the cached glyph run for the given text + config, or
-    /// `None` if not yet cached. Returns an owned value because the run lives
-    /// behind the cache's mutex and cannot be borrowed past the lock.
+    /// `None` if not yet cached. Returns an owned value because the run is
+    /// stored behind the cache's mutex and cannot be borrowed past the lock.
     #[must_use]
     pub fn get_shaped(&self, text: &str, measure: &TextMeasure) -> Option<ShapedTextRun> {
         let key = ShapedCacheKey::new(text, measure);

@@ -40,13 +40,14 @@ pub enum SurfaceShadow {
     On,
 }
 
-/// Whether the panel lives in 3D world space or as a 2D screen overlay.
+/// Whether the panel is placed in 3D world space or rendered as a 2D screen
+/// overlay.
 ///
 /// `World` panels are positioned and scaled in 3D space.
 /// `Screen` panels render via an orthographic overlay camera.
 #[derive(Clone, Debug, Reflect)]
 pub enum CoordinateSpace {
-    /// Panel lives in 3D world space.
+    /// Panel is placed in 3D world space.
     World {
         /// Panel width, expressed with the layout engine's [`Sizing`] enum.
         /// `Fixed` is a physical value in the panel's layout unit;

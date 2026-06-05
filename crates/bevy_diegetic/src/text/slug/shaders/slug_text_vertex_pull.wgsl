@@ -80,6 +80,14 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     }
 
     let record = instances[glyph];
+
+    // Bevy compiles shaders without bounds checks, so a run_index outside the
+    // run table would read arbitrary memory and emit a quad anywhere on
+    // screen. Collapse such a record to a degenerate quad.
+    if record.run_index >= arrayLength(&run_records) {
+        out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+        return out;
+    }
     let run = run_records[record.run_index];
 
     // Corner order matches RunMeshBuilder::push_glyph:

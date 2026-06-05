@@ -318,6 +318,27 @@ pub(crate) fn set_batch_text_material_buffers(
     material.extension.run_records = run_records;
 }
 
+/// Repoints a text material at replacement shared-atlas buffers after the
+/// atlas grows. Per-run materials bind the atlas `glyphs` buffer as the
+/// placeholder for the vertex-pull bindings (104/105); the placeholder
+/// follows the swap so the old buffer asset can drop without leaving the
+/// material unpreparable.
+pub(super) fn set_text_material_atlas(
+    material: &mut TextMaterial,
+    curves: Handle<ShaderBuffer>,
+    bands: Handle<ShaderBuffer>,
+    glyphs: Handle<ShaderBuffer>,
+) {
+    let placeholder = material.extension.instances == material.extension.glyphs;
+    material.extension.curves = curves;
+    material.extension.bands = bands;
+    if placeholder {
+        material.extension.instances = glyphs.clone();
+        material.extension.run_records = glyphs.clone();
+    }
+    material.extension.glyphs = glyphs;
+}
+
 /// Updates the shader anti-aliasing switches on a text material.
 pub(crate) fn set_text_material_anti_alias(
     material: &mut TextMaterial,

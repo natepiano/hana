@@ -3,7 +3,7 @@
 //! Two ways to address a run divide the public surface:
 //! - **By user marker** — [`DiegeticTextMut`] retexts standalone
 //!   [`DiegeticText`](crate::DiegeticText) labels: name a marker `M`, call `set`/`for_each_mut`. It
-//!   hops the panel→run relationship internally, the ergonomic path for "retext my labels".
+//!   traverses the panel→run relationship internally, the ergonomic path for "retext my labels".
 //! - **By [`PanelFieldId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
 //!   multi-run panel; [`PanelTextReader`] is the read-only variant a reader system uses so it does
 //!   not serialize on the `&mut DiegeticPanel` write claim.
@@ -326,9 +326,10 @@ impl TextEdit<'_> {
 /// addressed by a user marker `M` — the public path for "retext my labels".
 ///
 /// A standalone label is a one-element panel: the marker `M` sits on the panel
-/// entity, while the run text lives in the panel's authoritative `El.text` tree
-/// cache (the run child's `TextContent` is derived output reconcile rewrites).
-/// This `SystemParam` hops the panel→run relationship internally, so a caller
+/// entity, while the run text is stored in the panel's authoritative `El.text`
+/// tree cache (the run child's `TextContent` is derived output reconcile
+/// rewrites). This `SystemParam` traverses the panel→run relationship
+/// internally, so a caller
 /// names only its own marker and never touches [`PanelTextRuns`] / the tree /
 /// `sole()`:
 ///

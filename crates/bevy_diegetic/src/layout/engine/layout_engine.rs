@@ -243,8 +243,8 @@ impl LayoutResult {
     /// text edit, the caller re-measures the changed leaves: if their box did
     /// not move, only the glyphs changed, so the engine solve can be skipped and
     /// the render commands regenerated from the unchanged geometry. The command
-    /// stream re-reads text and visual-only config (color, alignment) live from
-    /// `tree`, so those flow through without a solve.
+    /// stream re-reads text and visual-only config (color, alignment) directly
+    /// from `tree`, so those flow through without a solve.
     ///
     /// Conservative — any of these returns `false`, so the caller runs a full
     /// solve: a structural change (element count / kinds / nesting), a viewport

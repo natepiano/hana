@@ -37,8 +37,8 @@ use crate::layout::Unit;
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
 /// Either a sizing error or a duplicate author-assigned [`PanelFieldId`]: a
-/// build-time `Result` so a repeated id is rejected up front instead of
-/// silently shadowing one run with another at runtime.
+/// build-time `Result` so a repeated id is rejected up front instead of one
+/// run silently replacing another at runtime.
 #[derive(Debug)]
 pub enum PanelBuildError {
     /// A fixed-size axis was zero or negative.
@@ -68,7 +68,7 @@ impl From<InvalidSize> for PanelBuildError {
 
 // ── Typestate marker types ──────────────────────────────────────────────────
 
-/// Marker: panel lives in 3D world space.
+/// Marker: panel is placed in 3D world space.
 pub struct World;
 
 /// Marker: panel renders as a screen overlay.

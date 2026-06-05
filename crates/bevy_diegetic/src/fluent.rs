@@ -11,7 +11,7 @@
 //! The chain ends in [`DiegeticTextBuilder::spawn`], which builds the panel plus
 //! its text child and returns the **panel** entity. That entity carries the
 //! [`DiegeticText`] marker, so a single label is addressable via
-//! `With<DiegeticText>`; the string itself lives once on the spawned run's
+//! `With<DiegeticText>`; the string itself is stored once, on the spawned run's
 //! [`TextContent`](crate::TextContent).
 //!
 //! ```ignore
@@ -59,9 +59,9 @@ use crate::panel::Fit;
 ///
 /// A one-element text panel — the runtime form of [`DiegeticText::world`] /
 /// [`DiegeticText::screen`] — carries this so a single label is queryable via
-/// `With<DiegeticText>`. The string lives on the spawned run's
-/// [`TextContent`](crate::TextContent), not here, and the coordinate space lives
-/// on the panel's `CoordinateSpace`; the marker holds no state of its own, so
+/// `With<DiegeticText>`. The string is stored on the spawned run's
+/// [`TextContent`](crate::TextContent), not here, and the coordinate space on
+/// the panel's `CoordinateSpace`; the marker holds no state of its own, so
 /// there is nothing on it to drift from the panel.
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
 pub struct DiegeticText;
@@ -372,9 +372,10 @@ impl DiegeticTextBuilder {
             TextSpace::World => self.transform,
             TextSpace::Screen => Transform::IDENTITY,
         };
-        // The authoritative style lives in the tree's `El.config` (built above)
-        // and reconcile derives the run from it; the root carries no `TextStyle`,
-        // so there is no stale copy a query could mutate to no effect.
+        // The authoritative style is stored in the tree's `El.config` (built
+        // above) and reconcile derives the run from it; the root carries no
+        // `TextStyle`, so there is no stale copy a query could mutate to no
+        // effect.
         (panel, DiegeticText, transform)
     }
 

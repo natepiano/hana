@@ -68,10 +68,10 @@ use crate::text::TextMaterial;
 #[reflect(Resource)]
 pub enum TextGeometryPath {
     /// One mesh child + one material per text run (the original path).
-    #[default]
     PerRunMeshes,
-    /// One vertex-pulling batch entity per batch key; runs ride in GPU record
-    /// tables.
+    /// One vertex-pulling batch entity per batch key; per-run data is stored
+    /// in GPU record tables indexed by the vertex shader.
+    #[default]
     BatchedRecords,
 }
 
@@ -226,7 +226,7 @@ pub(super) fn update_panel_text_batches(
                     .is_routed(RunStorageKey::from(label_entity))
         });
     let atlas = if any_work {
-        backend.commit_glyph_atlas(&mut storage_buffers)
+        backend.commit_glyph_atlas(&mut storage_buffers, &mut materials)
     } else {
         None
     };
@@ -1039,6 +1039,7 @@ mod tests {
     #[test]
     fn toggle_flips_both_directions_without_leaks() {
         let mut app = pipeline_app();
+        set_path(&mut app, TextGeometryPath::PerRunMeshes);
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
@@ -1144,7 +1145,7 @@ mod tests {
             .sum();
         assert_eq!(
             opaque_runs, 1,
-            "exactly the overridden run lives under the new key"
+            "exactly the overridden run is keyed under the new key"
         );
     }
 

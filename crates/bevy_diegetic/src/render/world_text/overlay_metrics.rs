@@ -4,7 +4,7 @@
 //! data, leaving the overlay dark (see `docs/bevy_diegetic/unify_text.md`, R8).
 //! [`DiegeticText`](crate::DiegeticText) labels are now one-element panels: the
 //! root carries the [`DiegeticText`](crate::DiegeticText) marker and the user's
-//! [`TypographyOverlay`], while the actual run lives on a
+//! [`TypographyOverlay`], while the actual run is stored on a
 //! [`TextContent`](super::TextContent) child with a
 //! [`PanelTextLayout`](crate::render::PanelTextLayout).
 //!

@@ -30,6 +30,7 @@ use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::glyph::RunRecord;
 use crate::text::slug::render;
 use crate::text::slug::render::RunRenderData;
+use crate::text::slug::render::TextMaterial;
 
 /// One production glyph positioned for run preparation: a `ShapedGlyph` plus
 /// the `Font` and collection index needed to extract its outline.
@@ -67,8 +68,8 @@ impl From<Entity> for RunStorageKey {
 }
 
 /// GPU storage handle for one prepared run. Only the run's glyph-quad mesh is
-/// per-run; the curve/band/glyph records it indexes live in the shared atlas
-/// ([`GlyphAtlasHandles`]).
+/// per-run; the curve/band/glyph records it indexes are stored in the shared
+/// atlas ([`GlyphAtlasHandles`]).
 #[derive(Clone, Debug)]
 pub struct RunStorage {
     /// One quad per glyph instance; each quad indexes the shared glyph atlas.
@@ -203,7 +204,7 @@ impl GlyphCache {
     /// The in-place write keeps the same `Handle<Mesh>`, so the render world
     /// re-uploads only the changed vertices without a handle swap and the run's
     /// mesh entity is never respawned. The curve/band/glyph records are not
-    /// per-run — they live in the shared atlas committed by
+    /// per-run — they are stored in the shared atlas committed by
     /// [`Self::commit_glyph_atlas`].
     pub fn commit_run_storage(
         &mut self,
@@ -232,36 +233,29 @@ impl GlyphCache {
     }
 
     /// Uploads the shared glyph atlas to its GPU buffers when new glyphs have
-    /// been packed since the last upload, returning the stable handles every
-    /// run's material binds. The three buffers are created the first time this
-    /// runs and then overwritten in place behind their handles, so a frame that
-    /// packs no new glyph re-uploads nothing. Returns `None` before any glyph is
-    /// packed, so no zero-length buffer is ever created.
+    /// been packed since the last upload, returning the handles every run's
+    /// material binds. A grown atlas gets three NEW buffer assets and every
+    /// live text material is repointed at them — `set_data` with a longer
+    /// payload would re-create the wgpu buffer behind existing material bind
+    /// groups, which keep reading the dead buffer (glyphs packed after a
+    /// material's creation render invisible). A frame that packs no new glyph
+    /// re-uploads nothing. Returns `None` before any glyph is packed, so no
+    /// zero-length buffer is ever created.
     pub fn commit_glyph_atlas(
         &mut self,
         storage_buffers: &mut Assets<ShaderBuffer>,
+        materials: &mut Assets<TextMaterial>,
     ) -> Option<GlyphAtlasHandles> {
         if self.outline_cache.atlas_glyph_records().is_empty() {
             return None;
         }
         let revision = self.outline_cache.atlas_revision();
-        if let Some(handles) = self.atlas.clone() {
-            // The atlas only grows; re-serialize the three buffers in place when
-            // a new glyph bumped the revision, otherwise reuse them untouched.
-            if self.uploaded_revision != revision {
-                if let Some(mut curves) = storage_buffers.get_mut(&handles.curves) {
-                    curves.set_data(self.outline_cache.atlas_curves().to_vec());
-                }
-                if let Some(mut bands) = storage_buffers.get_mut(&handles.bands) {
-                    bands.set_data(self.outline_cache.atlas_bands().to_vec());
-                }
-                if let Some(mut glyphs) = storage_buffers.get_mut(&handles.glyphs) {
-                    glyphs.set_data(self.outline_cache.atlas_glyph_records().to_vec());
-                }
-                self.uploaded_revision = revision;
-            }
+        if let Some(handles) = self.atlas.clone()
+            && self.uploaded_revision == revision
+        {
             return Some(handles);
         }
+        let had_atlas = self.atlas.is_some();
         let handles = GlyphAtlasHandles {
             curves: storage_buffers.add(ShaderBuffer::from(
                 self.outline_cache.atlas_curves().to_vec(),
@@ -273,6 +267,16 @@ impl GlyphCache {
                 self.outline_cache.atlas_glyph_records().to_vec(),
             )),
         };
+        if had_atlas {
+            for (_, material) in materials.iter_mut() {
+                render::set_text_material_atlas(
+                    material,
+                    handles.curves.clone(),
+                    handles.bands.clone(),
+                    handles.glyphs.clone(),
+                );
+            }
+        }
         self.uploaded_revision = revision;
         self.atlas = Some(handles.clone());
         Some(handles)
@@ -406,9 +410,10 @@ mod tests {
         let mut backend = GlyphCache::default();
         prepare(&mut backend, "Typography");
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let mut materials = Assets::<TextMaterial>::default();
 
         let first = backend
-            .commit_glyph_atlas(&mut storage_buffers)
+            .commit_glyph_atlas(&mut storage_buffers, &mut materials)
             .expect("packed glyphs should produce atlas handles");
         assert_eq!(
             storage_buffers.len(),
@@ -417,7 +422,7 @@ mod tests {
         );
 
         let second = backend
-            .commit_glyph_atlas(&mut storage_buffers)
+            .commit_glyph_atlas(&mut storage_buffers, &mut materials)
             .expect("atlas handles persist across commits");
         assert_eq!(first.curves, second.curves);
         assert_eq!(first.bands, second.bands);
@@ -430,11 +435,39 @@ mod tests {
     }
 
     #[test]
+    fn commit_glyph_atlas_growth_swaps_buffers_and_keeps_handles_fresh() {
+        let mut backend = GlyphCache::default();
+        prepare(&mut backend, "Typo");
+        let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let mut materials = Assets::<TextMaterial>::default();
+
+        let first = backend
+            .commit_glyph_atlas(&mut storage_buffers, &mut materials)
+            .expect("packed glyphs should produce atlas handles");
+
+        // New glyphs bump the atlas revision: the commit must produce NEW
+        // buffer assets (set_data on the old ones would re-create the wgpu
+        // buffer behind existing material bind groups).
+        prepare(&mut backend, "graphy!");
+        let second = backend
+            .commit_glyph_atlas(&mut storage_buffers, &mut materials)
+            .expect("grown atlas should produce handles");
+        assert_ne!(first.curves, second.curves);
+        assert_ne!(first.bands, second.bands);
+        assert_ne!(first.glyphs, second.glyphs);
+    }
+
+    #[test]
     fn commit_glyph_atlas_with_no_packed_glyphs_creates_no_buffer() {
         let mut backend = GlyphCache::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
+        let mut materials = Assets::<TextMaterial>::default();
 
-        assert!(backend.commit_glyph_atlas(&mut storage_buffers).is_none());
+        assert!(
+            backend
+                .commit_glyph_atlas(&mut storage_buffers, &mut materials)
+                .is_none()
+        );
         assert_eq!(storage_buffers.len(), 0);
     }
 

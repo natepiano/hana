@@ -40,8 +40,8 @@ use crate::text::RenderMode;
 use crate::text::RunRecord;
 use crate::text::TextMaterial;
 
-/// Where the growth-frame screenshots land (`target/` is wiped by
-/// `cargo clean`, so they live under `/private/tmp`).
+/// Directory the growth-frame screenshots are written to (`target/` is wiped
+/// by `cargo clean`, so they are stored under `/private/tmp`).
 const SCREENSHOT_DIR: &str = "/private/tmp/glyph_batch_proof";
 /// Vertical drop from the source label to the first batch-run copy.
 const RUN_VERTICAL_STEP: f32 = 0.55;
@@ -152,7 +152,7 @@ fn spawn_proof_batch(
     if template.is_empty() {
         return;
     }
-    let Some(atlas) = cache.commit_glyph_atlas(&mut buffers) else {
+    let Some(atlas) = cache.commit_glyph_atlas(&mut buffers, &mut materials) else {
         return;
     };
 

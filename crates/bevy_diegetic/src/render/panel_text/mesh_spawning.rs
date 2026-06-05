@@ -91,7 +91,7 @@ pub(super) fn update_panel_text_geometry(
     let atlas = if changed_runs.is_empty() {
         None
     } else {
-        backend.commit_glyph_atlas(&mut storage_buffers)
+        backend.commit_glyph_atlas(&mut storage_buffers, &mut materials)
     };
 
     for (label_entity, panel_run, panel_text_child, child_of) in &changed_runs {
@@ -186,9 +186,9 @@ pub(super) fn update_panel_text_geometry(
 /// handle the geometry system may have just despawned. The write is
 /// value-guarded (R5) so a no-op resolution does not trip `Changed<TextMaterial>`.
 ///
-/// After Phase 4's reparent the material lives two hops down — on the
-/// `DiegeticTextMesh` child of the `TextContent` run — so the run's mesh is reached
-/// through `ChildOf`, not on the label itself.
+/// After Phase 4's reparent the material is stored two `ChildOf` levels down —
+/// on the `DiegeticTextMesh` child of the `TextContent` run — so the run's mesh
+/// is reached through `ChildOf`, not on the label itself.
 pub(super) fn update_panel_text_alpha(
     changed_alphas: Query<
         (Entity, Ref<PreparedPanelText>, &Resolved<TextAlpha>),
@@ -426,6 +426,10 @@ mod tests {
     /// App with the full panel-text render pipeline — layout, reconcile, text
     /// shaping, the geometry/alpha split, and the storage-cleanup observer —
     /// over real fonts and asset storage, so a spawned run produces a mesh.
+    ///
+    /// Path: this module tests `TextGeometryPath::PerRunMeshes`. The per-run
+    /// systems are wired directly, without the production `run_if` gate, so
+    /// the resource default does not change what these tests exercise.
     fn pipeline_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -588,8 +592,8 @@ mod tests {
         let untouched_mesh_before =
             mesh_of_label(&mut app, untouched).expect("Beta mesh should exist");
 
-        // Recolor only "Alpha". Color rides in PreparedPanelText.fill_color, so its run
-        // is a geometry update; "Beta" is byte-identical and must be left alone.
+        // Recolor only "Alpha". Color is stored in PreparedPanelText.fill_color, so its
+        // run is a geometry update; "Beta" is byte-identical and must be left alone.
         app.world_mut()
             .commands()
             .set_tree(panel, two_text_tree(Color::BLACK, Color::WHITE));

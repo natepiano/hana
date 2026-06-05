@@ -32,8 +32,11 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 /// every backing layer (backing biases are `command_index ×
 /// LAYER_DEPTH_BIAS`, far below this constant). Without it, a sorted
 /// (non-OIT) view can composite a panel's translucent backing over the
-/// whole batch — text dimmed behind smoked glass. Within the batch,
-/// coplanar glyph order comes from the per-record depth nudge instead.
+/// whole batch, dimming the text behind it. Within the batch, coplanar
+/// glyph order comes from the per-record depth nudge instead.
+///
+/// Assumes a panel's backing layers stay below 64 commands deep; a panel
+/// exceeding that would out-bias its own text on sorted views.
 pub(crate) const BATCH_TEXT_DEPTH_BIAS: f32 = 64.0 * LAYER_DEPTH_BIAS;
 
 /// OIT depth offset for non-text panel layers.

@@ -2,6 +2,8 @@ mod constants;
 mod material;
 mod run_data;
 
+use bevy::prelude::Handle;
+use bevy::render::storage::ShaderBuffer;
 pub(super) use constants::SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
 pub(crate) use material::BatchTextMaterialInput;
 pub(crate) use material::RenderMode;
@@ -21,3 +23,12 @@ pub(super) use run_data::RunRenderData;
 pub(crate) use run_data::RunRenderError;
 pub(super) use run_data::build_run_render_data_with_clip;
 pub(crate) use run_data::glyph_quad_extents;
+
+pub(super) fn set_text_material_atlas(
+    material: &mut TextMaterial,
+    curves: Handle<ShaderBuffer>,
+    bands: Handle<ShaderBuffer>,
+    glyphs: Handle<ShaderBuffer>,
+) {
+    material::set_text_material_atlas(material, curves, bands, glyphs);
+}

@@ -313,7 +313,7 @@ pub struct FairyDustCube;
 /// Marker inserted on the per-face [`DiegeticText`] labels of a cube.
 ///
 /// Lets a caller retarget only the cube's face labels without also matching
-/// panel-child or other text. The label's editable string lives in a
+/// panel-child or other text. The label's editable string is stored in a
 /// `TextContent` run child, so address it through `DiegeticTextMut<M>` keyed on
 /// this marker rather than a direct `TextContent` query:
 ///

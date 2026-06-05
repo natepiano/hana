@@ -77,9 +77,9 @@ pub struct BatchPerfStats {
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
 /// 3. `update_panel_text_geometry` → [`Self::mesh_build_ms`] (glyphs → meshes)
 ///
-/// Render-pass time is not measured here — it lives in Bevy's own diagnostics
-/// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and is outside this
-/// crate's control.
+/// Render-pass time is not measured here — Bevy's own diagnostics report it
+/// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and it is outside
+/// this crate's control.
 ///
 /// All text is covered: standalone `DiegeticText` labels are one-element
 /// panels, so every `TextContent` run flows through this pipeline.

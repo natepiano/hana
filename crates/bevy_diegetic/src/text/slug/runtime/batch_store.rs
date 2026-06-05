@@ -112,9 +112,9 @@ impl Debug for BatchRenderLayers {
 }
 
 /// What splits text draws: every pipeline/material/entity-level property. A
-/// run differing on several fields at once still lands in exactly one batch.
-/// `fill_color`, `render_mode`, and the depth nudge ride in [`RunRecord`]s,
-/// so they do not split.
+/// run differing on several fields at once still maps to exactly one batch.
+/// `fill_color`, `render_mode`, and the depth nudge are stored per run in
+/// [`RunRecord`]s, so they do not split.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct BatchKey {
     /// Interned authored base material (`DiegeticPanel::text_material` or the

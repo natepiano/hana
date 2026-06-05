@@ -462,7 +462,7 @@ impl DiegeticPanel {
 /// [`Commands::run_system_cached_with`]. Replacing a tree has two effects:
 /// it stores the new tree on [`DiegeticPanel`], and it records a pending
 /// `Identical` / `VisualOnly` / `LayoutAffecting` decision for the later layout
-/// system to consume. That pending decision lives on an internal sibling
+/// system to consume. That pending decision is stored on an internal sibling
 /// component, not on [`DiegeticPanel`] itself, so a plain `&mut DiegeticPanel`
 /// method would update the tree but lose the information needed to skip layout.
 /// Keeping the wrapper here lets callers use a focused panel API instead of

@@ -1,4 +1,4 @@
-//! Public [`CascadeSet`] — the system set every propagation system lives in.
+//! Public [`CascadeSet`] — the system set every propagation system belongs to.
 
 use bevy::prelude::*;
 

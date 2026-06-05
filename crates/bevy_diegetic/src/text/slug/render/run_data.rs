@@ -54,8 +54,8 @@ impl Error for RunRenderError {}
 
 /// Builds one run-level glyph-quad mesh clipped to a local rect. Each quad's
 /// `UV_1.x` carries the glyph's shared-atlas index, looked up from
-/// `glyph_outline_cache`; the curve/band/glyph records themselves live in the
-/// atlas and are not rebuilt per run.
+/// `glyph_outline_cache`; the curve/band/glyph records themselves are stored
+/// in the atlas and are not rebuilt per run.
 pub fn build_run_render_data_with_clip(
     preview: &BuiltTextRun,
     glyph_outline_cache: &GlyphOutlineCache,
