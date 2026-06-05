@@ -12,10 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Update to Bevy 0.19 (`0.19.0-rc.2`) (breaking).
 - `OrbitCamInteractionState::speed(kind)` now returns `Option<ControlSpeed>` — `None` until a gamepad's speed settles (breaking).
 - Add `target: Option<Entity>` to the `AnimationBegin`, `AnimationEnd`, and `AnimationRejected` events (breaking).
 - Collapse `AnimationCancelled` into `AnimationEnd` and `ZoomCancelled` into `ZoomEnd`, each with a `reason` field (breaking).
-- Replace owned `bool` input fields with enums (`PinchGestureZoom`, `CameraMotion`, `FocusFrame`); rename `EguiWantsFocus.prev`/`curr` to `previous`/`current` (breaking).
+- Replace owned `bool` input fields with enums (`PinchGestureZoom`, `CameraMotion`, `FocusFrame`) (breaking).
+- Rename `ZoomDirection` to `ZoomInversion` (`Reversed` → `Inverted`) and `zoom_direction` builder method/field to `zoom_inversion`; the name `ZoomDirection` now refers to an unrelated new reporting enum (breaking).
+- Rebuild input handling on `bevy_enhanced_input` (new dependency).
+- Scroll zoom now uses an exponential curve so zoom in and out are symmetric.
+- Move the crate into the [hana](https://github.com/natepiano/hana) monorepo; `repository`/`homepage` metadata updated.
 - Replace raw `OrbitCam` input fields with input-mode components (`OrbitCamPreset`, `OrbitCamBindings`, `OrbitCamManual`).
 - Replace manual render-to-texture camera setup with `CameraInputRoutingConfig::explicit(...)` and `CameraInputSurfaceMetrics`.
 - Replace keyboard target-mutation examples with `OrbitCamBindings`/`OrbitCamManualInputWriter` examples.
@@ -26,6 +31,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Teaching examples for SimpleMouse, BlenderLike, keyboard, gamepad, manual, and custom bindings.
 - `ZoomDirection { In, Out }` and a `zoom_direction` tag on `OrbitCamControlRow`; built-in presets emit one zoom row per direction. `OrbitCamMouseWheelZoom` is now a marker struct.
 - `OrbitCamInteractionState::zoom_direction()` reports the active zoom's direction, held through the debounce window and flipped at once on a reversal.
+- Gamepad input preset.
+- `reflect-input-modes` cargo feature (enabled by default) — reflection support for the input-mode components.
+- `swapped_axis` example — multi-engine coordinate-convention showcase.
+
+### Removed
+- Remove the `bevy_egui` feature, `EguiWantsFocus`, and the egui example (breaking).
+
+### Fixed
+- Route camera input by focused window so overlapping windows with stale cursor positions no longer capture input.
+- Suppress pinch zoom while BlenderLike modifier keys are held.
+- Split `LookAtAndZoomToFit` into look and fit phases; internal fit work no longer emits `ZoomBegin`/`ZoomEnd`.
+- Input teardown no longer double-despawns binding entities (logged "Could not despawn entity" on every preset switch).
 
 ## [0.0.3] - 2026-04-15
 

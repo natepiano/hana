@@ -5,9 +5,11 @@ mod description;
 mod help_overlay;
 mod title_bar;
 
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
+use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
@@ -36,6 +38,9 @@ use crate::constants::INNER_RADIUS;
 use crate::constants::RADIUS;
 use crate::ensure_plugin;
 
+#[derive(Component)]
+pub(crate) struct FairyDustOverlayPanel;
+
 pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);
     app.add_systems(Startup, move |mut commands: Commands| {
@@ -60,6 +65,12 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
             );
         },
     );
+}
+
+pub(crate) fn install_overlay_picking(app: &mut App) {
+    app.add_observer(ignore_screen_panel_picking)
+        .add_observer(ignore_overlay_mesh_picking_on_mesh_added)
+        .add_observer(ignore_overlay_mesh_picking_on_parent_added);
 }
 
 pub(crate) fn register_title_control(app: &mut App, control: impl Into<TitleBarControl>) {
@@ -112,3 +123,143 @@ pub fn screen_panel_frame(
 /// Default background color for screen panels — exposed so per-panel
 /// builders can substitute it when no override is provided.
 pub(super) const fn default_inner_background() -> Color { INNER_BACKGROUND }
+
+fn ignore_screen_panel_picking(
+    trigger: On<Add, DiegeticPanel>,
+    panels: Query<&DiegeticPanel>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    let Ok(panel) = panels.get(entity) else {
+        return;
+    };
+    if panel.coordinate_space().is_screen() {
+        commands
+            .entity(entity)
+            .insert((FairyDustOverlayPanel, Pickable::IGNORE));
+    }
+}
+
+fn ignore_overlay_mesh_picking_on_mesh_added(
+    trigger: On<Add, Mesh3d>,
+    parents: Query<&ChildOf>,
+    panels: Query<(), With<FairyDustOverlayPanel>>,
+    mut commands: Commands,
+) {
+    ignore_overlay_mesh_picking(trigger.event_target(), &parents, &panels, &mut commands);
+}
+
+fn ignore_overlay_mesh_picking_on_parent_added(
+    trigger: On<Add, ChildOf>,
+    meshes: Query<(), With<Mesh3d>>,
+    parents: Query<&ChildOf>,
+    panels: Query<(), With<FairyDustOverlayPanel>>,
+    mut commands: Commands,
+) {
+    let entity = trigger.event_target();
+    if meshes.get(entity).is_ok() {
+        ignore_overlay_mesh_picking(entity, &parents, &panels, &mut commands);
+    }
+}
+
+fn ignore_overlay_mesh_picking(
+    entity: Entity,
+    parents: &Query<&ChildOf>,
+    panels: &Query<(), With<FairyDustOverlayPanel>>,
+    commands: &mut Commands,
+) {
+    if has_overlay_panel_ancestor(entity, parents, panels) {
+        commands.entity(entity).insert(Pickable::IGNORE);
+    }
+}
+
+fn has_overlay_panel_ancestor(
+    entity: Entity,
+    parents: &Query<&ChildOf>,
+    panels: &Query<(), With<FairyDustOverlayPanel>>,
+) -> bool {
+    let mut current = entity;
+    while let Ok(parent) = parents.get(current) {
+        let parent_entity = parent.parent();
+        if panels.get(parent_entity).is_ok() {
+            return true;
+        }
+        current = parent_entity;
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::picking::Pickable;
+    use bevy::prelude::*;
+    use bevy_diegetic::DiegeticPanel;
+    use bevy_diegetic::Sizing;
+
+    use super::FairyDustOverlayPanel;
+    use super::install_overlay_picking;
+
+    #[test]
+    fn screen_panel_root_ignores_picking() -> Result<(), String> {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let panel = spawn_screen_panel(&mut app)?;
+
+        assert_eq!(app.world().get::<Pickable>(panel), Some(&Pickable::IGNORE));
+        assert!(app.world().get::<FairyDustOverlayPanel>(panel).is_some());
+        Ok(())
+    }
+
+    #[test]
+    fn mesh_child_under_screen_panel_ignores_picking() -> Result<(), String> {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let panel = spawn_screen_panel(&mut app)?;
+        let child = app
+            .world_mut()
+            .spawn((Mesh3d::default(), ChildOf(panel)))
+            .id();
+
+        assert_eq!(app.world().get::<Pickable>(child), Some(&Pickable::IGNORE));
+        Ok(())
+    }
+
+    #[test]
+    fn mesh_grandchild_under_screen_panel_ignores_picking() -> Result<(), String> {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let panel = spawn_screen_panel(&mut app)?;
+        let child = app.world_mut().spawn(ChildOf(panel)).id();
+        let grandchild = app
+            .world_mut()
+            .spawn((Mesh3d::default(), ChildOf(child)))
+            .id();
+
+        assert_eq!(
+            app.world().get::<Pickable>(grandchild),
+            Some(&Pickable::IGNORE)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn unrelated_mesh_keeps_default_pickability() {
+        let mut app = App::new();
+        install_overlay_picking(&mut app);
+
+        let entity = app.world_mut().spawn(Mesh3d::default()).id();
+
+        assert!(app.world().get::<Pickable>(entity).is_none());
+    }
+
+    fn spawn_screen_panel(app: &mut App) -> Result<Entity, String> {
+        let panel = DiegeticPanel::screen()
+            .size(Sizing::FIT, Sizing::FIT)
+            .build()
+            .map_err(|error| format!("{error}"))?;
+        Ok(app.world_mut().spawn(panel).id())
+    }
+}

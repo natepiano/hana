@@ -1,5 +1,8 @@
+use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::ui::UiTargetCamera;
+use bevy::window::PrimaryWindow;
 use bevy_kana::ToF32;
 
 use super::constants::DEFAULT_OVERLAY_LINE_WIDTH;
@@ -194,6 +197,7 @@ fn draw_silhouette(
 /// Camera-derived drawing parameters shared across margin/bounds rendering.
 struct DrawContext<'a> {
     camera:          Entity,
+    ui_camera:       Entity,
     bounds:          &'a ScreenSpaceBounds,
     camera_basis:    &'a CameraBasis,
     average_depth:   f32,
@@ -206,7 +210,14 @@ struct DrawContext<'a> {
 fn draw_margin_lines_and_labels(
     commands: &mut Commands,
     gizmos: &mut Gizmos<FitTargetGizmo>,
-    label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
+    label_query: &mut Query<(
+        Entity,
+        &MarginLabel,
+        &mut Text,
+        &mut Node,
+        &mut TextColor,
+        &mut UiTargetCamera,
+    )>,
     draw_context: &DrawContext,
     config: &FitTargetOverlayConfig,
 ) -> Vec<Edge> {
@@ -260,6 +271,7 @@ fn draw_margin_lines_and_labels(
             label_query,
             MarginLabelParameters {
                 camera,
+                ui_camera: draw_context.ui_camera,
                 edge,
                 text,
                 color,
@@ -275,11 +287,18 @@ fn draw_margin_lines_and_labels(
 /// Removes margin labels for edges no longer visible, scoped to a specific camera.
 fn cleanup_stale_margin_labels(
     commands: &mut Commands,
-    label_query: &Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
+    label_query: &Query<(
+        Entity,
+        &MarginLabel,
+        &mut Text,
+        &mut Node,
+        &mut TextColor,
+        &mut UiTargetCamera,
+    )>,
     camera: Entity,
     visible_edges: &[Edge],
 ) {
-    for (entity, label, _, _, _) in label_query {
+    for (entity, label, _, _, _, _) in label_query {
         if label.camera == camera && !visible_edges.contains(&label.edge) {
             commands.entity(entity).despawn();
         }
@@ -338,20 +357,36 @@ pub(super) fn draw_fit_target_bounds(
         (
             Entity,
             &Camera,
+            &RenderTarget,
             &GlobalTransform,
             &Projection,
             &CurrentFitTarget,
         ),
         With<FitOverlay>,
     >,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
+    all_cameras: Query<(Entity, &Camera, &RenderTarget)>,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,
     global_transform_query: Query<&GlobalTransform>,
     meshes: Res<Assets<Mesh>>,
-    mut label_query: Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
-    mut bounds_label_query: Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
+    mut label_query: Query<(
+        Entity,
+        &MarginLabel,
+        &mut Text,
+        &mut Node,
+        &mut TextColor,
+        &mut UiTargetCamera,
+    )>,
+    mut bounds_label_query: Query<
+        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        Without<MarginLabel>,
+    >,
 ) {
-    for (camera, camera_component, camera_global, projection, current_target) in &camera_query {
+    let primary_window = primary_window.single().ok();
+    for (camera, camera_component, render_target, camera_global, projection, current_target) in
+        &camera_query
+    {
         let Some((vertices, _)) = projection::extract_mesh_vertices(
             current_target.0,
             &children_query,
@@ -369,6 +404,12 @@ pub(super) fn draw_fit_target_bounds(
             &BoundsCamera {
                 entity: camera,
                 camera_component,
+                ui_camera: label_ui_camera(
+                    camera,
+                    render_target,
+                    primary_window,
+                    all_cameras.iter(),
+                ),
                 camera_global,
                 projection,
             },
@@ -382,6 +423,7 @@ pub(super) fn draw_fit_target_bounds(
 /// Camera data for bounds visualization.
 struct BoundsCamera<'a> {
     entity:           Entity,
+    ui_camera:        Entity,
     camera_component: &'a Camera,
     camera_global:    &'a GlobalTransform,
     projection:       &'a Projection,
@@ -394,10 +436,21 @@ fn draw_bounds_for_camera(
     config: &FitTargetOverlayConfig,
     camera_data: &BoundsCamera,
     vertices: &[Vec3],
-    label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
-    bounds_label_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
+    label_query: &mut Query<(
+        Entity,
+        &MarginLabel,
+        &mut Text,
+        &mut Node,
+        &mut TextColor,
+        &mut UiTargetCamera,
+    )>,
+    bounds_label_query: &mut Query<
+        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        Without<MarginLabel>,
+    >,
 ) {
     let camera = camera_data.entity;
+    let ui_camera = camera_data.ui_camera;
     let camera_component = camera_data.camera_component;
     let camera_global = camera_data.camera_global;
     let projection = camera_data.projection;
@@ -461,6 +514,7 @@ fn draw_bounds_for_camera(
             commands,
             bounds_label_query,
             camera,
+            ui_camera,
             labels::bounds_label_position(upper_left),
         );
     }
@@ -468,6 +522,7 @@ fn draw_bounds_for_camera(
     // Margin lines + labels
     let draw_context = DrawContext {
         camera,
+        ui_camera,
         bounds: &bounds,
         camera_basis: &camera_basis,
         average_depth,
@@ -479,4 +534,68 @@ fn draw_bounds_for_camera(
 
     // Remove stale margin labels for this camera
     cleanup_stale_margin_labels(commands, label_query, camera, &visible_edges);
+}
+
+fn label_ui_camera<'a>(
+    source_camera: Entity,
+    source_target: &RenderTarget,
+    primary_window: Option<Entity>,
+    cameras: impl IntoIterator<Item = (Entity, &'a Camera, &'a RenderTarget)>,
+) -> Entity {
+    let Some(source_target) = source_target.normalize(primary_window) else {
+        return source_camera;
+    };
+    cameras
+        .into_iter()
+        .filter(|(_, camera, target)| {
+            camera.is_active && target.normalize(primary_window).as_ref() == Some(&source_target)
+        })
+        .max_by_key(|(entity, camera, _)| (camera.order, *entity))
+        .map_or(source_camera, |(entity, _, _)| entity)
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::window::WindowRef;
+
+    use super::*;
+
+    #[test]
+    fn label_ui_camera_uses_top_camera_on_same_primary_window() {
+        let mut world = World::new();
+        let primary_window = world.spawn_empty().id();
+        let other_window_entity = world.spawn_empty().id();
+        let source_camera = world.spawn_empty().id();
+        let overlay_camera = world.spawn_empty().id();
+        let inactive_camera = world.spawn_empty().id();
+        let other_window_camera = world.spawn_empty().id();
+
+        let source = camera(0, true);
+        let overlay = camera(100, true);
+        let inactive = camera(200, false);
+        let other_window = camera(300, true);
+
+        let source_target = RenderTarget::Window(WindowRef::Primary);
+        let overlay_target = RenderTarget::Window(WindowRef::Entity(primary_window));
+        let other_target = RenderTarget::Window(WindowRef::Entity(other_window_entity));
+        let cameras = [
+            (source_camera, &source, &source_target),
+            (overlay_camera, &overlay, &overlay_target),
+            (inactive_camera, &inactive, &overlay_target),
+            (other_window_camera, &other_window, &other_target),
+        ];
+
+        assert_eq!(
+            label_ui_camera(source_camera, &source_target, Some(primary_window), cameras),
+            overlay_camera
+        );
+    }
+
+    fn camera(order: isize, is_active: bool) -> Camera {
+        Camera {
+            order,
+            is_active,
+            ..default()
+        }
+    }
 }

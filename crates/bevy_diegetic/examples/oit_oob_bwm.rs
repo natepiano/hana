@@ -18,10 +18,10 @@
 //!
 //! This matches `typography`'s render configuration as closely as a standalone
 //! example can without the panel system:
-//!   - `WinitSettings::continuous()` + `PresentMode::AutoNoVsync`, so the app
-//!     actively draws through bwm's hidden -> resize -> visible restore instead
-//!     of throttling a hidden window (bevy's default `game()` settings would).
-//!     The crash needs a transparent draw to execute on the mismatched frame.
+//!   - `WinitSettings::continuous()` + `PresentMode::AutoNoVsync`, so the app actively draws
+//!     through bwm's hidden -> resize -> visible restore instead of throttling a hidden window
+//!     (bevy's default `game()` settings would). The crash needs a transparent draw to execute on
+//!     the mismatched frame.
 //!   - `fragments_per_pixel_average: 8.0`, the same OIT pool size `StableTransparency` uses.
 //!
 //! It also logs the OIT heads buffer capacity vs the view size every time they
@@ -30,12 +30,12 @@
 //! condition) or not.
 //!
 //! Reproduce:
-//!   1. cargo run --example oit_oob_bwm
+//!   1. cargo run --example `oit_oob_bwm`
 //!   2. Drag the window onto the monitor where `typography` crashed.
 //!   3. Quit. `bevy_window_manager` saves the window's monitor, size, and scale.
-//!   4. cargo run --example oit_oob_bwm again. It restores across the DPI
-//!      boundary on launch — that is when the panic hits. Watch the terminal:
-//!      the `oit_heads cap=... view=...` lines show the buffer oscillating.
+//!   4. cargo run --example `oit_oob_bwm` again. It restores across the DPI boundary on launch —
+//!      that is when the panic hits. Watch the terminal: the `oit_heads cap=... view=...` lines
+//!      show the buffer oscillating.
 //!
 //! State file: `~/Library/Application Support/oit_oob_bwm/windows.ron`
 //! (isolated from `typography`'s state; delete it to reset to a fresh window.)

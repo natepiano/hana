@@ -188,11 +188,12 @@ pub(super) fn update_panel_text_batches(
             &PanelTextLayout,
             &ChildOf,
             &GlobalTransform,
+            Option<&Visibility>,
         ),
         With<TextContent>,
     >,
     mut emptied_runs: RemovedComponents<PreparedPanelText>,
-    panels: Query<(&DiegeticPanel, Option<&RenderLayers>)>,
+    panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
     cascades: BatchKeyCascades,
     anti_alias: Res<TextAntiAlias>,
     mut backend: ResMut<GlyphCache>,
@@ -231,17 +232,24 @@ pub(super) fn update_panel_text_batches(
         None
     };
 
-    for (label_entity, prepared, panel_text_child, child_of, label_transform) in &runs {
+    for (label_entity, prepared, panel_text_child, child_of, label_transform, label_visibility) in
+        &runs
+    {
         let storage_key = RunStorageKey::from(label_entity);
+        let Ok((panel, panel_layers, panel_visibility)) = panels.get(child_of.parent()) else {
+            backend.batch_store_mut().remove_run(storage_key);
+            continue;
+        };
+        if is_hidden(label_visibility) || is_hidden(panel_visibility) {
+            backend.batch_store_mut().remove_run(storage_key);
+            continue;
+        }
         if !prepared.is_changed()
             && !cascade_changed.contains(&label_entity)
             && backend.batch_store().is_routed(storage_key)
         {
             continue;
         }
-        let Ok((panel, panel_layers)) = panels.get(child_of.parent()) else {
-            continue;
-        };
 
         // A glyph missing from the atlas means shaping hasn't packed it yet;
         // the run stays unrouted and self-heals next frame.
@@ -300,6 +308,10 @@ pub(super) fn update_panel_text_batches(
     perf.panel_text.mesh_build_ms =
         mesh_build_start.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
+}
+
+const fn is_hidden(visibility: Option<&Visibility>) -> bool {
+    matches!(visibility, Some(Visibility::Hidden))
 }
 
 /// Inputs for [`reconcile_batch_entities`].
@@ -1086,6 +1098,42 @@ mod tests {
             0,
             "the last run leaving despawns the batch entity"
         );
+    }
+
+    #[test]
+    fn hidden_panel_routes_no_batched_runs_until_visible() {
+        let mut app = pipeline_app();
+        set_path(&mut app, TextGeometryPath::BatchedRecords);
+        let panel = spawn_panel(&mut app, two_text_tree());
+        app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
+        settle(&mut app);
+
+        assert_eq!(
+            store_stats(&app),
+            (0, 0, 0),
+            "a hidden panel's text should not enter the batch store"
+        );
+        assert!(batch_entities(&mut app).is_empty());
+
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(Visibility::Inherited);
+        settle(&mut app);
+        assert_eq!(
+            store_stats(&app),
+            (1, 2, 9),
+            "restoring inherited visibility routes the existing text runs"
+        );
+        assert_eq!(batch_entities(&mut app).len(), 1);
+
+        app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
+        settle(&mut app);
+        assert_eq!(
+            store_stats(&app),
+            (0, 0, 0),
+            "hiding the panel again removes its text from the batch store"
+        );
+        assert!(batch_entities(&mut app).is_empty());
     }
 
     #[test]

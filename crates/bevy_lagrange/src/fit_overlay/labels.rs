@@ -21,6 +21,7 @@ pub(super) struct MarginLabel {
 /// Parameters for creating or updating a margin label.
 pub(super) struct MarginLabelParameters {
     pub(super) camera:          Entity,
+    pub(super) ui_camera:       Entity,
     pub(super) edge:            Edge,
     pub(super) text:            String,
     pub(super) color:           Color,
@@ -116,16 +117,24 @@ fn margin_label_node(edge: Edge, screen_position: ScreenPosition, viewport_size:
 /// Updates an existing margin label or creates a new one.
 pub(super) fn update_or_create_margin_label(
     commands: &mut Commands,
-    label_query: &mut Query<(Entity, &MarginLabel, &mut Text, &mut Node, &mut TextColor)>,
+    label_query: &mut Query<(
+        Entity,
+        &MarginLabel,
+        &mut Text,
+        &mut Node,
+        &mut TextColor,
+        &mut UiTargetCamera,
+    )>,
     parameters: MarginLabelParameters,
 ) {
-    let existing = label_query.iter_mut().find(|(_, label, _, _, _)| {
+    let existing = label_query.iter_mut().find(|(_, label, _, _, _, _)| {
         label.camera == parameters.camera && label.edge == parameters.edge
     });
 
-    if let Some((_, _, mut label_text, mut node, mut text_color)) = existing {
+    if let Some((_, _, mut label_text, mut node, mut text_color, mut ui_camera)) = existing {
         (**label_text).clone_from(&parameters.text);
         text_color.0 = parameters.color;
+        ui_camera.0 = parameters.ui_camera;
         apply_margin_label_anchor(
             &mut node,
             parameters.edge,
@@ -149,7 +158,7 @@ pub(super) fn update_or_create_margin_label(
                 edge:   parameters.edge,
                 camera: parameters.camera,
             },
-            UiTargetCamera(parameters.camera),
+            UiTargetCamera(parameters.ui_camera),
         ));
     }
 }
@@ -157,17 +166,22 @@ pub(super) fn update_or_create_margin_label(
 /// Updates an existing bounds label position or creates a new one.
 pub(super) fn update_or_create_bounds_label(
     commands: &mut Commands,
-    bounds_query: &mut Query<(Entity, &BoundsLabel, &mut Node), Without<MarginLabel>>,
+    bounds_query: &mut Query<
+        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        Without<MarginLabel>,
+    >,
     camera: Entity,
+    ui_camera: Entity,
     screen_position: ScreenPosition,
 ) {
     let existing = bounds_query
         .iter_mut()
-        .find(|(_, label, _)| label.camera == camera);
+        .find(|(_, label, _, _)| label.camera == camera);
 
-    if let Some((_, _, mut node)) = existing {
+    if let Some((_, _, mut node, mut target_camera)) = existing {
         node.left = Val::Px(screen_position.x);
         node.top = Val::Px(screen_position.y);
+        target_camera.0 = ui_camera;
     } else {
         commands.spawn((
             Text::new(BOUNDS_LABEL_TEXT),
@@ -183,7 +197,7 @@ pub(super) fn update_or_create_bounds_label(
                 ..default()
             },
             BoundsLabel { camera },
-            UiTargetCamera(camera),
+            UiTargetCamera(ui_camera),
         ));
     }
 }

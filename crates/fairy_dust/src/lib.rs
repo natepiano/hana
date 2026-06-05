@@ -139,6 +139,7 @@ pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     }));
     ensure_plugin(&mut app, DiegeticUiPlugin);
     ensure_plugin(&mut app, LagrangePlugin);
+    screen_panels::install_overlay_picking(&mut app);
     restart::install(&mut app);
     screen_space_lights::install(&mut app);
     SprinkleBuilder {
