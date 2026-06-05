@@ -1259,7 +1259,9 @@ toggle flipped in the gate examples.
   - Confirmed, no change needed: 4a → 4b ordering stands; neither phase
     is redundant; the 4b padding-contract test remains necessary; the
     pinned-respawn test already locks the case the 4a flip makes default.
-- **Step 4a — Flip the default to `BatchedRecords` and bake.** (Split per
+- **Step 4a — Flip the default to `BatchedRecords` and bake.** DONE
+  2026-06-04; gate results and retrospective follow the step
+  description. (Split per
   D5, approved 2026-06-03.) Flip `TextGeometryPath::default()` to
   `BatchedRecords`; the per-run path and the toggle stay as the one-key
   fallback through the bake window. **Depends on Step 3a's re-routing
@@ -1277,8 +1279,14 @@ toggle flipped in the gate examples.
   flip (3b review). The acceptance-table examples sweep run
   batched-by-default, waterfall captured under the new default. The
   sweep doubles as the **sorted-view composition check** (3b review):
-  only `aa_text` and `panel_rendering` put OIT on the main camera, and
-  the screen-space overlay camera is always sorted (it never gets OIT —
+  eight examples request OIT on the main camera via `StableTransparency`
+  (`typography`, `slug_text`, `world_text`, `diegetic_text_stress`,
+  `diegetic_panel_stress`, `glyph_batch_proof`, `panel_rendering`,
+  `aa_text`) — the original "only `aa_text` and `panel_rendering`" claim
+  was wrong — and OIT activation is now gated on the `oit_guard` shader
+  patches (`render/oit_guard.rs`), falling back to sorted transparency
+  when a guard fails. The screen-space overlay camera is always sorted
+  (it never gets OIT —
   `render/transparency.rs`), so the bake explicitly checks
   text-over-backing composition in the sorted-camera examples
   (`cascade`, `side_by_side`, `world_text`, `slug_text`, `screen_space`,
@@ -1305,9 +1313,128 @@ toggle flipped in the gate examples.
   not something this flip introduces. Bake = daily use across examples
   until confidence is established; any surprise still has the `B`-key
   fallback.
-- **Step 4b — Delete the per-run mesh path.** `RunMeshBuilder`,
+
+  ### Step 4a gate results (2026-06-04)
+
+  - Full suite green batched-by-default: 401/401 + clippy + fmt. Exactly
+    one test broke at the flip — `toggle_flips_both_directions_without_leaks`
+    relied on the old default for its starting state (the audit's
+    predicted failure mode); fixed with an explicit `set_path`.
+  - Test-path audit: `batching.rs` sets the path explicitly in all its
+    tests; `mesh_spawning.rs`'s `pipeline_app` hand-wires the per-run
+    systems without the production `run_if` gate (doc comment states it
+    deliberately tests `PerRunMeshes`); no other test module wires gated
+    systems, so no test silently switched paths.
+  - Sorted-view composition sweep, all seven: `cascade`,
+    `side_by_side` (A/B identical), `world_text`, `slug_text` (punch-out
+    intact), `screen_space` (including two screen panels at clearly
+    different depths — composition correct), `typography` (all 7 font
+    rows render; doubles as the atlas-rebind fix verification),
+    `diegetic_panel_stress` (checked under BOTH sorted and OIT — the
+    gate-deadlock run landed a sorted-composition data point for free).
+  - Flip-bounce stress: `text_alpha`, three per-run↔batched bounces over
+    BRP under each of the 7 alpha defaults — no white wedge, no stale
+    meshes, no wgpu slab errors.
+  - `Msaa::Off` + Coverage: `MAY_DISCARD` vertex-pull pipelines compiled
+    and rendered (Coverage visibly degrades to its documented Mask(0.5)
+    fallback); log clean.
+  - Waterfall recorded in the results table (After 4a): ms 29.6 → 7.6,
+    fps 34 → 135 same-session per-run vs batched (~3.9× frame time).
+  - Unplanned work the bake surfaced (all landed in-phase):
+    1. *bevy 0.19 OIT GPU faults* — bevy compiles shaders with
+       `ShaderRuntimeChecks::unchecked()` and its OIT shaders index the
+       heads/nodes buffers unguarded; a macOS live-resize lets the
+       drawable outgrow the CPU-side buffer-size snapshot, and the OOB
+       writes kernel-panicked the machine twice. Mitigation:
+       `render/oit_guard.rs` patches `oit_draw.wgsl`/`oit_resolve.wgsl`
+       in process with `arrayLength` guards, our vertex-pull shader
+       gained a `run_index` clamp, and `StableTransparency` activation
+       is gated on both patches being confirmed (guard failure = sorted
+       fallback, never unguarded OIT).
+    2. *Gate deadlock* — bevy only loads `oit_resolve.wgsl` when an OIT
+       view's resolve pipeline specializes, which the gate prevented;
+       every gated run silently fell back to sorted transparency until
+       the guard now requests the embedded shader at startup
+       (`RESOLVE_SHADER_PATH`, handle held in `OitGuardState`).
+    3. *Atlas-growth rebind regression* — `commit_glyph_atlas` grew the
+       shared atlas via `set_data` with a longer payload (the documented
+       `ShaderBuffer` rebind hazard), so long-lived batch materials kept
+       reading the dead buffer and late-loaded fonts rendered invisible;
+       the per-run path had masked this by recreating materials on every
+       change. Fixed: growth swaps in three new buffer assets and
+       repoints every `TextMaterial` (`set_text_material_atlas`,
+       placeholder-aware); pinned by
+       `commit_glyph_atlas_growth_swaps_buffers_and_keeps_handles_fresh`.
+  - User-side manual window-resize test with OIT genuinely active:
+    PASSED 2026-06-04 (typography; the earlier resize verification
+    predated the deadlock fix and only exercised the sorted fallback).
+
+  ### Step 4a Retrospective
+
+  **What worked:**
+  - The flip itself was one line plus one predicted test fix; the
+    explicit path-assumption audit named the exact failure before it
+    happened.
+  - The bake did its job twice over: batched-by-default put long-lived
+    materials and transparent coverage in every example, exposing two
+    latent defects (atlas rebind, bevy's unguarded OIT) that the
+    per-run path's constant material recreation had masked for weeks.
+
+  **What deviated from the plan:**
+  - A machine-crashing GPU fault investigation ran inside the bake; the
+    three-layer OIT guard infrastructure (`render/oit_guard.rs`,
+    vertex-pull clamp, gated activation) was not planned anywhere.
+  - The sweep's premise was wrong: eight examples carry
+    `StableTransparency`, not the two the plan claimed (corrected in
+    the step body above).
+
+  **Surprises:**
+  - bevy compiles ALL shader modules unchecked
+    (`create_shader_module_trusted` in `render_device.rs`) — bounds
+    safety in any shader we or bevy ship is purely textual. Upstream
+    bevy main is still unguarded (issue filing deferred per user).
+  - bevy's two OIT shaders load by different mechanisms
+    (`load_shader_library!` eager vs `load_embedded_asset!` lazy inside
+    pipeline specialization) — anything gating on the lazy one must
+    request it explicitly.
+  - `commit_glyph_atlas` carried the known rebind hazard from day one;
+    only the flip's long-lived materials could reveal it.
+  - The waterfall gap at this window size (~3.9×) is much larger than
+    the After-2 capture suggested; idle floor is within 0.2 ms of the
+    moving-labels cost — per-frame text cost is now GPU/render-bound,
+    not update-bound.
+
+  **Implications for remaining phases:**
+  - Step 4b is unblocked (all 4a gates green), pending the user-side
+    OIT-active resize re-test.
+  - Step 4b must NOT delete the atlas growth-swap + repoint — it is
+    shared-atlas plumbing, not per-run plumbing. After 4b makes
+    bindings 104/105 always-real, `set_text_material_atlas`'s
+    placeholder branch (`instances == glyphs`) becomes dead and should
+    be simplified *in 4b*, not before.
+  - `render/oit_guard.rs` is standing infrastructure independent of
+    this plan; it outlives 4b and is removed only when upstream bevy
+    guards its OIT accesses.
+- **Step 4b — Delete the per-run mesh path.** Entry precondition (4a
+  review): the user-side window-resize test with OIT genuinely active
+  has passed — SATISFIED 2026-06-04 (typography, manual resize, guarded
+  OIT). Delete: `RunMeshBuilder`,
   `RunRenderData`, per-run materials, the per-run mesh child spawn/despawn,
-  the toggle. (The production batch path never used `NoFrustumCulling` —
+  the toggle. `run_data.rs` is a **partial** delete (4a review):
+  `RunMeshBuilder`, `RunRenderData`, `RunRenderError`,
+  `build_run_render_data`, `commit_run_storage` go, but
+  `glyph_quad_extents` + `GlyphQuadExtents` stay — the batch path's
+  `build_glyph_records` calls them — along with their re-export chain
+  (`render/mod.rs`, `slug/mod.rs`, `text/mod.rs`). The OIT guard wiring
+  (`request_oit_resolve_shader` / `guard_oit_shaders` /
+  `activate_stable_transparency` in `RenderPlugin::build`) is not part
+  of the toggle and is untouched by this phase (4a review). With
+  bindings 104/105 always-real after the per-run materials go,
+  `set_text_material_atlas`'s placeholder branch
+  (`instances == glyphs`) becomes dead — simplify it in this phase; the
+  atlas growth-swap + repoint in `commit_glyph_atlas` is shared-atlas
+  plumbing and stays (4a review). (The production batch path never used
+  `NoFrustumCulling` —
   batch entities carry a real hand-written `Aabb` + `NoAutoAabb` from
   Step 2; the only `NoFrustumCulling` is in `batch_proof.rs`, deleted
   wholesale with the feature.) `RunStorage` (the struct) is deleted;
@@ -1333,24 +1460,47 @@ toggle flipped in the gate examples.
   becomes a standing contract of the only path — re-enabling the camera
   depth prepass re-enters the depth-only empty-layout territory that
   `material_group_is_stripped` guards, so any future prepass change must
-  keep (or consciously extend) that guard.
+  keep (or consciously extend) that guard. The doc update must not
+  re-assert the Target model's "prepass fragment reads no per-run
+  values" phrasing — Step 2 overturned it (`render_coverage` takes
+  `render_mode`) (4a review).
+
+  ### Step 4a Review (architect re-evaluation of remaining phases)
+
+  - Step 4b's deletion list corrected: `run_data.rs` is a partial
+    delete — `glyph_quad_extents` + `GlyphQuadExtents` survive (the
+    batch path's `build_glyph_records` depends on them); only the
+    per-run items (`RunMeshBuilder`, `RunRenderData`, `RunRenderError`,
+    `build_run_render_data`, `commit_run_storage`) go.
+  - Step 4b gained an entry precondition: the user-side OIT-active
+    window-resize test (left open by 4a — every pre-deadlock-fix run
+    exercised the sorted fallback).
+  - Step 4b gained two riders: the OIT guard wiring is not part of the
+    toggle (do not touch it during deletion); simplify
+    `set_text_material_atlas`'s now-dead placeholder branch in-phase
+    while keeping the atlas growth-swap + repoint.
+  - Step 4b's doc-update rider extended: do not re-assert the
+    overturned "prepass fragment reads no per-run values" claim.
+  - Confirmed, no change needed: the padding/growth survival
+    requirement and its headless byte-length test are correctly scoped;
+    4a→4b ordering stands; no merge or split needed.
 
 ## Results table (fill as steps land)
 
-| Measure | Baseline (2026-06-03) | After 2 (toggle on) | After 4 |
+| Measure | Baseline (2026-06-03) | After 2 (toggle on) | After 4a ⁴ |
 | ------- | --------------------- | ------------------- | ------- |
-| `ms`    | 20.2                  | 15.2 ¹              |         |
-| `fps`   | 51                    | 66 ¹                |         |
-| `ms` paused (idle floor) | (capture at Step 2) | 14.0 / 72 fps |         |
-| `wait`  | 17.65                 | 13.37               |         |
-| `render`| 19.7                  | 14.7                |         |
-| `assets`| 2.01 / 11.07          | 0.12 / 0.24         |         |
-| `prep`  | 8.70 / 18.31          | 1.41 / 1.97         |         |
-| `gpu wait` | 2.60 / 14.83       | 10.98 / 26.13 ²     |         |
-| `graph` | 6.36 / 10.30          | 2.21 / 2.32         |         |
-| render entities (text) | ~100 world + overlay runs | 3 batches (185 runs) |         |
-| draws per pass (text)  | ~100 world + overlay runs | t3d items 307 → 125 ³; shadow 370 → 8 |         |
-| batches / runs / glyphs | — (no batch store yet)   | 3 / 185 / ~958 |         |
+| `ms`    | 20.2                  | 15.2 ¹              | 7.6     |
+| `fps`   | 51                    | 66 ¹                | 135     |
+| `ms` paused (idle floor) | (capture at Step 2) | 14.0 / 72 fps | 7.4 / 130 fps |
+| `wait`  | 17.65                 | 13.37               | 2.04    |
+| `render`| 19.7                  | 14.7                | 6.7     |
+| `assets`| 2.01 / 11.07          | 0.12 / 0.24         | 0.15 / 0.29 |
+| `prep`  | 8.70 / 18.31          | 1.41 / 1.97         | 1.39 / 2.63 |
+| `gpu wait` | 2.60 / 14.83       | 10.98 / 26.13 ²     | 2.21 / 11.94 |
+| `graph` | 6.36 / 10.30          | 2.21 / 2.32         | 0.91 / 2.56 |
+| render entities (text) | ~100 world + overlay runs | 3 batches (185 runs) | 3 batches (185 runs) |
+| draws per pass (text)  | ~100 world + overlay runs | t3d items 307 → 125 ³; shadow 370 → 8 | t3d 125; shadow 8 |
+| batches / runs / glyphs | — (no batch store yet)   | 3 / 185 / ~958 | 3 / 185 / 954 |
 
 ¹ Captured in a smaller window than the doc baseline; the same-session
 per-run reference was ms 18.9 / 53 fps (`assets` 1.94, `prep` 8.94,
@@ -1362,6 +1512,12 @@ is exposed as visible waiting instead of hiding inside `prep`/`graph`.
 ³ The phase-item counter is scene-wide; the surviving ~122 items are SDF
 panel-backing meshes, not text. The text delta is −182 ≈ 185 runs → 3
 batch items.
+⁴ Captured 2026-06-04 at Step 4a (batched default; per-run path still
+present behind the toggle), debug build, smaller window than the doc
+baseline. Same-session per-run reference: ms 29.6 / 34 fps (`assets`
+3.62, `prep` 11.42, `gpu wait` 13.75, `graph` 8.96; t3d 307, shadow
+379) — a ~3.9× frame-time gap at this window size. This run had OIT
+genuinely active (gated activation, `render/oit_guard.rs`).
 
 The last three rows come from the Step-2 proof counters: `render entities
 (text)` = run count (per-run path) vs batch count (batched path), both from
