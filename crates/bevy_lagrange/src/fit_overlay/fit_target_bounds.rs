@@ -19,6 +19,8 @@ use super::labels::MarginLabel;
 use super::labels::MarginLabelParameters;
 use super::screen_space;
 use super::screen_space::MarginBalance;
+use super::visual::FitOverlayVisual;
+use super::visual::FitOverlayVisualKind;
 use crate::components::CurrentFitTarget;
 use crate::components::FitOverlay;
 use crate::constants::TOLERANCE;
@@ -33,7 +35,13 @@ use crate::projection::ScreenSpaceBounds;
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub(super) struct FitTargetGizmo;
 
-/// Configuration for fit target visualization colors and appearance.
+/// Configuration for fit target overlay colors and line appearance.
+///
+/// This resource controls visual style only. It does not select render layers,
+/// choose a camera, or override `Camera::order`. Configure visibility on the
+/// camera that carries `FitOverlay`: generated retained visuals copy that
+/// camera's effective `RenderLayers` and render in normal Bevy camera passes
+/// when camera and visual layers intersect.
 #[derive(Resource, Reflect, Debug, Clone)]
 #[reflect(Resource)]
 pub struct FitTargetOverlayConfig {
@@ -213,6 +221,7 @@ fn draw_margin_lines_and_labels(
     label_query: &mut Query<(
         Entity,
         &MarginLabel,
+        &FitOverlayVisual,
         &mut Text,
         &mut Node,
         &mut TextColor,
@@ -290,6 +299,7 @@ fn cleanup_stale_margin_labels(
     label_query: &Query<(
         Entity,
         &MarginLabel,
+        &FitOverlayVisual,
         &mut Text,
         &mut Node,
         &mut TextColor,
@@ -298,8 +308,12 @@ fn cleanup_stale_margin_labels(
     camera: Entity,
     visible_edges: &[Edge],
 ) {
-    for (entity, label, _, _, _, _) in label_query {
-        if label.camera == camera && !visible_edges.contains(&label.edge) {
+    for (entity, _, visual, _, _, _, _) in label_query {
+        let FitOverlayVisualKind::MarginLabel { edge } = visual.kind else {
+            continue;
+        };
+
+        if visual.camera == camera && !visible_edges.contains(&edge) {
             commands.entity(entity).despawn();
         }
     }
@@ -309,8 +323,7 @@ fn cleanup_stale_margin_labels(
 pub(super) fn on_remove_fit_visualization(
     trigger: On<Remove, FitOverlay>,
     mut commands: Commands,
-    label_query: Query<(Entity, &MarginLabel)>,
-    bounds_label_query: Query<(Entity, &BoundsLabel)>,
+    visual_query: Query<(Entity, &FitOverlayVisual)>,
 ) {
     let camera = trigger.entity;
 
@@ -319,14 +332,9 @@ pub(super) fn on_remove_fit_visualization(
     // (e.g. closing a secondary window triggers component removal during despawn).
     commands.entity(camera).try_remove::<FitMarginPercents>();
 
-    // Clean up labels belonging to this camera
-    for (entity, label) in &label_query {
-        if label.camera == camera {
-            commands.entity(entity).despawn();
-        }
-    }
-    for (entity, label) in &bounds_label_query {
-        if label.camera == camera {
+    // Clean up generated visuals belonging to this camera.
+    for (entity, visual) in &visual_query {
+        if visual.camera == camera {
             commands.entity(entity).despawn();
         }
     }
@@ -373,13 +381,20 @@ pub(super) fn draw_fit_target_bounds(
     mut label_query: Query<(
         Entity,
         &MarginLabel,
+        &FitOverlayVisual,
         &mut Text,
         &mut Node,
         &mut TextColor,
         &mut UiTargetCamera,
     )>,
     mut bounds_label_query: Query<
-        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        (
+            Entity,
+            &BoundsLabel,
+            &FitOverlayVisual,
+            &mut Node,
+            &mut UiTargetCamera,
+        ),
         Without<MarginLabel>,
     >,
 ) {
@@ -439,13 +454,20 @@ fn draw_bounds_for_camera(
     label_query: &mut Query<(
         Entity,
         &MarginLabel,
+        &FitOverlayVisual,
         &mut Text,
         &mut Node,
         &mut TextColor,
         &mut UiTargetCamera,
     )>,
     bounds_label_query: &mut Query<
-        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        (
+            Entity,
+            &BoundsLabel,
+            &FitOverlayVisual,
+            &mut Node,
+            &mut UiTargetCamera,
+        ),
         Without<MarginLabel>,
     >,
 ) {

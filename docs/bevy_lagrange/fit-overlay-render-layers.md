@@ -255,6 +255,8 @@ These phases are intended as sequential committable units.
 
 ### 1. Public Contract And Ownership Markers
 
+**Status:** Complete
+
 - Add or update Rust source doc comments on `FitOverlay` and
   `FitTargetOverlayConfig`.
 - Document that generated visuals copy the source camera's effective
@@ -268,6 +270,57 @@ These phases are intended as sequential committable units.
 - Register retained inspection targets for reflection under `fit_overlay` when
   BRP validation needs to inspect them.
 
+#### Retrospective
+
+**What worked:**
+
+- Existing label spawn/update functions in
+  `crates/bevy_lagrange/src/fit_overlay/labels.rs` let phase 1 stamp
+  `FitOverlayVisual` without changing label rendering.
+- Existing `Reflect` component style covered BRP-facing inspection without
+  manual type registration.
+
+**What deviated from the plan:**
+
+- `FitOverlayVisual` stayed internal to `fit_overlay`; BRP inspection should use
+  the reflected component type path, not a public Rust export.
+- `MarginLabel` and `BoundsLabel` became pure query tags immediately instead of
+  carrying duplicate `camera`/`edge` ownership fields.
+
+**Surprises:**
+
+- `FitOverlayVisualKind` needs both current label variants and future line
+  variants now, so phase 2 can reconcile one identity enum.
+- The current `FitTargetGizmo` render-layer limitation remains unchanged; phase
+  1 only changed ownership identity and source docs.
+
+**Implications for remaining phases:**
+
+- Phase 2 can use `FitOverlayVisual { camera, kind }` as the retained identity
+  for current labels and future retained visuals.
+- Phase 2 should add a shared helper for copying a source camera's effective
+  `RenderLayers`; phase 1 only documents that contract.
+- Phase 4 should decide whether `MarginLabel` and `BoundsLabel` still help as
+  label-backend tags once labels stop being UI nodes.
+
+#### Phase 1 Review
+
+- Phase 2 now names scheduling and orphan cleanup as reconciliation
+  foundation work.
+- Phase 2 now allows a per-frame index or map, with `Hash` derivation required
+  only if a hash-keyed implementation is chosen.
+- Phase 2 now calls out the backend-aware layer mismatch: current gizmo/UI
+  backends are not render-layer-correct until phases 3 and 4 replace them.
+- Phase 3 now names the temporary retained-lines/UI-labels mixed state and its
+  focused tests.
+- Phase 4 now scopes label work to the retained Core3d renderer and the
+  remaining label tag decision, because phase 1 already shipped label
+  ownership identity.
+- Phase 5 now limits feature cleanup to backend features proven stale by the
+  retained line and label implementations.
+- Reflection guidance now keeps `FitOverlayVisual` internal and avoids manual
+  registration unless a new generic or non-auto-registered target requires it.
+
 ### 2. Desired Frame And Reconciliation
 
 - Split the implementation into context/layout, reconciliation, retained line
@@ -276,8 +329,17 @@ These phases are intended as sequential committable units.
   the old gizmo/UI render backends.
 - Process every camera with `FitOverlay` using optional state so missing or
   invalid inputs produce `FitOverlayFrame::Empty`.
-- Reconcile retained identities with a per-frame `(camera, kind)` map, repair
-  copied `RenderLayers`, remove stale visuals, and deduplicate duplicates.
+- Reconcile retained identities with a per-frame `(camera, kind)` index or map,
+  repair copied `RenderLayers` on retained entities where meaningful, remove
+  stale visuals, and deduplicate duplicates.
+- If the reconciliation implementation uses a hash-keyed map, add `Hash` to the
+  internal visual key path; otherwise use an index shape that does not require
+  `Hash`.
+- Add the shared helper for resolving a source camera's effective
+  `RenderLayers`, defaulting to layer 0 when the component is absent.
+- Move overlay scheduling into the retained foundation: add
+  `FitOverlaySystemSet` in `PostUpdate`, and keep orphan cleanup outside any
+  `any_with_component::<FitOverlay>` gate.
 - Add orphan cleanup that is not gated only by active `FitOverlay` cameras.
 
 ### 3. Retained Line Backend
@@ -288,14 +350,21 @@ These phases are intended as sequential committable units.
   line visual during reconciliation.
 - Implement the line material, depth, visibility, culling, shadow, and picking
   policies defined below.
+- While labels still use UI nodes, explicitly test the allowed temporary mixed
+  state: retained lines inherit source-camera layers, while labels remain
+  `UiTargetCamera`-based until phase 4.
 - Remove `sync_gizmo_render_layers` only after no overlay line uses
   `FitTargetGizmo`.
 
 ### 4. Retained Label Backend
 
 - Move labels from Bevy UI nodes to retained overlay visual entities.
+- Continue using the existing `FitOverlayVisual { camera, kind }` label
+  identity; this phase is not responsible for introducing label ownership.
 - Propagate the source camera's effective `RenderLayers` to every label visual.
 - Replace `UiTargetCamera` retargeting with the retained label renderer.
+- Decide whether `MarginLabel` and `BoundsLabel` remain useful label-backend
+  tags once labels are no longer UI nodes.
 - Preserve label positioning, scaling, depth, picking, and visibility behavior
   through the same source-camera render path as the retained lines.
 
@@ -303,6 +372,9 @@ These phases are intended as sequential committable units.
 
 - Remove stale `bevy_gizmos`, `bevy_ui`, and replacement render feature flags
   only after retained lines and labels compile and pass focused tests.
+- Remove only features made stale by the selected retained backends; keep text,
+  asset, render, or picking feature flags if the final retained line or label
+  implementation still uses them.
 - Verify showcase behavior no longer depends on the
   `selection_gizmo::sync_selection_gizmo_layers` workaround.
 - Keep at least one core `bevy_lagrange` validation harness that does not depend
@@ -359,6 +431,10 @@ struct FitOverlayCameraContext {
 
 The effective layer value is recomputed every reconciliation pass. Removing a
 camera's `RenderLayers` component updates existing visuals back to layer 0.
+Phase 2 should introduce the shared effective-layer helper and repair retained
+entities where that backend already has meaningful `RenderLayers`. The old
+`FitTargetGizmo` line backend and temporary UI label backend are allowed to keep
+their known layer mismatch until phases 3 and 4 replace those render paths.
 
 The target and viewport fields are layout inputs and cleanup keys. They do not
 provide render isolation. Cameras with intersecting render layers can still see
@@ -381,11 +457,12 @@ enforce uniqueness. The implementation must either:
 Duplicate visuals with the same `(camera, kind)` should be treated as stale and
 deduplicated during reconciliation.
 
-The first implementation should prefer a per-frame map keyed by
+The first implementation should prefer a per-frame index or map keyed by
 `(camera, FitOverlayVisualKind)` over a retained owner index. It should keep one
 deterministic survivor for each key, update that entity, and despawn duplicates.
-If `FitOverlayVisualKind` is hash-keyed, `Edge` must derive `Hash`; otherwise
-the map key must avoid requiring `Hash` on `Edge`.
+This is an internal implementation choice, not a public API constraint. If
+`FitOverlayVisualKind` is hash-keyed, `Edge` must derive `Hash`; otherwise the
+key shape must avoid requiring `Hash` on `Edge`.
 
 The visual kind must encode geometry cardinality clearly. The intended retained
 representation is:
@@ -456,7 +533,9 @@ The label design must specify:
 
 While UI labels temporarily carry `FitOverlayVisual`, that marker is identity
 only. Those labels are not considered render-layer-correct until the retained
-Core3d-compatible label backend replaces `UiTargetCamera`.
+Core3d-compatible label backend replaces `UiTargetCamera`. Phase 4 should also
+decide whether `MarginLabel` and `BoundsLabel` still help as retained label tags
+or should be removed.
 
 ### Coordinate Types
 
@@ -510,7 +589,8 @@ The compile-safe migration path is:
 
 1. Current gizmo/UI path.
 2. Desired-frame and reconciliation path, still driving old backends.
-3. Retained line backend.
+3. Retained line backend, with the temporary mismatch tested while labels still
+   use `UiTargetCamera`.
 4. Retained label backend.
 5. Removal of `UiTargetCamera`, `FitTargetGizmo`, `sync_gizmo_render_layers`,
    and stale feature flags.
@@ -532,9 +612,11 @@ and plain UI label retargeting should not be part of the final overlay feature.
 
 Retained inspection targets such as `FitOverlayVisual`,
 `FitOverlayVisualKind`, `FitMarginPercents`, empty-frame state, and backend
-markers or resources should derive and be registered for reflection when the
-`fit_overlay` feature is enabled. They do not need to become public API, but BRP
-validation needs inspectable component and resource data.
+markers or resources should derive reflection under the `fit_overlay` feature.
+They do not need to become public Rust API. Manual reflection registration is
+only needed for targets Bevy does not auto-register, such as required generic
+monomorphizations or validation-only state that lacks an automatic component or
+resource registration path.
 
 ## Testing
 

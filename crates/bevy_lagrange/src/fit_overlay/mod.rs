@@ -9,6 +9,7 @@ mod convex_hull;
 mod fit_target_bounds;
 mod labels;
 mod screen_space;
+mod visual;
 
 use bevy::gizmos::GizmoPlugin;
 use bevy::prelude::*;

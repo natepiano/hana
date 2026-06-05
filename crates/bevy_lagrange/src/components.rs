@@ -68,10 +68,15 @@ pub struct CurrentFitTarget(
     pub Entity,
 );
 
-/// Enables fit target debug overlay on a camera entity.
+/// Enables the fit target debug overlay on a camera entity.
 ///
-/// Insert this component to enable overlay, remove it to disable.
-/// The presence or absence of the component is the toggle — no boolean field needed.
+/// Insert this component to enable the overlay; remove it to disable the
+/// overlay. The presence or absence of `FitOverlay` is the toggle.
+///
+/// Generated overlay visuals are owned by this camera. Retained visuals copy
+/// this camera's effective `RenderLayers`, render through normal Bevy
+/// layer-intersection visibility, and do not add another render visibility
+/// filter. `Camera::order` keeps its normal pass-order meaning.
 #[cfg(feature = "fit_overlay")]
 #[derive(Component, Reflect, Default)]
 #[reflect(Component, Default)]

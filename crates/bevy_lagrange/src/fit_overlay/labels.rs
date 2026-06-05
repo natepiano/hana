@@ -7,16 +7,15 @@ use super::constants::BOUNDS_LABEL_TEXT;
 use super::constants::LABEL_FONT_SIZE;
 use super::constants::LABEL_PIXEL_OFFSET;
 use super::screen_space;
+use super::visual::FitOverlayVisual;
+use super::visual::FitOverlayVisualKind;
 use crate::fit::Edge;
 use crate::projection::ScreenSpaceBounds;
 
-/// Component marking margin percentage labels, scoped to a specific camera entity.
+/// Component marking a margin percentage label.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub(super) struct MarginLabel {
-    pub(super) edge:   Edge,
-    pub(super) camera: Entity,
-}
+pub(super) struct MarginLabel;
 
 /// Parameters for creating or updating a margin label.
 pub(super) struct MarginLabelParameters {
@@ -29,12 +28,10 @@ pub(super) struct MarginLabelParameters {
     pub(super) viewport_size:   Vec2,
 }
 
-/// Component marking the "screen space bounds" label, scoped to a specific camera entity.
+/// Component marking the "screen space bounds" label.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
-pub(super) struct BoundsLabel {
-    pub(super) camera: Entity,
-}
+pub(super) struct BoundsLabel;
 
 /// Calculates the viewport pixel position for a margin label, offset by a fixed
 /// number of pixels from the screen-edge endpoint of the margin line.
@@ -120,6 +117,7 @@ pub(super) fn update_or_create_margin_label(
     label_query: &mut Query<(
         Entity,
         &MarginLabel,
+        &FitOverlayVisual,
         &mut Text,
         &mut Node,
         &mut TextColor,
@@ -127,11 +125,15 @@ pub(super) fn update_or_create_margin_label(
     )>,
     parameters: MarginLabelParameters,
 ) {
-    let existing = label_query.iter_mut().find(|(_, label, _, _, _, _)| {
-        label.camera == parameters.camera && label.edge == parameters.edge
+    let existing = label_query.iter_mut().find(|(_, _, visual, _, _, _, _)| {
+        visual.camera == parameters.camera
+            && visual.kind
+                == FitOverlayVisualKind::MarginLabel {
+                    edge: parameters.edge,
+                }
     });
 
-    if let Some((_, _, mut label_text, mut node, mut text_color, mut ui_camera)) = existing {
+    if let Some((_, _, _, mut label_text, mut node, mut text_color, mut ui_camera)) = existing {
         (**label_text).clone_from(&parameters.text);
         text_color.0 = parameters.color;
         ui_camera.0 = parameters.ui_camera;
@@ -154,9 +156,12 @@ pub(super) fn update_or_create_margin_label(
                 parameters.screen_position,
                 parameters.viewport_size,
             ),
-            MarginLabel {
-                edge:   parameters.edge,
+            MarginLabel,
+            FitOverlayVisual {
                 camera: parameters.camera,
+                kind:   FitOverlayVisualKind::MarginLabel {
+                    edge: parameters.edge,
+                },
             },
             UiTargetCamera(parameters.ui_camera),
         ));
@@ -167,18 +172,24 @@ pub(super) fn update_or_create_margin_label(
 pub(super) fn update_or_create_bounds_label(
     commands: &mut Commands,
     bounds_query: &mut Query<
-        (Entity, &BoundsLabel, &mut Node, &mut UiTargetCamera),
+        (
+            Entity,
+            &BoundsLabel,
+            &FitOverlayVisual,
+            &mut Node,
+            &mut UiTargetCamera,
+        ),
         Without<MarginLabel>,
     >,
     camera: Entity,
     ui_camera: Entity,
     screen_position: ScreenPosition,
 ) {
-    let existing = bounds_query
-        .iter_mut()
-        .find(|(_, label, _, _)| label.camera == camera);
+    let existing = bounds_query.iter_mut().find(|(_, _, visual, _, _)| {
+        visual.camera == camera && visual.kind == FitOverlayVisualKind::BoundsLabel
+    });
 
-    if let Some((_, _, mut node, mut target_camera)) = existing {
+    if let Some((_, _, _, mut node, mut target_camera)) = existing {
         node.left = Val::Px(screen_position.x);
         node.top = Val::Px(screen_position.y);
         target_camera.0 = ui_camera;
@@ -196,7 +207,11 @@ pub(super) fn update_or_create_bounds_label(
                 top: Val::Px(screen_position.y),
                 ..default()
             },
-            BoundsLabel { camera },
+            BoundsLabel,
+            FitOverlayVisual {
+                camera,
+                kind: FitOverlayVisualKind::BoundsLabel,
+            },
             UiTargetCamera(ui_camera),
         ));
     }
