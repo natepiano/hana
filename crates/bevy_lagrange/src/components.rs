@@ -73,10 +73,11 @@ pub struct CurrentFitTarget(
 /// Insert this component to enable the overlay; remove it to disable the
 /// overlay. The presence or absence of `FitOverlay` is the toggle.
 ///
-/// Generated overlay visuals are owned by this camera. Retained visuals copy
-/// this camera's effective `RenderLayers`, render through normal Bevy
+/// Generated overlay visuals are owned by this camera. Retained line visuals
+/// copy this camera's effective `RenderLayers`, render through normal Bevy
 /// layer-intersection visibility, and do not add another render visibility
-/// filter. `Camera::order` keeps its normal pass-order meaning.
+/// filter. Labels are plain Bevy UI nodes targeted through `UiTargetCamera`.
+/// `Camera::order` keeps its normal pass-order meaning.
 #[cfg(feature = "fit_overlay")]
 #[derive(Component, Reflect, Default)]
 #[reflect(Component, Default)]

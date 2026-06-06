@@ -1,3 +1,5 @@
+use bevy::camera::visibility::RenderLayers;
+
 use super::*;
 
 #[derive(Component)]
@@ -10,7 +12,7 @@ pub(crate) fn init_selection_gizmo(mut config_store: ResMut<GizmoConfigStore>) {
     let (config, _) = config_store.config_mut::<SelectionGizmo>();
     config.depth_bias = GIZMO_DEPTH_BIAS;
     config.line.width = GIZMO_LINE_WIDTH;
-    config.render_layers = RenderLayers::layer(SELECTION_GIZMO_LAYER);
+    config.render_layers = RenderLayers::layer(DEFAULT_SCENE_LAYER);
 }
 
 fn draw_shape_gizmo(
@@ -70,33 +72,4 @@ pub(crate) fn draw_hover_gizmo(
         return;
     };
     draw_shape_gizmo(&mut gizmos, transform, shape, Color::from(ORANGE));
-}
-
-type GizmoLayerQuery<'w, 's> = Query<
-    'w,
-    's,
-    (
-        Entity,
-        Option<&'static FitOverlay>,
-        Option<&'static RenderLayers>,
-    ),
-    With<OrbitCam>,
->;
-
-/// Cameras with `FitOverlay` lose the selection gizmo layer so the outline
-/// doesn't compete with the debug overlay. Cameras without it get the layer back.
-pub(crate) fn sync_selection_gizmo_layers(mut commands: Commands, camera_query: GizmoLayerQuery) {
-    let with_selection = RenderLayers::from_layers(&[DEFAULT_SCENE_LAYER, SELECTION_GIZMO_LAYER]);
-    let without_selection = RenderLayers::layer(DEFAULT_SCENE_LAYER);
-
-    for (entity, has_visualization, current_layers) in &camera_query {
-        let desired = if has_visualization.is_some() {
-            &without_selection
-        } else {
-            &with_selection
-        };
-        if current_layers != Some(desired) {
-            commands.entity(entity).insert(desired.clone());
-        }
-    }
 }

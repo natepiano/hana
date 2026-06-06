@@ -19,7 +19,6 @@ mod ui;
 use std::time::Duration;
 
 use bevy::camera::ScalingMode;
-use bevy::camera::visibility::RenderLayers;
 use bevy::color::palettes::css::DEEP_SKY_BLUE;
 use bevy::color::palettes::css::ORANGE;
 use bevy::math::curve::easing::EaseFunction;
@@ -167,7 +166,6 @@ fn main() {
             (
                 selection_gizmo::draw_selection_gizmo,
                 selection_gizmo::draw_hover_gizmo,
-                selection_gizmo::sync_selection_gizmo_layers,
                 event_log::rebuild_log_panel,
                 policy_panel::rebuild_policy_panel,
                 policy_panel::tick_key_flash,

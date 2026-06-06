@@ -6,6 +6,7 @@ use super::constants::BOUNDS_LABEL_COLOR;
 use super::constants::BOUNDS_LABEL_TEXT;
 use super::constants::LABEL_FONT_SIZE;
 use super::constants::LABEL_PIXEL_OFFSET;
+use super::constants::OVERLAY_LABEL_Z_INDEX;
 use super::screen_space;
 use super::visual::FitOverlayVisual;
 use super::visual::FitOverlayVisualKind;
@@ -111,6 +112,14 @@ fn margin_label_node(edge: Edge, screen_position: ScreenPosition, viewport_size:
     node
 }
 
+fn label_root_components() -> impl Bundle {
+    (GlobalZIndex(OVERLAY_LABEL_Z_INDEX), Pickable::IGNORE)
+}
+
+fn repair_label_root(commands: &mut Commands, entity: Entity) {
+    commands.entity(entity).insert(label_root_components());
+}
+
 /// Updates an existing margin label or creates a new one.
 pub(super) fn update_or_create_margin_label(
     commands: &mut Commands,
@@ -133,10 +142,12 @@ pub(super) fn update_or_create_margin_label(
                 }
     });
 
-    if let Some((_, _, _, mut label_text, mut node, mut text_color, mut ui_camera)) = existing {
+    if let Some((entity, _, _, mut label_text, mut node, mut text_color, mut ui_camera)) = existing
+    {
         (**label_text).clone_from(&parameters.text);
         text_color.0 = parameters.color;
         ui_camera.0 = parameters.ui_camera;
+        repair_label_root(commands, entity);
         apply_margin_label_anchor(
             &mut node,
             parameters.edge,
@@ -164,6 +175,7 @@ pub(super) fn update_or_create_margin_label(
                 },
             },
             UiTargetCamera(parameters.ui_camera),
+            label_root_components(),
         ));
     }
 }
@@ -189,10 +201,11 @@ pub(super) fn update_or_create_bounds_label(
         visual.camera == camera && visual.kind == FitOverlayVisualKind::BoundsLabel
     });
 
-    if let Some((_, _, _, mut node, mut target_camera)) = existing {
+    if let Some((entity, _, _, mut node, mut target_camera)) = existing {
         node.left = Val::Px(screen_position.x);
         node.top = Val::Px(screen_position.y);
         target_camera.0 = ui_camera;
+        repair_label_root(commands, entity);
     } else {
         commands.spawn((
             Text::new(BOUNDS_LABEL_TEXT),
@@ -213,6 +226,144 @@ pub(super) fn update_or_create_bounds_label(
                 kind: FitOverlayVisualKind::BoundsLabel,
             },
             UiTargetCamera(ui_camera),
+            label_root_components(),
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_kana::ScreenPosition;
+
+    use super::*;
+
+    #[derive(Resource)]
+    struct TestLabelEntities {
+        camera:    Entity,
+        ui_camera: Entity,
+    }
+
+    #[test]
+    fn margin_label_root_spawns_high_z_and_ignored_picking() {
+        let mut app = test_app();
+        app.add_systems(Update, spawn_test_margin_label);
+
+        app.update();
+
+        let camera = app.world().resource::<TestLabelEntities>().camera;
+        let mut query =
+            app.world_mut()
+                .query::<(&FitOverlayVisual, &GlobalZIndex, &Pickable, &UiTargetCamera)>();
+        let rows: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(rows.len(), 1);
+        let (visual, z_index, pickable, ui_camera) = rows[0];
+        assert_eq!(visual.camera, camera);
+        assert_eq!(
+            visual.kind,
+            FitOverlayVisualKind::MarginLabel { edge: Edge::Left }
+        );
+        assert_eq!(z_index, &GlobalZIndex(OVERLAY_LABEL_Z_INDEX));
+        assert_eq!(pickable, &Pickable::IGNORE);
+        assert_eq!(
+            ui_camera.0,
+            app.world().resource::<TestLabelEntities>().ui_camera
+        );
+    }
+
+    #[test]
+    fn bounds_label_update_repairs_high_z_and_ignored_picking() {
+        let mut app = test_app();
+        let entities = app.world().resource::<TestLabelEntities>();
+        let camera = entities.camera;
+        app.world_mut().spawn((
+            Text::new(BOUNDS_LABEL_TEXT),
+            TextFont {
+                font_size: FontSize::Px(LABEL_FONT_SIZE),
+                ..default()
+            },
+            TextColor(BOUNDS_LABEL_COLOR),
+            Node::default(),
+            BoundsLabel,
+            FitOverlayVisual {
+                camera,
+                kind: FitOverlayVisualKind::BoundsLabel,
+            },
+            UiTargetCamera(camera),
+        ));
+        app.add_systems(Update, update_test_bounds_label);
+
+        app.update();
+
+        let mut query =
+            app.world_mut()
+                .query::<(&FitOverlayVisual, &GlobalZIndex, &Pickable, &UiTargetCamera)>();
+        let rows: Vec<_> = query.iter(app.world()).collect();
+        assert_eq!(rows.len(), 1);
+        let (_, z_index, pickable, ui_camera) = rows[0];
+        assert_eq!(z_index, &GlobalZIndex(OVERLAY_LABEL_Z_INDEX));
+        assert_eq!(pickable, &Pickable::IGNORE);
+        assert_eq!(
+            ui_camera.0,
+            app.world().resource::<TestLabelEntities>().ui_camera
+        );
+    }
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        let camera = app.world_mut().spawn_empty().id();
+        let ui_camera = app.world_mut().spawn_empty().id();
+        app.insert_resource(TestLabelEntities { camera, ui_camera });
+        app
+    }
+
+    fn spawn_test_margin_label(
+        mut commands: Commands,
+        entities: Res<TestLabelEntities>,
+        mut label_query: Query<(
+            Entity,
+            &MarginLabel,
+            &FitOverlayVisual,
+            &mut Text,
+            &mut Node,
+            &mut TextColor,
+            &mut UiTargetCamera,
+        )>,
+    ) {
+        update_or_create_margin_label(
+            &mut commands,
+            &mut label_query,
+            MarginLabelParameters {
+                camera:          entities.camera,
+                ui_camera:       entities.ui_camera,
+                edge:            Edge::Left,
+                text:            "margin: 1.000%".to_string(),
+                color:           Color::WHITE,
+                screen_position: ScreenPosition::new(8.0, 8.0),
+                viewport_size:   Vec2::new(640.0, 480.0),
+            },
+        );
+    }
+
+    fn update_test_bounds_label(
+        mut commands: Commands,
+        entities: Res<TestLabelEntities>,
+        mut bounds_query: Query<
+            (
+                Entity,
+                &BoundsLabel,
+                &FitOverlayVisual,
+                &mut Node,
+                &mut UiTargetCamera,
+            ),
+            Without<MarginLabel>,
+        >,
+    ) {
+        update_or_create_bounds_label(
+            &mut commands,
+            &mut bounds_query,
+            entities.camera,
+            entities.ui_camera,
+            ScreenPosition::new(16.0, 16.0),
+        );
     }
 }

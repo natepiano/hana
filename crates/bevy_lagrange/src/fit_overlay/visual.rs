@@ -5,9 +5,8 @@ use crate::fit::Edge;
 /// Generated fit-overlay visual owned by a source camera.
 ///
 /// The `camera` identifies the entity with `FitOverlay` that requested this
-/// visual. The retained overlay renderer uses that camera's effective
-/// `RenderLayers`; any camera with intersecting effective layers may render the
-/// visual in its normal camera pass.
+/// visual. Retained line visuals copy that camera's effective `RenderLayers`;
+/// Bevy UI label visuals use `UiTargetCamera` instead.
 #[derive(Component, Reflect, Clone, Copy, Debug, PartialEq, Eq)]
 #[reflect(Component)]
 pub(super) struct FitOverlayVisual {

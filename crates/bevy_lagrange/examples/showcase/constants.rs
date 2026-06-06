@@ -156,7 +156,6 @@ pub(super) const PROJECTION_LOG_PERSPECTIVE: &str = "Projection: Perspective";
 
 // render layers
 pub(super) const DEFAULT_SCENE_LAYER: usize = 0;
-pub(super) const SELECTION_GIZMO_LAYER: usize = 1;
 
 // rotation
 pub(super) const FOURTH_ORBIT_MOVE_QUARTER_TURNS: f32 = 4.0;

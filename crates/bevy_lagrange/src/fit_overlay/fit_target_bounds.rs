@@ -1,22 +1,32 @@
+use bevy::camera::NormalizedRenderTarget;
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::ui::UiTargetCamera;
 use bevy::window::PrimaryWindow;
-use bevy_kana::ToF32;
 
 use super::constants::DEFAULT_OVERLAY_LINE_WIDTH;
 use super::constants::OVERLAY_BALANCED_COLOR;
-use super::constants::OVERLAY_GIZMO_DEPTH_BIAS;
 use super::constants::OVERLAY_RECTANGLE_COLOR;
 use super::constants::OVERLAY_SILHOUETTE_COLOR;
 use super::constants::OVERLAY_UNBALANCED_COLOR;
 use super::constants::PERCENT_MULTIPLIER;
+use super::context::FitOverlayCameraContext;
+use super::context::FitOverlayEmptyReason;
 use super::convex_hull;
+use super::frame::FitOverlayFrame;
+use super::frame::FitOverlayLayout;
 use super::labels;
 use super::labels::BoundsLabel;
 use super::labels::MarginLabel;
 use super::labels::MarginLabelParameters;
+use super::lines;
+use super::lines::FitOverlayLineContext;
+use super::lines::FitOverlayLineMaterial;
+use super::lines::FitOverlayLineMaterials;
+use super::lines::FitOverlayLineQueryItem;
+use super::lines::FitOverlayLineVisual;
+use super::reconciliation;
 use super::screen_space;
 use super::screen_space::MarginBalance;
 use super::visual::FitOverlayVisual;
@@ -26,22 +36,16 @@ use crate::components::FitOverlay;
 use crate::constants::TOLERANCE;
 use crate::fit::Edge;
 use crate::projection;
-use crate::projection::CameraBasis;
-use crate::projection::ProjectionMode;
 use crate::projection::ScreenSpaceBounds;
-
-/// Gizmo config group for fit target visualization (screen-aligned overlay).
-/// Toggle by inserting/removing the `FitOverlay` component on the camera entity.
-#[derive(Default, Reflect, GizmoConfigGroup)]
-pub(super) struct FitTargetGizmo;
 
 /// Configuration for fit target overlay colors and line appearance.
 ///
 /// This resource controls visual style only. It does not select render layers,
 /// choose a camera, or override `Camera::order`. Configure visibility on the
-/// camera that carries `FitOverlay`: generated retained visuals copy that
+/// camera that carries `FitOverlay`: generated retained line visuals copy that
 /// camera's effective `RenderLayers` and render in normal Bevy camera passes
-/// when camera and visual layers intersect.
+/// when camera and visual layers intersect. Overlay labels are Bevy UI nodes
+/// targeted through `UiTargetCamera`.
 #[derive(Resource, Reflect, Debug, Clone)]
 #[reflect(Resource)]
 pub struct FitTargetOverlayConfig {
@@ -53,7 +57,7 @@ pub struct FitTargetOverlayConfig {
     pub balanced_color:   Color,
     /// Color for unbalanced margins.
     pub unbalanced_color: Color,
-    /// Line width for gizmo rendering.
+    /// Line width for retained overlay line meshes, in viewport pixels.
     pub line_width:       f32,
 }
 
@@ -115,109 +119,40 @@ const fn calculate_edge_color(
     }
 }
 
-/// Creates the 4 corners of the screen-aligned boundary rectangle in world space.
-fn create_screen_corners(
-    bounds: &ScreenSpaceBounds,
-    camera: &CameraBasis,
-    average_depth: f32,
-    projection_mode: ProjectionMode,
-) -> [Vec3; 4] {
+/// Creates the 4 corners of the screen-aligned boundary rectangle in normalized space.
+const fn rectangle_points(bounds: &ScreenSpaceBounds) -> [Vec2; 4] {
     [
-        screen_space::normalized_to_world(
-            bounds.min_normalized_x,
-            bounds.min_normalized_y,
-            camera,
-            average_depth,
-            projection_mode,
-        ),
-        screen_space::normalized_to_world(
-            bounds.max_normalized_x,
-            bounds.min_normalized_y,
-            camera,
-            average_depth,
-            projection_mode,
-        ),
-        screen_space::normalized_to_world(
-            bounds.max_normalized_x,
-            bounds.max_normalized_y,
-            camera,
-            average_depth,
-            projection_mode,
-        ),
-        screen_space::normalized_to_world(
-            bounds.min_normalized_x,
-            bounds.max_normalized_y,
-            camera,
-            average_depth,
-            projection_mode,
-        ),
+        Vec2::new(bounds.min_normalized_x, bounds.min_normalized_y),
+        Vec2::new(bounds.max_normalized_x, bounds.min_normalized_y),
+        Vec2::new(bounds.max_normalized_x, bounds.max_normalized_y),
+        Vec2::new(bounds.min_normalized_x, bounds.max_normalized_y),
     ]
 }
 
-/// Draws the boundary rectangle outline.
-fn draw_rectangle(
-    gizmos: &mut Gizmos<FitTargetGizmo>,
-    corners: &[Vec3; 4],
-    config: &FitTargetOverlayConfig,
-) {
-    for i in 0..4 {
-        let next = (i + 1) % 4;
-        gizmos.line(corners[i], corners[next], config.rectangle_color);
-    }
-}
-
-/// Draws the silhouette polygon (convex hull of projected vertices) using gizmo lines.
-fn draw_silhouette(
-    gizmos: &mut Gizmos<FitTargetGizmo>,
-    vertices: &[Vec3],
-    camera: &CameraBasis,
-    average_depth: f32,
-    projection_mode: ProjectionMode,
-    color: Color,
-) {
-    let projected = convex_hull::project_vertices_to_2d(vertices, camera, projection_mode);
-    let hull = convex_hull::convex_hull_2d(&projected);
-
-    if hull.len() < 2 {
-        return;
-    }
-
-    for i in 0..hull.len() {
-        let next = (i + 1) % hull.len();
-        let start = screen_space::normalized_to_world(
-            hull[i].0,
-            hull[i].1,
-            camera,
-            average_depth,
-            projection_mode,
-        );
-        let end = screen_space::normalized_to_world(
-            hull[next].0,
-            hull[next].1,
-            camera,
-            average_depth,
-            projection_mode,
-        );
-        gizmos.line(start, end, color);
-    }
+fn silhouette_points(layout: &FitOverlayLayout) -> Vec<Vec2> {
+    let projected = convex_hull::project_vertices_to_2d(
+        &layout.vertices,
+        &layout.camera_basis,
+        layout.projection_mode,
+    );
+    convex_hull::convex_hull_2d(&projected)
+        .into_iter()
+        .map(|(x, y)| Vec2::new(x, y))
+        .collect()
 }
 
 /// Camera-derived drawing parameters shared across margin/bounds rendering.
 struct DrawContext<'a> {
-    camera:          Entity,
-    ui_camera:       Entity,
-    bounds:          &'a ScreenSpaceBounds,
-    camera_basis:    &'a CameraBasis,
-    average_depth:   f32,
-    projection_mode: ProjectionMode,
-    viewport_size:   Option<Vec2>,
+    camera:        Entity,
+    ui_camera:     Entity,
+    bounds:        &'a ScreenSpaceBounds,
+    viewport_size: Option<Vec2>,
 }
 
 /// Draws margin lines from boundary edges to screen edges and updates margin labels.
 /// Returns the set of edges that had visible margins.
 fn draw_margin_lines_and_labels(
-    commands: &mut Commands,
-    gizmos: &mut Gizmos<FitTargetGizmo>,
+    line_context: &mut FitOverlayLineContext<'_, '_, '_>,
     label_query: &mut Query<(
         Entity,
         &MarginLabel,
@@ -232,9 +167,6 @@ fn draw_margin_lines_and_labels(
 ) -> Vec<Edge> {
     let camera = draw_context.camera;
     let bounds = draw_context.bounds;
-    let camera_basis = draw_context.camera_basis;
-    let average_depth = draw_context.average_depth;
-    let projection_mode = draw_context.projection_mode;
     let viewport_size = draw_context.viewport_size;
     let horizontal_balance = screen_space::horizontal_balance(bounds, TOLERANCE);
     let vertical_balance = screen_space::vertical_balance(bounds, TOLERANCE);
@@ -249,23 +181,20 @@ fn draw_margin_lines_and_labels(
         visible_edges.push(edge);
 
         let (screen_x, screen_y) = screen_space::screen_edge_center(bounds, edge);
-        let boundary_position = screen_space::normalized_to_world(
-            boundary_x,
-            boundary_y,
-            camera_basis,
-            average_depth,
-            projection_mode,
-        );
-        let screen_position = screen_space::normalized_to_world(
-            screen_x,
-            screen_y,
-            camera_basis,
-            average_depth,
-            projection_mode,
-        );
-
         let color = calculate_edge_color(edge, horizontal_balance, vertical_balance, config);
-        gizmos.line(boundary_position, screen_position, color);
+        line_context.upsert_polyline(
+            FitOverlayVisual {
+                camera,
+                kind: FitOverlayVisualKind::MarginLine { edge },
+            },
+            &[
+                Vec2::new(boundary_x, boundary_y),
+                Vec2::new(screen_x, screen_y),
+            ],
+            false,
+            color,
+            config.line_width,
+        );
 
         let Some(viewport_size) = viewport_size else {
             continue;
@@ -276,7 +205,7 @@ fn draw_margin_lines_and_labels(
             labels::calculate_label_pixel_position(edge, bounds, viewport_size);
 
         labels::update_or_create_margin_label(
-            commands,
+            line_context.commands,
             label_query,
             MarginLabelParameters {
                 camera,
@@ -319,65 +248,46 @@ fn cleanup_stale_margin_labels(
     }
 }
 
-/// Observer that cleans up visualization state when `FitVisualization` is removed from a camera.
+/// Observer that cleans up overlay state when `FitOverlay` is removed from a camera.
 pub(super) fn on_remove_fit_visualization(
     trigger: On<Remove, FitOverlay>,
     mut commands: Commands,
     visual_query: Query<(Entity, &FitOverlayVisual)>,
 ) {
     let camera = trigger.entity;
-
-    // Clean up viewport margins from the camera entity.
-    // `try_remove` silently skips if the entity was despawned this frame
-    // (e.g. closing a secondary window triggers component removal during despawn).
-    commands.entity(camera).try_remove::<FitMarginPercents>();
-
-    // Clean up generated visuals belonging to this camera.
-    for (entity, visual) in &visual_query {
-        if visual.camera == camera {
-            commands.entity(entity).despawn();
-        }
-    }
+    reconciliation::clear_camera_visuals(&mut commands, camera, &visual_query);
 }
 
-/// Syncs the gizmo render layers and line width with visualization-enabled cameras.
-pub(super) fn sync_gizmo_render_layers(
-    mut config_store: ResMut<GizmoConfigStore>,
-    visualization_config: Res<FitTargetOverlayConfig>,
-    camera_query: Query<Option<&RenderLayers>, With<FitOverlay>>,
-) {
-    let (gizmo_config, _) = config_store.config_mut::<FitTargetGizmo>();
-    gizmo_config.line.width = visualization_config.line_width;
-    gizmo_config.depth_bias = OVERLAY_GIZMO_DEPTH_BIAS;
-
-    // Apply render layers from the first visualization-enabled camera
-    if let Some(Some(layers)) = camera_query.iter().next() {
-        gizmo_config.render_layers = layers.clone();
-    }
-}
-
-/// Draws screen-aligned bounds for all cameras with `FitVisualization`.
+/// Draws screen-aligned bounds for all cameras with `FitOverlay`.
 pub(super) fn draw_fit_target_bounds(
     mut commands: Commands,
-    mut gizmos: Gizmos<FitTargetGizmo>,
     config: Res<FitTargetOverlayConfig>,
+    mut line_materials: ResMut<FitOverlayLineMaterials>,
     camera_query: Query<
         (
             Entity,
             &Camera,
             &RenderTarget,
+            Option<&RenderLayers>,
             &GlobalTransform,
             &Projection,
-            &CurrentFitTarget,
+            Option<&CurrentFitTarget>,
         ),
         With<FitOverlay>,
     >,
     primary_window: Query<Entity, With<PrimaryWindow>>,
-    all_cameras: Query<(Entity, &Camera, &RenderTarget)>,
+    all_cameras: Query<(
+        Entity,
+        &Camera,
+        &RenderTarget,
+        Option<&Camera2d>,
+        Option<&Camera3d>,
+    )>,
     mesh_query: Query<&Mesh3d>,
     children_query: Query<&Children>,
     global_transform_query: Query<&GlobalTransform>,
-    meshes: Res<Assets<Mesh>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<FitOverlayLineMaterial>>,
     mut label_query: Query<(
         Entity,
         &MarginLabel,
@@ -387,6 +297,9 @@ pub(super) fn draw_fit_target_bounds(
         &mut TextColor,
         &mut UiTargetCamera,
     )>,
+    visual_query: Query<(Entity, &FitOverlayVisual)>,
+    line_query: Query<FitOverlayLineQueryItem, With<FitOverlayLineVisual>>,
+    line_cleanup_query: Query<(Entity, &FitOverlayVisual), With<FitOverlayLineVisual>>,
     mut bounds_label_query: Query<
         (
             Entity,
@@ -399,58 +312,112 @@ pub(super) fn draw_fit_target_bounds(
     >,
 ) {
     let primary_window = primary_window.single().ok();
-    for (camera, camera_component, render_target, camera_global, projection, current_target) in
-        &camera_query
+    for (
+        camera,
+        camera_component,
+        render_target,
+        render_layers,
+        camera_global,
+        projection,
+        current_target,
+    ) in &camera_query
     {
-        let Some((vertices, _)) = projection::extract_mesh_vertices(
-            current_target.0,
-            &children_query,
+        let frame = resolve_fit_overlay_frame(
+            camera,
+            camera_component,
+            render_target,
+            render_layers,
+            primary_window,
+            camera_global,
+            projection,
+            current_target,
             &mesh_query,
+            &children_query,
             &global_transform_query,
             &meshes,
-        ) else {
-            continue;
-        };
-
-        draw_bounds_for_camera(
-            &mut commands,
-            &mut gizmos,
-            &config,
-            &BoundsCamera {
-                entity: camera,
-                camera_component,
-                ui_camera: label_ui_camera(
-                    camera,
-                    render_target,
-                    primary_window,
-                    all_cameras.iter(),
-                ),
-                camera_global,
-                projection,
-            },
-            &vertices,
-            &mut label_query,
-            &mut bounds_label_query,
         );
+
+        match frame {
+            FitOverlayFrame::Visible(layout) => {
+                let line_index = lines::retained_line_entities(&line_query);
+                let mut line_context = FitOverlayLineContext {
+                    commands:       &mut commands,
+                    meshes:         &mut meshes,
+                    materials:      &mut materials,
+                    material_cache: &mut line_materials,
+                    line_index:     &line_index,
+                    layout:         &layout,
+                };
+                draw_bounds_for_camera(
+                    &mut line_context,
+                    &config,
+                    &layout,
+                    label_ui_camera(
+                        layout.context.camera,
+                        &layout.context.normalized_target,
+                        primary_window,
+                        all_cameras.iter(),
+                    ),
+                    &mut label_query,
+                    &mut bounds_label_query,
+                    &line_cleanup_query,
+                );
+            },
+            FitOverlayFrame::Empty(reason) => {
+                reconciliation::clear_empty_frame(&mut commands, camera, reason, &visual_query);
+            },
+        }
     }
 }
 
-/// Camera data for bounds visualization.
-struct BoundsCamera<'a> {
-    entity:           Entity,
-    ui_camera:        Entity,
-    camera_component: &'a Camera,
-    camera_global:    &'a GlobalTransform,
-    projection:       &'a Projection,
+fn resolve_fit_overlay_frame(
+    camera: Entity,
+    camera_component: &Camera,
+    render_target: &RenderTarget,
+    render_layers: Option<&RenderLayers>,
+    primary_window: Option<Entity>,
+    camera_global: &GlobalTransform,
+    projection: &Projection,
+    current_target: Option<&CurrentFitTarget>,
+    mesh_query: &Query<&Mesh3d>,
+    children_query: &Query<&Children>,
+    global_transform_query: &Query<&GlobalTransform>,
+    meshes: &Assets<Mesh>,
+) -> FitOverlayFrame {
+    let context = match FitOverlayCameraContext::resolve(
+        camera,
+        camera_component,
+        render_target,
+        render_layers,
+        primary_window,
+    ) {
+        Ok(context) => context,
+        Err(reason) => return FitOverlayFrame::Empty(reason),
+    };
+
+    let Some(current_target) = current_target else {
+        return FitOverlayFrame::Empty(FitOverlayEmptyReason::MissingCurrentFitTarget);
+    };
+
+    let Some((vertices, _)) = projection::extract_mesh_vertices(
+        current_target.0,
+        children_query,
+        mesh_query,
+        global_transform_query,
+        meshes,
+    ) else {
+        return FitOverlayFrame::Empty(FitOverlayEmptyReason::MissingMesh);
+    };
+
+    FitOverlayLayout::from_vertices(context, camera_global, projection, vertices)
 }
 
 /// Draws bounds visualization for a single camera/target pair.
 fn draw_bounds_for_camera(
-    commands: &mut Commands,
-    gizmos: &mut Gizmos<FitTargetGizmo>,
+    line_context: &mut FitOverlayLineContext<'_, '_, '_>,
     config: &FitTargetOverlayConfig,
-    camera_data: &BoundsCamera,
-    vertices: &[Vec3],
+    layout: &FitOverlayLayout,
+    ui_camera: Entity,
     label_query: &mut Query<(
         Entity,
         &MarginLabel,
@@ -470,110 +437,121 @@ fn draw_bounds_for_camera(
         ),
         Without<MarginLabel>,
     >,
+    line_cleanup_query: &Query<(Entity, &FitOverlayVisual), With<FitOverlayLineVisual>>,
 ) {
-    let camera = camera_data.entity;
-    let ui_camera = camera_data.ui_camera;
-    let camera_component = camera_data.camera_component;
-    let camera_global = camera_data.camera_global;
-    let projection = camera_data.projection;
+    let camera = layout.context.camera;
+    let bounds = &layout.bounds;
+    let viewport_size = layout.viewport_size;
+    let mut desired_line_kinds = Vec::new();
 
-    let camera_basis = CameraBasis::from(camera_global);
-
-    let Some(aspect_ratio) =
-        projection::projection_aspect_ratio(projection, camera_component.logical_viewport_size())
-    else {
-        return;
-    };
-
-    let Some((bounds, depths)) =
-        ScreenSpaceBounds::from_points(vertices, camera_global, projection, aspect_ratio)
-    else {
-        return;
-    };
-
-    let average_depth = depths.sum / depths.count.to_f32();
-    let projection_mode = match projection {
-        Projection::Perspective(_) => Some(ProjectionMode::Perspective),
-        Projection::Orthographic(_) => Some(ProjectionMode::Orthographic),
-        Projection::Custom(_) => None,
-    };
-    let Some(projection_mode) = projection_mode else {
-        return;
-    };
-    let viewport_size = camera_component.logical_viewport_size();
+    bevy::log::trace!(
+        "drawing fit overlay for {camera:?} with order {} and layers {:?}",
+        layout.context.order,
+        layout.context.layers
+    );
 
     // Update margin percentages on camera entity for BRP inspection.
     // `try_insert` silently skips if the entity was despawned this frame
     // (e.g. closing a secondary window while visualization is active).
-    commands
+    line_context
+        .commands
         .entity(camera)
-        .try_insert(FitMarginPercents::from(&bounds));
+        .try_insert(FitMarginPercents::from(bounds));
 
-    // Bounding rectangle
-    let corners = create_screen_corners(&bounds, &camera_basis, average_depth, projection_mode);
-    draw_rectangle(gizmos, &corners, config);
-
-    // Silhouette convex hull
-    draw_silhouette(
-        gizmos,
-        vertices,
-        &camera_basis,
-        average_depth,
-        projection_mode,
-        config.silhouette_color,
+    let rectangle = rectangle_points(bounds);
+    line_context.upsert_polyline(
+        FitOverlayVisual {
+            camera,
+            kind: FitOverlayVisualKind::Rectangle,
+        },
+        &rectangle,
+        true,
+        config.rectangle_color,
+        config.line_width,
     );
+    desired_line_kinds.push(FitOverlayVisualKind::Rectangle);
+
+    let silhouette = silhouette_points(layout);
+    if silhouette.len() >= 2 {
+        line_context.upsert_polyline(
+            FitOverlayVisual {
+                camera,
+                kind: FitOverlayVisualKind::Silhouette,
+            },
+            &silhouette,
+            true,
+            config.silhouette_color,
+            config.line_width,
+        );
+        desired_line_kinds.push(FitOverlayVisualKind::Silhouette);
+    }
 
     // "Screen space bounds" label
-    if let Some(viewport_size) = viewport_size {
-        let upper_left = screen_space::norm_to_viewport(
-            bounds.min_normalized_x,
-            bounds.max_normalized_y,
-            bounds.half_extent_x,
-            bounds.half_extent_y,
-            viewport_size,
-        );
-        labels::update_or_create_bounds_label(
-            commands,
-            bounds_label_query,
-            camera,
-            ui_camera,
-            labels::bounds_label_position(upper_left),
-        );
-    }
+    let upper_left = screen_space::norm_to_viewport(
+        bounds.min_normalized_x,
+        bounds.max_normalized_y,
+        bounds.half_extent_x,
+        bounds.half_extent_y,
+        viewport_size,
+    );
+    labels::update_or_create_bounds_label(
+        line_context.commands,
+        bounds_label_query,
+        camera,
+        ui_camera,
+        labels::bounds_label_position(upper_left),
+    );
 
     // Margin lines + labels
     let draw_context = DrawContext {
         camera,
         ui_camera,
-        bounds: &bounds,
-        camera_basis: &camera_basis,
-        average_depth,
-        projection_mode,
-        viewport_size,
+        bounds,
+        viewport_size: Some(viewport_size),
     };
     let visible_edges =
-        draw_margin_lines_and_labels(commands, gizmos, label_query, &draw_context, config);
+        draw_margin_lines_and_labels(line_context, label_query, &draw_context, config);
+    desired_line_kinds.extend(
+        visible_edges
+            .iter()
+            .map(|&edge| FitOverlayVisualKind::MarginLine { edge }),
+    );
 
     // Remove stale margin labels for this camera
-    cleanup_stale_margin_labels(commands, label_query, camera, &visible_edges);
+    cleanup_stale_margin_labels(line_context.commands, label_query, camera, &visible_edges);
+    lines::clear_stale_lines(
+        line_context.commands,
+        camera,
+        &desired_line_kinds,
+        line_cleanup_query,
+    );
 }
 
 fn label_ui_camera<'a>(
     source_camera: Entity,
-    source_target: &RenderTarget,
+    source_target: &NormalizedRenderTarget,
     primary_window: Option<Entity>,
-    cameras: impl IntoIterator<Item = (Entity, &'a Camera, &'a RenderTarget)>,
+    cameras: impl IntoIterator<
+        Item = (
+            Entity,
+            &'a Camera,
+            &'a RenderTarget,
+            Option<&'a Camera2d>,
+            Option<&'a Camera3d>,
+        ),
+    >,
 ) -> Entity {
-    let Some(source_target) = source_target.normalize(primary_window) else {
-        return source_camera;
-    };
+    // Bevy UI only extracts Camera2d/Camera3d views. The source camera remains
+    // the fallback when it is the only suitable same-target UI camera.
     cameras
         .into_iter()
-        .filter(|(_, camera, target)| {
-            camera.is_active && target.normalize(primary_window).as_ref() == Some(&source_target)
+        .filter(|(_, camera, target, camera_2d, camera_3d)| {
+            camera.is_active
+                && target.normalize(primary_window).as_ref() == Some(source_target)
+                && (camera_2d.is_some() || camera_3d.is_some())
         })
-        .max_by_key(|(entity, camera, _)| (camera.order, *entity))
-        .map_or(source_camera, |(entity, _, _)| entity)
+        .max_by_key(|(entity, camera, _, _, _)| (camera.order, *entity))
+        .map_or(source_camera, |(entity, _, _, _, _)| entity)
 }
 
 #[cfg(test)]
@@ -583,7 +561,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn label_ui_camera_uses_top_camera_on_same_primary_window() {
+    fn label_ui_camera_uses_top_camera_on_same_primary_window() -> Result<(), &'static str> {
         let mut world = World::new();
         let primary_window = world.spawn_empty().id();
         let other_window_entity = world.spawn_empty().id();
@@ -596,21 +574,126 @@ mod tests {
         let overlay = camera(100, true);
         let inactive = camera(200, false);
         let other_window = camera(300, true);
+        let source_3d = Camera3d::default();
+        let overlay_3d = Camera3d::default();
+        let inactive_3d = Camera3d::default();
+        let other_window_3d = Camera3d::default();
 
         let source_target = RenderTarget::Window(WindowRef::Primary);
         let overlay_target = RenderTarget::Window(WindowRef::Entity(primary_window));
         let other_target = RenderTarget::Window(WindowRef::Entity(other_window_entity));
+        let normalized_source_target = source_target
+            .normalize(Some(primary_window))
+            .ok_or("source target should normalize")?;
         let cameras = [
-            (source_camera, &source, &source_target),
-            (overlay_camera, &overlay, &overlay_target),
-            (inactive_camera, &inactive, &overlay_target),
-            (other_window_camera, &other_window, &other_target),
+            (
+                source_camera,
+                &source,
+                &source_target,
+                None,
+                Some(&source_3d),
+            ),
+            (
+                overlay_camera,
+                &overlay,
+                &overlay_target,
+                None,
+                Some(&overlay_3d),
+            ),
+            (
+                inactive_camera,
+                &inactive,
+                &overlay_target,
+                None,
+                Some(&inactive_3d),
+            ),
+            (
+                other_window_camera,
+                &other_window,
+                &other_target,
+                None,
+                Some(&other_window_3d),
+            ),
         ];
 
         assert_eq!(
-            label_ui_camera(source_camera, &source_target, Some(primary_window), cameras),
+            label_ui_camera(
+                source_camera,
+                &normalized_source_target,
+                Some(primary_window),
+                cameras
+            ),
             overlay_camera
         );
+        Ok(())
+    }
+
+    #[test]
+    fn label_ui_camera_falls_back_to_ui_renderable_source_camera() -> Result<(), &'static str> {
+        let mut world = World::new();
+        let primary_window = world.spawn_empty().id();
+        let source_camera = world.spawn_empty().id();
+        let non_ui_camera = world.spawn_empty().id();
+
+        let source = camera(0, true);
+        let non_ui = camera(500, true);
+        let source_3d = Camera3d::default();
+
+        let target = RenderTarget::Window(WindowRef::Primary);
+        let normalized_target = target
+            .normalize(Some(primary_window))
+            .ok_or("target should normalize")?;
+        let cameras = [
+            (source_camera, &source, &target, None, Some(&source_3d)),
+            (non_ui_camera, &non_ui, &target, None, None),
+        ];
+
+        assert_eq!(
+            label_ui_camera(
+                source_camera,
+                &normalized_target,
+                Some(primary_window),
+                cameras
+            ),
+            source_camera
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn label_ui_camera_skips_non_ui_render_camera_on_same_target() -> Result<(), &'static str> {
+        let mut world = World::new();
+        let primary_window = world.spawn_empty().id();
+        let source_camera = world.spawn_empty().id();
+        let non_ui_camera = world.spawn_empty().id();
+        let overlay_camera = world.spawn_empty().id();
+
+        let source = camera(0, true);
+        let non_ui = camera(500, true);
+        let overlay = camera(100, true);
+        let source_3d = Camera3d::default();
+        let overlay_3d = Camera3d::default();
+
+        let target = RenderTarget::Window(WindowRef::Primary);
+        let normalized_target = target
+            .normalize(Some(primary_window))
+            .ok_or("target should normalize")?;
+        let cameras = [
+            (source_camera, &source, &target, None, Some(&source_3d)),
+            (non_ui_camera, &non_ui, &target, None, None),
+            (overlay_camera, &overlay, &target, None, Some(&overlay_3d)),
+        ];
+
+        assert_eq!(
+            label_ui_camera(
+                source_camera,
+                &normalized_target,
+                Some(primary_window),
+                cameras
+            ),
+            overlay_camera
+        );
+        Ok(())
     }
 
     fn camera(order: isize, is_active: bool) -> Camera {

@@ -18,13 +18,12 @@ workspace = true
 default = ["reflect-input-modes"]
 fit_overlay = [
   "bevy/bevy_asset",
-  "bevy/bevy_gizmos",
   "bevy/bevy_mesh",
   "bevy/bevy_pbr",
   "bevy/bevy_picking",
-  "bevy/bevy_state",
   "bevy/bevy_text",
   "bevy/bevy_ui",
+  "bevy/bevy_ui_render",
 ]
 reflect-input-modes = []
 

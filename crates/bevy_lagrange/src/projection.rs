@@ -136,7 +136,7 @@ pub(crate) fn projection_aspect_ratio(
 
 /// Depths of the extreme projected points, tracked during the projection loop.
 /// Used by the fit algorithm for perspective-correct centering (harmonic mean)
-/// and by `fit_overlay` for average depth (gizmo placement).
+/// and by `fit_overlay` for average depth of retained line placement.
 #[derive(Debug, Clone)]
 pub(crate) struct PointDepths {
     pub min_x: f32,
