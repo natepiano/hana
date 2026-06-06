@@ -9,7 +9,6 @@ use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
-use super::RadiusMultiplier;
 use super::constants::CAP_STYLE_ENDPOINT_X_MULTIPLIERS;
 use super::constants::CAP_STYLE_LEFT_TUBE_INDEX;
 use super::constants::CAP_STYLE_LIGHT_PHASES;
@@ -98,7 +97,7 @@ pub(super) fn setup_section_cap_styles(
                 color: POINT_LIGHT_COLOR,
                 intensity: POINT_LIGHT_INTENSITY,
                 range: POINT_LIGHT_RANGE,
-                shadows_enabled: false,
+                shadow_maps_enabled: false,
                 ..default()
             },
             Transform::from_translation(start.lerp(end, initial_t)),
@@ -148,7 +147,6 @@ fn spawn_cap_style_tube(
                 material: Some(material),
                 ..default()
             },
-            RadiusMultiplier(CAP_STYLE_RADIUS_MULTIPLIER),
         ))
         .with_children(|parent| {
             parent.spawn(CableEndpoint::new(CableEnd::Start, start).with_cap(start_cap));

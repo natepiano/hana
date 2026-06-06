@@ -7,7 +7,7 @@
 //! # Architecture
 //!
 //! The crate is split into two layers:
-//! - [`routing`] — Pure math module (depends only on `glam`). Produces [`CableGeometry`].
+//! - `routing` — Pure math module (depends only on `glam`). Produces [`CableGeometry`].
 //! - Bevy integration layer — consumes [`CableGeometry`] for rendering.
 //!
 //! # Quick Start

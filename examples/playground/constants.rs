@@ -138,37 +138,14 @@ pub(crate) const SECTION_BOUNDS_SPAN_MULTIPLIER: f32 = 2.0;
 pub(crate) const SECTION_BOUNDS_WIDTH_PADDING: f32 = 2.0;
 
 // tube mesh
-pub(crate) const JOINT_RADIUS_MULTIPLIER: f32 = 1.5;
-pub(crate) const JOINT_SPHERE_SEGMENTS: u32 = 16;
 pub(crate) const TUBE_RADIUS: f32 = 0.06;
-pub(crate) const TUBE_SIDES: u32 = 32;
 
 // ui
 pub(crate) const CAMERA_HELP: &str = "Orbit: Middle-mouse (or trackpad)\n\
                                       Pan: Shift + middle-mouse\n\
                                       Zoom: Scroll wheel (or pinch)";
-pub(crate) const DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG: f32 = 25.0;
-pub(crate) const DEFAULT_ELBOW_ARM_MULTIPLIER: f32 = 1.0;
-pub(crate) const DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER: f32 = 1.0;
-pub(crate) const DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER: f32 = 0.5;
-pub(crate) const DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE: u32 = 32;
-pub(crate) const ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MAX: f32 = 90.0;
-pub(crate) const ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MIN: f32 = 1.0;
-pub(crate) const ELBOW_ARM_MULTIPLIER_SLIDER_MAX: f32 = 3.0;
-pub(crate) const ELBOW_ARM_MULTIPLIER_SLIDER_MIN: f32 = 0.1;
-pub(crate) const ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MAX: f32 = 20.0;
-pub(crate) const ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MIN: f32 = 1.0;
-pub(crate) const ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MAX: f32 = 5.0;
-pub(crate) const ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MIN: f32 = 0.5;
-pub(crate) const ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MAX: u32 = 32;
-pub(crate) const ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MIN: u32 = 2;
-pub(crate) const JOINT_RADIUS_MULTIPLIER_SLIDER_MAX: f32 = 4.0;
-pub(crate) const JOINT_RADIUS_MULTIPLIER_SLIDER_MIN: f32 = 1.0;
-pub(crate) const JOINT_SEGMENTS_SLIDER_MAX: u32 = 32;
-pub(crate) const JOINT_SEGMENTS_SLIDER_MIN: u32 = 8;
 pub(crate) const KEYBOARD_SHORTCUTS_HELP: &str = "D - Debug gizmos\n\
                                                   F - Full scene\n\
-                                                  I - Inspector\n\
                                                   +/- Slack";
 pub(crate) const OVERLAY_MARGIN: f32 = 12.0;
 pub(crate) const SECTION_INFO_CENTER_X_PERCENT: f32 = 50.0;
@@ -198,8 +175,4 @@ pub(crate) const SECTION_INFO_TEXTS: [(usize, &str); 7] = [
 ];
 pub(crate) const SECTION_INFO_TOP: f32 = 60.0;
 pub(crate) const SECTION_INFO_WIDTH: f32 = 400.0;
-pub(crate) const TUBE_RADIUS_SLIDER_MAX: f32 = 0.3;
-pub(crate) const TUBE_RADIUS_SLIDER_MIN: f32 = 0.01;
-pub(crate) const TUBE_SIDES_SLIDER_MAX: u32 = 64;
-pub(crate) const TUBE_SIDES_SLIDER_MIN: u32 = 1;
 pub(crate) const UI_FONT_SIZE: f32 = 14.0;

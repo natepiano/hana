@@ -73,7 +73,7 @@ pub(super) fn on_geometry_computed(
 
     if let Some(handle) = mesh_handle {
         // Update existing mesh asset in place
-        if let Some(existing) = meshes.get_mut(&handle.0) {
+        if let Some(mut existing) = meshes.get_mut(&handle.0) {
             *existing = new_mesh;
         }
     } else {

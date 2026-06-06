@@ -45,7 +45,7 @@ pub(crate) fn setup_section_connector(
     asset_server: &AssetServer,
 ) {
     let section_center_x = SECTION_X[CONNECTOR_SECTION_INDEX];
-    let plug_scene: Handle<Scene> = asset_server.load(CONNECTOR_MODEL_PATH);
+    let plug_scene: Handle<WorldAsset> = asset_server.load(CONNECTOR_MODEL_PATH);
 
     let configs = [
         (
@@ -106,7 +106,7 @@ pub(crate) fn setup_section_connector(
 
         let plug = commands
             .spawn((
-                SceneRoot(plug_scene.clone()),
+                WorldAssetRoot(plug_scene.clone()),
                 Transform::from_translation(end).with_scale(Vec3::splat(CONNECTOR_MODEL_SCALE)),
                 Draggable,
             ))

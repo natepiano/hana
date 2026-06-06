@@ -178,7 +178,7 @@ pub(crate) fn spawn_navigation_bar(commands: &mut Commands, camera: Entity) {
                 .with_child((
                     Text::new(NAVIGATION_PREVIOUS_LABEL),
                     TextFont {
-                        font_size: NAVIGATION_FONT_SIZE,
+                        font_size: FontSize::Px(NAVIGATION_FONT_SIZE),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -195,7 +195,7 @@ pub(crate) fn spawn_navigation_bar(commands: &mut Commands, camera: Entity) {
                         "{initial_section_number} / {SECTION_COUNT} - {initial_section_title}"
                     )),
                     TextFont {
-                        font_size: NAVIGATION_FONT_SIZE,
+                        font_size: FontSize::Px(NAVIGATION_FONT_SIZE),
                         ..default()
                     },
                     TextColor(Color::WHITE),
@@ -219,7 +219,7 @@ pub(crate) fn spawn_navigation_bar(commands: &mut Commands, camera: Entity) {
                 .with_child((
                     Text::new(NAVIGATION_NEXT_LABEL),
                     TextFont {
-                        font_size: NAVIGATION_FONT_SIZE,
+                        font_size: FontSize::Px(NAVIGATION_FONT_SIZE),
                         ..default()
                     },
                     TextColor(Color::WHITE),

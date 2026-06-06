@@ -8,7 +8,6 @@ use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
 
-use super::RadiusMultiplier;
 use super::constants::INSIDE_VIEW_END_Y_OFFSET;
 use super::constants::INSIDE_VIEW_ENDPOINT_X_OFFSET;
 use super::constants::INSIDE_VIEW_START_Y_OFFSET;
@@ -53,7 +52,6 @@ pub(super) fn setup_section_inside_view(
                 material: Some(cable_material.clone()),
                 ..default()
             },
-            RadiusMultiplier(INSIDE_VIEW_RADIUS_MULTIPLIER),
         ))
         .with_children(|parent| {
             parent.spawn(CableEndpoint::new(CableEnd::Start, start).with_cap(Capping::None));

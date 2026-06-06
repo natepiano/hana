@@ -10,7 +10,6 @@ mod scaffold;
 mod shared_hub;
 mod solver_comparison;
 
-pub(crate) use scaffold::RadiusMultiplier;
 pub(crate) use scaffold::SceneEntities;
 pub(crate) use scaffold::SharedCableMaterial;
 pub(crate) use scaffold::setup_camera;

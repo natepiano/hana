@@ -14,15 +14,12 @@
 //! - Zoom: Scroll wheel (or pinch)
 //! - D: Toggle debug gizmos
 //! - H: Home -zoom to fit entire scene
-//! - I: Toggle inspector
 //! - R: Reset detach demo (section 6)
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_catenary::CatenaryPlugin;
-use bevy_inspector_egui::bevy_egui::EguiPlugin;
-use bevy_inspector_egui::quick::ResourceInspectorPlugin;
 use bevy_lagrange::LagrangePlugin;
 
 mod animation;
@@ -40,8 +37,6 @@ use animation::LightAnimation;
 use constants::CATENARY_SECTION_INDEX;
 use constants::PLAYGROUND_WINDOW_TITLE;
 use sections::CurrentSection;
-use ui::CableSettings;
-use ui::InspectorVisibility;
 
 fn main() {
     App::new()
@@ -53,19 +48,11 @@ fn main() {
                 }),
                 ..default()
             }),
-            EguiPlugin::default(),
             LagrangePlugin,
             MeshPickingPlugin,
             BrpExtrasPlugin::default(),
             CatenaryPlugin,
-            ResourceInspectorPlugin::<CableSettings>::default().run_if(
-                |visible: Res<InspectorVisibility>| {
-                    matches!(*visible, InspectorVisibility::Visible)
-                },
-            ),
         ))
-        .init_resource::<CableSettings>()
-        .init_resource::<InspectorVisibility>()
         .init_resource::<input::DragState>()
         .init_resource::<LightAnimation>()
         .insert_resource(CurrentSection(CATENARY_SECTION_INDEX))
@@ -85,7 +72,6 @@ fn main() {
                 input::handle_keyboard,
                 navigation::handle_navigation_buttons,
                 input::handle_drag,
-                ui::sync_cable_settings.run_if(resource_changed::<CableSettings>),
                 animation::animate_tube_light,
             ),
         )

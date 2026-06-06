@@ -13,7 +13,6 @@ pub(super) const ASTAR_SECTION_Z: f32 = 0.0;
 pub(super) const CAMERA_FOCUS_Y_MULTIPLIER: f32 = 0.5;
 pub(super) const CAMERA_PITCH: f32 = 0.45;
 pub(super) const CAMERA_RADIUS: f32 = 12.0;
-pub(super) const CAMERA_TRACKPAD_SENSITIVITY: f32 = 0.3;
 pub(super) const CAMERA_YAW: f32 = 0.0;
 
 // cap styles

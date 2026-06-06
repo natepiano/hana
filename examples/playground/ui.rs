@@ -1,35 +1,9 @@
-//! Inspector settings, UI overlays, and cable-config sync.
+//! UI overlays for the cable playground.
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_catenary::Cable;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::ComputedCableGeometry;
-use bevy_inspector_egui::inspector_options::std_options::NumberDisplay;
-use bevy_inspector_egui::prelude::*;
 
 use super::constants::CAMERA_HELP;
-use super::constants::DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG;
-use super::constants::DEFAULT_ELBOW_ARM_MULTIPLIER;
-use super::constants::DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER;
-use super::constants::DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER;
-use super::constants::DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE;
-use super::constants::ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MAX;
-use super::constants::ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MIN;
-use super::constants::ELBOW_ARM_MULTIPLIER_SLIDER_MAX;
-use super::constants::ELBOW_ARM_MULTIPLIER_SLIDER_MIN;
-use super::constants::ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MAX;
-use super::constants::ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MIN;
-use super::constants::ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MAX;
-use super::constants::ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MIN;
-use super::constants::ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MAX;
-use super::constants::ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MIN;
-use super::constants::JOINT_RADIUS_MULTIPLIER;
-use super::constants::JOINT_RADIUS_MULTIPLIER_SLIDER_MAX;
-use super::constants::JOINT_RADIUS_MULTIPLIER_SLIDER_MIN;
-use super::constants::JOINT_SEGMENTS_SLIDER_MAX;
-use super::constants::JOINT_SEGMENTS_SLIDER_MIN;
-use super::constants::JOINT_SPHERE_SEGMENTS;
 use super::constants::KEYBOARD_SHORTCUTS_HELP;
 use super::constants::OVERLAY_MARGIN;
 use super::constants::SECTION_INFO_BACKGROUND;
@@ -38,123 +12,10 @@ use super::constants::SECTION_INFO_LEFT_OFFSET;
 use super::constants::SECTION_INFO_TEXTS;
 use super::constants::SECTION_INFO_TOP;
 use super::constants::SECTION_INFO_WIDTH;
-use super::constants::TUBE_RADIUS;
-use super::constants::TUBE_RADIUS_SLIDER_MAX;
-use super::constants::TUBE_RADIUS_SLIDER_MIN;
-use super::constants::TUBE_SIDES;
-use super::constants::TUBE_SIDES_SLIDER_MAX;
-use super::constants::TUBE_SIDES_SLIDER_MIN;
 use super::constants::UI_FONT_SIZE;
 use super::navigation;
-use super::scene::RadiusMultiplier;
 use super::scene::SceneEntities;
 use super::sections::SectionInfo;
-
-#[derive(Default, Resource)]
-pub(crate) enum InspectorVisibility {
-    Visible,
-    #[default]
-    Hidden,
-}
-
-#[derive(Resource, Reflect, InspectorOptions)]
-#[reflect(Resource, InspectorOptions)]
-pub(crate) struct CableSettings {
-    pub(crate) tube:  TubeSettings,
-    pub(crate) joint: JointSettings,
-    pub(crate) elbow: ElbowSettings,
-}
-
-#[derive(Reflect, InspectorOptions)]
-#[reflect(InspectorOptions)]
-pub(crate) struct TubeSettings {
-    #[inspector(
-        min = TUBE_RADIUS_SLIDER_MIN,
-        max = TUBE_RADIUS_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) radius: f32,
-    #[inspector(
-        min = TUBE_SIDES_SLIDER_MIN,
-        max = TUBE_SIDES_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) sides:  u32,
-}
-
-#[derive(Reflect, InspectorOptions)]
-#[reflect(InspectorOptions)]
-pub(crate) struct JointSettings {
-    #[inspector(
-        min = JOINT_RADIUS_MULTIPLIER_SLIDER_MIN,
-        max = JOINT_RADIUS_MULTIPLIER_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) radius_multiplier: f32,
-    #[inspector(
-        min = JOINT_SEGMENTS_SLIDER_MIN,
-        max = JOINT_SEGMENTS_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) segments:          u32,
-}
-
-#[derive(Reflect, InspectorOptions)]
-#[reflect(InspectorOptions)]
-pub(crate) struct ElbowSettings {
-    #[inspector(
-        min = ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MIN,
-        max = ELBOW_BEND_RADIUS_MULTIPLIER_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) bend_radius_multiplier: f32,
-    #[inspector(
-        min = ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MIN,
-        max = ELBOW_MIN_RADIUS_MULTIPLIER_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) min_radius_multiplier:  f32,
-    #[inspector(
-        min = ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MIN,
-        max = ELBOW_RINGS_PER_RIGHT_ANGLE_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) rings_per_right_angle:  u32,
-    #[inspector(
-        min = ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MIN,
-        max = ELBOW_ANGLE_THRESHOLD_DEG_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) angle_threshold_deg:    f32,
-    #[inspector(
-        min = ELBOW_ARM_MULTIPLIER_SLIDER_MIN,
-        max = ELBOW_ARM_MULTIPLIER_SLIDER_MAX,
-        display = NumberDisplay::Slider
-    )]
-    pub(crate) arm_multiplier:         f32,
-}
-
-impl Default for CableSettings {
-    fn default() -> Self {
-        Self {
-            tube:  TubeSettings {
-                radius: TUBE_RADIUS,
-                sides:  TUBE_SIDES,
-            },
-            joint: JointSettings {
-                radius_multiplier: JOINT_RADIUS_MULTIPLIER,
-                segments:          JOINT_SPHERE_SEGMENTS,
-            },
-            elbow: ElbowSettings {
-                bend_radius_multiplier: DEFAULT_ELBOW_BEND_RADIUS_MULTIPLIER,
-                min_radius_multiplier:  DEFAULT_ELBOW_MIN_RADIUS_MULTIPLIER,
-                rings_per_right_angle:  DEFAULT_ELBOW_RINGS_PER_RIGHT_ANGLE,
-                angle_threshold_deg:    DEFAULT_ELBOW_ANGLE_THRESHOLD_DEG,
-                arm_multiplier:         DEFAULT_ELBOW_ARM_MULTIPLIER,
-            },
-        }
-    }
-}
 
 pub(crate) fn setup_ui(mut commands: Commands, scene_entities: Res<SceneEntities>) {
     spawn_help_text(&mut commands, scene_entities.camera);
@@ -168,11 +29,11 @@ fn spawn_section_infos(commands: &mut Commands, camera: Entity) {
         commands.spawn((
             Text::new(text),
             TextFont {
-                font_size: UI_FONT_SIZE,
+                font_size: FontSize::Px(UI_FONT_SIZE),
                 ..default()
             },
             TextColor(Color::WHITE),
-            TextLayout::new_with_justify(Justify::Center),
+            TextLayout::justify(Justify::Center),
             Node {
                 position_type: PositionType::Absolute,
                 top: Val::Px(SECTION_INFO_TOP),
@@ -195,7 +56,7 @@ fn spawn_help_text(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(CAMERA_HELP),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         Node {
@@ -213,7 +74,7 @@ fn spawn_keyboard_shortcuts(commands: &mut Commands, camera: Entity) {
     commands.spawn((
         Text::new(KEYBOARD_SHORTCUTS_HELP),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         Node {
@@ -225,37 +86,4 @@ fn spawn_keyboard_shortcuts(commands: &mut Commands, camera: Entity) {
         Pickable::IGNORE,
         UiTargetCamera(camera),
     ));
-}
-
-pub(crate) fn sync_cable_settings(
-    cable_settings: Res<CableSettings>,
-    mut commands: Commands,
-    cables: Query<
-        (
-            Entity,
-            &CableMeshConfig,
-            &ComputedCableGeometry,
-            Option<&RadiusMultiplier>,
-        ),
-        With<Cable>,
-    >,
-) {
-    for (entity, cable_mesh_config, computed, multiplier) in &cables {
-        let mut updated_cable_mesh_config = cable_mesh_config.clone();
-        let mult = multiplier.map_or(1.0, |m| m.0);
-        updated_cable_mesh_config.tube.radius = cable_settings.tube.radius * mult;
-        updated_cable_mesh_config.tube.sides = cable_settings.tube.sides;
-        updated_cable_mesh_config.elbow.bend_radius_multiplier =
-            cable_settings.elbow.bend_radius_multiplier;
-        updated_cable_mesh_config.elbow.min_radius_multiplier =
-            cable_settings.elbow.min_radius_multiplier;
-        updated_cable_mesh_config.elbow.rings_per_right_angle =
-            cable_settings.elbow.rings_per_right_angle;
-        updated_cable_mesh_config.elbow.angle_threshold_deg =
-            cable_settings.elbow.angle_threshold_deg;
-        updated_cable_mesh_config.elbow.arm_multiplier = cable_settings.elbow.arm_multiplier;
-        commands
-            .entity(entity)
-            .insert((updated_cable_mesh_config, computed.clone()));
-    }
 }

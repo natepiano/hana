@@ -30,7 +30,6 @@ use super::scene::SceneEntities;
 use super::scene::SharedCableMaterial;
 use super::sections::CurrentSection;
 use super::sections::SectionBounds;
-use super::ui::InspectorVisibility;
 
 #[derive(Resource, Default)]
 pub(crate) struct DragState {
@@ -179,7 +178,6 @@ pub(crate) fn handle_keyboard(
     keyboard: Res<ButtonInput<KeyCode>>,
     mut commands: Commands,
     mut debug_gizmos: ResMut<DebugGizmos>,
-    mut inspector_visible: ResMut<InspectorVisibility>,
     scene_entities: Res<SceneEntities>,
     mut cables: Query<&mut Cable, Without<SlackLocked>>,
     shared_cable_material: Res<SharedCableMaterial>,
@@ -196,13 +194,6 @@ pub(crate) fn handle_keyboard(
         *debug_gizmos = match *debug_gizmos {
             DebugGizmos::Enabled => DebugGizmos::Disabled,
             DebugGizmos::Disabled => DebugGizmos::Enabled,
-        };
-    }
-
-    if keyboard.just_pressed(KeyCode::KeyI) {
-        *inspector_visible = match *inspector_visible {
-            InspectorVisibility::Visible => InspectorVisibility::Hidden,
-            InspectorVisibility::Hidden => InspectorVisibility::Visible,
         };
     }
 

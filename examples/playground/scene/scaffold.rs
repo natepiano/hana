@@ -1,8 +1,7 @@
 use bevy::prelude::*;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadBehavior;
-use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 
 use super::astar;
 use super::cap_styles;
@@ -10,7 +9,6 @@ use super::catenary;
 use super::constants::CAMERA_FOCUS_Y_MULTIPLIER;
 use super::constants::CAMERA_PITCH;
 use super::constants::CAMERA_RADIUS;
-use super::constants::CAMERA_TRACKPAD_SENSITIVITY;
 use super::constants::CAMERA_YAW;
 use super::constants::DIRECTIONAL_LIGHT_ROTATION;
 use super::constants::GROUND_COLOR;
@@ -56,11 +54,6 @@ pub(crate) struct SceneEntities {
 #[derive(Resource)]
 pub(crate) struct SharedCableMaterial(pub(crate) Handle<StandardMaterial>);
 
-/// Marker for cables with a radius multiplier relative to the inspector setting.
-/// The `sync_cable_settings` system applies `radius * multiplier` instead of raw radius.
-#[derive(Component)]
-pub(crate) struct RadiusMultiplier(pub(crate) f32);
-
 pub(crate) fn setup_camera(mut commands: Commands) {
     let focus = Vec3::new(
         SECTION_X[CATENARY_SECTION_INDEX],
@@ -68,33 +61,23 @@ pub(crate) fn setup_camera(mut commands: Commands) {
         SECTION_Z,
     );
     let camera = commands
-        .spawn(OrbitCam {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput {
-                    behavior:    TrackpadBehavior::BlenderLike {
-                        modifier_pan:  Some(KeyCode::ShiftLeft),
-                        modifier_zoom: Some(KeyCode::ControlLeft),
-                    },
-                    sensitivity: CAMERA_TRACKPAD_SENSITIVITY,
-                }),
-                ..Default::default()
-            }),
-            focus,
-            target_focus: focus,
-            yaw: Some(CAMERA_YAW),
-            pitch: Some(CAMERA_PITCH),
-            radius: Some(CAMERA_RADIUS),
-            ..default()
-        })
+        .spawn((
+            OrbitCam {
+                focus,
+                target_focus: focus,
+                yaw: Some(CAMERA_YAW),
+                pitch: Some(CAMERA_PITCH),
+                radius: Some(CAMERA_RADIUS),
+                ..default()
+            },
+            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        ))
         .with_child(SpotLight {
             intensity: SCENE_SPOTLIGHT_INTENSITY,
             range: SCENE_SPOTLIGHT_RANGE,
             outer_angle: SCENE_SPOTLIGHT_OUTER_ANGLE,
             inner_angle: SCENE_SPOTLIGHT_INNER_ANGLE,
-            shadows_enabled: false,
+            shadow_maps_enabled: false,
             ..default()
         })
         .id();
@@ -129,7 +112,7 @@ pub(crate) fn setup_scene(
     commands.spawn((
         DirectionalLight {
             illuminance: DIRECTIONAL_LIGHT_ILLUMINANCE,
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_rotation(Quat::from_euler(

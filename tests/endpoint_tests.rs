@@ -10,6 +10,7 @@ use bevy::app::App;
 use bevy::asset::AssetPlugin;
 use bevy::gizmos::GizmoPlugin;
 use bevy::math::Vec3;
+use bevy::mesh::MeshPlugin;
 use bevy::prelude::*;
 use bevy::transform::TransformPlugin;
 use bevy_catenary::AttachedTo;
@@ -46,6 +47,7 @@ fn build_test_app() -> App {
     let mut app = App::new();
     app.add_plugins(MinimalPlugins);
     app.add_plugins(AssetPlugin::default());
+    app.add_plugins(MeshPlugin);
     app.add_plugins(TransformPlugin);
     app.add_plugins(GizmoPlugin);
     app.add_plugins(CatenaryPlugin);

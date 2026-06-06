@@ -282,7 +282,7 @@ fn sample_parabolic_fallback(
 
 /// Solver that computes catenary curves between cable endpoints.
 ///
-/// Implements both [`CurveSolver`] (for use with [`Router`]) and [`RouteSolver`]
+/// Implements both [`CurveSolver`] (for use with [`Router`](crate::Router)) and [`RouteSolver`]
 /// (for standalone use without obstacle avoidance).
 #[derive(Clone, Debug, Reflect)]
 pub struct CatenarySolver {
