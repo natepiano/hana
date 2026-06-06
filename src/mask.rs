@@ -24,12 +24,11 @@ impl PhaseItemBatchSetKey for OutlineBatchSetKey {
     fn indexed(&self) -> bool { self.index_slab.is_some() }
 }
 
-/// Including `main_entity` makes each entity its own unique bin. Without it,
-/// GPU indirect drawing can reorder entities within a bin, causing
+/// Including `OutlineBinKey::main_entity` makes each entity its own unique bin.
+/// Without it, GPU indirect drawing can reorder entities within a bin, causing
 /// `instance_index` to map to the wrong `OutlineUniform` and shifting colors
-/// between entities. This approach sacrifices multi-entity draw call batching but the
-/// single storage buffer and bind group still provide a very large performance win
-/// over per-entity buffers.
+/// between entities. `OutlineUniformBuffer` and `OutlineBindGroup` are still
+/// shared across bins instead of allocating per-entity buffers.
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OutlineBinKey {
     pub(crate) asset_id:    UntypedAssetId,

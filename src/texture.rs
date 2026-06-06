@@ -21,13 +21,14 @@ use super::extract::ActiveOutlineModes;
 #[derive(Clone, Component)]
 pub(crate) struct FloodTextures {
     pub(crate) ping_pong_state: PingPongState,
-    // Textures for storing input-output of flood passes
+    /// `input` and `output` are swapped by `PingPongState` between jump-flood
+    /// passes.
     pub(crate) input:           CachedTexture,
     pub(crate) output:          CachedTexture,
     /// A dedicated depth texture for mesh outlines to later compare against
     /// global depth
     pub(crate) outline_depth:   Texture,
-    /// Stores outline color and mesh data
+    /// Stores mask `appearance_data`: color in rgb and priority in alpha.
     pub(crate) appearance:      CachedTexture,
     /// Stores per-mesh owner ID in x channel — only allocated when hull outlines are active
     pub(crate) owner:           Option<CachedTexture>,

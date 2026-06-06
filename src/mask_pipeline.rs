@@ -137,13 +137,15 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
         descriptor.vertex.shader_defs.extend(shader_defs.clone());
 
         let mut targets = vec![
-            // RT0: flood data (uv.xy, width, depth)
+            // RT0 maps to `FloodTextures::output` and mask `flood_data`:
+            // seed uv, outline width, and surface depth.
             Some(ColorTargetState {
                 format:     TextureFormat::Rgba32Float,
                 blend:      None,
                 write_mask: ColorWrites::ALL,
             }),
-            // RT1: appearance data (color.rgb, priority)
+            // RT1 maps to `FloodTextures::appearance` and mask `appearance_data`:
+            // outline color and priority.
             Some(ColorTargetState {
                 format:     TextureFormat::Rgba32Float,
                 blend:      None,
@@ -151,7 +153,8 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
             }),
         ];
         if key.hull_presence.is_present() {
-            // RT2: owner ID data (owner_id in x) — only when hull outlines exist
+            // RT2 maps to `FloodTextures::owner` and mask `owner_data`: owner ID
+            // in x, allocated only when hull outlines exist.
             targets.push(Some(ColorTargetState {
                 format:     TextureFormat::Rgba32Float,
                 blend:      None,

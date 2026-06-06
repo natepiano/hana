@@ -177,7 +177,7 @@ pub(crate) fn prepare_outline_buffer(
     }
 }
 
-/// Writes the outline buffer to the GPU and creates a single bind group.
+/// Writes `OutlineUniformBuffer` to the GPU and stores its `OutlineBindGroup`.
 pub(crate) fn prepare_outline_bind_group(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
