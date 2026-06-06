@@ -464,9 +464,9 @@ impl LayoutTree {
     /// `text_index` consults this to tell a genuine typo (`id` absent here) from a
     /// run not yet materialized into an entity (`id` present here, index just not
     /// rebuilt). See [`PanelText`](crate::PanelText).
-    // The sole caller is the `#[cfg(debug_assertions)]` typo-warn path in
-    // `PanelTextReader::resolve`, so this is compiled only in debug builds.
-    #[cfg(debug_assertions)]
+    // The runtime caller is the `#[cfg(debug_assertions)]` typo-warn path in
+    // `PanelTextReader::resolve`; test harnesses also compile this for coverage.
+    #[cfg(any(debug_assertions, test))]
     #[must_use]
     pub(crate) fn contains_text_id(&self, id: &PanelFieldId) -> bool {
         (0..self.elements.len()).any(|index| self.element_field_id(index) == Some(id))
