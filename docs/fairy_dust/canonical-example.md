@@ -51,12 +51,16 @@ fairy_dust::sprinkle_example()
             .control("Z ZoomToFit")
             .control("L LookAt"),
     )
+    .wire_chip_to_events::<ZoomBegin, ZoomEnd>("Z ZoomToFit")
+    .wire_chip_to_events_filtered::<AnimationBegin, AnimationEnd, _, _>(
+        "L LookAt",
+        |e| e.source == AnimationSource::LookAt,
+        |e| e.source == AnimationSource::LookAt,
+    )
     .with_camera_control_panel()
     .add_systems(Startup, spawn_example_specific_entities)
     .with_shortcut(KeyCode::KeyZ, zoom_to_fit_target)
     .with_shortcut(KeyCode::KeyL, look_at_target)
-    .add_observer(on_zoom_begin)
-    .add_observer(on_zoom_end)
     .run();
 ```
 
@@ -121,8 +125,8 @@ label. Use cube face panels for multi-row content:
 
 ### Canonical cube spin
 
-Use `.with_cube_spin::<Marker>(CubeSpinConfig::new())` for decorative cube
-rotation in input/preset examples. The default helper:
+Use `.with_cube_spin::<Marker>()` for decorative cube rotation in input/preset
+examples — the no-argument form applies the canonical default config, which:
 
 - registers a `P Pause` title chip;
 - binds `KeyCode::KeyP`;
@@ -131,8 +135,11 @@ rotation in input/preset examples. The default helper:
 
 So the visual default is paused off: the cube spins and the `P Pause` chip is
 inactive until the user presses `P`. Use `.cube_spin(config)` on the cube
-builder only for single Fairy Dust cube scenes. Use `.without_chip()` and
-`.without_key()` when an example needs spin motion without the title affordance.
+builder only for single Fairy Dust cube scenes. Use
+`.with_cube_spin_config::<Marker>(config)` when the default needs adjusting:
+`CubeSpinConfig::new().without_chip()` / `.without_key()` give spin motion
+without the title affordance (`input_gamepad` uses `.without_key()` plus
+`.with_chip(...)` to surface a gamepad pause chip instead).
 
 ### Camera
 
@@ -319,15 +326,25 @@ Even in these cases:
 - `H Home` is auto-prepended when `.with_camera_home()` is used; do not
   add it manually.
 
-## Observer/event highlighting
+## Chip/event highlighting
 
 When an example wires keyboard actions to camera events (`ZoomToFit`,
-`LookAt`, etc.), observe the matching `*Begin`/`*End` events and toggle
-`TitleBarControlState::set_active` on the chip:
+`LookAt`, etc.), use the title-bar chip wiring on the builder rather than
+hand-written observers:
 
-- `ZoomBegin`/`ZoomEnd` carry `target` — filter by entity ID.
-- `AnimationBegin`/`AnimationEnd` carry `source: AnimationSource` — filter
-  by source (`LookAt`, `LookAtAndZoomToFit`, etc.).
+- `.wire_chip_to_events::<Begin, End>(chip)` — the chip is active between
+  the `Begin` and `End` events. `ZoomBegin`/`ZoomEnd` need no filter when
+  one zoom chip exists.
+- `.wire_chip_to_events_filtered::<Begin, End, _, _>(chip, begin_filter,
+  end_filter)` — for shared event types: `AnimationBegin`/`AnimationEnd`
+  carry `source: AnimationSource`, so a `LookAt` chip filters on
+  `e.source == AnimationSource::LookAt`.
+- `.wire_chip_to_state::<R, _>(chip, extractor)` /
+  `.wire_chip_to_activation::<R>(chip)` — for chips driven by resource state
+  rather than events.
+
+Hand-written observers that call `TitleBarControlState::set_active` remain
+the fallback for activation logic the wiring helpers cannot express.
 
 ## What to remove when converting an existing example
 
@@ -362,13 +379,19 @@ When an example wires keyboard actions to camera events (`ZoomToFit`,
 
 ## Future work
 
-Implemented shared APIs are tracked in `docs/fairy_dust/enhancements.md`.
+Implemented shared APIs are tracked in
+`docs/fairy_dust/archive/initial-enhancements.md`.
 
 - Should `.with_camera_home()` optionally accept face-label config so
   the invisible home cube can carry visible text without needing a
   separate visible cube?
 - Should the example HUD support per-chip mouse-click activation (turn
   chips into buttons)?
-- `side_by_side.rs` and `text_stress.rs` still use raw `App::new()` —
-  convert to `fairy_dust::sprinkle_example()` per this guide and drop
-  their manual `add_plugins(DiegeticUiPlugin)`.
+- Every `bevy_lagrange` example uses `sprinkle_example()`. Nine
+  `bevy_diegetic` examples still use raw `App::new()` (`sdf.rs`,
+  `side_by_side.rs`, `screen_space.rs`, `paper_sizes.rs`, `dimensions.rs`,
+  `sizes.rs`, `font_loading.rs`, `font_features.rs`,
+  `text_renderer_gpu_bench.rs`) — convert per this guide and drop manual
+  `add_plugins(DiegeticUiPlugin)` where conversion makes sense; `sdf` and
+  `side_by_side` were deliberately left raw during the shortcut migration,
+  so revisit that decision before converting them.
