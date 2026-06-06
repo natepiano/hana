@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera). Thank you
 > for graciously allowing this project to build on your foundation.
 
-## [Unreleased]
+## [0.0.4-rc.1] - 2026-06-05
 
 ### Changed
 - Update to Bevy 0.19 (`0.19.0-rc.2`) (breaking).
