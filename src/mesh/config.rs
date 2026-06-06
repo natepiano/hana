@@ -62,15 +62,15 @@ pub enum Faces {
 #[reflect(Component)]
 pub struct CableMeshConfig {
     /// Tube cross-section: radius, side count, and rendered faces.
-    pub tube:     TubeConfig,
+    pub tube_config:  TubeConfig,
     /// Cap styles at each end of the tube.
-    pub caps:     CapConfig,
+    pub cap_config:   CapConfig,
     /// Distance to trim the tube back from each end.
-    pub trim:     TrimConfig,
+    pub trim_config:  TrimConfig,
     /// Elbow filleting between non-collinear tangents.
-    pub elbow:    ElbowConfig,
+    pub elbow_config: ElbowConfig,
     /// Material to apply to the generated mesh. If `None`, no material is added.
-    pub material: Option<Handle<StandardMaterial>>,
+    pub material:     Option<Handle<StandardMaterial>>,
 }
 
 /// Tube cross-section configuration.

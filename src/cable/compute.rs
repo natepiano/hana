@@ -137,7 +137,7 @@ fn recompute_cable_route(
             continue;
         };
 
-        let pos = if let Some(attached) = attached_to
+        let endpoint_position = if let Some(attached) = attached_to
             && let Ok(target_transform) = transforms.get(attached.0)
         {
             target_transform.transform_point(endpoint.offset)
@@ -146,16 +146,18 @@ fn recompute_cable_route(
         };
 
         if let Some(mut resolved) = resolved_endpoint_position {
-            if resolved.0 != pos {
-                resolved.0 = pos;
+            if resolved.0 != endpoint_position {
+                resolved.0 = endpoint_position;
             }
         } else {
-            commands.entity(child).insert(ResolvedEndpointPosition(pos));
+            commands
+                .entity(child)
+                .insert(ResolvedEndpointPosition(endpoint_position));
         }
 
         match endpoint.end {
-            CableEnd::Start => start_position = Some(pos),
-            CableEnd::End => end_position = Some(pos),
+            CableEnd::Start => start_position = Some(endpoint_position),
+            CableEnd::End => end_position = Some(endpoint_position),
         }
     }
 

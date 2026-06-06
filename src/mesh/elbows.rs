@@ -22,7 +22,7 @@ fn resolve_elbow_arms(
     max_arm: f32,
 ) -> (f32, f32) {
     cable_mesh_config
-        .elbow
+        .elbow_config
         .arm_overrides
         .as_ref()
         .and_then(|overrides| overrides.get(elbow_idx))
@@ -30,7 +30,7 @@ fn resolve_elbow_arms(
             || {
                 let arm = (fillet_start.distance(fillet_end)
                     * DEFAULT_ELBOW_ARM_FRACTION
-                    * cable_mesh_config.elbow.arm_multiplier)
+                    * cable_mesh_config.elbow_config.arm_multiplier)
                     .min(max_arm);
                 (arm, arm)
             },
@@ -75,15 +75,16 @@ struct ElbowParams {
 
 impl From<&CableMeshConfig> for ElbowParams {
     fn from(cable_mesh_config: &CableMeshConfig) -> Self {
-        let tube_radius = cable_mesh_config.tube.radius;
+        let tube_radius = cable_mesh_config.tube_config.radius;
         Self {
             angle_threshold_cos: cable_mesh_config
-                .elbow
+                .elbow_config
                 .angle_threshold_deg
                 .to_radians()
                 .cos(),
-            bend_radius:         tube_radius * cable_mesh_config.elbow.bend_radius_multiplier,
-            min_bend_radius:     tube_radius * cable_mesh_config.elbow.min_radius_multiplier,
+            bend_radius:         tube_radius
+                * cable_mesh_config.elbow_config.bend_radius_multiplier,
+            min_bend_radius:     tube_radius * cable_mesh_config.elbow_config.min_radius_multiplier,
         }
     }
 }
@@ -149,7 +150,7 @@ pub(super) fn insert_knee_rings(
     }
 
     let elbow_params = ElbowParams::from(cable_mesh_config);
-    let rings_per_right_angle = cable_mesh_config.elbow.rings_per_right_angle;
+    let rings_per_right_angle = cable_mesh_config.elbow_config.rings_per_right_angle;
     let mut output_points = Vec::with_capacity(point_count * 2);
     let mut output_arc_lengths = Vec::with_capacity(point_count * 2);
 
@@ -262,14 +263,14 @@ pub fn compute_elbow_metadata(
         return Vec::new();
     }
 
-    if cable_mesh_config.trim.start > 0.0 || cable_mesh_config.trim.end > 0.0 {
+    if cable_mesh_config.trim_config.start > 0.0 || cable_mesh_config.trim_config.end > 0.0 {
         let mut tangents = path::recompute_tangents(&points);
         path::trim_path(
             &mut points,
             &mut tangents,
             &mut arc_lengths,
-            cable_mesh_config.trim.start,
-            cable_mesh_config.trim.end,
+            cable_mesh_config.trim_config.start,
+            cable_mesh_config.trim_config.end,
         );
     }
 

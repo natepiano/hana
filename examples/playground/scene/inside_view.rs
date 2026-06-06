@@ -44,7 +44,7 @@ pub(super) fn setup_section_inside_view(
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
-                tube: TubeConfig {
+                tube_config: TubeConfig {
                     radius: TUBE_RADIUS * INSIDE_VIEW_RADIUS_MULTIPLIER,
                     sides:  INSIDE_VIEW_TUBE_SIDES,
                     faces:  Faces::Both,

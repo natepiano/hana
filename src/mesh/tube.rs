@@ -50,14 +50,16 @@ fn generate_tube_rings(
         for j in 0..sides {
             let angle = (j.to_f32() / sides.to_f32()) * TAU;
             let (sin_angle, cos_angle) = angle.sin_cos();
-            let offset = *frame_normal * cos_angle * cable_mesh_config.tube.radius
-                + *binormal * sin_angle * cable_mesh_config.tube.radius;
+            let offset = *frame_normal * cos_angle * cable_mesh_config.tube_config.radius
+                + *binormal * sin_angle * cable_mesh_config.tube_config.radius;
             let vertex_position = *point + offset;
             let vertex_normal = offset.normalize_or_zero();
 
-            out.buffers.positions.push(vertex_position.to_array());
-            out.buffers.normals.push(vertex_normal.to_array());
-            out.buffers.uvs.push([arc_u, j.to_f32() / sides.to_f32()]);
+            out.mesh_buffers.positions.push(vertex_position.to_array());
+            out.mesh_buffers.normals.push(vertex_normal.to_array());
+            out.mesh_buffers
+                .uvs
+                .push([arc_u, j.to_f32() / sides.to_f32()]);
         }
 
         if i > 0 {
@@ -71,9 +73,9 @@ fn generate_tube_rings(
                 let upcoming = next_base + j;
                 let upcoming_next = next_base + next;
 
-                match cable_mesh_config.tube.faces {
+                match cable_mesh_config.tube_config.faces {
                     Faces::Outside => buffers::push_quad(
-                        out.buffers.indices,
+                        out.mesh_buffers.indices,
                         current,
                         current_next,
                         upcoming,
@@ -81,7 +83,7 @@ fn generate_tube_rings(
                         WindingOrder::Standard,
                     ),
                     Faces::Inside => buffers::push_quad(
-                        out.buffers.indices,
+                        out.mesh_buffers.indices,
                         current,
                         current_next,
                         upcoming,
@@ -90,7 +92,7 @@ fn generate_tube_rings(
                     ),
                     Faces::Both => {
                         buffers::push_quad(
-                            out.buffers.indices,
+                            out.mesh_buffers.indices,
                             current,
                             current_next,
                             upcoming,
@@ -154,7 +156,7 @@ fn apply_inside_normals(
 /// All segments are flattened into a single continuous polyline.
 #[must_use]
 pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMeshConfig) -> Mesh {
-    let sides = cable_mesh_config.tube.sides.max(MIN_TUBE_SIDES);
+    let sides = cable_mesh_config.tube_config.sides.max(MIN_TUBE_SIDES);
     let total_length = geometry.total_length.max(MIN_SEGMENT_LENGTH);
 
     let flat = path::flatten_geometry(geometry);
@@ -166,13 +168,13 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMes
         return Mesh::new(PrimitiveTopology::TriangleList, default());
     }
 
-    if cable_mesh_config.trim.start > 0.0 || cable_mesh_config.trim.end > 0.0 {
+    if cable_mesh_config.trim_config.start > 0.0 || cable_mesh_config.trim_config.end > 0.0 {
         path::trim_path(
             &mut all_points,
             &mut all_tangents,
             &mut all_arc_lengths,
-            cable_mesh_config.trim.start,
-            cable_mesh_config.trim.end,
+            cable_mesh_config.trim_config.start,
+            cable_mesh_config.trim_config.end,
         );
     }
 
@@ -203,7 +205,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMes
         sides,
         total_length,
         &mut TubeMeshBuffers {
-            buffers:        MeshBuffers {
+            mesh_buffers:   MeshBuffers {
                 positions: &mut positions,
                 normals:   &mut normals,
                 uvs:       &mut uvs,
@@ -214,7 +216,7 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMes
     );
 
     apply_inside_normals(
-        &cable_mesh_config.tube.faces,
+        &cable_mesh_config.tube_config.faces,
         &mut positions,
         &mut normals,
         &mut uvs,

@@ -61,8 +61,8 @@ pub(crate) fn spawn_node_pair(
     start: Vec3,
     end: Vec3,
 ) {
-    for pos in [start, end] {
-        spawn_node_cube(commands, mesh, material, pos);
+    for position in [start, end] {
+        spawn_node_cube(commands, mesh, material, position);
     }
 }
 
@@ -70,12 +70,12 @@ pub(crate) fn spawn_node_cube<'a>(
     commands: &'a mut Commands,
     mesh: &Handle<Mesh>,
     material: &Handle<StandardMaterial>,
-    pos: Vec3,
+    position: Vec3,
 ) -> EntityCommands<'a> {
     let mut entity_commands = commands.spawn((
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
-        Transform::from_translation(pos),
+        Transform::from_translation(position),
         NodeCube,
     ));
     entity_commands.observe(input::on_mesh_clicked);

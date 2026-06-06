@@ -33,15 +33,15 @@ impl Obstacle {
         }
     }
 
-    fn point_containment(&self, pos: Vec3, margin: f32) -> PointContainment {
+    fn point_containment(&self, position: Vec3, margin: f32) -> PointContainment {
         let min = self.position - self.half_extents - Vec3::splat(margin);
         let max = self.position + self.half_extents + Vec3::splat(margin);
-        if pos.x >= min.x
-            && pos.x <= max.x
-            && pos.y >= min.y
-            && pos.y <= max.y
-            && pos.z >= min.z
-            && pos.z <= max.z
+        if position.x >= min.x
+            && position.x <= max.x
+            && position.y >= min.y
+            && position.y <= max.y
+            && position.z >= min.z
+            && position.z <= max.z
         {
             PointContainment::Inside
         } else {
@@ -53,12 +53,12 @@ impl Obstacle {
 /// Check whether a point falls inside any obstacle's `AABB`, expanded by `margin`.
 #[must_use]
 pub(super) fn is_point_in_any_obstacle(
-    pos: Vec3,
+    position: Vec3,
     obstacles: &[Obstacle],
     margin: f32,
 ) -> PointContainment {
     for obstacle in obstacles {
-        match obstacle.point_containment(pos, margin) {
+        match obstacle.point_containment(position, margin) {
             PointContainment::Inside => return PointContainment::Inside,
             PointContainment::Outside => {},
         }

@@ -48,6 +48,6 @@ pub(super) struct MeshBuffers<'a> {
 
 /// Extended mesh buffers that also track inside-face indices.
 pub(super) struct TubeMeshBuffers<'a> {
-    pub(super) buffers:        MeshBuffers<'a>,
+    pub(super) mesh_buffers:   MeshBuffers<'a>,
     pub(super) inside_indices: &'a mut Vec<u32>,
 }

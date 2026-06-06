@@ -53,8 +53,8 @@ pub(super) fn on_geometry_computed(
     };
 
     // Read endpoint cap styles from children
-    let mut cap_start = cable_mesh_config.caps.start.clone();
-    let mut cap_end = cable_mesh_config.caps.end.clone();
+    let mut cap_start = cable_mesh_config.cap_config.start.clone();
+    let mut cap_end = cable_mesh_config.cap_config.end.clone();
     for child in children.iter() {
         if let Ok(endpoint) = endpoints.get(child) {
             match endpoint.end {
@@ -66,8 +66,8 @@ pub(super) fn on_geometry_computed(
 
     // Build the config with endpoint cap styles applied
     let mut updated_cable_mesh_config = cable_mesh_config.clone();
-    updated_cable_mesh_config.caps.start = cap_start;
-    updated_cable_mesh_config.caps.end = cap_end;
+    updated_cable_mesh_config.cap_config.start = cap_start;
+    updated_cable_mesh_config.cap_config.end = cap_end;
 
     let new_mesh = tube::generate_tube_mesh(cable_geometry, &updated_cable_mesh_config);
 

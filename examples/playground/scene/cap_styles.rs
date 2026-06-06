@@ -139,7 +139,7 @@ fn spawn_cap_style_tube(
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
-                tube: TubeConfig {
+                tube_config: TubeConfig {
                     radius: TUBE_RADIUS * CAP_STYLE_RADIUS_MULTIPLIER,
                     faces: Faces::Both,
                     ..default()

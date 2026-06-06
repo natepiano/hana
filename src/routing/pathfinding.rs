@@ -113,8 +113,8 @@ impl AStarPlanner {
     }
 
     /// Convert a world position to the nearest grid cell.
-    fn world_to_cell(&self, pos: Vec3, origin: Vec3) -> Cell {
-        let relative = pos - origin;
+    fn world_to_cell(&self, position: Vec3, origin: Vec3) -> Cell {
+        let relative = position - origin;
         Cell {
             x: (relative.x / self.grid_size).round().to_i32(),
             y: (relative.y / self.grid_size).round().to_i32(),
@@ -123,8 +123,8 @@ impl AStarPlanner {
     }
 
     /// Check if a world-space point is inside any obstacle (with margin).
-    fn is_blocked(&self, pos: Vec3, obstacles: &[Obstacle]) -> Blockage {
-        match obstacle::is_point_in_any_obstacle(pos, obstacles, self.margin) {
+    fn is_blocked(&self, position: Vec3, obstacles: &[Obstacle]) -> Blockage {
+        match obstacle::is_point_in_any_obstacle(position, obstacles, self.margin) {
             PointContainment::Inside => Blockage::Blocked,
             PointContainment::Outside => Blockage::Clear,
         }
@@ -289,11 +289,11 @@ fn simplify_path(waypoints: &mut Vec<Vec3>) {
         let next = waypoints[i + 1];
         let current = waypoints[i];
 
-        let dir1 = (current - prev).normalize_or_zero();
-        let dir2 = (next - current).normalize_or_zero();
+        let incoming_direction = (current - prev).normalize_or_zero();
+        let outgoing_direction = (next - current).normalize_or_zero();
 
         // Keep the waypoint if direction changes significantly
-        if dir1.dot(dir2) < COLLINEARITY_THRESHOLD {
+        if incoming_direction.dot(outgoing_direction) < COLLINEARITY_THRESHOLD {
             simplified.push(current);
         }
     }
