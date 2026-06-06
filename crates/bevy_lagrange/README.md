@@ -10,7 +10,7 @@
 
 A camera controller for [Bevy](https://bevyengine.org) that combines smooth orbit controls with event-driven camera operations — zoom-to-fit, queued animations, and a debug overlay for fit targets.
 
-![A screen recording showing camera movement](https://user-images.githubusercontent.com/7709415/230715348-eb19d9a8-4826-4a73-a039-02cacdcb3dc9.gif "Demo of bevy_lagrange")
+![A screen recording showing camera movement](https://github.com/user-attachments/assets/d596d9cb-2874-47b1-90e4-d5c33ac53983 "Demo of bevy_lagrange")
 
 ## Features
 

@@ -7,7 +7,7 @@ homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_
 keywords             = ["bevy", "diegetic", "layout", "ui"]
 license.workspace    = true
 name                 = "bevy_diegetic"
-readme.workspace     = true
+readme               = "README.md"
 repository.workspace = true
 version.workspace    = true
 

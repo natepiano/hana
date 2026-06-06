@@ -6,7 +6,7 @@ edition.workspace    = true
 keywords             = ["bevy", "dev", "examples"]
 license.workspace    = true
 name                 = "fairy_dust"
-readme.workspace     = true
+readme               = "README.md"
 repository.workspace = true
 version.workspace    = true
 

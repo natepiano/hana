@@ -7,7 +7,7 @@ homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_
 keywords             = ["bevy", "camera", "gamedev", "orbit"]
 license.workspace    = true
 name                 = "bevy_lagrange"
-readme.workspace     = true
+readme               = "README.md"
 repository.workspace = true
 version              = "0.0.3-dev"
 

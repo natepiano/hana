@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rebuild input handling on `bevy_enhanced_input` (new dependency).
 - Scroll zoom now uses an exponential curve so zoom in and out are symmetric.
 - Move the crate into the [hana](https://github.com/natepiano/hana) monorepo; `repository`/`homepage` metadata updated.
+- Fit overlay lines are now retained `Core3d` mesh visuals on the source camera's `RenderLayers` instead of gizmos; overlay labels render as UI text targeted via `UiTargetCamera`.
 - Replace raw `OrbitCam` input fields with input-mode components (`OrbitCamPreset`, `OrbitCamBindings`, `OrbitCamManual`).
 - Replace manual render-to-texture camera setup with `CameraInputRoutingConfig::explicit(...)` and `CameraInputSurfaceMetrics`.
 - Replace keyboard target-mutation examples with `OrbitCamBindings`/`OrbitCamManualInputWriter` examples.
@@ -43,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Suppress pinch zoom while BlenderLike modifier keys are held.
 - Split `LookAtAndZoomToFit` into look and fit phases; internal fit work no longer emits `ZoomBegin`/`ZoomEnd`.
 - Input teardown no longer double-despawns binding entities (logged "Could not despawn entity" on every preset switch).
+- Fit overlay visuals no longer intercept picking, and duplicate/orphaned/stale overlay visuals are reconciled away.
 
 ## [0.0.3] - 2026-04-15
 
