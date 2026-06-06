@@ -1,11 +1,15 @@
 # Fit Overlay Render Layers
 
+> **Status: COMPLETE.** All five phases landed. The retained Core3d line
+> backend and the Bevy UI label path described below are the shipped
+> implementation (`crates/bevy_lagrange/src/fit_overlay/`). Archived as the
+> design and implementation record.
+
 Design note for making `bevy_lagrange`'s `FitOverlay` render correctly with
 multiple cameras, custom render layers, and screen-space overlay cameras.
 
-The public contract below describes the target retained-overlay implementation.
-The current implementation uses retained Core3d line meshes and plain Bevy UI
-labels.
+The public contract below describes the retained-overlay implementation:
+retained Core3d line meshes plus plain Bevy UI labels.
 
 ## Current Model
 
