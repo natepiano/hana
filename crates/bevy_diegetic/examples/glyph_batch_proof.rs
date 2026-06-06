@@ -1,10 +1,10 @@
 //! Glyph-instancing Step-1 proof (`docs/bevy_diegetic/glyph_instancing.md`).
 //!
-//! One ordinary world label renders through the per-run path and seeds the
-//! shared glyph atlas; the crate's `batch_proof` scaffolding then spawns one
-//! hand-built batch entity beside it whose glyphs are expanded entirely by
-//! the vertex-pulling shader from hand-written records. The two stacked
-//! copies under the source label must match it glyph for glyph.
+//! One ordinary world label renders through the production batch path and
+//! seeds the shared glyph atlas; the crate's `batch_proof` scaffolding then
+//! spawns one hand-built batch entity beside it whose glyphs are expanded
+//! entirely by the vertex-pulling shader from hand-written records. The two
+//! stacked copies under the source label must match it glyph for glyph.
 //!
 //! Shortcuts:
 //! - `G` — force a capacity growth (same-frame mesh swap; captures frames N / N+1 / N+2 to
@@ -60,9 +60,8 @@ fn main() {
         .run();
 }
 
-/// Spawns the source label: it renders through the per-run path (the
-/// coexistence half of the proof) and its prepared run + atlas records feed
-/// the hand-built batch.
+/// Spawns the source label: it renders through the production batch path and
+/// its prepared run + atlas records feed the hand-built batch.
 fn setup(mut commands: Commands) {
     commands.spawn((
         Name::new("Source label"),

@@ -52,7 +52,6 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextGeometryPath;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
@@ -476,8 +475,7 @@ fn main() {
             TitleBar::new()
                 .with_title("Text Stress")
                 .with_anchor(Anchor::TopLeft)
-                .control("Space pause")
-                .control("B batch path"),
+                .control("Space pause"),
         )
         .with_camera_control_panel()
         .add_plugins((
@@ -505,7 +503,6 @@ fn main() {
             Update,
             (
                 toggle_mutation,
-                toggle_geometry_path,
                 advance_frame,
                 mutate_labels,
                 update_status_panel,
@@ -555,18 +552,6 @@ fn label_text(index: usize, frame: u64) -> String { format!("{index:02} {:03}", 
 fn toggle_mutation(keyboard: Res<ButtonInput<KeyCode>>, mut mutating: ResMut<Mutating>) {
     if keyboard.just_pressed(KeyCode::Space) {
         mutating.0 = !mutating.0;
-    }
-}
-
-/// Flips between the per-run mesh path and the batched-records path (B), the
-/// Step-2 parity-gate comparison in one session.
-fn toggle_geometry_path(keyboard: Res<ButtonInput<KeyCode>>, mut path: ResMut<TextGeometryPath>) {
-    if keyboard.just_pressed(KeyCode::KeyB) {
-        *path = match *path {
-            TextGeometryPath::PerRunMeshes => TextGeometryPath::BatchedRecords,
-            TextGeometryPath::BatchedRecords => TextGeometryPath::PerRunMeshes,
-        };
-        info!("text geometry path: {:?}", *path);
     }
 }
 
@@ -624,7 +609,6 @@ fn spawn_batch_stats_overlay(mut commands: Commands) {
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(build_batch_stats_tree(&batch_stats_rows(
-            TextGeometryPath::PerRunMeshes,
             &BatchStatsValues::default(),
         )))
         .build();
@@ -926,13 +910,8 @@ struct BatchStatsValues {
 }
 
 /// Label/value rows for the batch-stats panel.
-fn batch_stats_rows(path: TextGeometryPath, values: &BatchStatsValues) -> Vec<(&str, String)> {
-    let path_label = match path {
-        TextGeometryPath::PerRunMeshes => "per-run",
-        TextGeometryPath::BatchedRecords => "batched",
-    };
+fn batch_stats_rows(values: &BatchStatsValues) -> Vec<(&str, String)> {
     vec![
-        ("path", path_label.to_string()),
         ("batches", values.batches.to_string()),
         ("runs", values.runs.to_string()),
         ("glyphs", values.glyphs.to_string()),
@@ -943,13 +922,11 @@ fn batch_stats_rows(path: TextGeometryPath, values: &BatchStatsValues) -> Vec<(&
     ]
 }
 
-/// Refreshes the upper-right batch-stats panel: batch store contents (zero on
-/// the per-run path) and per-pass phase items, live in whichever toggle state
-/// is active so before/after reads come from one session.
+/// Refreshes the upper-right batch-stats panel: batch store contents and
+/// per-pass phase items.
 fn update_batch_stats_panel(
     diegetic_perf: Res<DiegeticPerfStats>,
     draw_counts: Res<DrawCounts>,
-    geometry_path: Res<TextGeometryPath>,
     panels: Query<Entity, With<BatchStatsPanel>>,
     mut last_displayed: ResMut<LastDisplayedBatchStats>,
     mut commands: Commands,
@@ -973,7 +950,7 @@ fn update_batch_stats_panel(
         transparent_items: draw_counts.0.transparent.load(Ordering::Relaxed),
         shadow_items:      draw_counts.0.shadow.load(Ordering::Relaxed),
     };
-    let rows = batch_stats_rows(*geometry_path, &values);
+    let rows = batch_stats_rows(&values);
     let mut key = String::new();
     for (label, value) in &rows {
         key.push_str(label);

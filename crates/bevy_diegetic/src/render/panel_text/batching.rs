@@ -1,6 +1,6 @@
-//! Batched-records geometry path (`docs/bevy_diegetic/glyph_instancing.md`,
-//! Step 2): routes every panel-text run into a per-[`BatchKey`] batch entity
-//! instead of a per-run mesh child.
+//! Batched-records text geometry (`docs/bevy_diegetic/glyph_instancing.md`):
+//! routes every panel-text run into a per-[`BatchKey`] batch entity whose
+//! vertex shader pulls per-glyph and per-run records from GPU tables.
 //!
 //! Frame flow on the plan's schedule anchors: [`update_panel_text_batches`]
 //! writes glyph/run records before `TransformSystems::Propagate`;
@@ -30,7 +30,6 @@ use bevy_kana::ToUsize;
 
 use super::PanelTextLayout;
 use super::PreparedPanelText;
-use super::mesh_spawning::DiegeticTextMesh;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
@@ -59,67 +58,15 @@ use crate::text::RunRecord;
 use crate::text::RunStorageKey;
 use crate::text::TextMaterial;
 
-/// Which geometry path renders panel text.
-///
-/// Exactly one path executes per frame — never per-run toggling — so cascade
-/// observers, storage keys, and despawn observers act on one world model at a
-/// time. Flippable live over BRP (`#[reflect(Resource)]`).
-#[derive(Resource, Reflect, Clone, Copy, Debug, Default, Eq, PartialEq)]
-#[reflect(Resource)]
-pub enum TextGeometryPath {
-    /// One mesh child + one material per text run (the original path).
-    PerRunMeshes,
-    /// One vertex-pulling batch entity per batch key; per-run data is stored
-    /// in GPU record tables indexed by the vertex shader.
-    #[default]
-    BatchedRecords,
-}
-
-/// Marker on every batch render entity, BRP-inspectable, so the two geometry
-/// paths' products are distinguishable in a live world.
+/// Marker on every batch render entity, BRP-inspectable.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 pub struct DiegeticTextBatch;
 
-/// Tears down the outgoing path's products when [`TextGeometryPath`] flips,
-/// then re-dirties every prepared run so the incoming path rebuilds its world
-/// model the same frame.
-pub(super) fn apply_text_geometry_path(
-    toggle: Res<TextGeometryPath>,
-    mut backend: ResMut<GlyphCache>,
-    mut prepared_runs: Query<&mut PreparedPanelText>,
-    run_meshes: Query<Entity, With<DiegeticTextMesh>>,
-    mut perf: ResMut<DiegeticPerfStats>,
-    mut commands: Commands,
-) {
-    if !toggle.is_changed() || toggle.is_added() {
-        return;
-    }
-    match *toggle {
-        TextGeometryPath::BatchedRecords => {
-            // The On<Remove, DiegeticTextMesh> observer frees each run's
-            // storage as its mesh child despawns.
-            for mesh in &run_meshes {
-                commands.entity(mesh).despawn();
-            }
-        },
-        TextGeometryPath::PerRunMeshes => {
-            for entity in backend.batch_store_mut().drain_all() {
-                commands.entity(entity).despawn();
-            }
-            perf.batch = default();
-        },
-    }
-    for mut prepared in &mut prepared_runs {
-        prepared.set_changed();
-    }
-}
-
-/// Batched analogue of `update_panel_text_geometry`: builds changed runs'
-/// glyph records, routes them through the batch store, and reconciles batch
-/// entities and GPU assets to the store's state (spawn on a key's first run,
-/// despawn on its last, mesh growth on a capacity crossing — created, written,
-/// and swapped in the same frame, D4).
+/// Builds changed runs' glyph records, routes them through the batch store,
+/// and reconciles batch entities and GPU assets to the store's state (spawn
+/// on a key's first run, despawn on its last, mesh growth on a capacity
+/// crossing — created, written, and swapped in the same frame, D4).
 ///
 /// Cascade inputs feeding [`BatchKey`] fields: each run's resolved
 /// alpha / lighting / sidedness (with the global defaults for runs the
@@ -178,8 +125,8 @@ impl BatchKeyCascades<'_, '_> {
 /// resolved cascade value changed (alpha / lighting / sidedness are batch-key
 /// fields, so the run re-routes through `upsert_run` and moves batches when
 /// the key differs), or that are not yet routed, so the system is
-/// self-healing: a toggle flip or a skipped frame (e.g. a glyph not yet
-/// packed) re-routes on the next pass.
+/// self-healing: a skipped frame (e.g. a glyph not yet packed) re-routes on
+/// the next pass.
 pub(super) fn update_panel_text_batches(
     runs: Query<
         (
@@ -217,8 +164,8 @@ pub(super) fn update_panel_text_batches(
     // set holds only real transitions; membership re-routes the run below.
     let cascade_changed = cascades.changed_set();
 
-    // Upload the shared glyph atlas once before the run loop, exactly as the
-    // per-run path does — records only index the atlas.
+    // Upload the shared glyph atlas once before the run loop — records only
+    // index the atlas.
     let any_work = !cascade_changed.is_empty()
         || runs.iter().any(|(label_entity, prepared, ..)| {
             prepared.is_changed()
@@ -292,7 +239,9 @@ pub(super) fn update_panel_text_batches(
             depth_nudge: panel_text_child.command_index.saturating_add(1).to_f32()
                 * constants::LAYER_DEPTH_BIAS,
         };
-        backend.upsert_batch_run(key, storage_key, glyphs, record);
+        backend
+            .batch_store_mut()
+            .upsert_run(key, storage_key, glyphs, record);
     }
 
     reconcile_batch_entities(ReconcileBatchEntities {
@@ -532,10 +481,10 @@ fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord
     padded
 }
 
-/// Builds one run's glyph instance records against the shared atlas, clipped
-/// like the per-run mesh builder (`glyph_quad_extents` is the same extraction
-/// `push_glyph` uses). `run_index` is `0` on every record — the batch store
-/// stamps it at rebuild. Returns `None` when a glyph is not yet packed.
+/// Builds one run's glyph instance records against the shared atlas, with
+/// each quad's padded rect and UVs clipped by `glyph_quad_extents`.
+/// `run_index` is `0` on every record — the batch store stamps it at rebuild.
+/// Returns `None` when a glyph is not yet packed.
 pub(crate) fn build_glyph_records(
     cache: &GlyphCache,
     prepared: &PreparedTextRun,
@@ -564,8 +513,8 @@ pub(crate) fn build_glyph_records(
 
 /// Inert capacity-sized batch mesh: zeroed `POSITION` / `UV_0` / `UV_1`
 /// (values unread — the layout switches the `VERTEX_UVS_A/B` pipeline defs
-/// on) plus the static per-quad `U32` index pattern matching
-/// `RunMeshBuilder::push_glyph` winding.
+/// on) plus the static per-quad `U32` index pattern winding each quad
+/// `base, base+3, base+2, base, base+2, base+1`.
 pub(crate) fn inert_batch_mesh(capacity: u32) -> Mesh {
     let vertex_count = capacity.to_usize() * 4;
     let mut indices = Vec::with_capacity(capacity.to_usize() * 6);
@@ -822,7 +771,6 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::panel_text::alpha;
     use crate::render::panel_text::glyph_cascade;
-    use crate::render::panel_text::mesh_spawning;
     use crate::render::panel_text::reconcile;
     use crate::render::panel_text::shaping;
     use crate::render::text_shaping::TextShapingContext;
@@ -847,9 +795,9 @@ mod tests {
         }
     }
 
-    /// App with the full panel-text pipeline plus BOTH geometry paths behind
-    /// the toggle — the production registration's run conditions and ordering,
-    /// minus the visibility-set edges (headless: no visibility systems run).
+    /// App with the full panel-text pipeline — the production registration's
+    /// ordering, minus the visibility-set edges (headless: no visibility
+    /// systems run).
     fn pipeline_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -863,43 +811,26 @@ mod tests {
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
-            .init_resource::<TextGeometryPath>()
             .init_resource::<TextAntiAlias>()
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
             .init_asset::<TextMaterial>()
             .add_observer(alpha::seed_panel_text_child_alpha)
             .add_observer(glyph_cascade::seed_panel_text_child_glyph)
-            .add_observer(mesh_spawning::free_run_storage_on_mesh_removal)
             .add_systems(
                 PostUpdate,
                 (
                     reconcile::reconcile_panel_text_children,
                     shaping::shape_panel_text_children
                         .after(reconcile::reconcile_panel_text_children),
-                    apply_text_geometry_path
+                    update_panel_text_batches
                         .after(shaping::shape_panel_text_children)
-                        .before(mesh_spawning::update_panel_text_geometry)
-                        .before(update_panel_text_batches),
-                    mesh_spawning::update_panel_text_geometry
-                        .after(shaping::shape_panel_text_children)
-                        .before(TransformSystems::Propagate)
-                        .run_if(resource_equals(TextGeometryPath::PerRunMeshes)),
-                    mesh_spawning::update_panel_text_alpha
-                        .after(shaping::shape_panel_text_children)
-                        .before(TransformSystems::Propagate)
-                        .run_if(resource_equals(TextGeometryPath::PerRunMeshes)),
-                    (
-                        update_panel_text_batches
-                            .after(shaping::shape_panel_text_children)
-                            .before(TransformSystems::Propagate),
-                        write_batch_run_transforms.after(TransformSystems::Propagate),
-                        update_batch_bounds.after(write_batch_run_transforms),
-                        commit_batch_buffers
-                            .after(update_panel_text_batches)
-                            .after(write_batch_run_transforms),
-                    )
-                        .run_if(resource_equals(TextGeometryPath::BatchedRecords)),
+                        .before(TransformSystems::Propagate),
+                    write_batch_run_transforms.after(TransformSystems::Propagate),
+                    update_batch_bounds.after(write_batch_run_transforms),
+                    commit_batch_buffers
+                        .after(update_panel_text_batches)
+                        .after(write_batch_run_transforms),
                 ),
             );
         app
@@ -930,10 +861,6 @@ mod tests {
         }
     }
 
-    fn set_path(app: &mut App, path: TextGeometryPath) {
-        *app.world_mut().resource_mut::<TextGeometryPath>() = path;
-    }
-
     fn batch_entities(app: &mut App) -> Vec<Entity> {
         let mut state = app
             .world_mut()
@@ -948,13 +875,6 @@ mod tests {
         state.iter(app.world()).collect()
     }
 
-    fn mesh_children(app: &mut App) -> usize {
-        let mut state = app
-            .world_mut()
-            .query_filtered::<Entity, With<super::super::mesh_spawning::DiegeticTextMesh>>();
-        state.iter(app.world()).count()
-    }
-
     fn store_stats(app: &App) -> (usize, usize, usize) {
         let store = app.world().resource::<GlyphCache>().batch_store();
         let batches = store.batches().count();
@@ -967,9 +887,8 @@ mod tests {
     }
 
     #[test]
-    fn batched_path_routes_runs_into_one_batch_entity() {
+    fn runs_route_into_one_batch_entity() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
@@ -978,22 +897,11 @@ mod tests {
         assert_eq!(runs, 2);
         assert_eq!(glyphs, 9, "'Alpha' + 'Beta' visible glyphs");
         assert_eq!(batch_entities(&mut app).len(), 1);
-        assert_eq!(
-            mesh_children(&mut app),
-            0,
-            "the batched path spawns no per-run mesh children"
-        );
-        assert_eq!(
-            app.world().resource::<GlyphCache>().run_storage_len(),
-            0,
-            "the batched path claims no per-run storage"
-        );
     }
 
     #[test]
     fn batch_entity_gets_real_bounds_and_sort_translation() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
@@ -1016,7 +924,6 @@ mod tests {
     #[test]
     fn run_record_transform_matches_propagated_label_transform() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = app
             .world_mut()
             .spawn((
@@ -1049,42 +956,8 @@ mod tests {
     }
 
     #[test]
-    fn toggle_flips_both_directions_without_leaks() {
-        let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::PerRunMeshes);
-        spawn_panel(&mut app, two_text_tree());
-        settle(&mut app);
-
-        // Per-run era: mesh children + run storage, no batches.
-        assert_eq!(mesh_children(&mut app), 2);
-        assert_eq!(app.world().resource::<GlyphCache>().run_storage_len(), 2);
-        assert_eq!(store_stats(&app).0, 0);
-
-        // Flip on: meshes torn down (storage freed), runs routed to a batch.
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
-        settle(&mut app);
-        assert_eq!(mesh_children(&mut app), 0);
-        assert_eq!(
-            app.world().resource::<GlyphCache>().run_storage_len(),
-            0,
-            "flip-on frees every per-run storage slot"
-        );
-        assert_eq!(store_stats(&app), (1, 2, 9));
-        assert_eq!(batch_entities(&mut app).len(), 1);
-
-        // Flip back: batches torn down, per-run world rebuilt, no leaks.
-        set_path(&mut app, TextGeometryPath::PerRunMeshes);
-        settle(&mut app);
-        assert_eq!(batch_entities(&mut app).len(), 0);
-        assert_eq!(store_stats(&app), (0, 0, 0));
-        assert_eq!(mesh_children(&mut app), 2);
-        assert_eq!(app.world().resource::<GlyphCache>().run_storage_len(), 2);
-    }
-
-    #[test]
     fn despawning_the_panel_despawns_the_emptied_batch() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         assert_eq!(batch_entities(&mut app).len(), 1);
@@ -1103,7 +976,6 @@ mod tests {
     #[test]
     fn hidden_panel_routes_no_batched_runs_until_visible() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
         settle(&mut app);
@@ -1139,7 +1011,6 @@ mod tests {
     #[test]
     fn text_edit_rewrites_records_in_the_same_batch() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         let entity_before = batch_entities(&mut app)[0];
@@ -1165,7 +1036,6 @@ mod tests {
     #[test]
     fn alpha_cascade_change_moves_the_run_to_the_new_keys_batch() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         assert_eq!(store_stats(&app), (1, 2, 9));
@@ -1217,7 +1087,6 @@ mod tests {
         }
 
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_pinned_panel(&mut app);
         settle(&mut app);
         assert_eq!(store_stats(&app), (1, 2, 9));
@@ -1245,7 +1114,6 @@ mod tests {
     #[test]
     fn fill_color_edit_stays_in_batch_as_a_record_write() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         let entity_before = batch_entities(&mut app)[0];
@@ -1284,7 +1152,6 @@ mod tests {
     #[test]
     fn shadow_mode_change_rekeys_into_a_not_shadow_caster_batch() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         assert_eq!(store_stats(&app).0, 1);
@@ -1316,7 +1183,6 @@ mod tests {
     #[test]
     fn same_frame_cascade_move_and_despawn_leave_the_store_consistent() {
         let mut app = pipeline_app();
-        set_path(&mut app, TextGeometryPath::BatchedRecords);
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         let label = label_entities(&mut app)[0];
@@ -1340,5 +1206,41 @@ mod tests {
                 .is_routed(RunStorageKey::from(label)),
             "the despawned run left no membership behind"
         );
+    }
+
+    /// The `BatchGpu` doc contract: every commit payload is padded to the
+    /// buffer's capacity, so its byte length never changes between growths —
+    /// a constant-length `set_data` writes the existing wgpu buffer in place
+    /// and live material bind groups keep reading it. A refactor that drops
+    /// the padding fails here instead of at a parity screenshot.
+    #[test]
+    fn commit_payloads_keep_a_constant_length_between_growths() {
+        let glyph = GlyphInstanceRecord {
+            rect_min:    Vec2::ZERO,
+            rect_size:   Vec2::ONE,
+            uv_min:      Vec2::ZERO,
+            uv_size:     Vec2::ONE,
+            atlas_index: 0,
+            run_index:   0,
+        };
+        let record = RunRecord {
+            transform:   Mat4::IDENTITY,
+            fill_color:  Vec4::ONE,
+            render_mode: 1,
+            depth_nudge: 0.0,
+        };
+
+        for count in 0..=8_usize {
+            assert_eq!(
+                padded_glyph_records(&vec![glyph; count], 8).len(),
+                8,
+                "glyph payload length must equal capacity at {count} records"
+            );
+            assert_eq!(
+                padded_run_records(&vec![record; count], 8).len(),
+                8,
+                "run payload length must equal capacity at {count} records"
+            );
+        }
     }
 }

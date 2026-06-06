@@ -16,6 +16,12 @@
 //! `bevy_window_manager` performs exactly that cross-DPI restore at launch,
 //! which is what crashed the `typography` example.
 //!
+//! The out-of-bounds is invisible to CPU instrumentation: bevy sizes `oit_heads`
+//! from its extracted view snapshot, so on the CPU `heads.capacity()` always
+//! equals the view area. The fault opens only when a frame is slow enough that
+//! the OS resize lands MID-frame — the GPU rasterizes the new, larger drawable
+//! while bevy already extracted and sized `oit_heads` for the old one.
+//!
 //! This matches `typography`'s render configuration as closely as a standalone
 //! example can without the panel system:
 //!   - `WinitSettings::continuous()` + `PresentMode::AutoNoVsync`, so the app actively draws
@@ -23,6 +29,10 @@
 //!     (bevy's default `game()` settings would). The crash needs a transparent draw to execute on
 //!     the mismatched frame.
 //!   - `fragments_per_pixel_average: 8.0`, the same OIT pool size `StableTransparency` uses.
+//!   - A dense grid of `GRID * GRID` distinct-material transparent quads. In a debug build, every
+//!     transparent draw call pays objc2 `msg_send` verification, so this volume makes frames slow
+//!     enough that an OS resize can land mid-frame — recreating the GPU/CPU size disagreement that
+//!     `typography`'s thousands of transparent glyph draws produced.
 //!
 //! It also logs the OIT heads buffer capacity vs the view size every time they
 //! change, so a run that does NOT crash still shows whether the restore
@@ -53,8 +63,16 @@ use bevy::render::RenderApp;
 use bevy::render::RenderSystems;
 use bevy::render::camera::ExtractedCamera;
 use bevy::window::PresentMode;
+use bevy::window::PrimaryWindow;
+use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WinitSettings;
 use bevy_window_manager::WindowManagerPlugin;
+
+/// Grid is `GRID * GRID` distinct-material transparent quads (1296 draw calls).
+/// Each transparent draw call pays objc2 `msg_send` verification in debug, so
+/// this volume slows frames enough that an OS resize can land mid-frame. Lower
+/// it if the window is too sluggish to drag across monitors.
+const GRID: i16 = 36;
 
 fn main() {
     let mut app = App::new();
@@ -71,7 +89,8 @@ fn main() {
     .insert_resource(WinitSettings::continuous())
     // Cross-DPI restore on launch — the real trigger.
     .add_plugins(WindowManagerPlugin)
-    .add_systems(Startup, setup);
+    .add_systems(Startup, setup)
+    .add_systems(Update, log_scale_changes);
 
     // Safe size probe in the render world: log oit_heads capacity vs view size
     // whenever they change. Shows whether the restore reproduces the buffer
@@ -106,26 +125,54 @@ fn setup(
         Transform::from_xyz(0.0, 0.0, 6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Several overlapping transparent quads, each larger than the view, so the
-    // OIT draw pass builds a real per-pixel linked list across the whole screen
-    // — that is what writes into `oit_heads` for every pixel.
-    let quad = meshes.add(Rectangle::new(12.0, 12.0));
-    let layers = [
-        (Color::srgba(0.9, 0.2, 0.2, 0.4), 0.0),
-        (Color::srgba(0.2, 0.9, 0.2, 0.4), 0.4),
-        (Color::srgba(0.2, 0.4, 0.9, 0.4), 0.8),
-    ];
-    for (color, z) in layers {
-        commands.spawn((
-            Mesh3d(quad.clone()),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: color,
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                ..default()
-            })),
-            Transform::from_xyz(0.0, 0.0, z),
-        ));
+    // A dense grid of distinct-material transparent quads. Distinct materials
+    // defeat batching, so each is its own draw call; in debug each transparent
+    // draw call pays objc2 `msg_send` verification, making frames slow enough
+    // that an OS resize can land mid-frame. The quads overlap heavily, so the
+    // OIT draw pass writes `oit_heads` across the whole view with deep per-pixel
+    // linked lists — the same draw-call volume `typography`'s glyphs produce.
+    let quad = meshes.add(Rectangle::new(0.4, 0.4));
+    let span = 5.0_f32;
+    let step = span / f32::from(GRID - 1);
+    for gx in 0..GRID {
+        for gy in 0..GRID {
+            let fx = f32::from(gx).mul_add(step, -(span / 2.0));
+            let fy = f32::from(gy).mul_add(step, -(span / 2.0));
+            let z = f32::from((gx + gy) % 8) * 0.08;
+            let r = f32::from(gx) / f32::from(GRID);
+            let g = f32::from(gy) / f32::from(GRID);
+            commands.spawn((
+                Mesh3d(quad.clone()),
+                MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: Color::srgba(r, g, r.mul_add(-0.5, 1.0), 0.4),
+                    alpha_mode: AlphaMode::Blend,
+                    unlit: true,
+                    ..default()
+                })),
+                Transform::from_xyz(fx, fy, z),
+            ));
+        }
+    }
+}
+
+/// Main-world probe: logs whether a real cross-DPI scale change fires. The OIT
+/// out-of-bounds needs a genuine backing-scale change (window crossing monitors
+/// of different scale); a same-monitor resize keeps the scale factor fixed and
+/// cannot trigger it.
+fn log_scale_changes(
+    mut events: MessageReader<WindowScaleFactorChanged>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut last_scale: Local<f32>,
+) {
+    for msg in events.read() {
+        warn!("*** WindowScaleFactorChanged fired: {msg:?} ***");
+    }
+    if let Ok(window) = windows.single() {
+        let scale = window.resolution.scale_factor();
+        if (scale - *last_scale).abs() > f32::EPSILON {
+            warn!("window scale_factor: {} -> {scale}", *last_scale);
+            *last_scale = scale;
+        }
     }
 }
 

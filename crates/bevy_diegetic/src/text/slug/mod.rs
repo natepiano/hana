@@ -20,19 +20,14 @@ pub(crate) use glyph::GlyphInstanceRecord;
 pub(crate) use glyph::RunRecord;
 pub(crate) use render::BatchTextMaterialInput;
 pub(crate) use render::RenderMode;
-pub(crate) use render::RunRenderError;
 use render::SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
 pub(crate) use render::TextExtension;
 pub(crate) use render::TextExtensionKey;
 pub(crate) use render::TextMaterial;
-pub(crate) use render::TextMaterialInput;
 pub(crate) use render::batch_text_material;
 pub(crate) use render::glyph_quad_extents;
 pub(crate) use render::set_batch_text_material_buffers;
 pub(crate) use render::set_text_material_anti_alias;
-pub(crate) use render::text_material;
-#[cfg(test)]
-pub(crate) use render::text_material_fill_color;
 #[cfg(feature = "batch_proof")]
 pub(crate) use render::toggle_text_material_debug_glyph_index;
 pub(crate) use runtime::BatchGpu;

@@ -228,7 +228,6 @@ pub use render::StableTransparency;
 pub use render::TextAntiAlias;
 pub use render::TextContent;
 pub use render::TextEdit;
-pub use render::TextGeometryPath;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
 #[cfg(feature = "batch_proof")]

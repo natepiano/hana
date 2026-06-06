@@ -20,10 +20,6 @@ impl FontKey {
     /// Creates a font key from a stable caller-owned identifier.
     #[must_use]
     pub const fn new(value: u64) -> Self { Self(value) }
-
-    /// Raw key value.
-    #[must_use]
-    pub const fn value(self) -> u64 { self.0 }
 }
 
 /// Cache key for one resolved font glyph.
@@ -48,18 +44,6 @@ impl GlyphKey {
             preprocess_version,
         }
     }
-
-    /// Resolved font face identity.
-    #[must_use]
-    pub const fn font(self) -> FontKey { self.font }
-
-    /// Font glyph ID.
-    #[must_use]
-    pub const fn glyph_id(self) -> u16 { self.glyph_id }
-
-    /// Preprocessing version.
-    #[must_use]
-    pub const fn preprocess_version(self) -> u32 { self.preprocess_version }
 }
 
 /// One positioned glyph in a text run.

@@ -53,14 +53,10 @@ pub(crate) use slug::TextExtension;
     reason = "the AsBindGroup derive exposes this key through TextExtension's generated interface"
 )]
 pub(crate) use slug::TextExtensionKey;
-pub(crate) use slug::TextMaterialInput;
 pub(crate) use slug::batch_text_material;
 pub(crate) use slug::glyph_quad_extents;
 pub(crate) use slug::set_batch_text_material_buffers;
 pub(crate) use slug::set_text_material_anti_alias;
-pub(crate) use slug::text_material;
-#[cfg(test)]
-pub(crate) use slug::text_material_fill_color;
 #[cfg(feature = "batch_proof")]
 pub(crate) use slug::toggle_text_material_debug_glyph_index;
 

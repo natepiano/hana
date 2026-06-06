@@ -4,7 +4,7 @@
 //!
 //! Once text shaping has run for the example's ordinary panel and seeded the
 //! shared glyph atlas, [`spawn_proof_batch`] hand-builds one batch entity
-//! beside the per-run renderer: an inert capacity-sized mesh, a
+//! beside the production renderer: an inert capacity-sized mesh, a
 //! `GlyphInstanceRecord` buffer copied from the panel's prepared run with
 //! live atlas indices, and a `RunRecord` table with fixed hand-written
 //! placements. [`force_capacity_growth`] appends another run copy, re-creates

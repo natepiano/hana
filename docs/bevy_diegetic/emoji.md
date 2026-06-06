@@ -46,6 +46,16 @@ implements. No new font dependency.
 
 ## The pipeline this plugs into
 
+> **Update (glyph_instancing Step 4b, 2026-06-06):** the per-run mesh path
+> described below was deleted — `RunRenderData` / `RunStorage` /
+> `build_run_render_data` / `commit_run_storage` no longer exist, and text
+> renders only through the batched-records path (`GlyphInstanceRecord` /
+> `RunRecord` GPU tables expanded by `slug_text_vertex_pull.wgsl`). A color
+> glyph therefore lands as **N glyph records with a brush field** (one per
+> COLR layer) in its batch's instance table, not N layer-quads in a run
+> mesh; everything below about outlines, packing, coverage, and brushes is
+> unchanged.
+
 Today's monochrome path (all under `crates/bevy_diegetic/src/text/slug/`):
 
 - `glyph/outline.rs` — `ttf_parser::Face` + `OutlineBuilder`, cubic→quadratic

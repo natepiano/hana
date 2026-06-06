@@ -42,11 +42,9 @@ pub struct DiegeticPerfStats {
     /// `reconcile_panel_image_children` wall time in milliseconds: re-deriving
     /// text / image child entities from each changed panel's render commands.
     pub reconcile_ms:   f32,
-    /// Stages 2 & 3 — panel-text shaping + mesh-build timings and counts.
+    /// Stages 2 & 3 — panel-text shaping + record-build timings and counts.
     pub panel_text:     PanelTextPerfStats,
-    /// Glyph-batch counters, written by the batched-records geometry path
-    /// (`TextGeometryPath::BatchedRecords`); zeroed while the per-run path is
-    /// active.
+    /// Glyph-batch counters, written by `commit_batch_buffers`.
     pub batch:          BatchPerfStats,
 }
 
@@ -75,7 +73,7 @@ pub struct BatchPerfStats {
 /// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then the child reconcile →
 ///    [`DiegeticPerfStats::reconcile_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
-/// 3. `update_panel_text_geometry` → [`Self::mesh_build_ms`] (glyphs → meshes)
+/// 3. `update_panel_text_batches` → [`Self::mesh_build_ms`] (glyphs → batch records)
 ///
 /// Render-pass time is not measured here — Bevy's own diagnostics report it
 /// (`FrameTimeDiagnosticsPlugin`, `RenderDiagnosticsPlugin`) and it is outside
@@ -90,12 +88,10 @@ pub struct PanelTextPerfStats {
     ///
     /// Written twice per frame: first by `shape_panel_text_children` using
     /// the *previous* frame's `mesh_build_ms`, then overwritten by
-    /// `update_panel_text_geometry` using the current frame's values. The
-    /// final value is only correct because the geometry build is scheduled
+    /// `update_panel_text_batches` using the current frame's values. The
+    /// final value is only correct because the record build is scheduled
     /// `.after(shape_panel_text_children)`; reordering those systems would
-    /// leave `total_ms` stale by one frame. `update_panel_text_alpha` touches
-    /// no mesh and adds nothing to `mesh_build_ms`, so an alpha-only frame
-    /// reports ~0 mesh-build time.
+    /// leave `total_ms` stale by one frame.
     pub total_ms:      f32,
     /// Stage 2 — wall time of `shape_panel_text_children` this frame.
     /// Covers turning strings into positioned glyphs for every panel-text
@@ -105,10 +101,9 @@ pub struct PanelTextPerfStats {
     /// summed across entities. If this dominates, the cost is content-side
     /// (many strings, complex scripts, heavy font features).
     pub parley_ms:     f32,
-    /// Stage 3 — wall time of `update_panel_text_geometry` this frame.
-    /// Covers building glyph meshes and despawning stale meshes. After the
-    /// shared-atlas change (option C) the per-run pack / upload / material work
-    /// is sub-millisecond, so its sub-breakdown was retired.
+    /// Stage 3 — wall time of `update_panel_text_batches` this frame.
+    /// Covers building glyph records, routing runs through the batch store,
+    /// and reconciling batch entities and GPU assets.
     pub mesh_build_ms: f32,
     /// Number of panels whose text shaping ran this frame.
     pub shaped_panels: usize,

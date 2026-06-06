@@ -27,7 +27,6 @@ pub use panel_text::PanelTextLayout;
 pub use panel_text::PanelTextReader;
 pub use panel_text::PanelTextRuns;
 pub use panel_text::TextEdit;
-pub use panel_text::TextGeometryPath;
 use panel_text::TextRenderPlugin;
 pub use panel_text::TextRunOf;
 pub(crate) use sdf_material::SdfPanelMaterial;

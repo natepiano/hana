@@ -17,8 +17,8 @@ use crate::render::world_text::TextContent;
 /// authored `TextStyle::with_lighting` / `with_sidedness` — then climbs
 /// `ChildOf` to the panel's override (seeded by `seed_panel_overrides` for
 /// screen panels and unlit-material panels), else the global default (`Lit` /
-/// `DoubleSided`). `update_panel_text_geometry` reads these for the glyph
-/// material. Later changes flow through the propagation pass, not this observer.
+/// `DoubleSided`). `update_panel_text_batches` reads these as batch-key
+/// fields. Later changes flow through the propagation pass, not this observer.
 /// The glyph-render twin of `seed_panel_child_alpha`.
 pub(super) fn seed_panel_text_child_glyph(
     trigger: On<Add, TextContent>,

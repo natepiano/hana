@@ -1415,7 +1415,9 @@ toggle flipped in the gate examples.
   - `render/oit_guard.rs` is standing infrastructure independent of
     this plan; it outlives 4b and is removed only when upstream bevy
     guards its OIT accesses.
-- **Step 4b — Delete the per-run mesh path.** Entry precondition (4a
+- **Step 4b — Delete the per-run mesh path.** DONE 2026-06-06 — all
+  gates green (code gates + three live visual gates; see "Step 4b
+  status"). Entry precondition (4a
   review): the user-side window-resize test with OIT genuinely active
   has passed — SATISFIED 2026-06-04 (typography, manual resize, guarded
   OIT). Delete: `RunMeshBuilder`,
@@ -1465,6 +1467,74 @@ toggle flipped in the gate examples.
   values" phrasing — Step 2 overturned it (`render_coverage` takes
   `render_mode`) (4a review).
 
+  ### Step 4b status (2026-06-06)
+
+  **Done (code gates green):**
+  - Deleted: `mesh_spawning.rs` wholesale (`DiegeticTextMesh`,
+    `free_run_storage_on_mesh_removal`, `update_panel_text_geometry`,
+    `update_panel_text_alpha`, per-run material builders + tests);
+    `run_data.rs` partial per the 4a review (`RunMeshBuilder`,
+    `RunRenderData`, `RunRenderError`, `build_run_render_data_with_clip`
+    gone; `glyph_quad_extents` + `GlyphQuadExtents` survive with their
+    clip tests re-pointed at `glyph_quad_extents` directly);
+    `GlyphCache`'s `run_storage` map, `RunStorage`,
+    `build_run_render_data`, `commit_run_storage`, `remove_run_storage`,
+    and the `upsert_batch_run` wrapper (callers use
+    `batch_store_mut().upsert_run` — both toggle-era cross-path
+    debug_asserts went with their fields); `TextGeometryPath` +
+    `apply_text_geometry_path` + every `run_if` gate (batch systems run
+    unconditionally); `GlyphBatchStore::drain_all`; `text_material` +
+    `TextMaterialInput` + `text_material_fill_color` and the re-export
+    chains; dead `FontKey::value` / `GlyphKey` accessors;
+    `diegetic_text_stress`'s `B` toggle and stats `path` row.
+  - Kept, untouched as required: atlas growth-swap + repoint in
+    `commit_glyph_atlas`; OIT guard wiring in `RenderPlugin::build`;
+    `RunStorageKey` (now plain run identifier — `Component` derive
+    dropped, nothing inserts it).
+  - `set_text_material_atlas` placeholder branch
+    (`instances == glyphs`) removed — bindings 104/105 are always real.
+  - New headless test
+    `commit_payloads_keep_a_constant_length_between_growths` pins the
+    `BatchGpu` padding contract (payload length == capacity for 0..=8
+    records).
+  - Tests 403/403 workspace (272/272 with `batch_proof`), clippy clean
+    (workspace + `batch_proof`, all targets), fmt.
+  - Doc riders: `emoji.md` annotated (color-glyph layers land as N glyph
+    records with a brush field, not layer-quads in run meshes);
+    `enable_prepass() -> false` recorded as a standing contract at the
+    definition site (any future prepass change must keep or consciously
+    extend the `material_group_is_stripped` guard); `perf.rs` /
+    `alpha.rs` / `glyph_cascade.rs` / `batch_proof` docs re-pointed at
+    `update_panel_text_batches`.
+  - State parity under genuine guarded OIT (BRP, typography): 2 batches /
+    53 runs / 429 glyph records, identical before and after the
+    deletion; all 7 fonts loaded (7 atlas-growth panel rebuilds).
+
+  **Live gates (passed 2026-06-06 after the locked-session block
+  cleared):**
+  - Typography overlay before/after visual compare: PASSED — the
+    after-shot is byte-identical (`cmp` clean) to the pre-deletion
+    before-shot (`/private/tmp/4b_typography_after.png` vs
+    `4b_probe_relaunch.png`, 2,863,525 bytes), captured under genuine
+    guarded OIT.
+  - Forced-growth vs expected post-growth content: PASSED — all 7 fonts
+    render in their own faces after the 7 atlas growths (visual half;
+    the BRP state half passed above). Covered by the same byte-identical
+    after-shot.
+  - Final waterfall column: recorded in the results table (After 4b).
+
+  **Findings logged during the bake (pre-existing, not 4b):** one
+  launch came up with the world camera solid black under OIT (panels
+  intact); the state persisted 4+ minutes and cleared instantly when
+  `OrderIndependentTransparencySettings` was BRP-removed, rendering
+  correctly on re-insert. The launch's log showed a window-restore
+  settle-timeout mismatch, but that is correlation only — three forced
+  reproductions on 2026-06-06 (stale-width windows.ron, the observed
+  off-screen/scale-1.0 stale tuple, live post-activation
+  `scale_factor_override` flips both directions) all rendered fine.
+  Black state is real and OIT-resident; trigger unknown — see the
+  attempts-log memory.
+
   ### Step 4a Review (architect re-evaluation of remaining phases)
 
   - Step 4b's deletion list corrected: `run_data.rs` is a partial
@@ -1487,20 +1557,20 @@ toggle flipped in the gate examples.
 
 ## Results table (fill as steps land)
 
-| Measure | Baseline (2026-06-03) | After 2 (toggle on) | After 4a ⁴ |
-| ------- | --------------------- | ------------------- | ------- |
-| `ms`    | 20.2                  | 15.2 ¹              | 7.6     |
-| `fps`   | 51                    | 66 ¹                | 135     |
-| `ms` paused (idle floor) | (capture at Step 2) | 14.0 / 72 fps | 7.4 / 130 fps |
-| `wait`  | 17.65                 | 13.37               | 2.04    |
-| `render`| 19.7                  | 14.7                | 6.7     |
-| `assets`| 2.01 / 11.07          | 0.12 / 0.24         | 0.15 / 0.29 |
-| `prep`  | 8.70 / 18.31          | 1.41 / 1.97         | 1.39 / 2.63 |
-| `gpu wait` | 2.60 / 14.83       | 10.98 / 26.13 ²     | 2.21 / 11.94 |
-| `graph` | 6.36 / 10.30          | 2.21 / 2.32         | 0.91 / 2.56 |
-| render entities (text) | ~100 world + overlay runs | 3 batches (185 runs) | 3 batches (185 runs) |
-| draws per pass (text)  | ~100 world + overlay runs | t3d items 307 → 125 ³; shadow 370 → 8 | t3d 125; shadow 8 |
-| batches / runs / glyphs | — (no batch store yet)   | 3 / 185 / ~958 | 3 / 185 / 954 |
+| Measure | Baseline (2026-06-03) | After 2 (toggle on) | After 4a ⁴ | After 4b ⁵ |
+| ------- | --------------------- | ------------------- | ------- | ------- |
+| `ms`    | 20.2                  | 15.2 ¹              | 7.6     | 7.3     |
+| `fps`   | 51                    | 66 ¹                | 135     | 134     |
+| `ms` paused (idle floor) | (capture at Step 2) | 14.0 / 72 fps | 7.4 / 130 fps | 7.5 / 128 fps |
+| `wait`  | 17.65                 | 13.37               | 2.04    | 5.14    |
+| `render`| 19.7                  | 14.7                | 6.7     | 6.9     |
+| `assets`| 2.01 / 11.07          | 0.12 / 0.24         | 0.15 / 0.29 | 0.12 / 0.30 |
+| `prep`  | 8.70 / 18.31          | 1.41 / 1.97         | 1.39 / 2.63 | 1.35 / 2.50 |
+| `gpu wait` | 2.60 / 14.83       | 10.98 / 26.13 ²     | 2.21 / 11.94 | 3.41 / 9.18 |
+| `graph` | 6.36 / 10.30          | 2.21 / 2.32         | 0.91 / 2.56 | 1.97 / 3.30 |
+| render entities (text) | ~100 world + overlay runs | 3 batches (185 runs) | 3 batches (185 runs) | 3 batches (183 runs) |
+| draws per pass (text)  | ~100 world + overlay runs | t3d items 307 → 125 ³; shadow 370 → 8 | t3d 125; shadow 8 | t3d 125; shadow 8 |
+| batches / runs / glyphs | — (no batch store yet)   | 3 / 185 / ~958 | 3 / 185 / 954 | 3 / 183 / 943 |
 
 ¹ Captured in a smaller window than the doc baseline; the same-session
 per-run reference was ms 18.9 / 53 fps (`assets` 1.94, `prep` 8.94,
@@ -1518,6 +1588,17 @@ baseline. Same-session per-run reference: ms 29.6 / 34 fps (`assets`
 3.62, `prep` 11.42, `gpu wait` 13.75, `graph` 8.96; t3d 307, shadow
 379) — a ~3.9× frame-time gap at this window size. This run had OIT
 genuinely active (gated activation, `render/oit_guard.rs`).
+⁵ Captured 2026-06-06 after the per-run deletion (batch-only, no
+toggle), release build, 3440×2104 window — different build profile and
+window than the 4a column, so compare loosely: frame totals match 4a
+within noise (`ms` 7.3 vs 7.6, `render` 6.9 vs 6.7), confirming the
+deletion changed no steady-state work. Run/glyph counts (183/943 vs
+185/954) differ because the mutating scene varies frame to frame.
+`wait`/`gpu wait`/`graph` shifts reflect the profile/window change, not
+the deletion. Paused now-column: `layout`/`reconcile`/`shaping`/`mesh`
+all ≤0.01 ms; uploads i/rt both 0 (no per-frame asset churn at idle).
+Screenshots: `/private/tmp/4b_waterfall_moving.png` / `_paused.png`
+(paused 5s-max rows include BRP screenshot readback stalls).
 
 The last three rows come from the Step-2 proof counters: `render entities
 (text)` = run count (per-run path) vs batch count (batched path), both from

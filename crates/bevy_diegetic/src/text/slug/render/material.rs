@@ -1,6 +1,4 @@
 use bevy::asset::Asset;
-use bevy::color::Color;
-use bevy::color::LinearRgba;
 use bevy::math::Vec4;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::ExtendedMaterial;
@@ -81,16 +79,14 @@ pub(crate) struct TextExtension {
     /// Shared glyph-atlas horizontal/vertical band records.
     #[storage(102, read_only)]
     bands:             Handle<ShaderBuffer>,
-    /// Shared glyph-atlas records, indexed by each run's mesh through `UV_1.x`.
+    /// Shared glyph-atlas records, indexed by each glyph record's `atlas_index`.
     #[storage(103, read_only)]
     glyphs:            Handle<ShaderBuffer>,
-    /// Per-glyph instance records read by the vertex-pulling stage. Per-run
-    /// materials never read this binding and reuse the atlas `glyphs` handle
-    /// as a placeholder so their bind group stays preparable.
+    /// Per-glyph instance records read by the vertex-pulling stage.
     #[storage(104, read_only, visibility(vertex))]
     instances:         Handle<ShaderBuffer>,
     /// Per-run records (world transform, fill color, render mode, depth
-    /// nudge). Placeholder-bound on per-run materials, like `instances`.
+    /// nudge) read by the vertex-pulling stages.
     #[storage(105, read_only, visibility(vertex, fragment))]
     run_records:       Handle<ShaderBuffer>,
     /// Routes this material's vertex stages (main, prepass, shadow) through
@@ -125,15 +121,17 @@ impl MaterialExtension for TextExtension {
 
     fn prepass_fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
 
-    // The camera depth prepass cannot run vertex-pull batches: bevy strips
-    // the material bind group from depth-only opaque prepass pipelines
-    // (`is_depth_only_opaque_prepass`), and the vertex-pull vertex stage
-    // reads bindings 104/105 from that group — pipeline creation fails with
-    // a wgpu validation error. The main opaque pass writes its own depth
-    // (`GreaterEqual`, write enabled), so skipping the prepass is an early-z
-    // loss only. Shadow views still queue (`enable_shadows`); the ones bevy
-    // routes depth-only fall back to the standard vertex stage in
-    // `specialize` (see `material_group_is_stripped`).
+    // Standing contract of the text path: the camera depth prepass cannot
+    // run vertex-pull batches. Bevy strips the material bind group from
+    // depth-only opaque prepass pipelines (`is_depth_only_opaque_prepass`),
+    // and the vertex-pull vertex stage reads bindings 104/105 from that
+    // group — pipeline creation fails with a wgpu validation error. The main
+    // opaque pass writes its own depth (`GreaterEqual`, write enabled), so
+    // skipping the prepass is an early-z loss only. Shadow views still queue
+    // (`enable_shadows`); the ones bevy routes depth-only fall back to the
+    // standard vertex stage in `specialize` (see
+    // `material_group_is_stripped`). Any future change that re-enables the
+    // prepass must keep (or consciously extend) that guard.
     fn enable_prepass() -> bool { false }
 
     fn specialize(
@@ -147,7 +145,8 @@ impl MaterialExtension for TextExtension {
             // its `#ifdef PREPASS_PIPELINE` gate picks the entry point. The
             // swap happens here rather than in `vertex_shader()` /
             // `prepass_vertex_shader()` because those are material-type-wide,
-            // and per-run materials must keep the standard vertex stage.
+            // and stripped-group pipelines must keep the standard vertex
+            // stage (see `material_group_is_stripped`).
             descriptor.vertex.shader = SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
             if key.bind_group_data.debug_glyph_index {
                 descriptor
@@ -181,24 +180,6 @@ fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
         .is_none_or(|material_layout| material_layout.entries.is_empty())
 }
 
-/// Inputs for one text material instance.
-pub(crate) struct TextMaterialInput {
-    /// Base material settings.
-    pub base:             StandardMaterial,
-    /// Fill color.
-    pub fill_color:       Color,
-    /// Visible render mode.
-    pub render_mode:      RenderMode,
-    /// Per-layer depth offset for coplanar OIT layer ordering.
-    pub oit_depth_offset: f32,
-    /// Shared glyph-atlas band-packed quadratic curve records.
-    pub curves:           Handle<ShaderBuffer>,
-    /// Shared glyph-atlas horizontal/vertical band records.
-    pub bands:            Handle<ShaderBuffer>,
-    /// Shared glyph-atlas records, indexed by each run's mesh through `UV_1.x`.
-    pub glyphs:           Handle<ShaderBuffer>,
-}
-
 /// Inputs for one vertex-pulling batch material.
 pub(crate) struct BatchTextMaterialInput {
     /// Base material settings.
@@ -219,7 +200,7 @@ pub(crate) struct BatchTextMaterialInput {
     pub curves:            Handle<ShaderBuffer>,
     /// Shared glyph-atlas horizontal/vertical band records.
     pub bands:             Handle<ShaderBuffer>,
-    /// Shared glyph-atlas records, indexed by each run's mesh through `UV_1.x`.
+    /// Shared glyph-atlas records, indexed by each glyph record's `atlas_index`.
     pub glyphs:            Handle<ShaderBuffer>,
     /// Per-glyph instance records read by the vertex-pulling stage.
     pub instances:         Handle<ShaderBuffer>,
@@ -227,46 +208,6 @@ pub(crate) struct BatchTextMaterialInput {
     pub run_records:       Handle<ShaderBuffer>,
     /// Whether to enable the glyph-index staircase debug displacement.
     pub debug_glyph_index: bool,
-}
-
-/// Creates a `TextMaterial` from one run's color and render mode, binding the
-/// shared glyph-atlas curve/band/glyph buffers.
-#[must_use]
-pub(crate) fn text_material(input: TextMaterialInput) -> TextMaterial {
-    let TextMaterialInput {
-        base,
-        fill_color,
-        render_mode,
-        oit_depth_offset,
-        curves,
-        bands,
-        glyphs,
-    } = input;
-    let linear: LinearRgba = fill_color.into();
-    // Per-run materials keep the standard vertex stage; bindings 104/105 are
-    // never read by their pipelines, so the atlas `glyphs` buffer stands in to
-    // keep the bind group preparable.
-    let instances = glyphs.clone();
-    let run_records = glyphs.clone();
-    ExtendedMaterial {
-        base,
-        extension: TextExtension {
-            uniforms: TextUniform {
-                fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
-                render_mode: u32::from(render_mode),
-                oit_depth_offset,
-                supersample: 1,
-                aa_band: 1,
-            },
-            curves,
-            bands,
-            glyphs,
-            instances,
-            run_records,
-            vertex_pull: false,
-            debug_glyph_index: false,
-        },
-    }
 }
 
 /// Creates a vertex-pulling `TextMaterial` for one batch.
@@ -319,23 +260,16 @@ pub(crate) fn set_batch_text_material_buffers(
 }
 
 /// Repoints a text material at replacement shared-atlas buffers after the
-/// atlas grows. Per-run materials bind the atlas `glyphs` buffer as the
-/// placeholder for the vertex-pull bindings (104/105); the placeholder
-/// follows the swap so the old buffer asset can drop without leaving the
-/// material unpreparable.
+/// atlas grows. The batch record buffers (bindings 104/105) are per-batch,
+/// not atlas-owned, so they are untouched here.
 pub(super) fn set_text_material_atlas(
     material: &mut TextMaterial,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,
     glyphs: Handle<ShaderBuffer>,
 ) {
-    let placeholder = material.extension.instances == material.extension.glyphs;
     material.extension.curves = curves;
     material.extension.bands = bands;
-    if placeholder {
-        material.extension.instances = glyphs.clone();
-        material.extension.run_records = glyphs.clone();
-    }
     material.extension.glyphs = glyphs;
 }
 
@@ -355,9 +289,4 @@ pub(crate) fn set_text_material_anti_alias(
 pub(crate) const fn toggle_text_material_debug_glyph_index(material: &mut TextMaterial) -> bool {
     material.extension.debug_glyph_index = !material.extension.debug_glyph_index;
     material.extension.debug_glyph_index
-}
-
-#[cfg(test)]
-pub(crate) const fn text_material_fill_color(material: &TextMaterial) -> Vec4 {
-    material.extension.uniforms.fill_color
 }

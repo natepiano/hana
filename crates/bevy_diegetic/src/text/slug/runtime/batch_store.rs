@@ -527,17 +527,6 @@ impl GlyphBatchStore {
         }
         entities
     }
-
-    /// Tears down all routing state (toggle leaving `BatchedRecords`),
-    /// returning every batch entity for despawn. The interner persists — it
-    /// is keying state only.
-    pub fn drain_all(&mut self) -> Vec<Entity> {
-        self.run_index.clear();
-        self.batches
-            .drain()
-            .filter_map(|(_, batch)| batch.entity)
-            .collect()
-    }
 }
 
 #[cfg(test)]
@@ -822,31 +811,6 @@ mod tests {
             store.base_material(tinted_id).base_color,
             Color::srgb(0.5, 0.2, 0.2)
         );
-    }
-
-    #[test]
-    fn drain_all_clears_routing_but_keeps_the_interner() {
-        let mut store = GlyphBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
-        let id = batch_key.base_material;
-        store.upsert_run(
-            batch_key.clone(),
-            run_key(1),
-            vec![glyph(Vec2::ZERO, 0)],
-            record(Mat4::IDENTITY),
-        );
-        store
-            .get_mut(&batch_key)
-            .expect("batch should exist")
-            .entity = Some(Entity::from_bits(77));
-
-        let entities = store.drain_all();
-
-        assert_eq!(entities, vec![Entity::from_bits(77)]);
-        assert_eq!(store.batches().count(), 0);
-        assert!(!store.is_routed(run_key(1)));
-        // The interner is keying state only and persists across teardown.
-        assert_eq!(store.intern_base_material(&StandardMaterial::default()), id);
     }
 
     #[test]

@@ -1,92 +1,9 @@
-use std::error::Error;
-use std::fmt;
-use std::fmt::Display;
-use std::fmt::Formatter;
-
-use bevy::asset::RenderAssetUsages;
-use bevy::mesh::Indices;
-use bevy::prelude::Mesh;
-use bevy::render::render_resource::PrimitiveTopology;
-use bevy_kana::ToF32;
-use bevy_kana::ToU32;
-
-use crate::text::slug::runtime::BuiltTextRun;
 use crate::text::slug::runtime::GlyphInstance;
-use crate::text::slug::runtime::GlyphKey;
-use crate::text::slug::runtime::GlyphOutlineCache;
 
 const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
 
-/// GPU-ready data for one text run: a glyph-quad mesh whose every quad indexes
-/// the shared glyph atlas through `UV_1.x`. The curve, band, and glyph records
-/// live once in the atlas (`GlyphOutlineCache`), not per run.
-#[derive(Clone, Debug)]
-pub struct RunRenderData {
-    /// One quad per glyph instance in the run.
-    pub mesh: Mesh,
-}
-
-/// Error while building run-level render data.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum RunRenderError {
-    /// The shaped run referenced a glyph missing from its packed glyph cache.
-    MissingPackedGlyph(GlyphKey),
-    /// Clipping removed every quad from the prepared run.
-    NoVisibleGlyphs,
-}
-
-impl Display for RunRenderError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::MissingPackedGlyph(key) => write!(
-                f,
-                "missing packed glyph for font key {} glyph id {} preprocessing version {}",
-                key.font().value(),
-                key.glyph_id(),
-                key.preprocess_version()
-            ),
-            Self::NoVisibleGlyphs => write!(f, "text run has no visible glyph quads"),
-        }
-    }
-}
-
-impl Error for RunRenderError {}
-
-/// Builds one run-level glyph-quad mesh clipped to a local rect. Each quad's
-/// `UV_1.x` carries the glyph's shared-atlas index, looked up from
-/// `glyph_outline_cache`; the curve/band/glyph records themselves are stored
-/// in the atlas and are not rebuilt per run.
-pub fn build_run_render_data_with_clip(
-    preview: &BuiltTextRun,
-    glyph_outline_cache: &GlyphOutlineCache,
-    scale: f32,
-    clip_rect: Option<[f32; 4]>,
-) -> Result<RunRenderData, RunRenderError> {
-    let mut mesh_builder = RunMeshBuilder::new(preview.run.glyphs().len());
-
-    for glyph in preview.run.glyphs() {
-        let record_index = glyph_outline_cache
-            .global_index(glyph.key())
-            .ok_or_else(|| RunRenderError::MissingPackedGlyph(glyph.key()))?;
-        mesh_builder.push_glyph(*glyph, record_index, scale, clip_rect);
-    }
-
-    Ok(RunRenderData {
-        mesh: mesh_builder.finish(),
-    })
-}
-
-struct RunMeshBuilder {
-    positions:     Vec<[f32; 3]>,
-    normals:       Vec<[f32; 3]>,
-    uvs:           Vec<[f32; 2]>,
-    glyph_indices: Vec<[f32; 2]>,
-    indices:       Vec<u32>,
-}
-
 /// Padded, optionally clipped quad rect and UVs for one glyph instance — the
-/// extents [`RunMeshBuilder::push_glyph`] bakes into per-run mesh vertices and
-/// the batch record path packs into `GlyphInstanceRecord`s.
+/// extents `build_glyph_records` packs into `GlyphInstanceRecord`s.
 pub struct GlyphQuadExtents {
     pub(crate) left:      f32,
     pub(crate) right:     f32,
@@ -174,172 +91,72 @@ pub(crate) fn glyph_quad_extents(
     GlyphQuadExtents::new(left, right, bottom, top, padding_x, padding_y).clipped(clip_rect)
 }
 
-impl RunMeshBuilder {
-    fn new(glyph_count: usize) -> Self {
-        Self {
-            positions:     Vec::with_capacity(glyph_count * 4),
-            normals:       Vec::with_capacity(glyph_count * 4),
-            uvs:           Vec::with_capacity(glyph_count * 4),
-            glyph_indices: Vec::with_capacity(glyph_count * 4),
-            indices:       Vec::with_capacity(glyph_count * 6),
-        }
-    }
-
-    fn push_glyph(
-        &mut self,
-        glyph: GlyphInstance,
-        record_index: u32,
-        scale: f32,
-        clip_rect: Option<[f32; 4]>,
-    ) {
-        let Some(extents) = glyph_quad_extents(glyph, scale, clip_rect) else {
-            return;
-        };
-
-        let base = (self.positions.len()).to_u32();
-        let glyph_index = [record_index.to_f32(), 0.0];
-
-        self.positions.push([extents.left, extents.top, 0.0]);
-        self.positions.push([extents.right, extents.top, 0.0]);
-        self.positions.push([extents.right, extents.bottom, 0.0]);
-        self.positions.push([extents.left, extents.bottom, 0.0]);
-
-        self.normals.extend([[0.0, 0.0, 1.0]; 4]);
-        self.uvs.extend([
-            [extents.uv_left, extents.uv_top],
-            [extents.uv_right, extents.uv_top],
-            [extents.uv_right, extents.uv_bottom],
-            [extents.uv_left, extents.uv_bottom],
-        ]);
-        self.glyph_indices.extend([glyph_index; 4]);
-
-        self.indices
-            .extend([base, base + 3, base + 2, base, base + 2, base + 1]);
-    }
-
-    fn finish(self) -> Mesh {
-        let mut mesh = Mesh::new(
-            PrimitiveTopology::TriangleList,
-            RenderAssetUsages::default(),
-        );
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, self.positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, self.normals);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, self.uvs);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, self.glyph_indices);
-        mesh.insert_indices(Indices::U32(self.indices));
-        mesh
-    }
-}
-
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
-    clippy::panic,
-    reason = "tests should fail loudly when fixture mesh data is missing"
+    reason = "tests should fail loudly when fixture glyph data is missing"
 )]
 mod tests {
-    use bevy::mesh::MeshVertexAttribute;
-    use bevy::mesh::VertexAttributeValues;
-
     use super::*;
-    use crate::text::slug::runtime::GlyphOutlineCache;
+    use crate::text::slug::runtime::BuiltTextRun;
     use crate::text::slug::support;
 
     const FONT_DATA: &[u8] = include_bytes!("../../../../assets/fonts/JetBrainsMono-Regular.ttf");
 
-    #[test]
-    fn run_mesh_indexes_shared_atlas_with_one_record_per_unique_glyph() {
-        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "Typography");
-        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, None)
-            .expect("fixture run should render");
+    fn fixture_glyph(text: &str) -> GlyphInstance {
+        let (preview, _) = support::fixture_run_with_cache(FONT_DATA, 7, text);
+        *preview
+            .run
+            .glyphs()
+            .first()
+            .expect("fixture run should hold at least one glyph")
+    }
 
-        let glyph_instances = preview.run.glyphs().len();
-        let mesh_indices = render_data.mesh.indices().map_or(0, Indices::len);
-        assert_eq!(render_data.mesh.count_vertices(), glyph_instances * 4);
-        assert_eq!(mesh_indices, glyph_instances * 6);
-        // "Typography" repeats letters, so the shared atlas holds fewer glyph
-        // records than the run has glyph instances, and every run indexes that
-        // one table rather than copying curves per run.
-        assert!(
-            cache.atlas_glyph_records().len() < glyph_instances,
-            "repeated letters should share one atlas record"
-        );
-        assert!(!cache.atlas_curves().is_empty());
+    /// X/Y extent of the unclipped fixture glyph quad:
+    /// `(min_x, max_x, min_y, max_y)`.
+    fn quad_extent(preview: &BuiltTextRun) -> (f32, f32, f32, f32) {
+        let glyph = preview
+            .run
+            .glyphs()
+            .first()
+            .expect("fixture run should hold at least one glyph");
+        let extents =
+            glyph_quad_extents(*glyph, 1.0, None).expect("unclipped glyph should produce a quad");
+        (extents.left, extents.right, extents.bottom, extents.top)
     }
 
     #[test]
-    fn clip_rect_trims_mesh_positions_and_uvs() {
-        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
-        let (min_x, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
+    fn clip_rect_trims_quad_and_moves_uvs_into_the_glyph() {
+        let (preview, _) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (min_x, max_x, min_y, max_y) = quad_extent(&preview);
         let clip_x = f32::midpoint(min_x, max_x);
-        let clip_rect = Some([clip_x, min_y, max_x, max_y]);
 
-        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
-            .expect("fixture run should render");
+        let glyph = fixture_glyph("H");
+        let extents = glyph_quad_extents(glyph, 1.0, Some([clip_x, min_y, max_x, max_y]))
+            .expect("half-clipped glyph should keep a quad");
 
-        let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);
-        let uvs = float32x2_attribute(&render_data.mesh, Mesh::ATTRIBUTE_UV_0);
-        assert_eq!(positions.len(), 4);
-        assert_eq!(uvs.len(), 4);
         assert!(
-            positions.iter().all(|position| position[0] >= clip_x),
-            "clipped mesh should not extend left of the clip rect"
+            extents.left >= clip_x,
+            "clipped quad should not extend left of the clip rect"
         );
         assert!(
-            uvs.iter().any(|uv| uv[0] > 0.0),
+            extents.uv_left > 0.0,
             "left-trimmed glyph should move UVs into the glyph quad"
         );
     }
 
     #[test]
-    fn fully_clipped_glyph_emits_no_mesh_vertices() {
-        let (preview, cache) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
-        let (_, max_x, min_y, max_y) = mesh_extent(&preview, &cache);
-        let clip_rect = Some([max_x + 1.0, min_y, max_x + 2.0, max_y]);
+    fn fully_clipped_glyph_produces_no_quad() {
+        let (preview, _) = support::fixture_run_with_cache(FONT_DATA, 7, "H");
+        let (_, max_x, min_y, max_y) = quad_extent(&preview);
 
-        let render_data = build_run_render_data_with_clip(&preview, &cache, 1.0, clip_rect)
-            .expect("fixture run should render");
+        let glyph = fixture_glyph("H");
+        let extents =
+            glyph_quad_extents(glyph, 1.0, Some([max_x + 1.0, min_y, max_x + 2.0, max_y]));
 
-        assert_eq!(render_data.mesh.count_vertices(), 0);
-        assert_eq!(render_data.mesh.indices().map_or(0, Indices::len), 0);
-    }
-
-    /// X/Y extent of the unclipped fixture mesh: `(min_x, max_x, min_y, max_y)`.
-    fn mesh_extent(preview: &BuiltTextRun, cache: &GlyphOutlineCache) -> (f32, f32, f32, f32) {
-        let render_data = build_run_render_data_with_clip(preview, cache, 1.0, None)
-            .expect("fixture run should render");
-        let positions = float32x3_attribute(&render_data.mesh, Mesh::ATTRIBUTE_POSITION);
-        (
-            positions.iter().map(|p| p[0]).fold(f32::INFINITY, f32::min),
-            positions
-                .iter()
-                .map(|p| p[0])
-                .fold(f32::NEG_INFINITY, f32::max),
-            positions.iter().map(|p| p[1]).fold(f32::INFINITY, f32::min),
-            positions
-                .iter()
-                .map(|p| p[1])
-                .fold(f32::NEG_INFINITY, f32::max),
-        )
-    }
-
-    fn float32x3_attribute(mesh: &Mesh, attribute: MeshVertexAttribute) -> &[[f32; 3]] {
-        let values = mesh
-            .attribute(attribute)
-            .expect("mesh should contain requested attribute");
-        let VertexAttributeValues::Float32x3(values) = values else {
-            panic!("mesh attribute should be Float32x3");
-        };
-        values
-    }
-
-    fn float32x2_attribute(mesh: &Mesh, attribute: MeshVertexAttribute) -> &[[f32; 2]] {
-        let values = mesh
-            .attribute(attribute)
-            .expect("mesh should contain requested attribute");
-        let VertexAttributeValues::Float32x2(values) = values else {
-            panic!("mesh attribute should be Float32x2");
-        };
-        values
+        assert!(
+            extents.is_none(),
+            "a quad entirely outside the clip rect is dropped"
+        );
     }
 }
