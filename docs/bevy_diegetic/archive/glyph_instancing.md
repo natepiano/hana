@@ -1647,7 +1647,7 @@ expected not to move.
   (memory: `project_text_alpha_slab_errors`); the batch store removes the
   per-run assets entirely, but Step 2 watches the log with the toggle on.
 - **emoji.md color-glyph path** — the layered-color-glyph design in
-  [`emoji.md`](emoji.md) assumes per-run meshes ("glyph → N quads, one per
+  [`emoji.md`](../emoji.md) assumes per-run meshes ("glyph → N quads, one per
   layer"). Under instancing a color layer becomes N records with a brush
   field. Not this plan's work; Step 4 adds the cross-reference note to
   `emoji.md` so the two plans don't diverge silently.
