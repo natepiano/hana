@@ -4,7 +4,6 @@
 pub(crate) mod batch_proof;
 mod clip;
 mod constants;
-mod oit_guard;
 mod panel_geometry;
 mod panel_text;
 mod sdf_material;
@@ -18,7 +17,6 @@ pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
-use oit_guard::OitGuardState;
 use panel_geometry::PanelGeometryPlugin;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
@@ -134,25 +132,11 @@ impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((TextRenderPlugin, PanelGeometryPlugin))
             .init_resource::<TextAntiAlias>()
-            .init_resource::<OitGuardState>()
             // Bevy registers the OIT type without `ReflectComponent`; adding it
             // enables reflection-based (BRP) edits of OIT settings on a live camera.
             .register_type::<OrderIndependentTransparencySettings>()
             .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
             .add_systems(Update, sync_text_anti_alias)
-            .add_systems(
-                Startup,
-                oit_guard::request_oit_resolve_shader.run_if(resource_exists::<AssetServer>),
-            )
-            .add_systems(
-                Update,
-                (
-                    oit_guard::guard_oit_shaders,
-                    transparency::activate_stable_transparency,
-                )
-                    .chain()
-                    .run_if(resource_exists::<Assets<Shader>>),
-            )
             .add_observer(transparency::on_stable_transparency_added)
             .add_observer(transparency::on_stable_transparency_removed)
             .add_observer(transparency::on_screen_space_camera_added);

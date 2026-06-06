@@ -18,11 +18,9 @@
 //!   mesh edges; coplanar Blend text may shift at angles.
 //! - **Opt-in (`StableTransparency` on a `Camera3d`):** three observers in this module manage MSAA
 //!   across every camera that shares the window:
-//!   - On add: insert `Msaa::Off` on the OIT camera, set its depth texture to `TEXTURE_BINDING`,
-//!     and propagate `Msaa::Off` to every existing `ScreenSpaceCamera`. The
-//!     `OrderIndependentTransparencySettings` component itself arrives via
-//!     [`activate_stable_transparency`] only after `oit_guard` confirms bevy's OIT shaders are
-//!     patched with bounds guards — the unpatched shaders can fault the GPU on window resize.
+//!   - On add: insert `Msaa::Off` and `OrderIndependentTransparencySettings` on the OIT camera, set
+//!     its depth texture to `TEXTURE_BINDING`, and propagate `Msaa::Off` to every existing
+//!     `ScreenSpaceCamera`.
 //!   - On any new `ScreenSpaceCamera` spawned afterward (e.g. when a `DiegeticPanel::screen()`
 //!     appears mid-app): force `Msaa::Off` on it too, so the late-spawn case stays consistent.
 //!   - On remove: strip OIT and restore `Msaa::default()` everywhere it forced `Off`.
@@ -43,7 +41,6 @@ use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 use bevy::render::view::Msaa;
 
-use super::oit_guard::OitGuardState;
 use crate::screen_space::ScreenSpaceCamera;
 
 /// Sizing factor for Bevy's shared OIT fragment pool: the GPU node buffer holds
@@ -76,10 +73,9 @@ const OIT_FRAGMENTS_PER_PIXEL_AVERAGE: f32 = 8.0;
 /// owns the `Msaa` component on every camera that could share a framebuffer
 /// with an OIT camera, for the entire time `StableTransparency` is present:
 ///
-/// 1. **OIT camera turns on**: `on_stable_transparency_added` inserts `Msaa::Off` on the OIT camera
-///    and propagates `Msaa::Off` to every existing `ScreenSpaceCamera`;
-///    `activate_stable_transparency` adds `OrderIndependentTransparencySettings` once the
-///    `oit_guard` shader patches are confirmed.
+/// 1. **OIT camera turns on**: `on_stable_transparency_added` inserts `Msaa::Off` and
+///    `OrderIndependentTransparencySettings` on the OIT camera and propagates `Msaa::Off` to every
+///    existing `ScreenSpaceCamera`.
 /// 2. **Screen-space camera spawns later** (e.g. when a `DiegeticPanel::screen()` triggers
 ///    `setup_screen_space_view`): `on_screen_space_camera_added` detects the active OIT camera and
 ///    forces `Msaa::Off` on the new overlay camera before it can render with a default-MSAA
@@ -106,14 +102,10 @@ const OIT_FRAGMENTS_PER_PIXEL_AVERAGE: f32 = 8.0;
 #[derive(Component, Debug, Default, Clone, Copy)]
 pub struct StableTransparency;
 
-/// Prepares a `StableTransparency` camera for OIT: depth texture usage and
-/// `Msaa::Off` immediately, but NOT `OrderIndependentTransparencySettings` —
-/// [`activate_stable_transparency`] inserts that only after `oit_guard` has
-/// confirmed bevy's OIT shaders carry the bounds guards. The unguarded
-/// shaders write `oit_heads` out of bounds during a window resize (bevy
-/// compiles shaders without runtime checks), which has faulted the GPU at
-/// kernel-panic severity; gating the component means no OIT pipeline can ever
-/// compile from the unpatched source.
+/// Turns OIT on for a `StableTransparency` camera: inserts
+/// `OrderIndependentTransparencySettings` and `Msaa::Off`, sets the depth
+/// texture to `TEXTURE_BINDING` (required by the OIT resolve pass), and forces
+/// `Msaa::Off` on every existing `ScreenSpaceCamera` that shares the window.
 pub(super) fn on_stable_transparency_added(
     trigger: On<Add, StableTransparency>,
     mut cameras: Query<&mut Camera3d>,
@@ -124,39 +116,15 @@ pub(super) fn on_stable_transparency_added(
     if let Ok(mut camera_3d) = cameras.get_mut(cam) {
         camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
     }
-    commands.entity(cam).insert(Msaa::Off);
+    commands.entity(cam).insert((
+        OrderIndependentTransparencySettings {
+            fragments_per_pixel_average: OIT_FRAGMENTS_PER_PIXEL_AVERAGE,
+            ..default()
+        },
+        Msaa::Off,
+    ));
     for overlay in &mut msaa_overlays {
         commands.entity(overlay).insert(Msaa::Off);
-    }
-}
-
-/// Turns OIT on for every prepared `StableTransparency` camera once both of
-/// bevy's OIT shaders are patched ([`OitGuardState::ready`]). Until then the
-/// camera renders with ordinary sorted transparency; if patching failed
-/// (anchor mismatch after a bevy update), OIT stays off for the whole run —
-/// view-angle-stable compositing is lost, the GPU is not faulted.
-pub(super) fn activate_stable_transparency(
-    guard: Res<OitGuardState>,
-    cameras: Query<
-        Entity,
-        (
-            With<StableTransparency>,
-            Without<OrderIndependentTransparencySettings>,
-        ),
-    >,
-    mut commands: Commands,
-) {
-    if !guard.ready() {
-        return;
-    }
-    for cam in &cameras {
-        info!("stable transparency: OIT activated on {cam} (guarded shaders confirmed)");
-        commands
-            .entity(cam)
-            .insert(OrderIndependentTransparencySettings {
-                fragments_per_pixel_average: OIT_FRAGMENTS_PER_PIXEL_AVERAGE,
-                ..default()
-            });
     }
 }
 

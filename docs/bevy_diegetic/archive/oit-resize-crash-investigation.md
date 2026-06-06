@@ -116,7 +116,7 @@ If the source that crashed easily then is the source that will not crash now, th
 ## Conclusion
 
 - **No upstream bevy issue is warranted.** A "OIT crashes on resize" report would be correctly declined — the buffer-sizing code keeps `oit_heads >= view`, and the unguarded access cannot be reached organically. The unchecked indexing is a latent footgun, not a live defect on this version.
-- **The unchecked indexing is real** and is demonstrable deterministically by `oit_oob_isolate.rs` (`FORCE_SHRINK = true`): it forces `oit_heads` to a quarter of the view, and the resolve classifier paints magenta where the unguarded index would have gone out of bounds, plus shows the 2-line guard removes it. That example is the mechanism proof; it forces a state this bevy version does not produce on its own.
+- **The unchecked indexing is real.** It was demonstrated deterministically by the now-removed `oit_oob_isolate` example (`FORCE_SHRINK = true`): it forced `oit_heads` to a quarter of the view, and a resolve-pass classifier painted magenta where the unguarded index would have gone out of bounds, confirming the 2-line guard removed it. That forced a state this bevy version does not produce on its own — which is why the example, like the guard, was removed. (The other investigation example, `oit_oob_bwm`, drove the cross-DPI restore through `bevy_window_manager`; also removed.)
 - **`oit_guard` is cheap insurance**, not a fix for a reproducible bug. It converts a potential kernel panic into a dropped fragment if the GPU is ever in a bad state again.
 
 ---
