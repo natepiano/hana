@@ -18,7 +18,7 @@ use super::events::SetExclusiveFullscreen;
 use super::events::SetWindowed;
 use super::events::TogglePersistence;
 use super::input;
-use super::state::SelectedVideoModes;
+use super::input::SelectedVideoModes;
 
 pub(crate) fn on_set_borderless_fullscreen(
     _trigger: On<SetBorderlessFullscreen>,

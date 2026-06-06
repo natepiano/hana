@@ -26,11 +26,11 @@ use super::window_state::SavedWindowMode;
 use super::window_state::WindowState;
 use crate::ManagedWindow;
 use crate::ManagedWindowPersistence;
-use crate::config::RestoreWindowConfig;
 use crate::constants::DEFAULT_SCALE_FACTOR;
 use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
+use crate::restore_window_config::RestoreWindowConfig;
 
 /// Save all window states to the given path.
 pub(crate) fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {

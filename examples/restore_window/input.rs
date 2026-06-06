@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::env::current_exe;
 use std::path::PathBuf;
 
@@ -15,6 +16,7 @@ use dirs::config_dir;
 
 use super::constants::ACTIVE_VIDEO_MODE_SUFFIX;
 use super::constants::BACKWARD_SCROLL_OFFSET;
+use super::constants::DEFAULT_VIDEO_MODE_INDEX;
 use super::constants::FORWARD_SCROLL_OFFSET;
 use super::constants::MILLIHERTZ_PER_HERTZ;
 use super::constants::MONITOR_LABEL;
@@ -42,7 +44,45 @@ use super::events::SetExclusiveFullscreen;
 use super::events::SetWindowed;
 use super::events::SpawnManagedWindow;
 use super::events::TogglePersistence;
-use super::state::SelectedVideoModes;
+
+#[derive(Resource, Clone, Copy)]
+pub(crate) enum KeyboardInputMode {
+    Enabled,
+    Disabled,
+}
+
+impl From<bool> for KeyboardInputMode {
+    fn from(enabled: bool) -> Self {
+        if enabled {
+            Self::Enabled
+        } else {
+            Self::Disabled
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+pub(crate) struct SelectedVideoModes {
+    indices:              HashMap<usize, usize>,
+    pub(crate) last_sync: Option<(UVec2, u32)>,
+}
+
+impl SelectedVideoModes {
+    pub(crate) fn get(&self, monitor_index: usize) -> usize {
+        self.indices
+            .get(&monitor_index)
+            .copied()
+            .unwrap_or(DEFAULT_VIDEO_MODE_INDEX)
+    }
+
+    pub(crate) fn set(&mut self, monitor_index: usize, index: usize) {
+        self.indices.insert(monitor_index, index);
+    }
+}
+
+pub(crate) fn keyboard_enabled(input_mode: Res<KeyboardInputMode>) -> bool {
+    matches!(*input_mode, KeyboardInputMode::Enabled)
+}
 
 pub(crate) fn handle_global_input(
     keys: Res<ButtonInput<KeyCode>>,

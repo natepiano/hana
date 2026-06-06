@@ -20,7 +20,6 @@ mod events;
 mod input;
 mod mode_observers;
 mod setup;
-mod state;
 
 use std::env::var;
 
@@ -33,9 +32,9 @@ use constants::TEST_MODE_ENV_VAR;
 use events::MismatchStates;
 use events::RestoredStates;
 use events::WindowsSettledCount;
-use state::KeyboardInputMode;
-use state::SelectedVideoModes;
-use state::WindowCounter;
+use input::KeyboardInputMode;
+use input::SelectedVideoModes;
+use setup::WindowCounter;
 
 fn main() {
     App::new()
@@ -82,8 +81,8 @@ fn main() {
             (
                 display::update_primary_display,
                 display::update_secondary_displays,
-                input::handle_global_input.run_if(state::keyboard_enabled),
-                input::handle_window_mode_input.run_if(state::keyboard_enabled),
+                input::handle_global_input.run_if(input::keyboard_enabled),
+                input::handle_window_mode_input.run_if(input::keyboard_enabled),
                 debug::debug_winit_monitor,
                 debug::debug_window_changed,
                 debug::debug_scale_factor_changed,

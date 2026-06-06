@@ -32,7 +32,6 @@
 //!
 //! See the `custom_path` example for how to override the full path to the state file.
 
-mod config;
 mod constants;
 mod events;
 #[cfg(target_os = "macos")]
@@ -43,6 +42,7 @@ mod monitors;
 mod persistence;
 mod platform;
 mod restore;
+mod restore_window_config;
 mod visibility;
 #[cfg(all(target_os = "windows", feature = "workaround-winit-4341"))]
 mod windows_dpi_fix;
@@ -54,7 +54,6 @@ use std::path::PathBuf;
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use config::RestoreWindowConfig;
 pub use events::WindowRestoreMismatch;
 pub use events::WindowRestored;
 pub use managed::ManagedWindow;
@@ -74,6 +73,7 @@ use restore::RestorePlugin;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 use restore::has_restoring_windows;
 use restore::no_restoring_windows;
+use restore_window_config::RestoreWindowConfig;
 
 /// The main plugin. See module docs for usage.
 ///

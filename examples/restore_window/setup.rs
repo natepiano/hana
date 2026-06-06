@@ -12,10 +12,14 @@ use super::constants::MANAGED_WINDOW_TITLE_PREFIX;
 use super::constants::MARGIN;
 use super::constants::SECONDARY_WINDOW_HEIGHT;
 use super::constants::SECONDARY_WINDOW_WIDTH;
+use super::display::PrimaryDisplay;
+use super::display::SecondaryDisplay;
 use super::events::SpawnManagedWindow;
-use super::state::PrimaryDisplay;
-use super::state::SecondaryDisplay;
-use super::state::WindowCounter;
+
+#[derive(Resource, Default)]
+pub(crate) struct WindowCounter {
+    pub(crate) next: usize,
+}
 
 pub(crate) fn setup(mut commands: Commands) {
     commands.spawn(Camera2d);

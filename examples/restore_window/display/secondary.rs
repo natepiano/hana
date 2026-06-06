@@ -13,10 +13,12 @@ use super::super::constants::VIDEO_MODES_HEADER;
 use super::super::events::MismatchStates;
 use super::super::events::RestoredStates;
 use super::super::input;
-use super::super::state::SecondaryDisplay;
-use super::super::state::SelectedVideoModes;
+use super::super::input::SelectedVideoModes;
 use super::comparison::add_span;
 use super::comparison::build_comparison_spans;
+
+#[derive(Component)]
+pub(crate) struct SecondaryDisplay(pub(crate) Entity);
 
 // --- Secondary Window Displays ---
 

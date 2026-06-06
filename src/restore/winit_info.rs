@@ -11,7 +11,6 @@ use super::target_position::RestoreDiagnostics;
 use super::target_position::TargetPosition;
 use crate::Platform;
 use crate::WindowKey;
-use crate::config::RestoreWindowConfig;
 use crate::constants::DEFAULT_SCALE_FACTOR;
 use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::monitors::CurrentMonitor;
@@ -19,6 +18,7 @@ use crate::monitors::Monitors;
 use crate::persistence;
 #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
 use crate::persistence::SavedWindowMode;
+use crate::restore_window_config::RestoreWindowConfig;
 
 /// Window decoration dimensions (title bar, borders).
 struct WindowDecoration {

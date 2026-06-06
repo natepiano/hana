@@ -9,7 +9,6 @@ use bevy_kana::ToI32;
 use bevy_kana::ToU32;
 
 use super::WindowKey;
-use super::config::RestoreWindowConfig;
 use super::constants::DEFAULT_SCALE_FACTOR;
 use super::constants::FIRST_DUPLICATE_SUFFIX;
 use super::constants::MANAGED_WINDOW_NAME_SEPARATOR;
@@ -24,6 +23,7 @@ use super::platform::Platform;
 use super::restore;
 use super::restore::WinitInfo;
 use super::restore::X11FrameCompensated;
+use super::restore_window_config::RestoreWindowConfig;
 
 /// Marks a window entity as managed by the window manager plugin.
 ///
