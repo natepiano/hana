@@ -5,8 +5,25 @@
 | Item | State |
 | --- | --- |
 | Scheduler-ordering flash fix | **Done** (on `update/0.19.0-rc.2`) |
-| Per-run rebuild (this plan) | **In progress** — Phases 3–5 done (P2 already satisfied); Phases 6–7 remain |
+| Per-run rebuild (this plan) | **Done** — all phases landed (P2 was already satisfied) |
 | Font-load relayout | **Deferred** — not reachable through the current API |
+
+> **Archived 2026-06-06.** Every implementation phase landed. The per-run
+> runtime machinery built in Phases 4–6 — the `DiegeticTextMesh` reparent and
+> storage observers, the `update_panel_text_geometry` / `update_panel_text_alpha`
+> split, and the world-text mirror (`render_world_text` / `WorldTextMesh` /
+> `update_world_text_alpha`) — was later replaced by the batched-records path
+> ([`glyph-instancing.md`](glyph-instancing.md)); its Step 4b deleted the
+> per-run mesh path on 2026-06-06. Phases 1, 3, and 7 — the `gating_eq`
+> comparator, the conditional reconcile writes, and the image gating + tint
+> split — remain live code and supply the change detection the batching path
+> consumes. §6 (font-load relayout) is still correctly deferred:
+> `FontRegistered` has no internal observer and fonts are still referenced by
+> baked id. §10 (runtime settings ergonomics) was a separate track; since this
+> doc was written, `override_text_alpha` / `inherit_text_alpha` /
+> `override_font_unit` and `TextProps::set_alpha_mode` landed, closing gap 2
+> and part of gap 1; gap 3 (spawn-only `TextStyle.alpha_mode` / `.unit`) is
+> still open.
 
 ---
 
