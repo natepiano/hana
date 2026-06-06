@@ -4,9 +4,27 @@
 **Branch:** `update/0.19.0-rc.2`
 **Hardware:** Apple M2 Max, macOS 26.5, 64 GB
 **bevy:** 0.19.0-rc.2 · **wgpu:** 29 (Metal)
-**Outcome:** Not a reproducible bevy OIT defect. Most likely an externally-induced GPU/driver fault (see [Reframe](#reframe)). The `oit_guard` module is cheap kernel-panic insurance, not a fix for a live bevy bug.
+**Outcome:** Not a reproducible bevy OIT defect. Most likely an externally-induced GPU/driver fault (see [Reframe](#reframe)). The `oit_guard` module was **removed** on 2026-06-06 (see [Resolution](#resolution--oit_guard-removed)) — it was insurance against an externally-induced GPU state rather than a fix for a live bevy bug, and its anchor-bound shader patching was version-fragile.
 
 This document is the durable record of the investigation. The instrumentation it describes was reverted after it was written; the [Instrumentation reference](#instrumentation-reference) section is enough to recreate it if the fault ever recurs.
+
+---
+
+## Resolution — `oit_guard` removed
+
+On 2026-06-06, after the conclusion below, `oit_guard` was removed. Rationale:
+
+- The panic does not reproduce on the current source (8 attempts, plus the literal pre-guard code) — the OIT buffer is provably sized to the view every frame.
+- The leading explanation is an external GPU/driver fault (see [Reframe](#reframe)), not a bevy defect — so the module guarded against a non-bevy condition.
+- The guard worked by runtime-patching bevy's OIT shaders at **exact anchor strings**; a bevy bump that rewrites those shaders would silently disable OIT (see [maintainability](#oit_guard-maintainability-anchor-fragility)). Carrying that version-fragile machinery for a condition the current bevy does not produce was not justified.
+
+What was removed/changed:
+
+- Deleted `crates/bevy_diegetic/src/render/oit_guard.rs` (the shader-patching + activation-gate module).
+- `render/mod.rs`: dropped the `oit_guard` module declaration, the `OitGuardState` resource, the startup resolve-shader request, and the `guard_oit_shaders` → `activate_stable_transparency` system chain.
+- `render/transparency.rs`: removed the gated `activate_stable_transparency` system; OIT now activates directly in the `on_stable_transparency_added` observer (the pre-guard pattern from commit `b3948cc`) — it inserts `OrderIndependentTransparencySettings` + `Msaa::Off` and sets the depth `TEXTURE_BINDING` when `StableTransparency` is added.
+
+Net effect: OIT runs on bevy's stock (unguarded) OIT shaders again, exactly as it did before the guard existed. If the kernel panic ever recurs, recreate the instrumentation in the [Instrumentation reference](#instrumentation-reference), and first check whether another GPU-heavy process (editor/compositor) is implicated — that is the leading theory.
 
 ---
 
@@ -104,6 +122,8 @@ If the source that crashed easily then is the source that will not crash now, th
 ---
 
 ## `oit_guard` maintainability (anchor fragility)
+
+> The guard was removed on 2026-06-06 (see [Resolution](#resolution--oit_guard-removed)). This section records the fragility that informed that decision and what re-adding it would require.
 
 The guard injects its bounds check by finding **exact anchor strings** in bevy's OIT WGSL:
 
