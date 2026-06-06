@@ -1,9 +1,10 @@
 # Diegetic text performance — options
 
 > **Status: RETIRED 2026-06-03.** Options A, C, and D are landed and measured;
-> the one remaining option, **B (true instancing)**, now has its own plan in
-> [`glyph_instancing.md`](glyph_instancing.md). This file stays as the record
-> of phases A / C / D and of the waterfall overlay design.
+> the one remaining option, **B (true instancing)**, has its own plan in
+> [`glyph-instancing.md`](glyph-instancing.md) (since landed in full,
+> 2026-06-06). This file stays as the record of phases A / C / D and of the
+> waterfall overlay design.
 
 ## Baseline
 
@@ -225,7 +226,7 @@ Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-m
 - Removes the ~400-per-frame allocate/upload/discard churn.
 
 **B. True instancing (one shared quad)** — MOVED to
-[`glyph_instancing.md`](glyph_instancing.md)
+[`glyph-instancing.md`](glyph-instancing.md)
 - Stop storing a quad per glyph. Keep one unit quad and draw it N times, feeding a
   per-glyph table (position + glyph id) the GPU expands.
 - No per-label meshes; moving text just updates a small table. Also removes the
@@ -556,7 +557,8 @@ needs no name decision.)
 ## Suggested order
 
 A (done) → C (done) → D (done: Steps 0 / 1a / 1b / 2 / 3 / 4 all landed
-2026-06-03) → B ([`glyph_instancing.md`](glyph_instancing.md), current).
+2026-06-03) → B ([`glyph-instancing.md`](glyph-instancing.md), landed
+2026-06-06).
 
 Detail also in the memory notes `project_diegetic_text_single_source`,
 `project_diegetic_text_perf_targets`, and `project_perf_mode_measurement`.
