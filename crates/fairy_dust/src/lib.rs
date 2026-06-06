@@ -76,7 +76,6 @@ pub use constants::CUBE_FACE_PANEL_RELEASE_HOLD;
 pub use constants::DEFAULT_PANEL_BACKGROUND;
 pub use constants::EXAMPLE_CUBE_COLOR;
 pub use constants::EXAMPLE_CUBE_SIZE;
-pub use constants::EXAMPLE_GROUND_SIZE;
 pub use constants::LABEL_SIZE;
 pub use constants::LOG_FILTER;
 pub use constants::TITLE_COLOR;

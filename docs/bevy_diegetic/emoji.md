@@ -401,13 +401,13 @@ orbiting (Bottom).
 
 Standard canonical builder chain — `fairy_dust::sprinkle_example()` with
 `.with_brp_extras()`, `.with_save_window_position()`, `.with_studio_lighting()`,
-`.with_ground_plane().size(fairy_dust::EXAMPLE_GROUND_SIZE)`, the cube via
+`.with_ground_plane()`, the cube via
 `.with_cube()` carrying `CameraHomeTarget`, `.with_orbit_cam_preset(|_| {},
 OrbitCamPreset::BlenderLike)`, `.with_camera_home().pitch(..).yaw(..)`, a
 `TitleBar`, and `.with_camera_control_panel()`. The lead `fn main` comment notes
 that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
 
-- **Rotation** — `.with_cube_spin::<…>(CubeSpinConfig::new())`, which registers
+- **Rotation** — `.with_cube_spin::<…>()`, which registers
   the `P Pause` chip and starts spinning. The slow spin is what shows every face
   and lets the orbit camera demonstrate crispness across distances.
 - **Panels** (Left, Top) — `CubeFacePanelStyle::for_cube(cube_size)` with
