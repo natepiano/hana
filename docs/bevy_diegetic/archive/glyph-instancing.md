@@ -1,5 +1,10 @@
 # Glyph instancing — one shared quad, per-glyph records
 
+> **Status: COMPLETE 2026-06-06.** Steps 0–4b all landed. Step 4b deleted the
+> per-run mesh path, so batched records are the only text geometry path.
+> Stress-test frame time 20.2 ms → 7.3 ms; text draws per pass ~100 → 1 per
+> batch. Archived as the implementation record.
+
 Option B from [`diegetic-text-perf.md`](diegetic-text-perf.md) (now retired —
 A, C, and D landed there; this doc owns what remains). Goal: stop storing a
 quad per glyph in per-run meshes. Keep one quad's worth of geometry, draw it N
@@ -42,7 +47,7 @@ asset preparations, fewer draws):
 
 What instancing does **not** move: fragment cost (same pixels covered, same
 per-pixel curve evaluation — see the per-run-instancing note in
-[`slug_fx.md`](slug_fx.md#render-run-instancing-is-not-a-lever-here), which
+[`slug_fx.md`](../slug_fx.md#render-run-instancing-is-not-a-lever-here), which
 rejects *run-level* quads for fx; glyph-granularity records keep per-pixel
 cost identical), `gpu wait`, and the main-thread rows.
 
