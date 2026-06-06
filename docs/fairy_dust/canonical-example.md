@@ -150,6 +150,9 @@ starting view.
 
 Use the companion helpers when the input mode is part of the example:
 
+- `.with_orbit_cam_configured(configure)` when only camera fields (focus,
+  radius, limits, …) need configuring — input defaults to the `SimpleMouse`
+  preset.
 - `.with_orbit_cam_preset(...)` / `.with_orbit_cam_preset_bundle(...)` for
   built-in presets.
 - `.with_orbit_cam_bindings(...)` / `.with_orbit_cam_bindings_bundle(...)` for
@@ -161,6 +164,12 @@ Use the `_bundle` variants when the camera also needs extra camera-side
 components such as `Transform`, `Projection`, render settings, or an
 example-specific marker. Use low-level `.with_orbit_cam(configure, bundle)`
 only when the mode-specific helpers cannot express the example.
+
+After any OrbitCam helper, `.with_restore_camera_on_restart()` captures the
+current `OrbitCam` pose on `Ctrl+Shift+R` hot restart and makes the restore
+animation available through `RestoreWindowAnimation` — use it in examples
+where losing the camera pose across a restart would discard meaningful user
+navigation (`typography` and `ime` do this).
 
 When an example spawns an `OrbitCam` manually to teach bindings, manual input,
 or input routing, call `fairy_dust::apply_example_orbit_cam_limits(&mut cam)`
@@ -338,6 +347,10 @@ hand-written observers:
   end_filter)` — for shared event types: `AnimationBegin`/`AnimationEnd`
   carry `source: AnimationSource`, so a `LookAt` chip filters on
   `e.source == AnimationSource::LookAt`.
+- `.wire_chip_to_fit_target::<M>(chip)` — the chip is active while a fit
+  animation (`AnimateToFit`, `LookAt`, `ZoomToFit`) frames an entity carrying
+  marker `M`. Matching on `M` distinguishes the caller's fit from the built-in
+  Home fit, which frames its own internal cube.
 - `.wire_chip_to_state::<R, _>(chip, extractor)` /
   `.wire_chip_to_activation::<R>(chip)` — for chips driven by resource state
   rather than events.
