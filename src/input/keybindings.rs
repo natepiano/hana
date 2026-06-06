@@ -166,12 +166,16 @@ impl<C: Component> Keybindings<C> {
     }
 
     /// Spawns an action bound to a single key, blocked by all modifiers.
-    pub fn spawn_key<A: InputAction>(&self, action_spawner: &mut ActionSpawner<C>, key: KeyCode) {
+    pub fn spawn_key<A: InputAction>(
+        &self,
+        action_spawner: &mut ActionSpawner<C>,
+        key_code: KeyCode,
+    ) {
         action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
             BlockBy::new(self.modifier_blockers.all()),
-            bindings![key],
+            bindings![key_code],
         ));
     }
 
@@ -179,13 +183,13 @@ impl<C: Component> Keybindings<C> {
     pub fn spawn_shift_key<A: InputAction>(
         &self,
         action_spawner: &mut ActionSpawner<C>,
-        key: KeyCode,
+        key_code: KeyCode,
     ) {
         action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
             BlockBy::new(self.modifier_blockers.non_shift()),
-            bindings![key.with_mod_keys(ModKeys::SHIFT)],
+            bindings![key_code.with_mod_keys(ModKeys::SHIFT)],
         ));
     }
 
@@ -208,11 +212,11 @@ impl<C: Component> Keybindings<C> {
     pub fn spawn_platform_key<A: InputAction>(
         &self,
         action_spawner: &mut ActionSpawner<C>,
-        key: KeyCode,
+        key_code: KeyCode,
     ) {
         let platform_bindings = match PlatformShortcutMode::current() {
-            PlatformShortcutMode::Command => bindings![key.with_mod_keys(ModKeys::SUPER)],
-            PlatformShortcutMode::Control => bindings![key.with_mod_keys(ModKeys::CONTROL)],
+            PlatformShortcutMode::Command => bindings![key_code.with_mod_keys(ModKeys::SUPER)],
+            PlatformShortcutMode::Control => bindings![key_code.with_mod_keys(ModKeys::CONTROL)],
         };
         action_spawner.spawn((Action::<A>::new(), self.action_settings, platform_bindings));
     }

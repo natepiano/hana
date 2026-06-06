@@ -61,22 +61,22 @@ impl From<Orientation> for Quat {
     fn from(value: Orientation) -> Self { value.0 }
 }
 
-/// Rotation composition: applying `rhs` then `self`.
+/// Rotation composition: applying `right_hand_side` then `self`.
 impl Mul for Orientation {
     type Output = Self;
 
-    fn mul(self, rhs: Self) -> Self { Self(self.0 * rhs.0) }
+    fn mul(self, right_hand_side: Self) -> Self { Self(self.0 * right_hand_side.0) }
 }
 
 impl MulAssign for Orientation {
-    fn mul_assign(&mut self, rhs: Self) { self.0 = self.0 * rhs.0; }
+    fn mul_assign(&mut self, right_hand_side: Self) { self.0 = self.0 * right_hand_side.0; }
 }
 
 /// Rotates a vector by this orientation.
 impl Mul<Vec3> for Orientation {
     type Output = Vec3;
 
-    fn mul(self, rhs: Vec3) -> Vec3 { self.0 * rhs }
+    fn mul(self, right_hand_side: Vec3) -> Vec3 { self.0 * right_hand_side }
 }
 
 #[cfg(test)]

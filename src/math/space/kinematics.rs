@@ -84,56 +84,56 @@ macro_rules! semantic_newtype {
         impl Add for $name {
             type Output = Self;
 
-            fn add(self, rhs: Self) -> Self {
-                Self(self.0 + rhs.0)
+            fn add(self, right_hand_side: Self) -> Self {
+                Self(self.0 + right_hand_side.0)
             }
         }
 
         impl AddAssign for $name {
-            fn add_assign(&mut self, rhs: Self) {
-                self.0 += rhs.0;
+            fn add_assign(&mut self, right_hand_side: Self) {
+                self.0 += right_hand_side.0;
             }
         }
 
         impl Sub for $name {
             type Output = Self;
 
-            fn sub(self, rhs: Self) -> Self {
-                Self(self.0 - rhs.0)
+            fn sub(self, right_hand_side: Self) -> Self {
+                Self(self.0 - right_hand_side.0)
             }
         }
 
         impl SubAssign for $name {
-            fn sub_assign(&mut self, rhs: Self) {
-                self.0 -= rhs.0;
+            fn sub_assign(&mut self, right_hand_side: Self) {
+                self.0 -= right_hand_side.0;
             }
         }
 
         impl Mul<f32> for $name {
             type Output = Self;
 
-            fn mul(self, rhs: f32) -> Self {
-                Self(self.0 * rhs)
+            fn mul(self, right_hand_side: f32) -> Self {
+                Self(self.0 * right_hand_side)
             }
         }
 
         impl MulAssign<f32> for $name {
-            fn mul_assign(&mut self, rhs: f32) {
-                self.0 *= rhs;
+            fn mul_assign(&mut self, right_hand_side: f32) {
+                self.0 *= right_hand_side;
             }
         }
 
         impl Div<f32> for $name {
             type Output = Self;
 
-            fn div(self, rhs: f32) -> Self {
-                Self(self.0 / rhs)
+            fn div(self, right_hand_side: f32) -> Self {
+                Self(self.0 / right_hand_side)
             }
         }
 
         impl DivAssign<f32> for $name {
-            fn div_assign(&mut self, rhs: f32) {
-                self.0 /= rhs;
+            fn div_assign(&mut self, right_hand_side: f32) {
+                self.0 /= right_hand_side;
             }
         }
 
@@ -151,28 +151,28 @@ macro_rules! semantic_newtype {
         impl Add<$inner> for $name {
             type Output = Self;
 
-            fn add(self, rhs: $inner) -> Self {
-                Self(self.0 + rhs)
+            fn add(self, right_hand_side: $inner) -> Self {
+                Self(self.0 + right_hand_side)
             }
         }
 
         impl AddAssign<$inner> for $name {
-            fn add_assign(&mut self, rhs: $inner) {
-                self.0 += rhs;
+            fn add_assign(&mut self, right_hand_side: $inner) {
+                self.0 += right_hand_side;
             }
         }
 
         impl Sub<$inner> for $name {
             type Output = Self;
 
-            fn sub(self, rhs: $inner) -> Self {
-                Self(self.0 - rhs)
+            fn sub(self, right_hand_side: $inner) -> Self {
+                Self(self.0 - right_hand_side)
             }
         }
 
         impl SubAssign<$inner> for $name {
-            fn sub_assign(&mut self, rhs: $inner) {
-                self.0 -= rhs;
+            fn sub_assign(&mut self, right_hand_side: $inner) {
+                self.0 -= right_hand_side;
             }
         }
     };

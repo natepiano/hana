@@ -52,41 +52,41 @@ impl From<ScreenPosition> for Vec2 {
 impl Add for ScreenPosition {
     type Output = Self;
 
-    fn add(self, rhs: Self) -> Self { Self(self.0 + rhs.0) }
+    fn add(self, right_hand_side: Self) -> Self { Self(self.0 + right_hand_side.0) }
 }
 
 impl AddAssign for ScreenPosition {
-    fn add_assign(&mut self, rhs: Self) { self.0 += rhs.0; }
+    fn add_assign(&mut self, right_hand_side: Self) { self.0 += right_hand_side.0; }
 }
 
 impl Sub for ScreenPosition {
     type Output = Self;
 
-    fn sub(self, rhs: Self) -> Self { Self(self.0 - rhs.0) }
+    fn sub(self, right_hand_side: Self) -> Self { Self(self.0 - right_hand_side.0) }
 }
 
 impl SubAssign for ScreenPosition {
-    fn sub_assign(&mut self, rhs: Self) { self.0 -= rhs.0; }
+    fn sub_assign(&mut self, right_hand_side: Self) { self.0 -= right_hand_side.0; }
 }
 
 impl Mul<f32> for ScreenPosition {
     type Output = Self;
 
-    fn mul(self, rhs: f32) -> Self { Self(self.0 * rhs) }
+    fn mul(self, right_hand_side: f32) -> Self { Self(self.0 * right_hand_side) }
 }
 
 impl MulAssign<f32> for ScreenPosition {
-    fn mul_assign(&mut self, rhs: f32) { self.0 *= rhs; }
+    fn mul_assign(&mut self, right_hand_side: f32) { self.0 *= right_hand_side; }
 }
 
 impl Div<f32> for ScreenPosition {
     type Output = Self;
 
-    fn div(self, rhs: f32) -> Self { Self(self.0 / rhs) }
+    fn div(self, right_hand_side: f32) -> Self { Self(self.0 / right_hand_side) }
 }
 
 impl DivAssign<f32> for ScreenPosition {
-    fn div_assign(&mut self, rhs: f32) { self.0 /= rhs; }
+    fn div_assign(&mut self, right_hand_side: f32) { self.0 /= right_hand_side; }
 }
 
 impl Neg for ScreenPosition {
