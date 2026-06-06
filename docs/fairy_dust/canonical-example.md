@@ -30,7 +30,6 @@ fairy_dust::sprinkle_example()
     .with_save_window_position()
     .with_studio_lighting()
     .with_ground_plane()
-        .size(fairy_dust::EXAMPLE_GROUND_SIZE)
     .with_cube()
         .size(CUBE_SIZE)
         .color(fairy_dust::EXAMPLE_CUBE_COLOR)
@@ -75,10 +74,10 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
 - `.with_save_window_position()` — window position persists across runs.
 - `.with_studio_lighting()` — key/fill/rim lights + clear color. Replaces
   manual `DirectionalLight`/`PointLight`/`GlobalAmbientLight` spawns.
-- `.with_ground_plane()` — default 8×8 translucent ground. Override `.size()`
-  or `.color()` per example, but do not hand-roll a plane. For canonical
-  cube-focused examples, use `.size(fairy_dust::EXAMPLE_GROUND_SIZE)` so the
-  ground footprint stays consistent across the suite. Do **not** wire a
+- `.with_ground_plane()` — default 8×8 translucent ground. Use the default at
+  all times; override `.size()` or `.color()` only when the example has an
+  explicit reason (e.g. `swapped_axis` sizes the ground to cover its axis
+  gizmo), and never hand-roll a plane. Do **not** wire a
   click-on-ground observer to re-home the camera — `H Home` (auto-added by
   `.with_camera_home()`) is the standard homing affordance. Click-to-home
   on the ground tends to fire on stray clicks and interferes with picking

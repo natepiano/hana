@@ -27,7 +27,6 @@ fn main() {
             ProgrammaticCamera,
         )
         .with_ground_plane()
-        .size(GROUND_SIZE)
         .with_studio_lighting()
         .with_cube()
         .size(CUBE_SIZE)
@@ -199,8 +198,6 @@ fn camera_at_home(camera: &OrbitCam) -> bool {
 const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
 const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
 const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(0.2);
-
-const GROUND_SIZE: f32 = 8.0;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // UI — description panel explaining the home flow on screen.

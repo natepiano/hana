@@ -37,7 +37,6 @@ fn main() {
         .with_save_window_position()
         .with_studio_lighting()
         .with_ground_plane()
-        .size(GROUND_SIZE)
         .with_cube()
         .size(CUBE_SIZE)
         .color(CUBE_COLOR)
@@ -294,5 +293,3 @@ const CUBE_GROUND_CLEARANCE: f32 = 0.1;
 const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
 const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
 const CUBE_TRANSLATION: Vec3 = fairy_dust::example_cube_on_ground(CUBE_GROUND_CLEARANCE);
-
-const GROUND_SIZE: f32 = fairy_dust::EXAMPLE_GROUND_SIZE;
