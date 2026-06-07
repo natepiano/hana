@@ -21,6 +21,7 @@ use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
 use super::constants::TITLE_BAR_DEFAULT_TITLE;
+use super::constants::TITLE_BAR_SEGMENT_GAP;
 use super::screen_panel_frame;
 use super::screen_panel_material;
 use crate::camera_home::CameraHomeConfig;
@@ -55,18 +56,38 @@ impl TitleChip {
     pub const fn label_text(self) -> &'static str { self.label }
 }
 
+/// One independently highlightable word inside a segmented control.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TitleBarSegment {
+    id:    String,
+    label: String,
+}
+
+impl TitleBarSegment {
+    /// Creates a segment with separate stable identity and visible label.
+    #[must_use]
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id:    id.into(),
+            label: label.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Stored title-bar control with stable identity and visible label.
 pub struct TitleBarControl {
-    id:    String,
-    label: String,
+    id:       String,
+    label:    String,
+    segments: Vec<TitleBarSegment>,
 }
 
 impl TitleBarControl {
     fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
-            id:    id.into(),
-            label: label.into(),
+            id:       id.into(),
+            label:    label.into(),
+            segments: Vec::new(),
         }
     }
 
@@ -75,6 +96,23 @@ impl TitleBarControl {
         Self {
             id: label.clone(),
             label,
+            segments: Vec::new(),
+        }
+    }
+
+    /// Creates a control rendered as one cell: a key-hint label followed by
+    /// words that highlight independently, each by its segment id. The hint
+    /// itself never highlights.
+    #[must_use]
+    pub fn segmented(
+        hint: impl Into<String>,
+        segments: impl IntoIterator<Item = TitleBarSegment>,
+    ) -> Self {
+        let hint = hint.into();
+        Self {
+            id:       hint.clone(),
+            label:    hint,
+            segments: segments.into_iter().collect(),
         }
     }
 }
@@ -371,12 +409,22 @@ fn build_title_bar_layout(
             builder.text(&title_bar.title, title);
             for control in &title_bar.controls {
                 title_separator(builder, orientation);
-                let style = if state.is_active(&control.id) {
-                    active_control.clone()
+                if control.segments.is_empty() {
+                    let style = if state.is_active(&control.id) {
+                        active_control.clone()
+                    } else {
+                        inactive_control.clone()
+                    };
+                    builder.text(&control.label, style);
                 } else {
-                    inactive_control.clone()
-                };
-                builder.text(&control.label, style);
+                    segmented_control_cell(
+                        builder,
+                        control,
+                        state,
+                        &active_control,
+                        &inactive_control,
+                    );
+                }
             }
             title_separator(builder, orientation);
             let help_style = if state.is_active(HELP_CONTROL) {
@@ -386,6 +434,32 @@ fn build_title_bar_layout(
             };
             builder.text(HELP_CONTROL, help_style);
         });
+    });
+}
+
+/// One title-bar cell holding a segmented control: the key hint followed by
+/// its segments, each styled by its own activation state.
+fn segmented_control_cell(
+    builder: &mut LayoutBuilder,
+    control: &TitleBarControl,
+    state: &TitleBarControlState,
+    active: &TextStyle,
+    inactive: &TextStyle,
+) {
+    let row = El::new()
+        .direction(Direction::LeftToRight)
+        .child_gap(TITLE_BAR_SEGMENT_GAP)
+        .child_align_y(AlignY::Center);
+    builder.with(row, |builder| {
+        builder.text(&control.label, inactive.clone());
+        for segment in &control.segments {
+            let style = if state.is_active(&segment.id) {
+                active.clone()
+            } else {
+                inactive.clone()
+            };
+            builder.text(&segment.label, style);
+        }
     });
 }
 
@@ -426,6 +500,27 @@ mod tests {
         // Repeat Inactive on an empty list must be a no-op.
         state.set_active("H Home", ControlActivation::Inactive);
         assert!(!state.is_active("H Home"));
+    }
+
+    #[test]
+    fn segmented_control_keeps_hint_id_and_segment_ids() {
+        let control = TitleBarControl::segmented(
+            "A",
+            [
+                TitleBarSegment::new("aa-off", "Off"),
+                TitleBarSegment::new("aa-both", "Both"),
+            ],
+        );
+        assert_eq!(control.id, "A");
+        assert_eq!(control.label, "A");
+        assert_eq!(control.segments.len(), 2);
+
+        // Segment highlight uses the same id-based state as whole chips.
+        let mut state = TitleBarControlState::default();
+        state.set_active("aa-both", ControlActivation::Active);
+        assert!(state.is_active("aa-both"));
+        assert!(!state.is_active("aa-off"));
+        assert!(!state.is_active("A"));
     }
 
     #[test]

@@ -518,8 +518,12 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
 fn fragment(in: VertexOutput) {
 #ifdef VERTEX_UVS_A
 #ifdef VERTEX_UVS_B
+    // The shadow map stores a binary silhouette, so one winding test answers
+    // it: keep fragments inside the outline (punch-out runs invert the test).
     let glyph = glyphs[glyph_index(in.uv_b)];
-    if render_coverage(in.uv, glyph, run_render_mode(in.uv_b)) < 0.5 {
+    let point = design_position(in.uv, glyph);
+    let inside = winding_at(point, glyph) != 0;
+    if inside == (run_render_mode(in.uv_b) == RENDER_MODE_PUNCH_OUT) {
         discard;
     }
 #else

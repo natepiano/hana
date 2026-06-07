@@ -9,7 +9,10 @@
 //! the other axis (panel tree-build / `set_tree` churn).
 //!
 //! Controls:
-//!   Space — pause / resume per-frame mutation (compare moving vs idle cost)
+//!   Space — pause / resume per-frame mutation (compare moving vs idle cost);
+//!     the title-bar `Pause` segment highlights while paused
+//!   A — cycle the text anti-alias mode (Off → Anisotropic → Supersample →
+//!     Both); the title bar highlights the active mode
 //!
 //! A bottom-left screen overlay reports the frame as two additive blocks, one
 //! per thread, each row with a 5-second peak column. Main thread: `ms` is the
@@ -52,12 +55,16 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 
@@ -158,12 +165,47 @@ struct BatchStatsPanel;
 #[derive(Resource, Default)]
 struct FrameCounter(u64);
 
-/// Whether the per-frame mutation is running. Toggled with Space.
+/// Whether the per-frame mutation is running. Toggled with Space; the
+/// title-bar `Pause` segment highlights while paused.
 #[derive(Resource)]
 struct Mutating(bool);
 
 impl Default for Mutating {
     fn default() -> Self { Self(true) }
+}
+
+/// Title-bar segment id for the pause indicator.
+const PAUSE_CHIP: &str = "pause";
+
+/// The in-shader [`TextAntiAlias`] modes in `A`-key cycle order: title-bar
+/// segment id, visible label, and the mode itself. One source of truth for
+/// the chips, the chip wiring, and the cycle step.
+const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
+    ("aa-off", "Off", TextAntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", TextAntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
+    ("aa-both", "Both", TextAntiAlias::Both),
+];
+
+/// Maps a boolean to the title-bar activation it represents.
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
+
+/// Advances [`TextAntiAlias`] one step through [`AA_MODES`], wrapping at the
+/// end. The change propagates to every text material via the engine's
+/// `sync_text_anti_alias` system, and to the title-bar chips via the
+/// per-mode wiring in `main`.
+fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
+    let current = AA_MODES
+        .iter()
+        .position(|(_, _, mode)| *mode == *anti_alias)
+        .unwrap_or(0);
+    *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
 #[derive(Clone, Copy)]
@@ -475,8 +517,28 @@ fn main() {
             TitleBar::new()
                 .with_title("Text Stress")
                 .with_anchor(Anchor::TopLeft)
-                .control("Space pause"),
+                .control(TitleBarControl::segmented(
+                    "Space",
+                    [TitleBarSegment::new(PAUSE_CHIP, "Pause")],
+                ))
+                .control(TitleBarControl::segmented(
+                    "A",
+                    AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+                )),
         )
+        .wire_chip_to_state::<Mutating, _>(PAUSE_CHIP, |mutating| chip_activation(!mutating.0))
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
+        })
         .with_camera_control_panel()
         .add_plugins((
             RenderDiagnosticsPlugin,
@@ -510,6 +572,9 @@ fn main() {
             )
                 .chain(),
         )
+        // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
+        // cycle the AA mode.
+        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
         .run();
 }
 

@@ -106,20 +106,58 @@ campaign starts by rebuilding the baseline.
   text fragments vs OIT resolve vs panel SDF vs shadows vs the rest.
   This decides whether slug fragment work even dominates the 3.41 ms
   `gpu wait`, before any shader work is scoped.
+- **0c result (2026-06-07).** 10 s Metal System Trace on a fresh release
+  launch, built-in display (3456×2104), `TextAntiAlias::Both`,
+  1415 GPU frames (~141 fps). Per-frame GPU time by pass
+  (sum across Vertex/Fragment/Compute channels; channels overlap, so
+  the 7.49 ms grand total exceeds the ~7.1 ms wall frame):
+
+  | per-frame ms | share | pass |
+  | ---: | ---: | --- |
+  | 2.68 | 35.8 % | `main_transparent_pass_3d` (text glyphs + panel SDF backings + OIT writes; Fragment 2.59) |
+  | 2.69 | 35.9 % | shadow cascades 0–3 combined (1.35 / 0.66 / 0.40 / 0.28; Fragment 2.50 of it) |
+  | 0.86 | 11.5 % | light clustering passes combined |
+  | 0.31 | 4.1 % | upscaling |
+  | 0.29 | 3.8 % | `oit_resolve` |
+  | 0.10 | 1.4 % | `main_opaque_pass_3d` (vertex + clear only) |
+  | ~0.55 | ~7 % | wgpu-internal compute (draw validation, blits, mesh preprocessing) |
+
+  Findings: **OIT resolve is exonerated** (0.29 ms). The frame splits
+  almost exactly in half between the transparent pass and the shadow
+  cascades — shadows were not on the suspect list at this weight. The
+  shadow cost is fragment-heavy (2.50 of 2.69 ms), which a depth-only
+  pass should not be; that pattern points at alpha-evaluated materials
+  (text and/or panels) running real fragment work into 4 cascade maps.
+  Within the transparent pass, text vs panel-backing split is not
+  visible at pass granularity — the Phase 1 AA delta (~0.4–0.6 ms)
+  is a lower bound on the text share. Next probes, both cheap and live
+  over BRP: (A) toggle shadow casting off for text labels / panels and
+  watch the overlay — splits the 2.69 ms; (B) hide panels vs text —
+  splits the 2.68 ms. These pick the Phase 2 entry: 2a only pays if
+  text fragments dominate after (A)/(B); the shadow-cascade lever
+  (caster opt-out, cascade count/resolution) is a new candidate that
+  no shader experiment touches. Tooling: per-pass ranking script at
+  `scripts/rank_gpu_passes.py` (id/ref resolution per
+  `parse_gpu_intervals.py`); pass labels under bevy 0.19 still match
+  the parser's `main_transparent_pass_3d` filter, so Phase 0a's label
+  check is satisfied.
 
 ## Phase 1 — AA-mode A/B in the real scene
 
 The supersample multiplier is the one fragment cost no May experiment
 ever saw. Measure it before optimizing around it.
 
-- **Setup:** `TextAntiAlias` has no `Reflect` derive, so it cannot be
-  flipped over BRP yet. Add `Reflect` + `register_type` +
-  `ReflectResource` (same pattern as
-  `OrderIndependentTransparencySettings`).
-- **Method:** `diegetic_text_stress` release at full window, perf mode;
-  flip `Both → Anisotropic → Supersample → Off` live via BRP and record
-  frame / `gpu wait` per mode. Repeat on the canonical bench for the
-  table.
+- **Setup (DONE 2026-06-07):** the `A` key cycles `TextAntiAlias`
+  (`Off → Anisotropic → Supersample → Both`) in `diegetic_text_stress`;
+  the title bar shows all four mode names with the active one
+  highlighted, next to the `Space Pause` indicator (highlighted while
+  paused). Built on fairy_dust segmented title-bar controls
+  (`TitleBarControl::segmented`). BRP drives the same key via
+  `send_keys`, so the loop works manually and scripted.
+- **Method:** `diegetic_text_stress` release at full window on the
+  built-in display, perf mode; cycle the modes with `A` and record
+  frame / `gpu wait` per mode from the overlay. Repeat on the canonical
+  bench for the table.
 - **Decision rule:**
   - `Both → Anisotropic` recovers a large share of `gpu wait` → the
     supersample loop is the target: Phase 2b/2c first.
@@ -127,6 +165,25 @@ ever saw. Measure it before optimizing around it.
   - 0c shows text fragments are a minority of GPU time → the lever is
     outside text (OIT pool, panel SDF, shadows); scope a separate plan
     and stop here.
+- **First signal (2026-06-07, ad-hoc):** on the running release
+  instance (built-in display, 3440×2104, unfocused, mid-run after time
+  on the external): `Both` 96–103 fps (~10.05 ms), `Off` 100–107 fps
+  (~9.66 ms) → **AA full-off recovers ~0.4–0.6 ms**. The supersample
+  multiplier is not the dominant GPU cost in this scene — consistent
+  with the stride collapsing to 1 sample on the mostly-frontal stress
+  grid. Phase 2b/2c deprioritized; Phase 0c (per-pass decomposition)
+  is the next gate, then 2a. Caveat: decision-signal quality only
+  (mid-run, unfocused, `gpu wait` includes acquire-blocking); re-measure
+  fresh for the table, and spot-check a grazing-heavy scene (typography)
+  where the stride actually fires.
+- **Same session, display finding:** the instance had restored onto the
+  scale-1.0 external (drawable 1720×1378) and ran at 52–85 fps with
+  `gpu wait` 14.16 ms — moving the window to the built-in (drawable
+  3440×2104) took it to ~105 fps / `gpu wait` 5.53 ms with 3× more
+  pixels. Presenting to the external blocks the render thread in
+  swapchain acquire; rendering work was never the difference. This is
+  the invalid case the procedure doc's built-in-display rule exists to
+  catch.
 
 ## Phase 2 — shader experiments
 

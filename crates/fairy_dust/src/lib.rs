@@ -113,6 +113,7 @@ pub use screen_panels::DescriptionPanel;
 pub use screen_panels::TitleBar;
 pub use screen_panels::TitleBarControl;
 pub use screen_panels::TitleBarOrientation;
+pub use screen_panels::TitleBarSegment;
 pub use screen_panels::TitleChip;
 pub use screen_panels::TitleChipActivation;
 pub use screen_panels::screen_panel_frame;

@@ -39,3 +39,6 @@ pub(super) const SEPARATOR_HEIGHT: Px = Px(18.0);
 pub(super) const SEPARATOR_WIDTH: Px = Px(1.0);
 pub(super) const TITLE_BAR_CHILD_GAP: Px = Px(10.0);
 pub(super) const TITLE_BAR_DEFAULT_TITLE: &str = "CONTROLS";
+/// Gap between the words of a segmented control — tighter than
+/// `TITLE_BAR_CHILD_GAP` so the segments read as one label.
+pub(super) const TITLE_BAR_SEGMENT_GAP: Px = Px(6.0);

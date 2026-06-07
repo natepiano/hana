@@ -23,6 +23,7 @@ pub use title_bar::TitleBarControl;
 pub(crate) use title_bar::TitleBarControlRegistry;
 pub(crate) use title_bar::TitleBarControlState;
 pub use title_bar::TitleBarOrientation;
+pub use title_bar::TitleBarSegment;
 pub use title_bar::TitleChip;
 pub use title_bar::TitleChipActivation;
 
