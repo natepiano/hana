@@ -1,5 +1,14 @@
 # Slug Experiments
 
+> **Closed to new entries (2026-06-06).** Every experiment below ran on
+> the per-run mesh path with single-sample AA under bevy 0.18. Batched
+> records + vertex pulling, the `TextAntiAlias::Both` default, the
+> dedup/48-band reverts (`c3cfcbd`), and bevy 0.19 make these numbers
+> non-comparable with current measurements; the lessons remain citable.
+> New experiments: `gpu-perf-experiments.md` (created with the first
+> entry). Campaign plan:
+> [`gpu-perf-test-plan.md`](gpu-perf-test-plan.md).
+
 This document records Slug renderer experiments that were tried during
 the feasibility branch. Its purpose is to prevent future sessions from
 repeating failed approaches without a new reason.

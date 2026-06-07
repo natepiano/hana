@@ -7,6 +7,18 @@ Older empty templates and duplicate tables in other Slug documents
 have been removed; new benchmark entries must use the table below and
 link back here.
 
+## Status (2026-06-06)
+
+The 2026-05-23 baseline column below is **retired**. Every number in this
+table was measured on the per-run mesh path with single-sample AA under
+bevy 0.18. Since then: batched glyph records + vertex pulling replaced
+the per-run mesh path, `TextAntiAlias::Both` became the default fragment
+path, per-curve dedup was reverted and `any_outside_neighbor` added
+(`c3cfcbd`), and the engine moved to bevy 0.19.0-rc.2 / wgpu 29. No new
+column may be compared against the retired baseline. The new campaign
+starts with a fresh baseline column — see
+[`gpu-perf-test-plan.md`](gpu-perf-test-plan.md), Phase 0.
+
 ## Comparison Table
 
 One row per metric, one column per configuration, plus `Delta` and
@@ -221,6 +233,27 @@ record the case name.
 - All columns must come from the **same scene** (currently the
   720-instance `text_renderer_gpu_bench` Slug run). Variants measured
   in a different scene cannot be added to this table.
+- All columns must be measured with the bench window on the **built-in
+  MacBook display** (monitor 0, scale factor 2.0). The bench pins
+  `WindowPosition::Centered(MonitorSelection::Primary)`; on macOS that is
+  the main display, which is the built-in unless System Settings
+  designates an external as main. Confirm the drawable is `3200x1800`
+  (1600×900 logical × scale 2.0) before keeping a trace — a `1600x900`
+  drawable means the window landed on a scale-1.0 external and the trace
+  is invalid.
+- Every column must declare its `TextAntiAlias` mode (resource default:
+  `Both`). Columns with different AA modes are different configurations,
+  not deltas of one another.
+- Every column must declare the warmup protocol actually run
+  (`WARMUP_FRAMES`/`SAMPLE_FRAMES` and the xctrace time limit), backed by
+  the exported trace bundles. The 2026-05 "long-warmup" numbers were
+  recorded without surviving trace bundles (see the Newton-deflation
+  entry in `slug-experiments.md`), so protocol claims without trace
+  evidence don't count.
+- After an engine upgrade, verify the parser's label filter
+  (`main_transparent_pass_3d`) still matches the exported intervals
+  before trusting any trace — pass labels can change between bevy
+  releases.
 
 ## Verdict
 
