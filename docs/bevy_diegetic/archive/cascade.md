@@ -560,7 +560,7 @@ determinate plan corrections (no user-facing forks) and were folded into Phases 
   the `mod.rs` wrapper) for `Changed<Resolved<TextAlpha>>` / `Changed<Resolved<FontUnit>>`. Deleting (not
   repointing) the helpers is required: the unified pass now caches `Resolved<A>` and re-resolves on
   `Changed<Override<A>>` (an in-place `get_mut` edit triggers it), so keeping them would make two writers of
-  standalone `Resolved<…>` — the exact double-writer clobber the atomic commit below makes unrepresentable. Run
+  standalone `Resolved<…>` — the exact double-writer overwrite the atomic commit below makes unrepresentable. Run
   `rg "Resolved<(World|Panel)(TextAlpha|FontUnit)>"` to confirm none are missed. **Keep** the `With` /
   `Without<PanelChild>` entity-selection filters.
 - **Keep `seed_world_text_overrides`** (`world_text/mod.rs`) and its `Without<PanelChild>` filter — it is the
@@ -590,8 +590,8 @@ determinate plan corrections (no user-facing forks) and were folded into Phases 
   so it must carry that test coverage forward, not just drop it.
 
 Commit atomically: the new plugin, the reader repoint, and the old-type deletions are mutually
-dependent — they cannot land separately and stay green, because old and new both writing `Resolved` in
-one frame would clobber. That same atomic deletion ends the Phase-2 cross-fire and guarantees a single
+dependent — they cannot land separately and stay green, because old and new would both write `Resolved` in
+one frame. That same atomic deletion ends the Phase-2 cross-fire and guarantees a single
 writer: once the old per-role types and plugins are gone, two writers for one attribute is
 unrepresentable — no runtime guard or plugin-count assert is needed (an accidental double-add of the
 same generic plugin is caught by Bevy's built-in plugin uniqueness).

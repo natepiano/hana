@@ -106,7 +106,7 @@ The first public API has two entry points over the same IME core:
 Both paths share the same session ids, buffer, IME ownership, shortcut handling,
 and lifecycle events.
 
-Possible field-authored shape:
+Possible field-authored component:
 
 ```rust
 #[derive(Component)]
@@ -134,8 +134,8 @@ important public contract is:
 - editable values opt in explicitly,
 - the field decides how text is parsed,
 - invalid input can reject commit and keep the editor open,
-- editor lifecycle emits typed events so app code can synchronize backing state
-  without guessing which session or commit attempt is current.
+- editor lifecycle emits typed events that identify the current session and
+  commit attempt, so app code can synchronize backing state against them.
 
 ## Event contract
 
@@ -1550,7 +1550,7 @@ Class: design-improvement
 
 App-owned screen-space surfaces need a concrete synchronous hook for deciding
 whether a key or pointer event is a text-editing command or an app-surface
-action. Name the public disposition shape before implementation, for example
+action. Name the public disposition enum before implementation, for example
 `InputDisposition::{Edit(ImeCommand), SurfaceAction(AppSurfaceAction),
 RequestCommit, RequestCancel, Blur(BlurPolicy), Consume, FallthroughAllowed}`.
 It should run after active preedit/composition handling but before text-buffer

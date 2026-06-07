@@ -45,13 +45,13 @@ This plan removes (1) and leaves (2) completely intact. A naive
   `SlugRenderMode`, etc. keep their prefix; the prefix names the
   rendering technique (Lengyel's slug method), the way `MSDF` named the
   old one.
-- **The renderer-selection seam is deleted entirely** — the
+- **The renderer-selection boundary is deleted entirely** — the
   `TextRenderer` enum, the `TextRendererPreference` resource, and the
   per-entity / per-style `renderer` override fields. With one renderer
   there is nothing to select.
 - **Panel SDF is out of scope** and untouched.
 
-## The seam is runtime-only and clean
+## The selector boundary is runtime-only and clean
 
 `render/text_backend.rs` is the entire selector: a
 `TextRenderer { DistanceField, Slug }` enum and a
@@ -144,7 +144,7 @@ framing: world-space RTT panel text (same slug text path as the
 screen-space panel) and OIT overlap. `typography_overlay` compiles with
 the fix. The throwaway `TextRendererPreference::slug()` was reverted.
 
-### Phase 1 — Collapse the seam (lands together with Phase 2)
+### Phase 1 — Collapse the selector boundary (lands together with Phase 2)
 
 This phase removes the selector. It does not compile on its own: the
 distance-field arms it deletes leave imports, systems, and a material
@@ -253,7 +253,7 @@ lib is green now rather than waiting on Phase 2. Not committed.
 ### Retrospective
 
 **What worked:**
-- The seam was runtime-only as the plan claimed — each
+- The selector boundary was runtime-only as the plan claimed — each
   `if selected == Slug { … } else { … }` collapsed to its slug arm
   mechanically once the DF call-trees were traced.
 - Zero errors in any Phase-1-touched file; `cargo +nightly fmt` clean.
@@ -777,7 +777,7 @@ already-decided items, applied directly).
 - **Phase 7** — corrected stale `slug_text_spike/` paths to `text/slug/`; pinned the
   shadow-proxy re-export to `text/slug/mod.rs:26` (`pub(crate)`, the only surfacing point
   post-Phase-4); added rewording of the slug-module `is_shadow_proxy`/`SlugRenderMode`
-  doc comments; recorded the `From<GlyphRenderMode> for SlugRenderMode` seam at
+  doc comments; recorded the `From<GlyphRenderMode> for SlugRenderMode` conversion boundary at
   `mesh_spawning.rs:237` + `slug_render_mode` at `batching.rs:398` must change in lockstep
   with the enum shrink; flagged `shadows.rs` as the enum-shrink canary.
 - **Documentation** — `slug.md` upgraded to "status reword **+** audit/rewrite the deleted
@@ -1085,7 +1085,7 @@ silhouette without a second mesh.
       `render/world_text/mesh_spawning.rs` and
       `render/text_renderer/batching.rs` — they match on the dropped
       `Invisible` / `SolidQuad` variants. **Phase 4 review:** the single
-      conversion seam is `From<GlyphRenderMode> for SlugRenderMode` at
+      conversion boundary is `From<GlyphRenderMode> for SlugRenderMode` at
       `render/world_text/mesh_spawning.rs:237`; `slug_render_mode` is a sibling
       `const fn` at `render/text_renderer/batching.rs:397`. The enum shrink, the
       `From` impl, and both helpers must change in the same commit to keep the

@@ -365,7 +365,7 @@ Each phase below cites the decision it implements.
    and the `FluentText` marker, so the only `TextContent` left is on run entities.
    This pulls Phase 2 step 9 forward — it must precede step 4 below, or a child
    query would transiently match one-element fluent roots. (Relayout-on-string-edit
-   for the fluent path now rides the Phase 2 observer, step 10, not the old
+   for the fluent path now goes through the Phase 2 observer, step 10, not the old
    panel-root seed.)
 4. **Delete `PanelTextChild` (DT4-iii).** Move `#[require(TextStyle, Transform,
    Visibility)]` onto `TextContent`; delete `PanelTextChild`; swap every
@@ -652,7 +652,7 @@ the broken marker path before any example migration depends on it.
     subset. Add `PanelTextRuns::sole() -> Option<Entity>` (the lone run iff the set
     has exactly one), plus a thin `iter()` passthrough.
 
-    *Verified setup details (Phase 4-6 review, grounded in `bevy_ecs-0.19.0-rc.2/src/hierarchy.rs`):*
+    *Verified setup details (Phase 4-6 review, checked against `bevy_ecs-0.19.0-rc.2/src/hierarchy.rs`):*
     - **Module home + exports.** Define both in a new
       `render/panel_text/relationship.rs`; re-export from `panel_text/mod.rs` and
       `lib.rs`. `PanelTextRuns` is part of the public API — a consumer writes

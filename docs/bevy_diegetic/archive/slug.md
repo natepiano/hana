@@ -179,7 +179,7 @@ glyph. A glyph ID alone is not portable across fonts. The current
 paths request outlines from the styled `font_id`; that is not enough
 for parley fallback or mixed-font shaping.
 
-The long-term shape boundary should carry resolved font identity per
+The long-term shaping boundary should carry resolved font identity per
 glyph or per glyph run:
 
 ```rust
@@ -287,7 +287,7 @@ The renderer swap contract is behavioral, not architectural. Users
 should be able to choose the distance-field renderer or the Slug
 renderer at runtime and keep the same public text capabilities. The two
 renderers do not need matching internals, mesh layouts, material
-structures, alpha-mode choices, shadow passes, or cache shapes.
+structures, alpha-mode choices, shadow passes, or cache layouts.
 `WorldText` supports a per-entity renderer override, so apps can spawn
 one text entity with Slug and another with the distance-field renderer in
 the same scene while still falling back to the global preference when no
@@ -443,7 +443,7 @@ Completed:
   `Typography` and then drive the current per-glyph rendering path from
   that run.
 - Keep the `WorldText` contrast overlay in the example.
-- Defer the final GPU representation decision until this data shape
+- Defer the final GPU representation decision until this data layout
   exists and exposes real bottlenecks.
 
 Exit criteria: met. The example renders from `SlugTextRun` data and
@@ -553,7 +553,7 @@ rendered advances sharing the same parley shaping style inputs.
 - Phase 4 now requires a face-to-font-byte resolver before Slug outline
   extraction moves into the backend.
 - Phase 4 now makes lookup/readiness backend-neutral instead of
-  atlas-shaped.
+  atlas-specific.
 - Phase 4 now names the shared placement split before Phase 5 backend
   integration.
 - Phase 4 now keeps anchoring and debug bounds tied to the resolved
@@ -1187,7 +1187,7 @@ reviewed.
    not be part of the first feasibility target.
 6. **Module isolation:** Keep the Slug feasibility implementation in a
    separate private module and standalone example until text rendering
-   works. Do not reshape the production renderer or shared module
+   works. Do not modify the production renderer or shared module
    structure before the feasibility study proves the algorithm.
 7. **Run data and cache granularity:** Start with per-entity
    `SlugTextRun` data rather than a shared run cache. The run is a small
@@ -1213,10 +1213,10 @@ reviewed.
    builds one `SlugTextRun` for `Typography` and then uses that run to
    drive the current simple per-glyph rendering path. This is a small
    bridge step, not a phase by itself, and should be bundled with the
-   initial glyph-cache/data-shape work.
-10. **GPU shape timing:** Defer the final GPU representation decision.
+   initial glyph-cache/data-layout work.
+10. **GPU representation timing:** Defer the final GPU representation decision.
     Do not choose between a run-level material/buffer, instanced glyph
-    quads, or another batching shape while the work is still example-only.
+    quads, or another batching layout while the work is still example-only.
     First build the CPU run data and glyph cache, then use the resulting
     data and visible bottlenecks to choose the smallest GPU change that
     removes the worst current inefficiency.
@@ -1229,7 +1229,7 @@ reviewed.
     it proves that Slug can render a coherent text run while still
     carrying those behavior choices forward. Shared production
     prerequisites and backend integration follow after that proof.
-12. **Run-level GPU shape:** Phase 3 uses one mesh and one material for
+12. **Run-level GPU representation:** Phase 3 uses one mesh and one material for
     a shaped Slug run, plus combined curve, band, and glyph-record
     storage buffers. Each quad carries a glyph-record index, and the
     shader uses that record to select the correct bounds and band range.

@@ -162,7 +162,7 @@ specific real-world dimensions — the opposite of Fit-to-content text.
 The moment you want a fixed paper backing — a literal index card, business card,
 or poster prop with text on it — the paper is the artifact and the text is
 content laid on it. That is `Panel::world().paper(BusinessCard)` with a text
-child, i.e. the full builder. "It would have to be optional" is the tell: an
+child, i.e. the full builder. "It would have to be optional" is the cue: an
 optional fixed-paper backing is the signal you wanted a `Panel`, not a text
 primitive. So `PaperSize` lives on the `Panel` builder only; the sugar never
 carries it.
