@@ -67,6 +67,10 @@ pub(super) const NINETY_FIFTH_PERCENTILE: f64 = 95.0;
 pub(super) const NINETY_NINTH_PERCENTILE: f64 = 99.0;
 pub(super) const WARMUP_FRAMES: u32 = 120;
 
+// outline defaults
+pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;
+pub(super) const DEFAULT_OUTLINE_WIDTH: f32 = 5.0;
+
 // outline labels
 pub(super) const OUTLINE_METHOD_JUMP_FLOOD_LABEL: &str = "JumpFlood";
 pub(super) const OUTLINE_METHOD_SCREEN_HULL_LABEL: &str = "ScreenHull";
@@ -102,22 +106,6 @@ pub(super) const DATE_COMMAND_ARG_FORMAT: &str = "+%Y_%m_%d_%H_%M";
 pub(super) const DATE_COMMAND_ARG_REFERENCE_TIME: &str = "-r";
 pub(super) const RESULT_LABEL_PADDING: usize = 6;
 pub(super) const RESULTS_DIRECTORY_NAME: &str = "results";
-
-// startup
-pub(super) const BENCHMARK_WINDOW_TITLE: &str = "bevy_liminal benchmark";
-pub(super) const INITIALIZING_BENCHMARK_TEXT: &str = "Initializing benchmark...";
-
-// tick
-pub(super) const AUTO_BENCHMARK_COMPLETE_MESSAGE: &str = "Auto benchmark complete";
-pub(super) const AUTO_BENCHMARK_START_MESSAGE: &str = "Starting auto benchmark run";
-pub(super) const EXITING_MESSAGE: &str = "Exiting";
-pub(super) const SCENARIO_SWITCH_MESSAGE: &str = "Switching to scenario: {}";
-pub(super) const STARTUP_COMPLETE_MESSAGE: &str =
-    "Startup delay complete, beginning auto benchmark";
-
-// outline defaults
-pub(super) const DEFAULT_OUTLINE_INTENSITY: f32 = 1.0;
-pub(super) const DEFAULT_OUTLINE_WIDTH: f32 = 5.0;
 
 // scenarios
 pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
@@ -185,3 +173,15 @@ pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
         },
     },
 ];
+
+// startup
+pub(super) const BENCHMARK_WINDOW_TITLE: &str = "bevy_liminal benchmark";
+pub(super) const INITIALIZING_BENCHMARK_TEXT: &str = "Initializing benchmark...";
+
+// tick
+pub(super) const AUTO_BENCHMARK_COMPLETE_MESSAGE: &str = "Auto benchmark complete";
+pub(super) const AUTO_BENCHMARK_START_MESSAGE: &str = "Starting auto benchmark run";
+pub(super) const EXITING_MESSAGE: &str = "Exiting";
+pub(super) const SCENARIO_SWITCH_MESSAGE: &str = "Switching to scenario: {}";
+pub(super) const STARTUP_COMPLETE_MESSAGE: &str =
+    "Startup delay complete, beginning auto benchmark";
