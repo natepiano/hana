@@ -54,15 +54,15 @@ mod tests {
 
     #[test]
     fn payload_event_fields() {
-        let event = TestPayloadEvent {
+        let test_payload_event = TestPayloadEvent {
             value: PAYLOAD_VALUE,
         };
-        assert_eq!(event.value, PAYLOAD_VALUE);
+        assert_eq!(test_payload_event.value, PAYLOAD_VALUE);
     }
 
     #[test]
     fn unit_event_defaults() {
-        let event = TestEvent;
-        assert_eq!(size_of_val(&event), EMPTY_EVENT_SIZE);
+        let test_event = TestEvent;
+        assert_eq!(size_of_val(&test_event), EMPTY_EVENT_SIZE);
     }
 }

@@ -29,7 +29,7 @@ const STEP_VELOCITY: Velocity = Velocity::new(2.0, 0.0, 0.0);
 fn main() {
     println!("=== Semantic types: compile-time safety ===\n");
 
-    // Same-type arithmetic works
+    // `Position` arithmetic stays type-safe.
     let start_position = START_POSITION;
     let end_position = END_POSITION;
     let centroid = (start_position + end_position) / CENTROID_DIVISOR;
@@ -66,17 +66,17 @@ fn main() {
     let rotated = quarter_turn_orientation * Vec3::X;
     println!("X rotated 90° around Y: {rotated:?}");
 
-    // Composition
+    // `Orientation` composition.
     let double_orientation = quarter_turn_orientation * quarter_turn_orientation;
     let result = double_orientation * Vec3::X;
     println!("X rotated 180° around Y: {result:?}");
 
-    // Inverse
+    // `Orientation::inverse` restores identity.
     let undone_orientation = quarter_turn_orientation * quarter_turn_orientation.inverse();
     let identity_result = undone_orientation * Vec3::X;
     println!("Rotation * inverse = identity: {identity_result:?}");
 
-    // Interpolation
+    // `Orientation::slerp` interpolation.
     let start_orientation = Orientation::from(Quat::IDENTITY);
     let end_orientation = Orientation::from(Quat::from_rotation_y(FRAC_PI_2));
     let halfway_orientation = start_orientation.slerp(end_orientation, SLERP_FACTOR);
@@ -93,7 +93,7 @@ fn main() {
     println!("Double displacement: {total:?}");
     println!("Combined velocity: {combined:?}");
 
-    // Scale velocity by the frame time delta for per-frame movement
+    // `Velocity` scales by `FRAME_TIME_DELTA` for per-frame movement.
     let time_delta = FRAME_TIME_DELTA;
     let frame_velocity = velocity * time_delta;
     println!("Velocity * time_delta({time_delta}): {frame_velocity:?}");
