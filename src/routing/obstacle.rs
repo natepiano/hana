@@ -1,4 +1,5 @@
-//! `Obstacle` `AABB` type and the point/segment blocking helpers that operate on it.
+//! `Obstacle`, `PointContainment`, `Blockage`, `is_point_in_any_obstacle`, and
+//! `is_segment_blocked`.
 
 use bevy::math::Vec3;
 use bevy::reflect::Reflect;

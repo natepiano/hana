@@ -1,7 +1,7 @@
 //! Progressive cable playground — showcases `bevy_catenary` features from simple to complex.
 //!
-//! 7 sections navigated with arrow buttons or Left/Right keys. Camera animates
-//! to frame each section.
+//! `SECTION_COUNT` sections navigated with arrow buttons or Left/Right keys.
+//! `OrbitCam` animates to frame each section.
 //!
 //! **Known limitation**: Cable-to-cable attachment (chaining cables by attaching one
 //! endpoint to another cable's endpoint entity) does not work yet because `CableEndpoint`

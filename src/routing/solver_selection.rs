@@ -5,8 +5,9 @@
 
 //! Enum-based solver selection for cables.
 //!
-//! Replaces `Box<dyn RouteSolver>` with concrete enums that support `Clone`, `Reflect`,
-//! and avoid heap allocation. The existing traits remain as internal implementation details.
+//! Replaces `Box<dyn RouteSolver>` with `Solver`, `PathStrategy`, and `CurveKind`.
+//! `RouteSolver`, `PathPlanner`, and `CurveSolver` remain as internal implementation
+//! details.
 
 use bevy::math::Vec3;
 use bevy::reflect::Reflect;

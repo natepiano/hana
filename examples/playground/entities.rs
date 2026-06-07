@@ -1,4 +1,5 @@
-//! Shared markers and spawn helpers used across the playground sections.
+//! `Selected`, `NodeCube`, `Draggable`, `Despawnable`, `SlackLocked`, and the
+//! `spawn_cable`, `spawn_node_pair`, and `spawn_node_cube` helpers.
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;

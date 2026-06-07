@@ -23,7 +23,8 @@ enum CapSide {
     Inside,
 }
 
-/// Geometric parameters shared by all cap-generation helpers.
+/// Geometric parameters shared by `add_single_cap`, `add_hemisphere_cap`, and
+/// `add_flat_cap`.
 struct CapContext<'a> {
     center:        &'a Vec3,
     direction:     Vec3,

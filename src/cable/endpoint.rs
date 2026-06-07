@@ -1,4 +1,4 @@
-//! [`CableEndpoint`] and the observers that align and detach it.
+//! [`CableEndpoint`], `on_endpoint_alignment_update`, and `on_endpoint_detached`.
 
 use std::f32::consts::FRAC_PI_2;
 

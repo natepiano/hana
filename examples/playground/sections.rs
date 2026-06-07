@@ -1,4 +1,5 @@
-//! Section navigation state: bounds, current section, per-section info text.
+//! `CurrentSection`, `SectionBounds`, and `SectionInfo` state for section
+//! navigation.
 
 use std::cmp::Ordering;
 

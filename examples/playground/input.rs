@@ -1,4 +1,6 @@
-//! Drag state, keyboard handling, and pointer observers.
+//! `DragState`, `SlackAdjustment`, `handle_drag`, `handle_keyboard`, and the
+//! `on_drag_start`, `on_despawnable_clicked`, and `on_cable_mesh_child_added`
+//! pointer observers.
 
 use std::time::Duration;
 

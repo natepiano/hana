@@ -1,6 +1,6 @@
-//! Cable components and route computation — `Cable`, `CableEndpoint`, and supporting
-//! relationship/policy types, plus the observers that align attached targets and handle
-//! detachment.
+//! `Cable`, `CableEndpoint`, `AttachedTo`, `AttachedEndpoints`, `DetachPolicy`,
+//! and `EndpointAlignment`, plus `on_endpoint_alignment_update` and
+//! `on_endpoint_detached`.
 
 mod compute;
 mod constants;

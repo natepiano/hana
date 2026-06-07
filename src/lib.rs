@@ -102,9 +102,11 @@ pub use routing::solve_parameter;
 /// Registers:
 /// - [`DebugGizmos`] resource (default: off).
 /// - [`CableGizmoGroup`] for controlling debug visibility.
-/// - Cable route computation system (runs in `Update`).
-/// - Gizmo debug renderer (runs in `Update` after computation).
-/// - Observers for mesh regeneration, endpoint alignment, and detach handling.
+/// - `CablePlugin`, including `queue_changed_cables`, `queue_endpoint_changes`,
+///   `queue_attached_target_moves`, `recompute_dirty_cables`, `on_endpoint_alignment_update`, and
+///   `on_endpoint_detached`.
+/// - `MeshPlugin`, including `on_geometry_computed`.
+/// - `GizmosPlugin`, including `render_cable_gizmos` and `render_debug_gizmos`.
 pub struct CatenaryPlugin;
 
 impl Plugin for CatenaryPlugin {

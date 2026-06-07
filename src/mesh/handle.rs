@@ -1,5 +1,4 @@
-//! Mesh asset handle and child entity tracking, plus the observer that (re)generates
-//! the tube mesh when a cable's computed geometry changes.
+//! `CableMeshHandle`, `CableMeshChild`, and `on_geometry_computed`.
 
 use bevy::prelude::*;
 
@@ -18,7 +17,8 @@ pub struct CableMeshHandle(pub Handle<Mesh>);
 #[derive(Component)]
 pub struct CableMeshChild(pub Entity);
 
-/// Query type for accessing cable geometry, config, and mesh handles.
+/// Query type for accessing `ComputedCableGeometry`, `CableMeshConfig`,
+/// `CableMeshHandle`, and `CableMeshChild`.
 type CableMeshQuery<'w> = (
     &'w ComputedCableGeometry,
     &'w CableMeshConfig,
