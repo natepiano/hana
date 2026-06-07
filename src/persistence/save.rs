@@ -311,13 +311,15 @@ pub(crate) fn save_window_state(
             |current_monitor| (&current_monitor.effective_window_mode).into(),
         );
 
-        let entry = cached.0.entry(window_entity).or_default();
+        let cached_window_state = cached.0.entry(window_entity).or_default();
 
         // Only save if position, size, or mode actually changed
-        let position_changed = entry.physical_position != physical_position;
-        let size_changed = entry.logical_size != UVec2::new(logical_width, logical_height);
-        let mode_changed = entry.saved_window_mode.as_ref() != Some(&saved_window_mode);
-        let monitor_changed = entry.monitor != Some(monitor_index);
+        let position_changed = cached_window_state.physical_position != physical_position;
+        let size_changed =
+            cached_window_state.logical_size != UVec2::new(logical_width, logical_height);
+        let mode_changed =
+            cached_window_state.saved_window_mode.as_ref() != Some(&saved_window_mode);
+        let monitor_changed = cached_window_state.monitor != Some(monitor_index);
         if !position_changed && !size_changed && !mode_changed && !monitor_changed {
             continue;
         }
@@ -328,21 +330,21 @@ pub(crate) fn save_window_state(
 
         // Log monitor transitions with detailed info
         if monitor_changed {
-            let previous_scale = entry
+            let previous_scale = cached_window_state
                 .monitor
                 .and_then(|monitor_index| monitors.by_index(monitor_index))
                 .map(|monitor| monitor.scale);
             debug!(
                 "[save_window_state] [{window_key}] MONITOR CHANGE: {:?} (scale={previous_scale:?}) -> {monitor_index} (scale={monitor_scale})",
-                entry.monitor,
+                cached_window_state.monitor,
             );
         }
 
         // Update cache
-        entry.physical_position = physical_position;
-        entry.logical_size = UVec2::new(logical_width, logical_height);
-        entry.saved_window_mode = Some(saved_window_mode.clone());
-        entry.monitor = Some(monitor_index);
+        cached_window_state.physical_position = physical_position;
+        cached_window_state.logical_size = UVec2::new(logical_width, logical_height);
+        cached_window_state.saved_window_mode = Some(saved_window_mode.clone());
+        cached_window_state.monitor = Some(monitor_index);
 
         state_write = StateWrite::Needed;
 

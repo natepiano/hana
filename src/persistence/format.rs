@@ -10,9 +10,9 @@
 //! ## Adding a new version
 //!
 //! 1. Bump [`CURRENT_STATE_VERSION`].
-//! 2. If the new version changes the shape of an entry, add new structs (e.g. `PersistedEntryV2`)
-//!    and a conversion from the old entry type. If only semantics change, the existing structs can
-//!    be reused.
+//! 2. If the new version changes `PersistedEntry` or `WindowState` fields, add new structs (e.g.
+//!    `PersistedEntryV2`) and a conversion from the old entry type. If only semantics change, the
+//!    existing structs can be reused.
 //! 3. Add a `decode_v<N>` function that accepts a [`PersistedState`] and returns
 //!    `Option<HashMap<WindowKey, WindowState>>`.
 //! 4. Add an arm to the `match persisted.version` block inside [`decode`].
@@ -95,7 +95,8 @@ struct VersionProbe {
 /// then falls back to legacy unversioned formats. See the module-level
 /// docs for the full list of supported formats.
 pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    // Probe the version field without requiring any particular entry shape.
+    // Probe only `VersionProbe::version` before dispatching to `PersistedStateV1` or
+    // `PersistedState`.
     if let Ok(probe) = from_str::<VersionProbe>(contents) {
         match probe.version {
             PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
@@ -165,27 +166,36 @@ struct PersistedStateV1 {
 }
 
 fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let state = from_str::<WindowStateV1>(contents).ok()?;
+    let window_state_v1 = from_str::<WindowStateV1>(contents).ok()?;
     debug!("[decode] Migrated legacy single-window format to v2");
-    Some(HashMap::from([(WindowKey::Primary, state.into_current())]))
+    Some(HashMap::from([(
+        WindowKey::Primary,
+        window_state_v1.into_current(),
+    )]))
 }
 
 fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let v1 = from_str::<PersistedStateV1>(contents).ok()?;
-    if v1.version != PERSISTED_STATE_VERSION_V1 {
-        warn!("[decode] Invalid v1 persisted state version {}", v1.version);
+    let persisted_state_v1 = from_str::<PersistedStateV1>(contents).ok()?;
+    if persisted_state_v1.version != PERSISTED_STATE_VERSION_V1 {
+        warn!(
+            "[decode] Invalid v1 persisted state version {}",
+            persisted_state_v1.version
+        );
         return None;
     }
 
-    let mut states = HashMap::with_capacity(v1.entries.len());
-    for entry in v1.entries {
+    let mut states = HashMap::with_capacity(persisted_state_v1.entries.len());
+    for persisted_entry_v1 in persisted_state_v1.entries {
         if states
-            .insert(entry.window_key.clone(), entry.window_state.into_current())
+            .insert(
+                persisted_entry_v1.window_key.clone(),
+                persisted_entry_v1.window_state.into_current(),
+            )
             .is_some()
         {
             warn!(
                 "[decode] Invalid persisted state: duplicate key \"{}\"",
-                entry.window_key
+                persisted_entry_v1.window_key
             );
             return None;
         }
@@ -196,16 +206,19 @@ fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
 }
 
 fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    let persisted = from_str::<PersistedState>(contents).ok()?;
-    let mut states = HashMap::with_capacity(persisted.entries.len());
-    for entry in persisted.entries {
+    let persisted_state = from_str::<PersistedState>(contents).ok()?;
+    let mut states = HashMap::with_capacity(persisted_state.entries.len());
+    for persisted_entry in persisted_state.entries {
         if states
-            .insert(entry.window_key.clone(), entry.window_state)
+            .insert(
+                persisted_entry.window_key.clone(),
+                persisted_entry.window_state,
+            )
             .is_some()
         {
             warn!(
                 "[decode] Invalid persisted state: duplicate key \"{}\"",
-                entry.window_key
+                persisted_entry.window_key
             );
             return None;
         }
@@ -218,18 +231,18 @@ fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
 pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String, Error> {
     let mut entries: Vec<PersistedEntry> = states
         .iter()
-        .map(|(key, state)| PersistedEntry {
+        .map(|(key, window_state)| PersistedEntry {
             window_key:   key.clone(),
-            window_state: state.clone(),
+            window_state: window_state.clone(),
         })
         .collect();
     entries.sort_by(|a, b| a.window_key.cmp(&b.window_key));
 
-    let persisted = PersistedState {
+    let persisted_state = PersistedState {
         version: CURRENT_STATE_VERSION,
         entries,
     };
-    let ron_body = to_string_pretty(&persisted, PrettyConfig::default())?;
+    let ron_body = to_string_pretty(&persisted_state, PrettyConfig::default())?;
     Ok(format!("{RON_HEADER}{ron_body}"))
 }
 
@@ -268,7 +281,7 @@ mod tests {
 
     #[test]
     fn decode_v2_distinguishes_primary_and_managed_primary() {
-        let persisted = PersistedState {
+        let persisted_state = PersistedState {
             version: CURRENT_STATE_VERSION,
             entries: vec![
                 PersistedEntry {
@@ -284,7 +297,7 @@ mod tests {
                 },
             ],
         };
-        let contents = match to_string_pretty(&persisted, PrettyConfig::default()) {
+        let contents = match to_string_pretty(&persisted_state, PrettyConfig::default()) {
             Ok(contents) => contents,
             Err(error) => panic!("failed to serialize test state: {error}"),
         };
@@ -318,11 +331,11 @@ mod tests {
         let decoded = decoded.unwrap_or_default();
         assert!(decoded.contains_key(&WindowKey::Primary));
         assert_eq!(decoded.len(), 1);
-        let state = &decoded[&WindowKey::Primary];
-        assert_eq!(state.logical_position, Some((10, 20)));
-        assert_eq!(state.logical_width, 800);
-        assert_eq!(state.logical_height, 600);
-        assert!((state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+        let window_state = &decoded[&WindowKey::Primary];
+        assert_eq!(window_state.logical_position, Some((10, 20)));
+        assert_eq!(window_state.logical_width, 800);
+        assert_eq!(window_state.logical_height, 600);
+        assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
     }
 
     #[test]
@@ -350,15 +363,15 @@ mod tests {
         let decoded = format::decode(&v1_ron);
         assert!(decoded.is_some(), "expected v1 decode to succeed");
         let decoded = decoded.unwrap_or_default();
-        let state = &decoded[&WindowKey::Primary];
-        assert_eq!(state.logical_width, 800);
-        assert_eq!(state.logical_height, 600);
-        assert!((state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+        let window_state = &decoded[&WindowKey::Primary];
+        assert_eq!(window_state.logical_width, 800);
+        assert_eq!(window_state.logical_height, 600);
+        assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
     }
 
     #[test]
     fn decode_v2_rejects_duplicate_keys() {
-        let persisted = PersistedState {
+        let persisted_state = PersistedState {
             version: CURRENT_STATE_VERSION,
             entries: vec![
                 PersistedEntry {
@@ -371,7 +384,7 @@ mod tests {
                 },
             ],
         };
-        let contents = match to_string_pretty(&persisted, PrettyConfig::default()) {
+        let contents = match to_string_pretty(&persisted_state, PrettyConfig::default()) {
             Ok(contents) => contents,
             Err(error) => panic!("failed to serialize duplicate-key test state: {error}"),
         };
@@ -437,14 +450,14 @@ mod tests {
             assert!(decoded.is_some(), "golden legacy windowed file must decode");
             let decoded = decoded.unwrap_or_default();
             assert_eq!(decoded.len(), 1);
-            let state = &decoded[&WindowKey::Primary];
-            assert_eq!(state.logical_position, Some((200, 200)));
-            assert_eq!(state.logical_width, 1600);
-            assert_eq!(state.logical_height, 1200);
-            assert!((state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
-            assert_eq!(state.monitor, 0);
-            assert_eq!(state.saved_window_mode, SavedWindowMode::Windowed);
-            assert_eq!(state.app_name, "restore_window");
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((200, 200)));
+            assert_eq!(window_state.logical_width, 1600);
+            assert_eq!(window_state.logical_height, 1200);
+            assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+            assert_eq!(window_state.monitor, 0);
+            assert_eq!(window_state.saved_window_mode, SavedWindowMode::Windowed);
+            assert_eq!(window_state.app_name, "restore_window");
         }
 
         #[test]
@@ -455,12 +468,12 @@ mod tests {
                 "golden legacy borderless fullscreen file must decode"
             );
             let decoded = decoded.unwrap_or_default();
-            let state = &decoded[&WindowKey::Primary];
-            assert_eq!(state.logical_position, Some((0, 0)));
-            assert_eq!(state.logical_width, 3456);
-            assert_eq!(state.logical_height, 2234);
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((0, 0)));
+            assert_eq!(window_state.logical_width, 3456);
+            assert_eq!(window_state.logical_height, 2234);
             assert_eq!(
-                state.saved_window_mode,
+                window_state.saved_window_mode,
                 SavedWindowMode::BorderlessFullscreen
             );
         }
@@ -473,12 +486,12 @@ mod tests {
                 "golden legacy exclusive fullscreen file must decode"
             );
             let decoded = decoded.unwrap_or_default();
-            let state = &decoded[&WindowKey::Primary];
-            assert_eq!(state.logical_position, Some((0, 0)));
-            assert_eq!(state.logical_width, 1920);
-            assert_eq!(state.logical_height, 1200);
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((0, 0)));
+            assert_eq!(window_state.logical_width, 1920);
+            assert_eq!(window_state.logical_height, 1200);
             assert_eq!(
-                state.saved_window_mode,
+                window_state.saved_window_mode,
                 SavedWindowMode::Fullscreen {
                     video_mode: Some(SavedVideoMode {
                         physical_size:           UVec2::new(1920, 1200),

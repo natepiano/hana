@@ -101,7 +101,7 @@ impl TargetPosition {
 /// launched on and which [`MonitorScaleStrategy`] ran. The launch monitor is
 /// environmental on macOS (the OS picks the spawn display), so a cross-DPI test
 /// can silently degrade into a same-scale restore; asserting these fields makes
-/// that degradation a failure instead of a hollow pass.
+/// `RestoreDiagnostics` expose that same-scale fallback through BRP assertions.
 #[derive(Component, Clone, Copy, Debug, Reflect)]
 #[reflect(Component)]
 pub(crate) struct RestoreDiagnostics {

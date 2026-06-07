@@ -234,8 +234,7 @@ fn update_monitors(
 
     if has_changes {
         let monitors_resource = build_monitors(&monitors);
-        let current = current_monitor_query.iter().next().flatten();
-        if let Some(current_monitor) = current {
+        if let Some(current_monitor) = current_monitor_query.iter().next().flatten() {
             debug!(
                 "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
                 frame_count.0,

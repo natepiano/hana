@@ -149,7 +149,7 @@ pub(crate) fn load_target_position(
         restore_window_config.loaded_states = all_states;
     }
 
-    let Some(state) = restore_window_config
+    let Some(window_state) = restore_window_config
         .loaded_states
         .get(&WindowKey::Primary)
         .cloned()
@@ -166,12 +166,12 @@ pub(crate) fn load_target_position(
 
     debug!(
         "[load_target_position] Loaded state: position={:?} logical_size={}x{} monitor_scale={} monitor_index={} mode={:?}",
-        state.logical_position,
-        state.logical_width,
-        state.logical_height,
-        state.scale,
-        state.monitor,
-        state.saved_window_mode
+        window_state.logical_position,
+        window_state.logical_width,
+        window_state.logical_height,
+        window_state.scale,
+        window_state.monitor,
+        window_state.saved_window_mode
     );
 
     let starting_monitor_index = winit_info.starting_monitor_index;
@@ -180,8 +180,8 @@ pub(crate) fn load_target_position(
         .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
 
     let resolved_monitor = target_position::resolve_target_monitor_and_position(
-        state.monitor,
-        state.logical_position,
+        window_state.monitor,
+        window_state.logical_position,
         &monitors,
     );
     if matches!(
@@ -190,12 +190,12 @@ pub(crate) fn load_target_position(
     ) {
         warn!(
             "[load_target_position] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
-            state.monitor,
+            window_state.monitor,
         );
     }
 
     let target_position = target_position::compute_target_position(
-        &state,
+        &window_state,
         resolved_monitor.monitor_info,
         resolved_monitor.logical_position,
         winit_info.physical_decoration(),
@@ -212,7 +212,10 @@ pub(crate) fn load_target_position(
     );
 
     #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
-    if matches!(state.saved_window_mode, SavedWindowMode::Fullscreen { .. }) {
+    if matches!(
+        window_state.saved_window_mode,
+        SavedWindowMode::Fullscreen { .. }
+    ) {
         debug!(
             "[load_target_position] Windows exclusive fullscreen: showing window for surface creation"
         );
@@ -225,7 +228,7 @@ pub(crate) fn load_target_position(
     }
 
     let entity = *window_entity;
-    let is_fullscreen = state.saved_window_mode.is_fullscreen();
+    let is_fullscreen = window_state.saved_window_mode.is_fullscreen();
     let restore_diagnostics = RestoreDiagnostics {
         starting_monitor_index,
         starting_scale,

@@ -105,9 +105,10 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
 /// With no saved position, we anchor the window on the saved monitor via
 /// `WindowPosition::Centered` and size at `starting_scale` (so the stored logical size
 /// resolves to `target.physical_size` once the window lands on the target monitor).
-/// The two-phase scale-change dance is skipped because macOS does not fire
-/// `WindowScaleFactorChanged` for windows that are still hidden; waiting for it would
-/// deadlock. Settle starts immediately and verifies the resulting state.
+/// The `WindowScaleFactorChanged` -> `WindowRestoreState::ApplySize` transition is
+/// skipped because macOS does not fire `WindowScaleFactorChanged` for windows that are
+/// still hidden; waiting for it would deadlock. Settle starts immediately and verifies
+/// the resulting state.
 fn begin_cross_dpi_restore(target_position: &mut TargetPosition, window: &mut Window) {
     if target_position.physical_position.is_none() {
         // Size at `starting_scale`: `set_physical_resolution` is interpreted at the
