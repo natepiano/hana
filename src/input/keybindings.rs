@@ -107,7 +107,7 @@ impl<C: Component> Keybindings<C> {
         action_spawner: &mut ActionSpawner<C>,
         action_settings: ActionSettings,
     ) -> Self {
-        let non_consuming_modifier_settings = ActionSettings {
+        let non_consuming_modifier_action_settings = ActionSettings {
             consume_input: false,
             require_reset: true,
             ..default()
@@ -122,21 +122,21 @@ impl<C: Component> Keybindings<C> {
         let shift_entity = action_spawner
             .spawn((
                 Action::<S>::new(),
-                non_consuming_modifier_settings,
+                non_consuming_modifier_action_settings,
                 bindings![KeyCode::ShiftLeft, KeyCode::ShiftRight],
             ))
             .id();
         let primary_entity = action_spawner
             .spawn((
                 Action::<PrimaryShortcutsModifier>::new(),
-                non_consuming_modifier_settings,
+                non_consuming_modifier_action_settings,
                 primary_modifier_bindings,
             ))
             .id();
         let alt_entity = action_spawner
             .spawn((
                 Action::<AltModifier>::new(),
-                non_consuming_modifier_settings,
+                non_consuming_modifier_action_settings,
                 bindings![KeyCode::AltLeft, KeyCode::AltRight],
             ))
             .id();
@@ -149,7 +149,7 @@ impl<C: Component> Keybindings<C> {
                 let control_entity = action_spawner
                     .spawn((
                         Action::<ControlModifier>::new(),
-                        non_consuming_modifier_settings,
+                        non_consuming_modifier_action_settings,
                         bindings![KeyCode::ControlLeft, KeyCode::ControlRight],
                     ))
                     .id();
