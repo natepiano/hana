@@ -132,6 +132,44 @@ commands.spawn((
 ));
 ```
 
+## Tuning text cost
+
+Text gets more expensive to draw the more of the screen it fills — big text, or
+text you're looking at almost edge-on. If it's costing too much, `TextAntiAlias`
+lets you turn off some of the smoothing work in exchange for speed.
+
+There are two ways text can look rough, and the setting deals with them
+separately:
+
+- **Fuzzy edges** when you view text at a steep, near edge-on angle.
+- **A faint spike** sticking out of the sharp corners of letters, only at the
+  most extreme angles.
+
+The four modes are which of those two you fix:
+
+- `Off` — fix neither. Cheapest, but you can get both the fuzzy edges and the
+  corner spikes.
+- `Anisotropic` — fixes the fuzzy edges, costs almost nothing. Corner spikes can
+  still show.
+- `Supersample` — fixes the corner spikes, but costs more, and edges can still go
+  fuzzy at steep angles.
+- `Both` (default) — fixes both. Costs the most.
+
+Keep `Both` unless text is eating into your frame budget. Then drop to whichever
+single fix you actually need — usually `Anisotropic`, since fuzzy edges are the
+common problem and it costs almost nothing. Use `Supersample` if it's the corner
+spikes that bother you, or `Off` if your text never looks rough in the first
+place.
+
+```rust
+commands.insert_resource(TextAntiAlias::Anisotropic);
+```
+
+To see what each one looks like, run the `aa_text` example — keys `1`–`4` switch
+between them, and `A` and `B` fly the camera to angles that show off each
+problem. To see what they cost, run `diegetic_text_stress`, press `A` to cycle
+the modes, and watch the frame time go up and down.
+
 ## Bevy compatibility
 
 | bevy_diegetic | Bevy  |
