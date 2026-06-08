@@ -65,13 +65,13 @@ fn world_attached_cable_computes_geometry() {
 
     app.update();
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.cable_geometry.is_some(),
+        computed_cable_geometry.cable_geometry.is_some(),
         "Cable should have computed geometry after one update"
     );
 
-    let cable_geometry = computed.cable_geometry.as_ref().unwrap();
+    let cable_geometry = computed_cable_geometry.cable_geometry.as_ref().unwrap();
     assert!(
         !cable_geometry.segments.is_empty(),
         "Geometry should have at least one segment"
@@ -115,9 +115,9 @@ fn entity_attached_cable_follows_target() {
     // First update: compute initial geometry
     app.update();
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.cable_geometry.is_some(),
+        computed_cable_geometry.cable_geometry.is_some(),
         "Entity-attached cable should compute geometry"
     );
 
@@ -132,8 +132,8 @@ fn entity_attached_cable_follows_target() {
     // Second update may be needed for transform propagation
     app.update();
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
-    let cable_geometry = computed.cable_geometry.as_ref().unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let cable_geometry = computed_cable_geometry.cable_geometry.as_ref().unwrap();
 
     // The cable should have been recomputed with the new target position.
     // Start point should be near (10.0 + 0.5, 0.0, 0.0) = (10.5, 0, 0)
@@ -170,9 +170,9 @@ fn zero_length_cable_does_not_panic() {
     // Should not panic
     app.update();
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.cable_geometry.is_none(),
+        computed_cable_geometry.cable_geometry.is_none(),
         "Zero-length cable should skip computation"
     );
 }
@@ -212,9 +212,9 @@ fn missing_target_does_not_panic() {
     // Should not panic — falls back to raw offset
     app.update();
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.cable_geometry.is_some(),
+        computed_cable_geometry.cable_geometry.is_some(),
         "Cable with despawned target should still compute (using fallback offset)"
     );
 }
@@ -308,9 +308,9 @@ fn detach_policy_remain_keeps_cable() {
         "Cable should survive target despawn with DetachPolicy::Remain"
     );
 
-    let computed = app.world().get::<ComputedCableGeometry>(cable).unwrap();
+    let computed_cable_geometry = app.world().get::<ComputedCableGeometry>(cable).unwrap();
     assert!(
-        computed.cable_geometry.is_some(),
+        computed_cable_geometry.cable_geometry.is_some(),
         "Cable should retain its last computed geometry"
     );
 }

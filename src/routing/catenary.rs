@@ -23,6 +23,7 @@ use super::constants::MAX_NEWTON_ITERATIONS;
 use super::constants::MIN_CABLE_SAMPLE_POINTS;
 use super::constants::MIN_CATENARY_PARAM;
 use super::constants::MIN_SEGMENT_LENGTH;
+use super::constants::MIN_TAUT_CABLE_SLACK;
 use super::constants::NEAR_TAUT_INITIAL_GUESS_MULTIPLIER;
 use super::constants::NEAR_ZERO_GRAVITY_THRESHOLD;
 use super::constants::NEWTON_TOLERANCE;
@@ -133,7 +134,7 @@ pub fn sample_3d(
         return vec![start; n].into();
     }
 
-    let clamped_slack = slack.max(1.0);
+    let clamped_slack = slack.max(MIN_TAUT_CABLE_SLACK);
     let cable_length = chord_length * clamped_slack;
     let gravity_norm = gravity_direction.normalize_or_zero();
 

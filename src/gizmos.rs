@@ -53,8 +53,8 @@ fn render_cable_gizmos(
     if *debug_gizmos == DebugGizmos::Disabled {
         return;
     }
-    for computed in &cables {
-        let Some(cable_geometry) = &computed.cable_geometry else {
+    for computed_cable_geometry in &cables {
+        let Some(cable_geometry) = &computed_cable_geometry.cable_geometry else {
             continue;
         };
 
@@ -84,8 +84,8 @@ fn render_debug_gizmos(
         return;
     }
 
-    for computed in &cables {
-        let Some(cable_geometry) = &computed.cable_geometry else {
+    for computed_cable_geometry in &cables {
+        let Some(cable_geometry) = &computed_cable_geometry.cable_geometry else {
             continue;
         };
 

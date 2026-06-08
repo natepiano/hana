@@ -147,10 +147,10 @@ pub(super) fn on_endpoint_alignment_update(
     mut targets: Query<&mut Transform>,
 ) {
     let cable = trigger.event_target();
-    let Ok((computed, children)) = cables.get(cable) else {
+    let Ok((computed_cable_geometry, children)) = cables.get(cable) else {
         return;
     };
-    let Some(cable_geometry) = &computed.cable_geometry else {
+    let Some(cable_geometry) = &computed_cable_geometry.cable_geometry else {
         return;
     };
 

@@ -43,12 +43,13 @@ pub(super) fn on_geometry_computed(
         return;
     };
     let cable_entity = trigger.event_target();
-    let Ok((computed, cable_mesh_config, children, mesh_handle, _)) = cables.get(cable_entity)
+    let Ok((computed_cable_geometry, cable_mesh_config, children, mesh_handle, _)) =
+        cables.get(cable_entity)
     else {
         return;
     };
 
-    let Some(cable_geometry) = &computed.cable_geometry else {
+    let Some(cable_geometry) = &computed_cable_geometry.cable_geometry else {
         return;
     };
 

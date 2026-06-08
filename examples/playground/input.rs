@@ -13,6 +13,7 @@ use bevy_catenary::DebugGizmos;
 use bevy_catenary::Solver;
 use bevy_lagrange::ZoomToFit;
 
+use super::constants::MIN_TAUT_CABLE_SLACK;
 use super::constants::NAVIGATION_DURATION_MS;
 use super::constants::RAY_EPSILON;
 use super::constants::SLACK_ADJUSTMENT_STEP;
@@ -170,10 +171,10 @@ pub(crate) fn on_cable_mesh_child_added(
     cables: Query<&CableMeshChild>,
     mut commands: Commands,
 ) {
-    let Ok(mesh_child) = cables.get(trigger.event_target()) else {
+    let Ok(cable_mesh_child) = cables.get(trigger.event_target()) else {
         return;
     };
-    commands.entity(mesh_child.0).observe(on_mesh_clicked);
+    commands.entity(cable_mesh_child.0).observe(on_mesh_clicked);
 }
 
 pub(crate) fn handle_keyboard(
@@ -217,7 +218,7 @@ pub(crate) fn handle_keyboard(
                     curve_kind: CurveKind::Catenary(catenary),
                     ..
                 } => {
-                    catenary.slack = (catenary.slack + slack_delta).max(1.0);
+                    catenary.slack = (catenary.slack + slack_delta).max(MIN_TAUT_CABLE_SLACK);
                 },
                 _ => {},
             }

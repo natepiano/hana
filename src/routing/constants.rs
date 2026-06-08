@@ -8,6 +8,8 @@ pub(super) const MAX_NEWTON_ITERATIONS: u32 = 50;
 pub(crate) const MIN_CABLE_SAMPLE_POINTS: u32 = 2;
 pub(super) const MIN_CATENARY_PARAM: f32 = 1e-4;
 pub(crate) const MIN_SEGMENT_LENGTH: f32 = 0.001;
+/// Minimum slack factor for a taut cable.
+pub(super) const MIN_TAUT_CABLE_SLACK: f32 = 1.0;
 /// Initial Newton guess multiplier for near-taut cables where the standard
 /// approximation degenerates.
 pub(super) const NEAR_TAUT_INITIAL_GUESS_MULTIPLIER: f32 = 10.0;

@@ -17,6 +17,7 @@ pub(crate) const PLAYGROUND_WINDOW_TITLE: &str = "Playground";
 
 // cable
 pub(crate) const DEFAULT_CABLE_RESOLUTION: u32 = 0;
+pub(crate) const MIN_TAUT_CABLE_SLACK: f32 = 1.0;
 pub(crate) const OBSTACLE_HALF_EXTENTS: Vec3 = Vec3::new(0.8, 0.8, 0.8);
 pub(crate) const SLACK_NORMAL: f32 = 1.15;
 
