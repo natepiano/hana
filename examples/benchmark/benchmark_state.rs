@@ -47,11 +47,11 @@ pub(super) enum BenchmarkPhase {
 
 #[derive(Resource)]
 pub(super) struct BenchmarkState {
-    pub(super) mode:             BenchmarkMode,
+    pub(super) benchmark_mode:   BenchmarkMode,
     pub(super) current_scenario: usize,
     pub(super) outline_presence: OutlinePresence,
     pub(super) outline_method:   OutlineMethod,
-    pub(super) phase:            BenchmarkPhase,
+    pub(super) benchmark_phase:  BenchmarkPhase,
     pub(super) frame_counter:    u32,
     pub(super) frame_times:      Vec<f64>,
     pub(super) results:          Vec<ScenarioResult>,
@@ -68,18 +68,18 @@ impl BenchmarkState {
             } else {
                 ExitBehavior::KeepRunning
             };
-        let (mode, phase) = if exit_behavior == ExitBehavior::OnComplete {
+        let (benchmark_mode, benchmark_phase) = if exit_behavior == ExitBehavior::OnComplete {
             (BenchmarkMode::Auto, BenchmarkPhase::StartupDelay)
         } else {
             (BenchmarkMode::Interactive, BenchmarkPhase::Idle)
         };
 
         Self {
-            mode,
+            benchmark_mode,
             current_scenario: 0,
             outline_presence: OutlinePresence::Disabled,
             outline_method: OutlineMethod::default(),
-            phase,
+            benchmark_phase,
             frame_counter: 0,
             frame_times: Vec::with_capacity(MEASURE_FRAMES.to_usize()),
             results: Vec::with_capacity(SCENARIOS.len() * 2),

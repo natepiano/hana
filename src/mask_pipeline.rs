@@ -234,7 +234,8 @@ impl GetFullBatchData for MeshMaskPipeline {
         (mesh_instances, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
     ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
-        // This should only be called during GPU building.
+        // `MeshMaskPipeline::get_index_and_compare_data` expects
+        // `RenderMeshInstances::GpuBuilding`.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
             error!("{GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR}");
             return None;
@@ -277,7 +278,7 @@ impl GetFullBatchData for MeshMaskPipeline {
         (mesh_instances, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
     ) -> Option<NonMaxU32> {
-        // This should only be called during GPU building.
+        // `MeshMaskPipeline::get_binned_index` expects `RenderMeshInstances::GpuBuilding`.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
             error!("{GET_BINNED_INDEX_CPU_MODE_ERROR}");
             return None;

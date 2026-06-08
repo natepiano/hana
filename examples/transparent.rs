@@ -115,7 +115,7 @@ fn setup(
             ..default()
         })),
         Transform::from_translation(OUTLINED_CUBE_POSITION),
-        // Add outline
+        // Add an `Outline` component built from `Outline::jump_flood`.
         Outline::jump_flood(INITIAL_OUTLINE_WIDTH).build(),
     ));
 }

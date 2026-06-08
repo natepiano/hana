@@ -121,7 +121,8 @@ pub(crate) fn prepare_outline_buffer(
     let cpu_building = matches!(*render_mesh_instances, RenderMeshInstances::CpuBuilding(_));
 
     for phase in outline_phases.values() {
-        // Walk multidrawable meshes first — GPU path processes these before batchables.
+        // Visit `phase.multidrawable_meshes` before `phase.batchable_meshes` to match GPU
+        // preprocessing.
         for bins in phase.multidrawable_meshes.values() {
             for bin in bins.values() {
                 for &main_entity in bin.entities().keys() {
@@ -134,7 +135,7 @@ pub(crate) fn prepare_outline_buffer(
             }
         }
 
-        // Walk batchable meshes in the same iteration order as `batch_and_prepare`
+        // Visit `phase.batchable_meshes` in the same iteration order as `batch_and_prepare`.
         for bin in phase.batchable_meshes.values() {
             for &main_entity in bin.entities().keys() {
                 // In CPU mode, `get_binned_batch_data` skips entities with no
@@ -156,7 +157,7 @@ pub(crate) fn prepare_outline_buffer(
             }
         }
 
-        // Walk unbatchable meshes in the same order
+        // Visit `phase.unbatchable_meshes` after batchable meshes to match `batch_and_prepare`.
         for unbatchables in phase.unbatchable_meshes.values() {
             for &main_entity in unbatchables.entities.keys() {
                 if cpu_building

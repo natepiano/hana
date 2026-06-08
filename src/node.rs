@@ -52,7 +52,8 @@ use super::texture::FloodTextures;
 /// Render graph label for the outline pass.
 #[derive(Copy, Clone, Debug, RenderLabel, Hash, PartialEq, Eq)]
 pub(crate) enum OutlineRenderGraphNode {
-    /// The main outline render node that runs mask, flood, hull, and compose sub-passes.
+    /// Dispatches `OutlineNode::run` through `run_mask_init_pass`, `run_hull_pass`,
+    /// and `run_jump_flood_composite`.
     Main,
 }
 

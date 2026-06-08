@@ -55,7 +55,7 @@ pub(super) fn benchmark_tick(benchmark_tick_params: BenchmarkTickParams<'_, '_>)
         mut windows,
     } = benchmark_tick_params;
 
-    match state.phase {
+    match state.benchmark_phase {
         BenchmarkPhase::Idle => {},
         BenchmarkPhase::StartupDelay => {
             handle_startup_delay_phase(&mut state, &mut windows, &time);
@@ -93,7 +93,7 @@ fn handle_startup_delay_phase(
     state.startup_timer.tick(time.delta());
     if state.startup_timer.just_finished() {
         info!("{}", STARTUP_COMPLETE_MESSAGE);
-        state.phase = BenchmarkPhase::Setup;
+        state.benchmark_phase = BenchmarkPhase::Setup;
     }
 }
 
@@ -145,14 +145,14 @@ fn handle_setup_phase(
 
     state.frame_counter = 0;
     state.frame_times.clear();
-    state.phase = BenchmarkPhase::Warmup;
+    state.benchmark_phase = BenchmarkPhase::Warmup;
 }
 
 const fn advance_warmup_phase(state: &mut BenchmarkState) {
     state.frame_counter += 1;
     if state.frame_counter >= WARMUP_FRAMES {
         state.frame_counter = 0;
-        state.phase = BenchmarkPhase::Measure;
+        state.benchmark_phase = BenchmarkPhase::Measure;
     }
 }
 
@@ -162,7 +162,7 @@ fn measure_phase(state: &mut BenchmarkState, time: &Time<Real>) {
     state.frame_counter += 1;
 
     if state.frame_counter >= MEASURE_FRAMES {
-        state.phase = BenchmarkPhase::Analyze;
+        state.benchmark_phase = BenchmarkPhase::Analyze;
     }
 }
 
@@ -192,30 +192,30 @@ fn handle_analyze_phase(state: &mut BenchmarkState) {
 
     if state.outline_presence == OutlinePresence::Disabled {
         state.outline_presence = OutlinePresence::Enabled;
-        state.phase = BenchmarkPhase::Setup;
+        state.benchmark_phase = BenchmarkPhase::Setup;
         return;
     }
 
-    if state.mode == BenchmarkMode::Auto && state.current_scenario + 1 < SCENARIOS.len() {
+    if state.benchmark_mode == BenchmarkMode::Auto && state.current_scenario + 1 < SCENARIOS.len() {
         state.outline_presence = OutlinePresence::Disabled;
         state.current_scenario += 1;
-        state.phase = BenchmarkPhase::Setup;
+        state.benchmark_phase = BenchmarkPhase::Setup;
         return;
     }
 
     state.outline_presence = OutlinePresence::Disabled;
-    if state.mode == BenchmarkMode::Auto {
+    if state.benchmark_mode == BenchmarkMode::Auto {
         write_results(&state.results);
         if state.exit_behavior == ExitBehavior::OnComplete {
             info!("Auto benchmark complete, exiting in {AUTO_EXIT_DELAY_SECS}s");
-            state.phase = BenchmarkPhase::ExitDelay;
+            state.benchmark_phase = BenchmarkPhase::ExitDelay;
         } else {
             info!("{}", AUTO_BENCHMARK_COMPLETE_MESSAGE);
-            state.mode = BenchmarkMode::Interactive;
-            state.phase = BenchmarkPhase::Idle;
+            state.benchmark_mode = BenchmarkMode::Interactive;
+            state.benchmark_phase = BenchmarkPhase::Idle;
         }
     } else {
-        state.phase = BenchmarkPhase::Idle;
+        state.benchmark_phase = BenchmarkPhase::Idle;
     }
 }
 
@@ -235,11 +235,11 @@ pub(super) fn handle_input(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<B
 
     if input.just_pressed(KeyCode::KeyR) {
         info!("{}", AUTO_BENCHMARK_START_MESSAGE);
-        state.mode = BenchmarkMode::Auto;
+        state.benchmark_mode = BenchmarkMode::Auto;
         state.current_scenario = 0;
         state.outline_presence = OutlinePresence::Disabled;
         state.results.clear();
-        state.phase = BenchmarkPhase::Setup;
+        state.benchmark_phase = BenchmarkPhase::Setup;
         return;
     }
 
@@ -247,19 +247,19 @@ pub(super) fn handle_input(input: Res<ButtonInput<KeyCode>>, mut state: ResMut<B
         let new_outline_method = next_outline_method(state.outline_method);
         info!("Outline mode: {}", outline_method_label(new_outline_method));
         state.outline_method = new_outline_method;
-        state.mode = BenchmarkMode::Interactive;
+        state.benchmark_mode = BenchmarkMode::Interactive;
         state.outline_presence = OutlinePresence::Disabled;
-        state.phase = BenchmarkPhase::Setup;
+        state.benchmark_phase = BenchmarkPhase::Setup;
         return;
     }
 
     for (index, scenario) in SCENARIOS.iter().enumerate() {
         if input.just_pressed(scenario.key) {
             info!(SCENARIO_SWITCH_MESSAGE, scenario.name);
-            state.mode = BenchmarkMode::Interactive;
+            state.benchmark_mode = BenchmarkMode::Interactive;
             state.current_scenario = index;
             state.outline_presence = OutlinePresence::Disabled;
-            state.phase = BenchmarkPhase::Setup;
+            state.benchmark_phase = BenchmarkPhase::Setup;
             return;
         }
     }

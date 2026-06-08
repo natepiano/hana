@@ -59,8 +59,8 @@ struct LiveMetrics {
 
 fn build_hud_text(state: &BenchmarkState, diagnostics: &DiagnosticsStore) -> String {
     let scenario = &SCENARIOS[state.current_scenario];
-    let mode_label = benchmark_mode_label(&state.mode);
-    let phase_info = benchmark_phase_label(state);
+    let benchmark_mode_name = benchmark_mode_label(&state.benchmark_mode);
+    let benchmark_phase_info = benchmark_phase_label(state);
     let progress = auto_progress_label(state);
     let col = results_label_width();
     let outline_method_name = outline_method_label(state.outline_method);
@@ -68,7 +68,7 @@ fn build_hud_text(state: &BenchmarkState, diagnostics: &DiagnosticsStore) -> Str
     let bench_stats = benchmark_stats_line(state.frame_times.as_slice(), col);
 
     let mut hud = format!(
-        "[{mode_label}] {}{progress}  Mode: {outline_method_name}\n{phase_info}\n\n{BENCHMARK_LABEL:<col$}FPS: {fps:<fps_width$.fps_precision$}  Frame: {frame_time:.milliseconds_precision$}ms{bench_stats}",
+        "[{benchmark_mode_name}] {}{progress}  Mode: {outline_method_name}\n{benchmark_phase_info}\n\n{BENCHMARK_LABEL:<col$}FPS: {fps:<fps_width$.fps_precision$}  Frame: {frame_time:.milliseconds_precision$}ms{bench_stats}",
         scenario.name,
         fps = live_metrics.fps,
         fps_precision = HEADS_UP_DISPLAY_FPS_PRECISION,
@@ -90,7 +90,7 @@ const fn benchmark_mode_label(mode: &BenchmarkMode) -> &'static str {
 }
 
 fn benchmark_phase_label(state: &BenchmarkState) -> String {
-    match state.phase {
+    match state.benchmark_phase {
         BenchmarkPhase::Idle => BENCHMARK_PHASE_IDLE_LABEL.to_string(),
         BenchmarkPhase::StartupDelay => {
             let remaining = AUTO_STARTUP_DELAY_SECS - state.startup_timer.elapsed_secs();
@@ -108,7 +108,7 @@ fn benchmark_phase_label(state: &BenchmarkState) -> String {
 }
 
 fn auto_progress_label(state: &BenchmarkState) -> String {
-    if state.mode == BenchmarkMode::Auto {
+    if state.benchmark_mode == BenchmarkMode::Auto {
         format!(" ({}/{})", state.current_scenario + 1, SCENARIOS.len())
     } else {
         String::new()

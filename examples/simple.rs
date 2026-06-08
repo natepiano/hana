@@ -107,7 +107,7 @@ fn setup(
         Mesh3d(meshes.add(Cuboid::default())),
         MeshMaterial3d(materials.add(Color::from(YELLOW))),
         Transform::from_translation(OUTLINED_CUBE_POSITION),
-        // Add outline
+        // Add an `Outline` component built from `Outline::jump_flood`.
         Outline::jump_flood(INITIAL_OUTLINE_WIDTH).build(),
     ));
 }

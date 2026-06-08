@@ -47,12 +47,12 @@ pub(crate) fn propagate_outline_on_child_added(
         return;
     }
 
-    // Walk up ancestors to find one with a source `Outline` (not propagated)
+    // Follow `parent_query` through `ChildOf::parent` until a source `Outline` is found.
     let mut current = child;
     while let Ok(child_of) = parent_query.get(current) {
         let parent = child_of.parent();
         if let Ok(outline) = outline_query.get(parent) {
-            // Use the original source if this is a propagated outline
+            // Preserve `Outline::group_source` when the parent outline is already propagated.
             let source = outline.group_source.unwrap_or(parent);
             let mut propagated = outline.clone();
             propagated.group_source = Some(source);
@@ -81,7 +81,7 @@ pub(crate) fn propagate_outline_on_mesh_added(
         return;
     }
 
-    // Walk up ancestors to find one with `Outline`
+    // Follow `parent_query` through `ChildOf::parent` until an `Outline` is found.
     let mut current = child;
     while let Ok(child_of) = parent_query.get(current) {
         let parent = child_of.parent();

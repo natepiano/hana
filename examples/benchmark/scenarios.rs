@@ -8,9 +8,9 @@ use crate::viewport::ViewportInfo;
 
 #[derive(Clone, Copy)]
 pub(super) struct ScenarioDefinition {
-    pub(super) name: &'static str,
-    pub(super) key:  KeyCode,
-    pub(super) kind: ScenarioKind,
+    pub(super) name:          &'static str,
+    pub(super) key:           KeyCode,
+    pub(super) scenario_kind: ScenarioKind,
 }
 
 #[derive(Clone, Copy)]
@@ -35,7 +35,7 @@ pub(super) fn spawn_scenario(
         count,
         width,
         cube_fill,
-    } = scenario.kind;
+    } = scenario.scenario_kind;
     spawn_grid(
         commands,
         meshes,

@@ -110,63 +110,63 @@ pub(super) const RESULTS_DIRECTORY_NAME: &str = "results";
 // scenarios
 pub(super) const SCENARIOS: &[ScenarioDefinition] = &[
     ScenarioDefinition {
-        name: "Entities1",
-        key:  KeyCode::Digit1,
-        kind: ScenarioKind::Grid {
+        name:          "Entities1",
+        key:           KeyCode::Digit1,
+        scenario_kind: ScenarioKind::Grid {
             count:     1,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_5_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities5",
-        key:  KeyCode::Digit2,
-        kind: ScenarioKind::Grid {
+        name:          "Entities5",
+        key:           KeyCode::Digit2,
+        scenario_kind: ScenarioKind::Grid {
             count:     5,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_5_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities10",
-        key:  KeyCode::Digit3,
-        kind: ScenarioKind::Grid {
+        name:          "Entities10",
+        key:           KeyCode::Digit3,
+        scenario_kind: ScenarioKind::Grid {
             count:     10,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_10_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities100",
-        key:  KeyCode::Digit4,
-        kind: ScenarioKind::Grid {
+        name:          "Entities100",
+        key:           KeyCode::Digit4,
+        scenario_kind: ScenarioKind::Grid {
             count:     100,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_100_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities1000",
-        key:  KeyCode::Digit5,
-        kind: ScenarioKind::Grid {
+        name:          "Entities1000",
+        key:           KeyCode::Digit5,
+        scenario_kind: ScenarioKind::Grid {
             count:     1000,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_1000_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities10000",
-        key:  KeyCode::Digit6,
-        kind: ScenarioKind::Grid {
+        name:          "Entities10000",
+        key:           KeyCode::Digit6,
+        scenario_kind: ScenarioKind::Grid {
             count:     10000,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_10000_ENTITIES,
         },
     },
     ScenarioDefinition {
-        name: "Entities50000",
-        key:  KeyCode::Digit7,
-        kind: ScenarioKind::Grid {
+        name:          "Entities50000",
+        key:           KeyCode::Digit7,
+        scenario_kind: ScenarioKind::Grid {
             count:     50000,
             width:     DEFAULT_OUTLINE_WIDTH,
             cube_fill: CUBE_FILL_RATIO_FOR_50000_ENTITIES,

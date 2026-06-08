@@ -206,7 +206,7 @@ pub(crate) fn queue_hull_outline(
                 continue;
             };
             if !matches!(
-                outline.method,
+                outline.outline_method,
                 OutlineMethod::WorldHull | OutlineMethod::ScreenHull
             ) {
                 continue;
