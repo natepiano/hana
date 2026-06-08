@@ -74,11 +74,15 @@ pub(crate) fn init_winit_info(
     WINIT_WINDOWS.with(|winit_windows| {
         let winit_windows = winit_windows.borrow();
         if let Some(winit_window) = winit_windows.get_window(*window_entity) {
-            let outer = winit_window.outer_size();
-            let inner = winit_window.inner_size();
+            let physical_outer_size = winit_window.outer_size();
+            let physical_inner_size = winit_window.inner_size();
             let physical_decoration = WindowDecoration {
-                physical_width:  outer.width.saturating_sub(inner.width),
-                physical_height: outer.height.saturating_sub(inner.height),
+                physical_width: physical_outer_size
+                    .width
+                    .saturating_sub(physical_inner_size.width),
+                physical_height: physical_outer_size
+                    .height
+                    .saturating_sub(physical_inner_size.height),
             };
 
             let physical_position = winit_window.outer_position().map_or(
