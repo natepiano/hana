@@ -13,6 +13,9 @@
 //!     the title-bar `Pause` segment highlights while paused
 //!   A — cycle the text anti-alias mode (Off → Anisotropic → Supersample →
 //!     Both); the title bar highlights the active mode
+//!   T — toggle stable transparency (OIT) on the camera (compare the
+//!     transparent-pass + `oit_resolve` cost on vs off); the title-bar `OIT`
+//!     segment highlights while enabled
 //!
 //! A bottom-left screen overlay reports the frame as two additive blocks, one
 //! per thread, each row with a 5-second peak column. Main thread: `ms` is the
@@ -27,6 +30,7 @@ use std::sync::atomic::Ordering;
 use std::time::Duration;
 use std::time::Instant;
 
+use bevy::camera::primitives::Aabb;
 use bevy::core_pipeline::core_3d::Transparent3d;
 use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
@@ -55,13 +59,16 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -84,6 +91,16 @@ const LABEL_SIZE: f32 = 0.12;
 const GRID_BASE_Y: f32 = 0.6;
 
 const LABEL_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
+
+/// World-space half-extents of the static camera-home region, centered on
+/// [`GRID_FOCUS`]. Covers the label-anchor span (half the grid each way) plus a
+/// few label heights so the glyphs sit inside the framed box; the home fit adds
+/// its own screen-fraction margin on top.
+const HOME_REGION_HALF_EXTENTS: Vec3 = Vec3::new(
+    (GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 3.0,
+    (GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 1.5,
+    LABEL_SIZE,
+);
 
 // ── Overlay (screen-space) constants ──────────────────────────────────────────
 
@@ -176,6 +193,20 @@ impl Default for Mutating {
 
 /// Title-bar segment id for the pause indicator.
 const PAUSE_CHIP: &str = "pause";
+
+/// Whether `StableTransparency` (OIT) is enabled on the orbit camera. Toggled
+/// with `T`; the title-bar `OIT` segment highlights while enabled. The default
+/// matches `with_stable_transparency()` in `main`, which turns it on at spawn.
+/// `apply_stable_transparency` reconciles the camera component to this state.
+#[derive(Resource)]
+struct StableTransparencyOn(bool);
+
+impl Default for StableTransparencyOn {
+    fn default() -> Self { Self(true) }
+}
+
+/// Title-bar segment id for the OIT indicator.
+const OIT_CHIP: &str = "oit";
 
 /// The in-shader [`TextAntiAlias`] modes in `A`-key cycle order: title-bar
 /// segment id, visible label, and the mode itself. One source of truth for
@@ -524,6 +555,10 @@ fn main() {
                 .control(TitleBarControl::segmented(
                     "A",
                     AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+                ))
+                .control(TitleBarControl::segmented(
+                    "T",
+                    [TitleBarSegment::new(OIT_CHIP, "OIT")],
                 )),
         )
         .wire_chip_to_state::<Mutating, _>(PAUSE_CHIP, |mutating| chip_activation(!mutating.0))
@@ -539,6 +574,9 @@ fn main() {
         .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[3].2)
         })
+        .wire_chip_to_state::<StableTransparencyOn, _>(OIT_CHIP, |enabled| {
+            chip_activation(enabled.0)
+        })
         .with_camera_control_panel()
         .add_plugins((
             RenderDiagnosticsPlugin,
@@ -547,6 +585,7 @@ fn main() {
         ))
         .init_resource::<FrameCounter>()
         .init_resource::<Mutating>()
+        .init_resource::<StableTransparencyOn>()
         .init_resource::<LastDisplayedStatus>()
         .init_resource::<LastDisplayedBatchStats>()
         .insert_resource(MainSpanStart(Instant::now()))
@@ -557,6 +596,7 @@ fn main() {
             Startup,
             (
                 spawn_labels,
+                spawn_home_target,
                 spawn_status_overlay,
                 spawn_batch_stats_overlay,
             ),
@@ -572,9 +612,11 @@ fn main() {
             )
                 .chain(),
         )
+        .add_systems(Update, apply_stable_transparency)
         // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
-        // cycle the AA mode.
+        // cycle the AA mode; `T` toggles stable transparency the same way.
         .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
+        .with_shortcut(KeyCode::KeyT, toggle_stable_transparency)
         .run();
 }
 
@@ -612,11 +654,53 @@ fn spawn_labels(mut commands: Commands) {
 /// stable.
 fn label_text(index: usize, frame: u64) -> String { format!("{index:02} {:03}", frame % 1000) }
 
+/// Spawns the single invisible [`CameraHomeTarget`] that `H` frames: an explicit
+/// grid-sized [`Aabb`] at [`GRID_FOCUS`], no mesh, so the home union is one
+/// constant box.
+fn spawn_home_target(mut commands: Commands) {
+    commands.spawn((
+        CameraHomeTarget,
+        Aabb::from_min_max(
+            GRID_FOCUS - HOME_REGION_HALF_EXTENTS,
+            GRID_FOCUS + HOME_REGION_HALF_EXTENTS,
+        ),
+        Transform::default(),
+    ));
+}
+
 // ── Mutation ──────────────────────────────────────────────────────────────────
 
 fn toggle_mutation(keyboard: Res<ButtonInput<KeyCode>>, mut mutating: ResMut<Mutating>) {
     if keyboard.just_pressed(KeyCode::Space) {
         mutating.0 = !mutating.0;
+    }
+}
+
+/// Flips the desired [`StableTransparencyOn`] state; bound to `T` in `main`.
+/// [`apply_stable_transparency`] reconciles the camera component on the change.
+fn toggle_stable_transparency(mut enabled: ResMut<StableTransparencyOn>) { enabled.0 = !enabled.0; }
+
+/// Reconciles the orbit camera's `StableTransparency` component to the desired
+/// [`StableTransparencyOn`] state, inserting or removing it when the state
+/// changes. The `On<Add>` / `On<Remove>` observers in `bevy_diegetic` install
+/// or tear down the OIT settings in response.
+fn apply_stable_transparency(
+    enabled: Res<StableTransparencyOn>,
+    camera: Single<(Entity, Has<StableTransparency>), With<FairyDustOrbitCam>>,
+    mut commands: Commands,
+) {
+    if !enabled.is_changed() {
+        return;
+    }
+    let (entity, present) = *camera;
+    match (enabled.0, present) {
+        (true, false) => {
+            commands.entity(entity).insert(StableTransparency);
+        },
+        (false, true) => {
+            commands.entity(entity).remove::<StableTransparency>();
+        },
+        _ => {},
     }
 }
 

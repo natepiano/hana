@@ -152,3 +152,60 @@ bench + xctrace = verdict).
 - **Perf verdict:** pending — re-measure the shadow-cascade share on
   `diegetic_text_stress` (Probe A text-batch opt-out delta, or the 0c
   per-pass decomposition) against the ~0.95 ms text-shadow baseline.
+
+## 2026-06-07 — winding-only shadow re-measure + Probe B (decision signals)
+
+- **Scene/instrument:** `diegetic_text_stress`, release, fresh launch,
+  `brp_extras/get_diagnostics` `frame_time_ms.average` (~120-frame
+  window), median of clean samples per condition; hitch windows
+  (history_duration > ~0.9 s or visible spike) discarded.
+- **Display:** built-in, `TextAntiAlias::Both`, unfocused, AutoNoVsync.
+- **Caster census:** identical to Probe A — 3 `DiegeticTextBatch`
+  (2 casting), 121 panel backings (all `NotShadowCaster`), 2 plain
+  scene meshes (casting).
+
+### Measurement 1 — text-shadow cost after the winding-only cutout
+
+| condition | ms |
+| --- | ---: |
+| baseline (text casting, winding-only shadow shader) | 5.75 (5.747/5.756/5.717) |
+| text batches `NotShadowCaster` | 5.75 (5.747/5.863/5.717) |
+
+- **Delta ≈ 0.00 ms.** Opting text out of shadow casting no longer buys
+  anything — the winding-only cutout recovered the full ~0.95 ms that
+  Probe A attributed to text shadow rendering. **Perf verdict for the
+  winding-only entry above: confirmed** (wall-clock signal; xctrace
+  per-pass confirmation optional).
+
+### Measurement 2 — Probe B: transparent-pass split (text vs panels)
+
+All states cross-checked within clean windows of the same instance,
+text shadow-opted-out throughout:
+
+| condition | ms | delta vs visible |
+| --- | ---: | ---: |
+| text + panels visible | 5.71 (5.53/5.66/5.80/5.71) | — |
+| text hidden (3 batches) | ~5.2 (5.38/5.03) | **−0.5 text** |
+| panels hidden (121 backings, batch JSON-RPC) | 5.38 (5.38/5.38/5.28) | **−0.33 panels** |
+| both hidden | not captured (external GPU contention window) | — |
+
+- **Findings:**
+  - The whole transparent-geometry lever is **~0.8 ms wall-clock**
+    (text ~0.5, panels ~0.33, ≈ 60:40) — far below the 2.68 ms
+    summed-channel GPU time from 0c. On Apple TBDR the transparent
+    pass overlaps other passes, so summed channel ms ≠ recoverable
+    wall ms.
+  - **Phase 2 shader experiments can recover at most ~0.5 ms wall in
+    this scene.** Consistent with Phase 1: AA-off alone recovered
+    0.4–0.6 ms, i.e. most of text's wall cost here is the AA
+    supersample/stride work, not the base coverage evaluation.
+  - The shadow-cascade overhead lever from Probe A (~0.56 ms with zero
+    casters) is now as large as the entire text transparent share.
+- **Methodology hazard (logged for future probes):** external GPU
+  contention (WindowServer ~35 % + Ableton ~40 % CPU) produced
+  8.5–9.4 ms plateaus pinned near 120 Hz pacing, persisting for
+  minutes and twice coinciding with a state flip — mimicking a real
+  effect (hiding text first read as +3 ms). An empty-scene read at
+  ~8.8 ms proved contention. **Toggle-back cross-check is mandatory
+  before attributing any delta**; the overlay's `gpu wait` row
+  distinguishes contention (high wait, quiet CPU rows) from app cost.
