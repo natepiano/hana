@@ -1,16 +1,26 @@
 //! Rendering systems for diegetic UI panels and text.
 
+mod batch_key;
 #[cfg(feature = "batch_proof")]
 pub(crate) mod batch_proof;
 mod clip;
 mod constants;
 mod panel_geometry;
+mod panel_lines;
 mod panel_text;
 mod sdf_material;
 mod text_shaping;
 mod transparency;
 mod world_text;
 
+pub(crate) use batch_key::BaseMaterialId;
+pub(crate) use batch_key::BatchAlphaMode;
+pub(crate) use batch_key::BatchRenderLayers;
+pub(crate) use batch_key::VisualBatchKey;
+pub(crate) use batch_key::VisualLighting;
+pub(crate) use batch_key::VisualMaterialInterner;
+pub(crate) use batch_key::VisualShadow;
+pub(crate) use batch_key::VisualSidedness;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
@@ -18,6 +28,7 @@ pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
+use panel_lines::PanelLinePlugin;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
@@ -130,7 +141,7 @@ pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((TextRenderPlugin, PanelGeometryPlugin))
+        app.add_plugins((TextRenderPlugin, PanelGeometryPlugin, PanelLinePlugin))
             .init_resource::<TextAntiAlias>()
             // Bevy registers the OIT type without `ReflectComponent`; adding it
             // enables reflection-based (BRP) edits of OIT settings on a live camera.

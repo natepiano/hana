@@ -46,6 +46,8 @@ pub struct DiegeticPerfStats {
     pub panel_text:     PanelTextPerfStats,
     /// Glyph-batch counters, written by `commit_batch_buffers`.
     pub batch:          BatchPerfStats,
+    /// Panel-line batch counters, written by `commit_panel_line_batch_buffers`.
+    pub line_batch:     PanelLineBatchPerfStats,
 }
 
 /// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
@@ -66,6 +68,17 @@ pub struct BatchPerfStats {
     pub instance_uploads:  usize,
     /// Run-table buffer uploads this frame.
     pub run_table_uploads: usize,
+}
+
+/// Per-frame panel-line batch counters.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub struct PanelLineBatchPerfStats {
+    /// Live line batch count.
+    pub batches: usize,
+    /// Line primitive records routed across all batches.
+    pub records: usize,
+    /// Line record buffer uploads this frame.
+    pub uploads: usize,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:

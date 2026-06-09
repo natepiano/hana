@@ -125,9 +125,9 @@ pub enum PanelLinePaintOrder {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PanelLineLayering {
     /// Material depth bias lane.
-    depth_bias:       f32,
+    pub(crate) depth_bias:       f32,
     /// OIT coplanar depth offset lane.
-    oit_depth_offset: f32,
+    pub(crate) oit_depth_offset: f32,
 }
 
 /// Clip policy used by the pure panel-line resolver.

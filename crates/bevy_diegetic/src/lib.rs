@@ -222,6 +222,7 @@ pub use panel::Inches;
 pub use panel::Millimeters;
 pub use panel::PanelBuildError;
 pub use panel::PanelFieldRecord;
+pub use panel::PanelLineBatchPerfStats;
 use panel::PanelPlugin;
 pub use panel::PanelSizing;
 pub use panel::PanelSystems;

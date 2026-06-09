@@ -40,7 +40,7 @@
     centered_stroke_alpha,
     inflate_subpixel_half_size,
     stable_border_alpha,
-    stable_line_alpha,
+    rect_strip_alpha,
 }
 
 struct SdfPanelUniform {
@@ -55,7 +55,7 @@ struct SdfPanelUniform {
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
     /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond, `4` = line segment.
+    /// `3` = diamond, `4` = line segment, `5..=7` = oriented cap forms.
     sdf_kind:      u32,
     /// Extra parameters for custom SDF forms.
     sdf_params:    vec4<f32>,
@@ -116,19 +116,47 @@ fn sd_circle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     return length(p) - min(half_size.x, half_size.y);
 }
 
-/// Signed distance to a horizontal line segment with thickness
-/// `2 * half_size.y`, centered on the X axis and spanning
-/// `[-half_size.x, +half_size.x]`.
-fn sd_line_segment(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
-    let a = vec2<f32>(-half_size.x, 0.0);
-    let b = vec2<f32>(half_size.x, 0.0);
-    return sd_segment(p, a, b) - half_size.y;
+fn oriented_axis() -> vec2<f32> {
+    let axis = sdf.sdf_params.xy;
+    if dot(axis, axis) <= 0.000001 {
+        return vec2<f32>(1.0, 0.0);
+    }
+    return normalize(axis);
 }
 
-fn line_center_distance(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
-    let a = vec2<f32>(-half_size.x, 0.0);
-    let b = vec2<f32>(half_size.x, 0.0);
-    return sd_segment(p, a, b);
+fn oriented_cap_axis() -> vec2<f32> {
+    let axis = sdf.sdf_params.zw;
+    if dot(axis, axis) <= 0.000001 {
+        return vec2<f32>(1.0, 0.0);
+    }
+    return normalize(axis);
+}
+
+fn oriented_coords(p: vec2<f32>, axis: vec2<f32>) -> vec2<f32> {
+    let normal = vec2<f32>(-axis.y, axis.x);
+    return vec2<f32>(dot(p, axis), dot(p, normal));
+}
+
+fn sd_box(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    let q = abs(p) - half_size;
+    return length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0);
+}
+
+/// Signed distance to an oriented butt-ended line strip.
+fn sd_line_segment(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    return sd_box(oriented_coords(p, oriented_axis()), half_size);
+}
+
+fn line_shape_coords(p: vec2<f32>) -> vec2<f32> {
+    return oriented_coords(p, oriented_axis());
+}
+
+fn sd_oriented_triangle(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    return sd_triangle(oriented_coords(p, oriented_cap_axis()), half_size);
+}
+
+fn sd_oriented_square(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    return sd_box(oriented_coords(p, oriented_cap_axis()), half_size);
 }
 
 /// Signed distance to a right-pointing diamond.
@@ -154,6 +182,10 @@ fn sd_diamond(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
     return select(dist, -dist, inside);
 }
 
+fn sd_oriented_diamond(p: vec2<f32>, half_size: vec2<f32>) -> f32 {
+    return sd_diamond(oriented_coords(p, oriented_cap_axis()), half_size);
+}
+
 /// SDF dispatch for callouts/panels sharing the same backend.
 fn sd_form(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
     if sdf.sdf_kind == 1u {
@@ -167,6 +199,15 @@ fn sd_form(p: vec2<f32>, half_size: vec2<f32>, radii: vec4<f32>) -> f32 {
     }
     if sdf.sdf_kind == 4u {
         return sd_line_segment(p, half_size);
+    }
+    if sdf.sdf_kind == 5u {
+        return sd_oriented_triangle(p, half_size);
+    }
+    if sdf.sdf_kind == 6u {
+        return sd_oriented_square(p, half_size);
+    }
+    if sdf.sdf_kind == 7u {
+        return sd_oriented_diamond(p, half_size);
     }
     return sd_rounded_box(p, half_size, radii);
 }
@@ -291,14 +332,12 @@ fn fragment(
     let coverage_scale = inflated.z;
 
     let is_line_form = sdf.sdf_kind == 4u;
-    let line_center_dist = line_center_distance(local, effective_half_size);
-    let line_outer_dist = line_center_dist - effective_half_size.y;
-    let line_inner_dist = line_center_dist + effective_half_size.y;
-    let line_outer_aa = max(fwidth(line_outer_dist) * 0.75, 0.0001);
-    let line_outer_alpha = 1.0 - smoothstep(0.0, 2.0 * line_outer_aa, line_outer_dist);
+    let line_local = line_shape_coords(local);
+    let line_pixel_size = vec2<f32>(fwidth(line_local.x), fwidth(line_local.y));
+    let line_inflated = inflate_subpixel_half_size(sdf.half_size, line_pixel_size);
     let line_alpha = select(
         0.0,
-        stable_border_alpha(line_outer_alpha, line_outer_dist, line_inner_dist),
+        rect_strip_alpha(line_local, line_inflated.xy, line_inflated.z),
         is_line_form,
     );
 

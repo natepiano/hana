@@ -1246,6 +1246,83 @@ fn render_commands_include_rectangles() {
 }
 
 #[test]
+fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
+    const RULER_WIDTH: f32 = 10.0;
+    const RULER_HEIGHT: f32 = 297.0;
+    const TICK_TRACK_WIDTH: f32 = 5.0;
+    const SPINE_WIDTH: f32 = 0.2;
+
+    let mut builder = LayoutBuilder::new(RULER_WIDTH, RULER_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::LeftToRight),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom),
+                |builder| {
+                    builder.text("29", TextStyle::new(8.0).with_color(Color::WHITE));
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(TICK_TRACK_WIDTH + SPINE_WIDTH))
+                    .height(Sizing::fixed(RULER_HEIGHT))
+                    .direction(Direction::LeftToRight),
+                |builder| {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .draw(PanelDraw::lines([PanelLine::new(
+                                PanelPoint::new(0.0, 0.5),
+                                PanelPoint::new(TICK_TRACK_WIDTH, 0.5),
+                            )
+                            .width(0.3)
+                            .color(Color::WHITE)])),
+                        |_| {},
+                    );
+                    builder.with(
+                        El::new()
+                            .width(Sizing::fixed(SPINE_WIDTH))
+                            .height(Sizing::GROW)
+                            .background(Color::WHITE),
+                        |_| {},
+                    );
+                },
+            );
+        },
+    );
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&builder.build(), RULER_WIDTH, RULER_HEIGHT, 1.0);
+    let spine = result
+        .commands
+        .iter()
+        .find(|command| {
+            matches!(command.kind, RenderCommandKind::Rectangle { .. })
+                && approx_eq(command.bounds.width, SPINE_WIDTH)
+                && approx_eq(command.bounds.height, RULER_HEIGHT)
+        })
+        .expect("spine rectangle should be emitted");
+    let line_count = result
+        .commands
+        .iter()
+        .filter_map(|command| match &command.kind {
+            RenderCommandKind::Lines { lines } => Some(lines.len()),
+            _ => None,
+        })
+        .sum::<usize>();
+
+    assert!(approx_eq(spine.bounds.x, RULER_WIDTH - SPINE_WIDTH));
+    assert_eq!(line_count, 1);
+}
+
+#[test]
 fn render_commands_include_text() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.text("Hello", TextStyle::new(16.0));

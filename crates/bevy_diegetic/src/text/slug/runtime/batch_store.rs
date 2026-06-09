@@ -11,27 +11,17 @@
 //! buffers, uploading dirty records).
 
 use std::collections::HashMap;
-use std::fmt;
-use std::fmt::Debug;
-use std::fmt::Formatter;
-use std::hash::Hash;
-use std::hash::Hasher;
 use std::ops::Range;
 
-use bevy::asset::AssetId;
-use bevy::camera::visibility::RenderLayers;
-use bevy::image::Image;
 use bevy::math::Mat4;
 use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy::math::Vec4;
 use bevy::math::Vec4Swizzles;
 use bevy::pbr::StandardMaterial;
-use bevy::prelude::AlphaMode;
 use bevy::prelude::Entity;
 use bevy::prelude::Handle;
 use bevy::prelude::Mesh;
-use bevy::render::render_resource::Face;
 use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
@@ -40,76 +30,13 @@ use super::glyph_cache::RunStorageKey;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
+use crate::render::BaseMaterialId;
+use crate::render::BatchAlphaMode;
+use crate::render::BatchRenderLayers;
+use crate::render::VisualMaterialInterner;
 use crate::text::slug::glyph::GlyphInstanceRecord;
 use crate::text::slug::glyph::RunRecord;
 use crate::text::slug::render::TextMaterial;
-
-/// Interned identity for a panel's authored base text material — the
-/// `BaseMaterialId` field of [`BatchKey`].
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct BaseMaterialId(u32);
-
-/// `AlphaMode` re-encoded so it can sit in a hash-map key: `AlphaMode` has a
-/// manual `Eq` but no `Hash` (`Mask` carries an `f32`), so `Mask` stores the
-/// threshold's bits here.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum BatchAlphaMode {
-    Opaque,
-    Mask(u32),
-    Blend,
-    Premultiplied,
-    AlphaToCoverage,
-    Add,
-    Multiply,
-}
-
-impl From<AlphaMode> for BatchAlphaMode {
-    fn from(mode: AlphaMode) -> Self {
-        match mode {
-            AlphaMode::Opaque => Self::Opaque,
-            AlphaMode::Mask(threshold) => Self::Mask(threshold.to_bits()),
-            AlphaMode::Blend => Self::Blend,
-            AlphaMode::Premultiplied => Self::Premultiplied,
-            AlphaMode::AlphaToCoverage => Self::AlphaToCoverage,
-            AlphaMode::Add => Self::Add,
-            AlphaMode::Multiply => Self::Multiply,
-        }
-    }
-}
-
-impl From<BatchAlphaMode> for AlphaMode {
-    fn from(mode: BatchAlphaMode) -> Self {
-        match mode {
-            BatchAlphaMode::Opaque => Self::Opaque,
-            BatchAlphaMode::Mask(bits) => Self::Mask(f32::from_bits(bits)),
-            BatchAlphaMode::Blend => Self::Blend,
-            BatchAlphaMode::Premultiplied => Self::Premultiplied,
-            BatchAlphaMode::AlphaToCoverage => Self::AlphaToCoverage,
-            BatchAlphaMode::Add => Self::Add,
-            BatchAlphaMode::Multiply => Self::Multiply,
-        }
-    }
-}
-
-/// `RenderLayers` behind a hashable newtype: it derives `Eq` but not `Hash`.
-/// Hashing the iterated layer indices is consistent with the derived
-/// `PartialEq` because `RenderLayers` trims trailing empty blocks.
-#[derive(Clone, Eq, PartialEq)]
-pub(crate) struct BatchRenderLayers(pub RenderLayers);
-
-impl Hash for BatchRenderLayers {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        for layer in self.0.iter() {
-            layer.hash(state);
-        }
-    }
-}
-
-impl Debug for BatchRenderLayers {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.debug_list().entries(self.0.iter()).finish()
-    }
-}
 
 /// What splits text draws: every pipeline/material/entity-level property. A
 /// run differing on several fields at once still maps to exactly one batch.
@@ -131,74 +58,6 @@ pub(crate) struct BatchKey {
     pub shadow:        GlyphShadowMode,
     /// The owning panel's render layers.
     pub layers:        BatchRenderLayers,
-}
-
-/// Hash/Eq-able digest of the `StandardMaterial` fields panel text materials
-/// carry: floats as bits, textures as asset ids. `alpha_mode` and
-/// `depth_bias` are deliberately absent — both are overwritten per batch
-/// (alpha is a [`BatchKey`] field of its own; the bias became the per-run
-/// depth nudge). A field outside this digest does not split batches; extend
-/// the digest when panels start authoring more of `StandardMaterial`.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct InternedMaterialKey {
-    base_color:                 [u32; 4],
-    base_color_texture:         Option<AssetId<Image>>,
-    emissive:                   [u32; 4],
-    emissive_texture:           Option<AssetId<Image>>,
-    metallic:                   u32,
-    perceptual_roughness:       u32,
-    metallic_roughness_texture: Option<AssetId<Image>>,
-    reflectance:                u32,
-    normal_map_texture:         Option<AssetId<Image>>,
-    occlusion_texture:          Option<AssetId<Image>>,
-    unlit:                      bool,
-    double_sided:               bool,
-    cull_mode:                  Option<Face>,
-}
-
-impl From<&StandardMaterial> for InternedMaterialKey {
-    fn from(material: &StandardMaterial) -> Self {
-        let base_color = material.base_color.to_linear();
-        Self {
-            base_color:                 [
-                base_color.red.to_bits(),
-                base_color.green.to_bits(),
-                base_color.blue.to_bits(),
-                base_color.alpha.to_bits(),
-            ],
-            base_color_texture:         material.base_color_texture.as_ref().map(Handle::id),
-            emissive:                   [
-                material.emissive.red.to_bits(),
-                material.emissive.green.to_bits(),
-                material.emissive.blue.to_bits(),
-                material.emissive.alpha.to_bits(),
-            ],
-            emissive_texture:           material.emissive_texture.as_ref().map(Handle::id),
-            metallic:                   material.metallic.to_bits(),
-            perceptual_roughness:       material.perceptual_roughness.to_bits(),
-            metallic_roughness_texture: material
-                .metallic_roughness_texture
-                .as_ref()
-                .map(Handle::id),
-            reflectance:                material.reflectance.to_bits(),
-            normal_map_texture:         material.normal_map_texture.as_ref().map(Handle::id),
-            occlusion_texture:          material.occlusion_texture.as_ref().map(Handle::id),
-            unlit:                      material.unlit,
-            double_sided:               material.double_sided,
-            cull_mode:                  material.cull_mode,
-        }
-    }
-}
-
-/// Assigns one [`BaseMaterialId`] per distinct authored text material.
-/// Entries are never freed — bounded by distinct text materials per session
-/// (a handful; panels that never customize share the default id).
-#[derive(Debug, Default)]
-struct MaterialInterner {
-    ids:       HashMap<InternedMaterialKey, BaseMaterialId>,
-    /// Reverse lookup: a clone of the first-seen material per id, the base
-    /// the batch material is built from.
-    materials: Vec<StandardMaterial>,
 }
 
 /// GPU-side handles for one batch, created by the routing system on the
@@ -412,26 +271,19 @@ impl GlyphBatch {
 pub struct GlyphBatchStore {
     batches:   HashMap<BatchKey, GlyphBatch>,
     run_index: HashMap<RunStorageKey, BatchKey>,
-    interner:  MaterialInterner,
+    interner:  VisualMaterialInterner,
 }
 
 impl GlyphBatchStore {
     /// Id for an authored base material, minting one on first sight.
     pub fn intern_base_material(&mut self, material: &StandardMaterial) -> BaseMaterialId {
-        let key = InternedMaterialKey::from(material);
-        if let Some(id) = self.interner.ids.get(&key) {
-            return *id;
-        }
-        let id = BaseMaterialId(self.interner.materials.len().to_u32());
-        self.interner.materials.push(material.clone());
-        self.interner.ids.insert(key, id);
-        id
+        self.interner.intern_base_material(material)
     }
 
     /// The authored material behind an interned id.
     #[must_use]
     pub fn base_material(&self, id: BaseMaterialId) -> &StandardMaterial {
-        &self.interner.materials[id.0.to_usize()]
+        self.interner.base_material(id)
     }
 
     /// Whether a run is currently routed to any batch.
@@ -535,7 +387,9 @@ impl GlyphBatchStore {
     reason = "tests should fail loudly when fixture batches are missing"
 )]
 mod tests {
+    use bevy::camera::visibility::RenderLayers;
     use bevy::color::Color;
+    use bevy::prelude::AlphaMode;
 
     use super::*;
 

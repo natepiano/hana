@@ -4,7 +4,6 @@ mod run;
 
 pub(crate) use batch_store::BatchGpu;
 pub(crate) use batch_store::BatchKey;
-pub(crate) use batch_store::BatchRenderLayers;
 pub(crate) use glyph_cache::GlyphAtlasHandles;
 pub(crate) use glyph_cache::GlyphCache;
 pub(crate) use glyph_cache::PositionedGlyph;
@@ -17,3 +16,5 @@ pub(super) use run::GlyphInstance;
 pub(super) use run::GlyphKey;
 pub(super) use run::GlyphOutlineCache;
 pub(super) use run::TextRun;
+
+pub(crate) use crate::render::BatchRenderLayers;
