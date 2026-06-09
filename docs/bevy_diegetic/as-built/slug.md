@@ -53,7 +53,7 @@ Implementation rule:
 - `DistanceField`: describes the atlas texel encoding inside the
   current renderer: `Sdf`, `Msdf`, or `Mtsdf`.
 
-Experiment history lives in `docs/bevy_diegetic/slug-experiments.md`.
+Experiment history lives in `docs/bevy_diegetic/performance/slug-experiments.md`.
 Check that document before retrying shader or packing optimizations.
 - `RasterBackend`: describes who computes distance-field atlas texels:
   CPU or GPU.

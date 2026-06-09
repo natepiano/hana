@@ -2,7 +2,7 @@
 
 **Goal:** reduce GPU-side frame cost in diegetic text scenes. The CPU side
 is done — batched glyph records + vertex pulling
-([`as-built/glyph-instancing.md`](as-built/glyph-instancing.md)) cut the
+([`../as-built/glyph-instancing.md`](../as-built/glyph-instancing.md)) cut the
 stress-scene frame from 20.2 ms to 7.3 ms and the render thread no longer
 paces the frame. The largest remaining single render component is
 `gpu wait`.
