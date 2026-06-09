@@ -86,13 +86,24 @@ use fairy_dust::screen_panel_material;
 use wgpu::Buffer;
 use wgpu::BufferDescriptor;
 use wgpu::BufferUsages;
-use wgpu::ComputePassDescriptor;
-use wgpu::ComputePassTimestampWrites;
+use wgpu::Extent3d;
+use wgpu::LoadOp;
 use wgpu::MapMode;
+use wgpu::Operations;
 use wgpu::PollType;
 use wgpu::QuerySet;
 use wgpu::QuerySetDescriptor;
 use wgpu::QueryType;
+use wgpu::RenderPassColorAttachment;
+use wgpu::RenderPassDescriptor;
+use wgpu::RenderPassTimestampWrites;
+use wgpu::StoreOp;
+use wgpu::TextureDescriptor;
+use wgpu::TextureDimension;
+use wgpu::TextureFormat;
+use wgpu::TextureUsages;
+use wgpu::TextureView;
+use wgpu::TextureViewDescriptor;
 
 // ── Grid layout (meters) ──────────────────────────────────────────────────────
 
@@ -483,6 +494,10 @@ const GPU_TIMER_BYTES: u64 = 16;
 const GPU_TIMESTAMP_BYTES: usize = std::mem::size_of::<u64>();
 /// Read-slice byte length for the two timestamp results.
 const GPU_TIMER_READ_BYTES: usize = 2 * GPU_TIMESTAMP_BYTES;
+/// Upper bound (ms) on a believable single-frame 3D-pass GPU time. A decode
+/// above this means the two timestamps didn't pair cleanly (a stale or
+/// out-of-order slot); the sample is dropped rather than poisoning the mean.
+const GPU_TIMER_MAX_REASONABLE_MS: f32 = 1_000.0;
 
 /// True GPU duration of the main camera's 3D pass set (opaque + transparent +
 /// OIT resolve), in milliseconds, stored as `f32` bits. Written on the render
@@ -512,9 +527,17 @@ enum GpuTimerPhase {
 /// Render-world GPU timestamp resources, created once in `RenderStartup`.
 #[derive(Resource)]
 struct GpuTimer {
-    /// Two-slot timestamp query set: slot 0 before the opaque pass, slot 1
-    /// after the OIT resolve.
+    /// Two-slot timestamp query set: slot 0 written at the *end* of the start
+    /// marker pass (just before the opaque pass), slot 1 at the *beginning* of
+    /// the end marker pass (just after the OIT resolve).
     query_set:      QuerySet,
+    /// 1×1 throwaway color target the two marker render passes draw into. A
+    /// render pass needs an attachment, and a real (non-empty) pass is what makes
+    /// Apple Silicon actually record the stage-boundary timestamp — an empty
+    /// compute pass records nothing. Isolated from the real frame so it can't
+    /// disturb rendering; the marker passes carry no draws, only the timestamp
+    /// writes that bracket the main 3D passes in submission order.
+    dummy_view:     TextureView,
     /// `QUERY_RESOLVE | COPY_SRC` buffer the query set resolves into.
     resolve_buffer: Buffer,
     /// `COPY_DST | MAP_READ` buffer the resolve buffer is copied into for CPU
@@ -528,9 +551,9 @@ struct GpuTimer {
     mapped:         Arc<AtomicBool>,
 }
 
-/// Brackets the main camera's 3D pass set with two GPU timestamps — an empty
-/// compute pass at each end, because the only timestamp write Apple Silicon
-/// supports is at a pass stage boundary — then resolves, reads them back, and
+/// Brackets the main camera's 3D pass set with two GPU timestamps — written at
+/// the stage boundaries of two minimal marker render passes, the only place
+/// Apple Silicon samples GPU counters — then resolves, reads them back, and
 /// publishes the duration to the main world through [`GpuFrameMs`].
 struct GpuFrameTimingPlugin;
 
@@ -539,7 +562,9 @@ impl Plugin for GpuFrameTimingPlugin {
         let shared = GpuFrameMs(Arc::new(AtomicU32::new(0.0_f32.to_bits())));
         app.insert_resource(shared.clone());
         app.add_plugins(ExtractComponentPlugin::<GpuTimedView>::default());
-        app.add_systems(Startup, mark_gpu_timed_camera);
+        // Runs every frame until the camera exists and is marked — the `OrbitCam`
+        // is spawned after `Startup`, so a one-shot `Startup` system would miss it.
+        app.add_systems(Update, mark_gpu_timed_camera);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
             return;
         };
@@ -561,9 +586,13 @@ impl Plugin for GpuFrameTimingPlugin {
 }
 
 /// Inserts [`GpuTimedView`] on the main `OrbitCam` so the marker systems bracket
-/// its 3D pass set and not the overlay cameras'.
-fn mark_gpu_timed_camera(mut commands: Commands, camera: Query<Entity, With<OrbitCam>>) {
-    if let Ok(entity) = camera.single() {
+/// its 3D pass set and not the overlay cameras'. Idempotent: the
+/// `Without<GpuTimedView>` filter makes it a no-op once the marker is set.
+fn mark_gpu_timed_camera(
+    mut commands: Commands,
+    cameras: Query<Entity, (With<OrbitCam>, Without<GpuTimedView>)>,
+) {
+    for entity in &cameras {
         commands.entity(entity).insert(GpuTimedView);
     }
 }
@@ -589,18 +618,39 @@ fn init_gpu_timer(mut commands: Commands, device: Res<RenderDevice>, queue: Res<
         usage:              BufferUsages::COPY_DST | BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
+    // 1×1 throwaway target the marker passes draw into; the view keeps the
+    // texture alive, so the texture handle can drop here.
+    let dummy_view = wgpu_device
+        .create_texture(&TextureDescriptor {
+            label:           Some("gpu_frame_timer_marker"),
+            size:            Extent3d {
+                width:                 1,
+                height:                1,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count:    1,
+            dimension:       TextureDimension::D2,
+            format:          TextureFormat::Rgba8Unorm,
+            usage:           TextureUsages::RENDER_ATTACHMENT,
+            view_formats:    &[],
+        })
+        .create_view(&TextureViewDescriptor::default());
+    let period_ns = queue.0.get_timestamp_period();
     commands.insert_resource(GpuTimer {
         query_set,
+        dummy_view,
         resolve_buffer,
         read_buffer,
-        period_ns: queue.0.get_timestamp_period(),
+        period_ns,
         phase: GpuTimerPhase::Idle,
         mapped: Arc::new(AtomicBool::new(false)),
     });
 }
 
-/// Writes timestamp 0 just before the main camera's opaque pass, in an empty
-/// compute pass. Skips while a prior frame's read-back is still in flight.
+/// Writes timestamp 0 at the *end* of a marker render pass scheduled just before
+/// the main camera's opaque pass, so it stamps the GPU clock right as the 3D
+/// work begins. Skips while a prior frame's read-back is still in flight.
 fn gpu_timer_start(
     timer: Option<Res<GpuTimer>>,
     _view: ViewQuery<(), With<GpuTimedView>>,
@@ -612,20 +662,35 @@ fn gpu_timer_start(
     if !matches!(timer.phase, GpuTimerPhase::Idle) {
         return;
     }
-    ctx.command_encoder()
-        .begin_compute_pass(&ComputePassDescriptor {
-            label:            Some("gpu_timer_start"),
-            timestamp_writes: Some(ComputePassTimestampWrites {
-                query_set:                     &timer.query_set,
-                beginning_of_pass_write_index: Some(0),
-                end_of_pass_write_index:       None,
+    drop(
+        ctx.command_encoder()
+            .begin_render_pass(&RenderPassDescriptor {
+                label:                    Some("gpu_timer_start"),
+                color_attachments:        &[Some(RenderPassColorAttachment {
+                    view:           &timer.dummy_view,
+                    depth_slice:    None,
+                    resolve_target: None,
+                    ops:            Operations {
+                        load:  LoadOp::Clear(wgpu::Color::BLACK),
+                        store: StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes:         Some(RenderPassTimestampWrites {
+                    query_set:                     &timer.query_set,
+                    beginning_of_pass_write_index: None,
+                    end_of_pass_write_index:       Some(0),
+                }),
+                occlusion_query_set:      None,
+                multiview_mask:           None,
             }),
-        });
+    );
 }
 
-/// Writes timestamp 1 after the main camera's OIT resolve, then resolves both
-/// timestamps and copies them into the read buffer. Skips while a prior frame's
-/// read-back is still in flight.
+/// Writes timestamp 1 at the *beginning* of a marker render pass scheduled just
+/// after the main camera's OIT resolve, then resolves both timestamps and copies
+/// them into the read buffer. Skips while a prior frame's read-back is still in
+/// flight.
 fn gpu_timer_end(
     timer: Option<ResMut<GpuTimer>>,
     _view: ViewQuery<(), With<GpuTimedView>>,
@@ -637,15 +702,30 @@ fn gpu_timer_end(
     if !matches!(timer.phase, GpuTimerPhase::Idle) {
         return;
     }
+    drop(
+        ctx.command_encoder()
+            .begin_render_pass(&RenderPassDescriptor {
+                label:                    Some("gpu_timer_end"),
+                color_attachments:        &[Some(RenderPassColorAttachment {
+                    view:           &timer.dummy_view,
+                    depth_slice:    None,
+                    resolve_target: None,
+                    ops:            Operations {
+                        load:  LoadOp::Clear(wgpu::Color::BLACK),
+                        store: StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes:         Some(RenderPassTimestampWrites {
+                    query_set:                     &timer.query_set,
+                    beginning_of_pass_write_index: Some(1),
+                    end_of_pass_write_index:       None,
+                }),
+                occlusion_query_set:      None,
+                multiview_mask:           None,
+            }),
+    );
     let encoder = ctx.command_encoder();
-    encoder.begin_compute_pass(&ComputePassDescriptor {
-        label:            Some("gpu_timer_end"),
-        timestamp_writes: Some(ComputePassTimestampWrites {
-            query_set:                     &timer.query_set,
-            beginning_of_pass_write_index: Some(1),
-            end_of_pass_write_index:       None,
-        }),
-    });
     encoder.resolve_query_set(
         &timer.query_set,
         0..GPU_TIMER_QUERY_COUNT,
@@ -691,17 +771,25 @@ fn gpu_timer_readback(
         GpuTimerPhase::Mapping => {
             let _ = device.poll(PollType::Poll);
             if timer.mapped.load(Ordering::Relaxed) {
-                let elapsed_ms = {
+                let sample_ms = {
                     let view = timer.read_buffer.slice(..).get_mapped_range();
                     let start = timestamp_from_bytes(&view[0..GPU_TIMESTAMP_BYTES]);
                     let end =
                         timestamp_from_bytes(&view[GPU_TIMESTAMP_BYTES..GPU_TIMER_READ_BYTES]);
-                    let ticks = end.wrapping_sub(start);
-                    (ticks.to_f64() * f64::from(timer.period_ns) / NANOSECONDS_PER_MILLISECOND)
-                        .to_f32()
+                    // `checked_sub` is `None` when the slots didn't land in order
+                    // (a frame where the pair wrapped); drop it, keep last good.
+                    end.checked_sub(start).map(|ticks| {
+                        (ticks.to_f64() * f64::from(timer.period_ns) / NANOSECONDS_PER_MILLISECOND)
+                            .to_f32()
+                    })
                 };
                 timer.read_buffer.unmap();
-                gpu_ms.0.store(elapsed_ms.to_bits(), Ordering::Relaxed);
+                if let Some(ms) = sample_ms
+                    && ms.is_finite()
+                    && ms <= GPU_TIMER_MAX_REASONABLE_MS
+                {
+                    gpu_ms.0.store(ms.to_bits(), Ordering::Relaxed);
+                }
                 timer.phase = GpuTimerPhase::Idle;
             }
         },
@@ -1172,8 +1260,8 @@ fn build_overlay_tree(
 }
 
 /// Builds the upper-right batch-stats panel: one group per counter, each a
-/// label/value header line, a smaller description, and a thin separator.
-fn build_batch_stats_tree(rows: &[(&'static str, String, String)]) -> LayoutTree {
+/// label/value header line, smaller detail lines, and a thin separator.
+fn build_batch_stats_tree(rows: &[BatchStatsRow]) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -1189,8 +1277,8 @@ fn build_batch_stats_tree(rows: &[(&'static str, String, String)]) -> LayoutTree
                     .child_gap(STATS_GROUP_GAP),
                 |builder| {
                     let last = rows.len().saturating_sub(1);
-                    for (index, (label, value, description)) in rows.iter().enumerate() {
-                        stats_group(builder, label, value, description, index == last);
+                    for (index, row) in rows.iter().enumerate() {
+                        stats_group(builder, row, index == last);
                     }
                 },
             );
@@ -1199,15 +1287,9 @@ fn build_batch_stats_tree(rows: &[(&'static str, String, String)]) -> LayoutTree
     builder.build()
 }
 
-/// One batch-stats group: a larger label/value header line, a smaller
-/// description below it, and a thin separator (omitted on the final group).
-fn stats_group(
-    builder: &mut LayoutBuilder,
-    label: &str,
-    value: &str,
-    description: &str,
-    last: bool,
-) {
+/// One batch-stats group: a larger label/value header line, smaller detail
+/// lines below it, and a thin separator (omitted on the final group).
+fn stats_group(builder: &mut LayoutBuilder, row: &BatchStatsRow, last: bool) {
     builder.with(
         El::new()
             .width(Sizing::fixed(STATS_ROW_WIDTH))
@@ -1229,7 +1311,7 @@ fn stats_group(
                             .height(Sizing::FIT)
                             .child_alignment(AlignX::Left, AlignY::Center),
                         |builder| {
-                            builder.text(label, stats_header_label_style());
+                            builder.text(row.label, stats_header_label_style());
                         },
                     );
                     builder.with(
@@ -1238,21 +1320,21 @@ fn stats_group(
                             .height(Sizing::FIT)
                             .child_alignment(AlignX::Right, AlignY::Center),
                         |builder| {
-                            builder.text(value, stats_header_value_style());
+                            builder.text(&row.value, stats_header_value_style());
                         },
                     );
                 },
             );
-            // Description: smaller text, wraps within the group width. Skipped
-            // for rows that pass an empty description (e.g. `profile`).
-            if !description.is_empty() {
+            // Detail lines: smaller text, wraps within the group width. Rows
+            // without details (e.g. `profile`) only render their header.
+            for detail in &row.details {
                 builder.with(
                     El::new()
                         .width(Sizing::fixed(STATS_ROW_WIDTH))
                         .height(Sizing::FIT)
                         .child_alignment(AlignX::Left, AlignY::Top),
                     |builder| {
-                        builder.text(description, stats_desc_style());
+                        builder.text(detail, stats_desc_style());
                     },
                 );
             }
@@ -1404,57 +1486,61 @@ struct BatchStatsValues {
     shadow_per_view:      Vec<u32>,
 }
 
-/// Label, value, and a description for each batch-stats group. The `batches`
-/// description names the three batches this scene routes to (fixed); the `t3d`
-/// and `shadow` descriptions are the live per-view breakdown that produced the
-/// number this frame, read from the render phases.
-fn batch_stats_rows(values: &BatchStatsValues) -> Vec<(&'static str, String, String)> {
+/// One batch-stats group: label/value header plus zero or more detail lines.
+struct BatchStatsRow {
+    label:   &'static str,
+    value:   String,
+    details: Vec<String>,
+}
+
+/// Label, value, and detail lines for each batch-stats group. The `batches`
+/// details enumerate the batch keys this scene routes to (fixed); the `t3d` and
+/// `shadow` details are the live per-view breakdown that produced the number
+/// this frame, read from the render phases.
+fn batch_stats_rows(values: &BatchStatsValues) -> Vec<BatchStatsRow> {
     vec![
-        (
-            "profile",
-            if cfg!(debug_assertions) {
+        BatchStatsRow {
+            label:   "profile",
+            value:   if cfg!(debug_assertions) {
                 "debug"
             } else {
                 "release"
             }
             .to_string(),
-            // No description line — the value speaks for itself.
-            String::new(),
-        ),
-        (
-            "batches",
-            values.batches.to_string(),
-            // Two batch keys: the world labels (layer 0, lit, cast shadows),
-            // and one screen batch holding every screen panel — title bar,
-            // camera panel, and the three perf readouts (stats, columns,
-            // meter). All screen text is `None`, same material, same layer, so
-            // it shares one key.
-            "world labels · screen UI (title bar + camera + perf readouts)".to_string(),
-        ),
-        (
-            "runs",
-            values.runs.to_string(),
-            "text runs routed across all batches".to_string(),
-        ),
-        (
-            "glyphs",
-            values.glyphs.to_string(),
-            "glyph instances across all batches".to_string(),
-        ),
-        (
-            "t3d",
-            values.transparent_items.to_string(),
-            format!(
+            details: Vec::new(),
+        },
+        BatchStatsRow {
+            label:   "batches",
+            value:   values.batches.to_string(),
+            details: vec![
+                "1. world labels".to_string(),
+                "2. screen UI (title bar, camera, perf readouts)".to_string(),
+            ],
+        },
+        BatchStatsRow {
+            label:   "runs",
+            value:   values.runs.to_string(),
+            details: vec!["text runs routed across all batches".to_string()],
+        },
+        BatchStatsRow {
+            label:   "glyphs",
+            value:   values.glyphs.to_string(),
+            details: vec!["glyph instances across all batches".to_string()],
+        },
+        BatchStatsRow {
+            label:   "t3d",
+            value:   values.transparent_items.to_string(),
+            details: vec![format!(
                 "{} across {} camera views",
                 join_counts(&values.transparent_per_view),
                 values.transparent_per_view.len()
-            ),
-        ),
-        (
-            "shadow",
-            values.shadow_items.to_string(),
-            shadow_breakdown(&values.shadow_per_view),
-        ),
+            )],
+        },
+        BatchStatsRow {
+            label:   "shadow",
+            value:   values.shadow_items.to_string(),
+            details: vec![shadow_breakdown(&values.shadow_per_view)],
+        },
     ]
 }
 
@@ -1528,13 +1614,15 @@ fn update_batch_stats_panel(
     };
     let rows = batch_stats_rows(&values);
     let mut key = String::new();
-    for (label, value, description) in &rows {
-        key.push_str(label);
+    for row in &rows {
+        key.push_str(row.label);
         key.push('=');
-        key.push_str(value);
+        key.push_str(&row.value);
         key.push('|');
-        key.push_str(description);
-        key.push('|');
+        for detail in &row.details {
+            key.push_str(detail);
+            key.push('|');
+        }
     }
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
@@ -1609,8 +1697,15 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
 // ── Waterfall bar panel ─────────────────────────────────────────────────────────
 
 // colors
-/// Lane `gpu N-2`: a full-width reference bar standing for the refresh period.
-const WATERFALL_GPU_REF_COLOR: Color = Color::srgb(0.42, 0.42, 0.52);
+/// GPU-busy blocks. The wide block finishes frame N (ends at present); the tail
+/// block starts frame N+1 after submit. Width comes from the CPU-clock present
+/// anchor, not the timestamp query — see [`gpu_lane_segments`].
+const WATERFALL_GPU_COLOR: Color = Color::srgb(0.62, 0.45, 0.95);
+/// Transparent spacer for the GPU lane's idle gap (the render `submit` window,
+/// when the GPU has presented frame N but has not yet received frame N+1).
+/// [`lane_bars`] draws an alpha-0 segment with no background, so it only consumes
+/// width and positions the next block.
+const WATERFALL_GAP_COLOR: Color = Color::srgba(0.0, 0.0, 0.0, 0.0);
 /// Lane `main N`, `work` segment (main-thread CPU span).
 const WATERFALL_MAIN_WORK_COLOR: Color = Color::srgb(0.30, 0.60, 0.95);
 /// Lane `render N-1`, `prep` segment (`assets` + `prep`).
@@ -1642,13 +1737,14 @@ const WATERFALL_MIN_AXIS_MS: f32 = 1.0;
 const WATERFALL_MIN_SEGMENT_PX: f32 = 0.5;
 
 // timing
-/// Exponential smoothing rate (1/seconds) for the axis (smoothed frame time) —
-/// slower than [`WATERFALL_SMOOTHING`] so the scale doesn't jump frame to frame.
-const WATERFALL_AXIS_SMOOTHING: f32 = 1.5;
-/// Panel rebuild cadence (seconds) — 5 Hz.
-const WATERFALL_REBUILD_INTERVAL: f32 = 0.2;
-/// Exponential smoothing rate (1/seconds) for the lerp toward the live spans.
-const WATERFALL_SMOOTHING: f32 = 6.0;
+/// How long each on-screen picture is sampled before it refreshes (seconds).
+/// Per-frame values are averaged over this window so the held picture is the
+/// second's mean, not one noisy frame.
+const WATERFALL_SAMPLE_PERIOD: f32 = 1.0;
+/// How long the bars take to slide from the old picture to the new one at each
+/// refresh (seconds). After the morph the picture holds for the rest of the
+/// sample period (≈800 ms), giving a still frame to read.
+const WATERFALL_MORPH_DURATION: f32 = 0.2;
 
 /// Marker for the bottom-center waterfall bar panel.
 #[derive(Component)]
@@ -1664,20 +1760,67 @@ enum WaterfallShown {
     Hidden,
 }
 
-/// Lerped lane values for the waterfall panel, in milliseconds. Smoothed toward
-/// the live spans each frame; the panel rebuilds from these at
-/// [`WATERFALL_REBUILD_INTERVAL`]. Each lane carries only its short static
-/// label as text — the bars are colored rects — so a rebuild re-lays three
-/// strings, a cost negligible against the per-frame label load.
+/// Lane values for the waterfall panel, in milliseconds. The update samples a
+/// one-second mean into this, then morphs the on-screen copy toward it over
+/// [`WATERFALL_MORPH_DURATION`]. Each lane carries only its short static label as
+/// text — the bars are colored rects — so a rebuild re-lays three strings, a
+/// cost negligible against the per-frame label load.
 #[derive(Clone, Copy, Default)]
 struct WaterfallBars {
-    /// Smoothed frame time (ms) the lanes are scaled against — the dynamic axis.
+    /// Frame time (ms) the lanes are scaled against — the dynamic axis.
     axis:      f32,
     main_work: f32,
     main_wait: f32,
     prep:      f32,
     gpu_wait:  f32,
     submit:    f32,
+    /// Measured GPU time of the `OrbitCam` opaque `MainPass` only (`GpuFrameMs`) — a
+    /// sliver of the frame's GPU work (it excludes the prepass, the OIT resolve,
+    /// and every overlay camera), so it does NOT drive the GPU lane. The lane is
+    /// built from the present anchor instead; this is kept for a future
+    /// "main-pass GPU" sub-readout.
+    gpu:       f32,
+}
+
+impl WaterfallBars {
+    /// Field-wise sum, for accumulating the per-second mean.
+    fn add(self, other: Self) -> Self {
+        Self {
+            axis:      self.axis + other.axis,
+            main_work: self.main_work + other.main_work,
+            main_wait: self.main_wait + other.main_wait,
+            prep:      self.prep + other.prep,
+            gpu_wait:  self.gpu_wait + other.gpu_wait,
+            submit:    self.submit + other.submit,
+            gpu:       self.gpu + other.gpu,
+        }
+    }
+
+    /// Field-wise scale, dividing the accumulated sum by the sample count.
+    fn scale(self, factor: f32) -> Self {
+        Self {
+            axis:      self.axis * factor,
+            main_work: self.main_work * factor,
+            main_wait: self.main_wait * factor,
+            prep:      self.prep * factor,
+            gpu_wait:  self.gpu_wait * factor,
+            submit:    self.submit * factor,
+            gpu:       self.gpu * factor,
+        }
+    }
+
+    /// Field-wise lerp from `self` toward `to` by fraction `t`, for the morph.
+    const fn lerp(self, to: Self, t: f32) -> Self {
+        Self {
+            axis:      lerp(self.axis, to.axis, t),
+            main_work: lerp(self.main_work, to.main_work, t),
+            main_wait: lerp(self.main_wait, to.main_wait, t),
+            prep:      lerp(self.prep, to.prep, t),
+            gpu_wait:  lerp(self.gpu_wait, to.gpu_wait, t),
+            submit:    lerp(self.submit, to.submit, t),
+            gpu:       lerp(self.gpu, to.gpu, t),
+        }
+    }
 }
 
 fn spawn_waterfall_overlay(mut commands: Commands) {
@@ -1725,9 +1868,9 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                             .child_gap(WATERFALL_LANE_GAP)
                             .child_alignment(AlignX::Right, AlignY::Center),
                         |builder| {
-                            lane_label(builder, "Main world");
-                            lane_label(builder, "Render world");
-                            lane_label(builder, "GPU");
+                            lane_label(builder, "Main world  N+2");
+                            lane_label(builder, "Render world  N+1");
+                            lane_label(builder, "GPU  N");
                         },
                     );
                     builder.with(
@@ -1754,7 +1897,7 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                                     (bars.submit, WATERFALL_SUBMIT_COLOR),
                                 ],
                             );
-                            lane_bars(builder, bars.axis, &[(bars.axis, WATERFALL_GPU_REF_COLOR)]);
+                            lane_bars(builder, bars.axis, &gpu_lane_segments(bars));
                         },
                     );
                 },
@@ -1781,8 +1924,10 @@ fn lane_label(builder: &mut LayoutBuilder, label: &str) {
 
 /// One lane's bar track: a fixed-width track tinted [`WATERFALL_TRACK_COLOR`]
 /// with each `(ms, color)` segment drawn left-to-right at a width proportional
-/// to `axis_ms` (the smoothed frame time). The track sits in a shared lane row
-/// so it lines up with its label; the empty tail shows the track tint.
+/// to `axis_ms` (the frame time). An alpha-0 color draws a transparent spacer —
+/// it consumes width and positions the next block, used by the GPU lane for its
+/// leading offset and the gap between its two blocks. The track sits in a shared
+/// lane row so it lines up with its label; the empty tail shows the track tint.
 fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[(f32, Color)]) {
     let axis = axis_ms.max(WATERFALL_MIN_AXIS_MS);
     builder.with(
@@ -1807,13 +1952,16 @@ fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[(f32, Color)
                             continue;
                         }
                         used += px;
-                        builder.with(
-                            El::new()
-                                .width(Sizing::fixed(px))
-                                .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
-                                .background(color),
-                            |_builder| {},
-                        );
+                        let cell = El::new()
+                            .width(Sizing::fixed(px))
+                            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT));
+                        // Transparent gap: no background, only width.
+                        let cell = if color.alpha() > 0.0 {
+                            cell.background(color)
+                        } else {
+                            cell
+                        };
+                        builder.with(cell, |_builder| {});
                     }
                 },
             );
@@ -1821,51 +1969,124 @@ fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[(f32, Color)
     );
 }
 
-/// Smooths the lane values toward the live spans each frame and rebuilds the
-/// waterfall panel at [`WATERFALL_REBUILD_INTERVAL`]. `main N` = `work`
-/// (main-thread span) + `wait` (frame time past it); `render N-1` = `prep`
-/// (`assets` + `prep`) + `gpu wait` + `submit` (`graph`).
+/// The GPU lane's segments for one period, left to right: the GPU **busy**
+/// finishing frame N (ends at the present instant), the short **idle** gap while
+/// the render thread records and submits frame N+1's commands, then the GPU
+/// **busy** again starting frame N+1.
+///
+/// Driven by the CPU-clock present anchor, not the timestamp query: `present` =
+/// `prep` + `gpu_wait` is the instant the render thread's `gpu wait` (swapchain
+/// acquire) releases, which is the instant the GPU finishes frame N and frees an
+/// image. So the busy block's right edge lines up vertically with the render
+/// lane's `gpu wait` → `submit` boundary — the GPU is busy *through* the render
+/// thread's wait, which is why that wait exists. The next busy block starts at
+/// `present` + `submit`, lined up with the render lane's `submit` → end boundary:
+/// the GPU picks up frame N+1 the instant its commands are submitted. The GPU is
+/// the bottleneck under `with_perf_mode` (no vsync), so the only idle is that
+/// short `submit` gap.
+fn gpu_lane_segments(bars: &WaterfallBars) -> [(f32, Color); 3] {
+    let present = bars.prep + bars.gpu_wait;
+    let tail = (bars.axis - present - bars.submit).max(0.0);
+    [
+        (present, WATERFALL_GPU_COLOR),
+        (bars.submit, WATERFALL_GAP_COLOR),
+        (tail, WATERFALL_GPU_COLOR),
+    ]
+}
+
+/// Per-second timeline animation state, held across frames in a `Local`.
+///
+/// Each frame's instantaneous lane values are summed into `accum` over one
+/// sample period. At the period boundary the mean becomes `target`, the
+/// on-screen `displayed` becomes `from`, and `morph` resets to 0. For the next
+/// [`WATERFALL_MORPH_DURATION`] the bars slide `from` → `target`; after that they
+/// hold until the following boundary.
+#[derive(Default)]
+struct WaterfallAnim {
+    /// On-screen lane values this frame.
+    displayed: WaterfallBars,
+    /// Lane values at the start of the current morph.
+    from:      WaterfallBars,
+    /// The latest one-second mean — the morph destination and held picture.
+    target:    WaterfallBars,
+    /// Running field-wise sum of this period's frames.
+    accum:     WaterfallBars,
+    /// Frames summed into `accum`.
+    samples:   u32,
+    /// Seconds into the current sample period.
+    sampled:   f32,
+    /// Seconds since the last sample boundary (drives the morph fraction).
+    morph:     f32,
+    /// Whether the first sample has primed `displayed`/`from`/`target`.
+    primed:    bool,
+}
+
+/// Samples the three lanes into a one-second mean and animates the panel toward
+/// it: a [`WATERFALL_MORPH_DURATION`] slide at each boundary, then a still hold
+/// for the rest of the second. `main` = `work` (main-thread span) + `wait`
+/// (frame time past it); `render` = `prep` (`assets` + `prep`) + `gpu wait` +
+/// `submit` (`graph`); the GPU lane is built from the present anchor
+/// (`prep` + `gpu_wait`) — see [`gpu_lane_segments`].
 fn update_waterfall_panel(
     time: Res<Time>,
     main_thread: Res<MainThreadMs>,
     render_spans: Res<RenderThreadSpans>,
+    gpu_ms: Res<GpuFrameMs>,
     shown: Res<WaterfallShown>,
     panels: Query<Entity, With<WaterfallPanel>>,
     mut commands: Commands,
-    mut timer: Local<Option<Timer>>,
-    mut bars: Local<WaterfallBars>,
+    mut anim: Local<WaterfallAnim>,
 ) {
-    let frame_ms = time.delta_secs() * MILLISECONDS_PER_SECOND;
+    let delta_secs = time.delta_secs();
+    let frame_ms = delta_secs * MILLISECONDS_PER_SECOND;
     let main_span_ms = main_thread.0;
-    let target = WaterfallBars {
+    let instant = WaterfallBars {
         axis:      frame_ms,
         main_work: main_span_ms,
         main_wait: (frame_ms - main_span_ms).max(0.0),
         prep:      span_ms(&render_spans.0.assets) + span_ms(&render_spans.0.prep),
         gpu_wait:  span_ms(&render_spans.0.gpu_wait),
         submit:    span_ms(&render_spans.0.graph),
+        gpu:       span_ms(&gpu_ms.0),
     };
 
-    // The axis tracks frame time on its own, slower smoothing so the scale holds
-    // steady while the segments move.
-    let axis_blend = 1.0 - (-WATERFALL_AXIS_SMOOTHING * time.delta_secs()).exp();
-    let blend = 1.0 - (-WATERFALL_SMOOTHING * time.delta_secs()).exp();
-    bars.axis = lerp(bars.axis, target.axis, axis_blend);
-    bars.main_work = lerp(bars.main_work, target.main_work, blend);
-    bars.main_wait = lerp(bars.main_wait, target.main_wait, blend);
-    bars.prep = lerp(bars.prep, target.prep, blend);
-    bars.gpu_wait = lerp(bars.gpu_wait, target.gpu_wait, blend);
-    bars.submit = lerp(bars.submit, target.submit, blend);
+    if !anim.primed {
+        anim.displayed = instant;
+        anim.from = instant;
+        anim.target = instant;
+        anim.primed = true;
+    }
 
-    let timer = timer.get_or_insert_with(|| {
-        Timer::from_seconds(WATERFALL_REBUILD_INTERVAL, TimerMode::Repeating)
-    });
-    timer.tick(time.delta());
-    if !timer.just_finished() || matches!(*shown, WaterfallShown::Hidden) {
+    anim.accum = anim.accum.add(instant);
+    anim.samples += 1;
+    anim.sampled += delta_secs;
+    anim.morph += delta_secs;
+
+    // Period boundary: average the second, start a new morph toward it.
+    if anim.sampled >= WATERFALL_SAMPLE_PERIOD {
+        let mean = anim.accum.scale(1.0 / anim.samples.max(1).to_f32());
+        anim.from = anim.displayed;
+        anim.target = mean;
+        anim.accum = WaterfallBars::default();
+        anim.samples = 0;
+        anim.sampled = 0.0;
+        anim.morph = 0.0;
+    }
+
+    // Smoothstep the morph fraction so the slide eases in and out.
+    let raw = (anim.morph / WATERFALL_MORPH_DURATION).clamp(0.0, 1.0);
+    let eased = raw * raw * 2.0f32.mul_add(-raw, 3.0);
+    anim.displayed = anim.from.lerp(anim.target, eased);
+
+    // Rebuild only while the bars are moving (the morph plus one settle frame);
+    // during the hold the picture is unchanged, so the tree is left as-is.
+    let moving = anim.morph <= WATERFALL_MORPH_DURATION + delta_secs;
+    if !moving || matches!(*shown, WaterfallShown::Hidden) {
         return;
     }
+    let displayed = anim.displayed;
     for entity in &panels {
-        commands.set_tree(entity, build_waterfall_tree(&bars));
+        commands.set_tree(entity, build_waterfall_tree(&displayed));
     }
 }
 

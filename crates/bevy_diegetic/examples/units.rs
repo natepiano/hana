@@ -12,7 +12,6 @@
 
 use std::time::Duration;
 
-use bevy::anti_alias::smaa::Smaa;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
@@ -47,10 +46,6 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleChipActivation;
-
-/// Title-bar control label for the SMAA toggle.
-const SMAA_CONTROL: &str = "S SMAA";
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;
@@ -193,56 +188,6 @@ enum CameraProjection {
     Orthographic,
 }
 
-/// Source of truth for the post-process SMAA toggle.
-#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
-enum SmaaState {
-    /// SMAA on: post-process AA smooths the mesh edges that `Msaa::Off` (forced
-    /// by OIT) leaves jagged.
-    #[default]
-    On,
-    /// SMAA off.
-    Off,
-}
-
-impl TitleChipActivation for SmaaState {
-    fn activation(&self) -> ControlActivation {
-        match self {
-            Self::On => ControlActivation::Active,
-            Self::Off => ControlActivation::Inactive,
-        }
-    }
-}
-
-/// Seed SMAA on the orbit camera when it spawns so the example opens with edge
-/// anti-aliasing on (matching [`SmaaState`]'s default).
-fn seed_smaa(trigger: On<Add, OrbitCam>, mut commands: Commands) {
-    commands.entity(trigger.entity).insert(Smaa::default());
-}
-
-/// On `S`, toggle [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
-/// SMAA runs on the composited image after the OIT pass, so it anti-aliases
-/// mesh edges without disturbing the OIT text composite.
-fn toggle_smaa(
-    mut state: ResMut<SmaaState>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    *state = match *state {
-        SmaaState::On => SmaaState::Off,
-        SmaaState::Off => SmaaState::On,
-    };
-    for camera in &cameras {
-        match *state {
-            SmaaState::On => {
-                commands.entity(camera).insert(Smaa::default());
-            },
-            SmaaState::Off => {
-                commands.entity(camera).remove::<Smaa>();
-            },
-        }
-    }
-}
-
 fn build_panel_or_log(
     panel: Result<DiegeticPanel, bevy_diegetic::PanelBuildError>,
     label: &str,
@@ -282,8 +227,7 @@ fn main() {
                 .control("R Rulers")
                 .control("P Perspective")
                 .control("O Orthographic")
-                .control("Click to Zoom")
-                .control(SMAA_CONTROL),
+                .control("Click to Zoom"),
         )
         .wire_chip_to_state::<DebugOutlines, _>("D Outlines", |state| match state {
             DebugOutlines::On => ControlActivation::Active,
@@ -306,7 +250,6 @@ fn main() {
             |event| event.source == AnimationSource::ZoomToFit,
             |event| event.source == AnimationSource::ZoomToFit,
         )
-        .wire_chip_to_activation::<SmaaState>(SMAA_CONTROL)
         .with_camera_control_panel()
         .with_camera_control_panel_background_color(
             DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
@@ -314,12 +257,9 @@ fn main() {
         .init_resource::<DebugOutlines>()
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()
-        .init_resource::<SmaaState>()
-        .add_observer(seed_smaa)
         .add_systems(Startup, setup)
-        // S / D / R toggles and the P / O projection switch all run through Fairy
+        // D / R toggles and the P / O projection switch all run through Fairy
         // Dust's shortcut binding, which fires each only when no modifier is held.
-        .with_shortcut(KeyCode::KeyS, toggle_smaa)
         .with_shortcut(KeyCode::KeyD, toggle_debug_outlines)
         .with_shortcut(KeyCode::KeyR, toggle_rulers)
         .with_shortcut(KeyCode::KeyP, to_perspective_projection)

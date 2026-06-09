@@ -7,42 +7,32 @@
 //! home camera pose.
 //!
 //! This example runs OIT (`.with_stable_transparency()`), which forces
-//! `Msaa::Off`, so the cube's silhouette edges would alias. MSAA can't coexist
-//! with OIT, but post-process anti-aliasing can: SMAA is on by default to
-//! recover the edge AA. Press `S` to toggle it off and watch the cube
-//! silhouette alias — that is the AA cost OIT alone would impose. SMAA runs on
-//! the composited image after the OIT pass, so the two are compatible.
+//! `Msaa::Off` so blended world text can sort correctly.
 //!
 //! # Code layout
 //!
 //! Read top-to-bottom for the demonstrated API:
 //!   - `main()` wires the app (cube + face text, stable-transparency OIT, title-bar chips).
 //!   - **WORLD TEXT** section spawns the anchor demo and the ground label.
-//!   - **SMAA TOGGLE** section adds/removes [`Smaa`] on the camera.
 //!   - **ROTATION ANIMATION** at the end is decorative scaffolding.
 
-use bevy::anti_alias::smaa::Smaa;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticText;
-use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
-use fairy_dust::ControlActivation;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleChipActivation;
 
 // Camera home pose.
 const HOME_YAW: f32 = 0.015;
-const HOME_PITCH: f32 = 0.5;
+const HOME_PITCH: f32 = 0.2;
 
 // Title-bar control labels (also the keys for chip wiring).
 const X_ROTATE_CONTROL: &str = "X Rotate";
 const Y_ROTATE_CONTROL: &str = "Y Rotate";
 const Z_ROTATE_CONTROL: &str = "Z Rotate";
-const SMAA_CONTROL: &str = "S SMAA";
 
 // Rotation animation.
 const ROTATION_SPEED: f32 = 1.5;
@@ -51,11 +41,17 @@ const ROTATION_SPEED: f32 = 1.5;
 const CUBE_SIZE: f32 = fairy_dust::EXAMPLE_CUBE_SIZE;
 const CUBE_TRANSLATION: Vec3 = Vec3::new(-2.5, 1.0, 2.5);
 const CUBE_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const CUBE_FACE_TEXT_SIZE: f32 = 0.16;
+const CUBE_FACE_TEXT_COLOR: Color = fairy_dust::CUBE_FACE_PANEL_BLUE;
 const CUBE_YAW: f32 = 20.0;
+
+// Ground-plane label.
+const GROUND_TEXT_SIZE: f32 = 0.48;
+const GROUND_TEXT_TRANSLATION: Vec3 = Vec3::new(0.0, 0.001, 1.35);
 
 // Translucent backdrop behind the anchor demo labels.
 const ANCHOR_FRAME_COLOR: Color = Color::srgba(0.08, 0.08, 0.08, 0.18);
-const ANCHOR_FRAME_SIZE: Vec3 = Vec3::new(3.6, 2.0, 0.02);
+const ANCHOR_FRAME_SIZE: Vec3 = Vec3::new(3.6, 2.0, 0.18);
 const ANCHOR_FRAME_LOCAL_OFFSET: Vec3 = Vec3::new(0.0, -0.2, -0.1);
 
 fn main() {
@@ -74,12 +70,37 @@ fn main() {
                 .with_rotation(Quat::from_rotation_y(CUBE_YAW.to_radians())),
         )
         .insert((CameraHomeTarget, DemoCube))
-        .face_label(Face::Front, "FRONT")
-        .face_label(Face::Back, "BACK")
-        .face_label(Face::Top, "TOP")
-        .face_label(Face::Bottom, "BOTTOM")
-        .face_label(Face::Left, "LEFT")
-        .face_label(Face::Right, "RIGHT")
+        .face_text(
+            Face::Front,
+            "FRONT",
+            CUBE_FACE_TEXT_SIZE,
+            CUBE_FACE_TEXT_COLOR,
+        )
+        .face_text(
+            Face::Back,
+            "BACK",
+            CUBE_FACE_TEXT_SIZE,
+            CUBE_FACE_TEXT_COLOR,
+        )
+        .face_text(Face::Top, "TOP", CUBE_FACE_TEXT_SIZE, CUBE_FACE_TEXT_COLOR)
+        .face_text(
+            Face::Bottom,
+            "BOTTOM",
+            CUBE_FACE_TEXT_SIZE,
+            CUBE_FACE_TEXT_COLOR,
+        )
+        .face_text(
+            Face::Left,
+            "LEFT",
+            CUBE_FACE_TEXT_SIZE,
+            CUBE_FACE_TEXT_COLOR,
+        )
+        .face_text(
+            Face::Right,
+            "RIGHT",
+            CUBE_FACE_TEXT_SIZE,
+            CUBE_FACE_TEXT_COLOR,
+        )
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
         .with_stable_transparency()
         .with_camera_home()
@@ -91,8 +112,7 @@ fn main() {
                 .with_anchor(Anchor::TopLeft)
                 .control(X_ROTATE_CONTROL)
                 .control(Y_ROTATE_CONTROL)
-                .control(Z_ROTATE_CONTROL)
-                .control(SMAA_CONTROL),
+                .control(Z_ROTATE_CONTROL),
         )
         .wire_chip_to_events_filtered::<RotationBegin, RotationEnd, _, _>(
             X_ROTATE_CONTROL,
@@ -109,15 +129,12 @@ fn main() {
             |e| e.axis == Vec3::Z,
             |e| e.axis == Vec3::Z,
         )
-        .wire_chip_to_activation::<SmaaState>(SMAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<AnchorRotation>()
-        .init_resource::<SmaaState>()
         .add_systems(Startup, setup)
         .add_systems(Update, rotate_anchor_demo)
-        // S / X / Y / Z run through Fairy Dust's shortcut binding, which fires
-        // each only when no modifier is held.
-        .with_shortcut(KeyCode::KeyS, toggle_smaa)
+        // X / Y / Z run through Fairy Dust's shortcut binding, which fires each
+        // only when no modifier is held.
         .with_shortcut(KeyCode::KeyX, rotate_x)
         .with_shortcut(KeyCode::KeyY, rotate_y)
         .with_shortcut(KeyCode::KeyZ, rotate_z)
@@ -249,15 +266,16 @@ fn spawn_anchor_demo(
     }
 }
 
-/// Spawns the "GROUND PLANE" label flat on and centered on the ground plane.
+/// Spawns the "GROUND PLANE" label flat on the ground plane, shifted toward
+/// the home camera.
 fn spawn_ground_text(commands: &mut Commands) {
     commands.spawn((
         CameraHomeTarget,
         DiegeticText::world("GROUND PLANE")
-            .size(0.48)
+            .size(GROUND_TEXT_SIZE)
             .color(Color::srgb(0.9, 0.9, 0.1))
             .transform(
-                Transform::from_xyz(0.0, 0.001, 0.0)
+                Transform::from_translation(GROUND_TEXT_TRANSLATION)
                     .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
             )
             .build(),
@@ -265,62 +283,10 @@ fn spawn_ground_text(commands: &mut Commands) {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// SMAA TOGGLE — demonstrates that post-process SMAA composes with OIT. OIT
-// forces `Msaa::Off`, so without SMAA the cube silhouette aliases; toggling
-// SMAA on the camera entity recovers edge AA without disturbing the OIT pass.
-// This is the second primary API the example demonstrates.
-// ═════════════════════════════════════════════════════════════════════════════
-
-/// Source of truth for the post-process SMAA toggle. Drives both the camera
-/// component and the title-bar chip highlight.
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
-enum SmaaState {
-    /// No post-process AA: under OIT (`Msaa::Off`) the cube edges alias.
-    #[default]
-    Off,
-    /// SMAA on: mesh edges resolve while the OIT text stays stable.
-    On,
-}
-
-impl TitleChipActivation for SmaaState {
-    fn activation(&self) -> ControlActivation {
-        match self {
-            Self::On => ControlActivation::Active,
-            Self::Off => ControlActivation::Inactive,
-        }
-    }
-}
-
-/// On `S`, flip [`SmaaState`] and add or remove [`Smaa`] on the scene camera.
-/// SMAA is a post-process pass that runs on the composited image after OIT
-/// resolves, so it anti-aliases the mesh edges that `Msaa::Off` leaves jagged
-/// without disturbing the OIT text composite.
-fn toggle_smaa(
-    mut state: ResMut<SmaaState>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    *state = match *state {
-        SmaaState::Off => SmaaState::On,
-        SmaaState::On => SmaaState::Off,
-    };
-    for camera in &cameras {
-        match *state {
-            SmaaState::On => {
-                commands.entity(camera).insert(Smaa::default());
-            },
-            SmaaState::Off => {
-                commands.entity(camera).remove::<Smaa>();
-            },
-        }
-    }
-}
-
-// ═════════════════════════════════════════════════════════════════════════════
 // ROTATION ANIMATION — supporting (decorative). Driving the anchor demo and
 // the labeled cube around X/Y/Z so the viewer can see anchor points stay
-// fixed while the text rotates. Not part of the demonstrated `WorldText` or
-// SMAA APIs; safe to skim.
+// fixed while the text rotates. Not part of the demonstrated `WorldText` API;
+// safe to skim.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Fired when an axis rotation of the anchor demo begins.
@@ -335,7 +301,7 @@ struct RotationEnd {
     axis: Vec3,
 }
 
-/// Marker for anchor demo text entities that can be rotated with 'R'.
+/// Marker for anchor demo text entities that can rotate around their anchors.
 #[derive(Component)]
 struct AnchorDemoText {
     /// The world-space position of the anchor point (stays fixed during rotation).
