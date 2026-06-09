@@ -392,7 +392,7 @@ the fallback for activation logic the wiring helpers cannot express.
 ## Future work
 
 Implemented shared APIs are tracked in
-`docs/fairy_dust/archive/initial-enhancements.md`.
+`docs/fairy_dust/as-built/initial-enhancements.md`.
 
 - Should `.with_camera_home()` optionally accept face-label config so
   the invisible home cube can carry visible text without needing a

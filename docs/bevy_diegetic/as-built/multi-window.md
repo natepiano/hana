@@ -6,7 +6,7 @@
 > window-entity sugar on the builder, and the `WindowRef → Entity` resolver —
 > the resolver in `src/screen_space/mod.rs:63` matches the helper sketched
 > below. The multicam plan this unblocked is archived at
-> [`../../bevy_lagrange/archive/multicam.md`](../../bevy_lagrange/archive/multicam.md).
+> [`../../bevy_lagrange/as-built/multicam.md`](../../bevy_lagrange/as-built/multicam.md).
 
 Teach `bevy_diegetic`'s screen-space panel system to work correctly when more
 than one `Window` entity exists. Today the system silently disables itself —
@@ -20,7 +20,7 @@ blocking right now:
 
 - `crates/bevy_lagrange/examples/viewports_windows.rs` — the example whose
   conversion to canonical fairy_dust prompted this work (see
-  `docs/bevy_lagrange/archive/multicam.md`). Its second OS window is the
+  `docs/bevy_lagrange/as-built/multicam.md`). Its second OS window is the
   reproduction case.
 - Any future fairy_dust capability that wants per-window HUD (inspector
   panes, tool palettes, secondary-display readouts).
