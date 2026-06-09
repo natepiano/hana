@@ -361,7 +361,7 @@ pub(super) fn update_editor_anchor(
         };
         font_scale = panel.font_scale(panel_font_unit);
         let _ = panel.set_size((Px(editor_size.x), Px(editor_size.y)));
-        panel.set_screen_position(editor_pos);
+        let _ = panel.set_screen_position(editor_pos);
     }
     let caret_pos = caret_position(
         editor_pos,

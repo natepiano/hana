@@ -8,6 +8,7 @@ use bevy::camera::ClearColorConfig;
 use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::schedule::ApplyDeferred;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
@@ -19,9 +20,11 @@ use constants::SCREEN_SPACE_LIGHT_ILLUMINANCE;
 use constants::SCREEN_SPACE_PANEL_RESIZE_EPSILON;
 
 use crate::layout::Sizing;
+use crate::panel;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
+use crate::panel::LastPanelDimensions;
 use crate::panel::PanelSystems;
 use crate::panel::ScreenPosition;
 use crate::render::PanelChildSystems;
@@ -42,6 +45,11 @@ pub struct ScreenSpaceLight {
     render_layers: RenderLayers,
 }
 
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum ScreenSpaceSystems {
+    ResolveDimensions,
+}
+
 pub(crate) struct ScreenSpacePlugin;
 
 impl Plugin for ScreenSpacePlugin {
@@ -49,9 +57,22 @@ impl Plugin for ScreenSpacePlugin {
         app.add_observer(setup_screen_space_view)
             .add_observer(cleanup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
+            .configure_sets(
+                Update,
+                ScreenSpaceSystems::ResolveDimensions
+                    .after(PanelSystems::ResolveWorldFit)
+                    .before(PanelSystems::PositionScreenSpace),
+            )
             .add_systems(
                 Update,
-                position_screen_space_panels.after(PanelSystems::ResolveWorldFit),
+                (
+                    resolve_screen_space_panel_dimensions
+                        .in_set(ScreenSpaceSystems::ResolveDimensions),
+                    ApplyDeferred
+                        .after(ScreenSpaceSystems::ResolveDimensions)
+                        .before(PanelSystems::PositionScreenSpace),
+                    position_screen_space_panels.in_set(PanelSystems::PositionScreenSpace),
+                ),
             )
             .add_systems(
                 PostUpdate,
@@ -85,30 +106,28 @@ fn resolve_window_ref(
     }
 }
 
-/// Positions and sizes screen-space panels relative to their target window.
+/// Resolves final screen-space panel dimensions relative to their target window.
 ///
 /// Runs after the panel layout sequence so `Fit` panels are placed from
 /// their measured dimensions instead of the temporary build-time size.
-fn position_screen_space_panels(
+fn resolve_screen_space_panel_dimensions(
     windows: Query<(Entity, &Window)>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut panels: Query<(&mut Transform, &mut DiegeticPanel, &ComputedDiegeticPanel)>,
+    mut panels: Query<(
+        Entity,
+        &mut DiegeticPanel,
+        &ComputedDiegeticPanel,
+        &mut LastPanelDimensions,
+    )>,
+    mut commands: Commands,
 ) {
-    let mut by_entity: HashMap<Entity, (f32, f32)> = HashMap::default();
-    for (entity, window) in &windows {
-        let w = window.width();
-        let h = window.height();
-        if w > 0.0 && h > 0.0 {
-            by_entity.insert(entity, (w, h));
-        }
-    }
+    let by_entity = window_size_map(&windows);
     if by_entity.is_empty() {
         return;
     }
 
-    for (mut transform, mut panel, computed) in &mut panels {
+    for (entity, mut panel, computed, mut last_dimensions) in &mut panels {
         let CoordinateSpace::Screen {
-            position,
             width,
             height,
             window: window_ref,
@@ -117,9 +136,63 @@ fn position_screen_space_panels(
         else {
             continue;
         };
+        let width_sizing = *width;
+        let height_sizing = *height;
+        let window_ref = *window_ref;
+
+        let Some(window_entity) = resolve_window_ref(window_ref, &primary) else {
+            continue;
+        };
+        let Some(&(window_width, window_height)) = by_entity.get(&window_entity) else {
+            continue;
+        };
+        let (content_width, content_height) = (computed.content_width(), computed.content_height());
+
+        let new_width =
+            resolve_screen_axis(width_sizing, window_width, content_width, panel.width());
+        if (panel.width() - new_width).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
+            panel.set_width(new_width);
+        }
+        let new_height =
+            resolve_screen_axis(height_sizing, window_height, content_height, panel.height());
+        if (panel.height() - new_height).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
+            panel.set_height(new_height);
+        }
+
+        panel::trigger_panel_dimensions_changed(
+            &mut commands,
+            entity,
+            &panel,
+            computed,
+            &mut last_dimensions,
+        );
+    }
+}
+
+/// Positions screen-space panels relative to their target window.
+///
+/// Runs after [`PanelDimensionsChanged`](crate::PanelDimensionsChanged)
+/// observers have had a chance to react to final panel dimensions.
+fn position_screen_space_panels(
+    windows: Query<(Entity, &Window)>,
+    primary: Query<Entity, With<PrimaryWindow>>,
+    mut panels: Query<(&mut Transform, &DiegeticPanel)>,
+) {
+    let by_entity = window_size_map(&windows);
+    if by_entity.is_empty() {
+        return;
+    }
+
+    for (mut transform, panel) in &mut panels {
+        let CoordinateSpace::Screen {
+            position,
+            window: window_ref,
+            ..
+        } = panel.coordinate_space()
+        else {
+            continue;
+        };
         let position = *position;
-        let width = *width;
-        let height = *height;
         let window_ref = *window_ref;
 
         let Some(window_entity) = resolve_window_ref(window_ref, &primary) else {
@@ -130,16 +203,6 @@ fn position_screen_space_panels(
         };
         let half_width = window_width / 2.0;
         let half_height = window_height / 2.0;
-        let (content_width, content_height) = (computed.content_width(), computed.content_height());
-
-        let new_width = resolve_screen_axis(width, window_width, content_width, panel.width());
-        if (panel.width() - new_width).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
-            panel.set_width(new_width);
-        }
-        let new_height = resolve_screen_axis(height, window_height, content_height, panel.height());
-        if (panel.height() - new_height).abs() > SCREEN_SPACE_PANEL_RESIZE_EPSILON {
-            panel.set_height(new_height);
-        }
 
         let (screen_x, screen_y) = match position {
             ScreenPosition::Screen => {
@@ -152,6 +215,18 @@ fn position_screen_space_panels(
         transform.translation.x = screen_x - half_width;
         transform.translation.y = half_height - screen_y;
     }
+}
+
+fn window_size_map(windows: &Query<(Entity, &Window)>) -> HashMap<Entity, (f32, f32)> {
+    let mut by_entity = HashMap::default();
+    for (entity, window) in windows {
+        let w = window.width();
+        let h = window.height();
+        if w > 0.0 && h > 0.0 {
+            by_entity.insert(entity, (w, h));
+        }
+    }
+    by_entity
 }
 
 /// Resolves one axis of a screen-space panel's [`Sizing`] to a pixel value.
@@ -456,11 +531,14 @@ fn cleanup_screen_space_on_window_close(
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
+    use std::sync::Arc;
+
     use bevy::camera::RenderTarget;
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
     use bevy::window::WindowRef;
+    use bevy_kana::ToF32;
 
     use super::ScreenSpaceCamera;
     use super::ScreenSpaceLight;
@@ -468,11 +546,19 @@ mod tests {
     use super::resolve_screen_axis;
     use crate::Anchor;
     use crate::Fit;
+    use crate::HeadlessLayoutPlugin;
+    use crate::PanelDimensionsChanged;
+    use crate::Px;
+    use crate::TextStyle;
+    use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::Dimension;
     use crate::layout::Sizing;
+    use crate::layout::TextDimensions;
+    use crate::layout::TextMeasure;
     use crate::panel::ComputedDiegeticPanel;
     use crate::panel::DiegeticPanel;
     use crate::panel::PanelSystems;
+    use crate::text::DiegeticTextMeasurer;
 
     fn px(value: f32) -> Dimension { Dimension { value, unit: None } }
 
@@ -490,6 +576,149 @@ mod tests {
         for mut panel in &mut panels {
             panel.set_content_size(240.0, 80.0);
         }
+    }
+
+    fn monospace_measurer() -> DiegeticTextMeasurer {
+        DiegeticTextMeasurer {
+            measure_fn: Arc::new(|text: &str, measure: &TextMeasure| TextDimensions {
+                width:       text.chars().count().to_f32() * measure.size * MONOSPACE_WIDTH_RATIO,
+                height:      measure.size,
+                line_height: measure.size,
+            }),
+        }
+    }
+
+    #[derive(Resource, Default)]
+    struct DimensionEventLog(Vec<PanelDimensionsChanged>);
+
+    fn record_dimension_event(
+        event: On<PanelDimensionsChanged>,
+        mut log: ResMut<DimensionEventLog>,
+    ) {
+        log.0.push(*event.event());
+    }
+
+    #[test]
+    fn panel_dimensions_changed_fires_once_for_first_screen_fit_measurement() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(monospace_measurer());
+        app.init_resource::<DimensionEventLog>();
+        app.add_observer(record_dimension_event);
+        app.add_plugins(HeadlessLayoutPlugin);
+        app.add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+
+        let panel = DiegeticPanel::screen()
+            .size(Fit, Fit)
+            .layout(|builder| {
+                builder.text("test", TextStyle::new(10.0));
+            })
+            .build()
+            .expect("screen fit panel builds");
+        let panel = app.world_mut().spawn(panel).id();
+
+        app.update();
+
+        let log = app.world().resource::<DimensionEventLog>();
+        assert_eq!(log.0.len(), 1);
+        let event = log.0[0];
+        assert_eq!(event.entity, panel);
+        assert!(event.previous.is_none());
+        let panel_component = app
+            .world()
+            .get::<DiegeticPanel>(panel)
+            .expect("panel still exists");
+        assert_close(event.dimensions.resolved_size.x, panel_component.width());
+        assert_close(event.dimensions.resolved_size.y, panel_component.height());
+        assert_close(
+            event.dimensions.resolved_size.x,
+            event.dimensions.content_size.x,
+        );
+        assert_close(
+            event.dimensions.resolved_size.y,
+            event.dimensions.content_size.y,
+        );
+
+        app.update();
+
+        let log = app.world().resource::<DimensionEventLog>();
+        assert_eq!(log.0.len(), 1);
+    }
+
+    #[derive(Component)]
+    struct SourcePanel;
+
+    #[derive(Component)]
+    struct DependentPanel;
+
+    fn place_dependent_from_source(
+        event: On<PanelDimensionsChanged>,
+        sources: Query<&DiegeticPanel, (With<SourcePanel>, Without<DependentPanel>)>,
+        mut dependents: Query<&mut DiegeticPanel, (With<DependentPanel>, Without<SourcePanel>)>,
+    ) {
+        if sources.get(event.event().entity).is_err() {
+            return;
+        }
+        let target = Vec2::new(0.0, event.event().dimensions.resolved_size.y + 1.0);
+        for mut dependent in &mut dependents {
+            let _ = dependent.set_screen_position(target);
+        }
+    }
+
+    #[test]
+    fn dimension_observer_can_reposition_panel_before_screen_transform() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(monospace_measurer());
+        app.add_observer(place_dependent_from_source);
+        app.add_plugins(HeadlessLayoutPlugin);
+        app.add_plugins(ScreenSpacePlugin);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+
+        let source = DiegeticPanel::screen()
+            .size(Fit, Fit)
+            .anchor(Anchor::TopLeft)
+            .layout(|builder| {
+                builder.text("test", TextStyle::new(10.0));
+            })
+            .build()
+            .expect("source panel builds");
+        let source = app.world_mut().spawn((SourcePanel, source)).id();
+
+        let dependent = DiegeticPanel::screen()
+            .size(Px(20.0), Px(20.0))
+            .anchor(Anchor::TopLeft)
+            .screen_position(0.0, 0.0)
+            .layout(|_| {})
+            .build()
+            .expect("dependent panel builds");
+        let dependent = app.world_mut().spawn((DependentPanel, dependent)).id();
+
+        app.update();
+
+        let transform = app
+            .world()
+            .get::<Transform>(dependent)
+            .expect("dependent has transform");
+        let source = app
+            .world()
+            .get::<DiegeticPanel>(source)
+            .expect("source still exists");
+        assert_close(transform.translation.x, -400.0);
+        assert_close(transform.translation.y, 300.0 - source.height() - 1.0);
     }
 
     #[test]

@@ -206,6 +206,8 @@ pub use panel::HeadlessLayoutPlugin;
 pub use panel::Inches;
 pub use panel::Millimeters;
 pub use panel::PanelBuildError;
+pub use panel::PanelDimensions;
+pub use panel::PanelDimensionsChanged;
 pub use panel::PanelFieldRecord;
 use panel::PanelPlugin;
 pub use panel::PanelSizing;

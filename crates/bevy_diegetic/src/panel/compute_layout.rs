@@ -13,6 +13,8 @@ use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
 use super::diegetic_panel::DiegeticPanelChangeClassification;
 use super::diegetic_panel::ScaledLayoutTreeCache;
+use super::events;
+use super::events::LastPanelDimensions;
 use super::field;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
@@ -206,35 +208,48 @@ fn commit_layout_result(
 /// via `position_screen_space_panels` + `resolve_screen_axis`, so this
 /// system intentionally only touches world panels.
 pub(super) fn resolve_world_panel_fit(
-    mut panels: Query<(&mut DiegeticPanel, &ComputedDiegeticPanel)>,
+    mut panels: Query<(
+        Entity,
+        &mut DiegeticPanel,
+        &ComputedDiegeticPanel,
+        &mut LastPanelDimensions,
+    )>,
+    mut commands: Commands,
 ) {
-    for (mut panel, computed) in &mut panels {
+    for (entity, mut panel, computed, mut last_dimensions) in &mut panels {
         let (w_sizing, h_sizing) = match panel.coordinate_space() {
             CoordinateSpace::World { width, height } => (*width, *height),
             CoordinateSpace::Screen { .. } => continue,
         };
-        let Some(bounds) = computed.content_bounds() else {
-            continue;
-        };
-        let layout_to_points = panel.layout_unit().to_points();
-        if layout_to_points <= 0.0 {
-            continue;
-        }
-        let horizontal_content = bounds.width / layout_to_points;
-        let vertical_content = bounds.height / layout_to_points;
 
-        if let Sizing::Fit { min, max } = w_sizing {
-            let clamped = horizontal_content.clamp(min.value, max.value);
-            if (panel.width() - clamped).abs() > PANEL_RESIZE_EPSILON {
-                panel.set_width(clamped);
+        if let Some(bounds) = computed.content_bounds() {
+            let layout_to_points = panel.layout_unit().to_points();
+            if layout_to_points > 0.0 {
+                let horizontal_content = bounds.width / layout_to_points;
+                let vertical_content = bounds.height / layout_to_points;
+
+                if let Sizing::Fit { min, max } = w_sizing {
+                    let clamped = horizontal_content.clamp(min.value, max.value);
+                    if (panel.width() - clamped).abs() > PANEL_RESIZE_EPSILON {
+                        panel.set_width(clamped);
+                    }
+                }
+                if let Sizing::Fit { min, max } = h_sizing {
+                    let clamped = vertical_content.clamp(min.value, max.value);
+                    if (panel.height() - clamped).abs() > PANEL_RESIZE_EPSILON {
+                        panel.set_height(clamped);
+                    }
+                }
             }
         }
-        if let Sizing::Fit { min, max } = h_sizing {
-            let clamped = vertical_content.clamp(min.value, max.value);
-            if (panel.height() - clamped).abs() > PANEL_RESIZE_EPSILON {
-                panel.set_height(clamped);
-            }
-        }
+
+        events::trigger_panel_dimensions_changed(
+            &mut commands,
+            entity,
+            &panel,
+            computed,
+            &mut last_dimensions,
+        );
     }
 }
 
@@ -275,6 +290,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::panel::PanelDimensionsChanged;
     use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::text::DiegeticTextMeasurer;
@@ -310,6 +326,14 @@ mod tests {
         app
     }
 
+    #[track_caller]
+    fn assert_close(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() < 1e-4,
+            "expected {expected}, got {actual}",
+        );
+    }
+
     fn colored_text_tree(text: &str, color: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(text, TextStyle::new(10.0).with_color(color));
@@ -329,6 +353,60 @@ mod tests {
                 }
             })
             .expect("panel should produce a text command")
+    }
+
+    #[derive(Resource, Default)]
+    struct DimensionEventLog(Vec<PanelDimensionsChanged>);
+
+    fn record_dimension_event(
+        event: On<PanelDimensionsChanged>,
+        mut log: ResMut<DimensionEventLog>,
+    ) {
+        log.0.push(*event.event());
+    }
+
+    #[test]
+    fn world_panel_dimensions_changed_fires_once_for_first_measurement() {
+        let mut app = make_app();
+        app.init_resource::<DimensionEventLog>();
+        app.add_observer(record_dimension_event);
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Fit, Fit)
+                    .with_tree(colored_text_tree("Hello", Color::WHITE))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+
+        app.update();
+
+        let log = app.world().resource::<DimensionEventLog>();
+        assert_eq!(log.0.len(), 1);
+        let event = log.0[0];
+        assert_eq!(event.entity, entity);
+        assert!(event.previous.is_none());
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should exist");
+        assert_close(event.dimensions.resolved_size.x, panel.width());
+        assert_close(event.dimensions.resolved_size.y, panel.height());
+        assert_close(
+            event.dimensions.resolved_size.x,
+            event.dimensions.content_size.x,
+        );
+        assert_close(
+            event.dimensions.resolved_size.y,
+            event.dimensions.content_size.y,
+        );
+
+        app.update();
+
+        let log = app.world().resource::<DimensionEventLog>();
+        assert_eq!(log.0.len(), 1);
     }
 
     #[test]

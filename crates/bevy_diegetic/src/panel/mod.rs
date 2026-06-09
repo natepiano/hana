@@ -6,6 +6,7 @@ mod compute_layout;
 mod constants;
 mod coordinate_space;
 mod diegetic_panel;
+mod events;
 mod field;
 mod gizmos;
 mod perf;
@@ -22,6 +23,10 @@ pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
+pub(crate) use events::LastPanelDimensions;
+pub use events::PanelDimensions;
+pub use events::PanelDimensionsChanged;
+pub(crate) use events::trigger_panel_dimensions_changed;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
@@ -63,6 +68,8 @@ pub enum PanelSystems {
     /// Runs `resolve_world_panel_fit`
     /// — shrinks world panels with `Fit` axes to their content bounds.
     ResolveWorldFit,
+    /// Positions screen-space panels after `Fit` dimensions have resolved.
+    PositionScreenSpace,
     /// Runs gizmo reconciliation
     /// (`render_debug_gizmos`).
     RenderGizmos,
