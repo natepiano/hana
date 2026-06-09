@@ -149,6 +149,7 @@ pub use layout::CornerRadius;
 pub use layout::Dimension;
 pub use layout::DimensionMatch;
 pub use layout::Direction;
+pub use layout::DrawOverflow;
 pub use layout::El;
 pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
@@ -160,9 +161,11 @@ pub use layout::GlyphShadowMode;
 pub use layout::GlyphSidedness;
 pub use layout::HasUnit;
 pub use layout::In;
+pub use layout::InvalidPanelScalar;
 pub use layout::InvalidSize;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutTree;
+pub use layout::LineStyle;
 /// Function signature for custom text measurement. Takes a text string and
 /// a [`TextMeasure`] describing the font configuration, returns
 /// [`TextDimensions`]. See [`DiegeticTextMeasurer`] and the `side_by_side`
@@ -170,10 +173,22 @@ pub use layout::LayoutTree;
 pub use layout::MeasureTextFn;
 pub use layout::Mm;
 pub use layout::Padding;
+pub use layout::PanelCoord;
+pub use layout::PanelDraw;
+pub use layout::PanelLine;
+pub use layout::PanelLineLayering;
+pub use layout::PanelLinePaintOrder;
+pub use layout::PanelLinePrimitiveGeometry;
+pub use layout::PanelLinePrimitiveKey;
+pub use layout::PanelLinePrimitiveKind;
+pub use layout::PanelLineSourceKey;
+pub use layout::PanelPoint;
 pub use layout::PanelSize;
 pub use layout::PaperSize;
 pub use layout::Pt;
 pub use layout::Px;
+pub use layout::ResolvedPanelLine;
+pub use layout::ResolvedPanelLinePrimitive;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].

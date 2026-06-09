@@ -10,6 +10,10 @@ use crate::layout::AlignY;
 use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
+use crate::layout::DrawOverflow;
+use crate::layout::PanelLinePaintOrder;
+use crate::layout::PanelLineSourceKey;
+use crate::layout::ResolvedPanelLine;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
 use crate::layout::element::ChildOverflow;
@@ -17,9 +21,76 @@ use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
 use crate::layout::element::ScrollAnchor;
+use crate::layout::line;
+use crate::layout::line::PanelLineClipPolicy;
+use crate::layout::line::PanelLineResolveContext;
 use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
+
+#[derive(Clone, Copy)]
+struct PositionStackEntry {
+    index:          usize,
+    x:              f32,
+    y:              f32,
+    visited:        bool,
+    inherited_clip: BoundingBox,
+}
+
+#[derive(Clone, Copy)]
+struct GeometryStackEntry {
+    index:          usize,
+    visited:        bool,
+    inherited_clip: BoundingBox,
+}
+
+#[derive(Clone, Copy)]
+struct ChildStackContext<'a> {
+    parent:               &'a Element,
+    parent_size:          Vec2,
+    is_horizontal:        bool,
+    border_x:             f32,
+    border_y:             f32,
+    border_left:          f32,
+    border_top:           f32,
+    scroll_x:             f32,
+    scroll_y:             f32,
+    reverse_cursor_start: f32,
+    inherited_clip:       BoundingBox,
+}
+
+impl ChildStackContext<'_> {
+    const fn child_main_size(&self, child_size: Vec2) -> f32 {
+        if self.is_horizontal {
+            child_size.x
+        } else {
+            child_size.y
+        }
+    }
+
+    fn child_position(&self, origin: Vec2, reverse_cursor: f32, child_size: Vec2) -> Vec2 {
+        let parent = self.parent;
+        let base_x = origin.x + parent.padding.left.value + self.border_left - self.scroll_x;
+        let base_y = origin.y + parent.padding.top.value + self.border_top - self.scroll_y;
+        if self.is_horizontal {
+            let cross_available = self.parent_size.y - parent.padding.vertical() - self.border_y;
+            let cross_offset = match parent.child_align_y {
+                AlignY::Top => 0.0,
+                AlignY::Center => (cross_available - child_size.y).max(0.0) * 0.5,
+                AlignY::Bottom => (cross_available - child_size.y).max(0.0),
+            };
+            Vec2::new(base_x + reverse_cursor, base_y + cross_offset)
+        } else {
+            let cross_available = self.parent_size.x - parent.padding.horizontal() - self.border_x;
+            let cross_offset = match parent.child_align_x {
+                AlignX::Left => 0.0,
+                AlignX::Center => (cross_available - child_size.x).max(0.0) * 0.5,
+                AlignX::Right => (cross_available - child_size.x).max(0.0),
+            };
+            Vec2::new(base_x + cross_offset, base_y + reverse_cursor)
+        }
+    }
+}
 
 /// Emits border and scissor-end commands during the up-traversal (second visit)
 /// of the DFS positioning pass.
@@ -62,6 +133,8 @@ fn emit_down_traversal_commands(
     bounds: BoundingBox,
     index: usize,
     font_scale: f32,
+    inherited_clip: BoundingBox,
+    overlay_order: &mut usize,
 ) {
     // Emit rectangle if background is set.
     if let Some(color) = element.background {
@@ -80,22 +153,22 @@ fn emit_down_traversal_commands(
     // Clip to the border's inner edge — content can fill up to (but
     // not into) the border. Padding is inside this region.
     if matches!(element.overflow, ChildOverflow::Clipped) {
-        let bt = element.border.as_ref().map_or(0.0, |b| b.top.value);
-        let br = element.border.as_ref().map_or(0.0, |b| b.right.value);
-        let bb = element.border.as_ref().map_or(0.0, |b| b.bottom.value);
-        let bl = element.border.as_ref().map_or(0.0, |b| b.left.value);
-        let clip_bounds = BoundingBox {
-            x:      bounds.x + bl,
-            y:      bounds.y + bt,
-            width:  (bounds.width - bl - br).max(0.0),
-            height: (bounds.height - bt - bb).max(0.0),
-        };
+        let clip_bounds = element_scissor_bounds(element, bounds);
         commands.push(RenderCommand {
             bounds:      clip_bounds,
             kind:        RenderCommandKind::ScissorStart,
             element_idx: index,
         });
     }
+
+    emit_line_commands(
+        commands,
+        element,
+        bounds,
+        index,
+        inherited_clip,
+        overlay_order,
+    );
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -118,6 +191,66 @@ fn emit_down_traversal_commands(
             element_idx: index,
         });
     }
+}
+
+fn emit_line_commands(
+    commands: &mut Vec<RenderCommand>,
+    element: &Element,
+    bounds: BoundingBox,
+    index: usize,
+    inherited_clip: BoundingBox,
+    overlay_order: &mut usize,
+) {
+    let Some(panel_draw) = element.draw.as_ref() else {
+        return;
+    };
+    if panel_draw.lines_ref().is_empty() {
+        return;
+    }
+
+    let source_command_index = commands.len();
+    let (clip_policy, paint_order) = match panel_draw.overflow_policy() {
+        DrawOverflow::Clipped => (
+            PanelLineClipPolicy::OwnerBounds,
+            PanelLinePaintOrder::Normal {
+                command_index: source_command_index,
+            },
+        ),
+        DrawOverflow::Visible => (
+            PanelLineClipPolicy::Inherited,
+            PanelLinePaintOrder::Overlay {
+                order: *overlay_order,
+            },
+        ),
+    };
+
+    let mut lines = Vec::new();
+    for (line_ordinal, line) in panel_draw.lines_ref().iter().enumerate() {
+        let source_key = PanelLineSourceKey::element(index, 0, line_ordinal);
+        let context = PanelLineResolveContext::new(
+            bounds,
+            Some(inherited_clip),
+            clip_policy,
+            paint_order,
+            source_command_index,
+            source_key,
+        );
+        if let Some(resolved_line) = line::resolve_panel_line(line, context) {
+            lines.push(resolved_line);
+        }
+    }
+
+    let Some(command_bounds) = line_command_bounds(&lines) else {
+        return;
+    };
+    if matches!(panel_draw.overflow_policy(), DrawOverflow::Visible) {
+        *overlay_order += 1;
+    }
+    commands.push(RenderCommand {
+        bounds:      command_bounds,
+        kind:        RenderCommandKind::Lines { lines },
+        element_idx: index,
+    });
 }
 
 /// Emits render commands for text content (both wrapped and unwrapped).
@@ -174,6 +307,76 @@ fn line_x_for_alignment(align: TextAlign, bounds: BoundingBox, line_width: f32) 
     }
 }
 
+fn line_command_bounds(lines: &[ResolvedPanelLine]) -> Option<BoundingBox> {
+    let mut iter = lines.iter();
+    let first = iter.next()?.visual_bounds;
+    Some(iter.fold(first, |bounds, line| {
+        union_bounds(bounds, line.visual_bounds)
+    }))
+}
+
+fn union_bounds(a: BoundingBox, b: BoundingBox) -> BoundingBox {
+    let x0 = a.x.min(b.x);
+    let y0 = a.y.min(b.y);
+    let x1 = (a.x + a.width).max(b.x + b.width);
+    let y1 = (a.y + a.height).max(b.y + b.height);
+    BoundingBox {
+        x:      x0,
+        y:      y0,
+        width:  x1 - x0,
+        height: y1 - y0,
+    }
+}
+
+fn element_scissor_bounds(element: &Element, bounds: BoundingBox) -> BoundingBox {
+    let top = element
+        .border
+        .as_ref()
+        .map_or(0.0, |border| border.top.value);
+    let right = element
+        .border
+        .as_ref()
+        .map_or(0.0, |border| border.right.value);
+    let bottom = element
+        .border
+        .as_ref()
+        .map_or(0.0, |border| border.bottom.value);
+    let left = element
+        .border
+        .as_ref()
+        .map_or(0.0, |border| border.left.value);
+    BoundingBox {
+        x:      bounds.x + left,
+        y:      bounds.y + top,
+        width:  (bounds.width - left - right).max(0.0),
+        height: (bounds.height - top - bottom).max(0.0),
+    }
+}
+
+fn child_inherited_clip(
+    element: &Element,
+    bounds: BoundingBox,
+    inherited_clip: BoundingBox,
+) -> BoundingBox {
+    if matches!(element.overflow, ChildOverflow::Clipped) {
+        let scissor_bounds = element_scissor_bounds(element, bounds);
+        inherited_clip
+            .intersect(&scissor_bounds)
+            .unwrap_or_else(empty_clip)
+    } else {
+        inherited_clip
+    }
+}
+
+const fn empty_clip() -> BoundingBox {
+    BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  0.0,
+        height: 0.0,
+    }
+}
+
 /// Resolves the clamped per-axis scroll offset for a scrolling parent, returning
 /// `(0, 0)` for the common non-scrolling case. Each axis clamps to
 /// `[0, content - viewport]`; `End`-anchored axes measure the offset from the
@@ -220,67 +423,45 @@ fn resolve_scroll_offset(
     )
 }
 
-/// Pushes children onto the DFS stack in reverse order with computed positions.
-///
-/// Children are pushed in reverse so the first child is processed first during
-/// iteration. Uses a reverse cursor to compute positions without allocation.
-fn push_children_to_stack(
-    tree: &LayoutTree,
+fn child_stack_context<'a>(
+    parent: &'a Element,
     computed: &[ComputedLayout],
-    stack: &mut Vec<(usize, f32, f32, bool)>,
-    index: usize,
-    x: f32,
-    y: f32,
-) {
-    let children = tree.children_of(index);
-    if children.is_empty() {
-        return;
-    }
-
-    let parent_el = &tree.elements[index];
-    let parent_width = computed[index].width;
-    let parent_height = computed[index].height;
-    let is_horizontal = parent_el.direction == Direction::LeftToRight;
-
-    let mut children_main_size: f32 = 0.0;
-    for &idx in children {
-        children_main_size += if is_horizontal {
-            computed[idx].width
-        } else {
-            computed[idx].height
-        };
-    }
-
+    children: &[usize],
+    parent_size: Vec2,
+    is_horizontal: bool,
+    inherited_clip: BoundingBox,
+) -> ChildStackContext<'a> {
+    let children_main_size = children.iter().fold(0.0, |main_size, &idx| {
+        main_size
+            + if is_horizontal {
+                computed[idx].width
+            } else {
+                computed[idx].height
+            }
+    });
     let gap_total = if children.len() > 1 {
-        parent_el.child_gap.value * (children.len() - 1).to_f32()
+        parent.child_gap.value * (children.len() - 1).to_f32()
     } else {
         0.0
     };
-
-    let border_x = sizing::border_inset(parent_el, Axis::X);
-    let border_y = sizing::border_inset(parent_el, Axis::Y);
-    let border_left = sizing::border_leading(parent_el, Axis::X);
-    let border_top = sizing::border_leading(parent_el, Axis::Y);
-
+    let border_x = sizing::border_inset(parent, Axis::X);
+    let border_y = sizing::border_inset(parent, Axis::Y);
+    let border_left = sizing::border_leading(parent, Axis::X);
+    let border_top = sizing::border_leading(parent, Axis::Y);
     let main_available = if is_horizontal {
-        parent_width - parent_el.padding.horizontal() - border_x
+        parent_size.x - parent.padding.horizontal() - border_x
     } else {
-        parent_height - parent_el.padding.vertical() - border_y
+        parent_size.y - parent.padding.vertical() - border_y
     };
-
     let content_main = children_main_size + gap_total;
     let extra_main = (main_available - content_main).max(0.0);
-
     let cross_available = if is_horizontal {
-        parent_height - parent_el.padding.vertical() - border_y
+        parent_size.y - parent.padding.vertical() - border_y
     } else {
-        parent_width - parent_el.padding.horizontal() - border_x
+        parent_size.x - parent.padding.horizontal() - border_x
     };
-    // Offset subtracted from child positions so a clipping parent scrolls its
-    // children; the element's scissor rect stays fixed, so shifted-out content
-    // clips.
     let (scroll_x, scroll_y) = resolve_scroll_offset(
-        parent_el,
+        parent,
         computed,
         children,
         is_horizontal,
@@ -288,60 +469,80 @@ fn push_children_to_stack(
         cross_available,
         content_main,
     );
-
     let main_offset = if is_horizontal {
-        match parent_el.child_align_x {
+        match parent.child_align_x {
             AlignX::Left => 0.0,
             AlignX::Center => extra_main * 0.5,
             AlignX::Right => extra_main,
         }
     } else {
-        match parent_el.child_align_y {
+        match parent.child_align_y {
             AlignY::Top => 0.0,
             AlignY::Center => extra_main * 0.5,
             AlignY::Bottom => extra_main,
         }
     };
+    ChildStackContext {
+        parent,
+        parent_size,
+        is_horizontal,
+        border_x,
+        border_y,
+        border_left,
+        border_top,
+        scroll_x,
+        scroll_y,
+        reverse_cursor_start: main_offset + children_main_size + gap_total,
+        inherited_clip,
+    }
+}
+
+/// Pushes children onto the DFS stack in reverse order with computed positions.
+///
+/// Children are pushed in reverse so the first child is processed first during
+/// iteration. Uses a reverse cursor to compute positions without allocation.
+fn push_children_to_stack(
+    tree: &LayoutTree,
+    computed: &[ComputedLayout],
+    stack: &mut Vec<PositionStackEntry>,
+    index: usize,
+    x: f32,
+    y: f32,
+    inherited_clip: BoundingBox,
+) {
+    let children = tree.children_of(index);
+    if children.is_empty() {
+        return;
+    }
+
+    let parent_el = &tree.elements[index];
+    let is_horizontal = parent_el.direction == Direction::LeftToRight;
+    let child_context = child_stack_context(
+        parent_el,
+        computed,
+        children,
+        Vec2::new(computed[index].width, computed[index].height),
+        is_horizontal,
+        inherited_clip,
+    );
 
     // Walk children in reverse, subtracting each child's main size
     // from the cursor to produce positions in stack-push order.
-    let mut reverse_cursor = main_offset + children_main_size + gap_total;
+    let origin = Vec2::new(x, y);
+    let mut reverse_cursor = child_context.reverse_cursor_start;
     for &child_idx in children.iter().rev() {
-        let child_width = computed[child_idx].width;
-        let child_height = computed[child_idx].height;
-        let child_main = if is_horizontal {
-            child_width
-        } else {
-            child_height
-        };
-
+        let child_size = Vec2::new(computed[child_idx].width, computed[child_idx].height);
+        let child_main = child_context.child_main_size(child_size);
         reverse_cursor -= child_main;
+        let child_position = child_context.child_position(origin, reverse_cursor, child_size);
 
-        let (cx, cy) = if is_horizontal {
-            let cross_available = parent_height - parent_el.padding.vertical() - border_y;
-            let cross_offset = match parent_el.child_align_y {
-                AlignY::Top => 0.0,
-                AlignY::Center => (cross_available - child_height).max(0.0) * 0.5,
-                AlignY::Bottom => (cross_available - child_height).max(0.0),
-            };
-            (
-                x + parent_el.padding.left.value + border_left + reverse_cursor - scroll_x,
-                y + parent_el.padding.top.value + border_top + cross_offset - scroll_y,
-            )
-        } else {
-            let cross_available = parent_width - parent_el.padding.horizontal() - border_x;
-            let cross_offset = match parent_el.child_align_x {
-                AlignX::Left => 0.0,
-                AlignX::Center => (cross_available - child_width).max(0.0) * 0.5,
-                AlignX::Right => (cross_available - child_width).max(0.0),
-            };
-            (
-                x + parent_el.padding.left.value + border_left + cross_offset - scroll_x,
-                y + parent_el.padding.top.value + border_top + reverse_cursor - scroll_y,
-            )
-        };
-
-        stack.push((child_idx, cx, cy, false));
+        stack.push(PositionStackEntry {
+            index:          child_idx,
+            x:              child_position.x,
+            y:              child_position.y,
+            visited:        false,
+            inherited_clip: child_context.inherited_clip,
+        });
         reverse_cursor -= parent_el.child_gap.value;
     }
 }
@@ -352,31 +553,41 @@ pub(super) fn position_and_render(
     computed: &mut [ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    _viewport_width: f32,
-    _viewport_height: f32,
+    viewport_width: f32,
+    viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
+    let mut overlay_order = 0;
+    let viewport_clip = BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  viewport_width,
+        height: viewport_height,
+    };
 
-    // Stack entries: (element_index, x, y, is_second_visit)
-    let mut stack: Vec<(usize, f32, f32, bool)> = Vec::with_capacity(tree.len());
-    stack.push((root, 0.0, 0.0, false));
+    let mut stack = Vec::with_capacity(tree.len());
+    stack.push(PositionStackEntry {
+        index:          root,
+        x:              0.0,
+        y:              0.0,
+        visited:        false,
+        inherited_clip: viewport_clip,
+    });
 
-    while let Some(&mut (index, x, y, ref mut visited)) = stack.last_mut() {
+    while let Some(entry) = stack.pop() {
+        let index = entry.index;
         let element = &tree.elements[index];
         let bounds = BoundingBox {
-            x,
-            y,
-            width: computed[index].width,
+            x:      entry.x,
+            y:      entry.y,
+            width:  computed[index].width,
             height: computed[index].height,
         };
 
-        if *visited {
+        if entry.visited {
             emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
-            stack.pop();
         } else {
-            *visited = true;
-
             // Store the final bounding box for render-side culling and clipping.
             computed[index].bounds = bounds;
 
@@ -387,9 +598,18 @@ pub(super) fn position_and_render(
                 bounds,
                 index,
                 font_scale,
+                entry.inherited_clip,
+                &mut overlay_order,
             );
 
-            push_children_to_stack(tree, computed, &mut stack, index, x, y);
+            let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
+            stack.push(PositionStackEntry {
+                visited: true,
+                ..entry
+            });
+            push_children_to_stack(
+                tree, computed, &mut stack, index, entry.x, entry.y, child_clip,
+            );
         }
     }
     commands
@@ -401,21 +621,32 @@ pub(super) fn render_commands_from_geometry(
     computed: &[ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    _viewport_width: f32,
-    _viewport_height: f32,
+    viewport_width: f32,
+    viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
+    let mut overlay_order = 0;
+    let viewport_clip = BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  viewport_width,
+        height: viewport_height,
+    };
 
-    // Stack entries: (element_index, is_second_visit)
-    let mut stack: Vec<(usize, bool)> = Vec::with_capacity(tree.len());
-    stack.push((root, false));
+    let mut stack = Vec::with_capacity(tree.len());
+    stack.push(GeometryStackEntry {
+        index:          root,
+        visited:        false,
+        inherited_clip: viewport_clip,
+    });
 
-    while let Some((index, visited)) = stack.pop() {
+    while let Some(entry) = stack.pop() {
+        let index = entry.index;
         let element = &tree.elements[index];
         let bounds = computed[index].bounds;
 
-        if visited {
+        if entry.visited {
             emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
             continue;
         }
@@ -427,11 +658,21 @@ pub(super) fn render_commands_from_geometry(
             bounds,
             index,
             font_scale,
+            entry.inherited_clip,
+            &mut overlay_order,
         );
 
-        stack.push((index, true));
+        let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
+        stack.push(GeometryStackEntry {
+            visited: true,
+            ..entry
+        });
         for &child_idx in tree.children_of(index).iter().rev() {
-            stack.push((child_idx, false));
+            stack.push(GeometryStackEntry {
+                index:          child_idx,
+                visited:        false,
+                inherited_clip: child_clip,
+            });
         }
     }
 

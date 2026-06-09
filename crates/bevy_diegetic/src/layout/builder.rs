@@ -39,6 +39,7 @@ use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
 use super::Padding;
+use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
 use super::element::ChildOverflow;
@@ -73,6 +74,7 @@ pub struct El {
     scroll_anchor: ScrollAnchor,
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
+    draw:          Option<PanelDraw>,
 }
 
 impl El {
@@ -237,6 +239,15 @@ impl El {
         self
     }
 
+    /// Sets paint-only draw primitives owned by this element.
+    ///
+    /// `PanelDraw` does not affect layout measurement. It is stored for later
+    /// render-command resolution after the element has computed bounds.
+    pub fn draw(mut self, panel_draw: PanelDraw) -> Self {
+        self.draw = Some(panel_draw);
+        self
+    }
+
     /// Converts this declaration into an [`Element`] with the given content.
     fn into_element(self, content: ElementContent) -> Element {
         Element {
@@ -255,6 +266,7 @@ impl El {
             scroll_anchor: self.scroll_anchor,
             material: self.material,
             editable: self.editable,
+            draw: self.draw,
             content,
         }
     }

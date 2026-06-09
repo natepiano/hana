@@ -6,6 +6,7 @@ use bevy::image::Image;
 
 use super::Border;
 use super::BoundingBox;
+use super::ResolvedPanelLine;
 use super::TextStyle;
 
 /// A single render command produced by the layout pass.
@@ -63,6 +64,11 @@ pub enum RenderCommandKind {
         handle: Handle<Image>,
         /// Tint color multiplied against the texture (white = no tint).
         tint:   Color,
+    },
+    /// Resolved panel-local line primitives.
+    Lines {
+        /// Resolved lines to render as one command group.
+        lines: Vec<ResolvedPanelLine>,
     },
     /// Begin a clipping region. All subsequent commands until the matching
     /// [`ScissorEnd`](Self::ScissorEnd) are clipped to this bounding box.
