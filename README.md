@@ -7,7 +7,7 @@
 
 A Bevy plugin for rendering 3D mesh outlines using jump-flood and hull-extrusion methods.
 
-> **Work in progress.** This crate is in active development (v0.0.1) and not
+> **Work in progress.** This crate is in active development (v0.0.2-rc.1) and not
 > subject to semver stability guarantees. APIs will change without notice
 > between commits. Do not depend on this in production code yet.
 
@@ -97,7 +97,8 @@ Adding `Outline` to a parent entity automatically propagates it to all descendan
 
 | bevy_liminal | Bevy |
 |--------------|------|
-| 0.0          | 0.18 |
+| 0.0.2        | 0.19 |
+| 0.0.0–0.0.1  | 0.18 |
 
 ## License
 
