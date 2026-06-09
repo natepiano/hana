@@ -1122,7 +1122,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_liminal"
-version = "0.0.2-rc.1"
+version = "0.0.2-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
