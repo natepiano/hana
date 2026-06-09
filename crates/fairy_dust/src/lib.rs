@@ -55,6 +55,9 @@ use std::marker::PhantomData;
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::WgpuFeatures;
+use bevy::render::settings::WgpuSettings;
 pub use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_lagrange::LagrangePlugin;
@@ -133,10 +136,55 @@ pub use screen_panels::screen_panel_material;
 #[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins.set(LogPlugin {
+    app.add_plugins(DefaultPlugins.set(quiet_log_plugin()));
+    sprinkle_builder(app)
+}
+
+/// Creates an example app whose renderer enables
+/// `WgpuFeatures::TIMESTAMP_QUERY`.
+///
+/// Examples can then write GPU timestamps at render-pass stage boundaries
+/// (via a pass descriptor's `timestamp_writes`) and read back true GPU pass
+/// durations.
+///
+/// The device feature set is read once when `DefaultPlugins` adds `RenderPlugin`,
+/// before any builder method runs, so it can only be requested at construction —
+/// hence a separate constructor rather than a chained `with_*` method.
+///
+/// Requesting the feature aborts device creation on a GPU or OS that cannot
+/// sample timestamps at stage boundaries. On Metal that means Apple Silicon on
+/// macOS 11+ works and Intel Macs / pre-Big-Sur do not. Call this only from
+/// examples that record GPU timestamps.
+#[must_use]
+pub fn sprinkle_example_gpu_timestamps() -> SprinkleBuilder<NoOrbitCam> {
+    let mut app = App::new();
+    app.add_plugins(
+        DefaultPlugins.set(quiet_log_plugin()).set(RenderPlugin {
+            render_creation: WgpuSettings {
+                features: WgpuSettings::default().features | WgpuFeatures::TIMESTAMP_QUERY,
+                ..WgpuSettings::default()
+            }
+            .into(),
+            ..RenderPlugin::default()
+        }),
+    );
+    sprinkle_builder(app)
+}
+
+/// The workspace's quiet-filter [`LogPlugin`], shared by the
+/// `sprinkle_example*` constructors.
+fn quiet_log_plugin() -> LogPlugin {
+    LogPlugin {
         filter: LOG_FILTER.to_string(),
         ..LogPlugin::default()
-    }));
+    }
+}
+
+/// Register the Fairy Dust baseline plugins on an `app` that already has
+/// `DefaultPlugins`, then wrap it in a [`SprinkleBuilder`]. Shared by the
+/// `sprinkle_example*` constructors, which differ only in how `DefaultPlugins`
+/// is configured.
+fn sprinkle_builder(mut app: App) -> SprinkleBuilder<NoOrbitCam> {
     ensure_plugin(&mut app, DiegeticUiPlugin);
     ensure_plugin(&mut app, LagrangePlugin);
     screen_panels::install_overlay_picking(&mut app);

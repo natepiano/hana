@@ -8,6 +8,7 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Sizing;
@@ -385,9 +386,15 @@ fn build_title_bar_layout(
     title_bar: &TitleBar,
     state: &TitleBarControlState,
 ) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
-    let inactive_control = TextStyle::new(LABEL_SIZE).with_color(CONTROL_INACTIVE_COLOR);
-    let active_control = TextStyle::new(LABEL_SIZE).with_color(CONTROL_ACTIVE_COLOR);
+    let title = TextStyle::new(TITLE_SIZE)
+        .with_color(TITLE_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let inactive_control = TextStyle::new(LABEL_SIZE)
+        .with_color(CONTROL_INACTIVE_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let active_control = TextStyle::new(LABEL_SIZE)
+        .with_color(CONTROL_ACTIVE_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
 
     let background = title_bar
         .background_color

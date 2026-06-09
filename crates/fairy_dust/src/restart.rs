@@ -30,6 +30,7 @@ use bevy_lagrange::OrbitCam;
 use crate::constants::CARGO_BIN;
 use crate::constants::CARGO_EXAMPLE_FLAG;
 use crate::constants::CARGO_EXAMPLES_DIR;
+use crate::constants::CARGO_RELEASE_FLAG;
 use crate::constants::CARGO_RUN_SUBCOMMAND;
 use crate::constants::CARGO_TARGET_DIR;
 use crate::ensure_plugin;
@@ -116,14 +117,23 @@ fn restart_command(encoded_pose: Option<String>) -> Command {
         );
         process::exit(1);
     };
+    // Re-launch in the profile the running binary was built with: a release
+    // build has `debug_assertions` off, so pass `--release`; a debug build uses
+    // the default dev profile.
+    let release = !cfg!(debug_assertions);
     info!(
-        "fairy_dust restart: launching `cargo run --example {}` in {}",
+        "fairy_dust restart: launching `cargo run{} --example {}` in {}",
+        if release { " --release" } else { "" },
         example_name,
         workspace_root.display(),
     );
     let mut command = Command::new(CARGO_BIN);
+    command.arg(CARGO_RUN_SUBCOMMAND);
+    if release {
+        command.arg(CARGO_RELEASE_FLAG);
+    }
     command
-        .args([CARGO_RUN_SUBCOMMAND, CARGO_EXAMPLE_FLAG, &example_name])
+        .args([CARGO_EXAMPLE_FLAG, &example_name])
         .current_dir(&workspace_root);
     restart_camera::apply_child_env(&mut command, encoded_pose);
     command

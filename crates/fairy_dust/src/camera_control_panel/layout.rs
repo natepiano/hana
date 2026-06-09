@@ -5,6 +5,7 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Px;
@@ -50,14 +51,22 @@ fn build_guidance_layout(
     display: CameraGuidanceDisplay,
     background: Color,
 ) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
+    let title = TextStyle::new(TITLE_SIZE)
+        .with_color(TITLE_COLOR)
+        .no_wrap()
+        .with_shadow_mode(GlyphShadowMode::None);
     let header = TextStyle::new(LABEL_SIZE)
         .with_color(HEADER_COLOR)
-        .no_wrap();
-    let label = TextStyle::new(LABEL_SIZE).with_color(LABEL_COLOR).no_wrap();
+        .no_wrap()
+        .with_shadow_mode(GlyphShadowMode::None);
+    let label = TextStyle::new(LABEL_SIZE)
+        .with_color(LABEL_COLOR)
+        .no_wrap()
+        .with_shadow_mode(GlyphShadowMode::None);
     let active = TextStyle::new(LABEL_SIZE)
         .with_color(ACTIVE_COLOR)
-        .no_wrap();
+        .no_wrap()
+        .with_shadow_mode(GlyphShadowMode::None);
 
     screen_panels::screen_panel_frame(builder, Sizing::FIT, Sizing::FIT, background, |builder| {
         builder.with(
