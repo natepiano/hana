@@ -11,8 +11,8 @@ use ttf_parser::GlyphId;
 
 use crate::layout::ResolvedFontFace;
 use crate::layout::ShapedGlyph;
+use crate::render::DEFAULT_BAND_COUNT;
 use crate::text::Font;
-use crate::text::slug::glyph::DEFAULT_BAND_COUNT;
 use crate::text::slug::glyph::OutlineError;
 use crate::text::slug::runtime::BuiltTextRun;
 use crate::text::slug::runtime::CachedGlyphOutline;

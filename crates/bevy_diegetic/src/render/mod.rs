@@ -1,5 +1,6 @@
 //! Rendering systems for diegetic UI panels and text.
 
+pub(crate) mod analytic_paths;
 mod batch_key;
 #[cfg(feature = "batch_proof")]
 pub(crate) mod batch_proof;
@@ -13,6 +14,31 @@ mod text_shaping;
 mod transparency;
 mod world_text;
 
+use analytic_paths::AnalyticPathPlugin;
+pub(crate) use analytic_paths::BandRecord;
+pub(crate) use analytic_paths::BatchGpu;
+pub(crate) use analytic_paths::BatchKey;
+pub(crate) use analytic_paths::BatchTextMaterialInput;
+pub(crate) use analytic_paths::Bounds;
+pub(crate) use analytic_paths::CurveRecord;
+pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
+pub(crate) use analytic_paths::GlyphAtlasHandles;
+pub(crate) use analytic_paths::GlyphBatchStore;
+pub(crate) use analytic_paths::GlyphInstanceRecord;
+pub(crate) use analytic_paths::GlyphOutline;
+pub(crate) use analytic_paths::GlyphRecord;
+pub(crate) use analytic_paths::PathContour;
+pub(crate) use analytic_paths::PathOutline;
+pub(crate) use analytic_paths::QuadraticSegment;
+pub(crate) use analytic_paths::RenderMode;
+pub(crate) use analytic_paths::RunRecord;
+pub(crate) use analytic_paths::TextMaterial;
+pub(crate) use analytic_paths::batch_text_material;
+pub(crate) use analytic_paths::build_packed_path;
+pub(crate) use analytic_paths::set_batch_text_material_buffers;
+pub(crate) use analytic_paths::set_text_material_atlas;
+#[cfg(feature = "batch_proof")]
+pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
 pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
@@ -51,10 +77,6 @@ pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
 #[cfg(feature = "typography_overlay")]
 pub(crate) use world_text::emit_computed_world_text;
-
-use crate::text;
-use crate::text::TextMaterial;
-
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
 /// text runs, images, glyph meshes, and SDF geometry.
 ///
@@ -131,7 +153,11 @@ fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Asset
         return;
     }
     for (_, material) in materials.iter_mut() {
-        text::set_text_material_anti_alias(material, setting.supersamples(), setting.anisotropic());
+        analytic_paths::set_text_material_anti_alias(
+            material,
+            setting.supersamples(),
+            setting.anisotropic(),
+        );
     }
 }
 
@@ -141,15 +167,20 @@ pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((TextRenderPlugin, PanelGeometryPlugin, PanelLinePlugin))
-            .init_resource::<TextAntiAlias>()
-            // Bevy registers the OIT type without `ReflectComponent`; adding it
-            // enables reflection-based (BRP) edits of OIT settings on a live camera.
-            .register_type::<OrderIndependentTransparencySettings>()
-            .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
-            .add_systems(Update, sync_text_anti_alias)
-            .add_observer(transparency::on_stable_transparency_added)
-            .add_observer(transparency::on_stable_transparency_removed)
-            .add_observer(transparency::on_screen_space_camera_added);
+        app.add_plugins((
+            AnalyticPathPlugin,
+            TextRenderPlugin,
+            PanelGeometryPlugin,
+            PanelLinePlugin,
+        ))
+        .init_resource::<TextAntiAlias>()
+        // Bevy registers the OIT type without `ReflectComponent`; adding it
+        // enables reflection-based (BRP) edits of OIT settings on a live camera.
+        .register_type::<OrderIndependentTransparencySettings>()
+        .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
+        .add_systems(Update, sync_text_anti_alias)
+        .add_observer(transparency::on_stable_transparency_added)
+        .add_observer(transparency::on_stable_transparency_removed)
+        .add_observer(transparency::on_screen_space_camera_added);
     }
 }

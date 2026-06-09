@@ -1,19 +1,28 @@
 #[cfg(test)]
 mod coverage_probe;
 mod outline;
-mod packing;
 
-pub(super) use outline::Bounds;
-pub(super) use outline::Glyph;
+pub(crate) use outline::Glyph;
 pub(super) use outline::OutlineError;
-pub(super) use outline::QuadraticSegment;
 pub(super) use outline::font_glyph_id_has_visible_outline;
 pub(super) use outline::load_glyph_by_id_from_face;
-pub(super) use packing::BandRecord;
-pub(super) use packing::CurveRecord;
-pub(crate) use packing::DEFAULT_BAND_COUNT;
-pub(crate) use packing::GlyphInstanceRecord;
-pub(super) use packing::GlyphOutline;
-pub(super) use packing::GlyphRecord;
-pub(crate) use packing::RunRecord;
-pub(super) use packing::build_packed_glyph;
+
+pub(crate) use crate::render::Bounds;
+pub(crate) use crate::render::PathContour;
+pub(crate) use crate::render::PathOutline;
+
+/// Text bridge from font-extracted glyphs to renderer-owned analytic paths.
+#[must_use]
+pub(super) fn build_packed_glyph(glyph: Glyph, band_count: usize) -> crate::render::GlyphOutline {
+    let path = PathOutline {
+        bounds:   glyph.bounds,
+        contours: glyph
+            .contours
+            .into_iter()
+            .map(|contour| PathContour {
+                segments: contour.segments,
+            })
+            .collect(),
+    };
+    crate::render::build_packed_path(path, band_count)
+}

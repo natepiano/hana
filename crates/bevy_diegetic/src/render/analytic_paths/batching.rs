@@ -1,5 +1,5 @@
-//! Batch store for glyph instancing: groups text runs by batch key, owns each
-//! batch's CPU record vectors and GPU handles, and derives run ranges by
+//! Batch store for analytic path instancing: groups runs by batch key, owns
+//! each batch's CPU record vectors and GPU handles, and derives run ranges by
 //! rebuild (`docs/bevy_diegetic/glyph_instancing.md`, decision 4).
 //!
 //! Membership has a single mutation point — [`GlyphBatchStore::upsert_run`] /
@@ -26,7 +26,9 @@ use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
-use super::glyph_cache::RunStorageKey;
+use super::material::TextMaterial;
+use super::packing::GlyphInstanceRecord;
+use super::packing::RunRecord;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
@@ -34,9 +36,7 @@ use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
 use crate::render::BatchRenderLayers;
 use crate::render::VisualMaterialInterner;
-use crate::text::slug::glyph::GlyphInstanceRecord;
-use crate::text::slug::glyph::RunRecord;
-use crate::text::slug::render::TextMaterial;
+use crate::text::RunStorageKey;
 
 /// What splits text draws: every pipeline/material/entity-level property. A
 /// run differing on several fields at once still maps to exactly one batch.

@@ -8,6 +8,10 @@ use ttf_parser::Face;
 use ttf_parser::GlyphId;
 use ttf_parser::OutlineBuilder;
 
+use crate::render::Bounds;
+use crate::render::PathContour;
+use crate::render::QuadraticSegment;
+
 const CUBIC_TO_QUADRATIC_TOLERANCE: f32 = 0.25;
 const CUBIC_TO_QUADRATIC_MAX_DEPTH: u8 = 10;
 const HALF: f32 = 0.5;
@@ -15,42 +19,8 @@ const ERROR_SAMPLE_A: f32 = 0.25;
 const ERROR_SAMPLE_B: f32 = 0.75;
 const TANGENT_INTERSECTION_EPSILON: f32 = 0.000_001;
 
-/// A single quadratic Bezier segment in font design-space units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QuadraticSegment {
-    /// Segment start point.
-    pub start:   Vec2,
-    /// Quadratic control point.
-    pub control: Vec2,
-    /// Segment end point.
-    pub end:     Vec2,
-}
-
-/// Axis-aligned glyph bounds in font design-space units.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Bounds {
-    /// Minimum corner.
-    pub min: Vec2,
-    /// Maximum corner.
-    pub max: Vec2,
-}
-
-impl Bounds {
-    /// Width of the bounds.
-    #[must_use]
-    pub fn width(self) -> f32 { self.max.x - self.min.x }
-
-    /// Height of the bounds.
-    #[must_use]
-    pub fn height(self) -> f32 { self.max.y - self.min.y }
-}
-
 /// One closed glyph contour expressed as quadratic segments.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Contour {
-    /// Quadratic segments for this contour.
-    pub segments: Vec<QuadraticSegment>,
-}
+pub(crate) type Contour = PathContour;
 
 /// Quadratic-only outline representation for one glyph.
 #[derive(Clone, Debug, PartialEq)]

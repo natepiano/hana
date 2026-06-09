@@ -16,8 +16,8 @@ use bevy::render::render_resource::SpecializedMeshPipelineError;
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
-use super::constants::SLUG_TEXT_SHADER_PATH;
-use super::constants::SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
+use super::constants::ANALYTIC_PATH_SHADER_PATH;
+use super::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 use crate::layout::GlyphRenderMode;
 
 /// Visible render mode for the text shader.
@@ -90,7 +90,7 @@ pub(crate) struct TextExtension {
     #[storage(105, read_only, visibility(vertex, fragment))]
     run_records:       Handle<ShaderBuffer>,
     /// Routes this material's vertex stages (main, prepass, shadow) through
-    /// `slug_text_vertex_pull.wgsl` instead of the standard mesh vertex stage.
+    /// `analytic_path_vertex_pull.wgsl` instead of the standard mesh vertex stage.
     vertex_pull:       bool,
     /// Vertex-pull debug aid: displaces each quad by its recovered glyph
     /// index, making the slab-base subtraction visible as a staircase.
@@ -117,9 +117,9 @@ impl From<&TextExtension> for TextExtensionKey {
 }
 
 impl MaterialExtension for TextExtension {
-    fn fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
+    fn fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
-    fn prepass_fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
+    fn prepass_fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
     // Standing contract of the text path: the camera depth prepass cannot
     // run vertex-pull batches. Bevy strips the material bind group from
@@ -147,7 +147,7 @@ impl MaterialExtension for TextExtension {
             // `prepass_vertex_shader()` because those are material-type-wide,
             // and stripped-group pipelines must keep the standard vertex
             // stage (see `material_group_is_stripped`).
-            descriptor.vertex.shader = SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
+            descriptor.vertex.shader = ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
             if key.bind_group_data.debug_glyph_index {
                 descriptor
                     .vertex
@@ -262,7 +262,7 @@ pub(crate) fn set_batch_text_material_buffers(
 /// Repoints a text material at replacement shared-atlas buffers after the
 /// atlas grows. The batch record buffers (bindings 104/105) are per-batch,
 /// not atlas-owned, so they are untouched here.
-pub(super) fn set_text_material_atlas(
+pub(crate) fn set_text_material_atlas(
     material: &mut TextMaterial,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,

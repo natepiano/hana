@@ -8,7 +8,7 @@ use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
 use super::Bounds;
-use super::Glyph;
+use super::PathOutline;
 use super::QuadraticSegment;
 
 /// Default number of horizontal bands packed per glyph.
@@ -146,23 +146,48 @@ pub(crate) struct RunRecord {
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
-// WGSL mirror structs in `slug_text_vertex_pull.wgsl` assume these strides.
+// WGSL mirror structs in `analytic_path_vertex_pull.wgsl` assume these strides.
 // `ShaderSize` measures the encase layout, not the Rust layout.
 const _: () = assert!(GlyphInstanceRecord::SHADER_SIZE.get() == 40);
 const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
 
-/// One glyph's packed curve and band data for the text shader.
+/// Shared name for a renderer path atlas record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathRecord = GlyphRecord;
+
+/// Shared name for a batched path instance record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathInstanceRecord = GlyphInstanceRecord;
+
+/// Shared name for a batched path run record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathRunRecord = RunRecord;
+
+/// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GlyphOutline {
-    glyph:  Glyph,
+pub struct PackedPath {
+    bounds: Bounds,
     curves: Vec<CurveRecord>,
     bands:  Vec<BandRecord>,
 }
 
-impl GlyphOutline {
-    /// Glyph bounds in font design-space units.
+/// Compatibility alias for text glyph caches while text is bridged onto the
+/// shared path renderer.
+pub type GlyphOutline = PackedPath;
+
+impl PackedPath {
+    /// Path bounds in local design-space units.
     #[must_use]
-    pub const fn bounds(&self) -> Bounds { self.glyph.bounds }
+    pub const fn bounds(&self) -> Bounds { self.bounds }
 
     /// Band-packed curve records.
     #[must_use]
@@ -173,15 +198,15 @@ impl GlyphOutline {
     pub fn bands(&self) -> &[BandRecord] { &self.bands }
 }
 
-/// Builds horizontal band data for one quadratic glyph.
+/// Builds horizontal and vertical band data for one quadratic path outline.
 #[must_use]
-pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
+pub(crate) fn build_packed_path(path: PathOutline, band_count: usize) -> PackedPath {
     let band_count = band_count.max(1);
     let mut curves = Vec::new();
     let mut bands = Vec::with_capacity(band_count * 2);
-    let bounds = glyph.bounds;
+    let bounds = path.bounds;
 
-    let oriented_segments: Vec<(QuadraticSegment, CurveOrientation)> = glyph
+    let oriented_segments: Vec<(QuadraticSegment, CurveOrientation)> = path
         .contours
         .iter()
         .flat_map(|contour| contour.segments.iter().copied())
@@ -210,8 +235,8 @@ pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
         &mut bands,
     );
 
-    GlyphOutline {
-        glyph,
+    PackedPath {
+        bounds,
         curves,
         bands,
     }

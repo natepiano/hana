@@ -41,22 +41,22 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::render::BatchGpu;
+use crate::render::BatchKey;
+use crate::render::BatchRenderLayers;
+use crate::render::BatchTextMaterialInput;
+use crate::render::GlyphAtlasHandles;
+use crate::render::GlyphInstanceRecord;
+use crate::render::RenderMode;
+use crate::render::RunRecord;
 use crate::render::TextAntiAlias;
+use crate::render::TextMaterial;
 use crate::render::constants;
 use crate::render::world_text::TextContent;
 use crate::text;
-use crate::text::BatchGpu;
-use crate::text::BatchKey;
-use crate::text::BatchRenderLayers;
-use crate::text::BatchTextMaterialInput;
-use crate::text::GlyphAtlasHandles;
 use crate::text::GlyphCache;
-use crate::text::GlyphInstanceRecord;
 use crate::text::PreparedTextRun;
-use crate::text::RenderMode;
-use crate::text::RunRecord;
 use crate::text::RunStorageKey;
-use crate::text::TextMaterial;
 
 /// Marker on every batch render entity, BRP-inspectable.
 #[derive(Component, Reflect)]
@@ -388,7 +388,7 @@ pub(super) fn update_batch_bounds(
 /// Every payload is padded to the buffer's capacity so its byte length never
 /// changes between growths — a constant-length `set_data` writes the existing
 /// wgpu buffer in place, which the material's bind group observes without a
-/// re-prepare (see [`BatchGpu`](crate::text::BatchGpu)).
+/// re-prepare (see [`BatchGpu`](crate::render::BatchGpu)).
 pub(super) fn commit_batch_buffers(
     mut backend: ResMut<GlyphCache>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
@@ -669,7 +669,11 @@ fn grow_batch_assets(
         return;
     };
     if let Some(mut material) = materials.get_mut(&gpu.material) {
-        text::set_batch_text_material_buffers(&mut material, instances.clone(), run_table.clone());
+        crate::render::set_batch_text_material_buffers(
+            &mut material,
+            instances.clone(),
+            run_table.clone(),
+        );
     }
     gpu.instances = instances;
     gpu.run_table = run_table;
@@ -712,7 +716,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     // sorted (non-OIT) views. Per-run order inside the batch comes from the
     // per-record depth nudge, which a per-material bias cannot express.
     base.depth_bias = constants::BATCH_TEXT_DEPTH_BIAS;
-    text::batch_text_material(BatchTextMaterialInput {
+    crate::render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,

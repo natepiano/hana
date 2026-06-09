@@ -5,7 +5,7 @@
 //!
 //! - the real glyph **packer** (`build_packed_glyph`, the band/curve records, `DEFAULT_BAND_COUNT`)
 //!   — production code; if it changes, these numbers move,
-//! - a Rust **copy of the `slug_text.wgsl` `aa_band` math** (`Probe`) — kept in sync with the
+//! - a Rust **copy of the `analytic_path.wgsl` `aa_band` math** (`Probe`) — kept in sync with the
 //!   shader by hand,
 //! - an independent brute-force **ground truth** (`GroundTruth`) that counts inside/outside over
 //!   the footprint with no bands at all.
@@ -20,7 +20,7 @@
 //!    strides along the foreshortened axis rather than sampling a fixed grid,
 //! 3. the stride does not alias a straight edge.
 //!
-//! IMPORTANT: `Probe` mirrors the `slug_text.wgsl` coverage math by hand. If you
+//! IMPORTANT: `Probe` mirrors the `analytic_path.wgsl` coverage math by hand. If you
 //! change that shader, update `Probe` to match and re-run these tests. The
 //! [`shader_mirror_matches_wgsl`] test hashes the shader file and fails when it
 //! changes, as a reminder to re-check the mirror — it detects *that* the shader
@@ -32,7 +32,7 @@
     clippy::cast_sign_loss,
     clippy::suboptimal_flops,
     clippy::imprecise_flops,
-    reason = "line-for-line CPU mirror of the slug_text.wgsl coverage math: the int/f32/u32 casts \
+    reason = "line-for-line CPU mirror of the analytic_path.wgsl coverage math: the int/f32/u32 casts \
               reproduce the shader's f32()/u32() conversions, and mul_add/cbrt are deliberately \
               avoided so the Rust results match the shader's operation order exactly"
 )]
@@ -40,15 +40,14 @@
 use bevy::math::Vec2;
 use bevy::math::Vec4;
 
-use super::CurveRecord;
-use super::GlyphRecord;
-use super::build_packed_glyph;
-use super::outline::Bounds;
 use super::outline::Contour;
 use super::outline::Glyph;
-use super::outline::QuadraticSegment;
-use super::packing::BandRecord;
-use super::packing::DEFAULT_BAND_COUNT;
+use crate::render::BandRecord;
+use crate::render::Bounds;
+use crate::render::CurveRecord;
+use crate::render::DEFAULT_BAND_COUNT;
+use crate::render::GlyphRecord;
+use crate::render::QuadraticSegment;
 
 const ROOT_EPSILON: f32 = 0.000_01;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
@@ -73,7 +72,7 @@ const SUPER4_MIN_OVERCOVERAGE: f32 = 0.20;
 const FIX_IMPROVEMENT_OVER_SUPER4: f32 = 0.15;
 const EDGE_FIX_MAX_ERROR: f32 = 0.06;
 
-// ---- shader-math replica (mirrors slug_text.wgsl exactly) ------------------
+// ---- shader-math replica (mirrors analytic_path.wgsl exactly) --------------
 
 struct Probe {
     record: GlyphRecord,
@@ -492,7 +491,7 @@ fn footprint(angle_deg: f32, aniso: f32, px: f32) -> (Vec2, Vec2) {
 
 fn build() -> (Probe, GroundTruth) {
     let (glyph, segments) = sharp_corner_glyph();
-    let packed = build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
+    let packed = super::build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
     let band_count = (packed.bands().len() / 2) as u32;
     let probe = Probe {
         record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count),
@@ -630,14 +629,14 @@ fn stride_does_not_alias_straight_edge() {
     }
 }
 
-/// Tripwire: hashes `slug_text.wgsl` and fails when it changes. The [`Probe`]
+/// Tripwire: hashes `analytic_path.wgsl` and fails when it changes. The [`Probe`]
 /// above mirrors the shader's coverage math by hand; this flags that the shader
 /// moved so the mirror gets re-checked. It cannot tell whether the change was
 /// correct — the shader runs on the GPU. On failure, re-verify [`Probe`], then
 /// set `EXPECTED_SHADER_FNV1A` to the printed value.
 #[test]
 fn shader_mirror_matches_wgsl() {
-    const SHADER: &str = include_str!("../shaders/slug_text.wgsl");
+    const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
     const EXPECTED_SHADER_FNV1A: u64 = 0xb99c_4d31_86dd_44da;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(

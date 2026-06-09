@@ -217,7 +217,8 @@ Panel lines remain responsible for:
 - layout resolution
 - source identity
 - clipping and paint lanes
-- converting resolved line/cap primitives into stroked path contours
+- converting resolved line/cap primitives into stroked path contours by emitting
+  `PathOutline` / `PathContour` values made of `QuadraticSegment`s
 
 The shared analytic path renderer should own:
 
@@ -236,7 +237,7 @@ lifecycle requirements.
 These phases are the remaining work from the as-built state above. They are not
 historical requirements.
 
-### Phase A - Shared Analytic Path Core
+### Phase A - Shared Analytic Path Core (complete)
 
 Create `render/analytic_paths/` as the shared renderer target.
 
@@ -260,6 +261,58 @@ Acceptance:
 - The module structure is discoverable and does not hide the renderer under
   `text/slug/runtime`.
 
+#### Retrospective
+
+**What worked:**
+
+- `render/analytic_paths/` now owns packing, material, shader handles, batch
+  storage, path geometry records, and the shared analytic path plugin.
+- Text shaping, glyph lookup, font cache, and glyph outline extraction stayed in
+  `text/slug/`; `text/slug/glyph::build_packed_glyph` is the explicit bridge to
+  renderer-owned `PathOutline` packing.
+
+**What deviated from the plan:**
+
+- The renderer still exposes glyph-compatible aliases such as `GlyphRecord` and
+  `GlyphInstanceRecord` while Phase B begins consuming the path names.
+- The existing text batch key remains text-oriented, while the already-shared
+  `VisualBatchKey` remains the generic render compatibility key for future path
+  producers.
+
+**Surprises:**
+
+- The shader coverage mirror test moved cleanly after updating the tripwire to
+  `render/analytic_paths/analytic_path.wgsl`.
+- Moving `MaterialPlugin<TextMaterial>` into `AnalyticPathPlugin` did not require
+  panel text lifecycle changes.
+
+**Implications for remaining phases:**
+
+- Phase B should convert panel line primitives into `PathOutline` / path record
+  inputs instead of adding another line-specific SDF path.
+- Phase B should decide whether it can reuse the text-compatible analytic batch
+  store directly or needs a small source-kind wrapper around the shared visual
+  batch key.
+- Phase C and Phase D should treat text/callouts as clients of
+  `render/analytic_paths`, not owners of separate renderer logic.
+
+#### Phase A Review
+
+- Phase B was narrowed to line/cap contour construction, generic path atlas
+  ownership, instance routing, clipping policy, focused tests, and fallback
+  retirement; it must not rebuild coverage or AA infrastructure.
+- Phase B now names the batch-store boundary decision explicitly: panel marks
+  must either become analytic path runs with stable source identity or use a
+  small source-kind wrapper around the shared visual batch key.
+- Phase B now carries the clipping, hidden-panel cleanup, visual-bounds, and
+  line-batch-stat requirements before typography overlay or callouts consume
+  the shared path renderer.
+- Phase C was narrowed to remaining typography overlay line/callout/gizmo paths
+  because overlay metric panels already use transparent `DiegeticPanel`
+  children.
+- Phase D was split into planar mapping/classification and renderer routing so
+  standalone `CalloutLine` unification has a concrete boundary.
+
 ### Phase B - Panel Lines To Analytic Paths
 
 Convert resolved `PanelLine` primitives into analytic path contours and route
@@ -267,10 +320,28 @@ Convert resolved `PanelLine` primitives into analytic path contours and route
 
 Deliverables:
 
+- Decide and document the analytic batch-store boundary before changing line
+  rendering: either panel marks become stable analytic path runs, or the shared
+  renderer gets a small source-kind wrapper around `VisualBatchKey`.
+- Introduce or select a generic path atlas / mark cache keyed by non-glyph
+  sources such as `PanelLinePrimitiveKey`.
+- Add the panel-line path emitter, expected under `render/panel_lines/`, that
+  maps each `ResolvedPanelLinePrimitive` into renderer-owned `PathOutline`
+  data: straight line edges emit `QuadraticSegment`s with midpoint controls,
+  and curved caps/marks emit true quadratic segments or explicit quadratic
+  subdivisions.
 - Convert stroked line shafts into closed filled contours.
 - Convert `CalloutCap` primitives into compatible path contours.
-- Preserve `PanelLineSourceKey`, clips, paint lanes, layering, and panel-local
+- Route line/cap contours into the existing analytic coverage, AA, material,
+  and shader path; do not add another line-specific coverage implementation.
+- Preserve `PanelLineSourceKey`, including external/stable source ids for
+  non-ordinal producers, plus clips, paint lanes, layering, and panel-local
   coordinate semantics.
+- Choose and implement the clipping policy explicitly: pre-clipped contours,
+  clipped instance quads/UVs, or a per-instance clip field that preserves
+  `DrawOverflow`.
+- Keep `DiegeticPerfStats::line_batch` meaningful as vector-mark stats until a
+  deliberate replacement is designed.
 - Keep the current `render/panel_lines` batch renderer only as a temporary
   fallback while parity is proven.
 
@@ -280,12 +351,20 @@ Acceptance:
 - The A4 left ruler renders with the analytic precision of the Bevy 0.18
   rectangle-backed baseline.
 - Batch count remains bounded by compatibility, not tick count.
+- Conversion, clipping, hidden-panel cleanup, visual-bounds, and stale-record
+  behavior have focused tests in Phase B before Phase C or Phase D depend on
+  the path renderer.
+- The `units.rs` line batch HUD still reports useful vector-mark batch counts
+  after the renderer route changes.
 - The dedicated line SDF shader is retired for ruler-quality paths or clearly
   documented as a temporary fallback.
 
 ### Phase C - Typography Overlay Migration
 
-Move typography overlay guides onto panel-backed analytic path marks.
+Move the remaining typography overlay guide paths onto panel-backed analytic
+path marks. Existing transparent overlay panels stay; this phase targets the
+remaining line, arrow, callout, gizmo, and documentation paths that still bypass
+ordinary panel drawing.
 
 Deliverables:
 
@@ -293,8 +372,11 @@ Deliverables:
 - Use transparent overlay panels mapped to measured text/run bounds.
 - Represent metric guides, arrows, and similar annotations with ordinary panel
   draw/path data.
+- Assign stable external `PanelLineSourceKey` values for overlay-produced marks
+  so metric refreshes do not depend on ordinal churn.
 - Rebuild or update overlay panels on metric changes so renderer records refresh
   through normal panel lifecycle.
+- Remove or explicitly exempt retained gizmo/callout overlay line paths.
 
 Acceptance:
 
@@ -309,6 +391,11 @@ Add a transparent-panel-backed path for planar callouts.
 Deliverables:
 
 - Preserve `CalloutLine` as the standalone public API.
+- Add a mapping/classification slice that detects planar callouts, chooses or
+  creates the transparent panel, maps local/world `Vec3` endpoints into panel
+  coordinates, and preserves render layers.
+- Add a renderer-routing slice that emits stable external panel mark source ids
+  and routes planar callout shafts/caps through analytic paths.
 - Route planar callout geometry through a transparent panel and shared analytic
   path marks where possible.
 - Keep the direct callout renderer for non-coplanar cases or accepted
@@ -331,8 +418,9 @@ Deliverables:
 
 - Remove or quarantine the dedicated panel-line SDF renderer.
 - Keep the as-built module summary current.
-- Add focused tests for path conversion, batch cleanup, clipping, and visual
-  bounds.
+- Keep only cross-feature regression tests here; Phase B owns the focused path
+  conversion, cleanup, clipping, and visual-bounds tests required before later
+  consumers use the path renderer.
 - Capture and keep the ruler visual baseline evidence used to accept the pivot.
 
 Acceptance:
