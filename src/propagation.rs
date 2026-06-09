@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::scene::SceneInstanceReady;
+use bevy::world_serialization::WorldInstanceReady;
 
 use super::NoOutline;
 use super::Outline;
@@ -96,11 +96,11 @@ pub(crate) fn propagate_outline_on_mesh_added(
     }
 }
 
-/// When a `SceneInstanceReady` fires on an entity with `Outline`, propagate to
-/// all descendant meshes. This handles the `SceneRoot` case where the scene instance
+/// When a `WorldInstanceReady` fires on an entity with `Outline`, propagate to
+/// all descendant meshes. This handles the `WorldAssetRoot` case where the world instance
 /// entity may not have a `ChildOf` back to the entity with `Outline`.
 pub(crate) fn propagate_outline_on_scene_ready(
-    ready: On<SceneInstanceReady>,
+    ready: On<WorldInstanceReady>,
     outline_query: Query<&Outline>,
     mesh_query: Query<(), (With<Mesh3d>, Without<NoOutline>)>,
     children_query: Query<&Children>,

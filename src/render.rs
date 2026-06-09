@@ -121,26 +121,14 @@ pub(crate) fn prepare_outline_buffer(
     let cpu_building = matches!(*render_mesh_instances, RenderMeshInstances::CpuBuilding(_));
 
     for phase in outline_phases.values() {
-        // Visit `phase.multidrawable_meshes` before `phase.batchable_meshes` to match GPU
-        // preprocessing.
-        for bins in phase.multidrawable_meshes.values() {
-            for bin in bins.values() {
-                for &main_entity in bin.entities().keys() {
-                    let outline_uniform = extracted_outlines
-                        .by_main_entity
-                        .get(&main_entity)
-                        .map_or_else(OutlineUniform::zeroed, OutlineUniform::from);
-                    outline_buffer.0.push(outline_uniform);
-                }
-            }
-        }
-
-        // Visit `phase.batchable_meshes` in the same iteration order as `batch_and_prepare`.
-        for bin in phase.batchable_meshes.values() {
-            for &main_entity in bin.entities().keys() {
-                // In CPU mode, `get_binned_batch_data` skips entities with no
-                // mesh instance — mirror that here so indices stay aligned.
-                // In GPU mode, `batch_and_prepare` never skips, so neither do we.
+        // 0.19's `batch_and_prepare_binned_render_phase` builds the per-instance buffer
+        // in unbatchable-then-batchable order. Liminal forces non-multidrawable binning
+        // (see `queue.rs`), so `phase.multidrawable_meshes` is always empty — and its bin
+        // contents are private in 0.19 — so it is not visited here.
+        for unbatchables in phase.unbatchable_meshes.values() {
+            for &main_entity in unbatchables.entities.keys() {
+                // In CPU mode, `get_binned_batch_data` skips entities with no mesh
+                // instance — mirror that here so indices stay aligned.
                 if cpu_building
                     && render_mesh_instances
                         .render_mesh_queue_data(main_entity)
@@ -157,9 +145,8 @@ pub(crate) fn prepare_outline_buffer(
             }
         }
 
-        // Visit `phase.unbatchable_meshes` after batchable meshes to match `batch_and_prepare`.
-        for unbatchables in phase.unbatchable_meshes.values() {
-            for &main_entity in unbatchables.entities.keys() {
+        for bin in phase.batchable_meshes.values() {
+            for &main_entity in bin.entities().keys() {
                 if cpu_building
                     && render_mesh_instances
                         .render_mesh_queue_data(main_entity)
@@ -305,20 +292,11 @@ pub(crate) fn prepare_hull_outline_buffer(
     let cpu_building = matches!(*render_mesh_instances, RenderMeshInstances::CpuBuilding(_));
 
     for phase in outline_phases.values() {
-        for bins in phase.multidrawable_meshes.values() {
-            for bin in bins.values() {
-                for &main_entity in bin.entities().keys() {
-                    let outline_uniform = extracted_outlines
-                        .by_main_entity
-                        .get(&main_entity)
-                        .map_or_else(OutlineUniform::zeroed, OutlineUniform::from);
-                    outline_buffer.0.push(outline_uniform);
-                }
-            }
-        }
-
-        for bin in phase.batchable_meshes.values() {
-            for &main_entity in bin.entities().keys() {
+        // Unbatchable-then-batchable order, matching 0.19's
+        // `batch_and_prepare_binned_render_phase`. Multidrawable bins are always empty
+        // here (forced in `queue.rs`) and are private in 0.19, so they are not visited.
+        for unbatchables in phase.unbatchable_meshes.values() {
+            for &main_entity in unbatchables.entities.keys() {
                 if cpu_building
                     && render_mesh_instances
                         .render_mesh_queue_data(main_entity)
@@ -335,8 +313,8 @@ pub(crate) fn prepare_hull_outline_buffer(
             }
         }
 
-        for unbatchables in phase.unbatchable_meshes.values() {
-            for &main_entity in unbatchables.entities.keys() {
+        for bin in phase.batchable_meshes.values() {
+            for &main_entity in bin.entities().keys() {
                 if cpu_building
                     && render_mesh_instances
                         .render_mesh_queue_data(main_entity)

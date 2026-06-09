@@ -88,7 +88,7 @@ impl FromWorld for MeshMaskPipeline {
         let per_object_buffer_batch_size =
             GpuArrayBuffer::<OutlineUniform>::batch_size(&render_device.limits());
 
-        let mesh_pipeline = MeshPipeline::from_world(world);
+        let mesh_pipeline = world.resource::<MeshPipeline>().clone();
 
         Self {
             mesh_pipeline,
@@ -171,8 +171,8 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
 
         descriptor.depth_stencil = Some(DepthStencilState {
             format:              CORE_3D_DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare:       CompareFunction::GreaterEqual,
+            depth_write_enabled: Some(true),
+            depth_compare:       Some(CompareFunction::GreaterEqual),
             stencil:             default(),
             bias:                default(),
         });
@@ -193,25 +193,29 @@ impl GetBatchData for MeshMaskPipeline {
         SRes<MeshAllocator>,
         SRes<SkinUniforms>,
     );
-    type CompareData = AssetId<Mesh>;
+    type BatchSetCompareData = ();
+    type BatchCompareData = AssetId<Mesh>;
 
     type BufferData = MeshUniform;
 
     fn get_batch_data(
         (mesh_instances, _, mesh_allocator, skin_uniforms): &SystemParamItem<Self::Param>,
         (_, main_entity): (Entity, MainEntity),
-    ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
+    ) -> Option<(
+        Self::BufferData,
+        Option<(Self::BatchSetCompareData, Self::BatchCompareData)>,
+    )> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
             error!("{GET_BATCH_DATA_GPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
         let first_vertex_index = mesh_allocator
-            .mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+            .mesh_vertex_slice(&mesh_instance.mesh_asset_id())
             .map_or(0, |slice| slice.range.start);
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
-        let material_bind_group_index = mesh_instance.material_bindings_index;
+        let material_bind_group_index = mesh_instance.material_bindings_index();
 
         Some((
             MeshUniform::new(
@@ -220,9 +224,10 @@ impl GetBatchData for MeshMaskPipeline {
                 material_bind_group_index.slot,
                 None,
                 current_skin_index,
-                Some(mesh_instance.tag),
+                None,
+                Some(mesh_instance.tag()),
             ),
-            Some(mesh_instance.mesh_asset_id),
+            Some(((), mesh_instance.mesh_asset_id())),
         ))
     }
 }
@@ -233,7 +238,10 @@ impl GetFullBatchData for MeshMaskPipeline {
     fn get_index_and_compare_data(
         (mesh_instances, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
-    ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
+    ) -> Option<(
+        NonMaxU32,
+        Option<(Self::BatchSetCompareData, Self::BatchCompareData)>,
+    )> {
         // `MeshMaskPipeline::get_index_and_compare_data` expects
         // `RenderMeshInstances::GpuBuilding`.
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
@@ -244,8 +252,8 @@ impl GetFullBatchData for MeshMaskPipeline {
         let mesh_instance = mesh_instances.get(&main_entity)?;
 
         Some((
-            mesh_instance.current_uniform_index,
-            Some(mesh_instance.mesh_asset_id),
+            NonMaxU32::new(mesh_instance.gpu_specific.current_uniform_index())?,
+            Some(((), mesh_instance.mesh_asset_id())),
         ))
     }
 
@@ -259,7 +267,7 @@ impl GetFullBatchData for MeshMaskPipeline {
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
         let first_vertex_index = mesh_allocator
-            .mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+            .mesh_vertex_slice(&mesh_instance.mesh_asset_id())
             .map_or(0, |slice| slice.range.start);
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
@@ -267,10 +275,11 @@ impl GetFullBatchData for MeshMaskPipeline {
         Some(MeshUniform::new(
             &mesh_instance.transforms,
             first_vertex_index,
-            mesh_instance.material_bindings_index.slot,
+            mesh_instance.material_bindings_index().slot,
             None,
             current_skin_index,
-            Some(mesh_instance.tag),
+            None,
+            Some(mesh_instance.tag()),
         ))
     }
 
@@ -286,7 +295,7 @@ impl GetFullBatchData for MeshMaskPipeline {
 
         mesh_instances
             .get(&main_entity)
-            .map(|entity| entity.current_uniform_index)
+            .and_then(|entity| NonMaxU32::new(entity.gpu_specific.current_uniform_index()))
     }
 
     fn write_batch_indirect_parameters_metadata(

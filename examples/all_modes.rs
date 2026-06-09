@@ -8,10 +8,10 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
 use bevy_kana::ToF32;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
@@ -237,7 +237,7 @@ fn spawn_outline_grid(
         commands
             .spawn((
                 Name::new(format!("{SPACESHIP_NAME_PREFIX}{label}{NAME_SUFFIX}")),
-                SceneRoot(asset_server.load(SCENE_ASSET_PATH)),
+                WorldAssetRoot(asset_server.load(SCENE_ASSET_PATH)),
                 Transform {
                     translation: Vec3::new(x, SPACESHIP_ROW_Y, SPACESHIP_ROW_Z),
                     rotation,
@@ -250,7 +250,7 @@ fn spawn_outline_grid(
         commands.spawn((
             Text2d::new(label),
             TextFont {
-                font_size: COLUMN_LABEL_FONT_SIZE,
+                font_size: FontSize::Px(COLUMN_LABEL_FONT_SIZE),
                 ..default()
             },
             TextColor(Color::WHITE),
@@ -281,7 +281,7 @@ fn spawn_environment(
 
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         Transform::from_translation(LIGHT_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
@@ -289,16 +289,8 @@ fn spawn_environment(
 
     commands.spawn((
         OutlineCamera,
-        OrbitCam {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
+        OrbitCam::default(),
+        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
     ));
 }
@@ -307,7 +299,7 @@ fn spawn_ui(commands: &mut Commands) {
     commands.spawn((
         Text::new(GROUND_CLICK_UI_TEXT),
         TextFont {
-            font_size: UI_TEXT_FONT_SIZE,
+            font_size: FontSize::Px(UI_TEXT_FONT_SIZE),
             ..default()
         },
         TextColor(UI_TEXT_COLOR),
@@ -323,7 +315,7 @@ fn spawn_ui(commands: &mut Commands) {
         OverlapLabel,
         Text::new(GROUNDED_OVERLAP_LABEL),
         TextFont {
-            font_size: UI_TEXT_FONT_SIZE,
+            font_size: FontSize::Px(UI_TEXT_FONT_SIZE),
             ..default()
         },
         TextColor(OVERLAP_LABEL_COLOR),

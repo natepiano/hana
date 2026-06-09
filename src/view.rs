@@ -1,6 +1,7 @@
 use bevy::platform::collections::HashSet;
 use bevy::prelude::*;
 use bevy_render::Extract;
+use bevy_render::batching::gpu_preprocessing::GpuPreprocessingMode;
 use bevy_render::batching::gpu_preprocessing::GpuPreprocessingSupport;
 use bevy_render::render_phase::ViewBinnedRenderPhases;
 use bevy_render::view::RetainedViewEntity;
@@ -18,6 +19,18 @@ pub(crate) fn update_views(
 ) {
     live_entities.clear();
 
+    // Cap liminal's phases at `PreprocessingOnly` (never `Culling`/multidraw): the outline
+    // uniform buffer in `render.rs` mirrors the public batchable/unbatchable bins to stay
+    // index-aligned with `MeshUniform`, but 0.19 makes multidraw bin contents private and
+    // its indexed-indirect buffer is rebuilt from the (empty) multidraw batch count, which
+    // drops the CPU-written batchable indirect parameters and leaves the mesh undrawn.
+    let preprocessing_mode = match gpu_preprocessing_support.max_supported_mode {
+        GpuPreprocessingMode::None => GpuPreprocessingMode::None,
+        GpuPreprocessingMode::PreprocessingOnly | GpuPreprocessingMode::Culling => {
+            GpuPreprocessingMode::PreprocessingOnly
+        },
+    };
+
     for (main_entity, camera) in camera_query.iter() {
         if !camera.is_active {
             continue;
@@ -25,14 +38,8 @@ pub(crate) fn update_views(
 
         let retained_view_entity =
             RetainedViewEntity::new(main_entity.into(), None, PRIMARY_SUBVIEW_INDEX);
-        outline_phases.prepare_for_new_frame(
-            retained_view_entity,
-            gpu_preprocessing_support.max_supported_mode,
-        );
-        hull_outline_phases.prepare_for_new_frame(
-            retained_view_entity,
-            gpu_preprocessing_support.max_supported_mode,
-        );
+        outline_phases.prepare_for_new_frame(retained_view_entity, preprocessing_mode);
+        hull_outline_phases.prepare_for_new_frame(retained_view_entity, preprocessing_mode);
 
         live_entities.insert(retained_view_entity);
     }

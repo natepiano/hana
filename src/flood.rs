@@ -147,7 +147,7 @@ impl FromWorld for JumpFloodPipeline {
                     primitive:                        PrimitiveState::default(),
                     depth_stencil:                    None,
                     multisample:                      MultisampleState::default(),
-                    push_constant_ranges:             vec![],
+                    immediate_size:                   0,
                     zero_initialize_workgroup_memory: false,
                 });
 
@@ -200,7 +200,11 @@ impl<'w> JumpFloodPass<'w> {
         })
     }
 
-    pub(crate) fn execute(&self, render_context: &mut RenderContext<'_>, step: JumpFloodStep<'_>) {
+    pub(crate) fn execute(
+        &self,
+        render_context: &mut RenderContext<'_, '_>,
+        step: JumpFloodStep<'_>,
+    ) {
         let JumpFloodStep {
             input,
             output,
@@ -236,6 +240,7 @@ impl<'w> JumpFloodPass<'w> {
             depth_stencil_attachment: None,
             timestamp_writes:         None,
             occlusion_query_set:      None,
+            multiview_mask:           None,
         });
 
         render_pass.set_render_pipeline(self.render_pipeline);

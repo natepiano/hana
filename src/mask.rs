@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use bevy::asset::UntypedAssetId;
 use bevy::prelude::*;
-use bevy_render::mesh::allocator::SlabId;
+use bevy_render::mesh::allocator::MeshSlabs;
 use bevy_render::render_phase::BinnedPhaseItem;
 use bevy_render::render_phase::CachedRenderPipelinePhaseItem;
 use bevy_render::render_phase::DrawFunctionId;
@@ -16,12 +16,11 @@ use bevy_render::sync_world::MainEntity;
 pub(crate) struct OutlineBatchSetKey {
     pub(crate) pipeline:      CachedRenderPipelineId,
     pub(crate) draw_function: DrawFunctionId,
-    pub(crate) vertex_slab:   SlabId,
-    pub(crate) index_slab:    Option<SlabId>,
+    pub(crate) mesh_slabs:    MeshSlabs,
 }
 
 impl PhaseItemBatchSetKey for OutlineBatchSetKey {
-    fn indexed(&self) -> bool { self.index_slab.is_some() }
+    fn indexed(&self) -> bool { self.mesh_slabs.index_slab_id.is_some() }
 }
 
 /// Including `OutlineBinKey::main_entity` makes each entity its own unique bin.

@@ -2,11 +2,18 @@ use bevy::core_pipeline::prepass::DepthPrepass;
 use bevy::prelude::*;
 use bevy::render::render_resource::TextureUsages;
 use bevy_render::extract_component::ExtractComponent;
+use bevy_render::view::NoIndirectDrawing;
 
 /// Marker component for enabling a 3D camera to render mesh outlines.
+///
+/// Requires [`NoIndirectDrawing`]: the outline mask/hull phases build a parallel
+/// `OutlineUniform` buffer indexed by the same per-instance index as `MeshUniform`
+/// (see `render.rs`). In 0.19 the multidraw/indirect path assigns those indices on
+/// the GPU and keeps its bins private, so the parallel buffer can only stay aligned
+/// when the outline camera draws meshes directly with CPU-assigned indices.
 #[derive(Debug, Component, Reflect, Clone, ExtractComponent)]
 #[reflect(Component)]
-#[require(DepthPrepass)]
+#[require(DepthPrepass, NoIndirectDrawing)]
 pub struct OutlineCamera;
 
 /// Ensures the main pass depth texture has `TEXTURE_BINDING` so the compose shader

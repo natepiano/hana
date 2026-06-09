@@ -136,13 +136,13 @@ pub(crate) fn generate_normals_on_mesh_added(
 }
 
 fn generate_normals_for_handle(id: AssetId<Mesh>, meshes: &mut Assets<Mesh>) {
-    let Some(mesh) = meshes.get_mut(id) else {
+    let Some(mut mesh) = meshes.get_mut(id) else {
         return;
     };
     if mesh.attribute(ATTRIBUTE_OUTLINE_NORMAL).is_some() {
         return;
     }
-    generate_outline_normals(mesh);
+    generate_outline_normals(&mut mesh);
 }
 
 const fn position_key(pos: [f32; 3]) -> [u32; 3] {

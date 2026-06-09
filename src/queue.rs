@@ -1,10 +1,11 @@
+use std::collections::HashMap;
+
 use bevy::core_pipeline::prepass::MotionVectorPrepass;
 use bevy::core_pipeline::prepass::NormalPrepass;
-use bevy::ecs::change_detection::Tick;
 use bevy::pbr::MeshPipelineKey;
 use bevy::pbr::RenderMeshInstances;
 use bevy::prelude::*;
-use bevy_render::batching::gpu_preprocessing::GpuPreprocessingSupport;
+use bevy_render::camera::ExtractedCamera;
 use bevy_render::mesh::RenderMesh;
 use bevy_render::mesh::allocator::MeshAllocator;
 use bevy_render::render_asset::RenderAssets;
@@ -13,8 +14,10 @@ use bevy_render::render_phase::DrawFunctions;
 use bevy_render::render_phase::ViewBinnedRenderPhases;
 use bevy_render::render_resource::PipelineCache;
 use bevy_render::render_resource::SpecializedMeshPipelines;
+use bevy_render::sync_world::MainEntity;
 use bevy_render::view::ExtractedView;
 use bevy_render::view::RenderVisibleEntities;
+use bevy_render::view::RetainedViewEntity;
 
 use super::DrawHull;
 use super::DrawOutline;
@@ -49,12 +52,12 @@ pub(crate) fn queue_outline(
     mesh_allocator: Res<MeshAllocator>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
     render_mesh_instances: Res<RenderMeshInstances>,
-    gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
     active: Res<ActiveOutlineModes>,
     views: Query<
         (
             Entity,
             &ExtractedView,
+            &ExtractedCamera,
             &RenderVisibleEntities,
             &Msaa,
             Has<NormalPrepass>,
@@ -62,20 +65,33 @@ pub(crate) fn queue_outline(
         ),
         With<OutlineCamera>,
     >,
-    mut change_tick: Local<Tick>,
+    mut queued_entities: Local<HashMap<RetainedViewEntity, Vec<MainEntity>>>,
 ) {
     let draw_function = draw_functions.read().id::<DrawOutline>();
 
-    for (_, view, visible_entities, msaa, has_normal_prepass, has_motion_vector_prepass) in
+    for (_, view, camera, visible_entities, msaa, has_normal_prepass, has_motion_vector_prepass) in
         views.iter()
     {
         let Some(outline_phase) = outline_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
 
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::DEPTH_PREPASS
-            | MeshPipelineKey::from_hdr(view.hdr);
+        // Binned phases are retained across frames in 0.19, so explicitly remove the
+        // entities binned last frame before re-binning this frame's visible set.
+        let previously_queued = queued_entities
+            .entry(view.retained_view_entity)
+            .or_default();
+        for &main_entity in previously_queued.iter() {
+            outline_phase.remove(main_entity);
+        }
+        previously_queued.clear();
+
+        let Some(render_visible_entities) = visible_entities.get::<Mesh3d>() else {
+            continue;
+        };
+
+        let mut view_key =
+            MeshPipelineKey::from_msaa_samples(msaa.samples()) | MeshPipelineKey::DEPTH_PREPASS;
 
         if has_normal_prepass {
             view_key |= MeshPipelineKey::NORMAL_PREPASS;
@@ -83,8 +99,17 @@ pub(crate) fn queue_outline(
         if has_motion_vector_prepass {
             view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
         }
+        // Match the view's `mesh_view_bind_group` layout: bevy includes the in-shader
+        // tonemapping LUT bindings whenever the camera is SDR (`!camera.hdr`), so the
+        // mask pipeline (which binds that group via `SetMeshViewBindGroup`) must declare
+        // them too or the bind group is incompatible at draw time.
+        if !camera.hdr {
+            view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+        }
 
-        for &(render_entity, main_entity) in visible_entities.get::<Mesh3d>() {
+        for (render_entity, main_entity) in render_visible_entities.iter_visible() {
+            let render_entity = *render_entity;
+            let main_entity = *main_entity;
             if !extracted_outlines.by_main_entity.contains_key(&main_entity) {
                 continue;
             }
@@ -97,9 +122,7 @@ pub(crate) fn queue_outline(
                 continue;
             };
 
-            let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
-
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id()) else {
                 warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_FOUND_WARNING} {main_entity:?}"
@@ -108,9 +131,10 @@ pub(crate) fn queue_outline(
             };
 
             let mut mesh_pipeline_key = view_key;
-            mesh_pipeline_key |=
-                MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
-                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
+            mesh_pipeline_key |= MeshPipelineKey::from_primitive_topology_and_strip_index(
+                mesh.primitive_topology(),
+                mesh.index_format(),
+            ) | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
 
             let Ok(pipeline_id) = mesh_mask_pipelines.specialize(
                 &pipeline_cache,
@@ -132,30 +156,49 @@ pub(crate) fn queue_outline(
                 continue;
             };
 
-            let next_change_tick = change_tick.get() + 1;
-            change_tick.set(next_change_tick);
-
             outline_phase.add(
                 OutlineBatchSetKey {
                     pipeline: pipeline_id,
                     draw_function,
-                    vertex_slab: vertex_slab.unwrap_or_default(),
-                    index_slab,
+                    mesh_slabs: mesh_allocator
+                        .mesh_slabs(&mesh_instance.mesh_asset_id())
+                        .unwrap_or_default(),
                 },
                 OutlineBinKey {
-                    asset_id: mesh_instance.mesh_asset_id.untyped(),
+                    asset_id: mesh_instance.mesh_asset_id().untyped(),
                     main_entity,
                 },
                 (render_entity, main_entity),
                 mesh_instance.current_uniform_index,
-                BinnedRenderPhaseType::mesh(
-                    mesh_instance.should_batch(),
-                    &gpu_preprocessing_support,
-                ),
-                *change_tick,
+                // Force batchable/unbatchable (never multidrawable): the outline uniform
+                // buffer in `render.rs` is built by mirroring the public batchable and
+                // unbatchable bins, and 0.19 makes multidrawable bin contents private.
+                if mesh_instance.should_batch() {
+                    BinnedRenderPhaseType::BatchableMesh
+                } else {
+                    BinnedRenderPhaseType::UnbatchableMesh
+                },
             );
+            previously_queued.push(main_entity);
         }
     }
+}
+
+/// Builds the view-level [`MeshPipelineKey`] for the hull outline pass: MSAA
+/// sample count plus depth prepass, the normal prepass bit when present, and the
+/// in-shader tonemapping LUT bindings present whenever the camera is SDR.
+/// Matching the view's `mesh_view_bind_group` layout keeps the bind group
+/// compatible at draw time; see `queue_outline`.
+fn hull_view_key(msaa: Msaa, has_normal_prepass: bool, hdr: bool) -> MeshPipelineKey {
+    let mut view_key =
+        MeshPipelineKey::from_msaa_samples(msaa.samples()) | MeshPipelineKey::DEPTH_PREPASS;
+    if has_normal_prepass {
+        view_key |= MeshPipelineKey::NORMAL_PREPASS;
+    }
+    if !hdr {
+        view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+    }
+    view_key
 }
 
 pub(crate) fn queue_hull_outline(
@@ -169,18 +212,18 @@ pub(crate) fn queue_hull_outline(
     mesh_allocator: Res<MeshAllocator>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
     render_mesh_instances: Res<RenderMeshInstances>,
-    gpu_preprocessing_support: Res<GpuPreprocessingSupport>,
     views: Query<
         (
             Entity,
             &ExtractedView,
+            &ExtractedCamera,
             &RenderVisibleEntities,
             &Msaa,
             Has<NormalPrepass>,
         ),
         With<OutlineCamera>,
     >,
-    mut change_tick: Local<Tick>,
+    mut queued_entities: Local<HashMap<RetainedViewEntity, Vec<MainEntity>>>,
 ) {
     if !active.methods.has_hull() {
         return;
@@ -188,20 +231,30 @@ pub(crate) fn queue_hull_outline(
 
     let draw_function = draw_functions.read().id::<DrawHull>();
 
-    for (_, view, visible_entities, msaa, has_normal_prepass) in views.iter() {
+    for (_, view, camera, visible_entities, msaa, has_normal_prepass) in views.iter() {
         let Some(outline_phase) = outline_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
 
-        let mut view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
-            | MeshPipelineKey::DEPTH_PREPASS
-            | MeshPipelineKey::from_hdr(view.hdr);
-
-        if has_normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
+        // Binned phases are retained across frames in 0.19, so explicitly remove the
+        // entities binned last frame before re-binning this frame's visible set.
+        let previously_queued = queued_entities
+            .entry(view.retained_view_entity)
+            .or_default();
+        for &main_entity in previously_queued.iter() {
+            outline_phase.remove(main_entity);
         }
+        previously_queued.clear();
 
-        for &(render_entity, main_entity) in visible_entities.get::<Mesh3d>() {
+        let Some(render_visible_entities) = visible_entities.get::<Mesh3d>() else {
+            continue;
+        };
+
+        let view_key = hull_view_key(*msaa, has_normal_prepass, camera.hdr);
+
+        for (render_entity, main_entity) in render_visible_entities.iter_visible() {
+            let render_entity = *render_entity;
+            let main_entity = *main_entity;
             let Some(outline) = extracted_outlines.by_main_entity.get(&main_entity) else {
                 continue;
             };
@@ -221,9 +274,7 @@ pub(crate) fn queue_hull_outline(
                 continue;
             };
 
-            let (vertex_slab, index_slab) = mesh_allocator.mesh_slabs(&mesh_instance.mesh_asset_id);
-
-            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id) else {
+            let Some(mesh) = render_meshes.get(mesh_instance.mesh_asset_id()) else {
                 warn!(
                     target: LIMINAL_TRACING_TARGET,
                     "{NO_MESH_FOUND_WARNING} {main_entity:?}"
@@ -232,16 +283,17 @@ pub(crate) fn queue_hull_outline(
             };
 
             let mut mesh_pipeline_key = view_key;
-            mesh_pipeline_key |=
-                MeshPipelineKey::from_primitive_topology(mesh.primitive_topology())
-                    | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
+            mesh_pipeline_key |= MeshPipelineKey::from_primitive_topology_and_strip_index(
+                mesh.primitive_topology(),
+                mesh.index_format(),
+            ) | MeshPipelineKey::from_bits_retain(mesh.key_bits.bits());
 
             let Ok(pipeline_id) = hull_pipelines.specialize(
                 &pipeline_cache,
                 &hull_pipeline,
                 HullPipelineKey {
                     mesh_pipeline_key,
-                    dynamic_range: view.hdr.into(),
+                    dynamic_range: camera.hdr.into(),
                     outline_normal_presence: if mesh.layout.0.contains(ATTRIBUTE_OUTLINE_NORMAL) {
                         OutlineNormalPresence::Present
                     } else {
@@ -257,28 +309,30 @@ pub(crate) fn queue_hull_outline(
                 continue;
             };
 
-            let next_change_tick = change_tick.get() + 1;
-            change_tick.set(next_change_tick);
-
             outline_phase.add(
                 OutlineBatchSetKey {
                     pipeline: pipeline_id,
                     draw_function,
-                    vertex_slab: vertex_slab.unwrap_or_default(),
-                    index_slab,
+                    mesh_slabs: mesh_allocator
+                        .mesh_slabs(&mesh_instance.mesh_asset_id())
+                        .unwrap_or_default(),
                 },
                 OutlineBinKey {
-                    asset_id: mesh_instance.mesh_asset_id.untyped(),
+                    asset_id: mesh_instance.mesh_asset_id().untyped(),
                     main_entity,
                 },
                 (render_entity, main_entity),
                 mesh_instance.current_uniform_index,
-                BinnedRenderPhaseType::mesh(
-                    mesh_instance.should_batch(),
-                    &gpu_preprocessing_support,
-                ),
-                *change_tick,
+                // Force batchable/unbatchable (never multidrawable): the outline uniform
+                // buffer in `render.rs` is built by mirroring the public batchable and
+                // unbatchable bins, and 0.19 makes multidrawable bin contents private.
+                if mesh_instance.should_batch() {
+                    BinnedRenderPhaseType::BatchableMesh
+                } else {
+                    BinnedRenderPhaseType::UnbatchableMesh
+                },
             );
+            previously_queued.push(main_entity);
         }
     }
 }

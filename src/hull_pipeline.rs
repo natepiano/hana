@@ -41,7 +41,6 @@ use bevy_render::render_resource::VertexFormat;
 use bevy_render::render_resource::binding_types;
 use bevy_render::renderer::RenderDevice;
 use bevy_render::sync_world::MainEntity;
-use bevy_render::view::ViewTarget;
 use nonmax::NonMaxU32;
 
 use super::constants::ATTRIBUTE_OUTLINE_NORMAL;
@@ -128,7 +127,7 @@ impl FromWorld for HullPipeline {
             GpuArrayBuffer::<OutlineUniform>::batch_size(&render_device.limits());
 
         Self {
-            mesh_pipeline: MeshPipeline::from_world(world),
+            mesh_pipeline: world.resource::<MeshPipeline>().clone(),
             outline_layout,
             depth_layout,
             per_object_buffer_batch_size,
@@ -186,9 +185,9 @@ impl SpecializedMeshPipeline for HullPipeline {
         descriptor.vertex.shader_defs.extend(shader_defs.clone());
 
         let color_format = if key.dynamic_range.is_hdr() {
-            ViewTarget::TEXTURE_FORMAT_HDR
+            TextureFormat::Rgba16Float
         } else {
-            TextureFormat::bevy_default()
+            TextureFormat::Rgba8UnormSrgb
         };
 
         descriptor.fragment = Some(FragmentState {
@@ -203,8 +202,8 @@ impl SpecializedMeshPipeline for HullPipeline {
         });
 
         if let Some(depth_stencil) = descriptor.depth_stencil.as_mut() {
-            depth_stencil.depth_write_enabled = true;
-            depth_stencil.depth_compare = CompareFunction::GreaterEqual;
+            depth_stencil.depth_write_enabled = Some(true);
+            depth_stencil.depth_compare = Some(CompareFunction::GreaterEqual);
             depth_stencil.bias = DepthBiasState {
                 constant:    HULL_DEPTH_BIAS_CONSTANT,
                 slope_scale: HULL_DEPTH_BIAS_SLOPE_SCALE,
@@ -227,24 +226,28 @@ impl GetBatchData for HullPipeline {
         SRes<MeshAllocator>,
         SRes<SkinUniforms>,
     );
-    type CompareData = AssetId<Mesh>;
+    type BatchSetCompareData = ();
+    type BatchCompareData = AssetId<Mesh>;
     type BufferData = MeshUniform;
 
     fn get_batch_data(
         (mesh_instances, _, mesh_allocator, skin_uniforms): &SystemParamItem<Self::Param>,
         (_, main_entity): (Entity, MainEntity),
-    ) -> Option<(Self::BufferData, Option<Self::CompareData>)> {
+    ) -> Option<(
+        Self::BufferData,
+        Option<(Self::BatchSetCompareData, Self::BatchCompareData)>,
+    )> {
         let RenderMeshInstances::CpuBuilding(ref mesh_instances) = **mesh_instances else {
             error!("{GET_BATCH_DATA_GPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
         let first_vertex_index = mesh_allocator
-            .mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+            .mesh_vertex_slice(&mesh_instance.mesh_asset_id())
             .map_or(0, |slice| slice.range.start);
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
-        let material_bind_group_index = mesh_instance.material_bindings_index;
+        let material_bind_group_index = mesh_instance.material_bindings_index();
 
         Some((
             MeshUniform::new(
@@ -253,9 +256,10 @@ impl GetBatchData for HullPipeline {
                 material_bind_group_index.slot,
                 None,
                 current_skin_index,
-                Some(mesh_instance.tag),
+                None,
+                Some(mesh_instance.tag()),
             ),
-            Some(mesh_instance.mesh_asset_id),
+            Some(((), mesh_instance.mesh_asset_id())),
         ))
     }
 }
@@ -266,15 +270,18 @@ impl GetFullBatchData for HullPipeline {
     fn get_index_and_compare_data(
         (mesh_instances, _, _, _): &SystemParamItem<Self::Param>,
         main_entity: MainEntity,
-    ) -> Option<(NonMaxU32, Option<Self::CompareData>)> {
+    ) -> Option<(
+        NonMaxU32,
+        Option<(Self::BatchSetCompareData, Self::BatchCompareData)>,
+    )> {
         let RenderMeshInstances::GpuBuilding(ref mesh_instances) = **mesh_instances else {
             error!("{GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR}");
             return None;
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
         Some((
-            mesh_instance.current_uniform_index,
-            Some(mesh_instance.mesh_asset_id),
+            NonMaxU32::new(mesh_instance.gpu_specific.current_uniform_index())?,
+            Some(((), mesh_instance.mesh_asset_id())),
         ))
     }
 
@@ -288,7 +295,7 @@ impl GetFullBatchData for HullPipeline {
         };
         let mesh_instance = mesh_instances.get(&main_entity)?;
         let first_vertex_index = mesh_allocator
-            .mesh_vertex_slice(&mesh_instance.mesh_asset_id)
+            .mesh_vertex_slice(&mesh_instance.mesh_asset_id())
             .map_or(0, |slice| slice.range.start);
 
         let current_skin_index = skin_uniforms.skin_index(main_entity);
@@ -296,10 +303,11 @@ impl GetFullBatchData for HullPipeline {
         Some(MeshUniform::new(
             &mesh_instance.transforms,
             first_vertex_index,
-            mesh_instance.material_bindings_index.slot,
+            mesh_instance.material_bindings_index().slot,
             None,
             current_skin_index,
-            Some(mesh_instance.tag),
+            None,
+            Some(mesh_instance.tag()),
         ))
     }
 
@@ -313,7 +321,7 @@ impl GetFullBatchData for HullPipeline {
         };
         mesh_instances
             .get(&main_entity)
-            .map(|entity| entity.current_uniform_index)
+            .and_then(|entity| NonMaxU32::new(entity.gpu_specific.current_uniform_index()))
     }
 
     fn write_batch_indirect_parameters_metadata(

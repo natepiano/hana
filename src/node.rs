@@ -1,11 +1,6 @@
 use bevy::core_pipeline::prepass::ViewPrepassTextures;
-use bevy::ecs::query::QueryItem;
 use bevy::prelude::*;
 use bevy_render::camera::ExtractedCamera;
-use bevy_render::render_graph::NodeRunError;
-use bevy_render::render_graph::RenderGraphContext;
-use bevy_render::render_graph::RenderLabel;
-use bevy_render::render_graph::ViewNode;
 use bevy_render::render_phase::BinnedRenderPhase;
 use bevy_render::render_phase::ViewBinnedRenderPhases;
 use bevy_render::render_resource::BindGroupEntries;
@@ -19,6 +14,7 @@ use bevy_render::render_resource::StoreOp;
 use bevy_render::render_resource::TextureView;
 use bevy_render::render_resource::TextureViewDescriptor;
 use bevy_render::renderer::RenderContext;
+use bevy_render::renderer::ViewQuery;
 use bevy_render::texture::ColorAttachment;
 use bevy_render::view::ExtractedView;
 use bevy_render::view::ViewDepthTexture;
@@ -49,122 +45,109 @@ use super::mask::HullOutlinePhase;
 use super::mask::JumpFloodOutlinePhase;
 use super::texture::FloodTextures;
 
-/// Render graph label for the outline pass.
-#[derive(Copy, Clone, Debug, RenderLabel, Hash, PartialEq, Eq)]
-pub(crate) enum OutlineRenderGraphNode {
-    /// Dispatches `OutlineNode::run` through `run_mask_init_pass`, `run_hull_pass`,
-    /// and `run_jump_flood_composite`.
-    Main,
-}
-
-#[derive(Default)]
-pub(crate) struct OutlineNode;
-
-impl ViewNode for OutlineNode {
-    type ViewQuery = (
+/// Renders the outline passes for one view. Runs in the `Core3d` schedule in
+/// `Core3dSystems::EarlyPostProcess` (after the main pass, before bloom),
+/// replacing the former `OutlineNode` render-graph node.
+pub(crate) fn outline_pass(
+    world: &World,
+    view: ViewQuery<(
         Entity,
-        &'static ExtractedView,
-        &'static ExtractedCamera,
-        &'static ViewTarget,
-        &'static FloodTextures,
-        &'static ViewPrepassTextures,
-        &'static ViewDepthTexture,
-        &'static Msaa,
-        &'static FloodSettings,
+        &ExtractedView,
+        &ExtractedCamera,
+        &ViewTarget,
+        &FloodTextures,
+        &ViewPrepassTextures,
+        &ViewDepthTexture,
+        &Msaa,
+        &FloodSettings,
+    )>,
+    mut render_context: RenderContext,
+) {
+    let (
+        view_entity,
+        extracted_view,
+        camera,
+        view_target,
+        flood_textures,
+        prepass_textures,
+        view_depth_texture,
+        msaa,
+        flood_settings,
+    ) = view.into_inner();
+
+    let Some(outline_phases) =
+        world.get_resource::<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>()
+    else {
+        return;
+    };
+    let outline_phase = outline_phases.get(&extracted_view.retained_view_entity);
+    let hull_phase = world
+        .get_resource::<ViewBinnedRenderPhases<HullOutlinePhase>>()
+        .and_then(|phases| phases.get(&extracted_view.retained_view_entity));
+
+    let has_jump_flood = outline_phase.is_some_and(|phase| !phase.is_empty());
+    let has_hull = hull_phase.is_some_and(|phase| !phase.is_empty());
+    if !has_jump_flood && !has_hull {
+        return;
+    }
+
+    let outline_phase = outline_phase.filter(|phase| !phase.is_empty());
+    let hull_phase = hull_phase.filter(|phase| !phase.is_empty());
+
+    let Some(jump_flood_pass) = JumpFloodPass::new(world) else {
+        return;
+    };
+    let mut flood_textures = flood_textures.clone();
+    let Some(global_depth) = prepass_textures.depth.as_ref() else {
+        warn!("{NO_GLOBAL_DEPTH_TEXTURE_WARNING}");
+        return;
+    };
+
+    let outline_depth_view = flood_textures
+        .outline_depth
+        .create_view(&TextureViewDescriptor::default());
+
+    run_mask_init_pass(
+        &mut render_context,
+        MaskInitPassContext {
+            flood_textures: &flood_textures,
+            outline_depth_view: &outline_depth_view,
+            camera,
+            outline_phase,
+            world,
+            view_entity,
+        },
     );
 
-    fn run<'w>(
-        &self,
-        _: &mut RenderGraphContext,
-        render_context: &mut RenderContext,
-        (
-            view_entity,
-            extracted_view,
-            camera,
-            view_target,
-            flood_textures,
-            prepass_textures,
-            view_depth_texture,
-            msaa,
-            flood_settings,
-        ): QueryItem<'w, '_, Self::ViewQuery>,
-        world: &'w World,
-    ) -> Result<(), NodeRunError> {
-        let Some(outline_phases) =
-            world.get_resource::<ViewBinnedRenderPhases<JumpFloodOutlinePhase>>()
-        else {
-            return Ok(());
-        };
-        let outline_phase = outline_phases.get(&extracted_view.retained_view_entity);
-        let hull_phase = world
-            .get_resource::<ViewBinnedRenderPhases<HullOutlinePhase>>()
-            .and_then(|phases| phases.get(&extracted_view.retained_view_entity));
-
-        let has_jump_flood = outline_phase.is_some_and(|phase| !phase.is_empty());
-        let has_hull = hull_phase.is_some_and(|phase| !phase.is_empty());
-        if !has_jump_flood && !has_hull {
-            return Ok(());
-        }
-
-        let outline_phase = outline_phase.filter(|phase| !phase.is_empty());
-        let hull_phase = hull_phase.filter(|phase| !phase.is_empty());
-
-        let Some(jump_flood_pass) = JumpFloodPass::new(world) else {
-            return Ok(());
-        };
-        let mut flood_textures = flood_textures.clone();
-        let Some(global_depth) = prepass_textures.depth.as_ref() else {
-            warn!("{NO_GLOBAL_DEPTH_TEXTURE_WARNING}");
-            return Ok(());
-        };
-
-        let outline_depth_view = flood_textures
-            .outline_depth
-            .create_view(&TextureViewDescriptor::default());
-
-        run_mask_init_pass(
-            render_context,
-            MaskInitPassContext {
-                flood_textures: &flood_textures,
-                outline_depth_view: &outline_depth_view,
+    if let Some(hull_phase) = hull_phase {
+        run_hull_pass(
+            &mut render_context,
+            HullPassContext {
+                view_target,
+                view_depth_texture,
                 camera,
-                outline_phase,
+                phase: hull_phase,
                 world,
                 view_entity,
             },
         );
-
-        if let Some(hull_phase) = hull_phase {
-            run_hull_pass(
-                render_context,
-                HullPassContext {
-                    view_target,
-                    view_depth_texture,
-                    camera,
-                    phase: hull_phase,
-                    world,
-                    view_entity,
-                },
-            );
-        }
-
-        run_jump_flood_composite(
-            render_context,
-            world,
-            &jump_flood_pass,
-            JumpFloodCompositeContext {
-                flood_textures: &mut flood_textures,
-                outline_depth_view: &outline_depth_view,
-                global_depth,
-                view_target,
-                view_depth_texture,
-                msaa: *msaa,
-            },
-            flood_settings,
-        );
-
-        Ok(())
     }
+
+    run_jump_flood_composite(
+        &mut render_context,
+        world,
+        &jump_flood_pass,
+        JumpFloodCompositeContext {
+            flood_textures: &mut flood_textures,
+            outline_depth_view: &outline_depth_view,
+            global_depth,
+            view_target,
+            view_depth_texture,
+            hdr: camera.hdr,
+            msaa: *msaa,
+        },
+        flood_settings,
+    );
 }
 
 struct MaskInitPassContext<'a> {
@@ -177,7 +160,7 @@ struct MaskInitPassContext<'a> {
 }
 
 fn run_mask_init_pass(
-    render_context: &mut RenderContext<'_>,
+    render_context: &mut RenderContext<'_, '_>,
     mask_init_pass_context: MaskInitPassContext<'_>,
 ) {
     let MaskInitPassContext {
@@ -242,6 +225,7 @@ fn run_mask_init_pass(
         }),
         timestamp_writes:         None,
         occlusion_query_set:      None,
+        multiview_mask:           None,
     });
 
     if let Some(viewport) = camera.viewport.as_ref() {
@@ -264,7 +248,10 @@ struct HullPassContext<'a> {
     view_entity:        Entity,
 }
 
-fn run_hull_pass(render_context: &mut RenderContext<'_>, hull_pass_context: HullPassContext<'_>) {
+fn run_hull_pass(
+    render_context: &mut RenderContext<'_, '_>,
+    hull_pass_context: HullPassContext<'_>,
+) {
     let HullPassContext {
         view_target,
         view_depth_texture,
@@ -286,6 +273,7 @@ fn run_hull_pass(render_context: &mut RenderContext<'_>, hull_pass_context: Hull
         }),
         timestamp_writes:         None,
         occlusion_query_set:      None,
+        multiview_mask:           None,
     });
 
     if let Some(viewport) = camera.viewport.as_ref() {
@@ -303,11 +291,12 @@ struct JumpFloodCompositeContext<'a> {
     global_depth:       &'a ColorAttachment,
     view_target:        &'a ViewTarget,
     view_depth_texture: &'a ViewDepthTexture,
+    hdr:                bool,
     msaa:               Msaa,
 }
 
 fn run_jump_flood_composite(
-    render_context: &mut RenderContext<'_>,
+    render_context: &mut RenderContext<'_, '_>,
     world: &World,
     jump_flood_pass: &JumpFloodPass<'_>,
     jump_flood_composite_context: JumpFloodCompositeContext<'_>,
@@ -319,6 +308,7 @@ fn run_jump_flood_composite(
         global_depth,
         view_target,
         view_depth_texture,
+        hdr,
         msaa,
     } = jump_flood_composite_context;
     let Some(active) = world.get_resource::<ActiveOutlineModes>() else {
@@ -335,7 +325,7 @@ fn run_jump_flood_composite(
     let pipeline_cache = world.resource::<PipelineCache>();
 
     let sample_mode = SampleMode::from(msaa);
-    let dynamic_range = DynamicRange::from(view_target.is_hdr());
+    let dynamic_range = DynamicRange::from(hdr);
     let variant = ComposeVariant::new(sample_mode, dynamic_range);
     let pipeline_id = compose_pipeline.pipeline_id(variant);
 
@@ -390,6 +380,7 @@ fn run_jump_flood_composite(
         depth_stencil_attachment: None,
         timestamp_writes:         None,
         occlusion_query_set:      None,
+        multiview_mask:           None,
     });
 
     render_pass.set_render_pipeline(pipeline);

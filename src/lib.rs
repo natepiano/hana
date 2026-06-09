@@ -21,17 +21,17 @@ mod texture;
 mod uniforms;
 mod view;
 
-use bevy::core_pipeline::core_3d::graph::Core3d;
-use bevy::core_pipeline::core_3d::graph::Node3d;
+use bevy::core_pipeline::Core3d;
+use bevy::core_pipeline::Core3dSystems;
 use bevy::pbr;
+use bevy::pbr::MeshPipelineSystems;
 use bevy::prelude::*;
 use bevy_render::Render;
 use bevy_render::RenderApp;
 use bevy_render::RenderDebugFlags;
+use bevy_render::RenderStartup;
 use bevy_render::RenderSystems;
 use bevy_render::extract_component::ExtractComponentPlugin;
-use bevy_render::render_graph::RenderGraphExt;
-use bevy_render::render_graph::ViewNodeRunner;
 use bevy_render::render_phase::AddRenderCommand;
 use bevy_render::render_phase::BinnedRenderPhasePlugin;
 use bevy_render::render_phase::DrawFunctions;
@@ -49,8 +49,7 @@ use hull_pipeline::HullPipeline;
 use mask::HullOutlinePhase;
 use mask::JumpFloodOutlinePhase;
 use mask_pipeline::MeshMaskPipeline;
-use node::OutlineNode;
-use node::OutlineRenderGraphNode;
+use node::outline_pass;
 pub use outline::LineStyle;
 pub use outline::NoOutline;
 pub use outline::Outline;
@@ -72,7 +71,7 @@ use render::OutlineBindGroup;
 use render::OutlineUniformBuffer;
 use shaders::ShaderPlugin;
 
-/// Bevy plugin that registers outline rendering systems, pipelines, and render graph nodes.
+/// Bevy plugin that registers outline rendering systems and pipelines.
 pub struct LiminalPlugin;
 
 impl Plugin for LiminalPlugin {
@@ -120,6 +119,13 @@ impl Plugin for LiminalPlugin {
             .init_resource::<HullOutlineBindGroup>()
             .init_resource::<ActiveOutlineModes>()
             .init_resource::<ExtractedOutlineUniforms>()
+            // `MeshMaskPipeline` and `HullPipeline` clone the `MeshPipeline` resource,
+            // which 0.19 creates in `RenderStartup` via `MeshPipelineSystems`, so their
+            // initialization must run after it rather than in `Plugin::finish`.
+            .add_systems(
+                RenderStartup,
+                init_outline_pipelines.after(MeshPipelineSystems),
+            )
             .add_systems(
                 ExtractSchedule,
                 (
@@ -150,18 +156,9 @@ impl Plugin for LiminalPlugin {
             )
             .add_render_command::<JumpFloodOutlinePhase, DrawOutline>()
             .add_render_command::<HullOutlinePhase, DrawHull>()
-            .add_render_graph_node::<ViewNodeRunner<OutlineNode>>(
-                Core3d,
-                OutlineRenderGraphNode::Main,
-            )
-            .add_render_graph_edges(
-                Core3d,
-                (
-                    Node3d::EndMainPass,
-                    OutlineRenderGraphNode::Main,
-                    Node3d::Bloom,
-                ),
-            );
+            // Run after the main pass and before bloom (`Core3dSystems::PostProcess`),
+            // matching the former `EndMainPass -> OutlineNode -> Bloom` render-graph edges.
+            .add_systems(Core3d, outline_pass.in_set(Core3dSystems::EarlyPostProcess));
     }
 
     fn finish(&self, app: &mut App) {
@@ -178,9 +175,14 @@ impl Plugin for LiminalPlugin {
         render_app
             .insert_resource(outline_uniform_buffer)
             .insert_resource(hull_outline_uniform_buffer)
-            .init_resource::<MeshMaskPipeline>()
-            .init_resource::<HullPipeline>()
             .init_resource::<JumpFloodPipeline>()
             .init_resource::<ComposeOutputPipeline>();
     }
+}
+
+/// Initializes the outline pipelines that clone `MeshPipeline`. Runs in `RenderStartup`
+/// after `MeshPipelineSystems` so the `MeshPipeline` resource already exists.
+fn init_outline_pipelines(world: &mut World) {
+    world.init_resource::<MeshMaskPipeline>();
+    world.init_resource::<HullPipeline>();
 }

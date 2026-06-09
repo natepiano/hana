@@ -9,10 +9,10 @@ use bevy::input::keyboard::KeyboardInput;
 use bevy::prelude::*;
 use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
-use bevy_lagrange::InputControl;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_lagrange::TrackpadInput;
+use bevy_lagrange::OrbitCamInputMode;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
@@ -127,22 +127,14 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
-        OrbitCam {
-            button_orbit: MouseButton::Middle,
-            button_pan: MouseButton::Middle,
-            modifier_pan: Some(KeyCode::ShiftLeft),
-            input_control: Some(InputControl {
-                trackpad: Some(TrackpadInput::blender_default()),
-                ..default()
-            }),
-            ..default()
-        },
+        OrbitCam::default(),
+        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
         OutlineCamera,
     ));
 
     commands.spawn((
         PointLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             intensity: LIGHT_INTENSITY,
             range: LIGHT_RANGE,
             shadow_depth_bias: LIGHT_SHADOW_DEPTH_BIAS,
@@ -262,7 +254,7 @@ fn setup_ui(mut commands: Commands) {
             PostAntiAliasing::None,
         )),
         TextFont {
-            font_size: UI_FONT_SIZE,
+            font_size: FontSize::Px(UI_FONT_SIZE),
             ..default()
         },
         TextColor(Color::WHITE),
