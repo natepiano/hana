@@ -118,7 +118,134 @@ use wgpu::TextureUsages;
 use wgpu::TextureView;
 use wgpu::TextureViewDescriptor;
 
-// ── Grid layout (meters) ──────────────────────────────────────────────────────
+// ── App — plugin wiring, resources, startup/update systems, shortcuts ────────
+
+fn main() {
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example_gpu_timestamps`, which also requests the
+    // wgpu timestamp features so `RenderDiagnosticsPlugin` records real
+    // `render/<pass>/elapsed_gpu` timings for the meter's GPU lane.
+    // `with_brp_extras` brings in `FrameTimeDiagnosticsPlugin` (the overlay
+    // reads its FPS / frame-time diagnostic IDs below); `with_perf_mode` uncaps
+    // vsync and the unfocused winit throttle so the reported frame time
+    // reflects true per-frame cost.
+    fairy_dust::sprinkle_example_gpu_timestamps()
+        .with_brp_extras()
+        .with_perf_mode()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .size(GROUND_SIZE)
+        .with_orbit_cam_preset(
+            |cam| {
+                cam.focus = GRID_FOCUS;
+                cam.radius = Some(CAMERA_INITIAL_RADIUS);
+                cam.yaw = Some(0.0);
+                cam.pitch = Some(0.18);
+            },
+            OrbitCamPreset::BlenderLike,
+        )
+        .with_stable_transparency()
+        .with_camera_home()
+        .yaw(0.0)
+        .pitch(0.18)
+        .with_title_bar(text_stress_title_bar())
+        .wire_chip_to_state::<Mutating, _>(PAUSE_CHIP, |mutating| chip_activation(!mutating.0))
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
+        })
+        .wire_chip_to_state::<WaterfallShown, _>(METER_CHIP, |shown| {
+            chip_activation(matches!(*shown, WaterfallShown::Shown))
+        })
+        .wire_chip_to_state::<OitState, _>(OIT_CHIP, |oit| chip_activation(oit.0))
+        .with_camera_control_panel()
+        .add_plugins((
+            RenderThreadTimingPlugin,
+            GpuFrameTimingPlugin,
+            DrawCountPlugin,
+        ))
+        .init_resource::<FrameCounter>()
+        .init_resource::<Mutating>()
+        .init_resource::<OitState>()
+        .init_resource::<WaterfallShown>()
+        .init_resource::<LastDisplayedStatus>()
+        .init_resource::<LastDisplayedBatchStats>()
+        .insert_resource(MainSpanStart(Instant::now()))
+        .insert_resource(MainScheduleEnd(Instant::now()))
+        .init_resource::<MainThreadMs>()
+        .add_systems(First, mark_main_span_start)
+        .add_systems(Last, publish_main_span)
+        .add_observer(place_status_panel_below_title_bar)
+        .add_systems(
+            Startup,
+            (
+                spawn_labels,
+                spawn_home_target,
+                spawn_status_overlay,
+                spawn_batch_stats_overlay,
+                spawn_waterfall_overlay,
+            ),
+        )
+        .add_systems(
+            Update,
+            (
+                toggle_mutation,
+                advance_frame,
+                mutate_labels,
+                update_status_panel,
+                update_batch_stats_panel,
+                update_waterfall_panel,
+            )
+                .chain(),
+        )
+        // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
+        // cycle the AA mode.
+        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
+        .with_shortcut(KeyCode::KeyM, toggle_waterfall)
+        .with_shortcut(KeyCode::KeyO, toggle_oit)
+        .run();
+}
+
+fn text_stress_title_bar() -> TitleBar {
+    TitleBar::new()
+        .with_title("Text Stress")
+        .with_anchor(Anchor::TopLeft)
+        .control(TitleBarControl::segmented(
+            "Space",
+            [TitleBarSegment::new(PAUSE_CHIP, "Pause")],
+        ))
+        .control(TitleBarControl::segmented(
+            "A",
+            AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+        ))
+        .control(TitleBarControl::segmented(
+            "M",
+            [TitleBarSegment::new(METER_CHIP, "Meter")],
+        ))
+        .control(TitleBarControl::segmented(
+            "O",
+            [TitleBarSegment::new(OIT_CHIP, "OIT")],
+        ))
+}
+
+// ── Text write path — DiegeticText labels retext each frame via DiegeticTextMut ───
+
+// How it works: `spawn_labels` runs once at startup, spawning a
+// GRID_SIDE × GRID_SIDE grid of standalone `DiegeticText` world labels, each
+// tagged `StressLabel(index)`. Each frame `toggle_mutation` reads Space to flip
+// `Mutating`, `advance_frame` bumps `FrameCounter`, and `mutate_labels` walks
+// every label through `DiegeticTextMut::for_each_mut`, rewriting its string with
+// `set_text` — a tree-authoritative write plus relayout on all 100 labels, the
+// O(n_changed) worst case the perf gate targets.
 
 /// Labels per side; `GRID_SIDE * GRID_SIDE` is the total label count.
 const GRID_SIDE: usize = 10;
@@ -132,187 +259,19 @@ const CELL_SPACING: f32 = 0.55;
 const LABEL_SIZE: f32 = 0.12;
 /// Height of the grid's bottom row above the ground (meters).
 const GRID_BASE_Y: f32 = 0.6;
-/// Keeps the label grid framed 10% farther away in the start and home views.
-const CAMERA_DISTANCE_SCALE: f32 = 1.1;
-const CAMERA_INITIAL_RADIUS: f32 = 8.5 * CAMERA_DISTANCE_SCALE;
 
 const LABEL_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-/// World-space half-extents of the static camera-home region, centered on
-/// [`GRID_FOCUS`]. Covers the label-anchor span (half the grid each way) plus a
-/// few label heights so the glyphs sit inside the framed box, then scales the
-/// box to match the farther starting camera radius. The home fit adds its own
-/// screen-fraction margin on top.
-const HOME_REGION_HALF_EXTENTS: Vec3 = Vec3::new(
-    ((GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 3.0) * CAMERA_DISTANCE_SCALE,
-    ((GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 1.5) * CAMERA_DISTANCE_SCALE,
-    LABEL_SIZE * CAMERA_DISTANCE_SCALE,
+const GRID_FOCUS: Vec3 = Vec3::new(
+    0.0,
+    GRID_BASE_Y + (GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5,
+    0.0,
 );
-
-// ── Overlay (screen-space) constants ──────────────────────────────────────────
-
-/// Label/value text size for header-style rows in the left perf panel.
-const PERF_HEADER_ROW_FONT_SIZE: f32 = 13.0;
-/// Label/value text size for normal rows in the left perf panel.
-const PERF_ROW_FONT_SIZE: f32 = 11.0;
-const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
-const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
-/// Separator color shared by screen-panel frames, camera-panel dividers, and
-/// metric panel section rules.
-const PANEL_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-/// Separator line thickness in logical pixels.
-const PANEL_SEPARATOR_THICKNESS: f32 = 1.0;
-/// Wide enough to contain the longest timeline label plus the sub-row indent
-/// without leaving a large gap before the numeric columns.
-const LABEL_COLUMN_WIDTH: f32 = 144.0;
-/// Wide enough to contain the `5s max` header on one line.
-const VALUE_COLUMN_WIDTH: f32 = 72.0;
-const TABLE_COL_GAP: f32 = 8.0;
-const TABLE_ROW_GAP: f32 = 2.0;
-/// Full status table width, used by section titles and separators.
-const STATUS_TABLE_WIDTH: f32 = LABEL_COLUMN_WIDTH + VALUE_COLUMN_WIDTH * 2.0 + TABLE_COL_GAP * 2.0;
-/// Left padding on component-row labels, marking what sums into the block
-/// header above.
-const SUB_ROW_INDENT: f32 = 12.0;
-const FPS_UPDATE_INTERVAL: f32 = 1.0;
-const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
-const MILLISECONDS_PER_SECOND: f32 = 1000.0;
-const STATUS_TITLE_BAR_GAP: f32 = 1.0;
-const STATUS_POSITION_EPSILON: f32 = 0.5;
-
-// ── Batch-stats panel constants ───────────────────────────────────────────────
-
-/// Larger text on the label/value header line of each batch-stats group.
-const STATS_HEADER_FONT_SIZE: f32 = 15.0;
-/// Smaller text on the description line under each header.
-const STATS_DESC_FONT_SIZE: f32 = 9.0;
-/// Dim color for the description line.
-const STATS_DESC_COLOR: Color = Color::srgba(0.60, 0.66, 0.76, 0.68);
-/// Fixed width of each group: the label/value header spans it and the
-/// description wraps within it. Wider than the diagnostics overlay so most
-/// descriptions read on one line.
-const STATS_ROW_WIDTH: f32 = 260.0;
-/// Vertical gap between the header, description, and separator inside a group.
-const STATS_INTRA_GAP: f32 = 2.0;
-/// Vertical gap between groups.
-const STATS_GROUP_GAP: f32 = 6.0;
-
-/// Label hierarchy for the perf table.
-#[derive(Clone, Copy)]
-enum RowIndent {
-    None,
-    Phase,
-    Detail,
-}
-
-impl RowIndent {
-    const fn left_padding(self) -> f32 {
-        match self {
-            Self::None => 0.0,
-            Self::Phase => SUB_ROW_INDENT,
-            Self::Detail => SUB_ROW_INDENT * 2.0,
-        }
-    }
-}
-
-#[derive(Clone, Copy)]
-struct MetricRow {
-    label:  &'static str,
-    indent: RowIndent,
-    accent: Option<Color>,
-}
-
-impl MetricRow {
-    const fn new(label: &'static str, indent: RowIndent) -> Self {
-        Self {
-            label,
-            indent,
-            accent: None,
-        }
-    }
-
-    const fn accented(label: &'static str, indent: RowIndent, accent: Color) -> Self {
-        Self {
-            label,
-            indent,
-            accent: Some(accent),
-        }
-    }
-}
-
-/// Diagnostic table rows, in display order — two additive blocks, one per
-/// timeline.
-///
-/// Main thread: `ms` (frame wall time) = `layout` + `reconcile` + `shaping` +
-/// `mesh` (the measured diegetic spans) + `other` (the rest of the main
-/// schedules: cascade, transform propagation, every other system) +
-/// `wait for render` (blocked in `renderer_extract` waiting for the render
-/// thread to return the render app) + `extract` (main world → render world copy
-/// and send-back) + `frame slack` (the outer app-frame residual not covered by
-/// those measured spans).
-///
-/// Render lane, frame N: `render cycle` = `assets` (the `PrepareAssets` stage —
-/// re-uploading every mesh / image / buffer asset modified this frame) +
-/// `prep` (extract-commands apply, prepare meshes and views, specialize,
-/// queue, sort, bind groups) + `wait for GPU` (the `PrepareViews` stage
-/// containing the swapchain acquire — where the render thread blocks when the
-/// GPU is behind) + `render graph` (render-graph execution: pass encoding,
-/// submit, present) + `cleanup` (render cleanup and schedule closeout after
-/// graph) + `return` (post-schedule app-return handoff and main `recv` unblock
-/// gap) + `extract handoff` (main extracts into the render world and sends the
-/// render app back, allowing the next render schedule to start).
-///
-/// [`RowIndent`] controls display hierarchy only; the metric values stay in
-/// this fixed array order.
-const METRIC_ROWS: [MetricRow; 18] = [
-    MetricRow::new("fps", RowIndent::None),
-    MetricRow::new("ms/frame", RowIndent::None),
-    MetricRow::accented("layout", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("reconcile", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("shaping", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("mesh", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("other", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("wait for render", RowIndent::Phase, WATERFALL_WAIT_COLOR),
-    MetricRow::accented("extract", RowIndent::Phase, WATERFALL_EXTRACT_COLOR),
-    MetricRow::accented("frame slack", RowIndent::Phase, WATERFALL_FRAME_SLACK_COLOR),
-    MetricRow::new("render cycle", RowIndent::None),
-    MetricRow::accented("assets", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("prep", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("wait for GPU", RowIndent::Phase, WATERFALL_WAIT_COLOR),
-    MetricRow::accented(
-        "render graph",
-        RowIndent::Phase,
-        WATERFALL_RENDER_GRAPH_COLOR,
-    ),
-    MetricRow::accented("cleanup", RowIndent::Phase, WATERFALL_CLEANUP_COLOR),
-    MetricRow::accented("return", RowIndent::Phase, WATERFALL_RETURN_COLOR),
-    MetricRow::accented(
-        "extract handoff",
-        RowIndent::Phase,
-        WATERFALL_IDLE_LABEL_COLOR,
-    ),
-];
-const METRIC_COUNT: usize = METRIC_ROWS.len();
-const FPS_METRIC_INDEX: usize = 0;
-const MAIN_WORLD_METRIC_START: usize = 1;
-const RENDER_WORLD_METRIC_START: usize = 10;
-const INITIAL_METRICS: [&str; METRIC_COUNT] = ["--"; METRIC_COUNT];
-
-// ── Components / resources ────────────────────────────────────────────────────
 
 /// Marks a stress label and carries its grid index, so `for_each_mut` can write
 /// a distinct string per label.
 #[derive(Component, Clone, Copy)]
 struct StressLabel(usize);
-
-/// Marker for the screen-space diagnostic overlay panel.
-#[derive(Component)]
-struct StatusPanel;
-
-/// Marker for the upper-right glyph-batch stats panel (Step-2 proof
-/// counters), separate from the waterfall so its wide rows don't stretch it.
-#[derive(Component)]
-struct BatchStatsPanel;
 
 /// Monotonic frame counter driving the per-label text; wrapped to three digits so
 /// label widths stay bounded.
@@ -328,13 +287,94 @@ impl Default for Mutating {
     fn default() -> Self { Self(true) }
 }
 
-/// Whether the main camera uses [`StableTransparency`].
-#[derive(Resource)]
-struct OitState(bool);
-
-impl Default for OitState {
-    fn default() -> Self { Self(true) }
+/// Spawns the `GRID_SIDE × GRID_SIDE` grid of standalone world labels, each a
+/// `DiegeticText` carrying a `StressLabel(index)` marker.
+fn spawn_labels(mut commands: Commands) {
+    let half = (GRID_SIDE.to_f32() - 1.0) * 0.5;
+    for index in 0..LABEL_COUNT {
+        let col = (index % GRID_SIDE).to_f32();
+        let row = (index / GRID_SIDE).to_f32();
+        let x = (col - half) * CELL_SPACING;
+        let y = row.mul_add(CELL_SPACING, GRID_BASE_Y);
+        commands.spawn((
+            StressLabel(index),
+            DiegeticText::world(label_text(index, 0))
+                .size(LABEL_SIZE)
+                .color(LABEL_COLOR)
+                .transform(Transform::from_xyz(x, y, 0.0))
+                .build(),
+        ));
+    }
 }
+
+fn toggle_mutation(keyboard: Res<ButtonInput<KeyCode>>, mut mutating: ResMut<Mutating>) {
+    if keyboard.just_pressed(KeyCode::Space) {
+        mutating.0 = !mutating.0;
+    }
+}
+
+fn advance_frame(mutating: Res<Mutating>, mut frame: ResMut<FrameCounter>) {
+    if mutating.0 {
+        frame.0 = frame.0.wrapping_add(1);
+    }
+}
+
+/// Retexts every label through the `DiegeticTextMut` write path. `for_each_mut`
+/// yields each label's marker (its grid index) and a `TextEdit` handle, so all
+/// 100 strings change in one pass — the `O(n_changed)` worst case the gate
+/// targets.
+fn mutate_labels(
+    mutating: Res<Mutating>,
+    frame: Res<FrameCounter>,
+    mut labels: DiegeticTextMut<StressLabel>,
+) {
+    if !mutating.0 {
+        return;
+    }
+    labels.for_each_mut(|label, edit| {
+        edit.set_text(label_text(label.0, frame.0));
+    });
+}
+
+/// The per-label string: a fixed two-digit index and the live three-digit frame
+/// counter, so every label's text changes each frame while its width stays
+/// stable.
+fn label_text(index: usize, frame: u64) -> String { format!("{index:02} {:03}", frame % 1000) }
+
+// ── Camera home & ground — home-frame target and ground-plane size ───────────
+
+/// Keeps the label grid framed 10% farther away in the start and home views.
+const CAMERA_DISTANCE_SCALE: f32 = 1.1;
+const CAMERA_INITIAL_RADIUS: f32 = 8.5 * CAMERA_DISTANCE_SCALE;
+
+/// World-space half-extents of the static camera-home region, centered on
+/// [`GRID_FOCUS`]. Covers the label-anchor span (half the grid each way) plus a
+/// few label heights so the glyphs sit inside the framed box, then scales the
+/// box to match the farther starting camera radius. The home fit adds its own
+/// screen-fraction margin on top.
+const HOME_REGION_HALF_EXTENTS: Vec3 = Vec3::new(
+    ((GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 3.0) * CAMERA_DISTANCE_SCALE,
+    ((GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5 + LABEL_SIZE * 1.5) * CAMERA_DISTANCE_SCALE,
+    LABEL_SIZE * CAMERA_DISTANCE_SCALE,
+);
+
+const GROUND_SIZE: f32 = GRID_SIDE_F32 * CELL_SPACING + 1.0;
+
+/// Spawns the single invisible [`CameraHomeTarget`] that `H` frames: an explicit
+/// grid-sized [`Aabb`] at [`GRID_FOCUS`], no mesh, so the home union is one
+/// constant box.
+fn spawn_home_target(mut commands: Commands) {
+    commands.spawn((
+        CameraHomeTarget,
+        Aabb::from_min_max(
+            GRID_FOCUS - HOME_REGION_HALF_EXTENTS,
+            GRID_FOCUS + HOME_REGION_HALF_EXTENTS,
+        ),
+        Transform::default(),
+    ));
+}
+
+// ── Title-bar controls — pause, anti-alias cycle, meter and OIT toggles ──────
 
 /// Title-bar segment id for the pause indicator.
 const PAUSE_CHIP: &str = "pause";
@@ -354,6 +394,14 @@ const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
     ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
     ("aa-both", "Both", TextAntiAlias::Both),
 ];
+
+/// Whether the main camera uses [`StableTransparency`].
+#[derive(Resource)]
+struct OitState(bool);
+
+impl Default for OitState {
+    fn default() -> Self { Self(true) }
+}
 
 /// Maps a boolean to the title-bar activation it represents.
 const fn chip_activation(active: bool) -> ControlActivation {
@@ -376,68 +424,23 @@ fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
     *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
-#[derive(Clone, Copy)]
-struct PerfSnapshot {
-    timestamp:          f32,
-    fps:                f32,
-    frame_ms:           f32,
-    layout_ms:          f32,
-    reconcile_ms:       f32,
-    shaping_ms:         f32,
-    mesh_ms:            f32,
-    other_ms:           f32,
-    wait_for_render_ms: f32,
-    extract_ms:         f32,
-    frame_slack_ms:     f32,
-    render_cycle_ms:    f32,
-    assets_ms:          f32,
-    prep_ms:            f32,
-    wait_for_gpu_ms:    f32,
-    render_graph_ms:    f32,
-    cleanup_ms:         f32,
-    return_ms:          f32,
-    extract_handoff_ms: f32,
+/// Toggles [`StableTransparency`] / OIT on the main scene camera.
+fn toggle_oit(
+    mut state: ResMut<OitState>,
+    cameras: Query<Entity, With<OrbitCam>>,
+    mut commands: Commands,
+) {
+    state.0 = !state.0;
+    for camera in &cameras {
+        if state.0 {
+            commands.entity(camera).insert(StableTransparency);
+        } else {
+            commands.entity(camera).remove::<StableTransparency>();
+        }
+    }
 }
 
-impl PerfSnapshot {
-    const ZERO: Self = Self {
-        timestamp:          0.0,
-        fps:                0.0,
-        frame_ms:           0.0,
-        layout_ms:          0.0,
-        reconcile_ms:       0.0,
-        shaping_ms:         0.0,
-        mesh_ms:            0.0,
-        other_ms:           0.0,
-        wait_for_render_ms: 0.0,
-        extract_ms:         0.0,
-        frame_slack_ms:     0.0,
-        render_cycle_ms:    0.0,
-        assets_ms:          0.0,
-        prep_ms:            0.0,
-        wait_for_gpu_ms:    0.0,
-        render_graph_ms:    0.0,
-        cleanup_ms:         0.0,
-        return_ms:          0.0,
-        extract_handoff_ms: 0.0,
-    };
-}
-
-/// Last displayed overlay string, so the overlay tree is rebuilt only when a
-/// shown value changes.
-#[derive(Resource, Default)]
-struct LastDisplayedStatus {
-    text: String,
-}
-
-/// Last displayed batch-stats string, so the batch panel rebuilds only when a
-/// shown value changes.
-#[derive(Resource, Default)]
-struct LastDisplayedBatchStats {
-    text: String,
-}
-
-// ── Main-thread span ──────────────────────────────────────────────────────────
+// ── Measurement — main-thread span: frame wall time and the recv block ───────
 
 /// Start instant of the current main-world frame, recorded in `First`.
 #[derive(Resource)]
@@ -491,7 +494,7 @@ fn mark_extract_begin(main_end: Extract<Res<MainScheduleEnd>>, spans: Res<Render
         .store(return_gap.to_bits(), Ordering::Relaxed);
 }
 
-// ── Render-thread spans ───────────────────────────────────────────────────────
+// ── Measurement — render-thread spans: per-stage render timings ──────────────
 
 /// Latest render-thread segment values in milliseconds, stored as `f32` bits.
 /// Written at the end of each `Render` schedule run on the render thread and
@@ -732,7 +735,7 @@ fn relative_timeline_offset_ms(anchor_ms: f32, mark_ms: f32) -> f32 {
 
 fn has_timeline_mark(mark_ms: f32) -> bool { mark_ms.is_finite() && mark_ms > 0.0 }
 
-// ── GPU frame timer ───────────────────────────────────────────────────────────
+// ── Measurement — GPU frame timer: timestamp brackets on the 3D pass ─────────
 
 /// Nanoseconds per millisecond, for converting timestamp ticks to `ms`.
 const NANOSECONDS_PER_MILLISECOND: f64 = 1.0e6;
@@ -1053,7 +1056,7 @@ const fn timestamp_from_bytes(bytes: &[u8]) -> u64 {
     u64::from_le_bytes(timestamp)
 }
 
-// ── Shadow phase counts (render thread) ───────────────────────────────────────
+// ── Measurement — shadow draw counts: per-view shadow phase items ────────────
 
 /// Latest per-frame phase-item counts, written on the render thread after
 /// `PhaseSort` and read by the overlay on the main thread. Path-agnostic — it
@@ -1123,221 +1126,222 @@ fn count_phase_items(shadow_phases: Res<ViewBinnedRenderPhases<Shadow>>, counts:
     }
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ── Overlay — perf table: status panel and upper-right batch stats ───────────
 
-fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example_gpu_timestamps`, which also requests the
-    // wgpu timestamp features so `RenderDiagnosticsPlugin` records real
-    // `render/<pass>/elapsed_gpu` timings for the meter's GPU lane.
-    // `with_brp_extras` brings in `FrameTimeDiagnosticsPlugin` (the overlay
-    // reads its FPS / frame-time diagnostic IDs below); `with_perf_mode` uncaps
-    // vsync and the unfocused winit throttle so the reported frame time
-    // reflects true per-frame cost.
-    fairy_dust::sprinkle_example_gpu_timestamps()
-        .with_brp_extras()
-        .with_perf_mode()
-        .with_save_window_position()
-        .with_studio_lighting()
-        .with_ground_plane()
-        .size(GROUND_SIZE)
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = GRID_FOCUS;
-                cam.radius = Some(CAMERA_INITIAL_RADIUS);
-                cam.yaw = Some(0.0);
-                cam.pitch = Some(0.18);
-            },
-            OrbitCamPreset::BlenderLike,
-        )
-        .with_stable_transparency()
-        .with_camera_home()
-        .yaw(0.0)
-        .pitch(0.18)
-        .with_title_bar(text_stress_title_bar())
-        .wire_chip_to_state::<Mutating, _>(PAUSE_CHIP, |mutating| chip_activation(!mutating.0))
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
-            chip_activation(*anti_alias == AA_MODES[0].2)
-        })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
-            chip_activation(*anti_alias == AA_MODES[1].2)
-        })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
-            chip_activation(*anti_alias == AA_MODES[2].2)
-        })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
-            chip_activation(*anti_alias == AA_MODES[3].2)
-        })
-        .wire_chip_to_state::<WaterfallShown, _>(METER_CHIP, |shown| {
-            chip_activation(matches!(*shown, WaterfallShown::Shown))
-        })
-        .wire_chip_to_state::<OitState, _>(OIT_CHIP, |oit| chip_activation(oit.0))
-        .with_camera_control_panel()
-        .add_plugins((
-            RenderThreadTimingPlugin,
-            GpuFrameTimingPlugin,
-            DrawCountPlugin,
-        ))
-        .init_resource::<FrameCounter>()
-        .init_resource::<Mutating>()
-        .init_resource::<OitState>()
-        .init_resource::<WaterfallShown>()
-        .init_resource::<LastDisplayedStatus>()
-        .init_resource::<LastDisplayedBatchStats>()
-        .insert_resource(MainSpanStart(Instant::now()))
-        .insert_resource(MainScheduleEnd(Instant::now()))
-        .init_resource::<MainThreadMs>()
-        .add_systems(First, mark_main_span_start)
-        .add_systems(Last, publish_main_span)
-        .add_observer(place_status_panel_below_title_bar)
-        .add_systems(
-            Startup,
-            (
-                spawn_labels,
-                spawn_home_target,
-                spawn_status_overlay,
-                spawn_batch_stats_overlay,
-                spawn_waterfall_overlay,
-            ),
-        )
-        .add_systems(
-            Update,
-            (
-                toggle_mutation,
-                advance_frame,
-                mutate_labels,
-                update_status_panel,
-                update_batch_stats_panel,
-                update_waterfall_panel,
-            )
-                .chain(),
-        )
-        // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
-        // cycle the AA mode.
-        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
-        .with_shortcut(KeyCode::KeyM, toggle_waterfall)
-        .with_shortcut(KeyCode::KeyO, toggle_oit)
-        .run();
+/// Label/value text size for header-style rows in the left perf panel.
+const PERF_HEADER_ROW_FONT_SIZE: f32 = 13.0;
+/// Label/value text size for normal rows in the left perf panel.
+const PERF_ROW_FONT_SIZE: f32 = 11.0;
+const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
+const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
+/// Separator color shared by screen-panel frames, camera-panel dividers, and
+/// metric panel section rules.
+const PANEL_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
+/// Separator line thickness in logical pixels.
+const PANEL_SEPARATOR_THICKNESS: f32 = 1.0;
+/// Wide enough to contain the longest timeline label plus the sub-row indent
+/// without leaving a large gap before the numeric columns.
+const LABEL_COLUMN_WIDTH: f32 = 144.0;
+/// Wide enough to contain the `5s max` header on one line.
+const VALUE_COLUMN_WIDTH: f32 = 72.0;
+const TABLE_COL_GAP: f32 = 8.0;
+const TABLE_ROW_GAP: f32 = 2.0;
+/// Full status table width, used by section titles and separators.
+const STATUS_TABLE_WIDTH: f32 = LABEL_COLUMN_WIDTH + VALUE_COLUMN_WIDTH * 2.0 + TABLE_COL_GAP * 2.0;
+/// Left padding on component-row labels, marking what sums into the block
+/// header above.
+const SUB_ROW_INDENT: f32 = 12.0;
+const FPS_UPDATE_INTERVAL: f32 = 1.0;
+const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
+const MILLISECONDS_PER_SECOND: f32 = 1000.0;
+const STATUS_TITLE_BAR_GAP: f32 = 1.0;
+const STATUS_POSITION_EPSILON: f32 = 0.5;
+
+/// Larger text on the label/value header line of each batch-stats group.
+const STATS_HEADER_FONT_SIZE: f32 = 15.0;
+/// Smaller text on the description line under each header.
+const STATS_DESC_FONT_SIZE: f32 = 9.0;
+/// Dim color for the description line.
+const STATS_DESC_COLOR: Color = Color::srgba(0.60, 0.66, 0.76, 0.68);
+/// Fixed width of each group: the label/value header spans it and the
+/// description wraps within it. Wider than the diagnostics overlay so most
+/// descriptions read on one line.
+const STATS_ROW_WIDTH: f32 = 260.0;
+/// Vertical gap between the header, description, and separator inside a group.
+const STATS_INTRA_GAP: f32 = 2.0;
+/// Vertical gap between groups.
+const STATS_GROUP_GAP: f32 = 6.0;
+
+/// Label hierarchy for the perf table.
+#[derive(Clone, Copy)]
+enum RowIndent {
+    None,
+    Phase,
+    Detail,
 }
 
-fn text_stress_title_bar() -> TitleBar {
-    TitleBar::new()
-        .with_title("Text Stress")
-        .with_anchor(Anchor::TopLeft)
-        .control(TitleBarControl::segmented(
-            "Space",
-            [TitleBarSegment::new(PAUSE_CHIP, "Pause")],
-        ))
-        .control(TitleBarControl::segmented(
-            "A",
-            AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
-        ))
-        .control(TitleBarControl::segmented(
-            "M",
-            [TitleBarSegment::new(METER_CHIP, "Meter")],
-        ))
-        .control(TitleBarControl::segmented(
-            "O",
-            [TitleBarSegment::new(OIT_CHIP, "OIT")],
-        ))
-}
-
-const GROUND_SIZE: f32 = GRID_SIDE_F32 * CELL_SPACING + 1.0;
-const GRID_FOCUS: Vec3 = Vec3::new(
-    0.0,
-    GRID_BASE_Y + (GRID_SIDE_F32 - 1.0) * CELL_SPACING * 0.5,
-    0.0,
-);
-
-// ── Label grid ────────────────────────────────────────────────────────────────
-
-/// Spawns the `GRID_SIDE × GRID_SIDE` grid of standalone world labels, each a
-/// `DiegeticText` carrying a `StressLabel(index)` marker.
-fn spawn_labels(mut commands: Commands) {
-    let half = (GRID_SIDE.to_f32() - 1.0) * 0.5;
-    for index in 0..LABEL_COUNT {
-        let col = (index % GRID_SIDE).to_f32();
-        let row = (index / GRID_SIDE).to_f32();
-        let x = (col - half) * CELL_SPACING;
-        let y = row.mul_add(CELL_SPACING, GRID_BASE_Y);
-        commands.spawn((
-            StressLabel(index),
-            DiegeticText::world(label_text(index, 0))
-                .size(LABEL_SIZE)
-                .color(LABEL_COLOR)
-                .transform(Transform::from_xyz(x, y, 0.0))
-                .build(),
-        ));
-    }
-}
-
-/// The per-label string: a fixed two-digit index and the live three-digit frame
-/// counter, so every label's text changes each frame while its width stays
-/// stable.
-fn label_text(index: usize, frame: u64) -> String { format!("{index:02} {:03}", frame % 1000) }
-
-/// Spawns the single invisible [`CameraHomeTarget`] that `H` frames: an explicit
-/// grid-sized [`Aabb`] at [`GRID_FOCUS`], no mesh, so the home union is one
-/// constant box.
-fn spawn_home_target(mut commands: Commands) {
-    commands.spawn((
-        CameraHomeTarget,
-        Aabb::from_min_max(
-            GRID_FOCUS - HOME_REGION_HALF_EXTENTS,
-            GRID_FOCUS + HOME_REGION_HALF_EXTENTS,
-        ),
-        Transform::default(),
-    ));
-}
-
-// ── Mutation ──────────────────────────────────────────────────────────────────
-
-fn toggle_mutation(keyboard: Res<ButtonInput<KeyCode>>, mut mutating: ResMut<Mutating>) {
-    if keyboard.just_pressed(KeyCode::Space) {
-        mutating.0 = !mutating.0;
-    }
-}
-
-/// Toggles [`StableTransparency`] / OIT on the main scene camera.
-fn toggle_oit(
-    mut state: ResMut<OitState>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut commands: Commands,
-) {
-    state.0 = !state.0;
-    for camera in &cameras {
-        if state.0 {
-            commands.entity(camera).insert(StableTransparency);
-        } else {
-            commands.entity(camera).remove::<StableTransparency>();
+impl RowIndent {
+    const fn left_padding(self) -> f32 {
+        match self {
+            Self::None => 0.0,
+            Self::Phase => SUB_ROW_INDENT,
+            Self::Detail => SUB_ROW_INDENT * 2.0,
         }
     }
 }
 
-fn advance_frame(mutating: Res<Mutating>, mut frame: ResMut<FrameCounter>) {
-    if mutating.0 {
-        frame.0 = frame.0.wrapping_add(1);
+#[derive(Clone, Copy)]
+struct MetricRow {
+    label:  &'static str,
+    indent: RowIndent,
+    accent: Option<Color>,
+}
+
+impl MetricRow {
+    const fn new(label: &'static str, indent: RowIndent) -> Self {
+        Self {
+            label,
+            indent,
+            accent: None,
+        }
+    }
+
+    const fn accented(label: &'static str, indent: RowIndent, accent: Color) -> Self {
+        Self {
+            label,
+            indent,
+            accent: Some(accent),
+        }
     }
 }
 
-/// Retexts every label through the `DiegeticTextMut` write path. `for_each_mut`
-/// yields each label's marker (its grid index) and a `TextEdit` handle, so all
-/// 100 strings change in one pass — the `O(n_changed)` worst case the gate
-/// targets.
-fn mutate_labels(
-    mutating: Res<Mutating>,
-    frame: Res<FrameCounter>,
-    mut labels: DiegeticTextMut<StressLabel>,
-) {
-    if !mutating.0 {
-        return;
-    }
-    labels.for_each_mut(|label, edit| {
-        edit.set_text(label_text(label.0, frame.0));
-    });
+/// Diagnostic table rows, in display order — two additive blocks, one per
+/// timeline.
+///
+/// Main thread: `ms` (frame wall time) = `layout` + `reconcile` + `shaping` +
+/// `mesh` (the measured diegetic spans) + `other` (the rest of the main
+/// schedules: cascade, transform propagation, every other system) +
+/// `wait for render` (blocked in `renderer_extract` waiting for the render
+/// thread to return the render app) + `extract` (main world → render world copy
+/// and send-back) + `frame slack` (the outer app-frame residual not covered by
+/// those measured spans).
+///
+/// Render lane, frame N: `render cycle` = `assets` (the `PrepareAssets` stage —
+/// re-uploading every mesh / image / buffer asset modified this frame) +
+/// `prep` (extract-commands apply, prepare meshes and views, specialize,
+/// queue, sort, bind groups) + `wait for GPU` (the `PrepareViews` stage
+/// containing the swapchain acquire — where the render thread blocks when the
+/// GPU is behind) + `render graph` (render-graph execution: pass encoding,
+/// submit, present) + `cleanup` (render cleanup and schedule closeout after
+/// graph) + `return` (post-schedule app-return handoff and main `recv` unblock
+/// gap) + `extract handoff` (main extracts into the render world and sends the
+/// render app back, allowing the next render schedule to start).
+///
+/// [`RowIndent`] controls display hierarchy only; the metric values stay in
+/// this fixed array order.
+const METRIC_ROWS: [MetricRow; 18] = [
+    MetricRow::new("fps", RowIndent::None),
+    MetricRow::new("ms/frame", RowIndent::None),
+    MetricRow::accented("layout", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("reconcile", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("shaping", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("mesh", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("other", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("wait for render", RowIndent::Phase, WATERFALL_WAIT_COLOR),
+    MetricRow::accented("extract", RowIndent::Phase, WATERFALL_EXTRACT_COLOR),
+    MetricRow::accented("frame slack", RowIndent::Phase, WATERFALL_FRAME_SLACK_COLOR),
+    MetricRow::new("render cycle", RowIndent::None),
+    MetricRow::accented("assets", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("prep", RowIndent::Detail, WATERFALL_WORK_COLOR),
+    MetricRow::accented("wait for GPU", RowIndent::Phase, WATERFALL_WAIT_COLOR),
+    MetricRow::accented(
+        "render graph",
+        RowIndent::Phase,
+        WATERFALL_RENDER_GRAPH_COLOR,
+    ),
+    MetricRow::accented("cleanup", RowIndent::Phase, WATERFALL_CLEANUP_COLOR),
+    MetricRow::accented("return", RowIndent::Phase, WATERFALL_RETURN_COLOR),
+    MetricRow::accented(
+        "extract handoff",
+        RowIndent::Phase,
+        WATERFALL_IDLE_LABEL_COLOR,
+    ),
+];
+const METRIC_COUNT: usize = METRIC_ROWS.len();
+const FPS_METRIC_INDEX: usize = 0;
+const MAIN_WORLD_METRIC_START: usize = 1;
+const RENDER_WORLD_METRIC_START: usize = 10;
+const INITIAL_METRICS: [&str; METRIC_COUNT] = ["--"; METRIC_COUNT];
+
+/// Marker for the screen-space diagnostic overlay panel.
+#[derive(Component)]
+struct StatusPanel;
+
+/// Marker for the upper-right glyph-batch stats panel (Step-2 proof
+/// counters), separate from the waterfall so its wide rows don't stretch it.
+#[derive(Component)]
+struct BatchStatsPanel;
+
+#[derive(Clone, Copy)]
+struct PerfSnapshot {
+    timestamp:          f32,
+    fps:                f32,
+    frame_ms:           f32,
+    layout_ms:          f32,
+    reconcile_ms:       f32,
+    shaping_ms:         f32,
+    mesh_ms:            f32,
+    other_ms:           f32,
+    wait_for_render_ms: f32,
+    extract_ms:         f32,
+    frame_slack_ms:     f32,
+    render_cycle_ms:    f32,
+    assets_ms:          f32,
+    prep_ms:            f32,
+    wait_for_gpu_ms:    f32,
+    render_graph_ms:    f32,
+    cleanup_ms:         f32,
+    return_ms:          f32,
+    extract_handoff_ms: f32,
 }
 
-// ── Status overlay ────────────────────────────────────────────────────────────
+impl PerfSnapshot {
+    const ZERO: Self = Self {
+        timestamp:          0.0,
+        fps:                0.0,
+        frame_ms:           0.0,
+        layout_ms:          0.0,
+        reconcile_ms:       0.0,
+        shaping_ms:         0.0,
+        mesh_ms:            0.0,
+        other_ms:           0.0,
+        wait_for_render_ms: 0.0,
+        extract_ms:         0.0,
+        frame_slack_ms:     0.0,
+        render_cycle_ms:    0.0,
+        assets_ms:          0.0,
+        prep_ms:            0.0,
+        wait_for_gpu_ms:    0.0,
+        render_graph_ms:    0.0,
+        cleanup_ms:         0.0,
+        return_ms:          0.0,
+        extract_handoff_ms: 0.0,
+    };
+}
+
+/// Last displayed overlay string, so the overlay tree is rebuilt only when a
+/// shown value changes.
+#[derive(Resource, Default)]
+struct LastDisplayedStatus {
+    text: String,
+}
+
+/// Last displayed batch-stats string, so the batch panel rebuilds only when a
+/// shown value changes.
+#[derive(Resource, Default)]
+struct LastDisplayedBatchStats {
+    text: String,
+}
 
 fn spawn_status_overlay(mut commands: Commands) {
     let unlit = screen_panel_material();
@@ -2152,7 +2156,7 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
     peak
 }
 
-// ── Waterfall bar panel ─────────────────────────────────────────────────────────
+// ── Overlay — waterfall meter: bottom main/render/GPU timeline lanes ─────────
 
 // colors
 /// GPU-busy blocks. The wide block finishes frame N (ends at present); the tail
