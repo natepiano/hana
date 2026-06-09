@@ -40,6 +40,8 @@ use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
 use bevy::pbr::Shadow;
 use bevy::prelude::*;
+use bevy::render::Extract;
+use bevy::render::ExtractSchedule;
 use bevy::render::Render;
 use bevy::render::RenderApp;
 use bevy::render::RenderStartup;
@@ -342,10 +344,33 @@ struct MainSpanStart(Instant);
 #[derive(Resource, Default)]
 struct MainThreadMs(f32);
 
+/// Instant the main schedule finished (end of `Last`). Read on the main thread
+/// inside `ExtractSchedule` (which runs during `renderer_extract`) to measure
+/// the `recv` block: `extract_begin - main_schedule_end`.
+#[derive(Resource)]
+struct MainScheduleEnd(Instant);
+
 fn mark_main_span_start(mut start: ResMut<MainSpanStart>) { start.0 = Instant::now(); }
 
-fn publish_main_span(start: Res<MainSpanStart>, mut main_thread: ResMut<MainThreadMs>) {
+fn publish_main_span(
+    start: Res<MainSpanStart>,
+    mut main_thread: ResMut<MainThreadMs>,
+    mut schedule_end: ResMut<MainScheduleEnd>,
+) {
     main_thread.0 = start.0.elapsed().as_secs_f32() * MILLISECONDS_PER_SECOND;
+    schedule_end.0 = Instant::now();
+}
+
+/// First system in `ExtractSchedule` (runs on the main thread the instant the
+/// `recv().await` in `renderer_extract` unblocks). Stores the wait the main
+/// thread just spent blocked on the render thread returning the previous
+/// frame's render app — the true Main-lane `wait`.
+fn mark_extract_begin(main_end: Extract<Res<MainScheduleEnd>>, spans: Res<RenderThreadSpans>) {
+    let recv = Instant::now()
+        .saturating_duration_since(main_end.0)
+        .as_secs_f32()
+        * MILLISECONDS_PER_SECOND;
+    spans.0.recv.store(recv.to_bits(), Ordering::Relaxed);
 }
 
 // ── Render-thread spans ───────────────────────────────────────────────────────
@@ -369,6 +394,12 @@ struct RenderSpanBits {
     /// The `Render` stage: render-graph execution — pass encoding, submit,
     /// present.
     graph:    AtomicU32,
+    /// Main-thread block in `renderer_extract`: the `recv().await` that waits
+    /// for the render thread to return the previous frame's render app (after
+    /// its whole `Render` schedule, submit included) before extract can run.
+    /// Measured on the main thread as `extract_begin - main_schedule_end`; this
+    /// is what the Main lane's `wait` actually is.
+    recv:     AtomicU32,
 }
 
 /// Main-world handle to the shared [`RenderSpanBits`].
@@ -420,6 +451,7 @@ impl Plugin for RenderThreadTimingPlugin {
         };
         render_app.insert_resource(shared);
         render_app.init_resource::<RenderMarks>();
+        render_app.add_systems(ExtractSchedule, mark_extract_begin);
         render_app.add_systems(
             Render,
             (
@@ -970,6 +1002,7 @@ fn main() {
         .init_resource::<LastDisplayedStatus>()
         .init_resource::<LastDisplayedBatchStats>()
         .insert_resource(MainSpanStart(Instant::now()))
+        .insert_resource(MainScheduleEnd(Instant::now()))
         .init_resource::<MainThreadMs>()
         .add_systems(First, mark_main_span_start)
         .add_systems(Last, publish_main_span)
@@ -1716,11 +1749,13 @@ const WATERFALL_SUBMIT_COLOR: Color = Color::srgb(0.35, 0.85, 0.45);
 const WATERFALL_TRACK_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
 /// Shared between `main N` `wait` and `render N-1` `gpu wait` — both are stalls.
 const WATERFALL_WAIT_COLOR: Color = Color::srgb(0.95, 0.65, 0.20);
+/// Main lane `extract` + winit slop — the handoff after the `recv` block.
+const WATERFALL_EXTRACT_COLOR: Color = Color::srgb(0.55, 0.55, 0.72);
 
 // layout
 /// Full lane width in panel pixels — maps to the dynamic axis
 /// ([`WaterfallBars::axis`], the smoothed frame time).
-const WATERFALL_BAR_WIDTH: f32 = 240.0;
+const WATERFALL_BAR_WIDTH: f32 = 384.0;
 /// Gap between the label column and the bar column in panel pixels.
 const WATERFALL_LABEL_GAP: f32 = 6.0;
 /// Vertical gap between lanes in panel pixels.
@@ -1771,6 +1806,11 @@ struct WaterfallBars {
     axis:      f32,
     main_work: f32,
     main_wait: f32,
+    /// Measured main-thread `recv` block (`RenderSpanBits::recv`): the wait for
+    /// the render thread to return the previous frame's render app. The Main
+    /// lane's real `wait`; the leftover (`axis - main_work - recv`) is the
+    /// extract copy plus winit slop.
+    recv:      f32,
     prep:      f32,
     gpu_wait:  f32,
     submit:    f32,
@@ -1789,6 +1829,7 @@ impl WaterfallBars {
             axis:      self.axis + other.axis,
             main_work: self.main_work + other.main_work,
             main_wait: self.main_wait + other.main_wait,
+            recv:      self.recv + other.recv,
             prep:      self.prep + other.prep,
             gpu_wait:  self.gpu_wait + other.gpu_wait,
             submit:    self.submit + other.submit,
@@ -1802,6 +1843,7 @@ impl WaterfallBars {
             axis:      self.axis * factor,
             main_work: self.main_work * factor,
             main_wait: self.main_wait * factor,
+            recv:      self.recv * factor,
             prep:      self.prep * factor,
             gpu_wait:  self.gpu_wait * factor,
             submit:    self.submit * factor,
@@ -1815,6 +1857,7 @@ impl WaterfallBars {
             axis:      lerp(self.axis, to.axis, t),
             main_work: lerp(self.main_work, to.main_work, t),
             main_wait: lerp(self.main_wait, to.main_wait, t),
+            recv:      lerp(self.recv, to.recv, t),
             prep:      lerp(self.prep, to.prep, t),
             gpu_wait:  lerp(self.gpu_wait, to.gpu_wait, t),
             submit:    lerp(self.submit, to.submit, t),
@@ -1868,9 +1911,9 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                             .child_gap(WATERFALL_LANE_GAP)
                             .child_alignment(AlignX::Right, AlignY::Center),
                         |builder| {
-                            lane_label(builder, "Main world  N+2");
-                            lane_label(builder, "Render world  N+1");
-                            lane_label(builder, "GPU  N");
+                            lane_label(builder, "Main world");
+                            lane_label(builder, "Render world");
+                            lane_label(builder, "GPU");
                         },
                     );
                     builder.with(
@@ -1880,24 +1923,10 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                             .direction(Direction::TopToBottom)
                             .child_gap(WATERFALL_LANE_GAP),
                         |builder| {
-                            lane_bars(
-                                builder,
-                                bars.axis,
-                                &[
-                                    (bars.main_work, WATERFALL_MAIN_WORK_COLOR),
-                                    (bars.main_wait, WATERFALL_WAIT_COLOR),
-                                ],
-                            );
-                            lane_bars(
-                                builder,
-                                bars.axis,
-                                &[
-                                    (bars.prep, WATERFALL_PREP_COLOR),
-                                    (bars.gpu_wait, WATERFALL_WAIT_COLOR),
-                                    (bars.submit, WATERFALL_SUBMIT_COLOR),
-                                ],
-                            );
-                            lane_bars(builder, bars.axis, &gpu_lane_segments(bars));
+                            let span = bars.axis.max(WATERFALL_MIN_AXIS_MS);
+                            lane_bars(builder, span, &main_lane_segments(bars));
+                            lane_bars(builder, span, &render_lane_segments(bars));
+                            lane_bars(builder, span, &gpu_lane_segments(bars));
                         },
                     );
                 },
@@ -1969,27 +1998,45 @@ fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[(f32, Color)
     );
 }
 
-/// The GPU lane's segments for one period, left to right: the GPU **busy**
-/// finishing frame N (ends at the present instant), the short **idle** gap while
-/// the render thread records and submits frame N+1's commands, then the GPU
-/// **busy** again starting frame N+1.
-///
-/// Driven by the CPU-clock present anchor, not the timestamp query: `present` =
-/// `prep` + `gpu_wait` is the instant the render thread's `gpu wait` (swapchain
-/// acquire) releases, which is the instant the GPU finishes frame N and frees an
-/// image. So the busy block's right edge lines up vertically with the render
-/// lane's `gpu wait` → `submit` boundary — the GPU is busy *through* the render
-/// thread's wait, which is why that wait exists. The next busy block starts at
-/// `present` + `submit`, lined up with the render lane's `submit` → end boundary:
-/// the GPU picks up frame N+1 the instant its commands are submitted. The GPU is
-/// the bottleneck under `with_perf_mode` (no vsync), so the only idle is that
-/// short `submit` gap.
-fn gpu_lane_segments(bars: &WaterfallBars) -> [(f32, Color); 3] {
-    let present = bars.prep + bars.gpu_wait;
-    let tail = (bars.axis - present - bars.submit).max(0.0);
-    [
+/// Main lane, one frame on the shared timeline: `work` (main schedule span) ·
+/// `wait` (the measured `recv` block — main blocked until the render thread
+/// returns the previous frame's app) · `extract` (the main→render copy plus
+/// winit slop, the period left over after work and the block).
+fn main_lane_segments(b: &WaterfallBars) -> Vec<(f32, Color)> {
+    let period = b.axis.max(WATERFALL_MIN_AXIS_MS);
+    let work = b.main_work.clamp(0.0, period);
+    let wait = b.recv.clamp(0.0, (period - work).max(0.0));
+    let extract = (period - work - wait).max(0.0);
+    vec![
+        (work, WATERFALL_MAIN_WORK_COLOR),
+        (wait, WATERFALL_WAIT_COLOR),
+        (extract, WATERFALL_EXTRACT_COLOR),
+    ]
+}
+
+/// Render lane, one frame: `prep` (`assets` + prepare) · `gpu wait` (swapchain
+/// acquire — the stall waiting on the GPU below) · `submit` (`graph`).
+fn render_lane_segments(b: &WaterfallBars) -> Vec<(f32, Color)> {
+    vec![
+        (b.prep, WATERFALL_PREP_COLOR),
+        (b.gpu_wait, WATERFALL_WAIT_COLOR),
+        (b.submit, WATERFALL_SUBMIT_COLOR),
+    ]
+}
+
+/// GPU lane, one frame: `present` (busy, ending the instant the render lane's
+/// `gpu wait` releases) · idle `submit` gap · busy `tail` starting the next
+/// frame. The busy block's right edge lines up under the render lane's
+/// `gpu wait` → `submit` boundary — that vertical line is the GPU making the
+/// render thread wait.
+fn gpu_lane_segments(b: &WaterfallBars) -> Vec<(f32, Color)> {
+    let period = b.axis.max(WATERFALL_MIN_AXIS_MS);
+    let present = (b.prep + b.gpu_wait).min(period);
+    let submit = b.submit.min((period - present).max(0.0));
+    let tail = (period - present - submit).max(0.0);
+    vec![
         (present, WATERFALL_GPU_COLOR),
-        (bars.submit, WATERFALL_GAP_COLOR),
+        (submit, WATERFALL_GAP_COLOR),
         (tail, WATERFALL_GPU_COLOR),
     ]
 }
@@ -2044,6 +2091,7 @@ fn update_waterfall_panel(
         axis:      frame_ms,
         main_work: main_span_ms,
         main_wait: (frame_ms - main_span_ms).max(0.0),
+        recv:      span_ms(&render_spans.0.recv),
         prep:      span_ms(&render_spans.0.assets) + span_ms(&render_spans.0.prep),
         gpu_wait:  span_ms(&render_spans.0.gpu_wait),
         submit:    span_ms(&render_spans.0.graph),
