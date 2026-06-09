@@ -286,7 +286,11 @@ const METRIC_ROWS: [MetricRow; 18] = [
     ),
     MetricRow::accented("cleanup", RowIndent::Phase, WATERFALL_CLEANUP_COLOR),
     MetricRow::accented("return", RowIndent::Phase, WATERFALL_RETURN_COLOR),
-    MetricRow::accented("extract handoff", RowIndent::Phase, WATERFALL_EXTRACT_COLOR),
+    MetricRow::accented(
+        "extract handoff",
+        RowIndent::Phase,
+        WATERFALL_IDLE_LABEL_COLOR,
+    ),
 ];
 const METRIC_COUNT: usize = METRIC_ROWS.len();
 const FPS_METRIC_INDEX: usize = 0;
@@ -2155,27 +2159,28 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
 /// block starts frame N+1 after the render graph submits. Width comes from the
 /// CPU-clock present anchor, not the timestamp query — see [`gpu_lane_segments`].
 const WATERFALL_GPU_COLOR: Color = Color::srgb(0.0, 0.92, 1.0);
-/// Transparent spacer for the GPU lane's idle gap.
-const WATERFALL_GAP_COLOR: Color = Color::srgba(0.0, 0.0, 0.0, 0.0);
+/// Idle / parked spans: GPU idle gap and render-world extract handoff.
+const WATERFALL_GAP_COLOR: Color = Color::srgb(0.72, 0.78, 0.82);
 /// Main and render lane `work` segments.
 const WATERFALL_WORK_COLOR: Color = Color::srgb(0.30, 0.60, 0.95);
 /// Render world N `render graph` segment.
 const WATERFALL_RENDER_GRAPH_COLOR: Color = Color::srgb(0.35, 0.85, 0.45);
-/// Render world N post-graph cleanup segment.
-const WATERFALL_CLEANUP_COLOR: Color = Color::srgb(1.0, 1.0, 1.0);
+/// Render world N post-graph cleanup work.
+const WATERFALL_CLEANUP_COLOR: Color = Color::srgb(1.0, 0.22, 0.10);
 /// Render world N return-app / main-unblock gap before extract starts.
 const WATERFALL_RETURN_COLOR: Color = Color::srgb(0.95, 0.40, 0.56);
 /// Track tint behind each lane — the empty tail past the drawn segments.
 const WATERFALL_TRACK_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
 /// Shared between main world N+1 `wait for render` and render world N `wait for GPU`.
 const WATERFALL_WAIT_COLOR: Color = Color::srgb(0.95, 0.65, 0.20);
-/// Main lane `extract` and render lane `extract handoff` — the handoff after
-/// the `recv` block.
+/// Main lane `extract` — the main->render copy and send-back.
 const WATERFALL_EXTRACT_COLOR: Color = Color::srgb(0.72, 0.54, 1.0);
-/// Unclassified app-frame slack in the perf table.
-const WATERFALL_FRAME_SLACK_COLOR: Color = WATERFALL_CLEANUP_COLOR;
+/// Unclassified app-frame slack in the perf table; not measured work.
+const WATERFALL_FRAME_SLACK_COLOR: Color = WATERFALL_GAP_COLOR;
 /// Segment label color for dark backgrounds.
 const WATERFALL_LIGHT_LABEL_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
+/// Perf-table color for rows whose waterfall segment uses [`WATERFALL_GAP_COLOR`].
+const WATERFALL_IDLE_LABEL_COLOR: Color = WATERFALL_GAP_COLOR;
 /// Segment label color for light backgrounds.
 const WATERFALL_DARK_LABEL_COLOR: Color = Color::srgba(0.03, 0.04, 0.06, 1.0);
 /// WCAG luminance weight for linear red.
@@ -2217,7 +2222,7 @@ const WATERFALL_MIN_SEGMENT_FRACTION: f32 = 0.001;
 /// Screen-width fraction occupied by the waterfall panel.
 const WATERFALL_PANEL_WIDTH_FRACTION: f32 = 0.8;
 /// Segment label font size in panel pixels.
-const WATERFALL_SEGMENT_LABEL_FONT_SIZE: f32 = 8.5;
+const WATERFALL_SEGMENT_LABEL_FONT_SIZE: f32 = STATS_DESC_FONT_SIZE;
 /// Edge padding for leading- and trailing-aligned segment labels.
 const WATERFALL_SEGMENT_EDGE_LABEL_PADDING: f32 = 6.0;
 
@@ -2741,7 +2746,7 @@ fn render_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
         ),
         TimelineSegment::measured(graph_end, cleanup_end, WATERFALL_CLEANUP_COLOR, ""),
         TimelineSegment::measured(cleanup_end, return_end, WATERFALL_RETURN_COLOR, ""),
-        TimelineSegment::measured(return_end, extract_end, WATERFALL_EXTRACT_COLOR, ""),
+        TimelineSegment::measured(return_end, extract_end, WATERFALL_GAP_COLOR, ""),
     ]
 }
 
