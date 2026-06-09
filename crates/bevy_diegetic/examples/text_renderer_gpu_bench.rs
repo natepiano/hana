@@ -9,9 +9,9 @@
 //! cargo run -p bevy_diegetic --release --example text_renderer_gpu_bench -- --mode empty
 //! ```
 //!
-//! On platforms where Bevy/wgpu supports timestamp queries, render diagnostics
-//! include `elapsed_gpu`. On macOS/Metal, Bevy 0.18 only reports render CPU
-//! timings, so this example still reports frame and render-pass CPU metrics.
+//! Render diagnostics report Bevy's CPU render metrics here. GPU elapsed
+//! diagnostics may be unavailable or zero on Metal, so this benchmark treats
+//! them as optional report data rather than a reliable timing source.
 
 use std::collections::BTreeMap;
 use std::env;

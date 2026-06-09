@@ -6,7 +6,7 @@
 > `.with_camera_home()`, per-cursor H-key homing, and per-window guidance
 > columns. The multi-window screen-panel prerequisite this plan spun off is
 > archived at
-> [`../../bevy_diegetic/archive/multi-window.md`](../../bevy_diegetic/archive/multi-window.md).
+> [`../../bevy_diegetic/as-built/multi-window.md`](../../bevy_diegetic/as-built/multi-window.md).
 > The canonical guide referenced below now lives at
 > `docs/fairy_dust/canonical-example.md`.
 

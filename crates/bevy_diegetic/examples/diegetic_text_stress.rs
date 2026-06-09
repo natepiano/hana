@@ -13,31 +13,27 @@
 //!     the title-bar `Pause` segment highlights while paused
 //!   A — cycle the text anti-alias mode (Off → Anisotropic → Supersample →
 //!     Both); the title bar highlights the active mode
-//!   M — toggle the bottom-left render-timing meter; the title-bar `Meter`
-//!     segment highlights while it is on
+//!   M — toggle the bottom-left GPU pipeline visualization; the title-bar
+//!     `Pipeline` segment highlights while it is on
 //!   O — toggle stable transparency / OIT; the title-bar `OIT` segment
 //!     highlights while it is on
 //!
 //! A left screen overlay, placed immediately below the title bar, reports the
-//! frame as two additive blocks, one per thread, each row with a 5-second peak
-//! column. Main thread: `ms/frame` is the sum of `layout`, `reconcile`,
-//! `shaping`, `mesh`, `other`, `wait for render`, `extract`, and
-//! `frame slack`. Render thread: `render cycle` is the end-to-end frame N
-//! cycle from one render schedule start to the next: `assets`, `prep`,
-//! `wait for GPU`, `render graph`, `cleanup`, `return`, and
-//! `extract handoff`.
+//! frame as additive main/render blocks, each row with a 5-second peak column.
+//! Main thread: `ms/frame` is the sum of `layout`, `reconcile`, `shaping`,
+//! `mesh`, `other`, `wait for render`, `extract`, and `frame slack`. Render
+//! thread: `render cycle` is the end-to-end frame N cycle from one render
+//! schedule start to the next: `assets`, `prep`, `wait for GPU`, `render graph`,
+//! `cleanup`, `return`, and `extract handoff`.
 
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU32;
 use std::sync::atomic::Ordering;
 use std::time::Instant;
 
 use bevy::camera::primitives::Aabb;
-use bevy::core_pipeline::Core3d;
-use bevy::core_pipeline::Core3dSystems;
 use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -47,15 +43,10 @@ use bevy::render::Extract;
 use bevy::render::ExtractSchedule;
 use bevy::render::Render;
 use bevy::render::RenderApp;
-use bevy::render::RenderStartup;
 use bevy::render::RenderSystems;
-use bevy::render::extract_component::ExtractComponent;
-use bevy::render::extract_component::ExtractComponentPlugin;
 use bevy::render::render_phase::ViewBinnedRenderPhases;
-use bevy::render::renderer::RenderContext;
-use bevy::render::renderer::RenderDevice;
-use bevy::render::renderer::RenderQueue;
-use bevy::render::renderer::ViewQuery;
+use bevy::render::renderer::RenderGraph;
+use bevy::render::renderer::RenderGraphSystems;
 use bevy::window::PrimaryWindow;
 use bevy::window::Window;
 use bevy_diegetic::AlignX;
@@ -84,10 +75,15 @@ use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
-use bevy_kana::ToF64;
 use bevy_kana::ToU32;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
+use diagnostics::DrawCounts;
+use diagnostics::MainThreadMs;
+use diagnostics::RenderThreadSpans;
+use diagnostics::StressDiagnosticsPlugin;
+use diagnostics::relative_timeline_offset_ms;
+use diagnostics::timeline_duration_ms;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -96,40 +92,16 @@ use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
-use wgpu::Buffer;
-use wgpu::BufferDescriptor;
-use wgpu::BufferUsages;
-use wgpu::Extent3d;
-use wgpu::LoadOp;
-use wgpu::MapMode;
-use wgpu::Operations;
-use wgpu::PollType;
-use wgpu::QuerySet;
-use wgpu::QuerySetDescriptor;
-use wgpu::QueryType;
-use wgpu::RenderPassColorAttachment;
-use wgpu::RenderPassDescriptor;
-use wgpu::RenderPassTimestampWrites;
-use wgpu::StoreOp;
-use wgpu::TextureDescriptor;
-use wgpu::TextureDimension;
-use wgpu::TextureFormat;
-use wgpu::TextureUsages;
-use wgpu::TextureView;
-use wgpu::TextureViewDescriptor;
 
 // ── App — plugin wiring, resources, startup/update systems, shortcuts ────────
 
 fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example_gpu_timestamps`, which also requests the
-    // wgpu timestamp features so `RenderDiagnosticsPlugin` records real
-    // `render/<pass>/elapsed_gpu` timings for the meter's GPU lane.
+    // `fairy_dust::sprinkle_example` registers the diegetic UI plugin.
     // `with_brp_extras` brings in `FrameTimeDiagnosticsPlugin` (the overlay
     // reads its FPS / frame-time diagnostic IDs below); `with_perf_mode` uncaps
     // vsync and the unfocused winit throttle so the reported frame time
     // reflects true per-frame cost.
-    fairy_dust::sprinkle_example_gpu_timestamps()
+    fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_perf_mode()
         .with_save_window_position()
@@ -163,27 +135,18 @@ fn main() {
         .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[3].2)
         })
-        .wire_chip_to_state::<WaterfallShown, _>(METER_CHIP, |shown| {
-            chip_activation(matches!(*shown, WaterfallShown::Shown))
+        .wire_chip_to_state::<GpuPipelineShown, _>(PIPELINE_CHIP, |shown| {
+            chip_activation(matches!(*shown, GpuPipelineShown::Shown))
         })
         .wire_chip_to_state::<OitState, _>(OIT_CHIP, |oit| chip_activation(oit.0))
         .with_camera_control_panel()
-        .add_plugins((
-            RenderThreadTimingPlugin,
-            GpuFrameTimingPlugin,
-            DrawCountPlugin,
-        ))
+        .add_plugins(StressDiagnosticsPlugin)
         .init_resource::<FrameCounter>()
         .init_resource::<Mutating>()
         .init_resource::<OitState>()
-        .init_resource::<WaterfallShown>()
+        .init_resource::<GpuPipelineShown>()
         .init_resource::<LastDisplayedStatus>()
         .init_resource::<LastDisplayedBatchStats>()
-        .insert_resource(MainSpanStart(Instant::now()))
-        .insert_resource(MainScheduleEnd(Instant::now()))
-        .init_resource::<MainThreadMs>()
-        .add_systems(First, mark_main_span_start)
-        .add_systems(Last, publish_main_span)
         .add_observer(place_status_panel_below_title_bar)
         .add_systems(
             Startup,
@@ -192,7 +155,7 @@ fn main() {
                 spawn_home_target,
                 spawn_status_overlay,
                 spawn_batch_stats_overlay,
-                spawn_waterfall_overlay,
+                spawn_gpu_pipeline_overlay,
             ),
         )
         .add_systems(
@@ -203,14 +166,14 @@ fn main() {
                 mutate_labels,
                 update_status_panel,
                 update_batch_stats_panel,
-                update_waterfall_panel,
+                update_gpu_pipeline_panel,
             )
                 .chain(),
         )
         // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
         // cycle the AA mode.
         .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
-        .with_shortcut(KeyCode::KeyM, toggle_waterfall)
+        .with_shortcut(KeyCode::KeyM, toggle_gpu_pipeline)
         .with_shortcut(KeyCode::KeyO, toggle_oit)
         .run();
 }
@@ -229,7 +192,7 @@ fn text_stress_title_bar() -> TitleBar {
         ))
         .control(TitleBarControl::segmented(
             "M",
-            [TitleBarSegment::new(METER_CHIP, "Meter")],
+            [TitleBarSegment::new(PIPELINE_CHIP, "Pipeline")],
         ))
         .control(TitleBarControl::segmented(
             "O",
@@ -374,13 +337,13 @@ fn spawn_home_target(mut commands: Commands) {
     ));
 }
 
-// ── Title-bar controls — pause, anti-alias cycle, meter and OIT toggles ──────
+// ── Title-bar controls — pause, anti-alias cycle, pipeline and OIT toggles ───
 
 /// Title-bar segment id for the pause indicator.
 const PAUSE_CHIP: &str = "pause";
 
-/// Title-bar segment id for the meter (waterfall panel) indicator.
-const METER_CHIP: &str = "meter";
+/// Title-bar segment id for the GPU pipeline indicator.
+const PIPELINE_CHIP: &str = "pipeline";
 
 /// Title-bar segment id for the stable-transparency / OIT indicator.
 const OIT_CHIP: &str = "oit";
@@ -440,689 +403,546 @@ fn toggle_oit(
     }
 }
 
-// ── Measurement — main-thread span: frame wall time and the recv block ───────
+mod diagnostics {
+    use super::*;
 
-/// Start instant of the current main-world frame, recorded in `First`.
-#[derive(Resource)]
-struct MainSpanStart(Instant);
+    pub(super) struct StressDiagnosticsPlugin;
 
-/// Wall time of the previous main-world schedule run (`First` → `Last`) in
-/// milliseconds. The `other` row is this minus the four measured diegetic
-/// spans; the `wait` row is the frame time minus this.
-#[derive(Resource, Default)]
-struct MainThreadMs(f32);
-
-/// Instant the main schedule finished (end of `Last`). Read on the main thread
-/// inside `ExtractSchedule` (which runs during `renderer_extract`) to measure
-/// the `recv` block: `extract_begin - main_schedule_end`.
-#[derive(Resource)]
-struct MainScheduleEnd(Instant);
-
-fn mark_main_span_start(mut start: ResMut<MainSpanStart>) { start.0 = Instant::now(); }
-
-fn publish_main_span(
-    start: Res<MainSpanStart>,
-    mut main_thread: ResMut<MainThreadMs>,
-    mut schedule_end: ResMut<MainScheduleEnd>,
-    spans: Res<RenderThreadSpans>,
-) {
-    let end = Instant::now();
-    main_thread.0 = duration_ms(start.0, end);
-    schedule_end.0 = end;
-    spans.0.store_offset(&spans.0.main_start_ms, start.0);
-    spans.0.store_offset(&spans.0.main_end_ms, end);
-}
-
-/// First system in `ExtractSchedule` (runs on the main thread the instant the
-/// `recv().await` in `renderer_extract` unblocks). Stores the wait the main
-/// thread just spent blocked on the render thread returning the previous
-/// frame's render app — the true Main-lane `wait`.
-fn mark_extract_begin(main_end: Extract<Res<MainScheduleEnd>>, spans: Res<RenderThreadSpans>) {
-    let now = Instant::now();
-    let recv = duration_ms(main_end.0, now);
-    let extract_begin_ms = duration_ms(spans.0.epoch, now);
-    let render_end_ms = span_ms(&spans.0.render_end_ms);
-    let return_gap = timeline_duration_ms(render_end_ms, extract_begin_ms).unwrap_or(0.0);
-    spans.0.recv.store(recv.to_bits(), Ordering::Relaxed);
-    spans
-        .0
-        .extract_begin_ms
-        .store(extract_begin_ms.to_bits(), Ordering::Relaxed);
-    spans
-        .0
-        .return_gap
-        .store(return_gap.to_bits(), Ordering::Relaxed);
-}
-
-// ── Measurement — render-thread spans: per-stage render timings ──────────────
-
-/// Latest render-thread segment values in milliseconds, stored as `f32` bits.
-/// Written at the end of each `Render` schedule run on the render thread and
-/// read by the overlay on the main thread. The segments sum to `render`.
-struct RenderSpanBits {
-    /// Shared epoch for every timeline offset written by either thread.
-    epoch:            Instant,
-    /// Whole `Render` schedule.
-    render:           AtomicU32,
-    /// The `PrepareAssets` stage: re-uploading every mesh / image / buffer
-    /// asset modified this frame.
-    assets:           AtomicU32,
-    /// CPU before `PrepareViews` / render graph: extract-commands apply,
-    /// prepare meshes and views, specialize, queue, phase sort, bind groups.
-    prep:             AtomicU32,
-    /// The `PrepareViews` stage containing the swapchain acquire — where the
-    /// render thread blocks when the GPU is behind.
-    gpu_wait:         AtomicU32,
-    /// The `Render` stage: render-graph execution — pass encoding, submit,
-    /// present.
-    render_graph:     AtomicU32,
-    /// Render cleanup and schedule closeout after the render graph has run.
-    cleanup:          AtomicU32,
-    /// Main-thread block in `renderer_extract`: the `recv().await` that waits
-    /// for the render thread to return the previous frame's render app (after
-    /// its whole `Render` schedule, render graph and cleanup included) before
-    /// extract can run.
-    /// Measured on the main thread as `extract_begin - main_schedule_end`; this
-    /// is what the Main lane's `wait` actually is.
-    recv:             AtomicU32,
-    /// Render thread parked after a complete `Render` schedule, waiting for the
-    /// main thread to extract and return the render app.
-    wait_for_extract: AtomicU32,
-    /// Gap between render-schedule publication and the main thread beginning
-    /// extract: schedule closeout, return-app handoff, and main `recv` unblock
-    /// overhead.
-    return_gap:       AtomicU32,
-    /// Main `First` mark, as milliseconds since [`Self::epoch`].
-    main_start_ms:    AtomicU32,
-    /// Main `Last` mark, as milliseconds since [`Self::epoch`].
-    main_end_ms:      AtomicU32,
-    /// Main-thread `ExtractSchedule` begin mark, as milliseconds since
-    /// [`Self::epoch`].
-    extract_begin_ms: AtomicU32,
-    /// Render schedule start mark, as milliseconds since [`Self::epoch`].
-    render_start_ms:  AtomicU32,
-    /// Render schedule published-end mark, as milliseconds since [`Self::epoch`].
-    render_end_ms:    AtomicU32,
-}
-
-impl RenderSpanBits {
-    const fn new(epoch: Instant) -> Self {
-        Self {
-            epoch,
-            render: AtomicU32::new(0),
-            assets: AtomicU32::new(0),
-            prep: AtomicU32::new(0),
-            gpu_wait: AtomicU32::new(0),
-            render_graph: AtomicU32::new(0),
-            cleanup: AtomicU32::new(0),
-            recv: AtomicU32::new(0),
-            wait_for_extract: AtomicU32::new(0),
-            return_gap: AtomicU32::new(0),
-            main_start_ms: AtomicU32::new(0),
-            main_end_ms: AtomicU32::new(0),
-            extract_begin_ms: AtomicU32::new(0),
-            render_start_ms: AtomicU32::new(0),
-            render_end_ms: AtomicU32::new(0),
+    impl Plugin for StressDiagnosticsPlugin {
+        fn build(&self, app: &mut App) {
+            app.insert_resource(MainSpanStart(Instant::now()));
+            app.insert_resource(MainScheduleEnd(Instant::now()));
+            app.init_resource::<MainThreadMs>();
+            app.add_systems(First, mark_main_span_start);
+            app.add_systems(Last, publish_main_span);
+            app.add_plugins((RenderThreadTimingPlugin, DrawCountPlugin));
         }
     }
 
-    fn store_offset(&self, bits: &AtomicU32, instant: Instant) {
-        bits.store(
-            duration_ms(self.epoch, instant).to_bits(),
-            Ordering::Relaxed,
-        );
+    // ── Main-thread span: frame wall time and the recv block ─────────────────────
+
+    /// Start instant of the current main-world frame, recorded in `First`.
+    #[derive(Resource)]
+    struct MainSpanStart(Instant);
+
+    /// Wall time of the previous main-world schedule run (`First` → `Last`) in
+    /// milliseconds. The `other` row is this minus the four measured diegetic
+    /// spans; the `wait` row is the frame time minus this.
+    #[derive(Resource, Default)]
+    pub(super) struct MainThreadMs(f32);
+
+    impl MainThreadMs {
+        pub(super) const fn ms(&self) -> f32 { self.0 }
     }
-}
 
-/// Main-world handle to the shared [`RenderSpanBits`].
-#[derive(Resource, Clone)]
-struct RenderThreadSpans(Arc<RenderSpanBits>);
+    /// Instant the main schedule finished (end of `Last`). Read on the main thread
+    /// inside `ExtractSchedule` (which runs during `renderer_extract`) to measure
+    /// the `recv` block: `extract_begin - main_schedule_end`.
+    #[derive(Resource)]
+    struct MainScheduleEnd(Instant);
 
-/// Render-world `Instant` marks at `Render`-schedule set boundaries.
-#[derive(Resource)]
-struct RenderMarks {
-    start:               Instant,
-    before_assets:       Instant,
-    after_assets:        Instant,
-    before_views:        Instant,
-    after_views:         Instant,
-    before_render_graph: Instant,
-    after_render_graph:  Instant,
-    end:                 Instant,
-    completed:           bool,
-}
+    fn mark_main_span_start(mut start: ResMut<MainSpanStart>) { start.0 = Instant::now(); }
 
-impl Default for RenderMarks {
-    fn default() -> Self {
+    fn publish_main_span(
+        start: Res<MainSpanStart>,
+        mut main_thread: ResMut<MainThreadMs>,
+        mut schedule_end: ResMut<MainScheduleEnd>,
+        spans: Res<RenderThreadSpans>,
+    ) {
+        let end = Instant::now();
+        main_thread.0 = duration_ms(start.0, end);
+        schedule_end.0 = end;
+        spans.0.store_offset(&spans.0.main_start_ms, start.0);
+        spans.0.store_offset(&spans.0.main_end_ms, end);
+    }
+
+    /// First system in `ExtractSchedule` (runs on the main thread the instant the
+    /// `recv().await` in `renderer_extract` unblocks). Stores the wait the main
+    /// thread just spent blocked on the render thread returning the previous
+    /// frame's render app — the true Main-lane `wait`.
+    fn mark_extract_begin(main_end: Extract<Res<MainScheduleEnd>>, spans: Res<RenderThreadSpans>) {
         let now = Instant::now();
-        Self {
-            start:               now,
-            before_assets:       now,
-            after_assets:        now,
-            before_views:        now,
-            after_views:         now,
-            before_render_graph: now,
-            after_render_graph:  now,
-            end:                 now,
-            completed:           false,
-        }
-    }
-}
-
-/// Brackets the render app's `Render` schedule with `Instant` marks at its set
-/// boundaries and publishes the segment milliseconds to the main world through
-/// [`RenderThreadSpans`].
-///
-/// The render thread runs in parallel with the next main-world frame, so on a
-/// GPU-bound frame `render` approaches the frame time — with the excess
-/// sitting in `gpu_wait` — while the main-world rows stay small.
-struct RenderThreadTimingPlugin;
-
-impl Plugin for RenderThreadTimingPlugin {
-    fn build(&self, app: &mut App) {
-        let shared = RenderThreadSpans(Arc::new(RenderSpanBits::new(Instant::now())));
-        app.insert_resource(shared.clone());
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.insert_resource(shared);
-        render_app.init_resource::<RenderMarks>();
-        render_app.add_systems(ExtractSchedule, mark_extract_begin);
-        render_app.add_systems(
-            Render,
-            (
-                mark_render_start.before(RenderSystems::ExtractCommands),
-                mark_before_assets
-                    .after(RenderSystems::ExtractCommands)
-                    .before(RenderSystems::PrepareAssets),
-                mark_after_assets
-                    .after(RenderSystems::PrepareAssets)
-                    .before(RenderSystems::PrepareMeshes),
-                mark_before_views
-                    .after(RenderSystems::Specialize)
-                    .before(RenderSystems::PrepareViews),
-                mark_after_views
-                    .after(RenderSystems::PrepareViews)
-                    .before(RenderSystems::Queue),
-                mark_before_render_graph
-                    .after(RenderSystems::Prepare)
-                    .before(RenderSystems::Render),
-                mark_after_render_graph
-                    .after(RenderSystems::Render)
-                    .before(RenderSystems::Cleanup),
-                publish_render_spans.after(RenderSystems::PostCleanup),
-            ),
-        );
-    }
-}
-
-fn mark_render_start(mut marks: ResMut<RenderMarks>, spans: Res<RenderThreadSpans>) {
-    let now = Instant::now();
-    if marks.completed {
-        let wait_for_extract = duration_ms(marks.end, now);
+        let recv = duration_ms(main_end.0, now);
+        let extract_begin_ms = duration_ms(spans.0.epoch, now);
+        let render_end_ms = span_ms(&spans.0.render_end_ms);
+        let return_gap = timeline_duration_ms(render_end_ms, extract_begin_ms).unwrap_or(0.0);
+        spans.0.recv.store(recv.to_bits(), Ordering::Relaxed);
         spans
             .0
-            .wait_for_extract
-            .store(wait_for_extract.to_bits(), Ordering::Relaxed);
+            .extract_begin_ms
+            .store(extract_begin_ms.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .return_gap
+            .store(return_gap.to_bits(), Ordering::Relaxed);
     }
-    marks.start = now;
-    spans.0.store_offset(&spans.0.render_start_ms, now);
-}
 
-fn mark_before_assets(mut marks: ResMut<RenderMarks>) { marks.before_assets = Instant::now(); }
+    // ── Measurement — render-thread spans: per-stage render timings ──────────────
 
-fn mark_after_assets(mut marks: ResMut<RenderMarks>) { marks.after_assets = Instant::now(); }
-
-fn mark_before_views(mut marks: ResMut<RenderMarks>) { marks.before_views = Instant::now(); }
-
-fn mark_after_views(mut marks: ResMut<RenderMarks>) { marks.after_views = Instant::now(); }
-
-fn mark_before_render_graph(mut marks: ResMut<RenderMarks>) {
-    marks.before_render_graph = Instant::now();
-}
-
-fn mark_after_render_graph(mut marks: ResMut<RenderMarks>) {
-    marks.after_render_graph = Instant::now();
-}
-
-fn publish_render_spans(mut marks: ResMut<RenderMarks>, spans: Res<RenderThreadSpans>) {
-    let end = Instant::now();
-    let render = duration_ms(marks.start, end);
-    let assets = duration_ms(marks.before_assets, marks.after_assets);
-    let gpu_wait = duration_ms(marks.before_views, marks.after_views);
-    let render_graph = duration_ms(marks.before_render_graph, marks.after_render_graph);
-    let cleanup = duration_ms(marks.after_render_graph, end);
-    let prep = (render - assets - gpu_wait - render_graph - cleanup).max(0.0);
-    spans.0.render.store(render.to_bits(), Ordering::Relaxed);
-    spans.0.assets.store(assets.to_bits(), Ordering::Relaxed);
-    spans.0.prep.store(prep.to_bits(), Ordering::Relaxed);
-    spans
-        .0
-        .gpu_wait
-        .store(gpu_wait.to_bits(), Ordering::Relaxed);
-    spans
-        .0
-        .render_graph
-        .store(render_graph.to_bits(), Ordering::Relaxed);
-    spans.0.cleanup.store(cleanup.to_bits(), Ordering::Relaxed);
-    spans.0.store_offset(&spans.0.render_end_ms, end);
-    marks.end = end;
-    marks.completed = true;
-}
-
-/// One shared segment value, decoded from its `f32` bits.
-fn span_ms(bits: &AtomicU32) -> f32 { f32::from_bits(bits.load(Ordering::Relaxed)) }
-
-fn duration_ms(start: Instant, end: Instant) -> f32 {
-    end.saturating_duration_since(start).as_secs_f32() * MILLISECONDS_PER_SECOND
-}
-
-fn timeline_duration_ms(start_ms: f32, end_ms: f32) -> Option<f32> {
-    if has_timeline_mark(start_ms) && has_timeline_mark(end_ms) && end_ms >= start_ms {
-        Some(end_ms - start_ms)
-    } else {
-        None
+    /// Latest render-thread segment values in milliseconds, stored as `f32` bits.
+    /// Written at the end of each `Render` schedule run on the render thread and
+    /// read by the overlay on the main thread. The segments sum to `render`.
+    struct RenderSpanBits {
+        /// Shared epoch for every timeline offset written by either thread.
+        epoch:            Instant,
+        /// Whole `Render` schedule.
+        render:           AtomicU32,
+        /// The `PrepareAssets` stage: re-uploading every mesh / image / buffer
+        /// asset modified this frame.
+        assets:           AtomicU32,
+        /// CPU before `PrepareViews` / render graph: extract-commands apply,
+        /// prepare meshes and views, specialize, queue, phase sort, bind groups.
+        prep:             AtomicU32,
+        /// The `PrepareViews` stage containing the swapchain acquire — where the
+        /// render thread blocks when the GPU is behind.
+        gpu_wait:         AtomicU32,
+        /// Root `RenderGraph` schedule: camera graph execution, command encoding,
+        /// queued command-buffer submit, and finish systems.
+        render_graph:     AtomicU32,
+        /// `RenderGraphSystems::Render`: camera graph execution and command
+        /// encoding before queued command buffers are submitted.
+        graph_render:     AtomicU32,
+        /// `RenderGraphSystems::Submit`: queued command-buffer submit and
+        /// uncovered-swapchain handling.
+        graph_submit:     AtomicU32,
+        /// `RenderGraphSystems::Finish`: final root-graph systems.
+        graph_finish:     AtomicU32,
+        /// Render cleanup and schedule closeout after the root `RenderGraph`
+        /// schedule has run.
+        cleanup:          AtomicU32,
+        /// Main-thread block in `renderer_extract`: the `recv().await` that waits
+        /// for the render thread to return the previous frame's render app (after
+        /// its whole `Render` schedule, render graph and cleanup included) before
+        /// extract can run.
+        /// Measured on the main thread as `extract_begin - main_schedule_end`; this
+        /// is what the Main lane's `wait` actually is.
+        recv:             AtomicU32,
+        /// Render thread parked after a complete `Render` schedule, waiting for the
+        /// main thread to extract and return the render app.
+        wait_for_extract: AtomicU32,
+        /// Gap between render-schedule publication and the main thread beginning
+        /// extract: schedule closeout, return-app handoff, and main `recv` unblock
+        /// overhead.
+        return_gap:       AtomicU32,
+        /// Main `First` mark, as milliseconds since [`Self::epoch`].
+        main_start_ms:    AtomicU32,
+        /// Main `Last` mark, as milliseconds since [`Self::epoch`].
+        main_end_ms:      AtomicU32,
+        /// Main-thread `ExtractSchedule` begin mark, as milliseconds since
+        /// [`Self::epoch`].
+        extract_begin_ms: AtomicU32,
+        /// Render schedule start mark, as milliseconds since [`Self::epoch`].
+        render_start_ms:  AtomicU32,
+        /// Render schedule published-end mark, as milliseconds since [`Self::epoch`].
+        render_end_ms:    AtomicU32,
     }
-}
 
-fn relative_timeline_offset_ms(anchor_ms: f32, mark_ms: f32) -> f32 {
-    if has_timeline_mark(anchor_ms) && has_timeline_mark(mark_ms) {
-        (mark_ms - anchor_ms).max(0.0)
-    } else {
-        0.0
-    }
-}
-
-fn has_timeline_mark(mark_ms: f32) -> bool { mark_ms.is_finite() && mark_ms > 0.0 }
-
-// ── Measurement — GPU frame timer: timestamp brackets on the 3D pass ─────────
-
-/// Nanoseconds per millisecond, for converting timestamp ticks to `ms`.
-const NANOSECONDS_PER_MILLISECOND: f64 = 1.0e6;
-/// Number of timestamp slots in the per-frame query set.
-const GPU_TIMER_QUERY_COUNT: u32 = 2;
-/// Byte size of the two-slot timestamp read-back: `2 × u64`.
-const GPU_TIMER_BYTES: u64 = 16;
-/// Byte size of one timestamp query result.
-const GPU_TIMESTAMP_BYTES: usize = std::mem::size_of::<u64>();
-/// Read-slice byte length for the two timestamp results.
-const GPU_TIMER_READ_BYTES: usize = 2 * GPU_TIMESTAMP_BYTES;
-/// Upper bound (ms) on a believable single-frame 3D-pass GPU time. A decode
-/// above this means the two timestamps didn't pair cleanly (a stale or
-/// out-of-order slot); the sample is dropped rather than poisoning the mean.
-const GPU_TIMER_MAX_REASONABLE_MS: f32 = 1_000.0;
-
-/// True GPU duration of the main camera's 3D pass set (opaque + transparent +
-/// OIT resolve), in milliseconds, stored as `f32` bits. Written on the render
-/// thread once a frame's timestamps have been read back, read by the overlay on
-/// the main thread.
-#[derive(Resource, Clone)]
-struct GpuFrameMs(Arc<AtomicU32>);
-
-/// Marks the one camera whose 3D pass set is bracketed by GPU timestamps.
-/// Extracted to the render world so the marker systems run for exactly that
-/// view and skip the screen-space overlay cameras (which also run `Core3d`).
-#[derive(Component, Clone, Copy, ExtractComponent)]
-struct GpuTimedView;
-
-/// Read-back cycle position of the single timestamp buffer. Capture starts only
-/// from `Idle`, so a frame whose buffer is still mapped is skipped — capture
-/// lands roughly every other frame, which the second-scale overlay ignores.
-enum GpuTimerPhase {
-    /// Free to record a new timestamp pair.
-    Idle,
-    /// Timestamps resolved + copied this frame; the read buffer needs mapping.
-    Pending,
-    /// `map_async` is in flight; waiting for the GPU to finish the copy.
-    Mapping,
-}
-
-/// Render-world GPU timestamp resources, created once in `RenderStartup`.
-#[derive(Resource)]
-struct GpuTimer {
-    /// Two-slot timestamp query set: slot 0 written at the *end* of the start
-    /// marker pass (just before the opaque pass), slot 1 at the *beginning* of
-    /// the end marker pass (just after the OIT resolve).
-    query_set:      QuerySet,
-    /// 1×1 throwaway color target the two marker render passes draw into. A
-    /// render pass needs an attachment, and a real (non-empty) pass is what makes
-    /// Apple Silicon actually record the stage-boundary timestamp — an empty
-    /// compute pass records nothing. Isolated from the real frame so it can't
-    /// disturb rendering; the marker passes carry no draws, only the timestamp
-    /// writes that bracket the main 3D passes in submission order.
-    dummy_view:     TextureView,
-    /// `QUERY_RESOLVE | COPY_SRC` buffer the query set resolves into.
-    resolve_buffer: Buffer,
-    /// `COPY_DST | MAP_READ` buffer the resolve buffer is copied into for CPU
-    /// read-back.
-    read_buffer:    Buffer,
-    /// Nanoseconds per timestamp tick, from `Queue::get_timestamp_period`.
-    period_ns:      f32,
-    /// Read-back cycle position; see [`GpuTimerPhase`].
-    phase:          GpuTimerPhase,
-    /// Set by the `map_async` callback once the read buffer is mapped.
-    mapped:         Arc<AtomicBool>,
-}
-
-/// Brackets the main camera's 3D pass set with two GPU timestamps — written at
-/// the stage boundaries of two minimal marker render passes, the only place
-/// Apple Silicon samples GPU counters — then resolves, reads them back, and
-/// publishes the duration to the main world through [`GpuFrameMs`].
-struct GpuFrameTimingPlugin;
-
-impl Plugin for GpuFrameTimingPlugin {
-    fn build(&self, app: &mut App) {
-        let shared = GpuFrameMs(Arc::new(AtomicU32::new(0.0_f32.to_bits())));
-        app.insert_resource(shared.clone());
-        app.add_plugins(ExtractComponentPlugin::<GpuTimedView>::default());
-        // Runs every frame until the camera exists and is marked — the `OrbitCam`
-        // is spawned after `Startup`, so a one-shot `Startup` system would miss it.
-        app.add_systems(Update, mark_gpu_timed_camera);
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.insert_resource(shared);
-        render_app.add_systems(RenderStartup, init_gpu_timer);
-        render_app.add_systems(
-            Core3d,
-            (
-                gpu_timer_start
-                    .after(Core3dSystems::Prepass)
-                    .before(Core3dSystems::MainPass),
-                gpu_timer_end
-                    .after(Core3dSystems::MainPass)
-                    .before(Core3dSystems::PostProcess),
-            ),
-        );
-        render_app.add_systems(Render, gpu_timer_readback.after(RenderSystems::PostCleanup));
-    }
-}
-
-/// Inserts [`GpuTimedView`] on the main `OrbitCam` so the marker systems bracket
-/// its 3D pass set and not the overlay cameras'. Idempotent: the
-/// `Without<GpuTimedView>` filter makes it a no-op once the marker is set.
-fn mark_gpu_timed_camera(
-    mut commands: Commands,
-    cameras: Query<Entity, (With<OrbitCam>, Without<GpuTimedView>)>,
-) {
-    for entity in &cameras {
-        commands.entity(entity).insert(GpuTimedView);
-    }
-}
-
-/// Creates the timestamp query set and the resolve / read buffers from the
-/// render device, reading the timestamp period from the queue.
-fn init_gpu_timer(mut commands: Commands, device: Res<RenderDevice>, queue: Res<RenderQueue>) {
-    let wgpu_device = device.wgpu_device();
-    let query_set = wgpu_device.create_query_set(&QuerySetDescriptor {
-        label: Some("gpu_frame_timer"),
-        ty:    QueryType::Timestamp,
-        count: GPU_TIMER_QUERY_COUNT,
-    });
-    let resolve_buffer = wgpu_device.create_buffer(&BufferDescriptor {
-        label:              Some("gpu_frame_timer_resolve"),
-        size:               GPU_TIMER_BYTES,
-        usage:              BufferUsages::QUERY_RESOLVE | BufferUsages::COPY_SRC,
-        mapped_at_creation: false,
-    });
-    let read_buffer = wgpu_device.create_buffer(&BufferDescriptor {
-        label:              Some("gpu_frame_timer_read"),
-        size:               GPU_TIMER_BYTES,
-        usage:              BufferUsages::COPY_DST | BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    // 1×1 throwaway target the marker passes draw into; the view keeps the
-    // texture alive, so the texture handle can drop here.
-    let dummy_view = wgpu_device
-        .create_texture(&TextureDescriptor {
-            label:           Some("gpu_frame_timer_marker"),
-            size:            Extent3d {
-                width:                 1,
-                height:                1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count:    1,
-            dimension:       TextureDimension::D2,
-            format:          TextureFormat::Rgba8Unorm,
-            usage:           TextureUsages::RENDER_ATTACHMENT,
-            view_formats:    &[],
-        })
-        .create_view(&TextureViewDescriptor::default());
-    let period_ns = queue.0.get_timestamp_period();
-    commands.insert_resource(GpuTimer {
-        query_set,
-        dummy_view,
-        resolve_buffer,
-        read_buffer,
-        period_ns,
-        phase: GpuTimerPhase::Idle,
-        mapped: Arc::new(AtomicBool::new(false)),
-    });
-}
-
-/// Writes timestamp 0 at the *end* of a marker render pass scheduled just before
-/// the main camera's opaque pass, so it stamps the GPU clock right as the 3D
-/// work begins. Skips while a prior frame's read-back is still in flight.
-fn gpu_timer_start(
-    timer: Option<Res<GpuTimer>>,
-    _view: ViewQuery<(), With<GpuTimedView>>,
-    mut ctx: RenderContext,
-) {
-    let Some(timer) = timer else {
-        return;
-    };
-    if !matches!(timer.phase, GpuTimerPhase::Idle) {
-        return;
-    }
-    drop(
-        ctx.command_encoder()
-            .begin_render_pass(&RenderPassDescriptor {
-                label:                    Some("gpu_timer_start"),
-                color_attachments:        &[Some(RenderPassColorAttachment {
-                    view:           &timer.dummy_view,
-                    depth_slice:    None,
-                    resolve_target: None,
-                    ops:            Operations {
-                        load:  LoadOp::Clear(wgpu::Color::BLACK),
-                        store: StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes:         Some(RenderPassTimestampWrites {
-                    query_set:                     &timer.query_set,
-                    beginning_of_pass_write_index: None,
-                    end_of_pass_write_index:       Some(0),
-                }),
-                occlusion_query_set:      None,
-                multiview_mask:           None,
-            }),
-    );
-}
-
-/// Writes timestamp 1 at the *beginning* of a marker render pass scheduled just
-/// after the main camera's OIT resolve, then resolves both timestamps and copies
-/// them into the read buffer. Skips while a prior frame's read-back is still in
-/// flight.
-fn gpu_timer_end(
-    timer: Option<ResMut<GpuTimer>>,
-    _view: ViewQuery<(), With<GpuTimedView>>,
-    mut ctx: RenderContext,
-) {
-    let Some(mut timer) = timer else {
-        return;
-    };
-    if !matches!(timer.phase, GpuTimerPhase::Idle) {
-        return;
-    }
-    drop(
-        ctx.command_encoder()
-            .begin_render_pass(&RenderPassDescriptor {
-                label:                    Some("gpu_timer_end"),
-                color_attachments:        &[Some(RenderPassColorAttachment {
-                    view:           &timer.dummy_view,
-                    depth_slice:    None,
-                    resolve_target: None,
-                    ops:            Operations {
-                        load:  LoadOp::Clear(wgpu::Color::BLACK),
-                        store: StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes:         Some(RenderPassTimestampWrites {
-                    query_set:                     &timer.query_set,
-                    beginning_of_pass_write_index: Some(1),
-                    end_of_pass_write_index:       None,
-                }),
-                occlusion_query_set:      None,
-                multiview_mask:           None,
-            }),
-    );
-    let encoder = ctx.command_encoder();
-    encoder.resolve_query_set(
-        &timer.query_set,
-        0..GPU_TIMER_QUERY_COUNT,
-        &timer.resolve_buffer,
-        0,
-    );
-    encoder.copy_buffer_to_buffer(
-        &timer.resolve_buffer,
-        0,
-        &timer.read_buffer,
-        0,
-        GPU_TIMER_BYTES,
-    );
-    timer.phase = GpuTimerPhase::Pending;
-}
-
-/// Maps the read buffer one frame after the copy, decodes the two timestamps to
-/// milliseconds, and publishes to [`GpuFrameMs`]. Runs after the render graph
-/// has submitted, so the copy is queued before the map.
-fn gpu_timer_readback(
-    timer: Option<ResMut<GpuTimer>>,
-    device: Res<RenderDevice>,
-    gpu_ms: Res<GpuFrameMs>,
-) {
-    let Some(mut timer) = timer else {
-        return;
-    };
-    match timer.phase {
-        GpuTimerPhase::Pending => {
-            timer.mapped.store(false, Ordering::Relaxed);
-            let mapped = timer.mapped.clone();
-            timer
-                .read_buffer
-                .slice(..)
-                .map_async(MapMode::Read, move |result| {
-                    if result.is_ok() {
-                        mapped.store(true, Ordering::Relaxed);
-                    }
-                });
-            timer.phase = GpuTimerPhase::Mapping;
-            let _ = device.poll(PollType::Poll);
-        },
-        GpuTimerPhase::Mapping => {
-            let _ = device.poll(PollType::Poll);
-            if timer.mapped.load(Ordering::Relaxed) {
-                let sample_ms = {
-                    let view = timer.read_buffer.slice(..).get_mapped_range();
-                    let start = timestamp_from_bytes(&view[0..GPU_TIMESTAMP_BYTES]);
-                    let end =
-                        timestamp_from_bytes(&view[GPU_TIMESTAMP_BYTES..GPU_TIMER_READ_BYTES]);
-                    // `checked_sub` is `None` when the slots didn't land in order
-                    // (a frame where the pair wrapped); drop it, keep last good.
-                    end.checked_sub(start).map(|ticks| {
-                        (ticks.to_f64() * f64::from(timer.period_ns) / NANOSECONDS_PER_MILLISECOND)
-                            .to_f32()
-                    })
-                };
-                timer.read_buffer.unmap();
-                if let Some(ms) = sample_ms
-                    && ms.is_finite()
-                    && ms <= GPU_TIMER_MAX_REASONABLE_MS
-                {
-                    gpu_ms.0.store(ms.to_bits(), Ordering::Relaxed);
-                }
-                timer.phase = GpuTimerPhase::Idle;
+    impl RenderSpanBits {
+        const fn new(epoch: Instant) -> Self {
+            Self {
+                epoch,
+                render: AtomicU32::new(0),
+                assets: AtomicU32::new(0),
+                prep: AtomicU32::new(0),
+                gpu_wait: AtomicU32::new(0),
+                render_graph: AtomicU32::new(0),
+                graph_render: AtomicU32::new(0),
+                graph_submit: AtomicU32::new(0),
+                graph_finish: AtomicU32::new(0),
+                cleanup: AtomicU32::new(0),
+                recv: AtomicU32::new(0),
+                wait_for_extract: AtomicU32::new(0),
+                return_gap: AtomicU32::new(0),
+                main_start_ms: AtomicU32::new(0),
+                main_end_ms: AtomicU32::new(0),
+                extract_begin_ms: AtomicU32::new(0),
+                render_start_ms: AtomicU32::new(0),
+                render_end_ms: AtomicU32::new(0),
             }
-        },
-        GpuTimerPhase::Idle => {},
+        }
+
+        fn store_offset(&self, bits: &AtomicU32, instant: Instant) {
+            bits.store(
+                duration_ms(self.epoch, instant).to_bits(),
+                Ordering::Relaxed,
+            );
+        }
     }
-}
 
-const fn timestamp_from_bytes(bytes: &[u8]) -> u64 {
-    let mut timestamp = [0_u8; GPU_TIMESTAMP_BYTES];
-    timestamp.copy_from_slice(bytes);
-    u64::from_le_bytes(timestamp)
-}
+    /// Main-world handle to the shared [`RenderSpanBits`].
+    #[derive(Resource, Clone)]
+    pub(super) struct RenderThreadSpans(Arc<RenderSpanBits>);
 
-// ── Measurement — shadow draw counts: per-view shadow phase items ────────────
+    impl RenderThreadSpans {
+        pub(super) fn recv_ms(&self) -> f32 { span_ms(&self.0.recv) }
 
-/// Latest per-frame phase-item counts, written on the render thread after
-/// `PhaseSort` and read by the overlay on the main thread. Path-agnostic — it
-/// counts whichever toggle state is active — so toggle-off vs toggle-on reads
-/// come from one session.
-#[derive(Default)]
-struct DrawCountBits {
-    /// Shadow-phase caster draws summed across shadow views (batchable +
-    /// unbatchable bins, plus one per multidrawable batch set).
-    shadow:          AtomicU32,
-    /// Caster draws per shadow view (one view per cascade per shadow-casting
-    /// light), largest first — the components that sum to `shadow`.
-    shadow_per_view: Mutex<Vec<u32>>,
-}
+        pub(super) fn main_start_ms(&self) -> f32 { span_ms(&self.0.main_start_ms) }
 
-/// Main-world handle to the shared [`DrawCountBits`].
-#[derive(Resource, Clone)]
-struct DrawCounts(Arc<DrawCountBits>);
+        pub(super) fn main_end_ms(&self) -> f32 { span_ms(&self.0.main_end_ms) }
 
-/// Counts per-view shadow phase items after `RenderSystems::PhaseSort` into
-/// the shared [`DrawCountBits`] the upper-right overlay reads.
-struct DrawCountPlugin;
+        pub(super) fn render_start_ms(&self) -> f32 { span_ms(&self.0.render_start_ms) }
 
-impl Plugin for DrawCountPlugin {
-    fn build(&self, app: &mut App) {
-        let shared = DrawCounts(Arc::new(DrawCountBits::default()));
-        app.insert_resource(shared.clone());
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.insert_resource(shared);
-        render_app.add_systems(
-            Render,
-            count_phase_items
-                .after(RenderSystems::PhaseSort)
-                .before(RenderSystems::Render),
-        );
+        pub(super) fn render_ms(&self) -> f32 { span_ms(&self.0.render) }
+
+        pub(super) fn assets_ms(&self) -> f32 { span_ms(&self.0.assets) }
+
+        pub(super) fn prep_ms(&self) -> f32 { span_ms(&self.0.prep) }
+
+        pub(super) fn gpu_wait_ms(&self) -> f32 { span_ms(&self.0.gpu_wait) }
+
+        pub(super) fn render_graph_ms(&self) -> f32 { span_ms(&self.0.render_graph) }
+
+        pub(super) fn graph_render_ms(&self) -> f32 { span_ms(&self.0.graph_render) }
+
+        pub(super) fn graph_submit_ms(&self) -> f32 { span_ms(&self.0.graph_submit) }
+
+        pub(super) fn graph_finish_ms(&self) -> f32 { span_ms(&self.0.graph_finish) }
+
+        pub(super) fn cleanup_ms(&self) -> f32 { span_ms(&self.0.cleanup) }
+
+        pub(super) fn return_gap_ms(&self) -> f32 { span_ms(&self.0.return_gap) }
+
+        pub(super) fn wait_for_extract_ms(&self) -> f32 { span_ms(&self.0.wait_for_extract) }
     }
-}
 
-fn count_phase_items(shadow_phases: Res<ViewBinnedRenderPhases<Shadow>>, counts: Res<DrawCounts>) {
-    let mut shadow_per_view: Vec<u32> = shadow_phases
-        .values()
-        .map(|phase| {
-            (phase
-                .batchable_meshes
-                .values()
-                .map(|bin| bin.entities().len())
-                .sum::<usize>()
-                + phase
-                    .unbatchable_meshes
+    /// Render-world `Instant` marks at `Render`-schedule set boundaries.
+    #[derive(Resource)]
+    struct RenderMarks {
+        start:               Instant,
+        before_assets:       Instant,
+        after_assets:        Instant,
+        before_views:        Instant,
+        after_views:         Instant,
+        before_render_graph: Instant,
+        after_render_graph:  Instant,
+        end:                 Instant,
+        completed:           bool,
+    }
+
+    /// Root `RenderGraph` schedule marks inside Bevy's `RenderSystems::Render`
+    /// system.
+    #[derive(Resource)]
+    struct RenderGraphMarks {
+        start:        Instant,
+        after_render: Instant,
+        after_submit: Instant,
+        end:          Instant,
+        completed:    bool,
+    }
+
+    impl Default for RenderGraphMarks {
+        fn default() -> Self {
+            let now = Instant::now();
+            Self {
+                start:        now,
+                after_render: now,
+                after_submit: now,
+                end:          now,
+                completed:    false,
+            }
+        }
+    }
+
+    impl RenderGraphMarks {
+        fn total_ms(&self) -> Option<f32> {
+            self.completed.then(|| duration_ms(self.start, self.end))
+        }
+
+        fn render_ms(&self) -> Option<f32> {
+            self.completed
+                .then(|| duration_ms(self.start, self.after_render))
+        }
+
+        fn submit_ms(&self) -> Option<f32> {
+            self.completed
+                .then(|| duration_ms(self.after_render, self.after_submit))
+        }
+
+        fn finish_ms(&self) -> Option<f32> {
+            self.completed
+                .then(|| duration_ms(self.after_submit, self.end))
+        }
+    }
+
+    impl Default for RenderMarks {
+        fn default() -> Self {
+            let now = Instant::now();
+            Self {
+                start:               now,
+                before_assets:       now,
+                after_assets:        now,
+                before_views:        now,
+                after_views:         now,
+                before_render_graph: now,
+                after_render_graph:  now,
+                end:                 now,
+                completed:           false,
+            }
+        }
+    }
+
+    /// Brackets the render app's `Render` schedule with `Instant` marks at its set
+    /// boundaries and publishes the segment milliseconds to the main world through
+    /// [`RenderThreadSpans`].
+    ///
+    /// The render thread runs in parallel with the next main-world frame, so on a
+    /// GPU-bound frame `render` approaches the frame time — with the excess
+    /// sitting in `gpu_wait` — while the main-world rows stay small.
+    struct RenderThreadTimingPlugin;
+
+    impl Plugin for RenderThreadTimingPlugin {
+        fn build(&self, app: &mut App) {
+            let shared = RenderThreadSpans(Arc::new(RenderSpanBits::new(Instant::now())));
+            app.insert_resource(shared.clone());
+            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+                return;
+            };
+            render_app.insert_resource(shared);
+            render_app.init_resource::<RenderMarks>();
+            render_app.init_resource::<RenderGraphMarks>();
+            render_app.add_systems(ExtractSchedule, mark_extract_begin);
+            render_app.add_systems(
+                Render,
+                (
+                    mark_render_start.before(RenderSystems::ExtractCommands),
+                    mark_before_assets
+                        .after(RenderSystems::ExtractCommands)
+                        .before(RenderSystems::PrepareAssets),
+                    mark_after_assets
+                        .after(RenderSystems::PrepareAssets)
+                        .before(RenderSystems::PrepareMeshes),
+                    mark_before_views
+                        .after(RenderSystems::Specialize)
+                        .before(RenderSystems::PrepareViews),
+                    mark_after_views
+                        .after(RenderSystems::PrepareViews)
+                        .before(RenderSystems::Queue),
+                    mark_before_render_graph
+                        .after(RenderSystems::Prepare)
+                        .before(RenderSystems::Render),
+                    mark_after_render_graph
+                        .after(RenderSystems::Render)
+                        .before(RenderSystems::Cleanup),
+                    publish_render_spans.after(RenderSystems::PostCleanup),
+                ),
+            );
+            render_app.add_systems(
+                RenderGraph,
+                (
+                    mark_root_graph_start.in_set(RenderGraphSystems::Begin),
+                    mark_root_graph_after_render
+                        .after(RenderGraphSystems::Render)
+                        .before(RenderGraphSystems::Submit),
+                    mark_root_graph_after_submit
+                        .after(RenderGraphSystems::Submit)
+                        .before(RenderGraphSystems::Finish),
+                    mark_root_graph_end.after(RenderGraphSystems::Finish),
+                ),
+            );
+        }
+    }
+
+    fn mark_render_start(mut marks: ResMut<RenderMarks>, spans: Res<RenderThreadSpans>) {
+        let now = Instant::now();
+        if marks.completed {
+            let wait_for_extract = duration_ms(marks.end, now);
+            spans
+                .0
+                .wait_for_extract
+                .store(wait_for_extract.to_bits(), Ordering::Relaxed);
+        }
+        marks.start = now;
+        spans.0.store_offset(&spans.0.render_start_ms, now);
+    }
+
+    fn mark_before_assets(mut marks: ResMut<RenderMarks>) { marks.before_assets = Instant::now(); }
+
+    fn mark_after_assets(mut marks: ResMut<RenderMarks>) { marks.after_assets = Instant::now(); }
+
+    fn mark_before_views(mut marks: ResMut<RenderMarks>) { marks.before_views = Instant::now(); }
+
+    fn mark_after_views(mut marks: ResMut<RenderMarks>) { marks.after_views = Instant::now(); }
+
+    fn mark_before_render_graph(mut marks: ResMut<RenderMarks>) {
+        marks.before_render_graph = Instant::now();
+    }
+
+    fn mark_after_render_graph(mut marks: ResMut<RenderMarks>) {
+        marks.after_render_graph = Instant::now();
+    }
+
+    fn mark_root_graph_start(mut marks: ResMut<RenderGraphMarks>) {
+        marks.start = Instant::now();
+        marks.completed = false;
+    }
+
+    fn mark_root_graph_after_render(mut marks: ResMut<RenderGraphMarks>) {
+        marks.after_render = Instant::now();
+    }
+
+    fn mark_root_graph_after_submit(mut marks: ResMut<RenderGraphMarks>) {
+        marks.after_submit = Instant::now();
+    }
+
+    fn mark_root_graph_end(mut marks: ResMut<RenderGraphMarks>) {
+        marks.end = Instant::now();
+        marks.completed = true;
+    }
+
+    fn publish_render_spans(
+        mut marks: ResMut<RenderMarks>,
+        graph_marks: Res<RenderGraphMarks>,
+        spans: Res<RenderThreadSpans>,
+    ) {
+        let end = Instant::now();
+        let render = duration_ms(marks.start, end);
+        let assets = duration_ms(marks.before_assets, marks.after_assets);
+        let gpu_wait = duration_ms(marks.before_views, marks.after_views);
+        let outer_render_stage = duration_ms(marks.before_render_graph, marks.after_render_graph);
+        let render_graph = graph_marks.total_ms().unwrap_or(outer_render_stage);
+        let graph_render = graph_marks.render_ms().unwrap_or(render_graph);
+        let graph_submit = graph_marks.submit_ms().unwrap_or(0.0);
+        let graph_finish = graph_marks.finish_ms().unwrap_or(0.0);
+        let post_graph_tail = (outer_render_stage - render_graph).max(0.0);
+        let cleanup = duration_ms(marks.after_render_graph, end) + post_graph_tail;
+        let prep = (render - assets - gpu_wait - render_graph - cleanup).max(0.0);
+        spans.0.render.store(render.to_bits(), Ordering::Relaxed);
+        spans.0.assets.store(assets.to_bits(), Ordering::Relaxed);
+        spans.0.prep.store(prep.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .gpu_wait
+            .store(gpu_wait.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .render_graph
+            .store(render_graph.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .graph_render
+            .store(graph_render.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .graph_submit
+            .store(graph_submit.to_bits(), Ordering::Relaxed);
+        spans
+            .0
+            .graph_finish
+            .store(graph_finish.to_bits(), Ordering::Relaxed);
+        spans.0.cleanup.store(cleanup.to_bits(), Ordering::Relaxed);
+        spans.0.store_offset(&spans.0.render_end_ms, end);
+        marks.end = end;
+        marks.completed = true;
+    }
+
+    /// One shared segment value, decoded from its `f32` bits.
+    fn span_ms(bits: &AtomicU32) -> f32 { f32::from_bits(bits.load(Ordering::Relaxed)) }
+
+    fn duration_ms(start: Instant, end: Instant) -> f32 {
+        end.saturating_duration_since(start).as_secs_f32() * MILLISECONDS_PER_SECOND
+    }
+
+    pub(super) fn timeline_duration_ms(start_ms: f32, end_ms: f32) -> Option<f32> {
+        if has_timeline_mark(start_ms) && has_timeline_mark(end_ms) && end_ms >= start_ms {
+            Some(end_ms - start_ms)
+        } else {
+            None
+        }
+    }
+
+    pub(super) fn relative_timeline_offset_ms(anchor_ms: f32, mark_ms: f32) -> f32 {
+        if has_timeline_mark(anchor_ms) && has_timeline_mark(mark_ms) {
+            (mark_ms - anchor_ms).max(0.0)
+        } else {
+            0.0
+        }
+    }
+
+    fn has_timeline_mark(mark_ms: f32) -> bool { mark_ms.is_finite() && mark_ms > 0.0 }
+
+    // ── Measurement — shadow draw counts: per-view shadow phase items ────────────
+
+    /// Latest per-frame phase-item counts, written on the render thread after
+    /// `PhaseSort` and read by the overlay on the main thread. Path-agnostic — it
+    /// counts whichever toggle state is active — so toggle-off vs toggle-on reads
+    /// come from one session.
+    #[derive(Default)]
+    struct DrawCountBits {
+        /// Shadow-phase caster draws summed across shadow views (batchable +
+        /// unbatchable bins, plus one per multidrawable batch set).
+        shadow:          AtomicU32,
+        /// Caster draws per shadow view (one view per cascade per shadow-casting
+        /// light), largest first — the components that sum to `shadow`.
+        shadow_per_view: Mutex<Vec<u32>>,
+    }
+
+    /// Main-world handle to the shared [`DrawCountBits`].
+    #[derive(Resource, Clone)]
+    pub(super) struct DrawCounts(Arc<DrawCountBits>);
+
+    impl DrawCounts {
+        pub(super) fn shadow_items(&self) -> u32 { self.0.shadow.load(Ordering::Relaxed) }
+
+        pub(super) fn shadow_per_view(&self) -> Vec<u32> {
+            self.0
+                .shadow_per_view
+                .lock()
+                .map(|guard| guard.clone())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Counts per-view shadow phase items after `RenderSystems::PhaseSort` into
+    /// the shared [`DrawCountBits`] the upper-right overlay reads.
+    struct DrawCountPlugin;
+
+    impl Plugin for DrawCountPlugin {
+        fn build(&self, app: &mut App) {
+            let shared = DrawCounts(Arc::new(DrawCountBits::default()));
+            app.insert_resource(shared.clone());
+            let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+                return;
+            };
+            render_app.insert_resource(shared);
+            render_app.add_systems(
+                Render,
+                count_phase_items
+                    .after(RenderSystems::PhaseSort)
+                    .before(RenderSystems::Render),
+            );
+        }
+    }
+
+    fn count_phase_items(
+        shadow_phases: Res<ViewBinnedRenderPhases<Shadow>>,
+        counts: Res<DrawCounts>,
+    ) {
+        let mut shadow_per_view: Vec<u32> = shadow_phases
+            .values()
+            .map(|phase| {
+                (phase
+                    .batchable_meshes
                     .values()
-                    .map(|bin| bin.entities.len())
+                    .map(|bin| bin.entities().len())
                     .sum::<usize>()
-                + phase.multidrawable_meshes.len())
-            .to_u32()
-        })
-        .collect();
-    // Phase-map iteration order is not stable; sort largest-first so the
-    // on-screen breakdown stays in a fixed order frame to frame.
-    shadow_per_view.sort_unstable_by(|a, b| b.cmp(a));
+                    + phase
+                        .unbatchable_meshes
+                        .values()
+                        .map(|bin| bin.entities.len())
+                        .sum::<usize>()
+                    + phase.multidrawable_meshes.len())
+                .to_u32()
+            })
+            .collect();
+        // Phase-map iteration order is not stable; sort largest-first so the
+        // on-screen breakdown stays in a fixed order frame to frame.
+        shadow_per_view.sort_unstable_by(|a, b| b.cmp(a));
 
-    let shadow: u32 = shadow_per_view.iter().sum();
-    counts.0.shadow.store(shadow, Ordering::Relaxed);
-    if let Ok(mut guard) = counts.0.shadow_per_view.lock() {
-        *guard = shadow_per_view;
+        let shadow: u32 = shadow_per_view.iter().sum();
+        counts.0.shadow.store(shadow, Ordering::Relaxed);
+        if let Ok(mut guard) = counts.0.shadow_per_view.lock() {
+            *guard = shadow_per_view;
+        }
     }
 }
 
@@ -1215,8 +1035,7 @@ impl MetricRow {
     }
 }
 
-/// Diagnostic table rows, in display order — two additive blocks, one per
-/// timeline.
+/// Diagnostic table rows, in display order — two additive CPU blocks.
 ///
 /// Main thread: `ms` (frame wall time) = `layout` + `reconcile` + `shaping` +
 /// `mesh` (the measured diegetic spans) + `other` (the rest of the main
@@ -1231,40 +1050,51 @@ impl MetricRow {
 /// `prep` (extract-commands apply, prepare meshes and views, specialize,
 /// queue, sort, bind groups) + `wait for GPU` (the `PrepareViews` stage
 /// containing the swapchain acquire — where the render thread blocks when the
-/// GPU is behind) + `render graph` (render-graph execution: pass encoding,
-/// submit, present) + `cleanup` (render cleanup and schedule closeout after
-/// graph) + `return` (post-schedule app-return handoff and main `recv` unblock
-/// gap) + `extract handoff` (main extracts into the render world and sends the
-/// render app back, allowing the next render schedule to start).
-///
+/// GPU is behind) + `render graph` (root `RenderGraph` schedule: camera graphs,
+/// queued command-buffer submit, and finish systems) + `cleanup` (post-graph
+/// render-system tail and cleanup closeout) + `return` (post-schedule
+/// app-return handoff and main `recv` unblock gap) + `extract handoff` (main
+/// extracts into the render world and sends the render app back, allowing the
+/// next render schedule to start).
 /// [`RowIndent`] controls display hierarchy only; the metric values stay in
 /// this fixed array order.
-const METRIC_ROWS: [MetricRow; 18] = [
+const METRIC_ROWS: [MetricRow; 21] = [
     MetricRow::new("fps", RowIndent::None),
     MetricRow::new("ms/frame", RowIndent::None),
-    MetricRow::accented("layout", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("reconcile", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("shaping", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("mesh", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("other", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("wait for render", RowIndent::Phase, WATERFALL_WAIT_COLOR),
-    MetricRow::accented("extract", RowIndent::Phase, WATERFALL_EXTRACT_COLOR),
-    MetricRow::accented("frame slack", RowIndent::Phase, WATERFALL_FRAME_SLACK_COLOR),
+    MetricRow::accented("layout", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("reconcile", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("shaping", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("mesh", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("other", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("wait for render", RowIndent::Phase, GPU_PIPELINE_WAIT_COLOR),
+    MetricRow::accented("extract", RowIndent::Phase, GPU_PIPELINE_EXTRACT_COLOR),
+    MetricRow::accented(
+        "frame slack",
+        RowIndent::Phase,
+        GPU_PIPELINE_FRAME_SLACK_COLOR,
+    ),
     MetricRow::new("render cycle", RowIndent::None),
-    MetricRow::accented("assets", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("prep", RowIndent::Detail, WATERFALL_WORK_COLOR),
-    MetricRow::accented("wait for GPU", RowIndent::Phase, WATERFALL_WAIT_COLOR),
+    MetricRow::accented("assets", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("prep", RowIndent::Detail, GPU_PIPELINE_WORK_COLOR),
+    MetricRow::accented("wait for GPU", RowIndent::Phase, GPU_PIPELINE_WAIT_COLOR),
     MetricRow::accented(
         "render graph",
         RowIndent::Phase,
-        WATERFALL_RENDER_GRAPH_COLOR,
+        GPU_PIPELINE_RENDER_GRAPH_COLOR,
     ),
-    MetricRow::accented("cleanup", RowIndent::Phase, WATERFALL_CLEANUP_COLOR),
-    MetricRow::accented("return", RowIndent::Phase, WATERFALL_RETURN_COLOR),
+    MetricRow::accented(
+        "camera graphs",
+        RowIndent::Detail,
+        GPU_PIPELINE_RENDER_GRAPH_COLOR,
+    ),
+    MetricRow::accented("submit", RowIndent::Detail, GPU_PIPELINE_GRAPH_SUBMIT_COLOR),
+    MetricRow::accented("finish", RowIndent::Detail, GPU_PIPELINE_GRAPH_FINISH_COLOR),
+    MetricRow::accented("cleanup", RowIndent::Phase, GPU_PIPELINE_CLEANUP_COLOR),
+    MetricRow::accented("return", RowIndent::Phase, GPU_PIPELINE_RETURN_COLOR),
     MetricRow::accented(
         "extract handoff",
         RowIndent::Phase,
-        WATERFALL_IDLE_LABEL_COLOR,
+        GPU_PIPELINE_GAP_LABEL_COLOR,
     ),
 ];
 const METRIC_COUNT: usize = METRIC_ROWS.len();
@@ -1278,7 +1108,7 @@ const INITIAL_METRICS: [&str; METRIC_COUNT] = ["--"; METRIC_COUNT];
 struct StatusPanel;
 
 /// Marker for the upper-right glyph-batch stats panel (Step-2 proof
-/// counters), separate from the waterfall so its wide rows don't stretch it.
+/// counters), separate from the GPU pipeline so its wide rows don't stretch it.
 #[derive(Component)]
 struct BatchStatsPanel;
 
@@ -1300,6 +1130,9 @@ struct PerfSnapshot {
     prep_ms:            f32,
     wait_for_gpu_ms:    f32,
     render_graph_ms:    f32,
+    graph_render_ms:    f32,
+    graph_submit_ms:    f32,
+    graph_finish_ms:    f32,
     cleanup_ms:         f32,
     return_ms:          f32,
     extract_handoff_ms: f32,
@@ -1323,6 +1156,9 @@ impl PerfSnapshot {
         prep_ms:            0.0,
         wait_for_gpu_ms:    0.0,
         render_graph_ms:    0.0,
+        graph_render_ms:    0.0,
+        graph_submit_ms:    0.0,
+        graph_finish_ms:    0.0,
         cleanup_ms:         0.0,
         return_ms:          0.0,
         extract_handoff_ms: 0.0,
@@ -1681,7 +1517,7 @@ fn build_overlay_tree(now: &[String; METRIC_COUNT], max: &[String; METRIC_COUNT]
                         builder,
                         "work",
                         RowIndent::Phase,
-                        Some(WATERFALL_WORK_COLOR),
+                        Some(GPU_PIPELINE_WORK_COLOR),
                     );
                     for index in (MAIN_WORLD_METRIC_START + 1)..RENDER_WORLD_METRIC_START {
                         table_row(
@@ -1705,7 +1541,7 @@ fn build_overlay_tree(now: &[String; METRIC_COUNT], max: &[String; METRIC_COUNT]
                         builder,
                         "work",
                         RowIndent::Phase,
-                        Some(WATERFALL_WORK_COLOR),
+                        Some(GPU_PIPELINE_WORK_COLOR),
                     );
                     for index in (RENDER_WORLD_METRIC_START + 1)..METRIC_COUNT {
                         table_row(
@@ -1847,21 +1683,24 @@ fn update_status_panel(
     // app-frame time not covered by those spans. Values are clamped because
     // spans are sampled one frame apart, so a hitch can momentarily invert
     // them.
-    let main_span_ms = main_thread.0;
+    let main_span_ms = main_thread.ms();
     let other_ms = (main_span_ms - layout_ms - reconcile_ms - shaping_ms - mesh_ms).max(0.0);
     let outside_main_ms = (frame_ms - main_span_ms).max(0.0);
-    let wait_for_render_ms = span_ms(&render_spans.0.recv).clamp(0.0, outside_main_ms);
-    let return_ms = span_ms(&render_spans.0.return_gap);
-    let wait_for_extract_ms = span_ms(&render_spans.0.wait_for_extract);
+    let wait_for_render_ms = render_spans.recv_ms().clamp(0.0, outside_main_ms);
+    let return_ms = render_spans.return_gap_ms();
+    let wait_for_extract_ms = render_spans.wait_for_extract_ms();
     let extract_handoff_ms = (wait_for_extract_ms - return_ms).max(0.0);
     let extract_ms = extract_handoff_ms;
     let frame_slack_ms = (outside_main_ms - wait_for_render_ms - extract_ms).max(0.0);
-    let render_cycle_ms = span_ms(&render_spans.0.render) + wait_for_extract_ms;
-    let assets_ms = span_ms(&render_spans.0.assets);
-    let prep_ms = span_ms(&render_spans.0.prep);
-    let wait_for_gpu_ms = span_ms(&render_spans.0.gpu_wait);
-    let render_graph_ms = span_ms(&render_spans.0.render_graph);
-    let cleanup_ms = span_ms(&render_spans.0.cleanup);
+    let render_cycle_ms = render_spans.render_ms() + wait_for_extract_ms;
+    let assets_ms = render_spans.assets_ms();
+    let prep_ms = render_spans.prep_ms();
+    let wait_for_gpu_ms = render_spans.gpu_wait_ms();
+    let render_graph_ms = render_spans.render_graph_ms();
+    let graph_render_ms = render_spans.graph_render_ms();
+    let graph_submit_ms = render_spans.graph_submit_ms();
+    let graph_finish_ms = render_spans.graph_finish_ms();
+    let cleanup_ms = render_spans.cleanup_ms();
     history.push_back(PerfSnapshot {
         timestamp: time.elapsed_secs(),
         fps: frames_per_second.unwrap_or(0.0).to_f32(),
@@ -1879,6 +1718,9 @@ fn update_status_panel(
         prep_ms,
         wait_for_gpu_ms,
         render_graph_ms,
+        graph_render_ms,
+        graph_submit_ms,
+        graph_finish_ms,
         cleanup_ms,
         return_ms,
         extract_handoff_ms,
@@ -1934,6 +1776,9 @@ fn format_perf_snapshot(snapshot: PerfSnapshot) -> [String; METRIC_COUNT] {
         format!("{:.2}", snapshot.prep_ms),
         format!("{:.2}", snapshot.wait_for_gpu_ms),
         format!("{:.2}", snapshot.render_graph_ms),
+        format!("{:.2}", snapshot.graph_render_ms),
+        format!("{:.2}", snapshot.graph_submit_ms),
+        format!("{:.2}", snapshot.graph_finish_ms),
         format!("{:.2}", snapshot.cleanup_ms),
         format!("{:.2}", snapshot.return_ms),
         format!("{:.2}", snapshot.extract_handoff_ms),
@@ -2051,13 +1896,8 @@ fn update_batch_stats_panel(
         batches:         batch.batches,
         runs:            batch.runs,
         glyphs:          batch.glyph_records,
-        shadow_items:    draw_counts.0.shadow.load(Ordering::Relaxed),
-        shadow_per_view: draw_counts
-            .0
-            .shadow_per_view
-            .lock()
-            .map(|guard| guard.clone())
-            .unwrap_or_default(),
+        shadow_items:    draw_counts.shadow_items(),
+        shadow_per_view: draw_counts.shadow_per_view(),
     };
     let rows = batch_stats_rows(&values);
     let mut key = String::new();
@@ -2103,6 +1943,9 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         sum.prep_ms += sample.prep_ms;
         sum.wait_for_gpu_ms += sample.wait_for_gpu_ms;
         sum.render_graph_ms += sample.render_graph_ms;
+        sum.graph_render_ms += sample.graph_render_ms;
+        sum.graph_submit_ms += sample.graph_submit_ms;
+        sum.graph_finish_ms += sample.graph_finish_ms;
         sum.cleanup_ms += sample.cleanup_ms;
         sum.return_ms += sample.return_ms;
         sum.extract_handoff_ms += sample.extract_handoff_ms;
@@ -2124,6 +1967,9 @@ fn window_mean(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         prep_ms:            sum.prep_ms / count,
         wait_for_gpu_ms:    sum.wait_for_gpu_ms / count,
         render_graph_ms:    sum.render_graph_ms / count,
+        graph_render_ms:    sum.graph_render_ms / count,
+        graph_submit_ms:    sum.graph_submit_ms / count,
+        graph_finish_ms:    sum.graph_finish_ms / count,
         cleanup_ms:         sum.cleanup_ms / count,
         return_ms:          sum.return_ms / count,
         extract_handoff_ms: sum.extract_handoff_ms / count,
@@ -2149,6 +1995,9 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
         peak.prep_ms = peak.prep_ms.max(sample.prep_ms);
         peak.wait_for_gpu_ms = peak.wait_for_gpu_ms.max(sample.wait_for_gpu_ms);
         peak.render_graph_ms = peak.render_graph_ms.max(sample.render_graph_ms);
+        peak.graph_render_ms = peak.graph_render_ms.max(sample.graph_render_ms);
+        peak.graph_submit_ms = peak.graph_submit_ms.max(sample.graph_submit_ms);
+        peak.graph_finish_ms = peak.graph_finish_ms.max(sample.graph_finish_ms);
         peak.cleanup_ms = peak.cleanup_ms.max(sample.cleanup_ms);
         peak.return_ms = peak.return_ms.max(sample.return_ms);
         peak.extract_handoff_ms = peak.extract_handoff_ms.max(sample.extract_handoff_ms);
@@ -2156,110 +2005,116 @@ fn window_peak(history: &VecDeque<PerfSnapshot>) -> PerfSnapshot {
     peak
 }
 
-// ── Overlay — waterfall meter: bottom main/render/GPU timeline lanes ─────────
+// ── Overlay — GPU pipeline: bottom main/render/GPU timeline lanes ───────────
 
 // colors
-/// GPU-busy blocks. The wide block finishes frame N (ends at present); the tail
-/// block starts frame N+1 after the render graph submits. Width comes from the
-/// CPU-clock present anchor, not the timestamp query — see [`gpu_lane_segments`].
-const WATERFALL_GPU_COLOR: Color = Color::srgb(0.0, 0.92, 1.0);
-/// Idle / parked spans: GPU idle gap and render-world extract handoff.
-const WATERFALL_GAP_COLOR: Color = Color::srgb(0.72, 0.78, 0.82);
+/// Inferred Bevy GPU-pressure blocks. These may be executing on the hardware or
+/// queued behind other GPU work; they are not timestamp-measured execution.
+const GPU_PIPELINE_GPU_COLOR: Color = Color::srgb(0.0, 0.92, 1.0);
+/// Neutral spans: GPU available gap, frame slack, and render-world extract
+/// handoff.
+const GPU_PIPELINE_GAP_COLOR: Color = Color::srgb(0.72, 0.78, 0.82);
 /// Main and render lane `work` segments.
-const WATERFALL_WORK_COLOR: Color = Color::srgb(0.30, 0.60, 0.95);
+const GPU_PIPELINE_WORK_COLOR: Color = Color::srgb(0.30, 0.60, 0.95);
 /// Render world N `render graph` segment.
-const WATERFALL_RENDER_GRAPH_COLOR: Color = Color::srgb(0.35, 0.85, 0.45);
+const GPU_PIPELINE_RENDER_GRAPH_COLOR: Color = Color::srgb(0.35, 0.85, 0.45);
+/// Root render-graph submit set.
+const GPU_PIPELINE_GRAPH_SUBMIT_COLOR: Color = Color::srgb(0.70, 0.92, 0.36);
+/// Root render-graph finish set.
+const GPU_PIPELINE_GRAPH_FINISH_COLOR: Color = Color::srgb(0.54, 0.78, 0.38);
 /// Render world N post-graph cleanup work.
-const WATERFALL_CLEANUP_COLOR: Color = Color::srgb(1.0, 0.22, 0.10);
+const GPU_PIPELINE_CLEANUP_COLOR: Color = Color::srgb(1.0, 0.22, 0.10);
 /// Render world N return-app / main-unblock gap before extract starts.
-const WATERFALL_RETURN_COLOR: Color = Color::srgb(0.95, 0.40, 0.56);
+const GPU_PIPELINE_RETURN_COLOR: Color = Color::srgb(0.95, 0.40, 0.56);
 /// Track tint behind each lane — the empty tail past the drawn segments.
-const WATERFALL_TRACK_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
+const GPU_PIPELINE_TRACK_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.06);
 /// Shared between main world N+1 `wait for render` and render world N `wait for GPU`.
-const WATERFALL_WAIT_COLOR: Color = Color::srgb(0.95, 0.65, 0.20);
+const GPU_PIPELINE_WAIT_COLOR: Color = Color::srgb(0.95, 0.65, 0.20);
 /// Main lane `extract` — the main->render copy and send-back.
-const WATERFALL_EXTRACT_COLOR: Color = Color::srgb(0.72, 0.54, 1.0);
+const GPU_PIPELINE_EXTRACT_COLOR: Color = Color::srgb(0.72, 0.54, 1.0);
 /// Unclassified app-frame slack in the perf table; not measured work.
-const WATERFALL_FRAME_SLACK_COLOR: Color = WATERFALL_GAP_COLOR;
+const GPU_PIPELINE_FRAME_SLACK_COLOR: Color = GPU_PIPELINE_GAP_COLOR;
 /// Segment label color for dark backgrounds.
-const WATERFALL_LIGHT_LABEL_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
-/// Perf-table color for rows whose waterfall segment uses [`WATERFALL_GAP_COLOR`].
-const WATERFALL_IDLE_LABEL_COLOR: Color = WATERFALL_GAP_COLOR;
+const GPU_PIPELINE_LIGHT_LABEL_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 1.0);
+/// Perf-table color for rows whose GPU pipeline segment uses
+/// [`GPU_PIPELINE_GAP_COLOR`].
+const GPU_PIPELINE_GAP_LABEL_COLOR: Color = GPU_PIPELINE_GAP_COLOR;
 /// Segment label color for light backgrounds.
-const WATERFALL_DARK_LABEL_COLOR: Color = Color::srgba(0.03, 0.04, 0.06, 1.0);
+const GPU_PIPELINE_DARK_LABEL_COLOR: Color = Color::srgba(0.03, 0.04, 0.06, 1.0);
 /// WCAG luminance weight for linear red.
-const WATERFALL_LUMINANCE_RED_WEIGHT: f32 = 0.2126;
+const GPU_PIPELINE_LUMINANCE_RED_WEIGHT: f32 = 0.2126;
 /// WCAG luminance weight for linear green.
-const WATERFALL_LUMINANCE_GREEN_WEIGHT: f32 = 0.7152;
+const GPU_PIPELINE_LUMINANCE_GREEN_WEIGHT: f32 = 0.7152;
 /// WCAG luminance weight for linear blue.
-const WATERFALL_LUMINANCE_BLUE_WEIGHT: f32 = 0.0722;
+const GPU_PIPELINE_LUMINANCE_BLUE_WEIGHT: f32 = 0.0722;
 /// sRGB breakpoint for converting to linear light.
-const WATERFALL_SRGB_LINEAR_BREAKPOINT: f32 = 0.04045;
-/// Linear divisor below [`WATERFALL_SRGB_LINEAR_BREAKPOINT`].
-const WATERFALL_SRGB_LINEAR_DIVISOR: f32 = 12.92;
+const GPU_PIPELINE_SRGB_LINEAR_BREAKPOINT: f32 = 0.04045;
+/// Linear divisor below [`GPU_PIPELINE_SRGB_LINEAR_BREAKPOINT`].
+const GPU_PIPELINE_SRGB_LINEAR_DIVISOR: f32 = 12.92;
 /// sRGB offset used by the IEC transfer function.
-const WATERFALL_SRGB_TRANSFER_OFFSET: f32 = 0.055;
+const GPU_PIPELINE_SRGB_TRANSFER_OFFSET: f32 = 0.055;
 /// sRGB transfer-function divisor.
-const WATERFALL_SRGB_TRANSFER_DIVISOR: f32 = 1.055;
+const GPU_PIPELINE_SRGB_TRANSFER_DIVISOR: f32 = 1.055;
 /// sRGB transfer-function exponent.
-const WATERFALL_SRGB_TRANSFER_EXPONENT: f32 = 2.4;
+const GPU_PIPELINE_SRGB_TRANSFER_EXPONENT: f32 = 2.4;
 /// WCAG contrast-ratio luminance offset.
-const WATERFALL_CONTRAST_LUMINANCE_OFFSET: f32 = 0.05;
+const GPU_PIPELINE_CONTRAST_LUMINANCE_OFFSET: f32 = 0.05;
 
 // layout
 /// Gap between the label column and the bar column in panel pixels.
-const WATERFALL_LABEL_GAP: f32 = 6.0;
+const GPU_PIPELINE_LABEL_GAP: f32 = 6.0;
 /// Vertical gap between lanes in panel pixels.
-const WATERFALL_LANE_GAP: f32 = 4.0;
+const GPU_PIPELINE_LANE_GAP: f32 = 4.0;
 /// Lane bar thickness in panel pixels.
-const WATERFALL_LANE_HEIGHT: f32 = 14.0;
+const GPU_PIPELINE_LANE_HEIGHT: f32 = 14.7;
 /// Lane label text size in panel pixels.
-const WATERFALL_LANE_LABEL_FONT_SIZE: f32 = 13.0;
+const GPU_PIPELINE_LANE_LABEL_FONT_SIZE: f32 = 13.0;
 /// Lane row height in panel pixels — the label cell and the bar wrapper share
 /// it so the two columns align; tall enough not to clip the label text.
-const WATERFALL_LANE_ROW_HEIGHT: f32 = 20.0;
+const GPU_PIPELINE_LANE_ROW_HEIGHT: f32 = 21.0;
 /// Axis floor (ms) — keeps the bar scale finite before the first frame samples
 /// and on a stall.
-const WATERFALL_MIN_AXIS_MS: f32 = 1.0;
+const GPU_PIPELINE_MIN_AXIS_MS: f32 = 1.0;
 /// Timeline spacers thinner than this track fraction are dropped.
-const WATERFALL_MIN_SEGMENT_FRACTION: f32 = 0.001;
-/// Screen-width fraction occupied by the waterfall panel.
-const WATERFALL_PANEL_WIDTH_FRACTION: f32 = 0.8;
+const GPU_PIPELINE_MIN_SEGMENT_FRACTION: f32 = 0.001;
+/// Screen-width fraction occupied by the GPU pipeline visualization.
+const GPU_PIPELINE_PANEL_WIDTH_FRACTION: f32 = 0.8;
 /// Segment label font size in panel pixels.
-const WATERFALL_SEGMENT_LABEL_FONT_SIZE: f32 = STATS_DESC_FONT_SIZE;
+const GPU_PIPELINE_SEGMENT_LABEL_FONT_SIZE: f32 = STATS_DESC_FONT_SIZE;
 /// Edge padding for leading- and trailing-aligned segment labels.
-const WATERFALL_SEGMENT_EDGE_LABEL_PADDING: f32 = 6.0;
+const GPU_PIPELINE_SEGMENT_EDGE_LABEL_PADDING: f32 = 6.0;
 
 // timing
 /// How long each on-screen picture is sampled before it refreshes (seconds).
 /// Per-frame values are averaged over this window so the held picture is the
 /// second's mean, not one noisy frame.
-const WATERFALL_SAMPLE_PERIOD: f32 = 1.0;
+const GPU_PIPELINE_SAMPLE_PERIOD: f32 = 1.0;
 /// How long the bars take to slide from the old picture to the new one at each
 /// refresh (seconds). After the morph the picture holds for the rest of the
 /// sample period (≈800 ms), giving a still frame to read.
-const WATERFALL_MORPH_DURATION: f32 = 0.2;
+const GPU_PIPELINE_MORPH_DURATION: f32 = 0.2;
 
-/// Marker for the bottom-left waterfall bar panel.
+/// Marker for the bottom-left GPU pipeline visualization.
 #[derive(Component)]
-struct WaterfallPanel;
+struct GpuPipelinePanel;
 
-/// Whether the waterfall panel is shown; `M` toggles it and the title-bar
-/// `Meter` segment highlights while it is on. When hidden, the panel root takes
-/// `Visibility::Hidden` and `update_waterfall_panel` skips the rebuild.
+/// Whether the GPU pipeline visualization is shown; `M` toggles it and the
+/// title-bar `Pipeline` segment highlights while it is on. When hidden, the
+/// panel root takes `Visibility::Hidden` and `update_gpu_pipeline_panel` skips
+/// the rebuild.
 #[derive(Resource, Default)]
-enum WaterfallShown {
+enum GpuPipelineShown {
     #[default]
     Shown,
     Hidden,
 }
 
-/// Lane values for the waterfall panel, in milliseconds. The update samples a
-/// one-second mean into this, then morphs the on-screen copy toward it over
-/// [`WATERFALL_MORPH_DURATION`]. The lane values are converted into labeled
-/// [`TimelineSegment`]s when the tree is rebuilt.
+/// Lane values for the GPU pipeline visualization, in milliseconds. The update
+/// samples a one-second mean into this, then morphs the on-screen copy toward it
+/// over [`GPU_PIPELINE_MORPH_DURATION`]. The lane values are converted into
+/// labeled [`TimelineSegment`]s when the tree is rebuilt.
 #[derive(Clone, Copy, Default)]
-struct WaterfallBars {
+struct GpuPipelineBars {
     /// Shared window width in milliseconds, anchored at the render start mark.
     axis:             f32,
     /// Main-lane start offset relative to the render frame's start mark.
@@ -2268,21 +2123,21 @@ struct WaterfallBars {
     prep:             f32,
     gpu_wait:         f32,
     render_graph:     f32,
+    /// CPU camera/shadow graph execution before queued command buffers are
+    /// submitted to the GPU queue.
+    camera_graphs:    f32,
+    /// Root render-graph submit set, ending after queued command buffers have
+    /// been submitted to the GPU queue.
+    graph_submit:     f32,
     cleanup:          f32,
     /// Gap from render-schedule publication to main extract begin.
     return_gap:       f32,
     /// Render lane's right-side parked span, measured from the previous render
     /// schedule end to the next render start.
     wait_for_extract: f32,
-    /// Measured GPU time of the `OrbitCam` opaque `MainPass` only (`GpuFrameMs`) — a
-    /// sliver of the frame's GPU work (it excludes the prepass, the OIT resolve,
-    /// and every overlay camera), so it does NOT drive the GPU lane. The lane is
-    /// built from the present anchor instead; this is kept for a future
-    /// "main-pass GPU" sub-readout.
-    gpu:              f32,
 }
 
-impl WaterfallBars {
+impl GpuPipelineBars {
     /// Field-wise sum, for accumulating the per-second mean.
     fn add(self, other: Self) -> Self {
         Self {
@@ -2292,10 +2147,11 @@ impl WaterfallBars {
             prep:             self.prep + other.prep,
             gpu_wait:         self.gpu_wait + other.gpu_wait,
             render_graph:     self.render_graph + other.render_graph,
+            camera_graphs:    self.camera_graphs + other.camera_graphs,
+            graph_submit:     self.graph_submit + other.graph_submit,
             cleanup:          self.cleanup + other.cleanup,
             return_gap:       self.return_gap + other.return_gap,
             wait_for_extract: self.wait_for_extract + other.wait_for_extract,
-            gpu:              self.gpu + other.gpu,
         }
     }
 
@@ -2308,10 +2164,11 @@ impl WaterfallBars {
             prep:             self.prep * factor,
             gpu_wait:         self.gpu_wait * factor,
             render_graph:     self.render_graph * factor,
+            camera_graphs:    self.camera_graphs * factor,
+            graph_submit:     self.graph_submit * factor,
             cleanup:          self.cleanup * factor,
             return_gap:       self.return_gap * factor,
             wait_for_extract: self.wait_for_extract * factor,
-            gpu:              self.gpu * factor,
         }
     }
 
@@ -2324,10 +2181,11 @@ impl WaterfallBars {
             prep:             lerp(self.prep, to.prep, t),
             gpu_wait:         lerp(self.gpu_wait, to.gpu_wait, t),
             render_graph:     lerp(self.render_graph, to.render_graph, t),
+            camera_graphs:    lerp(self.camera_graphs, to.camera_graphs, t),
+            graph_submit:     lerp(self.graph_submit, to.graph_submit, t),
             cleanup:          lerp(self.cleanup, to.cleanup, t),
             return_gap:       lerp(self.return_gap, to.return_gap, t),
             wait_for_extract: lerp(self.wait_for_extract, to.wait_for_extract, t),
-            gpu:              lerp(self.gpu, to.gpu, t),
         }
     }
 
@@ -2338,7 +2196,7 @@ impl WaterfallBars {
     fn main_extract(self) -> f32 { (self.wait_for_extract - self.return_gap).max(0.0) }
 }
 
-/// Label placement inside a waterfall segment.
+/// Label placement inside a GPU pipeline segment.
 #[derive(Clone, Copy)]
 enum SegmentLabelAlignment {
     Center,
@@ -2366,8 +2224,8 @@ impl SegmentLabelAlignment {
     fn padding(self) -> Padding {
         match self {
             Self::Center => Padding::default(),
-            Self::Leading => Padding::new(WATERFALL_SEGMENT_EDGE_LABEL_PADDING, 0.0, 0.0, 0.0),
-            Self::Trailing => Padding::new(0.0, WATERFALL_SEGMENT_EDGE_LABEL_PADDING, 0.0, 0.0),
+            Self::Leading => Padding::new(GPU_PIPELINE_SEGMENT_EDGE_LABEL_PADDING, 0.0, 0.0, 0.0),
+            Self::Trailing => Padding::new(0.0, GPU_PIPELINE_SEGMENT_EDGE_LABEL_PADDING, 0.0, 0.0),
         }
     }
 
@@ -2418,28 +2276,28 @@ impl TimelineSegment {
     }
 }
 
-fn spawn_waterfall_overlay(mut commands: Commands) {
+fn spawn_gpu_pipeline_overlay(mut commands: Commands) {
     let unlit = screen_panel_material();
     let built = DiegeticPanel::screen()
-        .size(Percent(WATERFALL_PANEL_WIDTH_FRACTION), Fit)
+        .size(Percent(GPU_PIPELINE_PANEL_WIDTH_FRACTION), Fit)
         .anchor(Anchor::BottomLeft)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_waterfall_tree(&WaterfallBars::default()))
+        .with_tree(build_gpu_pipeline_tree(&GpuPipelineBars::default()))
         .build();
     match built {
         Ok(built) => {
-            commands.spawn((WaterfallPanel, built, Transform::default()));
+            commands.spawn((GpuPipelinePanel, built, Transform::default()));
         },
-        Err(error) => error!("diegetic_text_stress: failed to build waterfall overlay: {error}"),
+        Err(error) => error!("diegetic_text_stress: failed to build GPU pipeline overlay: {error}"),
     }
 }
 
 /// Builds the panel: a left label column (`Fit` width, sized to the widest
 /// label and right-flushed) beside a bar column, so every bar starts at the
-/// same x. Lane rows in both columns share [`WATERFALL_LANE_ROW_HEIGHT`] to keep
+/// same x. Lane rows in both columns share [`GPU_PIPELINE_LANE_ROW_HEIGHT`] to keep
 /// them aligned.
-fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
+fn build_gpu_pipeline_tree(bars: &GpuPipelineBars) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::GROW).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -2452,7 +2310,7 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .direction(Direction::LeftToRight)
-                    .child_gap(WATERFALL_LABEL_GAP)
+                    .child_gap(GPU_PIPELINE_LABEL_GAP)
                     .child_alignment(AlignX::Left, AlignY::Top),
                 |builder| {
                     builder.with(
@@ -2460,12 +2318,12 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                             .width(Sizing::FIT)
                             .height(Sizing::FIT)
                             .direction(Direction::TopToBottom)
-                            .child_gap(WATERFALL_LANE_GAP)
+                            .child_gap(GPU_PIPELINE_LANE_GAP)
                             .child_alignment(AlignX::Right, AlignY::Center),
                         |builder| {
                             lane_label(builder, "main world");
                             lane_label(builder, "render world");
-                            lane_label_with_color(builder, "GPU", WATERFALL_GPU_COLOR);
+                            lane_label_with_color(builder, "GPU", GPU_PIPELINE_GPU_COLOR);
                         },
                     );
                     builder.with(
@@ -2473,9 +2331,9 @@ fn build_waterfall_tree(bars: &WaterfallBars) -> LayoutTree {
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
                             .direction(Direction::TopToBottom)
-                            .child_gap(WATERFALL_LANE_GAP),
+                            .child_gap(GPU_PIPELINE_LANE_GAP),
                         |builder| {
-                            let span = bars.axis.max(WATERFALL_MIN_AXIS_MS);
+                            let span = bars.axis.max(GPU_PIPELINE_MIN_AXIS_MS);
                             lane_bars(builder, span, &main_lane_segments(bars));
                             lane_bars(builder, span, &render_lane_segments(bars));
                             lane_bars(builder, span, &gpu_lane_segments(bars));
@@ -2499,93 +2357,93 @@ fn lane_label_with_color(builder: &mut LayoutBuilder, label: &str, color: Color)
     builder.with(
         El::new()
             .width(Sizing::FIT)
-            .height(Sizing::fixed(WATERFALL_LANE_ROW_HEIGHT))
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_ROW_HEIGHT))
             .child_alignment(AlignX::Right, AlignY::Center),
         |builder| {
-            builder.text(label, waterfall_lane_label_style(color));
+            builder.text(label, gpu_pipeline_lane_label_style(color));
         },
     );
 }
 
-fn waterfall_lane_label_style(color: Color) -> TextStyle {
-    TextStyle::new(WATERFALL_LANE_LABEL_FONT_SIZE)
+fn gpu_pipeline_lane_label_style(color: Color) -> TextStyle {
+    TextStyle::new(GPU_PIPELINE_LANE_LABEL_FONT_SIZE)
         .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-/// One lane's bar track: a grow-width track tinted [`WATERFALL_TRACK_COLOR`]
+/// One lane's bar track: a grow-width track tinted [`GPU_PIPELINE_TRACK_COLOR`]
 /// with fractional-offset [`TimelineSegment`] blocks. Empty timeline spans
 /// become transparent spacers, so reading straight down at one x compares the
 /// same process-monotonic time on every lane.
 fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[TimelineSegment]) {
-    let axis = axis_ms.max(WATERFALL_MIN_AXIS_MS);
+    let axis = axis_ms.max(GPU_PIPELINE_MIN_AXIS_MS);
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(WATERFALL_LANE_ROW_HEIGHT))
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_ROW_HEIGHT))
             .direction(Direction::LeftToRight)
             .child_alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            waterfall_track(builder, axis, segments);
+            gpu_pipeline_track(builder, axis, segments);
         },
     );
 }
 
-fn waterfall_track(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
+fn gpu_pipeline_track(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
             .direction(Direction::TopToBottom)
-            .child_gap(-WATERFALL_LANE_HEIGHT)
-            .background(WATERFALL_TRACK_COLOR),
+            .child_gap(-GPU_PIPELINE_LANE_HEIGHT)
+            .background(GPU_PIPELINE_TRACK_COLOR),
         |builder| {
-            waterfall_segment_row(builder, axis, segments);
+            gpu_pipeline_segment_row(builder, axis, segments);
             for segment in segments {
-                waterfall_label_row(builder, axis, *segment);
+                gpu_pipeline_label_row(builder, axis, *segment);
             }
         },
     );
 }
 
-fn waterfall_segment_row(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
+fn gpu_pipeline_segment_row(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
             .direction(Direction::LeftToRight),
         |builder| {
             let mut used = 0.0;
             for segment in segments {
                 let start_fraction = (segment.start / axis).clamp(0.0, 1.0);
                 let end_fraction = (segment.end / axis).clamp(start_fraction, 1.0);
-                add_waterfall_spacer(builder, start_fraction - used);
+                add_gpu_pipeline_spacer(builder, start_fraction - used);
                 used = used.max(start_fraction);
 
                 let fraction = end_fraction - used;
-                add_waterfall_segment(builder, fraction, *segment);
+                add_gpu_pipeline_segment(builder, fraction, *segment);
                 used = used.max(end_fraction);
             }
         },
     );
 }
 
-fn add_waterfall_spacer(builder: &mut LayoutBuilder, fraction: f32) {
-    if fraction < WATERFALL_MIN_SEGMENT_FRACTION {
+fn add_gpu_pipeline_spacer(builder: &mut LayoutBuilder, fraction: f32) {
+    if fraction < GPU_PIPELINE_MIN_SEGMENT_FRACTION {
         return;
     }
     builder.with(
         El::new()
             .width(Sizing::percent(fraction))
-            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT)),
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT)),
         |_builder| {},
     );
 }
 
-fn add_waterfall_segment(builder: &mut LayoutBuilder, fraction: f32, segment: TimelineSegment) {
+fn add_gpu_pipeline_segment(builder: &mut LayoutBuilder, fraction: f32, segment: TimelineSegment) {
     let cell = El::new()
         .width(Sizing::percent(fraction))
-        .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
+        .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
         .padding(segment.alignment.padding())
         .child_alignment(segment.alignment.align_x(), AlignY::Center);
     let cell = if segment.color.alpha() > 0.0 {
@@ -2596,7 +2454,7 @@ fn add_waterfall_segment(builder: &mut LayoutBuilder, fraction: f32, segment: Ti
     builder.with(cell, |_builder| {});
 }
 
-fn waterfall_label_row(builder: &mut LayoutBuilder, axis: f32, segment: TimelineSegment) {
+fn gpu_pipeline_label_row(builder: &mut LayoutBuilder, axis: f32, segment: TimelineSegment) {
     if segment.label.is_empty() {
         return;
     }
@@ -2610,89 +2468,90 @@ fn waterfall_label_row(builder: &mut LayoutBuilder, axis: f32, segment: Timeline
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
             .direction(Direction::LeftToRight)
             .child_alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            add_waterfall_position_spacer(builder, spacer_fraction);
+            add_gpu_pipeline_position_spacer(builder, spacer_fraction);
             builder.with(
                 El::new()
                     .width(Sizing::percent(label_fraction))
-                    .height(Sizing::fixed(WATERFALL_LANE_HEIGHT))
+                    .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
                     .padding(segment.alignment.padding())
                     .child_alignment(segment.alignment.align_x(), AlignY::Center),
                 |builder| {
-                    builder.text(segment.label, waterfall_segment_label_style(segment));
+                    builder.text(segment.label, gpu_pipeline_segment_label_style(segment));
                 },
             );
         },
     );
 }
 
-fn add_waterfall_position_spacer(builder: &mut LayoutBuilder, fraction: f32) {
+fn add_gpu_pipeline_position_spacer(builder: &mut LayoutBuilder, fraction: f32) {
     if fraction <= 0.0 {
         return;
     }
     builder.with(
         El::new()
             .width(Sizing::percent(fraction))
-            .height(Sizing::fixed(WATERFALL_LANE_HEIGHT)),
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT)),
         |_builder| {},
     );
 }
 
-fn waterfall_segment_label_style(segment: TimelineSegment) -> TextStyle {
-    TextStyle::new(WATERFALL_SEGMENT_LABEL_FONT_SIZE)
+fn gpu_pipeline_segment_label_style(segment: TimelineSegment) -> TextStyle {
+    TextStyle::new(GPU_PIPELINE_SEGMENT_LABEL_FONT_SIZE)
         .bold()
-        .with_color(waterfall_segment_label_color(segment))
+        .with_color(gpu_pipeline_segment_label_color(segment))
         .with_align(segment.alignment.text_align())
         .with_shadow_mode(GlyphShadowMode::None)
         .no_wrap()
 }
 
-fn waterfall_segment_label_color(segment: TimelineSegment) -> Color {
+fn gpu_pipeline_segment_label_color(segment: TimelineSegment) -> Color {
     if segment.color.alpha() <= 0.0 {
-        return WATERFALL_LIGHT_LABEL_COLOR;
+        return GPU_PIPELINE_LIGHT_LABEL_COLOR;
     }
-    let luminance = waterfall_relative_luminance(segment.color);
-    let light_contrast = waterfall_contrast_ratio(
+    let luminance = gpu_pipeline_relative_luminance(segment.color);
+    let light_contrast = gpu_pipeline_contrast_ratio(
         luminance,
-        waterfall_relative_luminance(WATERFALL_LIGHT_LABEL_COLOR),
+        gpu_pipeline_relative_luminance(GPU_PIPELINE_LIGHT_LABEL_COLOR),
     );
-    let dark_contrast = waterfall_contrast_ratio(
+    let dark_contrast = gpu_pipeline_contrast_ratio(
         luminance,
-        waterfall_relative_luminance(WATERFALL_DARK_LABEL_COLOR),
+        gpu_pipeline_relative_luminance(GPU_PIPELINE_DARK_LABEL_COLOR),
     );
     if dark_contrast > light_contrast {
-        WATERFALL_DARK_LABEL_COLOR
+        GPU_PIPELINE_DARK_LABEL_COLOR
     } else {
-        WATERFALL_LIGHT_LABEL_COLOR
+        GPU_PIPELINE_LIGHT_LABEL_COLOR
     }
 }
 
-fn waterfall_contrast_ratio(background_luminance: f32, label_luminance: f32) -> f32 {
+fn gpu_pipeline_contrast_ratio(background_luminance: f32, label_luminance: f32) -> f32 {
     let lighter = background_luminance.max(label_luminance);
     let darker = background_luminance.min(label_luminance);
-    (lighter + WATERFALL_CONTRAST_LUMINANCE_OFFSET) / (darker + WATERFALL_CONTRAST_LUMINANCE_OFFSET)
+    (lighter + GPU_PIPELINE_CONTRAST_LUMINANCE_OFFSET)
+        / (darker + GPU_PIPELINE_CONTRAST_LUMINANCE_OFFSET)
 }
 
-fn waterfall_relative_luminance(color: Color) -> f32 {
+fn gpu_pipeline_relative_luminance(color: Color) -> f32 {
     let color = color.to_srgba();
-    waterfall_linear_srgb(color.red).mul_add(
-        WATERFALL_LUMINANCE_RED_WEIGHT,
-        waterfall_linear_srgb(color.green).mul_add(
-            WATERFALL_LUMINANCE_GREEN_WEIGHT,
-            waterfall_linear_srgb(color.blue) * WATERFALL_LUMINANCE_BLUE_WEIGHT,
+    gpu_pipeline_linear_srgb(color.red).mul_add(
+        GPU_PIPELINE_LUMINANCE_RED_WEIGHT,
+        gpu_pipeline_linear_srgb(color.green).mul_add(
+            GPU_PIPELINE_LUMINANCE_GREEN_WEIGHT,
+            gpu_pipeline_linear_srgb(color.blue) * GPU_PIPELINE_LUMINANCE_BLUE_WEIGHT,
         ),
     )
 }
 
-fn waterfall_linear_srgb(channel: f32) -> f32 {
-    if channel <= WATERFALL_SRGB_LINEAR_BREAKPOINT {
-        channel / WATERFALL_SRGB_LINEAR_DIVISOR
+fn gpu_pipeline_linear_srgb(channel: f32) -> f32 {
+    if channel <= GPU_PIPELINE_SRGB_LINEAR_BREAKPOINT {
+        channel / GPU_PIPELINE_SRGB_LINEAR_DIVISOR
     } else {
-        ((channel + WATERFALL_SRGB_TRANSFER_OFFSET) / WATERFALL_SRGB_TRANSFER_DIVISOR)
-            .powf(WATERFALL_SRGB_TRANSFER_EXPONENT)
+        ((channel + GPU_PIPELINE_SRGB_TRANSFER_OFFSET) / GPU_PIPELINE_SRGB_TRANSFER_DIVISOR)
+            .powf(GPU_PIPELINE_SRGB_TRANSFER_EXPONENT)
     }
 }
 
@@ -2700,25 +2559,25 @@ fn waterfall_linear_srgb(channel: f32) -> f32 {
 /// `wait` (the measured `recv` block — main blocked until the render thread
 /// returns the previous frame's app) · `extract` (the main→render copy and
 /// send-back before the next render schedule begins).
-fn main_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
-    let period = b.axis.max(WATERFALL_MIN_AXIS_MS);
+fn main_lane_segments(b: &GpuPipelineBars) -> Vec<TimelineSegment> {
+    let period = b.axis.max(GPU_PIPELINE_MIN_AXIS_MS);
     let extract_start = b.extract_begin().clamp(0.0, period);
     let work_start = b.main_offset.clamp(0.0, extract_start);
     let work_end = (work_start + b.main_work).clamp(work_start, extract_start);
     let extract_end = (extract_start + b.main_extract()).clamp(extract_start, period);
     vec![
-        TimelineSegment::measured(work_start, work_end, WATERFALL_WORK_COLOR, "work N+1")
+        TimelineSegment::measured(work_start, work_end, GPU_PIPELINE_WORK_COLOR, "work N+1")
             .with_label_alignment(SegmentLabelAlignment::Leading),
         TimelineSegment::measured(
             work_end,
             extract_start,
-            WATERFALL_WAIT_COLOR,
+            GPU_PIPELINE_WAIT_COLOR,
             "wait for render",
         ),
         TimelineSegment::measured(
             extract_start,
             extract_end,
-            WATERFALL_EXTRACT_COLOR,
+            GPU_PIPELINE_EXTRACT_COLOR,
             "extract",
         )
         .with_label_alignment(SegmentLabelAlignment::Trailing),
@@ -2726,48 +2585,58 @@ fn main_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
 }
 
 /// Render lane, frame N: `work` (`assets` + prepare) · `wait for GPU`
-/// (swapchain acquire — the stall waiting on the GPU below) · `render graph` ·
-/// cleanup block · return block · extract-handoff block. The short tail blocks
-/// are unlabeled in the waterfall; their names and colors live in the perf
-/// panel rows.
-fn render_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
-    let period = b.axis.max(WATERFALL_MIN_AXIS_MS);
+/// (swapchain acquire — the stall waiting on the GPU below) · root render graph
+/// internals (`camera graphs`, submit plus the tiny finish tail) · cleanup
+/// block · return block · extract-handoff block. GPU `next` starts after the
+/// submit block, so this row shows the CPU handoff span before the inferred GPU
+/// pressure begins. The short post-graph blocks are unlabeled in the GPU
+/// pipeline visualization; their names and colors live in the perf panel rows.
+fn render_lane_segments(b: &GpuPipelineBars) -> Vec<TimelineSegment> {
+    let period = b.axis.max(GPU_PIPELINE_MIN_AXIS_MS);
     let prep_end = b.prep.clamp(0.0, period);
     let wait_end = (prep_end + b.gpu_wait).clamp(prep_end, period);
     let graph_end = (wait_end + b.render_graph).clamp(wait_end, period);
+    let camera_end = (wait_end + b.camera_graphs).clamp(wait_end, graph_end);
     let cleanup_end = (graph_end + b.cleanup).clamp(graph_end, period);
     let return_end = b.extract_begin().clamp(cleanup_end, period);
     let extract_end = (return_end + b.main_extract()).clamp(return_end, period);
     vec![
-        TimelineSegment::measured(0.0, prep_end, WATERFALL_WORK_COLOR, "work N")
+        TimelineSegment::measured(0.0, prep_end, GPU_PIPELINE_WORK_COLOR, "work N")
             .with_label_alignment(SegmentLabelAlignment::Leading),
-        TimelineSegment::measured(prep_end, wait_end, WATERFALL_WAIT_COLOR, "wait for GPU"),
+        TimelineSegment::measured(prep_end, wait_end, GPU_PIPELINE_WAIT_COLOR, "wait for GPU"),
         TimelineSegment::measured(
             wait_end,
-            graph_end,
-            WATERFALL_RENDER_GRAPH_COLOR,
-            "render graph",
+            camera_end,
+            GPU_PIPELINE_RENDER_GRAPH_COLOR,
+            "camera graphs",
         ),
-        TimelineSegment::measured(graph_end, cleanup_end, WATERFALL_CLEANUP_COLOR, ""),
-        TimelineSegment::measured(cleanup_end, return_end, WATERFALL_RETURN_COLOR, ""),
-        TimelineSegment::measured(return_end, extract_end, WATERFALL_GAP_COLOR, ""),
+        TimelineSegment::measured(
+            camera_end,
+            graph_end,
+            GPU_PIPELINE_GRAPH_SUBMIT_COLOR,
+            "submit",
+        ),
+        TimelineSegment::measured(graph_end, cleanup_end, GPU_PIPELINE_CLEANUP_COLOR, ""),
+        TimelineSegment::measured(cleanup_end, return_end, GPU_PIPELINE_RETURN_COLOR, ""),
+        TimelineSegment::measured(return_end, extract_end, GPU_PIPELINE_GAP_COLOR, ""),
     ]
 }
 
-/// GPU lane, one frame: `current` (busy, ending the instant the render lane's
-/// `wait for GPU` releases) · idle render-graph gap · busy `next` starting
-/// the next frame. The current block's right edge lines up under the render lane's
-/// `wait for GPU` → `render graph` boundary — that vertical line is the GPU
-/// making the render thread wait.
-fn gpu_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
-    let period = b.axis.max(WATERFALL_MIN_AXIS_MS);
+/// GPU lane, one frame: `current` pressure until `get_current_texture` releases,
+/// `available` while the CPU records camera graphs and completes the submit
+/// set, then `next` pressure. This conservative boundary waits until the submit
+/// bracket ends instead of assuming the internal `RenderQueue::submit` call
+/// happened at the start of the set. This lane is Bevy queue pressure inferred
+/// from CPU-side frame marks, not measured hardware execution.
+fn gpu_lane_segments(b: &GpuPipelineBars) -> Vec<TimelineSegment> {
+    let period = b.axis.max(GPU_PIPELINE_MIN_AXIS_MS);
     let current_end = (b.prep + b.gpu_wait).clamp(0.0, period);
-    let idle_end = (current_end + b.render_graph).clamp(current_end, period);
+    let next_start = (current_end + b.camera_graphs + b.graph_submit).clamp(current_end, period);
     vec![
-        TimelineSegment::inferred(0.0, current_end, WATERFALL_GPU_COLOR, "current")
+        TimelineSegment::inferred(0.0, current_end, GPU_PIPELINE_GPU_COLOR, "current")
             .with_label_alignment(SegmentLabelAlignment::Leading),
-        TimelineSegment::measured(current_end, idle_end, WATERFALL_GAP_COLOR, "idle"),
-        TimelineSegment::inferred(idle_end, period, WATERFALL_GPU_COLOR, "next")
+        TimelineSegment::measured(current_end, next_start, GPU_PIPELINE_GAP_COLOR, "available"),
+        TimelineSegment::inferred(next_start, period, GPU_PIPELINE_GPU_COLOR, "next")
             .with_label_alignment(SegmentLabelAlignment::Trailing),
     ]
 }
@@ -2777,18 +2646,18 @@ fn gpu_lane_segments(b: &WaterfallBars) -> Vec<TimelineSegment> {
 /// Each frame's instantaneous lane values are summed into `accum` over one
 /// sample period. At the period boundary the mean becomes `target`, the
 /// on-screen `displayed` becomes `from`, and `morph` resets to 0. For the next
-/// [`WATERFALL_MORPH_DURATION`] the bars slide `from` → `target`; after that they
+/// [`GPU_PIPELINE_MORPH_DURATION`] the bars slide `from` → `target`; after that they
 /// hold until the following boundary.
 #[derive(Default)]
-struct WaterfallAnim {
+struct GpuPipelineAnim {
     /// On-screen lane values this frame.
-    displayed: WaterfallBars,
+    displayed: GpuPipelineBars,
     /// Lane values at the start of the current morph.
-    from:      WaterfallBars,
+    from:      GpuPipelineBars,
     /// The latest one-second mean — the morph destination and held picture.
-    target:    WaterfallBars,
+    target:    GpuPipelineBars,
     /// Running field-wise sum of this period's frames.
-    accum:     WaterfallBars,
+    accum:     GpuPipelineBars,
     /// Frames summed into `accum`.
     samples:   u32,
     /// Seconds into the current sample period.
@@ -2800,44 +2669,47 @@ struct WaterfallAnim {
 }
 
 /// Samples the three lanes into a one-second mean and animates the panel toward
-/// it: a [`WATERFALL_MORPH_DURATION`] slide at each boundary, then a still hold
+/// it: a [`GPU_PIPELINE_MORPH_DURATION`] slide at each boundary, then a still hold
 /// for the rest of the second. Main and render marks are stored as offsets from
 /// one shared epoch, then drawn relative to the render frame's start mark.
-fn update_waterfall_panel(
+fn update_gpu_pipeline_panel(
     time: Res<Time>,
     main_thread: Res<MainThreadMs>,
     render_spans: Res<RenderThreadSpans>,
-    gpu_ms: Res<GpuFrameMs>,
-    shown: Res<WaterfallShown>,
-    panels: Query<Entity, With<WaterfallPanel>>,
+    shown: Res<GpuPipelineShown>,
+    panels: Query<Entity, With<GpuPipelinePanel>>,
     mut commands: Commands,
-    mut anim: Local<WaterfallAnim>,
+    mut anim: Local<GpuPipelineAnim>,
 ) {
     let delta_secs = time.delta_secs();
-    let render_start_ms = span_ms(&render_spans.0.render_start_ms);
-    let main_start_ms = span_ms(&render_spans.0.main_start_ms);
-    let main_end_ms = span_ms(&render_spans.0.main_end_ms);
-    let main_span_ms = timeline_duration_ms(main_start_ms, main_end_ms).unwrap_or(main_thread.0);
-    let prep = span_ms(&render_spans.0.assets) + span_ms(&render_spans.0.prep);
-    let gpu_wait = span_ms(&render_spans.0.gpu_wait);
-    let render_graph = span_ms(&render_spans.0.render_graph);
-    let cleanup = span_ms(&render_spans.0.cleanup);
-    let return_gap = span_ms(&render_spans.0.return_gap);
-    let render = span_ms(&render_spans.0.render);
-    let wait_for_extract = span_ms(&render_spans.0.wait_for_extract);
+    let render_start_ms = render_spans.render_start_ms();
+    let main_start_ms = render_spans.main_start_ms();
+    let main_end_ms = render_spans.main_end_ms();
+    let main_span_ms =
+        timeline_duration_ms(main_start_ms, main_end_ms).unwrap_or_else(|| main_thread.ms());
+    let prep = render_spans.assets_ms() + render_spans.prep_ms();
+    let gpu_wait = render_spans.gpu_wait_ms();
+    let render_graph = render_spans.render_graph_ms();
+    let camera_graphs = render_spans.graph_render_ms();
+    let graph_submit = render_spans.graph_submit_ms();
+    let cleanup = render_spans.cleanup_ms();
+    let return_gap = render_spans.return_gap_ms();
+    let render = render_spans.render_ms();
+    let wait_for_extract = render_spans.wait_for_extract_ms();
     let main_offset = relative_timeline_offset_ms(render_start_ms, main_start_ms);
     let render_period = render + wait_for_extract;
-    let instant = WaterfallBars {
+    let instant = GpuPipelineBars {
         axis: render_period,
         main_offset,
         main_work: main_span_ms,
         prep,
         gpu_wait,
         render_graph,
+        camera_graphs,
+        graph_submit,
         cleanup,
         return_gap,
         wait_for_extract,
-        gpu: span_ms(&gpu_ms.0),
     };
 
     if !anim.primed {
@@ -2853,48 +2725,48 @@ fn update_waterfall_panel(
     anim.morph += delta_secs;
 
     // Period boundary: average the second, start a new morph toward it.
-    if anim.sampled >= WATERFALL_SAMPLE_PERIOD {
+    if anim.sampled >= GPU_PIPELINE_SAMPLE_PERIOD {
         let mean = anim.accum.scale(1.0 / anim.samples.max(1).to_f32());
         anim.from = anim.displayed;
         anim.target = mean;
-        anim.accum = WaterfallBars::default();
+        anim.accum = GpuPipelineBars::default();
         anim.samples = 0;
         anim.sampled = 0.0;
         anim.morph = 0.0;
     }
 
     // Smoothstep the morph fraction so the slide eases in and out.
-    let raw = (anim.morph / WATERFALL_MORPH_DURATION).clamp(0.0, 1.0);
+    let raw = (anim.morph / GPU_PIPELINE_MORPH_DURATION).clamp(0.0, 1.0);
     let eased = raw * raw * 2.0f32.mul_add(-raw, 3.0);
     anim.displayed = anim.from.lerp(anim.target, eased);
 
     // Rebuild only while the bars are moving (the morph plus one settle frame);
     // during the hold the picture is unchanged, so the tree is left as-is.
-    let moving = anim.morph <= WATERFALL_MORPH_DURATION + delta_secs;
-    if !moving || matches!(*shown, WaterfallShown::Hidden) {
+    let moving = anim.morph <= GPU_PIPELINE_MORPH_DURATION + delta_secs;
+    if !moving || matches!(*shown, GpuPipelineShown::Hidden) {
         return;
     }
     let displayed = anim.displayed;
     for entity in &panels {
-        commands.set_tree(entity, build_waterfall_tree(&displayed));
+        commands.set_tree(entity, build_gpu_pipeline_tree(&displayed));
     }
 }
 
-/// Toggles the waterfall panel (`M`): flips [`WaterfallShown`] and sets the
-/// panel root's `Visibility` to match. Hidden panels also skip the rebuild in
-/// [`update_waterfall_panel`].
-fn toggle_waterfall(
-    mut shown: ResMut<WaterfallShown>,
-    panels: Query<Entity, With<WaterfallPanel>>,
+/// Toggles the GPU pipeline visualization (`M`): flips [`GpuPipelineShown`] and
+/// sets the panel root's `Visibility` to match. Hidden panels also skip the
+/// rebuild in [`update_gpu_pipeline_panel`].
+fn toggle_gpu_pipeline(
+    mut shown: ResMut<GpuPipelineShown>,
+    panels: Query<Entity, With<GpuPipelinePanel>>,
     mut commands: Commands,
 ) {
     *shown = match *shown {
-        WaterfallShown::Shown => WaterfallShown::Hidden,
-        WaterfallShown::Hidden => WaterfallShown::Shown,
+        GpuPipelineShown::Shown => GpuPipelineShown::Hidden,
+        GpuPipelineShown::Hidden => GpuPipelineShown::Shown,
     };
     let visibility = match *shown {
-        WaterfallShown::Shown => Visibility::Inherited,
-        WaterfallShown::Hidden => Visibility::Hidden,
+        GpuPipelineShown::Shown => Visibility::Inherited,
+        GpuPipelineShown::Hidden => Visibility::Hidden,
     };
     for entity in &panels {
         commands.entity(entity).insert(visibility);
