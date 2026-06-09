@@ -577,4 +577,3 @@ These were open questions in the first draft; the review settled them:
   while another window's panel on the same layer survives.
 - **`propagate_screen_space_render_layers` is unchanged.** It walks
   panel hierarchies, not windows.
-
