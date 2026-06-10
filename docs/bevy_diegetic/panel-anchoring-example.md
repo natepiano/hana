@@ -35,6 +35,14 @@ first code path simple:
 | `Space` | toggle the active animation |
 | `R` | reset all panels |
 
+Reset behavior must be explicit before implementation because active world
+attachments capture an authored pose in `AnchoredWorldPanelPose`. For Demo 1,
+`R` should restore the target panel to its starting transform while leaving the
+relation active, so the dependent remains resolver-owned and follows the target.
+If a later control removes `AnchoredToPanel`, document whether it restores the
+captured authored pose or first refreshes that captured pose from the current
+resolved placement.
+
 ## Demo 1 — world-space point anchoring
 
 Scene:

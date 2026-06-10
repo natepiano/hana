@@ -211,7 +211,6 @@ pub use panel::PanelAnchorEdgeEndpoints;
 pub use panel::PanelAnchorGeometryError;
 pub use panel::PanelAnchorGeometryParam;
 pub use panel::PanelAnchorOffset;
-pub use panel::PanelAnchorOffsetUnits;
 pub use panel::PanelAnchorPoint;
 pub use panel::PanelAnchorPoints;
 pub use panel::PanelBuildError;

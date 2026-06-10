@@ -3,6 +3,7 @@
 
 mod anchor_geometry;
 mod anchoring;
+mod attachment_resolver;
 mod builder;
 mod compute_layout;
 mod constants;
@@ -13,6 +14,7 @@ mod field;
 mod gizmos;
 mod perf;
 mod sizing;
+mod world_anchoring;
 
 pub use anchor_geometry::PanelAnchorEdge;
 pub use anchor_geometry::PanelAnchorEdgeEndpoints;
@@ -26,11 +28,16 @@ pub use anchor_geometry::ResolvedPanelAnchorGeometry;
 pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
-pub use anchoring::PanelAnchorOffsetUnits;
 pub use anchoring::PanelsAnchoredHere;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use attachment_resolver::AttachmentResolveAction;
+pub(crate) use attachment_resolver::AttachmentResolveCandidate;
+pub(crate) use attachment_resolver::AttachmentResolveDiagnostics;
+pub(crate) use attachment_resolver::AttachmentResolveReasons;
+pub(crate) use attachment_resolver::resolve_panel_attachments;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
 pub use coordinate_space::CoordinateSpace;
@@ -65,6 +72,7 @@ pub use sizing::PanelSizing;
 pub use sizing::Percent;
 pub use sizing::Pixels;
 pub use sizing::Points;
+use world_anchoring::WorldAnchorResolveDiagnostics;
 
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
@@ -114,9 +122,9 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<CascadeDefaults>()
+            .init_resource::<WorldAnchorResolveDiagnostics>()
             .register_type::<AnchoredToPanel>()
             .register_type::<PanelAnchorOffset>()
-            .register_type::<PanelAnchorOffsetUnits>()
             .register_type::<PanelsAnchoredHere>()
             .configure_sets(
                 Update,
@@ -132,6 +140,15 @@ impl Plugin for HeadlessLayoutPlugin {
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    world_anchoring::restore_inactive_world_panel_poses,
+                    world_anchoring::resolve_world_space_panel_attachments,
+                )
+                    .chain()
+                    .before(TransformSystems::Propagate),
             );
     }
 }

@@ -18,8 +18,9 @@
 //!   O — toggle stable transparency / OIT; the title-bar `OIT` segment
 //!     highlights while it is on
 //!
-//! A left screen overlay, placed immediately below the title bar, reports the
-//! frame as additive main/render blocks, each row with a 5-second peak column.
+//! A left screen overlay, anchored above the bottom-left GPU pipeline
+//! visualization, reports the frame as additive main/render blocks, each row
+//! with a 5-second peak column.
 //! Main thread: `ms/frame` is the sum of `layout`, `reconcile`, `shaping`,
 //! `mesh`, `other`, `wait for render`, `extract`, and `frame slack`. Render
 //! thread: `render cycle` is the end-to-end frame N cycle from one render
@@ -63,7 +64,9 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelAnchorOffset;
 use bevy_diegetic::Percent;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlign;
@@ -142,7 +145,7 @@ fn main() {
         .init_resource::<GpuPipelineShown>()
         .init_resource::<LastDisplayedStatus>()
         .init_resource::<LastDisplayedBatchStats>()
-        .add_observer(anchor_status_panel_when_title_bar_added)
+        .add_observer(anchor_status_panel_when_gpu_pipeline_added)
         .add_observer(anchor_status_panel_when_status_panel_added)
         .add_systems(
             Startup,
@@ -970,8 +973,6 @@ const SUB_ROW_INDENT: f32 = 12.0;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 const MILLISECONDS_PER_SECOND: f32 = 1000.0;
-const STATUS_TITLE_BAR_GAP: f32 = 1.0;
-
 /// Larger text on the label/value header line of each batch-stats group.
 const STATS_HEADER_FONT_SIZE: f32 = 15.0;
 /// Smaller text on the description line under each header.
@@ -1214,34 +1215,34 @@ fn spawn_batch_stats_overlay(mut commands: Commands) {
     }
 }
 
-const fn status_panel_title_anchor(title_bar: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(title_bar, Anchor::TopLeft, Anchor::BottomLeft)
-        .with_screen_offset(Vec2::new(0.0, STATUS_TITLE_BAR_GAP))
+fn status_panel_pipeline_anchor(gpu_pipeline_panel: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(gpu_pipeline_panel, Anchor::BottomLeft, Anchor::TopLeft)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), Px(-5.0)))
 }
 
-fn anchor_status_panel_when_title_bar_added(
-    trigger: On<Add, TitleBar>,
+fn anchor_status_panel_when_gpu_pipeline_added(
+    trigger: On<Add, GpuPipelinePanel>,
     status_panels: Query<Entity, With<StatusPanel>>,
     mut commands: Commands,
 ) {
     for status_panel in &status_panels {
         commands
             .entity(status_panel)
-            .insert(status_panel_title_anchor(trigger.entity));
+            .insert(status_panel_pipeline_anchor(trigger.entity));
     }
 }
 
 fn anchor_status_panel_when_status_panel_added(
     trigger: On<Add, StatusPanel>,
-    title_bars: Query<Entity, With<TitleBar>>,
+    gpu_pipeline_panels: Query<Entity, With<GpuPipelinePanel>>,
     mut commands: Commands,
 ) {
-    let Ok(title_bar) = title_bars.single() else {
+    let Ok(gpu_pipeline_panel) = gpu_pipeline_panels.single() else {
         return;
     };
     commands
         .entity(trigger.entity)
-        .insert(status_panel_title_anchor(title_bar));
+        .insert(status_panel_pipeline_anchor(gpu_pipeline_panel));
 }
 
 fn status_label_style() -> TextStyle {

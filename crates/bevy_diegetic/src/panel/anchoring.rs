@@ -5,6 +5,8 @@ use std::ops::Deref;
 use bevy::prelude::*;
 
 use crate::layout::Anchor;
+use crate::layout::Dimension;
+use crate::layout::Unit;
 
 /// Relationship source that pins one panel anchor point to another panel.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
@@ -36,17 +38,11 @@ impl AnchoredToPanel {
         }
     }
 
-    /// Sets the offset using a unit-tagged value.
+    /// Sets the offset from the resolved target anchor point.
     #[must_use]
     pub const fn with_offset(mut self, offset: PanelAnchorOffset) -> Self {
         self.offset = offset;
         self
-    }
-
-    /// Sets the offset in screen logical pixels.
-    #[must_use]
-    pub const fn with_screen_offset(self, offset: Vec2) -> Self {
-        self.with_offset(PanelAnchorOffset::screen_pixels(offset))
     }
 
     /// Target panel entity.
@@ -69,54 +65,56 @@ impl FromWorld for AnchoredToPanel {
 
 const fn placeholder_entity() -> Entity { Entity::PLACEHOLDER }
 
-/// Unit-tagged offset for panel anchoring.
+/// Offset from a target panel anchor point.
+///
+/// Coordinates are authored in panel-local layout space: positive x moves
+/// right, positive y moves down. Bare `f32` values resolve against the target
+/// panel's layout unit; [`Px`](crate::Px), [`Mm`](crate::Mm),
+/// [`Pt`](crate::Pt), and [`In`](crate::In) carry explicit units.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 #[reflect(PartialEq, Debug, Default)]
 pub struct PanelAnchorOffset {
-    value: Vec2,
-    units: PanelAnchorOffsetUnits,
+    x: Dimension,
+    y: Dimension,
 }
 
 impl PanelAnchorOffset {
-    /// Zero screen-pixel offset.
-    pub const ZERO: Self = Self::screen_pixels(Vec2::ZERO);
+    /// Zero offset.
+    pub const ZERO: Self = Self {
+        x: Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+        y: Dimension {
+            value: 0.0,
+            unit:  None,
+        },
+    };
 
-    /// Creates an offset in screen logical pixels.
+    /// Creates an offset from two authored dimensions.
     #[must_use]
-    pub const fn screen_pixels(offset: Vec2) -> Self {
+    pub fn new(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self {
         Self {
-            value: offset,
-            units: PanelAnchorOffsetUnits::ScreenPixels,
+            x: x.into(),
+            y: y.into(),
         }
     }
 
-    /// Creates an offset in target panel-plane meters.
+    /// Horizontal offset dimension.
     #[must_use]
-    pub const fn target_plane_meters(offset: Vec2) -> Self {
-        Self {
-            value: offset,
-            units: PanelAnchorOffsetUnits::TargetPlaneMeters,
-        }
+    pub const fn x(self) -> Dimension { self.x }
+
+    /// Vertical offset dimension.
+    #[must_use]
+    pub const fn y(self) -> Dimension { self.y }
+
+    pub(crate) fn to_layout_units(self, layout_unit: Unit) -> Vec2 {
+        let layout_to_points = layout_unit.to_points();
+        Vec2::new(
+            self.x.to_points(layout_to_points) / layout_to_points,
+            self.y.to_points(layout_to_points) / layout_to_points,
+        )
     }
-
-    /// Offset unit tag.
-    #[must_use]
-    pub const fn units(self) -> PanelAnchorOffsetUnits { self.units }
-
-    /// Raw offset value.
-    #[must_use]
-    pub const fn as_vec2(self) -> Vec2 { self.value }
-}
-
-/// Units carried by a [`PanelAnchorOffset`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
-#[reflect(PartialEq, Debug, Default)]
-pub enum PanelAnchorOffsetUnits {
-    /// Logical pixels in a screen-space panel's window.
-    #[default]
-    ScreenPixels,
-    /// Meters in the target panel plane.
-    TargetPlaneMeters,
 }
 
 /// Reverse relationship target: panels anchored to this panel.

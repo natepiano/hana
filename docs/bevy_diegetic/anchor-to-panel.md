@@ -63,7 +63,7 @@ pub use panel::PanelsAnchoredHere;
 Put the screen-space resolver beside the rest of screen-space placement logic:
 
 ```text
-crates/bevy_diegetic/src/screen_space/anchoring.rs
+crates/bevy_diegetic/src/screen_space/anchoring/
 ```
 
 `screen_space/mod.rs` owns the schedule ordering because it already resolves
@@ -137,49 +137,39 @@ reflection is not exposed for this relationship in Phase 1. Scene or tooling
 support for reflected retargeting can be added later with explicit
 replacement-based `ReflectComponent` behavior.
 
-Use a named offset type instead of a raw `Vec2` so the public API preserves the
-unit contract before world-space anchoring ships:
+Use a named offset type instead of a raw `Vec2` so the public API uses the same
+dimension system as panel sizing and text sizing:
 
 ```rust
 #[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 #[reflect(PartialEq, Debug, Default)]
 pub struct PanelAnchorOffset {
-    value: Vec2,
-    units: PanelAnchorOffsetUnits,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-#[reflect(PartialEq, Debug, Default)]
-pub enum PanelAnchorOffsetUnits {
-    #[default]
-    ScreenPixels,
-    TargetPlaneMeters,
+    x: Dimension,
+    y: Dimension,
 }
 
 impl PanelAnchorOffset {
     pub const ZERO: Self;
 
-    pub const fn screen_pixels(offset: Vec2) -> Self;
-    pub const fn target_plane_meters(offset: Vec2) -> Self;
-    pub const fn units(self) -> PanelAnchorOffsetUnits;
-    pub const fn as_vec2(self) -> Vec2;
+    pub fn new(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self;
+    pub const fn x(self) -> Dimension;
+    pub const fn y(self) -> Dimension;
 }
 ```
 
-The resolver must validate the stored unit tag against the source panel's
-coordinate space:
+The resolver converts the stored dimensions at the point where it knows the
+target panel's coordinate system:
 
-- screen-space: logical pixels, top-left origin, y down
-- world-space: meters in the target panel plane, x right and y up
+- screen-space: target panel layout units, normally logical pixels, top-left
+  origin, y down
+- world-space: target panel layout units scaled onto the target panel plane,
+  x right and y down
 
-Phase 1 screen-space anchoring accepts `ScreenPixels` offsets, including
-`PanelAnchorOffset::ZERO`. If a `TargetPlaneMeters` offset is constructible
-before world-space anchoring ships, the screen resolver should skip the edge
-with `OffsetUnitsMismatch` instead of silently interpreting meters as pixels.
+Bare `f32` values resolve in the target panel's layout unit. Explicit
+`Px`/`Mm`/`Pt`/`In` values carry their units, matching `TextStyle::new` and
+`LayoutBuilder::new`.
 
-`with_offset(PanelAnchorOffset)` should be the typed constructor.
-`with_screen_offset(Vec2)` can provide the ergonomic Phase 1 screen-space
-shortcut while call sites still document the unit.
+`with_offset(PanelAnchorOffset)` is the typed constructor.
 
 Use `Vec<Entity>` for the reverse target collection:
 
@@ -205,8 +195,6 @@ impl AnchoredToPanel {
     ) -> Self;
 
     pub const fn with_offset(mut self, offset: PanelAnchorOffset) -> Self;
-
-    pub const fn with_screen_offset(mut self, offset: Vec2) -> Self;
 
     pub const fn target(&self) -> Entity;
 
@@ -245,7 +233,7 @@ The title-bar case becomes:
 
 ```rust
 AnchoredToPanel::new(title_bar, Anchor::TopLeft, Anchor::BottomLeft)
-    .with_screen_offset(Vec2::new(0.0, 1.0))
+    .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0)))
 ```
 
 ## Internal Placement Override
@@ -320,7 +308,8 @@ To place a dependent panel:
 
 ```rust
 let target_point =
-    target_bounds.point(attachment.target_anchor) + attachment.offset.as_vec2();
+    target_bounds.point(attachment.target_anchor)
+        + attachment.offset.to_layout_units(target_panel.layout_unit());
 let self_offset = attachment.source_anchor.offset(self_panel.width(), self_panel.height());
 let panel_anchor_offset = self_panel.anchor().offset(self_panel.width(), self_panel.height());
 
@@ -400,8 +389,7 @@ authored invalid relationships. Resolver-owned inactive cases are missing source
 panel data, missing target entity, existing targets that are not panels,
 self-attachment observed before cleanup, targets in another coordinate space,
 targets in another resolved window, targets whose window is missing or
-zero-sized, offset-unit mismatch, and nodes blocked by cycles. These cases
-should not panic.
+zero-sized, and nodes blocked by cycles. These cases should not panic.
 
 Use a bounded diagnostic resource keyed by `(source, target, reason)` rather
 than a single callsite `warn_once!`. Reasons should include:
@@ -418,7 +406,6 @@ enum AnchorResolveSkip {
     TargetWindowZeroSized,
     CrossWindow,
     MixedCoordinateSpace,
-    OffsetUnitsMismatch,
     Cycle,
     BlockedByCycle,
     BlockedBySkippedDependency,
@@ -644,15 +631,15 @@ let point_world = plane.point(anchor);
 The x axis points right. Panel-local y-down coordinates map to negative world
 `up`; `PanelPlane::point(anchor)` owns that sign conversion.
 
-The target anchor point applies the tagged meter offset in the target panel
-plane. A zero offset should be valid for world attachments even when it came
-from `PanelAnchorOffset::ZERO`; non-zero world offsets must use
-`PanelAnchorOffsetUnits::TargetPlaneMeters`.
+The target anchor point applies the authored offset after converting it through
+the target panel's layout unit and world-plane size. Panel-local positive y
+points down, so world placement subtracts the target plane's `up` vector for a
+positive y offset.
 
 ```rust
 let target_point_world = target_plane.point(target_anchor)
     + target_plane.right * offset_meters.x
-    + target_plane.up * offset_meters.y;
+    - target_plane.up * offset_meters.y;
 ```
 
 The source panel's desired global origin is:
@@ -797,7 +784,7 @@ Keep Phase 1 small enough to implement and review in checkpoints.
 1. Add `panel/anchoring.rs` with `AnchoredToPanel`, `PanelAnchorOffset`,
    `PanelsAnchoredHere`, constructors, and read-only reverse-index helpers.
    `AnchoredToPanel` is `#[component(immutable)]`, and `PanelAnchorOffset`
-   stores both value and units.
+   stores `Dimension` values for x and y offsets.
 2. Re-export public anchoring types from `panel/mod.rs` and `lib.rs`.
 3. Register `AnchoredToPanel`, `PanelAnchorOffset`, and `PanelsAnchoredHere` in
    `HeadlessLayoutPlugin` for type-registry parity.
@@ -827,7 +814,7 @@ Keep Phase 1 small enough to implement and review in checkpoints.
 #### Phase 1C — schedule and observer flushes
 
 1. Add `PanelSystems::ResolvePanelAttachments`.
-2. Split screen-space anchoring code into `screen_space/anchoring.rs`.
+2. Split screen-space anchoring code into `screen_space/anchoring/`.
 3. Convert the existing private `ScreenSpaceSystems` chain to include
    `FlushDimensionObservers` and `FlushObserverCommands`.
 4. Place `resolve_screen_space_panel_attachments` after both flushes and before
@@ -852,7 +839,8 @@ Keep Phase 1 small enough to implement and review in checkpoints.
 5. Resolve roots, chains, retargets, and independent subgraphs in one update.
 6. Detect self-attachment through Bevy's relationship behavior and longer cycles
    through the resolver.
-7. Validate offset units before resolving an edge.
+7. Convert offset dimensions through the target panel's layout unit before
+   resolving an edge.
 8. Add a source coordinate-space transition test: start from a valid screen
    attachment, change the source out of screen space, and assert the screen
    override clears or is ignored without stale reappearance.
@@ -997,7 +985,7 @@ hinge edges, not only point centers.
 - `panel/anchor_geometry.rs` added helper-backed public geometry reads through
   `PanelAnchorGeometryParam`, `ResolvedPanelAnchorGeometry`,
   `PanelScreenBounds`, `PanelPlane`, and `PanelAnchorEdge`.
-- `screen_space/anchoring.rs` now uses `PanelScreenBounds`, so screen attachment
+- `screen_space/anchoring/` now uses `PanelScreenBounds`, so screen attachment
   placement and public screen geometry use the same anchor math.
 
 **What deviated from the plan:**
@@ -1035,8 +1023,8 @@ hinge edges, not only point centers.
   `origin()` is top-left, and resolver math should call
   `PanelPlane::point(anchor)` instead of duplicating anchor-fraction math.
 - Phase 3 now says default zero-offset world attachments must work with
-  `AnchoredToPanel::new`; only non-zero world offsets require
-  `TargetPlaneMeters`.
+  `AnchoredToPanel::new`, and non-zero offsets use the shared `Dimension`
+  system rather than a separate anchor-only unit enum.
 - Phase 3 now names two implementation risks before coding: diagnostics must
   not share one `current_frame` counter across two resolver runs, and invalid
   world planes need explicit skip reasons and tests.
@@ -1048,6 +1036,8 @@ hinge edges, not only point centers.
   component the world resolver reads.
 
 ### Phase 3 — world-space point anchoring
+
+Status: **complete**.
 
 Implement world-to-world panel attachment using the same `AnchoredToPanel`
 relationship:
@@ -1089,10 +1079,10 @@ relationship:
 12. Keep optional post-alignment rotation as a separate component read by the
    world resolver if it is needed. Do not make animation systems fight the
    resolver by writing the same `Transform` after it.
-13. Accept zero world offsets from either `PanelAnchorOffset::ZERO` or
-    `PanelAnchorOffset::target_plane_meters(Vec2::ZERO)`, so
+13. Accept zero world offsets from `PanelAnchorOffset::ZERO`, so
     `AnchoredToPanel::new` works for default world attachments. Non-zero world
-    offsets must use `TargetPlaneMeters`.
+    offsets use `PanelAnchorOffset::new(x, y)` with bare `f32` or
+    `Px`/`Mm`/`Pt`/`In` dimensions.
 14. Define world-panel IME behavior before closing the phase. Preferred path:
     world fields that depend on world-anchored panels use helper-backed geometry
     after the world resolver; if that is deferred, add a test and docs that
@@ -1102,20 +1092,105 @@ This phase should make `examples/panel_anchoring.rs`, planned in
 [`panel-anchoring-example.md`](panel-anchoring-example.md), possible for static
 and keyboard-driven world anchoring.
 
+#### Retrospective
+
+**What worked:**
+
+- `panel/attachment_resolver.rs` now owns dependency ordering, cycle handling,
+  blocked-dependency handling, fallback requests, and bounded diagnostics for
+  both screen-space and world-space attachment resolvers.
+- `panel/world_anchoring.rs` adds a PostUpdate world resolver using the existing
+  `AnchoredToPanel` relation and the Phase 2 `PanelPlane` helpers.
+- World and screen sources are now split by source coordinate space: the screen
+  resolver handles screen panels, and the world resolver handles world panels.
+
+**What deviated from the plan:**
+
+- The first Phase 3 pass briefly duplicated graph traversal in the world
+  resolver. That was corrected before Phase 3 closeout: screen and world
+  resolvers now both call the shared attachment resolver.
+- No `panel_anchoring.rs` example was added in this phase. The world resolver now
+  makes the static world-anchor example possible, but the example remains in
+  [`panel-anchoring-example.md`](panel-anchoring-example.md).
+- World-panel editor placement was not changed. It still follows the existing
+  propagated-`GlobalTransform` path, so same-frame editor tracking for
+  world-anchored panels is deferred.
+
+**Surprises:**
+
+- The screen resolver test for a source changing from screen to world had to
+  stop expecting a screen diagnostic. With source-owned resolution, that edge is
+  no longer a screen failure.
+- Parent support is best kept to transforms that can round-trip through Bevy's
+  `Transform`: no parent, rotated parent, and uniform-scale parent.
+
+**Implications for remaining phases:**
+
+- Phase 4 examples can use world-to-world `AnchoredToPanel` for exact snapping
+  and `PanelAnchorGeometryParam` for animation-only movement.
+- If an active world relation needs animation, the next phase should add a
+  separate component read by the resolver rather than another system writing the
+  same `Transform`.
+- Screen and world attachment changes should extend
+  `panel/attachment_resolver.rs` when the behavior is graph-level, and stay in
+  the coordinate-specific resolver only when the behavior is screen math or
+  world transform math.
+- A later editor-specific pass is needed if world-anchored editable fields must
+  update their popup from the just-resolved PostUpdate pose in the same frame.
+
+#### Phase 3 Review
+
+- Phase 4 now starts by adding `examples/panel_anchoring.rs` for static and
+  keyboard-driven world-to-world anchoring before animation demos, and treats it
+  as deferred Phase 3 coverage.
+- Phase 4 now says active-relation animation must first add a resolver-read
+  component such as `PanelAnchorPoseOffset` or `PanelAnchorPostAlignment`.
+- Phase 4 now names the PostUpdate scheduling rule for same-frame animation
+  inputs and requires before/after resolver tests. The review tightened this:
+  Phase 4 must add or choose a named ordering point before adding resolver-read
+  animation inputs.
+- Phase 4 now treats world editable-field popup tracking as a separate follow-up
+  unless a later test or example intentionally touches it, with any same-frame
+  world editor work deferred to an editor-specific task.
+- The Phase 3 closeout commands now match what shipped: `cargo check`, focused
+  `world_anchoring` tests, shared `attachment_resolver` tests, and screen
+  anchoring regression tests.
+- Phase 3 now has a shared graph/diagnostics resolver with thin screen and world
+  placement adapters.
+- Phase 4 tests now avoid repeating Phase 3 mixed-space resolver coverage unless
+  animation code adds a new mixed-space path.
+- `panel-anchoring-example.md` now requires explicit reset/detach behavior for
+  `AnchoredWorldPanelPose`.
+
 ### Phase 4 — animated anchor consumers
 
 Build animation examples on top of the public anchor geometry rather than
-changing the resolver into a physics system. Split this phase into two passes:
+changing the resolver into a physics system. Split this phase into three
+passes:
 
-1. **Animations without an active attachment:** spring/magnetic attraction
+1. **Static and keyboard-driven world anchoring example:** create
+   `examples/panel_anchoring.rs` with the Demo 1 behavior from
+   [`panel-anchoring-example.md`](panel-anchoring-example.md). This uses
+   world-to-world `AnchoredToPanel` directly and proves the Phase 3 resolver in
+   an example before adding animation. Treat this as deferred Phase 3 coverage:
+   land it before spring, magnetic, elastic, or unwrap demos.
+2. **Animations without an active attachment:** spring/magnetic attraction
    between two panels that only read each other's anchor points. These examples
    do not insert `AnchoredToPanel`; they read `PanelAnchorGeometryParam` and
-   write `Transform` through `ParamSet`.
-2. **Animations while a panel is attached:** elastic attach/detach and chained
-   unwrapping where `AnchoredToPanel` is active. These wait for Phase 3 to add a
-   component such as `PanelAnchorPoseOffset` or `PanelAnchorPostAlignment` that
-   the world resolver reads, because the resolver writes the panel transform
-   while the attachment is active.
+   write `Transform` through `ParamSet`. Do not repeat the Phase 2 smoke test;
+   cover visible convergence/separation behavior and an `anchor_animation` test
+   filter.
+3. **World-resolver animation input:** before any active-relation animation
+   demo, add or choose a named `PostUpdate` ordering point for systems that write
+   resolver-read animation inputs before the world attachment resolver. If this
+   becomes a public `PanelSystems` variant, get explicit API approval during
+   that implementation phase.
+4. **Animations while a panel is attached:** elastic attach/detach and chained
+   unwrapping where `AnchoredToPanel` is active. Start by adding a component
+   such as `PanelAnchorPoseOffset` or `PanelAnchorPostAlignment`, make the world
+   resolver read it, and test that the pinned `source_anchor` stays fixed while
+   the component changes. Land that component and its tests before the
+   active-relation animation demo.
 
 The relationship remains the exact snap constraint. Active `AnchoredToPanel`
 means the resolver writes the panel placement. Animation systems should use one
@@ -1131,6 +1206,22 @@ resolved attached pose, define the handoff explicitly before writing the demo.
 Either keep the relation active and animate a component read by the resolver, or
 add a same-frame release-pose capture protocol so authored-pose restoration from
 Phase 3 does not snap the panel away before the animation starts.
+
+Because the world resolver runs in `PostUpdate` before
+`TransformSystems::Propagate`, same-frame animation inputs for an active relation
+must be written before the world attachment resolver. Phase 4 must name the set
+or system label that callers order against, then add tests showing writes before
+the resolver affect the current frame, while writes after the resolver affect the
+next frame.
+
+World editable-field popup tracking is not part of Phase 4. If an example or
+test touches editable fields on world-anchored panels, document the existing
+propagated-transform timing or add a separate editor-specific fix.
+
+Deferred follow-up: if same-frame popup tracking for world-anchored editable
+fields becomes required, handle it in an editor-specific task that covers
+`ime/editor.rs` after `resolve_world_space_panel_attachments`. Do not mix that
+work into `panel_anchoring.rs` or the animation demos.
 
 Hinge animations should consume `PanelAnchorEdge` geometry from Phase 2. Do not
 extend `AnchoredToPanel` beyond point-to-point snapping just to model hinge
@@ -1169,7 +1260,8 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 - window resize repositions `ScreenPosition::Screen` targets and dependents
 - removing `AnchoredToPanel` returns dependent to configured placement
 - source coordinate-space transition clears or ignores stale screen override
-- `TargetPlaneMeters` offset on a screen source skips with `OffsetUnitsMismatch`
+- explicit dimension offsets such as `Pt(12.0)` resolve to target-panel layout
+  units before placement
 - observer queued `AnchoredToPanel` insertion after `PanelDimensionsChanged`
   takes effect before attachment resolution in the same frame
 - relation writes applied before `PanelSystems::ResolvePanelAttachments` affect
@@ -1252,12 +1344,24 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 
 - elastic pair animation consumes anchor point geometry and has no active
   `AnchoredToPanel` relation while it owns transforms
+- `panel_anchoring.rs` includes the static and keyboard-driven world-to-world
+  anchoring demo before active-relation animation examples are added
+- the static `panel_anchoring.rs` pass documents reset and detach behavior for
+  `AnchoredWorldPanelPose`: whether reset removes the relation, refreshes the
+  captured authored pose, or leaves the resolver-owned pose intact
+- Phase 4 adds or names a `PostUpdate` ordering point for world-resolver
+  animation inputs before adding `PanelAnchorPoseOffset` /
+  `PanelAnchorPostAlignment`
 - post-alignment rotation animation, if added, is consumed by the resolver
   rather than writing the same transform after the resolver
+- writes to `PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` before the
+  world resolver affect the current frame; writes after it affect the next frame
 - `PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` keeps the pinned
   `source_anchor` fixed while composing local rotation
 - chained unwrap consumes edge geometry and does not require extending
   `AnchoredToPanel` beyond point snapping
+- mixed screen/world animation tests are only needed for animation-specific
+  paths; do not duplicate the base resolver ownership tests from Phase 3
 
 ### Phase Closeout
 
@@ -1282,8 +1386,11 @@ Phase 3 closeout:
 
 ```sh
 cargo +nightly fmt --all -- --check
-cargo check -p bevy_diegetic --example panel_anchoring
+cargo check -p bevy_diegetic
 cargo nextest run -p bevy_diegetic world_anchoring
+cargo nextest run -p bevy_diegetic attachment_resolver
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+cargo nextest run -p bevy_diegetic
 ```
 
 Phase 4 closeout:
@@ -1303,7 +1410,8 @@ this implementation plan.
 
 Recorded in the plan:
 
-- `PanelAnchorOffset` makes offset units explicit before world anchoring ships.
+- `PanelAnchorOffset` uses the same authored `Dimension` units as panel and
+  text sizing.
 - The public field name is `source_anchor`, avoiding ambiguity with
   `panel.anchor()`.
 - Phase 1 reflection is type-registration-only for relationship components;
@@ -1343,15 +1451,15 @@ Recorded in the plan:
 
 - `AnchoredToPanel` is explicitly `#[component(immutable)]`, so
   replacement-only retargeting is enforceable.
-- `PanelAnchorOffset` stores a unit tag; screen and world resolvers validate
-  offset units instead of relying on constructor naming alone.
+- `PanelAnchorOffset` stores `Dimension` values; screen and world resolvers
+  convert those values through the target panel's layout unit before placement.
 - Relationship mutation timing is part of the public schedule contract:
   relation changes applied before `ResolvePanelAttachments` affect the current
   frame, and later changes affect the next frame.
 - The flush contract no longer requires same-frame reverse-index visibility for
   resolver correctness.
-- Skip reasons include missing source/target, transient self-attachment,
-  offset-unit mismatch, and unsupported world parent transforms.
+- Skip reasons include missing source/target, transient self-attachment, and
+  unsupported world parent transforms.
 - Required `ResolvedScreenPanelPosition` tests distinguish spawn-frame `Added`
   from real `None -> Some -> None` resolver changes.
 - Diagnostics tests now cover coalescing, counts, last-seen frames, recovery,
