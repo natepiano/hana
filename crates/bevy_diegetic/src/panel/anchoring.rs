@@ -1,4 +1,15 @@
 //! Panel-to-panel anchoring relationship types.
+//!
+//! Anchoring is a per-frame resolved relationship, not `ChildOf` parenting.
+//! The pin position depends on both panels' sizes: a `Fit` target that
+//! remeasures or a window resize moves the target anchor point, so a
+//! parent-relative transform captured once would go stale. Screen panels also
+//! get window-absolute translations written every frame, which a parent
+//! transform would double-apply. Reparenting would further couple lifetimes
+//! (target despawn despawns dependents), inherit the target's scale chain, and
+//! turn an attachment cycle into a hierarchy cycle. The resolvers instead
+//! detach on target despawn, restore the authored pose when [`AnchoredToPanel`]
+//! is removed, and report unresolvable attachments through diagnostics.
 
 use std::ops::Deref;
 

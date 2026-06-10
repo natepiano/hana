@@ -1,7 +1,7 @@
 # Panel anchoring example
 
-Status: **example plan**. This doc sketches an eventual
-`examples/panel_anchoring.rs` scene for the anchor-to-panel feature described in
+Status: **started**. `examples/panel_anchoring.rs` now covers Demo 1. The
+animation demos remain planned for the later Phase 4 passes described in
 [`anchor-to-panel.md`](anchor-to-panel.md).
 
 ## Goal
@@ -9,12 +9,14 @@ Status: **example plan**. This doc sketches an eventual
 Show that panel anchors are useful both as exact layout constraints and as
 readable geometry for animation systems.
 
-`examples/panel_anchoring.rs` starts in Phase 3, when world anchoring exists.
+`examples/panel_anchoring.rs` starts with the Phase 3 world-anchoring behavior.
 Phase 1 screen-space anchoring remains covered by `diegetic_text_stress`.
 
-The example should have three compact demos in one scene:
+The example should grow into three compact demos in one scene:
 
-1. a world-space panel anchored to another panel and moved with hot keys
+1. a world-space panel anchored to another panel, with hot keys cycling the
+   source and target anchor points
+   (**implemented**)
 2. two panels that animate toward and away from each other using their resolved
    anchor points
 3. a three-panel chain that uses point anchors plus edge geometry to unwrap like
@@ -27,42 +29,46 @@ first code path simple:
 
 | key | action |
 |-----|--------|
-| `1` | focus the draggable anchored-panel demo |
+| `1` | focus the anchor-selection demo |
 | `2` | focus the spring pair demo |
 | `3` | focus the chained unwrap demo |
-| arrow keys | move the active target panel in the focused demo |
-| `Q` / `E` | rotate the active target panel |
+| left / right arrows | cycle the dependent panel's source anchor |
+| up / down arrows | cycle the target panel's target anchor |
 | `Space` | toggle the active animation |
-| `R` | reset all panels |
+| `R` | reset the active demo |
 
 Reset behavior must be explicit before implementation because active world
 attachments capture an authored pose in `AnchoredWorldPanelPose`. For Demo 1,
-`R` should restore the target panel to its starting transform while leaving the
-relation active, so the dependent remains resolver-owned and follows the target.
-If a later control removes `AnchoredToPanel`, document whether it restores the
-captured authored pose or first refreshes that captured pose from the current
-resolved placement.
+`R` restores the default source and target anchor selections while leaving the
+relation active. The dependent remains resolver-owned and snaps to the default
+anchor pair. If a later control removes `AnchoredToPanel`, document whether it
+restores the captured authored pose or first refreshes that captured pose from
+the current resolved placement.
 
 ## Demo 1 — world-space point anchoring
 
 Scene:
 
-- target panel: "Target"
-- dependent panel: "Anchored"
-- relation: dependent `TopLeft` anchored to target `BottomRight`
-- offset: a small world-space gap in the target panel plane
+- target panel: blue world panel
+- dependent panel: green world panel
+- relation: dependent source anchor anchored to target anchor
+- each world panel renders only a shaded in-panel square at its selected anchor
+  position
+- bottom-left info panel names the selected anchors and shows matching 3x3
+  reference grids
 
 Behavior:
 
-- Arrow keys move the target panel.
-- `Q` / `E` rotate the target panel around its normal.
-- The dependent panel stays coplanar and keeps its `TopLeft` pinned to the
-  target's `BottomRight` plus the offset.
+- Left/right arrows cycle the dependent panel's source anchor.
+- Up/down arrows cycle the target panel's target anchor.
+- `R` restores the default source and target anchor pair.
+- The dependent panel stays coplanar and keeps the selected source anchor pinned
+  to the selected target anchor.
 
 Purpose:
 
 - proves world-space anchoring is not screen-position sugar
-- proves target translation and rotation both feed the resolver
+- makes all nine anchor points visible and selectable
 - proves `source_anchor` and `target_anchor` are independent
 
 ## Demo 2 — anchor geometry as animation input
@@ -143,7 +149,7 @@ This example depends on the phases in [`anchor-to-panel.md`](anchor-to-panel.md)
 |------|----------------|--------|
 | title/perf panel screen anchoring in `diegetic_text_stress` | Phase 1 | proves the relationship model, observer flushes, graph behavior, and same-frame screen placement |
 | anchor geometry read smoke test | Phase 2 | proves public `point` and `edge` geometry is fresh enough for consumers |
-| Demo 1: moved/rotated world-space anchored panels | Phase 3 | needs world-to-world attachment, target-plane math, and no-lag transform scheduling |
+| Demo 1: selectable world-space anchor points | Phase 3 | needs world-to-world attachment, target-plane math, and no-lag transform scheduling |
 | Demo 2: elastic pair | Phase 4 | needs public anchor geometry plus animation ownership rules |
 | Demo 3: chained unwrap | Phase 4 | needs edge geometry and post-alignment or hinge-style animation input |
 
