@@ -319,6 +319,34 @@ Tests:
   `CascadeDefault`). Full suite 335/335 passed; build, clippy
   (`--all-targets`), and fmt clean.
 
+**Phase 2 review (team_review, 1 cycle — 4 lenses: correctness, risk,
+style, type system):**
+
+- Correctness and risk lenses: no findings. All Phase 2 plan items verified
+  present and following the `alpha_mode` model; observer/resource
+  registration chains complete (`TextRenderPlugin`, both test fixtures);
+  default-layer arithmetic bit-equal to pre-change constants (pinned by
+  test); `From<i8>` confirmed deleted with no surviving call sites.
+- Mechanical (auto-recorded, applied):
+  - `resolved_text_draw_layer` doc comment now states why it returns
+    `TextDrawLayer` rather than the inner `i8` (siblings return inner
+    values; the bare scalar never crosses the API).
+  - `backing_oit_offsets_stay_behind_default_text_and_rise_with_command_index`
+    derives its loop bound from `DEFAULT_TEXT_DRAW_LAYER` instead of a
+    hard-coded `64` (derive-test-values-from-production-constants rule).
+- Type-system lens, recorded as notes (no code change):
+  - `layout/text_props.rs` now imports `cascade::TextDrawLayer` while
+    `cascade/resolved.rs` imports layout types — the first two-way
+    cascade ↔ layout module dependency. Legal intra-crate and accepted:
+    `TextDrawLayer` is the first attribute whose inner type is a bare
+    scalar, so `TextStyle` stores the wrapper itself. Revisit the pattern
+    only if more scalar-wrapped attributes accumulate.
+  - Phase 3 note: `cascade_attr!`'s `eq` variant does not derive `Hash`, so
+    `BatchKey` stores `layer: i8` per the plan — Phase 3 unwraps
+    `TextDrawLayer.0` at the key boundary (mirrors `TextAlpha` →
+    `BatchAlphaMode` re-encoding).
+- 0 proposed user decisions; nothing surfaced to `/adhoc_review`.
+
 ### Phase 3 — batch routing and material derivation
 
 - `BatchKey` gains `layer: i8`; `BatchKeyCascades` gains the resolved query,

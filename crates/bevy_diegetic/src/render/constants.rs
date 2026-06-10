@@ -149,6 +149,10 @@ pub(super) fn resolve_material(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use super::*;
 
@@ -209,8 +213,10 @@ mod tests {
 
     #[test]
     fn backing_oit_offsets_stay_behind_default_text_and_rise_with_command_index() {
+        let default_layer =
+            usize::try_from(DEFAULT_TEXT_DRAW_LAYER).expect("default layer is positive");
         let mut previous = f32::NEG_INFINITY;
-        for command_index in 0..64_usize {
+        for command_index in 0..default_layer {
             let offset = DrawOrdinal::from_command_index(command_index).oit_depth_offset();
             assert!(offset < 0.0, "command {command_index} must sit behind text");
             assert!(offset > previous, "offsets must rise with command index");

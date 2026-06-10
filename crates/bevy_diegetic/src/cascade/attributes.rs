@@ -133,6 +133,8 @@ pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness 
 ///
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
+/// Returns [`TextDrawLayer`] rather than the inner `i8` — the attribute type
+/// is the public draw-order vocabulary; the bare scalar never crosses the API.
 #[must_use]
 pub fn resolved_text_draw_layer(world: &World, entity: Entity) -> TextDrawLayer {
     resolved_cascade::<TextDrawLayer>(world, entity)
