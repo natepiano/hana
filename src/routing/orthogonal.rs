@@ -110,10 +110,10 @@ impl OrthogonalPlanner {
         waypoints
     }
 
-    /// Generate a U-shaped orthogonal path that routes around obstacles by
-    /// going out, across, and back in. Each segment is axis-aligned.
+    /// Generate a U-shaped orthogonal path with `start`, `below_start`,
+    /// `below_corner`, `below_end`, and `end` waypoints.
     fn u_path(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
-        // Find the maximum obstacle extent to route around
+        // `offset` uses the largest `Obstacle::half_extents.max_element()` plus `margin`.
         let offset = self.margin.mul_add(
             OBSTACLE_CLEARANCE_MULTIPLIER,
             obstacles.iter().fold(0.0_f32, |acc, obstacle| {
@@ -122,7 +122,7 @@ impl OrthogonalPlanner {
             }),
         );
 
-        // Route below obstacles: go down, across X, across Z, up
+        // Build `below_start`, `below_corner`, and `below_end` below both endpoints.
         let below = start.y.min(end.y) - offset;
         let below_start = Vec3::new(start.x, below, start.z);
         let below_corner = Vec3::new(end.x, below, start.z);
@@ -133,7 +133,8 @@ impl OrthogonalPlanner {
 
 impl PathPlanner for OrthogonalPlanner {
     fn plan(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
-        // Axis orders to try: preferred first, then alternatives
+        // `axis_order` selects `VERTICAL_FIRST_AXIS_ORDERS` or
+        // `HORIZONTAL_FIRST_AXIS_ORDERS`.
         let orders = if matches!(self.axis_order, AxisOrder::VerticalFirst) {
             &VERTICAL_FIRST_AXIS_ORDERS
         } else {
@@ -152,7 +153,7 @@ impl PathPlanner for OrthogonalPlanner {
             }
         }
 
-        // Fallback: U-path around obstacles
+        // `Blockage::Blocked` for every axis path uses `u_path`.
         self.u_path(start, end, obstacles)
     }
 }

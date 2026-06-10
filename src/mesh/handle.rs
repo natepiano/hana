@@ -73,12 +73,14 @@ pub(super) fn on_geometry_computed(
     let new_mesh = tube::generate_tube_mesh(cable_geometry, &updated_cable_mesh_config);
 
     if let Some(handle) = mesh_handle {
-        // Update existing mesh asset in place
+        // `CableMeshHandle` looks up the existing `Mesh` with `Assets<Mesh>::get_mut`.
+        // Assigning `new_mesh` mutates the stored mesh asset.
         if let Some(mut existing) = meshes.get_mut(&handle.0) {
             *existing = new_mesh;
         }
     } else {
-        // First time: create asset, spawn mesh child
+        // `Assets<Mesh>::add` creates the `Handle<Mesh>` for the spawned `Mesh3d` child.
+        // `CableMeshChild` and `CableMeshHandle` are inserted on the cable entity.
         let handle = meshes.add(new_mesh);
         let mut child_commands = commands.spawn((Mesh3d(handle.clone()), ChildOf(cable_entity)));
         if let Some(ref mat) = cable_mesh_config.material {

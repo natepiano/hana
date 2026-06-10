@@ -173,7 +173,7 @@ impl AStarPlanner {
             let current = current_entry.cell;
 
             if current == goal {
-                // Reconstruct path
+                // Follow `came_from` with the `node` cursor, then reverse `path`.
                 let mut path = vec![current];
                 let mut node = current;
                 while let Some(&prev) = came_from.get(&node) {
@@ -241,7 +241,7 @@ impl PathPlanner for AStarPlanner {
             return vec![start, end];
         };
 
-        // Convert cells to world positions
+        // Convert `path_cells` into `waypoints` with `Cell::to_world`.
         let mut waypoints: Vec<Vec3> = path_cells
             .iter()
             .map(|c| c.to_world(origin, self.grid_size))
@@ -255,7 +255,7 @@ impl PathPlanner for AStarPlanner {
             *last = end;
         }
 
-        // Simplify: remove collinear waypoints
+        // `simplify_path` removes collinear entries from `waypoints`.
         simplify_path(&mut waypoints);
 
         waypoints

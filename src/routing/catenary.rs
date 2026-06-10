@@ -106,7 +106,7 @@ pub fn solve_parameter(
         }
     }
 
-    // Failed to converge — return current best if reasonable
+    // `solve_parameter` returns `Some(param)` only when `param > MIN_CATENARY_PARAM`.
     (param > MIN_CATENARY_PARAM).then_some(param)
 }
 
@@ -138,12 +138,13 @@ pub fn sample_3d(
     let cable_length = chord_length * clamped_slack;
     let gravity_norm = gravity_direction.normalize_or_zero();
 
-    // Near-taut cables degrade gracefully to a straight line
+    // `clamped_slack < STRAIGHT_LINE_THRESHOLD` returns `sample_straight_line`.
     if clamped_slack < STRAIGHT_LINE_THRESHOLD {
         return sample_straight_line(start, end, n);
     }
 
-    // If gravity is zero, fall back to straight line
+    // `gravity_norm.length_squared() < NEAR_ZERO_GRAVITY_THRESHOLD` returns
+    // `sample_straight_line`.
     if gravity_norm.length_squared() < NEAR_ZERO_GRAVITY_THRESHOLD {
         return sample_straight_line(start, end, n);
     }
@@ -158,7 +159,7 @@ pub fn sample_3d(
     let horizontal_vec = chord - vertical_component * gravity_norm;
     let horizontal_distance = horizontal_vec.length();
 
-    // If cable is purely vertical, handle as a special case
+    // `horizontal_distance < MIN_SEGMENT_LENGTH` returns `sample_vertical_hang`.
     if horizontal_distance < MIN_SEGMENT_LENGTH {
         return sample_vertical_hang(start, end, gravity_norm, cable_length, n);
     }
