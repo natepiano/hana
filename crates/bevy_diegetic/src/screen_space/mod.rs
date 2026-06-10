@@ -1,7 +1,9 @@
 //! Screen-space overlay support for diegetic panels.
 
+mod anchoring;
 mod constants;
 
+use anchoring::AnchorResolveDiagnostics;
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
@@ -26,6 +28,7 @@ use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::LastPanelDimensions;
 use crate::panel::PanelSystems;
+use crate::panel::ResolvedScreenPanelPosition;
 use crate::panel::ScreenPosition;
 use crate::render::PanelChildSystems;
 
@@ -48,6 +51,8 @@ pub struct ScreenSpaceLight {
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum ScreenSpaceSystems {
     ResolveDimensions,
+    FlushDimensionObservers,
+    FlushObserverCommands,
 }
 
 pub(crate) struct ScreenSpacePlugin;
@@ -57,20 +62,30 @@ impl Plugin for ScreenSpacePlugin {
         app.add_observer(setup_screen_space_view)
             .add_observer(cleanup_screen_space_view)
             .add_observer(cleanup_screen_space_on_window_close)
+            .init_resource::<AnchorResolveDiagnostics>()
             .configure_sets(
                 Update,
-                ScreenSpaceSystems::ResolveDimensions
-                    .after(PanelSystems::ResolveWorldFit)
-                    .before(PanelSystems::PositionScreenSpace),
+                (
+                    ScreenSpaceSystems::ResolveDimensions.after(PanelSystems::ResolveWorldFit),
+                    ScreenSpaceSystems::FlushDimensionObservers
+                        .after(ScreenSpaceSystems::ResolveDimensions),
+                    ScreenSpaceSystems::FlushObserverCommands
+                        .after(ScreenSpaceSystems::FlushDimensionObservers),
+                    PanelSystems::ResolvePanelAttachments
+                        .after(ScreenSpaceSystems::FlushObserverCommands)
+                        .before(PanelSystems::PositionScreenSpace),
+                    PanelSystems::PositionScreenSpace.after(PanelSystems::ResolvePanelAttachments),
+                ),
             )
             .add_systems(
                 Update,
                 (
                     resolve_screen_space_panel_dimensions
                         .in_set(ScreenSpaceSystems::ResolveDimensions),
-                    ApplyDeferred
-                        .after(ScreenSpaceSystems::ResolveDimensions)
-                        .before(PanelSystems::PositionScreenSpace),
+                    ApplyDeferred.in_set(ScreenSpaceSystems::FlushDimensionObservers),
+                    ApplyDeferred.in_set(ScreenSpaceSystems::FlushObserverCommands),
+                    anchoring::resolve_screen_space_panel_attachments
+                        .in_set(PanelSystems::ResolvePanelAttachments),
                     position_screen_space_panels.in_set(PanelSystems::PositionScreenSpace),
                 ),
             )
@@ -176,14 +191,14 @@ fn resolve_screen_space_panel_dimensions(
 fn position_screen_space_panels(
     windows: Query<(Entity, &Window)>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut panels: Query<(&mut Transform, &DiegeticPanel)>,
+    mut panels: Query<(&mut Transform, &DiegeticPanel, &ResolvedScreenPanelPosition)>,
 ) {
     let by_entity = window_size_map(&windows);
     if by_entity.is_empty() {
         return;
     }
 
-    for (mut transform, panel) in &mut panels {
+    for (mut transform, panel, resolved_position) in &mut panels {
         let CoordinateSpace::Screen {
             position,
             window: window_ref,
@@ -204,16 +219,19 @@ fn position_screen_space_panels(
         let half_width = window_width / 2.0;
         let half_height = window_height / 2.0;
 
-        let (screen_x, screen_y) = match position {
+        let configured_anchor_position = match position {
             ScreenPosition::Screen => {
                 let (fx, fy) = panel.anchor().offset_fraction();
-                (fx * window_width, fy * window_height)
+                Vec2::new(fx * window_width, fy * window_height)
             },
-            ScreenPosition::At(pos) => (pos.x, pos.y),
+            ScreenPosition::At(pos) => pos,
         };
+        let anchor_position = resolved_position
+            .anchor_position
+            .unwrap_or(configured_anchor_position);
 
-        transform.translation.x = screen_x - half_width;
-        transform.translation.y = half_height - screen_y;
+        transform.translation.x = anchor_position.x - half_width;
+        transform.translation.y = half_height - anchor_position.y;
     }
 }
 

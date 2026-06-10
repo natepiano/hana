@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use super::ResolvedScreenPanelPosition;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
 use super::builder::Screen;
@@ -64,6 +65,7 @@ use crate::layout::Unit;
     ComputedDiegeticPanel,
     DiegeticPanelChangeClassification,
     LastPanelDimensions,
+    ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
     Visibility

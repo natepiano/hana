@@ -763,12 +763,15 @@ not by public field mutation.
 
 Frame-validity contract:
 
-- Phase 2 adds `PanelSystems::PublishAnchorGeometry` as the writer set for any
-  cached geometry.
-- screen geometry is current after `PanelSystems::PublishAnchorGeometry` when it
-  runs after `PanelSystems::PositionScreenSpace`
-- cached world geometry is current after Bevy transform propagation and the
-  world geometry publisher
+- If Phase 2 uses cached geometry, it adds `PanelSystems::PublishAnchorGeometry`
+  as the writer set for that cache.
+- helper-backed screen geometry is current after
+  `PanelSystems::PositionScreenSpace`; cached screen geometry is current after
+  `PanelSystems::PublishAnchorGeometry` when that set exists and runs after
+  positioning
+- helper-backed world geometry must compute current parent/target transforms
+  when used by same-frame writers; cached world geometry is current after Bevy
+  transform propagation and the world geometry publisher
 - same-frame transform-writing consumers should use a helper-backed
   `PanelAnchorGeometryParam` mode that computes current target geometry before
   they write transforms; cached post-propagation world geometry is otherwise a
@@ -784,6 +787,8 @@ world anchoring relies on them.
 ## Implementation Phases
 
 ### Phase 1 — screen-space point anchoring
+
+Status: **complete**.
 
 Keep Phase 1 small enough to implement and review in checkpoints.
 
@@ -886,40 +891,102 @@ Keep Phase 1 small enough to implement and review in checkpoints.
 6. Keep the GPU/perf meter screen placement manually configured unless this
    phase also adds the needed explicit anchor relation there.
 
+#### Retrospective
+
+**What worked:**
+
+- `AnchoredToPanel` and `PanelsAnchoredHere` fit Bevy relationship hooks cleanly:
+  insert, retarget, removal, and target despawn all stayed source-owned.
+- The two screen-space flush sets let a `PanelDimensionsChanged` observer queue
+  an `AnchoredToPanel` insert and still resolve final screen placement in the
+  same `App::update`.
+
+**What deviated from the plan:**
+
+- `AnchoredToPanel` needed `#[reflect(ignore, default = "placeholder_entity")]`
+  on its private target field so type registration works without exposing
+  `ReflectComponent` mutation.
+- The Phase 1F IME/editor and text/SDF render smoke coverage was left as a
+  remaining consumer-audit item; the implementation replaced the
+  `diegetic_text_stress` title-bar observer and kept the deeper same-frame read
+  path out of the first resolver patch.
+
+**Surprises:**
+
+- Fixed screen panel sizing overwrites direct `DiegeticPanel::set_width` /
+  `set_height` test mutations during screen dimension resolution, so resize
+  tests must change the authored sizing input or replace the panel component.
+- Fit screen-panel text measured through the existing point-to-pixel conversion,
+  so first-frame Fit tests assert positive resolved dimensions rather than raw
+  authored point values.
+
+**Implications for remaining phases:**
+
+- Phase 2 should start by publishing a reusable screen-bounds / anchor-geometry
+  read path before moving IME/editor or child-render consumers away from
+  `GlobalTransform` assumptions.
+- Phase 3 can reuse the source-owned graph, skip diagnostics, and change-aware
+  override pattern, but world anchoring still needs its own authored-pose
+  fallback because it writes `Transform` directly.
+
+#### Phase 1 Review
+
+- Phase 2 now starts from the Phase 1 private screen-bounds math and the
+  leftover IME/editor plus text/SDF consumer audit, before adding a generic
+  anchor-animation consumer.
+- Phase 2 cache language now treats `PanelSystems::PublishAnchorGeometry` as
+  conditional on a cached implementation; helper-only geometry reads do not need
+  a cache just to satisfy the plan.
+- Phase 3 now has an explicit source-space ownership step before enabling
+  world-to-world edges, so the screen resolver stops treating valid future world
+  sources as screen mixed-space failures.
+- Phase 4 now has a release-pose handoff rule for elastic attach/detach
+  animations so they do not fight Phase 3 authored-pose restoration.
+
 ### Phase 2 — public anchor geometry reads
 
 Expose read-only resolved anchor geometry without changing attachment behavior.
 This phase should define the stable API that animation systems can consume:
 
-1. Add a public read surface equivalent to `ResolvedPanelAnchorGeometry`,
+1. Extract or reuse the Phase 1 private screen-bounds math instead of adding a
+   second screen geometry implementation.
+2. Add a public read surface equivalent to `ResolvedPanelAnchorGeometry`,
    `PanelAnchorPoints`, `PanelScreenBounds`, `PanelPlane`, and
    `PanelAnchorEdge`.
-2. Prefer `PanelAnchorGeometryParam`; if a cache component is needed, keep it
+3. Prefer `PanelAnchorGeometryParam`; if a cache component is needed, keep it
    library-owned with private fields and no `ReflectComponent` mutation.
-3. Add `PanelSystems::PublishAnchorGeometry` for cached geometry writes.
-4. Provide `point(anchor)` and `edge(edge)` helpers for screen bounds and world
+4. Add `PanelSystems::PublishAnchorGeometry` only if the implementation uses
+   cached geometry writes. Helper-only geometry reads do not need a cache writer
+   set.
+5. Provide `point(anchor)` and `edge(edge)` helpers for screen bounds and world
    planes.
-5. Publish screen-space anchor geometry in logical pixels with top-left origin
+6. Publish screen-space anchor geometry in logical pixels with top-left origin
    and y down.
-6. Publish world-space anchor geometry in world meters with an explicit unit
+7. Publish world-space anchor geometry in world meters with an explicit unit
    orthonormal plane basis and resolved meter extents.
-7. Define the freshness contract in the API docs:
+8. Define the freshness contract in the API docs:
    - cached screen geometry is current after `PanelSystems::PublishAnchorGeometry`
      following `PanelSystems::PositionScreenSpace`
    - cached world geometry is current after transform propagation and the world
      geometry publisher
    - same-frame transform writers use helper-backed current geometry rather than
      cached post-propagation snapshots
-8. Return `None` or an explicit error for missing windows, unresolved panels,
+9. Return `None` or an explicit error for missing windows, unresolved panels,
    zero-sized panels, and invalid panel state; do not synthesize geometry from
    stale transforms.
-9. Keep this phase read-only: no transform writes and no changes to
+10. Keep this phase read-only: no transform writes and no changes to
    `AnchoredToPanel` behavior.
+11. Move the leftover Phase 1F consumer audit into this phase: classify
+    IME/editor screen-panel reads and text/SDF child/render-prep reads, then
+    migrate same-frame screen consumers to the public geometry read path where
+    they should not depend on stale `GlobalTransform`.
 
-The first consumer should be an example or test that animates an entity toward a
-panel anchor point without using `AnchoredToPanel` as the mover. This phase must
-also cover edge geometry because the chained unwrap example needs hinge edges,
-not only point centers.
+The first consumer should be the IME/editor same-frame screen-panel read path or
+a small regression that proves it can consume current screen geometry for an
+attached panel. After that, add an example or test that animates an entity
+toward a panel anchor point without using `AnchoredToPanel` as the mover. This
+phase must also cover edge geometry because the chained unwrap example needs
+hinge edges, not only point centers.
 
 ### Phase 3 — world-space point anchoring
 
@@ -928,28 +995,34 @@ relationship:
 
 1. Add a world-space attachment resolver with its own schedule path. Do not put
    world resolution into the screen-space set chain.
-2. Run the resolver in `PostUpdate` before `TransformSystems::Propagate`.
-3. Use `TransformHelper::compute_global_transform` or an equivalent parent-chain
+2. Split source-space ownership before enabling world-to-world edges: screen
+   sources remain the screen resolver's responsibility, world sources become the
+   world resolver's responsibility, and mixed edges are diagnosed by the source
+   resolver. The Phase 1 screen resolver must not continue to classify valid
+   future world-to-world edges as screen `MixedCoordinateSpace` failures.
+3. Extract or share the source-owned graph traversal, cycle handling,
+   diagnostics, and stale-state clearing before reusing them from the world
+   resolver.
+4. Run the resolver in `PostUpdate` before `TransformSystems::Propagate`.
+5. Use `TransformHelper::compute_global_transform` or an equivalent parent-chain
    helper so same-frame target and parent transforms are current before writing
    the dependent's local `Transform`.
-4. Resolve only world-to-world source edges. Mixed screen/world edges are
+6. Resolve only world-to-world source edges. Mixed screen/world edges are
    diagnosed by the source-space resolver and do not panic.
-5. Compute target anchor points from `PanelPlane::from_panel`, using resolved
+7. Compute target anchor points from `PanelPlane::from_panel`, using resolved
    world-meter panel size, not raw layout-unit dimensions.
-6. While an `AnchoredToPanel` relation is active, the resolver owns world
+8. While an `AnchoredToPanel` relation is active, the resolver owns world
    position and default plane orientation. The default orientation mode is
    "copy the target panel plane."
-7. Preserve the dependent panel's chosen `source_anchor` as the point being
+9. Preserve the dependent panel's chosen `source_anchor` as the point being
    pinned. Do not preserve an arbitrary authored dependent rotation while the
    relation owns orientation.
-8. Capture and restore authored local pose with a resolver-owned record such as
+10. Capture and restore authored local pose with a resolver-owned record such as
    `AnchoredWorldPanelPose`.
-9. Support unparented panels, rotated parents, and uniform-scale parents;
+11. Support unparented panels, rotated parents, and uniform-scale parents;
    diagnose non-uniform or sheared parent chains with
    `UnsupportedWorldParentTransform`.
-10. Reuse the source-owned graph, candidate scan, cycle handling, diagnostics,
-   and stale-state clearing from the screen-space resolver.
-11. Keep optional post-alignment rotation as a separate resolver input if it is
+12. Keep optional post-alignment rotation as a separate resolver input if it is
    needed. Do not make animation systems fight the resolver by writing the same
    `Transform` after it.
 
@@ -974,6 +1047,12 @@ ownership modes:
 2. animation writes a separate resolver input such as offset or post-alignment
    rotation, and the resolver remains the only transform writer
 3. animation inserts or removes the relation only at state boundaries
+
+If an animation removes an active world relation and wants to start from the
+resolved attached pose, define the handoff explicitly before writing the demo.
+Either keep the relation active and animate a resolver-owned pose input, or add a
+same-frame release-pose capture protocol so authored-pose restoration from Phase
+3 does not snap the panel away before the animation starts.
 
 Hinge animations should consume `PanelAnchorEdge` geometry from Phase 2. Do not
 extend `AnchoredToPanel` beyond point-to-point snapping just to model hinge
@@ -1046,23 +1125,24 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 - diagnostics history coalesces repeated invalid edges, tracks
   `count` / `last_seen_frame`, clears current-frame issues on recovery, stores
   separate reasons for the same edge, and evicts past capacity
-- IME/editor same-frame screen-panel read regression covers an attached panel
-  moving in the same frame
-- newly attached screen panel with text/SDF children renders at the resolved
-  transform in the same update, or any intentional one-frame delay is explicitly
-  documented by the test
 
 ### Phase 2 tests
 
 - screen `ResolvedPanelAnchorGeometry::point` returns literal coordinates for
   all nine anchors
 - screen `edge` returns the expected endpoints for all four edges
-- screen geometry is current after `PanelSystems::PublishAnchorGeometry`
-  following `PanelSystems::PositionScreenSpace`
+- helper-backed screen geometry is current after
+  `PanelSystems::PositionScreenSpace`; cached screen geometry is current after
+  `PanelSystems::PublishAnchorGeometry` if Phase 2 adds that cache writer set
 - geometry cache components, if any, have private fields and no
   `ReflectComponent` mutation
 - helper-backed geometry can read the documented current value when a target
   moved earlier in the same frame
+- IME/editor same-frame screen-panel read regression covers an attached panel
+  moving in the same frame
+- newly attached screen panel with text/SDF children renders at the resolved
+  transform in the same update, or any intentional one-frame delay is explicitly
+  documented by the test
 - world `PanelPlane` basis directions are unit and orthonormal, with size in
   resolved meters
 - invalid window and unresolved-panel states return `None` or the documented

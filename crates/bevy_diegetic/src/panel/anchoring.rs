@@ -1,0 +1,275 @@
+//! Panel-to-panel anchoring relationship types.
+
+use std::ops::Deref;
+
+use bevy::prelude::*;
+
+use crate::layout::Anchor;
+
+/// Relationship source that pins one panel anchor point to another panel.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[component(immutable)]
+#[reflect(PartialEq, Debug, FromWorld, Clone)]
+#[relationship(relationship_target = PanelsAnchoredHere)]
+pub struct AnchoredToPanel {
+    #[relationship]
+    #[entities]
+    #[reflect(ignore, default = "placeholder_entity")]
+    target:            Entity,
+    /// Anchor point on the source panel.
+    pub source_anchor: Anchor,
+    /// Anchor point on the target panel.
+    pub target_anchor: Anchor,
+    /// Offset from the resolved target point.
+    pub offset:        PanelAnchorOffset,
+}
+
+impl AnchoredToPanel {
+    /// Creates a relationship from the source panel to `target`.
+    #[must_use]
+    pub const fn new(target: Entity, source_anchor: Anchor, target_anchor: Anchor) -> Self {
+        Self {
+            target,
+            source_anchor,
+            target_anchor,
+            offset: PanelAnchorOffset::ZERO,
+        }
+    }
+
+    /// Sets the offset using a unit-tagged value.
+    #[must_use]
+    pub const fn with_offset(mut self, offset: PanelAnchorOffset) -> Self {
+        self.offset = offset;
+        self
+    }
+
+    /// Sets the offset in screen logical pixels.
+    #[must_use]
+    pub const fn with_screen_offset(self, offset: Vec2) -> Self {
+        self.with_offset(PanelAnchorOffset::screen_pixels(offset))
+    }
+
+    /// Target panel entity.
+    #[must_use]
+    pub const fn target(&self) -> Entity { self.target }
+
+    /// Returns a copy that points at `target`.
+    #[must_use]
+    pub const fn retargeted(mut self, target: Entity) -> Self {
+        self.target = target;
+        self
+    }
+}
+
+impl FromWorld for AnchoredToPanel {
+    fn from_world(_world: &mut World) -> Self {
+        Self::new(Entity::PLACEHOLDER, Anchor::Center, Anchor::Center)
+    }
+}
+
+const fn placeholder_entity() -> Entity { Entity::PLACEHOLDER }
+
+/// Unit-tagged offset for panel anchoring.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(PartialEq, Debug, Default)]
+pub struct PanelAnchorOffset {
+    value: Vec2,
+    units: PanelAnchorOffsetUnits,
+}
+
+impl PanelAnchorOffset {
+    /// Zero screen-pixel offset.
+    pub const ZERO: Self = Self::screen_pixels(Vec2::ZERO);
+
+    /// Creates an offset in screen logical pixels.
+    #[must_use]
+    pub const fn screen_pixels(offset: Vec2) -> Self {
+        Self {
+            value: offset,
+            units: PanelAnchorOffsetUnits::ScreenPixels,
+        }
+    }
+
+    /// Creates an offset in target panel-plane meters.
+    #[must_use]
+    pub const fn target_plane_meters(offset: Vec2) -> Self {
+        Self {
+            value: offset,
+            units: PanelAnchorOffsetUnits::TargetPlaneMeters,
+        }
+    }
+
+    /// Offset unit tag.
+    #[must_use]
+    pub const fn units(self) -> PanelAnchorOffsetUnits { self.units }
+
+    /// Raw offset value.
+    #[must_use]
+    pub const fn as_vec2(self) -> Vec2 { self.value }
+}
+
+/// Units carried by a [`PanelAnchorOffset`].
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+#[reflect(PartialEq, Debug, Default)]
+pub enum PanelAnchorOffsetUnits {
+    /// Logical pixels in a screen-space panel's window.
+    #[default]
+    ScreenPixels,
+    /// Meters in the target panel plane.
+    TargetPlaneMeters,
+}
+
+/// Reverse relationship target: panels anchored to this panel.
+#[derive(Component, Default, Debug, Eq, PartialEq, Reflect)]
+#[reflect(FromWorld, Default)]
+#[relationship_target(relationship = AnchoredToPanel)]
+pub struct PanelsAnchoredHere(Vec<Entity>);
+
+impl PanelsAnchoredHere {
+    /// Iterates over source panel entities.
+    pub fn iter(&self) -> impl Iterator<Item = Entity> + '_ { self.0.iter().copied() }
+
+    /// Number of source panels currently pointing here.
+    #[must_use]
+    pub const fn len(&self) -> usize { self.0.len() }
+
+    /// Whether no source panels point here.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool { self.0.is_empty() }
+}
+
+impl Deref for PanelsAnchoredHere {
+    type Target = [Entity];
+
+    fn deref(&self) -> &Self::Target { &self.0 }
+}
+
+/// Resolver-owned screen position override for a panel's configured anchor.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct ResolvedScreenPanelPosition {
+    pub(crate) anchor_position: Option<Vec2>,
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use std::any::TypeId;
+
+    use bevy::ecs::reflect::ReflectComponent;
+    use bevy::ecs::relationship::Relationship;
+    use bevy::prelude::*;
+
+    use super::AnchoredToPanel;
+    use super::PanelAnchorOffset;
+    use super::PanelsAnchoredHere;
+    use crate::HeadlessLayoutPlugin;
+    use crate::layout::Anchor;
+
+    fn reverse_targets(world: &World, target: Entity) -> Vec<Entity> {
+        world
+            .get::<PanelsAnchoredHere>(target)
+            .map(|targets| targets.iter().collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn insert_replace_and_remove_update_reverse_index() {
+        let mut world = World::new();
+        let target_a = world.spawn_empty().id();
+        let target_b = world.spawn_empty().id();
+        let source = world.spawn_empty().id();
+
+        world.entity_mut(source).insert(AnchoredToPanel::new(
+            target_a,
+            Anchor::TopLeft,
+            Anchor::BottomLeft,
+        ));
+        assert_eq!(reverse_targets(&world, target_a), vec![source]);
+        assert!(reverse_targets(&world, target_b).is_empty());
+
+        world.entity_mut(source).insert(
+            AnchoredToPanel::new(target_a, Anchor::TopRight, Anchor::BottomRight)
+                .retargeted(target_b),
+        );
+        assert!(reverse_targets(&world, target_a).is_empty());
+        assert_eq!(reverse_targets(&world, target_b), vec![source]);
+
+        world.entity_mut(source).remove::<AnchoredToPanel>();
+        assert!(reverse_targets(&world, target_b).is_empty());
+    }
+
+    #[test]
+    fn despawning_target_detaches_without_despawning_dependent() {
+        let mut world = World::new();
+        let target = world.spawn_empty().id();
+        let source = world
+            .spawn(AnchoredToPanel::new(
+                target,
+                Anchor::TopLeft,
+                Anchor::BottomLeft,
+            ))
+            .id();
+
+        world.entity_mut(target).despawn();
+
+        assert!(world.get_entity(source).is_ok());
+        assert!(world.get::<AnchoredToPanel>(source).is_none());
+    }
+
+    #[test]
+    fn relationship_from_uses_center_to_center_zero_offset_defaults() {
+        let target = Entity::PLACEHOLDER;
+        let derived = <AnchoredToPanel as Relationship>::from(target);
+        let expected = AnchoredToPanel::new(target, Anchor::Center, Anchor::Center)
+            .with_offset(PanelAnchorOffset::ZERO);
+
+        assert_eq!(derived, expected);
+    }
+
+    #[test]
+    fn relationship_types_are_registered_without_reflect_component_mutation() {
+        let mut app = App::new();
+        app.add_plugins(HeadlessLayoutPlugin);
+
+        let registry = app.world().resource::<AppTypeRegistry>().read();
+        let source_has_reflect_component = registry
+            .get(TypeId::of::<AnchoredToPanel>())
+            .expect("AnchoredToPanel is registered")
+            .data::<ReflectComponent>()
+            .is_some();
+        let reverse_has_reflect_component = registry
+            .get(TypeId::of::<PanelsAnchoredHere>())
+            .expect("PanelsAnchoredHere is registered")
+            .data::<ReflectComponent>()
+            .is_some();
+        let offset_has_reflect_component = registry
+            .get(TypeId::of::<PanelAnchorOffset>())
+            .expect("PanelAnchorOffset is registered")
+            .data::<ReflectComponent>()
+            .is_some();
+        drop(registry);
+
+        assert!(!source_has_reflect_component);
+        assert!(!reverse_has_reflect_component);
+        assert!(!offset_has_reflect_component);
+    }
+
+    #[test]
+    fn anchored_to_panel_component_is_immutable() {
+        let mut world = World::new();
+        world.register_component::<AnchoredToPanel>();
+        let component_id = world
+            .components()
+            .component_id::<AnchoredToPanel>()
+            .expect("component registered");
+        let component = world
+            .components()
+            .get_info(component_id)
+            .expect("component info exists");
+
+        assert!(!component.mutable());
+    }
+}

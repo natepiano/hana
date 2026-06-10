@@ -47,12 +47,10 @@ use bevy::render::RenderSystems;
 use bevy::render::render_phase::ViewBinnedRenderPhases;
 use bevy::render::renderer::RenderGraph;
 use bevy::render::renderer::RenderGraphSystems;
-use bevy::window::PrimaryWindow;
-use bevy::window::Window;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::CoordinateSpace;
+use bevy_diegetic::AnchoredToPanel;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
@@ -65,10 +63,7 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
-use bevy_diegetic::PanelDimensions;
-use bevy_diegetic::PanelDimensionsChanged;
 use bevy_diegetic::Percent;
-use bevy_diegetic::ScreenPosition;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlign;
@@ -147,7 +142,8 @@ fn main() {
         .init_resource::<GpuPipelineShown>()
         .init_resource::<LastDisplayedStatus>()
         .init_resource::<LastDisplayedBatchStats>()
-        .add_observer(place_status_panel_below_title_bar)
+        .add_observer(anchor_status_panel_when_title_bar_added)
+        .add_observer(anchor_status_panel_when_status_panel_added)
         .add_systems(
             Startup,
             (
@@ -975,7 +971,6 @@ const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 const MILLISECONDS_PER_SECOND: f32 = 1000.0;
 const STATUS_TITLE_BAR_GAP: f32 = 1.0;
-const STATUS_POSITION_EPSILON: f32 = 0.5;
 
 /// Larger text on the label/value header line of each batch-stats group.
 const STATS_HEADER_FONT_SIZE: f32 = 15.0;
@@ -1219,82 +1214,34 @@ fn spawn_batch_stats_overlay(mut commands: Commands) {
     }
 }
 
-#[derive(Clone, Copy)]
-struct ScreenPanelBounds {
-    left:   f32,
-    bottom: f32,
+const fn status_panel_title_anchor(title_bar: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(title_bar, Anchor::TopLeft, Anchor::BottomLeft)
+        .with_screen_offset(Vec2::new(0.0, STATUS_TITLE_BAR_GAP))
 }
 
-fn place_status_panel_below_title_bar(
-    event: On<PanelDimensionsChanged>,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    title_bars: Query<&DiegeticPanel, (With<TitleBar>, Without<StatusPanel>)>,
-    mut status_panels: Query<&mut DiegeticPanel, With<StatusPanel>>,
+fn anchor_status_panel_when_title_bar_added(
+    trigger: On<Add, TitleBar>,
+    status_panels: Query<Entity, With<StatusPanel>>,
+    mut commands: Commands,
 ) {
-    let event = event.event();
-    let Ok(title_panel) = title_bars.get(event.entity) else {
-        return;
-    };
-    let Ok(window) = windows.single() else {
-        return;
-    };
-    let window_size = Vec2::new(window.width(), window.height());
-    if window_size.x <= 0.0 || window_size.y <= 0.0 {
-        return;
-    }
-
-    let Some(title_bounds) = screen_panel_bounds(title_panel, event.dimensions, window_size) else {
-        return;
-    };
-    let target = Vec2::new(
-        title_bounds.left,
-        title_bounds.bottom + STATUS_TITLE_BAR_GAP,
-    );
-
-    for mut status_panel in &mut status_panels {
-        if screen_position_matches(&status_panel, target) {
-            continue;
-        }
-        let _ = status_panel.set_screen_position(target);
+    for status_panel in &status_panels {
+        commands
+            .entity(status_panel)
+            .insert(status_panel_title_anchor(trigger.entity));
     }
 }
 
-fn screen_panel_bounds(
-    panel: &DiegeticPanel,
-    dimensions: PanelDimensions,
-    window_size: Vec2,
-) -> Option<ScreenPanelBounds> {
-    let CoordinateSpace::Screen { position, .. } = panel.coordinate_space() else {
-        return None;
+fn anchor_status_panel_when_status_panel_added(
+    trigger: On<Add, StatusPanel>,
+    title_bars: Query<Entity, With<TitleBar>>,
+    mut commands: Commands,
+) {
+    let Ok(title_bar) = title_bars.single() else {
+        return;
     };
-    let width = dimensions.resolved_size.x;
-    let height = dimensions.resolved_size.y;
-    if width <= 0.0 || height <= 0.0 {
-        return None;
-    }
-
-    let (anchor_x, anchor_y) = panel.anchor().offset_fraction();
-    let anchor_position = match *position {
-        ScreenPosition::Screen => Vec2::new(anchor_x * window_size.x, anchor_y * window_size.y),
-        ScreenPosition::At(position) => position,
-    };
-    let left = anchor_x.mul_add(-width, anchor_position.x);
-    let top = anchor_y.mul_add(-height, anchor_position.y);
-    Some(ScreenPanelBounds {
-        left,
-        bottom: top + height,
-    })
-}
-
-fn screen_position_matches(panel: &DiegeticPanel, target: Vec2) -> bool {
-    let CoordinateSpace::Screen {
-        position: ScreenPosition::At(current),
-        ..
-    } = panel.coordinate_space()
-    else {
-        return false;
-    };
-    (*current - target).length_squared() <= STATUS_POSITION_EPSILON * STATUS_POSITION_EPSILON
+    commands
+        .entity(trigger.entity)
+        .insert(status_panel_title_anchor(title_bar));
 }
 
 fn status_label_style() -> TextStyle {

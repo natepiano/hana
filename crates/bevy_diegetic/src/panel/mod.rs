@@ -1,6 +1,7 @@
 //! Panel integration: components, layout computation, and gizmo rendering
 //! — the Bevy-facing half of diegetic UI.
 
+mod anchoring;
 mod builder;
 mod compute_layout;
 mod constants;
@@ -12,6 +13,11 @@ mod gizmos;
 mod perf;
 mod sizing;
 
+pub use anchoring::AnchoredToPanel;
+pub use anchoring::PanelAnchorOffset;
+pub use anchoring::PanelAnchorOffsetUnits;
+pub use anchoring::PanelsAnchoredHere;
+pub(crate) use anchoring::ResolvedScreenPanelPosition;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 pub use builder::DiegeticPanelBuilder;
@@ -68,6 +74,8 @@ pub enum PanelSystems {
     /// Runs `resolve_world_panel_fit`
     /// — shrinks world panels with `Fit` axes to their content bounds.
     ResolveWorldFit,
+    /// Resolves panel-to-panel attachments before screen-space positioning.
+    ResolvePanelAttachments,
     /// Positions screen-space panels after `Fit` dimensions have resolved.
     PositionScreenSpace,
     /// Runs gizmo reconciliation
@@ -95,6 +103,10 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<CascadeDefaults>()
+            .register_type::<AnchoredToPanel>()
+            .register_type::<PanelAnchorOffset>()
+            .register_type::<PanelAnchorOffsetUnits>()
+            .register_type::<PanelsAnchoredHere>()
             .configure_sets(
                 Update,
                 (
