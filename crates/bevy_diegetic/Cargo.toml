@@ -84,6 +84,9 @@ name = "font_features"
 name = "units"
 
 [[example]]
+name = "analytic_line_probe"
+
+[[example]]
 name = "sizes"
 
 [[example]]

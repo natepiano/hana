@@ -20,18 +20,26 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
+use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
+use bevy_diegetic::Fit;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelDraw;
+use bevy_diegetic::PanelLine;
+use bevy_diegetic::PanelLineBatchPerfStats;
+use bevy_diegetic::PanelPoint;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
@@ -46,6 +54,10 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
+use fairy_dust::screen_panel_frame;
+use fairy_dust::screen_panel_material;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
 const A4: PaperSize = PaperSize::A4;
@@ -58,7 +70,7 @@ const CARD_HEIGHT: In = In(2.0);
 const CARD_NAME_SIZE: Pt = Pt(15.0);
 const CARD_TITLE_SIZE: Pt = Pt(13.0);
 const CARD_DETAIL_SIZE: Pt = Pt(11.0);
-const CARD_FOOTER_SIZE: Pt = Pt(6.0);
+const CARD_FOOTER_SIZE: Pt = Pt(6.5);
 
 // ── Index card ──────────────────────────────────────────────────────
 const INDEX_WIDTH: In = In(5.0);
@@ -71,13 +83,19 @@ const INDEX_HEADING_SIZE: Pt = Pt(14.0);
 const INDEX_SUBHEADING_SIZE: Pt = Pt(11.0);
 const INDEX_LABEL_SIZE: Pt = Pt(10.0);
 const INDEX_CODE_SIZE: Pt = Pt(10.0);
-const INDEX_FOOTER_SIZE: Pt = Pt(8.0);
+const INDEX_FOOTER_SIZE: Pt = Pt(10.0);
 
 // ── Screen panel styling ─────────────────────────────────────────────
 /// Inner-background alpha applied to both the title bar and the camera
 /// control panel. Higher than `fairy_dust`'s default (0.50) so the example's
 /// HUD reads as a more opaque surface against the 3D scene.
 const PANEL_BACKGROUND_ALPHA: f32 = 0.90;
+const BATCH_PANEL_TITLE_SIZE: Pt = Pt(8.0);
+const BATCH_PANEL_VALUE_SIZE: Pt = Pt(10.0);
+const BATCH_PANEL_LABEL_SIZE: Pt = Pt(7.0);
+const BATCH_PANEL_TITLE_COLOR: Color = Color::srgb(0.70, 0.78, 0.90);
+const BATCH_PANEL_VALUE_COLOR: Color = Color::srgb(0.92, 1.00, 0.82);
+const BATCH_PANEL_LABEL_COLOR: Color = Color::srgba(0.78, 0.84, 0.92, 0.86);
 
 // ── Scene layout ─────────────────────────────────────────────────────
 const GAP: Mm = Mm(15.0);
@@ -147,6 +165,12 @@ struct IndexPanel;
 #[derive(Component)]
 struct PanelRuler;
 
+#[derive(Component)]
+struct BatchCountPanel;
+
+#[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
+struct BatchCountDisplay(PanelLineBatchPerfStats);
+
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 enum DebugOutlines {
     On,
@@ -188,6 +212,21 @@ enum CameraProjection {
     Orthographic,
 }
 
+const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
+    ("aa-off", "Off", TextAntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", TextAntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
+    ("aa-both", "Both", TextAntiAlias::Both),
+];
+
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
+
 fn build_panel_or_log(
     panel: Result<DiegeticPanel, bevy_diegetic::PanelBuildError>,
     label: &str,
@@ -199,6 +238,73 @@ fn build_panel_or_log(
             None
         },
     }
+}
+
+fn spawn_batch_count_panel(commands: &mut Commands) {
+    let display = BatchCountDisplay::default();
+    let unlit = screen_panel_material();
+    let panel = DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(build_batch_count_panel_tree(display.0))
+        .build();
+
+    let Some(panel) = build_panel_or_log(panel, "batch count panel") else {
+        return;
+    };
+    commands.spawn((BatchCountPanel, display, panel, Transform::default()));
+}
+
+fn update_batch_count_panel(
+    mut commands: Commands,
+    perf: Res<DiegeticPerfStats>,
+    mut panels: Query<(Entity, &mut BatchCountDisplay), With<BatchCountPanel>>,
+) {
+    let stats = perf.line_batch;
+    for (entity, mut display) in &mut panels {
+        if display.0 == stats {
+            continue;
+        }
+        display.0 = stats;
+        commands.set_tree(entity, build_batch_count_panel_tree(stats));
+    }
+}
+
+fn build_batch_count_panel_tree(stats: PanelLineBatchPerfStats) -> LayoutTree {
+    let title = TextStyle::new(BATCH_PANEL_TITLE_SIZE)
+        .with_color(BATCH_PANEL_TITLE_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let value = TextStyle::new(BATCH_PANEL_VALUE_SIZE)
+        .with_color(BATCH_PANEL_VALUE_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let label = TextStyle::new(BATCH_PANEL_LABEL_SIZE)
+        .with_color(BATCH_PANEL_LABEL_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None);
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .direction(Direction::TopToBottom)
+                    .child_gap(2.0),
+                |builder| {
+                    builder.text("Line Batches", title);
+                    builder.text(format!("{}", stats.batches), value);
+                    builder.text(format!("records {}", stats.records), label.clone());
+                    builder.text(format!("uploads {}", stats.uploads), label);
+                },
+            );
+        },
+    );
+    builder.build()
 }
 
 fn main() {
@@ -225,6 +331,10 @@ fn main() {
                 .with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA))
                 .control("D Outlines")
                 .control("R Rulers")
+                .control(TitleBarControl::segmented(
+                    "A",
+                    AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+                ))
                 .control("P Perspective")
                 .control("O Orthographic")
                 .control("Click to Zoom"),
@@ -236,6 +346,18 @@ fn main() {
         .wire_chip_to_state::<Rulers, _>("R Rulers", |state| match state {
             Rulers::Visible => ControlActivation::Active,
             Rulers::Hidden => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .wire_chip_to_state::<CameraProjection, _>("P Perspective", |state| match state {
             CameraProjection::Perspective => ControlActivation::Active,
@@ -258,16 +380,20 @@ fn main() {
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()
         .add_systems(Startup, setup)
+        .add_systems(Update, update_batch_count_panel)
         // D / R toggles and the P / O projection switch all run through Fairy
         // Dust's shortcut binding, which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyD, toggle_debug_outlines)
         .with_shortcut(KeyCode::KeyR, toggle_rulers)
+        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
         .with_shortcut(KeyCode::KeyP, to_perspective_projection)
         .with_shortcut(KeyCode::KeyO, to_orthographic_projection)
         .run();
 }
 
 fn setup(mut commands: Commands) {
+    spawn_batch_count_panel(&mut commands);
+
     let a4_width_meters = f32::from(A4_WIDTH);
     let a4_height_meters = f32::from(A4_HEIGHT);
     let card_width_m = f32::from(CARD_WIDTH);
@@ -713,90 +839,216 @@ fn toggle_rulers(
     }
 }
 
+fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
+    let current = AA_MODES
+        .iter()
+        .position(|(_, _, mode)| *mode == *anti_alias)
+        .unwrap_or(0);
+    *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
+}
+
 // ── Panel rulers ────────────────────────────────────────────────────
 
-/// Builds vertical tick rows for a ruler. Each slot has a bottom tick, and
-/// the topmost slot also gets a tick at the upper edge.
-fn build_vertical_ticks(
-    b: &mut LayoutBuilder,
+#[derive(Clone, Copy)]
+enum TickAlignment {
+    Left,
+    Right,
+}
+
+fn metric_vertical_tick_lines(height_millimeters: i32, color: Color) -> Vec<PanelLine> {
+    vertical_tick_lines(
+        height_millimeters,
+        1.0,
+        PANEL_RULER_CM_TICK.0,
+        0.0,
+        TickAlignment::Right,
+        color,
+        millimeter_tick_size,
+    )
+}
+
+fn metric_vertical_ruler_lines(height_millimeters: i32, color: Color) -> Vec<PanelLine> {
+    let mut lines = metric_vertical_tick_lines(height_millimeters, color);
+    lines.push(vertical_spine_line(
+        height_millimeters.to_f32(),
+        PANEL_RULER_CM_TICK.0,
+        PANEL_RULER_SPINE.0,
+        color,
+    ));
+    lines
+}
+
+#[cfg(test)]
+fn metric_horizontal_tick_lines(width_millimeters: i32, color: Color) -> Vec<PanelLine> {
+    horizontal_tick_lines(width_millimeters, 1.0, 0.0, color, millimeter_tick_size)
+}
+
+fn metric_horizontal_ruler_lines(width_millimeters: i32, color: Color) -> Vec<PanelLine> {
+    let mut lines = horizontal_tick_lines(
+        width_millimeters,
+        1.0,
+        PANEL_RULER_SPINE.0,
+        color,
+        millimeter_tick_size,
+    );
+    lines.push(horizontal_spine_line(
+        width_millimeters.to_f32(),
+        0.0,
+        PANEL_RULER_SPINE.0,
+        color,
+    ));
+    lines
+}
+
+#[cfg(test)]
+fn imperial_vertical_tick_lines(height_sixteenths: i32, color: Color) -> Vec<PanelLine> {
+    vertical_tick_lines(
+        height_sixteenths,
+        1.0 / 16.0,
+        PANEL_RULER_INCH_TICK.0,
+        0.0,
+        TickAlignment::Left,
+        color,
+        sixteenth_tick_size,
+    )
+}
+
+fn imperial_vertical_ruler_lines(height_sixteenths: i32, color: Color) -> Vec<PanelLine> {
+    let height_inches = height_sixteenths.to_f32() / 16.0;
+    let mut lines = vertical_tick_lines(
+        height_sixteenths,
+        1.0 / 16.0,
+        PANEL_RULER_INCH_TICK.0,
+        PANEL_RULER_INCH_SPINE.0,
+        TickAlignment::Left,
+        color,
+        sixteenth_tick_size,
+    );
+    lines.push(vertical_spine_line(
+        height_inches,
+        0.0,
+        PANEL_RULER_INCH_SPINE.0,
+        color,
+    ));
+    lines
+}
+
+#[cfg(test)]
+fn imperial_horizontal_tick_lines(width_sixteenths: i32, color: Color) -> Vec<PanelLine> {
+    horizontal_tick_lines(
+        width_sixteenths,
+        1.0 / 16.0,
+        0.0,
+        color,
+        sixteenth_tick_size,
+    )
+}
+
+fn imperial_horizontal_ruler_lines(width_sixteenths: i32, color: Color) -> Vec<PanelLine> {
+    let width_inches = width_sixteenths.to_f32() / 16.0;
+    let mut lines = horizontal_tick_lines(
+        width_sixteenths,
+        1.0 / 16.0,
+        PANEL_RULER_INCH_SPINE.0,
+        color,
+        sixteenth_tick_size,
+    );
+    lines.push(horizontal_spine_line(
+        width_inches,
+        0.0,
+        PANEL_RULER_INCH_SPINE.0,
+        color,
+    ));
+    lines
+}
+
+fn vertical_tick_lines(
     count: i32,
     slot_height: f32,
-    align: AlignX,
-    ruler_color: Color,
+    track_width: f32,
+    track_x: f32,
+    alignment: TickAlignment,
+    color: Color,
     tick_size_fn: fn(i32) -> (f32, f32),
-) {
-    for idx in (0..count).rev() {
-        let (tick_width, tick_line) = tick_size_fn(idx);
-        let is_top = idx == count - 1;
-        b.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::fixed(slot_height))
-                .direction(Direction::TopToBottom)
-                .child_align_x(align),
-            |b| {
-                if is_top {
-                    let (tw, tl) = tick_size_fn(count);
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(tw))
-                            .height(Sizing::fixed(tl))
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                }
-                b.with(El::new().height(Sizing::GROW), |_| {});
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(tick_width))
-                        .height(Sizing::fixed(tick_line))
-                        .background(ruler_color),
-                    |_| {},
-                );
-            },
-        );
+) -> Vec<PanelLine> {
+    let height = count.to_f32() * slot_height;
+    (0..=count)
+        .map(|mark| {
+            let (tick_length, stroke_width) = tick_size_fn(mark);
+            let edge_y = (count - mark).to_f32() * slot_height;
+            let y = vertical_tick_center(edge_y, stroke_width);
+            let (start_x, end_x) = match alignment {
+                TickAlignment::Left => (track_x, track_x + tick_length),
+                TickAlignment::Right => {
+                    (track_x + track_width - tick_length, track_x + track_width)
+                },
+            };
+            PanelLine::new(
+                PanelPoint::new(start_x, y.min(height)),
+                PanelPoint::new(end_x, y.min(height)),
+            )
+            .width(stroke_width)
+            .color(color)
+        })
+        .collect()
+}
+
+fn horizontal_tick_lines(
+    count: i32,
+    slot_width: f32,
+    track_y: f32,
+    color: Color,
+    tick_size_fn: fn(i32) -> (f32, f32),
+) -> Vec<PanelLine> {
+    let width = count.to_f32() * slot_width;
+    (0..=count)
+        .map(|mark| {
+            let (tick_length, stroke_width) = tick_size_fn(mark);
+            let edge_x = mark.to_f32() * slot_width;
+            let x = horizontal_tick_center(edge_x, width, stroke_width);
+            PanelLine::new(
+                PanelPoint::new(x, track_y),
+                PanelPoint::new(x, track_y + tick_length),
+            )
+            .width(stroke_width)
+            .color(color)
+        })
+        .collect()
+}
+
+fn vertical_spine_line(height: f32, x: f32, width: f32, color: Color) -> PanelLine {
+    let center_x = width.mul_add(0.5, x);
+    PanelLine::new(
+        PanelPoint::new(center_x, 0.0),
+        PanelPoint::new(center_x, height),
+    )
+    .width(width)
+    .color(color)
+}
+
+fn horizontal_spine_line(width: f32, y: f32, line_width: f32, color: Color) -> PanelLine {
+    let center_y = line_width.mul_add(0.5, y);
+    PanelLine::new(
+        PanelPoint::new(0.0, center_y),
+        PanelPoint::new(width, center_y),
+    )
+    .width(line_width)
+    .color(color)
+}
+
+fn vertical_tick_center(edge_y: f32, stroke_width: f32) -> f32 {
+    if edge_y <= f32::EPSILON {
+        stroke_width * 0.5
+    } else {
+        stroke_width.mul_add(-0.5, edge_y)
     }
 }
 
-/// Builds horizontal tick columns for a ruler. Each slot has a left tick, and
-/// the rightmost slot also gets a tick at the right edge.
-fn build_horizontal_ticks(
-    b: &mut LayoutBuilder,
-    count: i32,
-    slot_width: f32,
-    ruler_color: Color,
-    tick_size_fn: fn(i32) -> (f32, f32),
-) {
-    for idx in 0..count {
-        let (tick_height, tick_line) = tick_size_fn(idx);
-        let is_last = idx == count - 1;
-        b.with(
-            El::new()
-                .width(Sizing::fixed(slot_width))
-                .height(Sizing::GROW)
-                .direction(Direction::LeftToRight)
-                .child_align_y(AlignY::Top),
-            |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(tick_line))
-                        .height(Sizing::fixed(tick_height))
-                        .background(ruler_color),
-                    |_| {},
-                );
-                if is_last {
-                    b.with(El::new().width(Sizing::GROW), |_| {});
-                    let (tw, tl) = tick_size_fn(count);
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(tl))
-                            .height(Sizing::fixed(tw))
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                }
-            },
-        );
+fn horizontal_tick_center(edge_x: f32, width: f32, stroke_width: f32) -> f32 {
+    if (width - edge_x).abs() <= f32::EPSILON {
+        stroke_width.mul_add(-0.5, width)
+    } else {
+        stroke_width.mul_add(0.5, edge_x)
     }
 }
 
@@ -861,40 +1113,20 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
             );
 
             // ── Right column: ticks + spine ─────────────────────
+            // One element, one lines list: same-color lines in one draw
+            // merge into a single analytic path, so the tick-spine
+            // junctions render without an anti-aliasing line.
             b.with(
                 El::new()
                     .width(Sizing::fixed(Mm(
                         PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
                     )))
                     .height(Sizing::fixed(Mm(height_millimeters.to_f32())))
-                    .direction(Direction::LeftToRight)
-                    .child_align_x(AlignX::Right),
-                |b| {
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_align_x(AlignX::Right),
-                        |b| {
-                            build_vertical_ticks(
-                                b,
-                                height_millimeters,
-                                1.0,
-                                AlignX::Right,
-                                ruler_color,
-                                millimeter_tick_size,
-                            );
-                        },
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(PANEL_RULER_SPINE))
-                            .height(Sizing::GROW)
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                },
+                    .draw(PanelDraw::lines(metric_vertical_ruler_lines(
+                        height_millimeters,
+                        ruler_color,
+                    ))),
+                |_| {},
             );
         },
     );
@@ -924,7 +1156,6 @@ fn build_imperial_panel_ruler(
     let top_spacer = panel_height.0 - last_label_inch.to_f32() - 0.5;
     let mut builder = LayoutBuilder::new(PANEL_RULER_INCH_WIDTH, panel_height);
     let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
-    let sixteenth_height = 1.0 / 16.0;
 
     builder.with(
         El::new()
@@ -940,34 +1171,11 @@ fn build_imperial_panel_ruler(
                         PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
                     )))
                     .height(Sizing::fixed(In(height_inches)))
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    // Spine.
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(PANEL_RULER_INCH_SPINE))
-                            .height(Sizing::GROW)
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_align_x(AlignX::Left),
-                        |b| {
-                            build_vertical_ticks(
-                                b,
-                                height_sixteenths,
-                                sixteenth_height,
-                                AlignX::Left,
-                                ruler_color,
-                                sixteenth_tick_size,
-                            );
-                        },
-                    );
-                },
+                    .draw(PanelDraw::lines(imperial_vertical_ruler_lines(
+                        height_sixteenths,
+                        ruler_color,
+                    ))),
+                |_| {},
             );
 
             // ── Right column: labels ────────────────────────────
@@ -1055,33 +1263,11 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
                     .height(Sizing::fixed(Mm(
                         PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
                     )))
-                    .direction(Direction::TopToBottom),
-                |b| {
-                    // Spine.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::fixed(PANEL_RULER_SPINE))
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_align_y(AlignY::Top),
-                        |b| {
-                            build_horizontal_ticks(
-                                b,
-                                width_millimeters,
-                                1.0,
-                                ruler_color,
-                                millimeter_tick_size,
-                            );
-                        },
-                    );
-                },
+                    .draw(PanelDraw::lines(metric_horizontal_ruler_lines(
+                        width_millimeters,
+                        ruler_color,
+                    ))),
+                |_| {},
             );
 
             // ── Bottom row: labels ──────────────────────────────
@@ -1145,7 +1331,6 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
     let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
     let last_label_inch = width_sixteenths / 16;
     let right_spacer = width_inches - 0.5 - last_label_inch.to_f32();
-    let sixteenth_width = 1.0 / 16.0;
 
     builder.with(
         El::new()
@@ -1160,34 +1345,11 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
                     .height(Sizing::fixed(In(
                         PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
                     )))
-                    .direction(Direction::TopToBottom),
-                |b| {
-                    // Spine.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::fixed(PANEL_RULER_INCH_SPINE))
-                            .background(ruler_color),
-                        |_| {},
-                    );
-                    // Tick row.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_align_y(AlignY::Top),
-                        |b| {
-                            build_horizontal_ticks(
-                                b,
-                                width_sixteenths,
-                                sixteenth_width,
-                                ruler_color,
-                                sixteenth_tick_size,
-                            );
-                        },
-                    );
-                },
+                    .draw(PanelDraw::lines(imperial_horizontal_ruler_lines(
+                        width_sixteenths,
+                        ruler_color,
+                    ))),
+                |_| {},
             );
 
             // ── Bottom row: labels ──────────────────────────────
@@ -1685,4 +1847,175 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
             .margin(ZOOM_MARGIN)
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 0.0001;
+
+    #[test]
+    fn metric_vertical_ticks_are_inclusive_and_right_aligned() {
+        let lines = metric_vertical_tick_lines(10, Color::WHITE);
+
+        assert_eq!(lines.len(), 11);
+        assert_close(start_y(&lines[10]), PANEL_RULER_CM_LINE.0 * 0.5);
+        assert_close(end_y(&lines[10]), PANEL_RULER_CM_LINE.0 * 0.5);
+        assert_close(start_x(&lines[10]), 0.0);
+        assert_close(end_x(&lines[10]), PANEL_RULER_CM_TICK.0);
+        assert_close(start_y(&lines[0]), 10.0 - PANEL_RULER_CM_LINE.0 * 0.5);
+        assert_close(
+            start_x(&lines[5]),
+            PANEL_RULER_CM_TICK.0 - PANEL_RULER_MM5_TICK.0,
+        );
+        assert_close(end_x(&lines[5]), PANEL_RULER_CM_TICK.0);
+        assert_close_value(line_width(&lines[5]), PANEL_RULER_MM5_LINE.0);
+    }
+
+    #[test]
+    fn metric_vertical_ruler_lines_include_right_spine() {
+        let lines = metric_vertical_ruler_lines(10, Color::WHITE);
+        let spine = lines.last().expect("ruler lines should include a spine");
+
+        assert_eq!(lines.len(), 12);
+        assert_close(
+            start_x(spine),
+            PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0 * 0.5,
+        );
+        assert_close(
+            end_x(spine),
+            PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0 * 0.5,
+        );
+        assert_close(start_y(spine), 0.0);
+        assert_close(end_y(spine), 10.0);
+        assert_close_value(line_width(spine), PANEL_RULER_SPINE.0);
+    }
+
+    #[test]
+    fn metric_horizontal_ticks_are_inclusive_and_endpoint_inset() {
+        let lines = metric_horizontal_tick_lines(10, Color::WHITE);
+
+        assert_eq!(lines.len(), 11);
+        assert_close(start_x(&lines[0]), PANEL_RULER_CM_LINE.0 * 0.5);
+        assert_close(start_y(&lines[0]), 0.0);
+        assert_close(end_y(&lines[0]), PANEL_RULER_CM_TICK.0);
+        assert_close(start_x(&lines[10]), 10.0 - PANEL_RULER_CM_LINE.0 * 0.5);
+        assert_close(end_y(&lines[5]), PANEL_RULER_MM5_TICK.0);
+        assert_close_value(line_width(&lines[5]), PANEL_RULER_MM5_LINE.0);
+    }
+
+    #[test]
+    fn metric_horizontal_ruler_lines_offset_ticks_below_spine() {
+        let lines = metric_horizontal_ruler_lines(10, Color::WHITE);
+        let first_tick = lines.first().expect("ruler lines should include ticks");
+        let spine = lines.last().expect("ruler lines should include a spine");
+
+        assert_eq!(lines.len(), 12);
+        assert_close(start_y(first_tick), PANEL_RULER_SPINE.0);
+        assert_close(
+            end_y(first_tick),
+            PANEL_RULER_SPINE.0 + PANEL_RULER_CM_TICK.0,
+        );
+        assert_close(start_y(spine), PANEL_RULER_SPINE.0 * 0.5);
+        assert_close(end_y(spine), PANEL_RULER_SPINE.0 * 0.5);
+        assert_close_value(line_width(spine), PANEL_RULER_SPINE.0);
+    }
+
+    #[test]
+    fn imperial_vertical_ticks_use_measured_track_height() {
+        let height_sixteenths = 32;
+        let lines = imperial_vertical_tick_lines(height_sixteenths, Color::WHITE);
+        let measured_height = height_sixteenths.to_f32() / 16.0;
+        let taller_label_panel = measured_height + EDGE_LABEL_EXTRA.0;
+
+        assert_eq!(lines.len(), 33);
+        assert_close(
+            start_y(&lines[0]),
+            measured_height - PANEL_RULER_INCH_LINE.0 * 0.5,
+        );
+        assert_close(start_y(&lines[32]), PANEL_RULER_INCH_LINE.0 * 0.5);
+        assert_close(end_x(&lines[0]), PANEL_RULER_INCH_TICK.0);
+        assert!(start_y(&lines[0]).is_some_and(|y| y < taller_label_panel));
+    }
+
+    #[test]
+    fn imperial_vertical_ruler_lines_offset_ticks_after_spine() {
+        let lines = imperial_vertical_ruler_lines(16, Color::WHITE);
+        let first_tick = lines.first().expect("ruler lines should include ticks");
+        let spine = lines.last().expect("ruler lines should include a spine");
+
+        assert_eq!(lines.len(), 18);
+        assert_close(start_x(first_tick), PANEL_RULER_INCH_SPINE.0);
+        assert_close(
+            end_x(first_tick),
+            PANEL_RULER_INCH_SPINE.0 + PANEL_RULER_INCH_TICK.0,
+        );
+        assert_close(start_x(spine), PANEL_RULER_INCH_SPINE.0 * 0.5);
+        assert_close(end_x(spine), PANEL_RULER_INCH_SPINE.0 * 0.5);
+        assert_close_value(line_width(spine), PANEL_RULER_INCH_SPINE.0);
+    }
+
+    #[test]
+    fn imperial_horizontal_ticks_preserve_major_minor_lengths() {
+        let width_sixteenths = 16;
+        let lines = imperial_horizontal_tick_lines(width_sixteenths, Color::WHITE);
+
+        assert_eq!(lines.len(), 17);
+        assert_close(start_x(&lines[0]), PANEL_RULER_INCH_LINE.0 * 0.5);
+        assert_close(start_x(&lines[16]), 1.0 - PANEL_RULER_INCH_LINE.0 * 0.5);
+        assert_close(end_y(&lines[8]), PANEL_RULER_HALF_TICK.0);
+        assert_close_value(line_width(&lines[8]), PANEL_RULER_HALF_LINE.0);
+        assert_close(end_y(&lines[1]), PANEL_RULER_16TH_TICK.0);
+        assert_close_value(line_width(&lines[1]), PANEL_RULER_16TH_LINE.0);
+    }
+
+    #[test]
+    fn imperial_horizontal_ruler_lines_offset_ticks_below_spine() {
+        let lines = imperial_horizontal_ruler_lines(16, Color::WHITE);
+        let first_tick = lines.first().expect("ruler lines should include ticks");
+        let spine = lines.last().expect("ruler lines should include a spine");
+
+        assert_eq!(lines.len(), 18);
+        assert_close(start_y(first_tick), PANEL_RULER_INCH_SPINE.0);
+        assert_close(
+            end_y(first_tick),
+            PANEL_RULER_INCH_SPINE.0 + PANEL_RULER_INCH_TICK.0,
+        );
+        assert_close(start_y(spine), PANEL_RULER_INCH_SPINE.0 * 0.5);
+        assert_close(end_y(spine), PANEL_RULER_INCH_SPINE.0 * 0.5);
+        assert_close_value(line_width(spine), PANEL_RULER_INCH_SPINE.0);
+    }
+
+    fn start_x(line: &PanelLine) -> Option<f32> { point_x(line.start()) }
+
+    fn start_y(line: &PanelLine) -> Option<f32> { point_y(line.start()) }
+
+    fn end_x(line: &PanelLine) -> Option<f32> { point_x(line.end()) }
+
+    fn end_y(line: &PanelLine) -> Option<f32> { point_y(line.end()) }
+
+    fn point_x(point: &PanelPoint) -> Option<f32> {
+        point.x().start_dimension().map(|dimension| dimension.value)
+    }
+
+    fn point_y(point: &PanelPoint) -> Option<f32> {
+        point.y().start_dimension().map(|dimension| dimension.value)
+    }
+
+    fn line_width(line: &PanelLine) -> f32 { line.line_style().width_dimension().value }
+
+    fn assert_close(actual: Option<f32>, expected: f32) {
+        assert!(
+            actual.is_some_and(|actual| (actual - expected).abs() <= EPSILON),
+            "expected {expected}, got {actual:?}",
+        );
+    }
+
+    fn assert_close_value(actual: f32, expected: f32) {
+        assert!(
+            (actual - expected).abs() <= EPSILON,
+            "expected {expected}, got {actual}",
+        );
+    }
 }

@@ -92,7 +92,7 @@ pub enum TextAlign {
 /// Controls the text shader's coverage computation. Both modes use
 /// `AlphaMode::Blend` for smooth anti-aliased edges. Discriminants are
 /// `#[repr(u32)]` and explicit because they map directly to shader
-/// constants in `slug_text.wgsl`; the compile-time assertions below keep
+/// constants in `analytic_path.wgsl`; the compile-time assertions below keep
 /// them in sync.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
 #[repr(u32)]
@@ -831,7 +831,7 @@ pub struct TextDimensions {
 // ── Shader discriminant assertions ──────────────────────────────────────────
 //
 // These compile-time assertions ensure that `GlyphRenderMode` discriminants
-// stay in sync with the `render_mode` constants in `slug_text.wgsl` (and the
+// stay in sync with the `render_mode` constants in `analytic_path.wgsl` (and the
 // matching `RenderMode` variants). If you add or reorder variants, update
 // the shader constants to match and adjust these assertions.
 

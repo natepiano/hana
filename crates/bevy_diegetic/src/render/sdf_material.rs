@@ -42,7 +42,7 @@ pub(crate) struct SdfPanelUniform {
     /// Border color in linear RGBA.
     pub border_color:     Vec4,
     /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond, `4` = line segment.
+    /// `3` = diamond, `4` = line segment, `5..=7` = oriented cap forms.
     pub sdf_kind:         u32,
     /// Extra parameters for custom SDF forms.
     pub sdf_params:       Vec4,
@@ -89,8 +89,6 @@ pub(crate) enum SdfPrimitiveKind {
     Triangle,
     Circle,
     Diamond,
-    #[expect(dead_code, reason = "still experimenting with callout options")]
-    LineSegment,
 }
 
 impl From<SdfPrimitiveKind> for u32 {
@@ -100,7 +98,6 @@ impl From<SdfPrimitiveKind> for u32 {
             SdfPrimitiveKind::Triangle => 1,
             SdfPrimitiveKind::Circle => 2,
             SdfPrimitiveKind::Diamond => 3,
-            SdfPrimitiveKind::LineSegment => 4,
         }
     }
 }

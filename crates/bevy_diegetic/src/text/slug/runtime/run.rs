@@ -4,12 +4,12 @@ use std::collections::hash_map::Entry;
 use bevy::math::Vec2;
 use bevy_kana::ToU32;
 
+use crate::render::BandRecord;
+use crate::render::Bounds;
+use crate::render::CurveRecord;
+use crate::render::GlyphOutline;
+use crate::render::GlyphRecord;
 use crate::text::slug::glyph;
-use crate::text::slug::glyph::BandRecord;
-use crate::text::slug::glyph::Bounds;
-use crate::text::slug::glyph::CurveRecord;
-use crate::text::slug::glyph::GlyphOutline;
-use crate::text::slug::glyph::GlyphRecord;
 use crate::text::slug::glyph::OutlineError;
 
 /// Stable identity for the resolved font face used by shaping.
@@ -214,6 +214,7 @@ impl GlyphOutlineCache {
                     axis_band_count,
                     band_start + axis_band_count,
                     axis_band_count,
+                    0.0,
                 ));
                 self.record_indices.insert(key, record_index);
                 self.revision = self.revision.wrapping_add(1);

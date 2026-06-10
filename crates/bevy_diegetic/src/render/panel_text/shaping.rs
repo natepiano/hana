@@ -12,6 +12,7 @@ use crate::layout::BoundingBox;
 use crate::layout::ShapedTextCache;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPerfStats;
+use crate::render::DEFAULT_BAND_COUNT;
 use crate::render::constants;
 use crate::render::text_shaping;
 use crate::render::text_shaping::GlyphReadiness;
@@ -19,7 +20,6 @@ use crate::render::text_shaping::TextBuildStats;
 use crate::render::text_shaping::TextShapingContext;
 use crate::render::world_text::AwaitingReady;
 use crate::render::world_text::TextContent;
-use crate::text::DEFAULT_BAND_COUNT;
 use crate::text::FontRegistry;
 use crate::text::GlyphCache;
 

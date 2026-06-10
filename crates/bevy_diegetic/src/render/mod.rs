@@ -1,23 +1,68 @@
 //! Rendering systems for diegetic UI panels and text.
 
+mod analytic_line_probe;
+mod analytic_paths;
+mod batch_key;
 #[cfg(feature = "batch_proof")]
 pub(crate) mod batch_proof;
 mod clip;
 mod constants;
 mod panel_geometry;
+mod panel_lines;
 mod panel_text;
 mod sdf_material;
 mod text_shaping;
 mod transparency;
 mod world_text;
 
+pub use analytic_line_probe::AnalyticLine;
+pub use analytic_line_probe::AnalyticLineProbe;
+pub use analytic_line_probe::AnalyticLineProbePlugin;
+use analytic_paths::AnalyticPathPlugin;
+pub(crate) use analytic_paths::BandRecord;
+pub(crate) use analytic_paths::BatchGpu;
+pub(crate) use analytic_paths::BatchKey;
+pub(crate) use analytic_paths::BatchTextMaterialInput;
+pub(crate) use analytic_paths::Bounds;
+pub(crate) use analytic_paths::CurveRecord;
+pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
+pub(crate) use analytic_paths::GlyphAtlasHandles;
+pub(crate) use analytic_paths::GlyphBatchStore;
+pub(crate) use analytic_paths::GlyphInstanceRecord;
+pub(crate) use analytic_paths::GlyphOutline;
+pub(crate) use analytic_paths::GlyphRecord;
+#[cfg(test)]
+pub(crate) use analytic_paths::PackedPath;
+pub(crate) use analytic_paths::PathAtlas;
+pub(crate) use analytic_paths::PathContour;
+pub(crate) use analytic_paths::PathOutline;
+pub(crate) use analytic_paths::QuadraticSegment;
+pub(crate) use analytic_paths::RenderMode;
+pub(crate) use analytic_paths::RunRecord;
+pub(crate) use analytic_paths::TextMaterial;
+pub(crate) use analytic_paths::batch_text_material;
+pub(crate) use analytic_paths::build_packed_path;
+pub(crate) use analytic_paths::set_batch_text_material_buffers;
+pub(crate) use analytic_paths::set_text_material_atlas;
+#[cfg(feature = "batch_proof")]
+pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
+pub(crate) use batch_key::BaseMaterialId;
+pub(crate) use batch_key::BatchAlphaMode;
+pub(crate) use batch_key::BatchRenderLayers;
+pub(crate) use batch_key::VisualBatchKey;
+pub(crate) use batch_key::VisualLighting;
+pub(crate) use batch_key::VisualMaterialInterner;
+pub(crate) use batch_key::VisualShadow;
+pub(crate) use batch_key::VisualSidedness;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
+use panel_lines::PanelLinePlugin;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
@@ -40,10 +85,6 @@ pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
 #[cfg(feature = "typography_overlay")]
 pub(crate) use world_text::emit_computed_world_text;
-
-use crate::text;
-use crate::text::TextMaterial;
-
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
 /// text runs, images, glyph meshes, and SDF geometry.
 ///
@@ -120,7 +161,79 @@ fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Asset
         return;
     }
     for (_, material) in materials.iter_mut() {
-        text::set_text_material_anti_alias(material, setting.supersamples(), setting.anisotropic());
+        analytic_paths::set_text_material_anti_alias(
+            material,
+            setting.supersamples(),
+            setting.anisotropic(),
+        );
+    }
+}
+
+/// Minimum on-screen width for hairline-dilated strokes (panel lines and
+/// analytic lines), in logical pixels. The shader dilates any thinner stroke
+/// up to this width, at full alpha.
+///
+/// The applied device-pixel value is `logical_px ×` the primary window's
+/// scale factor, with a scale-dependent floor: 1.75 device pixels below
+/// scale 2 (low-DPI strokes need the extra width for clean anti-aliasing),
+/// 1.5 at scale 2 and above. Below 1.5 device pixels the anti-aliased
+/// profile alternates with pixel phase and near-vertical lines stairstep a
+/// full column at each crossover.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Resource)]
+pub struct HairlineWidth {
+    /// Target stroke width in logical pixels.
+    pub logical_px: f32,
+}
+
+impl Default for HairlineWidth {
+    fn default() -> Self { Self { logical_px: 1.0 } }
+}
+
+/// Floor for the applied hairline width at scale factor ≥ 2 — see
+/// [`HairlineWidth`].
+const HAIRLINE_MIN_DEVICE_PX_HIGH_DPI: f32 = 1.5;
+
+/// Floor below scale factor 2: with fewer device pixels per stroke,
+/// anti-aliasing needs the extra width to render cleanly.
+const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.75;
+
+/// Mirrors [`HairlineWidth`] × window scale factor into every text material's
+/// `hairline_min_px` uniform: all materials when the applied value changes,
+/// plus newly added materials (which carry a constructor default).
+fn sync_hairline_width(
+    hairline_width: Res<HairlineWidth>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut materials: ResMut<Assets<TextMaterial>>,
+    mut material_events: MessageReader<AssetEvent<TextMaterial>>,
+    mut applied_device_px: Local<Option<f32>>,
+) {
+    let scale_factor = windows.iter().next().map_or(1.0, Window::scale_factor);
+    let floor = if scale_factor >= 2.0 {
+        HAIRLINE_MIN_DEVICE_PX_HIGH_DPI
+    } else {
+        HAIRLINE_MIN_DEVICE_PX_LOW_DPI
+    };
+    let device_px = (hairline_width.logical_px * scale_factor).max(floor);
+    if *applied_device_px != Some(device_px) {
+        *applied_device_px = Some(device_px);
+        material_events.clear();
+        for (_, material) in materials.iter_mut() {
+            analytic_paths::set_text_material_hairline(material, device_px);
+        }
+        return;
+    }
+    let added: Vec<AssetId<TextMaterial>> = material_events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::Added { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    for id in added {
+        if let Some(mut material) = materials.get_mut(id) {
+            analytic_paths::set_text_material_hairline(&mut material, device_px);
+        }
     }
 }
 
@@ -130,15 +243,21 @@ pub(crate) struct RenderPlugin;
 
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((TextRenderPlugin, PanelGeometryPlugin))
-            .init_resource::<TextAntiAlias>()
-            // Bevy registers the OIT type without `ReflectComponent`; adding it
-            // enables reflection-based (BRP) edits of OIT settings on a live camera.
-            .register_type::<OrderIndependentTransparencySettings>()
-            .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
-            .add_systems(Update, sync_text_anti_alias)
-            .add_observer(transparency::on_stable_transparency_added)
-            .add_observer(transparency::on_stable_transparency_removed)
-            .add_observer(transparency::on_screen_space_camera_added);
+        app.add_plugins((
+            AnalyticPathPlugin,
+            TextRenderPlugin,
+            PanelGeometryPlugin,
+            PanelLinePlugin,
+        ))
+        .init_resource::<TextAntiAlias>()
+        .init_resource::<HairlineWidth>()
+        // Bevy registers the OIT type without `ReflectComponent`; adding it
+        // enables reflection-based (BRP) edits of OIT settings on a live camera.
+        .register_type::<OrderIndependentTransparencySettings>()
+        .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
+        .add_systems(Update, (sync_text_anti_alias, sync_hairline_width))
+        .add_observer(transparency::on_stable_transparency_added)
+        .add_observer(transparency::on_stable_transparency_removed)
+        .add_observer(transparency::on_screen_space_camera_added);
     }
 }

@@ -5,7 +5,6 @@ use std::collections::hash_map::Entry;
 
 use bevy::prelude::Assets;
 use bevy::prelude::Entity;
-use bevy::prelude::Handle;
 use bevy::prelude::Resource;
 use bevy::prelude::Vec2;
 use bevy::render::storage::ShaderBuffer;
@@ -18,12 +17,13 @@ use super::GlyphInstance;
 use super::GlyphKey;
 use super::GlyphOutlineCache;
 use super::TextRun;
-use super::batch_store::GlyphBatchStore;
 use crate::layout::ShapedGlyph;
+use crate::render;
+use crate::render::GlyphAtlasHandles;
+use crate::render::GlyphBatchStore;
+use crate::render::TextMaterial;
 use crate::text::Font;
 use crate::text::slug::glyph::OutlineError;
-use crate::text::slug::render;
-use crate::text::slug::render::TextMaterial;
 
 /// One production glyph positioned for run preparation: a `ShapedGlyph` plus
 /// the `Font` and collection index needed to extract its outline.
@@ -58,19 +58,6 @@ pub(crate) struct RunStorageKey(u64);
 
 impl From<Entity> for RunStorageKey {
     fn from(label: Entity) -> Self { Self(label.to_bits()) }
-}
-
-/// Stable handles for the shared glyph atlas buffers every run's material binds.
-/// One set for the whole cache, re-uploaded only when a new glyph grows the
-/// atlas (see [`GlyphCache::commit_glyph_atlas`]).
-#[derive(Clone, Debug)]
-pub(crate) struct GlyphAtlasHandles {
-    /// Shared band-packed quadratic curve records.
-    pub curves: Handle<ShaderBuffer>,
-    /// Shared horizontal/vertical band records.
-    pub bands:  Handle<ShaderBuffer>,
-    /// Shared glyph records, indexed by each glyph record's `atlas_index`.
-    pub glyphs: Handle<ShaderBuffer>,
 }
 
 /// `GlyphCache` resource: owns the glyph cache and the batch store.
@@ -189,9 +176,18 @@ impl GlyphCache {
             )),
         };
         if had_atlas {
-            for (_, material) in materials.iter_mut() {
+            // Repoint only text-owned batch materials. Other analytic-path
+            // producers (panel lines, probes) share the TextMaterial asset
+            // type but own separate atlases.
+            for (_, batch) in self.batch_store.batches() {
+                let Some(gpu) = &batch.gpu else {
+                    continue;
+                };
+                let Some(mut material) = materials.get_mut(&gpu.material) else {
+                    continue;
+                };
                 render::set_text_material_atlas(
-                    material,
+                    &mut material,
                     handles.curves.clone(),
                     handles.bands.clone(),
                     handles.glyphs.clone(),

@@ -23,10 +23,10 @@ use bevy::prelude::Transform;
 use bevy::prelude::With;
 use bevy_kana::ToF32;
 
-use super::caps::ArrowCap;
-use super::caps::ArrowStyle;
+use super::caps;
 use super::caps::CalloutCap;
-use super::caps::DiamondCap;
+use super::caps::CalloutCapPrimitiveKind;
+use super::caps::ResolvedCalloutCapPrimitive;
 use super::constants::HIDDEN_HALF_HEIGHT_MULTIPLIER;
 use super::line::CalloutLine;
 use super::line::CalloutVisual;
@@ -95,8 +95,9 @@ pub(super) fn update_callout_lines(
         let dir = delta / len;
         let start_tip = line.start + dir * line.start_inset;
         let end_tip = line.end - dir * line.end_inset;
-        let shaft_start = start_tip + dir * line.start_cap.shaft_inset(line.cap_size);
-        let shaft_end = end_tip - dir * line.end_cap.shaft_inset(line.cap_size);
+        let shaft_start =
+            start_tip + dir * line.start_cap.shaft_inset(line.cap_size, resolve_dimension);
+        let shaft_end = end_tip - dir * line.end_cap.shaft_inset(line.cap_size, resolve_dimension);
         let layer = layers.cloned().unwrap_or(RenderLayers::layer(0));
 
         let mut ctx = CalloutRender {
@@ -130,65 +131,72 @@ fn spawn_cap(
     cap: CalloutCap,
     stroke: CapStroke,
 ) {
-    let color = cap.resolved_color(stroke.color);
-    match cap {
-        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Open => {
-            let (length, width) = resolved_arrow_dimensions(cap, stroke.size);
-            spawn_open_arrow_cap(ctx, tip, dir, length, width, stroke.thickness, color);
+    let resolved = cap.resolved_primitives(stroke.size, stroke.color, resolve_dimension);
+    for primitive in resolved.primitives() {
+        spawn_resolved_cap_primitive(ctx, tip, dir, *primitive, stroke.thickness);
+    }
+}
+
+fn resolve_dimension(dimension: crate::Dimension) -> f32 {
+    caps::resolve_cap_dimension(dimension, 1.0)
+}
+
+fn spawn_resolved_cap_primitive(
+    ctx: &mut CalloutRender<'_, '_, '_>,
+    tip: Vec3,
+    dir: Vec3,
+    primitive: ResolvedCalloutCapPrimitive,
+    thickness: f32,
+) {
+    match primitive.kind {
+        CalloutCapPrimitiveKind::OpenArrowWing(wing) => {
+            let end = tip + dir * primitive.length + cap_perp(dir) * primitive.width * wing.sign();
+            spawn_segment(ctx, tip, end, thickness, primitive.color);
         },
-        CalloutCap::Arrow(cap) if cap.style == ArrowStyle::Solid => {
-            let (length, width) = resolved_arrow_dimensions(cap, stroke.size);
-            spawn_cap_form(ctx, tip, -dir, CapPrimitive::Triangle, length, width, color);
+        CalloutCapPrimitiveKind::Triangle => {
+            spawn_cap_form(
+                ctx,
+                tip,
+                -dir,
+                CapPrimitive::Triangle,
+                primitive.length,
+                primitive.width,
+                primitive.color,
+            );
         },
-        CalloutCap::Circle(cap) => {
-            let radius = cap.radius.unwrap_or(stroke.size * 0.5);
+        CalloutCapPrimitiveKind::Circle => {
             spawn_cap_form(
                 ctx,
                 tip,
                 dir,
                 CapPrimitive::Circle,
-                radius * 2.0,
-                radius * 2.0,
-                color,
+                primitive.length,
+                primitive.width,
+                primitive.color,
             );
         },
-        CalloutCap::Square(cap) => {
-            let size = cap.size.unwrap_or(stroke.size);
-            spawn_cap_form(ctx, tip, dir, CapPrimitive::Square, size, size, color);
+        CalloutCapPrimitiveKind::Square => {
+            spawn_cap_form(
+                ctx,
+                tip,
+                dir,
+                CapPrimitive::Square,
+                primitive.length,
+                primitive.width,
+                primitive.color,
+            );
         },
-        CalloutCap::Diamond(cap) => {
-            let (width, height) = resolved_diamond_dimensions(cap, stroke.size);
-            spawn_cap_form(ctx, tip, dir, CapPrimitive::Diamond, width, height, color);
+        CalloutCapPrimitiveKind::Diamond => {
+            spawn_cap_form(
+                ctx,
+                tip,
+                dir,
+                CapPrimitive::Diamond,
+                primitive.length,
+                primitive.width,
+                primitive.color,
+            );
         },
-        CalloutCap::None | CalloutCap::Arrow(_) => {},
-    }
-}
-
-fn resolved_arrow_dimensions(cap: ArrowCap, cap_size: f32) -> (f32, f32) {
-    let length = cap.length.unwrap_or(cap_size);
-    (length, cap.width.unwrap_or(length))
-}
-
-fn resolved_diamond_dimensions(cap: DiamondCap, cap_size: f32) -> (f32, f32) {
-    let width = cap.width.unwrap_or(cap_size);
-    (width, cap.height.unwrap_or(width))
-}
-
-fn spawn_open_arrow_cap(
-    ctx: &mut CalloutRender<'_, '_, '_>,
-    tip: Vec3,
-    shaft_dir: Vec3,
-    length: f32,
-    width: f32,
-    thickness: f32,
-    color: Color,
-) {
-    let perp = cap_perp(shaft_dir);
-    for end in [
-        tip + shaft_dir * length + perp * width,
-        tip + shaft_dir * length - perp * width,
-    ] {
-        spawn_segment(ctx, tip, end, thickness, color);
     }
 }
 

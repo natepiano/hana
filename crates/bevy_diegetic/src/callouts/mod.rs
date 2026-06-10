@@ -19,6 +19,9 @@ use bevy::prelude::PostUpdate;
 use bevy::prelude::Vec3;
 pub use caps::ArrowStyle;
 pub use caps::CalloutCap;
+pub(crate) use caps::CalloutCapPrimitiveKind;
+pub(crate) use caps::ResolvedCalloutCap;
+pub(crate) use caps::ResolvedCalloutCapPrimitive;
 pub use line::CalloutLine;
 
 pub(crate) struct CalloutPlugin;

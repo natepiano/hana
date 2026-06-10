@@ -13,9 +13,10 @@
     reason = "tests collect into named variables for readable assertions and index access"
 )]
 #![allow(
+    clippy::expect_used,
     clippy::panic,
     clippy::unwrap_used,
-    reason = "tests use panic/unwrap for clearer failure messages"
+    reason = "tests use panicking helpers for clearer failure messages"
 )]
 
 use std::sync::Arc;
@@ -28,14 +29,23 @@ use crate::layout::AlignX;
 use crate::layout::AlignY;
 use crate::layout::Border;
 use crate::layout::Direction;
+use crate::layout::DrawOverflow;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutEngine;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
 use crate::layout::Padding;
+use crate::layout::PanelCoord;
+use crate::layout::PanelDraw;
+use crate::layout::PanelLine;
+use crate::layout::PanelLinePaintOrder;
+use crate::layout::PanelLineSourceKey;
+use crate::layout::PanelPoint;
 use crate::layout::RectangleSource;
+use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
+use crate::layout::ResolvedPanelLine;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
@@ -78,6 +88,26 @@ fn line_height(font_size: f32) -> f32 { font_size }
 
 fn text_height(line_count: u32, font_size: f32) -> f32 {
     line_count.to_f32() * line_height(font_size)
+}
+
+fn line_commands(commands: &[RenderCommand]) -> Vec<&[ResolvedPanelLine]> {
+    commands
+        .iter()
+        .filter_map(|command| match &command.kind {
+            RenderCommandKind::Lines { lines } => Some(lines.as_slice()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn command_index(
+    commands: &[RenderCommand],
+    predicate: impl Fn(&RenderCommandKind) -> bool,
+) -> usize {
+    commands
+        .iter()
+        .position(|command| predicate(&command.kind))
+        .expect("command should exist")
 }
 
 fn add_aligned_table_row(
@@ -149,6 +179,291 @@ fn fixed_child_dimensions() {
     // Child is index 1.
     assert_eq!(result.computed[1].width, 80.0);
     assert_eq!(result.computed[1].height, 40.0);
+}
+
+#[test]
+fn draw_commands_do_not_change_layout_bounds_or_non_line_commands() {
+    let mut base_builder = LayoutBuilder::new(200.0, 200.0);
+    base_builder.with(
+        El::new()
+            .width(Sizing::fixed(80.0))
+            .height(Sizing::fixed(40.0)),
+        |_| {},
+    );
+    let base_tree = base_builder.build();
+
+    let mut draw_builder = LayoutBuilder::new(200.0, 200.0);
+    draw_builder.with(
+        El::new()
+            .width(Sizing::fixed(80.0))
+            .height(Sizing::fixed(40.0))
+            .draw(PanelDraw::lines([PanelLine::new(
+                PanelPoint::new(0.0, 0.0),
+                PanelPoint::new(80.0, 40.0),
+            )])),
+        |_| {},
+    );
+    let draw_tree = draw_builder.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let base_result = engine.compute(&base_tree, VIEWPORT, VIEWPORT, 1.0);
+    let draw_result = engine.compute(&draw_tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert_eq!(
+        draw_result.computed[1].bounds,
+        base_result.computed[1].bounds
+    );
+    let draw_non_line_commands: Vec<_> = draw_result
+        .commands
+        .iter()
+        .filter(|command| !matches!(command.kind, RenderCommandKind::Lines { .. }))
+        .collect();
+    let base_non_line_commands: Vec<_> = base_result.commands.iter().collect();
+    assert_eq!(draw_non_line_commands, base_non_line_commands);
+    assert_eq!(line_commands(&draw_result.commands).len(), 1);
+}
+
+#[test]
+fn line_commands_regenerate_from_cached_geometry() {
+    let mut builder = LayoutBuilder::new(200.0, 200.0);
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(80.0))
+            .height(Sizing::fixed(40.0))
+            .draw(PanelDraw::lines([PanelLine::new((0.0, 0.0), (80.0, 40.0))])),
+        |_| {},
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let mut regenerated = result.clone();
+
+    regenerated.regenerate_commands(&tree);
+
+    assert_eq!(regenerated.commands, result.commands);
+    assert_eq!(line_commands(&regenerated.commands).len(), 1);
+}
+
+#[test]
+fn line_commands_emit_before_child_text_and_shift_command_indices() {
+    let text_style = TextStyle::new(12.0);
+    let mut base_builder = LayoutBuilder::new(200.0, 100.0);
+    base_builder.with(
+        El::new()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(40.0)),
+        |builder| {
+            builder.text("label", text_style.clone());
+        },
+    );
+    let base_tree = base_builder.build();
+
+    let mut draw_builder = LayoutBuilder::new(200.0, 100.0);
+    draw_builder.with(
+        El::new()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(40.0))
+            .draw(PanelDraw::lines([PanelLine::new(
+                (0.0, 20.0),
+                (100.0, 20.0),
+            )])),
+        |builder| {
+            builder.text("label", text_style);
+        },
+    );
+    let draw_tree = draw_builder.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let base_result = engine.compute(&base_tree, VIEWPORT, VIEWPORT, 1.0);
+    let draw_result = engine.compute(&draw_tree, VIEWPORT, VIEWPORT, 1.0);
+    let base_text_index = command_index(&base_result.commands, |kind| {
+        matches!(kind, RenderCommandKind::Text { .. })
+    });
+    let draw_text_index = command_index(&draw_result.commands, |kind| {
+        matches!(kind, RenderCommandKind::Text { .. })
+    });
+    let line_index = command_index(&draw_result.commands, |kind| {
+        matches!(kind, RenderCommandKind::Lines { .. })
+    });
+    let lines = line_commands(&draw_result.commands);
+    let resolved = &lines[0][0];
+
+    assert!(line_index < draw_text_index);
+    assert_eq!(draw_text_index, base_text_index + 1);
+    assert_eq!(resolved.source_command_index, line_index);
+    assert_eq!(
+        resolved.paint_order,
+        PanelLinePaintOrder::Normal {
+            command_index: line_index,
+        }
+    );
+}
+
+#[test]
+fn overflow_visible_line_uses_parent_clip_and_overlay_order() {
+    let mut builder = LayoutBuilder::new(100.0, 100.0);
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(50.0))
+            .height(Sizing::fixed(50.0))
+            .clip(),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(10.0))
+                    .height(Sizing::fixed(10.0))
+                    .draw(
+                        PanelDraw::lines([PanelLine::new(
+                            (0.0, 5.0),
+                            (PanelCoord::end(-40.0), 5.0),
+                        )])
+                        .overflow(DrawOverflow::Visible),
+                    ),
+                |_| {},
+            );
+        },
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let lines = line_commands(&result.commands);
+    let resolved = &lines[0][0];
+
+    assert_eq!(
+        resolved.clip,
+        Some(crate::layout::BoundingBox {
+            x:      0.0,
+            y:      0.0,
+            width:  50.0,
+            height: 50.0,
+        })
+    );
+    assert_eq!(
+        resolved.paint_order,
+        PanelLinePaintOrder::Overlay { order: 0 }
+    );
+    assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 10.0);
+}
+
+#[test]
+fn clipped_line_uses_owner_bounds_inside_parent_clip() {
+    let mut builder = LayoutBuilder::new(100.0, 100.0);
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(50.0))
+            .height(Sizing::fixed(50.0))
+            .clip(),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(10.0))
+                    .height(Sizing::fixed(10.0))
+                    .draw(PanelDraw::lines([PanelLine::new(
+                        (0.0, 5.0),
+                        (PanelCoord::end(-40.0), 5.0),
+                    )])),
+                |_| {},
+            );
+        },
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let lines = line_commands(&result.commands);
+    let resolved = &lines[0][0];
+
+    assert_eq!(
+        resolved.clip,
+        Some(crate::layout::BoundingBox {
+            x:      0.0,
+            y:      0.0,
+            width:  10.0,
+            height: 10.0,
+        })
+    );
+}
+
+#[test]
+fn line_draw_regeneration_updates_visual_only_line_records() {
+    let unchanged = PanelLine::new((0.0, 5.0), (40.0, 5.0));
+    let second = PanelLine::new((0.0, 10.0), (40.0, 10.0));
+    let mut original_builder = LayoutBuilder::new(100.0, 100.0);
+    original_builder.with(
+        El::new()
+            .width(Sizing::fixed(40.0))
+            .height(Sizing::fixed(20.0))
+            .draw(PanelDraw::lines([unchanged.clone(), second])),
+        |_| {},
+    );
+    let original_tree = original_builder.build();
+
+    let mut updated_builder = LayoutBuilder::new(100.0, 100.0);
+    updated_builder.with(
+        El::new()
+            .width(Sizing::fixed(40.0))
+            .height(Sizing::fixed(20.0))
+            .draw(PanelDraw::lines([
+                unchanged.color(Color::srgb(1.0, 0.0, 0.0))
+            ])),
+        |_| {},
+    );
+    let updated_tree = updated_builder.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let mut result = engine.compute(&original_tree, VIEWPORT, VIEWPORT, 1.0);
+    let original_key = line_commands(&result.commands)[0][0].source_key;
+
+    result.regenerate_commands(&updated_tree);
+    let updated_lines = line_commands(&result.commands);
+
+    assert_eq!(updated_lines[0].len(), 1);
+    assert_eq!(updated_lines[0][0].source_key, original_key);
+    assert_eq!(updated_lines[0][0].color, Color::srgb(1.0, 0.0, 0.0));
+}
+
+#[test]
+fn inserted_element_line_churns_later_ordinal_keys_without_stale_lines() {
+    let first = PanelLine::new((0.0, 5.0), (40.0, 5.0));
+    let second = PanelLine::new((0.0, 10.0), (40.0, 10.0));
+    let inserted = PanelLine::new((0.0, 15.0), (40.0, 15.0));
+
+    let mut original_builder = LayoutBuilder::new(100.0, 100.0);
+    original_builder.with(
+        El::new()
+            .width(Sizing::fixed(40.0))
+            .height(Sizing::fixed(20.0))
+            .draw(PanelDraw::lines([first.clone(), second.clone()])),
+        |_| {},
+    );
+    let original_tree = original_builder.build();
+
+    let mut inserted_builder = LayoutBuilder::new(100.0, 100.0);
+    inserted_builder.with(
+        El::new()
+            .width(Sizing::fixed(40.0))
+            .height(Sizing::fixed(20.0))
+            .draw(PanelDraw::lines([inserted, first, second])),
+        |_| {},
+    );
+    let inserted_tree = inserted_builder.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let mut result = engine.compute(&original_tree, VIEWPORT, VIEWPORT, 1.0);
+    let old_second_key = line_commands(&result.commands)[0][1].source_key;
+
+    result.regenerate_commands(&inserted_tree);
+    let updated_lines = line_commands(&result.commands);
+
+    assert_eq!(updated_lines[0].len(), 3);
+    assert_eq!(
+        updated_lines[0][1].source_key,
+        PanelLineSourceKey::element(1, 0, 1)
+    );
+    assert_eq!(
+        updated_lines[0][2].source_key,
+        PanelLineSourceKey::element(1, 0, 2)
+    );
+    assert_ne!(updated_lines[0][2].source_key, old_second_key);
 }
 
 // ── Grow sizing ──────────────────────────────────────────────────────────────
@@ -928,6 +1243,83 @@ fn render_commands_include_rectangles() {
         !rect_commands.is_empty(),
         "Should have at least one rectangle render command"
     );
+}
+
+#[test]
+fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
+    const RULER_WIDTH: f32 = 10.0;
+    const RULER_HEIGHT: f32 = 297.0;
+    const TICK_TRACK_WIDTH: f32 = 5.0;
+    const SPINE_WIDTH: f32 = 0.2;
+
+    let mut builder = LayoutBuilder::new(RULER_WIDTH, RULER_HEIGHT);
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .direction(Direction::LeftToRight),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .direction(Direction::TopToBottom),
+                |builder| {
+                    builder.text("29", TextStyle::new(8.0).with_color(Color::WHITE));
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(TICK_TRACK_WIDTH + SPINE_WIDTH))
+                    .height(Sizing::fixed(RULER_HEIGHT))
+                    .direction(Direction::LeftToRight),
+                |builder| {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .draw(PanelDraw::lines([PanelLine::new(
+                                PanelPoint::new(0.0, 0.5),
+                                PanelPoint::new(TICK_TRACK_WIDTH, 0.5),
+                            )
+                            .width(0.3)
+                            .color(Color::WHITE)])),
+                        |_| {},
+                    );
+                    builder.with(
+                        El::new()
+                            .width(Sizing::fixed(SPINE_WIDTH))
+                            .height(Sizing::GROW)
+                            .background(Color::WHITE),
+                        |_| {},
+                    );
+                },
+            );
+        },
+    );
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&builder.build(), RULER_WIDTH, RULER_HEIGHT, 1.0);
+    let spine = result
+        .commands
+        .iter()
+        .find(|command| {
+            matches!(command.kind, RenderCommandKind::Rectangle { .. })
+                && approx_eq(command.bounds.width, SPINE_WIDTH)
+                && approx_eq(command.bounds.height, RULER_HEIGHT)
+        })
+        .expect("spine rectangle should be emitted");
+    let line_count = result
+        .commands
+        .iter()
+        .filter_map(|command| match &command.kind {
+            RenderCommandKind::Lines { lines } => Some(lines.len()),
+            _ => None,
+        })
+        .sum::<usize>();
+
+    assert!(approx_eq(spine.bounds.x, RULER_WIDTH - SPINE_WIDTH));
+    assert_eq!(line_count, 1);
 }
 
 #[test]

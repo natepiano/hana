@@ -39,6 +39,17 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 /// exceeding that would out-bias its own text on sorted views.
 pub(crate) const BATCH_TEXT_DEPTH_BIAS: f32 = 64.0 * LAYER_DEPTH_BIAS;
 
+/// `Transparent3d` sort bias for normal batched panel-line entities.
+///
+/// Lines are vertex-pulled across many panels like text, so one batch render
+/// item cannot use a per-command material depth without fragmenting batches.
+/// The shader carries per-record command depth; this coarse lane keeps lines
+/// above backing quads and below text in sorted, non-OIT views.
+pub(crate) const BATCH_PANEL_LINE_DEPTH_BIAS: f32 = 63.0 * LAYER_DEPTH_BIAS;
+
+/// `Transparent3d` sort bias for overlay panel-line entities.
+pub(crate) const BATCH_PANEL_LINE_OVERLAY_DEPTH_BIAS: f32 = 96.0 * LAYER_DEPTH_BIAS;
+
 /// OIT depth offset for non-text panel layers.
 ///
 /// Panel text stays at `0.0` so unrelated opaque geometry keeps real depth

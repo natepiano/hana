@@ -1,4 +1,4 @@
-# OIT resize kernel-panic investigation (archive)
+# OIT resize kernel-panic investigation
 
 **Date:** 2026-06-06
 **Branch:** `update/0.19.0-rc.2`

@@ -26,6 +26,7 @@ use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
 use super::Padding;
+use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
 use super::Unit;
@@ -105,6 +106,8 @@ pub(super) struct Element {
     pub(super) material:      Option<Box<StandardMaterial>>,
     /// Optional editable field contract.
     pub(super) editable:      Option<ImePanelField>,
+    /// Optional paint-only draw data.
+    pub(super) draw:          Option<PanelDraw>,
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
@@ -175,6 +178,7 @@ impl Default for Element {
             scroll_anchor: ScrollAnchor::Start,
             material:      None,
             editable:      None,
+            draw:          None,
             content:       ElementContent::Empty,
         }
     }
@@ -376,6 +380,13 @@ impl LayoutTree {
     #[must_use]
     pub(crate) fn editable_field(&self, index: usize) -> Option<&ImePanelField> {
         self.elements.get(index).and_then(|e| e.editable.as_ref())
+    }
+
+    /// Returns the paint-only draw data for the element at `index`, if any.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn element_draw(&self, index: usize) -> Option<&PanelDraw> {
+        self.elements.get(index).and_then(|e| e.draw.as_ref())
     }
 
     /// Returns text content for the element at `index`, if any.
@@ -588,6 +599,9 @@ impl LayoutTree {
                 *border = border.resolved(layout_scale);
             }
             element.corner_radius = element.corner_radius.resolved(layout_scale);
+            if let Some(ref mut panel_draw) = element.draw {
+                *panel_draw = panel_draw.scaled(layout_scale);
+            }
             element.scroll_offset *= layout_scale;
             if let ElementContent::Text { ref mut config, .. } = element.content {
                 // If this text element carries an explicit unit (e.g., from
@@ -618,6 +632,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor,
         material,
         editable,
+        draw,
         content,
     } = element;
     let Element {
@@ -636,6 +651,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         scroll_anchor: n_scroll_anchor,
         material: n_material,
         editable: n_editable,
+        draw: n_draw,
         content: n_content,
     } = next;
 
@@ -664,6 +680,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
 
     let mut change = border_change;
     if background != n_background || corner_radius != n_corner_radius {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+
+    if draw != n_draw {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -774,14 +794,20 @@ mod tests {
     use super::FieldDisplayTextUpdate;
     use super::LayoutTree;
     use super::LayoutTreeChange;
+    use crate::CalloutCap;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
+    use crate::Mm;
     use crate::PanelFieldId;
     use crate::layout::Border;
+    use crate::layout::Dimension;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::Padding;
+    use crate::layout::PanelCoord;
+    use crate::layout::PanelDraw;
+    use crate::layout::PanelLine;
     use crate::layout::Sizing;
     use crate::layout::TextStyle;
     use crate::layout::TextWrap;
@@ -821,6 +847,22 @@ mod tests {
         ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(ImeBuiltInFieldKind::Text))
     }
 
+    fn panel_line() -> PanelLine {
+        PanelLine::new((1.0, 2.0), (PanelCoord::end(3.0), PanelCoord::percent(0.5)))
+            .width(0.25)
+            .cap_size(4.0)
+            .start_inset(0.5)
+            .end_inset(0.75)
+            .start_cap(CalloutCap::arrow().length_dimension(Mm(2.0)))
+            .end_cap(CalloutCap::circle().radius(1.5))
+    }
+
+    fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < f32::EPSILON }
+
+    fn assert_some_approx(actual: Option<f32>, expected: f32) {
+        assert!(actual.is_some_and(|value| approx_eq(value, expected)));
+    }
+
     #[test]
     fn identical_tree_classifies_as_identical() {
         let tree = text_tree("same", TextStyle::new(10.0));
@@ -850,6 +892,98 @@ mod tests {
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn builder_stores_panel_draw_on_element() {
+        let tree = root_tree(El::new().draw(PanelDraw::lines([panel_line()])));
+
+        assert_eq!(
+            tree.element_draw(0).map(|draw| draw.lines_ref().len()),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn draw_only_change_classifies_as_visual_only() {
+        let tree = root_tree(El::new());
+        let next = root_tree(El::new().draw(PanelDraw::lines([panel_line()])));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn draw_only_change_is_excluded_from_structure_hash() {
+        let tree = root_tree(El::new());
+        let next = root_tree(El::new().draw(PanelDraw::lines([panel_line()])));
+
+        assert_eq!(tree.structure_hash(), next.structure_hash());
+    }
+
+    #[test]
+    fn scaled_tree_scales_panel_draw_dimensions() {
+        let scale = 3.0;
+        let tree = root_tree(El::new().draw(PanelDraw::lines([panel_line()])));
+        let scaled = tree.scaled(scale, scale);
+        let line = scaled
+            .element_draw(0)
+            .and_then(|draw| draw.lines_ref().first());
+
+        assert_some_approx(
+            line.and_then(|line| line.start().x().start_dimension())
+                .map(|dimension| dimension.value),
+            3.0,
+        );
+        assert_some_approx(
+            line.and_then(|line| line.start().y().start_dimension())
+                .map(|dimension| dimension.value),
+            6.0,
+        );
+        assert_some_approx(
+            line.and_then(|line| line.end().x().end_dimension())
+                .map(|dimension| dimension.value),
+            9.0,
+        );
+        assert_eq!(
+            line.and_then(|line| line.end().y().percent_value()),
+            Some(0.5)
+        );
+        assert_some_approx(
+            line.map(|line| line.line_style().width_dimension().value),
+            0.75,
+        );
+        assert_some_approx(
+            line.map(|line| line.line_style().cap_size_dimension().value),
+            12.0,
+        );
+        assert_some_approx(
+            line.map(PanelLine::start_inset_dimension)
+                .map(|dimension| dimension.value),
+            1.5,
+        );
+        assert_some_approx(
+            line.map(PanelLine::end_inset_dimension)
+                .map(|dimension| dimension.value),
+            2.25,
+        );
+
+        let expected_arrow_inset = Dimension::from(Mm(2.0)).to_points(scale);
+        assert_some_approx(
+            line.map(|line| {
+                line.line_style()
+                    .start_cap_value()
+                    .shaft_inset(99.0, |dimension| dimension.value)
+            }),
+            expected_arrow_inset,
+        );
+        assert_some_approx(
+            line.map(|line| {
+                line.line_style()
+                    .end_cap_value()
+                    .shaft_inset(99.0, |dimension| dimension.value)
+            }),
+            4.5,
+        );
     }
 
     #[test]

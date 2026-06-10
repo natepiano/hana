@@ -29,7 +29,7 @@ Current shader-performance experiments use three checks:
 
 ### Canonical Benchmark Format
 
-See `docs/bevy_diegetic/slug-benchmark-procedure.md` for the single
+See `docs/bevy_diegetic/performance/slug-benchmark-procedure.md` for the single
 comparison table that all Slug benchmark entries must use. Do not
 introduce parallel formats here.
 
@@ -896,7 +896,7 @@ Keep the Slug implementation itself at `dda5299`.
 The old `5.9117 ms` fragment note did not reproduce under this setup;
 the reconstructed baseline numbers (alongside the current 96-band
 column and the latest experimental column) are recorded in
-`docs/bevy_diegetic/slug-benchmark-procedure.md`.
+`docs/bevy_diegetic/performance/slug-benchmark-procedure.md`.
 
 Assessment:
 
@@ -959,7 +959,7 @@ Why it matters:
 ## Per-segment ribbon — scene-limited visual notes (2026-05-23)
 
 Canonical performance numbers and verdict live in
-`docs/bevy_diegetic/slug-benchmark-procedure.md` (Per-segment ribbon
+`docs/bevy_diegetic/performance/slug-benchmark-procedure.md` (Per-segment ribbon
 column, 2026-05-23). The following notes are scene-limited observations
 that do not belong in the canonical performance table.
 
@@ -996,7 +996,7 @@ Screenshot procedure caveat:
 
 The per-segment ribbon was the first ribbon variant; three follow-on
 iterations replaced it. Canonical numbers and verdict live in
-`docs/bevy_diegetic/slug-benchmark-procedure.md`; this section records
+`docs/bevy_diegetic/performance/slug-benchmark-procedure.md`; this section records
 what was tried and why each step was taken.
 
 1. **Join joints into a tri-strip** (`half = 5`, `FLATTEN_STEPS = 12`).

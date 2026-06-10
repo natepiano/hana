@@ -16,8 +16,8 @@ use bevy::render::render_resource::SpecializedMeshPipelineError;
 use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderRef;
 
-use super::constants::SLUG_TEXT_SHADER_PATH;
-use super::constants::SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
+use super::constants::ANALYTIC_PATH_SHADER_PATH;
+use super::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 use crate::layout::GlyphRenderMode;
 
 /// Visible render mode for the text shader.
@@ -64,12 +64,20 @@ struct TextUniform {
     /// `edge_width` to a screen-space band derived from the distance gradient,
     /// which fixes the convex-corner flare at grazing angles.
     aa_band:          u32,
+    /// Minimum on-screen stroke width in device pixels for hairline-dilated
+    /// paths (`GlyphRecord::min_feature > 0`). Mirrored from
+    /// [`HairlineWidth`](crate::HairlineWidth) by `sync_hairline_width`.
+    hairline_min_px:  f32,
 }
+
+/// Constructor default for `TextUniform::hairline_min_px`; `sync_hairline_width`
+/// replaces it with the window-scale-derived value on the asset-added event.
+const HAIRLINE_DEFAULT_DEVICE_PX: f32 = 2.0;
 
 /// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
 #[bind_group_data(TextExtensionKey)]
-pub(crate) struct TextExtension {
+pub struct TextExtension {
     /// Shader uniforms.
     #[uniform(100)]
     uniforms:          TextUniform,
@@ -90,7 +98,7 @@ pub(crate) struct TextExtension {
     #[storage(105, read_only, visibility(vertex, fragment))]
     run_records:       Handle<ShaderBuffer>,
     /// Routes this material's vertex stages (main, prepass, shadow) through
-    /// `slug_text_vertex_pull.wgsl` instead of the standard mesh vertex stage.
+    /// `analytic_path_vertex_pull.wgsl` instead of the standard mesh vertex stage.
     vertex_pull:       bool,
     /// Vertex-pull debug aid: displaces each quad by its recovered glyph
     /// index, making the slab-base subtraction visible as a staircase.
@@ -100,7 +108,7 @@ pub(crate) struct TextExtension {
 /// Pipeline-specialization key for [`TextExtension`]: which vertex stage a
 /// material compiles against.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub(crate) struct TextExtensionKey {
+pub struct TextExtensionKey {
     /// Mirror of [`TextExtension::vertex_pull`].
     vertex_pull:       bool,
     /// Mirror of [`TextExtension::debug_glyph_index`].
@@ -117,9 +125,9 @@ impl From<&TextExtension> for TextExtensionKey {
 }
 
 impl MaterialExtension for TextExtension {
-    fn fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
+    fn fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
-    fn prepass_fragment_shader() -> ShaderRef { SLUG_TEXT_SHADER_PATH.into() }
+    fn prepass_fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
     // Standing contract of the text path: the camera depth prepass cannot
     // run vertex-pull batches. Bevy strips the material bind group from
@@ -147,7 +155,7 @@ impl MaterialExtension for TextExtension {
             // `prepass_vertex_shader()` because those are material-type-wide,
             // and stripped-group pipelines must keep the standard vertex
             // stage (see `material_group_is_stripped`).
-            descriptor.vertex.shader = SLUG_TEXT_VERTEX_PULL_SHADER_HANDLE;
+            descriptor.vertex.shader = ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
             if key.bind_group_data.debug_glyph_index {
                 descriptor
                     .vertex
@@ -236,6 +244,7 @@ pub(crate) fn batch_text_material(input: BatchTextMaterialInput) -> TextMaterial
                 oit_depth_offset,
                 supersample: u32::from(supersample),
                 aa_band: u32::from(aa_band),
+                hairline_min_px: HAIRLINE_DEFAULT_DEVICE_PX,
             },
             curves,
             bands,
@@ -262,7 +271,7 @@ pub(crate) fn set_batch_text_material_buffers(
 /// Repoints a text material at replacement shared-atlas buffers after the
 /// atlas grows. The batch record buffers (bindings 104/105) are per-batch,
 /// not atlas-owned, so they are untouched here.
-pub(super) fn set_text_material_atlas(
+pub(crate) fn set_text_material_atlas(
     material: &mut TextMaterial,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,
@@ -271,6 +280,12 @@ pub(super) fn set_text_material_atlas(
     material.extension.curves = curves;
     material.extension.bands = bands;
     material.extension.glyphs = glyphs;
+}
+
+/// Updates the hairline minimum stroke width (device pixels) on a text
+/// material.
+pub(crate) const fn set_text_material_hairline(material: &mut TextMaterial, device_px: f32) {
+    material.extension.uniforms.hairline_min_px = device_px;
 }
 
 /// Updates the shader anti-aliasing switches on a text material.

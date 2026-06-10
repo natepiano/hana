@@ -6,9 +6,10 @@ use bevy::render::render_resource::ShaderSize;
 use bevy::render::render_resource::ShaderType;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
+use bevy_kana::ToUsize;
 
 use super::Bounds;
-use super::Glyph;
+use super::PathOutline;
 use super::QuadraticSegment;
 
 /// Default number of horizontal bands packed per glyph.
@@ -16,26 +17,42 @@ pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
+/// Bow-to-chord ratio below which a segment packs as exactly linear.
+///
+/// Coordinate scaling rounds start/control/end independently, so a
+/// midpoint-control line segment can carry a few-ulp second difference.
+/// The shader's winding root `(-b ± sqrt(b² - 4ac)) / 2a` then cancels
+/// catastrophically (for a long edge, `b²`'s ulp exceeds `4ac`), losing the
+/// crossing entirely. A bow this small is far below one design unit of
+/// deviation, so snapping it to zero routes such segments through the exact
+/// linear solve with no visible change.
+const CURVE_LINEAR_SNAP_RATIO: f32 = 0.000_1;
 
 /// GPU curve record for a quadratic Bezier segment.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct CurveRecord {
+pub(crate) struct CurveRecord {
     /// Segment start point in `.xy`, control-minus-start in `.zw`.
     pub start_delta: Vec4,
     /// Quadratic second-difference in `.xy`, segment end point in `.zw`.
     pub curve_end:   Vec4,
     /// Conservative control-point bounds minimum in `.xy`, maximum in `.zw`.
     pub bounds:      Vec4,
-    /// Distance-solver coefficients in `.xyz`; `.w` is 1.0 when the curve is
-    /// assigned to the vertical band for distance (skipped by the horizontal
-    /// band's distance loop to avoid duplicate solves), 0.0 otherwise.
+    /// Distance-solver coefficients in `.xyz`; `.w` carries the owning
+    /// contour's narrowest stroke in design units (per-curve hairline
+    /// dilation), 0.0 for undilated contours (text glyphs).
     pub solver:      Vec4,
 }
 
 impl From<&QuadraticSegment> for CurveRecord {
     fn from(segment: &QuadraticSegment) -> Self {
         let control_delta = segment.control - segment.start;
-        let curve_delta = segment.end - 2.0 * segment.control + segment.start;
+        let mut curve_delta = segment.end - 2.0 * segment.control + segment.start;
+        let chord_sq = (segment.end - segment.start).length_squared();
+        if curve_delta.length_squared()
+            < chord_sq * (CURVE_LINEAR_SNAP_RATIO * CURVE_LINEAR_SNAP_RATIO)
+        {
+            curve_delta = Vec2::ZERO;
+        }
         let curve_norm_sq = curve_delta.length_squared();
         let inverse_curve_norm_sq = if curve_norm_sq >= CURVE_DEGENERATE_EPS {
             curve_norm_sq.recip()
@@ -68,7 +85,7 @@ impl From<&QuadraticSegment> for CurveRecord {
 
 /// GPU band record pointing at a contiguous curve range.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct BandRecord {
+pub(crate) struct BandRecord {
     /// First curve record for this band.
     pub start: u32,
     /// Number of curve records for this band.
@@ -81,11 +98,15 @@ pub struct BandRecord {
 
 /// GPU glyph record for one unique glyph in a packed text run.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct GlyphRecord {
+pub(crate) struct GlyphRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
     /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
     pub band_range:      UVec4,
+    /// Narrowest stroke of the path in design-space units; the shader dilates
+    /// the silhouette so that stroke covers at least one screen pixel
+    /// (hairline rendering). `0.0` disables — text glyphs stay undilated.
+    pub min_feature:     f32,
 }
 
 impl GlyphRecord {
@@ -97,15 +118,17 @@ impl GlyphRecord {
         horizontal_count: u32,
         vertical_start: u32,
         vertical_count: u32,
+        min_feature: f32,
     ) -> Self {
         Self {
             bounds_min_size: Vec4::new(bounds.min.x, bounds.min.y, bounds.width(), bounds.height()),
-            band_range:      UVec4::new(
+            band_range: UVec4::new(
                 horizontal_start,
                 horizontal_count,
                 vertical_start,
                 vertical_count,
             ),
+            min_feature,
         }
     }
 }
@@ -135,34 +158,64 @@ pub(crate) struct GlyphInstanceRecord {
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct RunRecord {
     /// Label world matrix (run layout space → world).
-    pub transform:   Mat4,
+    pub transform:        Mat4,
     /// Linear fill color.
-    pub fill_color:  Vec4,
+    pub fill_color:       Vec4,
     /// Visible render mode (`RenderMode` as `u32`).
-    pub render_mode: u32,
-    /// Depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`); the
-    /// shader zeroes it under OIT.
-    pub depth_nudge: f32,
+    pub render_mode:      u32,
+    /// Clip-space depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`)
+    /// for non-OIT views.
+    pub depth_nudge:      f32,
+    /// Per-run OIT position-z offset for coplanar ordering.
+    pub oit_depth_offset: f32,
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
-// WGSL mirror structs in `slug_text_vertex_pull.wgsl` assume these strides.
+// WGSL mirror structs in `analytic_path_vertex_pull.wgsl` assume these strides.
 // `ShaderSize` measures the encase layout, not the Rust layout.
+const _: () = assert!(GlyphRecord::SHADER_SIZE.get() == 48);
 const _: () = assert!(GlyphInstanceRecord::SHADER_SIZE.get() == 40);
 const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
 
-/// One glyph's packed curve and band data for the text shader.
+/// Shared name for a renderer path atlas record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathRecord = GlyphRecord;
+
+/// Shared name for a batched path instance record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathInstanceRecord = GlyphInstanceRecord;
+
+/// Shared name for a batched path run record.
+#[allow(
+    dead_code,
+    reason = "Phase A names shared path record types before Phase B consumes them"
+)]
+pub(crate) type PathRunRecord = RunRecord;
+
+/// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
-pub struct GlyphOutline {
-    glyph:  Glyph,
-    curves: Vec<CurveRecord>,
-    bands:  Vec<BandRecord>,
+pub(crate) struct PackedPath {
+    bounds:           Bounds,
+    curves:           Vec<CurveRecord>,
+    bands:            Vec<BandRecord>,
+    horizontal_count: u32,
+    vertical_count:   u32,
 }
 
-impl GlyphOutline {
-    /// Glyph bounds in font design-space units.
+/// Compatibility alias for text glyph caches while text is bridged onto the
+/// shared path renderer.
+pub(crate) type GlyphOutline = PackedPath;
+
+impl PackedPath {
+    /// Path bounds in local design-space units.
     #[must_use]
-    pub const fn bounds(&self) -> Bounds { self.glyph.bounds }
+    pub const fn bounds(&self) -> Bounds { self.bounds }
 
     /// Band-packed curve records.
     #[must_use]
@@ -171,23 +224,88 @@ impl GlyphOutline {
     /// Band records.
     #[must_use]
     pub fn bands(&self) -> &[BandRecord] { &self.bands }
+
+    /// Number of horizontal bands (first in the band list).
+    #[must_use]
+    pub const fn horizontal_count(&self) -> u32 { self.horizontal_count }
+
+    /// Number of vertical bands (after the horizontal bands).
+    #[must_use]
+    pub const fn vertical_count(&self) -> u32 { self.vertical_count }
 }
 
-/// Builds horizontal band data for one quadratic glyph.
-#[must_use]
-pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
-    let band_count = band_count.max(1);
-    let mut curves = Vec::new();
-    let mut bands = Vec::with_capacity(band_count * 2);
-    let bounds = glyph.bounds;
+/// Per-axis band counts and inclusion overlap for packing one path.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BandLayout {
+    /// Horizontal band count (splits the y extent).
+    pub horizontal_count: usize,
+    /// Vertical band count (splits the x extent).
+    pub vertical_count:   usize,
+    /// Design-unit margin around each band; curves within it are included so
+    /// the distance scan near a band edge still sees them.
+    pub overlap:          f32,
+}
 
-    let oriented_segments: Vec<(QuadraticSegment, CurveOrientation)> = glyph
+impl BandLayout {
+    /// Equal band counts on both axes with the text overlap margin.
+    #[must_use]
+    const fn uniform(band_count: usize) -> Self {
+        Self {
+            horizontal_count: band_count,
+            vertical_count:   band_count,
+            overlap:          BAND_OVERLAP_EM_UNITS,
+        }
+    }
+
+    /// Per-axis counts sized so each band spans about `target_extent` design
+    /// units, with a half-band overlap. Small paths keep one exact band (the
+    /// distance scan sees every curve at any zoom); large merged paths split
+    /// so the per-fragment curve loop stays short.
+    #[must_use]
+    pub fn for_extents(bounds: Bounds, target_extent: f32) -> Self {
+        Self {
+            horizontal_count: band_count_for_extent(bounds.height(), target_extent),
+            vertical_count:   band_count_for_extent(bounds.width(), target_extent),
+            overlap:          target_extent * 0.5,
+        }
+    }
+}
+
+fn band_count_for_extent(extent: f32, target_extent: f32) -> usize {
+    if target_extent <= 0.0 || !(extent / target_extent).is_finite() {
+        return 1;
+    }
+    (extent / target_extent)
+        .ceil()
+        .to_usize()
+        .clamp(1, DEFAULT_BAND_COUNT)
+}
+
+/// Builds horizontal and vertical band data for one quadratic path outline
+/// with equal per-axis band counts (the text glyph path).
+#[must_use]
+pub(crate) fn build_packed_path(path: PathOutline, band_count: usize) -> PackedPath {
+    build_packed_path_with_layout(path, BandLayout::uniform(band_count))
+}
+
+/// Builds horizontal and vertical band data for one quadratic path outline.
+#[must_use]
+pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayout) -> PackedPath {
+    let horizontal_count = layout.horizontal_count.max(1);
+    let vertical_count = layout.vertical_count.max(1);
+    let mut curves = Vec::new();
+    let mut bands = Vec::with_capacity(horizontal_count + vertical_count);
+    let bounds = path.bounds;
+
+    let oriented_segments: Vec<BandedSegment> = path
         .contours
         .iter()
-        .flat_map(|contour| contour.segments.iter().copied())
-        .map(|segment| {
-            let orientation = segment_orientation(&segment);
-            (segment, orientation)
+        .flat_map(|contour| {
+            contour.segments.iter().map(|segment| BandedSegment {
+                segment:     *segment,
+                orientation: segment_orientation(segment),
+                min_feature: contour.min_feature,
+            })
         })
         .collect();
 
@@ -195,7 +313,8 @@ pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
         &oriented_segments,
         bounds.min.y,
         bounds.height(),
-        band_count,
+        horizontal_count,
+        layout.overlap,
         Axis::Horizontal,
         &mut curves,
         &mut bands,
@@ -204,16 +323,19 @@ pub fn build_packed_glyph(glyph: Glyph, band_count: usize) -> GlyphOutline {
         &oriented_segments,
         bounds.min.x,
         bounds.width(),
-        band_count,
+        vertical_count,
+        layout.overlap,
         Axis::Vertical,
         &mut curves,
         &mut bands,
     );
 
-    GlyphOutline {
-        glyph,
+    PackedPath {
+        bounds,
         curves,
         bands,
+        horizontal_count: horizontal_count.to_u32(),
+        vertical_count: vertical_count.to_u32(),
     }
 }
 
@@ -229,11 +351,20 @@ enum CurveOrientation {
     Vertical,
 }
 
+/// One outline segment with the per-band packing inputs it carries.
+#[derive(Clone, Copy)]
+struct BandedSegment {
+    segment:     QuadraticSegment,
+    orientation: CurveOrientation,
+    min_feature: f32,
+}
+
 fn append_bands(
-    oriented_segments: &[(QuadraticSegment, CurveOrientation)],
+    oriented_segments: &[BandedSegment],
     start_position: f32,
     extent: f32,
     band_count: usize,
+    overlap: f32,
     axis: Axis,
     curves: &mut Vec<CurveRecord>,
     bands: &mut Vec<BandRecord>,
@@ -250,8 +381,8 @@ fn append_bands(
         let start = curves.len().to_u32();
         append_band_curves(
             oriented_segments,
-            band_min - BAND_OVERLAP_EM_UNITS,
-            band_max + BAND_OVERLAP_EM_UNITS,
+            band_min - overlap,
+            band_max + overlap,
             axis,
             curves,
         );
@@ -265,31 +396,29 @@ fn append_bands(
 }
 
 fn append_band_curves(
-    oriented_segments: &[(QuadraticSegment, CurveOrientation)],
+    oriented_segments: &[BandedSegment],
     band_min: f32,
     band_max: f32,
     axis: Axis,
     curves: &mut Vec<CurveRecord>,
 ) {
-    let mut filtered: Vec<(QuadraticSegment, CurveOrientation)> = oriented_segments
+    let mut filtered: Vec<BandedSegment> = oriented_segments
         .iter()
         .copied()
-        .filter(|(segment, _)| overlaps_band(segment, band_min, band_max, axis))
-        .filter(|(_, orientation)| match axis {
+        .filter(|banded| overlaps_band(&banded.segment, band_min, band_max, axis))
+        .filter(|banded| match axis {
             Axis::Horizontal => true,
-            Axis::Vertical => *orientation == CurveOrientation::Vertical,
+            Axis::Vertical => banded.orientation == CurveOrientation::Vertical,
         })
         .collect();
 
     filtered.sort_by(|left, right| {
-        descending_band_sort_value(&right.0, axis)
-            .total_cmp(&descending_band_sort_value(&left.0, axis))
+        descending_band_sort_value(&right.segment, axis)
+            .total_cmp(&descending_band_sort_value(&left.segment, axis))
     });
-    curves.extend(filtered.iter().map(|(segment, orientation)| {
-        let mut record = CurveRecord::from(segment);
-        if *orientation == CurveOrientation::Vertical {
-            record.solver.w = 1.0;
-        }
+    curves.extend(filtered.iter().map(|banded| {
+        let mut record = CurveRecord::from(&banded.segment);
+        record.solver.w = banded.min_feature;
         record
     }));
 }
@@ -361,10 +490,15 @@ mod tests {
 
     fn run_record(seed: f32) -> RunRecord {
         RunRecord {
-            transform:   Mat4::from_translation(bevy::math::Vec3::new(seed, -seed, seed * 2.0)),
-            fill_color:  Vec4::new(0.25, 0.5, 0.75, 1.0),
-            render_mode: 1,
-            depth_nudge: seed,
+            transform:        Mat4::from_translation(bevy::math::Vec3::new(
+                seed,
+                -seed,
+                seed * 2.0,
+            )),
+            fill_color:       Vec4::new(0.25, 0.5, 0.75, 1.0),
+            render_mode:      1,
+            depth_nudge:      seed,
+            oit_depth_offset: -seed,
         }
     }
 

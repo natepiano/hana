@@ -8,7 +8,7 @@
 > `OIT_FRAGMENTS_PER_PIXEL_AVERAGE = 8.0` after close-up exhaustion artifacts,
 > and a resize-crash investigation added then removed an in-process shader
 > guard — see
-> [`oit-resize-crash-investigation.md`](oit-resize-crash-investigation.md).
+> [`../investigation/oit-resize-crash-investigation.md`](../investigation/oit-resize-crash-investigation.md).
 
 ## Context
 

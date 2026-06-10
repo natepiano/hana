@@ -36,6 +36,7 @@ struct RunRecord {
     fill_color: vec4<f32>,
     render_mode: u32,
     depth_nudge: f32,
+    oit_depth_offset: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<GlyphInstanceRecord>;
