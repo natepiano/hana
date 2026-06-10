@@ -384,12 +384,13 @@ dependents fall back to configured placement and record
 `BlockedByCycle`. This gives every fallback path one source of truth for final
 placement and diagnostics.
 
-When Phase 3 adds a world resolver, resolver ownership is by source coordinate
-space:
+When Phase 3 adds a world resolver, each resolver handles only the source panels
+it can actually place:
 
 - screen sources are classified and resolved only by the screen resolver
 - world sources are classified and resolved only by the world resolver
-- mixed-space edges are diagnosed by the source resolver
+- screen-to-world and world-to-screen attachments remain unsupported for now and
+  are diagnosed instead of partially resolved
 - each resolver clears only the private override state it owns
 
 Dead target and target despawn should normally be handled by Bevy relationship
@@ -611,43 +612,42 @@ The world resolver should use the target panel's local plane:
 5. Compose any Phase-4 post-alignment rotation after plane alignment.
 
 World anchor geometry must use resolved visual size in world meters, not raw
-layout-unit `panel.width()` / `panel.height()`. Define one shared plane helper:
+layout-unit `panel.width()` / `panel.height()`. Use the shared plane helper
+from Phase 2:
 
 ```rust
 impl PanelPlane {
-    pub(crate) fn from_panel(panel: &DiegeticPanel, global: GlobalTransform) -> Self;
+    pub fn from_panel(
+        panel: &DiegeticPanel,
+        transform: &GlobalTransform,
+    ) -> Result<Self, PanelAnchorGeometryError>;
 }
 ```
 
-`PanelPlane::from_panel` uses `panel.world_width()` / `panel.world_height()` or
-the equivalent resolved meter dimensions. Its invariants are:
+`PanelPlane::from_panel` uses `panel.world_width()` / `panel.world_height()`,
+the panel's current `GlobalTransform`, and transform scale. Its invariants are:
 
-- `origin` is the world-space point for the panel's configured `panel.anchor()`
+- `origin()` is the world-space top-left corner of the panel
 - `right`, `up`, and `normal` are unit orthonormal world directions
 - `size` is the resolved visual width/height in world meters
 
-World anchor coordinates use signed panel-plane coordinates. If `fx/fy` come
-from `Anchor::offset_fraction()` and the panel's configured anchor is
-`panel.anchor()`, then a point on the panel plane is:
+World anchor coordinates should use `PanelPlane::point(anchor)` and
+`PanelPlane::edge(edge)` directly. Do not recalculate anchor fractions in the
+world resolver; the Phase 2 helper is the public contract and already accounts
+for the panel's configured `panel.anchor()`, transform scale, and top-left plane
+origin.
 
 ```rust
-let (anchor_fx, anchor_fy) = anchor.offset_fraction();
-let (panel_fx, panel_fy) = panel.anchor().offset_fraction();
-
-let offset = Vec2::new(
-    (anchor_fx - panel_fx) * plane.size.x,
-    (panel_fy - anchor_fy) * plane.size.y,
-);
-
-let point_world = plane.origin + plane.right * offset.x + plane.up * offset.y;
+let point_world = plane.point(anchor);
 ```
 
-The x axis points right. The y axis points up in world panel space, so top
-anchors have positive local y when the panel anchor is centered. This differs
-from screen-space offset y, which points down.
+The x axis points right. Panel-local y-down coordinates map to negative world
+`up`; `PanelPlane::point(anchor)` owns that sign conversion.
 
 The target anchor point applies the tagged meter offset in the target panel
-plane:
+plane. A zero offset should be valid for world attachments even when it came
+from `PanelAnchorOffset::ZERO`; non-zero world offsets must use
+`PanelAnchorOffsetUnits::TargetPlaneMeters`.
 
 ```rust
 let target_point_world = target_plane.point(target_anchor)
@@ -673,14 +673,14 @@ instead of decomposing an unrepresentable transform into a lossy Bevy
 `Transform`.
 
 World anchoring needs an authored-pose fallback because it writes `Transform`
-directly. Phase 3 should add a crate-private resolver-owned record such as
+directly. Phase 3 should add a crate-private record such as
 `AnchoredWorldPanelPose` that captures the dependent's authored local transform
 when the relation first becomes active. On relation removal, invalid target,
 skipped dependency, or cycle fallback, restore the authored transform and clear
-the resolver-owned record. While the relation is active, placement and default
-plane orientation are resolver-owned; user-authored transform edits should be
-made by removing the relation or by writing a resolver-owned offset/rotation
-input.
+that record. While the relation is active, the world resolver writes placement
+and default plane orientation; user-authored transform edits should be made by
+removing the relation or by writing a separate offset/rotation component that
+the world resolver reads.
 
 Use one no-lag schedule strategy in Phase 3: run world attachment resolution in
 `PostUpdate` before `TransformSystems::Propagate`, compute current target and
@@ -937,13 +937,15 @@ Keep Phase 1 small enough to implement and review in checkpoints.
 - Phase 2 cache language now treats `PanelSystems::PublishAnchorGeometry` as
   conditional on a cached implementation; helper-only geometry reads do not need
   a cache just to satisfy the plan.
-- Phase 3 now has an explicit source-space ownership step before enabling
-  world-to-world edges, so the screen resolver stops treating valid future world
-  sources as screen mixed-space failures.
+- Phase 3 now explicitly moves world source panels to a world resolver before
+  enabling world-to-world attachments, so the screen resolver does not try to
+  handle them.
 - Phase 4 now has a release-pose handoff rule for elastic attach/detach
   animations so they do not fight Phase 3 authored-pose restoration.
 
 ### Phase 2 — public anchor geometry reads
+
+Status: **complete**.
 
 Expose read-only resolved anchor geometry without changing attachment behavior.
 This phase should define the stable API that animation systems can consume:
@@ -988,6 +990,63 @@ toward a panel anchor point without using `AnchoredToPanel` as the mover. This
 phase must also cover edge geometry because the chained unwrap example needs
 hinge edges, not only point centers.
 
+#### Retrospective
+
+**What worked:**
+
+- `panel/anchor_geometry.rs` added helper-backed public geometry reads through
+  `PanelAnchorGeometryParam`, `ResolvedPanelAnchorGeometry`,
+  `PanelScreenBounds`, `PanelPlane`, and `PanelAnchorEdge`.
+- `screen_space/anchoring.rs` now uses `PanelScreenBounds`, so screen attachment
+  placement and public screen geometry use the same anchor math.
+
+**What deviated from the plan:**
+
+- No cache component or `PanelSystems::PublishAnchorGeometry` was added; the
+  implementation is helper-only.
+- `ime/editor.rs` was the same-frame screen-panel consumer that needed code
+  changes. `ImeSystemSet::UpdateEditorGeometry` now runs after
+  `PanelSystems::ResolvePanelAttachments` and before
+  `PanelSystems::PositionScreenSpace`, and screen-panel fields read
+  `PanelAnchorGeometryParam`.
+- The text/SDF audit did not require a migration in this phase: SDF panel-child
+  build reads panel layout, and text batch transform copying remains in
+  `PostUpdate` around transform propagation.
+
+**Surprises:**
+
+- A system that reads `PanelAnchorGeometryParam` and writes `Transform` should
+  use `ParamSet`, because the helper uses Bevy's `TransformHelper` internally.
+- `PanelPlane` needs to reject sheared or non-orthogonal world axes so public
+  world anchor points stay meaningful.
+
+**Implications for remaining phases:**
+
+- Phase 3 can build world-to-world placement from `PanelPlane`, including the
+  same invalid-plane check used by public geometry reads.
+- Phase 4 animation systems should read geometry and write transforms through a
+  `ParamSet`, or write a separate component that the world resolver reads.
+- Screen-to-world and world-to-screen attachments are still out of scope until a
+  later design explicitly defines them.
+
+#### Phase 2 Review
+
+- Phase 3 now uses the Phase 2 `PanelPlane` contract directly:
+  `origin()` is top-left, and resolver math should call
+  `PanelPlane::point(anchor)` instead of duplicating anchor-fraction math.
+- Phase 3 now says default zero-offset world attachments must work with
+  `AnchoredToPanel::new`; only non-zero world offsets require
+  `TargetPlaneMeters`.
+- Phase 3 now names two implementation risks before coding: diagnostics must
+  not share one `current_frame` counter across two resolver runs, and invalid
+  world planes need explicit skip reasons and tests.
+- Phase 3 now requires an explicit world-panel IME outcome before closeout:
+  helper-backed same-frame projection if implemented, or a documented one-frame
+  delay if deferred.
+- Phase 4 is split into animations without `AnchoredToPanel` first, then
+  animations that run while `AnchoredToPanel` is active after Phase 3 adds a
+  component the world resolver reads.
+
 ### Phase 3 — world-space point anchoring
 
 Implement world-to-world panel attachment using the same `AnchoredToPanel`
@@ -995,36 +1054,49 @@ relationship:
 
 1. Add a world-space attachment resolver with its own schedule path. Do not put
    world resolution into the screen-space set chain.
-2. Split source-space ownership before enabling world-to-world edges: screen
-   sources remain the screen resolver's responsibility, world sources become the
-   world resolver's responsibility, and mixed edges are diagnosed by the source
-   resolver. The Phase 1 screen resolver must not continue to classify valid
-   future world-to-world edges as screen `MixedCoordinateSpace` failures.
-3. Extract or share the source-owned graph traversal, cycle handling,
-   diagnostics, and stale-state clearing before reusing them from the world
-   resolver.
+2. Before enabling world-to-world edges, make the screen resolver skip world
+   source panels and make the world resolver handle them. Screen-to-world and
+   world-to-screen attachments remain unsupported in this phase and should
+   report a clear diagnostic instead of partially resolving.
+3. Extract or share the source-side graph traversal, cycle handling,
+   diagnostics, and stale-state clearing before writing the world placement
+   solver. If diagnostics are shared, give screen and world resolvers either
+   separate diagnostic resources or one explicit frame id; do not advance one
+   `current_frame` counter twice in the same `App::update`.
 4. Run the resolver in `PostUpdate` before `TransformSystems::Propagate`.
 5. Use `TransformHelper::compute_global_transform` or an equivalent parent-chain
    helper so same-frame target and parent transforms are current before writing
    the dependent's local `Transform`.
-6. Resolve only world-to-world source edges. Mixed screen/world edges are
-   diagnosed by the source-space resolver and do not panic.
-7. Compute target anchor points from `PanelPlane::from_panel`, using resolved
-   world-meter panel size, not raw layout-unit dimensions.
+6. Resolve only world-to-world edges. Screen-to-world and world-to-screen edges
+   remain unsupported and should diagnose without panicking.
+7. Compute target anchor points with `PanelPlane::from_panel` and
+   `PanelPlane::point(anchor)`, using resolved world-meter panel size, not raw
+   layout-unit dimensions. Do not duplicate the old anchor-fraction math inside
+   the resolver.
 8. While an `AnchoredToPanel` relation is active, the resolver owns world
    position and default plane orientation. The default orientation mode is
    "copy the target panel plane."
 9. Preserve the dependent panel's chosen `source_anchor` as the point being
    pinned. Do not preserve an arbitrary authored dependent rotation while the
    relation owns orientation.
-10. Capture and restore authored local pose with a resolver-owned record such as
+10. Capture and restore authored local pose with a crate-private record such as
    `AnchoredWorldPanelPose`.
 11. Support unparented panels, rotated parents, and uniform-scale parents;
    diagnose non-uniform or sheared parent chains with
-   `UnsupportedWorldParentTransform`.
-12. Keep optional post-alignment rotation as a separate resolver input if it is
-   needed. Do not make animation systems fight the resolver by writing the same
-   `Transform` after it.
+   `UnsupportedWorldParentTransform`. Map `PanelAnchorGeometryError::InvalidPanelPlane`
+   to an explicit resolver skip reason and cover source-plane and target-plane
+   failures in tests.
+12. Keep optional post-alignment rotation as a separate component read by the
+   world resolver if it is needed. Do not make animation systems fight the
+   resolver by writing the same `Transform` after it.
+13. Accept zero world offsets from either `PanelAnchorOffset::ZERO` or
+    `PanelAnchorOffset::target_plane_meters(Vec2::ZERO)`, so
+    `AnchoredToPanel::new` works for default world attachments. Non-zero world
+    offsets must use `TargetPlaneMeters`.
+14. Define world-panel IME behavior before closing the phase. Preferred path:
+    world fields that depend on world-anchored panels use helper-backed geometry
+    after the world resolver; if that is deferred, add a test and docs that
+    state the editor follows those panels one frame later.
 
 This phase should make `examples/panel_anchoring.rs`, planned in
 [`panel-anchoring-example.md`](panel-anchoring-example.md), possible for static
@@ -1033,34 +1105,40 @@ and keyboard-driven world anchoring.
 ### Phase 4 — animated anchor consumers
 
 Build animation examples on top of the public anchor geometry rather than
-changing the resolver into a physics system:
+changing the resolver into a physics system. Split this phase into two passes:
 
-- spring/magnetic attraction between two panels using resolved anchor points
-- elastic easing between attached and detached positions
-- chained panel unwrapping where anchor points define hinge edges
+1. **Animations without an active attachment:** spring/magnetic attraction
+   between two panels that only read each other's anchor points. These examples
+   do not insert `AnchoredToPanel`; they read `PanelAnchorGeometryParam` and
+   write `Transform` through `ParamSet`.
+2. **Animations while a panel is attached:** elastic attach/detach and chained
+   unwrapping where `AnchoredToPanel` is active. These wait for Phase 3 to add a
+   component such as `PanelAnchorPoseOffset` or `PanelAnchorPostAlignment` that
+   the world resolver reads, because the resolver writes the panel transform
+   while the attachment is active.
 
 The relationship remains the exact snap constraint. Active `AnchoredToPanel`
-means resolver-owned placement. Animation systems should use one of these
-ownership modes:
+means the resolver writes the panel placement. Animation systems should use one
+of these ownership modes:
 
-1. no active relation while the animation writes `Transform`
-2. animation writes a separate resolver input such as offset or post-alignment
+1. no `AnchoredToPanel` component while the animation writes `Transform`
+2. animation writes a separate component such as offset or post-alignment
    rotation, and the resolver remains the only transform writer
 3. animation inserts or removes the relation only at state boundaries
 
 If an animation removes an active world relation and wants to start from the
 resolved attached pose, define the handoff explicitly before writing the demo.
-Either keep the relation active and animate a resolver-owned pose input, or add a
-same-frame release-pose capture protocol so authored-pose restoration from Phase
-3 does not snap the panel away before the animation starts.
+Either keep the relation active and animate a component read by the resolver, or
+add a same-frame release-pose capture protocol so authored-pose restoration from
+Phase 3 does not snap the panel away before the animation starts.
 
 Hinge animations should consume `PanelAnchorEdge` geometry from Phase 2. Do not
 extend `AnchoredToPanel` beyond point-to-point snapping just to model hinge
 motion.
 
-Before the hinge demo lands, define a resolver-owned input such as
-`PanelAnchorPoseOffset` or `PanelAnchorPostAlignment`. It should compose local
-rotation after target-plane alignment and then translate so the pinned
+Before the hinge demo lands, define a component such as `PanelAnchorPoseOffset`
+or `PanelAnchorPostAlignment` that the world resolver reads. It should compose
+local rotation after target-plane alignment and then translate so the pinned
 `source_anchor` remains fixed. If the demo needs edge-like behavior, model it as
 `BottomCenter` / `TopCenter` point snapping plus equal-width, edge-parallel
 visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
@@ -1100,7 +1178,8 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
   window
 - missing explicit window, missing primary window, and zero-sized window skip
   without panic
-- cross-window and world/screen mixed attachments are skipped without panic
+- cross-window attachments and unsupported screen-to-world / world-to-screen
+  attachments are skipped without panic
 - each skip test starts from a valid resolved attachment, flips into the invalid
   state, then asserts the override clears, the final transform returns to
   configured placement, and the diagnostic resource records the exact
@@ -1163,7 +1242,8 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 - removal, invalid target, skipped dependency, and cycle fallback restore the
   captured authored local pose
 - chained world attachments resolve in one update
-- mixed screen/world edges are skipped and diagnosed by the source resolver
+- unsupported screen-to-world and world-to-screen edges are skipped and
+  diagnosed
 - world cycles and cycle descendants fall back consistently
 - the resolver runs before transform propagation and produces current
   `GlobalTransform` after propagation
@@ -1245,7 +1325,8 @@ Recorded in the plan:
   world planes, and edges.
 - Phase 3 has a no-lag world schedule and signed panel-plane math.
 - World anchoring owns placement and default plane orientation while active.
-- Phase 4 animation consumers must not fight resolver-owned transform writes.
+- Phase 4 animation consumers must not write the same `Transform` as the
+  resolver.
 - Hinge examples consume edge geometry rather than expanding
   `AnchoredToPanel`.
 - Phase 1 is split into reviewable implementation checkpoints.
@@ -1285,8 +1366,8 @@ Recorded in the plan:
   parent transforms.
 - Public anchor geometry is read-only by construction, with a named publish set
   and helper-backed same-frame consumer mode.
-- Phase 4 has an explicit resolver-owned post-alignment/pose-offset input before
-  hinge animation lands.
+- Phase 4 defines a post-alignment or pose-offset component read by the world
+  resolver before hinge animation lands.
 - Tests and closeout commands are split by phase with stable planned filters.
 - [`panel-anchoring-example.md`](panel-anchoring-example.md) now starts at
   Phase 3, uses point snapping plus edge geometry, and has staged closeout.

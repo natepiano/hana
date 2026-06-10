@@ -9,12 +9,13 @@ use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 
 use crate::layout::Anchor;
+use crate::panel;
 use crate::panel::AnchoredToPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
 use crate::panel::PanelAnchorOffsetUnits;
+use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
-use crate::panel::ScreenPosition;
 
 const DEFAULT_DIAGNOSTIC_CAPACITY: usize = 128;
 
@@ -92,8 +93,9 @@ fn panel_snapshots(
         let Ok((_, window_size)) = resolve_window(*window, primary, window_sizes) else {
             continue;
         };
-        let snapshot = ScreenPanelSnapshot::from_panel(panel, window_size);
-        snapshots.insert(entity, snapshot);
+        if let Some(snapshot) = ScreenPanelSnapshot::from_panel(panel, window_size) {
+            snapshots.insert(entity, snapshot);
+        }
     }
     snapshots
 }
@@ -234,49 +236,20 @@ struct ScreenPanelSnapshot {
 }
 
 impl ScreenPanelSnapshot {
-    fn from_panel(panel: &DiegeticPanel, window_size: Vec2) -> Self {
-        Self {
-            anchor_position: configured_anchor_position(panel, window_size),
-            anchor:          panel.anchor(),
-            size:            Vec2::new(panel.width(), panel.height()),
-        }
+    fn from_panel(panel: &DiegeticPanel, window_size: Vec2) -> Option<Self> {
+        let anchor_position = panel::screen_anchor_position(panel, window_size, None).ok()?;
+        let size = Vec2::new(panel.width(), panel.height());
+        PanelScreenBounds::from_anchor_position(anchor_position, panel.anchor(), size).ok()?;
+        Some(Self {
+            anchor_position,
+            anchor: panel.anchor(),
+            size,
+        })
     }
 
-    fn bounds(self) -> ScreenPanelBounds {
-        let anchor_offset = anchor_offset(self.anchor, self.size);
-        ScreenPanelBounds {
-            top_left: self.anchor_position - anchor_offset,
-            size:     self.size,
-        }
+    fn bounds(self) -> Option<PanelScreenBounds> {
+        PanelScreenBounds::from_anchor_position(self.anchor_position, self.anchor, self.size).ok()
     }
-}
-
-#[derive(Clone, Copy, Debug)]
-struct ScreenPanelBounds {
-    top_left: Vec2,
-    size:     Vec2,
-}
-
-impl ScreenPanelBounds {
-    fn point(self, anchor: Anchor) -> Vec2 { self.top_left + anchor_offset(anchor, self.size) }
-}
-
-fn configured_anchor_position(panel: &DiegeticPanel, window_size: Vec2) -> Vec2 {
-    let CoordinateSpace::Screen { position, .. } = panel.coordinate_space() else {
-        return Vec2::ZERO;
-    };
-    match *position {
-        ScreenPosition::Screen => {
-            let (x, y) = panel.anchor().offset_fraction();
-            Vec2::new(x * window_size.x, y * window_size.y)
-        },
-        ScreenPosition::At(position) => position,
-    }
-}
-
-fn anchor_offset(anchor: Anchor, size: Vec2) -> Vec2 {
-    let (x, y) = anchor.offset(size.x, size.y);
-    Vec2::new(x, y)
 }
 
 #[derive(Default)]
@@ -393,10 +366,16 @@ impl AttachmentGraph {
             return;
         };
 
+        let Some(target_bounds) = target_snapshot.bounds() else {
+            return;
+        };
+        let Some(child_bounds) = child_snapshot.bounds() else {
+            return;
+        };
         let target_point =
-            target_snapshot.bounds().point(attachment.target_anchor) + attachment.offset.as_vec2();
-        let source_offset = anchor_offset(attachment.source_anchor, child_snapshot.size);
-        let panel_offset = anchor_offset(child_snapshot.anchor, child_snapshot.size);
+            target_bounds.point(attachment.target_anchor) + attachment.offset.as_vec2();
+        let source_offset = child_bounds.anchor_offset(attachment.source_anchor);
+        let panel_offset = child_bounds.anchor_offset(child_snapshot.anchor);
         let top_left = target_point - source_offset;
         let anchor_position = top_left + panel_offset;
 

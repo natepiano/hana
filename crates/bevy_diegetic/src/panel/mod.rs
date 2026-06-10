@@ -1,6 +1,7 @@
 //! Panel integration: components, layout computation, and gizmo rendering
 //! — the Bevy-facing half of diegetic UI.
 
+mod anchor_geometry;
 mod anchoring;
 mod builder;
 mod compute_layout;
@@ -13,6 +14,16 @@ mod gizmos;
 mod perf;
 mod sizing;
 
+pub use anchor_geometry::PanelAnchorEdge;
+pub use anchor_geometry::PanelAnchorEdgeEndpoints;
+pub use anchor_geometry::PanelAnchorGeometryError;
+pub use anchor_geometry::PanelAnchorGeometryParam;
+pub use anchor_geometry::PanelAnchorPoint;
+pub use anchor_geometry::PanelAnchorPoints;
+pub use anchor_geometry::PanelPlane;
+pub use anchor_geometry::PanelScreenBounds;
+pub use anchor_geometry::ResolvedPanelAnchorGeometry;
+pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
 pub use anchoring::PanelAnchorOffsetUnits;

@@ -143,7 +143,8 @@ impl Plugin for ImePlugin {
                 Update,
                 editor::update_editor_anchor
                     .in_set(ImeSystemSet::UpdateEditorGeometry)
-                    .after(PanelSystems::ResolveWorldFit),
+                    .after(PanelSystems::ResolvePanelAttachments)
+                    .before(PanelSystems::PositionScreenSpace),
             )
             .add_systems(
                 Update,
