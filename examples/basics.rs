@@ -51,7 +51,7 @@ fn main() {
 
     println!("\n=== into_inner / From / Into: Bevy API interop ===\n");
 
-    // Escape hatch for APIs that expect raw `Vec3`
+    // Use `Position::into_inner` to pass a raw `Vec3` to Bevy APIs.
     let vec3: Vec3 = position.into_inner();
     println!("into_inner: {vec3:?}");
 
