@@ -32,6 +32,10 @@ pub(crate) const CARGO_TARGET_DIR: &str = "target";
 // visibility queues and panics.
 pub(crate) const CASCADE_COUNT: usize = 4;
 pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
+// `CascadeShadowConfigBuilder` requires `first_cascade_far_bound` to be
+// strictly greater than `minimum_distance`; this margin keeps tiny fitted scenes
+// from landing exactly on the minimum.
+pub(crate) const CASCADE_FIRST_BOUND_HEADROOM: f32 = 0.001;
 pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;
 pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;
 // Auto-fit cascade: once the scene's geometry exists, the key light's cascade

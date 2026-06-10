@@ -8,6 +8,7 @@ pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
 pub use super::resolved::TextAlpha;
+pub use super::resolved::TextDrawLayer;
 pub use super::resolved::TextLighting;
 pub use super::resolved::TextSidedness;
 use crate::layout::GlyphLighting;
@@ -46,6 +47,12 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored glyph sidedness.
     fn inherit_text_sidedness(&mut self) -> &mut Self;
+
+    /// Author this entity's text draw layer.
+    fn override_text_draw_layer(&mut self, draw_layer: TextDrawLayer) -> &mut Self;
+
+    /// Remove this entity's authored text draw layer.
+    fn inherit_text_draw_layer(&mut self) -> &mut Self;
 }
 
 impl CascadeEntityCommandsExt for EntityCommands<'_> {
@@ -75,6 +82,14 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_text_sidedness(&mut self) -> &mut Self {
         remove_cascade_override::<TextSidedness>(self)
+    }
+
+    fn override_text_draw_layer(&mut self, draw_layer: TextDrawLayer) -> &mut Self {
+        apply_cascade_override(self, draw_layer)
+    }
+
+    fn inherit_text_draw_layer(&mut self) -> &mut Self {
+        remove_cascade_override::<TextDrawLayer>(self)
     }
 }
 
@@ -112,6 +127,17 @@ pub fn resolved_text_lighting(world: &World, entity: Entity) -> GlyphLighting {
 #[must_use]
 pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness {
     resolved_cascade::<TextSidedness>(world, entity).0
+}
+
+/// Resolve an entity's current text draw layer.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+/// Returns [`TextDrawLayer`] rather than the inner `i8` — the attribute type
+/// is the public draw-order vocabulary; the bare scalar never crosses the API.
+#[must_use]
+pub fn resolved_text_draw_layer(world: &World, entity: Entity) -> TextDrawLayer {
+    resolved_cascade::<TextDrawLayer>(world, entity)
 }
 
 pub(crate) fn apply_cascade_override<'a, 'w, A>(

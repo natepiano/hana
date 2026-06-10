@@ -84,7 +84,7 @@ impl Unit {
 /// - `Mm(6.0).into()` → value 6.0, unit `Millimeters`
 /// - `In(0.24).into()` → value 0.24, unit `Inches`
 /// - `(24.0_f32).into()` → value 24.0, unit None (contextual default)
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 pub struct Dimension {
     /// The numeric size value.
     pub value: f32,

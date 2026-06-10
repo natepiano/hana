@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 
+use super::ResolvedScreenPanelPosition;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
 use super::builder::Screen;
@@ -11,6 +12,7 @@ use super::builder::World;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
+use super::events::LastPanelDimensions;
 use super::field::PanelFieldRecord;
 use crate::cascade;
 use crate::cascade::CascadeDefaults;
@@ -62,6 +64,8 @@ use crate::layout::Unit;
 #[require(
     ComputedDiegeticPanel,
     DiegeticPanelChangeClassification,
+    LastPanelDimensions,
+    ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
     Visibility
@@ -743,7 +747,13 @@ impl ComputedDiegeticPanel {
 }
 
 impl DiegeticPanel {
-    pub(crate) const fn set_screen_position(&mut self, screen_position: Vec2) -> bool {
+    /// Places this screen-space panel at an explicit pixel position.
+    ///
+    /// The origin is the window's top-left corner and y grows downward. The
+    /// panel's [`Anchor`] determines which point of the panel is placed at this
+    /// position. Returns `false` for world-space panels.
+    #[must_use]
+    pub const fn set_screen_position(&mut self, screen_position: Vec2) -> bool {
         let CoordinateSpace::Screen { position, .. } = &mut self.coordinate_space else {
             return false;
         };

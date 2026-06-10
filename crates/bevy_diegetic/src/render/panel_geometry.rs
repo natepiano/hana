@@ -11,15 +11,17 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
-use bevy_kana::ToF32;
 
 use super::PanelChildSystems;
 use super::clip;
 use super::constants;
+use super::constants::DrawOrdinal;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use super::sdf_material::SdfPanelMaterialInput;
+use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
+use crate::cascade::TextDrawLayer;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -223,6 +225,20 @@ fn reconcile_sdf_quads(
     sdf_materials: &mut Assets<SdfPanelMaterial>,
     commands: &mut Commands,
 ) {
+    // `warn_once!` is per-callsite: only the first panel to exhaust the
+    // headroom is named; later offenders stay silent.
+    if DrawOrdinal::from_command_index(render_commands.len())
+        >= DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER))
+    {
+        warn_once!(
+            "panel {:?} has {} render commands, reaching the default text draw layer \
+             ({DEFAULT_TEXT_DRAW_LAYER}); commands indexed at or above it draw over \
+             default-layer text",
+            context.panel_entity,
+            render_commands.len(),
+        );
+    }
+
     let gathered = gather_surfaces(context.panel, render_commands);
     let desired = desired_surfaces(gathered);
 
@@ -440,8 +456,9 @@ fn build_sdf_quad(
             Some(Color::NONE)
         }
     });
+    let draw_ordinal = DrawOrdinal::from_command_index(surface.command_index);
     let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
-    base.depth_bias = surface.command_index.to_f32() * constants::LAYER_DEPTH_BIAS;
+    base.depth_bias = draw_ordinal.depth_bias();
     let fill_color = base.base_color;
 
     let world_width = surface.bounds.width * points_to_world;
@@ -518,7 +535,7 @@ fn build_sdf_quad(
             border_widths: world_borders,
             border_color: surface.border_color,
             clip_rect,
-            oit_depth_offset: constants::panel_backing_oit_depth_offset(surface.command_index),
+            oit_depth_offset: draw_ordinal.oit_depth_offset(),
         },
     );
 
@@ -646,5 +663,144 @@ fn bounds_to_world_rect(
 
     WorldRect {
         center: Vec2::new(width.mul_add(0.5, left), height.mul_add(-0.5, top)),
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
+mod tests {
+    use std::sync::Arc;
+
+    use bevy::asset::AssetPlugin;
+
+    use super::*;
+    use crate::Mm;
+    use crate::layout::El;
+    use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutTree;
+    use crate::layout::Sizing;
+    use crate::layout::TextDimensions;
+    use crate::layout::TextMeasure;
+    use crate::panel::HeadlessLayoutPlugin;
+    use crate::text::DiegeticTextMeasurer;
+
+    /// Measurer stub for a text-free panel tree; never invoked.
+    fn zero_measurer() -> DiegeticTextMeasurer {
+        DiegeticTextMeasurer {
+            measure_fn: Arc::new(|_: &str, measure: &TextMeasure| TextDimensions {
+                width:       0.0,
+                height:      measure.size,
+                line_height: measure.size,
+            }),
+        }
+    }
+
+    fn geometry_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(AssetPlugin::default());
+        app.init_asset::<Mesh>();
+        app.init_asset::<StandardMaterial>();
+        app.init_asset::<SdfPanelMaterial>();
+        app.insert_resource(zero_measurer());
+        app.add_plugins(HeadlessLayoutPlugin);
+        app.add_systems(PostUpdate, build_panel_geometry);
+        app
+    }
+
+    /// A full-size background with a full-size backed child on top: two
+    /// overlapping backing surfaces at consecutive command indices, identical
+    /// in geometry and color.
+    fn stacked_backgrounds_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(Color::WHITE),
+            |builder| {
+                builder.with(
+                    El::new()
+                        .width(Sizing::GROW)
+                        .height(Sizing::GROW)
+                        .background(Color::WHITE),
+                    |_| {},
+                );
+            },
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn overlapping_backings_order_the_same_on_sorted_and_oit_paths() {
+        let mut app = geometry_app();
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .with_tree(stacked_backgrounds_tree())
+                .build()
+                .expect("panel should build"),
+        );
+        app.update();
+        app.update();
+
+        let mut quads: Vec<(usize, SdfPanelMaterial)> = {
+            let world = app.world_mut();
+            let mut query = world.query::<(&PanelSdfSurface, &MeshMaterial3d<SdfPanelMaterial>)>();
+            let pairs: Vec<(usize, Handle<SdfPanelMaterial>)> = query
+                .iter(world)
+                .map(|(surface, material)| (surface.command_index, material.0.clone()))
+                .collect();
+            let materials = world.resource::<Assets<SdfPanelMaterial>>();
+            pairs
+                .into_iter()
+                .map(|(command_index, handle)| {
+                    (
+                        command_index,
+                        materials
+                            .get(&handle)
+                            .expect("quad material exists")
+                            .clone(),
+                    )
+                })
+                .collect()
+        };
+        quads.sort_by_key(|(command_index, _)| *command_index);
+        assert_eq!(quads.len(), 2, "two overlapping backing quads expected");
+
+        let (below_index, below) = &quads[0];
+        let (above_index, above) = &quads[1];
+        assert!(below_index < above_index);
+
+        // Both ordering mechanisms must put the higher command index in
+        // front: sorted bias rises, OIT offset rises (reverse-Z, positive =
+        // closer), and both backings stay behind default-layer text at 0.0.
+        assert!(below.base.depth_bias < above.base.depth_bias);
+        assert!(
+            below.extension.uniforms.oit_depth_offset < above.extension.uniforms.oit_depth_offset
+        );
+        assert!(above.extension.uniforms.oit_depth_offset < 0.0);
+
+        // The two quads are geometry- and color-identical, so the materials
+        // must differ only in the two ordering fields: a command index must
+        // not move shadow- or shading-relevant state.
+        assert_eq!(below.base.alpha_mode, above.base.alpha_mode);
+        assert_eq!(below.base.base_color, above.base.base_color);
+        assert_eq!(below.base.unlit, above.base.unlit);
+        assert_eq!(below.base.double_sided, above.base.double_sided);
+        assert_eq!(below.base.cull_mode, above.base.cull_mode);
+        let below_uniforms = &below.extension.uniforms;
+        let above_uniforms = &above.extension.uniforms;
+        assert_eq!(below_uniforms.half_size, above_uniforms.half_size);
+        assert_eq!(below_uniforms.corner_radii, above_uniforms.corner_radii);
+        assert_eq!(below_uniforms.border_widths, above_uniforms.border_widths);
+        assert_eq!(
+            below_uniforms.fill_alpha.to_bits(),
+            above_uniforms.fill_alpha.to_bits()
+        );
+        assert_eq!(below_uniforms.clip_rect, above_uniforms.clip_rect);
     }
 }

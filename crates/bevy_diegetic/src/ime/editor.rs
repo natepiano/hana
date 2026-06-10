@@ -37,8 +37,11 @@ use crate::El;
 use crate::LayoutBuilder;
 use crate::LayoutTree;
 use crate::Padding;
+use crate::PanelAnchorGeometryParam;
+use crate::PanelAnchorPoints;
 use crate::PanelFieldId;
 use crate::PanelFieldRecord;
+use crate::PanelScreenBounds;
 use crate::Px;
 use crate::Sizing;
 use crate::TextMeasure;
@@ -323,6 +326,7 @@ pub(super) fn update_editor_anchor(
     mut panel_queries: ParamSet<(
         Query<&mut DiegeticPanel>,
         Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
+        PanelAnchorGeometryParam,
     )>,
     cameras: Query<(&Camera, &GlobalTransform)>,
     windows: Query<&Window>,
@@ -335,10 +339,7 @@ pub(super) fn update_editor_anchor(
         return;
     };
 
-    let screen_rect = {
-        let source_panels = panel_queries.p1();
-        target_screen_rect(editor, &source_panels, &cameras, window)
-    };
+    let screen_rect = target_screen_rect(editor, &mut panel_queries, &cameras, window);
     let Some(screen_rect) = screen_rect else {
         commands.trigger(ImeRequestCancel {
             session_id: editor.session_id,
@@ -361,7 +362,7 @@ pub(super) fn update_editor_anchor(
         };
         font_scale = panel.font_scale(panel_font_unit);
         let _ = panel.set_size((Px(editor_size.x), Px(editor_size.y)));
-        panel.set_screen_position(editor_pos);
+        let _ = panel.set_screen_position(editor_pos);
     }
     let caret_pos = caret_position(
         editor_pos,
@@ -480,24 +481,37 @@ fn spawn_editor_panel(
 
 fn target_screen_rect(
     editor: &ImeEditor,
-    panels: &Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
+    panel_queries: &mut ParamSet<(
+        Query<&mut DiegeticPanel>,
+        Query<(&DiegeticPanel, &ComputedDiegeticPanel, &GlobalTransform)>,
+        PanelAnchorGeometryParam,
+    )>,
     cameras: &Query<(&Camera, &GlobalTransform)>,
     window: &Window,
 ) -> Option<Rect> {
-    match editor.target {
-        ImeTarget::WorldPanelField {
-            panel,
-            ref field_id,
-        }
-        | ImeTarget::ScreenPanelField {
-            panel,
-            ref field_id,
-        } => {
-            let (panel, computed, panel_transform) = panels.get(panel).ok()?;
+    match &editor.target {
+        ImeTarget::WorldPanelField { panel, field_id } => {
+            let panels = panel_queries.p1();
+            let (panel, computed, panel_transform) = panels.get(*panel).ok()?;
             let record = field_record(computed, field_id)?;
             let source = editor.source.as_ref()?;
             let (camera, camera_transform) = cameras.get(source.camera).ok()?;
             project_field_record(record, panel, panel_transform, camera, camera_transform)
+        },
+        ImeTarget::ScreenPanelField { panel, field_id } => {
+            let (points_to_world, record) = {
+                let panels = panel_queries.p1();
+                let (panel_data, computed, _) = panels.get(*panel).ok()?;
+                (
+                    panel_data.points_to_world(),
+                    field_record(computed, field_id)?.clone(),
+                )
+            };
+            let geometry = panel_queries.p2().get(*panel).ok()?;
+            let PanelAnchorPoints::Screen { bounds, .. } = *geometry.points() else {
+                return None;
+            };
+            screen_field_record_rect(&record, points_to_world, bounds)
         },
         ImeTarget::AppOwned { .. } => Some(app_anchor_rect(editor.app_anchor, window)),
     }
@@ -545,6 +559,24 @@ fn project_field_record(
         points.push(viewport);
     }
     rect_from_points(&points)
+}
+
+fn screen_field_record_rect(
+    record: &PanelFieldRecord,
+    points_to_world: f32,
+    bounds: PanelScreenBounds,
+) -> Option<Rect> {
+    let min = bounds.top_left()
+        + Vec2::new(
+            record.bounds.x * points_to_world,
+            record.bounds.y * points_to_world,
+        );
+    let max = min
+        + Vec2::new(
+            record.bounds.width * points_to_world,
+            record.bounds.height * points_to_world,
+        );
+    rect_from_points(&[min, Vec2::new(max.x, min.y), max, Vec2::new(min.x, max.y)])
 }
 
 fn panel_local_corners(bounds: BoundingBox, panel: &DiegeticPanel) -> [Vec3; 4] {
@@ -772,6 +804,10 @@ fn add_caret(builder: &mut LayoutBuilder) {
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use bevy::math::Rect;
     use bevy::math::Vec2;
@@ -781,14 +817,22 @@ mod tests {
     use super::caret_prefix_text;
     use super::clamp_editor_position;
     use super::editor_size;
+    use super::screen_field_record_rect;
+    use crate::BoundingBox;
     use crate::DiegeticTextMeasurer;
     use crate::ImeBufferBoundary;
     use crate::ImeBufferRange;
     use crate::ImeBufferSnapshot;
+    use crate::ImeBuiltInFieldKind;
+    use crate::ImeBuiltInFieldSpec;
     use crate::ImeCursorState;
+    use crate::ImeEditableFieldSpec;
     use crate::ImePreedit;
     use crate::ImePreeditBoundary;
     use crate::ImeSelectionSnapshot;
+    use crate::PanelFieldId;
+    use crate::PanelFieldRecord;
+    use crate::PanelScreenBounds;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
 
     fn assert_float_eq(actual: f32, expected: f32) {
@@ -867,5 +911,32 @@ mod tests {
         let size = editor_size(Rect::from_corners(Vec2::ZERO, Vec2::new(900.0, 20.0)));
 
         assert_float_eq(size.x, super::MAX_EDITOR_WIDTH);
+    }
+
+    #[test]
+    fn screen_panel_field_rect_uses_resolved_screen_bounds() {
+        let record = PanelFieldRecord {
+            field_id:      PanelFieldId::named("title"),
+            bounds:        BoundingBox {
+                x:      20.0,
+                y:      10.0,
+                width:  60.0,
+                height: 15.0,
+            },
+            field_spec:    ImeEditableFieldSpec::BuiltIn(ImeBuiltInFieldSpec::new(
+                ImeBuiltInFieldKind::Text,
+            )),
+            display_text:  String::new(),
+            element_index: 0,
+            duplicate_id:  false,
+        };
+        let bounds = PanelScreenBounds::new(Vec2::new(100.0, 50.0), Vec2::new(200.0, 100.0))
+            .expect("screen bounds are valid");
+
+        let rect = screen_field_record_rect(&record, 2.0, bounds)
+            .expect("field bounds produce a visible rect");
+
+        assert_eq!(rect.min, Vec2::new(140.0, 70.0));
+        assert_eq!(rect.max, Vec2::new(260.0, 100.0));
     }
 }

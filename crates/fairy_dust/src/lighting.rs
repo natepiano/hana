@@ -9,6 +9,7 @@ use bevy::prelude::*;
 
 use crate::constants::CASCADE_CAMERA_HEADROOM;
 use crate::constants::CASCADE_COUNT;
+use crate::constants::CASCADE_FIRST_BOUND_HEADROOM;
 use crate::constants::CASCADE_FIRST_BOUND_RATIO;
 use crate::constants::CASCADE_FIRST_FAR_BOUND;
 use crate::constants::CASCADE_FIT_RADIUS_MULTIPLE;
@@ -173,7 +174,8 @@ fn fit_cascade_to_scene(
         },
         _ => 0.0,
     };
-    let maximum_distance = geometry_distance.max(camera_distance);
+    let maximum_distance =
+        adjusted_cascade_maximum_distance(geometry_distance.max(camera_distance));
 
     // Re-running every frame keeps the cascade re-adjusting across projection
     // toggles; rewrite the config only when the fit actually moves so a steady
@@ -190,10 +192,24 @@ fn fit_cascade_to_scene(
         num_cascades: CASCADE_COUNT,
         minimum_distance: CASCADE_MIN_DISTANCE,
         maximum_distance,
-        first_cascade_far_bound: maximum_distance * CASCADE_FIRST_BOUND_RATIO,
+        first_cascade_far_bound: first_cascade_far_bound(maximum_distance),
         ..default()
     }
     .build();
+}
+
+const fn adjusted_cascade_maximum_distance(maximum_distance: f32) -> f32 {
+    let minimum_distance =
+        (CASCADE_MIN_DISTANCE + CASCADE_FIRST_BOUND_HEADROOM) / CASCADE_FIRST_BOUND_RATIO;
+    if maximum_distance < minimum_distance {
+        minimum_distance
+    } else {
+        maximum_distance
+    }
+}
+
+const fn first_cascade_far_bound(maximum_distance: f32) -> f32 {
+    maximum_distance * CASCADE_FIRST_BOUND_RATIO
 }
 
 /// World-space bounding-sphere radius of the meshes whose [`RenderLayers`]
@@ -225,4 +241,25 @@ fn scene_bounding_radius(
         return None;
     }
     Some(((max - min) * 0.5).length())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tiny_scene_fit_keeps_first_cascade_bound_above_minimum() {
+        let maximum_distance = adjusted_cascade_maximum_distance(CASCADE_MIN_DISTANCE);
+
+        assert!(maximum_distance > CASCADE_MIN_DISTANCE);
+        assert!(first_cascade_far_bound(maximum_distance) > CASCADE_MIN_DISTANCE);
+    }
+
+    #[test]
+    fn large_scene_fit_keeps_measured_distance() {
+        let maximum_distance = adjusted_cascade_maximum_distance(CASCADE_MAX_DISTANCE);
+        let difference = (maximum_distance - CASCADE_MAX_DISTANCE).abs();
+
+        assert!(difference <= f32::EPSILON);
+    }
 }

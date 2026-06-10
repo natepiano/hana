@@ -6,6 +6,7 @@ use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
 
 use super::constants::CASCADE_DEPTH_CAP;
+use super::constants::DEFAULT_TEXT_DRAW_LAYER;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
@@ -72,6 +73,18 @@ cascade_attr!(
     /// `OneSided`.
     TextSidedness(GlyphSidedness),
     default = GlyphSidedness::DoubleSided,
+    eq
+);
+cascade_attr!(
+    /// Draw-layer cascade attribute.
+    ///
+    /// A text run's ordinal on its panel's draw-order axis, shared with
+    /// backing render-command indices. The global default sits above every
+    /// realistic backing command count, so default-layer text composites over
+    /// all backings; a lower value tucks a run behind the backings whose
+    /// command indices exceed it.
+    TextDrawLayer(i8),
+    default = DEFAULT_TEXT_DRAW_LAYER,
     eq
 );
 

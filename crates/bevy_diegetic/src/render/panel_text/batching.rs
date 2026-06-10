@@ -31,8 +31,10 @@ use bevy_kana::ToUsize;
 use super::PanelTextLayout;
 use super::PreparedPanelText;
 use crate::cascade::CascadeDefault;
+use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -53,6 +55,7 @@ use crate::render::RunRecord;
 use crate::render::TextAntiAlias;
 use crate::render::TextMaterial;
 use crate::render::constants;
+use crate::render::constants::DrawOrdinal;
 use crate::render::world_text::TextContent;
 use crate::text;
 use crate::text::GlyphCache;
@@ -715,15 +718,18 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, GlyphLighting::Unlit);
     constants::apply_glyph_sidedness(&mut base, key.sidedness);
-    // One sort bias for the whole batch: text after every backing layer in
-    // sorted (non-OIT) views. Per-run order inside the batch comes from the
-    // per-record depth nudge, which a per-material bias cannot express.
-    base.depth_bias = constants::BATCH_TEXT_DEPTH_BIAS;
+    // One bias/offset pair for the whole batch, derived from the default
+    // text draw layer: text after every backing layer on sorted (non-OIT)
+    // views, `0.0` OIT offset so opaque world geometry keeps depth authority.
+    // Per-run order inside the batch comes from the per-record depth nudge,
+    // which a per-material bias cannot express.
+    let text_ordinal = DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER));
+    base.depth_bias = text_ordinal.depth_bias();
     render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
-        oit_depth_offset: 0.0,
+        oit_depth_offset: text_ordinal.oit_depth_offset(),
         supersample: anti_alias.supersamples(),
         aa_band: anti_alias.anisotropic(),
         curves: atlas.curves.clone(),
@@ -815,6 +821,7 @@ mod tests {
             .add_plugins(CascadePlugin::<TextAlpha>::default())
             .add_plugins(CascadePlugin::<TextLighting>::default())
             .add_plugins(CascadePlugin::<TextSidedness>::default())
+            .add_plugins(CascadePlugin::<TextDrawLayer>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()

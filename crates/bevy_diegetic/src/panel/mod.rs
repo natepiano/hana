@@ -1,18 +1,43 @@
 //! Panel integration: components, layout computation, and gizmo rendering
 //! — the Bevy-facing half of diegetic UI.
 
+mod anchor_geometry;
+mod anchoring;
+mod attachment_resolver;
 mod builder;
 mod compute_layout;
 mod constants;
 mod coordinate_space;
 mod diegetic_panel;
+mod events;
 mod field;
 mod gizmos;
 mod perf;
 mod sizing;
+mod world_anchoring;
 
+pub use anchor_geometry::PanelAnchorEdge;
+pub use anchor_geometry::PanelAnchorEdgeEndpoints;
+pub use anchor_geometry::PanelAnchorGeometryError;
+pub use anchor_geometry::PanelAnchorGeometryParam;
+pub use anchor_geometry::PanelAnchorPoint;
+pub use anchor_geometry::PanelAnchorPoints;
+pub use anchor_geometry::PanelPlane;
+pub use anchor_geometry::PanelScreenBounds;
+pub use anchor_geometry::ResolvedPanelAnchorGeometry;
+pub(crate) use anchor_geometry::screen_anchor_position;
+pub use anchoring::AnchoredToPanel;
+pub use anchoring::PanelAnchorOffset;
+pub use anchoring::PanelsAnchoredHere;
+pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use attachment_resolver::AttachmentResolveAction;
+pub(crate) use attachment_resolver::AttachmentResolveCandidate;
+pub(crate) use attachment_resolver::AttachmentResolveDiagnostics;
+pub(crate) use attachment_resolver::AttachmentResolveReasons;
+pub(crate) use attachment_resolver::resolve_panel_attachments;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
 pub use coordinate_space::CoordinateSpace;
@@ -22,6 +47,10 @@ pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
+pub(crate) use events::LastPanelDimensions;
+pub use events::PanelDimensions;
+pub use events::PanelDimensionsChanged;
+pub(crate) use events::trigger_panel_dimensions_changed;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
@@ -44,6 +73,7 @@ pub use sizing::PanelSizing;
 pub use sizing::Percent;
 pub use sizing::Pixels;
 pub use sizing::Points;
+use world_anchoring::WorldAnchorResolveDiagnostics;
 
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
@@ -64,6 +94,10 @@ pub enum PanelSystems {
     /// Runs `resolve_world_panel_fit`
     /// — shrinks world panels with `Fit` axes to their content bounds.
     ResolveWorldFit,
+    /// Resolves panel-to-panel attachments before screen-space positioning.
+    ResolvePanelAttachments,
+    /// Positions screen-space panels after `Fit` dimensions have resolved.
+    PositionScreenSpace,
     /// Runs gizmo reconciliation
     /// (`render_debug_gizmos`).
     RenderGizmos,
@@ -89,6 +123,10 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<CascadeDefaults>()
+            .init_resource::<WorldAnchorResolveDiagnostics>()
+            .register_type::<AnchoredToPanel>()
+            .register_type::<PanelAnchorOffset>()
+            .register_type::<PanelsAnchoredHere>()
             .configure_sets(
                 Update,
                 (
@@ -103,6 +141,15 @@ impl Plugin for HeadlessLayoutPlugin {
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),
+            )
+            .add_systems(
+                PostUpdate,
+                (
+                    world_anchoring::restore_inactive_world_panel_poses,
+                    world_anchoring::resolve_world_space_panel_attachments,
+                )
+                    .chain()
+                    .before(TransformSystems::Propagate),
             );
     }
 }
