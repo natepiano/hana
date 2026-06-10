@@ -41,6 +41,7 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::render;
 use crate::render::BatchGpu;
 use crate::render::BatchKey;
 use crate::render::BatchRenderLayers;
@@ -228,16 +229,17 @@ pub(super) fn update_panel_text_batches(
         let record = RunRecord {
             // Pre-propagation snapshot; write_batch_run_transforms corrects it
             // after TransformSystems::Propagate the same frame.
-            transform:   label_transform.to_matrix(),
-            fill_color:  Vec4::new(
+            transform:        label_transform.to_matrix(),
+            fill_color:       Vec4::new(
                 fill_color.red,
                 fill_color.green,
                 fill_color.blue,
                 fill_color.alpha,
             ),
-            render_mode: u32::from(RenderMode::from(prepared.render_mode)),
-            depth_nudge: panel_text_child.command_index.saturating_add(1).to_f32()
+            render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
+            depth_nudge:      panel_text_child.command_index.saturating_add(1).to_f32()
                 * constants::LAYER_DEPTH_BIAS,
+            oit_depth_offset: 0.0,
         };
         backend
             .batch_store_mut()
@@ -472,10 +474,11 @@ fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord
     padded.resize(
         run_capacity.to_usize().max(records.len()),
         RunRecord {
-            transform:   Mat4::ZERO,
-            fill_color:  Vec4::ZERO,
-            render_mode: 0,
-            depth_nudge: 0.0,
+            transform:        Mat4::ZERO,
+            fill_color:       Vec4::ZERO,
+            render_mode:      0,
+            depth_nudge:      0.0,
+            oit_depth_offset: 0.0,
         },
     );
     padded
@@ -669,7 +672,7 @@ fn grow_batch_assets(
         return;
     };
     if let Some(mut material) = materials.get_mut(&gpu.material) {
-        crate::render::set_batch_text_material_buffers(
+        render::set_batch_text_material_buffers(
             &mut material,
             instances.clone(),
             run_table.clone(),
@@ -716,7 +719,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     // sorted (non-OIT) views. Per-run order inside the batch comes from the
     // per-record depth nudge, which a per-material bias cannot express.
     base.depth_bias = constants::BATCH_TEXT_DEPTH_BIAS;
-    crate::render::batch_text_material(BatchTextMaterialInput {
+    render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
@@ -1228,10 +1231,11 @@ mod tests {
             run_index:   0,
         };
         let record = RunRecord {
-            transform:   Mat4::IDENTITY,
-            fill_color:  Vec4::ONE,
-            render_mode: 1,
-            depth_nudge: 0.0,
+            transform:        Mat4::IDENTITY,
+            fill_color:       Vec4::ONE,
+            render_mode:      1,
+            depth_nudge:      0.0,
+            oit_depth_offset: 0.0,
         };
 
         for count in 0..=8_usize {

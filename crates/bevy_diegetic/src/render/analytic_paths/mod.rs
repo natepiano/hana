@@ -5,12 +5,14 @@
 //! and batch store so future panel-authored vector marks can use the same
 //! analytic coverage path.
 
+mod atlas;
 mod batching;
 mod constants;
 mod geometry;
 mod material;
 mod packing;
 
+pub(crate) use atlas::PathAtlas;
 pub(crate) use batching::BatchGpu;
 pub(crate) use batching::BatchKey;
 pub(crate) use batching::GlyphBatchStore;

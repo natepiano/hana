@@ -69,7 +69,7 @@ struct TextUniform {
 /// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
 #[bind_group_data(TextExtensionKey)]
-pub(crate) struct TextExtension {
+pub struct TextExtension {
     /// Shader uniforms.
     #[uniform(100)]
     uniforms:          TextUniform,
@@ -100,7 +100,7 @@ pub(crate) struct TextExtension {
 /// Pipeline-specialization key for [`TextExtension`]: which vertex stage a
 /// material compiles against.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub(crate) struct TextExtensionKey {
+pub struct TextExtensionKey {
     /// Mirror of [`TextExtension::vertex_pull`].
     vertex_pull:       bool,
     /// Mirror of [`TextExtension::debug_glyph_index`].

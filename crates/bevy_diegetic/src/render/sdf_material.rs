@@ -89,10 +89,6 @@ pub(crate) enum SdfPrimitiveKind {
     Triangle,
     Circle,
     Diamond,
-    LineSegment,
-    OrientedTriangle,
-    OrientedSquare,
-    OrientedDiamond,
 }
 
 impl From<SdfPrimitiveKind> for u32 {
@@ -102,10 +98,6 @@ impl From<SdfPrimitiveKind> for u32 {
             SdfPrimitiveKind::Triangle => 1,
             SdfPrimitiveKind::Circle => 2,
             SdfPrimitiveKind::Diamond => 3,
-            SdfPrimitiveKind::LineSegment => 4,
-            SdfPrimitiveKind::OrientedTriangle => 5,
-            SdfPrimitiveKind::OrientedSquare => 6,
-            SdfPrimitiveKind::OrientedDiamond => 7,
         }
     }
 }

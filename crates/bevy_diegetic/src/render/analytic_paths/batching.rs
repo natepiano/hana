@@ -268,7 +268,7 @@ impl GlyphBatch {
 /// Routes every panel-text run to its batch: one [`GlyphBatch`] per
 /// [`BatchKey`], a run→batch index, and the base-material interner.
 #[derive(Debug, Default)]
-pub struct GlyphBatchStore {
+pub(crate) struct GlyphBatchStore {
     batches:   HashMap<BatchKey, GlyphBatch>,
     run_index: HashMap<RunStorageKey, BatchKey>,
     interner:  VisualMaterialInterner,
@@ -410,6 +410,7 @@ mod tests {
             fill_color: Vec4::ONE,
             render_mode: 1,
             depth_nudge: 0.0,
+            oit_depth_offset: 0.0,
         }
     }
 

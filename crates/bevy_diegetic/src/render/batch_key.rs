@@ -1,7 +1,7 @@
 //! Shared visual batch-key pieces.
 //!
-//! Text and panel-line batching keep separate stores, GPU payloads, materials,
-//! and shaders, but they split on a common subset of render compatibility:
+//! Text and panel-line batching keep separate stores and source-lifecycle
+//! payloads, but they split on a common subset of render compatibility:
 //! authored base material identity, alpha mode, visibility layers, lighting,
 //! sidedness, and shadow participation.
 

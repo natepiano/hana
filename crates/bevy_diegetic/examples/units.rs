@@ -39,6 +39,7 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
@@ -53,6 +54,8 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 
@@ -67,7 +70,7 @@ const CARD_HEIGHT: In = In(2.0);
 const CARD_NAME_SIZE: Pt = Pt(15.0);
 const CARD_TITLE_SIZE: Pt = Pt(13.0);
 const CARD_DETAIL_SIZE: Pt = Pt(11.0);
-const CARD_FOOTER_SIZE: Pt = Pt(9.0);
+const CARD_FOOTER_SIZE: Pt = Pt(6.5);
 
 // ── Index card ──────────────────────────────────────────────────────
 const INDEX_WIDTH: In = In(5.0);
@@ -209,6 +212,21 @@ enum CameraProjection {
     Orthographic,
 }
 
+const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
+    ("aa-off", "Off", TextAntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", TextAntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
+    ("aa-both", "Both", TextAntiAlias::Both),
+];
+
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
+
 fn build_panel_or_log(
     panel: Result<DiegeticPanel, bevy_diegetic::PanelBuildError>,
     label: &str,
@@ -313,6 +331,10 @@ fn main() {
                 .with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA))
                 .control("D Outlines")
                 .control("R Rulers")
+                .control(TitleBarControl::segmented(
+                    "A",
+                    AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+                ))
                 .control("P Perspective")
                 .control("O Orthographic")
                 .control("Click to Zoom"),
@@ -324,6 +346,18 @@ fn main() {
         .wire_chip_to_state::<Rulers, _>("R Rulers", |state| match state {
             Rulers::Visible => ControlActivation::Active,
             Rulers::Hidden => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .wire_chip_to_state::<CameraProjection, _>("P Perspective", |state| match state {
             CameraProjection::Perspective => ControlActivation::Active,
@@ -351,6 +385,7 @@ fn main() {
         // Dust's shortcut binding, which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyD, toggle_debug_outlines)
         .with_shortcut(KeyCode::KeyR, toggle_rulers)
+        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
         .with_shortcut(KeyCode::KeyP, to_perspective_projection)
         .with_shortcut(KeyCode::KeyO, to_orthographic_projection)
         .run();
@@ -802,6 +837,14 @@ fn toggle_rulers(
     for mut visibility in &mut rulers {
         *visibility = vis;
     }
+}
+
+fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
+    let current = AA_MODES
+        .iter()
+        .position(|(_, _, mode)| *mode == *anti_alias)
+        .unwrap_or(0);
+    *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
 // ── Panel rulers ────────────────────────────────────────────────────

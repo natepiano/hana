@@ -1,6 +1,7 @@
 //! Rendering systems for diegetic UI panels and text.
 
-pub(crate) mod analytic_paths;
+mod analytic_line_probe;
+mod analytic_paths;
 mod batch_key;
 #[cfg(feature = "batch_proof")]
 pub(crate) mod batch_proof;
@@ -14,6 +15,9 @@ mod text_shaping;
 mod transparency;
 mod world_text;
 
+pub use analytic_line_probe::AnalyticLine;
+pub use analytic_line_probe::AnalyticLineProbe;
+pub use analytic_line_probe::AnalyticLineProbePlugin;
 use analytic_paths::AnalyticPathPlugin;
 pub(crate) use analytic_paths::BandRecord;
 pub(crate) use analytic_paths::BatchGpu;
@@ -27,6 +31,9 @@ pub(crate) use analytic_paths::GlyphBatchStore;
 pub(crate) use analytic_paths::GlyphInstanceRecord;
 pub(crate) use analytic_paths::GlyphOutline;
 pub(crate) use analytic_paths::GlyphRecord;
+#[cfg(test)]
+pub(crate) use analytic_paths::PackedPath;
+pub(crate) use analytic_paths::PathAtlas;
 pub(crate) use analytic_paths::PathContour;
 pub(crate) use analytic_paths::PathOutline;
 pub(crate) use analytic_paths::QuadraticSegment;

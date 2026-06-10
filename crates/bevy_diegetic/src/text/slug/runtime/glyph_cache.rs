@@ -176,9 +176,18 @@ impl GlyphCache {
             )),
         };
         if had_atlas {
-            for (_, material) in materials.iter_mut() {
+            // Repoint only text-owned batch materials. Other analytic-path
+            // producers (panel lines, probes) share the TextMaterial asset
+            // type but own separate atlases.
+            for (_, batch) in self.batch_store.batches() {
+                let Some(gpu) = &batch.gpu else {
+                    continue;
+                };
+                let Some(mut material) = materials.get_mut(&gpu.material) else {
+                    continue;
+                };
                 render::set_text_material_atlas(
-                    material,
+                    &mut material,
                     handles.curves.clone(),
                     handles.bands.clone(),
                     handles.glyphs.clone(),

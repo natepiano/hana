@@ -20,7 +20,7 @@ const ERROR_SAMPLE_B: f32 = 0.75;
 const TANGENT_INTERSECTION_EPSILON: f32 = 0.000_001;
 
 /// One closed glyph contour expressed as quadratic segments.
-pub(crate) type Contour = PathContour;
+pub type Contour = PathContour;
 
 /// Quadratic-only outline representation for one glyph.
 #[derive(Clone, Debug, PartialEq)]

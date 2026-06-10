@@ -233,6 +233,12 @@ pub use panel::Points;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
+#[doc(hidden)]
+pub use render::AnalyticLine;
+#[doc(hidden)]
+pub use render::AnalyticLineProbe;
+#[doc(hidden)]
+pub use render::AnalyticLineProbePlugin;
 pub use render::DiegeticTextBatch;
 pub use render::DiegeticTextMut;
 pub use render::PanelText;

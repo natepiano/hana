@@ -47,6 +47,7 @@ use crate::render::Bounds;
 use crate::render::CurveRecord;
 use crate::render::DEFAULT_BAND_COUNT;
 use crate::render::GlyphRecord;
+use crate::render::PackedPath;
 use crate::render::QuadraticSegment;
 
 const ROOT_EPSILON: f32 = 0.000_01;
@@ -637,7 +638,7 @@ fn stride_does_not_alias_straight_edge() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0xb99c_4d31_86dd_44da;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xfca6_d34a_6056_e2b4;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,
@@ -652,4 +653,301 @@ fn fnv1a_64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
     hash
+}
+
+// ---- panel-line tick scale probe -------------------------------------------
+
+/// Builds a probe for an axis-aligned rectangle outline with the given design
+/// size, packed exactly like a panel-line tick.
+fn rectangle_probe(size: Vec2, band_count: usize) -> Probe {
+    let corners = [
+        Vec2::ZERO,
+        Vec2::new(size.x, 0.0),
+        size,
+        Vec2::new(0.0, size.y),
+    ];
+    let segments: Vec<QuadraticSegment> = corners
+        .iter()
+        .copied()
+        .zip(corners.iter().copied().cycle().skip(1))
+        .take(corners.len())
+        .map(|(start, end)| line(start, end))
+        .collect();
+    let glyph = Glyph {
+        character: '-',
+        id:        0,
+        bounds:    Bounds {
+            min: Vec2::ZERO,
+            max: size,
+        },
+        contours:  vec![Contour { segments }],
+    };
+    let packed = super::build_packed_glyph(glyph, band_count);
+    let band_count = (packed.bands().len() / 2) as u32;
+    Probe {
+        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count),
+        curves: packed.curves().to_vec(),
+        bands:  packed.bands().to_vec(),
+    }
+}
+
+/// A ruler tick packs to ~709x106 design units. With ~18 design units per
+/// screen pixel, scan coverage across the long (top) edge and report the AA
+/// ramp the shader would produce.
+#[test]
+fn tick_edge_coverage_ramps_instead_of_stepping() {
+    let size = Vec2::new(709.0, 106.0);
+    for band_count in [DEFAULT_BAND_COUNT, 1] {
+        run_tick_scan(rectangle_probe(size, band_count), size, band_count);
+    }
+}
+
+fn run_tick_scan(probe: Probe, size: Vec2, band_count: usize) {
+    let du_per_px = 18.0;
+    let dx = Vec2::new(du_per_px, 0.0);
+    let dy = Vec2::new(0.0, du_per_px);
+
+    let x = size.x * 0.5;
+    let mut distinct = std::collections::BTreeSet::new();
+    println!(
+        "bands={band_count}: scan across top edge y={} (du/px {du_per_px})",
+        size.y
+    );
+    for step in -3..=3 {
+        let y = (step as f32).mul_add(du_per_px * 0.5, size.y);
+        let point = Vec2::new(x, y);
+        let (single, super4) = probe.aa_band_coverage(point, dx, dy);
+        let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+        let edge_width_sq = (du_per_px * EDGE_FILTER_WIDTH).powi(2);
+        let sd = probe.signed_distance(point, edge_width_sq);
+        println!("  y={y:8.2} sd={sd:8.2} single={single:.3} super4={super4:.3} aniso={aniso:.3}");
+        distinct.insert((single * 1000.0) as i32);
+    }
+    assert!(
+        distinct.iter().any(|&value| value > 100 && value < 900),
+        "coverage across the edge should pass through intermediate values, got {distinct:?}"
+    );
+}
+
+/// The panel-route ruler spine packs as a 96x48000 design-unit rectangle
+/// (0.2mm x 100mm at 480000 du/m); the probe route packs the same world
+/// geometry as 64000x128 and rotates it into place. Scan coverage at the
+/// stroke center along the full length of both boxes at the on-screen scale
+/// where the panel spine renders broken (~49 du/px for the panel box, ~66 for
+/// the probe box) and report any along-length variation.
+#[test]
+fn spine_coverage_uniform_along_length_for_both_orientations() {
+    let cases = [
+        ("panel  96x48000", Vec2::new(96.0, 48000.0), 49.0, true),
+        ("probe 64000x128", Vec2::new(64000.0, 128.0), 66.0, false),
+    ];
+    for (label, size, du_per_px, tall) in cases {
+        let probe = rectangle_probe(size, 1);
+        let dx = Vec2::new(du_per_px, 0.0);
+        let dy = Vec2::new(0.0, du_per_px);
+        let long_extent = if tall { size.y } else { size.x };
+        let mut min_cov = f32::MAX;
+        let mut max_cov = f32::MIN;
+        let mut worst_at = 0.0;
+        for step in 0..=400 {
+            let along = long_extent * (step as f32 + 0.5) / 401.0;
+            let point = if tall {
+                Vec2::new(size.x * 0.5, along)
+            } else {
+                Vec2::new(along, size.y * 0.5)
+            };
+            let (single, _) = probe.aa_band_coverage(point, dx, dy);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let cov = aniso.min(single);
+            if cov < min_cov {
+                min_cov = cov;
+                worst_at = along;
+            }
+            max_cov = max_cov.max(cov);
+        }
+        println!(
+            "{label}: stroke-center coverage min {min_cov:.3} (at {worst_at:.0}du) max {max_cov:.3}"
+        );
+        assert!(
+            max_cov - min_cov < 0.05,
+            "{label}: coverage varies {min_cov:.3}..{max_cov:.3} along the length (worst at {worst_at:.0}du)"
+        );
+    }
+}
+
+/// Atlas-format check: pack several paths the way `PathAtlas::rebuild` does
+/// (global curve/band arrays, per-glyph offsets) and probe a tall spine glyph
+/// through the GLOBAL arrays. Catches offset/format defects the single-glyph
+/// probes cannot.
+#[test]
+fn atlas_packed_tall_spine_covers_full_length() {
+    // Mimic the analytic_line_probe example's atlas: tick paths around the
+    // spines so the spine records land at non-zero offsets.
+    let mut sizes: Vec<Vec2> = Vec::new();
+    for _ in 0..40 {
+        sizes.push(Vec2::new(1920.0, 96.0));
+    }
+    for spine_h in [12000.0, 24000.0, 36000.0, 48000.0] {
+        sizes.push(Vec2::new(96.0, spine_h));
+        for _ in 0..10 {
+            sizes.push(Vec2::new(1920.0, 96.0));
+        }
+    }
+
+    let mut curves = Vec::new();
+    let mut bands = Vec::new();
+    let mut records = Vec::new();
+    for size in &sizes {
+        let corners = [
+            Vec2::ZERO,
+            Vec2::new(size.x, 0.0),
+            *size,
+            Vec2::new(0.0, size.y),
+        ];
+        let segments: Vec<QuadraticSegment> = corners
+            .iter()
+            .copied()
+            .zip(corners.iter().copied().cycle().skip(1))
+            .take(corners.len())
+            .map(|(start, end)| line(start, end))
+            .collect();
+        let glyph = Glyph {
+            character: '-',
+            id:        0,
+            bounds:    Bounds {
+                min: Vec2::ZERO,
+                max: *size,
+            },
+            contours:  vec![Contour { segments }],
+        };
+        let packed: PackedPath = super::build_packed_glyph(glyph, 1);
+        let curve_start = curves.len() as u32;
+        let band_start = bands.len() as u32;
+        let axis_band_count = (packed.bands().len() / 2) as u32;
+        curves.extend_from_slice(packed.curves());
+        bands.extend(packed.bands().iter().map(|band| BandRecord {
+            start: band.start + curve_start,
+            ..*band
+        }));
+        records.push(GlyphRecord::new(
+            packed.bounds(),
+            band_start,
+            axis_band_count,
+            band_start + axis_band_count,
+            axis_band_count,
+        ));
+    }
+
+    for (index, size) in sizes.iter().enumerate() {
+        if size.y < 10000.0 {
+            continue;
+        }
+        let probe = Probe {
+            record: records[index],
+            curves: curves.clone(),
+            bands:  bands.clone(),
+        };
+        let du_per_px = 49.0;
+        let dx = Vec2::new(du_per_px, 0.0);
+        let dy = Vec2::new(0.0, du_per_px);
+        let mut min_cov = f32::MAX;
+        let mut worst = 0.0;
+        let margin = du_per_px * 2.0;
+        for step in 0..=400 {
+            let along = margin + (size.y - 2.0 * margin) * (step as f32) / 400.0;
+            let point = Vec2::new(size.x * 0.5, along);
+            let (single, _) = probe.aa_band_coverage(point, dx, dy);
+            if single < min_cov {
+                min_cov = single;
+                worst = along;
+            }
+        }
+        println!(
+            "spine {}du at record {index}: min coverage {min_cov:.3} (at {worst:.0}du)",
+            size.y
+        );
+        assert!(
+            min_cov > 0.95,
+            "spine {}du record {index}: coverage drops to {min_cov:.3} at {worst:.0}du",
+            size.y,
+        );
+    }
+}
+
+/// Reproduction with the LIVE app's inexact design size (logged from the
+/// uploaded atlas: 96 x 48000.082). Clean power-friendly sizes pass; the live
+/// conversion produces sizes whose midpoint-control rounding can leave the
+/// quadratic winding solver with a tiny non-zero `a` and catastrophic
+/// cancellation in the root.
+#[test]
+fn live_inexact_spine_size_covers_full_length() {
+    let size = Vec2::new(96.0, 48000.082);
+    let probe = rectangle_probe(size, 1);
+    let du_per_px = 49.0;
+    let dx = Vec2::new(du_per_px, 0.0);
+    let dy = Vec2::new(0.0, du_per_px);
+    let margin = du_per_px * 2.0;
+    let mut failures = Vec::new();
+    for step in 0..=400 {
+        let along = margin + (size.y - 2.0 * margin) * (step as f32) / 400.0;
+        let point = Vec2::new(size.x * 0.5, along);
+        let (single, _) = probe.aa_band_coverage(point, dx, dy);
+        if single < 0.95 {
+            failures.push((along, single));
+        }
+    }
+    if !failures.is_empty() {
+        println!(
+            "first failure at {:.1}du, last at {:.1}du, {} of 401 samples",
+            failures[0].0,
+            failures[failures.len() - 1].0,
+            failures.len()
+        );
+    }
+    assert!(
+        failures.is_empty(),
+        "coverage lost at {} samples, first at {:.1}du",
+        failures.len(),
+        failures[0].0,
+    );
+}
+
+/// units.rs A4 ruler reproduction: spine 96x142560 du (0.2mm x 297mm at
+/// 480000 du/m) scanned at ~51 du/px, and a 1mm tick 960x96 du (at 960000
+/// du/m) scanned at ~103 du/px. The live render drops the mm ticks entirely
+/// and renders the spine in patches at this scale.
+#[test]
+fn units_ruler_sizes_cover_at_screen_scale() {
+    let cases = [
+        ("spine 96x142560", Vec2::new(96.0, 142_560.0), 51.0, true),
+        ("tick  960x96", Vec2::new(960.0, 96.0), 103.0, false),
+    ];
+    for (label, size, du_per_px, tall) in cases {
+        let probe = rectangle_probe(size, 1);
+        let dx = Vec2::new(du_per_px, 0.0);
+        let dy = Vec2::new(0.0, du_per_px);
+        let long_extent = if tall { size.y } else { size.x };
+        let mut min_cov = f32::MAX;
+        let mut max_cov = f32::MIN;
+        let mut worst_at = 0.0;
+        for step in 0..=800 {
+            let along = long_extent * (step as f32 + 0.5) / 801.0;
+            let point = if tall {
+                Vec2::new(size.x * 0.5, along)
+            } else {
+                Vec2::new(along, size.y * 0.5)
+            };
+            let (single, _) = probe.aa_band_coverage(point, dx, dy);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let cov = aniso.min(single);
+            if cov < min_cov {
+                min_cov = cov;
+                worst_at = along;
+            }
+            max_cov = max_cov.max(cov);
+        }
+        println!(
+            "{label}: stroke-center coverage min {min_cov:.3} (at {worst_at:.0}du) max {max_cov:.3}"
+        );
+    }
 }

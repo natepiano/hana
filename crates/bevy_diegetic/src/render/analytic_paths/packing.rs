@@ -16,10 +16,20 @@ pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
+/// Bow-to-chord ratio below which a segment packs as exactly linear.
+///
+/// Coordinate scaling rounds start/control/end independently, so a
+/// midpoint-control line segment can carry a few-ulp second difference.
+/// The shader's winding root `(-b ± sqrt(b² - 4ac)) / 2a` then cancels
+/// catastrophically (for a long edge, `b²`'s ulp exceeds `4ac`), losing the
+/// crossing entirely. A bow this small is far below one design unit of
+/// deviation, so snapping it to zero routes such segments through the exact
+/// linear solve with no visible change.
+const CURVE_LINEAR_SNAP_RATIO: f32 = 0.000_1;
 
 /// GPU curve record for a quadratic Bezier segment.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct CurveRecord {
+pub(crate) struct CurveRecord {
     /// Segment start point in `.xy`, control-minus-start in `.zw`.
     pub start_delta: Vec4,
     /// Quadratic second-difference in `.xy`, segment end point in `.zw`.
@@ -35,7 +45,13 @@ pub struct CurveRecord {
 impl From<&QuadraticSegment> for CurveRecord {
     fn from(segment: &QuadraticSegment) -> Self {
         let control_delta = segment.control - segment.start;
-        let curve_delta = segment.end - 2.0 * segment.control + segment.start;
+        let mut curve_delta = segment.end - 2.0 * segment.control + segment.start;
+        let chord_sq = (segment.end - segment.start).length_squared();
+        if curve_delta.length_squared()
+            < chord_sq * (CURVE_LINEAR_SNAP_RATIO * CURVE_LINEAR_SNAP_RATIO)
+        {
+            curve_delta = Vec2::ZERO;
+        }
         let curve_norm_sq = curve_delta.length_squared();
         let inverse_curve_norm_sq = if curve_norm_sq >= CURVE_DEGENERATE_EPS {
             curve_norm_sq.recip()
@@ -68,7 +84,7 @@ impl From<&QuadraticSegment> for CurveRecord {
 
 /// GPU band record pointing at a contiguous curve range.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct BandRecord {
+pub(crate) struct BandRecord {
     /// First curve record for this band.
     pub start: u32,
     /// Number of curve records for this band.
@@ -81,7 +97,7 @@ pub struct BandRecord {
 
 /// GPU glyph record for one unique glyph in a packed text run.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub struct GlyphRecord {
+pub(crate) struct GlyphRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
     /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
@@ -135,14 +151,16 @@ pub(crate) struct GlyphInstanceRecord {
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct RunRecord {
     /// Label world matrix (run layout space → world).
-    pub transform:   Mat4,
+    pub transform:        Mat4,
     /// Linear fill color.
-    pub fill_color:  Vec4,
+    pub fill_color:       Vec4,
     /// Visible render mode (`RenderMode` as `u32`).
-    pub render_mode: u32,
-    /// Depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`); the
-    /// shader zeroes it under OIT.
-    pub depth_nudge: f32,
+    pub render_mode:      u32,
+    /// Clip-space depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`)
+    /// for non-OIT views.
+    pub depth_nudge:      f32,
+    /// Per-run OIT position-z offset for coplanar ordering.
+    pub oit_depth_offset: f32,
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
@@ -174,7 +192,7 @@ pub(crate) type PathRunRecord = RunRecord;
 
 /// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
-pub struct PackedPath {
+pub(crate) struct PackedPath {
     bounds: Bounds,
     curves: Vec<CurveRecord>,
     bands:  Vec<BandRecord>,
@@ -182,7 +200,7 @@ pub struct PackedPath {
 
 /// Compatibility alias for text glyph caches while text is bridged onto the
 /// shared path renderer.
-pub type GlyphOutline = PackedPath;
+pub(crate) type GlyphOutline = PackedPath;
 
 impl PackedPath {
     /// Path bounds in local design-space units.
@@ -386,10 +404,15 @@ mod tests {
 
     fn run_record(seed: f32) -> RunRecord {
         RunRecord {
-            transform:   Mat4::from_translation(bevy::math::Vec3::new(seed, -seed, seed * 2.0)),
-            fill_color:  Vec4::new(0.25, 0.5, 0.75, 1.0),
-            render_mode: 1,
-            depth_nudge: seed,
+            transform:        Mat4::from_translation(bevy::math::Vec3::new(
+                seed,
+                -seed,
+                seed * 2.0,
+            )),
+            fill_color:       Vec4::new(0.25, 0.5, 0.75, 1.0),
+            render_mode:      1,
+            depth_nudge:      seed,
+            oit_depth_offset: -seed,
         }
     }
 

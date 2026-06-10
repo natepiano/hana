@@ -4,7 +4,7 @@ use bevy::math::Vec2;
 
 /// A single quadratic Bezier segment in path design-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct QuadraticSegment {
+pub(crate) struct QuadraticSegment {
     /// Segment start point.
     pub start:   Vec2,
     /// Quadratic control point.
@@ -15,7 +15,7 @@ pub struct QuadraticSegment {
 
 /// Axis-aligned path bounds in design-space units.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Bounds {
+pub(crate) struct Bounds {
     /// Minimum corner.
     pub min: Vec2,
     /// Maximum corner.

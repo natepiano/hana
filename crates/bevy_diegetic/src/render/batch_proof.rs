@@ -27,16 +27,16 @@ use bevy::render::view::window::screenshot::save_to_disk;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
+use super::BatchTextMaterialInput;
+use super::GlyphAtlasHandles;
+use super::GlyphInstanceRecord;
+use super::RenderMode;
+use super::RunRecord;
+use super::TextMaterial;
 use super::constants;
 use super::panel_text;
 use super::panel_text::PreparedPanelText;
 use super::world_text::TextContent;
-use crate::render::BatchTextMaterialInput;
-use crate::render::GlyphAtlasHandles;
-use crate::render::GlyphInstanceRecord;
-use crate::render::RenderMode;
-use crate::render::RunRecord;
-use crate::render::TextMaterial;
 use crate::text::GlyphCache;
 
 /// Directory the growth-frame screenshots are written to (`target/` is wiped
@@ -295,7 +295,7 @@ pub fn toggle_debug_index(world: &mut World) {
     let Some(mut material) = materials.get_mut(&material_handle) else {
         return;
     };
-    let debug_enabled = crate::render::toggle_text_material_debug_glyph_index(&mut material);
+    let debug_enabled = super::toggle_text_material_debug_glyph_index(&mut material);
     info!(
         "glyph batch proof: glyph-index staircase {}",
         if debug_enabled { "on" } else { "off" }
@@ -360,6 +360,7 @@ fn proof_run_record(source_transform: Mat4, index: usize, fill_color: Vec4) -> R
         fill_color,
         render_mode: u32::from(RenderMode::Text),
         depth_nudge: index.to_f32(),
+        oit_depth_offset: 0.0,
     }
 }
 
@@ -385,7 +386,7 @@ fn batch_material(
 ) -> TextMaterial {
     let mut base = constants::default_panel_material();
     base.alpha_mode = AlphaMode::Blend;
-    crate::render::batch_text_material(BatchTextMaterialInput {
+    super::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color,
         render_mode: RenderMode::Text,

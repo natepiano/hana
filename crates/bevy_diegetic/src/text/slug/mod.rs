@@ -2,8 +2,8 @@
 //!
 //! Renders glyphs from their quadratic Bézier contours with per-pixel
 //! analytic coverage. This module owns text-specific shaping, glyph lookup,
-//! and outline extraction; [`render::analytic_paths`](crate::render::analytic_paths)
-//! owns the shared renderer, material, shader, packing, and batch store.
+//! and outline extraction; `render` owns the shared renderer, material, shader,
+//! packing, and batch store.
 
 mod glyph;
 mod render;

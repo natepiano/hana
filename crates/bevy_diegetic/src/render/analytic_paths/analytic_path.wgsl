@@ -83,17 +83,23 @@ struct RunRecord {
     fill_color: vec4<f32>,
     render_mode: u32,
     depth_nudge: f32,
+    oit_depth_offset: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
 
+// The index arrives in an interpolated varying that is constant across the
+// quad, but perspective-corrected interpolation can land a hair below the
+// integer (478.9999 for 479.0) on long sliver quads, so recovery must round —
+// a floor() here reads the previous record and the quad renders another
+// path's coverage.
 fn run_index(glyph_uv: vec2<f32>) -> u32 {
-    return u32(floor(glyph_uv.y));
+    return u32(glyph_uv.y + 0.5);
 }
 #endif
 
 fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
-    return u32(floor(glyph_uv.x));
+    return u32(glyph_uv.x + 0.5);
 }
 
 // Per-run fill color: the run table under vertex pulling, the material
@@ -112,6 +118,16 @@ fn run_render_mode(glyph_uv: vec2<f32>) -> u32 {
     return run_records[run_index(glyph_uv)].render_mode;
 #else
     return uniforms.render_mode;
+#endif
+}
+
+// Per-run OIT z offset: the run table under vertex pulling, the material
+// uniform on the per-run path.
+fn run_oit_depth_offset(glyph_uv: vec2<f32>) -> f32 {
+#ifdef GLYPH_VERTEX_PULL
+    return run_records[run_index(glyph_uv)].oit_depth_offset;
+#else
+    return uniforms.oit_depth_offset;
 #endif
 }
 
@@ -578,7 +594,7 @@ fn fragment(
         // Offset position.z so coplanar layers get distinct depths in the OIT
         // linked list; pipeline depth_bias does not affect in.position.z.
         var oit_pos = in.position;
-        oit_pos.z += uniforms.oit_depth_offset;
+        oit_pos.z += run_oit_depth_offset(in.uv_b);
         oit_draw(oit_pos, out.color);
         discard;
     }

@@ -5,11 +5,11 @@ use bevy::math::Vec2;
 use bevy_kana::ToU32;
 
 use crate::render::BandRecord;
+use crate::render::Bounds;
 use crate::render::CurveRecord;
 use crate::render::GlyphOutline;
 use crate::render::GlyphRecord;
 use crate::text::slug::glyph;
-use crate::text::slug::glyph::Bounds;
 use crate::text::slug::glyph::OutlineError;
 
 /// Stable identity for the resolved font face used by shaping.

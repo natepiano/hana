@@ -12,14 +12,15 @@ from that state.
 ## Current State
 
 Panel-owned line drawing exists from authored API through layout resolution,
-render command emission, batched rendering, performance counters, and the
+render command emission, analytic-path batching, performance counters, and the
 `units.rs` ruler example.
 
-The current dedicated panel-line renderer is not the accepted long-term visual
-renderer. It proved the data model, lifecycle, and batching, but visual review
-found that its independent SDF/OIT/AA path diverges from slug text quality at
-grazing angles. The production target is now a shared analytic path renderer
-used by text glyphs and panel-authored vector marks.
+The old dedicated panel-line SDF renderer proved the data model, lifecycle, and
+batching, but visual review found that its independent SDF/OIT/AA path diverged
+from slug text quality at grazing angles. Panel lines now route through the
+shared analytic path renderer used by text glyphs and panel-authored vector
+marks. The old line material and WGSL file remain on disk as unregistered
+fallback/quarantine code.
 
 ## Authored API
 
@@ -97,34 +98,41 @@ Clipping is resolved at layout time:
 
 ## Current Renderer
 
-The current renderer lives under `render/panel_lines/` and is registered by
-`RenderPlugin`.
+The current panel-line adapter lives under `render/panel_lines/` and is
+registered by `RenderPlugin`.
 
 Implemented pieces:
 
 - `render/batch_key.rs` contains shared visual compatibility keys and material
   interning used by text and line batching.
 - `render/panel_lines/mod.rs` registers the plugin and systems.
+- `render/panel_lines/path.rs` converts resolved shaft/cap primitives into
+  closed analytic `PathOutline` contours plus clipped instance rect/UV data.
 - `render/panel_lines/batching.rs` routes panel line primitives into retained
-  cross-panel batches.
-- `render/panel_lines/primitive.rs` owns current CPU/GPU line primitive records.
-- `render/panel_lines/material.rs` owns the current line batch material.
-- `render/panel_lines/panel_line_batch.wgsl` is the current vertex-pulled line
-  shader.
+  cross-panel analytic path batches.
+- `render/panel_lines/primitive.rs` owns stable panel-line render identity.
+- `render/analytic_paths/atlas.rs` owns the generic path atlas used by
+  non-glyph path producers.
+- `render/analytic_paths/material.rs` / `analytic_path*.wgsl` provide the
+  shared analytic coverage, AA, vertex-pulling, and material route.
+- `render/panel_lines/material.rs` and `panel_line_batch.wgsl` are no longer
+  registered; they remain only as temporary fallback/quarantine files.
 
-The renderer batches line primitives across panels when compatibility matches.
+The renderer batches line path instances across panels when compatibility
+matches.
 Each batch uses:
 
 - an inert capacity-sized mesh
-- a storage buffer of line records
-- per-record panel-to-world transforms
-- per-record clip rectangles
+- shared path-atlas buffers for curve, band, and path records
+- per-batch instance and run storage buffers
+- per-run panel-to-world transforms
+- clipped instance rects and UVs
 - dirty record uploads
 - capacity growth
 - explicit bounds before visibility
 - hidden/removed-panel cleanup
 
-`DiegeticPerfStats::line_batch` exposes the visible verification seam:
+`DiegeticPerfStats::line_batch` exposes the visible verification counters:
 
 - batch count
 - record count
@@ -139,21 +147,22 @@ The old Bevy 0.18 ruler baseline in `../bevy_hana` drew ruler ticks and spines
 as tiny `El.background(...)` rectangles. Those rectangles used the mature panel
 geometry/SDF rectangle path.
 
-The new ruler migration correctly emits and batches line records, but the
+The first ruler migration correctly emitted and batched line records, but the
 dedicated panel-line shader showed poor visibility and unstable-looking color at
 grazing angles with stable transparency enabled. A diagnostic opaque/masked
 material made the geometry clearly visible, which proved the data and batching
 were present, but it looked too aliased to accept as the final renderer.
 
-Conclusion: the authored API and layout/batching model are useful, but the
-dedicated line SDF renderer should be treated as interim.
+Conclusion: the authored API and layout/batching model were useful, and the
+visual renderer needed to be the shared analytic path renderer. Phase B made
+that route the registered panel-line renderer.
 
 ## Units Example
 
 `crates/bevy_diegetic/examples/units.rs` now uses `PanelDraw::lines` for ruler
 ticks and ruler spine geometry.
 
-Helper seams:
+Helper functions:
 
 - `metric_vertical_tick_lines`
 - `metric_horizontal_ruler_lines`
@@ -169,8 +178,9 @@ rulers:
 - imperial measured-track height independent of `EDGE_LABEL_EXTRA`
 - bounded batch count instead of per-tick visual entities
 
-The left A4 ruler visual issue is not a layout or record-collection issue. It is
-the evidence that the current line renderer is the wrong long-term visual path.
+The left A4 ruler visual issue was not a layout or record-collection issue. It
+was the evidence that the old dedicated line renderer was the wrong long-term
+visual path.
 
 ## Shared Analytic Path Target
 
@@ -192,15 +202,19 @@ crates/bevy_diegetic/src/render/
   batch_key.rs
   analytic_paths/
     mod.rs
+    atlas.rs
     batching.rs
+    geometry.rs
     material.rs
-    path.rs
-    stroke.rs
+    packing.rs
     analytic_path.wgsl
+    analytic_path_vertex_pull.wgsl
   panel_text/
     ...
   panel_lines/
-    ...
+    batching.rs
+    path.rs
+    primitive.rs
 ```
 
 Text remains responsible for:
@@ -228,9 +242,9 @@ The shared analytic path renderer should own:
 - batching and compatibility
 - AA and grazing-angle coverage behavior
 
-The current `render/panel_lines` renderer should shrink toward an adapter or
-fallback after the analytic path renderer covers ruler/callout quality and
-lifecycle requirements.
+The current `render/panel_lines` module is now an adapter: it owns panel-line
+source identity, clipping, retained cleanup, and batch counters while feeding
+the shared analytic renderer.
 
 ## Remaining Implementation Phases
 
@@ -313,7 +327,7 @@ Acceptance:
 - Phase D was split into planar mapping/classification and renderer routing so
   standalone `CalloutLine` unification has a concrete boundary.
 
-### Phase B - Panel Lines To Analytic Paths
+### Phase B - Panel Lines To Analytic Paths (complete)
 
 Convert resolved `PanelLine` primitives into analytic path contours and route
 `PanelDraw::lines` through the shared path renderer.
@@ -359,6 +373,60 @@ Acceptance:
 - The dedicated line SDF shader is retired for ruler-quality paths or clearly
   documented as a temporary fallback.
 
+#### Retrospective
+
+**What worked:**
+
+- `render/panel_lines/path.rs` now converts segment shafts and resolved cap
+  forms into closed `PathOutline` contours, including midpoint-control
+  quadratics for straight edges and quadratic arc segments for circles.
+- `PanelLineBatchStore` kept panel-owned source cleanup while routing payloads
+  through `PathAtlas<PanelLineRenderKey>`, `GlyphInstanceRecord`, `RunRecord`,
+  and `TextMaterial`.
+
+**What deviated from the plan:**
+
+- Phase B added `RunRecord::oit_depth_offset` so panel-line analytic paths keep
+  per-primitive OIT ordering through the shared run table.
+- The old `render/panel_lines/material.rs` and `panel_line_batch.wgsl` were
+  left unregistered instead of deleted so Phase E can remove or archive them
+  after later consumers prove the shared route.
+
+**Surprises:**
+
+- The shared analytic shader needed no coverage changes for panel-line paths;
+  only the run-table OIT offset and shader hash changed.
+- `SdfPrimitiveKind` no longer needs the panel-line-only oriented variants once
+  panel lines leave the dedicated SDF material path.
+
+**Implications for remaining phases:**
+
+- Phase C and Phase D can produce ordinary `PanelDraw::lines` records and rely
+  on the analytic path adapter instead of carrying a separate overlay/callout
+  renderer route for planar marks.
+- Phase E should decide whether to delete the quarantined line SDF files or keep
+  them as archived reference code once typography and planar callouts use the
+  shared path renderer.
+
+#### Phase B Review
+
+- Phase C now names border-backed typography metric panels as analytic
+  `PanelDraw::lines` migration work instead of allowing SDF borders to satisfy
+  the vector-mark acceptance by accident.
+- Phase C now requires an external-source-id producer path or an explicit
+  stale-cleanup check when overlay panel entities are recreated.
+- Phase C now treats stale metric gizmo construction as cleanup/documentation
+  work, not a live renderer migration.
+- Phase C exempts typography-example dots/circles from the line migration and
+  records the separate non-line mark design question at the end of this doc.
+- Phase D now focuses on planar classification, transparent-panel selection,
+  coordinate mapping, stable source identity, and parity tests because Phase B
+  already owns shaft/cap analytic rendering.
+- Phase D now names `CalloutLine::surface_shadow` preservation as a transparent
+  panel grouping or fallback requirement.
+- Phase E now includes path-neutral naming cleanup for glyph/text-compatible
+  analytic renderer internals, or a deliberate deferral.
+
 ### Phase C - Typography Overlay Migration
 
 Move the remaining typography overlay guide paths onto panel-backed analytic
@@ -372,11 +440,24 @@ Deliverables:
 - Use transparent overlay panels mapped to measured text/run bounds.
 - Represent metric guides, arrows, and similar annotations with ordinary panel
   draw/path data.
+- Convert border-backed metric guide panels such as typography metric-line
+  panels to `PanelDraw::lines` / analytic vector marks rather than leaving them
+  on SDF rectangle borders.
 - Assign stable external `PanelLineSourceKey` values for overlay-produced marks
   so metric refreshes do not depend on ordinal churn.
+- Add or select a producer path for those external source ids; ordinary
+  element-owned `PanelDraw::lines` continues to use element/draw/line ordinals.
+- Keep overlay panel entities stable when retained renderer identity matters.
+  If a metric refresh recreates overlay panels, treat the panel-entity portion
+  of `PanelLineRenderKey` as churn and verify stale cleanup explicitly.
 - Rebuild or update overlay panels on metric changes so renderer records refresh
   through normal panel lifecycle.
 - Remove or explicitly exempt retained gizmo/callout overlay line paths.
+- Clean up stale typography metric `GizmoAsset` line/arrow construction when
+  the caller already discards those gizmos.
+- Exempt typography-example dots/circles from this phase's line migration; they
+  are non-line marks and should not force a public path/vector-mark API into
+  Phase C.
 
 Acceptance:
 
@@ -395,11 +476,15 @@ Deliverables:
   creates the transparent panel, maps local/world `Vec3` endpoints into panel
   coordinates, and preserves render layers.
 - Add a renderer-routing slice that emits stable external panel mark source ids
-  and routes planar callout shafts/caps through analytic paths.
+  and routes planar callout shafts/caps through the Phase B panel-line analytic
+  path adapter; do not build another cap/shaft renderer route.
 - Route planar callout geometry through a transparent panel and shared analytic
   path marks where possible.
 - Keep the direct callout renderer for non-coplanar cases or accepted
   temporary exceptions.
+- Preserve `CalloutLine::surface_shadow` by grouping panel-backed callouts into
+  transparent panels with matching `SurfaceShadow`, or document a temporary
+  direct-renderer fallback for shadow modes that cannot map through a panel.
 - Define and document shadow policy for panel-backed callouts.
 
 Acceptance:
@@ -411,13 +496,16 @@ Acceptance:
 
 ### Phase E - Hardening And Archive Closeout
 
-Close the interim-renderer gap after the shared path renderer has real
+Close the old-renderer gap after the shared path renderer has real
 consumers.
 
 Deliverables:
 
 - Remove or quarantine the dedicated panel-line SDF renderer.
 - Keep the as-built module summary current.
+- Rename text/glyph-compatible internal analytic-path names such as
+  `TextMaterial`, `GlyphRecord`, and `GlyphInstanceRecord` to path-neutral
+  names, or explicitly defer those compatibility aliases with rationale.
 - Keep only cross-feature regression tests here; Phase B owns the focused path
   conversion, cleanup, clipping, and visual-bounds tests required before later
   consumers use the path renderer.
@@ -428,7 +516,7 @@ Acceptance:
 - `units.rs`, typography overlay guides, and representative planar callouts all
   use the shared analytic path renderer for vector marks.
 - Panel backgrounds remain on the SDF rectangle fast path.
-- The document no longer names an interim renderer as a production path.
+- The document no longer names the old line renderer as a production path.
 
 ## Panel Backgrounds
 
@@ -471,13 +559,13 @@ panel-backed authoring:
 - convert strokes and caps into analytic path contours
 - batch with other compatible panel marks
 
-Do not spend more work making the interim line/cap SDF shader the long-term
-shared callout implementation.
+Do not spend more work making the old line/cap SDF shader the long-term shared
+callout implementation.
 
 ## Typography Overlay
 
-Typography overlay line migration should wait for the analytic path pivot or
-explicitly document that it is using the interim panel-line renderer.
+Typography overlay line migration should use the analytic path adapter or
+explicitly document any renderer-specific exception.
 
 The preferred model remains unified panel-backed drawing:
 
@@ -503,33 +591,37 @@ crates/bevy_diegetic/src/
     render.rs               # RenderCommandKind::Lines
     engine/positioning.rs   # line command emission
   panel/
-    perf.rs                 # line batch performance counters
+    perf.rs                 # analytic line batch performance counters
   render/
     batch_key.rs            # shared visual compatibility pieces
-    panel_lines/
+    analytic_paths/
       mod.rs
-      batching.rs
-      primitive.rs
-      material.rs
-      panel_line_batch.wgsl
+      atlas.rs              # generic non-glyph path atlas
+      batching.rs           # text batch store and shared GPU handle types
+      geometry.rs           # Bounds / PathOutline / PathContour / QuadraticSegment
+      material.rs           # shared analytic-path TextMaterial route
+      packing.rs            # curve, band, path, instance, and run records
+      analytic_path.wgsl
+      analytic_path_vertex_pull.wgsl
+    panel_lines/
+      mod.rs                # system registration
+      batching.rs           # retained analytic path batches for panel lines
+      path.rs               # resolved line/cap primitive to PathOutline adapter
+      primitive.rs          # stable panel-line render identity
+      material.rs           # unregistered temporary fallback/quarantine
+      panel_line_batch.wgsl # unregistered temporary fallback/quarantine
   callouts/
     caps.rs                 # shared CalloutCap resolution helpers
   examples/
     units.rs                # panel-line-backed rulers and batch-count HUD
 ```
 
-Target module addition:
-
-```text
-crates/bevy_diegetic/src/render/analytic_paths/
-```
-
-Keep this target under `render/`, not under `text/slug/runtime`, so text and
+The shared target stays under `render/`, not under `text/slug/runtime`, so text and
 panel marks are peers that feed the renderer.
 
 ## Verification Notes
 
-Useful verification seams:
+Useful verification points:
 
 - layout command tests for `RenderCommandKind::Lines`
 - helper tests in `units.rs` for tick generation
@@ -539,3 +631,25 @@ Useful verification seams:
 The visual comparison is the reason this archive points to the shared analytic
 path renderer instead of treating the current dedicated panel-line renderer as
 complete.
+
+## Open Design Discussion - Non-Line Panel Marks
+
+Phase C intentionally exempts typography-example dots/circles from the
+panel-line migration. They are filled non-line marks, and adding a public
+path/vector-mark draw API would expand the typography migration beyond its goal.
+
+Design questions to revisit:
+
+- Do we need a public `PanelDraw::paths` or `PanelDraw::marks` API for filled
+  circles, arbitrary closed contours, symbols, and non-line ornaments?
+- Should small filled dots be represented as a degenerate line with a circular
+  cap, or is that too implicit for authors and future maintainers?
+- Should filled marks share the panel-line retained store and
+  `PathAtlas<PanelLineRenderKey>`, or should a broader vector-mark store own
+  both line and non-line path producers?
+- What clipping, paint-order, stable-source-key, shadow, and material semantics
+  should apply when the mark is not naturally a stroke/cap pair?
+
+Current decision: do not add this API during Phase C. Keep dots/circles in the
+typography example on their existing path unless a later phase explicitly adds
+non-line panel mark support.
