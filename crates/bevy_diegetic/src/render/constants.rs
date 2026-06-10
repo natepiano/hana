@@ -6,6 +6,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
+use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
+use crate::cascade::TextDrawLayer;
 use crate::layout::GlyphSidedness;
 
 // layer ordering
@@ -24,29 +26,46 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Reverse-Z: positive = closer to camera = composited in front.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.0001;
 
-/// `Transparent3d` sort bias for batched-text entities.
+/// Shared draw-order ordinal for a panel's coplanar children.
 ///
-/// Per-run text materials sort after their panel's SDF backing layers via
-/// `command_depth × LAYER_DEPTH_BIAS`; a batch is one phase item covering
-/// runs across many panels, so it carries one bias that puts text after
-/// every backing layer (backing biases are `command_index ×
-/// LAYER_DEPTH_BIAS`, far below this constant). Without it, a sorted
-/// (non-OIT) view can composite a panel's translucent backing over the
-/// whole batch, dimming the text behind it. Within the batch, coplanar
-/// glyph order comes from the per-record depth nudge instead.
-///
-/// Assumes a panel's backing layers stay below 64 commands deep; a panel
-/// exceeding that would out-bias its own text on sorted views.
-pub(crate) const BATCH_TEXT_DEPTH_BIAS: f32 = 64.0 * LAYER_DEPTH_BIAS;
+/// Backing/image render-command indices and text draw layers both convert
+/// into it; [`Self::depth_bias`] and [`Self::oit_depth_offset`] are the only
+/// derivations of the two per-material ordering fields, so any two ordinals
+/// composite in the same relative order on sorted and OIT views.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct DrawOrdinal(i32);
 
-/// OIT depth offset for non-text panel layers.
-///
-/// Panel text stays at `0.0` so unrelated opaque geometry keeps real depth
-/// authority. Backgrounds, borders, and other SDF backing layers move backward
-/// from zero, using command order only as a coplanar tie-breaker.
-#[must_use]
-pub(crate) fn panel_backing_oit_depth_offset(command_index: usize) -> f32 {
-    -(command_index.to_f32() + 1.0) * OIT_DEPTH_STEP
+impl DrawOrdinal {
+    /// Converts a render-command index, saturating at `i32::MAX`. A
+    /// saturated ordinal sits above every text layer (`i8`), so it
+    /// composites in front of all text on sorted views and clamps to the
+    /// `0.0` OIT offset — unreachable in practice (a panel would need
+    /// 2^31 render commands).
+    pub(crate) fn from_command_index(command_index: usize) -> Self {
+        Self(i32::try_from(command_index).unwrap_or(i32::MAX))
+    }
+
+    /// `Transparent3d` sort bias. Bevy adds it to the item's view-space
+    /// distance (`sort_distance = view_z + depth_bias`, ascending sort,
+    /// drawn back-to-front), so a higher ordinal composites in front.
+    pub(crate) fn depth_bias(self) -> f32 { self.0.to_f32() * LAYER_DEPTH_BIAS }
+
+    /// OIT fragment depth offset, added to `position.z` before `oit_draw`
+    /// (reverse-Z: positive = closer). Clamped at `0.0`: ordinals below the
+    /// default text layer move backward from zero so default-layer text
+    /// composites over them, while ordinals at or above it stay at `0.0` so
+    /// unrelated opaque geometry keeps real depth authority over panel
+    /// content.
+    pub(crate) fn oit_depth_offset(self) -> f32 {
+        (self.0 - i32::from(DEFAULT_TEXT_DRAW_LAYER))
+            .min(0)
+            .to_f32()
+            * OIT_DEPTH_STEP
+    }
+}
+
+impl From<TextDrawLayer> for DrawOrdinal {
+    fn from(draw_layer: TextDrawLayer) -> Self { Self(i32::from(draw_layer.0)) }
 }
 
 // material defaults
@@ -127,4 +146,83 @@ pub(super) fn resolve_material(
     }
 
     material
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Ordinal pairs `(low, high)` spanning below-default, default-crossing,
+    /// and above-default ranges.
+    const ORDERED_LAYER_PAIRS: [(i8, i8); 8] = [
+        (i8::MIN, -1),
+        (-1, 0),
+        (0, 1),
+        (1, 63),
+        (63, DEFAULT_TEXT_DRAW_LAYER),
+        (0, DEFAULT_TEXT_DRAW_LAYER),
+        (DEFAULT_TEXT_DRAW_LAYER, 65),
+        (DEFAULT_TEXT_DRAW_LAYER, i8::MAX),
+    ];
+
+    #[test]
+    fn sorted_and_oit_orderings_agree_for_every_layer_pair() {
+        for (low, high) in ORDERED_LAYER_PAIRS {
+            let low_ordinal = DrawOrdinal::from(TextDrawLayer(low));
+            let high_ordinal = DrawOrdinal::from(TextDrawLayer(high));
+            assert!(
+                low_ordinal.depth_bias() < high_ordinal.depth_bias(),
+                "sorted bias must rise from {low} to {high}",
+            );
+            if low < DEFAULT_TEXT_DRAW_LAYER {
+                assert!(
+                    low_ordinal.oit_depth_offset() < high_ordinal.oit_depth_offset(),
+                    "OIT offset must rise from {low} to {high}",
+                );
+            } else {
+                assert_eq!(
+                    low_ordinal.oit_depth_offset().to_bits(),
+                    high_ordinal.oit_depth_offset().to_bits(),
+                    "OIT offsets at or above the default layer are clamped equal",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn default_layer_reproduces_previous_batch_material_values() {
+        let text_ordinal = DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER));
+        // Pre-DrawOrdinal constants: BATCH_TEXT_DEPTH_BIAS = 64.0 ×
+        // LAYER_DEPTH_BIAS and a hard-coded 0.0 OIT offset.
+        assert_eq!(text_ordinal.depth_bias().to_bits(), 64.0f32.to_bits());
+        assert_eq!(text_ordinal.oit_depth_offset().to_bits(), 0.0f32.to_bits());
+    }
+
+    #[test]
+    fn backing_depth_bias_matches_previous_command_index_formula() {
+        for command_index in [0_usize, 1, 5, 63] {
+            let expected = command_index.to_f32() * LAYER_DEPTH_BIAS;
+            let actual = DrawOrdinal::from_command_index(command_index).depth_bias();
+            assert_eq!(actual.to_bits(), expected.to_bits());
+        }
+    }
+
+    #[test]
+    fn backing_oit_offsets_stay_behind_default_text_and_rise_with_command_index() {
+        let mut previous = f32::NEG_INFINITY;
+        for command_index in 0..64_usize {
+            let offset = DrawOrdinal::from_command_index(command_index).oit_depth_offset();
+            assert!(offset < 0.0, "command {command_index} must sit behind text");
+            assert!(offset > previous, "offsets must rise with command index");
+            previous = offset;
+        }
+    }
+
+    #[test]
+    fn from_command_index_saturates_at_i32_max() {
+        assert_eq!(
+            DrawOrdinal::from_command_index(usize::MAX),
+            DrawOrdinal(i32::MAX),
+        );
+    }
 }

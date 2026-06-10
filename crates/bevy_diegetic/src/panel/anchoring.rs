@@ -79,36 +79,56 @@ const fn placeholder_entity() -> Entity { Entity::PLACEHOLDER }
 /// Offset from a target panel anchor point.
 ///
 /// Coordinates are authored in panel-local layout space: positive x moves
-/// right, positive y moves down. Bare `f32` values resolve against the target
+/// right, positive y moves down, positive z moves the source in front of the
+/// target — along the target plane normal for world panels, toward the screen
+/// camera for screen panels. Bare `f32` values resolve against the target
 /// panel's layout unit; [`Px`](crate::Px), [`Mm`](crate::Mm),
 /// [`Pt`](crate::Pt), and [`In`](crate::In) carry explicit units.
+///
+/// Screen depth selects draw order under the shared orthographic camera and
+/// never changes apparent size. The camera sits at z = 1000 with a far plane
+/// of 2000, so resolved depths outside `(-1000, 1000)` clip rather than
+/// clamp. Panel children are coplanar with their backing and order via
+/// material sort biases, not z: batched text carries a 64-unit
+/// `Transparent3d` sort bias, so on the sorted screen view a back panel's
+/// text composites over a front panel's backing until the panels' depths
+/// differ by more than 64 logical pixels.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
 #[reflect(PartialEq, Debug, Default)]
 pub struct PanelAnchorOffset {
     x: Dimension,
     y: Dimension,
+    z: Dimension,
 }
+
+const ZERO_DIMENSION: Dimension = Dimension {
+    value: 0.0,
+    unit:  None,
+};
 
 impl PanelAnchorOffset {
     /// Zero offset.
     pub const ZERO: Self = Self {
-        x: Dimension {
-            value: 0.0,
-            unit:  None,
-        },
-        y: Dimension {
-            value: 0.0,
-            unit:  None,
-        },
+        x: ZERO_DIMENSION,
+        y: ZERO_DIMENSION,
+        z: ZERO_DIMENSION,
     };
 
-    /// Creates an offset from two authored dimensions.
+    /// Creates an offset from two authored dimensions, with zero depth.
     #[must_use]
     pub fn new(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self {
         Self {
             x: x.into(),
             y: y.into(),
+            z: ZERO_DIMENSION,
         }
+    }
+
+    /// Sets the depth offset dimension.
+    #[must_use]
+    pub fn with_z(mut self, z: impl Into<Dimension>) -> Self {
+        self.z = z.into();
+        self
     }
 
     /// Horizontal offset dimension.
@@ -119,11 +139,16 @@ impl PanelAnchorOffset {
     #[must_use]
     pub const fn y(self) -> Dimension { self.y }
 
-    pub(crate) fn to_layout_units(self, layout_unit: Unit) -> Vec2 {
+    /// Depth offset dimension.
+    #[must_use]
+    pub const fn z(self) -> Dimension { self.z }
+
+    pub(crate) fn to_layout_units(self, layout_unit: Unit) -> Vec3 {
         let layout_to_points = layout_unit.to_points();
-        Vec2::new(
+        Vec3::new(
             self.x.to_points(layout_to_points) / layout_to_points,
             self.y.to_points(layout_to_points) / layout_to_points,
+            self.z.to_points(layout_to_points) / layout_to_points,
         )
     }
 }
@@ -154,9 +179,15 @@ impl Deref for PanelsAnchoredHere {
 }
 
 /// Resolver-owned screen position override for a panel's configured anchor.
+///
+/// `depth` is the resolved `translation.z` when the screen resolver produced
+/// one; `authored_depth` captures the pre-resolution z so removing the
+/// attachment restores it.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ResolvedScreenPanelPosition {
     pub(crate) anchor_position: Option<Vec2>,
+    pub(crate) depth:           Option<f32>,
+    pub(crate) authored_depth:  Option<f32>,
 }
 
 #[cfg(test)]
@@ -175,7 +206,11 @@ mod tests {
     use super::PanelAnchorOffset;
     use super::PanelsAnchoredHere;
     use crate::HeadlessLayoutPlugin;
+    use crate::Mm;
+    use crate::Px;
     use crate::layout::Anchor;
+    use crate::layout::Dimension;
+    use crate::layout::Unit;
 
     fn reverse_targets(world: &World, target: Entity) -> Vec<Entity> {
         world
@@ -236,6 +271,34 @@ mod tests {
             .with_offset(PanelAnchorOffset::ZERO);
 
         assert_eq!(derived, expected);
+    }
+
+    #[test]
+    fn new_defaults_depth_to_zero_and_with_z_sets_it() {
+        let offset = PanelAnchorOffset::new(Px(1.0), Px(2.0));
+        assert_eq!(
+            offset.z(),
+            Dimension {
+                value: 0.0,
+                unit:  None,
+            }
+        );
+
+        let offset = offset.with_z(Mm(3.0));
+        assert_eq!(offset.x(), Px(1.0).into());
+        assert_eq!(offset.y(), Px(2.0).into());
+        assert_eq!(offset.z(), Mm(3.0).into());
+    }
+
+    #[test]
+    fn to_layout_units_converts_depth_like_x_and_y() {
+        let offset = PanelAnchorOffset::new(Mm(10.0), Mm(20.0)).with_z(Mm(30.0));
+        let resolved = offset.to_layout_units(Unit::Millimeters);
+
+        assert!(
+            resolved.abs_diff_eq(Vec3::new(10.0, 20.0, 30.0), 1e-4),
+            "expected (10, 20, 30), got {resolved:?}",
+        );
     }
 
     #[test]

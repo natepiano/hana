@@ -191,14 +191,18 @@ fn resolve_screen_space_panel_dimensions(
 fn position_screen_space_panels(
     windows: Query<(Entity, &Window)>,
     primary: Query<Entity, With<PrimaryWindow>>,
-    mut panels: Query<(&mut Transform, &DiegeticPanel, &ResolvedScreenPanelPosition)>,
+    mut panels: Query<(
+        &mut Transform,
+        &DiegeticPanel,
+        &mut ResolvedScreenPanelPosition,
+    )>,
 ) {
     let by_entity = window_size_map(&windows);
     if by_entity.is_empty() {
         return;
     }
 
-    for (mut transform, panel, resolved_position) in &mut panels {
+    for (mut transform, panel, mut resolved_position) in &mut panels {
         let CoordinateSpace::Screen {
             position,
             window: window_ref,
@@ -232,6 +236,20 @@ fn position_screen_space_panels(
 
         transform.translation.x = anchor_position.x - half_width;
         transform.translation.y = half_height - anchor_position.y;
+        match resolved_position.depth {
+            Some(depth) => {
+                if resolved_position.authored_depth.is_none() {
+                    resolved_position.authored_depth = Some(transform.translation.z);
+                }
+                transform.translation.z = depth;
+            },
+            None => {
+                if let Some(authored_depth) = resolved_position.authored_depth {
+                    transform.translation.z = authored_depth;
+                    resolved_position.authored_depth = None;
+                }
+            },
+        }
     }
 }
 

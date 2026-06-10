@@ -1,12 +1,15 @@
 //! Panel-to-panel anchoring example.
 //!
 //! Left/right cycles which anchor on the dependent panel follows the target.
-//! Up/down cycles which anchor on the target panel is followed. The world
-//! panels show only their anchor markers; the bottom-left info panel names the
-//! active anchors.
+//! Up/down cycles which anchor on the target panel is followed. Holding
+//! minus/equal moves the depth offset continuously along the target's plane
+//! normal. The active anchor markers are elements of each panel's layout
+//! tree; a gizmo line links the two anchor points when a depth offset
+//! separates them. The bottom-left info panel names the active anchors and
+//! depth.
 
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
+use bevy::transform::TransformSystems;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -21,6 +24,8 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
+use bevy_diegetic::PanelAnchorGeometryParam;
+use bevy_diegetic::PanelAnchorOffset;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
@@ -37,9 +42,8 @@ const PANEL_HEIGHT: f32 = 78.0;
 const BORDER_WIDTH: f32 = 1.2;
 const HOME_MARGIN: f32 = 0.22;
 const ANCHOR_MARKER_SIZE: f32 = 10.0;
-const TARGET_MARKER_Z: f32 = 0.004;
-const DEPENDENT_MARKER_Z: f32 = 0.006;
 const MARKER_ALPHA: f32 = 0.72;
+const ANCHOR_LINK_MIN_LENGTH: f32 = 0.001;
 const INFO_PANEL_WIDTH: f32 = 230.0;
 const INFO_TITLE_SIZE: f32 = 16.0;
 const INFO_BODY_SIZE: f32 = 12.0;
@@ -94,6 +98,7 @@ const ANCHOR_NAMES: [&str; 9] = [
 
 const DEFAULT_SOURCE_INDEX: usize = 0;
 const DEFAULT_TARGET_INDEX: usize = 8;
+const DEPTH_RATE_MM_PER_SEC: f32 = 60.0;
 
 #[derive(Component)]
 struct AnchorTarget;
@@ -104,15 +109,11 @@ struct AnchoredDemoPanel;
 #[derive(Component)]
 struct AnchorInfoPanel;
 
-#[derive(Component)]
-struct AnchorMarker {
-    role: PanelRole,
-}
-
-#[derive(Resource, Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Resource, Clone, Copy, Debug, PartialEq)]
 struct AnchorSelection {
     source_index: usize,
     target_index: usize,
+    depth_mm:     f32,
 }
 
 impl Default for AnchorSelection {
@@ -120,6 +121,7 @@ impl Default for AnchorSelection {
         Self {
             source_index: DEFAULT_SOURCE_INDEX,
             target_index: DEFAULT_TARGET_INDEX,
+            depth_mm:     0.0,
         }
     }
 }
@@ -156,22 +158,22 @@ fn main() {
                 .with_title("Panel Anchoring")
                 .control("Left/Right Source")
                 .control("Up/Down Target")
+                .control("-/+ Depth")
                 .control("R Reset"),
         )
         .with_camera_control_panel()
         .init_resource::<AnchorSelection>()
         .add_systems(Startup, setup)
         .add_systems(Update, cycle_anchor_selection)
+        .add_systems(
+            PostUpdate,
+            draw_anchor_link.after(TransformSystems::Propagate),
+        )
         .run();
 }
 
-fn setup(
-    mut commands: Commands,
-    selection: Res<AnchorSelection>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    let target = build_panel(TARGET_BACKGROUND, TARGET_ACCENT);
+fn setup(mut commands: Commands, selection: Res<AnchorSelection>) {
+    let target = build_panel(TARGET_BACKGROUND, TARGET_ACCENT, selection.target_anchor());
     let Ok(target_panel) = target else {
         error!("panel_anchoring: failed to build target panel");
         return;
@@ -185,39 +187,25 @@ fn setup(
             Transform::from_translation(TARGET_POSITION),
         ))
         .id();
-    spawn_anchor_marker(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        target,
-        PanelRole::Target,
-        *selection,
-    );
 
-    let dependent = build_panel(DEPENDENT_BACKGROUND, DEPENDENT_ACCENT);
+    let dependent = build_panel(
+        DEPENDENT_BACKGROUND,
+        DEPENDENT_ACCENT,
+        selection.source_anchor(),
+    );
     let Ok(dependent_panel) = dependent else {
         error!("panel_anchoring: failed to build anchored panel");
         return;
     };
 
-    let dependent = commands
-        .spawn((
-            Name::new("Anchored panel"),
-            AnchoredDemoPanel,
-            CameraHomeTarget,
-            dependent_panel,
-            Transform::from_translation(DEPENDENT_AUTHORED_POSITION),
-            anchoring_relation(target, *selection),
-        ))
-        .id();
-    spawn_anchor_marker(
-        &mut commands,
-        &mut meshes,
-        &mut materials,
-        dependent,
-        PanelRole::Dependent,
-        *selection,
-    );
+    commands.spawn((
+        Name::new("Anchored panel"),
+        AnchoredDemoPanel,
+        CameraHomeTarget,
+        dependent_panel,
+        Transform::from_translation(DEPENDENT_AUTHORED_POSITION),
+        anchoring_relation(target, *selection),
+    ));
     spawn_info_panel(&mut commands, *selection);
 }
 
@@ -238,94 +226,13 @@ fn spawn_info_panel(commands: &mut Commands, selection: AnchorSelection) {
     }
 }
 
-fn spawn_anchor_marker(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    panel: Entity,
-    role: PanelRole,
-    selection: AnchorSelection,
-) {
-    let size = marker_size_meters(ANCHOR_MARKER_SIZE);
-    commands.entity(panel).with_child((
-        Name::new(role.marker_name()),
-        AnchorMarker { role },
-        NotShadowCaster,
-        Mesh3d(meshes.add(Rectangle::new(size, size))),
-        MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: role.accent_color().with_alpha(MARKER_ALPHA),
-            alpha_mode: AlphaMode::Blend,
-            double_sided: true,
-            ..default()
-        })),
-        Transform::from_translation(role.marker_position(selection)),
-    ));
-}
-
-fn update_anchor_markers(
-    selection: AnchorSelection,
-    markers: &mut Query<(&AnchorMarker, &mut Transform)>,
-) {
-    for (marker, mut transform) in markers {
-        transform.translation = marker.role.marker_position(selection);
-    }
-}
-
-const fn selected_anchor(role: PanelRole, selection: AnchorSelection) -> Anchor {
-    match role {
-        PanelRole::Target => selection.target_anchor(),
-        PanelRole::Dependent => selection.source_anchor(),
-    }
-}
-
-fn marker_position_for_anchor(anchor: Anchor, marker_size: f32, z: f32) -> Vec3 {
-    let size = panel_size_meters();
-    let center = marker_center_for_anchor(anchor, size, marker_size);
-    let (panel_x, panel_y) = Anchor::Center.offset(size.x, size.y);
-    Vec3::new(center.x - panel_x, panel_y - center.y, z)
-}
-
-fn marker_center_for_anchor(anchor: Anchor, panel_size: Vec2, marker_size: f32) -> Vec2 {
-    Vec2::new(
-        marker_center_x(anchor, panel_size.x, marker_size),
-        marker_center_y(anchor, panel_size.y, marker_size),
-    )
-}
-
-fn marker_center_x(anchor: Anchor, panel_width: f32, marker_size: f32) -> f32 {
-    let inset = marker_size * 0.5;
-    match anchor {
-        Anchor::TopLeft | Anchor::CenterLeft | Anchor::BottomLeft => inset,
-        Anchor::TopCenter | Anchor::Center | Anchor::BottomCenter => panel_width * 0.5,
-        Anchor::TopRight | Anchor::CenterRight | Anchor::BottomRight => panel_width - inset,
-    }
-}
-
-fn marker_center_y(anchor: Anchor, panel_height: f32, marker_size: f32) -> f32 {
-    let inset = marker_size * 0.5;
-    match anchor {
-        Anchor::TopLeft | Anchor::TopCenter | Anchor::TopRight => inset,
-        Anchor::CenterLeft | Anchor::Center | Anchor::CenterRight => panel_height * 0.5,
-        Anchor::BottomLeft | Anchor::BottomCenter | Anchor::BottomRight => panel_height - inset,
-    }
-}
-
-fn panel_size_meters() -> Vec2 {
-    Vec2::new(
-        PANEL_WIDTH * Unit::Millimeters.meters_per_unit(),
-        PANEL_HEIGHT * Unit::Millimeters.meters_per_unit(),
-    )
-}
-
-fn marker_size_meters(size: f32) -> f32 { size * Unit::Millimeters.meters_per_unit() }
-
 fn cycle_anchor_selection(
     keyboard: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     mut selection: ResMut<AnchorSelection>,
     targets: Query<Entity, With<AnchorTarget>>,
     dependents: Query<Entity, With<AnchoredDemoPanel>>,
     info_panels: Query<Entity, With<AnchorInfoPanel>>,
-    mut markers: Query<(&AnchorMarker, &mut Transform)>,
     mut commands: Commands,
 ) {
     let mut next = *selection;
@@ -341,6 +248,13 @@ fn cycle_anchor_selection(
     if keyboard.just_pressed(KeyCode::ArrowDown) {
         next.target_index = next_anchor(next.target_index);
     }
+    let depth_move = DEPTH_RATE_MM_PER_SEC * time.delta_secs();
+    if keyboard.pressed(KeyCode::Minus) {
+        next.depth_mm -= depth_move;
+    }
+    if keyboard.pressed(KeyCode::Equal) {
+        next.depth_mm += depth_move;
+    }
     if keyboard.just_pressed(KeyCode::KeyR) {
         next = AnchorSelection::default();
     }
@@ -355,6 +269,8 @@ fn cycle_anchor_selection(
         return;
     };
 
+    let anchors_changed =
+        next.source_index != selection.source_index || next.target_index != selection.target_index;
     *selection = next;
     commands
         .entity(dependent)
@@ -362,11 +278,52 @@ fn cycle_anchor_selection(
     if let Ok(info_panel) = info_panels.single() {
         commands.set_tree(info_panel, build_info_panel_tree(next));
     }
-    update_anchor_markers(next, &mut markers);
+    if anchors_changed {
+        commands.set_tree(
+            target,
+            build_panel_tree(TARGET_BACKGROUND, TARGET_ACCENT, next.target_anchor()),
+        );
+        commands.set_tree(
+            dependent,
+            build_panel_tree(DEPENDENT_BACKGROUND, DEPENDENT_ACCENT, next.source_anchor()),
+        );
+    }
 }
 
-const fn anchoring_relation(target: Entity, selection: AnchorSelection) -> AnchoredToPanel {
+fn draw_anchor_link(
+    selection: Res<AnchorSelection>,
+    geometry: PanelAnchorGeometryParam,
+    targets: Query<Entity, With<AnchorTarget>>,
+    dependents: Query<Entity, With<AnchoredDemoPanel>>,
+    mut gizmos: Gizmos,
+) {
+    let (Ok(target), Ok(dependent)) = (targets.single(), dependents.single()) else {
+        return;
+    };
+    let (Ok(target_geometry), Ok(dependent_geometry)) =
+        (geometry.get(target), geometry.get(dependent))
+    else {
+        return;
+    };
+    let (Some(target_point), Some(source_point)) = (
+        target_geometry.point(selection.target_anchor()).as_world(),
+        dependent_geometry
+            .point(selection.source_anchor())
+            .as_world(),
+    ) else {
+        return;
+    };
+    if target_point.distance_squared(source_point)
+        <= ANCHOR_LINK_MIN_LENGTH * ANCHOR_LINK_MIN_LENGTH
+    {
+        return;
+    }
+    gizmos.line_gradient(target_point, source_point, TARGET_ACCENT, DEPENDENT_ACCENT);
+}
+
+fn anchoring_relation(target: Entity, selection: AnchorSelection) -> AnchoredToPanel {
     AnchoredToPanel::new(target, selection.source_anchor(), selection.target_anchor())
+        .with_offset(PanelAnchorOffset::ZERO.with_z(Mm(selection.depth_mm)))
 }
 
 const fn next_anchor(index: usize) -> usize { (index + 1) % ANCHOR_POINTS.len() }
@@ -382,6 +339,7 @@ const fn previous_anchor(index: usize) -> usize {
 fn build_panel(
     background: Color,
     accent: Color,
+    marker_anchor: Anchor,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     DiegeticPanel::world()
         .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
@@ -389,21 +347,45 @@ fn build_panel(
         .material(panel_material())
         .text_material(text_material())
         .anchor(Anchor::Center)
-        .with_tree(build_panel_tree(background, accent))
+        .with_tree(build_panel_tree(background, accent, marker_anchor))
         .build()
 }
 
-fn build_panel_tree(background: Color, accent: Color) -> LayoutTree {
+fn build_panel_tree(background: Color, accent: Color, marker_anchor: Anchor) -> LayoutTree {
+    let (align_x, align_y) = anchor_alignment(marker_anchor);
     let mut builder = LayoutBuilder::new(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT));
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .background(background)
-            .border(Border::all(BORDER_WIDTH, accent)),
-        |_| {},
+            .border(Border::all(BORDER_WIDTH, accent))
+            .child_alignment(align_x, align_y),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(ANCHOR_MARKER_SIZE))
+                    .height(Sizing::fixed(ANCHOR_MARKER_SIZE))
+                    .background(accent.with_alpha(MARKER_ALPHA)),
+                |_| {},
+            );
+        },
     );
     builder.build()
+}
+
+const fn anchor_alignment(anchor: Anchor) -> (AlignX, AlignY) {
+    match anchor {
+        Anchor::TopLeft => (AlignX::Left, AlignY::Top),
+        Anchor::TopCenter => (AlignX::Center, AlignY::Top),
+        Anchor::TopRight => (AlignX::Right, AlignY::Top),
+        Anchor::CenterLeft => (AlignX::Left, AlignY::Center),
+        Anchor::Center => (AlignX::Center, AlignY::Center),
+        Anchor::CenterRight => (AlignX::Right, AlignY::Center),
+        Anchor::BottomLeft => (AlignX::Left, AlignY::Bottom),
+        Anchor::BottomCenter => (AlignX::Center, AlignY::Bottom),
+        Anchor::BottomRight => (AlignX::Right, AlignY::Bottom),
+    }
 }
 
 fn build_info_panel_tree(selection: AnchorSelection) -> LayoutTree {
@@ -427,6 +409,7 @@ fn build_info_panel_tree(selection: AnchorSelection) -> LayoutTree {
                         "followed:",
                         selection.target_label(),
                         selection.target_index,
+                        None,
                     );
                     info_section(
                         builder,
@@ -434,6 +417,7 @@ fn build_info_panel_tree(selection: AnchorSelection) -> LayoutTree {
                         "following:",
                         selection.source_label(),
                         selection.source_index,
+                        Some(selection.depth_mm),
                     );
                 },
             );
@@ -448,6 +432,7 @@ fn info_section(
     label: &str,
     value: &str,
     active_index: usize,
+    depth_mm: Option<f32>,
 ) {
     builder.with(
         El::new()
@@ -458,8 +443,39 @@ fn info_section(
         |builder| {
             builder.text(role.title(), info_title_style(role.accent_color()));
             info_anchor_row(builder, label, value, active_index, role.accent_color());
+            if let Some(depth_mm) = depth_mm {
+                info_depth_row(builder, depth_mm, role.accent_color());
+            }
         },
     );
+}
+
+fn info_depth_row(builder: &mut LayoutBuilder, depth_mm: f32, accent: Color) {
+    let value_style = if depth_mm == 0.0 {
+        info_label_style()
+    } else {
+        info_value_style(accent)
+    };
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .direction(Direction::LeftToRight)
+            .child_gap(INFO_COL_GAP)
+            .child_alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text("depth:", info_label_style());
+            builder.text(format_depth_mm(depth_mm), value_style);
+        },
+    );
+}
+
+fn format_depth_mm(depth_mm: f32) -> String {
+    if depth_mm == 0.0 {
+        "0 mm".to_owned()
+    } else {
+        format!("{depth_mm:+.0} mm")
+    }
 }
 
 fn info_anchor_row(
@@ -587,32 +603,10 @@ impl PanelRole {
         }
     }
 
-    const fn marker_name(self) -> &'static str {
-        match self {
-            Self::Target => "Target anchor marker",
-            Self::Dependent => "Anchored panel anchor marker",
-        }
-    }
-
     const fn accent_color(self) -> Color {
         match self {
             Self::Target => TARGET_ACCENT,
             Self::Dependent => DEPENDENT_ACCENT,
-        }
-    }
-
-    fn marker_position(self, selection: AnchorSelection) -> Vec3 {
-        marker_position_for_anchor(
-            selected_anchor(self, selection),
-            marker_size_meters(ANCHOR_MARKER_SIZE),
-            self.marker_z(),
-        )
-    }
-
-    const fn marker_z(self) -> f32 {
-        match self {
-            Self::Target => TARGET_MARKER_Z,
-            Self::Dependent => DEPENDENT_MARKER_Z,
         }
     }
 }

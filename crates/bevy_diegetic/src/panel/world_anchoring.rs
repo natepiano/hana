@@ -342,14 +342,17 @@ fn target_anchor_point(
 ) -> Result<Vec3, WorldAnchorResolveSkip> {
     let target_point = target_plane.point(attachment.target_anchor);
     let offset = target_offset_meters(target_panel, target_plane, attachment)?;
-    Ok(target_point + target_plane.right() * offset.x - target_plane.up() * offset.y)
+    Ok(
+        target_point + target_plane.right() * offset.x - target_plane.up() * offset.y
+            + target_plane.normal() * offset.z,
+    )
 }
 
 fn target_offset_meters(
     target_panel: &DiegeticPanel,
     target_plane: PanelPlane,
     attachment: AnchoredToPanel,
-) -> Result<Vec2, WorldAnchorResolveSkip> {
+) -> Result<Vec3, WorldAnchorResolveSkip> {
     let panel_size = Vec2::new(target_panel.width(), target_panel.height());
     if !panel_size.is_finite() || panel_size.x <= 0.0 || panel_size.y <= 0.0 {
         return Err(WorldAnchorResolveSkip::TargetPanelPlaneInvalid);
@@ -361,9 +364,10 @@ fn target_offset_meters(
         return Err(WorldAnchorResolveSkip::TargetPanelPlaneInvalid);
     }
     let target_size = target_plane.size();
-    Ok(Vec2::new(
+    Ok(Vec3::new(
         offset.x * target_size.x / panel_size.x,
         offset.y * target_size.y / panel_size.y,
+        offset.z * target_size.x / panel_size.x,
     ))
 }
 
@@ -594,6 +598,124 @@ mod tests {
                 .map(|pose| pose.authored_transform),
             Some(source_authored)
         );
+    }
+
+    #[test]
+    fn world_z_offset_displaces_along_target_plane_normal() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::new(Mm(25.0), Mm(50.0)).with_z(Mm(30.0))),
+            ))
+            .id();
+
+        app.update();
+
+        // The 200 mm panel spans 2 m, so 30 mm of depth is 0.3 m along +Z.
+        assert_close_3d(
+            transform(&app, source).translation,
+            Vec3::new(1.25, 0.5, 0.3),
+        );
+    }
+
+    #[test]
+    fn world_bare_z_offset_resolves_against_target_layout_unit() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::ZERO.with_z(30.0)),
+            ))
+            .id();
+
+        app.update();
+
+        // A bare 30.0 resolves as 30 layout units (mm here) = 0.3 m.
+        assert_close_3d(
+            transform(&app, source).translation,
+            Vec3::new(1.0, 1.0, 0.3),
+        );
+    }
+
+    #[test]
+    fn world_z_offset_follows_rotated_target_normal() {
+        let mut app = app_with_world_anchoring();
+        let target_rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0).with_rotation(target_rotation),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::TopLeft)
+                    .with_offset(PanelAnchorOffset::ZERO.with_z(Mm(100.0))),
+            ))
+            .id();
+
+        app.update();
+
+        // The rotated plane normal is +X, so 1 m of depth displaces along X.
+        let source_transform = transform(&app, source);
+        assert_close_3d(source_transform.translation, Vec3::new(2.0, 2.0, 0.0));
+        assert_close_quat(source_transform.rotation, target_rotation);
+    }
+
+    #[test]
+    fn world_z_offset_composes_with_xy_and_projects_back_to_target_point() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::BottomRight, Anchor::Center)
+                    .with_offset(PanelAnchorOffset::new(Mm(25.0), Mm(50.0)).with_z(Mm(30.0))),
+            ))
+            .id();
+
+        app.update();
+
+        let source_translation = transform(&app, source).translation;
+        assert_close_3d(source_translation, Vec3::new(0.25, 2.0, 0.3));
+
+        // The pinned BottomRight point minus the normal displacement lands on
+        // the target Center point plus the x/y offset.
+        let pinned = source_translation + Vec3::new(2.0, -1.0, 0.0);
+        assert_close_3d(pinned - Vec3::Z * 0.3, Vec3::new(2.25, 1.0, 0.0));
     }
 
     #[test]

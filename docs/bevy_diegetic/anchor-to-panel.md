@@ -23,7 +23,9 @@ bottom-right.
 
 An attachment pins one point and therefore determines position only. It does not
 compute width or height. Width or height driven by two references is a separate
-span constraint handled by constrained screen sizing.
+span constraint handled by constrained screen sizing. Phase 4 extends placement
+with an optional z offset and a pose (rotation and displacement about the pinned
+point); attachments still never compute width or height.
 
 Attachment is a layout relationship, not transform ownership:
 
@@ -146,14 +148,17 @@ dimension system as panel sizing and text sizing:
 pub struct PanelAnchorOffset {
     x: Dimension,
     y: Dimension,
+    z: Dimension, // added in Phase 4.2, default zero
 }
 
 impl PanelAnchorOffset {
     pub const ZERO: Self;
 
     pub fn new(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self;
+    pub fn with_z(self, z: impl Into<Dimension>) -> Self; // Phase 4.2
     pub const fn x(self) -> Dimension;
     pub const fn y(self) -> Dimension;
+    pub const fn z(self) -> Dimension; // Phase 4.2
 }
 ```
 
@@ -161,9 +166,11 @@ The resolver converts the stored dimensions at the point where it knows the
 target panel's coordinate system:
 
 - screen-space: target panel layout units, normally logical pixels, top-left
-  origin, y down
+  origin, y down; z resolves to logical pixels of depth, positive toward the
+  camera (in front of the target)
 - world-space: target panel layout units scaled onto the target panel plane,
-  x right and y down
+  x right and y down; z displaces along the plane normal, positive in front of
+  the target surface
 
 Bare `f32` values resolve in the target panel's layout unit. Explicit
 `Px`/`Mm`/`Pt`/`In` values carry their units, matching `TextStyle::new` and
@@ -1162,57 +1169,139 @@ and keyboard-driven world anchoring.
 - `panel-anchoring-example.md` now requires explicit reset/detach behavior for
   `AnchoredWorldPanelPose`.
 
-### Phase 4 — animated anchor consumers
+### Phase 4 — z offset, anchored rotation, and animation
 
-Build animation examples on top of the public anchor geometry rather than
-changing the resolver into a physics system. Split this phase into three
-passes:
+Phase 4 extends point anchoring with the remaining rigid placement inputs —
+depth and orientation — then makes them animatable. The relationship stays the
+exact snap constraint: an active `AnchoredToPanel` means the resolver is the
+only transform writer for that panel. Animation never writes `Transform`
+directly while a relation is active; it writes resolver-read inputs.
 
-1. **Static and keyboard-driven world anchoring example:** create
-   `examples/panel_anchoring.rs` with the Demo 1 behavior from
-   [`panel-anchoring-example.md`](panel-anchoring-example.md). This uses
-   world-to-world `AnchoredToPanel` directly and proves the Phase 3 resolver in
-   an example before adding animation. Treat this as deferred Phase 3 coverage:
-   land it before spring, magnetic, elastic, or unwrap demos.
-2. **Animations without an active attachment:** spring/magnetic attraction
-   between two panels that only read each other's anchor points. These examples
-   do not insert `AnchoredToPanel`; they read `PanelAnchorGeometryParam` and
-   write `Transform` through `ParamSet`. Do not repeat the Phase 2 smoke test;
-   cover visible convergence/separation behavior and an `anchor_animation` test
-   filter.
-3. **World-resolver animation input:** before any active-relation animation
-   demo, add or choose a named `PostUpdate` ordering point for systems that write
-   resolver-read animation inputs before the world attachment resolver. If this
-   becomes a public `PanelSystems` variant, get explicit API approval during
-   that implementation phase.
-4. **Animations while a panel is attached:** elastic attach/detach and chained
-   unwrapping where `AnchoredToPanel` is active. Start by adding a component
-   such as `PanelAnchorPoseOffset` or `PanelAnchorPostAlignment`, make the world
-   resolver read it, and test that the pinned `source_anchor` stays fixed while
-   the component changes. Land that component and its tests before the
-   active-relation animation demo.
+#### Phase 4.1 — static and keyboard-driven world anchoring example (complete)
 
-The relationship remains the exact snap constraint. Active `AnchoredToPanel`
-means the resolver writes the panel placement. Animation systems should use one
-of these ownership modes:
+`examples/panel_anchoring.rs` covers the Demo 1 behavior from
+[`panel-anchoring-example.md`](panel-anchoring-example.md): world-to-world
+`AnchoredToPanel` with hot keys cycling the source and target anchors. This
+proved the Phase 3 resolver in an example before animation work.
 
-1. no `AnchoredToPanel` component while the animation writes `Transform`
-2. animation writes a separate component such as offset or post-alignment
-   rotation, and the resolver remains the only transform writer
-3. animation inserts or removes the relation only at state boundaries
+#### Phase 4.2 — anchor z offset (complete)
 
-If an animation removes an active world relation and wants to start from the
-resolved attached pose, define the handoff explicitly before writing the demo.
-Either keep the relation active and animate a component read by the resolver, or
-add a same-frame release-pose capture protocol so authored-pose restoration from
-Phase 3 does not snap the panel away before the animation starts.
+Add `z: Dimension` to `PanelAnchorOffset`, default zero. `new(x, y)` keeps its
+two-argument signature; add a `with_z(impl Into<Dimension>)` builder and a
+`z()` accessor. Update `ZERO` and `to_layout_units` accordingly.
 
-Because the world resolver runs in `PostUpdate` before
-`TransformSystems::Propagate`, same-frame animation inputs for an active relation
-must be written before the world attachment resolver. Phase 4 must name the set
-or system label that callers order against, then add tests showing writes before
-the resolver affect the current frame, while writes after the resolver affect the
-next frame.
+World resolution: displace the pinned target point along
+`target_plane.normal()`. Convert authored units to meters with the same target
+density `target_offset_meters` already uses for x
+(`target_size.x / panel_size.x`); panels preserve aspect, so the x and y
+densities agree. Positive z moves the source in front of the target plane.
+
+Screen resolution: resolve z to logical pixels like x/y and write the source's
+`Transform.translation.z` as target z plus offset z. The shared screen camera
+is orthographic (`ScalingMode::WindowSize`), so z never changes apparent size;
+it selects draw order. Positive z places the source in front of its target.
+Mechanics:
+
+- `ResolvedScreenPanelPosition` carries a resolved depth alongside
+  `anchor_position`; `position_screen_space_panels` writes `translation.z`
+  only when the resolver produced a depth, otherwise the authored z is kept —
+  the same fallback rule x/y already follow.
+- `screen_panel_rects` stays x/y-only; anchor-point geometry is unaffected by
+  depth. The placer tracks depth per entity beside `desired_positions` so
+  chains accumulate z and a dependent of a dependent stacks deterministically.
+- Document the usable depth range instead of clamping: the screen camera sits
+  at `SCREEN_SPACE_CAMERA_Z` with `far = SCREEN_SPACE_CAMERA_FAR`; offsets
+  beyond that range clip.
+- Implementation finding: panel children are coplanar with their backing
+  (`TEXT_Z_OFFSET = 0.0`) and order via material sort biases, not z steps.
+  Batched text carries a 64-unit `Transparent3d` bias (the default text
+  draw layer, derived through `DrawOrdinal`),
+  and the shared screen camera is a sorted (non-OIT) view — so a back
+  panel's text composites over a front panel's backing until the panels'
+  depths differ by more than 64 logical pixels. Backing-vs-backing order
+  follows z within a few pixels (per-command biases are small). Documented
+  on `PanelAnchorOffset` instead of the originally planned sub-pixel
+  caveat, which assumed child z stepping that does not exist.
+
+#### Phase 4.3 — anchored rotation
+
+Add a mutable component the world resolver reads beside an active
+`AnchoredToPanel` (proposed name `PanelAnchorPose`; this replaces the earlier
+`PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` candidates — get explicit
+API approval before landing):
+
+```rust
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Default)]
+pub struct PanelAnchorPose {
+    /// Rotation about the pinned anchor point, in the target-plane frame.
+    pub rotation: Quat,
+    /// Translation from the pinned anchor point, in plane-frame meters.
+    pub translation: Vec3,
+}
+```
+
+- Rotation is authored in the target-plane frame (`right`, `up`, `normal`).
+  Normal-axis rotation spins the panel coplanar on its pin; right/up-axis
+  rotation hinges it off the target surface; an arbitrary `Quat` covers any
+  direction.
+- The resolver composes `plane_rotation(target_plane) * pose.rotation` and
+  keeps the existing translation equation
+  `target_point - desired_rotation * source_offset`
+  (`world_anchoring.rs::placement`). Because translation is derived from the
+  anchor point and the rotated source offset, the pinned `source_anchor` stays
+  fixed for any rotation — pivot-at-pin needs no extra math.
+- `pose.translation` displaces the pin point in the plane frame after the
+  static `PanelAnchorOffset` is applied, in meters: animation code works in
+  world units; layout-unit conversion stays an authoring convenience of the
+  static offset.
+- The component is separate from `AnchoredToPanel` because the relationship is
+  `#[component(immutable)]`: re-inserting it every frame to animate would
+  churn the `PanelsAnchoredHere` reverse index. The relation states what the
+  panel is pinned to; `PanelAnchorPose` states the pose about that pin and is
+  mutable for animation.
+- Scope: world resolver only. The screen resolver ignores `PanelAnchorPose`
+  rotation in this phase — the rect-based screen model assumes axis-aligned
+  panels, and a rotated chain target would need rotated-corner anchor math
+  plus a full-pose `ResolvedScreenPanelPosition`. If screen rotation becomes
+  required, plan it as a separate pass; under the orthographic screen camera
+  it renders as foreshortening with no perspective, which limits its value.
+
+This extends the attachment contract from position-only to position plus
+orientation. Attachments still never compute width or height.
+
+#### Phase 4.4 — animation ordering and demos
+
+- Name a `PostUpdate` ordering point for systems that write resolver-read
+  animation inputs (`PanelAnchorPose`, relation insert/remove at state
+  boundaries) before the world attachment resolver. If this becomes a public
+  `PanelSystems` variant, get explicit API approval during implementation.
+  Because the world resolver runs in `PostUpdate` before
+  `TransformSystems::Propagate`, writes before the resolver affect the current
+  frame and writes after it affect the next frame; tests must show both.
+- Ownership modes for animation systems:
+  1. no `AnchoredToPanel` component while the animation writes `Transform`
+  2. animation writes `PanelAnchorPose`, and the resolver remains the only
+     transform writer
+  3. animation inserts or removes the relation only at state boundaries
+- Release handoff: if an animation removes an active world relation and wants
+  to start from the resolved attached pose, define the handoff before writing
+  the demo. Either keep the relation active and animate `PanelAnchorPose`, or
+  add a same-frame release-pose capture protocol so authored-pose restoration
+  from Phase 3 does not snap the panel away before the animation starts.
+- Demos in `examples/panel_anchoring.rs`, specified in
+  [`panel-anchoring-example.md`](panel-anchoring-example.md):
+  - Demo 2 — pose animation while attached: the dependent lifts off the target
+    along the plane normal (`pose.translation.z`) and spins on its pin
+    (normal-axis `pose.rotation`), then settles back flush. The relation stays
+    active the whole time.
+  - Demo 3 — chained hinge unwrap: each link animates right-axis
+    `pose.rotation` about its pinned `BottomCenter` point; the chain unfolds
+    into a coplanar strip and folds back. Relations stay active; hinge gizmo
+    visuals may read `PanelAnchorEdge` geometry from Phase 2. Do not extend
+    `AnchoredToPanel` beyond point-to-point snapping to model hinge motion —
+    point snap plus pose rotation covers it.
+- Cover the demos with an `anchor_animation` test filter.
 
 World editable-field popup tracking is not part of Phase 4. If an example or
 test touches editable fields on world-anchored panels, document the existing
@@ -1222,17 +1311,6 @@ Deferred follow-up: if same-frame popup tracking for world-anchored editable
 fields becomes required, handle it in an editor-specific task that covers
 `ime/editor.rs` after `resolve_world_space_panel_attachments`. Do not mix that
 work into `panel_anchoring.rs` or the animation demos.
-
-Hinge animations should consume `PanelAnchorEdge` geometry from Phase 2. Do not
-extend `AnchoredToPanel` beyond point-to-point snapping just to model hinge
-motion.
-
-Before the hinge demo lands, define a component such as `PanelAnchorPoseOffset`
-or `PanelAnchorPostAlignment` that the world resolver reads. It should compose
-local rotation after target-plane alignment and then translate so the pinned
-`source_anchor` remains fixed. If the demo needs edge-like behavior, model it as
-`BottomCenter` / `TopCenter` point snapping plus equal-width, edge-parallel
-visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 
 ## Tests
 
@@ -1342,26 +1420,55 @@ visual hinge motion, not as a general edge constraint in `AnchoredToPanel`.
 
 ### Phase 4 tests / examples
 
-- elastic pair animation consumes anchor point geometry and has no active
-  `AnchoredToPanel` relation while it owns transforms
-- `panel_anchoring.rs` includes the static and keyboard-driven world-to-world
-  anchoring demo before active-relation animation examples are added
+Phase 4.2 — z offset:
+
+- world z offset displaces the dependent along the target plane normal by the
+  authored dimension converted with the target density; literal expected
+  translations for `Mm` and bare layout-unit values
+- world z offset composes with x/y offset and non-center anchors; the pinned
+  anchor point projects back onto the authored target point
+- rotated target plane: z offset follows the rotated normal, not world Z
+- screen z offset writes `translation.z` relative to the target's z; positive
+  offset places the source in front
+- screen chains accumulate depth: `A -> B -> C` with z offsets stacks
+  deterministically in one update
+- removing the attachment clears the resolved depth and restores the authored
+  screen z, same `None -> Some -> None` transitions as x/y
+- zero z offset leaves `translation.z` untouched for unattached panels and
+  panels authored without depth
+
+Phase 4.3 — anchored rotation:
+
+- normal-axis `PanelAnchorPose` rotation spins the dependent coplanar while
+  the pinned `source_anchor` point stays fixed (assert the world-space anchor
+  point before and after rotation)
+- right/up-axis rotation hinges the dependent off the target plane; pinned
+  point still fixed
+- `pose.translation` displaces the pin in the plane frame in meters, after the
+  static `PanelAnchorOffset`
+- pose composes with target rotation: a rotated target plane plus a pose
+  rotation produces `plane_rotation * pose.rotation`
+- removing `PanelAnchorPose` returns the dependent to the plain snapped
+  placement without touching the captured `AnchoredWorldPanelPose`
+- screen panels with `PanelAnchorPose` resolve position as before; rotation is
+  ignored and documented as world-only
+
+Phase 4.4 — animation:
+
+- writes to `PanelAnchorPose` before the world resolver affect the current
+  frame; writes after it affect the next frame, using the named ordering point
+- pose animation is consumed by the resolver rather than writing the same
+  transform after the resolver
+- Demo 2 lift/spin animation keeps the relation active and never writes
+  `Transform` directly
+- Demo 3 chained unwrap animates per-link pose rotation; relations stay
+  active; no extension of `AnchoredToPanel` beyond point snapping
 - the static `panel_anchoring.rs` pass documents reset and detach behavior for
   `AnchoredWorldPanelPose`: whether reset removes the relation, refreshes the
   captured authored pose, or leaves the resolver-owned pose intact
-- Phase 4 adds or names a `PostUpdate` ordering point for world-resolver
-  animation inputs before adding `PanelAnchorPoseOffset` /
-  `PanelAnchorPostAlignment`
-- post-alignment rotation animation, if added, is consumed by the resolver
-  rather than writing the same transform after the resolver
-- writes to `PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` before the
-  world resolver affect the current frame; writes after it affect the next frame
-- `PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` keeps the pinned
-  `source_anchor` fixed while composing local rotation
-- chained unwrap consumes edge geometry and does not require extending
-  `AnchoredToPanel` beyond point snapping
 - mixed screen/world animation tests are only needed for animation-specific
   paths; do not duplicate the base resolver ownership tests from Phase 3
+- demos are covered by an `anchor_animation` test filter
 
 ### Phase Closeout
 
@@ -1393,12 +1500,30 @@ cargo nextest run -p bevy_diegetic screen_space::anchoring
 cargo nextest run -p bevy_diegetic
 ```
 
-Phase 4 closeout:
+Phase 4.2 closeout:
+
+```sh
+cargo +nightly fmt --all -- --check
+cargo nextest run -p bevy_diegetic panel::anchoring
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+cargo nextest run -p bevy_diegetic world_anchoring
+```
+
+Phase 4.3 closeout:
+
+```sh
+cargo +nightly fmt --all -- --check
+cargo nextest run -p bevy_diegetic world_anchoring
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+```
+
+Phase 4.4 closeout:
 
 ```sh
 cargo +nightly fmt --all -- --check
 cargo check -p bevy_diegetic --example panel_anchoring
 cargo nextest run -p bevy_diegetic anchor_animation
+cargo nextest run -p bevy_diegetic
 ```
 
 ## Team Review Notes

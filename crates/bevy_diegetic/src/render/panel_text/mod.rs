@@ -38,6 +38,7 @@ use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
 use crate::layout::GlyphRenderMode;
@@ -76,6 +77,7 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
         app.add_plugins(CascadePlugin::<TextLighting>::default());
         app.add_plugins(CascadePlugin::<TextSidedness>::default());
+        app.add_plugins(CascadePlugin::<TextDrawLayer>::default());
         app.add_observer(seed_panel_text_child_alpha);
         app.add_observer(seed_panel_text_child_glyph);
         app.init_resource::<TextShapingContext>();

@@ -721,6 +721,7 @@ mod tests {
             .entity_mut(panel)
             .insert(ResolvedScreenPanelPosition {
                 anchor_position: Some(Vec2::new(120.0, 80.0)),
+                ..Default::default()
             });
 
         let mut state = SystemState::<PanelAnchorGeometryParam>::new(app.world_mut());

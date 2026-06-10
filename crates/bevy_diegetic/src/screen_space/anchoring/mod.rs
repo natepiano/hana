@@ -10,9 +10,10 @@ use bevy::window::PrimaryWindow;
 pub(crate) use candidate::AnchorResolveSkip;
 use candidate::classify_candidates;
 use placement::ScreenAttachmentPlacer;
-use placement::desired_position_map;
+use placement::desired_placement_map;
+use placement::panel_depths;
 use placement::screen_attachment_resolve_reasons;
-use placement::write_desired_positions;
+use placement::write_desired_placements;
 use rect::screen_panel_rects;
 use window::window_size_lookup;
 
@@ -32,11 +33,13 @@ pub(super) fn resolve_screen_space_panel_attachments(
     entities: Query<()>,
     attachments: Query<(Entity, &AnchoredToPanel)>,
     panels: Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
+    transforms: Query<&Transform>,
     mut resolved_positions: Query<&mut ResolvedScreenPanelPosition>,
     mut diagnostics: ResMut<AnchorResolveDiagnostics>,
 ) {
     let window_sizes = window_size_lookup(&windows);
-    let mut desired_positions = desired_position_map(&panels);
+    let mut desired_placements = desired_placement_map(&panels);
+    let mut depths = panel_depths(&panels, &resolved_positions, &transforms);
     let mut rects = screen_panel_rects(&panels, &primary, &window_sizes);
     let candidates = classify_candidates(&attachments, &panels, &entities, &primary, &window_sizes)
         .into_iter()
@@ -48,8 +51,9 @@ pub(super) fn resolve_screen_space_panel_attachments(
         })
         .collect();
     let mut placer = ScreenAttachmentPlacer {
-        rects:             &mut rects,
-        desired_positions: &mut desired_positions,
+        rects:              &mut rects,
+        desired_placements: &mut desired_placements,
+        depths:             &mut depths,
     };
     panel::resolve_panel_attachments(
         candidates,
@@ -57,7 +61,7 @@ pub(super) fn resolve_screen_space_panel_attachments(
         &mut diagnostics,
         |action| placer.handle(action),
     );
-    write_desired_positions(desired_positions, &mut resolved_positions);
+    write_desired_placements(desired_placements, &mut resolved_positions);
 }
 
 #[cfg(test)]
@@ -205,6 +209,29 @@ mod tests {
             .get::<ResolvedScreenPanelPosition>(entity)
             .expect("panel has resolved position")
             .anchor_position
+    }
+
+    fn resolved_depth(app: &App, entity: Entity) -> Option<f32> {
+        app.world()
+            .get::<ResolvedScreenPanelPosition>(entity)
+            .expect("panel has resolved position")
+            .depth
+    }
+
+    fn assert_depth(app: &App, entity: Entity, expected: f32) {
+        let transform = app
+            .world()
+            .get::<Transform>(entity)
+            .expect("panel has transform");
+        assert_close(transform.translation.z, expected);
+    }
+
+    fn set_authored_depth(app: &mut App, entity: Entity, depth: f32) {
+        app.world_mut()
+            .get_mut::<Transform>(entity)
+            .expect("panel has transform")
+            .translation
+            .z = depth;
     }
 
     fn record_non_added_resolver_changes(
@@ -595,6 +622,130 @@ mod tests {
             .expect("source has resolved position");
         assert_eq!(resolved.anchor_position, Some(Vec2::new(116.0, 142.0)));
         assert_translation(&app, source, Vec2::new(-284.0, 158.0));
+    }
+
+    #[test]
+    fn z_offset_writes_translation_depth_relative_to_target() {
+        let mut app = app_with_window();
+        let target = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(200.0, 40.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 100.0),
+            ))
+            .id();
+        set_authored_depth(&mut app, target, 3.0);
+        let source = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0)).with_z(Px(5.0))),
+            ))
+            .id();
+
+        app.update();
+
+        assert_translation(&app, source, Vec2::new(-300.0, 159.0));
+        assert_depth(&app, source, 8.0);
+        assert_eq!(resolved_depth(&app, source), Some(8.0));
+    }
+
+    #[test]
+    fn z_offset_chain_accumulates_depth_in_one_update() {
+        let mut app = app_with_window();
+        let root = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(200.0, 40.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 100.0),
+            ))
+            .id();
+        let middle = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
+                AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::ZERO.with_z(Px(2.0))),
+            ))
+            .id();
+        let leaf = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
+                AnchoredToPanel::new(middle, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::ZERO.with_z(Px(3.0))),
+            ))
+            .id();
+
+        app.update();
+
+        assert_depth(&app, middle, 2.0);
+        assert_depth(&app, leaf, 5.0);
+    }
+
+    #[test]
+    fn removing_attachment_restores_authored_depth() {
+        let mut app = app_with_window();
+        let target = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(200.0, 40.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 100.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::ZERO.with_z(Px(5.0))),
+            ))
+            .id();
+        set_authored_depth(&mut app, source, 7.0);
+
+        app.update();
+        assert_depth(&app, source, 5.0);
+        assert_eq!(resolved_depth(&app, source), Some(5.0));
+
+        app.world_mut()
+            .entity_mut(source)
+            .remove::<AnchoredToPanel>();
+        app.update();
+
+        assert_eq!(resolved_depth(&app, source), None);
+        assert_depth(&app, source, 7.0);
+    }
+
+    #[test]
+    fn zero_z_offset_keeps_authored_depth_untouched() {
+        let mut app = app_with_window();
+        let target = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(200.0, 40.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 100.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
+            ))
+            .id();
+        set_authored_depth(&mut app, source, 7.0);
+
+        app.update();
+
+        assert_translation(&app, source, Vec2::new(-300.0, 159.0));
+        assert_eq!(resolved_depth(&app, source), None);
+        assert_depth(&app, source, 7.0);
     }
 
     #[test]

@@ -81,10 +81,12 @@ pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
 pub use cascade::FontUnit;
 pub use cascade::TextAlpha;
+pub use cascade::TextDrawLayer;
 pub use cascade::TextLighting;
 pub use cascade::TextSidedness;
 pub use cascade::resolved_font_unit;
 pub use cascade::resolved_text_alpha;
+pub use cascade::resolved_text_draw_layer;
 pub use cascade::resolved_text_lighting;
 pub use cascade::resolved_text_sidedness;
 #[cfg(feature = "typography_overlay")]

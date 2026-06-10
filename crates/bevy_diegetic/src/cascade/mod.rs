@@ -52,6 +52,7 @@
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
 //! | [`TextLighting`] | `CascadeDefault<TextLighting>` | `override_text_lighting`, `inherit_text_lighting`, [`resolved_text_lighting`] |
 //! | [`TextSidedness`] | `CascadeDefault<TextSidedness>` | `override_text_sidedness`, `inherit_text_sidedness`, [`resolved_text_sidedness`] |
+//! | [`TextDrawLayer`] | `CascadeDefault<TextDrawLayer>` | `override_text_draw_layer`, `inherit_text_draw_layer`, [`resolved_text_draw_layer`] |
 //!
 //! # Membership is a property of the tree, not of a shared component
 //!
@@ -111,15 +112,18 @@ mod resolved;
 pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
+pub use attributes::TextDrawLayer;
 pub use attributes::TextLighting;
 pub use attributes::TextSidedness;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_text_alpha;
+pub use attributes::resolved_text_draw_layer;
 pub use attributes::resolved_text_lighting;
 pub use attributes::resolved_text_sidedness;
 pub use cascade_set::CascadeSet;
+pub(crate) use constants::DEFAULT_TEXT_DRAW_LAYER;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;
 pub(crate) use plugin::CascadePlugin;

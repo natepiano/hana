@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
-use bevy_kana::ToF32;
 
 use super::PanelTextLayout;
 use super::PanelTextRuns;
@@ -12,6 +11,7 @@ use crate::PanelFieldId;
 use crate::cascade;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -26,7 +26,7 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::clip;
-use crate::render::constants;
+use crate::render::constants::DrawOrdinal;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::world_text::TextContent;
 
@@ -35,13 +35,14 @@ use crate::render::world_text::TextContent;
 /// `existing_children` query for one reconcile pass.
 #[derive(Clone, Copy)]
 struct ReusableChild<'a> {
-    entity:    Entity,
-    text:      &'a TextContent,
-    style:     &'a TextStyle,
-    layout:    &'a PanelTextLayout,
-    alpha:     Option<&'a Override<TextAlpha>>,
-    lighting:  Option<&'a Override<TextLighting>>,
-    sidedness: Option<&'a Override<TextSidedness>>,
+    entity:     Entity,
+    text:       &'a TextContent,
+    style:      &'a TextStyle,
+    layout:     &'a PanelTextLayout,
+    alpha:      Option<&'a Override<TextAlpha>>,
+    lighting:   Option<&'a Override<TextLighting>>,
+    sidedness:  Option<&'a Override<TextSidedness>>,
+    draw_layer: Option<&'a Override<TextDrawLayer>>,
 }
 
 /// One text render command resolved to its reconcile inputs: source
@@ -123,6 +124,7 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextAlpha>>,
         Option<&Override<TextLighting>>,
         Option<&Override<TextSidedness>>,
+        Option<&Override<TextDrawLayer>>,
     )>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -153,7 +155,8 @@ pub(super) fn reconcile_panel_text_children(
         let existing_run_entities: &[Entity] = panel_runs.map_or(&[][..], |runs| &**runs);
         let mut existing_by_key: HashMap<(PanelFieldId, usize), ReusableChild> = HashMap::new();
         for &entity in existing_run_entities {
-            let Ok((text, style, layout, alpha, lighting, sidedness)) = existing_runs.get(entity)
+            let Ok((text, style, layout, alpha, lighting, sidedness, draw_layer)) =
+                existing_runs.get(entity)
             else {
                 continue;
             };
@@ -167,6 +170,7 @@ pub(super) fn reconcile_panel_text_children(
                     alpha,
                     lighting,
                     sidedness,
+                    draw_layer,
                 },
             );
         }
@@ -175,12 +179,14 @@ pub(super) fn reconcile_panel_text_children(
         let mut text_index: HashMap<PanelFieldId, Entity> = HashMap::new();
         for (element_idx, cmd_index, id, line_index, text, config, bounds, clip) in &text_commands {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
-            // `with_lighting` / `with_sidedness`) are captured before
-            // `for_shaping()` clears them, then inserted as `Override<A>` on
-            // the label. `None` means the label inherits the panel value.
+            // `with_lighting` / `with_sidedness` / `with_draw_layer`) are
+            // captured before `for_shaping()` clears them, then inserted as
+            // `Override<A>` on the label. `None` means the label inherits the
+            // panel value.
             let label_alpha = config.alpha_mode();
             let label_lighting = config.lighting();
             let label_sidedness = config.sidedness();
+            let label_draw_layer = config.draw_layer();
             let style = config.for_shaping(Anchor::TopLeft);
             let panel_text_child = PanelTextLayout {
                 id: id.clone(),
@@ -208,6 +214,7 @@ pub(super) fn reconcile_panel_text_children(
                     label_alpha,
                     label_lighting,
                     label_sidedness,
+                    label_draw_layer,
                 });
                 reusable.entity
             } else {
@@ -220,6 +227,7 @@ pub(super) fn reconcile_panel_text_children(
                     label_alpha,
                     label_lighting,
                     label_sidedness,
+                    label_draw_layer,
                 })
             };
 
@@ -232,7 +240,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -249,22 +257,24 @@ pub(super) fn reconcile_panel_text_children(
 }
 
 /// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reconcile
-/// threads text, style, layout, and three captured cascade overrides through to
+/// threads text, style, layout, and four captured cascade overrides through to
 /// a freshly spawned child.
 struct SpawnPanelTextChild<'a, 'w, 's> {
-    commands:        &'a mut Commands<'w, 's>,
-    panel_entity:    Entity,
-    text:            &'a str,
-    style:           TextStyle,
-    layout:          PanelTextLayout,
-    label_alpha:     Option<AlphaMode>,
-    label_lighting:  Option<GlyphLighting>,
-    label_sidedness: Option<GlyphSidedness>,
+    commands:         &'a mut Commands<'w, 's>,
+    panel_entity:     Entity,
+    text:             &'a str,
+    style:            TextStyle,
+    layout:           PanelTextLayout,
+    label_alpha:      Option<AlphaMode>,
+    label_lighting:   Option<GlyphLighting>,
+    label_sidedness:  Option<GlyphSidedness>,
+    label_draw_layer: Option<TextDrawLayer>,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
-/// the three captured cascade overrides (alpha, lighting, sidedness) the label
-/// authored. `None` for an override means the label inherits the panel value.
+/// the four captured cascade overrides (alpha, lighting, sidedness, draw
+/// layer) the label authored. `None` for an override means the label inherits
+/// the panel value.
 fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
     let SpawnPanelTextChild {
         commands,
@@ -275,6 +285,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         label_alpha,
         label_lighting,
         label_sidedness,
+        label_draw_layer,
     } = request;
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
@@ -298,22 +309,26 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         if let Some(sidedness) = label_sidedness {
             cascade::apply_cascade_override(&mut child, TextSidedness(sidedness));
         }
+        if let Some(draw_layer) = label_draw_layer {
+            cascade::apply_cascade_override(&mut child, draw_layer);
+        }
     });
     spawned
 }
 
 /// Inputs to [`update_reused_panel_text_child`]. Grouped into a struct because
-/// reconcile threads text, style, layout, and three captured cascade overrides
+/// reconcile threads text, style, layout, and four captured cascade overrides
 /// through to a reused child.
 struct UpdateReusedChild<'a, 'w, 's> {
-    commands:        &'a mut Commands<'w, 's>,
-    reusable:        ReusableChild<'a>,
-    text:            &'a str,
-    style:           TextStyle,
-    layout:          PanelTextLayout,
-    label_alpha:     Option<AlphaMode>,
-    label_lighting:  Option<GlyphLighting>,
-    label_sidedness: Option<GlyphSidedness>,
+    commands:         &'a mut Commands<'w, 's>,
+    reusable:         ReusableChild<'a>,
+    text:             &'a str,
+    style:            TextStyle,
+    layout:           PanelTextLayout,
+    label_alpha:      Option<AlphaMode>,
+    label_lighting:   Option<GlyphLighting>,
+    label_sidedness:  Option<GlyphSidedness>,
+    label_draw_layer: Option<TextDrawLayer>,
 }
 
 /// Writes each gated component of a reused panel-text child only when it
@@ -321,10 +336,10 @@ struct UpdateReusedChild<'a, 'w, 's> {
 /// `shape_panel_text_children` plus the mesh rebuild skip it.
 ///
 /// `gating_eq` excludes render-context fields and compares floats by bits;
-/// the cascade overrides (alpha, lighting, sidedness) are gated on their own
-/// because `gating_eq` ignores them. Writing one unconditionally would re-fire
-/// `Changed<Resolved<A>>` on every run and defeat the per-run short-circuit
-/// downstream.
+/// the cascade overrides (alpha, lighting, sidedness, draw layer) are gated on
+/// their own because `gating_eq` ignores them. Writing one unconditionally
+/// would re-fire `Changed<Resolved<A>>` on every run and defeat the per-run
+/// short-circuit downstream.
 fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     let UpdateReusedChild {
         commands,
@@ -335,6 +350,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         label_alpha,
         label_lighting,
         label_sidedness,
+        label_draw_layer,
     } = request;
     let mut child = commands.entity(reusable.entity);
     if reusable.text.text() != text {
@@ -382,6 +398,18 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         None => {
             if reusable.sidedness.is_some() {
                 cascade::remove_cascade_override::<TextSidedness>(&mut child);
+            }
+        },
+    }
+    match label_draw_layer {
+        Some(incoming) => {
+            if reusable.draw_layer.map(|node_override| node_override.0) != Some(incoming) {
+                cascade::apply_cascade_override(&mut child, incoming);
+            }
+        },
+        None => {
+            if reusable.draw_layer.is_some() {
+                cascade::remove_cascade_override::<TextDrawLayer>(&mut child);
             }
         },
     }
@@ -614,7 +642,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: incoming.command_index.to_f32() * constants::LAYER_DEPTH_BIAS,
+        depth_bias: DrawOrdinal::from_command_index(incoming.command_index).depth_bias(),
         ..default()
     });
 
