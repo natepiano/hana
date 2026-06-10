@@ -867,11 +867,6 @@ fn metric_vertical_tick_lines(height_millimeters: i32, color: Color) -> Vec<Pane
     )
 }
 
-fn metric_vertical_spine_line(height_millimeters: i32, color: Color) -> PanelLine {
-    vertical_spine_line(height_millimeters.to_f32(), 0.0, PANEL_RULER_SPINE.0, color)
-}
-
-#[cfg(test)]
 fn metric_vertical_ruler_lines(height_millimeters: i32, color: Color) -> Vec<PanelLine> {
     let mut lines = metric_vertical_tick_lines(height_millimeters, color);
     lines.push(vertical_spine_line(
@@ -1118,36 +1113,20 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
             );
 
             // ── Right column: ticks + spine ─────────────────────
+            // One element, one lines list: same-color lines in one draw
+            // merge into a single analytic path, so the tick-spine
+            // junctions render without an anti-aliasing line.
             b.with(
                 El::new()
                     .width(Sizing::fixed(Mm(
                         PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
                     )))
                     .height(Sizing::fixed(Mm(height_millimeters.to_f32())))
-                    .direction(Direction::LeftToRight)
-                    .child_align_x(AlignX::Right),
-                |b| {
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .draw(PanelDraw::lines(metric_vertical_tick_lines(
-                                height_millimeters,
-                                ruler_color,
-                            ))),
-                        |_| {},
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(PANEL_RULER_SPINE))
-                            .height(Sizing::GROW)
-                            .draw(PanelDraw::lines([metric_vertical_spine_line(
-                                height_millimeters,
-                                ruler_color,
-                            )])),
-                        |_| {},
-                    );
-                },
+                    .draw(PanelDraw::lines(metric_vertical_ruler_lines(
+                        height_millimeters,
+                        ruler_color,
+                    ))),
+                |_| {},
             );
         },
     );

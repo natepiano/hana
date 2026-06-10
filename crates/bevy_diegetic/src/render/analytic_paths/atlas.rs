@@ -12,7 +12,8 @@ use super::CurveRecord;
 use super::GlyphRecord;
 use super::PathAtlasHandles;
 use super::PathOutline;
-use super::build_packed_path;
+use super::packing;
+use super::packing::BandLayout;
 
 /// Compact atlas keyed by caller-owned stable path identities.
 #[derive(Debug)]
@@ -44,8 +45,9 @@ impl<K> PathAtlas<K>
 where
     K: Clone + Eq + Hash,
 {
-    /// Rebuilds the atlas from the caller's live path set.
-    pub fn rebuild<I>(&mut self, paths: I, band_count: usize)
+    /// Rebuilds the atlas from the caller's live path set. Band counts scale
+    /// per axis so each band spans about `target_band_extent` design units.
+    pub fn rebuild<I>(&mut self, paths: I, target_band_extent: f32)
     where
         I: IntoIterator<Item = (K, PathOutline)>,
     {
@@ -55,11 +57,12 @@ where
         self.path_records.clear();
 
         for (key, path) in paths {
-            let packed = build_packed_path(path, band_count);
+            let min_feature = path.min_feature();
+            let layout = BandLayout::for_extents(path.bounds, target_band_extent);
+            let packed = packing::build_packed_path_with_layout(path, layout);
             let record_index = self.path_records.len().to_u32();
             let curve_start = self.curves.len().to_u32();
             let band_start = self.bands.len().to_u32();
-            let axis_band_count = packed.bands().len().to_u32() / 2;
 
             self.curves.extend_from_slice(packed.curves());
             self.bands
@@ -70,9 +73,10 @@ where
             self.path_records.push(GlyphRecord::new(
                 packed.bounds(),
                 band_start,
-                axis_band_count,
-                band_start + axis_band_count,
-                axis_band_count,
+                packed.horizontal_count(),
+                band_start + packed.horizontal_count(),
+                packed.vertical_count(),
+                min_feature,
             ));
             self.indices.insert(key, record_index);
         }

@@ -64,7 +64,15 @@ struct TextUniform {
     /// `edge_width` to a screen-space band derived from the distance gradient,
     /// which fixes the convex-corner flare at grazing angles.
     aa_band:          u32,
+    /// Minimum on-screen stroke width in device pixels for hairline-dilated
+    /// paths (`GlyphRecord::min_feature > 0`). Mirrored from
+    /// [`HairlineWidth`](crate::HairlineWidth) by `sync_hairline_width`.
+    hairline_min_px:  f32,
 }
+
+/// Constructor default for `TextUniform::hairline_min_px`; `sync_hairline_width`
+/// replaces it with the window-scale-derived value on the asset-added event.
+const HAIRLINE_DEFAULT_DEVICE_PX: f32 = 2.0;
 
 /// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
@@ -236,6 +244,7 @@ pub(crate) fn batch_text_material(input: BatchTextMaterialInput) -> TextMaterial
                 oit_depth_offset,
                 supersample: u32::from(supersample),
                 aa_band: u32::from(aa_band),
+                hairline_min_px: HAIRLINE_DEFAULT_DEVICE_PX,
             },
             curves,
             bands,
@@ -271,6 +280,12 @@ pub(crate) fn set_text_material_atlas(
     material.extension.curves = curves;
     material.extension.bands = bands;
     material.extension.glyphs = glyphs;
+}
+
+/// Updates the hairline minimum stroke width (device pixels) on a text
+/// material.
+pub(crate) const fn set_text_material_hairline(material: &mut TextMaterial, device_px: f32) {
+    material.extension.uniforms.hairline_min_px = device_px;
 }
 
 /// Updates the shader anti-aliasing switches on a text material.

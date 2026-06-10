@@ -157,10 +157,18 @@ fn build_line(
         STROKE_DESIGN_UNITS,
     );
     // One band per axis: a rectangle has four curves, and at line scale the
-    // default 96 bands starve the distance scan (see PANEL_LINE_BAND_COUNT).
+    // default 96 bands starve the distance scan (see
+    // PANEL_LINE_BAND_TARGET_DESIGN_UNITS).
     let packed = super::build_packed_path(rectangle_outline(design), 1);
     let band_count = u32::try_from(packed.bands().len() / 2).ok()?;
-    let glyph = GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count);
+    let glyph = GlyphRecord::new(
+        packed.bounds(),
+        0,
+        band_count,
+        band_count,
+        band_count,
+        design.x.min(design.y),
+    );
 
     let curves = storage_buffers.add(ShaderBuffer::from(packed.curves().to_vec()));
     let bands = storage_buffers.add(ShaderBuffer::from(packed.bands().to_vec()));
@@ -225,7 +233,8 @@ fn rectangle_outline(design: Vec2) -> PathOutline {
             max: design,
         },
         contours: vec![PathContour {
-            segments: corners
+            min_feature: design.x.min(design.y),
+            segments:    corners
                 .iter()
                 .copied()
                 .zip(corners.iter().copied().cycle().skip(1))

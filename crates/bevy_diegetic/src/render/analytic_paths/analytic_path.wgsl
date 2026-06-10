@@ -42,8 +42,17 @@ struct TextUniform {
     oit_depth_offset: f32,
     supersample: u32,
     aa_band: u32,
+    // Minimum on-screen stroke width in device pixels for hairline-dilated
+    // paths. Synced from the HairlineWidth resource (logical px × window
+    // scale factor, floored): a stroke dilated to under ~1.5px renders as
+    // either one solid column or two half-bright columns depending on pixel
+    // phase, so a near-vertical line stairsteps a full column per crossover.
+    hairline_min_px: f32,
 }
 
+// solver.xyz holds the distance-solver coefficients; solver.w carries the
+// owning contour's narrowest stroke in design units (per-curve hairline
+// dilation), 0.0 for undilated contours (text glyphs).
 struct CurveRecord {
     start_delta: vec4<f32>,
     curve_end: vec4<f32>,
@@ -61,11 +70,20 @@ struct BandRecord {
 struct GlyphRecord {
     bounds_min_size: vec4<f32>,
     band_range: vec4<u32>,
+    // Narrowest dilating stroke across the path's contours, in design units;
+    // > 0 enables hairline dilation and sizes the distance scan for the
+    // largest dilation in the path. 0 for text. Per-contour widths arrive in
+    // each curve's solver.w.
+    min_feature: f32,
 }
 
 struct CoverageTerms {
     winding: i32,
-    distance_sq: f32,
+    // Min over scanned curves of (distance - that curve's dilation): the
+    // distance to the nearest per-contour-dilated silhouette.
+    adjusted: f32,
+    // Dilation of the curve that won `adjusted`.
+    dilation: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: TextUniform;
@@ -292,21 +310,47 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
         point.y > bounds_max.y;
 }
 
+// Per-curve hairline dilation. hairline_target is the minimum on-screen
+// stroke width converted to design units (pixel_design_units ×
+// uniforms.hairline_min_px); a curve whose contour stroke (solver.w) falls
+// below it dilates by half the deficit. 0 for undilated contours.
+fn curve_dilation(curve: CurveRecord, hairline_target: f32) -> f32 {
+    if curve.solver.w <= 0.0 {
+        return 0.0;
+    }
+    return max(0.0, (hairline_target - curve.solver.w) * 0.5);
+}
+
+fn accumulate_nearest(
+    terms: ptr<function, CoverageTerms>,
+    point: vec2<f32>,
+    curve: CurveRecord,
+    hairline_target: f32,
+) {
+    let dilation = curve_dilation(curve, hairline_target);
+    let adjusted = sqrt(curve_distance_sq(point, curve)) - dilation;
+    if adjusted < (*terms).adjusted {
+        (*terms).adjusted = adjusted;
+        (*terms).dilation = dilation;
+    }
+}
+
 fn horizontal_coverage_terms(
     point: vec2<f32>,
-    edge_width_sq: f32,
+    scan_width_sq: f32,
+    hairline_target: f32,
     glyph: GlyphRecord,
 ) -> CoverageTerms {
     let include_winding = !outside_glyph_bounds(point, glyph);
     let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
-    var terms = CoverageTerms(0, 1000000000000.0);
+    var terms = CoverageTerms(0, 1000000.0, 0.0);
     for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
         let curve = curves[horizontal_band.start + offset];
         if include_winding {
             terms.winding += curve_winding(curve, point);
         }
-        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
-            terms.distance_sq = min(terms.distance_sq, curve_distance_sq(point, curve));
+        if curve_bounds_distance_sq(point, curve) <= scan_width_sq {
+            accumulate_nearest(&terms, point, curve, hairline_target);
         }
     }
     return terms;
@@ -337,21 +381,22 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
     return dot(diff, diff);
 }
 
-fn nearest_vertical_curve_distance_sq(
+fn nearest_vertical_curve(
     point: vec2<f32>,
-    edge_width_sq: f32,
+    scan_width_sq: f32,
+    hairline_target: f32,
     glyph: GlyphRecord,
-    initial_distance_sq: f32,
-) -> f32 {
+    initial: CoverageTerms,
+) -> CoverageTerms {
     let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
-    var distance_sq = initial_distance_sq;
+    var terms = initial;
     for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
         let curve = curves[vertical_band.start + offset];
-        if curve_bounds_distance_sq(point, curve) <= edge_width_sq {
-            distance_sq = min(distance_sq, curve_distance_sq(point, curve));
+        if curve_bounds_distance_sq(point, curve) <= scan_width_sq {
+            accumulate_nearest(&terms, point, curve, hairline_target);
         }
     }
-    return distance_sq;
+    return terms;
 }
 
 // Non-zero winding number at `point`, using the point's horizontal band.
@@ -369,7 +414,7 @@ fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
 }
 
 // Whether any neighbor one filter-width away is outside the fill. A true
-// outer silhouette has at least one outside neighbor; an interior seam of a
+// outer silhouette has at least one outside neighbor; an interior edge of a
 // self-intersecting / overlapping glyph (e.g. the EB Garamond `g` neck) is
 // filled on both sides, so all neighbors stay inside.
 fn any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -> bool {
@@ -379,56 +424,63 @@ fn any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -
         || winding_at(point - vec2<f32>(0.0, edge_width), glyph) == 0;
 }
 
-fn distance_coverage(point: vec2<f32>, pixel: vec2<f32>, glyph: GlyphRecord) -> f32 {
+fn distance_coverage(
+    point: vec2<f32>,
+    pixel: vec2<f32>,
+    dilation_max: f32,
+    hairline_target: f32,
+    glyph: GlyphRecord,
+) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
-    let edge_width_sq = edge_width * edge_width;
-    let terms = horizontal_coverage_terms(point, edge_width_sq, glyph);
+    // The distance scan must reach the most-dilated silhouette plus the AA ramp.
+    let scan_width = edge_width + dilation_max;
+    let scan_width_sq = scan_width * scan_width;
+    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
     let inside = terms.winding != 0;
-    let distance_sq = nearest_vertical_curve_distance_sq(
-        point,
-        edge_width_sq,
-        glyph,
-        terms.distance_sq,
-    );
-    if distance_sq > edge_width_sq {
+    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
+    if terms.adjusted > edge_width {
         return select(0.0, 1.0, inside);
     }
 
     // An inside fragment within edge_width of a curve sits either near the true
-    // outer silhouette (apply the AA ramp) or near an interior seam where two
-    // filled regions overlap (keep solid). The seam case has no outside
+    // outer silhouette (apply the AA ramp) or near an interior edge where two
+    // filled regions overlap (keep solid). The overlap case has no outside
     // neighbor, so the down-ramp toward the submerged edge must be suppressed.
     if inside && !any_outside_neighbor(point, edge_width, glyph) {
         return 1.0;
     }
 
-    let distance = sqrt(distance_sq);
-    let signed_distance = select(-distance, distance, inside);
+    // This smoothstep ramp is inside-POSITIVE (unlike signed_distance, whose
+    // band_coverage consumer is inside-negative). Outside, -adjusted =
+    // dilation - distance goes positive within the dilated halo; inside, the
+    // dilated edge is farther out than the raw edge: distance + dilation =
+    // adjusted + 2 * dilation.
+    let signed_distance = select(-terms.adjusted, terms.adjusted + 2.0 * terms.dilation, inside);
     return smoothstep(-edge_width, edge_width, signed_distance);
 }
 
-// Signed design-space distance to the glyph silhouette: negative inside,
-// positive outside, saturated to ±edge_width beyond the scan range. Interior
-// overlaps are forced solidly negative (same case any_outside_neighbor guards in
-// distance_coverage). Feeds the screen-space AA band used by aa_band mode.
-fn signed_distance(point: vec2<f32>, edge_width_sq: f32, glyph: GlyphRecord) -> f32 {
-    let edge_width = sqrt(edge_width_sq);
-    let terms = horizontal_coverage_terms(point, edge_width_sq, glyph);
+// Signed design-space distance to the per-curve-dilated silhouette: negative
+// inside, positive outside, saturated to ±scan_width beyond the scan range.
+// Interior overlaps are forced solidly negative (same case
+// any_outside_neighbor guards in distance_coverage). Feeds the screen-space
+// AA band used by aa_band mode.
+fn signed_distance(
+    point: vec2<f32>,
+    scan_width_sq: f32,
+    hairline_target: f32,
+    glyph: GlyphRecord,
+) -> f32 {
+    let scan_width = sqrt(scan_width_sq);
+    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
     let inside = terms.winding != 0;
-    let distance_sq = nearest_vertical_curve_distance_sq(
-        point,
-        edge_width_sq,
-        glyph,
-        terms.distance_sq,
-    );
-    if distance_sq > edge_width_sq {
-        return select(edge_width, -edge_width, inside);
+    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
+    if terms.adjusted > scan_width {
+        return select(scan_width, -scan_width, inside);
     }
-    if inside && !any_outside_neighbor(point, edge_width, glyph) {
-        return -edge_width;
+    if inside && !any_outside_neighbor(point, scan_width, glyph) {
+        return -scan_width;
     }
-    let distance = sqrt(distance_sq);
-    return select(distance, -distance, inside);
+    return select(terms.adjusted, -(terms.adjusted + 2.0 * terms.dilation), inside);
 }
 
 // Coverage from a signed distance and a screen-space band width: a 1px box ramp
@@ -455,10 +507,11 @@ fn aniso_band_coverage(
     point: vec2<f32>,
     dx: vec2<f32>,
     dy: vec2<f32>,
-    edge_width_sq: f32,
+    scan_width_sq: f32,
+    hairline_target: f32,
     glyph: GlyphRecord,
 ) -> f32 {
-    let sd_center = signed_distance(point, edge_width_sq, glyph);
+    let sd_center = signed_distance(point, scan_width_sq, hairline_target, glyph);
     let len_dx = length(dx);
     let len_dy = length(dy);
     let major = select(dy, dx, len_dx >= len_dy);
@@ -468,15 +521,18 @@ fn aniso_band_coverage(
     let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
     let inv_count = 1.0 / sample_count;
 
-    let d_major = min(abs(signed_distance(point + major, edge_width_sq, glyph) - sd_center), major_len);
-    let d_minor = min(abs(signed_distance(point + minor, edge_width_sq, glyph) - sd_center), minor_len);
+    let d_major = min(abs(signed_distance(point + major, scan_width_sq, hairline_target, glyph) - sd_center), major_len);
+    let d_minor = min(abs(signed_distance(point + minor, scan_width_sq, hairline_target, glyph) - sd_center), minor_len);
     let per_band = max(d_minor + d_major * inv_count, ROOT_EPSILON);
 
     let count = u32(sample_count);
     var sum = 0.0;
     for (var index = 0u; index < count; index += 1u) {
         let stride = (f32(index) + 0.5) * inv_count - 0.5;
-        sum += band_coverage(signed_distance(point + stride * major, edge_width_sq, glyph), per_band);
+        sum += band_coverage(
+            signed_distance(point + stride * major, scan_width_sq, hairline_target, glyph),
+            per_band,
+        );
     }
     return sum * inv_count;
 }
@@ -490,6 +546,24 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
     let dx = dpdx(point);
     let dy = dpdy(point);
 
+    // Hairline dilation: a contour whose stroke falls below
+    // uniforms.hairline_min_px on screen is rendered dilated to that width, so
+    // a ruler tick stays a uniform thin line instead of a sub-pixel sliver
+    // whose brightness depends on where it lands in the pixel grid. Each curve
+    // dilates by its own contour's deficit (solver.w), so a merged path mixing
+    // stroke widths dilates every member exactly to the floor. hairline_target
+    // is the floor in design units, sized from the well-resolved footprint
+    // axis so grazing-angle foreshortening cannot balloon the dilation;
+    // dilation_max (from the narrowest contour) sizes the distance scan.
+    // glyph.min_feature == 0 (text glyphs) disables.
+    var dilation_max = 0.0;
+    var hairline_target = 0.0;
+    if glyph.min_feature > 0.0 {
+        let pixel_design_units = min(pixel.x, pixel.y);
+        hairline_target = pixel_design_units * uniforms.hairline_min_px;
+        dilation_max = max(0.0, (hairline_target - glyph.min_feature) * 0.5);
+    }
+
     // The two AA axes are independent. aa_band picks the edge-ramp width (scalar
     // design-space `edge_width` vs. a screen-space band that holds ~1px per axis,
     // so the convex-corner apron can't balloon at grazing). supersample picks 1
@@ -500,27 +574,28 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
     var coverage: f32;
     if uniforms.aa_band != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
-        let edge_width_sq = edge_width * edge_width;
+        let scan_width = edge_width + dilation_max;
+        let scan_width_sq = scan_width * scan_width;
         if uniforms.supersample != 0u {
-            coverage = aniso_band_coverage(point, dx, dy, edge_width_sq, glyph);
+            coverage = aniso_band_coverage(point, dx, dy, scan_width_sq, hairline_target, glyph);
         } else {
             // Single sample: one full-footprint band from the center sample's
             // screen-space distance gradient.
-            let band = max(fwidth(signed_distance(point, edge_width_sq, glyph)), ROOT_EPSILON);
-            coverage = band_coverage(signed_distance(point, edge_width_sq, glyph), band);
+            let band = max(fwidth(signed_distance(point, scan_width_sq, hairline_target, glyph)), ROOT_EPSILON);
+            coverage = band_coverage(signed_distance(point, scan_width_sq, hairline_target, glyph), band);
         }
     } else if uniforms.supersample != 0u {
         // Scalar band, four rotated-grid footprint samples (the original path). At
         // grazing angles dx/dy stretch along the foreshortened axis, so the
         // samples integrate the coverage strip a single sample cannot capture.
         var sum = 0.0;
-        sum += distance_coverage(point + 0.375 * dx + 0.125 * dy, pixel, glyph);
-        sum += distance_coverage(point - 0.125 * dx + 0.375 * dy, pixel, glyph);
-        sum += distance_coverage(point - 0.375 * dx - 0.125 * dy, pixel, glyph);
-        sum += distance_coverage(point + 0.125 * dx - 0.375 * dy, pixel, glyph);
+        sum += distance_coverage(point + 0.375 * dx + 0.125 * dy, pixel, dilation_max, hairline_target, glyph);
+        sum += distance_coverage(point - 0.125 * dx + 0.375 * dy, pixel, dilation_max, hairline_target, glyph);
+        sum += distance_coverage(point - 0.375 * dx - 0.125 * dy, pixel, dilation_max, hairline_target, glyph);
+        sum += distance_coverage(point + 0.125 * dx - 0.375 * dy, pixel, dilation_max, hairline_target, glyph);
         coverage = sum * 0.25;
     } else {
-        coverage = distance_coverage(point, pixel, glyph);
+        coverage = distance_coverage(point, pixel, dilation_max, hairline_target, glyph);
     }
 
     if render_mode == RENDER_MODE_PUNCH_OUT {

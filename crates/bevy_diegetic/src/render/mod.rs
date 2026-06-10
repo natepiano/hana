@@ -56,6 +56,7 @@ pub(crate) use batch_key::VisualShadow;
 pub(crate) use batch_key::VisualSidedness;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
@@ -168,6 +169,74 @@ fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Asset
     }
 }
 
+/// Minimum on-screen width for hairline-dilated strokes (panel lines and
+/// analytic lines), in logical pixels. The shader dilates any thinner stroke
+/// up to this width, at full alpha.
+///
+/// The applied device-pixel value is `logical_px ×` the primary window's
+/// scale factor, with a scale-dependent floor: 1.75 device pixels below
+/// scale 2 (low-DPI strokes need the extra width for clean anti-aliasing),
+/// 1.5 at scale 2 and above. Below 1.5 device pixels the anti-aliased
+/// profile alternates with pixel phase and near-vertical lines stairstep a
+/// full column at each crossover.
+#[derive(Resource, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Resource)]
+pub struct HairlineWidth {
+    /// Target stroke width in logical pixels.
+    pub logical_px: f32,
+}
+
+impl Default for HairlineWidth {
+    fn default() -> Self { Self { logical_px: 1.0 } }
+}
+
+/// Floor for the applied hairline width at scale factor ≥ 2 — see
+/// [`HairlineWidth`].
+const HAIRLINE_MIN_DEVICE_PX_HIGH_DPI: f32 = 1.5;
+
+/// Floor below scale factor 2: with fewer device pixels per stroke,
+/// anti-aliasing needs the extra width to render cleanly.
+const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.75;
+
+/// Mirrors [`HairlineWidth`] × window scale factor into every text material's
+/// `hairline_min_px` uniform: all materials when the applied value changes,
+/// plus newly added materials (which carry a constructor default).
+fn sync_hairline_width(
+    hairline_width: Res<HairlineWidth>,
+    windows: Query<&Window, With<PrimaryWindow>>,
+    mut materials: ResMut<Assets<TextMaterial>>,
+    mut material_events: MessageReader<AssetEvent<TextMaterial>>,
+    mut applied_device_px: Local<Option<f32>>,
+) {
+    let scale_factor = windows.iter().next().map_or(1.0, Window::scale_factor);
+    let floor = if scale_factor >= 2.0 {
+        HAIRLINE_MIN_DEVICE_PX_HIGH_DPI
+    } else {
+        HAIRLINE_MIN_DEVICE_PX_LOW_DPI
+    };
+    let device_px = (hairline_width.logical_px * scale_factor).max(floor);
+    if *applied_device_px != Some(device_px) {
+        *applied_device_px = Some(device_px);
+        material_events.clear();
+        for (_, material) in materials.iter_mut() {
+            analytic_paths::set_text_material_hairline(material, device_px);
+        }
+        return;
+    }
+    let added: Vec<AssetId<TextMaterial>> = material_events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::Added { id } => Some(*id),
+            _ => None,
+        })
+        .collect();
+    for id in added {
+        if let Some(mut material) = materials.get_mut(id) {
+            analytic_paths::set_text_material_hairline(&mut material, device_px);
+        }
+    }
+}
+
 /// Umbrella render plugin — registers the render-side sub-plugins
 /// (slug text, SDF panel geometry).
 pub(crate) struct RenderPlugin;
@@ -181,11 +250,12 @@ impl Plugin for RenderPlugin {
             PanelLinePlugin,
         ))
         .init_resource::<TextAntiAlias>()
+        .init_resource::<HairlineWidth>()
         // Bevy registers the OIT type without `ReflectComponent`; adding it
         // enables reflection-based (BRP) edits of OIT settings on a live camera.
         .register_type::<OrderIndependentTransparencySettings>()
         .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
-        .add_systems(Update, sync_text_anti_alias)
+        .add_systems(Update, (sync_text_anti_alias, sync_hairline_width))
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)
         .add_observer(transparency::on_screen_space_camera_added);

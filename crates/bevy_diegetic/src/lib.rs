@@ -241,6 +241,7 @@ pub use render::AnalyticLineProbe;
 pub use render::AnalyticLineProbePlugin;
 pub use render::DiegeticTextBatch;
 pub use render::DiegeticTextMut;
+pub use render::HairlineWidth;
 pub use render::PanelText;
 pub use render::PanelTextLayout;
 pub use render::PanelTextReader;

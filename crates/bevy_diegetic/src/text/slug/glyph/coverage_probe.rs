@@ -473,7 +473,8 @@ fn sharp_corner_glyph() -> (Glyph, Vec<QuadraticSegment>) {
             max: Vec2::new(580.0, 700.0),
         },
         contours:  vec![Contour {
-            segments: segments.clone(),
+            segments:    segments.clone(),
+            min_feature: 0.0,
         }],
     };
     (glyph, segments)
@@ -495,7 +496,7 @@ fn build() -> (Probe, GroundTruth) {
     let packed = super::build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
     let band_count = (packed.bands().len() / 2) as u32;
     let probe = Probe {
-        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count),
+        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
         curves: packed.curves().to_vec(),
         bands:  packed.bands().to_vec(),
     };
@@ -638,7 +639,7 @@ fn stride_does_not_alias_straight_edge() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0xfca6_d34a_6056_e2b4;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xb3c7_8b91_b811_f369;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,
@@ -680,12 +681,15 @@ fn rectangle_probe(size: Vec2, band_count: usize) -> Probe {
             min: Vec2::ZERO,
             max: size,
         },
-        contours:  vec![Contour { segments }],
+        contours:  vec![Contour {
+            segments,
+            min_feature: 0.0,
+        }],
     };
     let packed = super::build_packed_glyph(glyph, band_count);
     let band_count = (packed.bands().len() / 2) as u32;
     Probe {
-        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count),
+        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
         curves: packed.curves().to_vec(),
         bands:  packed.bands().to_vec(),
     }
@@ -818,7 +822,10 @@ fn atlas_packed_tall_spine_covers_full_length() {
                 min: Vec2::ZERO,
                 max: *size,
             },
-            contours:  vec![Contour { segments }],
+            contours:  vec![Contour {
+                segments,
+                min_feature: 0.0,
+            }],
         };
         let packed: PackedPath = super::build_packed_glyph(glyph, 1);
         let curve_start = curves.len() as u32;
@@ -835,6 +842,7 @@ fn atlas_packed_tall_spine_covers_full_length() {
             axis_band_count,
             band_start + axis_band_count,
             axis_band_count,
+            0.0,
         ));
     }
 

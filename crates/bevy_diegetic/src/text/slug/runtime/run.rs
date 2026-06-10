@@ -214,6 +214,7 @@ impl GlyphOutlineCache {
                     axis_band_count,
                     band_start + axis_band_count,
                     axis_band_count,
+                    0.0,
                 ));
                 self.record_indices.insert(key, record_index);
                 self.revision = self.revision.wrapping_add(1);

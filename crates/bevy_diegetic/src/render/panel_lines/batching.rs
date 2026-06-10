@@ -57,14 +57,15 @@ use crate::render::VisualShadow;
 use crate::render::VisualSidedness;
 use crate::render::constants;
 
-/// Panel-line paths pack with a single band per axis. Bands shrink the
-/// per-fragment curve loop for glyphs with hundreds of curves, but a line
-/// rectangle has four and a cap at most a dozen — and at line scale (a tick
-/// packs ~100 design units tall) 96 bands are ~1 unit wide, so the banded
-/// distance scan cannot see an edge beyond ~2 units. The signed distance then
-/// saturates inside the silhouette and the AA ramp collapses to a hard step.
-/// One band keeps the distance exact at every zoom.
-const PANEL_LINE_BAND_COUNT: usize = 1;
+/// Target design-unit extent for one panel-line band (≈ 5.8mm at the
+/// reference design scale). Bands shrink the per-fragment curve loop — a
+/// merged ruler path carries hundreds of curves — but the banded distance
+/// scan is blind past the band overlap (half this extent), so bands smaller
+/// than the on-screen scan width collapse the AA ramp to a hard step. At
+/// this size a single tick or arrowhead still packs one exact band, and
+/// blindness only sets in once a whole millimeter ruler drops under ~200
+/// screen pixels, where 1mm ticks are sub-pixel mush regardless.
+const PANEL_LINE_BAND_TARGET_DESIGN_UNITS: f32 = 2048.0;
 
 const PANEL_LINE_LINE_DEPTH_BIAS_STEP: f32 = 0.001;
 const PANEL_LINE_PART_DEPTH_BIAS_STEP: f32 = 0.000_001;
@@ -271,7 +272,8 @@ impl PanelLineBatchStore {
                     .map(|record| (record.key, record.outline.clone()))
             })
             .collect();
-        self.atlas.rebuild(paths, PANEL_LINE_BAND_COUNT);
+        self.atlas
+            .rebuild(paths, PANEL_LINE_BAND_TARGET_DESIGN_UNITS);
         for batch in self.batches.values_mut() {
             for record in &mut batch.records {
                 if let Some(atlas_index) = self.atlas.index(&record.key) {
@@ -359,6 +361,71 @@ struct BuiltPanelLinePrimitive {
     record:    LineBatchRecord,
 }
 
+/// Same-silhouette grouping key: primitives that agree on everything that
+/// must be uniform across one merged analytic path. Members of one group
+/// render as a single multi-contour path, so abutting strokes (tick meets
+/// spine) share one winding field and one anti-aliasing ramp.
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct LineMergeKey {
+    element_index: usize,
+    color:         [u32; 4],
+    clip:          Option<[u32; 4]>,
+    owner_bounds:  [u32; 4],
+    paint_lane:    LinePaintLane,
+    layering:      [u32; 2],
+}
+
+impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
+    fn from(source: &LinePrimitiveSource<'_>) -> Self {
+        let linear = source.primitive.color().to_linear();
+        let layering = source.line.layering();
+        Self {
+            element_index: source.element_index,
+            color:         [
+                linear.red.to_bits(),
+                linear.green.to_bits(),
+                linear.blue.to_bits(),
+                linear.alpha.to_bits(),
+            ],
+            clip:          source.primitive.clip().map(bounding_box_bits),
+            owner_bounds:  bounding_box_bits(source.line.owner_bounds()),
+            paint_lane:    LinePaintLane::from(source.line.paint_order()),
+            layering:      [
+                layering.depth_bias.to_bits(),
+                layering.oit_depth_offset.to_bits(),
+            ],
+        }
+    }
+}
+
+const fn bounding_box_bits(bounds: BoundingBox) -> [u32; 4] {
+    [
+        bounds.x.to_bits(),
+        bounds.y.to_bits(),
+        bounds.width.to_bits(),
+        bounds.height.to_bits(),
+    ]
+}
+
+/// Splits the primitive list into merge groups, preserving first-occurrence
+/// order so group identities stay stable across reconciles.
+fn group_line_primitives<'a>(
+    sources: Vec<LinePrimitiveSource<'a>>,
+) -> Vec<Vec<LinePrimitiveSource<'a>>> {
+    let mut groups: Vec<Vec<LinePrimitiveSource<'a>>> = Vec::new();
+    let mut group_indices: HashMap<LineMergeKey, usize> = HashMap::new();
+    for source in sources {
+        let key = LineMergeKey::from(&source);
+        if let Some(&index) = group_indices.get(&key) {
+            groups[index].push(source);
+        } else {
+            group_indices.insert(key, groups.len());
+            groups.push(vec![source]);
+        }
+    }
+    groups
+}
+
 pub(super) fn reconcile_panel_line_batches(
     changed_panels: Query<
         (
@@ -441,9 +508,9 @@ fn collect_panel_records(
     render_commands: &[RenderCommand],
     store: &mut PanelLineBatchStore,
 ) -> Vec<(LineBatchKey, LineBatchRecord)> {
-    collect_line_primitives(render_commands)
+    group_line_primitives(collect_line_primitives(render_commands))
         .into_iter()
-        .filter_map(|source| build_panel_line_primitive(context, source, store))
+        .filter_map(|group| build_panel_line_group(context, group, store))
         .map(|built| (built.batch_key, built.record))
         .collect()
 }
@@ -467,20 +534,37 @@ fn collect_line_primitives(render_commands: &[RenderCommand]) -> Vec<LinePrimiti
     primitives
 }
 
-fn build_panel_line_primitive(
+fn build_panel_line_group(
     context: &PanelLineReconcileContext<'_>,
-    source: LinePrimitiveSource<'_>,
+    group: Vec<LinePrimitiveSource<'_>>,
     store: &mut PanelLineBatchStore,
 ) -> Option<BuiltPanelLinePrimitive> {
-    if clipped_out(source.primitive.bounds(), source.primitive.clip()) {
-        return None;
-    }
+    let members: Vec<&LinePrimitiveSource<'_>> = group
+        .iter()
+        .filter(|source| !clipped_out(source.primitive.bounds(), source.primitive.clip()))
+        .collect();
+    let first = members.first()?;
 
-    let path = path::build_panel_line_path(source.primitive, &context.path_context)?;
-    let depth_bias = primitive_depth_bias(source.line, source.primitive);
-    let oit_depth_offset = primitive_oit_depth_offset(source.line, source.primitive);
+    let primitives: Vec<&ResolvedPanelLinePrimitive> =
+        members.iter().map(|source| source.primitive).collect();
+    let path = path::build_panel_line_path(
+        &primitives,
+        first.line.owner_bounds(),
+        first.primitive.clip(),
+        &context.path_context,
+    )?;
+    // A merged silhouette has one depth; the lowest member offset keeps the
+    // group at the depth the front-most authoring order produced alone.
+    let depth_bias = members
+        .iter()
+        .map(|source| primitive_depth_bias(source.line, source.primitive))
+        .fold(f32::INFINITY, f32::min);
+    let oit_depth_offset = members
+        .iter()
+        .map(|source| primitive_oit_depth_offset(source.line, source.primitive))
+        .fold(f32::INFINITY, f32::min);
     let base = constants::resolve_material(
-        context.panel.tree().element_material(source.element_index),
+        context.panel.tree().element_material(first.element_index),
         context.panel.material(),
         None,
     );
@@ -493,13 +577,13 @@ fn build_panel_line_primitive(
         shadow: context.shadow,
         layers: context.layers.clone(),
     };
-    let paint_lane = LinePaintLane::from(source.line.paint_order());
+    let paint_lane = LinePaintLane::from(first.line.paint_order());
     let batch_key = LineBatchKey::new(visual, paint_lane, batch_material_depth_bias(paint_lane));
     let key = PanelLineRenderKey {
         panel:  context.panel_entity,
-        source: source.primitive.source_key(),
+        source: first.primitive.source_key(),
     };
-    let linear = source.primitive.color().to_linear();
+    let linear = first.primitive.color().to_linear();
     let run = RunRecord {
         transform: context.panel_transform,
         fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
@@ -1159,7 +1243,8 @@ mod tests {
                 max: Vec2::ONE,
             },
             contours: vec![PathContour {
-                segments: vec![
+                min_feature: 0.0,
+                segments:    vec![
                     QuadraticSegment {
                         start:   Vec2::ZERO,
                         control: Vec2::new(0.5, 0.0),

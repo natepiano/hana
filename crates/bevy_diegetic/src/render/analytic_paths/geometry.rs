@@ -36,7 +36,11 @@ impl Bounds {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PathContour {
     /// Quadratic segments in contour order.
-    pub segments: Vec<QuadraticSegment>,
+    pub segments:    Vec<QuadraticSegment>,
+    /// Narrowest stroke of this contour in design-space units, packed per
+    /// curve for hairline dilation. `0.0` disables — text glyph contours
+    /// stay undilated.
+    pub min_feature: f32,
 }
 
 /// Renderer-owned quadratic outline representation.
@@ -46,4 +50,24 @@ pub(crate) struct PathOutline {
     pub bounds:   Bounds,
     /// Closed contours that make up the filled path.
     pub contours: Vec<PathContour>,
+}
+
+impl PathOutline {
+    /// Narrowest dilating stroke across all contours, forwarded to
+    /// `GlyphRecord::min_feature` so the shader sizes its distance scan for
+    /// the largest dilation in the path. `0.0` when no contour dilates.
+    #[must_use]
+    pub fn min_feature(&self) -> f32 {
+        let narrowest = self
+            .contours
+            .iter()
+            .map(|contour| contour.min_feature)
+            .filter(|min_feature| *min_feature > 0.0)
+            .fold(f32::INFINITY, f32::min);
+        if narrowest.is_finite() {
+            narrowest
+        } else {
+            0.0
+        }
+    }
 }
