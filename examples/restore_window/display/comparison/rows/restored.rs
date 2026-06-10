@@ -1,42 +1,28 @@
-use bevy::prelude::*;
-use bevy::window::WindowPosition;
-use bevy_kana::ToI32;
-use bevy_kana::ToU32;
-use bevy_window_manager::CurrentMonitor;
+use bevy::prelude::ChildSpawnerCommands;
+use bevy::prelude::TextFont;
 
-use super::super::constants::ACTUAL_COLUMN_TITLE;
-use super::super::constants::AUTOMATIC_TEXT;
-use super::super::constants::COMPARISON_COLUMN_PADDING;
-use super::super::constants::CURRENT_COLUMN_TITLE;
-use super::super::constants::DEFAULT_COLOR;
-use super::super::constants::EFFECTIVE_MODE_LABEL;
-use super::super::constants::EXPECTED_COLUMN_TITLE;
-use super::super::constants::LABEL_WIDTH;
-use super::super::constants::MIN_COMPARISON_COLUMN_WIDTH;
-use super::super::constants::MISMATCH_COLOR;
-use super::super::constants::MISMATCH_WARN_COLOR;
-use super::super::constants::MODE_LABEL;
-use super::super::constants::MONITOR_LABEL;
-use super::super::constants::NO_RESTORE_DATA_TEXT;
-use super::super::constants::NONE_TEXT;
-use super::super::constants::POSITION_LOGICAL_LABEL;
-use super::super::constants::POSITION_PHYSICAL_LABEL;
-use super::super::constants::RESTORED_COLUMN_TITLE;
-use super::super::constants::SCALE_LABEL;
-use super::super::constants::SIZE_LOGICAL_LABEL;
-use super::super::constants::SIZE_PHYSICAL_LABEL;
-use super::super::events::CachedMismatchState;
-use super::super::events::CachedRestoredState;
-
-struct CurrentValues {
-    physical_position: String,
-    logical_position:  String,
-    physical_size:     String,
-    logical_size:      String,
-    scale:             String,
-    monitor:           String,
-    mode:              String,
-}
+use super::super::values::CurrentValues;
+use super::super::values::RestoredValues;
+use super::span::add_span;
+use crate::constants::ACTUAL_COLUMN_TITLE;
+use crate::constants::CURRENT_COLUMN_TITLE;
+use crate::constants::DEFAULT_COLOR;
+use crate::constants::EXPECTED_COLUMN_TITLE;
+use crate::constants::LABEL_WIDTH;
+use crate::constants::MIN_COMPARISON_COLUMN_WIDTH;
+use crate::constants::MISMATCH_COLOR;
+use crate::constants::MISMATCH_WARN_COLOR;
+use crate::constants::MODE_LABEL;
+use crate::constants::MONITOR_LABEL;
+use crate::constants::NONE_TEXT;
+use crate::constants::POSITION_LOGICAL_LABEL;
+use crate::constants::POSITION_PHYSICAL_LABEL;
+use crate::constants::RESTORED_COLUMN_TITLE;
+use crate::constants::SCALE_LABEL;
+use crate::constants::SIZE_LOGICAL_LABEL;
+use crate::constants::SIZE_PHYSICAL_LABEL;
+use crate::events::CachedMismatchState;
+use crate::events::CachedRestoredState;
 
 struct ComparisonMismatch {
     expected: String,
@@ -56,111 +42,8 @@ enum ComparisonLayout {
     WithMismatchColumns,
 }
 
-struct RestoredValues {
-    physical_position: String,
-    logical_position:  String,
-    physical_size:     String,
-    logical_size:      String,
-    monitor:           String,
-    mode:              String,
-}
-
-impl From<&CachedRestoredState> for RestoredValues {
-    fn from(cached_restored_state: &CachedRestoredState) -> Self {
-        let physical_size = cached_restored_state.physical_size;
-        let logical_size = cached_restored_state.logical_size;
-        Self {
-            physical_position: cached_restored_state.physical_position.map_or_else(
-                || NONE_TEXT.to_string(),
-                |position| format!("({}, {})", position.x, position.y),
-            ),
-            logical_position:  cached_restored_state.logical_position.map_or_else(
-                || NONE_TEXT.to_string(),
-                |position| format!("({}, {})", position.x, position.y),
-            ),
-            physical_size:     format!("{}x{}", physical_size.x, physical_size.y),
-            logical_size:      format!("{}x{}", logical_size.x, logical_size.y),
-            monitor:           cached_restored_state.monitor.to_string(),
-            mode:              format!("{:?}", cached_restored_state.window_mode),
-        }
-    }
-}
-
-impl RestoredValues {
-    fn comparison_width(&self) -> usize {
-        [
-            self.physical_position.len(),
-            self.logical_position.len(),
-            self.physical_size.len(),
-            self.logical_size.len(),
-            self.monitor.len(),
-            self.mode.len(),
-        ]
-        .into_iter()
-        .max()
-        .unwrap_or(0)
-            + COMPARISON_COLUMN_PADDING
-    }
-}
-
-/// Build comparison spans (restored vs current) for a window and add them as `TextSpan` children.
-pub(super) fn build_comparison_spans(
-    child_spawner: &mut ChildSpawnerCommands,
-    cached_restored_state: Option<&CachedRestoredState>,
-    cached_mismatch_state: Option<&CachedMismatchState>,
-    window: &Window,
-    current_monitor: &CurrentMonitor,
-    font: &TextFont,
-) {
-    let effective_window_mode = current_monitor.effective_window_mode;
-    let scale = window.resolution.scale_factor();
-
-    let current_values = CurrentValues {
-        physical_position: match window.position {
-            WindowPosition::At(position) => format!("({}, {})", position.x, position.y),
-            _ => AUTOMATIC_TEXT.to_string(),
-        },
-        logical_position:  match window.position {
-            WindowPosition::At(position) => {
-                let logical_x = (f64::from(position.x) / f64::from(scale)).round().to_i32();
-                let logical_y = (f64::from(position.y) / f64::from(scale)).round().to_i32();
-                format!("({logical_x}, {logical_y})")
-            },
-            _ => AUTOMATIC_TEXT.to_string(),
-        },
-        physical_size:     format!("{}x{}", window.physical_width(), window.physical_height()),
-        logical_size:      format!(
-            "{}x{}",
-            window.resolution.width().to_u32(),
-            window.resolution.height().to_u32()
-        ),
-        scale:             format!("{scale}"),
-        monitor:           format!("{}", current_monitor.index),
-        mode:              format!("{effective_window_mode:?}"),
-    };
-
-    if let Some(cached_restored_state) = cached_restored_state {
-        build_restored_spans(
-            child_spawner,
-            cached_restored_state,
-            cached_mismatch_state,
-            &current_values,
-            font,
-        );
-    } else {
-        build_current_only_spans(child_spawner, &current_values, font);
-    }
-
-    add_span(
-        child_spawner,
-        font,
-        &format!("\n{EFFECTIVE_MODE_LABEL} {effective_window_mode:?}\n"),
-        DEFAULT_COLOR,
-    );
-}
-
 /// Render comparison rows when restore data is available.
-fn build_restored_spans(
+pub(super) fn build_restored_spans(
     child_spawner: &mut ChildSpawnerCommands,
     cached_restored_state: &CachedRestoredState,
     cached_mismatch_state: Option<&CachedMismatchState>,
@@ -260,14 +143,14 @@ fn add_position_rows(
             current:  current_values.physical_position.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: cached_mismatch_state
-                    .physical_position
+                    .physical_position_mismatch
                     .expected_physical_position
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
                     ),
                 actual:   cached_mismatch_state
-                    .physical_position
+                    .physical_position_mismatch
                     .actual_physical_position
                     .map_or_else(
                         || NONE_TEXT.to_string(),
@@ -286,14 +169,14 @@ fn add_position_rows(
             current:  current_values.logical_position.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: cached_mismatch_state
-                    .logical_position
+                    .logical_position_mismatch
                     .expected_logical_position
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
                     ),
                 actual:   cached_mismatch_state
-                    .logical_position
+                    .logical_position_mismatch
                     .actual_logical_position
                     .map_or_else(
                         || NONE_TEXT.to_string(),
@@ -323,13 +206,25 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state.physical_size.expected_physical_size.x,
-                    cached_mismatch_state.physical_size.expected_physical_size.y
+                    cached_mismatch_state
+                        .physical_size_mismatch
+                        .expected_physical_size
+                        .x,
+                    cached_mismatch_state
+                        .physical_size_mismatch
+                        .expected_physical_size
+                        .y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state.physical_size.actual_physical_size.x,
-                    cached_mismatch_state.physical_size.actual_physical_size.y
+                    cached_mismatch_state
+                        .physical_size_mismatch
+                        .actual_physical_size
+                        .x,
+                    cached_mismatch_state
+                        .physical_size_mismatch
+                        .actual_physical_size
+                        .y
                 ),
             }),
         },
@@ -345,13 +240,25 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state.logical_size.expected_logical_size.x,
-                    cached_mismatch_state.logical_size.expected_logical_size.y
+                    cached_mismatch_state
+                        .logical_size_mismatch
+                        .expected_logical_size
+                        .x,
+                    cached_mismatch_state
+                        .logical_size_mismatch
+                        .expected_logical_size
+                        .y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state.logical_size.actual_logical_size.x,
-                    cached_mismatch_state.logical_size.actual_logical_size.y
+                    cached_mismatch_state
+                        .logical_size_mismatch
+                        .actual_logical_size
+                        .x,
+                    cached_mismatch_state
+                        .logical_size_mismatch
+                        .actual_logical_size
+                        .y
                 ),
             }),
         },
@@ -384,8 +291,14 @@ fn add_scale_row(
         restored: String::new(),
         current:  current_values.scale.clone(),
         mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
-            expected: cached_mismatch_state.scale.expected.to_string(),
-            actual:   cached_mismatch_state.scale.actual.to_string(),
+            expected: cached_mismatch_state
+                .scale_factor_difference
+                .expected
+                .to_string(),
+            actual:   cached_mismatch_state
+                .scale_factor_difference
+                .actual
+                .to_string(),
         }),
     };
     add_row(child_spawner, font, &comparison_row, column_width);
@@ -407,8 +320,11 @@ fn add_monitor_row(
             restored: restored_values.monitor.clone(),
             current:  current_values.monitor.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
-                expected: cached_mismatch_state.monitor.expected.to_string(),
-                actual:   cached_mismatch_state.monitor.actual.to_string(),
+                expected: cached_mismatch_state
+                    .monitor_difference
+                    .expected
+                    .to_string(),
+                actual:   cached_mismatch_state.monitor_difference.actual.to_string(),
             }),
         },
         column_width,
@@ -431,77 +347,14 @@ fn add_mode_row(
             restored: restored_values.mode.clone(),
             current:  current_values.mode.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
-                expected: format!("{:?}", cached_mismatch_state.mode.expected),
-                actual:   format!("{:?}", cached_mismatch_state.mode.actual),
+                expected: format!(
+                    "{:?}",
+                    cached_mismatch_state.window_mode_difference.expected
+                ),
+                actual:   format!("{:?}", cached_mismatch_state.window_mode_difference.actual),
             }),
         },
         column_width,
-    );
-}
-
-/// Render current-only values when no restore data exists.
-fn build_current_only_spans(
-    child_spawner: &mut ChildSpawnerCommands,
-    current_values: &CurrentValues,
-    font: &TextFont,
-) {
-    add_span(child_spawner, font, NO_RESTORE_DATA_TEXT, MISMATCH_COLOR);
-    add_span(
-        child_spawner,
-        font,
-        &format!(
-            "{:<LABEL_WIDTH$}{}\n",
-            POSITION_PHYSICAL_LABEL, current_values.physical_position
-        ),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!(
-            "{:<LABEL_WIDTH$}{}\n",
-            POSITION_LOGICAL_LABEL, current_values.logical_position
-        ),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!(
-            "{:<LABEL_WIDTH$}{}\n",
-            SIZE_PHYSICAL_LABEL, current_values.physical_size
-        ),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!(
-            "{:<LABEL_WIDTH$}{}\n",
-            SIZE_LOGICAL_LABEL, current_values.logical_size
-        ),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!("{:<LABEL_WIDTH$}{}\n", SCALE_LABEL, current_values.scale),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!(
-            "{:<LABEL_WIDTH$}{}\n",
-            MONITOR_LABEL, current_values.monitor
-        ),
-        DEFAULT_COLOR,
-    );
-    add_span(
-        child_spawner,
-        font,
-        &format!("{:<LABEL_WIDTH$}{}\n", MODE_LABEL, current_values.mode),
-        DEFAULT_COLOR,
     );
 }
 
@@ -613,14 +466,4 @@ fn add_extended_comparison_row(
         &format!("{}\n", comparison_mismatch.actual),
         mismatch_color,
     );
-}
-
-/// Add a single `TextSpan` child.
-pub(super) fn add_span(
-    child_spawner: &mut ChildSpawnerCommands,
-    font: &TextFont,
-    text: &str,
-    color: Color,
-) {
-    child_spawner.spawn((TextSpan(text.to_string()), font.clone(), TextColor(color)));
 }

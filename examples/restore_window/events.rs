@@ -34,13 +34,13 @@ pub(crate) struct ClearStateAndQuit;
 pub(crate) struct QuitApp;
 
 #[derive(Debug, Clone, Reflect)]
-pub(crate) struct MonitorMismatch {
+pub(crate) struct MonitorDifference {
     pub(crate) expected: usize,
     pub(crate) actual:   usize,
 }
 
 #[derive(Debug, Clone, Reflect)]
-pub(crate) struct ModeMismatch {
+pub(crate) struct WindowModeDifference {
     pub(crate) expected: WindowMode,
     pub(crate) actual:   WindowMode,
 }
@@ -70,7 +70,7 @@ pub(crate) struct LogicalSizeMismatch {
 }
 
 #[derive(Debug, Clone, Reflect)]
-pub(crate) struct ScaleMismatch {
+pub(crate) struct ScaleFactorDifference {
     pub(crate) expected: f64,
     pub(crate) actual:   f64,
 }
@@ -90,9 +90,9 @@ pub(crate) struct WindowRestoredReceived {
 #[derive(Resource, Debug, Clone, Reflect)]
 #[reflect(Resource)]
 pub(crate) struct WindowRestoreMismatchReceived {
-    pub(crate) monitor:       MonitorMismatch,
-    pub(crate) physical_size: PhysicalSizeMismatch,
-    pub(crate) mode:          ModeMismatch,
+    pub(crate) monitor_difference:     MonitorDifference,
+    pub(crate) physical_size_mismatch: PhysicalSizeMismatch,
+    pub(crate) window_mode_difference: WindowModeDifference,
 }
 
 #[derive(Resource, Debug, Default, Reflect)]
@@ -103,13 +103,13 @@ pub(crate) struct WindowsSettledCount {
 
 #[derive(Clone)]
 pub(crate) struct CachedMismatchState {
-    pub(crate) physical_position: PhysicalPositionMismatch,
-    pub(crate) logical_position:  LogicalPositionMismatch,
-    pub(crate) physical_size:     PhysicalSizeMismatch,
-    pub(crate) logical_size:      LogicalSizeMismatch,
-    pub(crate) mode:              ModeMismatch,
-    pub(crate) monitor:           MonitorMismatch,
-    pub(crate) scale:             ScaleMismatch,
+    pub(crate) physical_position_mismatch: PhysicalPositionMismatch,
+    pub(crate) logical_position_mismatch:  LogicalPositionMismatch,
+    pub(crate) physical_size_mismatch:     PhysicalSizeMismatch,
+    pub(crate) logical_size_mismatch:      LogicalSizeMismatch,
+    pub(crate) window_mode_difference:     WindowModeDifference,
+    pub(crate) monitor_difference:         MonitorDifference,
+    pub(crate) scale_factor_difference:    ScaleFactorDifference,
 }
 
 #[derive(Resource, Default)]
@@ -207,31 +207,31 @@ pub(crate) fn on_window_restore_mismatch(
     mismatch_states.by_entity.insert(
         event.entity,
         CachedMismatchState {
-            physical_position: PhysicalPositionMismatch {
+            physical_position_mismatch: PhysicalPositionMismatch {
                 expected_physical_position: event.expected_physical_position,
                 actual_physical_position:   event.actual_physical_position,
             },
-            logical_position:  LogicalPositionMismatch {
+            logical_position_mismatch:  LogicalPositionMismatch {
                 expected_logical_position: event.expected_logical_position,
                 actual_logical_position:   event.actual_logical_position,
             },
-            physical_size:     PhysicalSizeMismatch {
+            physical_size_mismatch:     PhysicalSizeMismatch {
                 expected_physical_size: event.expected_physical_size,
                 actual_physical_size:   event.actual_physical_size,
             },
-            logical_size:      LogicalSizeMismatch {
+            logical_size_mismatch:      LogicalSizeMismatch {
                 expected_logical_size: event.expected_logical_size,
                 actual_logical_size:   event.actual_logical_size,
             },
-            mode:              ModeMismatch {
+            window_mode_difference:     WindowModeDifference {
                 expected: event.expected_window_mode,
                 actual:   event.actual_window_mode,
             },
-            monitor:           MonitorMismatch {
+            monitor_difference:         MonitorDifference {
                 expected: event.expected_monitor,
                 actual:   event.actual_monitor,
             },
-            scale:             ScaleMismatch {
+            scale_factor_difference:    ScaleFactorDifference {
                 expected: event.expected_scale,
                 actual:   event.actual_scale,
             },
@@ -239,15 +239,15 @@ pub(crate) fn on_window_restore_mismatch(
     );
 
     commands.insert_resource(WindowRestoreMismatchReceived {
-        monitor:       MonitorMismatch {
+        monitor_difference:     MonitorDifference {
             expected: event.expected_monitor,
             actual:   event.actual_monitor,
         },
-        physical_size: PhysicalSizeMismatch {
+        physical_size_mismatch: PhysicalSizeMismatch {
             expected_physical_size: event.expected_physical_size,
             actual_physical_size:   event.actual_physical_size,
         },
-        mode:          ModeMismatch {
+        window_mode_difference: WindowModeDifference {
             expected: event.expected_window_mode,
             actual:   event.actual_window_mode,
         },
