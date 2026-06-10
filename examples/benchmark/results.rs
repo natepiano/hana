@@ -91,12 +91,12 @@ pub(super) fn compute_statistics(name: &str, frame_times: &mut [f64]) -> Scenari
     }
 }
 
-fn percentile(sorted: &[f64], pct: f64) -> f64 {
+fn percentile(sorted: &[f64], percentile: f64) -> f64 {
     if sorted.is_empty() {
         return 0.0;
     }
     let len_f64 = (sorted.len() - 1).to_f64();
-    let idx = (pct / 100.0 * len_f64).round().to_u32().to_usize();
+    let idx = (percentile / 100.0 * len_f64).round().to_u32().to_usize();
     sorted[idx.min(sorted.len() - 1)]
 }
 

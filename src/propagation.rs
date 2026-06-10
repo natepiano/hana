@@ -141,8 +141,8 @@ pub(crate) fn remove_outline_from_descendants(
         if !mesh_query.contains(descendant) {
             continue;
         }
-        if let Ok(desc_outline) = outline_query.get(descendant)
-            && desc_outline.group_source == Some(source)
+        if let Ok(descendant_outline) = outline_query.get(descendant)
+            && descendant_outline.group_source == Some(source)
         {
             commands.entity(descendant).try_remove::<Outline>();
         }
@@ -167,9 +167,9 @@ pub(crate) fn sync_propagated_outlines(
 
         for descendant in children_query.iter_descendants(source) {
             if mesh_query.contains(descendant)
-                && let Ok(mut desc_outline) = outline_mut.get_mut(descendant)
+                && let Ok(mut descendant_outline) = outline_mut.get_mut(descendant)
             {
-                *desc_outline = propagated.clone();
+                *descendant_outline = propagated.clone();
             }
         }
     }

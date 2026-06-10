@@ -47,8 +47,8 @@ pub fn generate_outline_normals(mesh: &mut Mesh) {
     let mut accumulated_normals: HashMap<[u32; 3], Vec3> = HashMap::new();
 
     let triangle_count = index_count / triangle_vertex_count;
-    for tri in 0..triangle_count {
-        let (i0, i1, i2) = triangle_indices(mesh, positions.len(), tri);
+    for triangle in 0..triangle_count {
+        let (i0, i1, i2) = triangle_indices(mesh, positions.len(), triangle);
 
         let p0 = Vec3::from(positions[i0]);
         let p1 = Vec3::from(positions[i1]);
@@ -90,8 +90,8 @@ pub fn generate_outline_normals(mesh: &mut Mesh) {
     // Build per-vertex outline normals by looking up each vertex's position.
     let normals: Vec<[f32; 3]> = positions
         .iter()
-        .map(|pos| {
-            let key = position_key(*pos);
+        .map(|position| {
+            let key = position_key(*position);
             accumulated_normals
                 .get(&key)
                 .copied()
@@ -145,13 +145,17 @@ fn generate_normals_for_handle(id: AssetId<Mesh>, meshes: &mut Assets<Mesh>) {
     generate_outline_normals(&mut mesh);
 }
 
-const fn position_key(pos: [f32; 3]) -> [u32; 3] {
-    [pos[0].to_bits(), pos[1].to_bits(), pos[2].to_bits()]
+const fn position_key(position: [f32; 3]) -> [u32; 3] {
+    [
+        position[0].to_bits(),
+        position[1].to_bits(),
+        position[2].to_bits(),
+    ]
 }
 
 fn accumulate_weighted_normal(
     accumulated_normals: &mut HashMap<[u32; 3], Vec3>,
-    pos: [f32; 3],
+    position: [f32; 3],
     face_normal: Vec3,
     edge_a: Vec3,
     edge_b: Vec3,
@@ -168,13 +172,13 @@ fn accumulate_weighted_normal(
     let angle = cos_angle.acos();
 
     let entry = accumulated_normals
-        .entry(position_key(pos))
+        .entry(position_key(position))
         .or_insert(Vec3::ZERO);
     *entry += face_normal * angle;
 }
 
-fn triangle_indices(mesh: &Mesh, vertex_count: usize, tri: usize) -> (usize, usize, usize) {
-    let base = tri * TRIANGLE_VERTEX_COUNT.to_usize();
+fn triangle_indices(mesh: &Mesh, vertex_count: usize, triangle: usize) -> (usize, usize, usize) {
+    let base = triangle * TRIANGLE_VERTEX_COUNT.to_usize();
     if let Some(indices) = mesh.indices() {
         let mut iter = indices.iter().skip(base);
         let i0 = iter.next().unwrap_or(0);
