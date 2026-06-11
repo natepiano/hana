@@ -66,7 +66,7 @@ pub(crate) fn update_secondary_displays(
         let video_modes_display =
             input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
-        let font = TextFont {
+        let text_font = TextFont {
             font_size: FontSize::Px(FONT_SIZE),
             ..default()
         };
@@ -79,7 +79,7 @@ pub(crate) fn update_secondary_displays(
                 let monitor_row = input::format_monitor_row(&current_monitor, &refresh_display);
                 add_span(
                     child_spawner,
-                    &font,
+                    &text_font,
                     &format!("{SECONDARY_WINDOW_NAME_LABEL} {name}\n{monitor_row}\n\n"),
                     DEFAULT_COLOR,
                 );
@@ -91,13 +91,13 @@ pub(crate) fn update_secondary_displays(
                     cached_mismatch_state,
                     window,
                     &current_monitor,
-                    &font,
+                    &text_font,
                 );
 
                 // Video modes
                 add_span(
                     child_spawner,
-                    &font,
+                    &text_font,
                     &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
                     DEFAULT_COLOR,
                 );
@@ -105,7 +105,7 @@ pub(crate) fn update_secondary_displays(
                 // Controls
                 add_span(
                     child_spawner,
-                    &font,
+                    &text_font,
                     SECONDARY_WINDOW_CONTROLS,
                     DEFAULT_COLOR,
                 );

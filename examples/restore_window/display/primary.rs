@@ -64,7 +64,7 @@ pub(crate) fn update_primary_display(
     let video_modes_display =
         input::build_video_modes_display(&video_modes, selected_idx, active_mode_idx);
 
-    let font = TextFont {
+    let text_font = TextFont {
         font_size: FontSize::Px(FONT_SIZE),
         ..default()
     };
@@ -77,7 +77,7 @@ pub(crate) fn update_primary_display(
             let monitor_row = input::format_monitor_row(current_monitor, &refresh_display);
             add_span(
                 child_spawner,
-                &font,
+                &text_font,
                 &format!("{monitor_row}\n\n"),
                 DEFAULT_COLOR,
             );
@@ -89,13 +89,13 @@ pub(crate) fn update_primary_display(
                 cached_mismatch_state,
                 window,
                 current_monitor,
-                &font,
+                &text_font,
             );
 
             // Video modes
             add_span(
                 child_spawner,
-                &font,
+                &text_font,
                 &format!("{VIDEO_MODES_HEADER}{video_modes_display}\n"),
                 DEFAULT_COLOR,
             );
@@ -103,7 +103,7 @@ pub(crate) fn update_primary_display(
             // Controls
             add_span(
                 child_spawner,
-                &font,
+                &text_font,
                 &format!(
                     "\nControls:\n\
                  [Enter] Exclusive Fullscreen\n\
@@ -141,12 +141,12 @@ pub(crate) fn update_primary_display(
                     monitor_info.index,
                 ));
             }
-            add_span(child_spawner, &font, MANAGED_WINDOWS_HEADER, DEFAULT_COLOR);
+            add_span(child_spawner, &text_font, MANAGED_WINDOWS_HEADER, DEFAULT_COLOR);
             if managed_lines.is_empty() {
-                add_span(child_spawner, &font, NO_MANAGED_WINDOWS_TEXT, DEFAULT_COLOR);
+                add_span(child_spawner, &text_font, NO_MANAGED_WINDOWS_TEXT, DEFAULT_COLOR);
             } else {
                 for line in &managed_lines {
-                    add_span(child_spawner, &font, line, DEFAULT_COLOR);
+                    add_span(child_spawner, &text_font, line, DEFAULT_COLOR);
                 }
             }
         });

@@ -12,8 +12,9 @@ use crate::restore::settle_state::SettleState;
 
 /// Holds the target window state during the restore process.
 ///
-/// All values are pre-computed with proper types. Casting from saved state
-/// happens once during loading, not scattered throughout the restore logic.
+/// Values converted from saved state are stored as `IVec2`, `UVec2`,
+/// `WindowMode`, and scale factors during loading, before restore logic reads
+/// them.
 ///
 /// Dimensions stored here are **inner** (content area only), matching what
 /// Bevy's `Window.resolution` represents and what we save to the state file.
@@ -55,9 +56,9 @@ pub(crate) struct TargetPosition {
     /// - **Total timeout** (2s): hard deadline. If values never stabilize for 200ms continuously,
     ///   fires `WindowRestoreMismatch` with whatever state exists at timeout.
     ///
-    /// This handles compositor artifacts like Wayland `wl_surface.enter`/`leave` bounces
-    /// where `current_monitor()` transiently reports the wrong monitor during fullscreen
-    /// transitions.
+    /// This handles transient Wayland `wl_surface.enter`/`wl_surface.leave`
+    /// reports where `current_monitor()` briefly returns the wrong monitor during
+    /// fullscreen transitions.
     pub(crate) settle_state:             Option<SettleState>,
 }
 

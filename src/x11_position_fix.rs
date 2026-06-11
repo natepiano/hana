@@ -72,11 +72,12 @@ pub(crate) struct X11FrameTop(i32);
 
 /// Re-issue the W6-compensated position once the window is mapped.
 ///
-/// During the initial restore the X11 WM can pin a freshly-mapped window's `y` to its
-/// own placement, ignoring the requested position (winit #4445 territory) — observed
-/// under bevy 0.19 where the same requested `y` lands at a fixed value regardless. Once
-/// the window is mapped, `set_outer_position` round-trips cleanly: the readback equals
-/// the requested position plus a stable `frame_top`. This system watches the settling
+/// During the initial restore the X11 WM can set a freshly-mapped window's `y`
+/// from `_NET_FRAME_EXTENTS` and client-area coordinates, ignoring the requested
+/// position from winit #4445. Under bevy 0.19 the same requested `y` reads back
+/// as a fixed value until mapping completes. Once the window is mapped,
+/// `set_outer_position` readback equals the requested position plus a stable
+/// `frame_top`. This system watches the settling
 /// window and, while the readback hasn't reached `compensated + frame_top`, re-issues the
 /// compensated position so the mapped window converges on the saved position.
 ///

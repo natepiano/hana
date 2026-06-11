@@ -104,7 +104,7 @@ fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
 ///
 /// With no saved position, we anchor the window on the saved monitor via
 /// `WindowPosition::Centered` and size at `starting_scale` (so the stored logical size
-/// resolves to `target.physical_size` once the window lands on the target monitor).
+/// resolves to `target.physical_size` once `WindowPosition::Centered` selects the target monitor).
 /// The `WindowScaleFactorChanged` -> `WindowRestoreState::ApplySize` transition is
 /// skipped because macOS does not fire `WindowScaleFactorChanged` for windows that are
 /// still hidden; waiting for it would deadlock. Settle starts immediately and verifies
@@ -397,7 +397,8 @@ fn try_apply_restore(
             // move, `set_outer_position` is applied at the starting monitor's scale,
             // so the move doubles it. Size must NOT be compensated: as of bevy 0.19,
             // `request_inner_size` resolves at the target monitor's scale, so the
-            // full physical size lands correctly (compensating it would halve it).
+            // `request_inner_size` produces the requested full physical size
+            // (compensating it would halve it).
             apply_window_geometry(
                 window,
                 target_position.compensated_position(),

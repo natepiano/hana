@@ -17,7 +17,7 @@ pub(super) fn build_comparison_spans(
     cached_mismatch_state: Option<&CachedMismatchState>,
     window: &Window,
     current_monitor: &CurrentMonitor,
-    font: &TextFont,
+    text_font: &TextFont,
 ) {
     let effective_window_mode = current_monitor.effective_window_mode;
     let current_values = CurrentValues::from_window(window, current_monitor);
@@ -28,15 +28,15 @@ pub(super) fn build_comparison_spans(
             cached_restored_state,
             cached_mismatch_state,
             &current_values,
-            font,
+            text_font,
         );
     } else {
-        rows::build_current_only_spans(child_spawner, &current_values, font);
+        rows::build_current_only_spans(child_spawner, &current_values, text_font);
     }
 
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!("\n{EFFECTIVE_MODE_LABEL} {effective_window_mode:?}\n"),
         DEFAULT_COLOR,
     );

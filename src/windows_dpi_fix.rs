@@ -1,8 +1,8 @@
 //! Workaround for Windows DPI change bug when dragging between mixed-DPI monitors.
 //!
 //! On Windows 11 with monitors of different DPI scales, winit's `WM_DPICHANGED`
-//! handler has a bug that causes windows to bounce back or resize incorrectly
-//! when dragged between monitors.
+//! handler can overwrite the `WM_DPICHANGED` suggested rectangle with the old
+//! Bevy/winit window position or size when dragged between monitors.
 //!
 //! This module subclasses the window to intercept `WM_DPICHANGED` and handle it
 //! using Microsoft's recommended simple approach: use the suggested `RECT` from `lparam`.
@@ -46,7 +46,8 @@ use super::constants::SUBCLASS_REFERENCE_DATA;
 struct SendSyncHwnd(HWND);
 
 // SAFETY: `HWND` is just a pointer/handle that can be sent between threads.
-// The actual window operations are thread-safe when using proper Win32 APIs.
+// `RemoveWindowSubclass`, `SetWindowSubclass`, and `SetWindowPos` are safe to
+// call with the stored handle under this guard's usage.
 unsafe impl Send for SendSyncHwnd {}
 unsafe impl Sync for SendSyncHwnd {}
 

@@ -22,7 +22,8 @@
 //! ## The Solution
 //!
 //! This plugin uses winit directly to capture the actual window position at startup,
-//! compensates for scale factor conversions, and properly restores windows across monitors.
+//! compensates for scale factor conversions, restores `Window.position`,
+//! `Window.resolution`, visibility, and monitor state across monitors.
 //!
 //! The plugin automatically hides the window during startup and shows it after positioning
 //! is complete, preventing any visual flash at the default position.
@@ -214,8 +215,9 @@ impl Plugin for WindowManagerPluginCustomPath {
             (
                 x11_position_fix::compensate_target_position,
                 // Re-apply the compensated position once the window is mapped: bevy 0.19
-                // lets the X11 WM pin a fresh window's position during the initial restore,
-                // but a mapped window round-trips cleanly through `set_outer_position`.
+                // can ignore the first `set_outer_position` request while the X11 window is
+                // unmapped, while a mapped window's `Window.position` readback matches the
+                // requested compensated position plus `X11FrameTop`.
                 x11_position_fix::reapply_compensated_position
                     .after(restore::restore_windows)
                     .before(restore::check_restore_settling),

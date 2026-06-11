@@ -19,12 +19,17 @@ use crate::constants::SIZE_PHYSICAL_LABEL;
 pub(super) fn build_current_only_spans(
     child_spawner: &mut ChildSpawnerCommands,
     current_values: &CurrentValues,
-    font: &TextFont,
+    text_font: &TextFont,
 ) {
-    add_span(child_spawner, font, NO_RESTORE_DATA_TEXT, MISMATCH_COLOR);
     add_span(
         child_spawner,
-        font,
+        text_font,
+        NO_RESTORE_DATA_TEXT,
+        MISMATCH_COLOR,
+    );
+    add_span(
+        child_spawner,
+        text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
             POSITION_PHYSICAL_LABEL, current_values.physical_position
@@ -33,7 +38,7 @@ pub(super) fn build_current_only_spans(
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
             POSITION_LOGICAL_LABEL, current_values.logical_position
@@ -42,7 +47,7 @@ pub(super) fn build_current_only_spans(
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
             SIZE_PHYSICAL_LABEL, current_values.physical_size
@@ -51,7 +56,7 @@ pub(super) fn build_current_only_spans(
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
             SIZE_LOGICAL_LABEL, current_values.logical_size
@@ -60,13 +65,13 @@ pub(super) fn build_current_only_spans(
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!("{:<LABEL_WIDTH$}{}\n", SCALE_LABEL, current_values.scale),
         DEFAULT_COLOR,
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
             MONITOR_LABEL, current_values.monitor
@@ -75,7 +80,7 @@ pub(super) fn build_current_only_spans(
     );
     add_span(
         child_spawner,
-        font,
+        text_font,
         &format!("{:<LABEL_WIDTH$}{}\n", MODE_LABEL, current_values.mode),
         DEFAULT_COLOR,
     );

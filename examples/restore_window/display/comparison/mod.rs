@@ -18,7 +18,7 @@ pub(super) fn build_comparison_spans(
     cached_mismatch_state: Option<&CachedMismatchState>,
     window: &Window,
     current_monitor: &CurrentMonitor,
-    font: &TextFont,
+    text_font: &TextFont,
 ) {
     builder::build_comparison_spans(
         child_spawner,
@@ -26,16 +26,16 @@ pub(super) fn build_comparison_spans(
         cached_mismatch_state,
         window,
         current_monitor,
-        font,
+        text_font,
     );
 }
 
 /// Add a single `TextSpan` child.
 pub(super) fn add_span(
     child_spawner: &mut ChildSpawnerCommands,
-    font: &TextFont,
+    text_font: &TextFont,
     text: &str,
     color: Color,
 ) {
-    rows::add_span(child_spawner, font, text, color);
+    rows::add_span(child_spawner, text_font, text, color);
 }

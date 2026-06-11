@@ -5,7 +5,8 @@ use bevy::prelude::Reflect;
 /// When restoring from a high-DPI to low-DPI monitor, we must set position BEFORE size
 /// because Bevy's `changed_windows` system processes size changes before position changes.
 /// If we set both together, the window resizes first while still at the old position,
-/// temporarily extending into the wrong monitor and triggering a scale factor bounce from macOS.
+/// temporarily extending into the wrong monitor and triggering a macOS
+/// `WindowScaleFactorChanged` event before the final position is applied.
 ///
 /// By moving a 1x1 window to the final position first, we ensure the window is already
 /// at the correct location when we later apply size in `ApplySize`.
@@ -32,9 +33,10 @@ pub(crate) enum WindowRestoreState {
 /// - **Windows (DX12)**: Wait for surface creation before applying fullscreen (see <https://github.com/rust-windowing/winit/issues/3124>).
 /// - **macOS**: Apply mode directly.
 ///
-/// The key insight: on X11, if fullscreen mode is set in the same frame as
-/// position, the compositor may briefly honor it then revert. Splitting into
-/// separate frames ensures each change is processed independently.
+/// On X11, `FullscreenRestoreState::MoveToMonitor` must complete before
+/// `FullscreenRestoreState::ApplyMode`; setting fullscreen mode in the same
+/// frame as position can make the compositor briefly apply fullscreen and then
+/// revert it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 pub(crate) enum FullscreenRestoreState {
     /// Move window to target monitor position. Skipped on Wayland (no position).
