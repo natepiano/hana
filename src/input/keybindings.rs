@@ -35,26 +35,26 @@ impl PlatformShortcutMode {
 }
 
 struct ModifierBlockers {
-    all:       Vec<Entity>,
-    non_shift: Vec<Entity>,
+    all_entities:       Vec<Entity>,
+    non_shift_entities: Vec<Entity>,
 }
 
 impl ModifierBlockers {
     fn new(shift_entity: Entity, primary_entity: Entity, alt_entity: Entity) -> Self {
         Self {
-            all:       vec![shift_entity, primary_entity, alt_entity],
-            non_shift: vec![primary_entity, alt_entity],
+            all_entities:       vec![shift_entity, primary_entity, alt_entity],
+            non_shift_entities: vec![primary_entity, alt_entity],
         }
     }
 
     fn add_non_shift_modifier(&mut self, entity: Entity) {
-        self.all.push(entity);
-        self.non_shift.push(entity);
+        self.all_entities.push(entity);
+        self.non_shift_entities.push(entity);
     }
 
-    fn all(&self) -> Vec<Entity> { self.all.clone() }
+    fn all_entities(&self) -> Vec<Entity> { self.all_entities.clone() }
 
-    fn non_shift(&self) -> Vec<Entity> { self.non_shift.clone() }
+    fn non_shift_entities(&self) -> Vec<Entity> { self.non_shift_entities.clone() }
 }
 
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
@@ -174,7 +174,7 @@ impl<C: Component> Keybindings<C> {
         action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.all()),
+            BlockBy::new(self.modifier_blockers.all_entities()),
             bindings![key_code],
         ));
     }
@@ -188,7 +188,7 @@ impl<C: Component> Keybindings<C> {
         action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.non_shift()),
+            BlockBy::new(self.modifier_blockers.non_shift_entities()),
             bindings![key_code.with_mod_keys(ModKeys::SHIFT)],
         ));
     }
@@ -202,7 +202,7 @@ impl<C: Component> Keybindings<C> {
         action_spawner.spawn((
             Action::<A>::new(),
             self.action_settings,
-            BlockBy::new(self.modifier_blockers.all()),
+            BlockBy::new(self.modifier_blockers.all_entities()),
             bindings,
         ));
     }
