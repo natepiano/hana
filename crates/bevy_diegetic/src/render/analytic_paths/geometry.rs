@@ -36,11 +36,19 @@ impl Bounds {
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PathContour {
     /// Quadratic segments in contour order.
-    pub segments:    Vec<QuadraticSegment>,
+    pub segments:      Vec<QuadraticSegment>,
     /// Narrowest stroke of this contour in design-space units, packed per
     /// curve for hairline dilation. `0.0` disables — text glyph contours
     /// stay undilated.
-    pub min_feature: f32,
+    pub min_feature:   f32,
+    /// Resolved hairline fade exponent for this contour, packed per curve
+    /// (`CurveRecord::fade_exponent`). The shader's winning (nearest) curve
+    /// supplies the exponent for each coverage evaluation, so contours with
+    /// different fade policies merge into one path without an anti-aliasing
+    /// junction. `0.0` renders sub-floor strokes at full alpha
+    /// ([`HairlineFade::Full`](crate::HairlineFade::Full)); text glyph
+    /// contours carry `0.0` and are exempt regardless (dilation 0).
+    pub fade_exponent: f32,
 }
 
 /// Renderer-owned quadratic outline representation.

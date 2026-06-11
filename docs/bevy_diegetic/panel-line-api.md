@@ -1,4 +1,4 @@
-# Panel Line API As-Built Review - 2026-06-09
+# Panel Line API As-Built Review - 2026-06-10
 
 This document archives what was built for panel-owned line drawing in
 `bevy_diegetic`, the decisions that survived implementation, and the direction
@@ -39,7 +39,9 @@ fallback/quarantine code.
 
 - A line is authored as a centerline from `PanelPoint` start to end.
 - Stroke width expands around the centerline during rendering.
-- `LineStyle` owns stroke width, color, cap size, and start/end `CalloutCap`.
+- `LineStyle` owns stroke width, color, cap size, start/end `CalloutCap`, and
+  an optional `HairlineFade` override (`PanelLine::hairline_fade`; `None`
+  inherits the element → panel → global cascade — see the Phase C addendum).
 - `CalloutCap` is reused for cap semantics instead of introducing a separate
   panel-only cap model.
 - `start_inset` and `end_inset` allow callout-like endpoint adjustment.
@@ -106,10 +108,11 @@ Implemented pieces:
 - `render/batch_key.rs` contains shared visual compatibility keys and material
   interning used by text and line batching.
 - `render/panel_lines/mod.rs` registers the plugin and systems.
-- `render/panel_lines/path.rs` converts resolved shaft/cap primitives into
-  closed analytic `PathOutline` contours plus clipped instance rect/UV data.
-- `render/panel_lines/batching.rs` routes panel line primitives into retained
-  cross-panel analytic path batches.
+- `render/panel_lines/path.rs` converts groups of resolved shaft/cap primitives
+  into one closed multi-contour analytic `PathOutline` plus clipped instance
+  rect/UV data.
+- `render/panel_lines/batching.rs` groups same-styled primitives per element
+  and routes them into retained cross-panel analytic path batches.
 - `render/panel_lines/primitive.rs` owns stable panel-line render identity.
 - `render/analytic_paths/atlas.rs` owns the generic path atlas used by
   non-glyph path producers.
@@ -117,6 +120,25 @@ Implemented pieces:
   shared analytic coverage, AA, vertex-pulling, and material route.
 - `render/panel_lines/material.rs` and `panel_line_batch.wgsl` are no longer
   registered; they remain only as temporary fallback/quarantine files.
+
+Within one element, same-styled line primitives merge into a single
+multi-contour analytic path before packing:
+
+- `LineMergeKey` groups resolved primitives by element, color, clip, owner
+  bounds, paint lane, and layering.
+- Each group becomes one `PathOutline` whose contours union under a single
+  winding rule, so abutting or overlapping members (tick-to-spine junctions)
+  render solid instead of compositing two AA ramps as
+  `1 − (1 − a)(1 − b) < 1` and letting background show through as a line.
+- Merging never crosses element boundaries; same-colored lines in different
+  elements still composite their AA edges independently.
+- Each `PathContour` carries the stroke `min_feature` of its source primitive;
+  the packer writes it per curve (`CurveRecord.solver.w`) so the shader
+  dilates sub-pixel strokes to the `HairlineWidth` floor per member, not per
+  merged path.
+- Band counts scale per axis with path extent against
+  `PANEL_LINE_BAND_TARGET_DESIGN_UNITS`, keeping merged ruler-scale paths on
+  bounded per-band curve lists while small paths keep one exact band.
 
 The renderer batches line path instances across panels when compatibility
 matches.
@@ -307,7 +329,7 @@ Acceptance:
 - Phase B should decide whether it can reuse the text-compatible analytic batch
   store directly or needs a small source-kind wrapper around the shared visual
   batch key.
-- Phase C and Phase D should treat text/callouts as clients of
+- Phase D and Phase E should treat text/callouts as clients of
   `render/analytic_paths`, not owners of separate renderer logic.
 
 #### Phase A Review
@@ -321,10 +343,10 @@ Acceptance:
 - Phase B now carries the clipping, hidden-panel cleanup, visual-bounds, and
   line-batch-stat requirements before typography overlay or callouts consume
   the shared path renderer.
-- Phase C was narrowed to remaining typography overlay line/callout/gizmo paths
+- Phase D was narrowed to remaining typography overlay line/callout/gizmo paths
   because overlay metric panels already use transparent `DiegeticPanel`
   children.
-- Phase D was split into planar mapping/classification and renderer routing so
+- Phase E was split into planar mapping/classification and renderer routing so
   standalone `CalloutLine` unification has a concrete boundary.
 
 ### Phase B - Panel Lines To Analytic Paths (complete)
@@ -366,7 +388,7 @@ Acceptance:
   rectangle-backed baseline.
 - Batch count remains bounded by compatibility, not tick count.
 - Conversion, clipping, hidden-panel cleanup, visual-bounds, and stale-record
-  behavior have focused tests in Phase B before Phase C or Phase D depend on
+  behavior have focused tests in Phase B before Phase D or Phase E depend on
   the path renderer.
 - The `units.rs` line batch HUD still reports useful vector-mark batch counts
   after the renderer route changes.
@@ -389,7 +411,7 @@ Acceptance:
 - Phase B added `RunRecord::oit_depth_offset` so panel-line analytic paths keep
   per-primitive OIT ordering through the shared run table.
 - The old `render/panel_lines/material.rs` and `panel_line_batch.wgsl` were
-  left unregistered instead of deleted so Phase E can remove or archive them
+  left unregistered instead of deleted so Phase F can remove or archive them
   after later consumers prove the shared route.
 
 **Surprises:**
@@ -401,33 +423,306 @@ Acceptance:
 
 **Implications for remaining phases:**
 
-- Phase C and Phase D can produce ordinary `PanelDraw::lines` records and rely
+- Phase D and Phase E can produce ordinary `PanelDraw::lines` records and rely
   on the analytic path adapter instead of carrying a separate overlay/callout
   renderer route for planar marks.
-- Phase E should decide whether to delete the quarantined line SDF files or keep
+- Phase F should decide whether to delete the quarantined line SDF files or keep
   them as archived reference code once typography and planar callouts use the
   shared path renderer.
 
 #### Phase B Review
 
-- Phase C now names border-backed typography metric panels as analytic
+- Phase D now names border-backed typography metric panels as analytic
   `PanelDraw::lines` migration work instead of allowing SDF borders to satisfy
   the vector-mark acceptance by accident.
-- Phase C now requires an external-source-id producer path or an explicit
+- Phase D now requires an external-source-id producer path or an explicit
   stale-cleanup check when overlay panel entities are recreated.
-- Phase C now treats stale metric gizmo construction as cleanup/documentation
+- Phase D now treats stale metric gizmo construction as cleanup/documentation
   work, not a live renderer migration.
-- Phase C exempts typography-example dots/circles from the line migration and
+- Phase D exempts typography-example dots/circles from the line migration and
   records the separate non-line mark design question at the end of this doc.
-- Phase D now focuses on planar classification, transparent-panel selection,
+- Phase E now focuses on planar classification, transparent-panel selection,
   coordinate mapping, stable source identity, and parity tests because Phase B
   already owns shaft/cap analytic rendering.
-- Phase D now names `CalloutLine::surface_shadow` preservation as a transparent
+- Phase E now names `CalloutLine::surface_shadow` preservation as a transparent
   panel grouping or fallback requirement.
-- Phase E now includes path-neutral naming cleanup for glyph/text-compatible
+- Phase F now includes path-neutral naming cleanup for glyph/text-compatible
   analytic renderer internals, or a deliberate deferral.
 
-### Phase C - Typography Overlay Migration
+#### Phase B Post-Review Fixes
+
+Visual review of the analytic ruler output surfaced and fixed:
+
+- Tick-to-spine junction line: two abutting analytic draws composite their AA
+  ramps below full coverage even when the geometric coverages sum to one.
+  Fixed by the per-element merge described under Current Renderer; `units.rs`
+  now authors each metric vertical ruler's spine and ticks in one element so
+  they share a merge group.
+- Hairline dilation moved from per-path to per-curve: `CurveRecord.solver.w`
+  (previously a dead orientation flag) now carries the owning contour's
+  narrowest stroke, so a merged path containing both thin ticks and a thicker
+  spine dilates each member correctly.
+- AA Off/Supersample sign inversion: `distance_coverage` uses an
+  inside-positive smoothstep ramp while the `aa_band` path is inside-negative;
+  the dilation rework initially applied one sign convention to both, rendering
+  thin glyph strokes as hollow rims with AA off. Fixed with per-path sign
+  handling. The CPU coverage probe mirrors only the `aa_band` path, which is
+  why 318 tests passed through the regression — a `distance_coverage` mirror
+  is Phase C work.
+- The pre-fix Supersample/Off path eroded sub-floor strokes proportionally to
+  their width deficit — an accidental distance fade that presented as tick
+  LOD. All four AA modes now dilate to the floor at full alpha; reproducing
+  the fade deliberately is Phase C's `HairlineFade` policy.
+
+### Phase C - AA And Hairline Fade Cascades (complete)
+
+Make the anti-aliasing mode and the hairline fade policy cascade
+global → panel → element, the way `AlphaMode` cascades, so text and lines —
+or individual elements — can be tuned independently. Motivating cases: thin
+distant ruler ticks should be able to fade out instead of dilating at full
+alpha, and small text on colored backgrounds needs different AA than the
+global default.
+
+Deliverables:
+
+- Add a `HairlineFade` policy field to `HairlineWidth`: `Full` (default,
+  current behavior) dilates sub-floor strokes to the floor at full alpha;
+  `Fade { exponent }` dilates but scales alpha by
+  `(natural_width / floor)^exponent`. Validate the exponent (positive,
+  finite) at one site; the resource is Reflect/BRP-mutable, so arbitrary
+  values can arrive at runtime.
+- Declare `TextAntiAlias` and `HairlineFade` as cascade attributes through
+  the existing `cascade_attr!` infrastructure (`TextAlpha` is the template):
+  `Override<A>` / `Resolved<A>` components, cascade plugin registration, and
+  attribute verbs. The global resources stay as the cascade root defaults.
+- Carry the resolved AA mode and fade policy in `RunRecord` instead of
+  material uniforms so overrides do not split batches or materials. Update
+  the `RunRecord` size assertion and the WGSL mirror struct. Add a single
+  enum→bits conversion site (an `AaBits`-style helper plus a fade-bits
+  helper) so the GPU encoding cannot drift from the authored enums.
+- Shader constraint: read the per-run flags and compute `fwidth`/`dpdx`/
+  `dpdy` unconditionally in uniform control flow, then branch — derivative
+  ops inside a branch on per-run data are non-uniform flow and undefined in
+  WGSL.
+- Derive the fade factor in the shader from the already-tracked winning curve
+  dilation (`natural = target − 2 × dilation`); no new per-curve data.
+  Compute it per coverage evaluation (per supersample point) from that
+  evaluation's winning dilation; acceptance checks for shimmer where adjacent
+  samples select different winning curves.
+- Keep fade independent of AA mode — fade susceptibility must not be a side
+  effect of which coverage estimator runs (that coupling was the Phase B sign
+  bug).
+- Text stays structurally exempt from fade with no run flag needed: glyph
+  curves carry `solver.w = 0`, so dilation is 0, `natural = target`, and the
+  fade factor is 1.
+- Merge interaction: `LineMergeKey` groups per element and cascade
+  resolution is per element, so every member of a merge group shares one
+  resolved AA mode and fade policy; the merged group's run carries the
+  resolved values.
+- Global-change invalidation: a `TextAntiAlias` or `HairlineWidth` change
+  must re-resolve cascades and mark run tables dirty — the sync systems
+  evolve from material-uniform mirrors into cascade-root updates; per-record
+  bits cannot be refreshed by rewriting a uniform.
+- Discard fragments below the alpha epsilon before OIT submission so
+  near-zero faded fragments do not occupy OIT fragment-pool slots (the pool
+  has a measured exhaustion history).
+- Update the shader-hash tripwire and extend the CPU coverage probe to mirror
+  `distance_coverage` including dilation tracking and the fade factor,
+  closing the test gap that let the Phase B sign inversion through. These
+  tests are Phase C acceptance prerequisites, not later cleanup.
+- Complete Phase C before Phase D and Phase E implementation so overlay and
+  callout line producers inherit per-element AA/fade support without
+  retrofit.
+
+Acceptance:
+
+- An element-level AA override renders with its own mode while siblings keep
+  the inherited mode, without increasing batch count.
+- `Fade` on the units rulers reproduces the distance fade-out of thin ticks
+  while spines and at-floor strokes stay at full alpha, with no shimmer at
+  fade boundaries under `Supersample`/`Both`.
+- Text rendering is unaffected by any fade configuration.
+- A global resource change applied after per-element overrides exist re-packs
+  run records correctly (integration test).
+- With no overrides authored and `Full` fade, output is visually identical to
+  the current as-built state.
+
+#### Retrospective
+
+**What worked:**
+
+- `cascade_attr!(existing Ty, default = ...)` — a new macro arm in
+  `cascade/resolved.rs` — joins an already-named render value type to the
+  cascade without minting a wrapper struct, so the attributes are literally
+  `TextAntiAlias` and `HairlineFade` (`Override<TextAntiAlias>`,
+  `resolved_text_anti_alias`).
+- `RunRecord` grew `aa_flags: u32` + `fade_exponent: f32` (96 → 112 B stride);
+  the encase assertion, both WGSL mirrors, and the padded-payload tests all
+  moved together. `TextAntiAlias::aa_flags()` and
+  `HairlineFade::fade_exponent()` are the single conversion/validation sites.
+- The fade factor derives in-shader from the evaluation's winning
+  `CoverageTerms.dilation` exactly as planned — no new per-curve data; text
+  exemption fell out of `solver.w = 0` with no run flag.
+- The `distance_coverage` CPU mirror (with dilation + fade) locked the Phase B
+  sign convention as a profile-equivalence test: a dilated sub-floor stroke
+  must render identically to a naturally-at-floor stroke.
+
+**What deviated from the plan:**
+
+- Panel line elements are arena indices, not entities, so the element level of
+  the cascade is tree config (`El::anti_alias` / `El::hairline_fade`,
+  `Element` fields, `VisualOnly` in `classify_element_change`), resolved in
+  `build_panel_line_group` as element override else the panel entity's
+  `Resolved<A>`. The entity cascade covers global → panel → label.
+- The aa_band single-sample path's `fwidth(signed_distance(...))` could not
+  stay: it sat inside what is now a non-uniform branch (per-run `aa_flags`).
+  It was replaced by forward differences along `dpdx`/`dpdy` of the design
+  point — the same model the CPU probe already used, so probe and shader now
+  agree operation-for-operation. Cost: two extra `signed_distance`
+  evaluations in that mode only.
+- `CascadePlugin::<TextAntiAlias>` / `::<HairlineFade>` are registered in
+  `HeadlessLayoutPlugin` (not `RenderPlugin`) because `seed_panel_overrides`
+  reads their `CascadeDefault<A>` resources in headless layout apps.
+- Per-label text AA authoring is the `override_text_anti_alias` verb on the
+  label entity; no `TextStyle::with_anti_alias` capture was added (not a doc
+  deliverable — record here so it is a deliberate gap, not an omission).
+
+**Surprises:**
+
+- The alpha-epsilon-before-OIT deliverable was already satisfied: the
+  `DISCARD_ALPHA` discard has always preceded `oit_draw` in the fragment
+  entry; Phase C only documented the ordering.
+- Two global resources now mirror into `CascadeDefault<A>` roots
+  (`sync_text_anti_alias`, `sync_hairline_fade`), ordered
+  `.before(CascadeSet::Propagate)` so a global change re-resolves and re-packs
+  the same frame; the headless integration test proves the whole chain
+  (element override survives a global flip, batch count stays 1).
+
+**Implications for remaining phases:**
+
+- Phase D / Phase E line producers get per-element AA/fade for free by
+  authoring `El::anti_alias` / `El::hairline_fade` on the elements that own
+  `PanelDraw::lines`; external-source producers (Phase D) inherit the owning
+  panel's resolved values through the same `build_panel_line_group` path.
+- Phase F's record rename must now also cover `aa_flags` / `fade_exponent`
+  WGSL mirror comments and the `AA_FLAG_*` constant pair mirrored between
+  `render/mod.rs` and `analytic_path.wgsl`.
+
+#### Phase C Review
+
+- Phase D drops the external `PanelLineSourceKey` deliverables (user-approved
+  2026-06-11): overlay marks are element-owned `PanelDraw::lines`; Phase E
+  settles whether `External` gains semantics or is deleted, default element-
+  owned trees.
+- Phase D now owns migrating the overlay's standalone `CalloutLine` producers
+  (arrows + dashed glyph pointers) to `PanelDraw::lines` (user-approved
+  2026-06-11); Phase E's parity acceptance names a synthetic consumer instead.
+- Phase D's pre-phase producer-site identification is recorded inline as a
+  concrete inventory (metric panel builders, the discarded gizmo builder and
+  its `draw_dimension_arrow` orphan, arrow/dash producers, exempted dots,
+  lifecycle components, stale module doc).
+- Phase D adds a fade-policy pin: overlay guides author
+  `El::hairline_fade(HairlineFade::Full)` (or record the opposite decision),
+  with an acceptance line that guides stay visible under a global `Fade`.
+- Phase E's parity acceptance now states the expected AA/dilation divergence
+  between the panel-backed and direct routes and restricts parity geometry or
+  tolerance accordingly.
+- Phase F's SDF deliverable is split into removable (quarantined panel-line
+  files) vs retained (`SdfPanelMaterial` for backgrounds and the non-coplanar
+  callout fallback), plus the stale `sdf_material.rs` discriminant doc.
+- Phase F's rename audit now covers the Phase C mirror surfaces (`RunRecord`
+  WGSL mirrors, `AA_FLAG_*` pair, coverage-probe tripwire) and re-counts the
+  reference-site figure at phase start.
+- Phase F's cross-panel OIT regression check gains a heterogeneous per-run
+  `aa_flags` / `fade_exponent` case after a global resource flip.
+
+#### Phase C Addendum — Per-Line Fade And Two-Lane Coverage (as built 2026-06-11)
+
+Follow-up implemented after Phase C closed, fixing the tick/spine abutment
+artifact the element-level fade exemption produced in `units.rs`. Supersedes
+the Phase C retrospective statements that `RunRecord` carries `fade_exponent`
+and that the fade factor derives from a single winning curve. User-verified
+in `units` 2026-06-11: junction line gone at zoom-in, fade-out joins
+correctly, spine/majors stay solid.
+
+Problem: exempting majors/spine via `El::hairline_fade(HairlineFade::Full)`
+required a second element, splitting the ruler into two merge groups → two
+analytic paths whose independent AA ramps composite to ~0.75 alpha where
+minor ticks abut the spine (a faint junction line). Blend modes cannot fix
+this — at the junction each path contributes ~0.5 coverage and `over` gives
+0.75, `max` 0.5, while the union is 1.0 — so the merge has to happen at the
+winding level, inside one record.
+
+As built:
+
+- **Per-line authoring**: `PanelLine::hairline_fade(HairlineFade)` /
+  `LineStyle::hairline_fade` (`Option<HairlineFade>`, `None` inherits the
+  element → panel → global resolution). Carried through
+  `ResolvedPanelLine::hairline_fade`; resolved per member in
+  `build_panel_line_group` and passed to `build_panel_line_path` as
+  `PanelLineMember { primitive, fade_exponent }`. The merge key is unchanged
+  — mixed fade policies share one group, one record, one batch.
+- **Fade is per-curve data**: `PathContour` and `CurveRecord` gained
+  `fade_exponent` (curve stride 64 → 80 B, new encase assertion);
+  `RunRecord.fade_exponent` and `TextUniform.hairline_fade_exponent` were
+  deleted (run stride 112 → 96 B; both WGSL mirrors, padded-payload tests,
+  and every constructor updated). `aa_flags` stays per-record.
+- **Two-lane coverage evaluation** in `analytic_path.wgsl`: curves split into
+  an exempt lane (`fade_exponent == 0`; never-fading contours and all text
+  glyphs) and a faded lane (`> 0`). Contours are wholly one lane, so each
+  lane's winding is a valid winding number of its sub-geometry and the lane
+  windings sum to the whole path's. Each lane carries its own `LaneTerms`
+  (winding, adjusted distance, dilation) through the existing scan loops;
+  `union_lane` rebuilds the whole-path terms from the two accumulators
+  (windings add, the nearest-silhouette race is the cross-lane min), and
+  coverage combines as `mix(exempt_coverage, union_coverage, fade_factor)`.
+  At fade factor 1 that is exactly the pre-fade single-winding evaluation —
+  an exempt/faded abutment is union-interior, so no junction line; at factor
+  0 only the exempt sub-geometry remains. The aa_band feeders (`SdSample`,
+  `signed_distance`) carry exempt + union signed distances (`vec2`,
+  per-evaluation band widths); the interior-edge suppression
+  (`lanes_any_outside_neighbor`) tests the exempt lane and the union and
+  walks neighbors once for both.
+- Why not single-winning-curve fade selection (the first cut): with mixed
+  stroke widths the thinner stroke dilates more, so its curves win the
+  `distance − dilation` race inside the wider exempt stroke — a 0.1 mm
+  fading minor tick would dim the 0.2 mm exempt spine's pixels on every tick
+  row at zoom-out (dotted spine). The mix combine keeps an exempt contour
+  at full alpha wherever it covers (`mix(1, 1, f) = 1`).
+- Why not `max(exempt_coverage, faded_coverage × fade_factor)` (the second
+  cut, reverted same day): at the boundary where an exempt contour abuts a
+  faded one, each lane's AA ramp reaches ~0.5 and `max(0.5, 0.5) = 0.5` — a
+  half-alpha junction line in the zoomed-in regime (dilation 0, factor 1),
+  worse than the 0.75 the original two-record compositing gave. Union
+  coverage at the junction needs both windings in one accumulator. Pinned by
+  `merged_mixed_fade_path_has_no_junction_dip` in `coverage_probe.rs`:
+  exempt spine in the merged path == spine alone, fading tick == tick alone,
+  pointwise along the shared row the mixed path is never darker than the
+  all-fading path or the spine alone, and in the undilated regime the mixed
+  path equals the all-fading path with the junction at full alpha (the
+  max-combine defect's regime, which the dilated-only first version of the
+  test never sampled).
+- **CPU mirror** (`coverage_probe.rs`): `LaneTerms`/`CoverageTerms`,
+  lane-split winding/accumulation, `union_lane`, exempt/union
+  `lane_coverage` / `lane_signed_distance`, exempt/union band math in the
+  aa_band/aniso mirrors; shader-hash tripwire re-pinned
+  (`0x74a9_fc4a_efdd_a544`).
+- **units.rs**: the nested fixed/fading element workaround is deleted; each
+  ruler is one element again, majors and the spine pin
+  `HairlineFade::Full` per line (`exempt_major_ticks`), minors inherit the
+  global fade. The Phase C acceptance test
+  (`element_overrides_share_one_batch_and_global_changes_repack`) now reads
+  fade from the record outline's contours instead of the run record.
+- Cost note: the fade exponent lives in packed curve data, so a global
+  exponent change re-packs and re-uploads the line atlas (the panel
+  reconcile already rebuilt outlines on `Changed<Resolved<HairlineFade>>`;
+  the added work is the band pack plus a tens-of-KB upload per step).
+- Phase D's fade-policy pin can now be authored per line as well as per
+  element; the Phase F rename audit covers `CurveRecord::fade_exponent` (not
+  `RunRecord`) and the heterogeneous-fade OIT regression case exercises
+  per-curve fade after a global flip.
+
+### Phase D - Typography Overlay Migration
 
 Move the remaining typography overlay guide paths onto panel-backed analytic
 path marks. Existing transparent overlay panels stay; this phase targets the
@@ -443,29 +738,67 @@ Deliverables:
 - Convert border-backed metric guide panels such as typography metric-line
   panels to `PanelDraw::lines` / analytic vector marks rather than leaving them
   on SDF rectangle borders.
-- Assign stable external `PanelLineSourceKey` values for overlay-produced marks
-  so metric refreshes do not depend on ordinal churn.
-- Add or select a producer path for those external source ids; ordinary
-  element-owned `PanelDraw::lines` continues to use element/draw/line ordinals.
+- Author overlay marks as ordinary element-owned `PanelDraw::lines` with
+  element/draw/line ordinals (decision 2026-06-11: the external
+  `PanelLineSourceKey` deliverables are dropped — `External` has no producer,
+  no element-index/material/AA-fade resolution semantics, and the overlay's
+  per-refresh tree rebuilds make element ordinals naturally stable; Phase E
+  settles whether `External` gains semantics or is deleted).
 - Keep overlay panel entities stable when retained renderer identity matters.
   If a metric refresh recreates overlay panels, treat the panel-entity portion
   of `PanelLineRenderKey` as churn and verify stale cleanup explicitly.
 - Rebuild or update overlay panels on metric changes so renderer records refresh
   through normal panel lifecycle.
 - Remove or explicitly exempt retained gizmo/callout overlay line paths.
+  Phase D owns the overlay's standalone `CalloutLine` producers (decision
+  2026-06-11): migrate `spawn_metric_arrow_callouts` (metric_lines.rs) and
+  `spawn_dashed_callout_line` (glyph.rs) directly to element-owned
+  `PanelDraw::lines` on the overlay panels — `LineStyle` already carries
+  start/end `CalloutCap` and Phase B renders caps analytically, and one
+  element per dash group replaces today's per-dash `CalloutLine` entity
+  fan-out. Phase E does not depend on these producers.
 - Clean up stale typography metric `GizmoAsset` line/arrow construction when
   the caller already discards those gizmos.
 - Exempt typography-example dots/circles from this phase's line migration; they
   are non-line marks and should not force a public path/vector-mark API into
-  Phase C.
+  Phase D.
+- Metric guides become hairline-dilating analytic strokes, so a global
+  `HairlineFade::Fade` policy would fade them at distance — wrong for a debug
+  overlay. Author `El::hairline_fade(HairlineFade::Full)` on guide elements
+  (or record an explicit decision that overlay guides may fade).
+
+Producer-site inventory (recorded 2026-06-10, satisfies the pre-phase
+identification step):
+
+- Border-backed metric panel: `debug/typography_overlay/metric_lines.rs`
+  `spawn_metric_line_panel` + `build_metric_line_tree`.
+- Discarded gizmo builder: `metric_lines.rs` destructures
+  `build_metric_gizmos` as `(_, _, metric_lines)` — the gizmo halves are
+  built and thrown away. Deleting it also orphans
+  `callouts::draw_dimension_arrow` (`callouts/render.rs`, its only caller).
+- Arrow callouts: `metric_lines.rs::spawn_metric_arrow_callouts`.
+- Bbox border panels, callouts, and dashed lines:
+  `debug/typography_overlay/glyph.rs` (`spawn_dashed_callout_line` fans one
+  dashed line into many `CalloutLine` entities).
+- Mesh-circle dots: `glyph.rs::spawn_overlay_dot` (exempted, non-line mark).
+- Lifecycle/cleanup components: `debug/typography_overlay/pipeline.rs` and
+  `lifecycle.rs`.
+- Stale documentation: `debug/typography_overlay/mod.rs` still says "Metric
+  lines are drawn using Bevy's retained GizmoAsset" — already false; fix in
+  this phase's cleanup.
 
 Acceptance:
 
 - Typography guide lines align with the measured text/run bounds they annotate.
 - Old callout/gizmo line paths are removed or explicitly exempted.
-- Overlay removal and metric changes do not leave stale path records.
+- Overlay guide lines remain visible under a global
+  `HairlineWidth { fade: Fade { .. } }` configuration.
+- An explicit churn test: recreate overlay panels through repeated metric
+  changes, scan all batch run records for source keys with no live panel
+  entity, and assert zero stale records — "does not leave stale records" is
+  not satisfiable by inspection alone.
 
-### Phase D - Planar Callout Unification
+### Phase E - Planar Callout Unification
 
 Add a transparent-panel-backed path for planar callouts.
 
@@ -475,9 +808,15 @@ Deliverables:
 - Add a mapping/classification slice that detects planar callouts, chooses or
   creates the transparent panel, maps local/world `Vec3` endpoints into panel
   coordinates, and preserves render layers.
-- Add a renderer-routing slice that emits stable external panel mark source ids
-  and routes planar callout shafts/caps through the Phase B panel-line analytic
-  path adapter; do not build another cap/shaft renderer route.
+- Add a renderer-routing slice that routes planar callout shafts/caps through
+  the Phase B panel-line analytic path adapter; do not build another cap/shaft
+  renderer route. At phase start, choose the mark-identity route (decision
+  2026-06-11, default = (a)): (a) author callout marks as element-owned
+  `PanelDraw::lines` on the transparent panels this phase creates — uniform
+  element-index/material/AA-fade resolution, and delete
+  `PanelLineSourceKey::External` as dead code; or (b) keep the `External`
+  route, which then requires defining element-index, material, and AA/fade
+  resolution semantics for post-layout lines.
 - Route planar callout geometry through a transparent panel and shared analytic
   path marks where possible.
 - Keep the direct callout renderer for non-coplanar cases or accepted
@@ -490,22 +829,59 @@ Deliverables:
 Acceptance:
 
 - A representative planar standalone callout and panel-backed callout match in
-  endpoints, insets, caps, thickness, color, and clipping.
+  endpoints, insets, caps, thickness, color, and clipping. The parity
+  consumer is a synthetic/example callout authored for the test — the
+  typography overlay's callouts migrate to `PanelDraw::lines` in Phase D and
+  are not available as consumers here (decision 2026-06-11). Pixel-exact parity
+  is not achievable by design: the panel-backed route applies cascade-resolved
+  `TextAntiAlias` and hairline dilation while the direct renderer uses
+  `SdfPanelMaterial` AA with no dilation, so a callout thinner than the
+  hairline floor renders wider panel-backed. Restrict parity geometry to
+  at-floor-or-wider strokes, or state the expected divergence and comparison
+  tolerance in the test.
 - Panel-backed callouts batch with compatible panel marks.
 - Non-coplanar callouts remain supported or are rejected by a clear boundary.
 
-### Phase E - Hardening And Archive Closeout
+### Phase F - Hardening And Archive Closeout
 
 Close the old-renderer gap after the shared path renderer has real
 consumers.
 
 Deliverables:
 
-- Remove or quarantine the dedicated panel-line SDF renderer.
+- Remove the quarantined panel-line SDF files (`render/panel_lines/material.rs`,
+  `panel_line_batch.wgsl`) — they are the only removable SDF surface. The
+  shared `SdfPanelMaterial` / `SdfPrimitiveKind` path stays: panel backgrounds
+  and the Phase E non-coplanar callout fallback
+  (`callouts/render.rs` uses `Triangle` / `Circle` / `RoundedRect` /
+  `Diamond`) depend on it. Also fix the stale doc at
+  `render/sdf_material.rs` that still describes retired discriminants
+  ("`4` = line segment, `5..=7` = oriented cap forms") and remove any
+  matching dead WGSL branches.
 - Keep the as-built module summary current.
 - Rename text/glyph-compatible internal analytic-path names such as
   `TextMaterial`, `GlyphRecord`, and `GlyphInstanceRecord` to path-neutral
-  names, or explicitly defer those compatibility aliases with rationale.
+  names, or explicitly defer with a per-type rationale recorded in code. The
+  rename touches reference sites across render and text modules (re-count at
+  phase start; Phase C added uses in `panel_lines/batching.rs` and
+  `panel_text/batching.rs`); stage it through the existing `PathRecord` /
+  `PathInstanceRecord` aliases — first switch crate-internal uses to the
+  aliases, then rename the definitions — so there is a compiling
+  intermediate state. The rename audit also covers the Phase C surfaces: the
+  `RunRecord` mirror structs and `aa_flags` comments in
+  `analytic_path.wgsl` and `analytic_path_vertex_pull.wgsl`, the
+  `CurveRecord::fade_exponent` mirrors (Phase C addendum moved fade from
+  `RunRecord` to per-curve data), the `AA_FLAG_SUPERSAMPLE` /
+  `AA_FLAG_BAND` constant pair mirrored between `render/mod.rs` and
+  `analytic_path.wgsl`, and the shader-hash tripwire + CPU mirror in
+  `text/slug/glyph/coverage_probe.rs`.
+- Add a cross-panel OIT ordering regression check: lines from multiple
+  panels batched together must composite in the order their
+  `oit_depth_offset` values declare. Include a heterogeneous case: a
+  cross-panel batch whose runs carry different `aa_flags` and whose packed
+  curves carry different `fade_exponent` values must composite and re-pack
+  correctly after a global `TextAntiAlias` / `HairlineWidth` flip (Phase
+  C's headless test covers only the intra-panel case).
 - Keep only cross-feature regression tests here; Phase B owns the focused path
   conversion, cleanup, clipping, and visual-bounds tests required before later
   consumers use the path renderer.
@@ -634,7 +1010,7 @@ complete.
 
 ## Open Design Discussion - Non-Line Panel Marks
 
-Phase C intentionally exempts typography-example dots/circles from the
+Phase D intentionally exempts typography-example dots/circles from the
 panel-line migration. They are filled non-line marks, and adding a public
 path/vector-mark draw API would expand the typography migration beyond its goal.
 
@@ -650,6 +1026,6 @@ Design questions to revisit:
 - What clipping, paint-order, stable-source-key, shadow, and material semantics
   should apply when the mark is not naturally a stroke/cap pair?
 
-Current decision: do not add this API during Phase C. Keep dots/circles in the
+Current decision: do not add this API during Phase D. Keep dots/circles in the
 typography example on their existing path unless a later phase explicitly adds
 non-line panel mark support.

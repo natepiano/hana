@@ -52,6 +52,16 @@
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
 //! | [`TextLighting`] | `CascadeDefault<TextLighting>` | `override_text_lighting`, `inherit_text_lighting`, [`resolved_text_lighting`] |
 //! | [`TextSidedness`] | `CascadeDefault<TextSidedness>` | `override_text_sidedness`, `inherit_text_sidedness`, [`resolved_text_sidedness`] |
+//! | [`TextAntiAlias`](crate::TextAntiAlias) | `CascadeDefault<TextAntiAlias>`, mirrored from the `TextAntiAlias` resource | `override_text_anti_alias`, `inherit_text_anti_alias`, [`resolved_text_anti_alias`] |
+//! | [`HairlineFade`](crate::HairlineFade) | `CascadeDefault<HairlineFade>`, mirrored from [`HairlineWidth::fade`](crate::HairlineWidth) | `override_hairline_fade`, `inherit_hairline_fade`, [`resolved_hairline_fade`] |
+//!
+//! `TextAntiAlias` and `HairlineFade` are existing render value types joined
+//! to the cascade with `cascade_attr!(existing ...)` — the attribute *is* the
+//! value type, with no wrapper struct. Panel line elements additionally
+//! override both per element through the layout tree
+//! ([`El::anti_alias`](crate::El::anti_alias) /
+//! [`El::hairline_fade`](crate::El::hairline_fade)), resolved as element
+//! override else the panel entity's cascade value.
 //!
 //! # Membership is a property of the tree, not of a shared component
 //!
@@ -116,7 +126,9 @@ pub use attributes::TextSidedness;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_font_unit;
+pub use attributes::resolved_hairline_fade;
 pub use attributes::resolved_text_alpha;
+pub use attributes::resolved_text_anti_alias;
 pub use attributes::resolved_text_lighting;
 pub use attributes::resolved_text_sidedness;
 pub use cascade_set::CascadeSet;

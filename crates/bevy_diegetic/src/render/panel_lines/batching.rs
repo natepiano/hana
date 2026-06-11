@@ -25,8 +25,11 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::path;
+use super::path::PanelLineMember;
 use super::path::PanelLinePathContext;
 use super::primitive::PanelLineRenderKey;
+use crate::cascade::CascadeDefault;
+use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
 use crate::layout::PanelLinePaintOrder;
 use crate::layout::PanelLineSourceKey;
@@ -44,6 +47,7 @@ use crate::render::BatchRenderLayers;
 use crate::render::BatchTextMaterialInput;
 use crate::render::GlyphAtlasHandles;
 use crate::render::GlyphInstanceRecord;
+use crate::render::HairlineFade;
 use crate::render::PathAtlas;
 use crate::render::PathOutline;
 use crate::render::RenderMode;
@@ -342,12 +346,18 @@ impl PanelLineBatchStore {
 }
 
 struct PanelLineReconcileContext<'a> {
-    panel_entity:    Entity,
-    panel:           &'a DiegeticPanel,
-    panel_transform: Mat4,
-    path_context:    PanelLinePathContext,
-    shadow:          VisualShadow,
-    layers:          BatchRenderLayers,
+    panel_entity:        Entity,
+    panel:               &'a DiegeticPanel,
+    panel_transform:     Mat4,
+    path_context:        PanelLinePathContext,
+    shadow:              VisualShadow,
+    layers:              BatchRenderLayers,
+    /// The panel entity's cascade-resolved anti-alias mode; elements without
+    /// their own override inherit it.
+    panel_anti_alias:    TextAntiAlias,
+    /// The panel entity's cascade-resolved hairline fade policy; elements
+    /// without their own override inherit it.
+    panel_hairline_fade: HairlineFade,
 }
 
 struct LinePrimitiveSource<'a> {
@@ -435,6 +445,8 @@ pub(super) fn reconcile_panel_line_batches(
             &GlobalTransform,
             Option<&RenderLayers>,
             Option<&Visibility>,
+            Option<&Resolved<TextAntiAlias>>,
+            Option<&Resolved<HairlineFade>>,
         ),
         Or<(
             Changed<ComputedDiegeticPanel>,
@@ -442,11 +454,15 @@ pub(super) fn reconcile_panel_line_batches(
             Changed<GlobalTransform>,
             Changed<RenderLayers>,
             Changed<Visibility>,
+            Changed<Resolved<TextAntiAlias>>,
+            Changed<Resolved<HairlineFade>>,
         )>,
     >,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
     anti_alias: Res<TextAntiAlias>,
+    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
+    hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut store: ResMut<PanelLineBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -457,8 +473,16 @@ pub(super) fn reconcile_panel_line_batches(
         store.remove_panel(panel);
     }
 
-    for (panel_entity, panel, computed, panel_transform, panel_layers, panel_visibility) in
-        &changed_panels
+    for (
+        panel_entity,
+        panel,
+        computed,
+        panel_transform,
+        panel_layers,
+        panel_visibility,
+        panel_anti_alias,
+        panel_hairline_fade,
+    ) in &changed_panels
     {
         let Some(result) = computed.result() else {
             store.remove_panel(panel_entity);
@@ -481,6 +505,9 @@ pub(super) fn reconcile_panel_line_batches(
             },
             shadow: panel.surface_shadow().into(),
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
+            panel_anti_alias: panel_anti_alias.map_or(anti_alias_default.0, |resolved| resolved.0),
+            panel_hairline_fade: panel_hairline_fade
+                .map_or(hairline_fade_default.0, |resolved| resolved.0),
         };
         let records = collect_panel_records(&context, &result.commands, &mut store);
         store.upsert_panel(panel_entity, records);
@@ -545,10 +572,27 @@ fn build_panel_line_group(
         .collect();
     let first = members.first()?;
 
-    let primitives: Vec<&ResolvedPanelLinePrimitive> =
-        members.iter().map(|source| source.primitive).collect();
+    // Element override else the panel's cascade-resolved value; each line may
+    // override both. Fade is per-curve in the merged path, so mixed policies
+    // share this one group.
+    let element_hairline_fade = context
+        .panel
+        .tree()
+        .element_hairline_fade(first.element_index)
+        .unwrap_or(context.panel_hairline_fade);
+    let path_members: Vec<PanelLineMember<'_>> = members
+        .iter()
+        .map(|source| PanelLineMember {
+            primitive:     source.primitive,
+            fade_exponent: source
+                .line
+                .hairline_fade()
+                .unwrap_or(element_hairline_fade)
+                .fade_exponent(),
+        })
+        .collect();
     let path = path::build_panel_line_path(
-        &primitives,
+        &path_members,
         first.line.owner_bounds(),
         first.primitive.clip(),
         &context.path_context,
@@ -583,6 +627,13 @@ fn build_panel_line_group(
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
     };
+    // Element override else the panel's cascade-resolved value. The merge key
+    // groups per element, so every member of this group shares one resolution.
+    let anti_alias = context
+        .panel
+        .tree()
+        .element_anti_alias(first.element_index)
+        .unwrap_or(context.panel_anti_alias);
     let linear = first.primitive.color().to_linear();
     let run = RunRecord {
         transform: context.panel_transform,
@@ -590,6 +641,7 @@ fn build_panel_line_group(
         render_mode: u32::from(RenderMode::Text),
         depth_nudge: depth_bias,
         oit_depth_offset,
+        aa_flags: anti_alias.aa_flags(),
     };
     let instance = GlyphInstanceRecord {
         rect_min:    path.rect_min,
@@ -914,6 +966,7 @@ fn padded_line_runs(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord> 
             render_mode:      0,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
+            aa_flags:         0,
         },
     );
     padded
@@ -991,16 +1044,158 @@ const fn apply_visual_sidedness(base: &mut StandardMaterial, sidedness: VisualSi
 #[cfg(test)]
 #[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
+    use std::sync::Arc;
+
+    use bevy::asset::AssetPlugin;
     use bevy::color::Color;
 
     use super::*;
+    use crate::El;
+    use crate::Mm;
+    use crate::cascade::CascadeSet;
+    use crate::layout::PanelDraw;
+    use crate::layout::PanelLine;
     use crate::layout::PanelLineLayering;
     use crate::layout::PanelLinePrimitiveGeometry;
     use crate::layout::PanelLinePrimitiveKey;
     use crate::layout::PanelLinePrimitiveKind;
+    use crate::layout::TextDimensions;
+    use crate::layout::TextMeasure;
+    use crate::panel::HeadlessLayoutPlugin;
     use crate::render::Bounds;
+    use crate::render::HairlineWidth;
     use crate::render::PathContour;
     use crate::render::QuadraticSegment;
+    use crate::text::DiegeticTextMeasurer;
+
+    /// Headless app wired with panel layout, the AA/fade cascade plugins
+    /// (via [`HeadlessLayoutPlugin`]), the production cascade-root sync
+    /// systems, and the panel-line reconcile.
+    fn line_batch_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(AssetPlugin::default())
+            .insert_resource(DiegeticTextMeasurer {
+                measure_fn: Arc::new(|_text: &str, measure: &TextMeasure| TextDimensions {
+                    width:       measure.size,
+                    height:      measure.size,
+                    line_height: measure.size,
+                }),
+            })
+            .add_plugins(HeadlessLayoutPlugin)
+            .init_resource::<TextAntiAlias>()
+            .init_resource::<HairlineWidth>()
+            .init_resource::<PanelLineBatchStore>()
+            .init_asset::<Mesh>()
+            .init_asset::<TextMaterial>()
+            .init_asset::<ShaderBuffer>()
+            .add_systems(
+                Update,
+                (
+                    crate::render::sync_text_anti_alias,
+                    crate::render::sync_hairline_fade,
+                )
+                    .before(CascadeSet::Propagate),
+            )
+            .add_systems(PostUpdate, reconcile_panel_line_batches);
+        app
+    }
+
+    fn horizontal_line() -> PanelLine {
+        PanelLine::new((0.0, 5.0), (20.0, 5.0))
+            .width(0.4)
+            .color(Color::WHITE)
+    }
+
+    /// Per record: the run's AA flags and the packed outline's fade exponent
+    /// (fade is per-curve data carried by the record's contours, not a run
+    /// field).
+    fn sorted_run_fields(store: &PanelLineBatchStore) -> Vec<(u32, u32)> {
+        let mut fields: Vec<(u32, u32)> = store
+            .batches()
+            .flat_map(|(_, batch)| &batch.records)
+            .map(|record| {
+                (
+                    record.run.aa_flags,
+                    record.outline.contours[0].fade_exponent.to_bits(),
+                )
+            })
+            .collect();
+        fields.sort_unstable();
+        fields
+    }
+
+    /// Phase C acceptance: an element-level AA override renders with its own
+    /// mode while its sibling keeps the inherited mode without increasing the
+    /// batch count, and a global `TextAntiAlias` / `HairlineWidth::fade`
+    /// change applied after the override exists re-packs the non-overridden
+    /// run records while the overrides hold.
+    #[test]
+    fn element_overrides_share_one_batch_and_global_changes_repack() {
+        let mut app = line_batch_app();
+
+        // Element 1: no overrides. Element 2: AA Off + fade pinned to Full.
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .size(40.0, 20.0)
+                        .draw(PanelDraw::lines([horizontal_line()])),
+                    |_| {},
+                );
+                builder.with(
+                    El::new()
+                        .size(40.0, 20.0)
+                        .anti_alias(TextAntiAlias::Off)
+                        .hairline_fade(HairlineFade::Full)
+                        .draw(PanelDraw::lines([horizontal_line()])),
+                    |_| {},
+                );
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("test panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        for _ in 0..3 {
+            app.update();
+        }
+
+        {
+            let store = app.world().resource::<PanelLineBatchStore>();
+            assert_eq!(
+                store.batches().count(),
+                1,
+                "an element AA override must not split the batch"
+            );
+            assert_eq!(
+                sorted_run_fields(store),
+                vec![
+                    (TextAntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
+                    (TextAntiAlias::Both.aa_flags(), 0.0_f32.to_bits()),
+                ],
+                "one run carries the element override, the other the global default"
+            );
+        }
+
+        // Global changes after the overrides exist: the cascade-root sync +
+        // propagation re-resolve the panel, and `Changed<Resolved<A>>`
+        // re-packs the run records.
+        *app.world_mut().resource_mut::<TextAntiAlias>() = TextAntiAlias::Anisotropic;
+        app.world_mut().resource_mut::<HairlineWidth>().fade = HairlineFade::Fade { exponent: 1.5 };
+        for _ in 0..3 {
+            app.update();
+        }
+
+        let store = app.world().resource::<PanelLineBatchStore>();
+        assert_eq!(
+            sorted_run_fields(store),
+            vec![
+                (TextAntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
+                (TextAntiAlias::Anisotropic.aa_flags(), 1.5_f32.to_bits()),
+            ],
+            "the non-overridden run re-packs to the new globals; the element overrides hold"
+        );
+    }
 
     #[test]
     fn line_ordinal_contributes_to_depth_inside_grouped_command() {
@@ -1080,6 +1275,7 @@ mod tests {
             shaft_end: Vec2::new(50.0, 0.0),
             width: 2.0,
             color: Color::WHITE,
+            hairline_fade: None,
             primitives: vec![primitive],
         };
         let commands = vec![RenderCommand {
@@ -1232,6 +1428,7 @@ mod tests {
                 render_mode:      u32::from(RenderMode::Text),
                 depth_nudge:      0.0,
                 oit_depth_offset: 0.0,
+                aa_flags:         TextAntiAlias::Both.aa_flags(),
             },
         }
     }
@@ -1243,8 +1440,9 @@ mod tests {
                 max: Vec2::ONE,
             },
             contours: vec![PathContour {
-                min_feature: 0.0,
-                segments:    vec![
+                min_feature:   0.0,
+                fade_exponent: 0.0,
+                segments:      vec![
                     QuadraticSegment {
                         start:   Vec2::ZERO,
                         control: Vec2::new(0.5, 0.0),
@@ -1312,6 +1510,7 @@ mod tests {
             shaft_end: Vec2::X,
             width: 1.0,
             color: Color::WHITE,
+            hairline_fade: None,
             primitives: vec![primitive],
         }
     }

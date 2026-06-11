@@ -19,6 +19,7 @@ use crate::CalloutCap;
 use crate::callouts::CalloutCapPrimitiveKind;
 use crate::callouts::ResolvedCalloutCap;
 use crate::callouts::ResolvedCalloutCapPrimitive;
+use crate::render::HairlineFade;
 
 const POINT_SPACE_SCALE: f32 = 1.0;
 const MIN_LINE_LENGTH_SQUARED: f32 = f32::EPSILON;
@@ -54,11 +55,12 @@ pub struct PanelLine {
 /// Visual style for a [`PanelLine`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineStyle {
-    width:     Dimension,
-    color:     Color,
-    cap_size:  Dimension,
-    start_cap: CalloutCap,
-    end_cap:   CalloutCap,
+    width:         Dimension,
+    color:         Color,
+    cap_size:      Dimension,
+    start_cap:     CalloutCap,
+    end_cap:       CalloutCap,
+    hairline_fade: Option<HairlineFade>,
 }
 
 /// A 2D point authored relative to an element's resolved box.
@@ -184,6 +186,9 @@ pub struct ResolvedPanelLine {
     pub(crate) width:                f32,
     /// Resolved base line color.
     pub(crate) color:                Color,
+    /// Authored hairline fade override; `None` inherits the owning element's
+    /// resolution.
+    pub(crate) hairline_fade:        Option<HairlineFade>,
     /// Shaft and cap primitives in stable part order.
     pub(crate) primitives:           Vec<ResolvedPanelLinePrimitive>,
 }
@@ -327,6 +332,19 @@ impl PanelLine {
         self
     }
 
+    /// Overrides the hairline fade policy for this line. Lines without an
+    /// override inherit the owning element's resolution (element override
+    /// else the panel's cascade-resolved [`HairlineFade`]). Lines with
+    /// different fade policies still merge into one analytic path — the
+    /// shader fades each coverage evaluation by its winning curve's
+    /// exponent — so a never-fading ruler spine and fading minor ticks abut
+    /// without an anti-aliasing junction.
+    #[must_use]
+    pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
+        self.style = self.style.hairline_fade(fade);
+        self
+    }
+
     /// Insets the visible start tip inward from `start`.
     #[must_use]
     pub fn start_inset(mut self, inset: impl Into<Dimension>) -> Self {
@@ -467,6 +485,10 @@ impl ResolvedPanelLine {
     /// Returns the resolved base line color.
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
+
+    /// Returns the authored hairline fade override, if any.
+    #[must_use]
+    pub const fn hairline_fade(&self) -> Option<HairlineFade> { self.hairline_fade }
 
     /// Returns shaft and cap primitives in stable part order.
     #[must_use]
@@ -640,6 +662,7 @@ pub(crate) fn resolve_panel_line(
         shaft_end,
         width,
         color,
+        hairline_fade: line.line_style().hairline_fade_value(),
         primitives,
     })
 }
@@ -1005,13 +1028,25 @@ impl LineStyle {
     #[must_use]
     pub const fn end_cap_value(&self) -> CalloutCap { self.end_cap }
 
+    /// Overrides the hairline fade policy for lines using this style.
+    #[must_use]
+    pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
+        self.hairline_fade = Some(fade);
+        self
+    }
+
+    /// Returns the hairline fade override, if any.
+    #[must_use]
+    pub const fn hairline_fade_value(&self) -> Option<HairlineFade> { self.hairline_fade }
+
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {
-            width:     scaled_dimension(self.width, default_scale),
-            color:     self.color,
-            cap_size:  scaled_dimension(self.cap_size, default_scale),
-            start_cap: self.start_cap.scaled_dimensions(default_scale),
-            end_cap:   self.end_cap.scaled_dimensions(default_scale),
+            width:         scaled_dimension(self.width, default_scale),
+            color:         self.color,
+            cap_size:      scaled_dimension(self.cap_size, default_scale),
+            start_cap:     self.start_cap.scaled_dimensions(default_scale),
+            end_cap:       self.end_cap.scaled_dimensions(default_scale),
+            hairline_fade: self.hairline_fade,
         }
     }
 }
@@ -1019,11 +1054,12 @@ impl LineStyle {
 impl Default for LineStyle {
     fn default() -> Self {
         Self {
-            width:     DEFAULT_LINE_WIDTH,
-            color:     Color::WHITE,
-            cap_size:  DEFAULT_CAP_SIZE,
-            start_cap: CalloutCap::None,
-            end_cap:   CalloutCap::None,
+            width:         DEFAULT_LINE_WIDTH,
+            color:         Color::WHITE,
+            cap_size:      DEFAULT_CAP_SIZE,
+            start_cap:     CalloutCap::None,
+            end_cap:       CalloutCap::None,
+            hairline_fade: None,
         }
     }
 }

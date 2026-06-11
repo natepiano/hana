@@ -40,23 +40,41 @@ pub(super) struct PanelLinePath {
     pub uv_size:   Vec2,
 }
 
+/// One merge-group member: a resolved primitive plus its resolved hairline
+/// fade exponent (line override else element/panel resolution, encoded by
+/// [`HairlineFade::fade_exponent`](crate::HairlineFade::fade_exponent)).
+pub(super) struct PanelLineMember<'a> {
+    pub primitive:     &'a ResolvedPanelLinePrimitive,
+    pub fade_exponent: f32,
+}
+
+/// One member's panel-space contour with its per-contour packing inputs.
+struct MemberContour {
+    segments:      Vec<QuadraticSegment>,
+    /// World-unit narrowest stroke (hairline dilation input).
+    min_feature:   f32,
+    fade_exponent: f32,
+}
+
 /// Converts one mergeable group of resolved panel-line primitives (same
 /// color, clip, and layering) into a single multi-contour filled analytic
 /// path. One winding field covers the whole group, so abutting or
 /// overlapping members — a tick butted against a ruler spine — render as one
 /// silhouette with no anti-aliasing junction line between them. Each contour
-/// keeps its own stroke width for per-curve hairline dilation.
+/// keeps its own stroke width for per-curve hairline dilation and its own
+/// fade exponent, so fading and non-fading members coexist in the merged
+/// path.
 pub(super) fn build_panel_line_path(
-    primitives: &[&ResolvedPanelLinePrimitive],
+    members: &[PanelLineMember<'_>],
     owner_bounds: BoundingBox,
     clip: Option<BoundingBox>,
     context: &PanelLinePathContext,
 ) -> Option<PanelLinePath> {
-    let contours: Vec<(Vec<QuadraticSegment>, f32)> = primitives
+    let contours: Vec<MemberContour> = members
         .iter()
-        .filter_map(|primitive| primitive_contour(primitive, context))
+        .filter_map(|member| member_contour(member, context))
         .collect();
-    let source_bounds = segment_bounds(contours.iter().flat_map(|(segments, _)| segments))?;
+    let source_bounds = segment_bounds(contours.iter().flat_map(|contour| &contour.segments))?;
     let translation = PathTranslation::new(source_bounds);
     let (rect_min, rect_size, uv_min, uv_size) =
         clipped_instance(translation, clip, owner_bounds, context)?;
@@ -70,28 +88,40 @@ pub(super) fn build_panel_line_path(
     })
 }
 
-/// One primitive's panel-space contour and world-unit narrowest stroke.
-fn primitive_contour(
-    primitive: &ResolvedPanelLinePrimitive,
+/// One member's panel-space contour, world-unit narrowest stroke, and fade
+/// exponent.
+fn member_contour(
+    member: &PanelLineMember<'_>,
     context: &PanelLinePathContext,
-) -> Option<(Vec<QuadraticSegment>, f32)> {
-    match primitive.geometry() {
-        PanelLinePrimitiveGeometry::Segment { start, end, width } => Some((
+) -> Option<MemberContour> {
+    let (segments, min_feature) = match member.primitive.geometry() {
+        PanelLinePrimitiveGeometry::Segment { start, end, width } => (
             segment_contour(start, end, width, context)?,
             width * context.points_to_world,
-        )),
+        ),
         PanelLinePrimitiveGeometry::Form {
             center,
             axis,
             half_size,
         } => {
             let world_half_size = half_size * context.points_to_world;
-            Some((
-                form_contour(primitive.kind(), center, axis, world_half_size, context)?,
+            (
+                form_contour(
+                    member.primitive.kind(),
+                    center,
+                    axis,
+                    world_half_size,
+                    context,
+                )?,
                 2.0 * world_half_size.x.min(world_half_size.y),
-            ))
+            )
         },
-    }
+    };
+    Some(MemberContour {
+        segments,
+        min_feature,
+        fade_exponent: member.fade_exponent,
+    })
 }
 
 fn segment_contour(
@@ -198,21 +228,19 @@ fn line_segment((start, end): (Vec2, Vec2)) -> QuadraticSegment {
     }
 }
 
-fn local_design_outline(
-    contours: Vec<(Vec<QuadraticSegment>, f32)>,
-    translation: PathTranslation,
-) -> PathOutline {
+fn local_design_outline(contours: Vec<MemberContour>, translation: PathTranslation) -> PathOutline {
     let contours = contours
         .into_iter()
-        .map(|(mut segments, min_feature_world)| {
-            for segment in &mut segments {
+        .map(|mut contour| {
+            for segment in &mut contour.segments {
                 segment.start = translation.to_design(segment.start);
                 segment.control = translation.to_design(segment.control);
                 segment.end = translation.to_design(segment.end);
             }
             PathContour {
-                segments,
-                min_feature: min_feature_world * translation.design_units_per_world,
+                segments:      contour.segments,
+                min_feature:   contour.min_feature * translation.design_units_per_world,
+                fade_exponent: contour.fade_exponent,
             }
         })
         .collect();
@@ -430,12 +458,22 @@ mod tests {
 
     const TEST_VEC2_EPSILON_SQUARED: f32 = 0.000_001;
 
+    const fn member(primitive: &ResolvedPanelLinePrimitive) -> PanelLineMember<'_> {
+        PanelLineMember {
+            primitive,
+            fade_exponent: 0.0,
+        }
+    }
+
     #[test]
     fn segment_emits_closed_rectangle_with_midpoint_quadratics() {
         let primitive = segment_primitive(None);
-        let Some(path) =
-            build_panel_line_path(&[&primitive], wide_owner_bounds(), None, &test_context())
-        else {
+        let Some(path) = build_panel_line_path(
+            &[member(&primitive)],
+            wide_owner_bounds(),
+            None,
+            &test_context(),
+        ) else {
             panic!("segment should build a path");
         };
 
@@ -469,7 +507,7 @@ mod tests {
         };
         let primitive = segment_primitive(Some(clip));
         let Some(path) = build_panel_line_path(
-            &[&primitive],
+            &[member(&primitive)],
             wide_owner_bounds(),
             Some(clip),
             &test_context(),
@@ -496,7 +534,8 @@ mod tests {
             height: 2.0,
         };
         let primitive = segment_primitive(Some(clip));
-        let Some(path) = build_panel_line_path(&[&primitive], clip, Some(clip), &test_context())
+        let Some(path) =
+            build_panel_line_path(&[member(&primitive)], clip, Some(clip), &test_context())
         else {
             panic!("owner-clipped segment should build a path");
         };
@@ -531,9 +570,12 @@ mod tests {
             part_order: 0,
         };
 
-        let Some(path) =
-            build_panel_line_path(&[&primitive], wide_owner_bounds(), None, &test_context())
-        else {
+        let Some(path) = build_panel_line_path(
+            &[member(&primitive)],
+            wide_owner_bounds(),
+            None,
+            &test_context(),
+        ) else {
             panic!("circle should build a path");
         };
 
@@ -657,7 +699,7 @@ mod tests {
             for (line_index, line) in lines.iter().enumerate() {
                 for primitive in line.primitives() {
                     let Some(path) = build_panel_line_path(
-                        &[primitive],
+                        &[member(primitive)],
                         line.owner_bounds(),
                         primitive.clip(),
                         &context,
@@ -732,7 +774,7 @@ mod tests {
                 anchor_y:        0.1,
             };
             let Some(path) =
-                build_panel_line_path(&[&primitive], wide_owner_bounds(), None, &context)
+                build_panel_line_path(&[member(&primitive)], wide_owner_bounds(), None, &context)
             else {
                 panic!("path should build");
             };

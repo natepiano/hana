@@ -1,8 +1,32 @@
-// Analytic coverage text shader.
+// Analytic path fragment shader: exact coverage for quadratic-Bezier
+// outlines, shared by slug text runs and merged panel-line paths. A
+// "glyph" here is one packed path — a font glyph or a whole merge group of
+// panel lines (ticks + spine in one record).
 //
-// This first pass evaluates non-zero winding coverage from quadratic curve
-// records grouped into horizontal bands. It is deliberately separate from
-// the production text renderer.
+// Inputs (packed by render/analytic_paths/packing.rs, structs mirrored
+// below — coverage_probe.rs hash-pins this file against its CPU mirror):
+//   curves  — CurveRecord quadratic segments with precomputed
+//             distance-solver coefficients, per-contour hairline stroke
+//             width (solver.w), and per-contour fade exponent.
+//   bands   — BandRecord (start, count) windows into a band-ordered curve
+//             table. Each glyph has horizontal bands (y-slabs: every curve
+//             a +x ray from a point in the slab can cross) and vertical
+//             bands (x-slabs), so winding and nearest-distance scans touch
+//             a handful of curves, not the whole path.
+//   glyphs  — GlyphRecord per packed path: design-space bounds, band table
+//             ranges, narrowest dilating stroke.
+//   uv_a    — fractional position inside the glyph bounds quad.
+//   uv_b    — (glyph index, run index) as floats, constant per quad.
+//   per-run — fill color / render mode / OIT offset / AA flags from the
+//             RunRecord table under GLYPH_VERTEX_PULL, else from the
+//             material's TextUniform.
+//
+// Evaluation: non-zero winding (inside/outside) + distance to the nearest
+// curve (the AA ramp), both banded. Strokes thinner than
+// TextUniform.hairline_min_px on screen are dilated per curve to that
+// floor and faded back by each contour's fade exponent; fading and exempt
+// contours coexist in one path via the two-lane CoverageTerms evaluation.
+// Coverage then feeds PBR lighting and (when enabled) OIT.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -35,6 +59,10 @@ const EDGE_FILTER_WIDTH: f32 = 1.2;
 const MAX_ANISO_SAMPLES: f32 = 16.0;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
+// Mirrors AA_FLAG_SUPERSAMPLE / AA_FLAG_BAND in render/mod.rs — the
+// RunRecord.aa_flags bit encoding written by TextAntiAlias::aa_flags().
+const AA_FLAG_SUPERSAMPLE: u32 = 1u;
+const AA_FLAG_BAND: u32 = 2u;
 
 struct TextUniform {
     fill_color: vec4<f32>,
@@ -50,16 +78,39 @@ struct TextUniform {
     hairline_min_px: f32,
 }
 
-// solver.xyz holds the distance-solver coefficients; solver.w carries the
-// owning contour's narrowest stroke in design units (per-curve hairline
-// dilation), 0.0 for undilated contours (text glyphs).
+// One quadratic Bezier segment, mirroring `CurveRecord` in packing.rs. The
+// segment is evaluated as B(t) = start + 2t·control_delta + t²·curve_delta,
+// so winding and distance never need the raw control point.
 struct CurveRecord {
+    // Segment start point in .xy; control-minus-start in .zw.
     start_delta: vec4<f32>,
+    // Quadratic second difference (end − 2·control + start) in .xy — zero
+    // for segments the packer snapped to exactly linear; segment end point
+    // in .zw.
     curve_end: vec4<f32>,
+    // Control-point AABB, min in .xy / max in .zw — conservative cull for
+    // the distance scan.
     bounds: vec4<f32>,
+    // .xyz: precomputed closest-point cubic coefficients — .x and .y are the
+    // point-independent terms of the normalized cubic
+    // exact_quadratic_distance_sq solves, .z is 1/|curve_delta|² (0 routes
+    // the segment through the exact linear solve). .w: the owning contour's
+    // narrowest stroke in design units (per-curve hairline dilation), 0.0
+    // for undilated contours (text glyphs).
     solver: vec4<f32>,
+    // Owning contour's resolved hairline fade exponent; each coverage
+    // evaluation fades by the winning (nearest) curve's exponent, so one
+    // merged path can mix fading and non-fading contours. 0.0 disables fade
+    // for this curve.
+    fade_exponent: f32,
 }
 
+// One band's window into the band-ordered curve table: a horizontal band
+// holds every curve whose y-extent overlaps that y-slab of the glyph (the
+// complete crossing set for a +x winding ray from inside the slab), a
+// vertical band the same by x. Band lookup derives the index from the
+// point's normalized coordinate; y_min/y_max are the band edges in design
+// units.
 struct BandRecord {
     start: u32,
     count: u32,
@@ -67,8 +118,13 @@ struct BandRecord {
     y_max: f32,
 }
 
+// One packed path (font glyph or merged panel-line group).
 struct GlyphRecord {
+    // Design-space bounds: min in .xy, size in .zw. uv_a maps onto this
+    // rectangle (see design_position).
     bounds_min_size: vec4<f32>,
+    // Band-table ranges: horizontal band start/count in .xy, vertical band
+    // start/count in .zw.
     band_range: vec4<u32>,
     // Narrowest dilating stroke across the path's contours, in design units;
     // > 0 enables hairline dilation and sizes the distance scan for the
@@ -77,13 +133,52 @@ struct GlyphRecord {
     min_feature: f32,
 }
 
-struct CoverageTerms {
+struct LaneTerms {
     winding: i32,
-    // Min over scanned curves of (distance - that curve's dilation): the
-    // distance to the nearest per-contour-dilated silhouette.
+    // Min over this lane's scanned curves of (distance - that curve's
+    // dilation): the distance to the lane's nearest per-contour-dilated
+    // silhouette.
     adjusted: f32,
     // Dilation of the curve that won `adjusted`.
     dilation: f32,
+}
+
+// Two-lane coverage accumulator. Curves split by fade policy: the exempt
+// lane holds fade_exponent == 0 curves (never-fading contours, and every
+// text glyph), the faded lane holds fade_exponent > 0 curves. Contours are
+// wholly one lane, so each lane's winding is a valid winding number of its
+// own sub-geometry, and the lanes' windings sum to the whole path's. Final
+// alpha takes mix(exempt_coverage, union_coverage, fade_factor): at fade
+// factor 1 the path renders exactly as an unfaded single-winding union (an
+// exempt/faded abutment is union-interior, so no junction line), at factor 0
+// only the exempt sub-geometry remains, and a never-fading ruler spine keeps
+// full alpha (mix(1, 1, f) = 1) even where a thinner (more-dilated) fading
+// tick's curves are nearer in adjusted-distance terms.
+struct CoverageTerms {
+    exempt: LaneTerms,
+    faded: LaneTerms,
+    // Fade exponent of the faded lane's winning curve.
+    fade_exponent: f32,
+}
+
+fn empty_coverage_terms() -> CoverageTerms {
+    return CoverageTerms(
+        LaneTerms(0, 1000000.0, 0.0),
+        LaneTerms(0, 1000000.0, 0.0),
+        0.0,
+    );
+}
+
+// The whole path's terms, rebuilt from the two lanes: windings add (the
+// lanes partition the path's contours), and the nearest-silhouette race is
+// the cross-lane min with the winner's dilation.
+fn union_lane(terms: CoverageTerms) -> LaneTerms {
+    let faded_wins = terms.faded.adjusted < terms.exempt.adjusted;
+    return LaneTerms(
+        terms.exempt.winding + terms.faded.winding,
+        min(terms.exempt.adjusted, terms.faded.adjusted),
+        select(terms.exempt.dilation, terms.faded.dilation, faded_wins),
+    );
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: TextUniform;
@@ -102,6 +197,7 @@ struct RunRecord {
     render_mode: u32,
     depth_nudge: f32,
     oit_depth_offset: f32,
+    aa_flags: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
@@ -116,6 +212,8 @@ fn run_index(glyph_uv: vec2<f32>) -> u32 {
 }
 #endif
 
+// uv_b.x carries the glyph table index; same rounding recovery as
+// run_index above.
 fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
     return u32(glyph_uv.x + 0.5);
 }
@@ -149,6 +247,23 @@ fn run_oit_depth_offset(glyph_uv: vec2<f32>) -> f32 {
 #endif
 }
 
+// Per-run anti-alias mode bits (AA_FLAG_SUPERSAMPLE | AA_FLAG_BAND), sourced
+// like `run_fill_color`.
+fn run_aa_flags(glyph_uv: vec2<f32>) -> u32 {
+#ifdef GLYPH_VERTEX_PULL
+    return run_records[run_index(glyph_uv)].aa_flags;
+#else
+    var flags = 0u;
+    if uniforms.supersample != 0u {
+        flags |= AA_FLAG_SUPERSAMPLE;
+    }
+    if uniforms.aa_band != 0u {
+        flags |= AA_FLAG_BAND;
+    }
+    return flags;
+#endif
+}
+
 fn glyph_bounds_min(glyph: GlyphRecord) -> vec2<f32> {
     return glyph.bounds_min_size.xy;
 }
@@ -157,6 +272,8 @@ fn glyph_bounds_size(glyph: GlyphRecord) -> vec2<f32> {
     return glyph.bounds_min_size.zw;
 }
 
+// uv_a → design-space point inside the glyph bounds. v flips: uv origin is
+// top-left, design space is y-up.
 fn design_position(uv: vec2<f32>, glyph: GlyphRecord) -> vec2<f32> {
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_size = glyph_bounds_size(glyph);
@@ -190,6 +307,7 @@ fn vertical_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
     return min(u32(normalized_x * f32(band_count)), band_count - 1u);
 }
 
+// Sign-preserving cube root for the depressed-cubic solver below.
 fn cbrt_signed(x: f32) -> f32 {
     if x < 0.0 {
         return -pow(-x, 1.0 / 3.0);
@@ -197,6 +315,8 @@ fn cbrt_signed(x: f32) -> f32 {
     return pow(x, 1.0 / 3.0);
 }
 
+// Real roots of t³ + a·t² + b·t + c (trigonometric branch for three roots,
+// Cardano for one). Writes them to `roots`, returns the count.
 fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>>) -> u32 {
     let a2 = a * a;
     let q = (1.0 / 9.0) * (a2 - 3.0 * b);
@@ -222,6 +342,12 @@ fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>
     return 1u;
 }
 
+// Squared distance from `point` to the segment. The on-curve closest-point
+// parameters are the roots of the cubic (B(t) − point)·B'(t) = 0; its two
+// point-independent coefficients and the 1/|curve_delta|² normalizer arrive
+// precomputed in curve.solver.xyz, the point-dependent terms are filled in
+// here. Endpoints compete with the in-range (t ∈ [0, 1]) roots; degenerate
+// curvature (solver.z == 0) falls back to the exact point–segment distance.
 fn exact_quadratic_distance_sq(
     curve: CurveRecord,
     point: vec2<f32>,
@@ -261,7 +387,22 @@ fn exact_quadratic_distance_sq(
 }
 
 fn winding_for_t(curve: CurveRecord, point: vec2<f32>, t: f32) -> i32 {
-    if t < 0.0 || t >= 1.0 {
+    let dy = 2.0 * (curve.start_delta.w + curve.curve_end.y * t);
+    if abs(dy) < ROOT_EPSILON {
+        return 0;
+    }
+    // Half-open in y, not t: an upward crossing counts on t ∈ [0, 1), a
+    // downward crossing on t ∈ (0, 1], so each segment's y-interval includes
+    // its lower endpoint and excludes its upper one. A ray exactly through a
+    // join (e.g. a rectangle cap's corner, where the horizontal edge
+    // contributes nothing) then sees both adjoining segments agree — counting
+    // half-open in t lets one cap count its t=0 corner while the other
+    // excludes its t=1 corner, flipping a whole row of fragments inside.
+    let upward = dy > 0.0;
+    if upward && (t < 0.0 || t >= 1.0) {
+        return 0;
+    }
+    if !upward && (t <= 0.0 || t > 1.0) {
         return 0;
     }
 
@@ -271,14 +412,13 @@ fn winding_for_t(curve: CurveRecord, point: vec2<f32>, t: f32) -> i32 {
     if curve_x <= point.x {
         return 0;
     }
-
-    let dy = 2.0 * (curve.start_delta.w + curve.curve_end.y * t);
-    if abs(dy) < ROOT_EPSILON {
-        return 0;
-    }
-    return select(-1, 1, dy > 0.0);
+    return select(-1, 1, upward);
 }
 
+// Signed crossing count this segment contributes to a +x ray from `point`:
+// solve the quadratic y(t) = point.y, score each in-range root by crossing
+// direction (winding_for_t). Sums to the non-zero winding number over a
+// whole contour.
 fn curve_winding(curve: CurveRecord, point: vec2<f32>) -> i32 {
     let a = curve.curve_end.y;
     let b = 2.0 * curve.start_delta.w;
@@ -310,6 +450,22 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
         point.y > bounds_max.y;
 }
 
+// Hairline fade factor for one coverage evaluation: the alpha scale that
+// makes a dilated sub-floor stroke fade toward its natural coverage instead
+// of rendering at full alpha. Both inputs come from the evaluation's winning
+// curve — its dilation (natural = hairline_target − 2 × dilation) and its
+// contour's fade_exponent — so contours with different fade policies coexist
+// in one merged path. dilation 0 (at-floor strokes, and text glyphs whose
+// curves carry solver.w = 0) gives factor 1; fade_exponent 0 disables (Full
+// policy).
+fn hairline_fade_factor(dilation: f32, hairline_target: f32, fade_exponent: f32) -> f32 {
+    if fade_exponent <= 0.0 || dilation <= 0.0 || hairline_target <= 0.0 {
+        return 1.0;
+    }
+    let natural = max(hairline_target - 2.0 * dilation, 0.0);
+    return pow(natural / hairline_target, fade_exponent);
+}
+
 // Per-curve hairline dilation. hairline_target is the minimum on-screen
 // stroke width converted to design units (pixel_design_units ×
 // uniforms.hairline_min_px); a curve whose contour stroke (solver.w) falls
@@ -321,6 +477,10 @@ fn curve_dilation(curve: CurveRecord, hairline_target: f32) -> f32 {
     return max(0.0, (hairline_target - curve.solver.w) * 0.5);
 }
 
+// Run one curve in the nearest-silhouette race for its lane: adjusted =
+// distance − that curve's dilation, so a more-dilated (thinner-stroke)
+// curve's silhouette wins at the same raw distance. The faded lane also
+// records the winner's fade exponent.
 fn accumulate_nearest(
     terms: ptr<function, CoverageTerms>,
     point: vec2<f32>,
@@ -329,12 +489,22 @@ fn accumulate_nearest(
 ) {
     let dilation = curve_dilation(curve, hairline_target);
     let adjusted = sqrt(curve_distance_sq(point, curve)) - dilation;
-    if adjusted < (*terms).adjusted {
-        (*terms).adjusted = adjusted;
-        (*terms).dilation = dilation;
+    if curve.fade_exponent > 0.0 {
+        if adjusted < (*terms).faded.adjusted {
+            (*terms).faded.adjusted = adjusted;
+            (*terms).faded.dilation = dilation;
+            (*terms).fade_exponent = curve.fade_exponent;
+        }
+    } else if adjusted < (*terms).exempt.adjusted {
+        (*terms).exempt.adjusted = adjusted;
+        (*terms).exempt.dilation = dilation;
     }
 }
 
+// One pass over the point's horizontal band: per-lane winding (the y-slab
+// band holds every curve a +x ray can cross, so the winding is complete
+// after this pass) plus nearest-distance candidates for curves whose AABB
+// is within scan_width.
 fn horizontal_coverage_terms(
     point: vec2<f32>,
     scan_width_sq: f32,
@@ -343,11 +513,16 @@ fn horizontal_coverage_terms(
 ) -> CoverageTerms {
     let include_winding = !outside_glyph_bounds(point, glyph);
     let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
-    var terms = CoverageTerms(0, 1000000.0, 0.0);
+    var terms = empty_coverage_terms();
     for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
         let curve = curves[horizontal_band.start + offset];
         if include_winding {
-            terms.winding += curve_winding(curve, point);
+            let winding = curve_winding(curve, point);
+            if curve.fade_exponent > 0.0 {
+                terms.faded.winding += winding;
+            } else {
+                terms.exempt.winding += winding;
+            }
         }
         if curve_bounds_distance_sq(point, curve) <= scan_width_sq {
             accumulate_nearest(&terms, point, curve, hairline_target);
@@ -381,6 +556,10 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
     return dot(diff, diff);
 }
 
+// Distance-only second pass over the point's vertical (x-slab) band: a
+// curve above or below the point can sit outside its horizontal band yet
+// inside the AA scan radius. Winding is already complete from the
+// horizontal pass.
 fn nearest_vertical_curve(
     point: vec2<f32>,
     scan_width_sq: f32,
@@ -399,8 +578,9 @@ fn nearest_vertical_curve(
     return terms;
 }
 
-// Non-zero winding number at `point`, using the point's horizontal band.
-// Returns 0 outside the glyph bounds.
+// Non-zero winding number at `point` over ALL curves (both lanes), using the
+// point's horizontal band. Returns 0 outside the glyph bounds. The prepass
+// silhouette test wants the union fill, not a per-lane one.
 fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
     if outside_glyph_bounds(point, glyph) {
         return 0;
@@ -413,15 +593,90 @@ fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
     return winding;
 }
 
-// Whether any neighbor one filter-width away is outside the fill. A true
-// outer silhouette has at least one outside neighbor; an interior edge of a
-// self-intersecting / overlapping glyph (e.g. the EB Garamond `g` neck) is
-// filled on both sides, so all neighbors stay inside.
-fn any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -> bool {
-    return winding_at(point + vec2<f32>(edge_width, 0.0), glyph) == 0
-        || winding_at(point - vec2<f32>(edge_width, 0.0), glyph) == 0
-        || winding_at(point + vec2<f32>(0.0, edge_width), glyph) == 0
-        || winding_at(point - vec2<f32>(0.0, edge_width), glyph) == 0;
+// Per-lane winding number at `point` (x = exempt lane, y = faded lane);
+// zero outside the glyph bounds.
+fn lane_winding_at(point: vec2<f32>, glyph: GlyphRecord) -> vec2<i32> {
+    if outside_glyph_bounds(point, glyph) {
+        return vec2<i32>(0, 0);
+    }
+    let band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    var winding = vec2<i32>(0, 0);
+    for (var offset = 0u; offset < band.count; offset += 1u) {
+        let curve = curves[band.start + offset];
+        let curve_winding_value = curve_winding(curve, point);
+        if curve.fade_exponent > 0.0 {
+            winding.y += curve_winding_value;
+        } else {
+            winding.x += curve_winding_value;
+        }
+    }
+    return winding;
+}
+
+// Whether any neighbor one filter-width away is outside the fill: x for the
+// exempt lane, y for the whole-path union (a lane's winding components sum
+// to the union's). A true outer silhouette has at least one outside
+// neighbor; an interior edge of a self-intersecting / overlapping glyph
+// (e.g. the EB Garamond `g` neck) is filled on both sides, so all neighbors
+// stay inside.
+fn lanes_any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -> vec2<bool> {
+    let right = lane_winding_at(point + vec2<f32>(edge_width, 0.0), glyph);
+    let left = lane_winding_at(point - vec2<f32>(edge_width, 0.0), glyph);
+    let up = lane_winding_at(point + vec2<f32>(0.0, edge_width), glyph);
+    let down = lane_winding_at(point - vec2<f32>(0.0, edge_width), glyph);
+    return vec2<bool>(
+        right.x == 0 || left.x == 0 || up.x == 0 || down.x == 0,
+        right.x + right.y == 0 || left.x + left.y == 0
+            || up.x + up.y == 0 || down.x + down.y == 0,
+    );
+}
+
+// Whether a lane's inside fragment sits within `edge_width` of one of its
+// curves — the only case where the interior-edge suppression (the neighbor
+// walk) matters.
+fn lane_needs_neighbor_test(lane: LaneTerms, edge_width: f32) -> bool {
+    return lane.winding != 0 && lane.adjusted <= edge_width;
+}
+
+// One lane's inside-POSITIVE smoothstep coverage. `no_outside` is the lane's
+// interior-edge suppression: an inside fragment within edge_width of a curve
+// sits either near the true outer silhouette (apply the AA ramp) or near an
+// interior edge where two filled regions overlap (keep solid). The overlap
+// case has no outside neighbor, so the down-ramp toward the submerged edge
+// must be suppressed.
+fn lane_coverage(lane: LaneTerms, edge_width: f32, no_outside: bool) -> f32 {
+    let inside = lane.winding != 0;
+    if lane.adjusted > edge_width {
+        return select(0.0, 1.0, inside);
+    }
+    if inside && no_outside {
+        return 1.0;
+    }
+    // This smoothstep ramp is inside-POSITIVE (unlike lane_signed_distance,
+    // whose band_coverage consumer is inside-negative). Outside, -adjusted
+    // = dilation - distance goes positive within the dilated halo; inside,
+    // the dilated edge is farther out than the raw edge:
+    // distance + dilation = adjusted + 2 * dilation.
+    let signed_distance = select(-lane.adjusted, lane.adjusted + 2.0 * lane.dilation, inside);
+    return smoothstep(-edge_width, edge_width, signed_distance);
+}
+
+// Interior-edge suppression flags (x = exempt lane, y = whole-path union),
+// walking the neighbor windings once for both and only when some evaluation
+// needs the test.
+fn lanes_no_outside_neighbor(
+    terms: CoverageTerms,
+    union_terms: LaneTerms,
+    point: vec2<f32>,
+    edge_width: f32,
+    glyph: GlyphRecord,
+) -> vec2<bool> {
+    if lane_needs_neighbor_test(terms.exempt, edge_width)
+        || lane_needs_neighbor_test(union_terms, edge_width) {
+        let any_outside = lanes_any_outside_neighbor(point, edge_width, glyph);
+        return vec2<bool>(!any_outside.x, !any_outside.y);
+    }
+    return vec2<bool>(false, false);
 }
 
 fn distance_coverage(
@@ -436,51 +691,76 @@ fn distance_coverage(
     let scan_width = edge_width + dilation_max;
     let scan_width_sq = scan_width * scan_width;
     var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
-    let inside = terms.winding != 0;
     terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
-    if terms.adjusted > edge_width {
-        return select(0.0, 1.0, inside);
-    }
+    let union_terms = union_lane(terms);
+    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, edge_width, glyph);
 
-    // An inside fragment within edge_width of a curve sits either near the true
-    // outer silhouette (apply the AA ramp) or near an interior edge where two
-    // filled regions overlap (keep solid). The overlap case has no outside
-    // neighbor, so the down-ramp toward the submerged edge must be suppressed.
-    if inside && !any_outside_neighbor(point, edge_width, glyph) {
-        return 1.0;
-    }
-
-    // This smoothstep ramp is inside-POSITIVE (unlike signed_distance, whose
-    // band_coverage consumer is inside-negative). Outside, -adjusted =
-    // dilation - distance goes positive within the dilated halo; inside, the
-    // dilated edge is farther out than the raw edge: distance + dilation =
-    // adjusted + 2 * dilation.
-    let signed_distance = select(-terms.adjusted, terms.adjusted + 2.0 * terms.dilation, inside);
-    return smoothstep(-edge_width, edge_width, signed_distance);
+    // The fade factor interpolates between only-exempt-visible (factor 0)
+    // and the whole unfaded path (factor 1, the pre-fade single-winding
+    // evaluation). The junction where an exempt contour abuts a fading one
+    // is union-interior, so no per-lane AA ramps meet there at half alpha.
+    let exempt = lane_coverage(terms.exempt, edge_width, no_outside.x);
+    let union_coverage = lane_coverage(union_terms, edge_width, no_outside.y);
+    let fade = hairline_fade_factor(terms.faded.dilation, hairline_target, terms.fade_exponent);
+    return mix(exempt, union_coverage, fade);
 }
 
-// Signed design-space distance to the per-curve-dilated silhouette: negative
-// inside, positive outside, saturated to ±scan_width beyond the scan range.
-// Interior overlaps are forced solidly negative (same case
-// any_outside_neighbor guards in distance_coverage). Feeds the screen-space
+// One signed-distance evaluation plus the faded lane's winning dilation and
+// fade exponent, so the aa_band consumers can apply the per-evaluation fade
+// factor. sd.x is the exempt lane, sd.y the whole-path union.
+struct SdSample {
+    sd: vec2<f32>,
+    dilation: f32,
+    fade_exponent: f32,
+}
+
+// One lane's signed design-space distance to its per-curve-dilated
+// silhouette: negative inside, positive outside, saturated to ±scan_width
+// beyond the scan range. Interior overlaps are forced solidly negative (same
+// case lane_coverage suppresses).
+fn lane_signed_distance(lane: LaneTerms, scan_width: f32, no_outside: bool) -> f32 {
+    let inside = lane.winding != 0;
+    if lane.adjusted > scan_width {
+        return select(scan_width, -scan_width, inside);
+    }
+    if inside && no_outside {
+        return -scan_width;
+    }
+    return select(lane.adjusted, -(lane.adjusted + 2.0 * lane.dilation), inside);
+}
+
+// Exempt-lane and whole-path-union signed distances feeding the screen-space
 // AA band used by aa_band mode.
+fn signed_distance_sample(
+    point: vec2<f32>,
+    scan_width_sq: f32,
+    hairline_target: f32,
+    glyph: GlyphRecord,
+) -> SdSample {
+    let scan_width = sqrt(scan_width_sq);
+    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
+    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
+    let union_terms = union_lane(terms);
+    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, scan_width, glyph);
+    return SdSample(
+        vec2<f32>(
+            lane_signed_distance(terms.exempt, scan_width, no_outside.x),
+            lane_signed_distance(union_terms, scan_width, no_outside.y),
+        ),
+        terms.faded.dilation,
+        terms.fade_exponent,
+    );
+}
+
+// Exempt/union signed distances for callers that need only the field values
+// (ramp width finite differences).
 fn signed_distance(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
     glyph: GlyphRecord,
-) -> f32 {
-    let scan_width = sqrt(scan_width_sq);
-    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
-    let inside = terms.winding != 0;
-    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
-    if terms.adjusted > scan_width {
-        return select(scan_width, -scan_width, inside);
-    }
-    if inside && !any_outside_neighbor(point, scan_width, glyph) {
-        return -scan_width;
-    }
-    return select(terms.adjusted, -(terms.adjusted + 2.0 * terms.dilation), inside);
+) -> vec2<f32> {
+    return signed_distance_sample(point, scan_width_sq, hairline_target, glyph).sd;
 }
 
 // Coverage from a signed distance and a screen-space band width: a 1px box ramp
@@ -521,26 +801,39 @@ fn aniso_band_coverage(
     let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
     let inv_count = 1.0 / sample_count;
 
-    let d_major = min(abs(signed_distance(point + major, scan_width_sq, hairline_target, glyph) - sd_center), major_len);
-    let d_minor = min(abs(signed_distance(point + minor, scan_width_sq, hairline_target, glyph) - sd_center), minor_len);
-    let per_band = max(d_minor + d_major * inv_count, ROOT_EPSILON);
+    // Per-evaluation (exempt / union) band widths from signed-distance
+    // differences.
+    let d_major = min(abs(signed_distance(point + major, scan_width_sq, hairline_target, glyph) - sd_center), vec2<f32>(major_len));
+    let d_minor = min(abs(signed_distance(point + minor, scan_width_sq, hairline_target, glyph) - sd_center), vec2<f32>(minor_len));
+    let per_band = max(d_minor + d_major * inv_count, vec2<f32>(ROOT_EPSILON));
 
+    // Fade applies per stride sample from that sample's faded-lane winning
+    // curve, so adjacent samples that select different winning curves each
+    // fade by their own curve's deficit and exponent.
     let count = u32(sample_count);
     var sum = 0.0;
     for (var index = 0u; index < count; index += 1u) {
         let stride = (f32(index) + 0.5) * inv_count - 0.5;
-        sum += band_coverage(
-            signed_distance(point + stride * major, scan_width_sq, hairline_target, glyph),
-            per_band,
-        );
+        let sample = signed_distance_sample(point + stride * major, scan_width_sq, hairline_target, glyph);
+        let exempt = band_coverage(sample.sd.x, per_band.x);
+        let union_coverage = band_coverage(sample.sd.y, per_band.y);
+        let fade = hairline_fade_factor(sample.dilation, hairline_target, sample.fade_exponent);
+        sum += mix(exempt, union_coverage, fade);
     }
     return sum * inv_count;
 }
 
-fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
-    // Derivatives stay at the top, in uniform control flow: every branch below
-    // switches on a uniform value, so the fwidth/dpdx calls are never gated by a
-    // per-fragment condition.
+fn render_coverage(
+    uv: vec2<f32>,
+    glyph: GlyphRecord,
+    render_mode: u32,
+    aa_flags: u32,
+) -> f32 {
+    // Derivatives stay at the top, BEFORE any branch: aa_flags is per-run data
+    // recovered from an interpolated varying, so the branches below are
+    // non-uniform control flow where fwidth/dpdx/dpdy are undefined in WGSL.
+    // Every derivative this function needs is computed here; in-branch ramp
+    // widths are rebuilt from finite differences along dx/dy instead.
     let point = design_position(uv, glyph);
     let pixel = max(abs(fwidth(point)), vec2<f32>(ROOT_EPSILON));
     let dx = dpdx(point);
@@ -572,19 +865,30 @@ fn render_coverage(uv: vec2<f32>, glyph: GlyphRecord, render_mode: u32) -> f32 {
     // grazing-angle corner wing). All four combinations are valid; the combined
     // mode fixes both artifacts at once.
     var coverage: f32;
-    if uniforms.aa_band != 0u {
+    if (aa_flags & AA_FLAG_BAND) != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
         let scan_width = edge_width + dilation_max;
         let scan_width_sq = scan_width * scan_width;
-        if uniforms.supersample != 0u {
+        if (aa_flags & AA_FLAG_SUPERSAMPLE) != 0u {
             coverage = aniso_band_coverage(point, dx, dy, scan_width_sq, hairline_target, glyph);
         } else {
-            // Single sample: one full-footprint band from the center sample's
-            // screen-space distance gradient.
-            let band = max(fwidth(signed_distance(point, scan_width_sq, hairline_target, glyph)), ROOT_EPSILON);
-            coverage = band_coverage(signed_distance(point, scan_width_sq, hairline_target, glyph), band);
+            // Single sample: one full-footprint exempt/union band from the
+            // center sample's screen-space distance change. Forward
+            // differences along dx/dy stand in for fwidth(sd), which is
+            // unavailable here — this branch is non-uniform flow (aa_flags is
+            // per-run).
+            let center = signed_distance_sample(point, scan_width_sq, hairline_target, glyph);
+            let band = max(
+                abs(signed_distance(point + dx, scan_width_sq, hairline_target, glyph) - center.sd)
+                    + abs(signed_distance(point + dy, scan_width_sq, hairline_target, glyph) - center.sd),
+                vec2<f32>(ROOT_EPSILON),
+            );
+            let exempt = band_coverage(center.sd.x, band.x);
+            let union_coverage = band_coverage(center.sd.y, band.y);
+            let fade = hairline_fade_factor(center.dilation, hairline_target, center.fade_exponent);
+            coverage = mix(exempt, union_coverage, fade);
         }
-    } else if uniforms.supersample != 0u {
+    } else if (aa_flags & AA_FLAG_SUPERSAMPLE) != 0u {
         // Scalar band, four rotated-grid footprint samples (the original path). At
         // grazing angles dx/dy stretch along the foreshortened axis, so the
         // samples integrate the coverage strip a single sample cannot capture.
@@ -639,8 +943,15 @@ fn fragment(
 
     let glyph = glyphs[glyph_index(in.uv_b)];
     let fill_color = run_fill_color(in.uv_b);
-    let coverage = render_coverage(in.uv, glyph, run_render_mode(in.uv_b));
+    let coverage = render_coverage(
+        in.uv,
+        glyph,
+        run_render_mode(in.uv_b),
+        run_aa_flags(in.uv_b),
+    );
     let final_alpha = coverage * fill_color.a;
+    // This discard precedes oit_draw below, so faded near-zero fragments never
+    // occupy OIT fragment-pool slots.
     if final_alpha < DISCARD_ALPHA {
         discard;
     }

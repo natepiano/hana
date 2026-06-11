@@ -13,8 +13,10 @@ use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::field::PanelFieldRecord;
 use crate::cascade;
+use crate::cascade::CascadeDefault;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
+use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextLighting;
@@ -30,6 +32,8 @@ use crate::layout::LayoutTreeChange;
 use crate::layout::PanelSize;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
+use crate::render::HairlineFade;
+use crate::render::TextAntiAlias;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
@@ -520,6 +524,11 @@ pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
     defaults: Res<CascadeDefaults>,
+    anti_alias_overrides: Query<&Override<TextAntiAlias>>,
+    hairline_fade_overrides: Query<&Override<HairlineFade>>,
+    parents: Query<&ChildOf>,
+    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
+    hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -536,8 +545,28 @@ pub(super) fn seed_panel_overrides(
     // `reconcile_panel_text_children`).
     let is_screen = panel.coordinate_space().is_screen();
     let material_unlit = panel.text_material().is_some_and(|material| material.unlit);
+    // The panel renders its elements' analytic line marks, so it carries its
+    // own resolved anti-alias mode and hairline fade for the line batcher to
+    // read (and to filter on `Changed<Resolved<A>>`). A fresh panel resolves
+    // to the global defaults; later `override_*` verbs self-heal these.
+    let anti_alias = cascade::resolve_walk::<TextAntiAlias>(
+        entity,
+        &anti_alias_overrides,
+        &parents,
+        anti_alias_default.0,
+    );
+    let hairline_fade = cascade::resolve_walk::<HairlineFade>(
+        entity,
+        &hairline_fade_overrides,
+        &parents,
+        hairline_fade_default.0,
+    );
     let mut entity_commands = commands.entity(entity);
-    entity_commands.insert(Resolved(FontUnit(font_unit)));
+    entity_commands.insert((
+        Resolved(FontUnit(font_unit)),
+        Resolved(anti_alias),
+        Resolved(hairline_fade),
+    ));
     cascade::apply_cascade_override(&mut entity_commands, FontUnit(font_unit));
     if let Some(alpha_mode) = panel.text_alpha_mode() {
         cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));

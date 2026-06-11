@@ -84,7 +84,9 @@ pub use cascade::TextAlpha;
 pub use cascade::TextLighting;
 pub use cascade::TextSidedness;
 pub use cascade::resolved_font_unit;
+pub use cascade::resolved_hairline_fade;
 pub use cascade::resolved_text_alpha;
+pub use cascade::resolved_text_anti_alias;
 pub use cascade::resolved_text_lighting;
 pub use cascade::resolved_text_sidedness;
 #[cfg(feature = "typography_overlay")]
@@ -241,6 +243,7 @@ pub use render::AnalyticLineProbe;
 pub use render::AnalyticLineProbePlugin;
 pub use render::DiegeticTextBatch;
 pub use render::DiegeticTextMut;
+pub use render::HairlineFade;
 pub use render::HairlineWidth;
 pub use render::PanelText;
 pub use render::PanelTextLayout;

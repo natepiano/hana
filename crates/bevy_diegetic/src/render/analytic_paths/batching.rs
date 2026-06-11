@@ -411,6 +411,7 @@ mod tests {
             render_mode: 1,
             depth_nudge: 0.0,
             oit_depth_offset: 0.0,
+            aa_flags: 3,
         }
     }
 
