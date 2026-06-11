@@ -4,7 +4,7 @@ use bevy_catenary::Cable;
 use bevy_catenary::CableEnd;
 use bevy_catenary::CableEndpoint;
 use bevy_catenary::CableMeshConfig;
-use bevy_catenary::Capping;
+use bevy_catenary::CapStyle;
 use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
@@ -49,8 +49,8 @@ pub(super) fn setup_section_cap_styles(
         transparent_material,
         left_start,
         left_end,
-        Capping::Round,
-        Capping::Round,
+        CapStyle::Round,
+        CapStyle::Round,
     );
 
     let (mid_start, mid_end) = cap_style_endpoints(section_center_x, CAP_STYLE_MIDDLE_TUBE_INDEX);
@@ -59,8 +59,8 @@ pub(super) fn setup_section_cap_styles(
         cable_material.clone(),
         mid_start,
         mid_end,
-        Capping::None,
-        Capping::flat(),
+        CapStyle::None,
+        CapStyle::flat(),
     );
 
     let (right_start, right_end) =
@@ -70,8 +70,8 @@ pub(super) fn setup_section_cap_styles(
         cable_material.clone(),
         right_start,
         right_end,
-        Capping::Round,
-        Capping::None,
+        CapStyle::Round,
+        CapStyle::None,
     );
 
     let tubes = [
@@ -128,8 +128,8 @@ fn spawn_cap_style_tube(
     material: Handle<StandardMaterial>,
     start: Vec3,
     end: Vec3,
-    start_cap: Capping,
-    end_cap: Capping,
+    start_cap: CapStyle,
+    end_cap: CapStyle,
 ) {
     commands
         .spawn((

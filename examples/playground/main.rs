@@ -1,4 +1,5 @@
-//! Progressive cable playground — showcases `bevy_catenary` features from simple to complex.
+//! Progressive cable playground with catenary, routed cable, cap style,
+//! alignment, and detach demo sections.
 //!
 //! `SECTION_COUNT` sections navigated with arrow buttons or Left/Right keys.
 //! `OrbitCam` animates to frame each section.

@@ -62,7 +62,7 @@ pub use mesh::CableMeshChild;
 pub use mesh::CableMeshConfig;
 pub use mesh::CableMeshHandle;
 pub use mesh::CapConfig;
-pub use mesh::Capping;
+pub use mesh::CapStyle;
 pub use mesh::ElbowConfig;
 pub use mesh::ElbowMetadata;
 pub use mesh::Faces;

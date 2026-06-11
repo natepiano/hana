@@ -9,7 +9,8 @@ use crate::cable::CableEndpoint;
 use crate::cable::ComputedCableGeometry;
 
 /// Stores the mesh asset handle for a cable's generated tube mesh.
-/// The library manages this — users don't need to interact with it directly.
+/// `on_geometry_computed` writes `CableMeshHandle` and `CableMeshChild`;
+/// users don't need to interact with them directly.
 #[derive(Component)]
 pub struct CableMeshHandle(pub Handle<Mesh>);
 

@@ -6,7 +6,7 @@ use bevy_catenary::Cable;
 use bevy_catenary::CableEnd;
 use bevy_catenary::CableEndpoint;
 use bevy_catenary::CableMeshConfig;
-use bevy_catenary::Capping;
+use bevy_catenary::CapStyle;
 use bevy_catenary::EndpointAlignment;
 use bevy_catenary::Solver;
 
@@ -117,7 +117,7 @@ pub(crate) fn setup_section_connector(
             parent.spawn(CableEndpoint::new(CableEnd::Start, start));
             parent.spawn((
                 CableEndpoint::new(CableEnd::End, Vec3::ZERO)
-                    .with_cap(Capping::None)
+                    .with_cap(CapStyle::None)
                     .with_alignment(alignment),
                 AttachedTo(plug),
             ));

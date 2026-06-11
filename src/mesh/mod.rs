@@ -13,7 +13,7 @@ mod tube;
 use bevy::prelude::*;
 pub use config::CableMeshConfig;
 pub use config::CapConfig;
-pub use config::Capping;
+pub use config::CapStyle;
 pub use config::ElbowConfig;
 pub use config::Faces;
 pub use config::TrimConfig;

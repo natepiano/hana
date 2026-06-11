@@ -3,7 +3,7 @@ use bevy_catenary::Cable;
 use bevy_catenary::CableEnd;
 use bevy_catenary::CableEndpoint;
 use bevy_catenary::CableMeshConfig;
-use bevy_catenary::Capping;
+use bevy_catenary::CapStyle;
 use bevy_catenary::Faces;
 use bevy_catenary::Solver;
 use bevy_catenary::TubeConfig;
@@ -54,7 +54,7 @@ pub(super) fn setup_section_inside_view(
             },
         ))
         .with_children(|parent| {
-            parent.spawn(CableEndpoint::new(CableEnd::Start, start).with_cap(Capping::None));
-            parent.spawn(CableEndpoint::new(CableEnd::End, end).with_cap(Capping::None));
+            parent.spawn(CableEndpoint::new(CableEnd::Start, start).with_cap(CapStyle::None));
+            parent.spawn(CableEndpoint::new(CableEnd::End, end).with_cap(CapStyle::None));
         });
 }

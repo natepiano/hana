@@ -1,6 +1,6 @@
 #![allow(
     clippy::used_underscore_binding,
-    reason = "false positive on Reflect derive for Capping::Flat { normal }"
+    reason = "false positive on Reflect derive for CapStyle::Flat { normal }"
 )]
 
 use bevy::prelude::*;
@@ -15,10 +15,10 @@ use super::constants::DEFAULT_TUBE_SIDES;
 
 /// How to cap each end of a tube mesh.
 ///
-/// Surface normal is only relevant for [`Capping::Flat`] caps and is encoded directly
+/// Surface normal is only relevant for [`CapStyle::Flat`] caps and is encoded directly
 /// in the variant, so invalid states are unrepresentable.
 #[derive(Clone, Debug, Default, Reflect)]
-pub enum Capping {
+pub enum CapStyle {
     /// Open end, so no cap geometry is generated.
     None,
     /// Hemisphere cap with a smooth rounded end.
@@ -31,7 +31,7 @@ pub enum Capping {
     },
 }
 
-impl Capping {
+impl CapStyle {
     /// Flat cap using the cable's tangent direction.
     #[must_use]
     pub const fn flat() -> Self { Self::Flat { normal: None } }
@@ -98,16 +98,16 @@ impl Default for TubeConfig {
 #[derive(Clone, Debug, Reflect)]
 pub struct CapConfig {
     /// Cap style for the start end of the tube.
-    pub start: Capping,
+    pub start: CapStyle,
     /// Cap style for the end of the tube.
-    pub end:   Capping,
+    pub end:   CapStyle,
 }
 
 impl Default for CapConfig {
     fn default() -> Self {
         Self {
-            start: Capping::Round,
-            end:   Capping::Round,
+            start: CapStyle::Round,
+            end:   CapStyle::Round,
         }
     }
 }

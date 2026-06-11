@@ -58,7 +58,7 @@ pub(crate) fn spawn_detach_demo(
     cable_material: &Handle<StandardMaterial>,
 ) {
     let section_center_x = SECTION_X[DETACH_DEMO_SECTION_INDEX];
-    let assets = DetachDemoAssets {
+    let detach_demo_assets = DetachDemoAssets {
         sphere_mesh: meshes.add(
             Sphere::new(HUB_SPHERE_RADIUS)
                 .mesh()
@@ -93,14 +93,20 @@ pub(crate) fn spawn_detach_demo(
     ];
 
     for row in rows {
-        spawn_detach_demo_row(commands, materials, &assets, section_center_x, row);
+        spawn_detach_demo_row(
+            commands,
+            materials,
+            &detach_demo_assets,
+            section_center_x,
+            row,
+        );
     }
 }
 
 fn spawn_detach_demo_row(
     commands: &mut Commands,
     materials: &mut Assets<StandardMaterial>,
-    assets: &DetachDemoAssets,
+    detach_demo_assets: &DetachDemoAssets,
     section_center_x: f32,
     row: DetachDemoRow,
 ) {
@@ -110,7 +116,7 @@ fn spawn_detach_demo_row(
     });
     let sphere = commands
         .spawn((
-            Mesh3d(assets.sphere_mesh.clone()),
+            Mesh3d(detach_demo_assets.sphere_mesh.clone()),
             MeshMaterial3d(sphere_material),
             Transform::from_translation(Vec3::new(
                 section_center_x - DETACH_DEMO_ENDPOINT_X_OFFSET,
@@ -130,8 +136,8 @@ fn spawn_detach_demo_row(
     );
     entities::spawn_node_cube(
         commands,
-        assets.node_mesh,
-        assets.node_material,
+        detach_demo_assets.node_mesh,
+        detach_demo_assets.node_material,
         anchor_position,
     )
     .insert(DetachDemoEntity);
@@ -144,7 +150,7 @@ fn spawn_detach_demo_row(
                 resolution: DEFAULT_CABLE_RESOLUTION,
             },
             CableMeshConfig {
-                material: Some(assets.cable_material.clone()),
+                material: Some(detach_demo_assets.cable_material.clone()),
                 ..default()
             },
             DetachDemoEntity,

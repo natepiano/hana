@@ -8,7 +8,7 @@ use super::Cable;
 use super::ComputedCableGeometry;
 use super::compute::DirtyCables;
 use super::constants::ALIGNMENT_FEEDBACK_GUARD;
-use crate::mesh::Capping;
+use crate::mesh::CapStyle;
 use crate::routing::CurveKind;
 use crate::routing::Solver;
 
@@ -35,7 +35,7 @@ pub struct CableEndpoint {
     /// Position offset. World-space for world-attached, local-space for entity-attached.
     pub offset:        Vec3,
     /// How to cap this end of the tube mesh.
-    pub cap_style:     Capping,
+    pub cap_style:     CapStyle,
     /// What happens when the target entity is despawned.
     pub detach_policy: DetachPolicy,
     /// How the endpoint's [`AttachedTo`] target rotates to follow the cable's tangent.
@@ -50,7 +50,7 @@ impl CableEndpoint {
         Self {
             end,
             offset: offset.into(),
-            cap_style: Capping::Round,
+            cap_style: CapStyle::Round,
             detach_policy: DetachPolicy::Remain,
             alignment: EndpointAlignment::AsSpawned,
         }
@@ -58,7 +58,7 @@ impl CableEndpoint {
 
     /// Set the cap style for this endpoint.
     #[must_use]
-    pub const fn with_cap(mut self, cap_style: Capping) -> Self {
+    pub const fn with_cap(mut self, cap_style: CapStyle) -> Self {
         self.cap_style = cap_style;
         self
     }
@@ -106,7 +106,8 @@ pub enum EndpointAlignment {
 /// per-solver concern — see `CatenarySolver::with_detach_slack_bump`.
 #[derive(Clone, Debug, Default, Reflect)]
 pub enum DetachPolicy {
-    /// Convert to world-attached at the last resolved position. Cable keeps its shape.
+    /// Convert to world-attached at the last resolved position. The cable's
+    /// `ComputedCableGeometry` curve stays unchanged.
     #[default]
     Remain,
     /// Despawn the entire cable when this endpoint's target is removed.
@@ -203,7 +204,8 @@ pub(super) fn on_endpoint_alignment_update(
     }
 }
 
-/// Observer that handles endpoint detachment when a target entity is despawned.
+/// Observer that applies the endpoint's [`DetachPolicy`] when its [`AttachedTo`]
+/// target is despawned.
 ///
 /// Bevy auto-removes `AttachedTo` when the target entity is despawned, which
 /// triggers `OnRemove<AttachedTo>`. This observer reads the endpoint's

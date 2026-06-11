@@ -10,7 +10,7 @@ use super::buffers;
 use super::buffers::MeshBuffers;
 use super::buffers::WindingOrder;
 use super::config::CableMeshConfig;
-use super::config::Capping;
+use super::config::CapStyle;
 use super::config::Faces;
 use super::constants::CAP_UV_CENTER;
 use super::constants::MIN_CAP_RINGS;
@@ -88,13 +88,13 @@ pub(super) fn add_end_caps(
 }
 
 /// Dispatch a single cap (start or end) based on style.
-fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffers) {
+fn add_single_cap(style: &CapStyle, context: &CapContext, buffers: &mut MeshBuffers) {
     let needs_outside = matches!(context.faces, Faces::Outside | Faces::Both);
     let needs_inside = matches!(context.faces, Faces::Inside | Faces::Both);
     let cap_rings = context.sides.max(MIN_CAP_RINGS);
 
     match style {
-        Capping::Round => {
+        CapStyle::Round => {
             for &cap_side in &[CapSide::Outside, CapSide::Inside] {
                 let needed = match cap_side {
                     CapSide::Outside => needs_outside,
@@ -105,7 +105,7 @@ fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffe
                 }
             }
         },
-        Capping::Flat { normal } => {
+        CapStyle::Flat { normal } => {
             let flat_context = CapContext {
                 direction: normal.unwrap_or(context.direction),
                 ..*context
@@ -120,7 +120,7 @@ fn add_single_cap(style: &Capping, context: &CapContext, buffers: &mut MeshBuffe
                 }
             }
         },
-        Capping::None => {},
+        CapStyle::None => {},
     }
 }
 
