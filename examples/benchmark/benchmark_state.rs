@@ -14,6 +14,7 @@ use crate::constants::OUTLINE_METHOD_SCREEN_HULL_LABEL;
 use crate::constants::OUTLINE_METHOD_WORLD_HULL_LABEL;
 use crate::constants::OUTLINE_PRESENCE_DISABLED_LABEL;
 use crate::constants::OUTLINE_PRESENCE_ENABLED_LABEL;
+use crate::constants::RESULTS_PER_SCENARIO;
 use crate::constants::SCENARIOS;
 use crate::results::ScenarioResult;
 
@@ -82,7 +83,7 @@ impl BenchmarkState {
             benchmark_phase,
             frame_counter: 0,
             frame_times: Vec::with_capacity(MEASURE_FRAMES.to_usize()),
-            results: Vec::with_capacity(SCENARIOS.len() * 2),
+            results: Vec::with_capacity(SCENARIOS.len() * RESULTS_PER_SCENARIO),
             startup_timer: Timer::from_seconds(AUTO_STARTUP_DELAY_SECS, TimerMode::Once),
             exit_timer: Timer::from_seconds(AUTO_EXIT_DELAY_SECS, TimerMode::Once),
             exit_behavior,

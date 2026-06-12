@@ -106,6 +106,7 @@ pub(super) const DATE_COMMAND_ARG_FORMAT: &str = "+%Y_%m_%d_%H_%M";
 pub(super) const DATE_COMMAND_ARG_REFERENCE_TIME: &str = "-r";
 pub(super) const RESULT_LABEL_PADDING: usize = 6;
 pub(super) const RESULTS_DIRECTORY_NAME: &str = "results";
+pub(super) const RESULTS_PER_SCENARIO: usize = 2;
 
 // scenarios
 pub(super) const SCENARIOS: &[ScenarioDefinition] = &[

@@ -92,7 +92,9 @@ pub(crate) fn prepare_flood_textures(
             view_formats: &[],
         };
 
-        // Create the depth texture
+        // `FloodTextures::outline_depth` is the flood-init pass depth attachment in
+        // `src/node.rs` and is sampled as `outline_depth_texture` by the compose and
+        // hull shaders.
         let outline_depth = render_device.create_texture(&TextureDescriptor {
             label: Some(OUTLINE_DEPTH_TEXTURE_LABEL),
             size,
@@ -100,8 +102,7 @@ pub(crate) fn prepare_flood_textures(
             sample_count: MSAA_DISABLED_SAMPLE_COUNT,
             dimension: TextureDimension::D2,
             format: CORE_3D_DEPTH_FORMAT,
-            usage: TextureUsages::RENDER_ATTACHMENT  // For using as depth buffer
-        | TextureUsages::TEXTURE_BINDING, // For sampling in composite pass
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
 
