@@ -9,6 +9,8 @@
 //! them to each panel's layout unit automatically.
 //!
 //! Press **D** to toggle debug outlines. Press **R** to toggle rulers.
+//! Press **F** to toggle hairline fade; hold **↑** / **↓** to vary the fade
+//! exponent.
 
 use std::time::Duration;
 
@@ -26,6 +28,8 @@ use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::HairlineFade;
+use bevy_diegetic::HairlineWidth;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -143,6 +147,13 @@ const HOME_MARGIN: f32 = 0.25;
 const ZOOM_DURATION_MS: u64 = 1000;
 const ZOOM_MARGIN: f32 = 0.08;
 
+// ── Hairline fade ────────────────────────────────────────────────────
+const FADE_EXPONENT_DEFAULT: f32 = 1.0;
+const FADE_EXPONENT_MIN: f32 = 0.25;
+const FADE_EXPONENT_MAX: f32 = 6.0;
+/// Exponent change per second while an arrow key is held.
+const FADE_EXPONENT_RATE: f32 = 1.0;
+
 // ── Colors ───────────────────────────────────────────────────────────
 const A4_DIM_COLOR: Color = Color::srgba(0.0, 0.0, 0.1, 1.0);
 const A4_TEXT_COLOR: Color = Color::BLACK;
@@ -168,8 +179,19 @@ struct PanelRuler;
 #[derive(Component)]
 struct BatchCountPanel;
 
-#[derive(Component, Clone, Copy, Default, PartialEq, Eq)]
-struct BatchCountDisplay(PanelLineBatchPerfStats);
+#[derive(Component, Clone, Copy, Default, PartialEq)]
+struct BatchCountDisplay {
+    stats: PanelLineBatchPerfStats,
+    fade:  HairlineFade,
+}
+
+/// Last `Fade` exponent, restored when `F` re-enables fade.
+#[derive(Resource, Clone, Copy)]
+struct FadeExponentMemory(f32);
+
+impl Default for FadeExponentMemory {
+    fn default() -> Self { Self(FADE_EXPONENT_DEFAULT) }
+}
 
 #[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
 enum DebugOutlines {
@@ -248,7 +270,7 @@ fn spawn_batch_count_panel(commands: &mut Commands) {
         .anchor(Anchor::BottomLeft)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(build_batch_count_panel_tree(display.0))
+        .with_tree(build_batch_count_panel_tree(display))
         .build();
 
     let Some(panel) = build_panel_or_log(panel, "batch count panel") else {
@@ -260,19 +282,31 @@ fn spawn_batch_count_panel(commands: &mut Commands) {
 fn update_batch_count_panel(
     mut commands: Commands,
     perf: Res<DiegeticPerfStats>,
+    hairline: Res<HairlineWidth>,
     mut panels: Query<(Entity, &mut BatchCountDisplay), With<BatchCountPanel>>,
 ) {
-    let stats = perf.line_batch;
+    let next = BatchCountDisplay {
+        stats: perf.line_batch,
+        fade:  hairline.fade,
+    };
     for (entity, mut display) in &mut panels {
-        if display.0 == stats {
+        if *display == next {
             continue;
         }
-        display.0 = stats;
-        commands.set_tree(entity, build_batch_count_panel_tree(stats));
+        *display = next;
+        commands.set_tree(entity, build_batch_count_panel_tree(next));
     }
 }
 
-fn build_batch_count_panel_tree(stats: PanelLineBatchPerfStats) -> LayoutTree {
+fn fade_line(fade: HairlineFade) -> String {
+    match fade {
+        HairlineFade::Full => "fade off".to_string(),
+        HairlineFade::Fade { exponent } => format!("fade exp {exponent:.2}"),
+    }
+}
+
+fn build_batch_count_panel_tree(display: BatchCountDisplay) -> LayoutTree {
+    let stats = display.stats;
     let title = TextStyle::new(BATCH_PANEL_TITLE_SIZE)
         .with_color(BATCH_PANEL_TITLE_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
@@ -299,7 +333,8 @@ fn build_batch_count_panel_tree(stats: PanelLineBatchPerfStats) -> LayoutTree {
                     builder.text("Line Batches", title);
                     builder.text(format!("{}", stats.batches), value);
                     builder.text(format!("records {}", stats.records), label.clone());
-                    builder.text(format!("uploads {}", stats.uploads), label);
+                    builder.text(format!("uploads {}", stats.uploads), label.clone());
+                    builder.text(fade_line(display.fade), label);
                 },
             );
         },
@@ -331,6 +366,8 @@ fn main() {
                 .with_background_color(DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA))
                 .control("D Outlines")
                 .control("R Rulers")
+                .control("F Fade")
+                .control("↑↓ Exponent")
                 .control(TitleBarControl::segmented(
                     "A",
                     AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
@@ -346,6 +383,15 @@ fn main() {
         .wire_chip_to_state::<Rulers, _>("R Rulers", |state| match state {
             Rulers::Visible => ControlActivation::Active,
             Rulers::Hidden => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<HairlineWidth, _>("F Fade", |hairline| match hairline.fade {
+            HairlineFade::Fade { .. } => ControlActivation::Active,
+            HairlineFade::Full => ControlActivation::Inactive,
+        })
+        // The arrows only act while fade is on, so the chip lights with it.
+        .wire_chip_to_state::<HairlineWidth, _>("↑↓ Exponent", |hairline| match hairline.fade {
+            HairlineFade::Fade { .. } => ControlActivation::Active,
+            HairlineFade::Full => ControlActivation::Inactive,
         })
         .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[0].2)
@@ -379,6 +425,7 @@ fn main() {
         .init_resource::<DebugOutlines>()
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()
+        .init_resource::<FadeExponentMemory>()
         .add_systems(Startup, setup)
         .add_systems(Update, update_batch_count_panel)
         // D / R toggles and the P / O projection switch all run through Fairy
@@ -388,6 +435,9 @@ fn main() {
         .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
         .with_shortcut(KeyCode::KeyP, to_perspective_projection)
         .with_shortcut(KeyCode::KeyO, to_orthographic_projection)
+        .with_shortcut(KeyCode::KeyF, toggle_hairline_fade)
+        .with_held_shortcut(KeyCode::ArrowUp, increase_fade_exponent)
+        .with_held_shortcut(KeyCode::ArrowDown, decrease_fade_exponent)
         .run();
 }
 
@@ -847,12 +897,81 @@ fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
     *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
+/// `F` — toggles hairline fade, restoring the last arrow-tuned exponent.
+fn toggle_hairline_fade(
+    mut hairline: ResMut<HairlineWidth>,
+    mut memory: ResMut<FadeExponentMemory>,
+) {
+    hairline.fade = match hairline.fade {
+        HairlineFade::Full => HairlineFade::Fade { exponent: memory.0 },
+        HairlineFade::Fade { exponent } => {
+            memory.0 = exponent;
+            HairlineFade::Full
+        },
+    };
+}
+
+/// Held `↑` — raises the fade exponent (fades sooner).
+fn increase_fade_exponent(hairline: ResMut<HairlineWidth>, time: Res<Time>) {
+    adjust_fade_exponent(hairline, time.delta_secs() * FADE_EXPONENT_RATE);
+}
+
+/// Held `↓` — lowers the fade exponent (fades later).
+fn decrease_fade_exponent(hairline: ResMut<HairlineWidth>, time: Res<Time>) {
+    adjust_fade_exponent(hairline, -time.delta_secs() * FADE_EXPONENT_RATE);
+}
+
+fn adjust_fade_exponent(mut hairline: ResMut<HairlineWidth>, delta: f32) {
+    let HairlineFade::Fade { exponent } = hairline.fade else {
+        return;
+    };
+    let next = (exponent + delta).clamp(FADE_EXPONENT_MIN, FADE_EXPONENT_MAX);
+    if next.to_bits() != exponent.to_bits() {
+        hairline.fade = HairlineFade::Fade { exponent: next };
+    }
+}
+
 // ── Panel rulers ────────────────────────────────────────────────────
 
 #[derive(Clone, Copy)]
 enum TickAlignment {
     Left,
     Right,
+}
+
+/// Pins major ticks (one line per mark, in mark order) to
+/// [`HairlineFade::Full`] per line so only minor ticks fade with distance.
+/// All lines stay in one element: the renderer merges them into a single
+/// analytic path, fading each coverage evaluation by its winning curve's
+/// exponent, so the exempt and fading lines abut without an anti-aliasing
+/// junction.
+fn exempt_major_ticks(ticks: Vec<PanelLine>, is_major: impl Fn(i32) -> bool) -> Vec<PanelLine> {
+    (0_i32..)
+        .zip(ticks)
+        .map(|(mark, line)| {
+            if is_major(mark) {
+                line.hairline_fade(HairlineFade::Full)
+            } else {
+                line
+            }
+        })
+        .collect()
+}
+
+const fn is_metric_major(mm: i32) -> bool { mm % 10 == 0 }
+
+const fn is_imperial_major(sixteenth: i32) -> bool { sixteenth % 16 == 0 }
+
+/// Ruler track element: ticks (majors pinned to `HairlineFade::Full`, minors
+/// inheriting the global fade) and the never-fading spine in one draw.
+fn ruler_track(b: &mut LayoutBuilder, width: Sizing, height: Sizing, lines: Vec<PanelLine>) {
+    b.with(
+        El::new()
+            .width(width)
+            .height(height)
+            .draw(PanelDraw::lines(lines)),
+        |_| {},
+    );
 }
 
 fn metric_vertical_tick_lines(height_millimeters: i32, color: Color) -> Vec<PanelLine> {
@@ -868,13 +987,17 @@ fn metric_vertical_tick_lines(height_millimeters: i32, color: Color) -> Vec<Pane
 }
 
 fn metric_vertical_ruler_lines(height_millimeters: i32, color: Color) -> Vec<PanelLine> {
-    let mut lines = metric_vertical_tick_lines(height_millimeters, color);
-    lines.push(vertical_spine_line(
-        height_millimeters.to_f32(),
-        PANEL_RULER_CM_TICK.0,
-        PANEL_RULER_SPINE.0,
-        color,
-    ));
+    let ticks = metric_vertical_tick_lines(height_millimeters, color);
+    let mut lines = exempt_major_ticks(ticks, is_metric_major);
+    lines.push(
+        vertical_spine_line(
+            height_millimeters.to_f32(),
+            PANEL_RULER_CM_TICK.0,
+            PANEL_RULER_SPINE.0,
+            color,
+        )
+        .hairline_fade(HairlineFade::Full),
+    );
     lines
 }
 
@@ -884,19 +1007,18 @@ fn metric_horizontal_tick_lines(width_millimeters: i32, color: Color) -> Vec<Pan
 }
 
 fn metric_horizontal_ruler_lines(width_millimeters: i32, color: Color) -> Vec<PanelLine> {
-    let mut lines = horizontal_tick_lines(
+    let ticks = horizontal_tick_lines(
         width_millimeters,
         1.0,
         PANEL_RULER_SPINE.0,
         color,
         millimeter_tick_size,
     );
-    lines.push(horizontal_spine_line(
-        width_millimeters.to_f32(),
-        0.0,
-        PANEL_RULER_SPINE.0,
-        color,
-    ));
+    let mut lines = exempt_major_ticks(ticks, is_metric_major);
+    lines.push(
+        horizontal_spine_line(width_millimeters.to_f32(), 0.0, PANEL_RULER_SPINE.0, color)
+            .hairline_fade(HairlineFade::Full),
+    );
     lines
 }
 
@@ -915,7 +1037,7 @@ fn imperial_vertical_tick_lines(height_sixteenths: i32, color: Color) -> Vec<Pan
 
 fn imperial_vertical_ruler_lines(height_sixteenths: i32, color: Color) -> Vec<PanelLine> {
     let height_inches = height_sixteenths.to_f32() / 16.0;
-    let mut lines = vertical_tick_lines(
+    let ticks = vertical_tick_lines(
         height_sixteenths,
         1.0 / 16.0,
         PANEL_RULER_INCH_TICK.0,
@@ -924,12 +1046,11 @@ fn imperial_vertical_ruler_lines(height_sixteenths: i32, color: Color) -> Vec<Pa
         color,
         sixteenth_tick_size,
     );
-    lines.push(vertical_spine_line(
-        height_inches,
-        0.0,
-        PANEL_RULER_INCH_SPINE.0,
-        color,
-    ));
+    let mut lines = exempt_major_ticks(ticks, is_imperial_major);
+    lines.push(
+        vertical_spine_line(height_inches, 0.0, PANEL_RULER_INCH_SPINE.0, color)
+            .hairline_fade(HairlineFade::Full),
+    );
     lines
 }
 
@@ -946,19 +1067,18 @@ fn imperial_horizontal_tick_lines(width_sixteenths: i32, color: Color) -> Vec<Pa
 
 fn imperial_horizontal_ruler_lines(width_sixteenths: i32, color: Color) -> Vec<PanelLine> {
     let width_inches = width_sixteenths.to_f32() / 16.0;
-    let mut lines = horizontal_tick_lines(
+    let ticks = horizontal_tick_lines(
         width_sixteenths,
         1.0 / 16.0,
         PANEL_RULER_INCH_SPINE.0,
         color,
         sixteenth_tick_size,
     );
-    lines.push(horizontal_spine_line(
-        width_inches,
-        0.0,
-        PANEL_RULER_INCH_SPINE.0,
-        color,
-    ));
+    let mut lines = exempt_major_ticks(ticks, is_imperial_major);
+    lines.push(
+        horizontal_spine_line(width_inches, 0.0, PANEL_RULER_INCH_SPINE.0, color)
+            .hairline_fade(HairlineFade::Full),
+    );
     lines
 }
 
@@ -1113,20 +1233,15 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
             );
 
             // ── Right column: ticks + spine ─────────────────────
-            // One element, one lines list: same-color lines in one draw
-            // merge into a single analytic path, so the tick-spine
-            // junctions render without an anti-aliasing line.
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(Mm(
-                        PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
-                    )))
-                    .height(Sizing::fixed(Mm(height_millimeters.to_f32())))
-                    .draw(PanelDraw::lines(metric_vertical_ruler_lines(
-                        height_millimeters,
-                        ruler_color,
-                    ))),
-                |_| {},
+            // All lines share one draw and merge into a single analytic
+            // path, so tick/spine junctions render without an anti-aliasing
+            // line; majors and the spine pin `HairlineFade::Full` per line
+            // while minors inherit the global fade.
+            ruler_track(
+                b,
+                Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
+                Sizing::fixed(Mm(height_millimeters.to_f32())),
+                metric_vertical_ruler_lines(height_millimeters, ruler_color),
             );
         },
     );
@@ -1165,17 +1280,11 @@ fn build_imperial_panel_ruler(
             .child_align_y(AlignY::Bottom),
         |b| {
             // ── Left column: spine + ticks ──────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(In(
-                        PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
-                    )))
-                    .height(Sizing::fixed(In(height_inches)))
-                    .draw(PanelDraw::lines(imperial_vertical_ruler_lines(
-                        height_sixteenths,
-                        ruler_color,
-                    ))),
-                |_| {},
+            ruler_track(
+                b,
+                Sizing::fixed(In(PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0)),
+                Sizing::fixed(In(height_inches)),
+                imperial_vertical_ruler_lines(height_sixteenths, ruler_color),
             );
 
             // ── Right column: labels ────────────────────────────
@@ -1257,17 +1366,11 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
             .direction(Direction::TopToBottom),
         |b| {
             // ── Top row: spine + ticks ──────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(Mm(width_millimeters.to_f32())))
-                    .height(Sizing::fixed(Mm(
-                        PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0
-                    )))
-                    .draw(PanelDraw::lines(metric_horizontal_ruler_lines(
-                        width_millimeters,
-                        ruler_color,
-                    ))),
-                |_| {},
+            ruler_track(
+                b,
+                Sizing::fixed(Mm(width_millimeters.to_f32())),
+                Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
+                metric_horizontal_ruler_lines(width_millimeters, ruler_color),
             );
 
             // ── Bottom row: labels ──────────────────────────────
@@ -1339,17 +1442,11 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
             .direction(Direction::TopToBottom),
         |b| {
             // ── Top row: spine + ticks ──────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(In(width_inches)))
-                    .height(Sizing::fixed(In(
-                        PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0
-                    )))
-                    .draw(PanelDraw::lines(imperial_horizontal_ruler_lines(
-                        width_sixteenths,
-                        ruler_color,
-                    ))),
-                |_| {},
+            ruler_track(
+                b,
+                Sizing::fixed(In(width_inches)),
+                Sizing::fixed(In(PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0)),
+                imperial_horizontal_ruler_lines(width_sixteenths, ruler_color),
             );
 
             // ── Bottom row: labels ──────────────────────────────
@@ -1878,7 +1975,10 @@ mod tests {
         let lines = metric_vertical_ruler_lines(10, Color::WHITE);
         let spine = lines.last().expect("ruler lines should include a spine");
 
+        // 11 ticks plus the spine; cm marks 0 and 10 and the spine pin
+        // `HairlineFade::Full`, the rest inherit.
         assert_eq!(lines.len(), 12);
+        assert_fade_exempt_marks(&lines, &[0, 10]);
         assert_close(
             start_x(spine),
             PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0 * 0.5,
@@ -1912,6 +2012,7 @@ mod tests {
         let spine = lines.last().expect("ruler lines should include a spine");
 
         assert_eq!(lines.len(), 12);
+        assert_fade_exempt_marks(&lines, &[0, 10]);
         assert_close(start_y(first_tick), PANEL_RULER_SPINE.0);
         assert_close(
             end_y(first_tick),
@@ -1945,7 +2046,10 @@ mod tests {
         let first_tick = lines.first().expect("ruler lines should include ticks");
         let spine = lines.last().expect("ruler lines should include a spine");
 
+        // 17 ticks plus the spine; inch marks 0 and 16 and the spine pin
+        // `HairlineFade::Full`, the rest inherit.
         assert_eq!(lines.len(), 18);
+        assert_fade_exempt_marks(&lines, &[0, 16]);
         assert_close(start_x(first_tick), PANEL_RULER_INCH_SPINE.0);
         assert_close(
             end_x(first_tick),
@@ -1977,6 +2081,7 @@ mod tests {
         let spine = lines.last().expect("ruler lines should include a spine");
 
         assert_eq!(lines.len(), 18);
+        assert_fade_exempt_marks(&lines, &[0, 16]);
         assert_close(start_y(first_tick), PANEL_RULER_INCH_SPINE.0);
         assert_close(
             end_y(first_tick),
@@ -2004,6 +2109,26 @@ mod tests {
     }
 
     fn line_width(line: &PanelLine) -> f32 { line.line_style().width_dimension().value }
+
+    /// Ruler lines = ticks in mark order then the spine last; the listed
+    /// major marks and the spine must pin `HairlineFade::Full`, every other
+    /// tick must inherit (no override).
+    fn assert_fade_exempt_marks(lines: &[PanelLine], major_marks: &[i32]) {
+        let (spine, ticks) = lines.split_last().expect("ruler lines should not be empty");
+        assert_eq!(
+            spine.line_style().hairline_fade_value(),
+            Some(HairlineFade::Full),
+            "spine must pin HairlineFade::Full"
+        );
+        for (mark, tick) in (0_i32..).zip(ticks) {
+            let expected = major_marks.contains(&mark).then_some(HairlineFade::Full);
+            assert_eq!(
+                tick.line_style().hairline_fade_value(),
+                expected,
+                "tick at mark {mark} has the wrong fade override"
+            );
+        }
+    }
 
     fn assert_close(actual: Option<f32>, expected: f32) {
         assert!(

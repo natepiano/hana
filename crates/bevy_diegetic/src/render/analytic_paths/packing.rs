@@ -32,15 +32,20 @@ const CURVE_LINEAR_SNAP_RATIO: f32 = 0.000_1;
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct CurveRecord {
     /// Segment start point in `.xy`, control-minus-start in `.zw`.
-    pub start_delta: Vec4,
+    pub start_delta:   Vec4,
     /// Quadratic second-difference in `.xy`, segment end point in `.zw`.
-    pub curve_end:   Vec4,
+    pub curve_end:     Vec4,
     /// Conservative control-point bounds minimum in `.xy`, maximum in `.zw`.
-    pub bounds:      Vec4,
+    pub bounds:        Vec4,
     /// Distance-solver coefficients in `.xyz`; `.w` carries the owning
     /// contour's narrowest stroke in design units (per-curve hairline
     /// dilation), 0.0 for undilated contours (text glyphs).
-    pub solver:      Vec4,
+    pub solver:        Vec4,
+    /// Owning contour's resolved hairline fade exponent
+    /// (`PathContour::fade_exponent`). Each coverage evaluation fades by the
+    /// winning (nearest) curve's exponent, so one merged path can mix fading
+    /// and non-fading contours. `0.0` disables fade for this curve.
+    pub fade_exponent: f32,
 }
 
 impl From<&QuadraticSegment> for CurveRecord {
@@ -60,25 +65,26 @@ impl From<&QuadraticSegment> for CurveRecord {
             0.0
         };
         Self {
-            start_delta: Vec4::new(
+            start_delta:   Vec4::new(
                 segment.start.x,
                 segment.start.y,
                 control_delta.x,
                 control_delta.y,
             ),
-            curve_end:   Vec4::new(curve_delta.x, curve_delta.y, segment.end.x, segment.end.y),
-            bounds:      Vec4::new(
+            curve_end:     Vec4::new(curve_delta.x, curve_delta.y, segment.end.x, segment.end.y),
+            bounds:        Vec4::new(
                 segment.start.x.min(segment.control.x).min(segment.end.x),
                 segment.start.y.min(segment.control.y).min(segment.end.y),
                 segment.start.x.max(segment.control.x).max(segment.end.x),
                 segment.start.y.max(segment.control.y).max(segment.end.y),
             ),
-            solver:      Vec4::new(
+            solver:        Vec4::new(
                 3.0 * control_delta.dot(curve_delta) * inverse_curve_norm_sq,
                 2.0 * control_delta.length_squared() * inverse_curve_norm_sq,
                 inverse_curve_norm_sq,
                 0.0,
             ),
+            fade_exponent: 0.0,
         }
     }
 }
@@ -168,11 +174,16 @@ pub(crate) struct RunRecord {
     pub depth_nudge:      f32,
     /// Per-run OIT position-z offset for coplanar ordering.
     pub oit_depth_offset: f32,
+    /// Resolved anti-alias mode bits (`TextAntiAlias::aa_flags`:
+    /// `AA_FLAG_SUPERSAMPLE` | `AA_FLAG_BAND`). Per-record so an element-level
+    /// AA override never splits a batch or material.
+    pub aa_flags:         u32,
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
 // WGSL mirror structs in `analytic_path_vertex_pull.wgsl` assume these strides.
 // `ShaderSize` measures the encase layout, not the Rust layout.
+const _: () = assert!(CurveRecord::SHADER_SIZE.get() == 80);
 const _: () = assert!(GlyphRecord::SHADER_SIZE.get() == 48);
 const _: () = assert!(GlyphInstanceRecord::SHADER_SIZE.get() == 40);
 const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
@@ -302,9 +313,10 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
         .iter()
         .flat_map(|contour| {
             contour.segments.iter().map(|segment| BandedSegment {
-                segment:     *segment,
-                orientation: segment_orientation(segment),
-                min_feature: contour.min_feature,
+                segment:       *segment,
+                orientation:   segment_orientation(segment),
+                min_feature:   contour.min_feature,
+                fade_exponent: contour.fade_exponent,
             })
         })
         .collect();
@@ -354,9 +366,10 @@ enum CurveOrientation {
 /// One outline segment with the per-band packing inputs it carries.
 #[derive(Clone, Copy)]
 struct BandedSegment {
-    segment:     QuadraticSegment,
-    orientation: CurveOrientation,
-    min_feature: f32,
+    segment:       QuadraticSegment,
+    orientation:   CurveOrientation,
+    min_feature:   f32,
+    fade_exponent: f32,
 }
 
 fn append_bands(
@@ -419,6 +432,7 @@ fn append_band_curves(
     curves.extend(filtered.iter().map(|banded| {
         let mut record = CurveRecord::from(&banded.segment);
         record.solver.w = banded.min_feature;
+        record.fade_exponent = banded.fade_exponent;
         record
     }));
 }
@@ -499,6 +513,7 @@ mod tests {
             render_mode:      1,
             depth_nudge:      seed,
             oit_depth_offset: -seed,
+            aa_flags:         3,
         }
     }
 

@@ -51,6 +51,8 @@ use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::render::HairlineFade;
+use crate::render::TextAntiAlias;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -75,6 +77,8 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
+    anti_alias:    Option<TextAntiAlias>,
+    hairline_fade: Option<HairlineFade>,
 }
 
 impl El {
@@ -248,6 +252,28 @@ impl El {
         self
     }
 
+    /// Overrides the anti-alias mode for this element's analytic line marks.
+    ///
+    /// Without an override the element inherits the panel entity's
+    /// cascade-resolved [`TextAntiAlias`] (panel override else the global
+    /// resource). Per-record data — an override never splits a batch.
+    pub const fn anti_alias(mut self, mode: TextAntiAlias) -> Self {
+        self.anti_alias = Some(mode);
+        self
+    }
+
+    /// Overrides the hairline fade policy for this element's analytic line
+    /// marks.
+    ///
+    /// Without an override the element inherits the panel entity's
+    /// cascade-resolved [`HairlineFade`] (panel override else
+    /// [`HairlineWidth::fade`](crate::HairlineWidth)). Per-record data — an
+    /// override never splits a batch.
+    pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
+        self.hairline_fade = Some(fade);
+        self
+    }
+
     /// Converts this declaration into an [`Element`] with the given content.
     fn into_element(self, content: ElementContent) -> Element {
         Element {
@@ -267,6 +293,8 @@ impl El {
             material: self.material,
             editable: self.editable,
             draw: self.draw,
+            anti_alias: self.anti_alias,
+            hairline_fade: self.hairline_fade,
             content,
         }
     }

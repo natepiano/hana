@@ -78,12 +78,14 @@ pub struct DiegeticTextBatch;
 /// re-routing.
 #[derive(SystemParam)]
 pub(super) struct BatchKeyCascades<'w, 's> {
-    alphas:            Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
-    lightings:         Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
-    sidednesses:       Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
-    alpha_default:     Res<'w, CascadeDefault<TextAlpha>>,
-    lighting_default:  Res<'w, CascadeDefault<TextLighting>>,
-    sidedness_default: Res<'w, CascadeDefault<TextSidedness>>,
+    alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
+    lightings:          Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
+    sidednesses:        Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
+    anti_aliases:       Query<'w, 's, &'static Resolved<TextAntiAlias>, With<TextContent>>,
+    alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
+    lighting_default:   Res<'w, CascadeDefault<TextLighting>>,
+    sidedness_default:  Res<'w, CascadeDefault<TextSidedness>>,
+    anti_alias_default: Res<'w, CascadeDefault<TextAntiAlias>>,
     changed: Query<
         'w,
         's,
@@ -95,6 +97,7 @@ pub(super) struct BatchKeyCascades<'w, 's> {
                 Changed<Resolved<TextAlpha>>,
                 Changed<Resolved<TextLighting>>,
                 Changed<Resolved<TextSidedness>>,
+                Changed<Resolved<TextAntiAlias>>,
             )>,
         ),
     >,
@@ -122,6 +125,12 @@ impl BatchKeyCascades<'_, '_> {
         self.sidednesses
             .get(label)
             .map_or(self.sidedness_default.0.0, |resolved| resolved.0.0)
+    }
+
+    fn anti_alias(&self, label: Entity) -> TextAntiAlias {
+        self.anti_aliases
+            .get(label)
+            .map_or(self.anti_alias_default.0, |resolved| resolved.0)
     }
 }
 
@@ -243,6 +252,7 @@ pub(super) fn update_panel_text_batches(
             depth_nudge:      panel_text_child.command_index.saturating_add(1).to_f32()
                 * constants::LAYER_DEPTH_BIAS,
             oit_depth_offset: 0.0,
+            aa_flags:         cascades.anti_alias(label_entity).aa_flags(),
         };
         backend
             .batch_store_mut()
@@ -482,6 +492,7 @@ fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord
             render_mode:      0,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
+            aa_flags:         0,
         },
     );
     padded
@@ -1243,6 +1254,7 @@ mod tests {
             render_mode:      1,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
+            aa_flags:         TextAntiAlias::Both.aa_flags(),
         };
 
         for count in 0..=8_usize {

@@ -37,6 +37,7 @@ struct RunRecord {
     render_mode: u32,
     depth_nudge: f32,
     oit_depth_offset: f32,
+    aa_flags: u32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<GlyphInstanceRecord>;

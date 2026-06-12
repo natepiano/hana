@@ -24,6 +24,7 @@ use super::PathOutline;
 use super::QuadraticSegment;
 use super::RenderMode;
 use super::RunRecord;
+use super::TextAntiAlias;
 use super::TextMaterial;
 
 /// Design-space units assigned to the stroke (thin) axis. Fixing the thin axis
@@ -205,6 +206,8 @@ fn build_line(
         render_mode:      u32::from(RenderMode::Text),
         depth_nudge:      0.0,
         oit_depth_offset: 0.0,
+        // Matches the probe material's supersample + aa_band settings.
+        aa_flags:         TextAntiAlias::Both.aa_flags(),
     };
 
     let instances = storage_buffers.add(ShaderBuffer::from(vec![instance]));
@@ -233,8 +236,9 @@ fn rectangle_outline(design: Vec2) -> PathOutline {
             max: design,
         },
         contours: vec![PathContour {
-            min_feature: design.x.min(design.y),
-            segments:    corners
+            min_feature:   design.x.min(design.y),
+            fade_exponent: 0.0,
+            segments:      corners
                 .iter()
                 .copied()
                 .zip(corners.iter().copied().cycle().skip(1))
@@ -306,7 +310,17 @@ mod tests {
     const EPS: f32 = 1.0e-5;
 
     fn winding_for_t(curve: &CurveRecord, point: Vec2, t: f32) -> i32 {
-        if !(0.0..1.0).contains(&t) {
+        let dy = 2.0 * curve.curve_end.y.mul_add(t, curve.start_delta.w);
+        if dy.abs() < EPS {
+            return 0;
+        }
+        // Half-open in y, not t: upward crossings count on t ∈ [0, 1),
+        // downward on t ∈ (0, 1] (the shader's grazing-row parity rule).
+        let upward = dy > 0.0;
+        if upward && !(0.0..1.0).contains(&t) {
+            return 0;
+        }
+        if !upward && (t <= 0.0 || t > 1.0) {
             return 0;
         }
         let linear_x = (2.0 * curve.start_delta.z).mul_add(t, curve.start_delta.x);
@@ -314,11 +328,7 @@ mod tests {
         if curve_x <= point.x {
             return 0;
         }
-        let dy = 2.0 * curve.curve_end.y.mul_add(t, curve.start_delta.w);
-        if dy.abs() < EPS {
-            return 0;
-        }
-        if dy > 0.0 { 1 } else { -1 }
+        if upward { 1 } else { -1 }
     }
 
     fn curve_winding(curve: &CurveRecord, point: Vec2) -> i32 {

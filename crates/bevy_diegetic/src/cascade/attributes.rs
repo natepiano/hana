@@ -14,6 +14,8 @@ pub use super::resolved::TextSidedness;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
+use crate::render::HairlineFade;
+use crate::render::TextAntiAlias;
 
 /// Typed cascade commands for entity-local authored values.
 ///
@@ -53,6 +55,18 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored text draw layer.
     fn inherit_text_draw_layer(&mut self) -> &mut Self;
+
+    /// Author this entity's anti-alias mode.
+    fn override_text_anti_alias(&mut self, anti_alias: TextAntiAlias) -> &mut Self;
+
+    /// Remove this entity's authored anti-alias mode.
+    fn inherit_text_anti_alias(&mut self) -> &mut Self;
+
+    /// Author this entity's hairline fade policy.
+    fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self;
+
+    /// Remove this entity's authored hairline fade policy.
+    fn inherit_hairline_fade(&mut self) -> &mut Self;
 }
 
 impl CascadeEntityCommandsExt for EntityCommands<'_> {
@@ -90,6 +104,22 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_text_draw_layer(&mut self) -> &mut Self {
         remove_cascade_override::<TextDrawLayer>(self)
+    }
+
+    fn override_text_anti_alias(&mut self, anti_alias: TextAntiAlias) -> &mut Self {
+        apply_cascade_override(self, anti_alias)
+    }
+
+    fn inherit_text_anti_alias(&mut self) -> &mut Self {
+        remove_cascade_override::<TextAntiAlias>(self)
+    }
+
+    fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self {
+        apply_cascade_override(self, fade)
+    }
+
+    fn inherit_hairline_fade(&mut self) -> &mut Self {
+        remove_cascade_override::<HairlineFade>(self)
     }
 }
 
@@ -138,6 +168,24 @@ pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness 
 #[must_use]
 pub fn resolved_text_draw_layer(world: &World, entity: Entity) -> TextDrawLayer {
     resolved_cascade::<TextDrawLayer>(world, entity)
+}
+
+/// Resolve an entity's current anti-alias mode.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_text_anti_alias(world: &World, entity: Entity) -> TextAntiAlias {
+    resolved_cascade::<TextAntiAlias>(world, entity)
+}
+
+/// Resolve an entity's current hairline fade policy.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_hairline_fade(world: &World, entity: Entity) -> HairlineFade {
+    resolved_cascade::<HairlineFade>(world, entity)
 }
 
 pub(crate) fn apply_cascade_override<'a, 'w, A>(

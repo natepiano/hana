@@ -33,6 +33,8 @@ use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::render::HairlineFade;
+use crate::render::TextAntiAlias;
 
 /// Result of replacing the display text for a panel field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -108,6 +110,12 @@ pub(super) struct Element {
     pub(super) editable:      Option<ImePanelField>,
     /// Optional paint-only draw data.
     pub(super) draw:          Option<PanelDraw>,
+    /// Optional anti-alias override for this element's analytic line marks.
+    /// `None` inherits the panel entity's cascade-resolved mode.
+    pub(super) anti_alias:    Option<TextAntiAlias>,
+    /// Optional hairline fade override for this element's analytic line marks.
+    /// `None` inherits the panel entity's cascade-resolved policy.
+    pub(super) hairline_fade: Option<HairlineFade>,
     /// Content of this element.
     pub(super) content:       ElementContent,
 }
@@ -179,6 +187,8 @@ impl Default for Element {
             material:      None,
             editable:      None,
             draw:          None,
+            anti_alias:    None,
+            hairline_fade: None,
             content:       ElementContent::Empty,
         }
     }
@@ -387,6 +397,18 @@ impl LayoutTree {
     #[must_use]
     pub(crate) fn element_draw(&self, index: usize) -> Option<&PanelDraw> {
         self.elements.get(index).and_then(|e| e.draw.as_ref())
+    }
+
+    /// Returns the anti-alias override for the element at `index`, if any.
+    #[must_use]
+    pub fn element_anti_alias(&self, index: usize) -> Option<TextAntiAlias> {
+        self.elements.get(index).and_then(|e| e.anti_alias)
+    }
+
+    /// Returns the hairline fade override for the element at `index`, if any.
+    #[must_use]
+    pub fn element_hairline_fade(&self, index: usize) -> Option<HairlineFade> {
+        self.elements.get(index).and_then(|e| e.hairline_fade)
     }
 
     /// Returns text content for the element at `index`, if any.
@@ -633,6 +655,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material,
         editable,
         draw,
+        anti_alias,
+        hairline_fade,
         content,
     } = element;
     let Element {
@@ -652,6 +676,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material: n_material,
         editable: n_editable,
         draw: n_draw,
+        anti_alias: n_anti_alias,
+        hairline_fade: n_hairline_fade,
         content: n_content,
     } = next;
 
@@ -684,6 +710,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     if draw != n_draw {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+
+    if anti_alias != n_anti_alias || hairline_fade != n_hairline_fade {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 

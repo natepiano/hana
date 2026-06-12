@@ -10,12 +10,30 @@ use super::constants::DEFAULT_TEXT_DRAW_LAYER;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
+use crate::render::HairlineFade;
+use crate::render::TextAntiAlias;
 
 mod private {
     pub trait Sealed {}
 }
 
 macro_rules! cascade_attr {
+    // Joins an already-declared value type (one whose own name is the
+    // attribute, e.g. `TextAntiAlias`) to the cascade instead of minting a
+    // wrapper struct. The type must derive `Copy`, `PartialEq`, `Debug`, and
+    // `Reflect`.
+    (existing $name:ty, default = $default:expr) => {
+        impl $crate::cascade::resolved::private::Sealed for $name {}
+
+        impl $crate::cascade::resolved::CascadeProperty for $name {}
+
+        impl $crate::cascade::resolved::CascadeAttr for $name {}
+
+        impl Default for $crate::cascade::defaults::CascadeDefault<$name> {
+            fn default() -> Self { Self($default) }
+        }
+    };
+
     ($(#[$meta:meta])* $name:ident($value:ty), default = $default:expr, eq) => {
         $(#[$meta])*
         #[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
@@ -87,6 +105,15 @@ cascade_attr!(
     default = DEFAULT_TEXT_DRAW_LAYER,
     eq
 );
+
+// Anti-alias mode cascade attribute. The `TextAntiAlias` resource is the
+// authored global; `sync_text_anti_alias` mirrors it into
+// `CascadeDefault<TextAntiAlias>` as the cascade root default.
+cascade_attr!(existing TextAntiAlias, default = TextAntiAlias::Both);
+// Hairline-fade cascade attribute. `HairlineWidth::fade` is the authored
+// global; `sync_hairline_fade` mirrors it into `CascadeDefault<HairlineFade>`
+// as the cascade root default.
+cascade_attr!(existing HairlineFade, default = HairlineFade::Full);
 
 #[cfg(test)]
 cascade_attr!(TestUnit(Unit), default = Unit::Meters);

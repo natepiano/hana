@@ -7,31 +7,36 @@ use crate::cascade::Resolved;
 use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
+use crate::render::TextAntiAlias;
 use crate::render::world_text::TextContent;
 
-/// Spawn-time cascade seed for a panel label's glyph lighting, sidedness, and
-/// draw layer.
+/// Spawn-time cascade seed for a panel label's glyph attributes.
 ///
 /// Fires when a label first gains [`TextContent`] and seeds its
 /// `Resolved<TextLighting>` / `Resolved<TextSidedness>` /
-/// `Resolved<TextDrawLayer>` via [`resolve_walk`](cascade::resolve_walk). The
-/// walk honors the label's own override first — `reconcile_panel_text_children`
-/// inserts one when the label authored `TextStyle::with_lighting` /
-/// `with_sidedness` / `with_draw_layer` — then climbs `ChildOf` to the panel's
-/// override (seeded by `seed_panel_overrides` for screen panels and
-/// unlit-material panels), else the global default (`Lit` / `DoubleSided` /
-/// the default draw layer). `update_panel_text_batches` reads these as
-/// batch-key fields. Later changes flow through the propagation pass, not
-/// this observer. The glyph-render twin of `seed_panel_child_alpha`.
+/// `Resolved<TextDrawLayer>` / `Resolved<TextAntiAlias>` via
+/// [`resolve_walk`](cascade::resolve_walk). The walk honors the label's own
+/// override first — `reconcile_panel_text_children` inserts one when the label
+/// authored `TextStyle::with_lighting` / `with_sidedness` /
+/// `with_draw_layer`, and `override_text_anti_alias` authors anti-alias state
+/// — then climbs `ChildOf` to the panel's override (seeded by
+/// `seed_panel_overrides` for screen panels and unlit-material panels), else
+/// the global default (`Lit` / `DoubleSided` / the default draw layer /
+/// `Both`). `update_panel_text_batches` reads lighting, sidedness, and draw
+/// layer as batch-key fields and anti-alias mode as a per-run record field.
+/// Later changes flow through the propagation pass, not this observer. The
+/// glyph-render twin of `seed_panel_child_alpha`.
 pub(super) fn seed_panel_text_child_glyph(
     trigger: On<Add, TextContent>,
     lighting_overrides: Query<&Override<TextLighting>>,
     sidedness_overrides: Query<&Override<TextSidedness>>,
     draw_layer_overrides: Query<&Override<TextDrawLayer>>,
+    anti_alias_overrides: Query<&Override<TextAntiAlias>>,
     parents: Query<&ChildOf>,
     lighting_default: Res<CascadeDefault<TextLighting>>,
     sidedness_default: Res<CascadeDefault<TextSidedness>>,
     draw_layer_default: Res<CascadeDefault<TextDrawLayer>>,
+    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -53,10 +58,17 @@ pub(super) fn seed_panel_text_child_glyph(
         &parents,
         draw_layer_default.0,
     );
+    let anti_alias = cascade::resolve_walk::<TextAntiAlias>(
+        entity,
+        &anti_alias_overrides,
+        &parents,
+        anti_alias_default.0,
+    );
     commands.entity(entity).insert((
         Resolved(lighting),
         Resolved(sidedness),
         Resolved(draw_layer),
+        Resolved(anti_alias),
     ));
 }
 

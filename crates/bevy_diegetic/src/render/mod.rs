@@ -55,6 +55,7 @@ pub(crate) use batch_key::VisualMaterialInterner;
 pub(crate) use batch_key::VisualShadow;
 pub(crate) use batch_key::VisualSidedness;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
+use bevy::log::warn_once;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
@@ -85,6 +86,9 @@ pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
 #[cfg(feature = "typography_overlay")]
 pub(crate) use world_text::emit_computed_world_text;
+
+use crate::cascade::CascadeDefault;
+use crate::cascade::CascadeSet;
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
 /// text runs, images, glyph meshes, and SDF geometry.
 ///
@@ -116,6 +120,12 @@ pub(crate) enum PanelChildSystems {
 ///
 /// The variants are the useful points on that quality/cost ladder.
 ///
+/// This resource is the cascade root default: `sync_text_anti_alias` mirrors
+/// it into `CascadeDefault<TextAntiAlias>`, and entities override it per
+/// panel or per label via
+/// [`override_text_anti_alias`](crate::cascade::CascadeEntityCommandsExt::override_text_anti_alias)
+/// (line elements override via [`El::anti_alias`](crate::El::anti_alias)).
+///
 /// # Performance
 ///
 /// Cost is per text fragment and scales with how many pixels text covers.
@@ -126,7 +136,8 @@ pub(crate) enum PanelChildSystems {
 /// angles), so it pays the cost only where the footprint is foreshortened. A frame
 /// dense with large grazing text is where dropping to [`Anisotropic`](Self::Anisotropic)
 /// — or [`Off`](Self::Off) — reclaims fill-rate.
-#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Resource)]
 pub enum TextAntiAlias {
     /// Scalar band, one sample. Edges blur at grazing angles and the sharp-corner
     /// wing shows. Mainly a reference.
@@ -144,6 +155,14 @@ pub enum TextAntiAlias {
     Both,
 }
 
+/// `RunRecord::aa_flags` bit for footprint supersampling. Mirrored by
+/// `AA_FLAG_SUPERSAMPLE` in `analytic_path.wgsl`.
+pub(crate) const AA_FLAG_SUPERSAMPLE: u32 = 1;
+
+/// `RunRecord::aa_flags` bit for the screen-space anisotropic edge band.
+/// Mirrored by `AA_FLAG_BAND` in `analytic_path.wgsl`.
+pub(crate) const AA_FLAG_BAND: u32 = 1 << 1;
+
 impl TextAntiAlias {
     /// Whether this mode supersamples the footprint (multiple samples vs. one).
     #[must_use]
@@ -152,13 +171,36 @@ impl TextAntiAlias {
     /// Whether this mode uses the screen-space anisotropic band (vs. scalar).
     #[must_use]
     pub const fn anisotropic(self) -> bool { matches!(self, Self::Anisotropic | Self::Both) }
+
+    /// The `RunRecord::aa_flags` encoding of this mode — the one enum→bits
+    /// conversion site, so the GPU encoding cannot drift from the variants.
+    #[must_use]
+    pub(crate) const fn aa_flags(self) -> u32 {
+        let supersample = if self.supersamples() {
+            AA_FLAG_SUPERSAMPLE
+        } else {
+            0
+        };
+        let band = if self.anisotropic() { AA_FLAG_BAND } else { 0 };
+        supersample | band
+    }
 }
 
 /// Mirrors [`TextAntiAlias`] into every text material's `supersample` and
-/// `aa_band` uniforms whenever the setting changes.
-fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Assets<TextMaterial>>) {
+/// `aa_band` uniforms and into the attribute's cascade root default whenever
+/// the setting changes. The cascade write re-resolves every participant's
+/// `Resolved<TextAntiAlias>`, which re-packs run records — per-record
+/// `aa_flags` cannot be refreshed by rewriting a material uniform.
+fn sync_text_anti_alias(
+    setting: Res<TextAntiAlias>,
+    mut cascade_default: ResMut<CascadeDefault<TextAntiAlias>>,
+    mut materials: ResMut<Assets<TextMaterial>>,
+) {
     if !setting.is_changed() {
         return;
+    }
+    if cascade_default.0 != *setting {
+        cascade_default.0 = *setting;
     }
     for (_, material) in materials.iter_mut() {
         analytic_paths::set_text_material_anti_alias(
@@ -184,10 +226,69 @@ fn sync_text_anti_alias(setting: Res<TextAntiAlias>, mut materials: ResMut<Asset
 pub struct HairlineWidth {
     /// Target stroke width in logical pixels.
     pub logical_px: f32,
+    /// What happens to a stroke whose natural width falls below the floor.
+    ///
+    /// The cascade root default: `sync_hairline_fade` mirrors it into
+    /// `CascadeDefault<HairlineFade>`, and line elements override it per
+    /// panel via
+    /// [`override_hairline_fade`](crate::cascade::CascadeEntityCommandsExt::override_hairline_fade),
+    /// per element via [`El::hairline_fade`](crate::El::hairline_fade), or
+    /// per line via [`PanelLine::hairline_fade`](crate::PanelLine::hairline_fade).
+    pub fade:       HairlineFade,
 }
 
 impl Default for HairlineWidth {
-    fn default() -> Self { Self { logical_px: 1.0 } }
+    fn default() -> Self {
+        Self {
+            logical_px: 1.0,
+            fade:       HairlineFade::Full,
+        }
+    }
+}
+
+/// Policy for strokes dilated up to the [`HairlineWidth`] floor.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect)]
+pub enum HairlineFade {
+    /// Dilate sub-floor strokes to the floor at full alpha (every stroke stays
+    /// uniformly visible at any distance).
+    #[default]
+    Full,
+    /// Dilate to the floor but scale alpha by
+    /// `(natural_width / floor)^exponent`, so a stroke fades out as its
+    /// natural on-screen width shrinks below the floor — a distance LOD for
+    /// thin marks such as ruler ticks. Exponent `1.0` matches natural
+    /// coverage; higher exponents fade sooner. Text glyphs are exempt
+    /// structurally: their curves carry no dilating stroke width, so their
+    /// fade factor is always 1.
+    Fade {
+        /// Fade curve exponent; must be positive and finite.
+        exponent: f32,
+    },
+}
+
+impl HairlineFade {
+    /// The `CurveRecord::fade_exponent` encoding of this policy: `0.0`
+    /// disables fade (`Full`), any positive value is the `Fade` exponent. The
+    /// one validation site — the resource is Reflect/BRP-mutable, so a
+    /// non-finite or non-positive exponent can arrive at runtime and falls
+    /// back to `Full`.
+    #[must_use]
+    pub(crate) fn fade_exponent(self) -> f32 {
+        match self {
+            Self::Full => 0.0,
+            Self::Fade { exponent } => {
+                if exponent.is_finite() && exponent > 0.0 {
+                    exponent
+                } else {
+                    warn_once!(
+                        "HairlineFade::Fade exponent {exponent} is not positive and finite; \
+                         rendering as HairlineFade::Full"
+                    );
+                    0.0
+                }
+            },
+        }
+    }
 }
 
 /// Floor for the applied hairline width at scale factor ≥ 2 — see
@@ -197,6 +298,22 @@ const HAIRLINE_MIN_DEVICE_PX_HIGH_DPI: f32 = 1.5;
 /// Floor below scale factor 2: with fewer device pixels per stroke,
 /// anti-aliasing needs the extra width to render cleanly.
 const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.75;
+
+/// Mirrors [`HairlineWidth::fade`] into the attribute's cascade root default
+/// whenever the resource changes. The cascade write re-resolves every
+/// participant's `Resolved<HairlineFade>`, which re-packs line outlines (fade
+/// is per-curve data in `CurveRecord::fade_exponent`).
+fn sync_hairline_fade(
+    hairline_width: Res<HairlineWidth>,
+    mut cascade_default: ResMut<CascadeDefault<HairlineFade>>,
+) {
+    if !hairline_width.is_changed() {
+        return;
+    }
+    if cascade_default.0 != hairline_width.fade {
+        cascade_default.0 = hairline_width.fade;
+    }
+}
 
 /// Mirrors [`HairlineWidth`] × window scale factor into every text material's
 /// `hairline_min_px` uniform: all materials when the applied value changes,
@@ -255,7 +372,17 @@ impl Plugin for RenderPlugin {
         // enables reflection-based (BRP) edits of OIT settings on a live camera.
         .register_type::<OrderIndependentTransparencySettings>()
         .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
-        .add_systems(Update, (sync_text_anti_alias, sync_hairline_width))
+        // The cascade-root mirrors must land before propagation so a global
+        // change reaches every `Resolved<A>` the same frame.
+        .add_systems(
+            Update,
+            (
+                sync_text_anti_alias,
+                sync_hairline_fade,
+                sync_hairline_width,
+            )
+                .before(CascadeSet::Propagate),
+        )
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)
         .add_observer(transparency::on_screen_space_camera_added);
