@@ -27,12 +27,12 @@ use bevy::render::view::window::screenshot::save_to_disk;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
+use super::AntiAlias;
 use super::BatchTextMaterialInput;
 use super::GlyphAtlasHandles;
 use super::GlyphInstanceRecord;
 use super::RenderMode;
 use super::RunRecord;
-use super::TextAntiAlias;
 use super::TextMaterial;
 use super::constants;
 use super::panel_text;
@@ -363,7 +363,7 @@ fn proof_run_record(source_transform: Mat4, index: usize, fill_color: Vec4) -> R
         depth_nudge: index.to_f32(),
         oit_depth_offset: 0.0,
         // Matches the proof material's supersample + aa_band settings.
-        aa_flags: TextAntiAlias::Both.aa_flags(),
+        aa_flags: AntiAlias::Both.aa_flags(),
     }
 }
 

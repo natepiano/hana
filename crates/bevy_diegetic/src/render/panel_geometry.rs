@@ -20,8 +20,8 @@ use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use super::sdf_material::SdfPanelMaterialInput;
-use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
-use crate::cascade::TextDrawLayer;
+use crate::cascade::DEFAULT_DRAW_LAYER;
+use crate::cascade::DrawLayer;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -241,11 +241,11 @@ fn reconcile_sdf_quads(
         .max();
     if let Some(max_draw_slot) = max_draw_slot
         && DrawOrdinal::from_draw_slot(max_draw_slot)
-            >= DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER))
+            >= DrawOrdinal::from(DrawLayer(DEFAULT_DRAW_LAYER))
     {
         warn_once!(
             "panel {:?} uses geometry draw slots up to {}, reaching the default text draw \
-             layer ({DEFAULT_TEXT_DRAW_LAYER}); slots at or above it draw over \
+             layer ({DEFAULT_DRAW_LAYER}); slots at or above it draw over \
              default-layer text",
             context.panel_entity,
             max_draw_slot,

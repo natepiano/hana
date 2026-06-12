@@ -79,8 +79,8 @@ use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
 use crate::cascade::FontUnit;
 use crate::layout::ShapedTextCache;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 /// System sets for ordering panel work and its cross-module dependencies.
 ///
@@ -124,7 +124,7 @@ impl Plugin for HeadlessLayoutPlugin {
             // Anti-alias and hairline fade live here, not in `RenderPlugin`,
             // because `seed_panel_overrides` reads their `CascadeDefault<A>`
             // resources — headless layout apps must have them.
-            .add_plugins(CascadePlugin::<TextAntiAlias>::default())
+            .add_plugins(CascadePlugin::<AntiAlias>::default())
             .add_plugins(CascadePlugin::<HairlineFade>::default())
             .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()

@@ -17,4 +17,4 @@ pub(super) const CASCADE_DEPTH_CAP: usize = 64;
 /// it). Assumes a panel's render commands stay below this count; a panel
 /// exceeding it would draw commands over its own default-layer text on
 /// sorted views.
-pub(crate) const DEFAULT_TEXT_DRAW_LAYER: i8 = 64;
+pub(crate) const DEFAULT_DRAW_LAYER: i8 = 64;

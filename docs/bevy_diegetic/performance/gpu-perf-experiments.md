@@ -10,7 +10,7 @@ Phase 2 experiment verdicts. The May-era log
 are not comparable to anything recorded here.
 
 Every entry declares: scene, build profile, display (drawable size),
-`TextAntiAlias` mode, and instrument (stress overlay = decision signal,
+`AntiAlias` mode, and instrument (stress overlay = decision signal,
 bench + xctrace = verdict).
 
 ---
@@ -36,7 +36,7 @@ bench + xctrace = verdict).
 
 - **Scene/instrument:** `diegetic_text_stress`, release, fresh launch,
   10 s Metal System Trace attached after ~25 s warmup.
-- **Display:** built-in, drawable 3456×2104, `TextAntiAlias::Both`,
+- **Display:** built-in, drawable 3456×2104, `AntiAlias::Both`,
   window unfocused, AutoNoVsync. 1415 GPU frames captured (~141 fps).
 - **Method:** `xctrace record --template 'Metal System Trace'
   --time-limit 10s --attach <pid>`; export `metal-gpu-intervals`;
@@ -82,7 +82,7 @@ bench + xctrace = verdict).
 - **Scene/instrument:** `diegetic_text_stress`, release, fresh launch,
   `brp_extras/get_diagnostics` `frame_time_ms.average` (~1 s window),
   median of 3 clean samples per condition (hitch samples discarded).
-- **Display:** built-in, drawable 3456×2104, `TextAntiAlias::Both`,
+- **Display:** built-in, drawable 3456×2104, `AntiAlias::Both`,
   unfocused, AutoNoVsync.
 - **Caster census (via BRP):** 126 `Mesh3d` entities = 121 panel
   backings (**already `NotShadowCaster`**) + 3 `DiegeticTextBatch`
@@ -159,7 +159,7 @@ bench + xctrace = verdict).
   `brp_extras/get_diagnostics` `frame_time_ms.average` (~120-frame
   window), median of clean samples per condition; hitch windows
   (history_duration > ~0.9 s or visible spike) discarded.
-- **Display:** built-in, `TextAntiAlias::Both`, unfocused, AutoNoVsync.
+- **Display:** built-in, `AntiAlias::Both`, unfocused, AutoNoVsync.
 - **Caster census:** identical to Probe A — 3 `DiegeticTextBatch`
   (2 casting), 121 panel backings (all `NotShadowCaster`), 2 plain
   scene meshes (casting).

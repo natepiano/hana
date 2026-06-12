@@ -6,12 +6,12 @@ use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
 
 use super::constants::CASCADE_DEPTH_CAP;
-use super::constants::DEFAULT_TEXT_DRAW_LAYER;
+use super::constants::DEFAULT_DRAW_LAYER;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 mod private {
     pub trait Sealed {}
@@ -19,7 +19,7 @@ mod private {
 
 macro_rules! cascade_attr {
     // Joins an already-declared value type (one whose own name is the
-    // attribute, e.g. `TextAntiAlias`) to the cascade instead of minting a
+    // attribute, e.g. `AntiAlias`) to the cascade instead of minting a
     // wrapper struct. The type must derive `Copy`, `PartialEq`, `Debug`, and
     // `Reflect`.
     (existing $name:ty, default = $default:expr) => {
@@ -96,20 +96,21 @@ cascade_attr!(
 cascade_attr!(
     /// Draw-layer cascade attribute.
     ///
-    /// A text run's ordinal on its panel's draw-order axis, shared with
-    /// backing render-command indices. The global default sits above every
-    /// realistic backing command count, so default-layer text composites over
-    /// all backings; a lower value tucks a run behind the backings whose
-    /// command indices exceed it.
-    TextDrawLayer(i8),
-    default = DEFAULT_TEXT_DRAW_LAYER,
+    /// A text run's ordinal on its panel's draw-order axis, shared with the
+    /// geometry draw slots that backings, dividers, images, and lines consume
+    /// in emission order. The global default sits above every realistic
+    /// geometry slot count, so default-layer text composites over all
+    /// backings; a lower value tucks a run behind the geometry whose draw
+    /// slots exceed it.
+    DrawLayer(i8),
+    default = DEFAULT_DRAW_LAYER,
     eq
 );
 
-// Anti-alias mode cascade attribute. The `TextAntiAlias` resource is the
+// Anti-alias mode cascade attribute. The `AntiAlias` resource is the
 // authored global; `sync_text_anti_alias` mirrors it into
-// `CascadeDefault<TextAntiAlias>` as the cascade root default.
-cascade_attr!(existing TextAntiAlias, default = TextAntiAlias::Both);
+// `CascadeDefault<AntiAlias>` as the cascade root default.
+cascade_attr!(existing AntiAlias, default = AntiAlias::Both);
 // Hairline-fade cascade attribute. `HairlineWidth::fade` is the authored
 // global; `sync_hairline_fade` mirrors it into `CascadeDefault<HairlineFade>`
 // as the cascade root default.

@@ -52,6 +52,7 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::AnchoredToPanel;
+use bevy_diegetic::AntiAlias;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
@@ -70,7 +71,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlign;
-use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
@@ -121,16 +121,16 @@ fn main() {
         .pitch(0.18)
         .with_title_bar(text_stress_title_bar())
         .wire_chip_to_state::<Mutating, _>(PAUSE_CHIP, |mutating| chip_activation(!mutating.0))
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[0].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[0].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[1].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[1].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[2].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[2].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[3].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .wire_chip_to_state::<GpuPipelineShown, _>(PIPELINE_CHIP, |shown| {
@@ -347,14 +347,14 @@ const PIPELINE_CHIP: &str = "pipeline";
 /// Title-bar segment id for the stable-transparency / OIT indicator.
 const OIT_CHIP: &str = "oit";
 
-/// The in-shader [`TextAntiAlias`] modes in `A`-key cycle order: title-bar
+/// The in-shader [`AntiAlias`] modes in `A`-key cycle order: title-bar
 /// segment id, visible label, and the mode itself. One source of truth for
 /// the chips, the chip wiring, and the cycle step.
-const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
-    ("aa-off", "Off", TextAntiAlias::Off),
-    ("aa-anisotropic", "Anisotropic", TextAntiAlias::Anisotropic),
-    ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
-    ("aa-both", "Both", TextAntiAlias::Both),
+const AA_MODES: [(&str, &str, AntiAlias); 4] = [
+    ("aa-off", "Off", AntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", AntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", AntiAlias::Supersample),
+    ("aa-both", "Both", AntiAlias::Both),
 ];
 
 /// Whether the main camera uses [`StableTransparency`].
@@ -374,11 +374,11 @@ const fn chip_activation(active: bool) -> ControlActivation {
     }
 }
 
-/// Advances [`TextAntiAlias`] one step through [`AA_MODES`], wrapping at the
+/// Advances [`AntiAlias`] one step through [`AA_MODES`], wrapping at the
 /// end. The change propagates to every text material via the engine's
 /// `sync_text_anti_alias` system, and to the title-bar chips via the
 /// per-mode wiring in `main`.
-fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
+fn cycle_text_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
     let current = AA_MODES
         .iter()
         .position(|(_, _, mode)| *mode == *anti_alias)

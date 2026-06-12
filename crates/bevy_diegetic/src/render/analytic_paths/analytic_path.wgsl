@@ -71,7 +71,7 @@ const MAX_ANISO_SAMPLES: f32 = 16.0;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 // Mirrors AA_FLAG_SUPERSAMPLE / AA_FLAG_BAND in render/mod.rs — the
-// RunRecord.aa_flags bit encoding written by TextAntiAlias::aa_flags().
+// RunRecord.aa_flags bit encoding written by AntiAlias::aa_flags().
 const AA_FLAG_SUPERSAMPLE: u32 = 1u;
 const AA_FLAG_BAND: u32 = 2u;
 

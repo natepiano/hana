@@ -15,6 +15,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 
+use super::AntiAlias;
 use super::BatchTextMaterialInput;
 use super::Bounds;
 use super::GlyphInstanceRecord;
@@ -24,7 +25,6 @@ use super::PathOutline;
 use super::QuadraticSegment;
 use super::RenderMode;
 use super::RunRecord;
-use super::TextAntiAlias;
 use super::TextMaterial;
 
 /// Design-space units assigned to the stroke (thin) axis. Fixing the thin axis
@@ -207,7 +207,7 @@ fn build_line(
         depth_nudge:      0.0,
         oit_depth_offset: 0.0,
         // Matches the probe material's supersample + aa_band settings.
-        aa_flags:         TextAntiAlias::Both.aa_flags(),
+        aa_flags:         AntiAlias::Both.aa_flags(),
     };
 
     let instances = storage_buffers.add(ShaderBuffer::from(vec![instance]));

@@ -4,18 +4,18 @@ use bevy::prelude::*;
 use super::CascadeDefault;
 use super::resolved;
 use super::resolved::CascadeAttr;
+pub use super::resolved::DrawLayer;
 pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
 pub use super::resolved::TextAlpha;
-pub use super::resolved::TextDrawLayer;
 pub use super::resolved::TextLighting;
 pub use super::resolved::TextSidedness;
 use crate::layout::GlyphLighting;
 use crate::layout::GlyphSidedness;
 use crate::layout::Unit;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 /// Typed cascade commands for entity-local authored values.
 ///
@@ -50,14 +50,14 @@ pub trait CascadeEntityCommandsExt {
     /// Remove this entity's authored glyph sidedness.
     fn inherit_text_sidedness(&mut self) -> &mut Self;
 
-    /// Author this entity's text draw layer.
-    fn override_text_draw_layer(&mut self, draw_layer: TextDrawLayer) -> &mut Self;
+    /// Author this entity's draw layer.
+    fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self;
 
-    /// Remove this entity's authored text draw layer.
-    fn inherit_text_draw_layer(&mut self) -> &mut Self;
+    /// Remove this entity's authored draw layer.
+    fn inherit_draw_layer(&mut self) -> &mut Self;
 
     /// Author this entity's anti-alias mode.
-    fn override_text_anti_alias(&mut self, anti_alias: TextAntiAlias) -> &mut Self;
+    fn override_text_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self;
 
     /// Remove this entity's authored anti-alias mode.
     fn inherit_text_anti_alias(&mut self) -> &mut Self;
@@ -98,20 +98,18 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
         remove_cascade_override::<TextSidedness>(self)
     }
 
-    fn override_text_draw_layer(&mut self, draw_layer: TextDrawLayer) -> &mut Self {
+    fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self {
         apply_cascade_override(self, draw_layer)
     }
 
-    fn inherit_text_draw_layer(&mut self) -> &mut Self {
-        remove_cascade_override::<TextDrawLayer>(self)
-    }
+    fn inherit_draw_layer(&mut self) -> &mut Self { remove_cascade_override::<DrawLayer>(self) }
 
-    fn override_text_anti_alias(&mut self, anti_alias: TextAntiAlias) -> &mut Self {
+    fn override_text_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self {
         apply_cascade_override(self, anti_alias)
     }
 
     fn inherit_text_anti_alias(&mut self) -> &mut Self {
-        remove_cascade_override::<TextAntiAlias>(self)
+        remove_cascade_override::<AntiAlias>(self)
     }
 
     fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self {
@@ -159,15 +157,15 @@ pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness 
     resolved_cascade::<TextSidedness>(world, entity).0
 }
 
-/// Resolve an entity's current text draw layer.
+/// Resolve an entity's current draw layer.
 ///
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
-/// Returns [`TextDrawLayer`] rather than the inner `i8` — the attribute type
+/// Returns [`DrawLayer`] rather than the inner `i8` — the attribute type
 /// is the public draw-order vocabulary; the bare scalar never crosses the API.
 #[must_use]
-pub fn resolved_text_draw_layer(world: &World, entity: Entity) -> TextDrawLayer {
-    resolved_cascade::<TextDrawLayer>(world, entity)
+pub fn resolved_draw_layer(world: &World, entity: Entity) -> DrawLayer {
+    resolved_cascade::<DrawLayer>(world, entity)
 }
 
 /// Resolve an entity's current anti-alias mode.
@@ -175,8 +173,8 @@ pub fn resolved_text_draw_layer(world: &World, entity: Entity) -> TextDrawLayer 
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
 #[must_use]
-pub fn resolved_text_anti_alias(world: &World, entity: Entity) -> TextAntiAlias {
-    resolved_cascade::<TextAntiAlias>(world, entity)
+pub fn resolved_text_anti_alias(world: &World, entity: Entity) -> AntiAlias {
+    resolved_cascade::<AntiAlias>(world, entity)
 }
 
 /// Resolve an entity's current hairline fade policy.

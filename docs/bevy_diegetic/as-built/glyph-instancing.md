@@ -171,7 +171,7 @@ column does not exist.
   at all (it discards on coverage only, `:483-486`), and the AA
   screen-space derivative logic is untouched (same UV values, new source).
 - **Extension uniform keeps the globals.** Binding 100 retains `supersample`
-  and `aa_band` (global AA settings mirrored from the `TextAntiAlias`
+  and `aa_band` (global AA settings mirrored from the `AntiAlias`
   resource by `sync_text_anti_alias`) and the `oit_depth_offset` policy
   field (always 0.0) — per-batch uniform, unchanged. Only `fill_color`,
   `render_mode`, and the depth nudge leave the uniform for the per-run
@@ -423,7 +423,7 @@ First cut — rebuild, don't allocate:
   creation: interned base material + the key's cascade values + the shared
   atlas handles; `sync_text_anti_alias` already iterates
   `Assets<TextMaterial>` generically, so batch materials pick up
-  `TextAntiAlias` changes with no new code (one-frame latency — it runs in
+  `AntiAlias` changes with no new code (one-frame latency — it runs in
   Update).
 - Storage keys are never held by the batch path: `run_index` keys are
   routing entries, not `run_storage` allocations, so a toggle flip cannot

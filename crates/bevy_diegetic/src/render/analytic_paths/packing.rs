@@ -174,7 +174,7 @@ pub(crate) struct RunRecord {
     pub depth_nudge:      f32,
     /// Per-run OIT position-z offset for coplanar ordering.
     pub oit_depth_offset: f32,
-    /// Resolved anti-alias mode bits (`TextAntiAlias::aa_flags`:
+    /// Resolved anti-alias mode bits (`AntiAlias::aa_flags`:
     /// `AA_FLAG_SUPERSAMPLE` | `AA_FLAG_BAND`). Per-record so an element-level
     /// AA override never splits a batch or material.
     pub aa_flags:         u32,

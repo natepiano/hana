@@ -40,6 +40,7 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
+use crate::render::AntiAlias;
 use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
 use crate::render::BatchRenderLayers;
@@ -51,7 +52,6 @@ use crate::render::PathAtlas;
 use crate::render::PathOutline;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
-use crate::render::TextAntiAlias;
 use crate::render::TextMaterial;
 use crate::render::VisualBatchKey;
 use crate::render::VisualLighting;
@@ -331,7 +331,7 @@ struct PanelLineReconcileContext<'a> {
     layers:              BatchRenderLayers,
     /// The panel entity's cascade-resolved anti-alias mode; elements without
     /// their own override inherit it.
-    panel_anti_alias:    TextAntiAlias,
+    panel_anti_alias:    AntiAlias,
     /// The panel entity's cascade-resolved hairline fade policy; elements
     /// without their own override inherit it.
     panel_hairline_fade: HairlineFade,
@@ -420,7 +420,7 @@ pub(super) fn reconcile_panel_line_batches(
             &GlobalTransform,
             Option<&RenderLayers>,
             Option<&Visibility>,
-            Option<&Resolved<TextAntiAlias>>,
+            Option<&Resolved<AntiAlias>>,
             Option<&Resolved<HairlineFade>>,
         ),
         Or<(
@@ -429,14 +429,14 @@ pub(super) fn reconcile_panel_line_batches(
             Changed<GlobalTransform>,
             Changed<RenderLayers>,
             Changed<Visibility>,
-            Changed<Resolved<TextAntiAlias>>,
+            Changed<Resolved<AntiAlias>>,
             Changed<Resolved<HairlineFade>>,
         )>,
     >,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
-    anti_alias: Res<TextAntiAlias>,
-    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
+    anti_alias: Res<AntiAlias>,
+    anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut store: ResMut<PanelLineBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -674,7 +674,7 @@ fn clipped_out(bounds: BoundingBox, clip: Option<BoundingBox>) -> bool {
 
 fn reconcile_batch_entities(
     atlas: Option<&GlyphAtlasHandles>,
-    anti_alias: TextAntiAlias,
+    anti_alias: AntiAlias,
     store: &mut PanelLineBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<TextMaterial>,
@@ -719,7 +719,7 @@ fn reconcile_batch_entities(
 fn spawn_batch_entity(
     key: &LineBatchKey,
     atlas: &GlyphAtlasHandles,
-    anti_alias: TextAntiAlias,
+    anti_alias: AntiAlias,
     store: &mut PanelLineBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<TextMaterial>,
@@ -963,7 +963,7 @@ struct LineBatchMaterialInput<'a> {
     atlas:      &'a GlyphAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
-    anti_alias: TextAntiAlias,
+    anti_alias: AntiAlias,
 }
 
 fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
@@ -1051,7 +1051,7 @@ mod tests {
                 }),
             })
             .add_plugins(HeadlessLayoutPlugin)
-            .init_resource::<TextAntiAlias>()
+            .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
             .init_resource::<PanelLineBatchStore>()
             .init_asset::<Mesh>()
@@ -1095,7 +1095,7 @@ mod tests {
 
     /// Phase C acceptance: an element-level AA override renders with its own
     /// mode while its sibling keeps the inherited mode without increasing the
-    /// batch count, and a global `TextAntiAlias` / `HairlineWidth::fade`
+    /// batch count, and a global `AntiAlias` / `HairlineWidth::fade`
     /// change applied after the override exists re-packs the non-overridden
     /// run records while the overrides hold.
     #[test]
@@ -1115,7 +1115,7 @@ mod tests {
                 builder.with(
                     El::new()
                         .size(40.0, 20.0)
-                        .anti_alias(TextAntiAlias::Off)
+                        .anti_alias(AntiAlias::Off)
                         .hairline_fade(HairlineFade::Full)
                         .draw(PanelDraw::lines([horizontal_line()])),
                     |_| {},
@@ -1138,8 +1138,8 @@ mod tests {
             assert_eq!(
                 sorted_run_fields(store),
                 vec![
-                    (TextAntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
-                    (TextAntiAlias::Both.aa_flags(), 0.0_f32.to_bits()),
+                    (AntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
+                    (AntiAlias::Both.aa_flags(), 0.0_f32.to_bits()),
                 ],
                 "one run carries the element override, the other the global default"
             );
@@ -1148,7 +1148,7 @@ mod tests {
         // Global changes after the overrides exist: the cascade-root sync +
         // propagation re-resolve the panel, and `Changed<Resolved<A>>`
         // re-packs the run records.
-        *app.world_mut().resource_mut::<TextAntiAlias>() = TextAntiAlias::Anisotropic;
+        *app.world_mut().resource_mut::<AntiAlias>() = AntiAlias::Anisotropic;
         app.world_mut().resource_mut::<HairlineWidth>().fade = HairlineFade::Fade { exponent: 1.5 };
         for _ in 0..3 {
             app.update();
@@ -1158,8 +1158,8 @@ mod tests {
         assert_eq!(
             sorted_run_fields(store),
             vec![
-                (TextAntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
-                (TextAntiAlias::Anisotropic.aa_flags(), 1.5_f32.to_bits()),
+                (AntiAlias::Off.aa_flags(), 0.0_f32.to_bits()),
+                (AntiAlias::Anisotropic.aa_flags(), 1.5_f32.to_bits()),
             ],
             "the non-overridden run re-packs to the new globals; the element overrides hold"
         );
@@ -1459,7 +1459,7 @@ mod tests {
                 render_mode:      u32::from(RenderMode::Text),
                 depth_nudge:      0.0,
                 oit_depth_offset: 0.0,
-                aa_flags:         TextAntiAlias::Both.aa_flags(),
+                aa_flags:         AntiAlias::Both.aa_flags(),
             },
         }
     }

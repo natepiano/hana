@@ -1,4 +1,4 @@
-//! `text_draw_layer` — authored draw order for text runs relative to panel
+//! `draw_layer` — authored draw order for text runs relative to panel
 //! backings.
 //!
 //! Two content panels show the same three text tiers while a translucent
@@ -15,7 +15,7 @@
 //! `Transparent3d` sort bias and the OIT fragment depth offset, so the tiers
 //! order the same way on both views.
 //!
-//! Cross-panel order combines each command's bias with the shade's depth
+//! Cross-panel order combines each draw slot's bias with the shade's depth
 //! offset. On the screen view both are logical pixels (8 < 16 < 64). On the
 //! world view the 6 mm separation becomes an NDC depth delta of one OIT step
 //! per millimeter per meter of orbit radius (the near plane tracks the
@@ -26,10 +26,10 @@
 //!
 //! Hotkeys:
 //! - `H` — home the camera.
-//! - `K` — toggle the default-layer run: `override_text_draw_layer` drops it to the body layer (it
-//!   dims behind the shade), `inherit_text_draw_layer` removes the override so it resolves back to
-//!   the cascade default. The authored tree carries no memory of a removed override — inherit
-//!   always lands on the default, which is why the toggle targets the run that starts without one.
+//! - `K` — toggle the default-layer run: `override_draw_layer` drops it to the body layer (it dims
+//!   behind the shade), `inherit_draw_layer` removes the override so it resolves back to the
+//!   cascade default. The authored tree carries no memory of a removed override — inherit always
+//!   lands on the default, which is why the toggle targets the run that starts without one.
 
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
@@ -38,6 +38,7 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
+use bevy_diegetic::DrawLayer;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -49,7 +50,6 @@ use bevy_diegetic::PanelFieldId;
 use bevy_diegetic::PanelTextLayout;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::TextDrawLayer;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_lagrange::OrbitCamPreset;
@@ -78,14 +78,14 @@ const TITLE_COLOR: Color = Color::srgb(0.92, 0.96, 1.0);
 const TOP_COLOR: Color = Color::srgb(1.0, 0.78, 0.30);
 
 // draw layers
-/// Body runs: above the content panel's own backing commands (background,
-/// divider, border — indices 0..=2) and below the shade backing's effective
-/// bias (its command 0 plus the depth offset).
-const DIM_TEXT_LAYER: TextDrawLayer = TextDrawLayer(8);
+/// Body runs: above the content panel's own backing geometry (background,
+/// divider, border — draw slots 0..=2) and below the shade backing's
+/// effective bias (its slot 0 plus the depth offset).
+const DIM_TEXT_LAYER: DrawLayer = DrawLayer(8);
 /// Above the default layer (64). The sorted screen view honors the full
 /// value; OIT views clamp layers at or above the default to the default's
 /// offset, so this run composites like default text there.
-const TOP_TEXT_LAYER: TextDrawLayer = TextDrawLayer(72);
+const TOP_TEXT_LAYER: DrawLayer = DrawLayer(72);
 
 // layout (content units: millimeters on the world panel, scaled to logical
 // pixels on the screen panel)
@@ -240,10 +240,7 @@ fn setup(mut commands: Commands) {
 /// Spawns one content panel and its sliding shade on the given view.
 fn spawn_view(commands: &mut Commands, side: ViewSide) {
     let Ok(content_panel) = build_content_panel(side) else {
-        error!(
-            "text_draw_layer: failed to build {} content panel",
-            side.label()
-        );
+        error!("draw_layer: failed to build {} content panel", side.label());
         return;
     };
     let target = match side {
@@ -265,10 +262,7 @@ fn spawn_view(commands: &mut Commands, side: ViewSide) {
     };
 
     let Ok(shade_panel) = build_shade_panel(side) else {
-        error!(
-            "text_draw_layer: failed to build {} shade panel",
-            side.label()
-        );
+        error!("draw_layer: failed to build {} shade panel", side.label());
         return;
     };
     commands.spawn((
@@ -317,10 +311,10 @@ fn toggle_default_run_layer(
         let mut label = commands.entity(entity);
         match *state {
             DefaultRunLayer::Dropped => {
-                label.override_text_draw_layer(DIM_TEXT_LAYER);
+                label.override_draw_layer(DIM_TEXT_LAYER);
             },
             DefaultRunLayer::Inherited => {
-                label.inherit_text_draw_layer();
+                label.inherit_draw_layer();
             },
         }
     }

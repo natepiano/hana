@@ -34,8 +34,8 @@ use crate::layout::LayoutTreeChange;
 use crate::layout::PanelSize;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 /// A diegetic UI panel attached to a 3D entity.
 ///
@@ -528,10 +528,10 @@ pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
     defaults: Res<CascadeDefaults>,
-    anti_alias_overrides: Query<&Override<TextAntiAlias>>,
+    anti_alias_overrides: Query<&Override<AntiAlias>>,
     hairline_fade_overrides: Query<&Override<HairlineFade>>,
     parents: Query<&ChildOf>,
-    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
+    anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut commands: Commands,
 ) {
@@ -553,7 +553,7 @@ pub(super) fn seed_panel_overrides(
     // own resolved anti-alias mode and hairline fade for the line batcher to
     // read (and to filter on `Changed<Resolved<A>>`). A fresh panel resolves
     // to the global defaults; later `override_*` verbs self-heal these.
-    let anti_alias = cascade::resolve_walk::<TextAntiAlias>(
+    let anti_alias = cascade::resolve_walk::<AntiAlias>(
         entity,
         &anti_alias_overrides,
         &parents,

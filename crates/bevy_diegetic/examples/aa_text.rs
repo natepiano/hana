@@ -1,7 +1,7 @@
 //! `aa_text` compares every anti-aliasing path the text renderer can use on
 //! lit text standing on a ground plane under studio lighting.
 //!
-//! Use `1` `2` `3` `4` for the in-shader [`TextAntiAlias`] modes, `N` `S` `F`
+//! Use `1` `2` `3` `4` for the in-shader [`AntiAlias`] modes, `N` `S` `F`
 //! `T` for Bevy post-process AA, `O` for OIT, `A` / `B` for authored camera
 //! views, and `H` to return home.
 //!
@@ -22,6 +22,7 @@ use bevy::render::view::Msaa;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::AntiAlias;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
@@ -41,7 +42,6 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextAlign;
-use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
@@ -85,13 +85,13 @@ const SCENE_X_OFFSET: f32 = -0.4;
 /// `H Home`.
 const OIT_CONTROL: &str = "O OIT";
 
-/// The in-shader [`TextAntiAlias`] modes, in cost order. One source of truth for
+/// The in-shader [`AntiAlias`] modes, in cost order. One source of truth for
 /// both the key that selects each and the chip label shown for it.
-const TEXT_MODES: [(KeyCode, &str, TextAntiAlias); 4] = [
-    (KeyCode::Digit1, "1 Off", TextAntiAlias::Off),
-    (KeyCode::Digit2, "2 Anisotropic", TextAntiAlias::Anisotropic),
-    (KeyCode::Digit3, "3 SuperSample", TextAntiAlias::Supersample),
-    (KeyCode::Digit4, "4 Both", TextAntiAlias::Both),
+const TEXT_MODES: [(KeyCode, &str, AntiAlias); 4] = [
+    (KeyCode::Digit1, "1 Off", AntiAlias::Off),
+    (KeyCode::Digit2, "2 Anisotropic", AntiAlias::Anisotropic),
+    (KeyCode::Digit3, "3 SuperSample", AntiAlias::Supersample),
+    (KeyCode::Digit4, "4 Both", AntiAlias::Both),
 ];
 
 /// The post-process passes, with `None` as the explicit off state. One source of
@@ -231,7 +231,7 @@ const OIT_TAA_COMPAT_MESSAGE: &str = "MSAA is incompatible with OIT and TAA";
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example`. It registers `TextAntiAlias`, so this
+    // `fairy_dust::sprinkle_example`. It registers `AntiAlias`, so this
     // example only selects it.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -284,7 +284,7 @@ fn main() {
         .add_systems(
             Update,
             (
-                select_post_aa,
+                set_post_anti_alias,
                 refresh_aa_panel,
                 refresh_demo_panel,
                 refresh_cube_status_panels,
@@ -294,14 +294,14 @@ fn main() {
         // Every key runs through Fairy Dust's shortcut binding, which fires each
         // only when no modifier is held — so bare `A` no longer also fires on the
         // `Ctrl+Shift+A` home-gizmo chord.
-        .with_shortcut(KeyCode::Digit1, select_text_aa_off)
-        .with_shortcut(KeyCode::Digit2, select_text_aa_anisotropic)
-        .with_shortcut(KeyCode::Digit3, select_text_aa_supersample)
-        .with_shortcut(KeyCode::Digit4, select_text_aa_both)
-        .with_shortcut(KeyCode::KeyN, select_post_aa_none)
-        .with_shortcut(KeyCode::KeyS, select_post_aa_smaa)
-        .with_shortcut(KeyCode::KeyF, select_post_aa_fxaa)
-        .with_shortcut(KeyCode::KeyT, select_post_aa_taa)
+        .with_shortcut(KeyCode::Digit1, set_anti_alias_off)
+        .with_shortcut(KeyCode::Digit2, set_anti_alias_anisotropic)
+        .with_shortcut(KeyCode::Digit3, set_anti_alias_supersample)
+        .with_shortcut(KeyCode::Digit4, set_anti_alias_both)
+        .with_shortcut(KeyCode::KeyN, set_post_anti_alias_none)
+        .with_shortcut(KeyCode::KeyS, set_post_anti_alias_smaa)
+        .with_shortcut(KeyCode::KeyF, set_post_anti_alias_fxaa)
+        .with_shortcut(KeyCode::KeyT, set_post_anti_alias_taa)
         .with_shortcut(KeyCode::KeyO, toggle_oit)
         .with_shortcut(KeyCode::KeyA, view_a)
         .with_shortcut(KeyCode::KeyB, view_b)
@@ -461,39 +461,47 @@ fn spawn_cube_compatibility_panels(
     }
 }
 
-/// 1..4 select the matching [`TextAntiAlias`] mode through Fairy Dust's shortcut
+/// 1..4 select the matching [`AntiAlias`] mode through Fairy Dust's shortcut
 /// binding. Each fires only when no modifier is held; setting the resource only
 /// when it changes avoids needless panel rebuilds.
-fn set_text_aa(aa: &mut TextAntiAlias, mode: TextAntiAlias) {
+fn set_anti_alias(aa: &mut AntiAlias, mode: AntiAlias) {
     if *aa != mode {
         *aa = mode;
     }
 }
 
-fn select_text_aa_off(mut aa: ResMut<TextAntiAlias>) { set_text_aa(&mut aa, TextAntiAlias::Off); }
+fn set_anti_alias_off(mut aa: ResMut<AntiAlias>) { set_anti_alias(&mut aa, AntiAlias::Off); }
 
-fn select_text_aa_anisotropic(mut aa: ResMut<TextAntiAlias>) {
-    set_text_aa(&mut aa, TextAntiAlias::Anisotropic);
+fn set_anti_alias_anisotropic(mut aa: ResMut<AntiAlias>) {
+    set_anti_alias(&mut aa, AntiAlias::Anisotropic);
 }
 
-fn select_text_aa_supersample(mut aa: ResMut<TextAntiAlias>) {
-    set_text_aa(&mut aa, TextAntiAlias::Supersample);
+fn set_anti_alias_supersample(mut aa: ResMut<AntiAlias>) {
+    set_anti_alias(&mut aa, AntiAlias::Supersample);
 }
 
-fn select_text_aa_both(mut aa: ResMut<TextAntiAlias>) { set_text_aa(&mut aa, TextAntiAlias::Both); }
+fn set_anti_alias_both(mut aa: ResMut<AntiAlias>) { set_anti_alias(&mut aa, AntiAlias::Both); }
 
 /// N/S/F/T request a post-process mode through Fairy Dust's shortcut binding;
 /// `select_post_aa` applies it. Each fires only when no modifier is held.
-fn select_post_aa_none(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::None); }
+fn set_post_anti_alias_none(mut requested: ResMut<RequestedPost>) {
+    requested.0 = Some(PostAa::None);
+}
 
-fn select_post_aa_smaa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Smaa); }
+fn set_post_anti_alias_smaa(mut requested: ResMut<RequestedPost>) {
+    requested.0 = Some(PostAa::Smaa);
+}
 
-fn select_post_aa_fxaa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Fxaa); }
+fn set_post_anti_alias_fxaa(mut requested: ResMut<RequestedPost>) {
+    requested.0 = Some(PostAa::Fxaa);
+}
 
-fn select_post_aa_taa(mut requested: ResMut<RequestedPost>) { requested.0 = Some(PostAa::Taa); }
+fn set_post_anti_alias_taa(mut requested: ResMut<RequestedPost>) {
+    requested.0 = Some(PostAa::Taa);
+}
 
 /// Applies a requested post-process mode and reconciles the camera's components.
-fn select_post_aa(
+fn set_post_anti_alias(
     mut requested: ResMut<RequestedPost>,
     mut mode: ResMut<PostAa>,
     cameras: Query<Entity, With<OrbitCam>>,
@@ -505,7 +513,7 @@ fn select_post_aa(
     if *mode != selected {
         *mode = selected;
         for camera in &cameras {
-            apply_post_aa(&mut commands, camera, selected);
+            apply_post_anti_alias(&mut commands, camera, selected);
         }
     }
 }
@@ -513,7 +521,7 @@ fn select_post_aa(
 /// Strips every post-process pass off `camera`, then installs the one `mode`
 /// selects. The frozen [`TemporalJitter`]/[`MipBias`] TAA leaves behind are
 /// removed so the off-state renders unshifted.
-fn apply_post_aa(commands: &mut Commands, camera: Entity, mode: PostAa) {
+fn apply_post_anti_alias(commands: &mut Commands, camera: Entity, mode: PostAa) {
     let mut entity = commands.entity(camera);
     entity
         .remove::<Smaa>()
@@ -578,7 +586,7 @@ fn sync_taa_msaa(
 
 // =============================================================================
 // CAMERA VIEWS -- authored comparison angles for the text AA artifacts.
-// This supports the demo; it is not required to use `TextAntiAlias`.
+// This supports the demo; it is not required to use `AntiAlias`.
 // =============================================================================
 
 /// A camera viewpoint `A` / `B` can fly to, paired with the instruction box that
@@ -654,7 +662,7 @@ struct ColumnStyles {
 }
 
 /// Spawns the bottom-left panel with the initial state of both AA settings.
-fn spawn_aa_panel(mut commands: Commands, aa: Res<TextAntiAlias>, post: Res<PostAa>) {
+fn spawn_aa_panel(mut commands: Commands, aa: Res<AntiAlias>, post: Res<PostAa>) {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
@@ -705,7 +713,7 @@ fn spawn_demo_panel(mut commands: Commands, oit: Res<OitState>, post: Res<PostAa
 /// Repaints the panel whenever either AA setting changes so the active chip in
 /// each column tracks the live state.
 fn refresh_aa_panel(
-    aa: Res<TextAntiAlias>,
+    aa: Res<AntiAlias>,
     post: Res<PostAa>,
     panel: Single<Entity, With<AaPanel>>,
     mut commands: Commands,
@@ -732,13 +740,13 @@ fn refresh_demo_panel(
 
 /// Builds the bottom-left panel tree: two columns, each chip highlighted when it
 /// matches the live setting.
-fn build_aa_tree(aa: TextAntiAlias, post: PostAa) -> LayoutTree {
+fn build_aa_tree(aa: AntiAlias, post: PostAa) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     build_aa_layout(&mut builder, aa, post);
     builder.build()
 }
 
-fn build_aa_layout(builder: &mut LayoutBuilder, aa: TextAntiAlias, post: PostAa) {
+fn build_aa_layout(builder: &mut LayoutBuilder, aa: AntiAlias, post: PostAa) {
     let styles = ColumnStyles {
         header:   TextStyle::new(TITLE_SIZE)
             .with_color(HEADER_COLOR)

@@ -51,8 +51,8 @@ use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -77,7 +77,7 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
-    anti_alias:    Option<TextAntiAlias>,
+    anti_alias:    Option<AntiAlias>,
     hairline_fade: Option<HairlineFade>,
 }
 
@@ -255,9 +255,9 @@ impl El {
     /// Overrides the anti-alias mode for this element's analytic line marks.
     ///
     /// Without an override the element inherits the panel entity's
-    /// cascade-resolved [`TextAntiAlias`] (panel override else the global
+    /// cascade-resolved [`AntiAlias`] (panel override else the global
     /// resource). Per-record data — an override never splits a batch.
-    pub const fn anti_alias(mut self, mode: TextAntiAlias) -> Self {
+    pub const fn anti_alias(mut self, mode: AntiAlias) -> Self {
         self.anti_alias = Some(mode);
         self
     }

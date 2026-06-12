@@ -18,6 +18,7 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::AntiAlias;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
@@ -43,7 +44,6 @@ use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
-use bevy_diegetic::TextAntiAlias;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
@@ -234,11 +234,11 @@ enum CameraProjection {
     Orthographic,
 }
 
-const AA_MODES: [(&str, &str, TextAntiAlias); 4] = [
-    ("aa-off", "Off", TextAntiAlias::Off),
-    ("aa-anisotropic", "Anisotropic", TextAntiAlias::Anisotropic),
-    ("aa-supersample", "Supersample", TextAntiAlias::Supersample),
-    ("aa-both", "Both", TextAntiAlias::Both),
+const AA_MODES: [(&str, &str, AntiAlias); 4] = [
+    ("aa-off", "Off", AntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", AntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", AntiAlias::Supersample),
+    ("aa-both", "Both", AntiAlias::Both),
 ];
 
 const fn chip_activation(active: bool) -> ControlActivation {
@@ -393,16 +393,16 @@ fn main() {
             HairlineFade::Fade { .. } => ControlActivation::Active,
             HairlineFade::Full => ControlActivation::Inactive,
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[0].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[0].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[1].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[1].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[2].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[2].2)
         })
-        .wire_chip_to_state::<TextAntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[3].0, |anti_alias| {
             chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .wire_chip_to_state::<CameraProjection, _>("P Perspective", |state| match state {
@@ -895,7 +895,7 @@ fn toggle_rulers(
     }
 }
 
-fn cycle_text_anti_alias(mut anti_alias: ResMut<TextAntiAlias>) {
+fn cycle_text_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
     let current = AA_MODES
         .iter()
         .position(|(_, _, mode)| *mode == *anti_alias)

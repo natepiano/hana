@@ -28,7 +28,7 @@ pub struct RenderCommand {
     /// [`Lines`](RenderCommandKind::Lines)) each occupy one slot in emission
     /// order. `Text` and scissor commands record the next slot without
     /// consuming it, so text-heavy panels don't inflate later geometry
-    /// ordinals toward the default text draw layer.
+    /// ordinals toward the default draw layer.
     pub draw_slot:   usize,
 }
 
@@ -88,7 +88,7 @@ pub enum RenderCommandKind {
 
 impl RenderCommandKind {
     /// Whether this command occupies a [`RenderCommand::draw_slot`]. Text gets
-    /// its draw ordinal from `TextDrawLayer` and scissor commands draw nothing,
+    /// its draw ordinal from `DrawLayer` and scissor commands draw nothing,
     /// so neither consumes a slot.
     #[must_use]
     pub const fn consumes_draw_slot(&self) -> bool {

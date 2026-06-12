@@ -135,7 +135,7 @@ commands.spawn((
 ## Tuning text cost
 
 Text gets more expensive to draw the more of the screen it fills — big text, or
-text you're looking at almost edge-on. If it's costing too much, `TextAntiAlias`
+text you're looking at almost edge-on. If it's costing too much, `AntiAlias`
 lets you turn off some of the smoothing work in exchange for speed.
 
 There are two ways text can look rough, and the setting deals with them
@@ -162,7 +162,7 @@ spikes that bother you, or `Off` if your text never looks rough in the first
 place.
 
 ```rust
-commands.insert_resource(TextAntiAlias::Anisotropic);
+commands.insert_resource(AntiAlias::Anisotropic);
 ```
 
 To see what each one looks like, run the `aa_text` example — keys `1`–`4` switch

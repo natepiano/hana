@@ -6,8 +6,8 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
-use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
-use crate::cascade::TextDrawLayer;
+use crate::cascade::DEFAULT_DRAW_LAYER;
+use crate::cascade::DrawLayer;
 use crate::layout::GlyphSidedness;
 
 // layer ordering
@@ -28,7 +28,7 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Calibration: `bevy_lagrange` syncs the perspective near plane to
 /// `radius × 0.001`, so a fragment at the camera's focus distance has
 /// `position.z = near / d ≈ 0.001`. The largest offset magnitude,
-/// `DEFAULT_TEXT_DRAW_LAYER` steps (command 0), must stay well below
+/// `DEFAULT_DRAW_LAYER` steps (slot 0), must stay well below
 /// that or the offset drives `position.z` non-positive and
 /// `pack_24bit_depth_8bit_alpha` in `oit_draw` saturates it to the
 /// cleared-background depth, where bevy's resolve pass drops every
@@ -38,10 +38,10 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 ///
 /// Panels much farther than the camera focus shrink `position.z` below
 /// the 64-step budget (z = near/d crosses `6.4e-5` at ~15.6× the orbit
-/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl` and
-/// `slug_text.wgsl` keeps those fragments storable; past the bound their
-/// coplanar ordering collapses to OIT-list insertion order instead of
-/// going invisible.
+/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl`,
+/// `analytic_path.wgsl`, and `panel_line_batch.wgsl` keeps those fragments
+/// storable; past the bound their coplanar ordering collapses to OIT-list
+/// insertion order instead of going invisible.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
 
 /// Shared draw-order ordinal for a panel's coplanar children.
@@ -84,15 +84,12 @@ impl DrawOrdinal {
     /// unrelated opaque geometry keeps real depth authority over panel
     /// content.
     pub(crate) fn oit_depth_offset(self) -> f32 {
-        (self.0 - i32::from(DEFAULT_TEXT_DRAW_LAYER))
-            .min(0)
-            .to_f32()
-            * OIT_DEPTH_STEP
+        (self.0 - i32::from(DEFAULT_DRAW_LAYER)).min(0).to_f32() * OIT_DEPTH_STEP
     }
 }
 
-impl From<TextDrawLayer> for DrawOrdinal {
-    fn from(draw_layer: TextDrawLayer) -> Self { Self(i32::from(draw_layer.0)) }
+impl From<DrawLayer> for DrawOrdinal {
+    fn from(draw_layer: DrawLayer) -> Self { Self(i32::from(draw_layer.0)) }
 }
 
 // material defaults
@@ -190,22 +187,22 @@ mod tests {
         (-1, 0),
         (0, 1),
         (1, 63),
-        (63, DEFAULT_TEXT_DRAW_LAYER),
-        (0, DEFAULT_TEXT_DRAW_LAYER),
-        (DEFAULT_TEXT_DRAW_LAYER, 65),
-        (DEFAULT_TEXT_DRAW_LAYER, i8::MAX),
+        (63, DEFAULT_DRAW_LAYER),
+        (0, DEFAULT_DRAW_LAYER),
+        (DEFAULT_DRAW_LAYER, 65),
+        (DEFAULT_DRAW_LAYER, i8::MAX),
     ];
 
     #[test]
     fn sorted_and_oit_orderings_agree_for_every_layer_pair() {
         for (low, high) in ORDERED_LAYER_PAIRS {
-            let low_ordinal = DrawOrdinal::from(TextDrawLayer(low));
-            let high_ordinal = DrawOrdinal::from(TextDrawLayer(high));
+            let low_ordinal = DrawOrdinal::from(DrawLayer(low));
+            let high_ordinal = DrawOrdinal::from(DrawLayer(high));
             assert!(
                 low_ordinal.depth_bias() < high_ordinal.depth_bias(),
                 "sorted bias must rise from {low} to {high}",
             );
-            if low < DEFAULT_TEXT_DRAW_LAYER {
+            if low < DEFAULT_DRAW_LAYER {
                 assert!(
                     low_ordinal.oit_depth_offset() < high_ordinal.oit_depth_offset(),
                     "OIT offset must rise from {low} to {high}",
@@ -222,7 +219,7 @@ mod tests {
 
     #[test]
     fn default_layer_reproduces_previous_batch_material_values() {
-        let text_ordinal = DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER));
+        let text_ordinal = DrawOrdinal::from(DrawLayer(DEFAULT_DRAW_LAYER));
         // Pre-DrawOrdinal constants: BATCH_TEXT_DEPTH_BIAS = 64.0 ×
         // LAYER_DEPTH_BIAS and a hard-coded 0.0 OIT offset.
         assert_eq!(text_ordinal.depth_bias().to_bits(), 64.0f32.to_bits());
@@ -240,8 +237,7 @@ mod tests {
 
     #[test]
     fn backing_oit_offsets_stay_behind_default_text_and_rise_with_draw_slot() {
-        let default_layer =
-            usize::try_from(DEFAULT_TEXT_DRAW_LAYER).expect("default layer is positive");
+        let default_layer = usize::try_from(DEFAULT_DRAW_LAYER).expect("default layer is positive");
         let mut previous = f32::NEG_INFINITY;
         for draw_slot in 0..default_layer {
             let offset = DrawOrdinal::from_draw_slot(draw_slot).oit_depth_offset();

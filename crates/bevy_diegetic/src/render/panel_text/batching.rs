@@ -31,9 +31,9 @@ use bevy_kana::ToUsize;
 use super::PanelTextLayout;
 use super::PreparedPanelText;
 use crate::cascade::CascadeDefault;
+use crate::cascade::DrawLayer;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -43,6 +43,7 @@ use crate::layout::GlyphSidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
+use crate::render::AntiAlias;
 use crate::render::BatchGpu;
 use crate::render::BatchKey;
 use crate::render::BatchRenderLayers;
@@ -51,7 +52,6 @@ use crate::render::GlyphAtlasHandles;
 use crate::render::GlyphInstanceRecord;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
-use crate::render::TextAntiAlias;
 use crate::render::TextMaterial;
 use crate::render::constants;
 use crate::render::constants::DrawOrdinal;
@@ -80,13 +80,13 @@ pub(super) struct BatchKeyCascades<'w, 's> {
     alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
     lightings:          Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
     sidednesses:        Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
-    anti_aliases:       Query<'w, 's, &'static Resolved<TextAntiAlias>, With<TextContent>>,
-    draw_layers:        Query<'w, 's, &'static Resolved<TextDrawLayer>, With<TextContent>>,
+    anti_aliases:       Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
+    draw_layers:        Query<'w, 's, &'static Resolved<DrawLayer>, With<TextContent>>,
     alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
     lighting_default:   Res<'w, CascadeDefault<TextLighting>>,
     sidedness_default:  Res<'w, CascadeDefault<TextSidedness>>,
-    anti_alias_default: Res<'w, CascadeDefault<TextAntiAlias>>,
-    draw_layer_default: Res<'w, CascadeDefault<TextDrawLayer>>,
+    anti_alias_default: Res<'w, CascadeDefault<AntiAlias>>,
+    draw_layer_default: Res<'w, CascadeDefault<DrawLayer>>,
     changed: Query<
         'w,
         's,
@@ -98,8 +98,8 @@ pub(super) struct BatchKeyCascades<'w, 's> {
                 Changed<Resolved<TextAlpha>>,
                 Changed<Resolved<TextLighting>>,
                 Changed<Resolved<TextSidedness>>,
-                Changed<Resolved<TextAntiAlias>>,
-                Changed<Resolved<TextDrawLayer>>,
+                Changed<Resolved<AntiAlias>>,
+                Changed<Resolved<DrawLayer>>,
             )>,
         ),
     >,
@@ -129,13 +129,13 @@ impl BatchKeyCascades<'_, '_> {
             .map_or(self.sidedness_default.0.0, |resolved| resolved.0.0)
     }
 
-    fn anti_alias(&self, label: Entity) -> TextAntiAlias {
+    fn anti_alias(&self, label: Entity) -> AntiAlias {
         self.anti_aliases
             .get(label)
             .map_or(self.anti_alias_default.0, |resolved| resolved.0)
     }
 
-    fn draw_layer(&self, label: Entity) -> TextDrawLayer {
+    fn draw_layer(&self, label: Entity) -> DrawLayer {
         self.draw_layers
             .get(label)
             .map_or(self.draw_layer_default.0, |resolved| resolved.0)
@@ -163,7 +163,7 @@ pub(super) fn update_panel_text_batches(
     mut emptied_runs: RemovedComponents<PreparedPanelText>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
     cascades: BatchKeyCascades,
-    anti_alias: Res<TextAntiAlias>,
+    anti_alias: Res<AntiAlias>,
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -294,7 +294,7 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
 /// Inputs for [`reconcile_batch_entities`].
 struct ReconcileBatchEntities<'a, 'w, 's> {
     atlas:           Option<&'a GlyphAtlasHandles>,
-    anti_alias:      TextAntiAlias,
+    anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
     materials:       &'a mut Assets<TextMaterial>,
@@ -567,7 +567,7 @@ pub(crate) fn inert_batch_mesh(capacity: u32) -> Mesh {
 struct SpawnBatchEntity<'a, 'w, 's> {
     key:             &'a BatchKey,
     atlas:           &'a GlyphAtlasHandles,
-    anti_alias:      TextAntiAlias,
+    anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
     materials:       &'a mut Assets<TextMaterial>,
@@ -722,7 +722,7 @@ struct BatchMaterialInput<'a> {
     atlas:      &'a GlyphAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
-    anti_alias: TextAntiAlias,
+    anti_alias: AntiAlias,
 }
 
 /// Builds one batch's material: the interned base with the key's cascade
@@ -748,7 +748,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     // `0.0` from the default layer up, so opaque world geometry keeps depth
     // authority). Per-run order inside the batch comes from the per-record
     // depth nudge, which a per-material bias cannot express.
-    let text_ordinal = DrawOrdinal::from(TextDrawLayer(key.layer));
+    let text_ordinal = DrawOrdinal::from(DrawLayer(key.layer));
     base.depth_bias = text_ordinal.depth_bias();
     render::batch_text_material(BatchTextMaterialInput {
         base,
@@ -846,11 +846,11 @@ mod tests {
             .add_plugins(CascadePlugin::<TextAlpha>::default())
             .add_plugins(CascadePlugin::<TextLighting>::default())
             .add_plugins(CascadePlugin::<TextSidedness>::default())
-            .add_plugins(CascadePlugin::<TextDrawLayer>::default())
+            .add_plugins(CascadePlugin::<DrawLayer>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
-            .init_resource::<TextAntiAlias>()
+            .init_resource::<AntiAlias>()
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
             .init_asset::<TextMaterial>()
@@ -1134,18 +1134,9 @@ mod tests {
     fn runs_with_distinct_draw_layers_route_to_distinct_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
-            "Alpha",
-            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
-        );
-        builder.text(
-            "Beta",
-            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
-        );
-        builder.text(
-            "Gamma",
-            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(-3)),
-        );
+        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
+        builder.text("Beta", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
+        builder.text("Gamma", TextStyle::new(10.0).with_draw_layer(DrawLayer(-3)));
         builder.text("Delta", TextStyle::new(10.0));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
@@ -1168,15 +1159,12 @@ mod tests {
     fn label_spawned_with_a_draw_layer_override_routes_to_the_override_batch() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
-            "Alpha",
-            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
-        );
+        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
         // The run was never routed before, so it took the unrouted-run path —
-        // no `Changed<Resolved<TextDrawLayer>>` membership involved.
+        // no `Changed<Resolved<DrawLayer>>` membership involved.
         assert_eq!(store_stats(&app), (1, 1, 5));
         assert_eq!(batch_layers(&app), vec![10]);
     }
@@ -1193,7 +1181,7 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(label)
-            .override_text_draw_layer(TextDrawLayer(10));
+            .override_draw_layer(DrawLayer(10));
         settle(&mut app);
 
         let (batches, runs, glyphs) = store_stats(&app);
@@ -1211,7 +1199,7 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(label)
-            .inherit_text_draw_layer();
+            .inherit_draw_layer();
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 2, 9));
@@ -1240,10 +1228,7 @@ mod tests {
     fn layer_below_a_backing_sorts_between_neighboring_commands() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
-            "Alpha",
-            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(5)),
-        );
+        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(5)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
@@ -1423,7 +1408,7 @@ mod tests {
             render_mode:      1,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
-            aa_flags:         TextAntiAlias::Both.aa_flags(),
+            aa_flags:         AntiAlias::Both.aa_flags(),
         };
 
         for count in 0..=8_usize {

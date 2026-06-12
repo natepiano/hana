@@ -491,7 +491,7 @@ Deliverables:
   `(natural_width / floor)^exponent`. Validate the exponent (positive,
   finite) at one site; the resource is Reflect/BRP-mutable, so arbitrary
   values can arrive at runtime.
-- Declare `TextAntiAlias` and `HairlineFade` as cascade attributes through
+- Declare `AntiAlias` and `HairlineFade` as cascade attributes through
   the existing `cascade_attr!` infrastructure (`TextAlpha` is the template):
   `Override<A>` / `Resolved<A>` components, cascade plugin registration, and
   attribute verbs. The global resources stay as the cascade root defaults.
@@ -519,7 +519,7 @@ Deliverables:
   resolution is per element, so every member of a merge group shares one
   resolved AA mode and fade policy; the merged group's run carries the
   resolved values.
-- Global-change invalidation: a `TextAntiAlias` or `HairlineWidth` change
+- Global-change invalidation: a `AntiAlias` or `HairlineWidth` change
   must re-resolve cascades and mark run tables dirty — the sync systems
   evolve from material-uniform mirrors into cascade-root updates; per-record
   bits cannot be refreshed by rewriting a uniform.
@@ -554,11 +554,11 @@ Acceptance:
 - `cascade_attr!(existing Ty, default = ...)` — a new macro arm in
   `cascade/resolved.rs` — joins an already-named render value type to the
   cascade without minting a wrapper struct, so the attributes are literally
-  `TextAntiAlias` and `HairlineFade` (`Override<TextAntiAlias>`,
+  `AntiAlias` and `HairlineFade` (`Override<AntiAlias>`,
   `resolved_text_anti_alias`).
 - `RunRecord` grew `aa_flags: u32` + `fade_exponent: f32` (96 → 112 B stride);
   the encase assertion, both WGSL mirrors, and the padded-payload tests all
-  moved together. `TextAntiAlias::aa_flags()` and
+  moved together. `AntiAlias::aa_flags()` and
   `HairlineFade::fade_exponent()` are the single conversion/validation sites.
 - The fade factor derives in-shader from the evaluation's winning
   `CoverageTerms.dilation` exactly as planned — no new per-curve data; text
@@ -580,7 +580,7 @@ Acceptance:
   point — the same model the CPU probe already used, so probe and shader now
   agree operation-for-operation. Cost: two extra `signed_distance`
   evaluations in that mode only.
-- `CascadePlugin::<TextAntiAlias>` / `::<HairlineFade>` are registered in
+- `CascadePlugin::<AntiAlias>` / `::<HairlineFade>` are registered in
   `HeadlessLayoutPlugin` (not `RenderPlugin`) because `seed_panel_overrides`
   reads their `CascadeDefault<A>` resources in headless layout apps.
 - Per-label text AA authoring is the `override_text_anti_alias` verb on the
@@ -834,7 +834,7 @@ Acceptance:
   typography overlay's callouts migrate to `PanelDraw::lines` in Phase D and
   are not available as consumers here (decision 2026-06-11). Pixel-exact parity
   is not achievable by design: the panel-backed route applies cascade-resolved
-  `TextAntiAlias` and hairline dilation while the direct renderer uses
+  `AntiAlias` and hairline dilation while the direct renderer uses
   `SdfPanelMaterial` AA with no dilation, so a callout thinner than the
   hairline floor renders wider panel-backed. Restrict parity geometry to
   at-floor-or-wider strokes, or state the expected divergence and comparison
@@ -880,7 +880,7 @@ Deliverables:
   `oit_depth_offset` values declare. Include a heterogeneous case: a
   cross-panel batch whose runs carry different `aa_flags` and whose packed
   curves carry different `fade_exponent` values must composite and re-pack
-  correctly after a global `TextAntiAlias` / `HairlineWidth` flip (Phase
+  correctly after a global `AntiAlias` / `HairlineWidth` flip (Phase
   C's headless test covers only the intra-panel case).
 - Keep only cross-feature regression tests here; Phase B owns the focused path
   conversion, cleanup, clipping, and visual-bounds tests required before later

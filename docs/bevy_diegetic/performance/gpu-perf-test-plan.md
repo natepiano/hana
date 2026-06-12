@@ -28,7 +28,7 @@ renderer that has since changed four ways:
 1. **Batched records + vertex pulling** replaced the per-run mesh path.
    The fragment shader is the same file (`text/slug/shaders/slug_text.wgsl`);
    the vertex stage, draw structure, and buffer model are not.
-2. **`TextAntiAlias::Both` became the default fragment path**
+2. **`AntiAlias::Both` became the default fragment path**
    (`render/mod.rs`). Per edge fragment at grazing angles:
    3 setup `signed_distance` evaluations + up to 16 stride samples
    (`MAX_ANISO_SAMPLES`), each a full double band loop. Every May
@@ -98,7 +98,7 @@ campaign starts by rebuilding the baseline.
   external; that is the intended measurement surface.
 - **0b. Fresh canonical baseline column.** Populate a new column in
   `slug-benchmark-procedure.md` per its procedure, declaring the
-  `TextAntiAlias` mode and the warmup protocol actually run (keep the
+  `AntiAlias` mode and the warmup protocol actually run (keep the
   exported trace bundles as evidence).
 - **0c. Real-scene GPU decomposition.** xctrace on `diegetic_text_stress`
   (release, perf mode, full window): export GPU intervals for *all* pass
@@ -107,7 +107,7 @@ campaign starts by rebuilding the baseline.
   This decides whether slug fragment work even dominates the 3.41 ms
   `gpu wait`, before any shader work is scoped.
 - **0c result (2026-06-07).** 10 s Metal System Trace on a fresh release
-  launch, built-in display (3456×2104), `TextAntiAlias::Both`,
+  launch, built-in display (3456×2104), `AntiAlias::Both`,
   1415 GPU frames (~141 fps). Per-frame GPU time by pass
   (sum across Vertex/Fragment/Compute channels; channels overlap, so
   the 7.49 ms grand total exceeds the ~7.1 ms wall frame):
@@ -147,7 +147,7 @@ campaign starts by rebuilding the baseline.
 The supersample multiplier is the one fragment cost no May experiment
 ever saw. Measure it before optimizing around it.
 
-- **Setup (DONE 2026-06-07):** the `A` key cycles `TextAntiAlias`
+- **Setup (DONE 2026-06-07):** the `A` key cycles `AntiAlias`
   (`Off → Anisotropic → Supersample → Both`) in `diegetic_text_stress`;
   the title bar shows all four mode names with the active one
   highlighted, next to the `Space Pause` indicator (highlighted while

@@ -13,7 +13,7 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
-use crate::cascade::TextDrawLayer;
+use crate::cascade::DrawLayer;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -214,8 +214,8 @@ pub struct TextStyle {
     /// cascade attribute.
     alpha_mode:     Option<AlphaMode>,
     /// Per-label draw-layer override. `None` = inherit from the
-    /// `TextDrawLayer` cascade attribute.
-    draw_layer:     Option<TextDrawLayer>,
+    /// `DrawLayer` cascade attribute.
+    draw_layer:     Option<DrawLayer>,
 }
 
 impl PartialEq for TextStyle {
@@ -361,9 +361,9 @@ impl TextStyle {
     /// Returns the per-label draw-layer override, if any.
     ///
     /// `None` means the label inherits the panel-level override, then
-    /// `CascadeDefault<TextDrawLayer>`.
+    /// `CascadeDefault<DrawLayer>`.
     #[must_use]
-    pub const fn draw_layer(&self) -> Option<TextDrawLayer> { self.draw_layer }
+    pub const fn draw_layer(&self) -> Option<DrawLayer> { self.draw_layer }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -525,13 +525,13 @@ impl TextStyle {
         self
     }
 
-    /// Sets the per-label [`TextDrawLayer`] override.
+    /// Sets the per-label [`DrawLayer`] override.
     ///
     /// The panel-text reconciler captures this value before converting via
-    /// [`for_shaping`](Self::for_shaping) and inserts `Override<TextDrawLayer>`
+    /// [`for_shaping`](Self::for_shaping) and inserts `Override<DrawLayer>`
     /// on the label.
     #[must_use]
-    pub const fn with_draw_layer(mut self, draw_layer: TextDrawLayer) -> Self {
+    pub const fn with_draw_layer(mut self, draw_layer: DrawLayer) -> Self {
         self.draw_layer = Some(draw_layer);
         self
     }
@@ -609,8 +609,8 @@ impl TextStyle {
         self.alpha_mode = Some(alpha_mode);
     }
 
-    /// Sets the per-label [`TextDrawLayer`] override.
-    pub const fn set_draw_layer(&mut self, draw_layer: TextDrawLayer) {
+    /// Sets the per-label [`DrawLayer`] override.
+    pub const fn set_draw_layer(&mut self, draw_layer: DrawLayer) {
         self.draw_layer = Some(draw_layer);
     }
 
@@ -767,7 +767,7 @@ impl TextStyle {
     /// `lighting`).
     /// Excludes `unit` (measurement context, not a mesh input), `alpha_mode`
     /// (gated separately through `Override<TextAlpha>`), and `draw_layer`
-    /// (gated separately through `Override<TextDrawLayer>`).
+    /// (gated separately through `Override<DrawLayer>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
         let Self {
             font_id,

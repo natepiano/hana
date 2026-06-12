@@ -123,7 +123,7 @@ pub(crate) enum PanelChildSystems {
 /// The variants are the useful points on that quality/cost ladder.
 ///
 /// This resource is the cascade root default: `sync_text_anti_alias` mirrors
-/// it into `CascadeDefault<TextAntiAlias>`, and entities override it per
+/// it into `CascadeDefault<AntiAlias>`, and entities override it per
 /// panel or per label via
 /// [`override_text_anti_alias`](crate::cascade::CascadeEntityCommandsExt::override_text_anti_alias)
 /// (line elements override via [`El::anti_alias`](crate::El::anti_alias)).
@@ -140,7 +140,7 @@ pub(crate) enum PanelChildSystems {
 /// — or [`Off`](Self::Off) — reclaims fill-rate.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Resource)]
-pub enum TextAntiAlias {
+pub enum AntiAlias {
     /// Scalar band, one sample. Edges blur at grazing angles and the sharp-corner
     /// wing shows. Mainly a reference.
     Off,
@@ -165,7 +165,7 @@ pub(crate) const AA_FLAG_SUPERSAMPLE: u32 = 1;
 /// Mirrored by `AA_FLAG_BAND` in `analytic_path.wgsl`.
 pub(crate) const AA_FLAG_BAND: u32 = 1 << 1;
 
-impl TextAntiAlias {
+impl AntiAlias {
     /// Whether this mode supersamples the footprint (multiple samples vs. one).
     #[must_use]
     pub const fn supersamples(self) -> bool { matches!(self, Self::Supersample | Self::Both) }
@@ -188,14 +188,14 @@ impl TextAntiAlias {
     }
 }
 
-/// Mirrors [`TextAntiAlias`] into every text material's `supersample` and
+/// Mirrors [`AntiAlias`] into every text material's `supersample` and
 /// `aa_band` uniforms and into the attribute's cascade root default whenever
 /// the setting changes. The cascade write re-resolves every participant's
-/// `Resolved<TextAntiAlias>`, which re-packs run records — per-record
+/// `Resolved<AntiAlias>`, which re-packs run records — per-record
 /// `aa_flags` cannot be refreshed by rewriting a material uniform.
 fn sync_text_anti_alias(
-    setting: Res<TextAntiAlias>,
-    mut cascade_default: ResMut<CascadeDefault<TextAntiAlias>>,
+    setting: Res<AntiAlias>,
+    mut cascade_default: ResMut<CascadeDefault<AntiAlias>>,
     mut materials: ResMut<Assets<TextMaterial>>,
 ) {
     if !setting.is_changed() {
@@ -368,7 +368,7 @@ impl Plugin for RenderPlugin {
             PanelGeometryPlugin,
             PanelLinePlugin,
         ))
-        .init_resource::<TextAntiAlias>()
+        .init_resource::<AntiAlias>()
         .init_resource::<HairlineWidth>()
         // Bevy registers the OIT type without `ReflectComponent`; adding it
         // enables reflection-based (BRP) edits of OIT settings on a live camera.

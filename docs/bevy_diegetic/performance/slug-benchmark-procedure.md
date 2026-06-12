@@ -12,7 +12,7 @@ link back here.
 The 2026-05-23 baseline column below is **retired**. Every number in this
 table was measured on the per-run mesh path with single-sample AA under
 bevy 0.18. Since then: batched glyph records + vertex pulling replaced
-the per-run mesh path, `TextAntiAlias::Both` became the default fragment
+the per-run mesh path, `AntiAlias::Both` became the default fragment
 path, per-curve dedup was reverted and `any_outside_neighbor` added
 (`c3cfcbd`), and the engine moved to bevy 0.19.0-rc.2 / wgpu 29. No new
 column may be compared against the retired baseline. The new campaign
@@ -241,7 +241,7 @@ record the case name.
   (1600×900 logical × scale 2.0) before keeping a trace — a `1600x900`
   drawable means the window landed on a scale-1.0 external and the trace
   is invalid.
-- Every column must declare its `TextAntiAlias` mode (resource default:
+- Every column must declare its `AntiAlias` mode (resource default:
   `Both`). Columns with different AA modes are different configurations,
   not deltas of one another.
 - Every column must declare the warmup protocol actually run

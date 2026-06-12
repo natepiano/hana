@@ -9,9 +9,9 @@ use super::PanelTextRuns;
 use super::TextRunOf;
 use crate::PanelFieldId;
 use crate::cascade;
+use crate::cascade::DrawLayer;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -42,7 +42,7 @@ struct ReusableChild<'a> {
     alpha:      Option<&'a Override<TextAlpha>>,
     lighting:   Option<&'a Override<TextLighting>>,
     sidedness:  Option<&'a Override<TextSidedness>>,
-    draw_layer: Option<&'a Override<TextDrawLayer>>,
+    draw_layer: Option<&'a Override<DrawLayer>>,
 }
 
 /// One text render command resolved to its reconcile inputs: source
@@ -124,7 +124,7 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextAlpha>>,
         Option<&Override<TextLighting>>,
         Option<&Override<TextSidedness>>,
-        Option<&Override<TextDrawLayer>>,
+        Option<&Override<DrawLayer>>,
     )>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -268,7 +268,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<GlyphLighting>,
     label_sidedness:  Option<GlyphSidedness>,
-    label_draw_layer: Option<TextDrawLayer>,
+    label_draw_layer: Option<DrawLayer>,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
@@ -328,7 +328,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<GlyphLighting>,
     label_sidedness:  Option<GlyphSidedness>,
-    label_draw_layer: Option<TextDrawLayer>,
+    label_draw_layer: Option<DrawLayer>,
 }
 
 /// Writes each gated component of a reused panel-text child only when it
@@ -409,7 +409,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         },
         None => {
             if reusable.draw_layer.is_some() {
-                cascade::remove_cascade_override::<TextDrawLayer>(&mut child);
+                cascade::remove_cascade_override::<DrawLayer>(&mut child);
             }
         },
     }

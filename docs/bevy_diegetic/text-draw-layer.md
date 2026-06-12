@@ -1,13 +1,20 @@
 # Text draw layer
 
-Status: **Phases 1–4 implemented** (Phase 1: audit, `DrawOrdinal` mapping,
+Status: **Phases 1–5 implemented** (Phase 1: audit, `DrawOrdinal` mapping,
 backing OIT inversion fix, D2 diagnostic, tests; Phase 2: `TextDrawLayer`
 cascade attribute, `TextStyle` integration, `From<TextDrawLayer>` routing;
 Phase 3: `BatchKey.layer` routing + per-layer material derivation; Phase 4:
-`examples/text_draw_layer.rs` two-view demo + the `OIT_DEPTH_STEP`
+`examples/draw_layer.rs` two-view demo + the `OIT_DEPTH_STEP`
 recalibration and `OIT_MIN_DEPTH` shader floor that its OIT verification
-forced). Pauses the anchor-to-panel example work (Phase 4.3/4.4); resume
-that after this lands.
+forced; Phase 5: geometry draw-slot compaction, merged from the draw-line
+integration branch). Pauses the anchor-to-panel example work (Phase
+4.3/4.4); resume that after this lands.
+
+Naming: after Phase 5 the `text` prefix was dropped from the attribute,
+its default constant, and the cascade verbs — now `DrawLayer`,
+`DEFAULT_DRAW_LAYER`, `override_draw_layer` / `inherit_draw_layer` /
+`resolved_draw_layer`. Historical sections below keep the names as
+originally written.
 
 ## Intent
 
@@ -35,11 +42,13 @@ implementation detail. This mirrors what backings already do internally:
 
 ## Semantics
 
-- A draw layer is an ordinal on the same axis as backing `command_index`:
-  text with layer `L` draws above every panel child whose command index is
-  below `L` and below every child at or above it.
+- A draw layer is an ordinal on the same axis as geometry draw slots
+  (Phase 5; originally raw backing `command_index`): text with layer `L`
+  draws above every panel child whose draw slot is below `L` and below
+  every child at or above it.
 - Default layer = 64, reproducing today's constant and its documented
-  headroom assumption (no panel has 64 backing commands).
+  headroom assumption (no panel has 64 slot-consuming geometry commands;
+  before Phase 5's compaction the bound was on raw command count).
 - The value is a bounded small integer (`i8`), not an `f32`. Bounding keeps
   the OIT offset within range — text currently sits at OIT offset `0.0` so
   real opaque geometry keeps depth authority over it, and large authored
@@ -52,8 +61,9 @@ implementation detail. This mirrors what backings already do internally:
   text against another panel's children once the panels' depths differ by
   more than the bias span (the existing 64-px screen-anchoring interaction,
   documented on `PanelAnchorOffset`).
-- Scope is text runs only. Backings and image children keep their
-  command-index ordinals; making those authorable is out of scope.
+- Scope is text runs only. Backings and image children are not authorable;
+  their ordinals are emission-order draw slots (Phase 5 — `command_index`
+  survives only as the reconcile identity key).
 - Panel-vs-panel stacking (screen anchoring depth) is out of scope; it
   resumes in anchor-to-panel Phase 4 and should derive its layer quantum
   from the constants this plan defines, so "text wins by default, authors
@@ -72,19 +82,19 @@ exact-equality type, matching `TextAlpha` / `TextLighting`):
 cascade_attr!(
     /// Draw-order layer for a text run relative to its panel's backing layers.
     TextDrawLayer(i8),
-    default = DEFAULT_TEXT_DRAW_LAYER,
+    default = DEFAULT_DRAW_LAYER,
     eq
 );
 ```
 
-- `DEFAULT_TEXT_DRAW_LAYER: i8 = 64` lives in `cascade/constants.rs` — the
+- `DEFAULT_DRAW_LAYER: i8 = 64` lives in `cascade/constants.rs` — the
   macro's default expression evaluates at the macro site, and `cascade/`
   must not import from `render/` (current dependency direction is
   `render/ → cascade/`, one-way). `render/constants.rs` re-expresses
   `BATCH_TEXT_DEPTH_BIAS` through it.
 - `CascadeDefault<TextDrawLayer>` resource from the macro default.
-- entity-command overrides `override_text_draw_layer` /
-  `inherit_text_draw_layer`, matching the existing attribute commands.
+- entity-command overrides `override_draw_layer` /
+  `inherit_draw_layer`, matching the existing attribute commands.
 - `TextStyle::with_draw_layer(TextDrawLayer)` — house style: authoring
   methods take the high-level type, never the raw scalar (`with_lighting`,
   `with_weight`). `TextStyle` gains `draw_layer: Option<TextDrawLayer>`
@@ -179,12 +189,12 @@ consistently before exposing it.
   paths but in front of the panel-content band; not panel children, out of
   scope, unchanged.
 - D2 diagnostic added: `reconcile_sdf_quads` emits `warn_once!` when a
-  panel's render-command count reaches `DEFAULT_TEXT_DRAW_LAYER`.
-- `DEFAULT_TEXT_DRAW_LAYER: i8 = 64` added to `cascade/constants.rs`
+  panel's render-command count reaches `DEFAULT_DRAW_LAYER`.
+- `DEFAULT_DRAW_LAYER: i8 = 64` added to `cascade/constants.rs`
   (Phase 2 macro site); `DrawOrdinal` lives in `render/constants.rs` with
   `From<i8>` and a saturating `from_command_index(usize)`.
   `BATCH_TEXT_DEPTH_BIAS` deleted; `batch_material` derives both fields from
-  `DrawOrdinal::from(DEFAULT_TEXT_DRAW_LAYER)` (bit-equal to the old
+  `DrawOrdinal::from(DEFAULT_DRAW_LAYER)` (bit-equal to the old
   constants, pinned by test).
 
 **Phase 1 review (team_review, 1 cycle — 4 lenses: correctness, risk,
@@ -207,7 +217,7 @@ style, type system):**
   world view with overlapping translucent backings the next time one is
   launched; the regression test pins material values, not pixels.
 - Dropped: rewriting the D2 comparison as
-  `render_commands.len() >= DEFAULT_TEXT_DRAW_LAYER as usize` — the
+  `render_commands.len() >= DEFAULT_DRAW_LAYER as usize` — the
   suggested form uses a banned `as` cast and the `DrawOrdinal` comparison
   keeps both operands on the one ordering axis by construction.
 - Dropped: `debug_assert!` inside `from_command_index` — the saturation
@@ -265,7 +275,7 @@ Tests:
 - Add the attribute beside `TextAlpha` / `TextLighting` / `TextSidedness`:
   `cascade_attr!` with `eq`, `CascadeDefault` registration in the cascade
   plugin, override/inherit entity commands, reflection registration,
-  `DEFAULT_TEXT_DRAW_LAYER` in `cascade/constants.rs`.
+  `DEFAULT_DRAW_LAYER` in `cascade/constants.rs`.
 - `TextStyle` integration in full: `draw_layer: Option<TextDrawLayer>`
   field, `with_draw_layer(TextDrawLayer)` builder, `PartialEq` impl update,
   and the `glyph_cascade.rs` seeding observer inserting the override —
@@ -287,10 +297,10 @@ Tests:
 
 **Phase 2 results (implemented):**
 
-- `cascade_attr!(TextDrawLayer(i8), default = DEFAULT_TEXT_DRAW_LAYER, eq)`
-  in `cascade/resolved.rs`; `override_text_draw_layer` /
-  `inherit_text_draw_layer` entity commands and the public
-  `resolved_text_draw_layer` reader in `cascade/attributes.rs`; exports from
+- `cascade_attr!(TextDrawLayer(i8), default = DEFAULT_DRAW_LAYER, eq)`
+  in `cascade/resolved.rs`; `override_draw_layer` /
+  `inherit_draw_layer` entity commands and the public
+  `resolved_draw_layer` reader in `cascade/attributes.rs`; exports from
   `cascade/mod.rs` and `lib.rs`; `CascadePlugin::<TextDrawLayer>` registered
   in `TextRenderPlugin` (reflection registration comes from the plugin).
   The override verb and reader take/return `TextDrawLayer`, not raw `i8` —
@@ -315,8 +325,8 @@ Tests:
 - Tests (4 new, in `glyph_cascade.rs`): default resolution without an
   override; `with_draw_layer` lands `Override<TextDrawLayer>` + resolves on
   the label; a tree edit dropping the style value removes the override and
-  re-inherits the default through reconcile; `override_text_draw_layer` /
-  `inherit_text_draw_layer` round-trip with `Resolved` self-heal. The
+  re-inherits the default through reconcile; `override_draw_layer` /
+  `inherit_draw_layer` round-trip with `Resolved` self-heal. The
   batching `pipeline_app` test fixture gained
   `CascadePlugin::<TextDrawLayer>` (the seed observer now requires its
   `CascadeDefault`). Full suite 335/335 passed; build, clippy
@@ -331,11 +341,11 @@ style, type system):**
   default-layer arithmetic bit-equal to pre-change constants (pinned by
   test); `From<i8>` confirmed deleted with no surviving call sites.
 - Mechanical (auto-recorded, applied):
-  - `resolved_text_draw_layer` doc comment now states why it returns
+  - `resolved_draw_layer` doc comment now states why it returns
     `TextDrawLayer` rather than the inner `i8` (siblings return inner
     values; the bare scalar never crosses the API).
   - `backing_oit_offsets_stay_behind_default_text_and_rise_with_command_index`
-    derives its loop bound from `DEFAULT_TEXT_DRAW_LAYER` instead of a
+    derives its loop bound from `DEFAULT_DRAW_LAYER` instead of a
     hard-coded `64` (derive-test-values-from-production-constants rule).
 - Type-system lens, recorded as notes (no code change):
   - `layout/text_props.rs` now imports `cascade::TextDrawLayer` while
@@ -386,7 +396,7 @@ Tests:
   arm. Key construction unwraps: `layer: cascades.draw_layer(label).0`.
 - `batch_material` derives both ordering fields from
   `DrawOrdinal::from(TextDrawLayer(key.layer))`; the flat
-  `DEFAULT_TEXT_DRAW_LAYER` derivation and its hard-coded-`0.0`-equivalent
+  `DEFAULT_DRAW_LAYER` derivation and its hard-coded-`0.0`-equivalent
   OIT offset are gone from the routing path (the default layer reproduces
   them bit-exactly, pinned by test).
 - `TextExtension` gains a `#[cfg(test)] oit_depth_offset()` reader
@@ -396,13 +406,13 @@ Tests:
   with the same-layer pair sharing one (entity-count asserted); a label
   spawned with a layer override routes to the override batch through the
   unrouted-run path (no `Changed` dependence); a live
-  `override_text_draw_layer` re-keys the run — new key's entity spawns, and
-  the follow-up `inherit_text_draw_layer` despawns the emptied batch entity
+  `override_draw_layer` re-keys the run — new key's entity spawns, and
+  the follow-up `inherit_draw_layer` despawns the emptied batch entity
   while the default batch entity survives; default-layer batch material
   bit-equal to the pre-change `BATCH_TEXT_DEPTH_BIAS = 64.0` / `0.0` OIT
   pair; a layer-5 batch's material values sort strictly between backing
   commands 3 and 7 on both the sorted bias and the OIT offset. The
-  `batch_store` test key helper stamps `layer: DEFAULT_TEXT_DRAW_LAYER`.
+  `batch_store` test key helper stamps `layer: DEFAULT_DRAW_LAYER`.
   Full suite 340/340 passed; build, clippy (`--all-targets`), and fmt clean.
 
 **Phase 3 review (team_review, 1 cycle — 4 lenses: correctness, risk,
@@ -440,12 +450,12 @@ style, type system):**
   a sorted screen view and an OIT world view (`StableTransparency`) to show
   the orderings agree.
 - Decide during implementation whether this extends an existing example or
-  adds `examples/text_draw_layer.rs`; keep the example layout convention
+  adds `examples/draw_layer.rs`; keep the example layout convention
   (primary-API code first).
 
 **Phase 4 results (implemented):**
 
-- New `examples/text_draw_layer.rs` (the layout engine has no in-panel
+- New `examples/draw_layer.rs` (the layout engine has no in-panel
   sibling overlap, so "subpanel sliding over sibling text" is a second
   textless panel attached via `AnchoredToPanel`, re-inserted per frame with
   a sinusoidal x offset). One `ViewSide` enum builds both views from the
@@ -484,7 +494,7 @@ style, type system):**
 - D4 follow-up: `K` hotkey toggles the default-layer run between an
   explicit `DIM_TEXT_LAYER` override (dims behind the shade) and
   inheriting the cascade default (bright above it again) via
-  `override_text_draw_layer` / `inherit_text_draw_layer`, addressing the
+  `override_draw_layer` / `inherit_draw_layer`, addressing the
   run's wrapped line entities by `text_id` run id. Verified live in both
   directions on both views.
 - Verification: full suite 340/340 (`cargo nextest run`), build, clippy
@@ -531,7 +541,7 @@ runtime-layer API.
 - **Authored styles are overrides.** `TextStyle::with_draw_layer` in a
   tree does not produce a distinct "authored" state: reconcile inserts
   the same `Override<TextDrawLayer>` component on the run's label
-  entities that `override_text_draw_layer` would. The cascade resolution
+  entities that `override_draw_layer` would. The cascade resolution
   chain is label override → panel override → `CascadeDefault` (64);
   there is no fourth slot holding the tree's value.
 - **`inherit` is destructive of authored values.** Removing an override
@@ -555,6 +565,43 @@ runtime-layer API.
   `PanelFieldId` (apply to every line of the run) and, if "restore the
   authored value" is wanted, an explicit stored authored-layer slot —
   both out of scope here, recorded as the natural next step.
+
+### Phase 5 — geometry draw-slot compaction (implemented)
+
+Merged from the draw-line integration branch (`bb3edde`, after the Phase 4
+merge); recorded here because it modifies the Phase 1–3 ordinal mapping
+directly. Motivation: raw `command_index` counts every render command, so
+text-heavy panels burn ordinal headroom on commands that never draw
+geometry — `diegetic_text_stress`'s status overlay reached ~74 commands and
+tripped the D2 warning while emitting only ~5 geometry draws.
+
+- `RenderCommand` (layout/render.rs) gains `pub draw_slot: usize`, stamped
+  at emission (`layout/engine/positioning.rs`, `EmissionCounters` +
+  `push_command`). Rectangle, border, divider, image, and lines commands
+  each consume one slot; text and scissor commands record the next slot
+  without consuming it (`RenderCommandKind::consumes_draw_slot()`).
+- `DrawOrdinal::from_command_index` → `from_draw_slot`; every depth-bias /
+  OIT-offset derivation feeds from slots. `From<TextDrawLayer>` is
+  unchanged — text layers and geometry slots share one ordinal scale as
+  before.
+- Identity vs. ordering split: reconcile reuse keys keep raw
+  `command_index` (`PanelSdfSurface`, dividers) so entities survive slot
+  shifts; ordering comes from `draw_slot`, which also joins the SDF
+  signature so a slot move rebuilds the material (where `depth_bias`
+  lives) without respawning the entity.
+- `PanelTextLayout.command_index` → `draw_slot`;
+  `PanelImageChild.command_index` → `draw_slot`; text
+  `RunRecord.depth_nudge` is now `draw_slot × LAYER_DEPTH_BIAS` — the
+  former `+1` is gone because the recorded slot already equals the next
+  geometry slot, preserving relative order exactly.
+- The D2 warning in `panel_geometry.rs` checks the highest geometry slot,
+  not `render_commands.len()`; it no longer fires in
+  `diegetic_text_stress`.
+- Supersedes the Semantics scope line "backings and image children keep
+  their command-index ordinals" (amended above) and D2's command-count
+  framing (noted on the decision).
+- Verified on `bb3edde`: cargo build, `cargo +nightly fmt`, 527/527
+  `cargo nextest run`, stress example log clean.
 
 ## Risks
 
@@ -602,7 +649,11 @@ runtime-layer API.
   artistic range); (c) document only, as today. Recommendation: (a) —
   cheap, fires exactly when the assumption breaks, no semantics change.
   **Decision: (a) debug diagnostic** — warn when a panel's render-command
-  count reaches the default layer; no semantics change.
+  count reaches the default layer; no semantics change. *Superseded in
+  part by Phase 5:* the diagnostic now checks the highest geometry draw
+  slot rather than the render-command count — text and scissor commands no
+  longer consume ordinals, so command count alone overstated the pressure
+  on the default layer's headroom.
 - **D3 — shared ordinal newtype** (minor, Type System lens; class:
   design-improvement; status: proposed). Problem: the layer (`i8`) and
   backing `command_index` (`usize`) are one ordering axis in two integer
@@ -620,9 +671,9 @@ runtime-layer API.
   share one code path.
 - **D4 — runtime layer-override hotkey in the demo** (important, demo
   ergonomics lens; class: design-improvement; status: proposed). Problem:
-  `examples/text_draw_layer.rs` demonstrates only the static authoring API
+  `examples/draw_layer.rs` demonstrates only the static authoring API
   (`TextStyle::with_draw_layer`); the public surface also has the runtime
-  verbs `override_text_draw_layer` / `inherit_text_draw_layer` (Phase 3
+  verbs `override_draw_layer` / `inherit_draw_layer` (Phase 3
   tests them, no example shows them; `cascade.rs` establishes the
   hotkey-toggle teaching pattern for `TextAlpha`). Options: (a) add a
   hotkey that drops the layer-72 run to layer 8 and back via the runtime
@@ -634,7 +685,7 @@ runtime-layer API.
   choice between the two faithful variants): the toggle targets the
   *default-layer* run, not the layer-72 run. A tree-authored
   `with_draw_layer` materializes as `Override<TextDrawLayer>` on the run's
-  label entities, so `inherit_text_draw_layer` cannot restore 72 — it
+  label entities, so `inherit_draw_layer` cannot restore 72 — it
   resolves to the cascade default. The default run starts with no override
   and round-trips exactly: `K` overrides it to the body layer (it dims
   behind the shade) and inherits back. The run is authored with `text_id`

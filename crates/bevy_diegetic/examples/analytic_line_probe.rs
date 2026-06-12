@@ -380,12 +380,12 @@ fn add_tick_track(builder: &mut LayoutBuilder, ticks: Vec<PanelLine>, spine: Pan
 }
 
 /// A toggles anti-aliasing Off/Both to split winding defects from AA defects.
-fn aa_toggle(keys: Res<ButtonInput<KeyCode>>, mut setting: ResMut<bevy_diegetic::TextAntiAlias>) {
+fn aa_toggle(keys: Res<ButtonInput<KeyCode>>, mut setting: ResMut<bevy_diegetic::AntiAlias>) {
     if keys.just_pressed(KeyCode::KeyA) {
-        *setting = if *setting == bevy_diegetic::TextAntiAlias::Off {
-            bevy_diegetic::TextAntiAlias::Both
+        *setting = if *setting == bevy_diegetic::AntiAlias::Off {
+            bevy_diegetic::AntiAlias::Both
         } else {
-            bevy_diegetic::TextAntiAlias::Off
+            bevy_diegetic::AntiAlias::Off
         };
     }
 }

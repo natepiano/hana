@@ -2,19 +2,19 @@ use bevy::prelude::*;
 
 use crate::cascade;
 use crate::cascade::CascadeDefault;
+use crate::cascade::DrawLayer;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
-use crate::cascade::TextDrawLayer;
 use crate::cascade::TextLighting;
 use crate::cascade::TextSidedness;
-use crate::render::TextAntiAlias;
+use crate::render::AntiAlias;
 use crate::render::world_text::TextContent;
 
 /// Spawn-time cascade seed for a panel label's glyph attributes.
 ///
 /// Fires when a label first gains [`TextContent`] and seeds its
 /// `Resolved<TextLighting>` / `Resolved<TextSidedness>` /
-/// `Resolved<TextDrawLayer>` / `Resolved<TextAntiAlias>` via
+/// `Resolved<DrawLayer>` / `Resolved<AntiAlias>` via
 /// [`resolve_walk`](cascade::resolve_walk). The walk honors the label's own
 /// override first — `reconcile_panel_text_children` inserts one when the label
 /// authored `TextStyle::with_lighting` / `with_sidedness` /
@@ -30,13 +30,13 @@ pub(super) fn seed_panel_text_child_glyph(
     trigger: On<Add, TextContent>,
     lighting_overrides: Query<&Override<TextLighting>>,
     sidedness_overrides: Query<&Override<TextSidedness>>,
-    draw_layer_overrides: Query<&Override<TextDrawLayer>>,
-    anti_alias_overrides: Query<&Override<TextAntiAlias>>,
+    draw_layer_overrides: Query<&Override<DrawLayer>>,
+    anti_alias_overrides: Query<&Override<AntiAlias>>,
     parents: Query<&ChildOf>,
     lighting_default: Res<CascadeDefault<TextLighting>>,
     sidedness_default: Res<CascadeDefault<TextSidedness>>,
-    draw_layer_default: Res<CascadeDefault<TextDrawLayer>>,
-    anti_alias_default: Res<CascadeDefault<TextAntiAlias>>,
+    draw_layer_default: Res<CascadeDefault<DrawLayer>>,
+    anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -52,13 +52,13 @@ pub(super) fn seed_panel_text_child_glyph(
         &parents,
         sidedness_default.0,
     );
-    let draw_layer = cascade::resolve_walk::<TextDrawLayer>(
+    let draw_layer = cascade::resolve_walk::<DrawLayer>(
         entity,
         &draw_layer_overrides,
         &parents,
         draw_layer_default.0,
     );
-    let anti_alias = cascade::resolve_walk::<TextAntiAlias>(
+    let anti_alias = cascade::resolve_walk::<AntiAlias>(
         entity,
         &anti_alias_overrides,
         &parents,
@@ -85,7 +85,7 @@ mod tests {
     use crate::TextStyle;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
-    use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
+    use crate::cascade::DEFAULT_DRAW_LAYER;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
@@ -113,14 +113,14 @@ mod tests {
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<TextLighting>::default())
             .add_plugins(CascadePlugin::<TextSidedness>::default())
-            .add_plugins(CascadePlugin::<TextDrawLayer>::default())
+            .add_plugins(CascadePlugin::<DrawLayer>::default())
             .add_observer(seed_panel_text_child_glyph)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
         app
     }
 
     /// One-label tree, optionally authoring a draw layer on the label.
-    fn label_tree(draw_layer: Option<TextDrawLayer>) -> LayoutTree {
+    fn label_tree(draw_layer: Option<DrawLayer>) -> LayoutTree {
         let mut style = TextStyle::new(13.0);
         if let Some(layer) = draw_layer {
             style = style.with_draw_layer(layer);
@@ -131,11 +131,11 @@ mod tests {
     }
 
     /// Resolved draw layer of the scene's single panel label.
-    fn single_label_draw_layer(app: &mut App) -> TextDrawLayer {
+    fn single_label_draw_layer(app: &mut App) -> DrawLayer {
         let mut query = app
             .world_mut()
-            .query_filtered::<&Resolved<TextDrawLayer>, With<TextContent>>();
-        let resolved: Vec<TextDrawLayer> = query.iter(app.world()).map(|r| r.0).collect();
+            .query_filtered::<&Resolved<DrawLayer>, With<TextContent>>();
+        let resolved: Vec<DrawLayer> = query.iter(app.world()).map(|r| r.0).collect();
         assert_eq!(resolved.len(), 1, "expected exactly one panel label");
         resolved[0]
     }
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(
             single_label_draw_layer(&mut app),
-            TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER)
+            DrawLayer(DEFAULT_DRAW_LAYER)
         );
     }
 
@@ -165,7 +165,7 @@ mod tests {
         let mut app = test_app();
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
-            .with_tree(label_tree(Some(TextDrawLayer(10))))
+            .with_tree(label_tree(Some(DrawLayer(10))))
             .build()
             .expect("test panel should build");
         app.world_mut().spawn(panel);
@@ -175,14 +175,14 @@ mod tests {
         }
 
         // `reconcile` captured the style's draw layer and inserted the
-        // label's `Override<TextDrawLayer>`; the walk resolves it ahead of
+        // label's `Override<DrawLayer>`; the walk resolves it ahead of
         // the global default.
         let mut overrides = app
             .world_mut()
-            .query_filtered::<&Override<TextDrawLayer>, With<TextContent>>();
-        let authored: Vec<TextDrawLayer> = overrides.iter(app.world()).map(|o| o.0).collect();
-        assert_eq!(authored, vec![TextDrawLayer(10)]);
-        assert_eq!(single_label_draw_layer(&mut app), TextDrawLayer(10));
+            .query_filtered::<&Override<DrawLayer>, With<TextContent>>();
+        let authored: Vec<DrawLayer> = overrides.iter(app.world()).map(|o| o.0).collect();
+        assert_eq!(authored, vec![DrawLayer(10)]);
+        assert_eq!(single_label_draw_layer(&mut app), DrawLayer(10));
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         let mut app = test_app();
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
-            .with_tree(label_tree(Some(TextDrawLayer(10))))
+            .with_tree(label_tree(Some(DrawLayer(10))))
             .build()
             .expect("test panel should build");
         let panel_entity = app.world_mut().spawn(panel).id();
@@ -198,10 +198,10 @@ mod tests {
         for _ in 0..3 {
             app.update();
         }
-        assert_eq!(single_label_draw_layer(&mut app), TextDrawLayer(10));
+        assert_eq!(single_label_draw_layer(&mut app), DrawLayer(10));
 
         // The label drops its own draw layer. `reconcile` removes the label's
-        // `Override<TextDrawLayer>` (its update arm), and the propagation pass
+        // `Override<DrawLayer>` (its update arm), and the propagation pass
         // re-inherits the global default.
         app.world_mut()
             .commands()
@@ -211,7 +211,7 @@ mod tests {
         }
         assert_eq!(
             single_label_draw_layer(&mut app),
-            TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER)
+            DrawLayer(DEFAULT_DRAW_LAYER)
         );
     }
 
@@ -223,27 +223,27 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(entity)
-            .override_text_draw_layer(TextDrawLayer(-3));
+            .override_draw_layer(DrawLayer(-3));
         app.update();
         assert_eq!(
             app.world()
-                .get::<Resolved<TextDrawLayer>>(entity)
-                .expect("override self-heals Resolved<TextDrawLayer>")
+                .get::<Resolved<DrawLayer>>(entity)
+                .expect("override self-heals Resolved<DrawLayer>")
                 .0,
-            TextDrawLayer(-3)
+            DrawLayer(-3)
         );
 
         app.world_mut()
             .commands()
             .entity(entity)
-            .inherit_text_draw_layer();
+            .inherit_draw_layer();
         app.update();
         assert_eq!(
             app.world()
-                .get::<Resolved<TextDrawLayer>>(entity)
-                .expect("inherit re-heals Resolved<TextDrawLayer>")
+                .get::<Resolved<DrawLayer>>(entity)
+                .expect("inherit re-heals Resolved<DrawLayer>")
                 .0,
-            TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER)
+            DrawLayer(DEFAULT_DRAW_LAYER)
         );
     }
 }

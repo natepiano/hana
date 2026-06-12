@@ -33,8 +33,8 @@ use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::render::AntiAlias;
 use crate::render::HairlineFade;
-use crate::render::TextAntiAlias;
 
 /// Result of replacing the display text for a panel field.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -112,7 +112,7 @@ pub(super) struct Element {
     pub(super) draw:          Option<PanelDraw>,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
-    pub(super) anti_alias:    Option<TextAntiAlias>,
+    pub(super) anti_alias:    Option<AntiAlias>,
     /// Optional hairline fade override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved policy.
     pub(super) hairline_fade: Option<HairlineFade>,
@@ -401,7 +401,7 @@ impl LayoutTree {
 
     /// Returns the anti-alias override for the element at `index`, if any.
     #[must_use]
-    pub fn element_anti_alias(&self, index: usize) -> Option<TextAntiAlias> {
+    pub fn element_anti_alias(&self, index: usize) -> Option<AntiAlias> {
         self.elements.get(index).and_then(|e| e.anti_alias)
     }
 
