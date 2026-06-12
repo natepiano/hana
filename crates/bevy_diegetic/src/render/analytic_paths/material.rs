@@ -105,6 +105,11 @@ pub struct TextExtension {
     debug_glyph_index: bool,
 }
 
+#[cfg(test)]
+pub(crate) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+    material.extension.uniforms.oit_depth_offset
+}
+
 /// Pipeline-specialization key for [`TextExtension`]: which vertex stage a
 /// material compiles against.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]

@@ -33,6 +33,8 @@ pub(crate) use material::set_batch_text_material_buffers;
 pub(crate) use material::set_text_material_anti_alias;
 pub(crate) use material::set_text_material_atlas;
 pub(crate) use material::set_text_material_hairline;
+#[cfg(test)]
+pub(crate) use material::text_material_oit_depth_offset;
 #[cfg(feature = "batch_proof")]
 pub(crate) use material::toggle_text_material_debug_glyph_index;
 pub(crate) use packing::BandRecord;

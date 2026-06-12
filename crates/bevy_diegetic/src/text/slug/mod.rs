@@ -18,7 +18,15 @@ pub(crate) use runtime::PositionedGlyph;
 pub(crate) use runtime::PreparedTextRun;
 pub(crate) use runtime::RunStorageKey;
 
+#[cfg(test)]
+use crate::render::TextMaterial;
+
 pub(super) struct SlugPlugin;
+
+#[cfg(test)]
+pub(super) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+    render::text_material_oit_depth_offset(material)
+}
 
 impl Plugin for SlugPlugin {
     fn build(&self, app: &mut App) { app.init_resource::<GlyphCache>(); }

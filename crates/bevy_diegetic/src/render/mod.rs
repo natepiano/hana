@@ -44,6 +44,8 @@ pub(crate) use analytic_paths::batch_text_material;
 pub(crate) use analytic_paths::build_packed_path;
 pub(crate) use analytic_paths::set_batch_text_material_buffers;
 pub(crate) use analytic_paths::set_text_material_atlas;
+#[cfg(test)]
+pub(crate) use analytic_paths::text_material_oit_depth_offset;
 #[cfg(feature = "batch_proof")]
 pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
 pub(crate) use batch_key::BaseMaterialId;

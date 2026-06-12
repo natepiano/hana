@@ -34,6 +34,17 @@
     STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS,
     STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE,
 }
+
+// Floor for the offset fragment depth handed to oit_draw.
+// pack_24bit_depth_8bit_alpha saturates depth to [0, 1] and bevy's OIT
+// resolve compares packed (depth << 8 | alpha) values against the cleared
+// background (depth 0, alpha 1): a fragment whose offset z reaches 0 packs
+// below the background whenever its alpha < 1.0 and is silently dropped.
+// ~3 quanta of the 24-bit depth packing keeps the fragment storable; an
+// out-of-calibration offset then degrades to wrong ordering, not
+// invisibility. Offset magnitudes are calibrated against the focus depth
+// in OIT_DEPTH_STEP (render/constants.rs).
+const OIT_MIN_DEPTH: f32 = 2e-7;
 #endif
 
 #import bevy_diegetic::sdf_stroke::{
@@ -464,7 +475,7 @@ fn fragment(
     let alpha_mode = pbr_input.material.flags & STANDARD_MATERIAL_FLAGS_ALPHA_MODE_RESERVED_BITS;
     if alpha_mode != STANDARD_MATERIAL_FLAGS_ALPHA_MODE_OPAQUE {
         var oit_pos = in.position;
-        oit_pos.z += sdf.oit_depth_offset;
+        oit_pos.z = max(oit_pos.z + sdf.oit_depth_offset, OIT_MIN_DEPTH);
         oit_draw(oit_pos, out.color);
         discard;
     }
