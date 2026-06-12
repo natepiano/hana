@@ -300,7 +300,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
 }
 
 #[test]
-fn overflow_visible_line_uses_parent_clip_and_overlay_order() {
+fn overflow_visible_line_clips_only_to_explicit_clipped_ancestor() {
     let mut builder = LayoutBuilder::new(100.0, 100.0);
     builder.with(
         El::new()
@@ -326,6 +326,9 @@ fn overflow_visible_line_uses_parent_clip_and_overlay_order() {
     let tree = builder.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let line_index = command_index(&result.commands, |kind| {
+        matches!(kind, RenderCommandKind::Lines { .. })
+    });
     let lines = line_commands(&result.commands);
     let resolved = &lines[0][0];
 
@@ -340,9 +343,44 @@ fn overflow_visible_line_uses_parent_clip_and_overlay_order() {
     );
     assert_eq!(
         resolved.paint_order,
-        PanelLinePaintOrder::Overlay { order: 0 }
+        PanelLinePaintOrder::Normal {
+            draw_slot: result.commands[line_index].draw_slot,
+        }
     );
     assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 10.0);
+}
+
+#[test]
+fn overflow_visible_line_without_clipped_ancestor_escapes_viewport() {
+    let mut builder = LayoutBuilder::new(100.0, 100.0);
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(50.0))
+            .height(Sizing::fixed(50.0)),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(10.0))
+                    .height(Sizing::fixed(10.0))
+                    .draw(
+                        PanelDraw::lines([PanelLine::new(
+                            (0.0, 5.0),
+                            (PanelCoord::end(-150.0), 5.0),
+                        )])
+                        .overflow(DrawOverflow::Visible),
+                    ),
+                |_| {},
+            );
+        },
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let lines = line_commands(&result.commands);
+    let resolved = &lines[0][0];
+
+    assert_eq!(resolved.clip, None);
+    assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 100.0);
 }
 
 #[test]

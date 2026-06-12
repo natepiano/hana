@@ -1,10 +1,6 @@
 use bevy::color::Color;
 use bevy::math::Vec3;
-use bevy::prelude::Commands;
 use bevy::prelude::Component;
-use bevy::prelude::Entity;
-use bevy::prelude::Transform;
-use bevy::prelude::Visibility;
 
 use super::caps::CalloutCap;
 use super::constants::DEFAULT_CAP_SIZE;
@@ -107,13 +103,3 @@ impl CalloutLine {
 /// Child marker for generated callout meshes.
 #[derive(Component)]
 pub(super) struct CalloutVisual;
-
-/// Spawns a callout-line entity under `parent`.
-///
-/// This is the simplest public entry point. The actual SDF mesh segments
-/// are built by the callout rendering system.
-pub(super) fn spawn_callout_line(commands: &mut Commands, parent: Entity, line: &CalloutLine) {
-    commands
-        .entity(parent)
-        .with_child((line.clone(), Transform::IDENTITY, Visibility::Inherited));
-}

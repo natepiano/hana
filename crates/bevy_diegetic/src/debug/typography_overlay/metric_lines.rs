@@ -4,7 +4,6 @@ use super::GlyphMetricVisibility;
 use super::TypographyOverlay;
 use super::constants::LEFT_OUTER_ARROW_SLOT;
 use super::constants::METRIC_RECT_WIDTH_SLOTS;
-use super::constants::RIGHT_OUTER_ARROW_SLOT;
 use super::labels;
 use super::pipeline::FontContext;
 use super::pipeline::GlyphExtents;
@@ -22,19 +21,20 @@ use crate::debug::constants::LABEL_CAP_HEIGHT;
 use crate::debug::constants::LABEL_DESCENT;
 use crate::debug::constants::LABEL_TOP;
 use crate::debug::constants::LABEL_X_HEIGHT;
-use crate::debug::constants::METRIC_ARROW_Z_OFFSET;
 use crate::debug::constants::METRIC_LINE_Z_OFFSET;
 use crate::default_panel_material;
 use crate::layout::Anchor;
-use crate::layout::Border;
-use crate::layout::Direction;
+use crate::layout::DrawOverflow;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
 use crate::layout::LineMetricsSnapshot;
-use crate::layout::Sizing;
+use crate::layout::PanelDraw;
+use crate::layout::PanelLine;
+use crate::layout::PanelPoint;
 use crate::panel::DiegeticPanel;
 use crate::render::ComputedWorldText;
+use crate::render::HairlineFade;
 use crate::text::FontMetrics;
 
 pub(super) struct MetricLineSpec {
@@ -43,7 +43,7 @@ pub(super) struct MetricLineSpec {
 }
 
 /// Spawns horizontal metric lines and dimension arrows for font-level metrics.
-pub(super) fn spawn_font_metric_gizmos(
+pub(super) fn spawn_font_metric_guides(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_name: &str,
     font_context: &FontContext<'_>,
@@ -59,20 +59,10 @@ pub(super) fn spawn_font_metric_gizmos(
         arrow_spacing: first_glyph.map_or(0.0, |glyph| scaling::arrow_spacing(glyph.advance_x)),
     };
 
-    let (_, _, metric_lines) = build_metric_gizmos(
-        font_context.font,
-        font_context.line,
-        ctx.overlay,
-        ctx.anchor_y,
-        &extents,
-        ctx.font_size,
-        ctx.scale,
-    );
-
-    spawn_metric_line_panel(ctx, font_context, &extents);
-    spawn_metric_arrow_callouts(ctx, font_context, &extents);
+    spawn_metric_guide_panel(ctx, font_context, &extents);
 
     if ctx.overlay.labels == GlyphMetricVisibility::Shown {
+        let metric_lines = metric_line_labels(font_context.font, font_context.line);
         labels::spawn_metric_labels(ctx, font_name, font_context, &metric_lines, &extents);
     }
 
@@ -86,8 +76,10 @@ pub(super) fn spawn_font_metric_gizmos(
     );
 }
 
-/// Spawns horizontal font metric lines as a single transparent world panel.
-fn spawn_metric_line_panel(
+/// Spawns horizontal font metric lines and the vertical dimension arrows as a
+/// single transparent world panel whose root element owns every guide as a
+/// [`PanelLine`].
+fn spawn_metric_guide_panel(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     extents: &GlyphExtents,
@@ -117,8 +109,10 @@ fn spawn_metric_line_panel(
         return;
     }
 
-    let border_width = scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
-    let tree = build_metric_line_tree(width, height, &line_specs, border_width);
+    let line_width = scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
+    let mut lines = metric_guide_lines(width, &line_specs, line_width);
+    lines.extend(metric_arrow_lines(ctx, font_context, extents, width));
+    let tree = build_metric_guide_tree(width, height, lines);
 
     let mut material = default_panel_material();
     material.base_color = Color::NONE;
@@ -206,158 +200,37 @@ fn metric_line_specs(
     specs
 }
 
-fn build_metric_line_tree(
+/// One horizontal [`PanelLine`] per metric, placed where the retired border
+/// strips sat: the first line hangs below the panel top edge, every other
+/// line sits above its spec offset. Specs at non-increasing offsets are
+/// skipped, matching the zero-height border segments the old tree dropped.
+fn metric_guide_lines(
     width: f32,
-    height: f32,
     line_specs: &[MetricLineSpec],
-    border_width: f32,
-) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::new()
-            .size(width, height)
-            .direction(Direction::TopToBottom),
-    );
-
-    for (index, window) in line_specs.windows(2).enumerate() {
-        let current = &window[0];
-        let next = &window[1];
-        let segment_height = next.offset_y - current.offset_y;
-        if segment_height <= 0.0 {
+    line_width: f32,
+) -> Vec<PanelLine> {
+    let mut lines = Vec::with_capacity(line_specs.len());
+    let mut previous_offset = f32::NEG_INFINITY;
+    for (index, spec) in line_specs.iter().enumerate() {
+        if index > 0 && spec.offset_y <= previous_offset {
             continue;
         }
-
-        let mut border = Border::new().bottom(border_width).color(next.color);
-        if index == 0 {
-            border = border.top(border_width).color(current.color);
-        }
-
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::fixed(segment_height))
-                .border(border),
-            |_| {},
-        );
-    }
-    builder.build()
-}
-
-/// Builds gizmos for horizontal metric lines and dimension arrows.
-/// Returns the lines gizmo, arrows gizmo, and the list of
-/// `(label, layout_y)` pairs for label spawning.
-fn build_metric_gizmos(
-    font_metrics: &FontMetrics,
-    line_metrics: &LineMetricsSnapshot,
-    overlay: &TypographyOverlay,
-    anchor_y: f32,
-    extents: &GlyphExtents,
-    font_size: f32,
-    scale: f32,
-) -> (GizmoAsset, GizmoAsset, Vec<(&'static str, f32)>) {
-    let mut lines_gizmo = GizmoAsset::default();
-    let mut arrows_gizmo = GizmoAsset::default();
-    let color = overlay.color;
-    let z = METRIC_LINE_Z_OFFSET;
-    let head = scaling::arrowhead_size(font_size, scale);
-    let gap = scaling::arrow_gap(font_size, scale);
-
-    let baseline_y = line_metrics.baseline;
-    let ascent_y = baseline_y - line_metrics.ascent;
-    let descent_y = baseline_y + line_metrics.descent;
-    let top_y = line_metrics.top;
-    let bottom_y = line_metrics.bottom;
-
-    let mut metric_lines: Vec<(&str, f32)> = Vec::with_capacity(7);
-    if (top_y - ascent_y).abs() > 0.5 {
-        metric_lines.push((LABEL_TOP, top_y));
-    }
-    metric_lines.push((LABEL_ASCENT, ascent_y));
-    metric_lines.push((LABEL_CAP_HEIGHT, baseline_y - font_metrics.cap_height));
-    metric_lines.push((LABEL_X_HEIGHT, baseline_y - font_metrics.x_height));
-    metric_lines.push((LABEL_BASELINE, baseline_y));
-    metric_lines.push((LABEL_DESCENT, descent_y));
-    if (bottom_y - descent_y).abs() > 0.5 {
-        metric_lines.push((LABEL_BOTTOM, bottom_y));
-    }
-
-    let left_outermost = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
-    let right_outermost = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
-    let line_x0 = left_outermost;
-    let line_x1 = right_outermost;
-
-    for &(label, layout_y) in &metric_lines {
-        let y = scaling::layout_to_world_y(layout_y, anchor_y, scale);
-        let line_color = if label == LABEL_BASELINE {
-            BASELINE_COLOR
+        previous_offset = spec.offset_y;
+        let center_y = if index == 0 {
+            line_width * 0.5
         } else {
-            color
+            line_width.mul_add(-0.5, spec.offset_y)
         };
-        lines_gizmo.line(
-            Vec3::new(line_x0, y, z),
-            Vec3::new(line_x1, y, z),
-            line_color,
+        lines.push(
+            PanelLine::new(
+                PanelPoint::new(0.0, center_y),
+                PanelPoint::new(width, center_y),
+            )
+            .width(line_width)
+            .color(spec.color),
         );
     }
-
-    let ascent_world = scaling::layout_to_world_y(ascent_y, anchor_y, scale);
-    let baseline_world = scaling::layout_to_world_y(baseline_y, anchor_y, scale);
-    let descent_world = scaling::layout_to_world_y(descent_y, anchor_y, scale);
-
-    let left_1 = extents.first_left - extents.arrow_spacing;
-    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
-
-    let g = &mut arrows_gizmo;
-    callouts::draw_dimension_arrow(
-        g,
-        Vec3::new(left_1, ascent_world, z),
-        Vec3::new(left_1, baseline_world, z),
-        color,
-        head,
-        gap,
-    );
-    callouts::draw_dimension_arrow(
-        g,
-        Vec3::new(left_1, baseline_world, z),
-        Vec3::new(left_1, descent_world, z),
-        color,
-        head,
-        gap,
-    );
-    callouts::draw_dimension_arrow(
-        g,
-        Vec3::new(left_2, ascent_world, z),
-        Vec3::new(left_2, descent_world, z),
-        color,
-        head,
-        gap,
-    );
-
-    let x_height_world =
-        scaling::layout_to_world_y(baseline_y - font_metrics.x_height, anchor_y, scale);
-    let cap_height_world =
-        scaling::layout_to_world_y(baseline_y - font_metrics.cap_height, anchor_y, scale);
-
-    let right_1 = extents.last_right + extents.arrow_spacing;
-    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
-
-    callouts::draw_dimension_arrow(
-        g,
-        Vec3::new(right_1, x_height_world, z),
-        Vec3::new(right_1, baseline_world, z),
-        color,
-        head,
-        gap,
-    );
-    callouts::draw_dimension_arrow(
-        g,
-        Vec3::new(right_2, cap_height_world, z),
-        Vec3::new(right_2, baseline_world, z),
-        color,
-        head,
-        gap,
-    );
-
-    (lines_gizmo, arrows_gizmo, metric_lines)
+    lines
 }
 
 const fn solid_arrow_cap(head: f32, tint: Option<Color>) -> CalloutCap {
@@ -372,82 +245,104 @@ const fn solid_arrow_cap(head: f32, tint: Option<Color>) -> CalloutCap {
     }
 }
 
-fn spawn_metric_arrow_callouts(
-    ctx: &mut OverlayContext<'_, '_, '_>,
+/// Vertical dimension arrows between metric lines, authored in the metric
+/// guide panel's local space (origin at the panel's top-left, y down).
+fn metric_arrow_lines(
+    ctx: &OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     extents: &GlyphExtents,
-) {
+    width: f32,
+) -> Vec<PanelLine> {
     let line_metrics = font_context.line;
     let font_metrics = font_context.font;
     let baseline_y = line_metrics.baseline;
     let ascent_y = baseline_y - line_metrics.ascent;
     let descent_y = baseline_y + line_metrics.descent;
-    let ascent_world = scaling::layout_to_world_y(ascent_y, ctx.anchor_y, ctx.scale);
-    let baseline_world = scaling::layout_to_world_y(baseline_y, ctx.anchor_y, ctx.scale);
-    let descent_world = scaling::layout_to_world_y(descent_y, ctx.anchor_y, ctx.scale);
-    let x_height_world =
-        scaling::layout_to_world_y(baseline_y - font_metrics.x_height, ctx.anchor_y, ctx.scale);
-    let cap_height_world = scaling::layout_to_world_y(
-        baseline_y - font_metrics.cap_height,
-        ctx.anchor_y,
-        ctx.scale,
-    );
 
-    let left_1 = extents.first_left - extents.arrow_spacing;
-    let left_2 = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
-    let right_1 = extents.last_right + extents.arrow_spacing;
-    let right_2 = RIGHT_OUTER_ARROW_SLOT.mul_add(extents.arrow_spacing, extents.last_right);
+    let top_layout = if (line_metrics.top - ascent_y).abs() > 0.5 {
+        line_metrics.top
+    } else {
+        ascent_y
+    };
+    let top_world = scaling::layout_to_world_y(top_layout, ctx.anchor_y, ctx.scale);
+    let local_y =
+        |layout_y: f32| top_world - scaling::layout_to_world_y(layout_y, ctx.anchor_y, ctx.scale);
+
+    let ascent = local_y(ascent_y);
+    let baseline = local_y(baseline_y);
+    let descent = local_y(descent_y);
+    let x_height = local_y(baseline_y - font_metrics.x_height);
+    let cap_height = local_y(baseline_y - font_metrics.cap_height);
+
+    let spacing = extents.arrow_spacing;
+    let left_1 = 2.0 * spacing;
+    let left_2 = 0.0;
+    let right_1 = width - spacing;
+    let right_2 = width;
     let head = scaling::arrowhead_size(ctx.font_size, ctx.scale);
     let gap = scaling::arrow_gap(ctx.font_size, ctx.scale);
     let thickness = scaling::callout_line_thickness(ctx.overlay, ctx.font_size, ctx.scale);
 
     let plain = || solid_arrow_cap(head, None);
     let tinted = || solid_arrow_cap(head, Some(BASELINE_COLOR));
-    let pos = |x, y| Vec3::new(x, y, METRIC_ARROW_Z_OFFSET);
 
-    for (from, to, start_cap, end_cap) in [
-        (
-            pos(left_1, ascent_world),
-            pos(left_1, baseline_world),
-            plain(),
-            tinted(),
-        ),
-        (
-            pos(left_1, baseline_world),
-            pos(left_1, descent_world),
-            tinted(),
-            plain(),
-        ),
-        (
-            pos(left_2, ascent_world),
-            pos(left_2, descent_world),
-            plain(),
-            plain(),
-        ),
-        (
-            pos(right_1, x_height_world),
-            pos(right_1, baseline_world),
-            plain(),
-            tinted(),
-        ),
-        (
-            pos(right_2, cap_height_world),
-            pos(right_2, baseline_world),
-            plain(),
-            tinted(),
-        ),
-    ] {
-        callouts::spawn_callout_line(
-            ctx.commands,
-            ctx.entity,
-            &callouts::CalloutLine::new(from, to)
-                .color(ctx.overlay.color)
-                .thickness(thickness)
-                .surface_shadow(ctx.overlay.surface_shadow)
-                .start_inset(gap)
-                .end_inset(gap)
-                .start_cap(start_cap)
-                .end_cap(end_cap),
-        );
+    [
+        (left_1, ascent, baseline, plain(), tinted()),
+        (left_1, baseline, descent, tinted(), plain()),
+        (left_2, ascent, descent, plain(), plain()),
+        (right_1, x_height, baseline, plain(), tinted()),
+        (right_2, cap_height, baseline, plain(), tinted()),
+    ]
+    .into_iter()
+    .map(|(x, from_y, to_y, start_cap, end_cap)| {
+        PanelLine::new(PanelPoint::new(x, from_y), PanelPoint::new(x, to_y))
+            .width(thickness)
+            .color(ctx.overlay.color)
+            .start_inset(gap)
+            .end_inset(gap)
+            .start_cap(start_cap)
+            .end_cap(end_cap)
+    })
+    .collect()
+}
+
+/// Single-element tree owning every metric guide line. The element pins
+/// [`HairlineFade::Full`] so debug guides never fade with distance, and the
+/// draw overflows visibly because the outermost arrow columns sit exactly on
+/// the panel's left and right edges.
+fn build_metric_guide_tree(width: f32, height: f32, lines: Vec<PanelLine>) -> LayoutTree {
+    LayoutBuilder::with_root(
+        El::new()
+            .size(width, height)
+            .hairline_fade(HairlineFade::Full)
+            .draw(PanelDraw::lines(lines).overflow(DrawOverflow::Visible)),
+    )
+    .build()
+}
+
+/// `(label, layout_y)` pairs for the metric label spawner, in top-to-bottom
+/// order.
+fn metric_line_labels(
+    font_metrics: &FontMetrics,
+    line_metrics: &LineMetricsSnapshot,
+) -> Vec<(&'static str, f32)> {
+    let baseline_y = line_metrics.baseline;
+    let ascent_y = baseline_y - line_metrics.ascent;
+    let descent_y = baseline_y + line_metrics.descent;
+    let top_y = line_metrics.top;
+    let bottom_y = line_metrics.bottom;
+
+    let mut metric_lines: Vec<(&'static str, f32)> = Vec::with_capacity(7);
+    if (top_y - ascent_y).abs() > 0.5 {
+        metric_lines.push((LABEL_TOP, top_y));
     }
+    metric_lines.push((LABEL_ASCENT, ascent_y));
+    metric_lines.push((LABEL_CAP_HEIGHT, baseline_y - font_metrics.cap_height));
+    metric_lines.push((LABEL_X_HEIGHT, baseline_y - font_metrics.x_height));
+    metric_lines.push((LABEL_BASELINE, baseline_y));
+    metric_lines.push((LABEL_DESCENT, descent_y));
+    if (bottom_y - descent_y).abs() > 0.5 {
+        metric_lines.push((LABEL_BOTTOM, bottom_y));
+    }
+    metric_lines
 }

@@ -125,7 +125,7 @@ pub fn build_typography_overlay(
         };
 
         if overlay.font_metrics == GlyphMetricVisibility::Shown {
-            metric_lines::spawn_font_metric_gizmos(
+            metric_lines::spawn_font_metric_guides(
                 &mut ctx,
                 font.name(),
                 &font_context,
@@ -136,7 +136,7 @@ pub fn build_typography_overlay(
         }
 
         if overlay.glyph_metrics == GlyphMetricVisibility::Shown {
-            glyph::spawn_glyph_metric_gizmos(&mut ctx, &font_context, computed, &mut assets);
+            glyph::spawn_glyph_metric_guides(&mut ctx, &font_context, computed, &mut assets);
         }
     }
 }

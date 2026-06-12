@@ -11,7 +11,6 @@ use bevy::prelude::Changed;
 use bevy::prelude::Children;
 use bevy::prelude::Commands;
 use bevy::prelude::Entity;
-use bevy::prelude::GizmoAsset;
 use bevy::prelude::Mesh;
 use bevy::prelude::Mesh3d;
 use bevy::prelude::MeshMaterial3d;
@@ -377,39 +376,4 @@ fn spawn_cap_form(
             .with_child((common, NotShadowCaster)),
         SurfaceShadow::On => ctx.commands.entity(ctx.parent).with_child(common),
     };
-}
-
-/// Draws a double-headed dimension arrow into a gizmo asset.
-pub(super) fn draw_dimension_arrow(
-    gizmo: &mut GizmoAsset,
-    from: Vec3,
-    to: Vec3,
-    color: Color,
-    head_size: f32,
-    gap: f32,
-) {
-    let delta = to - from;
-    let len = delta.length();
-    if len < f32::EPSILON {
-        return;
-    }
-    let dir = delta / len;
-    let perp = Vec3::new(-dir.y, dir.x, 0.0);
-
-    let tip_from = from + dir * gap;
-    let tip_to = to - dir * gap;
-
-    gizmo.line(tip_from, tip_to, color);
-    gizmo.line(
-        tip_from,
-        tip_from + dir * head_size + perp * head_size,
-        color,
-    );
-    gizmo.line(
-        tip_from,
-        tip_from + dir * head_size - perp * head_size,
-        color,
-    );
-    gizmo.line(tip_to, tip_to - dir * head_size + perp * head_size, color);
-    gizmo.line(tip_to, tip_to - dir * head_size - perp * head_size, color);
 }

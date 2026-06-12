@@ -54,16 +54,13 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DrawOrdinal(i32);
 
-/// `Transparent3d` sort bias for normal batched panel-line entities.
+/// `Transparent3d` sort bias for batched panel-line entities.
 ///
 /// Lines are vertex-pulled across many panels like text, so one batch render
 /// item cannot use a per-command material depth without fragmenting batches.
 /// The shader carries per-record command depth; this coarse lane keeps lines
 /// above backing quads and below text in sorted, non-OIT views.
 pub(crate) const BATCH_PANEL_LINE_DEPTH_BIAS: f32 = 63.0 * LAYER_DEPTH_BIAS;
-
-/// `Transparent3d` sort bias for overlay panel-line entities.
-pub(crate) const BATCH_PANEL_LINE_OVERLAY_DEPTH_BIAS: f32 = 96.0 * LAYER_DEPTH_BIAS;
 
 impl DrawOrdinal {
     /// Converts a geometry draw slot, saturating at `i32::MAX`. A

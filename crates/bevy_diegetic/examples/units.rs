@@ -426,6 +426,12 @@ fn main() {
         .init_resource::<Rulers>()
         .init_resource::<CameraProjection>()
         .init_resource::<FadeExponentMemory>()
+        .insert_resource(HairlineWidth {
+            fade: HairlineFade::Fade {
+                exponent: FADE_EXPONENT_DEFAULT,
+            },
+            ..default()
+        })
         .add_systems(Startup, setup)
         .add_systems(Update, update_batch_count_panel)
         // D / R toggles and the P / O projection switch all run through Fairy

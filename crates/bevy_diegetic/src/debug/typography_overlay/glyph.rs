@@ -11,7 +11,7 @@ use super::pipeline::FontContext;
 use super::pipeline::OverlayAssets;
 use super::pipeline::OverlayContext;
 use super::scaling;
-use crate::callouts;
+use crate::callouts::CalloutCap;
 use crate::debug::constants::BASELINE_COLOR;
 use crate::debug::constants::BBOX_COLOR;
 use crate::debug::constants::BBOX_MIN_WORLD_RATIO;
@@ -24,14 +24,18 @@ use crate::debug::constants::LABEL_ORIGIN;
 use crate::debug::constants::LABEL_SIZE_RATIO;
 use crate::default_panel_material;
 use crate::layout::Anchor;
-use crate::layout::Border;
+use crate::layout::DrawOverflow;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
-use crate::layout::Sizing;
+use crate::layout::LayoutTree;
+use crate::layout::PanelDraw;
+use crate::layout::PanelLine;
+use crate::layout::PanelPoint;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
+use crate::render::HairlineFade;
 
 /// Geometry inputs for the horizontal advancement dimension arrow. Exists to
 /// reduce helper parameter counts.
@@ -44,19 +48,36 @@ struct ArrowGeometry {
     z:             f32,
 }
 
-/// Geometry and styling for a dashed callout line segment. Exists to reduce
-/// helper parameter counts.
-struct DashedLine {
-    start:     Vec3,
-    end:       Vec3,
-    dash_len:  f32,
-    gap_len:   f32,
-    color:     Color,
-    thickness: f32,
+/// One guide segment in overlay-container world space (x right, y up).
+/// [`spawn_guide_panel`] converts these into element-owned [`PanelLine`]s.
+struct GuideSegment {
+    start:       Vec2,
+    end:         Vec2,
+    width:       f32,
+    color:       Color,
+    start_inset: f32,
+    end_inset:   f32,
+    start_cap:   CalloutCap,
+    end_cap:     CalloutCap,
+}
+
+impl GuideSegment {
+    const fn new(start: Vec2, end: Vec2, width: f32, color: Color) -> Self {
+        Self {
+            start,
+            end,
+            width,
+            color,
+            start_inset: 0.0,
+            end_inset: 0.0,
+            start_cap: CalloutCap::None,
+            end_cap: CalloutCap::None,
+        }
+    }
 }
 
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
-pub(super) fn spawn_glyph_metric_gizmos(
+pub(super) fn spawn_glyph_metric_guides(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
@@ -75,7 +96,8 @@ pub(super) fn spawn_glyph_metric_gizmos(
     }
 }
 
-/// Spawns one transparent bordered world panel per glyph bounding box.
+/// Spawns one transparent world panel per glyph whose root element draws the
+/// bounding box outline as four [`PanelLine`]s.
 fn spawn_glyph_box_panels(
     ctx: &mut OverlayContext<'_, '_, '_>,
     computed: &ComputedWorldText,
@@ -86,7 +108,7 @@ fn spawn_glyph_box_panels(
     material.alpha_mode = AlphaMode::Blend;
     material.unlit = true;
 
-    let border_width = scaling::bbox_border_width(ctx.overlay, ctx.font_size, ctx.scale);
+    let line_width = scaling::bbox_border_width(ctx.overlay, ctx.font_size, ctx.scale);
 
     for glyph in &computed.glyphs {
         let [x, y, width, height] = glyph.rect;
@@ -94,15 +116,7 @@ fn spawn_glyph_box_panels(
             continue;
         }
 
-        let mut builder = LayoutBuilder::new(width, height);
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::GROW)
-                .border(Border::all(border_width, bbox_color)),
-            |_| {},
-        );
-        let tree = builder.build();
+        let tree = build_box_outline_tree(width, height, line_width, bbox_color);
 
         let Ok(panel) = DiegeticPanel::world()
             .size(width, height)
@@ -120,6 +134,95 @@ fn spawn_glyph_box_panels(
             Transform::from_xyz(x + width / 2.0, y - height / 2.0, CALLOUT_Z_OFFSET),
         ));
     }
+}
+
+/// Rectangle outline placed where the retired `Border::all` strips sat: each
+/// line is centered half a stroke inside its box edge.
+fn build_box_outline_tree(width: f32, height: f32, line_width: f32, color: Color) -> LayoutTree {
+    let inset = line_width * 0.5;
+    let lines = [
+        ((0.0, inset), (width, inset)),
+        ((0.0, height - inset), (width, height - inset)),
+        ((inset, 0.0), (inset, height)),
+        ((width - inset, 0.0), (width - inset, height)),
+    ]
+    .map(|((x0, y0), (x1, y1))| {
+        PanelLine::new(PanelPoint::new(x0, y0), PanelPoint::new(x1, y1))
+            .width(line_width)
+            .color(color)
+    });
+
+    LayoutBuilder::with_root(
+        El::new()
+            .size(width, height)
+            .hairline_fade(HairlineFade::Full)
+            .draw(PanelDraw::lines(lines).overflow(DrawOverflow::Visible)),
+    )
+    .build()
+}
+
+/// Spawns one transparent world panel sized to the segments' bounding box,
+/// with every segment authored as an element-owned [`PanelLine`]. The element
+/// pins [`HairlineFade::Full`] so debug guides never fade with distance.
+fn spawn_guide_panel(ctx: &mut OverlayContext<'_, '_, '_>, segments: &[GuideSegment], z: f32) {
+    let Some(first) = segments.first() else {
+        return;
+    };
+
+    let mut min = first.start.min(first.end);
+    let mut max = first.start.max(first.end);
+    for segment in segments {
+        min = min.min(segment.start.min(segment.end));
+        max = max.max(segment.start.max(segment.end));
+    }
+
+    // A purely horizontal or vertical cluster has zero extent on one axis;
+    // pad to the widest stroke so the panel size stays positive. The lines
+    // overflow visibly, so padding never shifts them.
+    let pad = segments
+        .iter()
+        .map(|segment| segment.width)
+        .fold(f32::EPSILON, f32::max);
+    let size = (max - min).max(Vec2::splat(pad));
+
+    let lines = segments.iter().map(|segment| {
+        let local = |point: Vec2| PanelPoint::new(point.x - min.x, max.y - point.y);
+        PanelLine::new(local(segment.start), local(segment.end))
+            .width(segment.width)
+            .color(segment.color)
+            .start_inset(segment.start_inset)
+            .end_inset(segment.end_inset)
+            .start_cap(segment.start_cap)
+            .end_cap(segment.end_cap)
+    });
+
+    let tree = LayoutBuilder::with_root(
+        El::new()
+            .size(size.x, size.y)
+            .hairline_fade(HairlineFade::Full)
+            .draw(PanelDraw::lines(lines).overflow(DrawOverflow::Visible)),
+    )
+    .build();
+
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+
+    let Ok(panel) = DiegeticPanel::world()
+        .size(size.x, size.y)
+        .anchor(Anchor::TopLeft)
+        .surface_shadow(ctx.overlay.surface_shadow)
+        .material(material)
+        .with_tree(tree)
+        .build()
+    else {
+        return;
+    };
+
+    ctx.commands
+        .entity(ctx.entity)
+        .with_child((panel, Transform::from_xyz(min.x, max.y, z)));
 }
 
 /// Spawns the "Bounding Box" callout label with shelf and riser lines.
@@ -158,27 +261,23 @@ fn spawn_bounding_box_callout(
     let callout_top_layout = f32::midpoint(cap_height_y_layout, ascent_y_layout);
     let callout_top_world = scaling::layout_to_world_y(callout_top_layout, ctx.anchor_y, ctx.scale);
 
-    callouts::spawn_callout_line(
-        ctx.commands,
-        ctx.entity,
-        &callouts::CalloutLine::new(
-            Vec3::new(shelf_right_x, shelf_y, z),
-            Vec3::new(shelf_end_x, shelf_y, z),
-        )
-        .color(bbox_color)
-        .thickness(callout_thickness)
-        .surface_shadow(ctx.overlay.surface_shadow),
-    );
-    callouts::spawn_callout_line(
-        ctx.commands,
-        ctx.entity,
-        &callouts::CalloutLine::new(
-            Vec3::new(shelf_end_x, shelf_y, z),
-            Vec3::new(shelf_end_x, callout_top_world, z),
-        )
-        .color(bbox_color)
-        .thickness(callout_thickness)
-        .surface_shadow(ctx.overlay.surface_shadow),
+    spawn_guide_panel(
+        ctx,
+        &[
+            GuideSegment::new(
+                Vec2::new(shelf_right_x, shelf_y),
+                Vec2::new(shelf_end_x, shelf_y),
+                callout_thickness,
+                bbox_color,
+            ),
+            GuideSegment::new(
+                Vec2::new(shelf_end_x, shelf_y),
+                Vec2::new(shelf_end_x, callout_top_world),
+                callout_thickness,
+                bbox_color,
+            ),
+        ],
+        z,
     );
 
     // Label at the top of the riser, to the left (CenterRight anchor).
@@ -248,20 +347,15 @@ fn spawn_origin_and_advancement(
     let len = dx.hypot(dy);
     let edge_x = (dx / len).mul_add(-dot_radius, origin_x);
     let edge_y = (dy / len).mul_add(-dot_radius, origin_y);
-    callouts::spawn_callout_line(
-        ctx.commands,
-        ctx.entity,
-        &callouts::CalloutLine::new(
-            Vec3::new(edge_x, edge_y, z),
-            Vec3::new(first_mid_x, label_top_y, z),
-        )
-        .color(BASELINE_COLOR)
-        .thickness(scaling::callout_line_thickness(
-            ctx.overlay,
-            ctx.font_size,
-            ctx.scale,
-        ))
-        .surface_shadow(ctx.overlay.surface_shadow),
+    spawn_guide_panel(
+        ctx,
+        &[GuideSegment::new(
+            Vec2::new(edge_x, edge_y),
+            Vec2::new(first_mid_x, label_top_y),
+            scaling::callout_line_thickness(ctx.overlay, ctx.font_size, ctx.scale),
+            BASELINE_COLOR,
+        )],
+        z,
     );
     super::spawn_overlay_label(
         ctx.commands,
@@ -299,7 +393,8 @@ fn spawn_origin_and_advancement(
     );
 }
 
-/// Spawns the horizontal advancement arrow with tick lines and label.
+/// Spawns the horizontal advancement arrow, its dashed bracket lines, and the
+/// label. The arrow and both dash groups live in one guide panel element.
 fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &ArrowGeometry) {
     let arrow_y = geometry.descent_world - geometry.spacing;
     let head = scaling::arrowhead_size(ctx.font_size, ctx.scale);
@@ -313,55 +408,39 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     let tick_below = arrow_y;
     let dash_len = geometry.spacing * BRACKET_DASH_RATIO;
     let gap_len = geometry.spacing * BRACKET_GAP_RATIO;
-    spawn_dashed_callout_line(
-        ctx,
-        &DashedLine {
-            start: Vec3::new(geometry.origin_x, tick_below, geometry.z),
-            end: Vec3::new(geometry.origin_x, tick_above, geometry.z),
-            dash_len,
-            gap_len,
-            color: ctx.overlay.color,
-            thickness,
-        },
+    let mut segments = dashed_segments(
+        Vec2::new(geometry.origin_x, tick_below),
+        Vec2::new(geometry.origin_x, tick_above),
+        dash_len,
+        gap_len,
+        thickness,
+        ctx.overlay.color,
     );
-    spawn_dashed_callout_line(
-        ctx,
-        &DashedLine {
-            start: Vec3::new(geometry.advance_end_x, tick_below, geometry.z),
-            end: Vec3::new(geometry.advance_end_x, tick_above, geometry.z),
-            dash_len,
-            gap_len,
-            color: ctx.overlay.color,
-            thickness,
-        },
-    );
+    segments.extend(dashed_segments(
+        Vec2::new(geometry.advance_end_x, tick_below),
+        Vec2::new(geometry.advance_end_x, tick_above),
+        dash_len,
+        gap_len,
+        thickness,
+        ctx.overlay.color,
+    ));
 
     // Horizontal dimension arrow.
-    callouts::spawn_callout_line(
-        ctx.commands,
-        ctx.entity,
-        &callouts::CalloutLine::new(
-            Vec3::new(geometry.origin_x, arrow_y, geometry.z),
-            Vec3::new(geometry.advance_end_x, arrow_y, geometry.z),
+    let arrow_cap = CalloutCap::arrow().solid().length(head).width(head);
+    segments.push(GuideSegment {
+        start_inset: gap,
+        end_inset: gap,
+        start_cap: arrow_cap,
+        end_cap: arrow_cap,
+        ..GuideSegment::new(
+            Vec2::new(geometry.origin_x, arrow_y),
+            Vec2::new(geometry.advance_end_x, arrow_y),
+            thickness,
+            ctx.overlay.color,
         )
-        .color(ctx.overlay.color)
-        .thickness(thickness)
-        .surface_shadow(ctx.overlay.surface_shadow)
-        .start_inset(gap)
-        .end_inset(gap)
-        .start_cap(
-            callouts::CalloutCap::arrow()
-                .solid()
-                .length(head)
-                .width(head),
-        )
-        .end_cap(
-            callouts::CalloutCap::arrow()
-                .solid()
-                .length(head)
-                .width(head),
-        ),
-    );
+    });
+
+    spawn_guide_panel(ctx, &segments, geometry.z);
 
     // "Advancement" label centered below the arrow.
     let advance_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
@@ -403,25 +482,30 @@ fn spawn_overlay_dot(
     };
 }
 
-fn spawn_dashed_callout_line(ctx: &mut OverlayContext<'_, '_, '_>, line: &DashedLine) {
-    let delta = line.end - line.start;
+/// Splits one line into dash segments. All dashes of the line stay in one
+/// guide-panel element, replacing the per-dash entity fan-out the old callout
+/// path spawned.
+fn dashed_segments(
+    start: Vec2,
+    end: Vec2,
+    dash_len: f32,
+    gap_len: f32,
+    width: f32,
+    color: Color,
+) -> Vec<GuideSegment> {
+    let delta = end - start;
     let total_len = delta.length();
     if total_len < f32::EPSILON {
-        return;
+        return Vec::new();
     }
     let dir = delta / total_len;
-    let stride = line.dash_len + line.gap_len;
+    let stride = dash_len + gap_len;
     let count = (total_len / stride).ceil().to_usize();
-    for i in 0..count {
-        let t = i.to_f32() * stride;
-        let dash_end = (t + line.dash_len).min(total_len);
-        callouts::spawn_callout_line(
-            ctx.commands,
-            ctx.entity,
-            &callouts::CalloutLine::new(line.start + dir * t, line.start + dir * dash_end)
-                .color(line.color)
-                .thickness(line.thickness)
-                .surface_shadow(ctx.overlay.surface_shadow),
-        );
-    }
+    (0..count)
+        .map(|i| {
+            let t = i.to_f32() * stride;
+            let dash_end = (t + dash_len).min(total_len);
+            GuideSegment::new(start + dir * t, start + dir * dash_end, width, color)
+        })
+        .collect()
 }

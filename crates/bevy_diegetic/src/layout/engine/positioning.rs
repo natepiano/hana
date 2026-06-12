@@ -29,12 +29,10 @@ use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
 
 /// Mutable counters threaded through one command-emission pass: the next
-/// geometry [`RenderCommand::draw_slot`] and the next overlay ordinal for
-/// overflow-visible panel lines.
+/// geometry [`RenderCommand::draw_slot`].
 #[derive(Default)]
 struct EmissionCounters {
-    draw_slot:     usize,
-    overlay_order: usize,
+    draw_slot: usize,
 }
 
 /// Pushes one command, stamping its [`RenderCommand::draw_slot`]. Slot-consuming
@@ -61,18 +59,58 @@ fn push_command(
 
 #[derive(Clone, Copy)]
 struct PositionStackEntry {
-    index:          usize,
-    x:              f32,
-    y:              f32,
-    visited:        bool,
-    inherited_clip: BoundingBox,
+    index:        usize,
+    x:            f32,
+    y:            f32,
+    visited:      bool,
+    clip_context: ClipContext,
 }
 
 #[derive(Clone, Copy)]
 struct GeometryStackEntry {
-    index:          usize,
-    visited:        bool,
-    inherited_clip: BoundingBox,
+    index:        usize,
+    visited:      bool,
+    clip_context: ClipContext,
+}
+
+/// Clip state threaded down the DFS. `inherited` starts at the viewport and
+/// narrows at every [`ChildOverflow::Clipped`] ancestor — it clips owner-bound
+/// content. `scissor` carries only the [`ChildOverflow::Clipped`] ancestor
+/// intersections (no viewport seed), so overflow-visible panel lines escape
+/// the panel viewport but still respect explicit scissor regions.
+#[derive(Clone, Copy)]
+struct ClipContext {
+    inherited: BoundingBox,
+    scissor:   Option<BoundingBox>,
+}
+
+impl ClipContext {
+    const fn root(viewport: BoundingBox) -> Self {
+        Self {
+            inherited: viewport,
+            scissor:   None,
+        }
+    }
+
+    fn child(self, element: &Element, bounds: BoundingBox) -> Self {
+        if matches!(element.overflow, ChildOverflow::Clipped) {
+            let scissor_bounds = element_scissor_bounds(element, bounds);
+            Self {
+                inherited: self
+                    .inherited
+                    .intersect(&scissor_bounds)
+                    .unwrap_or_else(empty_clip),
+                scissor:   Some(match self.scissor {
+                    Some(scissor) => scissor
+                        .intersect(&scissor_bounds)
+                        .unwrap_or_else(empty_clip),
+                    None => scissor_bounds,
+                }),
+            }
+        } else {
+            self
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -87,7 +125,7 @@ struct ChildStackContext<'a> {
     scroll_x:             f32,
     scroll_y:             f32,
     reverse_cursor_start: f32,
-    inherited_clip:       BoundingBox,
+    clip_context:         ClipContext,
 }
 
 impl ChildStackContext<'_> {
@@ -170,7 +208,7 @@ fn emit_down_traversal_commands(
     bounds: BoundingBox,
     index: usize,
     font_scale: f32,
-    inherited_clip: BoundingBox,
+    clip_context: ClipContext,
 ) {
     // Emit rectangle if background is set.
     if let Some(color) = element.background {
@@ -201,7 +239,7 @@ fn emit_down_traversal_commands(
         );
     }
 
-    emit_line_commands(commands, counters, element, bounds, index, inherited_clip);
+    emit_line_commands(commands, counters, element, bounds, index, clip_context);
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -236,7 +274,7 @@ fn emit_line_commands(
     element: &Element,
     bounds: BoundingBox,
     index: usize,
-    inherited_clip: BoundingBox,
+    clip_context: ClipContext,
 ) {
     let Some(panel_draw) = element.draw.as_ref() else {
         return;
@@ -246,21 +284,17 @@ fn emit_line_commands(
     }
 
     let source_command_index = commands.len();
-    let (clip_policy, paint_order) = match panel_draw.overflow_policy() {
+    let (clip, clip_policy) = match panel_draw.overflow_policy() {
         DrawOverflow::Clipped => (
+            Some(clip_context.inherited),
             PanelLineClipPolicy::OwnerBounds,
-            // The slot the Lines command below will occupy, so lines layer on
-            // the same ordinal scale as the panel's other geometry.
-            PanelLinePaintOrder::Normal {
-                draw_slot: counters.draw_slot,
-            },
         ),
-        DrawOverflow::Visible => (
-            PanelLineClipPolicy::Inherited,
-            PanelLinePaintOrder::Overlay {
-                order: counters.overlay_order,
-            },
-        ),
+        DrawOverflow::Visible => (clip_context.scissor, PanelLineClipPolicy::Inherited),
+    };
+    // The slot the Lines command below will occupy, so lines layer on the
+    // same ordinal scale as the panel's other geometry.
+    let paint_order = PanelLinePaintOrder::Normal {
+        draw_slot: counters.draw_slot,
     };
 
     let mut lines = Vec::new();
@@ -268,7 +302,7 @@ fn emit_line_commands(
         let source_key = PanelLineSourceKey::element(index, 0, line_ordinal);
         let context = PanelLineResolveContext::new(
             bounds,
-            Some(inherited_clip),
+            clip,
             clip_policy,
             paint_order,
             source_command_index,
@@ -282,9 +316,6 @@ fn emit_line_commands(
     let Some(command_bounds) = line_command_bounds(&lines) else {
         return;
     };
-    if matches!(panel_draw.overflow_policy(), DrawOverflow::Visible) {
-        counters.overlay_order += 1;
-    }
     push_command(
         commands,
         counters,
@@ -399,21 +430,6 @@ fn element_scissor_bounds(element: &Element, bounds: BoundingBox) -> BoundingBox
     }
 }
 
-fn child_inherited_clip(
-    element: &Element,
-    bounds: BoundingBox,
-    inherited_clip: BoundingBox,
-) -> BoundingBox {
-    if matches!(element.overflow, ChildOverflow::Clipped) {
-        let scissor_bounds = element_scissor_bounds(element, bounds);
-        inherited_clip
-            .intersect(&scissor_bounds)
-            .unwrap_or_else(empty_clip)
-    } else {
-        inherited_clip
-    }
-}
-
 const fn empty_clip() -> BoundingBox {
     BoundingBox {
         x:      0.0,
@@ -475,7 +491,7 @@ fn child_stack_context<'a>(
     children: &[usize],
     parent_size: Vec2,
     is_horizontal: bool,
-    inherited_clip: BoundingBox,
+    clip_context: ClipContext,
 ) -> ChildStackContext<'a> {
     let children_main_size = children.iter().fold(0.0, |main_size, &idx| {
         main_size
@@ -539,7 +555,7 @@ fn child_stack_context<'a>(
         scroll_x,
         scroll_y,
         reverse_cursor_start: main_offset + children_main_size + gap_total,
-        inherited_clip,
+        clip_context,
     }
 }
 
@@ -554,7 +570,7 @@ fn push_children_to_stack(
     index: usize,
     x: f32,
     y: f32,
-    inherited_clip: BoundingBox,
+    clip_context: ClipContext,
 ) {
     let children = tree.children_of(index);
     if children.is_empty() {
@@ -569,7 +585,7 @@ fn push_children_to_stack(
         children,
         Vec2::new(computed[index].width, computed[index].height),
         is_horizontal,
-        inherited_clip,
+        clip_context,
     );
 
     // Walk children in reverse, subtracting each child's main size
@@ -583,11 +599,11 @@ fn push_children_to_stack(
         let child_position = child_context.child_position(origin, reverse_cursor, child_size);
 
         stack.push(PositionStackEntry {
-            index:          child_idx,
-            x:              child_position.x,
-            y:              child_position.y,
-            visited:        false,
-            inherited_clip: child_context.inherited_clip,
+            index:        child_idx,
+            x:            child_position.x,
+            y:            child_position.y,
+            visited:      false,
+            clip_context: child_context.clip_context,
         });
         reverse_cursor -= parent_el.child_gap.value;
     }
@@ -614,11 +630,11 @@ pub(super) fn position_and_render(
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(PositionStackEntry {
-        index:          root,
-        x:              0.0,
-        y:              0.0,
-        visited:        false,
-        inherited_clip: viewport_clip,
+        index:        root,
+        x:            0.0,
+        y:            0.0,
+        visited:      false,
+        clip_context: ClipContext::root(viewport_clip),
     });
 
     while let Some(entry) = stack.pop() {
@@ -653,10 +669,10 @@ pub(super) fn position_and_render(
                 bounds,
                 index,
                 font_scale,
-                entry.inherited_clip,
+                entry.clip_context,
             );
 
-            let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
+            let child_clip = entry.clip_context.child(element, bounds);
             stack.push(PositionStackEntry {
                 visited: true,
                 ..entry
@@ -690,9 +706,9 @@ pub(super) fn render_commands_from_geometry(
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(GeometryStackEntry {
-        index:          root,
-        visited:        false,
-        inherited_clip: viewport_clip,
+        index:        root,
+        visited:      false,
+        clip_context: ClipContext::root(viewport_clip),
     });
 
     while let Some(entry) = stack.pop() {
@@ -721,19 +737,19 @@ pub(super) fn render_commands_from_geometry(
             bounds,
             index,
             font_scale,
-            entry.inherited_clip,
+            entry.clip_context,
         );
 
-        let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
+        let child_clip = entry.clip_context.child(element, bounds);
         stack.push(GeometryStackEntry {
             visited: true,
             ..entry
         });
         for &child_idx in tree.children_of(index).iter().rev() {
             stack.push(GeometryStackEntry {
-                index:          child_idx,
-                visited:        false,
-                inherited_clip: child_clip,
+                index:        child_idx,
+                visited:      false,
+                clip_context: child_clip,
             });
         }
     }

@@ -1,13 +1,15 @@
 //! Typography overlay — renders font-level metric lines and per-glyph
-//! bounding boxes as retained gizmos on any [`TextContent`](crate::TextContent)
-//! entity.
+//! bounding boxes on any [`TextContent`](crate::TextContent) entity.
 //!
 //! Uses [`ComputedWorldText`](crate::render::ComputedWorldText) data
 //! populated by the renderer to ensure exact alignment with the rendered
 //! slug glyphs — no independent layout computation.
 //!
-//! Metric lines are drawn using Bevy's retained [`GizmoAsset`](bevy::prelude::GizmoAsset)
-//! (spawned once, not redrawn every frame). Labels are spawned as
+//! Guide lines, dimension arrows, and dashed callouts are authored as
+//! element-owned [`PanelDraw::lines`](crate::layout::PanelDraw::lines) on
+//! transparent world panels, so they render through the shared analytic
+//! path renderer with [`HairlineFade::Full`](crate::render::HairlineFade)
+//! pinned (debug guides never fade with distance). Labels are spawned as
 //! [`TextContent`](crate::TextContent) children.
 
 mod constants;
@@ -71,9 +73,10 @@ pub enum GlyphMetricVisibility {
 /// Built into the library as a debug tool — only available when the
 /// `typography_overlay` feature is enabled.
 ///
-/// Metric lines are rendered as retained gizmos (spawned once, not
-/// redrawn every frame). Labels are spawned as [`TextContent`](crate::TextContent)
-/// children.
+/// Metric lines, dimension arrows, and dashed callouts render as
+/// element-owned panel lines on transparent world panels (rebuilt only when
+/// the text or overlay changes). Labels are spawned as
+/// [`TextContent`](crate::TextContent) children.
 ///
 /// # Example
 ///
@@ -90,13 +93,13 @@ pub struct TypographyOverlay {
     /// Show font-level metric lines (ascent, descent, cap height, x-height,
     /// baseline, top, bottom).
     pub font_metrics:   GlyphMetricVisibility,
-    /// Show per-glyph bounding boxes as gizmo lines (from font bbox).
+    /// Show per-glyph bounding boxes as panel-line outlines (from font bbox).
     pub glyph_metrics:  GlyphMetricVisibility,
     /// Show text labels on the metric lines.
     pub labels:         GlyphMetricVisibility,
     /// Color for overlay lines and labels (includes alpha).
     pub color:          Color,
-    /// Gizmo line width in pixels.
+    /// Guide line width in pixels.
     pub line_width:     f32,
     /// Font size for metric labels.
     pub label_size:     f32,

@@ -26,8 +26,6 @@ const MIN_LINE_LENGTH_SQUARED: f32 = f32::EPSILON;
 const LINE_COVERAGE_PADDING: f32 = 0.5;
 const NORMAL_DEPTH_BIAS_STEP: f32 = 1.0;
 const NORMAL_OIT_DEPTH_STEP: f32 = -0.000_001;
-const OVERLAY_DEPTH_BIAS: f32 = 96.0;
-const OVERLAY_OIT_DEPTH_OFFSET: f32 = 0.0001;
 const DEFAULT_LINE_WIDTH: Dimension = Dimension {
     value: 1.0,
     unit:  None,
@@ -118,11 +116,6 @@ pub enum PanelLinePaintOrder {
         /// backing/text-compatible depth lanes.
         draw_slot: usize,
     },
-    /// Overlay order for owner-overflow-visible lines.
-    Overlay {
-        /// Stable overlay ordinal within the panel command stream.
-        order: usize,
-    },
 }
 
 /// Numeric layering hints for a resolved line command.
@@ -139,7 +132,8 @@ pub struct PanelLineLayering {
 pub(crate) enum PanelLineClipPolicy {
     /// Clip to the inherited panel/parent clip intersected with owner bounds.
     OwnerBounds,
-    /// Clip to the inherited panel/parent clip and ignore owner bounds.
+    /// Clip to the inherited clip as given (`None` means unclipped) and
+    /// ignore owner bounds.
     Inherited,
 }
 
@@ -533,14 +527,6 @@ impl PanelLinePaintOrder {
             Self::Normal { draw_slot } => PanelLineLayering {
                 depth_bias:       draw_slot.to_f32() * NORMAL_DEPTH_BIAS_STEP,
                 oit_depth_offset: (draw_slot.to_f32() + 1.0) * NORMAL_OIT_DEPTH_STEP,
-            },
-            Self::Overlay { order } => PanelLineLayering {
-                depth_bias:       order
-                    .to_f32()
-                    .mul_add(NORMAL_DEPTH_BIAS_STEP, OVERLAY_DEPTH_BIAS),
-                oit_depth_offset: order
-                    .to_f32()
-                    .mul_add(-NORMAL_OIT_DEPTH_STEP, OVERLAY_OIT_DEPTH_OFFSET),
             },
         }
     }
@@ -1379,7 +1365,7 @@ mod tests {
                 owner_bounds(),
                 Some(inherited),
                 PanelLineClipPolicy::Inherited,
-                PanelLinePaintOrder::Overlay { order: 0 },
+                PanelLinePaintOrder::Normal { draw_slot: 0 },
                 0,
                 PanelLineSourceKey::element(1, 0, 0),
             ),
@@ -1387,6 +1373,26 @@ mod tests {
         .expect("visible overflow line should resolve");
 
         assert_eq!(resolved.clip, Some(inherited));
+        assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 110.0);
+    }
+
+    #[test]
+    fn visible_overflow_without_inherited_clip_resolves_unclipped() {
+        let line = PanelLine::new((0.0, 0.0), (PanelCoord::end(-30.0), 0.0));
+        let resolved = resolve_panel_line(
+            &line,
+            PanelLineResolveContext::new(
+                owner_bounds(),
+                None,
+                PanelLineClipPolicy::Inherited,
+                PanelLinePaintOrder::Normal { draw_slot: 0 },
+                0,
+                PanelLineSourceKey::element(1, 0, 0),
+            ),
+        )
+        .expect("unclipped visible overflow line should resolve");
+
+        assert_eq!(resolved.clip, None);
         assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 110.0);
     }
 

@@ -85,7 +85,7 @@ pub(super) const LABEL_TOP: &str = "top";
 pub(super) const LABEL_X_HEIGHT: &str = "x-height";
 
 // line widths
-/// Default line width for overlay gizmos (in pixels).
+/// Default line width for overlay guides (in pixels).
 pub(super) const DEFAULT_LINE_WIDTH: f32 = 0.5;
 
 /// Multiplier applied to `bbox_border_width` to derive the border
@@ -98,9 +98,6 @@ pub(super) const THIN_LINE_WIDTH: f32 = 1.0;
 // z-layer offsets
 /// Z offset for callout elements (bounding boxes, origin dots, advancement arrows).
 pub(super) const CALLOUT_Z_OFFSET: f32 = 0.0;
-
-/// Z offset for metric callout arrows rendered above the metric lines.
-pub(super) const METRIC_ARROW_Z_OFFSET: f32 = 0.0;
 
 /// Z offset for metric lines and vertical dimension arrows.
 pub(super) const METRIC_LINE_Z_OFFSET: f32 = 0.0;

@@ -31,7 +31,6 @@ use super::primitive::PanelLineRenderKey;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
-use crate::layout::PanelLinePaintOrder;
 use crate::layout::PanelLineSourceKey;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
@@ -81,44 +80,22 @@ const PANEL_LINE_PART_OIT_DEPTH_STEP: f32 = 0.000_000_001;
 #[reflect(Component)]
 pub(super) struct DiegeticPanelLineBatch;
 
-/// Coarse paint lane used as a batch split.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-enum LinePaintLane {
-    Normal,
-    Overlay,
-}
-
-impl From<PanelLinePaintOrder> for LinePaintLane {
-    fn from(order: PanelLinePaintOrder) -> Self {
-        match order {
-            PanelLinePaintOrder::Normal { .. } => Self::Normal,
-            PanelLinePaintOrder::Overlay { .. } => Self::Overlay,
-        }
-    }
-}
-
 /// Cross-panel compatibility key for analytic panel-line path instances.
 ///
 /// Per-primitive color, render mode, transform, sorted depth nudge, and OIT
-/// offset live in `RunRecord`s. The material depth bias is only the coarse
-/// normal/overlay lane so compatible marks can batch across panels and command
+/// offset live in `RunRecord`s. The material depth bias is the single
+/// panel-line lane so compatible marks can batch across panels and command
 /// indices.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct LineBatchKey {
     visual:              VisualBatchKey,
-    paint_lane:          LinePaintLane,
     material_depth_bias: u32,
 }
 
 impl LineBatchKey {
-    const fn new(
-        visual: VisualBatchKey,
-        paint_lane: LinePaintLane,
-        material_depth_bias: f32,
-    ) -> Self {
+    const fn new(visual: VisualBatchKey, material_depth_bias: f32) -> Self {
         Self {
             visual,
-            paint_lane,
             material_depth_bias: material_depth_bias.to_bits(),
         }
     }
@@ -381,7 +358,6 @@ struct LineMergeKey {
     color:         [u32; 4],
     clip:          Option<[u32; 4]>,
     owner_bounds:  [u32; 4],
-    paint_lane:    LinePaintLane,
     layering:      [u32; 2],
 }
 
@@ -399,7 +375,6 @@ impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
             ],
             clip:          source.primitive.clip().map(bounding_box_bits),
             owner_bounds:  bounding_box_bits(source.line.owner_bounds()),
-            paint_lane:    LinePaintLane::from(source.line.paint_order()),
             layering:      [
                 layering.depth_bias.to_bits(),
                 layering.oit_depth_offset.to_bits(),
@@ -621,8 +596,7 @@ fn build_panel_line_group(
         shadow: context.shadow,
         layers: context.layers.clone(),
     };
-    let paint_lane = LinePaintLane::from(first.line.paint_order());
-    let batch_key = LineBatchKey::new(visual, paint_lane, batch_material_depth_bias(paint_lane));
+    let batch_key = LineBatchKey::new(visual, constants::BATCH_PANEL_LINE_DEPTH_BIAS);
     let key = PanelLineRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
@@ -671,13 +645,6 @@ fn primitive_depth_bias(line: &ResolvedPanelLine, primitive: &ResolvedPanelLineP
         .part_order()
         .to_f32()
         .mul_add(PANEL_LINE_PART_DEPTH_BIAS_STEP, line_depth)
-}
-
-const fn batch_material_depth_bias(paint_lane: LinePaintLane) -> f32 {
-    match paint_lane {
-        LinePaintLane::Normal => constants::BATCH_PANEL_LINE_DEPTH_BIAS,
-        LinePaintLane::Overlay => constants::BATCH_PANEL_LINE_OVERLAY_DEPTH_BIAS,
-    }
 }
 
 fn primitive_oit_depth_offset(
@@ -1056,6 +1023,7 @@ mod tests {
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelLineLayering;
+    use crate::layout::PanelLinePaintOrder;
     use crate::layout::PanelLinePrimitiveGeometry;
     use crate::layout::PanelLinePrimitiveKey;
     use crate::layout::PanelLinePrimitiveKind;
@@ -1197,6 +1165,81 @@ mod tests {
         );
     }
 
+    /// Phase D acceptance: the typography overlay rebuilds its guide panels
+    /// by despawning and respawning them on every metric refresh, so the
+    /// panel-entity portion of every batch key churns. Repeated recreation
+    /// must leave zero records keyed to a dead panel entity.
+    #[test]
+    fn recreated_guide_panels_leave_no_stale_records() {
+        fn spawn_guide_panel(app: &mut App, offset: f32) -> Entity {
+            let panel = DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .layout(move |builder| {
+                    builder.with(
+                        El::new()
+                            .size(40.0, 20.0)
+                            .hairline_fade(HairlineFade::Full)
+                            .draw(PanelDraw::lines([
+                                PanelLine::new((0.0, offset), (20.0, offset))
+                                    .width(0.4)
+                                    .color(Color::WHITE),
+                                PanelLine::new((offset, 0.0), (offset, 15.0))
+                                    .width(0.4)
+                                    .color(Color::WHITE),
+                            ])),
+                        |_| {},
+                    );
+                })
+                .build()
+                .unwrap_or_else(|error| panic!("guide panel should build: {error:?}"));
+            app.world_mut().spawn(panel).id()
+        }
+
+        let mut app = line_batch_app();
+        let mut current = spawn_guide_panel(&mut app, 5.0);
+        for _ in 0..3 {
+            app.update();
+        }
+
+        for refresh in 0..5 {
+            app.world_mut().entity_mut(current).despawn();
+            current = spawn_guide_panel(&mut app, 4.0 + refresh.to_f32());
+            for _ in 0..3 {
+                app.update();
+            }
+
+            let store = app.world().resource::<PanelLineBatchStore>();
+            let stale_records: Vec<Entity> = store
+                .batches()
+                .flat_map(|(_, batch)| &batch.records)
+                .map(|record| record.key.panel)
+                .filter(|panel| *panel != current)
+                .collect();
+            assert!(
+                stale_records.is_empty(),
+                "refresh {refresh}: records keyed to dead panels: {stale_records:?}"
+            );
+
+            let stale_index: Vec<Entity> = store
+                .panel_index
+                .keys()
+                .copied()
+                .filter(|panel| *panel != current)
+                .collect();
+            assert!(
+                stale_index.is_empty(),
+                "refresh {refresh}: panel index holds dead panels: {stale_index:?}"
+            );
+        }
+
+        let store = app.world().resource::<PanelLineBatchStore>();
+        let record_count: usize = store.batches().map(|(_, batch)| batch.records.len()).sum();
+        assert_eq!(
+            record_count, 1,
+            "the surviving panel's guide lines must stay batched as one merged record"
+        );
+    }
+
     #[test]
     fn line_ordinal_contributes_to_depth_inside_grouped_command() {
         let first = test_line(0);
@@ -1213,19 +1256,7 @@ mod tests {
     }
 
     #[test]
-    fn batch_material_depth_uses_coarse_paint_lane() {
-        assert_eq!(
-            batch_material_depth_bias(LinePaintLane::Normal).to_bits(),
-            constants::BATCH_PANEL_LINE_DEPTH_BIAS.to_bits(),
-        );
-        assert_eq!(
-            batch_material_depth_bias(LinePaintLane::Overlay).to_bits(),
-            constants::BATCH_PANEL_LINE_OVERLAY_DEPTH_BIAS.to_bits(),
-        );
-    }
-
-    #[test]
-    fn collect_line_primitives_preserves_resolved_overlay_clip() {
+    fn collect_line_primitives_preserves_resolved_line_clip() {
         let inherited_clip = BoundingBox {
             x:      0.0,
             y:      0.0,
@@ -1264,7 +1295,7 @@ mod tests {
             owner_bounds: owner_clip,
             visual_bounds: primitive_bounds,
             clip: Some(inherited_clip),
-            paint_order: PanelLinePaintOrder::Overlay { order: 0 },
+            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
             layering: PanelLineLayering {
                 depth_bias:       0.0,
                 oit_depth_offset: 0.0,
@@ -1400,7 +1431,6 @@ mod tests {
                 shadow: VisualShadow::Cast,
                 layers: BatchRenderLayers(RenderLayers::layer(0)),
             },
-            LinePaintLane::Normal,
             0.0,
         )
     }
