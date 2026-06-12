@@ -1,10 +1,13 @@
 # Text draw layer
 
-Status: **Phases 1–2 implemented** (Phase 1: audit, `DrawOrdinal` mapping,
+Status: **Phases 1–4 implemented** (Phase 1: audit, `DrawOrdinal` mapping,
 backing OIT inversion fix, D2 diagnostic, tests; Phase 2: `TextDrawLayer`
-cascade attribute, `TextStyle` integration, `From<TextDrawLayer>` routing);
-Phases 3–4 pending. Pauses the anchor-to-panel example work (Phase 4.3/4.4);
-resume that after this lands.
+cascade attribute, `TextStyle` integration, `From<TextDrawLayer>` routing;
+Phase 3: `BatchKey.layer` routing + per-layer material derivation; Phase 4:
+`examples/text_draw_layer.rs` two-view demo + the `OIT_DEPTH_STEP`
+recalibration and `OIT_MIN_DEPTH` shader floor that its OIT verification
+forced). Pauses the anchor-to-panel example work (Phase 4.3/4.4); resume
+that after this lands.
 
 ## Intent
 
@@ -370,6 +373,65 @@ Tests:
   backing and above lower commands, on both the sorted sort key and the OIT
   offset (material-value assertions, not pixels)
 
+**Phase 3 results (implemented):**
+
+- `BatchKey` gains `layer: i8` after `sidedness`
+  (`text/slug/runtime/batch_store.rs`) — the resolved `TextDrawLayer`
+  unwrapped to its inner `i8` at the key boundary, since the `eq` attribute
+  variant derives no `Hash` (mirrors `TextAlpha` → `BatchAlphaMode`).
+- `BatchKeyCascades` gains the `Resolved<TextDrawLayer>` query,
+  `CascadeDefault<TextDrawLayer>`, a `draw_layer()` accessor returning
+  `TextDrawLayer` (siblings return inner types; `i8`'s wrapper is kept until
+  the key boundary), and `Changed<Resolved<TextDrawLayer>>` in the changed
+  arm. Key construction unwraps: `layer: cascades.draw_layer(label).0`.
+- `batch_material` derives both ordering fields from
+  `DrawOrdinal::from(TextDrawLayer(key.layer))`; the flat
+  `DEFAULT_TEXT_DRAW_LAYER` derivation and its hard-coded-`0.0`-equivalent
+  OIT offset are gone from the routing path (the default layer reproduces
+  them bit-exactly, pinned by test).
+- `TextExtension` gains a `#[cfg(test)] oit_depth_offset()` reader
+  (`text/slug/render/material.rs`) — the uniform struct is module-private,
+  and the batching ordering tests need the material's stored offset.
+- Tests (5 new, in `batching.rs`): three distinct layers → three batches
+  with the same-layer pair sharing one (entity-count asserted); a label
+  spawned with a layer override routes to the override batch through the
+  unrouted-run path (no `Changed` dependence); a live
+  `override_text_draw_layer` re-keys the run — new key's entity spawns, and
+  the follow-up `inherit_text_draw_layer` despawns the emptied batch entity
+  while the default batch entity survives; default-layer batch material
+  bit-equal to the pre-change `BATCH_TEXT_DEPTH_BIAS = 64.0` / `0.0` OIT
+  pair; a layer-5 batch's material values sort strictly between backing
+  commands 3 and 7 on both the sorted bias and the OIT offset. The
+  `batch_store` test key helper stamps `layer: DEFAULT_TEXT_DRAW_LAYER`.
+  Full suite 340/340 passed; build, clippy (`--all-targets`), and fmt clean.
+
+**Phase 3 review (team_review, 1 cycle — 4 lenses: correctness, risk,
+style, type system):**
+
+- Correctness and style lenses: no findings. All five plan test bullets
+  verified present; no call site still derives batch ordering from the flat
+  default; accessor naming and fallback consistent with the siblings; no
+  banned words.
+- Risk lens raised one note, reviewed and recorded without a code change:
+  the seed-observer → routing frame order looked implicit. The mechanism is
+  already enforced three ways: `apply_cascade_override` heals `Resolved`
+  itself at command flush, the seed observer covers non-override labels,
+  and a late `Resolved` insertion still matches the
+  `Changed<Resolved<TextDrawLayer>>` arm (added counts as changed), so the
+  worst case re-routes next frame rather than sticking on the default key.
+  Same structure as alpha/lighting/sidedness; no new schedule edge.
+- Type-system lens: no structural findings (BatchKey Hash/Eq composition,
+  wrapper discipline, and the i8 key boundary all confirmed). One note
+  recorded here per the no-design-decision-comments rule instead of as a
+  source comment: `DrawOrdinal`'s only constructors are
+  `From<TextDrawLayer>` and `from_command_index(usize)` — Phase 2's
+  `From<i8>` deletion is what keeps every layer-derived ordering value
+  traceable to the attribute type; any future `impl From<…> for
+  DrawOrdinal` should be reviewed as a new ordering source. The
+  `#[cfg(test)]` `oit_depth_offset()` reader was confirmed the right
+  visibility tool (the uniform struct stays module-private).
+- 0 proposed user decisions; nothing surfaced to `/adhoc_review`.
+
 ### Phase 4 — demo
 
 - Example demonstrating the artistic case: a subpanel sliding over sibling
@@ -380,6 +442,119 @@ Tests:
 - Decide during implementation whether this extends an existing example or
   adds `examples/text_draw_layer.rs`; keep the example layout convention
   (primary-API code first).
+
+**Phase 4 results (implemented):**
+
+- New `examples/text_draw_layer.rs` (the layout engine has no in-panel
+  sibling overlap, so "subpanel sliding over sibling text" is a second
+  textless panel attached via `AnchoredToPanel`, re-inserted per frame with
+  a sinusoidal x offset). One `ViewSide` enum builds both views from the
+  same content tree: a world panel (Mm units, OIT via
+  `with_stable_transparency`) and a screen panel (Px units, sorted ortho
+  view, `screen_panel_material`). Three tiers: body paragraph at layer 8
+  (dims under the shade), one default-layer run and a layer-72 run (both
+  stay bright over it — layer 72 clamps to the default's OIT offset per D1
+  and out-sorts it on the screen view). Verified live on both views: the
+  orderings agree.
+- Shade depth sits between the tiers on each view's own axis: 16 logical px
+  on the sorted view (8 < 16 < 64 exactly); 6 mm on the world view, where
+  `bevy_lagrange` syncing the near plane to `radius × 0.001` makes the
+  shade's NDC delta one `OIT_DEPTH_STEP` per millimeter per meter of orbit
+  radius — in-band (8 < steps < 64) for radii of 0.094–0.75 m (camera-home
+  lands at ~0.24 m, ≈25 steps).
+- **The demo exposed a Phase 1 regression on OIT views** — the exact
+  visual-change risk the audit called out. With `OIT_DEPTH_STEP = 1e-4`,
+  the new `(command_index − 64)` offsets reach −6.4e-3 while a fragment at
+  the camera's focus only has `position.z = near/d ≈ 1e-3` (the lagrange
+  near-radius sync makes this distance-independent). The offset drove z
+  negative; `pack_24bit_depth_8bit_alpha` saturates depth to 0, and bevy's
+  OIT resolve (no `DepthPrepass` on the camera, so the manual-depth-test
+  path) compares packed `(depth << 8) | alpha` values against the cleared
+  background `(0 << 8) | 255` — every saturated fragment with alpha < 1.0
+  packed below it and was silently dropped: panel fills, dividers, shade
+  quads, and layer-8 text all invisible; only alpha-exactly-1.0 and
+  offset-0 draws survived. Fix: `OIT_DEPTH_STEP` 1e-4 → 1e-6
+  (`render/constants.rs`; 64 steps = 6.4 % of focus depth, one step ≈ 17
+  quanta of the 24-bit packing, doc comment records the calibration), plus
+  an `OIT_MIN_DEPTH = 2e-7` floor on the offset z before `oit_draw` in
+  `sdf_panel.wgsl` and `slug_text.wgsl` so an out-of-calibration offset
+  degrades to wrong ordering instead of invisibility. The slug shader-hash
+  tripwire was updated (coverage math untouched). `panel_anchoring`'s world
+  view shared the regression and renders correctly after the fix.
+- D4 follow-up: `K` hotkey toggles the default-layer run between an
+  explicit `DIM_TEXT_LAYER` override (dims behind the shade) and
+  inheriting the cascade default (bright above it again) via
+  `override_text_draw_layer` / `inherit_text_draw_layer`, addressing the
+  run's wrapped line entities by `text_id` run id. Verified live in both
+  directions on both views.
+- Verification: full suite 340/340 (`cargo nextest run`), build, clippy
+  (`--all-targets`), fmt clean; live screenshots of both views confirm the
+  three-tier behavior and the sliding dim effect.
+
+**Phase 4 review (team_review, 1 cycle — 4 lenses: correctness, risk,
+implementation quality/style, demo ergonomics):**
+
+- Correctness lens: all Phase 4 spec bullets verified delivered; the
+  depth-band arithmetic (steps = shade mm / radius m; 6 mm in-band for
+  0.094–0.75 m), the constants.rs calibration claims (64 steps = 6.4 % of
+  focus depth, one step ≈ 17 quanta), and the `OIT_MIN_DEPTH` floor's
+  packed value (3 quanta → packs above the cleared background for any
+  alpha) all check out. D1's clamp behavior confirmed against the
+  `sorted_and_oit_orderings_agree_for_every_layer_pair` test.
+- Risk lens, auto-recorded (doc-only, applied): the far-distance bound —
+  a panel much farther than the camera focus shrinks `position.z` below
+  the 64-step budget at ~15.6× the orbit radius; past it the floor keeps
+  fragments visible but coplanar ordering collapses to OIT-list insertion
+  order. Documented on `OIT_DEPTH_STEP` and cross-referenced from both
+  shaders' `OIT_MIN_DEPTH` comments. f32 precision of `z + k×1e-6` at
+  focus depths verified non-issue; callouts' positive-offset axis
+  unaffected by the step change; no test encodes the old magnitude.
+- Risk lens, considered and dropped: a debug diagnostic when an offset
+  hits the floor — fragment depth is per-pixel GPU state with no CPU
+  feedback channel, and a CPU-side approximation would need the live
+  camera distance per panel at material-build time; not implementable
+  where the information exists.
+- Style lens: no findings (conventions match `panel_anchoring` /
+  `text_alpha`; no banned words; comments state mechanisms; no dead
+  code or stale references).
+- Ergonomics lens: two findings surfaced as D4/D5 below; status-line
+  wording and a `DIM_TEXT_LAYER` doc expansion dropped (the module doc
+  and the adjacent `SHADE_DEPTH_MM` comment already carry the math; the
+  OIT/sorted vocabulary is this library's own).
+
+### End-of-implementation discussion — inheritance of the text draw layer
+
+Implementing the D4 hotkey surfaced how the draw layer's cascade behaves
+at runtime; recording it here because the semantics constrain any future
+runtime-layer API.
+
+- **Authored styles are overrides.** `TextStyle::with_draw_layer` in a
+  tree does not produce a distinct "authored" state: reconcile inserts
+  the same `Override<TextDrawLayer>` component on the run's label
+  entities that `override_text_draw_layer` would. The cascade resolution
+  chain is label override → panel override → `CascadeDefault` (64);
+  there is no fourth slot holding the tree's value.
+- **`inherit` is destructive of authored values.** Removing an override
+  has no memory — a run authored at layer 72 that is toggled
+  `override(8)` → `inherit()` lands on the default (64), not back at 72.
+  Restoring an authored non-default layer requires re-overriding with
+  the original value, which the caller must have kept. This is why the
+  demo's `K` toggle targets the default-layer run: it starts with no
+  override, so `override`/`inherit` round-trips its true state exactly.
+- **Runtime verbs act per line entity.** A wrapped run spawns one label
+  entity per line; each line carries its own override and resolves
+  independently. `DiegeticPanel::text_child(id)` resolves only the
+  run's first line, so a whole-run runtime change must address all line
+  entities — the demo authors the run with `text_id` and matches
+  `PanelTextLayout.id` across entities. A verb applied to one line of a
+  wrapped run silently splits the run's layering (the demo's first
+  implementation did exactly this and only line 0 dimmed).
+- **Implication for a future run-scoped API.** If runtime layer changes
+  become a real authoring surface (beyond demos), the per-line and
+  no-memory semantics argue for a run-scoped verb pair keyed by
+  `PanelFieldId` (apply to every line of the run) and, if "restore the
+  authored value" is wanted, an explicit stored authored-layer slot —
+  both out of scope here, recorded as the natural next step.
 
 ## Risks
 
@@ -443,3 +618,38 @@ Tests:
   `TextDrawLayer` and backing `command_index` both convert into it, and the
   depth-bias / OIT-offset derivations take `DrawOrdinal` so the two sources
   share one code path.
+- **D4 — runtime layer-override hotkey in the demo** (important, demo
+  ergonomics lens; class: design-improvement; status: proposed). Problem:
+  `examples/text_draw_layer.rs` demonstrates only the static authoring API
+  (`TextStyle::with_draw_layer`); the public surface also has the runtime
+  verbs `override_text_draw_layer` / `inherit_text_draw_layer` (Phase 3
+  tests them, no example shows them; `cascade.rs` establishes the
+  hotkey-toggle teaching pattern for `TextAlpha`). Options: (a) add a
+  hotkey that drops the layer-72 run to layer 8 and back via the runtime
+  verbs (title-bar control listed); (b) keep the demo static — the Phase 4
+  spec bullet asks only for the artistic case. Recommendation: (a) — it
+  completes the API surface the example teaches at small cost and shows
+  the live re-batching working.
+  **Decision: (a) add the hotkey**, amended during implementation (user
+  choice between the two faithful variants): the toggle targets the
+  *default-layer* run, not the layer-72 run. A tree-authored
+  `with_draw_layer` materializes as `Override<TextDrawLayer>` on the run's
+  label entities, so `inherit_text_draw_layer` cannot restore 72 — it
+  resolves to the cascade default. The default run starts with no override
+  and round-trips exactly: `K` overrides it to the body layer (it dims
+  behind the shade) and inherits back. The run is authored with `text_id`
+  and its wrapped lines are found by run id in `PanelTextLayout` (each
+  line is its own label entity). See the inheritance discussion below.
+- **D5 — layer-72 on-panel copy vs the OIT clamp** (important, demo
+  ergonomics lens; class: design-improvement; status: proposed). Problem:
+  the run reads "AUTHORED AT LAYER 72 - ABOVE ALL", but on the OIT view
+  layers above the default clamp to the default's offset (D1) — the run
+  ties with default text there; "above all" holds only on the sorted view.
+  The caveat lives in the module doc and this plan, not on screen. Options:
+  (a) amend the run's text (e.g. "AUTHORED AT LAYER 72 - TOP ON SORTED");
+  (b) leave the copy — the run never composites *below* anything on either
+  view, so the claim is not observably false. Recommendation: (b) — the
+  visible behavior matches the words on both views; precision about the
+  tie belongs in the docs, and the shorter line keeps the demo legible.
+  **Decision: (b) leave the copy** — the on-panel line stays as authored;
+  the OIT-tie caveat stays in the module doc and this plan.

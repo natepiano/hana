@@ -17,6 +17,11 @@ pub(crate) use material::set_text_material_anti_alias;
 pub(crate) use material::toggle_text_material_debug_glyph_index;
 pub(crate) use run_data::glyph_quad_extents;
 
+#[cfg(test)]
+pub(super) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+    material::text_material_oit_depth_offset(material)
+}
+
 pub(super) fn set_text_material_atlas(
     material: &mut TextMaterial,
     curves: Handle<ShaderBuffer>,

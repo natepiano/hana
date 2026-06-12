@@ -41,6 +41,11 @@ pub(crate) use runtime::RunStorageKey;
 
 pub(super) struct SlugPlugin;
 
+#[cfg(test)]
+pub(super) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+    render::text_material_oit_depth_offset(material)
+}
+
 impl Plugin for SlugPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "shaders/slug_text.wgsl");

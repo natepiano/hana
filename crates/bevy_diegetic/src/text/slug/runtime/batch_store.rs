@@ -126,6 +126,10 @@ pub(crate) struct BatchKey {
     pub lighting:      GlyphLighting,
     /// Resolved `TextSidedness` cascade value.
     pub sidedness:     GlyphSidedness,
+    /// Resolved `TextDrawLayer` cascade value, unwrapped to its inner `i8` at
+    /// this boundary — the attribute type derives no `Hash` (mirrors the
+    /// `TextAlpha` → [`BatchAlphaMode`] re-encoding).
+    pub layer:         i8,
     /// The run's `GlyphShadowMode` (`Cast` batches cast, `None` batches carry
     /// `NotShadowCaster`).
     pub shadow:        GlyphShadowMode,
@@ -538,6 +542,7 @@ mod tests {
     use bevy::color::Color;
 
     use super::*;
+    use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
 
     fn glyph(rect_min: Vec2, atlas_index: u32) -> GlyphInstanceRecord {
         GlyphInstanceRecord {
@@ -566,6 +571,7 @@ mod tests {
             alpha:         alpha.into(),
             lighting:      GlyphLighting::Lit,
             sidedness:     GlyphSidedness::DoubleSided,
+            layer:         DEFAULT_TEXT_DRAW_LAYER,
             shadow:        GlyphShadowMode::Cast,
             layers:        BatchRenderLayers(RenderLayers::layer(0)),
         }

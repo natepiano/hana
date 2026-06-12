@@ -66,6 +66,11 @@ use self::slug::SlugPlugin;
 
 pub(crate) struct TextPlugin;
 
+#[cfg(test)]
+pub(super) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+    slug::text_material_oit_depth_offset(material)
+}
+
 impl Plugin for TextPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(SlugPlugin);

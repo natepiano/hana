@@ -31,7 +31,6 @@ use bevy_kana::ToUsize;
 use super::PanelTextLayout;
 use super::PreparedPanelText;
 use crate::cascade::CascadeDefault;
-use crate::cascade::DEFAULT_TEXT_DRAW_LAYER;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextDrawLayer;
@@ -72,17 +71,19 @@ pub struct DiegeticTextBatch;
 /// crossing — created, written, and swapped in the same frame, D4).
 ///
 /// Cascade inputs feeding [`BatchKey`] fields: each run's resolved
-/// alpha / lighting / sidedness (with the global defaults for runs the
-/// cascade has not seeded) plus the changed-this-frame run set that triggers
-/// re-routing.
+/// alpha / lighting / sidedness / draw layer (with the global defaults for
+/// runs the cascade has not seeded) plus the changed-this-frame run set that
+/// triggers re-routing.
 #[derive(SystemParam)]
 pub(super) struct BatchKeyCascades<'w, 's> {
-    alphas:            Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
-    lightings:         Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
-    sidednesses:       Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
-    alpha_default:     Res<'w, CascadeDefault<TextAlpha>>,
-    lighting_default:  Res<'w, CascadeDefault<TextLighting>>,
-    sidedness_default: Res<'w, CascadeDefault<TextSidedness>>,
+    alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
+    lightings:          Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
+    sidednesses:        Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
+    draw_layers:        Query<'w, 's, &'static Resolved<TextDrawLayer>, With<TextContent>>,
+    alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
+    lighting_default:   Res<'w, CascadeDefault<TextLighting>>,
+    sidedness_default:  Res<'w, CascadeDefault<TextSidedness>>,
+    draw_layer_default: Res<'w, CascadeDefault<TextDrawLayer>>,
     changed: Query<
         'w,
         's,
@@ -94,6 +95,7 @@ pub(super) struct BatchKeyCascades<'w, 's> {
                 Changed<Resolved<TextAlpha>>,
                 Changed<Resolved<TextLighting>>,
                 Changed<Resolved<TextSidedness>>,
+                Changed<Resolved<TextDrawLayer>>,
             )>,
         ),
     >,
@@ -122,12 +124,18 @@ impl BatchKeyCascades<'_, '_> {
             .get(label)
             .map_or(self.sidedness_default.0.0, |resolved| resolved.0.0)
     }
+
+    fn draw_layer(&self, label: Entity) -> TextDrawLayer {
+        self.draw_layers
+            .get(label)
+            .map_or(self.draw_layer_default.0, |resolved| resolved.0)
+    }
 }
 
 /// The query walks every run but touches only those whose text changed, whose
-/// resolved cascade value changed (alpha / lighting / sidedness are batch-key
-/// fields, so the run re-routes through `upsert_run` and moves batches when
-/// the key differs), or that are not yet routed, so the system is
+/// resolved cascade value changed (alpha / lighting / sidedness / draw layer
+/// are batch-key fields, so the run re-routes through `upsert_run` and moves
+/// batches when the key differs), or that are not yet routed, so the system is
 /// self-healing: a skipped frame (e.g. a glyph not yet packed) re-routes on
 /// the next pass.
 pub(super) fn update_panel_text_batches(
@@ -223,6 +231,7 @@ pub(super) fn update_panel_text_batches(
             alpha: cascades.alpha(label_entity).into(),
             lighting: cascades.lighting(label_entity),
             sidedness: cascades.sidedness(label_entity),
+            layer: cascades.draw_layer(label_entity).0,
             shadow: prepared.shadow_mode,
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
         };
@@ -711,12 +720,13 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, GlyphLighting::Unlit);
     constants::apply_glyph_sidedness(&mut base, key.sidedness);
-    // One bias/offset pair for the whole batch, derived from the default
-    // text draw layer: text after every backing layer on sorted (non-OIT)
-    // views, `0.0` OIT offset so opaque world geometry keeps depth authority.
-    // Per-run order inside the batch comes from the per-record depth nudge,
-    // which a per-material bias cannot express.
-    let text_ordinal = DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER));
+    // One bias/offset pair for the whole batch, derived from the key's draw
+    // layer: the bias orders the batch among backing commands on sorted
+    // (non-OIT) views, the OIT offset among them on OIT views (clamped at
+    // `0.0` from the default layer up, so opaque world geometry keeps depth
+    // authority). Per-run order inside the batch comes from the per-record
+    // depth nudge, which a per-material bias cannot express.
+    let text_ordinal = DrawOrdinal::from(TextDrawLayer(key.layer));
     base.depth_bias = text_ordinal.depth_bias();
     text::batch_text_material(BatchTextMaterialInput {
         base,
@@ -1071,6 +1081,161 @@ mod tests {
         assert_eq!(
             opaque_runs, 1,
             "exactly the overridden run is keyed under the new key"
+        );
+    }
+
+    /// Per-batch (`depth_bias`, OIT depth offset) read off the single live
+    /// batch's material asset.
+    fn batch_material_values(app: &App) -> (f32, f32) {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (_, batch) = store.batches().next().expect("one batch should exist");
+        let gpu = batch.gpu.as_ref().expect("batch should have GPU assets");
+        let material = app
+            .world()
+            .resource::<Assets<TextMaterial>>()
+            .get(&gpu.material)
+            .expect("batch material asset should exist");
+        (
+            material.base.depth_bias,
+            text::text_material_oit_depth_offset(material),
+        )
+    }
+
+    fn batch_layers(app: &App) -> Vec<i8> {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let mut layers: Vec<i8> = store.batches().map(|(key, _)| key.layer).collect();
+        layers.sort_unstable();
+        layers
+    }
+
+    #[test]
+    fn runs_with_distinct_draw_layers_route_to_distinct_batches() {
+        let mut app = pipeline_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(
+            "Alpha",
+            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
+        );
+        builder.text(
+            "Beta",
+            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
+        );
+        builder.text(
+            "Gamma",
+            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(-3)),
+        );
+        builder.text("Delta", TextStyle::new(10.0));
+        spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        let (batches, runs, _) = store_stats(&app);
+        assert_eq!(batches, 3, "three distinct layers split three batches");
+        assert_eq!(runs, 4);
+        assert_eq!(batch_layers(&app), vec![-3, 10, 64]);
+        assert_eq!(batch_entities(&mut app).len(), 3);
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let shared_layer_runs: usize = store
+            .batches()
+            .filter(|(key, _)| key.layer == 10)
+            .map(|(_, batch)| batch.run_count())
+            .sum();
+        assert_eq!(shared_layer_runs, 2, "same-layer runs share one batch");
+    }
+
+    #[test]
+    fn label_spawned_with_a_draw_layer_override_routes_to_the_override_batch() {
+        let mut app = pipeline_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(
+            "Alpha",
+            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(10)),
+        );
+        spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        // The run was never routed before, so it took the unrouted-run path —
+        // no `Changed<Resolved<TextDrawLayer>>` membership involved.
+        assert_eq!(store_stats(&app), (1, 1, 5));
+        assert_eq!(batch_layers(&app), vec![10]);
+    }
+
+    #[test]
+    fn draw_layer_cascade_change_moves_the_run_and_reconciles_batch_entities() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+        assert_eq!(store_stats(&app), (1, 2, 9));
+        let default_entity = batch_entities(&mut app)[0];
+
+        let label = label_entities(&mut app)[0];
+        app.world_mut()
+            .commands()
+            .entity(label)
+            .override_text_draw_layer(TextDrawLayer(10));
+        settle(&mut app);
+
+        let (batches, runs, glyphs) = store_stats(&app);
+        assert_eq!(
+            batches, 2,
+            "the layer-changed run re-keys into its own batch"
+        );
+        assert_eq!(runs, 2);
+        assert_eq!(glyphs, 9, "no records were lost in the move");
+        assert_eq!(batch_layers(&app), vec![10, 64]);
+        let entities = batch_entities(&mut app);
+        assert_eq!(entities.len(), 2, "the new key's batch entity spawned");
+        assert!(entities.contains(&default_entity));
+
+        app.world_mut()
+            .commands()
+            .entity(label)
+            .inherit_text_draw_layer();
+        settle(&mut app);
+
+        assert_eq!(store_stats(&app), (1, 2, 9));
+        assert_eq!(batch_layers(&app), vec![64]);
+        assert_eq!(
+            batch_entities(&mut app),
+            vec![default_entity],
+            "the emptied layer batch entity despawned; the default batch entity survived"
+        );
+    }
+
+    #[test]
+    fn default_layer_batch_material_reproduces_previous_values() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+
+        // Pre-DrawOrdinal constants: BATCH_TEXT_DEPTH_BIAS = 64.0 ×
+        // LAYER_DEPTH_BIAS and a hard-coded 0.0 OIT offset.
+        let (depth_bias, oit_depth_offset) = batch_material_values(&app);
+        assert_eq!(depth_bias.to_bits(), 64.0f32.to_bits());
+        assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
+    }
+
+    #[test]
+    fn layer_below_a_backing_sorts_between_neighboring_commands() {
+        let mut app = pipeline_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(
+            "Alpha",
+            TextStyle::new(10.0).with_draw_layer(TextDrawLayer(5)),
+        );
+        spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        let (depth_bias, oit_depth_offset) = batch_material_values(&app);
+        let lower_backing = DrawOrdinal::from_command_index(3);
+        let higher_backing = DrawOrdinal::from_command_index(7);
+        assert!(
+            lower_backing.depth_bias() < depth_bias && depth_bias < higher_backing.depth_bias(),
+            "the layer-5 batch sorts between commands 3 and 7 on the sorted axis"
+        );
+        assert!(
+            lower_backing.oit_depth_offset() < oit_depth_offset
+                && oit_depth_offset < higher_backing.oit_depth_offset(),
+            "the layer-5 batch sorts between commands 3 and 7 on the OIT axis"
         );
     }
 
