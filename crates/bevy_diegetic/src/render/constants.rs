@@ -46,10 +46,11 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
 
 /// Shared draw-order ordinal for a panel's coplanar children.
 ///
-/// Backing/image render-command indices and text draw layers both convert
-/// into it; [`Self::depth_bias`] and [`Self::oit_depth_offset`] are the only
-/// derivations of the two per-material ordering fields, so any two ordinals
-/// composite in the same relative order on sorted and OIT views.
+/// Backing/image/line draw slots (`RenderCommand::draw_slot`) and text draw
+/// layers both convert into it; [`Self::depth_bias`] and
+/// [`Self::oit_depth_offset`] are the only derivations of the two per-material
+/// ordering fields, so any two ordinals composite in the same relative order
+/// on sorted and OIT views.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DrawOrdinal(i32);
 
@@ -65,13 +66,13 @@ pub(crate) const BATCH_PANEL_LINE_DEPTH_BIAS: f32 = 63.0 * LAYER_DEPTH_BIAS;
 pub(crate) const BATCH_PANEL_LINE_OVERLAY_DEPTH_BIAS: f32 = 96.0 * LAYER_DEPTH_BIAS;
 
 impl DrawOrdinal {
-    /// Converts a render-command index, saturating at `i32::MAX`. A
+    /// Converts a geometry draw slot, saturating at `i32::MAX`. A
     /// saturated ordinal sits above every text layer (`i8`), so it
     /// composites in front of all text on sorted views and clamps to the
     /// `0.0` OIT offset — unreachable in practice (a panel would need
-    /// 2^31 render commands).
-    pub(crate) fn from_command_index(command_index: usize) -> Self {
-        Self(i32::try_from(command_index).unwrap_or(i32::MAX))
+    /// 2^31 geometry commands).
+    pub(crate) fn from_draw_slot(draw_slot: usize) -> Self {
+        Self(i32::try_from(draw_slot).unwrap_or(i32::MAX))
     }
 
     /// `Transparent3d` sort bias. Bevy adds it to the item's view-space
@@ -233,30 +234,30 @@ mod tests {
 
     #[test]
     fn backing_depth_bias_matches_previous_command_index_formula() {
-        for command_index in [0_usize, 1, 5, 63] {
-            let expected = command_index.to_f32() * LAYER_DEPTH_BIAS;
-            let actual = DrawOrdinal::from_command_index(command_index).depth_bias();
+        for draw_slot in [0_usize, 1, 5, 63] {
+            let expected = draw_slot.to_f32() * LAYER_DEPTH_BIAS;
+            let actual = DrawOrdinal::from_draw_slot(draw_slot).depth_bias();
             assert_eq!(actual.to_bits(), expected.to_bits());
         }
     }
 
     #[test]
-    fn backing_oit_offsets_stay_behind_default_text_and_rise_with_command_index() {
+    fn backing_oit_offsets_stay_behind_default_text_and_rise_with_draw_slot() {
         let default_layer =
             usize::try_from(DEFAULT_TEXT_DRAW_LAYER).expect("default layer is positive");
         let mut previous = f32::NEG_INFINITY;
-        for command_index in 0..default_layer {
-            let offset = DrawOrdinal::from_command_index(command_index).oit_depth_offset();
-            assert!(offset < 0.0, "command {command_index} must sit behind text");
-            assert!(offset > previous, "offsets must rise with command index");
+        for draw_slot in 0..default_layer {
+            let offset = DrawOrdinal::from_draw_slot(draw_slot).oit_depth_offset();
+            assert!(offset < 0.0, "slot {draw_slot} must sit behind text");
+            assert!(offset > previous, "offsets must rise with draw slot");
             previous = offset;
         }
     }
 
     #[test]
-    fn from_command_index_saturates_at_i32_max() {
+    fn from_draw_slot_saturates_at_i32_max() {
         assert_eq!(
-            DrawOrdinal::from_command_index(usize::MAX),
+            DrawOrdinal::from_draw_slot(usize::MAX),
             DrawOrdinal(i32::MAX),
         );
     }

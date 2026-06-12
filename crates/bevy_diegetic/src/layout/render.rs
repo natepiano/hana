@@ -21,6 +21,15 @@ pub struct RenderCommand {
     pub kind:        RenderCommandKind,
     /// Index of the source element in the `LayoutTree`.
     pub element_idx: usize,
+    /// Coplanar geometry draw slot, the panel-local `DrawOrdinal` source.
+    ///
+    /// Slot-consuming kinds ([`Rectangle`](RenderCommandKind::Rectangle),
+    /// [`Border`](RenderCommandKind::Border), [`Image`](RenderCommandKind::Image),
+    /// [`Lines`](RenderCommandKind::Lines)) each occupy one slot in emission
+    /// order. `Text` and scissor commands record the next slot without
+    /// consuming it, so text-heavy panels don't inflate later geometry
+    /// ordinals toward the default text draw layer.
+    pub draw_slot:   usize,
 }
 
 /// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.
@@ -75,4 +84,20 @@ pub enum RenderCommandKind {
     ScissorStart,
     /// End the most recent clipping region.
     ScissorEnd,
+}
+
+impl RenderCommandKind {
+    /// Whether this command occupies a [`RenderCommand::draw_slot`]. Text gets
+    /// its draw ordinal from `TextDrawLayer` and scissor commands draw nothing,
+    /// so neither consumes a slot.
+    #[must_use]
+    pub const fn consumes_draw_slot(&self) -> bool {
+        match self {
+            Self::Rectangle { .. }
+            | Self::Border { .. }
+            | Self::Image { .. }
+            | Self::Lines { .. } => true,
+            Self::Text { .. } | Self::ScissorStart | Self::ScissorEnd => false,
+        }
+    }
 }

@@ -40,9 +40,12 @@ struct PanelSdfMesh;
 /// stored as raw bits so the component derives `Eq` and compares exactly.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 struct PanelSdfSurface {
-    /// Render-command index — the quad's stable key across rebuilds, and what
-    /// drives its layer/OIT depth ordering.
+    /// Render-command index — the quad's stable key across rebuilds.
     command_index: usize,
+    /// Geometry draw slot — drives the quad's layer/OIT depth ordering. Part
+    /// of the signature so a slot shift refreshes the material's two ordering
+    /// fields.
+    draw_slot:     usize,
     /// World-space transform center (x, y).
     center:        [u32; 2],
     /// World-space mesh size (full width, height).
@@ -120,8 +123,12 @@ struct ElementSurface {
     border_widths: [f32; 4],
     /// Border color.
     border_color:  Option<Color>,
-    /// Index of the first render command for this element (for layer ordering).
+    /// Index of the first render command for this element (the reconcile
+    /// reuse key).
     command_index: usize,
+    /// Draw slot of the first render command for this element (for layer
+    /// ordering).
+    draw_slot:     usize,
     /// Active clip rect in layout coordinates when this surface was
     /// gathered. `None` means unclipped.
     clip_rect:     Option<BoundingBox>,
@@ -227,15 +234,21 @@ fn reconcile_sdf_quads(
 ) {
     // `warn_once!` is per-callsite: only the first panel to exhaust the
     // headroom is named; later offenders stay silent.
-    if DrawOrdinal::from_command_index(render_commands.len())
-        >= DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER))
+    let max_draw_slot = render_commands
+        .iter()
+        .filter(|cmd| cmd.kind.consumes_draw_slot())
+        .map(|cmd| cmd.draw_slot)
+        .max();
+    if let Some(max_draw_slot) = max_draw_slot
+        && DrawOrdinal::from_draw_slot(max_draw_slot)
+            >= DrawOrdinal::from(TextDrawLayer(DEFAULT_TEXT_DRAW_LAYER))
     {
         warn_once!(
-            "panel {:?} has {} render commands, reaching the default text draw layer \
-             ({DEFAULT_TEXT_DRAW_LAYER}); commands indexed at or above it draw over \
+            "panel {:?} uses geometry draw slots up to {}, reaching the default text draw \
+             layer ({DEFAULT_TEXT_DRAW_LAYER}); slots at or above it draw over \
              default-layer text",
             context.panel_entity,
-            render_commands.len(),
+            max_draw_slot,
         );
     }
 
@@ -341,7 +354,7 @@ fn reconcile_interaction_mesh(
 
 struct GatheredCommands {
     surfaces: HashMap<usize, ElementSurface>,
-    dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)>,
+    dividers: Vec<ElementSurface>,
 }
 
 /// Gathers fill + border data per element from render commands.
@@ -352,7 +365,7 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
     let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
-    let mut dividers: Vec<(usize, BoundingBox, Color, Option<BoundingBox>)> = Vec::new();
+    let mut dividers: Vec<ElementSurface> = Vec::new();
 
     for (cmd_index, cmd) in commands.iter().enumerate() {
         let active_clip = clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport);
@@ -362,7 +375,16 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
                     continue;
                 };
                 if *source == RectangleSource::BetweenChildrenBorder {
-                    dividers.push((cmd_index, cmd.bounds, *color, Some(active_clip)));
+                    dividers.push(ElementSurface {
+                        index:         usize::MAX,
+                        bounds:        cmd.bounds,
+                        fill_color:    Some(*color),
+                        border_widths: [0.0; 4],
+                        border_color:  None,
+                        command_index: cmd_index,
+                        draw_slot:     cmd.draw_slot,
+                        clip_rect:     Some(active_clip),
+                    });
                 } else {
                     surfaces
                         .entry(cmd.element_idx)
@@ -373,6 +395,7 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
                             border_widths: [0.0; 4],
                             border_color:  None,
                             command_index: cmd_index,
+                            draw_slot:     cmd.draw_slot,
                             clip_rect:     Some(active_clip),
                         })
                         .fill_color = Some(*color);
@@ -391,6 +414,7 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
                         border_widths: [0.0; 4],
                         border_color:  None,
                         command_index: cmd_index,
+                        draw_slot:     cmd.draw_slot,
                         clip_rect:     Some(active_clip),
                     });
                 surface.border_widths = [
@@ -412,17 +436,7 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
 /// render, each keyed by its `command_index`.
 fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
     let mut desired: Vec<ElementSurface> = gathered.surfaces.into_values().collect();
-    desired.extend(gathered.dividers.into_iter().map(
-        |(command_index, bounds, color, clip_rect)| ElementSurface {
-            index: usize::MAX,
-            bounds,
-            fill_color: Some(color),
-            border_widths: [0.0; 4],
-            border_color: None,
-            command_index,
-            clip_rect,
-        },
-    ));
+    desired.extend(gathered.dividers);
     desired
 }
 
@@ -456,7 +470,7 @@ fn build_sdf_quad(
             Some(Color::NONE)
         }
     });
-    let draw_ordinal = DrawOrdinal::from_command_index(surface.command_index);
+    let draw_ordinal = DrawOrdinal::from_draw_slot(surface.draw_slot);
     let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
     base.depth_bias = draw_ordinal.depth_bias();
     let fill_color = base.base_color;
@@ -544,6 +558,7 @@ fn build_sdf_quad(
 
     let signature = PanelSdfSurface {
         command_index: surface.command_index,
+        draw_slot:     surface.draw_slot,
         center:        vec2_bits(world_rect.center),
         mesh_size:     vec2_bits(mesh_size),
         corner_radii:  array4_bits(world_radii),

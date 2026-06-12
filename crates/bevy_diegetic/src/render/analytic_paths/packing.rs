@@ -169,7 +169,7 @@ pub(crate) struct RunRecord {
     pub fill_color:       Vec4,
     /// Visible render mode (`RenderMode` as `u32`).
     pub render_mode:      u32,
-    /// Clip-space depth nudge in layer units (`command_index × LAYER_DEPTH_BIAS`)
+    /// Clip-space depth nudge in layer units (`draw_slot × LAYER_DEPTH_BIAS`)
     /// for non-OIT views.
     pub depth_nudge:      f32,
     /// Per-run OIT position-z offset for coplanar ordering.

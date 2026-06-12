@@ -294,7 +294,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
     assert_eq!(
         resolved.paint_order,
         PanelLinePaintOrder::Normal {
-            command_index: line_index,
+            draw_slot: draw_result.commands[line_index].draw_slot,
         }
     );
 }

@@ -1282,6 +1282,7 @@ mod tests {
             bounds:      primitive_bounds,
             element_idx: 1,
             kind:        RenderCommandKind::Lines { lines: vec![line] },
+            draw_slot:   0,
         }];
 
         let collected = collect_line_primitives(&commands);
@@ -1499,7 +1500,7 @@ mod tests {
             },
             visual_bounds: primitive.bounds(),
             clip: None,
-            paint_order: PanelLinePaintOrder::Normal { command_index: 0 },
+            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
             layering: PanelLineLayering {
                 depth_bias:       0.0,
                 oit_depth_offset: 0.0,

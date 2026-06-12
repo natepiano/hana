@@ -14,27 +14,28 @@ pub struct PanelTextLayout {
     /// run (`0` for an unwrapped run). Together they form the reconcile reuse
     /// key, replacing the former positional `(element_idx, command_index)` pair
     /// so a named run survives a sibling reorder.
-    pub id:            PanelFieldId,
+    pub id:          PanelFieldId,
     /// Line ordinal of this command within its run (`0`-based), so a wrapped
     /// multi-line run reuses each line stably.
-    pub line_index:    usize,
+    pub line_index:  usize,
     /// Index of the source element in the layout tree.
-    pub element_idx:   usize,
-    /// Index of the render command that produced this text child.
-    /// Used for Z-offset layering in Geometry mode.
-    pub command_index: usize,
+    pub element_idx: usize,
+    /// Geometry draw slot recorded when this text command was emitted (the
+    /// slot the next geometry command occupies). Drives the run's non-OIT
+    /// depth nudge so the run draws above the geometry emitted before it.
+    pub draw_slot:   usize,
     /// Layout-computed position and size in layout coordinates.
-    pub bounds:        BoundingBox,
+    pub bounds:      BoundingBox,
     /// X scale: points to meters.
-    pub scale_x:       f32,
+    pub scale_x:     f32,
     /// Y scale: points to meters.
-    pub scale_y:       f32,
+    pub scale_y:     f32,
     /// `Anchor` X offset in world units.
-    pub anchor_x:      f32,
+    pub anchor_x:    f32,
     /// `Anchor` Y offset in world units.
-    pub anchor_y:      f32,
+    pub anchor_y:    f32,
     /// Active clip rect in layout coordinates, or `None` if unclipped.
-    pub clip_rect:     Option<BoundingBox>,
+    pub clip_rect:   Option<BoundingBox>,
 }
 
 impl PanelTextLayout {
@@ -43,7 +44,7 @@ impl PanelTextLayout {
     ///
     /// Compares `bounds`, `scale_x`, `scale_y`, `anchor_x`, `anchor_y`, and
     /// `clip_rect` via `to_bits`. Excludes the reuse-identity fields
-    /// (`id`/`line_index`/`element_idx`/`command_index`), constant within a
+    /// (`id`/`line_index`/`element_idx`/`draw_slot`), constant within a
     /// reused slot.
     pub(super) fn gating_eq(&self, other: &Self) -> bool {
         let Self {
@@ -56,7 +57,7 @@ impl PanelTextLayout {
             id: _,
             line_index: _,
             element_idx: _,
-            command_index: _,
+            draw_slot: _,
         } = self;
 
         bbox_bits(bounds) == bbox_bits(&other.bounds)
@@ -93,16 +94,16 @@ mod tests {
 
     fn sample_layout() -> PanelTextLayout {
         PanelTextLayout {
-            id:            PanelFieldId::named("sample"),
-            line_index:    0,
-            element_idx:   0,
-            command_index: 0,
-            bounds:        bbox(1.0, 2.0, 30.0, 12.0),
-            scale_x:       0.5,
-            scale_y:       0.5,
-            anchor_x:      0.0,
-            anchor_y:      0.0,
-            clip_rect:     None,
+            id:          PanelFieldId::named("sample"),
+            line_index:  0,
+            element_idx: 0,
+            draw_slot:   0,
+            bounds:      bbox(1.0, 2.0, 30.0, 12.0),
+            scale_x:     0.5,
+            scale_y:     0.5,
+            anchor_x:    0.0,
+            anchor_y:    0.0,
+            clip_rect:   None,
         }
     }
 
@@ -122,11 +123,11 @@ mod tests {
 
     #[test]
     fn gating_eq_ignores_reuse_key() {
-        // element_idx/command_index form the reuse key, constant within a slot.
+        // element_idx/draw_slot form the reuse key, constant within a slot.
         let base = sample_layout();
         let mut rekeyed = sample_layout();
         rekeyed.element_idx = 7;
-        rekeyed.command_index = 9;
+        rekeyed.draw_slot = 9;
         assert!(base.gating_eq(&rekeyed));
     }
 

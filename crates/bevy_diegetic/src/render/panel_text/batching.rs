@@ -260,8 +260,10 @@ pub(super) fn update_panel_text_batches(
                 fill_color.alpha,
             ),
             render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
-            depth_nudge:      panel_text_child.command_index.saturating_add(1).to_f32()
-                * constants::LAYER_DEPTH_BIAS,
+            // The recorded slot is the one the next geometry command occupies,
+            // so the run already sits one layer above everything emitted
+            // before it.
+            depth_nudge:      panel_text_child.draw_slot.to_f32() * constants::LAYER_DEPTH_BIAS,
             oit_depth_offset: draw_ordinal.oit_depth_offset(),
             aa_flags:         cascades.anti_alias(label_entity).aa_flags(),
         };
@@ -1246,16 +1248,16 @@ mod tests {
         settle(&mut app);
 
         let (depth_bias, oit_depth_offset) = batch_material_values(&app);
-        let lower_backing = DrawOrdinal::from_command_index(3);
-        let higher_backing = DrawOrdinal::from_command_index(7);
+        let lower_backing = DrawOrdinal::from_draw_slot(3);
+        let higher_backing = DrawOrdinal::from_draw_slot(7);
         assert!(
             lower_backing.depth_bias() < depth_bias && depth_bias < higher_backing.depth_bias(),
-            "the layer-5 batch sorts between commands 3 and 7 on the sorted axis"
+            "the layer-5 batch sorts between slots 3 and 7 on the sorted axis"
         );
         assert!(
             lower_backing.oit_depth_offset() < oit_depth_offset
                 && oit_depth_offset < higher_backing.oit_depth_offset(),
-            "the layer-5 batch sorts between commands 3 and 7 on the OIT axis"
+            "the layer-5 batch sorts between slots 3 and 7 on the OIT axis"
         );
     }
 

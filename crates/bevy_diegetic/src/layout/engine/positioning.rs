@@ -28,6 +28,37 @@ use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
 
+/// Mutable counters threaded through one command-emission pass: the next
+/// geometry [`RenderCommand::draw_slot`] and the next overlay ordinal for
+/// overflow-visible panel lines.
+#[derive(Default)]
+struct EmissionCounters {
+    draw_slot:     usize,
+    overlay_order: usize,
+}
+
+/// Pushes one command, stamping its [`RenderCommand::draw_slot`]. Slot-consuming
+/// kinds take the current slot and advance the counter; text and scissor
+/// commands record the slot the next geometry command will occupy.
+fn push_command(
+    commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
+    bounds: BoundingBox,
+    kind: RenderCommandKind,
+    element_idx: usize,
+) {
+    let draw_slot = counters.draw_slot;
+    if kind.consumes_draw_slot() {
+        counters.draw_slot += 1;
+    }
+    commands.push(RenderCommand {
+        bounds,
+        kind,
+        element_idx,
+        draw_slot,
+    });
+}
+
 #[derive(Clone, Copy)]
 struct PositionStackEntry {
     index:          usize,
@@ -98,29 +129,34 @@ fn emit_up_traversal_commands(
     tree: &LayoutTree,
     computed: &[ComputedLayout],
     commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
     element: &Element,
     bounds: BoundingBox,
     index: usize,
 ) {
     if let Some(ref border) = element.border {
-        commands.push(RenderCommand {
+        push_command(
+            commands,
+            counters,
             bounds,
-            kind: RenderCommandKind::Border { border: *border },
-            element_idx: index,
-        });
+            RenderCommandKind::Border { border: *border },
+            index,
+        );
 
         // Between-children borders.
         if border.between_children.value > 0.0 {
-            emit_between_borders(tree, computed, commands, index, border);
+            emit_between_borders(tree, computed, commands, counters, index, border);
         }
     }
 
     if matches!(element.overflow, ChildOverflow::Clipped) {
-        commands.push(RenderCommand {
+        push_command(
+            commands,
+            counters,
             bounds,
-            kind: RenderCommandKind::ScissorEnd,
-            element_idx: index,
-        });
+            RenderCommandKind::ScissorEnd,
+            index,
+        );
     }
 }
 
@@ -128,24 +164,26 @@ fn emit_up_traversal_commands(
 /// down-traversal (first visit) of the DFS positioning pass.
 fn emit_down_traversal_commands(
     commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
     element: &Element,
     wrapped: Option<&WrappedText>,
     bounds: BoundingBox,
     index: usize,
     font_scale: f32,
     inherited_clip: BoundingBox,
-    overlay_order: &mut usize,
 ) {
     // Emit rectangle if background is set.
     if let Some(color) = element.background {
-        commands.push(RenderCommand {
+        push_command(
+            commands,
+            counters,
             bounds,
-            kind: RenderCommandKind::Rectangle {
+            RenderCommandKind::Rectangle {
                 color,
                 source: RectangleSource::Background,
             },
-            element_idx: index,
-        });
+            index,
+        );
     }
 
     // Emit scissor start if clipping (always emit — scissor regions
@@ -154,21 +192,16 @@ fn emit_down_traversal_commands(
     // not into) the border. Padding is inside this region.
     if matches!(element.overflow, ChildOverflow::Clipped) {
         let clip_bounds = element_scissor_bounds(element, bounds);
-        commands.push(RenderCommand {
-            bounds:      clip_bounds,
-            kind:        RenderCommandKind::ScissorStart,
-            element_idx: index,
-        });
+        push_command(
+            commands,
+            counters,
+            clip_bounds,
+            RenderCommandKind::ScissorStart,
+            index,
+        );
     }
 
-    emit_line_commands(
-        commands,
-        element,
-        bounds,
-        index,
-        inherited_clip,
-        overlay_order,
-    );
+    emit_line_commands(commands, counters, element, bounds, index, inherited_clip);
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -177,29 +210,33 @@ fn emit_down_traversal_commands(
         ..
     } = element.content
     {
-        emit_text_commands(commands, wrapped, config, text, bounds, index, font_scale);
+        emit_text_commands(
+            commands, counters, wrapped, config, text, bounds, index, font_scale,
+        );
     }
 
     // Emit image render commands.
     if let ElementContent::Image { ref handle, tint } = element.content {
-        commands.push(RenderCommand {
+        push_command(
+            commands,
+            counters,
             bounds,
-            kind: RenderCommandKind::Image {
+            RenderCommandKind::Image {
                 handle: handle.clone(),
                 tint,
             },
-            element_idx: index,
-        });
+            index,
+        );
     }
 }
 
 fn emit_line_commands(
     commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
     element: &Element,
     bounds: BoundingBox,
     index: usize,
     inherited_clip: BoundingBox,
-    overlay_order: &mut usize,
 ) {
     let Some(panel_draw) = element.draw.as_ref() else {
         return;
@@ -212,14 +249,16 @@ fn emit_line_commands(
     let (clip_policy, paint_order) = match panel_draw.overflow_policy() {
         DrawOverflow::Clipped => (
             PanelLineClipPolicy::OwnerBounds,
+            // The slot the Lines command below will occupy, so lines layer on
+            // the same ordinal scale as the panel's other geometry.
             PanelLinePaintOrder::Normal {
-                command_index: source_command_index,
+                draw_slot: counters.draw_slot,
             },
         ),
         DrawOverflow::Visible => (
             PanelLineClipPolicy::Inherited,
             PanelLinePaintOrder::Overlay {
-                order: *overlay_order,
+                order: counters.overlay_order,
             },
         ),
     };
@@ -244,18 +283,21 @@ fn emit_line_commands(
         return;
     };
     if matches!(panel_draw.overflow_policy(), DrawOverflow::Visible) {
-        *overlay_order += 1;
+        counters.overlay_order += 1;
     }
-    commands.push(RenderCommand {
-        bounds:      command_bounds,
-        kind:        RenderCommandKind::Lines { lines },
-        element_idx: index,
-    });
+    push_command(
+        commands,
+        counters,
+        command_bounds,
+        RenderCommandKind::Lines { lines },
+        index,
+    );
 }
 
 /// Emits render commands for text content (both wrapped and unwrapped).
 fn emit_text_commands(
     commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
     wrapped: Option<&WrappedText>,
     config: &TextStyle,
     text: &str,
@@ -272,30 +314,34 @@ fn emit_text_commands(
         for (line_idx, line) in wrap_result.lines.iter().enumerate() {
             let line_y = wrap_result.line_height.mul_add(line_idx.to_f32(), bounds.y);
             let line_x = line_x_for_alignment(config.text_align(), bounds, line.width);
-            commands.push(RenderCommand {
-                bounds:      BoundingBox {
+            push_command(
+                commands,
+                counters,
+                BoundingBox {
                     x:      line_x,
                     y:      line_y,
                     width:  line.width,
                     height: wrap_result.line_height,
                 },
-                kind:        RenderCommandKind::Text {
+                RenderCommandKind::Text {
                     text:   line.text.clone(),
                     config: scaled_config.clone(),
                 },
-                element_idx: index,
-            });
+                index,
+            );
         }
     } else {
         // Unwrapped text (`TextWrap::None`): single command.
-        commands.push(RenderCommand {
+        push_command(
+            commands,
+            counters,
             bounds,
-            kind: RenderCommandKind::Text {
+            RenderCommandKind::Text {
                 text:   text.to_owned(),
                 config: scaled_config,
             },
-            element_idx: index,
-        });
+            index,
+        );
     }
 }
 
@@ -558,7 +604,7 @@ pub(super) fn position_and_render(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let mut overlay_order = 0;
+    let mut counters = EmissionCounters::default();
     let viewport_clip = BoundingBox {
         x:      0.0,
         y:      0.0,
@@ -586,20 +632,28 @@ pub(super) fn position_and_render(
         };
 
         if entry.visited {
-            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
+            emit_up_traversal_commands(
+                tree,
+                computed,
+                &mut commands,
+                &mut counters,
+                element,
+                bounds,
+                index,
+            );
         } else {
             // Store the final bounding box for render-side culling and clipping.
             computed[index].bounds = bounds;
 
             emit_down_traversal_commands(
                 &mut commands,
+                &mut counters,
                 element,
                 wrapped[index].as_ref(),
                 bounds,
                 index,
                 font_scale,
                 entry.inherited_clip,
-                &mut overlay_order,
             );
 
             let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
@@ -626,7 +680,7 @@ pub(super) fn render_commands_from_geometry(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let mut overlay_order = 0;
+    let mut counters = EmissionCounters::default();
     let viewport_clip = BoundingBox {
         x:      0.0,
         y:      0.0,
@@ -647,19 +701,27 @@ pub(super) fn render_commands_from_geometry(
         let bounds = computed[index].bounds;
 
         if entry.visited {
-            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
+            emit_up_traversal_commands(
+                tree,
+                computed,
+                &mut commands,
+                &mut counters,
+                element,
+                bounds,
+                index,
+            );
             continue;
         }
 
         emit_down_traversal_commands(
             &mut commands,
+            &mut counters,
             element,
             wrapped[index].as_ref(),
             bounds,
             index,
             font_scale,
             entry.inherited_clip,
-            &mut overlay_order,
         );
 
         let child_clip = child_inherited_clip(element, bounds, entry.inherited_clip);
@@ -687,6 +749,7 @@ fn emit_between_borders(
     tree: &LayoutTree,
     computed: &[ComputedLayout],
     commands: &mut Vec<RenderCommand>,
+    counters: &mut EmissionCounters,
     parent_idx: usize,
     border: &Border,
 ) {
@@ -709,36 +772,40 @@ fn emit_between_borders(
             let midpoint = (b_bounds.x - (a_bounds.x + a_bounds.width))
                 .mul_add(0.5, a_bounds.x + a_bounds.width);
             let line_x = border.between_children.value.mul_add(-0.5, midpoint);
-            commands.push(RenderCommand {
-                bounds:      BoundingBox {
+            push_command(
+                commands,
+                counters,
+                BoundingBox {
                     x:      line_x,
                     y:      parent_bounds.y + parent.padding.top.value,
                     width:  border.between_children.value,
                     height: parent_bounds.height - parent.padding.vertical(),
                 },
-                kind:        RenderCommandKind::Rectangle {
+                RenderCommandKind::Rectangle {
                     color:  border.color,
                     source: RectangleSource::BetweenChildrenBorder,
                 },
-                element_idx: parent_idx,
-            });
+                parent_idx,
+            );
         } else {
             let midpoint = (b_bounds.y - (a_bounds.y + a_bounds.height))
                 .mul_add(0.5, a_bounds.y + a_bounds.height);
             let line_y = border.between_children.value.mul_add(-0.5, midpoint);
-            commands.push(RenderCommand {
-                bounds:      BoundingBox {
+            push_command(
+                commands,
+                counters,
+                BoundingBox {
                     x:      parent_bounds.x + parent.padding.left.value,
                     y:      line_y,
                     width:  parent_bounds.width - parent.padding.horizontal(),
                     height: border.between_children.value,
                 },
-                kind:        RenderCommandKind::Rectangle {
+                RenderCommandKind::Rectangle {
                     color:  border.color,
                     source: RectangleSource::BetweenChildrenBorder,
                 },
-                element_idx: parent_idx,
-            });
+                parent_idx,
+            );
         }
     }
 }

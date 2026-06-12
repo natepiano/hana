@@ -113,8 +113,10 @@ pub struct PanelLinePrimitiveKey {
 pub enum PanelLinePaintOrder {
     /// Normal panel command order.
     Normal {
-        /// Command index used by backing/text-compatible depth lanes.
-        command_index: usize,
+        /// Geometry draw slot
+        /// ([`RenderCommand::draw_slot`](crate::layout::RenderCommand::draw_slot)) used by
+        /// backing/text-compatible depth lanes.
+        draw_slot: usize,
     },
     /// Overlay order for owner-overflow-visible lines.
     Overlay {
@@ -528,9 +530,9 @@ impl ResolvedPanelLinePrimitive {
 impl PanelLinePaintOrder {
     fn layering(self) -> PanelLineLayering {
         match self {
-            Self::Normal { command_index } => PanelLineLayering {
-                depth_bias:       command_index.to_f32() * NORMAL_DEPTH_BIAS_STEP,
-                oit_depth_offset: (command_index.to_f32() + 1.0) * NORMAL_OIT_DEPTH_STEP,
+            Self::Normal { draw_slot } => PanelLineLayering {
+                depth_bias:       draw_slot.to_f32() * NORMAL_DEPTH_BIAS_STEP,
+                oit_depth_offset: (draw_slot.to_f32() + 1.0) * NORMAL_OIT_DEPTH_STEP,
             },
             Self::Overlay { order } => PanelLineLayering {
                 depth_bias:       order
@@ -1344,7 +1346,7 @@ mod tests {
                     height: 100.0,
                 }),
                 PanelLineClipPolicy::OwnerBounds,
-                PanelLinePaintOrder::Normal { command_index: 3 },
+                PanelLinePaintOrder::Normal { draw_slot: 3 },
                 3,
                 PanelLineSourceKey::element(1, 0, 0),
             ),
@@ -1449,7 +1451,7 @@ mod tests {
                 height: 200.0,
             }),
             PanelLineClipPolicy::OwnerBounds,
-            PanelLinePaintOrder::Normal { command_index: 0 },
+            PanelLinePaintOrder::Normal { draw_slot: 0 },
             0,
             PanelLineSourceKey::element(1, 0, 0),
         )

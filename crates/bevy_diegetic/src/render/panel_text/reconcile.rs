@@ -46,7 +46,7 @@ struct ReusableChild<'a> {
 }
 
 /// One text render command resolved to its reconcile inputs: source
-/// `(element_idx, command_index)`, run `id`, per-run `line_index`, the string,
+/// `(element_idx, draw_slot)`, run `id`, per-run `line_index`, the string,
 /// its style, layout bounds, and the effective clip rect.
 type PendingTextChild = (
     usize,
@@ -89,7 +89,7 @@ fn collect_text_commands(
                 *counter += 1;
                 Some((
                     cmd.element_idx,
-                    cmd_index,
+                    cmd.draw_slot,
                     id,
                     line_index,
                     text.clone(),
@@ -177,7 +177,7 @@ pub(super) fn reconcile_panel_text_children(
 
         let mut visited_keys: Vec<(PanelFieldId, usize)> = Vec::new();
         let mut text_index: HashMap<PanelFieldId, Entity> = HashMap::new();
-        for (element_idx, cmd_index, id, line_index, text, config, bounds, clip) in &text_commands {
+        for (element_idx, draw_slot, id, line_index, text, config, bounds, clip) in &text_commands {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
             // `with_lighting` / `with_sidedness` / `with_draw_layer`) are
             // captured before `for_shaping()` clears them, then inserted as
@@ -192,7 +192,7 @@ pub(super) fn reconcile_panel_text_children(
                 id: id.clone(),
                 line_index: *line_index,
                 element_idx: *element_idx,
-                command_index: *cmd_index,
+                draw_slot: *draw_slot,
                 bounds: *bounds,
                 scale_x,
                 scale_y,
@@ -418,22 +418,23 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
 /// Marker plus cached reconcile inputs for an image child entity.
 ///
 /// `reconcile_panel_image_children` compares the incoming `handle` / `tint` /
-/// `bounds` / `command_index` against these cached values to decide whether to
+/// `bounds` / `draw_slot` against these cached values to decide whether to
 /// skip the child, mutate its tint in place, or rebuild its mesh and material.
 #[derive(Component, Clone, Debug)]
 pub(super) struct PanelImageChild {
     /// Index of the source element in the layout tree (the reuse key).
-    pub element_idx:   usize,
-    /// Render-command slot the material's `depth_bias` derives from. A sibling
-    /// insert/remove shifts this without changing the visual inputs, so it is
-    /// gated like the rest to keep image layering correct under reorder.
-    pub command_index: usize,
+    pub element_idx: usize,
+    /// Geometry draw slot the material's `depth_bias` derives from. A sibling
+    /// geometry insert/remove shifts this without changing the visual inputs,
+    /// so it is gated like the rest to keep image layering correct under
+    /// reorder.
+    pub draw_slot:   usize,
     /// Image asset handle from the most recent build.
-    pub handle:        Handle<Image>,
+    pub handle:      Handle<Image>,
     /// Tint color from the most recent build.
-    pub tint:          Color,
+    pub tint:        Color,
     /// Layout bounds from the most recent build.
-    pub bounds:        BoundingBox,
+    pub bounds:      BoundingBox,
 }
 
 /// A reused image child plus the material handle reconcile mutates for a
@@ -493,11 +494,11 @@ pub(super) fn reconcile_panel_image_children(
                 RenderCommandKind::Image { handle, tint } => {
                     clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
                     Some(PanelImageChild {
-                        element_idx:   cmd.element_idx,
-                        command_index: cmd_index,
-                        handle:        handle.clone(),
-                        tint:          *tint,
-                        bounds:        cmd.bounds,
+                        element_idx: cmd.element_idx,
+                        draw_slot:   cmd.draw_slot,
+                        handle:      handle.clone(),
+                        tint:        *tint,
+                        bounds:      cmd.bounds,
                     })
                 },
                 _ => None,
@@ -576,7 +577,7 @@ struct ImageGeometry {
 /// Image tint has no cascade, so this comparison is the only no-op suppressor.
 /// Because `materials.get_mut` marks the asset modified on access, the tint
 /// branch is reached only when the cached tint actually differs (R5/F8). A
-/// `command_index` move rebuilds the material because `depth_bias` lives there.
+/// `draw_slot` move rebuilds the material because `depth_bias` lives there.
 fn reconcile_existing_image(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -588,7 +589,7 @@ fn reconcile_existing_image(
 ) {
     let cached = reusable.cached;
     let visuals_unchanged = cached.handle == incoming.handle
-        && cached.command_index == incoming.command_index
+        && cached.draw_slot == incoming.draw_slot
         && bounds_bits(&cached.bounds) == bounds_bits(&incoming.bounds);
 
     if visuals_unchanged {
@@ -642,7 +643,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: DrawOrdinal::from_command_index(incoming.command_index).depth_bias(),
+        depth_bias: DrawOrdinal::from_draw_slot(incoming.draw_slot).depth_bias(),
         ..default()
     });
 
@@ -886,21 +887,21 @@ mod tests {
         let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
             .map(|line| {
                 let panel_text_child = PanelTextLayout {
-                    id:            id.clone(),
-                    line_index:    line,
-                    element_idx:   7,
-                    command_index: line,
-                    bounds:        BoundingBox {
+                    id:          id.clone(),
+                    line_index:  line,
+                    element_idx: 7,
+                    draw_slot:   line,
+                    bounds:      BoundingBox {
                         x:      0.0,
                         y:      line.to_f32() * 10.0,
                         width:  100.0,
                         height: 10.0,
                     },
-                    scale_x:       1.0,
-                    scale_y:       1.0,
-                    anchor_x:      0.0,
-                    anchor_y:      0.0,
-                    clip_rect:     None,
+                    scale_x:     1.0,
+                    scale_y:     1.0,
+                    anchor_x:    0.0,
+                    anchor_y:    0.0,
+                    clip_rect:   None,
                 };
                 (
                     Entity::from_raw_u32(line.try_into().expect("small")).expect("valid"),
@@ -1303,7 +1304,7 @@ mod tests {
 
     /// A single image leaf sized in panel units; `with_background` toggles the
     /// element's background, which prepends a rectangle command and shifts the
-    /// image's `command_index` without changing its `element_idx`.
+    /// image's `draw_slot` without changing its `element_idx`.
     fn one_image_tree(handle: Handle<Image>, tint: Color, with_background: bool) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         let mut element = El::new().size(10.0, 10.0);
@@ -1460,10 +1461,10 @@ mod tests {
     }
 
     #[test]
-    fn command_index_shift_rebuilds_material_so_depth_bias_stays_correct() {
+    fn draw_slot_shift_rebuilds_material_so_depth_bias_stays_correct() {
         let mut app = image_reconcile_app();
         let handle = Handle::<Image>::default();
-        // No background: the image is the first render command (command_index 0).
+        // No background: the image is the first geometry command (draw_slot 0).
         let panel = spawn_image_panel(
             &mut app,
             one_image_tree(handle.clone(), Color::WHITE, false),
@@ -1474,11 +1475,11 @@ mod tests {
         assert_eq!(
             material_depth_bias(&app, &material_before).to_bits(),
             0.0_f32.to_bits(),
-            "the lone image sits at command_index 0"
+            "the lone image sits at draw_slot 0"
         );
 
         // Adding a background to the element prepends a rectangle command,
-        // shifting the image to command_index 1 while its element_idx is stable.
+        // shifting the image to draw_slot 1 while its element_idx is stable.
         app.world_mut()
             .commands()
             .set_tree(panel, one_image_tree(handle, Color::WHITE, true));
@@ -1487,12 +1488,12 @@ mod tests {
         let (_, material_after) = single_image_child(&mut app);
         assert_ne!(
             material_before, material_after,
-            "a command_index shift rebuilds the material (a new asset)"
+            "a draw_slot shift rebuilds the material (a new asset)"
         );
         assert_eq!(
             material_depth_bias(&app, &material_after).to_bits(),
             LAYER_DEPTH_BIAS.to_bits(),
-            "the rebuilt material picks up the shifted command_index's depth bias"
+            "the rebuilt material picks up the shifted draw slot's depth bias"
         );
     }
 }
