@@ -6,7 +6,6 @@ use super::AttachedTo;
 use super::Cable;
 use super::CableEnd;
 use super::CableEndpoint;
-use super::endpoint::ResolvedEndpointPosition;
 use crate::routing::CableGeometry;
 use crate::routing::MIN_SEGMENT_LENGTH;
 use crate::routing::RouteRequest;
@@ -25,6 +24,10 @@ pub(crate) enum CableSystems {
 pub(super) struct DirtyCables(pub(super) EntityHashSet);
 
 pub(super) struct ComputePlugin;
+
+/// Last world-space position resolved for an endpoint while it was attached.
+#[derive(Component, Clone, Copy)]
+pub(super) struct ResolvedEndpointPosition(pub(super) Vec3);
 
 impl Plugin for ComputePlugin {
     fn build(&self, app: &mut App) {

@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use super::Cable;
 use super::ComputedCableGeometry;
 use super::compute::DirtyCables;
+use super::compute::ResolvedEndpointPosition;
 use super::constants::ALIGNMENT_FEEDBACK_GUARD;
 use crate::mesh::CapStyle;
 use crate::routing::CurveKind;
@@ -131,10 +132,6 @@ pub struct AttachedTo(pub Entity);
 #[derive(Component)]
 #[relationship_target(relationship = AttachedTo)]
 pub struct AttachedEndpoints(Vec<Entity>);
-
-/// Last world-space position resolved for an endpoint while it was attached.
-#[derive(Component, Clone, Copy)]
-pub(super) struct ResolvedEndpointPosition(pub(super) Vec3);
 
 /// Align the [`AttachedTo`] target of each [`CableEndpoint`] to the cable's tangent
 /// per the endpoint's [`EndpointAlignment`].
