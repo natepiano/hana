@@ -143,7 +143,7 @@ pub(crate) fn outline_pass(
             global_depth,
             view_target,
             view_depth_texture,
-            hdr: camera.hdr,
+            dynamic_range: DynamicRange::from(camera.hdr),
             msaa: *msaa,
         },
         flood_settings,
@@ -291,7 +291,7 @@ struct JumpFloodCompositeContext<'a> {
     global_depth:       &'a ColorAttachment,
     view_target:        &'a ViewTarget,
     view_depth_texture: &'a ViewDepthTexture,
-    hdr:                bool,
+    dynamic_range:      DynamicRange,
     msaa:               Msaa,
 }
 
@@ -308,7 +308,7 @@ fn run_jump_flood_composite(
         global_depth,
         view_target,
         view_depth_texture,
-        hdr,
+        dynamic_range,
         msaa,
     } = jump_flood_composite_context;
     let Some(active) = world.get_resource::<ActiveOutlineModes>() else {
@@ -325,7 +325,6 @@ fn run_jump_flood_composite(
     let pipeline_cache = world.resource::<PipelineCache>();
 
     let sample_mode = SampleMode::from(msaa);
-    let dynamic_range = DynamicRange::from(hdr);
     let variant = ComposeVariant::new(sample_mode, dynamic_range);
     let pipeline_id = compose_pipeline.pipeline_id(variant);
 
