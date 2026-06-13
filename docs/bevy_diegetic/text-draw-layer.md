@@ -13,8 +13,17 @@ integration branch). Pauses the anchor-to-panel example work (Phase
 Naming: after Phase 5 the `text` prefix was dropped from the attribute,
 its default constant, and the cascade verbs — now `DrawLayer`,
 `DEFAULT_DRAW_LAYER`, `override_draw_layer` / `inherit_draw_layer` /
-`resolved_draw_layer`. Historical sections below keep the names as
-originally written.
+`resolved_draw_layer`. A later commit (`485b174`) applied the same cleanup
+to the sibling attributes once panel lines began consuming them: the
+`TextLighting` / `TextSidedness` cascade newtypes and the `VisualLighting` /
+`VisualSidedness` batch-key types were removed, so the cascade attribute is
+now the bare enum (`Lighting` / `Sidedness` / `AntiAlias`), resolved via
+`Resolved<Lighting>` etc. (value is `.0`, no longer `.0.0`), and the verbs
+lost the prefix (`override_lighting` / `inherit_lighting` /
+`resolved_lighting`, likewise for sidedness and anti-alias;
+`sync_text_anti_alias` → `sync_anti_alias`). `TextAlpha` keeps its prefix —
+alpha applies to glyph runs only. Historical sections below keep the names
+as originally written.
 
 ## Intent
 
