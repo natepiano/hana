@@ -17,12 +17,6 @@
 //! - H: Home -zoom to fit entire scene
 //! - R: Reset detach demo (section 6)
 
-use bevy::picking::mesh_picking::MeshPickingPlugin;
-use bevy::prelude::*;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_catenary::CatenaryPlugin;
-use bevy_lagrange::LagrangePlugin;
-
 mod animation;
 mod connector;
 mod constants;
@@ -35,6 +29,11 @@ mod sections;
 mod ui;
 
 use animation::LightAnimation;
+use bevy::picking::mesh_picking::MeshPickingPlugin;
+use bevy::prelude::*;
+use bevy_brp_extras::BrpExtrasPlugin;
+use bevy_catenary::CatenaryPlugin;
+use bevy_lagrange::LagrangePlugin;
 use constants::CATENARY_SECTION_INDEX;
 use constants::PLAYGROUND_WINDOW_TITLE;
 use sections::CurrentSection;
