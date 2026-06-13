@@ -51,17 +51,17 @@ impl SavedWindowMode {
     /// Convert to Bevy's `WindowMode` with the given monitor index.
     #[must_use]
     pub(crate) const fn to_window_mode(&self, monitor_index: usize) -> WindowMode {
-        let selection = MonitorSelection::Index(monitor_index);
+        let monitor_selection = MonitorSelection::Index(monitor_index);
         match self {
             Self::Windowed => WindowMode::Windowed,
-            Self::BorderlessFullscreen => WindowMode::BorderlessFullscreen(selection),
+            Self::BorderlessFullscreen => WindowMode::BorderlessFullscreen(monitor_selection),
             Self::Fullscreen { video_mode: None } => {
-                WindowMode::Fullscreen(selection, VideoModeSelection::Current)
+                WindowMode::Fullscreen(monitor_selection, VideoModeSelection::Current)
             },
             Self::Fullscreen {
                 video_mode: Some(saved),
             } => WindowMode::Fullscreen(
-                selection,
+                monitor_selection,
                 VideoModeSelection::Specific(saved.to_video_mode()),
             ),
         }

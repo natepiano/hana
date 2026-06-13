@@ -86,7 +86,7 @@ pub(crate) struct X11FrameTop(i32);
 pub(crate) fn reapply_compensated_position(
     mut windows: Query<(&TargetPosition, &X11FrameTop, &mut Window)>,
 ) {
-    for (target_position, frame_top, mut window) in &mut windows {
+    for (target_position, physical_frame_top, mut window) in &mut windows {
         if target_position.settle_state.is_none() {
             continue;
         }
@@ -102,8 +102,10 @@ pub(crate) fn reapply_compensated_position(
         let WindowPosition::At(physical_actual) = window.position else {
             continue;
         };
-        let physical_expected =
-            IVec2::new(physical_compensated.x, physical_compensated.y + frame_top.0);
+        let physical_expected = IVec2::new(
+            physical_compensated.x,
+            physical_compensated.y + physical_frame_top.0,
+        );
         if physical_actual != physical_expected {
             debug!(
                 "[W6] Re-applying compensated position {physical_compensated:?}: \
