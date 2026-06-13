@@ -21,6 +21,7 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
+use bevy_diegetic::PanelChanged;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
@@ -50,6 +51,9 @@ use crate::screen_panels;
 pub(crate) struct CameraGuidancePanel {
     bound_camera: Option<Entity>,
 }
+
+#[derive(Component)]
+struct CameraGuidanceRevealPending;
 
 /// Inner background color for the camera control panel. Defaults to the
 /// crate's `INNER_BACKGROUND` constant; override via
@@ -100,13 +104,18 @@ fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackgro
 
     match panel {
         Ok(panel) => {
-            commands.spawn((
-                CameraGuidancePanel { bound_camera: None },
-                snapshot,
-                CameraGuidanceDisplayState::from_display(display),
-                panel,
-                Transform::default(),
-            ));
+            commands
+                .spawn((
+                    CameraGuidancePanel { bound_camera: None },
+                    snapshot,
+                    CameraGuidanceDisplayState::from_display(display),
+                    panel,
+                    Transform::default(),
+                ))
+                .observe(
+                    reveal_panel_after_rebuild
+                        .run_if(any_with_component::<CameraGuidanceRevealPending>),
+                );
         },
         Err(error) => {
             error!("fairy_dust: failed to build camera control panel: {error}");
@@ -258,4 +267,11 @@ fn repaint_panel_display(
         build_guidance_tree(snapshot, display.display(), background.0),
     );
     display.render_state = RenderState::Idle;
+}
+
+fn reveal_panel_after_rebuild(event: On<PanelChanged>, mut commands: Commands) {
+    commands
+        .entity(event.entity)
+        .insert(Visibility::Inherited)
+        .remove::<CameraGuidanceRevealPending>();
 }

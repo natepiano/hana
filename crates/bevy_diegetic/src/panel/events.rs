@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use super::constants::PANEL_RESIZE_EPSILON;
 use super::diegetic_panel::ComputedDiegeticPanel;
 use super::diegetic_panel::DiegeticPanel;
+use crate::layout::LayoutTreeChange;
 
 /// Final panel dimensions for the current layout pass.
 ///
@@ -56,6 +57,45 @@ pub struct PanelDimensionsChanged {
     pub previous:   Option<PanelDimensions>,
 }
 
+/// Fired on a [`DiegeticPanel`] entity when its retained panel output changes.
+///
+/// This is broader than [`PanelDimensionsChanged`]: visual-only edits refresh
+/// render commands without changing measured dimensions, and layout-affecting
+/// edits may solve to the same dimensions.
+#[derive(EntityEvent, Clone, Copy, Debug)]
+pub struct PanelChanged {
+    /// The panel entity whose retained output changed.
+    pub entity: Entity,
+    /// The kind of retained output change that occurred.
+    pub kind:   PanelChangeKind,
+}
+
+/// Why a [`PanelChanged`] event fired.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PanelChangeKind {
+    /// The panel produced its first retained output.
+    Initial,
+    /// The panel refreshed render commands without running a full layout solve.
+    VisualOnly,
+    /// The panel ran a full layout solve.
+    LayoutAffecting,
+}
+
+impl PanelChangeKind {
+    pub(crate) const fn from_layout_change(
+        change: Option<LayoutTreeChange>,
+        had_result: bool,
+    ) -> Self {
+        if !had_result {
+            return Self::Initial;
+        }
+        match change {
+            Some(LayoutTreeChange::VisualOnly) => Self::VisualOnly,
+            _ => Self::LayoutAffecting,
+        }
+    }
+}
+
 /// Last panel dimensions emitted through [`PanelDimensionsChanged`].
 #[derive(Component, Default)]
 pub(crate) struct LastPanelDimensions {
@@ -99,5 +139,18 @@ pub(crate) fn trigger_panel_dimensions_changed(
             entity: current_entity,
             dimensions,
             previous,
+        });
+}
+
+pub(crate) fn trigger_panel_changed(
+    commands: &mut Commands,
+    entity: Entity,
+    kind: PanelChangeKind,
+) {
+    commands
+        .entity(entity)
+        .trigger(move |current_entity| PanelChanged {
+            entity: current_entity,
+            kind,
         });
 }

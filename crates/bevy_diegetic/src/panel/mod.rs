@@ -48,6 +48,8 @@ pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
 pub(crate) use events::LastPanelDimensions;
+pub use events::PanelChangeKind;
+pub use events::PanelChanged;
 pub use events::PanelDimensions;
 pub use events::PanelDimensionsChanged;
 pub(crate) use events::trigger_panel_dimensions_changed;

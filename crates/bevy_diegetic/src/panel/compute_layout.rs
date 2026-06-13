@@ -15,6 +15,7 @@ use super::diegetic_panel::DiegeticPanelChangeClassification;
 use super::diegetic_panel::ScaledLayoutTreeCache;
 use super::events;
 use super::events::LastPanelDimensions;
+use super::events::PanelChangeKind;
 use super::field;
 use super::perf::DiegeticPerfStats;
 use crate::cascade::CascadeDefaults;
@@ -45,6 +46,7 @@ pub(super) fn compute_panel_layouts(
         &mut ScaledLayoutTreeCache,
     )>,
     mut computed_panels: Query<&mut ComputedDiegeticPanel>,
+    mut commands: Commands,
     panel_font_units: Query<&Resolved<FontUnit>>,
     measurer: Res<DiegeticTextMeasurer>,
     cache: Res<ShapedTextCache>,
@@ -96,6 +98,7 @@ pub(super) fn compute_panel_layouts(
         {
             continue;
         }
+        let had_result = computed.result().is_some();
 
         let scaled_tree = scaled_tree_cache.get_or_update(
             panel_ref.tree(),
@@ -125,6 +128,7 @@ pub(super) fn compute_panel_layouts(
             && let Some(result) = computed.result_mut()
         {
             result.regenerate_commands(scaled_tree);
+            events::trigger_panel_changed(&mut commands, entity, PanelChangeKind::VisualOnly);
             panel_count += 1;
             continue;
         }
@@ -133,6 +137,11 @@ pub(super) fn compute_panel_layouts(
         let result = engine.compute(scaled_tree, viewport_width, viewport_height, 1.0);
 
         commit_layout_result(&mut computed, &panel_ref, scaled_tree, result, entity);
+        events::trigger_panel_changed(
+            &mut commands,
+            entity,
+            PanelChangeKind::from_layout_change(pending_change, had_result),
+        );
         panel_count += 1;
     }
 
@@ -290,6 +299,8 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::panel::PanelChangeKind;
+    use crate::panel::PanelChanged;
     use crate::panel::PanelDimensionsChanged;
     use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
     use crate::screen_space::ScreenSpacePlugin;
@@ -358,10 +369,17 @@ mod tests {
     #[derive(Resource, Default)]
     struct DimensionEventLog(Vec<PanelDimensionsChanged>);
 
+    #[derive(Resource, Default)]
+    struct PanelChangeEventLog(Vec<PanelChanged>);
+
     fn record_dimension_event(
         event: On<PanelDimensionsChanged>,
         mut log: ResMut<DimensionEventLog>,
     ) {
+        log.0.push(*event.event());
+    }
+
+    fn record_panel_changed_event(event: On<PanelChanged>, mut log: ResMut<PanelChangeEventLog>) {
         log.0.push(*event.event());
     }
 
@@ -460,6 +478,49 @@ mod tests {
             .get::<DiegeticPanel>(entity)
             .expect("panel should exist");
         assert_eq!(panel.tree_revision(), 1);
+    }
+
+    #[test]
+    fn visual_only_tree_change_fires_panel_changed_but_not_dimensions_changed() {
+        let mut app = make_app();
+        app.init_resource::<PanelChangeEventLog>();
+        app.init_resource::<DimensionEventLog>();
+        app.add_observer(record_panel_changed_event);
+        app.add_observer(record_dimension_event);
+
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(colored_text_tree("Hello", Color::WHITE))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        app.update();
+        app.world_mut()
+            .resource_mut::<PanelChangeEventLog>()
+            .0
+            .clear();
+        app.world_mut()
+            .resource_mut::<DimensionEventLog>()
+            .0
+            .clear();
+
+        app.world_mut()
+            .commands()
+            .set_tree(entity, colored_text_tree("Hello", Color::BLACK));
+        app.update();
+
+        let panel_change_events = &app.world().resource::<PanelChangeEventLog>().0;
+        assert_eq!(panel_change_events.len(), 1);
+        assert_eq!(panel_change_events[0].entity, entity);
+        assert_eq!(panel_change_events[0].kind, PanelChangeKind::VisualOnly);
+        assert!(
+            app.world().resource::<DimensionEventLog>().0.is_empty(),
+            "color-only edits refresh computed output without changing dimensions",
+        );
     }
 
     #[test]

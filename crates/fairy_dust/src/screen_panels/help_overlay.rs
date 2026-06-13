@@ -48,7 +48,7 @@ const HOME_AABB_LABEL: &str = "Show bounding box for camera home AnimateToFit";
 const SCREEN_PANEL_KEYS: &str = "ctrl-shift-L";
 const SCREEN_PANEL_LABEL: &str = "Toggle screen space panels off/on";
 const CAMERA_PRESET_KEYS: &str = "shift-C";
-const CAMERA_PRESET_LABEL: &str = "Cycle through camera presets";
+const CAMERA_PRESET_LABEL: &str = "Cycle camera presets and panel off";
 
 /// Always-active context holding the Shift+/ toggle.
 #[derive(Component)]
