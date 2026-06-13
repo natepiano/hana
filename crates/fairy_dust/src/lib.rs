@@ -50,6 +50,7 @@ mod screen_panels;
 mod screen_space_lights;
 mod shortcuts;
 mod transparency;
+mod unclamp;
 
 use std::marker::PhantomData;
 

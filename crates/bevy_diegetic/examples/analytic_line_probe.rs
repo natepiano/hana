@@ -49,17 +49,9 @@ fn main() {
         .with_save_window_position()
         .with_studio_lighting()
         //   .with_ground_plane()
-        .with_orbit_cam_preset(
-            |cam| {
-                // Millimeter-scale strokes need unrestricted inspection:
-                // clear every example clamp.
-                cam.zoom_lower_limit = 0.000_000_001;
-                cam.zoom_upper_limit = None;
-                cam.pitch_upper_limit = None;
-                cam.pitch_lower_limit = None;
-            },
-            OrbitCamPreset::BlenderLike,
-        )
+        // Millimeter-scale strokes need unrestricted inspection.
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .unclamped()
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)

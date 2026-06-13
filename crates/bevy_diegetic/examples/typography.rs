@@ -12,6 +12,7 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
+use bevy_diegetic::AntiAlias;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
@@ -37,6 +38,8 @@ use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
 
 const DISPLAY_SIZE: f32 = 0.48;
 const DISPLAY_Y: f32 = 0.5;
@@ -96,6 +99,22 @@ const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
     ("6", "Liberation Serif", KeyCode::Digit6),
     ("7", "Noto Sans CJK SC", KeyCode::Digit7),
 ];
+
+/// Anti-alias cycle: (chip id, segment label, mode). `A` steps through them.
+const AA_MODES: [(&str, &str, AntiAlias); 4] = [
+    ("aa-off", "Off", AntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", AntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", AntiAlias::Supersample),
+    ("aa-both", "Both", AntiAlias::Both),
+];
+
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
 const CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH: &str = "fonts/CrimsonText-Regular.ttf";
 const EB_GARAMOND_REGULAR_FONT_ASSET_PATH: &str = "fonts/EBGaramond-Regular.ttf";
 const LIBERATION_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSans-Regular.ttf";
@@ -203,6 +222,7 @@ fn main() {
         )
         .color(GROUND_COLOR)
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .unclamped()
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)
@@ -218,6 +238,18 @@ fn main() {
         .wire_chip_to_state::<CycleState, _>("←/→ Cycle Word", |state| match state {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .with_camera_control_panel()
         .insert_resource(WordCycle {
@@ -238,6 +270,7 @@ fn main() {
         // T and the font digits run through Fairy Dust's shortcut binding,
         // which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyT, toggle_overlay)
+        .with_shortcut(KeyCode::KeyA, cycle_anti_alias)
         .with_shortcut(KeyCode::Digit1, request_font_1)
         .with_shortcut(KeyCode::Digit2, request_font_2)
         .with_shortcut(KeyCode::Digit3, request_font_3)
@@ -254,6 +287,10 @@ fn title_bar() -> TitleBar {
     TitleBar::new()
         .control("T Overlay")
         .control("←/→ Cycle Word")
+        .control(TitleBarControl::segmented(
+            "A",
+            AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+        ))
 }
 
 fn setup(
@@ -574,6 +611,15 @@ fn toggle_overlay(
         }
         *overlay_state = OverlayState::Off;
     }
+}
+
+/// `A` — steps the global anti-alias mode through [`AA_MODES`].
+fn cycle_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
+    let current = AA_MODES
+        .iter()
+        .position(|(_, _, mode)| *mode == *anti_alias)
+        .unwrap_or(0);
+    *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
 fn cycle_word(

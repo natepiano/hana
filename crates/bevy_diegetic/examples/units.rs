@@ -349,12 +349,8 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_PLANE_SIZE)
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.zoom_lower_limit = 0.000_000_1;
-            },
-            OrbitCamPreset::BlenderLike,
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .unclamped()
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)

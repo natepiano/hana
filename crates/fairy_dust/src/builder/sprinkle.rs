@@ -41,6 +41,7 @@ use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::shortcuts;
 use crate::transparency;
+use crate::unclamp;
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
@@ -446,6 +447,17 @@ impl SprinkleBuilder<WithOrbitCam> {
     #[must_use]
     pub fn with_stable_transparency(mut self) -> Self {
         transparency::install(&mut self.app);
+        self
+    }
+
+    /// Clear the example-default pitch and zoom limits on the spawned
+    /// `OrbitCam`: `pitch_upper_limit`/`pitch_lower_limit`/`zoom_upper_limit`
+    /// become `None` and `zoom_lower_limit` drops to a tiny positive floor.
+    /// Use to inspect geometry from steep angles or at extreme zoom. Overrides
+    /// limits set in the camera `configure` closure.
+    #[must_use]
+    pub fn unclamped(mut self) -> Self {
+        unclamp::install(&mut self.app);
         self
     }
 }
