@@ -82,15 +82,13 @@ pub use cascade::CascadeSet;
 pub use cascade::DrawLayer;
 pub use cascade::FontUnit;
 pub use cascade::TextAlpha;
-pub use cascade::TextLighting;
-pub use cascade::TextSidedness;
+pub use cascade::resolved_anti_alias;
 pub use cascade::resolved_draw_layer;
 pub use cascade::resolved_font_unit;
 pub use cascade::resolved_hairline_fade;
+pub use cascade::resolved_lighting;
+pub use cascade::resolved_sidedness;
 pub use cascade::resolved_text_alpha;
-pub use cascade::resolved_text_anti_alias;
-pub use cascade::resolved_text_lighting;
-pub use cascade::resolved_text_sidedness;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -159,16 +157,15 @@ pub use layout::FontFeatureFlags;
 pub use layout::FontFeatures;
 pub use layout::FontSlant;
 pub use layout::FontWeight;
-pub use layout::GlyphLighting;
 pub use layout::GlyphRenderMode;
 pub use layout::GlyphShadowMode;
-pub use layout::GlyphSidedness;
 pub use layout::HasUnit;
 pub use layout::In;
 pub use layout::InvalidPanelScalar;
 pub use layout::InvalidSize;
 pub use layout::LayoutBuilder;
 pub use layout::LayoutTree;
+pub use layout::Lighting;
 pub use layout::LineStyle;
 /// Function signature for custom text measurement. Takes a text string and
 /// a [`TextMeasure`] describing the font configuration, returns
@@ -193,6 +190,7 @@ pub use layout::Pt;
 pub use layout::Px;
 pub use layout::ResolvedPanelLine;
 pub use layout::ResolvedPanelLinePrimitive;
+pub use layout::Sidedness;
 pub use layout::Sizing;
 pub use layout::TextAlign;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].

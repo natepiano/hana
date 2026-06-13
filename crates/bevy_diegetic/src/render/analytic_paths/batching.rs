@@ -29,9 +29,9 @@ use bevy_kana::ToUsize;
 use super::material::TextMaterial;
 use super::packing::GlyphInstanceRecord;
 use super::packing::RunRecord;
-use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
 use crate::render::BatchRenderLayers;
@@ -49,10 +49,10 @@ pub(crate) struct BatchKey {
     pub base_material: BaseMaterialId,
     /// Resolved `TextAlpha` cascade value.
     pub alpha:         BatchAlphaMode,
-    /// Resolved `TextLighting` cascade value.
-    pub lighting:      GlyphLighting,
-    /// Resolved `TextSidedness` cascade value.
-    pub sidedness:     GlyphSidedness,
+    /// Resolved `Lighting` cascade value.
+    pub lighting:      Lighting,
+    /// Resolved `Sidedness` cascade value.
+    pub sidedness:     Sidedness,
     /// Resolved `DrawLayer` cascade value, unwrapped to its inner `i8` at
     /// this boundary — the attribute type derives no `Hash` (mirrors the
     /// `TextAlpha` → [`BatchAlphaMode`] re-encoding).
@@ -425,8 +425,8 @@ mod tests {
         BatchKey {
             base_material: id,
             alpha:         alpha.into(),
-            lighting:      GlyphLighting::Lit,
-            sidedness:     GlyphSidedness::DoubleSided,
+            lighting:      Lighting::Lit,
+            sidedness:     Sidedness::DoubleSided,
             layer:         DEFAULT_DRAW_LAYER,
             shadow:        GlyphShadowMode::Cast,
             layers:        BatchRenderLayers(RenderLayers::layer(0)),

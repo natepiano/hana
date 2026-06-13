@@ -5,20 +5,20 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::DrawLayer;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
-use crate::cascade::TextLighting;
-use crate::cascade::TextSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::render::AntiAlias;
 use crate::render::world_text::TextContent;
 
 /// Spawn-time cascade seed for a panel label's glyph attributes.
 ///
 /// Fires when a label first gains [`TextContent`] and seeds its
-/// `Resolved<TextLighting>` / `Resolved<TextSidedness>` /
+/// `Resolved<Lighting>` / `Resolved<Sidedness>` /
 /// `Resolved<DrawLayer>` / `Resolved<AntiAlias>` via
 /// [`resolve_walk`](cascade::resolve_walk). The walk honors the label's own
 /// override first — `reconcile_panel_text_children` inserts one when the label
 /// authored `TextStyle::with_lighting` / `with_sidedness` /
-/// `with_draw_layer`, and `override_text_anti_alias` authors anti-alias state
+/// `with_draw_layer`, and `override_anti_alias` authors anti-alias state
 /// — then climbs `ChildOf` to the panel's override (seeded by
 /// `seed_panel_overrides` for screen panels and unlit-material panels), else
 /// the global default (`Lit` / `DoubleSided` / the default draw layer /
@@ -28,25 +28,25 @@ use crate::render::world_text::TextContent;
 /// glyph-render twin of `seed_panel_child_alpha`.
 pub(super) fn seed_panel_text_child_glyph(
     trigger: On<Add, TextContent>,
-    lighting_overrides: Query<&Override<TextLighting>>,
-    sidedness_overrides: Query<&Override<TextSidedness>>,
+    lighting_overrides: Query<&Override<Lighting>>,
+    sidedness_overrides: Query<&Override<Sidedness>>,
     draw_layer_overrides: Query<&Override<DrawLayer>>,
     anti_alias_overrides: Query<&Override<AntiAlias>>,
     parents: Query<&ChildOf>,
-    lighting_default: Res<CascadeDefault<TextLighting>>,
-    sidedness_default: Res<CascadeDefault<TextSidedness>>,
+    lighting_default: Res<CascadeDefault<Lighting>>,
+    sidedness_default: Res<CascadeDefault<Sidedness>>,
     draw_layer_default: Res<CascadeDefault<DrawLayer>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
-    let lighting = cascade::resolve_walk::<TextLighting>(
+    let lighting = cascade::resolve_walk::<Lighting>(
         entity,
         &lighting_overrides,
         &parents,
         lighting_default.0,
     );
-    let sidedness = cascade::resolve_walk::<TextSidedness>(
+    let sidedness = cascade::resolve_walk::<Sidedness>(
         entity,
         &sidedness_overrides,
         &parents,
@@ -111,8 +111,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .insert_resource(measurer())
             .add_plugins(HeadlessLayoutPlugin)
-            .add_plugins(CascadePlugin::<TextLighting>::default())
-            .add_plugins(CascadePlugin::<TextSidedness>::default())
+            .add_plugins(CascadePlugin::<Lighting>::default())
+            .add_plugins(CascadePlugin::<Sidedness>::default())
             .add_plugins(CascadePlugin::<DrawLayer>::default())
             .add_observer(seed_panel_text_child_glyph)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);

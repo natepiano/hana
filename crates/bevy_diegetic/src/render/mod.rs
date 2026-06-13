@@ -52,10 +52,8 @@ pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
 pub(crate) use batch_key::VisualBatchKey;
-pub(crate) use batch_key::VisualLighting;
 pub(crate) use batch_key::VisualMaterialInterner;
 pub(crate) use batch_key::VisualShadow;
-pub(crate) use batch_key::VisualSidedness;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;
@@ -122,10 +120,10 @@ pub(crate) enum PanelChildSystems {
 ///
 /// The variants are the useful points on that quality/cost ladder.
 ///
-/// This resource is the cascade root default: `sync_text_anti_alias` mirrors
+/// This resource is the cascade root default: `sync_anti_alias` mirrors
 /// it into `CascadeDefault<AntiAlias>`, and entities override it per
 /// panel or per label via
-/// [`override_text_anti_alias`](crate::cascade::CascadeEntityCommandsExt::override_text_anti_alias)
+/// [`override_anti_alias`](crate::cascade::CascadeEntityCommandsExt::override_anti_alias)
 /// (line elements override via [`El::anti_alias`](crate::El::anti_alias)).
 ///
 /// # Performance
@@ -193,7 +191,7 @@ impl AntiAlias {
 /// the setting changes. The cascade write re-resolves every participant's
 /// `Resolved<AntiAlias>`, which re-packs run records — per-record
 /// `aa_flags` cannot be refreshed by rewriting a material uniform.
-fn sync_text_anti_alias(
+fn sync_anti_alias(
     setting: Res<AntiAlias>,
     mut cascade_default: ResMut<CascadeDefault<AntiAlias>>,
     mut materials: ResMut<Assets<TextMaterial>>,
@@ -378,11 +376,7 @@ impl Plugin for RenderPlugin {
         // change reaches every `Resolved<A>` the same frame.
         .add_systems(
             Update,
-            (
-                sync_text_anti_alias,
-                sync_hairline_fade,
-                sync_hairline_width,
-            )
+            (sync_anti_alias, sync_hairline_fade, sync_hairline_width)
                 .before(CascadeSet::Propagate),
         )
         .add_observer(transparency::on_stable_transparency_added)

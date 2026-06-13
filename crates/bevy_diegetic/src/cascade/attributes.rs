@@ -9,10 +9,8 @@ pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
 pub use super::resolved::TextAlpha;
-pub use super::resolved::TextLighting;
-pub use super::resolved::TextSidedness;
-use crate::layout::GlyphLighting;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
@@ -38,17 +36,17 @@ pub trait CascadeEntityCommandsExt {
     /// Remove this entity's authored font unit.
     fn inherit_font_unit(&mut self) -> &mut Self;
 
-    /// Author this entity's glyph lighting.
-    fn override_text_lighting(&mut self, lighting: GlyphLighting) -> &mut Self;
+    /// Author this entity's lighting mode.
+    fn override_lighting(&mut self, lighting: Lighting) -> &mut Self;
 
-    /// Remove this entity's authored glyph lighting.
-    fn inherit_text_lighting(&mut self) -> &mut Self;
+    /// Remove this entity's authored lighting mode.
+    fn inherit_lighting(&mut self) -> &mut Self;
 
-    /// Author this entity's glyph sidedness.
-    fn override_text_sidedness(&mut self, sidedness: GlyphSidedness) -> &mut Self;
+    /// Author this entity's sidedness.
+    fn override_sidedness(&mut self, sidedness: Sidedness) -> &mut Self;
 
-    /// Remove this entity's authored glyph sidedness.
-    fn inherit_text_sidedness(&mut self) -> &mut Self;
+    /// Remove this entity's authored sidedness.
+    fn inherit_sidedness(&mut self) -> &mut Self;
 
     /// Author this entity's draw layer.
     fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self;
@@ -57,10 +55,10 @@ pub trait CascadeEntityCommandsExt {
     fn inherit_draw_layer(&mut self) -> &mut Self;
 
     /// Author this entity's anti-alias mode.
-    fn override_text_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self;
+    fn override_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self;
 
     /// Remove this entity's authored anti-alias mode.
-    fn inherit_text_anti_alias(&mut self) -> &mut Self;
+    fn inherit_anti_alias(&mut self) -> &mut Self;
 
     /// Author this entity's hairline fade policy.
     fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self;
@@ -82,21 +80,17 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_font_unit(&mut self) -> &mut Self { remove_cascade_override::<FontUnit>(self) }
 
-    fn override_text_lighting(&mut self, lighting: GlyphLighting) -> &mut Self {
-        apply_cascade_override(self, TextLighting(lighting))
+    fn override_lighting(&mut self, lighting: Lighting) -> &mut Self {
+        apply_cascade_override(self, lighting)
     }
 
-    fn inherit_text_lighting(&mut self) -> &mut Self {
-        remove_cascade_override::<TextLighting>(self)
+    fn inherit_lighting(&mut self) -> &mut Self { remove_cascade_override::<Lighting>(self) }
+
+    fn override_sidedness(&mut self, sidedness: Sidedness) -> &mut Self {
+        apply_cascade_override(self, sidedness)
     }
 
-    fn override_text_sidedness(&mut self, sidedness: GlyphSidedness) -> &mut Self {
-        apply_cascade_override(self, TextSidedness(sidedness))
-    }
-
-    fn inherit_text_sidedness(&mut self) -> &mut Self {
-        remove_cascade_override::<TextSidedness>(self)
-    }
+    fn inherit_sidedness(&mut self) -> &mut Self { remove_cascade_override::<Sidedness>(self) }
 
     fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self {
         apply_cascade_override(self, draw_layer)
@@ -104,13 +98,11 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_draw_layer(&mut self) -> &mut Self { remove_cascade_override::<DrawLayer>(self) }
 
-    fn override_text_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self {
+    fn override_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self {
         apply_cascade_override(self, anti_alias)
     }
 
-    fn inherit_text_anti_alias(&mut self) -> &mut Self {
-        remove_cascade_override::<AntiAlias>(self)
-    }
+    fn inherit_anti_alias(&mut self) -> &mut Self { remove_cascade_override::<AntiAlias>(self) }
 
     fn override_hairline_fade(&mut self, fade: HairlineFade) -> &mut Self {
         apply_cascade_override(self, fade)
@@ -139,22 +131,22 @@ pub fn resolved_font_unit(world: &World, entity: Entity) -> Unit {
     resolved_cascade::<FontUnit>(world, entity).0
 }
 
-/// Resolve an entity's current glyph lighting.
+/// Resolve an entity's current lighting mode.
 ///
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
 #[must_use]
-pub fn resolved_text_lighting(world: &World, entity: Entity) -> GlyphLighting {
-    resolved_cascade::<TextLighting>(world, entity).0
+pub fn resolved_lighting(world: &World, entity: Entity) -> Lighting {
+    resolved_cascade::<Lighting>(world, entity)
 }
 
-/// Resolve an entity's current glyph sidedness.
+/// Resolve an entity's current sidedness.
 ///
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
 #[must_use]
-pub fn resolved_text_sidedness(world: &World, entity: Entity) -> GlyphSidedness {
-    resolved_cascade::<TextSidedness>(world, entity).0
+pub fn resolved_sidedness(world: &World, entity: Entity) -> Sidedness {
+    resolved_cascade::<Sidedness>(world, entity)
 }
 
 /// Resolve an entity's current draw layer.
@@ -173,7 +165,7 @@ pub fn resolved_draw_layer(world: &World, entity: Entity) -> DrawLayer {
 /// Reads the cached resolved value when present. If the entity has not been
 /// seeded yet, this falls back to the same parent walk used by propagation.
 #[must_use]
-pub fn resolved_text_anti_alias(world: &World, entity: Entity) -> AntiAlias {
+pub fn resolved_anti_alias(world: &World, entity: Entity) -> AntiAlias {
     resolved_cascade::<AntiAlias>(world, entity)
 }
 

@@ -50,16 +50,18 @@
 //! | --- | --- | --- |
 //! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
-//! | [`TextLighting`] | `CascadeDefault<TextLighting>` | `override_text_lighting`, `inherit_text_lighting`, [`resolved_text_lighting`] |
-//! | [`TextSidedness`] | `CascadeDefault<TextSidedness>` | `override_text_sidedness`, `inherit_text_sidedness`, [`resolved_text_sidedness`] |
+//! | [`Lighting`](crate::Lighting) | `CascadeDefault<Lighting>` | `override_lighting`, `inherit_lighting`, [`resolved_lighting`] |
+//! | [`Sidedness`](crate::Sidedness) | `CascadeDefault<Sidedness>` | `override_sidedness`, `inherit_sidedness`, [`resolved_sidedness`] |
 //! | [`DrawLayer`] | `CascadeDefault<DrawLayer>` | `override_draw_layer`, `inherit_draw_layer`, [`resolved_draw_layer`] |
-//! | [`AntiAlias`](crate::AntiAlias) | `CascadeDefault<AntiAlias>`, mirrored from the `AntiAlias` resource | `override_text_anti_alias`, `inherit_text_anti_alias`, [`resolved_text_anti_alias`] |
+//! | [`AntiAlias`](crate::AntiAlias) | `CascadeDefault<AntiAlias>`, mirrored from the `AntiAlias` resource | `override_anti_alias`, `inherit_anti_alias`, [`resolved_anti_alias`] |
 //! | [`HairlineFade`](crate::HairlineFade) | `CascadeDefault<HairlineFade>`, mirrored from [`HairlineWidth::fade`](crate::HairlineWidth) | `override_hairline_fade`, `inherit_hairline_fade`, [`resolved_hairline_fade`] |
 //!
-//! `AntiAlias` and `HairlineFade` are existing render value types joined
-//! to the cascade with `cascade_attr!(existing ...)` — the attribute *is* the
-//! value type, with no wrapper struct. Panel line elements additionally
-//! override both per element through the layout tree
+//! `Lighting`, `Sidedness`, `AntiAlias`, and `HairlineFade` are existing value
+//! types joined to the cascade with `cascade_attr!(existing ...)` — the
+//! attribute *is* the value type, with no wrapper struct. `Lighting` and
+//! `Sidedness` resolve once per panel and feed both glyph runs and panel
+//! lines. Panel line elements additionally override anti-alias and hairline
+//! fade per element through the layout tree
 //! ([`El::anti_alias`](crate::El::anti_alias) /
 //! [`El::hairline_fade`](crate::El::hairline_fade)), resolved as element
 //! override else the panel entity's cascade value.
@@ -123,17 +125,15 @@ pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::DrawLayer;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
-pub use attributes::TextLighting;
-pub use attributes::TextSidedness;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
+pub use attributes::resolved_anti_alias;
 pub use attributes::resolved_draw_layer;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_hairline_fade;
+pub use attributes::resolved_lighting;
+pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
-pub use attributes::resolved_text_anti_alias;
-pub use attributes::resolved_text_lighting;
-pub use attributes::resolved_text_sidedness;
 pub use cascade_set::CascadeSet;
 pub(crate) use constants::DEFAULT_DRAW_LAYER;
 pub use defaults::CascadeDefault;

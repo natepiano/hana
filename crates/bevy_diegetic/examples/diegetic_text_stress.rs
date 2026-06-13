@@ -171,7 +171,7 @@ fn main() {
         )
         // Modifier-guarded, so the Ctrl+Shift+A home-gizmo chord doesn't also
         // cycle the AA mode.
-        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
+        .with_shortcut(KeyCode::KeyA, cycle_anti_alias)
         .with_shortcut(KeyCode::KeyM, toggle_gpu_pipeline)
         .with_shortcut(KeyCode::KeyO, toggle_oit)
         .run();
@@ -376,9 +376,9 @@ const fn chip_activation(active: bool) -> ControlActivation {
 
 /// Advances [`AntiAlias`] one step through [`AA_MODES`], wrapping at the
 /// end. The change propagates to every text material via the engine's
-/// `sync_text_anti_alias` system, and to the title-bar chips via the
+/// `sync_anti_alias` system, and to the title-bar chips via the
 /// per-mode wiring in `main`.
-fn cycle_text_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
+fn cycle_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
     let current = AA_MODES
         .iter()
         .position(|(_, _, mode)| *mode == *anti_alias)

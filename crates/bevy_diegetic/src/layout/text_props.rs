@@ -138,10 +138,10 @@ pub enum GlyphShadowMode {
 /// Whether glyph meshes render both faces or only the front face.
 ///
 /// World text defaults to double-sided; screen text defaults to one-sided.
-/// The cascade carries the contextual default ([`GlyphSidedness`] is a cascade
+/// The cascade carries the contextual default (`Sidedness` is a cascade
 /// attribute); a per-label value on [`TextStyle`] overrides it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
-pub enum GlyphSidedness {
+pub enum Sidedness {
     /// Render both faces with no culling (default).
     #[default]
     DoubleSided,
@@ -152,10 +152,10 @@ pub enum GlyphSidedness {
 /// Whether glyph materials respond to scene lighting.
 ///
 /// World text defaults to lit; screen text defaults to unlit. The cascade
-/// carries the contextual default ([`GlyphLighting`] is a cascade attribute);
-/// a per-label value on [`TextStyle`] overrides it.
+/// carries the contextual default (`Lighting` is a cascade attribute); a
+/// per-label value on [`TextStyle`] overrides it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
-pub enum GlyphLighting {
+pub enum Lighting {
     /// Use normal PBR lighting.
     #[default]
     Lit,
@@ -199,12 +199,12 @@ pub struct TextStyle {
     anchor:         Anchor,
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
-    /// Per-label sidedness override. `None` = inherit from the `TextSidedness`
+    /// Per-label sidedness override. `None` = inherit from the `Sidedness`
     /// cascade attribute (world panels default `DoubleSided`, screen `OneSided`).
-    sidedness:      Option<GlyphSidedness>,
-    /// Per-label lighting override. `None` = inherit from the `TextLighting`
+    sidedness:      Option<Sidedness>,
+    /// Per-label lighting override. `None` = inherit from the `Lighting`
     /// cascade attribute (world panels default `Lit`, screen `Unlit`).
-    lighting:       Option<GlyphLighting>,
+    lighting:       Option<Lighting>,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from the resolved
     /// `FontUnit` cascade attribute (panel font unit for panel text, world
@@ -325,11 +325,11 @@ impl TextStyle {
 
     /// Returns the per-label sidedness override, if set (`None` = inherit).
     #[must_use]
-    pub const fn sidedness(&self) -> Option<GlyphSidedness> { self.sidedness }
+    pub const fn sidedness(&self) -> Option<Sidedness> { self.sidedness }
 
     /// Returns the per-label lighting override, if set (`None` = inherit).
     #[must_use]
-    pub const fn lighting(&self) -> Option<GlyphLighting> { self.lighting }
+    pub const fn lighting(&self) -> Option<Lighting> { self.lighting }
 
     /// Returns the font feature overrides.
     #[must_use]
@@ -460,14 +460,14 @@ impl TextStyle {
 
     /// Sets a per-label sidedness override (overrides the panel/context default).
     #[must_use]
-    pub const fn with_sidedness(mut self, sidedness: GlyphSidedness) -> Self {
+    pub const fn with_sidedness(mut self, sidedness: Sidedness) -> Self {
         self.sidedness = Some(sidedness);
         self
     }
 
     /// Sets a per-label lighting override (overrides the panel/context default).
     #[must_use]
-    pub const fn with_lighting(mut self, lighting: GlyphLighting) -> Self {
+    pub const fn with_lighting(mut self, lighting: Lighting) -> Self {
         self.lighting = Some(lighting);
         self
     }
@@ -475,7 +475,7 @@ impl TextStyle {
     /// Sets the glyph material to render unlit, bypassing PBR lighting.
     #[must_use]
     pub const fn with_unlit(mut self) -> Self {
-        self.lighting = Some(GlyphLighting::Unlit);
+        self.lighting = Some(Lighting::Unlit);
         self
     }
 
@@ -575,14 +575,12 @@ impl TextStyle {
     pub const fn set_shadow_mode(&mut self, mode: GlyphShadowMode) { self.shadow_mode = mode; }
 
     /// Sets a per-label sidedness override (overrides the panel/context default).
-    pub const fn set_sidedness(&mut self, sidedness: GlyphSidedness) {
+    pub const fn set_sidedness(&mut self, sidedness: Sidedness) {
         self.sidedness = Some(sidedness);
     }
 
     /// Sets a per-label lighting override (overrides the panel/context default).
-    pub const fn set_lighting(&mut self, lighting: GlyphLighting) {
-        self.lighting = Some(lighting);
-    }
+    pub const fn set_lighting(&mut self, lighting: Lighting) { self.lighting = Some(lighting); }
 
     /// Sets font feature overrides.
     pub const fn set_font_features(&mut self, features: FontFeatures) {

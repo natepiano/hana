@@ -22,9 +22,9 @@ use bevy::render::render_resource::Face;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
-use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::panel::SurfaceShadow;
 
 /// Interned identity for an authored base material.
@@ -93,38 +93,6 @@ impl Debug for BatchRenderLayers {
     }
 }
 
-/// Lighting mode shared by visual batch keys.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum VisualLighting {
-    Lit,
-    Unlit,
-}
-
-impl From<GlyphLighting> for VisualLighting {
-    fn from(lighting: GlyphLighting) -> Self {
-        match lighting {
-            GlyphLighting::Lit => Self::Lit,
-            GlyphLighting::Unlit => Self::Unlit,
-        }
-    }
-}
-
-/// Sidedness mode shared by visual batch keys.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum VisualSidedness {
-    DoubleSided,
-    OneSided,
-}
-
-impl From<GlyphSidedness> for VisualSidedness {
-    fn from(sidedness: GlyphSidedness) -> Self {
-        match sidedness {
-            GlyphSidedness::DoubleSided => Self::DoubleSided,
-            GlyphSidedness::OneSided => Self::OneSided,
-        }
-    }
-}
-
 /// Shadow participation shared by visual batch keys.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum VisualShadow {
@@ -158,9 +126,9 @@ pub(crate) struct VisualBatchKey {
     /// Authored alpha/pipeline compatibility.
     pub alpha:         BatchAlphaMode,
     /// Lit/unlit compatibility.
-    pub lighting:      VisualLighting,
+    pub lighting:      Lighting,
     /// Culling/double-sided compatibility.
-    pub sidedness:     VisualSidedness,
+    pub sidedness:     Sidedness,
     /// Shadow-caster compatibility.
     pub shadow:        VisualShadow,
     /// Owning render layers.

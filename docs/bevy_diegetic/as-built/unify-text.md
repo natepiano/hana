@@ -291,15 +291,15 @@ Status legend: `proposed` = awaiting author choice.
   cannot carry two default sets, yet world text must default Lit/double-sided
   and screen text Unlit/front-facing (and wrap/anchor defaults differ too).
   Pick how defaults apply so neither context renders wrong: (a) each component
-  seeds `Override<GlyphLighting/...>` via an observer (mirrors the existing
+  seeds `Override<Lighting/...>` via an observer (mirrors the existing
   `FontUnit`/`TextAlpha` seeding); (b) extend the cascade with
-  `CascadeDefault<GlyphLighting/GlyphSidedness>` seeded per coordinate space;
+  `CascadeDefault<Lighting/Sidedness>` seeded per coordinate space;
   (c) the builders set explicit defaults at construction. Touches the user's
   standing rule against silently-wrong rendering.
-  **→ DECIDED: (b) promote `GlyphLighting` + `GlyphSidedness` to cascade
+  **→ DECIDED: (b) promote `Lighting` + `Sidedness` to cascade
   attributes.** Global `CascadeDefault` = world values (`Lit` / `DoubleSided`);
-  the screen-panel construction bridge stamps `Override<GlyphLighting>(Unlit)` /
-  `Override<GlyphSidedness>(OneSided)`, exactly as `CascadeDefaults.panel_font_unit`
+  the screen-panel construction bridge stamps `Override<Lighting>(Unlit)` /
+  `Override<Sidedness>(OneSided)`, exactly as `CascadeDefaults.panel_font_unit`
   seeds `Override<FontUnit>` today. Children inherit; per-entity override still
   works. This is the documented field-promotion migration in `cascade/mod.rs`
   (lines 89–100), not new infrastructure — covers the listed inventory
@@ -489,14 +489,14 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 
 ### Phase 1 — `bevy_diegetic` cascade + sugar + deletions
 
-6. Promote `GlyphLighting` + `GlyphSidedness` to cascade attributes:
+6. Promote `Lighting` + `Sidedness` to cascade attributes:
    `cascade_attr!` declarations, typed `override_*` / `inherit_*` / `resolved_*`
    wrappers, `CascadePlugin::<_>::default()` lines, render read sites switched to
    `Resolved<_>`. Global `CascadeDefault` = `Lit` / `DoubleSided` (world) (D2).
 7. Implement `WorldText` / `ScreenText` as fluent builders that build a
    one-element `DiegeticPanel` internally and return the spawn bundle (D1, D8).
 8. The screen-panel construction bridge seeds `Override<FontUnit>(px)`,
-   `Override<GlyphLighting>(Unlit)`, `Override<GlyphSidedness>(OneSided)` —
+   `Override<Lighting>(Unlit)`, `Override<Sidedness>(OneSided)` —
    one bridge covering D2 + D3 screen defaults.
 9. Delete `world_scale` (field + `with_world_scale` / `set_world_scale` /
    `world_scale`) and the `Without<PanelTextChild>` standalone render path; world
@@ -560,7 +560,7 @@ pending a run of the heavy examples.
 Single-correct-outcome refinements to the plan above (not user forks):
 
 - **R1 — Phase 1 has an internal compile gate.** Step 6 (promote
-  `GlyphLighting`/`GlyphSidedness` to cascade) must complete before steps 7–8
+  `Lighting`/`Sidedness` to cascade) must complete before steps 7–8
   (sugar builders + screen seed bridge) compile, since the bridge calls
   `override_glyph_lighting` / `override_glyph_sidedness`. Split into **Phase 1a**
   (step 6 only) → **Phase 1b** (7–9). Today neither enum is a cascade attribute;
@@ -592,8 +592,8 @@ Single-correct-outcome refinements to the plan above (not user forks):
   (before behavioral changes) so Phase 1 reviews against the clear name.
 
 - **R6 — Screen defaults are seeded inline at construction, not deferred.** The
-  D2/D3 bridge inserts `Override<FontUnit>(Pixels)`, `Override<GlyphLighting>(Unlit)`,
-  `Override<GlyphSidedness>(OneSided)` on the panel entity *during* `build()`
+  D2/D3 bridge inserts `Override<FontUnit>(Pixels)`, `Override<Lighting>(Unlit)`,
+  `Override<Sidedness>(OneSided)` on the panel entity *during* `build()`
   (mirroring the existing `seed_panel_overrides` on `Added<DiegeticPanel>`), not
   via a next-frame observer — else screen text flashes Lit/meters on frame 1.
   Precedence holds: per-entity override > panel override > global default, so a
@@ -645,7 +645,7 @@ Single-correct-outcome refinements to the plan above (not user forks):
   remaining Bucket-2 rewrites follow.
 
 - **R12 — Verification adds automated tests, not just visuals.** Phase 6 gains
-  unit/first-frame tests: `Resolved<GlyphLighting>` = Unlit on a spawned
+  unit/first-frame tests: `Resolved<Lighting>` = Unlit on a spawned
   ScreenText (and Lit on WorldText); per-label `with_alpha_mode` override still
   resolves over the panel default *and* is removed when the label drops it on a
   reconcile update (guards the twice-deleted path); `ScreenText::new(24.0)`
@@ -682,9 +682,9 @@ Single-correct-outcome refinements to the plan above (not user forks):
 - **R17 — Lighting/sidedness follow the `TextAlpha` dual pattern, not
   cascade-only.** Sharpens D2. `alpha_mode` is the worked precedent: the field
   stays on the style *and* the reconcile/construction path captures it into
-  `Override<TextAlpha>`. `GlyphLighting`/`GlyphSidedness` do the same — keep the
+  `Override<TextAlpha>`. `Lighting`/`Sidedness` do the same — keep the
   field on `TextStyle` for per-label authoring (e.g. one Unlit label in a Lit
-  panel), and capture it into `Override<GlyphLighting>` / `Override<GlyphSidedness>`
+  panel), and capture it into `Override<Lighting>` / `Override<Sidedness>`
   at reconcile/construction; the global `CascadeDefault` fills it when unset. So
   D2's "promote to cascade attribute" = add the cascade layer, *not* remove the
   field. The reconcile capture path mirrors the existing `config.alpha_mode()`
@@ -696,10 +696,10 @@ Single-correct-outcome refinements to the plan above (not user forks):
   `Resolved<_>` same-frame, but the *child text* resolves through propagation
   (`CascadeSet::Propagate`). Per the cascade contract, a write before Propagate
   is visible to readers scheduled after it in the same frame — so the new
-  `GlyphLighting`/`GlyphSidedness` render reads must be ordered after
+  `Lighting`/`Sidedness` render reads must be ordered after
   `CascadeSet::Propagate`, exactly as `TextAlpha`/`FontUnit` reads are today. No
   first-frame flash if that ordering holds; R12's first-frame test
-  (`Resolved<GlyphLighting>` = Unlit on a spawned `ScreenText`) is the guard.
+  (`Resolved<Lighting>` = Unlit on a spawned `ScreenText`) is the guard.
 
 - **R19 — Sugar builders are separate types wrapping the panel builder.**
   Sharpens R7. `WorldTextBuilder` / `ScreenTextBuilder` hold a
@@ -739,8 +739,8 @@ Single-correct-outcome refinements to the plan above (not user forks):
   `Override<TextLighting>(Unlit)` for any panel whose `text_material` is unlit;
   a label that sets `.with_lighting`/`.with_unlit`/`.with_sidedness` is captured
   as its own `Override` in `reconcile_panel_text_children` (spawn + reuse) and
-  wins. Cascade attributes are newtypes `TextLighting(GlyphLighting)` /
-  `TextSidedness(GlyphSidedness)` (the enum names can't be reused — the
+  wins. Cascade attributes are newtypes `TextLighting(Lighting)` /
+  `TextSidedness(Sidedness)` (the enum names can't be reused — the
   `cascade_attr!` macro wraps the value, as `FontUnit(Unit)` does). Both render
   paths now read `Resolved<_>`; the forced `double_sided` and the
   material-driven unlit are gone. Per-context default **and** per-label override

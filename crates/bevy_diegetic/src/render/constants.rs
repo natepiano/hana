@@ -8,7 +8,7 @@ use bevy_kana::ToF32;
 
 use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::DrawLayer;
-use crate::layout::GlyphSidedness;
+use crate::layout::Sidedness;
 
 // layer ordering
 /// Per-command depth bias for Geometry mode sort ordering.
@@ -121,15 +121,15 @@ pub(super) const TEXT_Z_OFFSET: f32 = 0.0;
 pub(super) const UNCLIPPED_TEXT_CLIP_RECT: Vec4 = Vec4::new(-1e6, -1e6, 1e6, 1e6);
 
 /// Configures a `StandardMaterial`'s `double_sided` and `cull_mode` fields from
-/// a [`GlyphSidedness`] choice. Shared by the panel-text and world-text glyph
+/// a [`Sidedness`] choice. Shared by the panel-text and world-text glyph
 /// material builders.
-pub(crate) const fn apply_glyph_sidedness(base: &mut StandardMaterial, sidedness: GlyphSidedness) {
+pub(crate) const fn apply_glyph_sidedness(base: &mut StandardMaterial, sidedness: Sidedness) {
     match sidedness {
-        GlyphSidedness::DoubleSided => {
+        Sidedness::DoubleSided => {
             base.double_sided = true;
             base.cull_mode = None;
         },
-        GlyphSidedness::OneSided => {
+        Sidedness::OneSided => {
             base.double_sided = false;
             base.cull_mode = Some(Face::Back);
         },

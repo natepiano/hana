@@ -438,7 +438,7 @@ fn main() {
         // Dust's shortcut binding, which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyD, toggle_debug_outlines)
         .with_shortcut(KeyCode::KeyR, toggle_rulers)
-        .with_shortcut(KeyCode::KeyA, cycle_text_anti_alias)
+        .with_shortcut(KeyCode::KeyA, cycle_anti_alias)
         .with_shortcut(KeyCode::KeyP, to_perspective_projection)
         .with_shortcut(KeyCode::KeyO, to_orthographic_projection)
         .with_shortcut(KeyCode::KeyF, toggle_hairline_fade)
@@ -895,7 +895,7 @@ fn toggle_rulers(
     }
 }
 
-fn cycle_text_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
+fn cycle_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
     let current = AA_MODES
         .iter()
         .position(|(_, _, mode)| *mode == *anti_alias)

@@ -1485,7 +1485,7 @@ Surfaced by team review; outcomes recorded here as resolved.
    `Slug*` type appears in any public fn/field signature; the public
    text API is the existing renderer-agnostic surface (`WorldText`,
    `WorldTextStyle`/`TextProps`, `GlyphRenderMode`, `GlyphShadowMode`,
-   `GlyphSidedness`). All `Slug*` types become `pub(crate)` and drop
+   `Sidedness`). All `Slug*` types become `pub(crate)` and drop
    from `lib.rs`. A type is promoted to public only when a specific
    slug_fx artistic effect requires a developer to name it — none do
    today.

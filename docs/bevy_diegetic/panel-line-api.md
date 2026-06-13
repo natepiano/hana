@@ -555,7 +555,7 @@ Acceptance:
   `cascade/resolved.rs` — joins an already-named render value type to the
   cascade without minting a wrapper struct, so the attributes are literally
   `AntiAlias` and `HairlineFade` (`Override<AntiAlias>`,
-  `resolved_text_anti_alias`).
+  `resolved_anti_alias`).
 - `RunRecord` grew `aa_flags: u32` + `fade_exponent: f32` (96 → 112 B stride);
   the encase assertion, both WGSL mirrors, and the padded-payload tests all
   moved together. `AntiAlias::aa_flags()` and
@@ -583,7 +583,7 @@ Acceptance:
 - `CascadePlugin::<AntiAlias>` / `::<HairlineFade>` are registered in
   `HeadlessLayoutPlugin` (not `RenderPlugin`) because `seed_panel_overrides`
   reads their `CascadeDefault<A>` resources in headless layout apps.
-- Per-label text AA authoring is the `override_text_anti_alias` verb on the
+- Per-label text AA authoring is the `override_anti_alias` verb on the
   label entity; no `TextStyle::with_anti_alias` capture was added (not a doc
   deliverable — record here so it is a deliberate gap, not an omission).
 
@@ -593,7 +593,7 @@ Acceptance:
   `DISCARD_ALPHA` discard has always preceded `oit_draw` in the fragment
   entry; Phase C only documented the ordering.
 - Two global resources now mirror into `CascadeDefault<A>` roots
-  (`sync_text_anti_alias`, `sync_hairline_fade`), ordered
+  (`sync_anti_alias`, `sync_hairline_fade`), ordered
   `.before(CascadeSet::Propagate)` so a global change re-resolves and re-packs
   the same frame; the headless integration test proves the whole chain
   (element override survives a global flip, batch count stays 1).

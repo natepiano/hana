@@ -172,7 +172,7 @@ column does not exist.
   screen-space derivative logic is untouched (same UV values, new source).
 - **Extension uniform keeps the globals.** Binding 100 retains `supersample`
   and `aa_band` (global AA settings mirrored from the `AntiAlias`
-  resource by `sync_text_anti_alias`) and the `oit_depth_offset` policy
+  resource by `sync_anti_alias`) and the `oit_depth_offset` policy
   field (always 0.0) — per-batch uniform, unchanged. Only `fill_color`,
   `render_mode`, and the depth nudge leave the uniform for the per-run
   record.
@@ -421,7 +421,7 @@ First cut — rebuild, don't allocate:
   the store entry when the last run leaves (the batch analogue of the R10
   empty-run path). The per-batch `TextMaterial` is built once at batch
   creation: interned base material + the key's cascade values + the shared
-  atlas handles; `sync_text_anti_alias` already iterates
+  atlas handles; `sync_anti_alias` already iterates
   `Assets<TextMaterial>` generically, so batch materials pick up
   `AntiAlias` changes with no new code (one-frame latency — it runs in
   Update).
@@ -1788,7 +1788,7 @@ per-run-free (coverage-only discard); `depth_nudge` formula pinned
 Integration: `update_panel_text_alpha` gated to `PerRunMeshes` until 3a
 (decision 10); batch-entity lifecycle pinned (spawn on first insert,
 despawn on empty — the batch R10 analogue); per-batch material construction
-+ generic `sync_text_anti_alias` coverage recorded (decision 4); batch path
++ generic `sync_anti_alias` coverage recorded (decision 4); batch path
 never holds storage keys (no flip double-free) + flip-both-directions and
 overlay-key-stable-from-frame-1 gate items (Step 2);
 `commit_batch_buffers` named, owns pending-set writes, the D3 swap, and

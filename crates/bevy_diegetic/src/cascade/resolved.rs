@@ -7,8 +7,8 @@ use bevy::reflect::Typed;
 
 use super::constants::CASCADE_DEPTH_CAP;
 use super::constants::DEFAULT_DRAW_LAYER;
-use crate::layout::GlyphLighting;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
@@ -79,21 +79,6 @@ cascade_attr!(
     default = Unit::Meters
 );
 cascade_attr!(
-    /// Glyph-lighting cascade attribute. Global default is `Lit` (world text);
-    /// the screen-panel construction bridge overrides it to `Unlit`.
-    TextLighting(GlyphLighting),
-    default = GlyphLighting::Lit,
-    eq
-);
-cascade_attr!(
-    /// Glyph-sidedness cascade attribute. Global default is `DoubleSided`
-    /// (world text); the screen-panel construction bridge overrides it to
-    /// `OneSided`.
-    TextSidedness(GlyphSidedness),
-    default = GlyphSidedness::DoubleSided,
-    eq
-);
-cascade_attr!(
     /// Draw-layer cascade attribute.
     ///
     /// A text run's ordinal on its panel's draw-order axis, shared with the
@@ -107,8 +92,16 @@ cascade_attr!(
     eq
 );
 
+// Lighting cascade attribute. Global default is `Lit` (world text); the
+// screen-panel construction bridge overrides it to `Unlit`. Consumed by both
+// glyph runs and panel lines.
+cascade_attr!(existing Lighting, default = Lighting::Lit);
+// Sidedness cascade attribute. Global default is `DoubleSided` (world text);
+// the screen-panel construction bridge overrides it to `OneSided`. Consumed by
+// both glyph runs and panel lines.
+cascade_attr!(existing Sidedness, default = Sidedness::DoubleSided);
 // Anti-alias mode cascade attribute. The `AntiAlias` resource is the
-// authored global; `sync_text_anti_alias` mirrors it into
+// authored global; `sync_anti_alias` mirrors it into
 // `CascadeDefault<AntiAlias>` as the cascade root default.
 cascade_attr!(existing AntiAlias, default = AntiAlias::Both);
 // Hairline-fade cascade attribute. `HairlineWidth::fade` is the authored

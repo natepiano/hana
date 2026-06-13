@@ -40,13 +40,13 @@ use crate::layout::El;
 use crate::layout::FontFeatures;
 use crate::layout::FontSlant;
 use crate::layout::FontWeight;
-use crate::layout::GlyphLighting;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
-use crate::layout::GlyphSidedness;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
+use crate::layout::Lighting;
 use crate::layout::Px;
+use crate::layout::Sidedness;
 use crate::layout::Sizing;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
@@ -191,25 +191,25 @@ macro_rules! text_style_setters {
             }
 
             /// Overrides glyph sidedness for this text (else inherits the
-            /// context default via the `TextSidedness` cascade attribute).
+            /// context default via the `Sidedness` cascade attribute).
             #[must_use]
-            pub const fn sidedness(mut self, sidedness: GlyphSidedness) -> Self {
+            pub const fn sidedness(mut self, sidedness: Sidedness) -> Self {
                 self.style.set_sidedness(sidedness);
                 self
             }
 
             /// Overrides glyph lighting for this text (else inherits the context
-            /// default via the `TextLighting` cascade attribute).
+            /// default via the `Lighting` cascade attribute).
             #[must_use]
-            pub const fn lighting(mut self, lighting: GlyphLighting) -> Self {
+            pub const fn lighting(mut self, lighting: Lighting) -> Self {
                 self.style.set_lighting(lighting);
                 self
             }
 
-            /// Shorthand for [`Self::lighting`] with [`GlyphLighting::Unlit`].
+            /// Shorthand for [`Self::lighting`] with [`Lighting::Unlit`].
             #[must_use]
             pub const fn unlit(mut self) -> Self {
-                self.style.set_lighting(GlyphLighting::Unlit);
+                self.style.set_lighting(Lighting::Unlit);
                 self
             }
 

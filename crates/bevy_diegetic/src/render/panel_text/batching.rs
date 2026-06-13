@@ -34,12 +34,10 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::DrawLayer;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextLighting;
-use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
-use crate::layout::GlyphLighting;
 use crate::layout::GlyphShadowMode;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
@@ -78,13 +76,13 @@ pub struct DiegeticTextBatch;
 #[derive(SystemParam)]
 pub(super) struct BatchKeyCascades<'w, 's> {
     alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
-    lightings:          Query<'w, 's, &'static Resolved<TextLighting>, With<TextContent>>,
-    sidednesses:        Query<'w, 's, &'static Resolved<TextSidedness>, With<TextContent>>,
+    lightings:          Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
+    sidednesses:        Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
     anti_aliases:       Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
     draw_layers:        Query<'w, 's, &'static Resolved<DrawLayer>, With<TextContent>>,
     alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
-    lighting_default:   Res<'w, CascadeDefault<TextLighting>>,
-    sidedness_default:  Res<'w, CascadeDefault<TextSidedness>>,
+    lighting_default:   Res<'w, CascadeDefault<Lighting>>,
+    sidedness_default:  Res<'w, CascadeDefault<Sidedness>>,
     anti_alias_default: Res<'w, CascadeDefault<AntiAlias>>,
     draw_layer_default: Res<'w, CascadeDefault<DrawLayer>>,
     changed: Query<
@@ -96,8 +94,8 @@ pub(super) struct BatchKeyCascades<'w, 's> {
             With<PreparedPanelText>,
             Or<(
                 Changed<Resolved<TextAlpha>>,
-                Changed<Resolved<TextLighting>>,
-                Changed<Resolved<TextSidedness>>,
+                Changed<Resolved<Lighting>>,
+                Changed<Resolved<Sidedness>>,
                 Changed<Resolved<AntiAlias>>,
                 Changed<Resolved<DrawLayer>>,
             )>,
@@ -117,16 +115,16 @@ impl BatchKeyCascades<'_, '_> {
             .map_or(self.alpha_default.0.0, |resolved| resolved.0.0)
     }
 
-    fn lighting(&self, label: Entity) -> GlyphLighting {
+    fn lighting(&self, label: Entity) -> Lighting {
         self.lightings
             .get(label)
-            .map_or(self.lighting_default.0.0, |resolved| resolved.0.0)
+            .map_or(self.lighting_default.0, |resolved| resolved.0)
     }
 
-    fn sidedness(&self, label: Entity) -> GlyphSidedness {
+    fn sidedness(&self, label: Entity) -> Sidedness {
         self.sidednesses
             .get(label)
-            .map_or(self.sidedness_default.0.0, |resolved| resolved.0.0)
+            .map_or(self.sidedness_default.0, |resolved| resolved.0)
     }
 
     fn anti_alias(&self, label: Entity) -> AntiAlias {
@@ -740,7 +738,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
         anti_alias,
     } = input;
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
-    base.unlit = matches!(key.lighting, GlyphLighting::Unlit);
+    base.unlit = matches!(key.lighting, Lighting::Unlit);
     constants::apply_glyph_sidedness(&mut base, key.sidedness);
     // One bias/offset pair for the whole batch, derived from the key's draw
     // layer: the bias orders the batch among backing commands on sorted
@@ -844,8 +842,8 @@ mod tests {
             .insert_resource(monospace_measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<TextAlpha>::default())
-            .add_plugins(CascadePlugin::<TextLighting>::default())
-            .add_plugins(CascadePlugin::<TextSidedness>::default())
+            .add_plugins(CascadePlugin::<Lighting>::default())
+            .add_plugins(CascadePlugin::<Sidedness>::default())
             .add_plugins(CascadePlugin::<DrawLayer>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()

@@ -12,15 +12,13 @@ use crate::cascade;
 use crate::cascade::DrawLayer;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextLighting;
-use crate::cascade::TextSidedness;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
-use crate::layout::GlyphLighting;
-use crate::layout::GlyphSidedness;
+use crate::layout::Lighting;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
+use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -40,8 +38,8 @@ struct ReusableChild<'a> {
     style:      &'a TextStyle,
     layout:     &'a PanelTextLayout,
     alpha:      Option<&'a Override<TextAlpha>>,
-    lighting:   Option<&'a Override<TextLighting>>,
-    sidedness:  Option<&'a Override<TextSidedness>>,
+    lighting:   Option<&'a Override<Lighting>>,
+    sidedness:  Option<&'a Override<Sidedness>>,
     draw_layer: Option<&'a Override<DrawLayer>>,
 }
 
@@ -122,8 +120,8 @@ pub(super) fn reconcile_panel_text_children(
         &TextStyle,
         &PanelTextLayout,
         Option<&Override<TextAlpha>>,
-        Option<&Override<TextLighting>>,
-        Option<&Override<TextSidedness>>,
+        Option<&Override<Lighting>>,
+        Option<&Override<Sidedness>>,
         Option<&Override<DrawLayer>>,
     )>,
     mut commands: Commands,
@@ -266,8 +264,8 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     style:            TextStyle,
     layout:           PanelTextLayout,
     label_alpha:      Option<AlphaMode>,
-    label_lighting:   Option<GlyphLighting>,
-    label_sidedness:  Option<GlyphSidedness>,
+    label_lighting:   Option<Lighting>,
+    label_sidedness:  Option<Sidedness>,
     label_draw_layer: Option<DrawLayer>,
 }
 
@@ -304,10 +302,10 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
         }
         if let Some(lighting) = label_lighting {
-            cascade::apply_cascade_override(&mut child, TextLighting(lighting));
+            cascade::apply_cascade_override(&mut child, lighting);
         }
         if let Some(sidedness) = label_sidedness {
-            cascade::apply_cascade_override(&mut child, TextSidedness(sidedness));
+            cascade::apply_cascade_override(&mut child, sidedness);
         }
         if let Some(draw_layer) = label_draw_layer {
             cascade::apply_cascade_override(&mut child, draw_layer);
@@ -326,8 +324,8 @@ struct UpdateReusedChild<'a, 'w, 's> {
     style:            TextStyle,
     layout:           PanelTextLayout,
     label_alpha:      Option<AlphaMode>,
-    label_lighting:   Option<GlyphLighting>,
-    label_sidedness:  Option<GlyphSidedness>,
+    label_lighting:   Option<Lighting>,
+    label_sidedness:  Option<Sidedness>,
     label_draw_layer: Option<DrawLayer>,
 }
 
@@ -376,28 +374,26 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         },
     }
     match label_lighting {
-        Some(lighting) => {
-            let incoming = TextLighting(lighting);
+        Some(incoming) => {
             if reusable.lighting.map(|node_override| node_override.0) != Some(incoming) {
                 cascade::apply_cascade_override(&mut child, incoming);
             }
         },
         None => {
             if reusable.lighting.is_some() {
-                cascade::remove_cascade_override::<TextLighting>(&mut child);
+                cascade::remove_cascade_override::<Lighting>(&mut child);
             }
         },
     }
     match label_sidedness {
-        Some(sidedness) => {
-            let incoming = TextSidedness(sidedness);
+        Some(incoming) => {
             if reusable.sidedness.map(|node_override| node_override.0) != Some(incoming) {
                 cascade::apply_cascade_override(&mut child, incoming);
             }
         },
         None => {
             if reusable.sidedness.is_some() {
-                cascade::remove_cascade_override::<TextSidedness>(&mut child);
+                cascade::remove_cascade_override::<Sidedness>(&mut child);
             }
         },
     }

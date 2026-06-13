@@ -21,17 +21,15 @@ use crate::cascade::FontUnit;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextLighting;
-use crate::cascade::TextSidedness;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
-use crate::layout::GlyphLighting;
-use crate::layout::GlyphSidedness;
 use crate::layout::InvalidSize;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
 use crate::layout::LayoutTreeChange;
+use crate::layout::Lighting;
 use crate::layout::PanelSize;
+use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
@@ -576,13 +574,10 @@ pub(super) fn seed_panel_overrides(
         cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
     }
     if is_screen {
-        cascade::apply_cascade_override(&mut entity_commands, TextLighting(GlyphLighting::Unlit));
-        cascade::apply_cascade_override(
-            &mut entity_commands,
-            TextSidedness(GlyphSidedness::OneSided),
-        );
+        cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
+        cascade::apply_cascade_override(&mut entity_commands, Sidedness::OneSided);
     } else if material_unlit {
-        cascade::apply_cascade_override(&mut entity_commands, TextLighting(GlyphLighting::Unlit));
+        cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
     }
 }
 

@@ -17,7 +17,6 @@ use bevy::math::Vec3A;
 use bevy::math::Vec4;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
-use bevy::render::render_resource::Face;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToF32;
@@ -31,11 +30,13 @@ use super::primitive::PanelLineRenderKey;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
+use crate::layout::Lighting;
 use crate::layout::PanelLineSourceKey;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::layout::ResolvedPanelLine;
 use crate::layout::ResolvedPanelLinePrimitive;
+use crate::layout::Sidedness;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
@@ -54,10 +55,8 @@ use crate::render::RenderMode;
 use crate::render::RunRecord;
 use crate::render::TextMaterial;
 use crate::render::VisualBatchKey;
-use crate::render::VisualLighting;
 use crate::render::VisualMaterialInterner;
 use crate::render::VisualShadow;
-use crate::render::VisualSidedness;
 use crate::render::constants;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
@@ -329,6 +328,12 @@ struct PanelLineReconcileContext<'a> {
     path_context:        PanelLinePathContext,
     shadow:              VisualShadow,
     layers:              BatchRenderLayers,
+    /// The panel entity's cascade-resolved lighting mode; every line on the
+    /// panel renders with it, matching the panel's glyph runs.
+    panel_lighting:      Lighting,
+    /// The panel entity's cascade-resolved sidedness; every line on the panel
+    /// renders with it, matching the panel's glyph runs.
+    panel_sidedness:     Sidedness,
     /// The panel entity's cascade-resolved anti-alias mode; elements without
     /// their own override inherit it.
     panel_anti_alias:    AntiAlias,
@@ -420,6 +425,8 @@ pub(super) fn reconcile_panel_line_batches(
             &GlobalTransform,
             Option<&RenderLayers>,
             Option<&Visibility>,
+            Option<&Resolved<Lighting>>,
+            Option<&Resolved<Sidedness>>,
             Option<&Resolved<AntiAlias>>,
             Option<&Resolved<HairlineFade>>,
         ),
@@ -429,6 +436,8 @@ pub(super) fn reconcile_panel_line_batches(
             Changed<GlobalTransform>,
             Changed<RenderLayers>,
             Changed<Visibility>,
+            Changed<Resolved<Lighting>>,
+            Changed<Resolved<Sidedness>>,
             Changed<Resolved<AntiAlias>>,
             Changed<Resolved<HairlineFade>>,
         )>,
@@ -436,6 +445,8 @@ pub(super) fn reconcile_panel_line_batches(
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
     anti_alias: Res<AntiAlias>,
+    lighting_default: Res<CascadeDefault<Lighting>>,
+    sidedness_default: Res<CascadeDefault<Sidedness>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut store: ResMut<PanelLineBatchStore>,
@@ -455,6 +466,8 @@ pub(super) fn reconcile_panel_line_batches(
         panel_transform,
         panel_layers,
         panel_visibility,
+        panel_lighting,
+        panel_sidedness,
         panel_anti_alias,
         panel_hairline_fade,
     ) in &changed_panels
@@ -480,6 +493,8 @@ pub(super) fn reconcile_panel_line_batches(
             },
             shadow: panel.surface_shadow().into(),
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
+            panel_lighting: panel_lighting.map_or(lighting_default.0, |resolved| resolved.0),
+            panel_sidedness: panel_sidedness.map_or(sidedness_default.0, |resolved| resolved.0),
             panel_anti_alias: panel_anti_alias.map_or(anti_alias_default.0, |resolved| resolved.0),
             panel_hairline_fade: panel_hairline_fade
                 .map_or(hairline_fade_default.0, |resolved| resolved.0),
@@ -591,8 +606,8 @@ fn build_panel_line_group(
     let visual = VisualBatchKey {
         base_material,
         alpha: BatchAlphaMode::Blend,
-        lighting: VisualLighting::Unlit,
-        sidedness: VisualSidedness::DoubleSided,
+        lighting: context.panel_lighting,
+        sidedness: context.panel_sidedness,
         shadow: context.shadow,
         layers: context.layers.clone(),
     };
@@ -976,8 +991,8 @@ fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
         anti_alias,
     } = input;
     base.alpha_mode = key.visual.alpha.into();
-    base.unlit = matches!(key.visual.lighting, VisualLighting::Unlit);
-    apply_visual_sidedness(&mut base, key.visual.sidedness);
+    base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
+    constants::apply_glyph_sidedness(&mut base, key.visual.sidedness);
     base.depth_bias = key.depth_bias();
     render::batch_text_material(BatchTextMaterialInput {
         base,
@@ -995,19 +1010,6 @@ fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
     })
 }
 
-const fn apply_visual_sidedness(base: &mut StandardMaterial, sidedness: VisualSidedness) {
-    match sidedness {
-        VisualSidedness::DoubleSided => {
-            base.double_sided = true;
-            base.cull_mode = None;
-        },
-        VisualSidedness::OneSided => {
-            base.double_sided = false;
-            base.cull_mode = Some(Face::Back);
-        },
-    }
-}
-
 #[cfg(test)]
 #[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
@@ -1019,6 +1021,7 @@ mod tests {
     use super::*;
     use crate::El;
     use crate::Mm;
+    use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
@@ -1037,8 +1040,9 @@ mod tests {
     use crate::text::DiegeticTextMeasurer;
 
     /// Headless app wired with panel layout, the AA/fade cascade plugins
-    /// (via [`HeadlessLayoutPlugin`]), the production cascade-root sync
-    /// systems, and the panel-line reconcile.
+    /// (via [`HeadlessLayoutPlugin`]), the lighting/sidedness cascade plugins
+    /// (which `RenderPlugin` gets from `TextRenderPlugin`), the production
+    /// cascade-root sync systems, and the panel-line reconcile.
     fn line_batch_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -1051,6 +1055,8 @@ mod tests {
                 }),
             })
             .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(CascadePlugin::<Lighting>::default())
+            .add_plugins(CascadePlugin::<Sidedness>::default())
             .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
             .init_resource::<PanelLineBatchStore>()
@@ -1060,7 +1066,7 @@ mod tests {
             .add_systems(
                 Update,
                 (
-                    crate::render::sync_text_anti_alias,
+                    crate::render::sync_anti_alias,
                     crate::render::sync_hairline_fade,
                 )
                     .before(CascadeSet::Propagate),
@@ -1426,8 +1432,8 @@ mod tests {
             VisualBatchKey {
                 base_material,
                 alpha: BatchAlphaMode::Blend,
-                lighting: VisualLighting::Lit,
-                sidedness: VisualSidedness::DoubleSided,
+                lighting: Lighting::Lit,
+                sidedness: Sidedness::DoubleSided,
                 shadow: VisualShadow::Cast,
                 layers: BatchRenderLayers(RenderLayers::layer(0)),
             },

@@ -17,11 +17,11 @@ use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelBuildError;
+use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
@@ -104,7 +104,7 @@ pub fn cube_face_text(
         DiegeticText::world(text)
             .size(text_size)
             .color(color)
-            .sidedness(GlyphSidedness::OneSided)
+            .sidedness(Sidedness::OneSided)
             .transform(face.local_transform(cube_size * 0.5))
             .build(),
     )

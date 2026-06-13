@@ -39,11 +39,11 @@ use super::world_text;
 use crate::cascade::CascadePlugin;
 use crate::cascade::DrawLayer;
 use crate::cascade::TextAlpha;
-use crate::cascade::TextLighting;
-use crate::cascade::TextSidedness;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
+use crate::layout::Lighting;
 use crate::layout::ShapedTextCache;
+use crate::layout::Sidedness;
 use crate::panel::DiegeticPerfStats;
 use crate::text::PreparedTextRun;
 
@@ -75,8 +75,8 @@ pub(super) struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
-        app.add_plugins(CascadePlugin::<TextLighting>::default());
-        app.add_plugins(CascadePlugin::<TextSidedness>::default());
+        app.add_plugins(CascadePlugin::<Lighting>::default());
+        app.add_plugins(CascadePlugin::<Sidedness>::default());
         app.add_plugins(CascadePlugin::<DrawLayer>::default());
         app.add_observer(seed_panel_text_child_alpha);
         app.add_observer(seed_panel_text_child_glyph);

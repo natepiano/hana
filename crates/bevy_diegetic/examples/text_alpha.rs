@@ -23,11 +23,11 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Direction;
 use bevy_diegetic::El;
-use bevy_diegetic::GlyphSidedness;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
+use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlpha;
 use bevy_diegetic::TextStyle;
@@ -213,7 +213,7 @@ fn setup(
                 DiegeticText::world("HELLO")
                     .size(0.22)
                     .color(Color::srgb(0.9, 0.3, 0.1))
-                    .sidedness(GlyphSidedness::OneSided)
+                    .sidedness(Sidedness::OneSided)
                     .transform(Transform::from_xyz(0.0, 0.0, 0.501))
                     .build(),
             );
