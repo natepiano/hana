@@ -255,9 +255,9 @@ pub fn compute_elbow_metadata(
     geometry: &CableGeometry,
     cable_mesh_config: &CableMeshConfig,
 ) -> Vec<ElbowMetadata> {
-    let flat = path::flatten_geometry(geometry);
-    let mut points = flat.points;
-    let mut arc_lengths = flat.arc_lengths;
+    let flattened_geometry = path::flatten_geometry(geometry);
+    let mut points = flattened_geometry.points;
+    let mut arc_lengths = flattened_geometry.arc_lengths;
 
     if points.len() < 3 {
         return Vec::new();

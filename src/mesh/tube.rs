@@ -159,10 +159,10 @@ pub fn generate_tube_mesh(geometry: &CableGeometry, cable_mesh_config: &CableMes
     let sides = cable_mesh_config.tube_config.sides.max(MIN_TUBE_SIDES);
     let total_length = geometry.total_length.max(MIN_SEGMENT_LENGTH);
 
-    let flat = path::flatten_geometry(geometry);
-    let mut all_points = flat.points;
-    let mut all_tangents = flat.tangents;
-    let mut all_arc_lengths = flat.arc_lengths;
+    let flattened_geometry = path::flatten_geometry(geometry);
+    let mut all_points = flattened_geometry.points;
+    let mut all_tangents = flattened_geometry.tangents;
+    let mut all_arc_lengths = flattened_geometry.arc_lengths;
 
     if all_points.len() < MIN_CABLE_SAMPLE_POINTS.to_usize() {
         return Mesh::new(PrimitiveTopology::TriangleList, default());
