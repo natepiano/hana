@@ -1,14 +1,23 @@
 # Text draw layer
 
-Status: **Phases 1–5 implemented** (Phase 1: audit, `DrawOrdinal` mapping,
-backing OIT inversion fix, D2 diagnostic, tests; Phase 2: `TextDrawLayer`
-cascade attribute, `TextStyle` integration, `From<TextDrawLayer>` routing;
-Phase 3: `BatchKey.layer` routing + per-layer material derivation; Phase 4:
-`examples/draw_layer.rs` two-view demo + the `OIT_DEPTH_STEP`
-recalibration and `OIT_MIN_DEPTH` shader floor that its OIT verification
-forced; Phase 5: geometry draw-slot compaction, merged from the draw-line
-integration branch). Pauses the anchor-to-panel example work (Phase
-4.3/4.4); resume that after this lands.
+> **As-built 2026-06-13 — implemented.** Phases 1–5 all landed and are the
+> live model: Phase 1 audit, `DrawOrdinal` mapping, backing OIT inversion
+> fix, D2 diagnostic, tests; Phase 2 the `DrawLayer` cascade attribute,
+> `TextStyle` integration, `From<DrawLayer>` routing; Phase 3 `BatchKey.layer`
+> routing + per-layer material derivation; Phase 4 `examples/text_draw_layer.rs`
+> two-view demo + the `OIT_DEPTH_STEP` recalibration and `OIT_MIN_DEPTH`
+> shader floor its OIT verification forced; Phase 5 geometry draw-slot
+> compaction. This is the implementation record for the **current** draw-order
+> model (`draw_slot` counter, `DEFAULT_DRAW_LAYER = 64`, OIT clamp).
+>
+> **Superseded-by-design:** a successor layering model is under design in
+> [`../panel-draw-order.md`](../panel-draw-order.md) — a CSS-style fixed draw
+> order + sealed groups + a signed `DrawZIndex`, which would remove the
+> `draw_slot` counter, the `64` default, and the OIT clamp. When that model
+> ships and replaces this one in code, **delete this doc** (a fully-superseded
+> as-built that contradicts the live code is worse than none); the reusable
+> OIT/transparency rationale and `OIT_DEPTH_STEP` calibration have been carried
+> into `panel-draw-order.md`.
 
 Naming: after Phase 5 the `text` prefix was dropped from the attribute,
 its default constant, and the cascade verbs — now `DrawLayer`,
