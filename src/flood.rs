@@ -60,37 +60,6 @@ pub(crate) struct FloodSettings {
     pub(crate) width: f32,
 }
 
-pub(crate) fn prepare_flood_settings(
-    mut commands: Commands,
-    extracted_outlines: Res<ExtractedOutlineUniforms>,
-    cameras: Query<Entity, With<OutlineCamera>>,
-) {
-    let flood_settings = FloodSettings {
-        width: extracted_outlines.max_jump_flood_width,
-    };
-
-    for entity in cameras.iter() {
-        commands.entity(entity).insert(flood_settings.clone());
-    }
-}
-
-/// Number of jump-flood passes required to cover an outline of the given
-/// pixel width. Derived from the `JumpFlood` radius: convert width ->
-/// diameter,
-/// diameter → next-power-of-two radius, plus one final compose pass.
-/// Returns 0 when no flood is needed.
-pub(super) fn jump_flood_pass_count(width: f32) -> u32 {
-    if width <= NO_FLOOD_WIDTH_THRESHOLD {
-        return NO_FLOOD_PASS_COUNT;
-    }
-
-    ((width * JUMP_FLOOD_DIAMETER_SCALE).ceil().to_u32() / JUMP_FLOOD_RADIUS_DIVISOR
-        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT)
-        .next_power_of_two()
-        .trailing_zeros()
-        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT
-}
-
 #[derive(Resource)]
 pub(crate) struct JumpFloodPipeline {
     pub(crate) layout:         BindGroupLayoutDescriptor,
@@ -251,4 +220,35 @@ impl<'w> JumpFloodPass<'w> {
         );
         render_pass.draw(0..TRIANGLE_VERTEX_COUNT, 0..FULL_SCREEN_DRAW_INSTANCE_COUNT);
     }
+}
+
+pub(crate) fn prepare_flood_settings(
+    mut commands: Commands,
+    extracted_outlines: Res<ExtractedOutlineUniforms>,
+    cameras: Query<Entity, With<OutlineCamera>>,
+) {
+    let flood_settings = FloodSettings {
+        width: extracted_outlines.max_jump_flood_width,
+    };
+
+    for entity in cameras.iter() {
+        commands.entity(entity).insert(flood_settings.clone());
+    }
+}
+
+/// Number of jump-flood passes required to cover an outline of the given
+/// pixel width. Derived from the `JumpFlood` radius: convert width ->
+/// diameter,
+/// diameter → next-power-of-two radius, plus one final compose pass.
+/// Returns 0 when no flood is needed.
+pub(super) fn jump_flood_pass_count(width: f32) -> u32 {
+    if width <= NO_FLOOD_WIDTH_THRESHOLD {
+        return NO_FLOOD_PASS_COUNT;
+    }
+
+    ((width * JUMP_FLOOD_DIAMETER_SCALE).ceil().to_u32() / JUMP_FLOOD_RADIUS_DIVISOR
+        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT)
+        .next_power_of_two()
+        .trailing_zeros()
+        + JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT
 }
