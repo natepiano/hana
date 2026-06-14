@@ -31,7 +31,6 @@ use super::PanelTextLayout;
 use super::PreparedPanelText;
 use super::layout::PanelTextZLevel;
 use crate::cascade::CascadeDefault;
-use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -292,7 +291,6 @@ fn batch_key_for_run(
         lighting: cascades.lighting(label_entity),
         sidedness: cascades.sidedness(label_entity),
         z_level: z_level.0,
-        layer: DEFAULT_DRAW_LAYER,
         shadow: prepared.shadow_mode,
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
     }
@@ -773,7 +771,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, Lighting::Unlit);
     render::apply_glyph_sidedness(&mut base, key.sidedness);
-    base.depth_bias = draw_order::text_batch_depth_bias(key.z_level);
+    base.depth_bias = draw_order::text_batch_depth_bias(key.z_level).get();
     render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
@@ -1154,13 +1152,6 @@ mod tests {
         )
     }
 
-    fn batch_layers(app: &App) -> Vec<i8> {
-        let store = app.world().resource::<GlyphCache>().batch_store();
-        let mut layers: Vec<i8> = store.batches().map(|(key, _)| key.layer).collect();
-        layers.sort_unstable();
-        layers
-    }
-
     fn batch_z_levels(app: &App) -> Vec<i8> {
         let store = app.world().resource::<GlyphCache>().batch_store();
         let mut z_levels: Vec<i8> = store.batches().map(|(key, _)| key.z_level).collect();
@@ -1258,14 +1249,20 @@ mod tests {
         assert_eq!(
             batch_material_depth_biases(&app),
             vec![
-                (LOWERED_LEVEL.0, lowered_depth_bias.to_bits()),
-                (RAISED_LEVEL.0, raised_depth_bias.to_bits()),
+                (LOWERED_LEVEL.0, lowered_depth_bias.get().to_bits()),
+                (RAISED_LEVEL.0, raised_depth_bias.get().to_bits()),
             ],
         );
-        assert_ne!(lowered_depth_bias.to_bits(), default_depth_bias.to_bits());
-        assert_ne!(raised_depth_bias.to_bits(), default_depth_bias.to_bits());
-        assert!(lowered_depth_bias < default_depth_bias);
-        assert!(default_depth_bias < raised_depth_bias);
+        assert_ne!(
+            lowered_depth_bias.get().to_bits(),
+            default_depth_bias.get().to_bits()
+        );
+        assert_ne!(
+            raised_depth_bias.get().to_bits(),
+            default_depth_bias.get().to_bits()
+        );
+        assert!(lowered_depth_bias.get() < default_depth_bias.get());
+        assert!(default_depth_bias.get() < raised_depth_bias.get());
     }
 
     #[test]
@@ -1282,7 +1279,6 @@ mod tests {
         let (batches, runs, _) = store_stats(&app);
         assert_eq!(batches, 1, "text draw layers no longer split batches");
         assert_eq!(runs, 4);
-        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
         assert_eq!(batch_entities(&mut app).len(), 1);
     }
 
@@ -1295,7 +1291,6 @@ mod tests {
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 1, 5));
-        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
     }
 
     #[test]
@@ -1317,7 +1312,6 @@ mod tests {
         assert_eq!(batches, 1, "draw-layer cascade no longer affects batches");
         assert_eq!(runs, 2);
         assert_eq!(glyphs, 9);
-        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
         let entities = batch_entities(&mut app);
         assert_eq!(entities, vec![default_entity]);
 
@@ -1328,7 +1322,6 @@ mod tests {
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 2, 9));
-        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
         assert_eq!(
             batch_entities(&mut app),
             vec![default_entity],
@@ -1347,11 +1340,11 @@ mod tests {
             constants::DRAW_LEVEL_TEXT_SUBLANE.to_f32() * constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             previous_text_lane.to_bits(),
-            draw_order::text_batch_depth_bias(0).to_bits()
+            draw_order::text_batch_depth_bias(0).get().to_bits()
         );
         assert_eq!(
             depth_bias.to_bits(),
-            draw_order::text_batch_depth_bias(0).to_bits()
+            draw_order::text_batch_depth_bias(0).get().to_bits()
         );
         assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
     }

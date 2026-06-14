@@ -39,7 +39,6 @@ use crate::layout::Padding;
 use crate::layout::PanelCoord;
 use crate::layout::PanelDraw;
 use crate::layout::PanelLine;
-use crate::layout::PanelLinePaintOrder;
 use crate::layout::PanelLineSourceKey;
 use crate::layout::PanelPoint;
 use crate::layout::RectangleSource;
@@ -291,12 +290,6 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
     assert!(line_index < draw_text_index);
     assert_eq!(draw_text_index, base_text_index + 1);
     assert_eq!(resolved.source_command_index, line_index);
-    assert_eq!(
-        resolved.paint_order,
-        PanelLinePaintOrder::Normal {
-            draw_slot: draw_result.commands[line_index].draw_slot,
-        }
-    );
 }
 
 #[test]
@@ -341,12 +334,7 @@ fn overflow_visible_line_clips_only_to_explicit_clipped_ancestor() {
             height: 50.0,
         })
     );
-    assert_eq!(
-        resolved.paint_order,
-        PanelLinePaintOrder::Normal {
-            draw_slot: result.commands[line_index].draw_slot,
-        }
-    );
+    assert_eq!(resolved.source_command_index, line_index);
     assert!(resolved.visual_bounds.x + resolved.visual_bounds.width > 10.0);
 }
 

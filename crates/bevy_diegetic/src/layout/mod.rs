@@ -70,8 +70,6 @@ pub use line::InvalidPanelScalar;
 pub use line::LineStyle;
 pub use line::PanelCoord;
 pub use line::PanelLine;
-pub use line::PanelLineLayering;
-pub use line::PanelLinePaintOrder;
 pub use line::PanelLinePrimitiveGeometry;
 pub use line::PanelLinePrimitiveKey;
 pub use line::PanelLinePrimitiveKind;

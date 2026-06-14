@@ -223,8 +223,8 @@ pub(super) fn reconcile_panel_text_children(
                 line_index: *line_index,
                 element_idx: *element_idx,
                 draw_ordinal: draw_depth.ordinal_index(),
-                depth_bias: draw_depth.depth_bias(),
-                oit_depth_offset: draw_depth.oit_depth_offset(),
+                depth_bias: draw_depth.depth_bias().get(),
+                oit_depth_offset: draw_depth.oit_depth_offset().get(),
                 bounds: *bounds,
                 scale_x,
                 scale_y,
@@ -681,7 +681,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: incoming.draw_depth.depth_bias(),
+        depth_bias: incoming.draw_depth.depth_bias().get(),
         ..default()
     });
 

@@ -135,6 +135,7 @@ pub use attributes::resolved_lighting;
 pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
 pub use cascade_set::CascadeSet;
+#[cfg(test)]
 pub(crate) use constants::DEFAULT_DRAW_LAYER;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;

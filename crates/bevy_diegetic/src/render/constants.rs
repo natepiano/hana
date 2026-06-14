@@ -41,6 +41,8 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// storable; past the bound their coplanar ordering collapses to OIT-list
 /// insertion order instead of going invisible.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
+/// Nominal OIT `position.z` for fragments at the camera focus distance.
+pub(crate) const OIT_FOCUS_DEPTH: f32 = 0.001;
 
 // material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).

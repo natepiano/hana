@@ -9,12 +9,8 @@
 /// than looping forever.
 pub(super) const CASCADE_DEPTH_CAP: usize = 64;
 
-/// Default draw layer for panel text runs.
+/// Default `DrawLayer` cascade value for panel text runs.
 ///
-/// Sits above any realistic panel render-command count, so default-layer text
-/// composites over every backing layer on both sorted and OIT views
-/// (`render::draw_order::DrawOrdinal` derives both ordering mechanisms from
-/// it). Assumes a panel's render commands stay below this count; a panel
-/// exceeding it would draw commands over its own default-layer text on
-/// sorted views.
+/// A cascade default only; the draw-order projection (`render::draw_order`)
+/// does not read it for ordering.
 pub(crate) const DEFAULT_DRAW_LAYER: i8 = 64;

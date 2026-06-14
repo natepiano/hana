@@ -12,7 +12,6 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
 use crate::layout::DrawOverflow;
-use crate::layout::PanelLinePaintOrder;
 use crate::layout::PanelLineSourceKey;
 use crate::layout::ResolvedPanelLine;
 use crate::layout::TextAlign;
@@ -29,35 +28,19 @@ use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
 
-/// Mutable counters threaded through one command-emission pass: the next
-/// geometry [`RenderCommand::draw_slot`].
-#[derive(Default)]
-struct EmissionCounters {
-    draw_slot: usize,
-}
-
-/// Pushes one command, stamping its [`RenderCommand::draw_slot`] and
-/// [`RenderCommand::z_index`]. Slot-consuming kinds take the current slot and
-/// advance the counter; text and scissor commands record the slot the next
-/// geometry command will occupy.
+/// Pushes one command with its [`RenderCommand::z_index`].
 fn push_command(
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     bounds: BoundingBox,
     kind: RenderCommandKind,
     element_idx: usize,
     z_index: Option<DrawLayer>,
 ) {
-    let draw_slot = counters.draw_slot;
-    if kind.consumes_draw_slot() {
-        counters.draw_slot += 1;
-    }
     commands.push(RenderCommand {
         bounds,
         kind,
         element_idx,
         z_index,
-        draw_slot,
     });
 }
 
@@ -171,7 +154,6 @@ fn emit_up_traversal_commands(
     tree: &LayoutTree,
     computed: &[ComputedLayout],
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     element: &Element,
     bounds: BoundingBox,
     index: usize,
@@ -179,7 +161,6 @@ fn emit_up_traversal_commands(
     if let Some(ref border) = element.border {
         push_command(
             commands,
-            counters,
             bounds,
             RenderCommandKind::Border { border: *border },
             index,
@@ -188,14 +169,13 @@ fn emit_up_traversal_commands(
 
         // Between-children borders.
         if border.between_children.value > 0.0 {
-            emit_between_borders(tree, computed, commands, counters, index, border);
+            emit_between_borders(tree, computed, commands, index, border);
         }
     }
 
     if matches!(element.overflow, ChildOverflow::Clipped) {
         push_command(
             commands,
-            counters,
             bounds,
             RenderCommandKind::ScissorEnd,
             index,
@@ -208,7 +188,6 @@ fn emit_up_traversal_commands(
 /// down-traversal (first visit) of the DFS positioning pass.
 fn emit_down_traversal_commands(
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     element: &Element,
     wrapped: Option<&WrappedText>,
     bounds: BoundingBox,
@@ -220,7 +199,6 @@ fn emit_down_traversal_commands(
     if let Some(color) = element.background {
         push_command(
             commands,
-            counters,
             bounds,
             RenderCommandKind::Rectangle {
                 color,
@@ -239,7 +217,6 @@ fn emit_down_traversal_commands(
         let clip_bounds = element_scissor_bounds(element, bounds);
         push_command(
             commands,
-            counters,
             clip_bounds,
             RenderCommandKind::ScissorStart,
             index,
@@ -247,7 +224,7 @@ fn emit_down_traversal_commands(
         );
     }
 
-    emit_line_commands(commands, counters, element, bounds, index, clip_context);
+    emit_line_commands(commands, element, bounds, index, clip_context);
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -258,7 +235,6 @@ fn emit_down_traversal_commands(
     {
         emit_text_commands(
             commands,
-            counters,
             wrapped,
             config,
             text,
@@ -273,7 +249,6 @@ fn emit_down_traversal_commands(
     if let ElementContent::Image { ref handle, tint } = element.content {
         push_command(
             commands,
-            counters,
             bounds,
             RenderCommandKind::Image {
                 handle: handle.clone(),
@@ -287,7 +262,6 @@ fn emit_down_traversal_commands(
 
 fn emit_line_commands(
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     element: &Element,
     bounds: BoundingBox,
     index: usize,
@@ -308,11 +282,6 @@ fn emit_line_commands(
         ),
         DrawOverflow::Visible => (clip_context.scissor, PanelLineClipPolicy::Inherited),
     };
-    // Phase 5 removes this legacy paint-order value after render no longer
-    // needs `PanelLinePaintOrder::Normal`.
-    let paint_order = PanelLinePaintOrder::Normal {
-        draw_slot: counters.draw_slot,
-    };
 
     let mut lines = Vec::new();
     for (line_ordinal, line) in panel_draw.lines_ref().iter().enumerate() {
@@ -321,7 +290,6 @@ fn emit_line_commands(
             bounds,
             clip,
             clip_policy,
-            paint_order,
             source_command_index,
             source_key,
         );
@@ -335,7 +303,6 @@ fn emit_line_commands(
     };
     push_command(
         commands,
-        counters,
         command_bounds,
         RenderCommandKind::Lines { lines },
         index,
@@ -346,7 +313,6 @@ fn emit_line_commands(
 /// Emits render commands for text content (both wrapped and unwrapped).
 fn emit_text_commands(
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     wrapped: Option<&WrappedText>,
     config: &TextStyle,
     text: &str,
@@ -366,7 +332,6 @@ fn emit_text_commands(
             let line_x = line_x_for_alignment(config.text_align(), bounds, line.width);
             push_command(
                 commands,
-                counters,
                 BoundingBox {
                     x:      line_x,
                     y:      line_y,
@@ -385,7 +350,6 @@ fn emit_text_commands(
         // Unwrapped text (`TextWrap::None`): single command.
         push_command(
             commands,
-            counters,
             bounds,
             RenderCommandKind::Text {
                 text:   text.to_owned(),
@@ -641,7 +605,6 @@ pub(super) fn position_and_render(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let mut counters = EmissionCounters::default();
     let viewport_clip = BoundingBox {
         x:      0.0,
         y:      0.0,
@@ -669,22 +632,13 @@ pub(super) fn position_and_render(
         };
 
         if entry.visited {
-            emit_up_traversal_commands(
-                tree,
-                computed,
-                &mut commands,
-                &mut counters,
-                element,
-                bounds,
-                index,
-            );
+            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
         } else {
             // Store the final bounding box for render-side culling and clipping.
             computed[index].bounds = bounds;
 
             emit_down_traversal_commands(
                 &mut commands,
-                &mut counters,
                 element,
                 wrapped[index].as_ref(),
                 bounds,
@@ -717,7 +671,6 @@ pub(super) fn render_commands_from_geometry(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let mut counters = EmissionCounters::default();
     let viewport_clip = BoundingBox {
         x:      0.0,
         y:      0.0,
@@ -738,21 +691,12 @@ pub(super) fn render_commands_from_geometry(
         let bounds = computed[index].bounds;
 
         if entry.visited {
-            emit_up_traversal_commands(
-                tree,
-                computed,
-                &mut commands,
-                &mut counters,
-                element,
-                bounds,
-                index,
-            );
+            emit_up_traversal_commands(tree, computed, &mut commands, element, bounds, index);
             continue;
         }
 
         emit_down_traversal_commands(
             &mut commands,
-            &mut counters,
             element,
             wrapped[index].as_ref(),
             bounds,
@@ -786,7 +730,6 @@ fn emit_between_borders(
     tree: &LayoutTree,
     computed: &[ComputedLayout],
     commands: &mut Vec<RenderCommand>,
-    counters: &mut EmissionCounters,
     parent_idx: usize,
     border: &Border,
 ) {
@@ -811,7 +754,6 @@ fn emit_between_borders(
             let line_x = border.between_children.value.mul_add(-0.5, midpoint);
             push_command(
                 commands,
-                counters,
                 BoundingBox {
                     x:      line_x,
                     y:      parent_bounds.y + parent.padding.top.value,
@@ -831,7 +773,6 @@ fn emit_between_borders(
             let line_y = border.between_children.value.mul_add(-0.5, midpoint);
             push_command(
                 commands,
-                counters,
                 BoundingBox {
                     x:      parent_bounds.x + parent.padding.left.value,
                     y:      line_y,

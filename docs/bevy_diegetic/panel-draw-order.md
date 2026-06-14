@@ -387,7 +387,7 @@ User decisions:
 - **Line-layering deletion is a public-API removal (approved full removal):** Phase 5 now enumerates the `pub` `PanelLineLayering` + `PanelLinePaintOrder`, their 4 re-exports, the `ResolvedPanelLineCommand.layering` field/accessor + `PanelLinePaintOrder::layering()` method, and the now-vestigial `PanelLinePaintOrder` enum collapse (+ `positioning.rs:313` seed and `integration_tests.rs:296/346` assertions).
 - **Cascade teardown owner (approved Phase 6):** the entire `DrawLayer`-cascade machinery + the `DEFAULT_DRAW_LAYER` constant are deleted in Phase 6 with the rename, not Phase 5. Phase 5 keeps `DEFAULT_DRAW_LAYER` (the cascade default) alive and only removes its non-cascade readers; both Work Orders updated to remove the prior "delete here or defer" ambiguity.
 
-### Phase 5 — Delete the dead mechanism + rework the overflow check · status: todo
+### Phase 5 — Delete the dead mechanism + rework the overflow check · status: done (uncommitted in tree)
 
 #### Work Order
 
@@ -476,6 +476,71 @@ rename — do NOT delete any cascade machinery or `DEFAULT_DRAW_LAYER` in Phase 
 to Phase 6); `cargo nextest run` green; overflow warning fires at the **smaller** of
 the per-level band-capacity ceiling (`DRAW_LEVEL_GEOMETRY_LANES`) and the OIT budget.
 
+### Retrospective
+
+**What worked:**
+- Full removal landed clean: `PanelLineLayering`/`PanelLinePaintOrder`, their
+  re-exports, `ResolvedPanelLineCommand.layering`, the carrier `draw_slot` fields, and
+  the analytic `BatchKey.layer` field/write are all gone; `draw_slot` has zero
+  references left in `src`. 415 tests pass, clippy clean.
+- Two-ceiling guard implemented as intended: `DrawOrderProjection::level_occupancy()
+  -> Vec<(i8, usize)>` plus pure predicates `per_level_band_overflows(busiest)` and
+  `oit_total_overflows(panel_total)` in `panel_geometry.rs`, each `warn_once!`
+  independently. Per-level band measures the busiest single z-level; OIT budget
+  measures the panel-global sum — the two genuinely distinct quantities the Phase 4a
+  review flagged.
+
+**What deviated from the plan:**
+- Added `ScreenDepthBias(f32)`/`OitDepthOffset(f32)` newtypes in `draw_order.rs`
+  (user-requested mid-phase) — the depth helpers now return these, `.get()` only at
+  material/buffer write boundaries. Not in the original Work Order; it is an
+  ergonomics win the Phase 6 rename inherits.
+- `OIT_FOCUS_DEPTH = 0.001` constant added to `constants.rs` to name the OIT-budget
+  numerator (`oit_depth_budget() = floor(OIT_FOCUS_DEPTH / OIT_DEPTH_STEP) ≈ 1000`),
+  with a doc comment on the 24-bit / ~17-quanta calibration so 1e-7 (→ layer merge)
+  is not reintroduced.
+- The "semver-visible public-API removal" framing in the Spec is moot — the crate is
+  unpublished, so the public-symbol deletion carried no real constraint.
+
+**Surprises:**
+- `DEFAULT_DRAW_LAYER`'s only surviving non-test use is the `default =` in
+  `cascade_attr!(DrawLayer(i8), default = DEFAULT_DRAW_LAYER, eq)` (`resolved.rs:88`).
+  The cascade still resolves each text run's `DrawLayer` to 64, but **nothing consumes
+  that resolved value for ordering** — it is fully inert machinery awaiting Phase 6.
+  Its doc comment was rewritten to say so.
+
+**Implications for remaining phases:**
+- Phase 6 inherits the newtypes (`ScreenDepthBias`/`OitDepthOffset`) and the
+  `OIT_FOCUS_DEPTH` constant in its rename blast radius.
+- Phase 6's cascade teardown surface is unchanged from the Phase 4a review's
+  assignment, now confirmed against shipped code: `resolved.rs:91` `default =`, the
+  verbs, `glyph_cascade.rs`, the `Override`/`Resolved<DrawLayer>` path, and
+  `DEFAULT_DRAW_LAYER` itself all still compile and are still inert.
+
+### Phase 5 Review
+
+Architect re-evaluation of Phases 6/7 against shipped Phase 5 code. All findings were
+determined corrections (no open user decisions); applied to the Phase 6 Work Order:
+- **Shared observer (was a rendering-break trap):** Phase 6 spec now says delete only
+  the four `DrawLayer` arms of `seed_panel_text_child_glyph` (`glyph_cascade.rs:33/38/55–60/70`),
+  not the observer — it also resolves `Resolved<Lighting>`/`Sidedness>`/`AntiAlias>`.
+- **Missing teardown file:** added `render/panel_text/mod.rs` (production
+  `CascadePlugin::<DrawLayer>` `:80` + `use … DrawLayer` `:40`) to Phase 6 Spec/Files —
+  the teardown would not have compiled without it; `batching.rs` registrations are test-only.
+- **Dead test citations:** parity test is `sorted_and_oit_orderings_agree_for_every_z_level_pair`
+  at `draw_order.rs:493` using `representative_streams()` + `RAISED_LEVEL`/`LOWERED_LEVEL`;
+  `ORDERED_LAYER_PAIRS`/`(i8,i8)` pairs no longer exist. Corrected.
+- **Re-point heads-up narrowed:** the `glyph_cascade.rs mod tests` `DEFAULT_DRAW_LAYER`
+  uses are deleted with the machinery, not re-pointed; no draw-order test references it.
+- **`#[cfg(test)]` re-export constraint:** recorded that Phase 5 narrowed
+  `cascade/mod.rs:139` to test-only; Phase 6 deletes it + the `glyph_cascade.rs:88` import.
+- **Drifted refs / count:** `resolved.rs` declaration `:87`/`:88` (not `:90/:91`);
+  added `text_props.rs:366` getter + `reconcile.rs:218` reader; rename count updated to
+  ~214 across 16 files; flagged the `ScreenDepthBias`/`OitDepthOffset`/`OIT_FOCUS_DEPTH`
+  newtypes as read-review only (no `DrawLayer` token, not renamed).
+- **Phase 7:** unaffected — its per-level-band ceiling constraint matches shipped
+  `constants.rs`/`draw_order.rs`; no change.
+
 ### Phase 6 — Flag-day rename + example + test/doc cleanup · status: todo
 
 #### Work Order
@@ -487,37 +552,44 @@ in-panel-overlay example, and finish test/doc cleanup.
 
 - **Confirm the rename with the user first** (rename-through-editor convention).
   Re-derive the edit scope at execution — citations across this plan have
-  drifted; as of the last review `DrawLayer` + `draw_layer` was ~172 refs across
-  17 files, `DEFAULT_DRAW_LAYER` adds ~24, `glyph_cascade.rs` carries ~40.
-  `cascade_attr!` regenerates the verbs, `Reflect`, and the BRP type path
+  drifted; as of the post-Phase-5 review `DrawLayer` + `draw_layer` was **~214 refs
+  across 16 files** (`grep -rho` count), `DEFAULT_DRAW_LAYER` adds 4 production+test
+  sites. `cascade_attr!` regenerates the verbs, `Reflect`, and the BRP type path
   automatically — no hand-written reflection sites.
 - Rename via the editor: `DrawLayer → DrawZIndex`, `draw_layer → draw_zindex` —
   the `El`/`Element` field, `TextStyle` field (`text_props.rs:218`) + builder
-  `with_draw_layer` (`:534`) + setter `set_draw_layer` (`:611`), cascade declaration
-  (`cascade/resolved.rs:90`, `DrawLayer(i8)`), verbs
-  (`cascade/attributes.rs:52/95/159`), and readers (`reconcile.rs`,
-  `glyph_cascade.rs`, `panel_text/batching.rs`). **Post-extraction surface (Phase 4a)
+  `with_draw_layer` (`:534`) + setter `set_draw_layer` (`:611`) + getter
+  `draw_layer()` (`:366`), cascade declaration (`cascade/resolved.rs:87`,
+  `DrawLayer(i8)`), verbs (`cascade/attributes.rs:52/95/159`), and readers
+  (`reconcile.rs:218` `config.draw_layer()`, `glyph_cascade.rs`,
+  `panel_text/batching.rs`). **Post-extraction surface (Phase 4a)
   the rename must also cover:** `render/draw_order.rs` (the engine — `DrawLayer`
   import, `From<DrawLayer>`, `HierarchicalDrawKey.z_index: Option<DrawLayer>`, and the
-  test module's `ORDERED_LAYER_PAIRS`/`RAISED_LEVEL`/`LOWERED_LEVEL`), the
-  `text_element`/`text_id_element` builders (`layout/builder.rs`), `PanelTextZLevel`
-  (`panel_text/layout.rs`), and consider whether `line_batch_depth_bias`/
-  `text_batch_depth_bias`/`DRAW_LEVEL_*` (`render/draw_order.rs`, `render/constants.rs`)
-  read clearly post-rename. Re-confirm every cited line number at rename time.
+  test module's `RAISED_LEVEL`/`LOWERED_LEVEL` consts — note **`ORDERED_LAYER_PAIRS`
+  no longer exists**; the parity test now uses `representative_streams()`), the
+  `text_element`/`text_id_element` builders (`layout/builder.rs`), and `PanelTextZLevel`
+  (`panel_text/layout.rs:45`). The `ScreenDepthBias`/`OitDepthOffset` newtypes,
+  `OIT_FOCUS_DEPTH`, `line_batch_depth_bias`/`text_batch_depth_bias`, and `DRAW_LEVEL_*`
+  contain **no `DrawLayer` token** — they are NOT part of the rename; review only that
+  they still read clearly afterward. Re-confirm every cited line number at rename time.
 - Rewrite the example `examples/text_draw_layer.rs` → e.g. `panel_draw_order.rs`:
   one panel, a text child and a sibling overlay quad in the same tree, ordered with
   `DrawZIndex` and a hotkey toggle — not the current second-anchored-panel fake.
   Author raised/lowered text via the now-working `text_element(El::new()
   .draw_layer(...), …)` path (Phase 4a), and a sibling overlay quad via
-  `El::draw_layer`.
-- The parity test `sorted_and_oit_orderings_agree_for_every_layer_pair` now lives in
-  `render/draw_order.rs:~552` (moved by the extraction) and already iterates
-  `(i8, i8)` layer pairs via `DrawOrdinal::from(DrawLayer(..))`; Phase 4a also added
-  `hierarchical_depth_bias_and_oit_orderings_agree` and the no-override material
-  equivalence test. Reconcile against those (do not describe the test as untouched):
-  generalize remaining coverage over `(HierarchicalDrawKey, HierarchicalDrawKey)`
-  pairs (unset at different steps; unset vs `z = 0` same step; unset vs set across
-  steps; raised/lowered pairs) only where not already covered.
+  `El::draw_layer`. **The current example's hotkey handler calls the retired cascade
+  verbs `override_draw_layer`/`inherit_draw_layer` (`:314/:317`) and `with_draw_layer`
+  (`:374/:377`) — Phase 6 deletes those verbs, so the rewrite must drop that path
+  entirely, not rename it.**
+- The parity test is now `sorted_and_oit_orderings_agree_for_every_z_level_pair` at
+  `render/draw_order.rs:493` (renamed + moved by the extraction); it iterates z-level
+  pairs via `representative_streams()` + the `RAISED_LEVEL`/`LOWERED_LEVEL` consts
+  (`:284/:295`), **not** `ORDERED_LAYER_PAIRS`/`(i8,i8)` layer pairs (those no longer
+  exist). Phase 4a also added `hierarchical_depth_bias_and_oit_orderings_agree` and the
+  no-override material equivalence test. Reconcile against those (do not describe the
+  test as untouched): generalize remaining coverage over `(HierarchicalDrawKey,
+  HierarchicalDrawKey)` pairs (unset at different steps; unset vs `z = 0` same step;
+  unset vs set across steps; raised/lowered pairs) only where not already covered.
 - `coverage_probe.rs` `EXPECTED_SHADER_FNV1A` was refreshed in Phase 4
   (the `OIT_MIN_DEPTH` retune). The rename does not touch shader text
   (`draw_layer` is passed as a precomputed offset through the existing shader
@@ -527,33 +599,56 @@ in-panel-overlay example, and finish test/doc cleanup.
   no-refresh).
 - **Tear down the entire `DrawLayer` cascade machinery here** (Phase 5 deliberately
   left it wired): the `with_draw_layer`/`set_draw_layer` verbs (`text_props.rs`), the
-  `glyph_cascade.rs` seeding observer + propagation/reconcile arms, the
   `Override`/`Resolved<DrawLayer>` resolution path, the cascade declaration
-  (`resolved.rs:90`), the `override_draw_layer`/`inherit_draw_layer`/`resolved_draw_layer`
-  verbs (`attributes.rs:52/95/159`), and the `DEFAULT_DRAW_LAYER` constant
-  (`cascade/constants.rs:20`). Doing this with the rename keeps the cascade
-  declaration, verbs, and `DEFAULT_DRAW_LAYER` coming out together so the rename
-  lands on a clean post-cascade surface. The test pinning that `TextStyle`
-  draw-layers do not split batches (`panel_text/batching.rs`) goes with them.
-  **Heads-up:** the Phase 4a tests that reference `DEFAULT_DRAW_LAYER` as the text
-  lane (the no-override equivalence pin, `ORDERED_LAYER_PAIRS` in `draw_order.rs`)
-  must be re-pointed to a literal `64`/`63` or a surviving constant when the
-  constant is deleted.
+  (`resolved.rs:87`, `default = DEFAULT_DRAW_LAYER` at `:88`), the
+  `override_draw_layer`/`inherit_draw_layer`/`resolved_draw_layer` verbs
+  (`attributes.rs:52/95/159`), and the `DEFAULT_DRAW_LAYER` constant
+  (`cascade/constants.rs:16`). **The production `CascadePlugin::<DrawLayer>`
+  registration and the `seed_panel_text_child_glyph` observer wiring live in
+  `render/panel_text/mod.rs` (`:80` plugin, `:82` observer, `:40` `use … DrawLayer`),
+  NOT in `batching.rs` (those are test-only) — delete the `CascadePlugin::<DrawLayer>`
+  line and its import there.** Also delete the now-`#[cfg(test)]`-gated re-export
+  `cascade/mod.rs:139` (`pub(crate) use constants::DEFAULT_DRAW_LAYER`, narrowed to
+  test-only in Phase 5) and the `glyph_cascade.rs:88` test import.
+- **`seed_panel_text_child_glyph` (`glyph_cascade.rs:29`) is a SHARED observer** — it
+  resolves and inserts `Resolved<Lighting>`, `Resolved<Sidedness>`, `Resolved<DrawLayer>`,
+  AND `Resolved<AntiAlias>` together; the other three are consumed for rendering
+  (`panel_text/batching.rs`, `panel_lines/batching.rs`). **Do NOT delete the observer.**
+  Surgically remove only the four `DrawLayer`-specific lines: the `draw_layer_overrides`
+  query (`:33`), `draw_layer_default` (`:38`), the `resolve_walk::<DrawLayer>` block
+  (`:55–60`), and the `Resolved(draw_layer)` insert (`:70`). Deleting the whole
+  observer would break lighting/sidedness/anti-alias.
+- Doing the teardown with the rename keeps the cascade declaration, verbs, and
+  `DEFAULT_DRAW_LAYER` coming out together so the rename lands on a clean post-cascade
+  surface. The test pinning that `TextStyle` draw-layers do not split batches
+  (`panel_text/batching.rs`) goes with them. The cascade-resolution tests inside
+  `glyph_cascade.rs mod tests` (`:88/:159/:214/:246`) are **deleted with the
+  machinery, not re-pointed** — no surviving draw-order test references
+  `DEFAULT_DRAW_LAYER` (the line/text lane pins already use literal `63`/`64`).
 - Delete `as-built/text-draw-layer.md` once the old mechanism is gone.
 
 **Files:** `examples/text_draw_layer.rs` (→ renamed), `render/draw_order.rs`
-(engine + parity test), `render/constants.rs` (`DRAW_LEVEL_*`), `layout/text_props.rs`,
-`layout/builder.rs` (`text_element`/`text_id_element`), `render/panel_text/layout.rs`
-(`PanelTextZLevel`), `cascade/resolved.rs`, `cascade/attributes.rs`,
-`cascade/constants.rs` (`DEFAULT_DRAW_LAYER` deletion), `render/panel_text/glyph_cascade.rs`
-(cascade machinery teardown), plus every renamed reference (editor-driven), and
-`docs/bevy_diegetic/as-built/text-draw-layer.md` (delete).
+(engine + parity test), `layout/text_props.rs`, `layout/builder.rs`
+(`text_element`/`text_id_element`), `render/panel_text/layout.rs` (`PanelTextZLevel`),
+`render/panel_text/reconcile.rs` (`config.draw_layer()` reader), `cascade/resolved.rs`,
+`cascade/attributes.rs`, `cascade/constants.rs` (`DEFAULT_DRAW_LAYER` deletion at `:16`),
+`cascade/mod.rs` (delete the `#[cfg(test)]` `DEFAULT_DRAW_LAYER` re-export at `:139`),
+`render/panel_text/glyph_cascade.rs` (surgical `DrawLayer`-arm removal — keep the
+shared observer), **`render/panel_text/mod.rs` (delete `CascadePlugin::<DrawLayer>`
+`:80` + `use … DrawLayer` `:40`)**, plus every renamed reference (editor-driven), and
+`docs/bevy_diegetic/as-built/text-draw-layer.md` (delete). (`render/constants.rs`
+`DRAW_LEVEL_*` and the depth-bias newtypes carry no `DrawLayer` token — read-review
+only, not edited.)
 
 **Constraints from prior phases:** Phase 4 refreshed `EXPECTED_SHADER_FNV1A`. Phase 5
 deleted the `draw_slot` machinery and the line-layering types but **left
 `DEFAULT_DRAW_LAYER` and the whole `DrawLayer` cascade machinery intact** — Phase 6
-owns deleting them (the Spec bullet above), together with the rename. The new model
-is fully wired into rendering; the rename + cascade teardown must not change ordering
+owns deleting them (the Spec bullet above), together with the rename. Phase 5 also
+**narrowed the `cascade/mod.rs` `DEFAULT_DRAW_LAYER` re-export to `#[cfg(test)]`**
+(`:139`) — the only remaining production reader is `resolved.rs:88` (`default =`); every
+other reference is test-only. The `seed_panel_text_child_glyph` observer is shared
+across four cascade attributes — only the `DrawLayer` arms come out. The new model is
+fully wired into rendering; the rename + cascade teardown must not change ordering
 behavior (a parity test guards it).
 
 **Acceptance gate:** compiles under the new names; example demonstrates in-panel

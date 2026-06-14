@@ -60,6 +60,7 @@ use crate::render::VisualShadow;
 use crate::render::draw_order;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrderProjection;
+use crate::render::draw_order::ScreenDepthBias;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -95,7 +96,7 @@ struct LineBatchKey {
 impl LineBatchKey {
     const fn new(visual: VisualBatchKey, z_level: i8) -> Self { Self { visual, z_level } }
 
-    fn depth_bias(&self) -> f32 { draw_order::line_batch_depth_bias(self.z_level) }
+    fn depth_bias(&self) -> ScreenDepthBias { draw_order::line_batch_depth_bias(self.z_level) }
 }
 
 /// GPU-side handles for one line path batch.
@@ -377,8 +378,8 @@ impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
             clip:          source.primitive.clip().map(bounding_box_bits),
             owner_bounds:  bounding_box_bits(source.line.owner_bounds()),
             layering:      [
-                source.draw_depth.depth_bias().to_bits(),
-                source.draw_depth.oit_depth_offset().to_bits(),
+                source.draw_depth.depth_bias().get().to_bits(),
+                source.draw_depth.oit_depth_offset().get().to_bits(),
             ],
         }
     }
@@ -663,7 +664,7 @@ fn build_panel_line_group(
 fn primitive_depth_bias(source: &LinePrimitiveSource<'_>) -> f32 {
     let line_depth = line_depth_order(source.line).to_f32().mul_add(
         PANEL_LINE_LINE_DEPTH_BIAS_STEP,
-        source.draw_depth.depth_bias(),
+        source.draw_depth.depth_bias().get(),
     );
     source
         .primitive
@@ -675,7 +676,7 @@ fn primitive_depth_bias(source: &LinePrimitiveSource<'_>) -> f32 {
 fn primitive_oit_depth_offset(source: &LinePrimitiveSource<'_>) -> f32 {
     let line_depth = line_depth_order(source.line).to_f32().mul_add(
         PANEL_LINE_LINE_OIT_DEPTH_STEP,
-        source.draw_depth.oit_depth_offset(),
+        source.draw_depth.oit_depth_offset().get(),
     );
     source
         .primitive
@@ -1001,7 +1002,7 @@ fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
     base.alpha_mode = key.visual.alpha.into();
     base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
     render::apply_glyph_sidedness(&mut base, key.visual.sidedness);
-    base.depth_bias = key.depth_bias();
+    base.depth_bias = key.depth_bias().get();
     render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
@@ -1034,8 +1035,6 @@ mod tests {
     use crate::cascade::DrawLayer;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
-    use crate::layout::PanelLineLayering;
-    use crate::layout::PanelLinePaintOrder;
     use crate::layout::PanelLinePrimitiveGeometry;
     use crate::layout::PanelLinePrimitiveKey;
     use crate::layout::PanelLinePrimitiveKind;
@@ -1182,11 +1181,11 @@ mod tests {
         assert_eq!(z_level, 0);
         assert_eq!(
             previous_line_lane.to_bits(),
-            draw_order::line_batch_depth_bias(0).to_bits()
+            draw_order::line_batch_depth_bias(0).get().to_bits()
         );
         assert_eq!(
             material_depth_bias.to_bits(),
-            draw_order::line_batch_depth_bias(0).to_bits()
+            draw_order::line_batch_depth_bias(0).get().to_bits()
         );
         assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
         assert_eq!(
@@ -1225,8 +1224,8 @@ mod tests {
         assert_eq!(
             depth_biases,
             vec![
-                (-1, draw_order::line_batch_depth_bias(-1).to_bits()),
-                (1, draw_order::line_batch_depth_bias(1).to_bits()),
+                (-1, draw_order::line_batch_depth_bias(-1).get().to_bits()),
+                (1, draw_order::line_batch_depth_bias(1).get().to_bits()),
             ],
         );
     }
@@ -1390,7 +1389,6 @@ mod tests {
                 lines: vec![first.clone(), second.clone()],
             },
             z_index:     None,
-            draw_slot:   0,
         }];
         let draw_depth = draw_depth_for_command(&commands, 0);
         let first_source = LinePrimitiveSource {
@@ -1452,11 +1450,6 @@ mod tests {
             owner_bounds: owner_clip,
             visual_bounds: primitive_bounds,
             clip: Some(inherited_clip),
-            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
-            layering: PanelLineLayering {
-                depth_bias:       0.0,
-                oit_depth_offset: 0.0,
-            },
             start: Vec2::ZERO,
             end: Vec2::new(50.0, 0.0),
             shaft_start: Vec2::ZERO,
@@ -1471,7 +1464,6 @@ mod tests {
             element_idx: 1,
             kind:        RenderCommandKind::Lines { lines: vec![line] },
             z_index:     None,
-            draw_slot:   0,
         }];
 
         let projection = DrawOrderProjection::from_commands(&commands);
@@ -1689,11 +1681,6 @@ mod tests {
             },
             visual_bounds: primitive.bounds(),
             clip: None,
-            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
-            layering: PanelLineLayering {
-                depth_bias:       0.0,
-                oit_depth_offset: 0.0,
-            },
             start: Vec2::ZERO,
             end: Vec2::X,
             shaft_start: Vec2::ZERO,

@@ -24,15 +24,6 @@ pub struct RenderCommand {
     pub element_idx: usize,
     /// Optional authored draw layer from the source element.
     pub z_index:     Option<DrawLayer>,
-    /// Legacy coplanar geometry draw slot kept until the counter is removed.
-    ///
-    /// Slot-consuming kinds ([`Rectangle`](RenderCommandKind::Rectangle),
-    /// [`Border`](RenderCommandKind::Border), [`Image`](RenderCommandKind::Image),
-    /// [`Lines`](RenderCommandKind::Lines)) each occupy one slot in emission
-    /// order. `Text` and scissor commands record the next slot without
-    /// consuming it, so text-heavy panels don't inflate later geometry
-    /// ordinals toward the default draw layer.
-    pub draw_slot:   usize,
 }
 
 /// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.
@@ -124,18 +115,6 @@ impl RenderCommandKind {
             Self::Lines { .. } => Some(DrawStep::Lines),
             Self::Text { .. } => Some(DrawStep::Text),
             Self::ScissorStart | Self::ScissorEnd => None,
-        }
-    }
-
-    /// Whether this command occupies a legacy [`RenderCommand::draw_slot`].
-    #[must_use]
-    pub const fn consumes_draw_slot(&self) -> bool {
-        match self {
-            Self::Rectangle { .. }
-            | Self::Border { .. }
-            | Self::Image { .. }
-            | Self::Lines { .. } => true,
-            Self::Text { .. } | Self::ScissorStart | Self::ScissorEnd => false,
         }
     }
 }

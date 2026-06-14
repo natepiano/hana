@@ -112,7 +112,6 @@ mod tests {
             },
             element_idx: 0,
             z_index: None,
-            draw_slot: 0,
         }
     }
 
@@ -122,7 +121,6 @@ mod tests {
             kind: RenderCommandKind::ScissorStart,
             element_idx: 0,
             z_index: None,
-            draw_slot: 0,
         }
     }
 
@@ -132,7 +130,6 @@ mod tests {
             kind: RenderCommandKind::ScissorEnd,
             element_idx: 0,
             z_index: None,
-            draw_slot: 0,
         }
     }
 

@@ -81,12 +81,9 @@ cascade_attr!(
 cascade_attr!(
     /// Draw-layer cascade attribute.
     ///
-    /// A text run's ordinal on its panel's draw-order axis, shared with the
-    /// geometry draw slots that backings, dividers, images, and lines consume
-    /// in emission order. The global default sits above every realistic
-    /// geometry slot count, so default-layer text composites over all
-    /// backings; a lower value tucks a run behind the geometry whose draw
-    /// slots exceed it.
+    /// A text run's authored z-level on its panel's draw-order axis. The
+    /// global default composites default-layer text above default-layer panel
+    /// geometry; lower values render behind commands with higher draw layers.
     DrawLayer(i8),
     default = DEFAULT_DRAW_LAYER,
     eq

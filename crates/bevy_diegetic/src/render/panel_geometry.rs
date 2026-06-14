@@ -11,19 +11,20 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
+use bevy_kana::ToUsize;
 
 use super::PanelChildSystems;
 use super::clip;
 use super::constants;
+use super::constants::DRAW_LEVEL_GEOMETRY_LANES;
+use super::constants::OIT_DEPTH_STEP;
+use super::constants::OIT_FOCUS_DEPTH;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderProjection;
-use super::draw_order::DrawOrdinal;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use super::sdf_material::SdfPanelMaterialInput;
-use crate::cascade::DEFAULT_DRAW_LAYER;
-use crate::cascade::DrawLayer;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -233,23 +234,29 @@ fn reconcile_sdf_quads(
     sdf_materials: &mut Assets<SdfPanelMaterial>,
     commands: &mut Commands,
 ) {
-    // `warn_once!` is per-callsite: only the first panel to exhaust the
-    // headroom is named; later offenders stay silent.
-    let max_draw_slot = render_commands
-        .iter()
-        .filter(|cmd| cmd.kind.consumes_draw_slot())
-        .map(|cmd| cmd.draw_slot)
-        .max();
-    if let Some(max_draw_slot) = max_draw_slot
-        && DrawOrdinal::from_draw_slot(max_draw_slot)
-            >= DrawOrdinal::from(DrawLayer(DEFAULT_DRAW_LAYER))
+    let occupancy = draw_order.level_occupancy();
+    if let Some((z_level, level_count)) = occupancy.iter().copied().max_by_key(|(_, count)| *count)
+        && per_level_band_overflows(level_count)
     {
         warn_once!(
-            "panel {:?} uses geometry draw slots up to {}, reaching the default text draw \
-             layer ({DEFAULT_DRAW_LAYER}); slots at or above it draw over \
-             default-layer text",
+            "panel {:?} has {} draw commands at z-level {}, reaching the per-level screen band \
+             cap ({}); coplanar geometry at that level reaches the shared line/text sub-lanes",
             context.panel_entity,
-            max_draw_slot,
+            level_count,
+            z_level,
+            per_level_band_capacity(),
+        );
+    }
+
+    let panel_total = occupancy.iter().map(|(_, count)| *count).sum();
+    if oit_total_overflows(panel_total) {
+        warn_once!(
+            "panel {:?} has {} total draw commands, reaching the OIT depth budget ({}); the \
+             panel-global ordinal span exhausts 24-bit OIT depth headroom and coplanar ordering \
+             degrades to OIT-list insertion order",
+            context.panel_entity,
+            panel_total,
+            oit_depth_budget(),
         );
     }
 
@@ -301,6 +308,21 @@ fn reconcile_sdf_quads(
         commands.entity(entity).despawn();
     }
 }
+
+fn per_level_band_capacity() -> usize {
+    usize::try_from(DRAW_LEVEL_GEOMETRY_LANES).unwrap_or(usize::MAX)
+}
+
+fn per_level_band_overflows(busiest: usize) -> bool { busiest >= per_level_band_capacity() }
+
+fn oit_depth_budget() -> usize {
+    if OIT_DEPTH_STEP <= 0.0 {
+        return usize::MAX;
+    }
+    (OIT_FOCUS_DEPTH / OIT_DEPTH_STEP).floor().to_usize()
+}
+
+fn oit_total_overflows(panel_total: usize) -> bool { panel_total >= oit_depth_budget() }
 
 /// Reconciles the invisible full-panel interaction quad: it is respawned only
 /// when the panel's world size or center changed, and left untouched otherwise.
@@ -482,7 +504,7 @@ fn build_sdf_quad(
         }
     });
     let mut base = super::resolve_material(element_mat, panel.material(), effective_color);
-    base.depth_bias = surface.draw_depth.depth_bias();
+    base.depth_bias = surface.draw_depth.depth_bias().get();
     let fill_color = base.base_color;
 
     let world_width = surface.bounds.width * points_to_world;
@@ -559,7 +581,7 @@ fn build_sdf_quad(
             border_widths: world_borders,
             border_color: surface.border_color,
             clip_rect,
-            oit_depth_offset: surface.draw_depth.oit_depth_offset(),
+            oit_depth_offset: surface.draw_depth.oit_depth_offset().get(),
         },
     );
 
@@ -714,6 +736,22 @@ mod tests {
     use crate::panel::HeadlessLayoutPlugin;
     use crate::text::DiegeticTextMeasurer;
 
+    #[test]
+    fn per_level_band_overflows_at_screen_band_capacity() {
+        let capacity = per_level_band_capacity();
+
+        assert!(!per_level_band_overflows(capacity.saturating_sub(1)));
+        assert!(per_level_band_overflows(capacity));
+    }
+
+    #[test]
+    fn oit_total_overflows_at_depth_budget() {
+        let budget = oit_depth_budget();
+
+        assert!(!oit_total_overflows(budget.saturating_sub(1)));
+        assert!(oit_total_overflows(budget));
+    }
+
     /// Minimal measurer for geometry tests that include text commands.
     fn zero_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -818,12 +856,12 @@ mod tests {
 
         let (entity_before, surface_before, material_offset_before) = single_sdf_quad(&mut app);
         assert_eq!(
-            surface_before.draw_depth.oit_depth_offset().to_bits(),
+            surface_before.draw_depth.oit_depth_offset().get().to_bits(),
             (-constants::OIT_DEPTH_STEP).to_bits(),
         );
         assert_eq!(
             material_offset_before.to_bits(),
-            surface_before.draw_depth.oit_depth_offset().to_bits(),
+            surface_before.draw_depth.oit_depth_offset().get().to_bits(),
         );
 
         app.world_mut()
@@ -835,16 +873,16 @@ mod tests {
         let (entity_after, surface_after, material_offset_after) = single_sdf_quad(&mut app);
         assert_eq!(entity_after, entity_before);
         assert_ne!(
-            surface_before.draw_depth.oit_depth_offset().to_bits(),
-            surface_after.draw_depth.oit_depth_offset().to_bits(),
+            surface_before.draw_depth.oit_depth_offset().get().to_bits(),
+            surface_after.draw_depth.oit_depth_offset().get().to_bits(),
         );
         assert_eq!(
-            surface_after.draw_depth.oit_depth_offset().to_bits(),
+            surface_after.draw_depth.oit_depth_offset().get().to_bits(),
             0.0_f32.to_bits(),
         );
         assert_eq!(
             material_offset_after.to_bits(),
-            surface_after.draw_depth.oit_depth_offset().to_bits(),
+            surface_after.draw_depth.oit_depth_offset().get().to_bits(),
         );
     }
 

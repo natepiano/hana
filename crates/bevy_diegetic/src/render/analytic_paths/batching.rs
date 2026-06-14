@@ -55,9 +55,6 @@ pub(crate) struct BatchKey {
     pub sidedness:     Sidedness,
     /// Panel command z-level for the batch's shared screen sort lane.
     pub z_level:       i8,
-    /// Legacy text draw-layer slot kept until the old cascade field is removed.
-    /// Panel text depth is carried per run in [`RunRecord`].
-    pub layer:         i8,
     /// The run's `GlyphShadowMode` (`Cast` batches cast, `None` batches carry
     /// `NotShadowCaster`).
     pub shadow:        GlyphShadowMode,
@@ -397,7 +394,6 @@ mod tests {
     use bevy::prelude::AlphaMode;
 
     use super::*;
-    use crate::cascade::DEFAULT_DRAW_LAYER;
 
     fn glyph(rect_min: Vec2, atlas_index: u32) -> GlyphInstanceRecord {
         GlyphInstanceRecord {
@@ -429,7 +425,6 @@ mod tests {
             lighting:      Lighting::Lit,
             sidedness:     Sidedness::DoubleSided,
             z_level:       0,
-            layer:         DEFAULT_DRAW_LAYER,
             shadow:        GlyphShadowMode::Cast,
             layers:        BatchRenderLayers(RenderLayers::layer(0)),
         }

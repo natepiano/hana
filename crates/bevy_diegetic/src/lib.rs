@@ -177,8 +177,6 @@ pub use layout::Padding;
 pub use layout::PanelCoord;
 pub use layout::PanelDraw;
 pub use layout::PanelLine;
-pub use layout::PanelLineLayering;
-pub use layout::PanelLinePaintOrder;
 pub use layout::PanelLinePrimitiveGeometry;
 pub use layout::PanelLinePrimitiveKey;
 pub use layout::PanelLinePrimitiveKind;

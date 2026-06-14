@@ -7,7 +7,6 @@ use std::fmt::{self};
 
 use bevy::color::Color;
 use bevy::math::Vec2;
-use bevy_kana::ToF32;
 
 use super::BoundingBox;
 use super::Dimension;
@@ -24,8 +23,6 @@ use crate::render::HairlineFade;
 const POINT_SPACE_SCALE: f32 = 1.0;
 const MIN_LINE_LENGTH_SQUARED: f32 = f32::EPSILON;
 const LINE_COVERAGE_PADDING: f32 = 0.5;
-const NORMAL_DEPTH_BIAS_STEP: f32 = 1.0;
-const NORMAL_OIT_DEPTH_STEP: f32 = -0.000_001;
 const DEFAULT_LINE_WIDTH: Dimension = Dimension {
     value: 1.0,
     unit:  None,
@@ -106,26 +103,6 @@ pub struct PanelLinePrimitiveKey {
     pub primitive_ordinal: usize,
 }
 
-/// Paint lane assigned during panel-line resolution.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelLinePaintOrder {
-    /// Normal panel command order.
-    Normal {
-        /// Legacy geometry draw slot retained until Phase 5 removes
-        /// `PanelLinePaintOrder`.
-        draw_slot: usize,
-    },
-}
-
-/// Numeric layering hints for a resolved line command.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PanelLineLayering {
-    /// Material depth bias lane.
-    pub(crate) depth_bias:       f32,
-    /// OIT coplanar depth offset lane.
-    pub(crate) oit_depth_offset: f32,
-}
-
 /// Clip policy used by the pure panel-line resolver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PanelLineClipPolicy {
@@ -142,7 +119,6 @@ pub(crate) struct PanelLineResolveContext {
     pub(crate) owner_bounds:         BoundingBox,
     pub(crate) inherited_clip:       Option<BoundingBox>,
     pub(crate) clip_policy:          PanelLineClipPolicy,
-    pub(crate) paint_order:          PanelLinePaintOrder,
     pub(crate) source_command_index: usize,
     pub(crate) source_key:           PanelLineSourceKey,
 }
@@ -165,10 +141,6 @@ pub struct ResolvedPanelLine {
     pub(crate) visual_bounds:        BoundingBox,
     /// Effective clip for this line.
     pub(crate) clip:                 Option<BoundingBox>,
-    /// Paint lane selected for this line.
-    pub(crate) paint_order:          PanelLinePaintOrder,
-    /// Numeric depth/OIT hints for the renderer.
-    pub(crate) layering:             PanelLineLayering,
     /// Resolved start tip after authored start inset.
     pub(crate) start:                Vec2,
     /// Resolved end tip after authored end inset.
@@ -418,16 +390,6 @@ impl PanelLinePrimitiveKey {
     }
 }
 
-impl PanelLineLayering {
-    /// Returns the material depth bias lane.
-    #[must_use]
-    pub const fn depth_bias(&self) -> f32 { self.depth_bias }
-
-    /// Returns the OIT coplanar depth offset lane.
-    #[must_use]
-    pub const fn oit_depth_offset(&self) -> f32 { self.oit_depth_offset }
-}
-
 impl ResolvedPanelLine {
     /// Returns the stable line source key.
     #[must_use]
@@ -448,14 +410,6 @@ impl ResolvedPanelLine {
     /// Returns the effective clip for this line.
     #[must_use]
     pub const fn clip(&self) -> Option<BoundingBox> { self.clip }
-
-    /// Returns this line's paint lane.
-    #[must_use]
-    pub const fn paint_order(&self) -> PanelLinePaintOrder { self.paint_order }
-
-    /// Returns numeric layering hints for this line.
-    #[must_use]
-    pub const fn layering(&self) -> PanelLineLayering { self.layering }
 
     /// Returns the resolved start tip after authored start inset.
     #[must_use]
@@ -520,23 +474,11 @@ impl ResolvedPanelLinePrimitive {
     pub const fn part_order(&self) -> usize { self.part_order }
 }
 
-impl PanelLinePaintOrder {
-    fn layering(self) -> PanelLineLayering {
-        match self {
-            Self::Normal { draw_slot } => PanelLineLayering {
-                depth_bias:       draw_slot.to_f32() * NORMAL_DEPTH_BIAS_STEP,
-                oit_depth_offset: (draw_slot.to_f32() + 1.0) * NORMAL_OIT_DEPTH_STEP,
-            },
-        }
-    }
-}
-
 impl PanelLineResolveContext {
     pub(crate) const fn new(
         owner_bounds: BoundingBox,
         inherited_clip: Option<BoundingBox>,
         clip_policy: PanelLineClipPolicy,
-        paint_order: PanelLinePaintOrder,
         source_command_index: usize,
         source_key: PanelLineSourceKey,
     ) -> Self {
@@ -544,7 +486,6 @@ impl PanelLineResolveContext {
             owner_bounds,
             inherited_clip,
             clip_policy,
-            paint_order,
             source_command_index,
             source_key,
         }
@@ -595,8 +536,6 @@ pub(crate) fn resolve_panel_line(
         ResolvedLineClip::Visible(clip) => clip,
         ResolvedLineClip::FullyClipped => return None,
     };
-    let layering = context.paint_order.layering();
-
     let mut primitives = Vec::new();
     if (shaft_end - shaft_start).dot(direction) > f32::EPSILON {
         push_segment_primitive(
@@ -641,8 +580,6 @@ pub(crate) fn resolve_panel_line(
         owner_bounds: context.owner_bounds,
         visual_bounds,
         clip,
-        paint_order: context.paint_order,
-        layering,
         start,
         end,
         shaft_start,
@@ -1225,7 +1162,6 @@ mod tests {
     use super::PanelCoord;
     use super::PanelLine;
     use super::PanelLineClipPolicy;
-    use super::PanelLinePaintOrder;
     use super::PanelLinePrimitiveKind;
     use super::PanelLineResolveContext;
     use super::PanelLineSourceKey;
@@ -1331,7 +1267,6 @@ mod tests {
                     height: 100.0,
                 }),
                 PanelLineClipPolicy::OwnerBounds,
-                PanelLinePaintOrder::Normal { draw_slot: 3 },
                 3,
                 PanelLineSourceKey::element(1, 0, 0),
             ),
@@ -1364,7 +1299,6 @@ mod tests {
                 owner_bounds(),
                 Some(inherited),
                 PanelLineClipPolicy::Inherited,
-                PanelLinePaintOrder::Normal { draw_slot: 0 },
                 0,
                 PanelLineSourceKey::element(1, 0, 0),
             ),
@@ -1384,7 +1318,6 @@ mod tests {
                 owner_bounds(),
                 None,
                 PanelLineClipPolicy::Inherited,
-                PanelLinePaintOrder::Normal { draw_slot: 0 },
                 0,
                 PanelLineSourceKey::element(1, 0, 0),
             ),
@@ -1456,7 +1389,6 @@ mod tests {
                 height: 200.0,
             }),
             PanelLineClipPolicy::OwnerBounds,
-            PanelLinePaintOrder::Normal { draw_slot: 0 },
             0,
             PanelLineSourceKey::element(1, 0, 0),
         )
