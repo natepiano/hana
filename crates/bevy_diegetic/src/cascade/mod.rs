@@ -52,7 +52,6 @@
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
 //! | [`Lighting`](crate::Lighting) | `CascadeDefault<Lighting>` | `override_lighting`, `inherit_lighting`, [`resolved_lighting`] |
 //! | [`Sidedness`](crate::Sidedness) | `CascadeDefault<Sidedness>` | `override_sidedness`, `inherit_sidedness`, [`resolved_sidedness`] |
-//! | [`DrawLayer`] | `CascadeDefault<DrawLayer>` | `override_draw_layer`, `inherit_draw_layer`, [`resolved_draw_layer`] |
 //! | [`AntiAlias`](crate::AntiAlias) | `CascadeDefault<AntiAlias>`, mirrored from the `AntiAlias` resource | `override_anti_alias`, `inherit_anti_alias`, [`resolved_anti_alias`] |
 //! | [`HairlineFade`](crate::HairlineFade) | `CascadeDefault<HairlineFade>`, mirrored from [`HairlineWidth::fade`](crate::HairlineWidth) | `override_hairline_fade`, `inherit_hairline_fade`, [`resolved_hairline_fade`] |
 //!
@@ -122,21 +121,17 @@ mod plugin;
 mod resolved;
 
 pub use attributes::CascadeEntityCommandsExt;
-pub use attributes::DrawZIndex;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_anti_alias;
-pub use attributes::resolved_draw_layer;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_hairline_fade;
 pub use attributes::resolved_lighting;
 pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
 pub use cascade_set::CascadeSet;
-#[cfg(test)]
-pub(crate) use constants::DEFAULT_DRAW_LAYER;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;
 pub(crate) use plugin::CascadePlugin;

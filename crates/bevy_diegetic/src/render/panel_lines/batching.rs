@@ -1032,7 +1032,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
-    use crate::cascade::DrawZIndex;
+    use crate::layout::DrawZIndex;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelLinePrimitiveGeometry;
@@ -1091,12 +1091,12 @@ mod tests {
             .color(Color::WHITE)
     }
 
-    fn spawn_line_panel(app: &mut App, draw_layer: Option<DrawZIndex>) -> Entity {
+    fn spawn_line_panel(app: &mut App, z_index: Option<DrawZIndex>) -> Entity {
         let mut line_element = El::new()
             .size(40.0, 20.0)
             .draw(PanelDraw::lines([horizontal_line()]));
-        if let Some(draw_layer) = draw_layer {
-            line_element = line_element.draw_layer(draw_layer);
+        if let Some(z_index) = z_index {
+            line_element = line_element.z_index(z_index);
         }
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(60.0))
@@ -1196,7 +1196,7 @@ mod tests {
     }
 
     #[test]
-    fn line_draw_layers_route_to_matching_level_batches() {
+    fn line_z_indexes_route_to_matching_level_batches() {
         let mut app = line_batch_app();
         spawn_line_panel(&mut app, Some(DrawZIndex(-1)));
         spawn_line_panel(&mut app, Some(DrawZIndex(1)));

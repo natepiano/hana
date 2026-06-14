@@ -822,8 +822,8 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
-    use crate::cascade::DrawZIndex;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
+    use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
@@ -875,7 +875,6 @@ mod tests {
             .add_plugins(CascadePlugin::<TextAlpha>::default())
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
-            .add_plugins(CascadePlugin::<DrawZIndex>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
@@ -1218,16 +1217,16 @@ mod tests {
     }
 
     #[test]
-    fn text_element_draw_layer_authors_z_level_batches() {
+    fn text_element_z_index_authors_z_level_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text_element(
-            El::new().draw_layer(LOWERED_LEVEL),
+            El::new().z_index(LOWERED_LEVEL),
             "Lower",
             TextStyle::new(10.0),
         );
         builder.text_element(
-            El::new().draw_layer(RAISED_LEVEL),
+            El::new().z_index(RAISED_LEVEL),
             "Raise",
             TextStyle::new(10.0),
         );
@@ -1263,70 +1262,6 @@ mod tests {
         );
         assert!(lowered_depth_bias.get() < default_depth_bias.get());
         assert!(default_depth_bias.get() < raised_depth_bias.get());
-    }
-
-    #[test]
-    fn text_style_draw_layers_do_not_split_batches() {
-        let mut app = pipeline_app();
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
-        builder.text("Beta", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
-        builder.text("Gamma", TextStyle::new(10.0).with_draw_layer(DrawZIndex(-3)));
-        builder.text("Delta", TextStyle::new(10.0));
-        spawn_panel(&mut app, builder.build());
-        settle(&mut app);
-
-        let (batches, runs, _) = store_stats(&app);
-        assert_eq!(batches, 1, "text draw layers no longer split batches");
-        assert_eq!(runs, 4);
-        assert_eq!(batch_entities(&mut app).len(), 1);
-    }
-
-    #[test]
-    fn label_spawned_with_a_draw_layer_override_uses_default_batch_key() {
-        let mut app = pipeline_app();
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
-        spawn_panel(&mut app, builder.build());
-        settle(&mut app);
-
-        assert_eq!(store_stats(&app), (1, 1, 5));
-    }
-
-    #[test]
-    fn draw_layer_cascade_change_does_not_rekey_text_batches() {
-        let mut app = pipeline_app();
-        spawn_panel(&mut app, two_text_tree());
-        settle(&mut app);
-        assert_eq!(store_stats(&app), (1, 2, 9));
-        let default_entity = batch_entities(&mut app)[0];
-
-        let label = label_entities(&mut app)[0];
-        app.world_mut()
-            .commands()
-            .entity(label)
-            .override_draw_layer(DrawZIndex(10));
-        settle(&mut app);
-
-        let (batches, runs, glyphs) = store_stats(&app);
-        assert_eq!(batches, 1, "draw-layer cascade no longer affects batches");
-        assert_eq!(runs, 2);
-        assert_eq!(glyphs, 9);
-        let entities = batch_entities(&mut app);
-        assert_eq!(entities, vec![default_entity]);
-
-        app.world_mut()
-            .commands()
-            .entity(label)
-            .inherit_draw_layer();
-        settle(&mut app);
-
-        assert_eq!(store_stats(&app), (1, 2, 9));
-        assert_eq!(
-            batch_entities(&mut app),
-            vec![default_entity],
-            "the default batch entity survives draw-layer cascade changes"
-        );
     }
 
     #[test]

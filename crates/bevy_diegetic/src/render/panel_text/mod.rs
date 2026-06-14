@@ -37,7 +37,6 @@ use super::PanelChildSystems;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
-use crate::cascade::DrawZIndex;
 use crate::cascade::TextAlpha;
 use crate::layout::GlyphRenderMode;
 use crate::layout::GlyphShadowMode;
@@ -77,7 +76,6 @@ impl Plugin for TextRenderPlugin {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
         app.add_plugins(CascadePlugin::<Lighting>::default());
         app.add_plugins(CascadePlugin::<Sidedness>::default());
-        app.add_plugins(CascadePlugin::<DrawZIndex>::default());
         app.add_observer(seed_panel_text_child_alpha);
         app.add_observer(seed_panel_text_child_glyph);
         app.init_resource::<TextShapingContext>();

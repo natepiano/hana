@@ -13,7 +13,6 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
-use crate::cascade::DrawZIndex;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -163,6 +162,13 @@ pub enum Lighting {
     Unlit,
 }
 
+/// Panel-scoped authored draw-order z-index.
+///
+/// `None` and `DrawZIndex(0)` use the default level; positive values move
+/// forward, and negative values move back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub struct DrawZIndex(pub i8);
+
 // ── TextStyle ────────────────────────────────────────────────────────────────
 
 /// Unified text styling for both layout (panel) text and standalone world text.
@@ -213,9 +219,6 @@ pub struct TextStyle {
     /// Per-label alpha-mode override. `None` = inherit from the `TextAlpha`
     /// cascade attribute.
     alpha_mode:     Option<AlphaMode>,
-    /// Per-label draw-layer override. `None` = inherit from the
-    /// `DrawLayer` cascade attribute.
-    draw_layer:     Option<DrawZIndex>,
 }
 
 impl PartialEq for TextStyle {
@@ -238,7 +241,6 @@ impl PartialEq for TextStyle {
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.alpha_mode == other.alpha_mode
-            && self.draw_layer == other.draw_layer
     }
 }
 
@@ -277,7 +279,6 @@ impl TextStyle {
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             alpha_mode:     None,
-            draw_layer:     None,
         }
     }
 
@@ -357,13 +358,6 @@ impl TextStyle {
     /// `CascadeDefault<TextAlpha>`.
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
-
-    /// Returns the per-label draw-layer override, if any.
-    ///
-    /// `None` means the label inherits the panel-level override, then
-    /// `CascadeDefault<DrawLayer>`.
-    #[must_use]
-    pub const fn draw_layer(&self) -> Option<DrawZIndex> { self.draw_layer }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -525,17 +519,6 @@ impl TextStyle {
         self
     }
 
-    /// Sets the per-label [`DrawLayer`] override.
-    ///
-    /// The panel-text reconciler captures this value before converting via
-    /// [`for_shaping`](Self::for_shaping) and inserts `Override<DrawLayer>`
-    /// on the label.
-    #[must_use]
-    pub const fn with_draw_layer(mut self, draw_layer: DrawZIndex) -> Self {
-        self.draw_layer = Some(draw_layer);
-        self
-    }
-
     // ── In-place (set_*) setters ──────────────────────────────────────────
 
     /// Sets the font identifier.
@@ -607,11 +590,6 @@ impl TextStyle {
         self.alpha_mode = Some(alpha_mode);
     }
 
-    /// Sets the per-label [`DrawLayer`] override.
-    pub const fn set_draw_layer(&mut self, draw_layer: DrawZIndex) {
-        self.draw_layer = Some(draw_layer);
-    }
-
     // ── Conversions and derived views ─────────────────────────────────────
 
     /// Returns a copy with font-related dimensions multiplied by `factor`.
@@ -632,8 +610,7 @@ impl TextStyle {
     /// Returns a copy prepared for text shaping at the given anchor.
     ///
     /// Forces [`TextWrap::None`] and [`TextAlign::Left`] and clears the unit /
-    /// alpha-mode / draw-layer authoring fields (those route through the
-    /// cascade). The two
+    /// alpha-mode authoring fields (those route through the cascade). The two
     /// contexts differ only in anchor: world text uses [`Anchor::TopLeft`] (the
     /// command origin), layout-engine text uses [`Anchor::Center`].
     /// Crate-internal helper.
@@ -645,7 +622,6 @@ impl TextStyle {
             anchor,
             unit: None,
             alpha_mode: None,
-            draw_layer: None,
             ..self.clone()
         }
     }
@@ -698,8 +674,6 @@ impl TextStyle {
             unit: _,
             // Render-only — affects compositing, not measurement.
             alpha_mode: _,
-            // Render-only — affects draw order, not measurement.
-            draw_layer: _,
         } = self;
 
         font_id.hash(hasher);
@@ -738,7 +712,6 @@ impl TextStyle {
             sidedness: _,
             lighting: _,
             alpha_mode: _,
-            draw_layer: _,
         } = self;
 
         *font_id == other.font_id
@@ -763,9 +736,8 @@ impl TextStyle {
     /// `font_features`) via `to_bits`, plus the render fields baked into the
     /// mesh and material (`color`, `render_mode`, `shadow_mode`, `sidedness`,
     /// `lighting`).
-    /// Excludes `unit` (measurement context, not a mesh input), `alpha_mode`
-    /// (gated separately through `Override<TextAlpha>`), and `draw_layer`
-    /// (gated separately through `Override<DrawLayer>`).
+    /// Excludes `unit` (measurement context, not a mesh input) and
+    /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
         let Self {
             font_id,
@@ -786,7 +758,6 @@ impl TextStyle {
             lighting,
             unit: _,
             alpha_mode: _,
-            draw_layer: _,
         } = self;
 
         *font_id == other.font_id

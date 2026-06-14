@@ -6,7 +6,6 @@ use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
 
 use super::constants::CASCADE_DEPTH_CAP;
-use super::constants::DEFAULT_DRAW_LAYER;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::layout::Unit;
@@ -78,17 +77,6 @@ cascade_attr!(
     FontUnit(Unit),
     default = Unit::Meters
 );
-cascade_attr!(
-    /// Draw-layer cascade attribute.
-    ///
-    /// A text run's authored z-level on its panel's draw-order axis. The
-    /// global default composites default-layer text above default-layer panel
-    /// geometry; lower values render behind commands with higher draw layers.
-    DrawZIndex(i8),
-    default = DEFAULT_DRAW_LAYER,
-    eq
-);
-
 // Lighting cascade attribute. Global default is `Lit` (world text); the
 // screen-panel construction bridge overrides it to `Unlit`. Consumed by both
 // glyph runs and panel lines.

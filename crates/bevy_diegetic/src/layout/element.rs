@@ -25,6 +25,7 @@ use super::Border;
 use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
+use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
@@ -33,7 +34,6 @@ use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
-use crate::cascade::DrawZIndex;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -112,7 +112,7 @@ pub(super) struct Element {
     /// Optional paint-only draw data.
     pub(super) draw:          Option<PanelDraw>,
     /// Optional `DrawZIndex` stamped onto this element's render commands.
-    pub(super) z_index:    Option<DrawZIndex>,
+    pub(super) z_index:       Option<DrawZIndex>,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
     pub(super) anti_alias:    Option<AntiAlias>,
@@ -190,7 +190,7 @@ impl Default for Element {
             material:      None,
             editable:      None,
             draw:          None,
-            z_index:    None,
+            z_index:       None,
             anti_alias:    None,
             hairline_fade: None,
             content:       ElementContent::Empty,
@@ -659,7 +659,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material,
         editable,
         draw,
-        z_index: draw_layer,
+        z_index,
         anti_alias,
         hairline_fade,
         content,
@@ -681,7 +681,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material: n_material,
         editable: n_editable,
         draw: n_draw,
-        z_index: n_draw_layer,
+        z_index: n_z_index,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
         content: n_content,
@@ -715,7 +715,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    if draw != n_draw || draw_layer != n_draw_layer {
+    if draw != n_draw || z_index != n_z_index {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -836,9 +836,9 @@ mod tests {
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelFieldId;
-    use crate::cascade::DrawZIndex;
     use crate::layout::Border;
     use crate::layout::Dimension;
+    use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::Padding;
@@ -932,13 +932,13 @@ mod tests {
     }
 
     #[test]
-    fn draw_layer_only_classifies_as_visual_only() {
+    fn z_index_only_classifies_as_visual_only() {
         let tree = root_tree(El::new().width(Sizing::GROW).height(Sizing::GROW));
         let next = root_tree(
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
-                .draw_layer(DrawZIndex(1)),
+                .z_index(DrawZIndex(1)),
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);

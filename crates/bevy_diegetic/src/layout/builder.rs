@@ -32,28 +32,28 @@ use bevy::image::Image;
 use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
 
-use super::element::ChildOverflow;
-use super::element::Element;
-use super::element::ElementContent;
-use super::element::LayoutTree;
-use super::element::ScrollAnchor;
 use super::AlignX;
 use super::AlignY;
 use super::Border;
 use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
+use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
-use crate::cascade::DrawZIndex;
-use crate::render::AntiAlias;
-use crate::render::HairlineFade;
+use super::element::ChildOverflow;
+use super::element::Element;
+use super::element::ElementContent;
+use super::element::LayoutTree;
+use super::element::ScrollAnchor;
 use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::render::AntiAlias;
+use crate::render::HairlineFade;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -78,7 +78,7 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
-    draw_layer:    Option<DrawZIndex>,
+    z_index:       Option<DrawZIndex>,
     anti_alias:    Option<AntiAlias>,
     hairline_fade: Option<HairlineFade>,
 }
@@ -254,9 +254,9 @@ impl El {
         self
     }
 
-    /// Sets the authored draw layer for this element's render commands.
-    pub const fn draw_layer(mut self, draw_layer: DrawZIndex) -> Self {
-        self.draw_layer = Some(draw_layer);
+    /// Sets the authored `z_index` for this element's render commands.
+    pub const fn z_index(mut self, z_index: DrawZIndex) -> Self {
+        self.z_index = Some(z_index);
         self
     }
 
@@ -301,7 +301,7 @@ impl El {
             material: self.material,
             editable: self.editable,
             draw: self.draw,
-            z_index: self.draw_layer,
+            z_index: self.z_index,
             anti_alias: self.anti_alias,
             hairline_fade: self.hairline_fade,
             content,
@@ -464,7 +464,7 @@ impl LayoutBuilder {
     /// Adds a text leaf with an [`El`] declaration.
     ///
     /// Use this when the text leaf itself needs element fields such as
-    /// [`El::draw_layer`]. The run is given a builder-minted
+    /// [`El::z_index`]. The run is given a builder-minted
     /// [`PanelFieldId::Auto`] id; use [`Self::text_id_element`] when the run
     /// also needs an author-assigned id.
     pub fn text_element(

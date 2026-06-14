@@ -91,6 +91,7 @@ pub use sizing::AlignY;
 pub use sizing::Direction;
 pub use sizing::Padding;
 pub use sizing::Sizing;
+pub use text_props::DrawZIndex;
 pub use text_props::FontSlant;
 pub use text_props::FontWeight;
 pub use text_props::GlyphRenderMode;

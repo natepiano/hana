@@ -6,9 +6,9 @@ use bevy::image::Image;
 
 use super::Border;
 use super::BoundingBox;
+use super::DrawZIndex;
 use super::ResolvedPanelLine;
 use super::TextStyle;
-use crate::cascade::DrawZIndex;
 
 /// A single render command produced by the layout pass.
 ///

@@ -28,8 +28,8 @@ use super::constants::DRAW_LEVEL_STRIDE;
 use super::constants::DRAW_LEVEL_TEXT_SUBLANE;
 use super::constants::LAYER_DEPTH_BIAS;
 use super::constants::OIT_DEPTH_STEP;
-use crate::cascade::DrawZIndex;
 use crate::layout::DrawStep;
+use crate::layout::DrawZIndex;
 use crate::layout::RenderCommand;
 
 /// Shared draw-order ordinal for a panel's coplanar children.

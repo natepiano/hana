@@ -27,7 +27,8 @@
   - `layout/element.rs` — `Element` struct, `classify_element_change()` (`~:644`, `draw_layer` currently destructured `_`)
   - `layout/engine/positioning.rs` — `EmissionCounters` (`:35–36`), `push_command()` (`:43–60`), `PanelLinePaintOrder::Normal{draw_slot}` seed (`:314`)
   - `layout/line.rs` — `PanelLinePaintOrder` (`:111–128`), `NORMAL_DEPTH_BIAS_STEP`/`NORMAL_OIT_DEPTH_STEP`, layering derivation (`:526–532`)
-  - `render/constants.rs` — `DrawOrdinal` (`:59`), `HierarchicalDrawKey`+`Ord` (`:62–127`), `enumerate_ordinals` (`:136`), `OIT_DEPTH_STEP` (`:47`), `LAYER_DEPTH_BIAS`, `BATCH_PANEL_LINE_DEPTH_BIAS`, `DrawOrdinal::oit_depth_offset` clamp (`:86–88`), `sorted_and_oit_orderings_agree_for_every_layer_pair` test (`~:557`)
+  - `render/draw_order.rs` — **the ordinal projection engine** (extracted here in Phase 4a; this is the single load-bearing file for the ordering input): `DrawOrderProjection`, `DrawCommandDepth { ordinal, z_level, depth_bias, oit_depth_offset }`, `enumerate_ordinals`, `level_sublane_depth_bias`/`text_batch_depth_bias`/`line_batch_depth_bias`, the `ScreenDepthBias`/`OitDepthOffset` newtypes, `DrawOrderProjection::level_occupancy()`, and the parity test `sorted_and_oit_orderings_agree_for_every_z_level_pair`.
+  - `render/constants.rs` — **literal constants only** after the Phase 4a extraction: `OIT_DEPTH_STEP`, `LAYER_DEPTH_BIAS`, `OIT_FOCUS_DEPTH`, the `DRAW_LEVEL_*` band constants (`DRAW_LEVEL_GEOMETRY_LANES = 64`, `DRAW_LEVEL_STRIDE = 65`). `DrawOrdinal`/`HierarchicalDrawKey`/`enumerate_ordinals`/the OIT clamp + the parity test all moved to `render/draw_order.rs` (the old `constants.rs:59–136` / `:557` citations in completed-phase Work Orders are pre-extraction archive refs).
   - `render/panel_geometry.rs` — `PanelSdfSurface`+`draw_slot` (`:42–60`/`:48`/`:131`), eq sig (`:561`), surface build from `cmd.draw_slot` (`:385/398/417`), depth derivation (`~:473/475/552`), overflow guard (`:237–253`)
   - `render/panel_text/batching.rs` — cascade read `cascades.draw_layer(label_entity)` (`:237`) → `DrawOrdinal::from(draw_layer)` (`:238`); per-run `depth_nudge` from `draw_slot` (`:264`) + `oit_depth_offset` (`:255/265`); batch lane `DrawOrdinal::from(DrawLayer(key.layer))` (`:749`)
   - `render/panel_text/reconcile.rs` — image identity (`:427/433`), image-material rebuild keying on `draw_slot` (`:494/588/642`)
@@ -541,7 +542,7 @@ determined corrections (no open user decisions); applied to the Phase 6 Work Ord
 - **Phase 7:** unaffected — its per-level-band ceiling constraint matches shipped
   `constants.rs`/`draw_order.rs`; no change.
 
-### Phase 6 — Flag-day rename + example + test/doc cleanup · status: todo
+### Phase 6 — Flag-day rename + example + test/doc cleanup · status: done (cascade teardown + example uncommitted in tree; type rename committed `83d7b0a`; user's snake_case `draw_layer → z_index` editor pass on kept symbols still pending)
 
 #### Work Order
 
@@ -655,6 +656,83 @@ behavior (a parity test guards it).
 overlay; parity test green over the new key; as-built doc removed; `cargo nextest
 run` green.
 
+#### Retrospective
+
+**What worked:**
+- The cascade teardown split cleanly from the rename. The user did the type
+  rename `DrawLayer → DrawZIndex` via editor (committed `83d7b0a`); codex did the
+  deletion-heavy teardown + example + doc/test cleanup. Doing teardown on a clean
+  tree first shrank the user's remaining `draw_layer → z_index` snake_case pass to
+  a handful of kept symbols (`El::draw_layer`, `classify_element_change` locals,
+  KEEP-test calls).
+- Surgical removal of the `DrawZIndex` arms from the two SHARED paths landed
+  correctly: `seed_panel_text_child_glyph` (`glyph_cascade.rs`) and the reconcile
+  per-label override threading kept their `Lighting`/`Sidedness`/`TextAlpha` arms
+  fully intact (both reviewers verified). The shared-observer trap the Phase 5
+  review flagged did not fire.
+- Dual review (blind codex + Claude) returned APPROVE, nits only. 408 tests pass,
+  clippy clean, FNV tripwire unchanged.
+
+**What deviated from the plan:**
+- **`DrawZIndex` was relocated, not deleted in place.** The Work Order said "delete
+  the cascade declaration (`resolved.rs:87`)", but `cascade_attr!(DrawZIndex(i8),
+  …)` *mints* the `DrawZIndex` newtype — and that newtype is the KEPT authoring
+  type (`Element.z_index`, `El::draw_layer` are `Option<DrawZIndex>`). Deleting the
+  invocation outright would have deleted the type and broken the build. It was
+  converted to a plain `pub struct DrawZIndex(pub i8)` and **moved to
+  `layout/text_props.rs`** next to `Lighting`/`Sidedness` (user decision), with the
+  cascade trait impls + `DEFAULT_DRAW_LAYER` default stripped; re-exported via
+  `layout/mod.rs`; `lib.rs` repointed `cascade::DrawZIndex → layout::DrawZIndex`;
+  every import site moved `cascade::` → `layout::`.
+- Phase 6 split across two authors (user-editor rename + codex teardown) rather
+  than one editor-driven flag-day, because the user was mid-rename when the phase
+  was dispatched.
+
+**Surprises:**
+- The user named the `Element` authoring field `z_index` (not the plan's
+  `draw_zindex`), so the kept snake_case surface converges on `z_index`, while the
+  `El` builder method is still `draw_layer` pending the user's editor pass — a
+  transient three-way split (`Element.z_index` / `El::draw_layer()` / type
+  `DrawZIndex`).
+- One stale bareword `DrawLayer` doc comment survives at `draw_order.rs:66` —
+  residue from the user's own rename commit `83d7b0a` (symbol-rename missed the
+  backticked comment), not a teardown defect. The user's snake_case pass catches it.
+
+**Implications for remaining phases:**
+- Phase 7 (design-only) is unaffected by the teardown: it reads `panel_geometry.rs`,
+  `panel_text/batching.rs`, `render/constants.rs` — none touched the cascade. The
+  ordinal projection + per-level screen banding it builds on are unchanged.
+- The only Phase 6 remainder is the user's snake_case `draw_layer → z_index` editor
+  rename on kept symbols (`El::draw_layer` builder/field, `classify_element_change`
+  locals, surviving test/example `.draw_layer(...)` calls, the `draw_order.rs:66`
+  comment). No code-author phase owns this — it is the user's editor pass.
+
+### Phase 6 Review
+
+Architect re-evaluation of Phase 7 against shipped Phase 6 code. Phase 7 confirmed
+sound — no `significant` findings, no re-scoping. All edits applied (minor):
+- **Stale projection-engine location:** the shared Delegation Context "Key files"
+  pointed `DrawOrdinal`/`HierarchicalDrawKey`/`enumerate_ordinals` at
+  `render/constants.rs:59–136`, but Phase 4a moved the engine to
+  `render/draw_order.rs`. Corrected the header (engine → `draw_order.rs`;
+  `constants.rs` is literals-only) and added `render/draw_order.rs` to Phase 7's
+  read list — it is the single load-bearing file for the ordering input and was
+  omitted, so a fresh session would have read constants-only literals and missed
+  `DrawOrderProjection`.
+- **Missing precedent pointer:** Phase 7 Spec now cites the shipped two-axis
+  batching template (`RunRecord`/`run_record_for` + `text_batch_depth_bias`/
+  `line_batch_depth_bias`) so the batched-fill design replicates it rather than
+  re-deriving the CPU-screen-lane + per-record-OIT-offset split.
+- **Reconcile + guard facts:** corrected Phase 7's reconcile key from `element_idx`
+  to the shipped `PanelSdfSurface.command_index` carrier with the full
+  `DrawCommandDepth` reuse signature (Blocker-B), and added that the per-level/OIT
+  overflow guard currently lives inside `reconcile_sdf_quads` and must be re-homed
+  if fills leave the per-quad SDF path.
+- **Deliverable location:** Phase 7's design doc is a top-level plan
+  (`docs/bevy_diegetic/element-batching.md`), not an `as-built/` record.
+- Phase 7 `Constraints from prior phases` updated with the Phase 6 cascade-teardown +
+  `DrawZIndex` relocation fact (does not affect the geometry/batching path).
+
 ### Phase 7 — Design: universal element batching (fills join the batched path) · status: todo (design only)
 
 #### Work Order
@@ -675,7 +753,8 @@ lines already batch; fills do not).
   design unifies fills onto that batched path.
 - Per-quad material variety (size, color, corner radii, depth) moves into a
   per-quad storage buffer indexed by vertex/instance, like text/lines.
-- Ordering input is the existing `DrawOrderProjection` ordinal:
+- Ordering input is the existing `DrawOrderProjection` ordinal (in
+  `render/draw_order.rs`):
   - **World (OIT) panels:** carry `oit_depth_offset` per quad; submission order is
     irrelevant (per-fragment sort) — batch freely.
   - **Screen (non-OIT) panels:** a batch is one draw and blends in buffer order, so
@@ -684,13 +763,31 @@ lines already batch; fills do not).
     across levels. Cross-panel ordering for *overlapping* screen panels (a single
     global text/fill band cannot carry per-panel distance separation) is a known
     constraint the design must address.
+  - **Follow the shipped two-axis precedent.** Text and lines already implement
+    exactly this split: the batch material carries one per-`z_level` `depth_bias`
+    (CPU-fixed screen lane, `text_batch_depth_bias`/`line_batch_depth_bias` in
+    `render/draw_order.rs`), while each `RunRecord` carries its own per-record
+    `oit_depth_offset`/`depth_nudge` in the storage buffer
+    (`render/panel_text/batching.rs`, `RunRecord`/`run_record_for`). The
+    batched-fill design must replicate this `RunRecord`-style structure rather than
+    re-derive it — lines + text are the two worked examples (Phase 4a).
 - Buffer churn: a fill change rebuilds the buffer. Honor the ShaderBuffer rebind
   hazard — `set_data` with a changed byte length re-creates the wgpu buffer and
   material bind groups do not follow; pad to fixed capacity and swap in new buffer
   assets + rewrite material handles on growth.
-- Reconcile: per-quad identity keyed on `element_idx`/ordinal (consistent with the
-  Phase-4 reconcile carriers), so a z-index move re-keys the buffer record, never
-  respawns the entity.
+- Reconcile: per-quad identity keyed on `command_index` (the shipped
+  `PanelSdfSurface` carrier is `{ command_index, draw_depth: DrawCommandDepth, … }`
+  in `render/panel_geometry.rs`, keyed on `command_index`, not a bare
+  `element_idx`), so a z-index move re-keys the buffer record, never respawns the
+  entity. **The reuse signature stores the whole `DrawCommandDepth`** (the Phase-4a
+  Blocker-B fix: a `text_anchor` shift must invalidate reuse) — the batched-fill
+  design must preserve full-`DrawCommandDepth` reuse keying, not collapse it to an
+  ordinal scalar.
+- **Re-home the overflow guard.** The per-level band + OIT-budget guard
+  (`per_level_band_overflows`/`oit_total_overflows`, `render/panel_geometry.rs:237–261`,
+  fed by `DrawOrderProjection::level_occupancy()`) currently lives inside
+  `reconcile_sdf_quads`. A design that moves fills off the per-quad SDF path must
+  decide where this guard re-homes so per-level/OIT overflow is still detected.
 - Decide batch granularity: one element batch per `(view, z-level, material class)`
   vs a single per-panel mega-buffer — weigh draw-call count against buffer-rebuild
   cost.
@@ -704,12 +801,22 @@ lines already batch; fills do not).
   ordinal? a finer intra-batch screen ordering? widen the band?) — the OIT path has
   the focus-depth budget; the screen path has this hard 64-lane-per-level cap.
 
-**Files:** new design doc (e.g. `docs/bevy_diegetic/element-batching.md`); reads
-`render/panel_geometry.rs`, `render/panel_text/batching.rs`, `render/constants.rs`.
+**Files:** new design doc — a top-level **plan** (not an as-built record), so
+`docs/bevy_diegetic/element-batching.md`, not under `as-built/` (Phase 6's
+`as-built/` subtree is for shipped-mechanism records; this is forward design).
+Reads `render/draw_order.rs` (the ordinal projection engine — the single
+load-bearing file for the ordering input, added to this read list post-Phase-6),
+`render/panel_geometry.rs` (per-fill SDF path + the overflow guard),
+`render/panel_text/batching.rs` (the `RunRecord` two-axis batching precedent),
+`render/constants.rs` (the `DRAW_LEVEL_*` band literals).
 
 **Constraints from prior phases:** Phases 4/4a established the ordinal projection
 and the per-level screen `depth_bias` banding that any batched-fill path reuses.
 Phase 5 deleted `draw_slot`; the projection ordinal is the sole ordering source.
+Phase 6 deleted the `DrawZIndex` cascade machinery and relocated the `DrawZIndex`
+authoring newtype to `crate::layout` (`layout/text_props.rs`) — it is no longer a
+cascade attribute, just the plain `Option<DrawZIndex>` authoring field on
+`Element`/`El`; this does not affect the geometry/batching path Phase 7 designs.
 
 **Acceptance gate:** a written, reviewed design doc covering the buffer layout, the
 per-view ordinal sort, the OIT-vs-screen ordering split, the buffer-rebind/padding
