@@ -79,6 +79,7 @@ pub use line::PanelLineSourceKey;
 pub use line::PanelPoint;
 pub use line::ResolvedPanelLine;
 pub use line::ResolvedPanelLinePrimitive;
+pub(crate) use render::DrawStep;
 pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;

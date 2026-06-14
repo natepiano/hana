@@ -1,5 +1,7 @@
 //! Rendering constants and material utilities for diegetic panels.
 
+use std::cmp::Ordering;
+
 use bevy::asset::uuid_handle;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
@@ -8,6 +10,8 @@ use bevy_kana::ToF32;
 
 use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::DrawLayer;
+use crate::layout::DrawStep;
+use crate::layout::RenderCommand;
 use crate::layout::Sidedness;
 
 // layer ordering
@@ -54,6 +58,15 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DrawOrdinal(i32);
 
+/// Sort key for draw commands: `DrawLayer`, then `DrawStep::ordinal`, then
+/// `RenderCommand` stream index.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct HierarchicalDrawKey {
+    z_index:    Option<DrawLayer>,
+    step:       DrawStep,
+    tree_order: u32,
+}
+
 /// `Transparent3d` sort bias for batched panel-line entities.
 ///
 /// Lines are vertex-pulled across many panels like text, so one batch render
@@ -90,6 +103,61 @@ impl DrawOrdinal {
 
 impl From<DrawLayer> for DrawOrdinal {
     fn from(draw_layer: DrawLayer) -> Self { Self(i32::from(draw_layer.0)) }
+}
+
+impl Ord for HierarchicalDrawKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let z_level = |key: &Self| key.z_index.map_or(0_i8, |z_index| z_index.0);
+
+        z_level(self)
+            .cmp(&z_level(other))
+            .then(self.step.ordinal().cmp(&other.step.ordinal()))
+            .then(self.tree_order.cmp(&other.tree_order))
+    }
+}
+
+impl PartialOrd for HierarchicalDrawKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+}
+
+/// Enumerates draw-participating commands into panel-local dense ranks.
+///
+/// The returned vector is index-aligned with `commands`; scissor commands map
+/// to `None`. Each `DrawOrdinal` stores the dense rank. Callers deriving the
+/// text-anchored OIT offset subtract the lowest `DrawStep::Text` rank, or `0`
+/// for panels with no text commands.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "render reads this projection after the draw-order migration"
+    )
+)]
+pub(crate) fn enumerate_ordinals(commands: &[RenderCommand]) -> Vec<Option<DrawOrdinal>> {
+    let mut keyed_commands = commands
+        .iter()
+        .enumerate()
+        .filter_map(|(index, command)| {
+            command.kind.draw_step().map(|step| {
+                (
+                    HierarchicalDrawKey {
+                        z_index: command.z_index,
+                        step,
+                        tree_order: u32::try_from(index).unwrap_or(u32::MAX),
+                    },
+                    index,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    keyed_commands.sort_by_key(|(key, _)| *key);
+
+    let mut ordinals = vec![None; commands.len()];
+    for (rank, (_, index)) in keyed_commands.into_iter().enumerate() {
+        ordinals[index] = Some(DrawOrdinal(i32::try_from(rank).unwrap_or(i32::MAX)));
+    }
+    ordinals
 }
 
 // material defaults
@@ -178,8 +246,17 @@ pub(super) fn resolve_material(
     reason = "tests should panic on unexpected values"
 )]
 mod tests {
-    use super::*;
+    use bevy::image::Image;
+    use bevy_kana::ToI32;
 
+    use super::*;
+    use crate::layout::Border;
+    use crate::layout::BoundingBox;
+    use crate::layout::RectangleSource;
+    use crate::layout::RenderCommandKind;
+    use crate::layout::TextStyle;
+
+    const LOWERED_TEXT_LEVEL: DrawLayer = DrawLayer(-1);
     /// Ordinal pairs `(low, high)` spanning below-default, default-crossing,
     /// and above-default ranges.
     const ORDERED_LAYER_PAIRS: [(i8, i8); 8] = [
@@ -192,6 +269,224 @@ mod tests {
         (DEFAULT_DRAW_LAYER, 65),
         (DEFAULT_DRAW_LAYER, i8::MAX),
     ];
+    const RAISED_FILL_LEVEL: DrawLayer = DrawLayer(2);
+
+    #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+    struct ShippedOracleKey {
+        lane:         i32,
+        stream_index: usize,
+    }
+
+    fn representative_streams() -> [Vec<RenderCommand>; 2] {
+        [
+            commands_from_kinds([
+                (rectangle(), None),
+                (text(), None),
+                (image(), None),
+                (lines(), None),
+                (text(), None),
+                (RenderCommandKind::ScissorStart, None),
+                (RenderCommandKind::ScissorEnd, None),
+            ]),
+            commands_from_kinds([
+                (text(), None),
+                (lines(), None),
+                (rectangle(), None),
+                (RenderCommandKind::ScissorStart, None),
+                (border(), None),
+                (text(), None),
+                (RenderCommandKind::ScissorEnd, None),
+                (image(), None),
+            ]),
+        ]
+    }
+
+    fn commands_from_kinds<const N: usize>(
+        entries: [(RenderCommandKind, Option<DrawLayer>); N],
+    ) -> Vec<RenderCommand> {
+        let mut next_draw_slot = 0;
+        entries
+            .into_iter()
+            .enumerate()
+            .map(|(element_idx, (kind, z_index))| {
+                let draw_slot = next_draw_slot;
+                if kind.consumes_draw_slot() {
+                    next_draw_slot += 1;
+                }
+                RenderCommand {
+                    bounds: BoundingBox::default(),
+                    kind,
+                    element_idx,
+                    z_index,
+                    draw_slot,
+                }
+            })
+            .collect()
+    }
+
+    fn rectangle() -> RenderCommandKind {
+        RenderCommandKind::Rectangle {
+            color:  Color::WHITE,
+            source: RectangleSource::Background,
+        }
+    }
+
+    fn image() -> RenderCommandKind {
+        RenderCommandKind::Image {
+            handle: Handle::<Image>::default(),
+            tint:   Color::WHITE,
+        }
+    }
+
+    fn border() -> RenderCommandKind {
+        RenderCommandKind::Border {
+            border: Border::default(),
+        }
+    }
+
+    fn lines() -> RenderCommandKind { RenderCommandKind::Lines { lines: Vec::new() } }
+
+    fn text() -> RenderCommandKind {
+        RenderCommandKind::Text {
+            text:   String::new(),
+            config: TextStyle::default(),
+        }
+    }
+
+    fn shipped_oracle_key(index: usize, command: &RenderCommand) -> Option<ShippedOracleKey> {
+        let step = command.kind.draw_step()?;
+        let lane = match step {
+            DrawStep::Fill => DrawOrdinal::from_draw_slot(command.draw_slot).0,
+            DrawStep::Lines => line_batch_lane(),
+            DrawStep::Text => i32::from(DEFAULT_DRAW_LAYER),
+        };
+        Some(ShippedOracleKey {
+            lane,
+            stream_index: index,
+        })
+    }
+
+    fn line_batch_lane() -> i32 { (BATCH_PANEL_LINE_DEPTH_BIAS / LAYER_DEPTH_BIAS).to_i32() }
+
+    fn drawing_indices(commands: &[RenderCommand]) -> Vec<usize> {
+        commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.kind.draw_step().is_some())
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    fn ordinal_at(ordinals: &[Option<DrawOrdinal>], index: usize) -> DrawOrdinal {
+        ordinals[index].expect("drawing commands receive ordinals")
+    }
+
+    fn text_anchor_rank(commands: &[RenderCommand], ordinals: &[Option<DrawOrdinal>]) -> i32 {
+        commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.kind.draw_step() == Some(DrawStep::Text))
+            .map(|(index, _)| ordinal_at(ordinals, index).0)
+            .min()
+            .unwrap_or(0)
+    }
+
+    fn ranks_for_step(
+        commands: &[RenderCommand],
+        ordinals: &[Option<DrawOrdinal>],
+        step: DrawStep,
+    ) -> Vec<i32> {
+        commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.kind.draw_step() == Some(step))
+            .map(|(index, _)| ordinal_at(ordinals, index).0)
+            .collect()
+    }
+
+    fn ranks_for_z_index(
+        commands: &[RenderCommand],
+        ordinals: &[Option<DrawOrdinal>],
+        z_index: DrawLayer,
+    ) -> Vec<i32> {
+        commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.z_index == Some(z_index))
+            .map(|(index, _)| ordinal_at(ordinals, index).0)
+            .collect()
+    }
+
+    fn assert_pairwise_order_agreement(commands: &[RenderCommand]) {
+        // `shipped_oracle_key` and `enumerate_ordinals` agree when each
+        // `DrawStep::Fill` has a `RenderCommand::draw_slot` strictly below
+        // `line_batch_lane()` (`63`). At `draw_slot == 63`, the shipped lanes
+        // assign `DrawStep::Fill` and `DrawStep::Lines` the same lane and
+        // break the tie with `stream_index`; `HierarchicalDrawKey` sorts by
+        // `DrawStep::ordinal` before `tree_order`, so `DrawStep::Fill` stays
+        // below `DrawStep::Lines`.
+        let ordinals = enumerate_ordinals(commands);
+        let indices = drawing_indices(commands);
+
+        for &left_index in &indices {
+            for &right_index in &indices {
+                let left_rank = ordinal_at(&ordinals, left_index).0;
+                let right_rank = ordinal_at(&ordinals, right_index).0;
+                let left_oracle = shipped_oracle_key(left_index, &commands[left_index])
+                    .expect("drawing command has oracle key");
+                let right_oracle = shipped_oracle_key(right_index, &commands[right_index])
+                    .expect("drawing command has oracle key");
+
+                assert_eq!(
+                    left_rank.cmp(&right_rank),
+                    left_oracle.cmp(&right_oracle),
+                    "new rank order must match shipped order for indices {left_index} and \
+                     {right_index}",
+                );
+            }
+        }
+    }
+
+    fn assert_scissors_excluded(commands: &[RenderCommand]) {
+        let ordinals = enumerate_ordinals(commands);
+        for (index, command) in commands.iter().enumerate() {
+            if command.kind.draw_step().is_none() {
+                assert_eq!(
+                    ordinals[index], None,
+                    "scissor command {index} maps to None"
+                );
+            }
+        }
+        assert_eq!(
+            ordinals.iter().flatten().count(),
+            drawing_indices(commands).len(),
+            "only drawing commands receive ordinals",
+        );
+    }
+
+    fn assert_depth_bias_and_text_anchored_oit_agree(commands: &[RenderCommand]) {
+        let ordinals = enumerate_ordinals(commands);
+        let text_anchor = text_anchor_rank(commands, &ordinals);
+        let indices = drawing_indices(commands);
+
+        for &left_index in &indices {
+            for &right_index in &indices {
+                let left_rank = ordinal_at(&ordinals, left_index).0;
+                let right_rank = ordinal_at(&ordinals, right_index).0;
+                let left_depth_bias = DrawOrdinal(left_rank).depth_bias();
+                let right_depth_bias = DrawOrdinal(right_rank).depth_bias();
+                let left_oit_depth_offset = (left_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
+                let right_oit_depth_offset = (right_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
+
+                assert_eq!(
+                    left_depth_bias.total_cmp(&right_depth_bias),
+                    left_oit_depth_offset.total_cmp(&right_oit_depth_offset),
+                    "sorted depth bias and text-anchored OIT offset must order indices \
+                     {left_index} and {right_index} the same way",
+                );
+            }
+        }
+    }
 
     #[test]
     fn sorted_and_oit_orderings_agree_for_every_layer_pair() {
@@ -253,5 +548,123 @@ mod tests {
             DrawOrdinal::from_draw_slot(usize::MAX),
             DrawOrdinal(i32::MAX),
         );
+    }
+
+    #[test]
+    fn hierarchical_ordinals_match_shipped_order_for_unset_z_index() {
+        for commands in representative_streams() {
+            assert!(
+                commands.iter().all(|command| command.z_index.is_none()),
+                "representative streams omit z_index overrides",
+            );
+            assert_pairwise_order_agreement(&commands);
+        }
+    }
+
+    #[test]
+    fn level_zero_fill_stays_below_lines_at_lane_boundary() {
+        let line_lane = usize::try_from(line_batch_lane()).expect("line lane is nonnegative");
+        assert_eq!(line_lane, 63, "line lane stays at the documented boundary");
+
+        let mut commands = commands_from_kinds([(lines(), None), (rectangle(), None)]);
+        commands[1].draw_slot = line_lane;
+
+        let ordinals = enumerate_ordinals(&commands);
+        let line_rank = ranks_for_step(&commands, &ordinals, DrawStep::Lines)
+            .into_iter()
+            .next()
+            .expect("lines command receives an ordinal");
+        let fill_rank = ranks_for_step(&commands, &ordinals, DrawStep::Fill)
+            .into_iter()
+            .next()
+            .expect("fill command receives an ordinal");
+
+        assert!(
+            fill_rank < line_rank,
+            "level-zero fill at the line lane must stay below lines",
+        );
+    }
+
+    #[test]
+    fn hierarchical_ordinals_exclude_scissors() {
+        for commands in representative_streams() {
+            assert_scissors_excluded(&commands);
+        }
+    }
+
+    #[test]
+    fn text_anchor_keeps_lowest_text_oit_offset_at_zero() {
+        let commands = representative_streams()
+            .into_iter()
+            .next()
+            .expect("representative streams include a text stream");
+        let ordinals = enumerate_ordinals(&commands);
+        let text_anchor = text_anchor_rank(&commands, &ordinals);
+        let lowest_text_rank = ranks_for_step(&commands, &ordinals, DrawStep::Text)
+            .into_iter()
+            .min()
+            .expect("representative stream includes text commands");
+        let text_anchored_offset = (lowest_text_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
+
+        assert_eq!(lowest_text_rank - text_anchor, 0);
+        assert_eq!(text_anchored_offset.to_bits(), 0.0f32.to_bits());
+    }
+
+    #[test]
+    fn hierarchical_depth_bias_and_oit_orderings_agree() {
+        for commands in representative_streams() {
+            assert_depth_bias_and_text_anchored_oit_agree(&commands);
+        }
+    }
+
+    #[test]
+    fn z_index_overrides_move_commands_between_step_groups() {
+        let raised_fill_commands = commands_from_kinds([
+            (text(), None),
+            (rectangle(), Some(RAISED_FILL_LEVEL)),
+            (text(), None),
+        ]);
+        let raised_fill_ordinals = enumerate_ordinals(&raised_fill_commands);
+        let raised_fill_rank = ranks_for_z_index(
+            &raised_fill_commands,
+            &raised_fill_ordinals,
+            RAISED_FILL_LEVEL,
+        )
+        .into_iter()
+        .next()
+        .expect("raised fill command receives an ordinal");
+        for text_rank in
+            ranks_for_step(&raised_fill_commands, &raised_fill_ordinals, DrawStep::Text)
+        {
+            assert!(
+                raised_fill_rank > text_rank,
+                "raised fill rank must sit above default text ranks",
+            );
+        }
+
+        let lowered_text_commands = commands_from_kinds([
+            (text(), Some(LOWERED_TEXT_LEVEL)),
+            (rectangle(), None),
+            (image(), None),
+        ]);
+        let lowered_text_ordinals = enumerate_ordinals(&lowered_text_commands);
+        let lowered_text_rank = ranks_for_z_index(
+            &lowered_text_commands,
+            &lowered_text_ordinals,
+            LOWERED_TEXT_LEVEL,
+        )
+        .into_iter()
+        .next()
+        .expect("lowered text command receives an ordinal");
+        for fill_rank in ranks_for_step(
+            &lowered_text_commands,
+            &lowered_text_ordinals,
+            DrawStep::Fill,
+        ) {
+            assert!(
+                lowered_text_rank < fill_rank,
+                "lowered text rank must sit below default fill ranks",
+            );
+        }
     }
 }

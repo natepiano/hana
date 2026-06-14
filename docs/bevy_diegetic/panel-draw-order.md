@@ -1,6 +1,6 @@
 # Panel draw order
 
-> **Status: DESIGN — ready to implement, phased.** A successor to the shipped
+> **Status: DESIGN — ready to implement, phased.** A successor to the current
 > draw-layer model recorded in
 > [`as-built/text-draw-layer.md`](as-built/text-draw-layer.md). It replaces the
 > `draw_slot` emission counter, the `DEFAULT_DRAW_LAYER = 64` text default, and
@@ -39,7 +39,7 @@ must be controlled.
 
 ## What is wrong with the current model
 
-The shipped model (see the as-built doc) puts everything on one flat integer
+The current model (see the as-built doc) puts everything on one flat integer
 axis, `DrawOrdinal(i32)`:
 
 - **Geometry** takes an emission-order `draw_slot` (0, 1, 2 …).
@@ -114,7 +114,7 @@ them.
 
 The overflow ceiling is gone not because numbering is bounded, but because text
 sits at the *text step*, always ahead of the *fill step* by construction. The
-shipped ceiling came from text being pinned at a fixed number (`64`) that
+current ceiling came from text being pinned at a fixed number (`64`) that
 geometry slots could climb to; a semantic step has no number to reach. (The OIT
 budget still caps how many *distinct coplanar* ordinals one panel can resolve —
 that bound is preserved as the overflow check, see Phase 5.)
@@ -124,7 +124,7 @@ step between fills and text rather than carrying a per-command material depth.
 They do not gain `DrawZIndex` unless a later pass adds it; only their step
 placement changes.
 
-## What changes from the shipped model
+## What changes from the current model
 
 | Change | Piece today | Today | Becomes |
 |---|---|---|---|
@@ -196,7 +196,7 @@ enum DrawStep { Fill, Lines, Text }   // ordinal() = 0, 1, 2
 
 Use an explicit `ordinal()` mapping (a `match`), not the derived discriminant,
 so reordering variants cannot silently invert the ladder. `Fill < Lines < Text`
-is confirmed against the shipped coarse lanes (lines at
+is confirmed against the current coarse lanes (lines at
 `BATCH_PANEL_LINE_DEPTH_BIAS = 63`, just under text `64`). No `ChildBoxes`
 variant: a child box is a child element's `Fill` emitted later, so `tree_order`
 already places it above the parent fill and below text. No `Raised` variant:
@@ -245,9 +245,9 @@ order. This is the only definition of "later-wins" stable through batching.
 enumerated ordinal `0..N`. That single ordinal feeds **both**
 `depth_bias = ordinal × LAYER_DEPTH_BIAS` and
 `oit_depth_offset = (ordinal − text_anchor) × OIT_DEPTH_STEP`, exactly as the
-shipped `DrawOrdinal` does — so sorted/OIT parity is preserved by construction,
+current `DrawOrdinal` does — so sorted/OIT parity is preserved by construction,
 not reduced. `text_anchor` is the lowest ordinal among `Text`-step commands, so
-default text lands at OIT offset `0.0` (preserving the shipped calibration) and
+default text lands at OIT offset `0.0` (preserving the current calibration) and
 raised content goes positive, lowered negative — the D5 symmetric offset, no
 clamp.
 
@@ -283,7 +283,7 @@ Regression guards the implementation must not break:
 
 Six separable commits, each building green (`cargo build && cargo +nightly fmt`,
 `cargo nextest run`). The `DrawLayer` → `DrawZIndex` rename is the final phase,
-so phases 1–5 keep the shipped name and the model stays semantically honest
+so phases 1–5 keep the current name and the model stays semantically honest
 (default `64` belongs to the old text-layer model and is only deleted when the
 new model lands).
 
@@ -299,6 +299,7 @@ reads, no behavior change.
   scissors to `None`).
 
 *Gate:* compiles; nothing reads `draw_step()` yet; existing tests unchanged.
+*Status:* done — committed `474382b` (bundled with Phase 2).
 
 ### Phase 2 — `Option<DrawLayer>` on `El`/`Element` + emission stamps `z_index`, inert
 
@@ -318,11 +319,12 @@ render.
 - `render/clip.rs` — scissor construction sets `z_index: None` (`:118–134`).
 
 *Gate:* compiles; render still reads `draw_slot`; field is inert.
+*Status:* done — committed `474382b`.
 
 ### Phase 3 — `HierarchicalDrawKey` + projection, computed in parallel and validated
 
 *Commit:* the key, its `Ord`, and the panel-level enumeration — computed and
-asserted equal to the shipped ordering, but not yet driving render.
+asserted equal to the current ordering, but not yet driving render.
 
 - `render/constants.rs` — add `HierarchicalDrawKey` + the 2-level `Ord`; add a
   panel-level `fn enumerate_ordinals(&[RenderCommand]) -> Vec<DrawOrdinal>` that
@@ -330,11 +332,76 @@ asserted equal to the shipped ordering, but not yet driving render.
   `text_anchor`-relative `oit_depth_offset`. `tree_order` = the command's index
   in the stream (`.enumerate()`), not the `draw_slot` counter.
 - Parity test: for representative panels, the new enumeration reproduces the
-  shipped `draw_slot`/`DrawLayer` relative order (so the flip in Phase 4 is a
+  current `draw_slot`/`DrawLayer` relative order (so the flip in Phase 4 is a
   no-op for existing content, and only new `DrawZIndex` authoring changes order).
 
 *Gate:* compiles; new ordinal computed and asserted against the old; render
 still reads `draw_slot`.
+*Status:* done — uncommitted in tree (`render/constants.rs` + a `pub(crate) use
+render::DrawStep` re-export in `layout/mod.rs`). `enumerate_ordinals` is
+`#[cfg_attr(not(test), expect(dead_code, …))]` until Phase 4 reads it.
+
+#### Retrospective (Phases 1–3)
+
+**What worked:**
+- Inert-by-phase sequencing held: each phase compiled green with zero render
+  reads, so the new model accreted beside the current `draw_slot` path without
+  touching behavior. 404 tests pass.
+- The current order turned out to already be step-grouped at the *coarse* lanes
+  (`Fill` `draw_slot` `0..62` < `Lines` `63` < `Text` `64`), so the new
+  `(z_level, step, tree_order)` key reproduces it — the parity oracle keys `Fill`
+  by `draw_slot`, `Lines` by the `63` batch lane, `Text` by `64`, and compares
+  order (pairwise sign), not magnitudes.
+
+**What deviated from the plan:**
+- `DrawStep` was private to `layout`; Phase 3 added a `pub(crate) use
+  render::DrawStep` re-export in `layout/mod.rs` (one file beyond the planned
+  `constants.rs`-only scope) so `HierarchicalDrawKey` can store `step: DrawStep`.
+- `enumerate_ordinals` returns `Vec<Option<DrawOrdinal>>` (index-aligned, `None`
+  for scissors), not the doc's sketched `Vec<DrawOrdinal>`, so Phase 4 can recover
+  each command's ordinal by stream position.
+- Phase 2's `classify_element_change` ignores the new field (`draw_layer: _`)
+  while inert; the comparison is deferred to Phase 4 (already recorded in the
+  Phase 4 bullets) so a `.draw_layer()`-only change re-emits once render reads it.
+
+**Surprises:**
+- Lane-collision boundary: the overflow guard (`panel_geometry.rs:237`) rejects
+  `draw_slot ≥ 64` but *allows* `63`, where a `Fill` ties the `Lines` lane. Old
+  code leaves that tie to submission order; the new key deterministically orders
+  `Fill` below `Lines` (the documented lane intent). So Phase 4 is a true no-op
+  only for `draw_slot < 63`; the `== 63` case is a deliberate tie-resolution, now
+  pinned by `level_zero_fill_stays_below_lines_at_lane_boundary`.
+
+**Implications for remaining phases:**
+- Phase 4 must read `enumerate_ordinals` (the `expect(dead_code)` attr comes off
+  then) and wire the `classify_element_change` `draw_layer` comparison.
+- Phase 4's "existing panels render unchanged" gate should be stated as holding
+  for `draw_slot < 63` (the lane boundary is an intended, tested resolution).
+
+#### Review of remaining phases (post-Phase-3)
+
+An architect pass over phases 4–6 changed the plan as follows:
+
+- **Phase 4 — line ordering source.** The per-record line offsets are NOT "fine
+  disambiguation" — they are `draw_slot`-derived (`PanelLinePaintOrder::Normal`,
+  `line.rs:525–532`). Phase 4 must re-derive them from the enumerated ordinal.
+- **Phase 4 — reconcile re-keying widened.** `PanelSdfSurface`, `PanelTextChild`,
+  and `PanelImageChild` each key on `draw_slot`; all move to the ordinal, not just
+  the image rebuild.
+- **Phase 4 — single z-index source (user decision).** Every command takes its
+  level from its own element's `z_index`; the per-label `DrawLayer` cascade read
+  (`batching.rs:238`) is deleted. No inheritance — that was old-model baggage.
+- **Phase 4 — `OIT_MIN_DEPTH` retuned (user decision).** Honor the invariant:
+  `3 × OIT_DEPTH_STEP` in the 3 shaders + `EXPECTED_SHADER_FNV1A` refresh, same
+  commit, for codebase consistency.
+- **Phase 4 — gate strengthened.** Add a render-level material-value equivalence
+  check (CPU ordinal parity from Phase 3 does not cover the per-pass rewrite).
+- **Phase 5 — `draw_slot` deletion inventory completed.** `positioning.rs:314`,
+  `PanelLinePaintOrder::Normal`/`NORMAL_*_STEP`, and the per-carrier fields were
+  missing; overflow count now sourced from `enumerate_ordinals`.
+- **Phase 6 — estimates refreshed.** Blast radius ~172 refs/17 files (not 227/21);
+  re-verify line citations at rename time; example path corrected; FNV refresh
+  moved to Phase 4 (no longer a Phase-6 no-op).
 
 ### Phase 4 — Flip render reads to the enumerated ordinal (behavior change)
 
@@ -352,14 +419,35 @@ emission-order input feeding `tree_order`.
   `DrawStep::Text` instead of `DEFAULT_DRAW_LAYER`.
 - `render/panel_lines/batching.rs` + `render/analytic_paths/batching.rs` —
   rederive the coarse `BATCH_PANEL_LINE_DEPTH_BIAS` lane (`:614`) from
-  `DrawStep::Lines`; the per-record line/part offsets (`:654–677`,
-  `:72–75`) stay as fine within-`Lines`-step disambiguation.
+  `DrawStep::Lines`. **The per-record line offsets are NOT fine disambiguation —
+  they are `draw_slot`-derived coarse offsets** (`PanelLinePaintOrder::Normal {
+  draw_slot }` seeded at `positioning.rs:314` → `line.rs:525–532` derives
+  `depth_bias = draw_slot × NORMAL_DEPTH_BIAS_STEP(1.0)` and
+  `oit_depth_offset = (draw_slot+1) × NORMAL_OIT_DEPTH_STEP(−1e-6)`, applied at
+  `:654–677`/`:72–75`). They read `draw_slot` (deleted in Phase 5), so Phase 4
+  must re-derive the per-record line/part depth from the enumerated ordinal (or
+  `tree_order` within the `Lines` step), not retain the `draw_slot` formula.
 - `render/constants.rs` — delete the `min(ordinal − 64, 0)` clamp in
   `oit_depth_offset` (`:86–88`); the symmetric `text_anchor`-relative offset
   from Phase 3 replaces it (D5).
+- **Retune `OIT_MIN_DEPTH` (decision: honor the invariant).** Replace the
+  hard-coded `OIT_MIN_DEPTH = 2e-7` with `3 × OIT_DEPTH_STEP` in all three
+  shaders (`sdf_panel.wgsl`, `analytic_path.wgsl`, `panel_line_batch.wgsl`) so the
+  floor tracks calibration. The `.wgsl` text changes, so refresh
+  `EXPECTED_SHADER_FNV1A` (`coverage_probe.rs ~:871`) **in this same commit** —
+  Phase 4 must stay green. (Numerically the old `2e-7` was adequate; this is for
+  codebase consistency — the floor and the step now derive from one constant.)
 - `render/panel_text/reconcile.rs` — re-key image-material rebuild on the
   ordinal/step instead of `draw_slot` (`:587–589`, material build `:642`); text
   reuse key `(PanelFieldId, line_index)` is unchanged.
+- **Three reconcile-identity carriers also key on `draw_slot` and must move to the
+  ordinal/step** (the "Reconcile identity" invariant names text/image but missed
+  the SDF surface): `PanelSdfSurface.draw_slot` in the geometry-eq signature
+  (`panel_geometry.rs:48/131/561`), `PanelTextChild.draw_slot`
+  (`panel_text/layout.rs:26`), and `PanelImageChild.draw_slot` in the
+  `visuals_unchanged` reuse test (`reconcile.rs:427/494/588`). Re-key each on the
+  enumerated ordinal (or drop it) in this phase, or reconcile reuse/respawn breaks
+  when Phase 5 deletes the field.
 - `layout/element.rs` — `classify_element_change` must compare `draw_layer`
   (Phase 2 left it destructured as `draw_layer: _`, inert). Once render reads
   `z_index`, a `.draw_layer()`-only authoring change must classify as a
@@ -367,16 +455,30 @@ emission-order input feeding `tree_order`.
   otherwise it takes the `Identical` skip (`panel/compute_layout.rs:96`) and the
   panel keeps stale depth. Acceptance: toggling only `draw_layer` re-orders the
   element on screen.
-- Cross-cutting integration point (the one risk in this phase): the enumeration
-  needs every command's `z_index` at panel-geometry time. Geometry `z_index`
-  comes from the `Element` field (Phase 2); text `z_index` resolves through the
-  existing `DrawLayer` cascade on label entities
-  (`render/panel_text/glyph_cascade.rs`, 41 refs). Feed both into the same
-  enumeration; verify a forgotten text-z-index path falls back to the zero level,
-  not a panic.
+- **Single z-index source (resolved).** Every command — fill, text, line — takes
+  its level from its own element's `z_index` (the `Element.draw_layer` field,
+  Phase 2), feeding `enumerate_ordinals` directly. The base order is declaration
+  order (`tree_order`) + the fixed `DrawStep` ladder; `z_index` is the override.
+  There is **no inheritance** — that was an artifact of the old text-only
+  `DrawLayer` cascade (a default-`64` layer propagated to label entities), which
+  is retired here, not carried forward. So Phase 4 **deletes the per-label cascade
+  read** (`render/panel_text/batching.rs:238` reading `Resolved<DrawLayer>`); text
+  level no longer comes from `Override`/`Resolved<DrawLayer>`. The `with_draw_layer`
+  authoring verb + `glyph_cascade.rs` `Override`/`Resolved<DrawLayer>` resolution +
+  the propagation/reconcile arms are old-model machinery removed in Phase 5/6 (add
+  them to that deletion inventory). Ergonomic API: one `.draw_zindex(n)` builder on
+  any element.
 
 *Gate:* compiles; the in-panel overlay renders above text on **both** the sorted
-screen view and the OIT world view; existing panels render unchanged.
+screen view and the OIT world view; existing panels render unchanged (for
+`draw_slot < 63` — the lane boundary is the intended resolution, see
+retrospective). The Phase 3 parity test is CPU-only (ordinal order); add a
+**render-level equivalence acceptance check** here: for representative panels with
+no override, the post-flip per-pass material values (`panel_geometry`
+`depth_bias`/`oit_depth_offset`, the text batch lane + per-run nudge, the line
+batch lane + per-record offset) must match their pre-flip values — the unified
+ordinal replaces three differently-scaled derivations (`LAYER_DEPTH_BIAS`,
+`NORMAL_*_STEP`, text `draw_layer`), which the CPU ordinal test does not cover.
 
 ### Phase 5 — Delete the dead mechanism + rework the overflow check
 
@@ -385,11 +487,23 @@ screen view and the OIT world view; existing panels render unchanged.
 - Delete `RenderCommandKind::consumes_draw_slot()` (`render.rs:94–102`),
   `RenderCommand::draw_slot` (`:32`), `EmissionCounters.draw_slot`
   (`positioning.rs:33–58`), and `DEFAULT_DRAW_LAYER` (`cascade/constants.rs:20`).
+- **Full `draw_slot`-reader inventory to delete/rework (the list above was
+  incomplete):** the counter is also read at `positioning.rs:314` to seed
+  `PanelLinePaintOrder::Normal { draw_slot }` — delete that variant field plus
+  `NORMAL_DEPTH_BIAS_STEP`/`NORMAL_OIT_DEPTH_STEP` and the `line.rs:525–532`
+  derivation (their ordering moves to the Phase-4 ordinal). Also drop the
+  per-carrier `draw_slot` fields once Phase 4 re-keys reconcile:
+  `PanelSdfSurface.draw_slot`, `PanelTextChild.draw_slot`,
+  `PanelImageChild.draw_slot`. Deleting `RenderCommand::draw_slot` without these
+  will not compile.
 - `render/panel_geometry.rs` — rework the overflow check (`:237–253`): it stays,
   but warns when a panel's *distinct coplanar ordinal count* approaches the OIT
-  budget (`≈ focus-depth / OIT_DEPTH_STEP`), not when `draw_slot ≥ 64`. Past the
-  budget, ordering degrades to best-effort OIT insertion order (the same
-  far-panel degradation the shipped model has) — no silent truncation.
+  budget (`≈ focus-depth / OIT_DEPTH_STEP`), not when `draw_slot ≥ 64`. Source the
+  count from `enumerate_ordinals(...).iter().flatten().count()` (which spans
+  fills, lines, AND text), not a reconstructed `draw_slot` max (which counts only
+  slot-consuming kinds). Past the budget, ordering degrades to best-effort OIT
+  insertion order (the same far-panel degradation the current model has) — no
+  silent truncation.
 
 *Gate:* compiles with `draw_slot`/`DEFAULT_DRAW_LAYER` gone; overflow warning
 fires only near the OIT budget.
@@ -397,9 +511,12 @@ fires only near the OIT budget.
 ### Phase 6 — Flag-day rename + example + test/doc cleanup
 
 *Commit:* the editor-driven rename and the user-facing deliverables. Blast
-radius: ~227 refs across 21 files; `cascade_attr!` regenerates the verbs,
-`Reflect`, and the BRP type path automatically, so no hand-written reflection
-sites.
+radius (re-derive at execution — the earlier "~227 refs / 21 files" had drifted):
+as of this review, `DrawLayer` + `draw_layer` is ~172 refs across 17 files
+(`DEFAULT_DRAW_LAYER` adds ~24 more), `glyph_cascade.rs` carries 40 (not 41).
+`cascade_attr!` regenerates the verbs, `Reflect`, and the BRP type path
+automatically, so no hand-written reflection sites. Re-confirm every cited line
+number below at rename time — line citations across this plan have drifted.
 
 - Rename via the editor: `DrawLayer` → `DrawZIndex`, `draw_layer` → `draw_zindex`
   (the `El`/`Element` field, `TextStyle` field `text_props.rs:218` + builder
@@ -407,7 +524,8 @@ sites.
   `cascade/attributes.rs:51/95/159`, the critical readers `reconcile.rs`,
   `glyph_cascade.rs`, `panel_text/batching.rs`, `constants.rs`). **Confirm the
   rename with the user first** (per the rename-through-editor convention).
-- Rewrite the example (`text_draw_layer.rs` → e.g. `panel_draw_order.rs`):
+- Rewrite the example (`crates/bevy_diegetic/examples/text_draw_layer.rs` → e.g.
+  `panel_draw_order.rs`):
   one panel, a text child and a sibling overlay quad in the same tree, ordered
   with `DrawZIndex` and a hotkey toggle — not the current second-anchored-panel
   fake. Depends on the `El` field (Phase 2), so it lands here.
@@ -415,11 +533,12 @@ sites.
   (`constants.rs:196–218`) over `(HierarchicalDrawKey, HierarchicalDrawKey)`
   pairs: two unset commands at different steps; unset vs `z = 0` same step;
   unset vs set across steps; raised pairs (D5 symmetric offset).
-- `text/slug/glyph/coverage_probe.rs` — refresh `EXPECTED_SHADER_FNV1A` (`~:871`)
-  **only if** an OIT-offset shader (`analytic_path.wgsl` etc.) text changed; the
-  new model passes a precomputed offset through the existing shader input, so the
-  `.wgsl` likely does not change and this is a no-op. The CPU `Probe` mirror
-  models coverage, applied before the offset — no structural change either way.
+- `text/slug/glyph/coverage_probe.rs` — `EXPECTED_SHADER_FNV1A` (`~:871`) is
+  already refreshed in **Phase 4** (the `OIT_MIN_DEPTH` retuning edits the
+  `.wgsl`). Phase 6's `DrawLayer → DrawZIndex` rename does not itself touch shader
+  text — `draw_layer` is passed as a precomputed offset through the existing
+  shader input — so no further FNV refresh here. The CPU `Probe` mirror models
+  coverage, applied before the offset — no structural change.
 - Delete `as-built/text-draw-layer.md` once the old mechanism is gone.
 
 *Gate:* compiles under the new names; example demonstrates in-panel overlay;
@@ -462,7 +581,7 @@ record so a later review does not relitigate them.
 - **D4 — Rewrite the example for in-panel overlay.** A deliverable, not a choice
   (Phase 6); the only sub-choice (replace vs rename the file) is minor — pick a
   name matching `DrawZIndex`.
-- **D5 — Raise above text on the OIT world view: remove the clamp.** The shipped
+- **D5 — Raise above text on the OIT world view: remove the clamp.** The current
   `min(ordinal − 64, 0)` clamp pins everything at/above text to OIT offset `0.0`,
   so raised content ties with text — and because batching makes OIT insertion
   order *archetype* order, that tie is unreliable, not merely insertion-ordered.
