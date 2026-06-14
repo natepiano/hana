@@ -34,7 +34,6 @@ use super::GlyphInstanceRecord;
 use super::RenderMode;
 use super::RunRecord;
 use super::TextMaterial;
-use super::constants;
 use super::panel_text;
 use super::panel_text::PreparedPanelText;
 use super::world_text::TextContent;
@@ -387,7 +386,7 @@ fn batch_material(
     run_table: Handle<ShaderBuffer>,
     fill_color: Vec4,
 ) -> TextMaterial {
-    let mut base = constants::default_panel_material();
+    let mut base = super::default_panel_material();
     base.alpha_mode = AlphaMode::Blend;
     super::batch_text_material(BatchTextMaterialInput {
         base,

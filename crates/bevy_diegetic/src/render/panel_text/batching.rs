@@ -29,12 +29,12 @@ use bevy_kana::ToUsize;
 
 use super::PanelTextLayout;
 use super::PreparedPanelText;
+use super::layout::PanelTextZLevel;
 use crate::cascade::CascadeDefault;
 use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
-use crate::layout::DrawStep;
 use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
@@ -42,6 +42,7 @@ use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
 use crate::render::AntiAlias;
+use crate::render::BaseMaterialId;
 use crate::render::BatchGpu;
 use crate::render::BatchKey;
 use crate::render::BatchRenderLayers;
@@ -51,8 +52,7 @@ use crate::render::GlyphInstanceRecord;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
 use crate::render::TextMaterial;
-use crate::render::constants;
-use crate::render::constants::DrawOrdinal;
+use crate::render::draw_order;
 use crate::render::world_text::TextContent;
 use crate::text;
 use crate::text::GlyphCache;
@@ -143,6 +143,7 @@ pub(super) fn update_panel_text_batches(
             Entity,
             Ref<PreparedPanelText>,
             Ref<PanelTextLayout>,
+            Ref<PanelTextZLevel>,
             &ChildOf,
             &GlobalTransform,
             Option<&Visibility>,
@@ -179,9 +180,10 @@ pub(super) fn update_panel_text_batches(
     let any_work = !cascade_changed.is_empty()
         || runs
             .iter()
-            .any(|(label_entity, prepared, panel_text_child, ..)| {
+            .any(|(label_entity, prepared, panel_text_child, z_level, ..)| {
                 prepared.is_changed()
                     || panel_text_child.is_changed()
+                    || z_level.is_changed()
                     || !backend
                         .batch_store()
                         .is_routed(RunStorageKey::from(label_entity))
@@ -192,8 +194,15 @@ pub(super) fn update_panel_text_batches(
         None
     };
 
-    for (label_entity, prepared, panel_text_child, child_of, label_transform, label_visibility) in
-        &runs
+    for (
+        label_entity,
+        prepared,
+        panel_text_child,
+        z_level,
+        child_of,
+        label_transform,
+        label_visibility,
+    ) in &runs
     {
         let storage_key = RunStorageKey::from(label_entity);
         let Ok((panel, panel_layers, panel_visibility)) = panels.get(child_of.parent()) else {
@@ -206,6 +215,7 @@ pub(super) fn update_panel_text_batches(
         }
         if !prepared.is_changed()
             && !panel_text_child.is_changed()
+            && !z_level.is_changed()
             && !cascade_changed.contains(&label_entity)
             && backend.batch_store().is_routed(storage_key)
         {
@@ -227,34 +237,23 @@ pub(super) fn update_panel_text_batches(
         let base = panel
             .text_material()
             .cloned()
-            .unwrap_or_else(constants::default_panel_material);
+            .unwrap_or_else(render::default_panel_material);
         let base_material = backend.batch_store_mut().intern_base_material(&base);
-        let key = BatchKey {
+        let key = batch_key_for_run(
             base_material,
-            alpha: cascades.alpha(label_entity).into(),
-            lighting: cascades.lighting(label_entity),
-            sidedness: cascades.sidedness(label_entity),
-            layer: DEFAULT_DRAW_LAYER,
-            shadow: prepared.shadow_mode,
-            layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
-        };
+            label_entity,
+            panel_layers,
+            &prepared,
+            &cascades,
+            *z_level,
+        );
 
-        let fill_color = LinearRgba::from(prepared.fill_color);
-        let record = RunRecord {
-            // Pre-propagation snapshot; write_batch_run_transforms corrects it
-            // after TransformSystems::Propagate the same frame.
-            transform:        label_transform.to_matrix(),
-            fill_color:       Vec4::new(
-                fill_color.red,
-                fill_color.green,
-                fill_color.blue,
-                fill_color.alpha,
-            ),
-            render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
-            depth_nudge:      panel_text_child.depth_bias,
-            oit_depth_offset: panel_text_child.oit_depth_offset,
-            aa_flags:         cascades.anti_alias(label_entity).aa_flags(),
-        };
+        let record = run_record_for(
+            &prepared,
+            &panel_text_child,
+            label_transform,
+            cascades.anti_alias(label_entity),
+        );
         backend
             .batch_store_mut()
             .upsert_run(key, storage_key, glyphs, record);
@@ -277,6 +276,50 @@ pub(super) fn update_panel_text_batches(
 
 const fn is_hidden(visibility: Option<&Visibility>) -> bool {
     matches!(visibility, Some(Visibility::Hidden))
+}
+
+fn batch_key_for_run(
+    base_material: BaseMaterialId,
+    label_entity: Entity,
+    panel_layers: Option<&RenderLayers>,
+    prepared: &PreparedPanelText,
+    cascades: &BatchKeyCascades<'_, '_>,
+    z_level: PanelTextZLevel,
+) -> BatchKey {
+    BatchKey {
+        base_material,
+        alpha: cascades.alpha(label_entity).into(),
+        lighting: cascades.lighting(label_entity),
+        sidedness: cascades.sidedness(label_entity),
+        z_level: z_level.0,
+        layer: DEFAULT_DRAW_LAYER,
+        shadow: prepared.shadow_mode,
+        layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
+    }
+}
+
+fn run_record_for(
+    prepared: &PreparedPanelText,
+    panel_text_child: &PanelTextLayout,
+    label_transform: &GlobalTransform,
+    anti_alias: AntiAlias,
+) -> RunRecord {
+    let fill_color = LinearRgba::from(prepared.fill_color);
+    RunRecord {
+        // Pre-propagation snapshot; write_batch_run_transforms corrects it
+        // after TransformSystems::Propagate the same frame.
+        transform:        label_transform.to_matrix(),
+        fill_color:       Vec4::new(
+            fill_color.red,
+            fill_color.green,
+            fill_color.blue,
+            fill_color.alpha,
+        ),
+        render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
+        depth_nudge:      panel_text_child.depth_bias,
+        oit_depth_offset: panel_text_child.oit_depth_offset,
+        aa_flags:         anti_alias.aa_flags(),
+    }
 }
 
 /// Inputs for [`reconcile_batch_entities`].
@@ -729,11 +772,8 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     } = input;
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, Lighting::Unlit);
-    constants::apply_glyph_sidedness(&mut base, key.sidedness);
-    // The batch material keeps text batches in the `DrawStep::Text` lane; each
-    // run record carries the command-specific ordinal for sorted and OIT views.
-    let text_ordinal = DrawOrdinal::from_draw_step(DrawStep::Text);
-    base.depth_bias = text_ordinal.depth_bias();
+    render::apply_glyph_sidedness(&mut base, key.sidedness);
+    base.depth_bias = draw_order::text_batch_depth_bias(key.z_level);
     render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
@@ -786,6 +826,7 @@ mod tests {
     use crate::cascade::CascadePlugin;
     use crate::cascade::DrawLayer;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
+    use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
@@ -793,6 +834,7 @@ mod tests {
     use crate::layout::TextStyle;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::render::constants;
     use crate::render::panel_text::alpha;
     use crate::render::panel_text::glyph_cascade;
     use crate::render::panel_text::reconcile;
@@ -800,6 +842,9 @@ mod tests {
     use crate::render::text_shaping::TextShapingContext;
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
+
+    const LOWERED_LEVEL: DrawLayer = DrawLayer(-1);
+    const RAISED_LEVEL: DrawLayer = DrawLayer(1);
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -1116,6 +1161,113 @@ mod tests {
         layers
     }
 
+    fn batch_z_levels(app: &App) -> Vec<i8> {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let mut z_levels: Vec<i8> = store.batches().map(|(key, _)| key.z_level).collect();
+        z_levels.sort_unstable();
+        z_levels
+    }
+
+    fn batch_material_depth_biases(app: &App) -> Vec<(i8, u32)> {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let materials = app.world().resource::<Assets<TextMaterial>>();
+        let mut depth_biases: Vec<(i8, u32)> = store
+            .batches()
+            .map(|(key, batch)| {
+                let gpu = batch
+                    .gpu
+                    .as_ref()
+                    .expect("text batch should have GPU assets");
+                let material = materials
+                    .get(&gpu.material)
+                    .expect("text batch material asset should exist");
+                (key.z_level, material.base.depth_bias.to_bits())
+            })
+            .collect();
+        depth_biases.sort_by_key(|(z_level, _)| *z_level);
+        depth_biases
+    }
+
+    fn panel_text_z_levels(app: &mut App) -> Vec<i8> {
+        let mut state = app.world_mut().query::<&PanelTextZLevel>();
+        let mut z_levels: Vec<i8> = state.iter(app.world()).map(|z_level| z_level.0).collect();
+        z_levels.sort_unstable();
+        z_levels
+    }
+
+    #[test]
+    fn default_text_across_panels_shares_one_batch() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, two_text_tree());
+        spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+
+        assert_eq!(store_stats(&app), (1, 4, 18));
+        assert_eq!(batch_z_levels(&app), vec![0]);
+        assert_eq!(batch_entities(&mut app).len(), 1);
+    }
+
+    #[test]
+    fn z_level_change_moves_run_to_level_batch() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+        assert_eq!(store_stats(&app), (1, 2, 9));
+
+        let label = label_entities(&mut app)[0];
+        app.world_mut()
+            .commands()
+            .entity(label)
+            .insert(PanelTextZLevel(1));
+        settle(&mut app);
+
+        assert_eq!(store_stats(&app), (2, 2, 9));
+        assert_eq!(batch_z_levels(&app), vec![0, 1]);
+        assert_eq!(batch_entities(&mut app).len(), 2);
+    }
+
+    #[test]
+    fn text_element_draw_layer_authors_z_level_batches() {
+        let mut app = pipeline_app();
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_element(
+            El::new().draw_layer(LOWERED_LEVEL),
+            "Lower",
+            TextStyle::new(10.0),
+        );
+        builder.text_element(
+            El::new().draw_layer(RAISED_LEVEL),
+            "Raise",
+            TextStyle::new(10.0),
+        );
+        spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        assert_eq!(
+            panel_text_z_levels(&mut app),
+            vec![LOWERED_LEVEL.0, RAISED_LEVEL.0]
+        );
+        assert_eq!(batch_z_levels(&app), vec![LOWERED_LEVEL.0, RAISED_LEVEL.0]);
+        let (batches, runs, _) = store_stats(&app);
+        assert_eq!(batches, 2);
+        assert_eq!(runs, 2);
+
+        let lowered_depth_bias = draw_order::text_batch_depth_bias(LOWERED_LEVEL.0);
+        let default_depth_bias = draw_order::text_batch_depth_bias(0);
+        let raised_depth_bias = draw_order::text_batch_depth_bias(RAISED_LEVEL.0);
+        assert_eq!(
+            batch_material_depth_biases(&app),
+            vec![
+                (LOWERED_LEVEL.0, lowered_depth_bias.to_bits()),
+                (RAISED_LEVEL.0, raised_depth_bias.to_bits()),
+            ],
+        );
+        assert_ne!(lowered_depth_bias.to_bits(), default_depth_bias.to_bits());
+        assert_ne!(raised_depth_bias.to_bits(), default_depth_bias.to_bits());
+        assert!(lowered_depth_bias < default_depth_bias);
+        assert!(default_depth_bias < raised_depth_bias);
+    }
+
     #[test]
     fn text_style_draw_layers_do_not_split_batches() {
         let mut app = pipeline_app();
@@ -1185,17 +1337,21 @@ mod tests {
     }
 
     #[test]
-    fn text_step_batch_material_uses_text_lane() {
+    fn default_text_batch_material_uses_level_zero_text_lane() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
         let (depth_bias, oit_depth_offset) = batch_material_values(&app);
+        let previous_text_lane =
+            constants::DRAW_LEVEL_TEXT_SUBLANE.to_f32() * constants::LAYER_DEPTH_BIAS;
+        assert_eq!(
+            previous_text_lane.to_bits(),
+            draw_order::text_batch_depth_bias(0).to_bits()
+        );
         assert_eq!(
             depth_bias.to_bits(),
-            DrawOrdinal::from_draw_step(DrawStep::Text)
-                .depth_bias()
-                .to_bits()
+            draw_order::text_batch_depth_bias(0).to_bits()
         );
         assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
     }

@@ -57,9 +57,9 @@ use crate::render::TextMaterial;
 use crate::render::VisualBatchKey;
 use crate::render::VisualMaterialInterner;
 use crate::render::VisualShadow;
-use crate::render::constants;
-use crate::render::constants::DrawCommandDepth;
-use crate::render::constants::DrawOrderProjection;
+use crate::render::draw_order;
+use crate::render::draw_order::DrawCommandDepth;
+use crate::render::draw_order::DrawOrderProjection;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -84,24 +84,18 @@ pub(super) struct DiegeticPanelLineBatch;
 /// Cross-panel compatibility key for analytic panel-line path instances.
 ///
 /// Per-primitive color, render mode, transform, sorted depth nudge, and OIT
-/// offset live in `RunRecord`s. The material depth bias is the single
-/// panel-line lane so compatible marks can batch across panels and command
-/// indices.
+/// offset live in `RunRecord`s. `LineBatchKey::z_level` selects the shared
+/// panel-line lane for that authored level.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct LineBatchKey {
-    visual:              VisualBatchKey,
-    material_depth_bias: u32,
+    visual:  VisualBatchKey,
+    z_level: i8,
 }
 
 impl LineBatchKey {
-    const fn new(visual: VisualBatchKey, material_depth_bias: f32) -> Self {
-        Self {
-            visual,
-            material_depth_bias: material_depth_bias.to_bits(),
-        }
-    }
+    const fn new(visual: VisualBatchKey, z_level: i8) -> Self { Self { visual, z_level } }
 
-    const fn depth_bias(&self) -> f32 { f32::from_bits(self.material_depth_bias) }
+    fn depth_bias(&self) -> f32 { draw_order::line_batch_depth_bias(self.z_level) }
 }
 
 /// GPU-side handles for one line path batch.
@@ -612,7 +606,7 @@ fn build_panel_line_group(
         .iter()
         .map(|source| primitive_oit_depth_offset(source))
         .fold(f32::INFINITY, f32::min);
-    let base = constants::resolve_material(
+    let base = render::resolve_material(
         context.panel.tree().element_material(first.element_index),
         context.panel.material(),
         None,
@@ -626,7 +620,7 @@ fn build_panel_line_group(
         shadow: context.shadow,
         layers: context.layers.clone(),
     };
-    let batch_key = LineBatchKey::new(visual, constants::BATCH_PANEL_LINE_DEPTH_BIAS);
+    let batch_key = LineBatchKey::new(visual, first.draw_depth.z_level());
     let key = PanelLineRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
@@ -1006,7 +1000,7 @@ fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
     } = input;
     base.alpha_mode = key.visual.alpha.into();
     base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
-    constants::apply_glyph_sidedness(&mut base, key.visual.sidedness);
+    render::apply_glyph_sidedness(&mut base, key.visual.sidedness);
     base.depth_bias = key.depth_bias();
     render::batch_text_material(BatchTextMaterialInput {
         base,
@@ -1037,6 +1031,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
+    use crate::cascade::DrawLayer;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelLineLayering;
@@ -1051,6 +1046,8 @@ mod tests {
     use crate::render::HairlineWidth;
     use crate::render::PathContour;
     use crate::render::QuadraticSegment;
+    use crate::render::constants::DRAW_LEVEL_GEOMETRY_LANES;
+    use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::text::DiegeticTextMeasurer;
 
     /// Headless app wired with panel layout, the AA/fade cascade plugins
@@ -1095,6 +1092,58 @@ mod tests {
             .color(Color::WHITE)
     }
 
+    fn spawn_line_panel(app: &mut App, draw_layer: Option<DrawLayer>) -> Entity {
+        let mut line_element = El::new()
+            .size(40.0, 20.0)
+            .draw(PanelDraw::lines([horizontal_line()]));
+        if let Some(draw_layer) = draw_layer {
+            line_element = line_element.draw_layer(draw_layer);
+        }
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .layout(|builder| {
+                builder.with(line_element, |_| {});
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel).id()
+    }
+
+    fn settle(app: &mut App) {
+        for _ in 0..3 {
+            app.update();
+        }
+    }
+
+    fn one_line_batch_values(app: &App) -> (i8, f32, f32, Vec<(f32, f32)>) {
+        let store = app.world().resource::<PanelLineBatchStore>();
+        let Some((key, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        let Some(gpu) = batch.gpu.as_ref() else {
+            panic!("line batch should have GPU assets");
+        };
+        let Some(material) = app
+            .world()
+            .resource::<Assets<TextMaterial>>()
+            .get(&gpu.material)
+        else {
+            panic!("line batch material should exist");
+        };
+        let mut records: Vec<(f32, f32)> = batch
+            .run_records()
+            .into_iter()
+            .map(|record| (record.depth_nudge, record.oit_depth_offset))
+            .collect();
+        records.sort_by(|left, right| left.0.total_cmp(&right.0));
+        (
+            key.z_level,
+            material.base.depth_bias,
+            render::text_material_oit_depth_offset(material),
+            records,
+        )
+    }
+
     /// Per record: the run's AA flags and the packed outline's fade exponent
     /// (fade is per-curve data carried by the record's contours, not a run
     /// field).
@@ -1111,6 +1160,75 @@ mod tests {
             .collect();
         fields.sort_unstable();
         fields
+    }
+
+    #[test]
+    fn default_lines_across_panels_share_one_level_zero_batch() {
+        let mut app = line_batch_app();
+        spawn_line_panel(&mut app, None);
+        spawn_line_panel(&mut app, None);
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelLineBatchStore>();
+        assert_eq!(store.batches().count(), 1);
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 2);
+
+        let (z_level, material_depth_bias, material_oit_offset, records) =
+            one_line_batch_values(&app);
+        let previous_line_lane = (DRAW_LEVEL_GEOMETRY_LANES - 1).to_f32() * LAYER_DEPTH_BIAS;
+        assert_eq!(z_level, 0);
+        assert_eq!(
+            previous_line_lane.to_bits(),
+            draw_order::line_batch_depth_bias(0).to_bits()
+        );
+        assert_eq!(
+            material_depth_bias.to_bits(),
+            draw_order::line_batch_depth_bias(0).to_bits()
+        );
+        assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(
+            records,
+            vec![(0.0, 0.0), (0.0, 0.0)],
+            "per-record offsets stay in the run table"
+        );
+    }
+
+    #[test]
+    fn line_draw_layers_route_to_matching_level_batches() {
+        let mut app = line_batch_app();
+        spawn_line_panel(&mut app, Some(DrawLayer(-1)));
+        spawn_line_panel(&mut app, Some(DrawLayer(1)));
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelLineBatchStore>();
+        let mut levels: Vec<i8> = store.batches().map(|(key, _)| key.z_level).collect();
+        levels.sort_unstable();
+        assert_eq!(levels, vec![-1, 1]);
+
+        let materials = app.world().resource::<Assets<TextMaterial>>();
+        let mut depth_biases: Vec<(i8, u32)> = store
+            .batches()
+            .map(|(key, batch)| {
+                let Some(gpu) = batch.gpu.as_ref() else {
+                    panic!("line batch should have GPU assets");
+                };
+                let Some(material) = materials.get(&gpu.material) else {
+                    panic!("line batch material should exist");
+                };
+                (key.z_level, material.base.depth_bias.to_bits())
+            })
+            .collect();
+        depth_biases.sort_by_key(|(z_level, _)| *z_level);
+        assert_eq!(
+            depth_biases,
+            vec![
+                (-1, draw_order::line_batch_depth_bias(-1).to_bits()),
+                (1, draw_order::line_batch_depth_bias(1).to_bits()),
+            ],
+        );
     }
 
     /// Phase C acceptance: an element-level AA override renders with its own
@@ -1472,7 +1590,7 @@ mod tests {
                 shadow: VisualShadow::Cast,
                 layers: BatchRenderLayers(RenderLayers::layer(0)),
             },
-            0.0,
+            0,
         )
     }
 

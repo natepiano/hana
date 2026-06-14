@@ -53,6 +53,8 @@ pub(crate) struct BatchKey {
     pub lighting:      Lighting,
     /// Resolved `Sidedness` cascade value.
     pub sidedness:     Sidedness,
+    /// Panel command z-level for the batch's shared screen sort lane.
+    pub z_level:       i8,
     /// Legacy text draw-layer slot kept until the old cascade field is removed.
     /// Panel text depth is carried per run in [`RunRecord`].
     pub layer:         i8,
@@ -426,6 +428,7 @@ mod tests {
             alpha:         alpha.into(),
             lighting:      Lighting::Lit,
             sidedness:     Sidedness::DoubleSided,
+            z_level:       0,
             layer:         DEFAULT_DRAW_LAYER,
             shadow:        GlyphShadowMode::Cast,
             layers:        BatchRenderLayers(RenderLayers::layer(0)),

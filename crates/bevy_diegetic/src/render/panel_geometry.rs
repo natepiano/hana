@@ -15,10 +15,10 @@ use bevy::prelude::*;
 use super::PanelChildSystems;
 use super::clip;
 use super::constants;
-use super::constants::DrawCommandDepth;
-use super::constants::DrawOrderProjection;
-use super::constants::DrawOrdinal;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
+use super::draw_order::DrawCommandDepth;
+use super::draw_order::DrawOrderProjection;
+use super::draw_order::DrawOrdinal;
 use super::sdf_material;
 use super::sdf_material::SdfPanelMaterial;
 use super::sdf_material::SdfPanelMaterialInput;
@@ -38,14 +38,14 @@ struct PanelSdfMesh;
 
 /// What a [`PanelSdfMesh`] quad was built from. A panel rebuild compares this
 /// against the freshly gathered surface to decide whether the quad can stay
-/// untouched, be recolored in place, or must be respawned. All `f32` values are
-/// stored as raw bits so the component derives `Eq` and compares exactly.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+/// untouched, have its material rewritten in place, or must be respawned.
+/// Geometry and color `f32` values are stored as raw bits for exact comparison.
+#[derive(Component, Clone, Copy, PartialEq)]
 struct PanelSdfSurface {
     /// Render-command index — the quad's stable key across rebuilds.
     command_index: usize,
-    /// Dense panel-local ordinal used by the quad's material ordering fields.
-    draw_ordinal:  DrawOrdinal,
+    /// Projected ordering values used by the quad's material.
+    draw_depth:    DrawCommandDepth,
     /// World-space transform center (x, y).
     center:        [u32; 2],
     /// World-space mesh size (full width, height).
@@ -139,7 +139,7 @@ struct ElementSurface {
 /// layout fast path regenerates render commands in place), so this system runs
 /// on more than geometry moves. Rather than tear down and respawn every quad,
 /// it diffs each surface against the existing child by [`PanelSdfSurface`]:
-/// identical surfaces stay untouched, a color-only difference recolors the
+/// identical surfaces stay untouched, a material-only difference rewrites the
 /// material in place, and a geometry difference (or a new/removed surface)
 /// respawns just that quad. A surface that changes only its text color thus
 /// leaves the background, border, and divider quads alone.
@@ -278,7 +278,7 @@ fn reconcile_sdf_quads(
         match existing.remove(&quad.signature.command_index) {
             // Identical — leave the quad untouched.
             Some((_, signature, _)) if signature == quad.signature => {},
-            // Geometry unchanged, color differs — recolor in place.
+            // Geometry unchanged, material differs — rewrite the material.
             Some((entity, signature, material)) if signature.geometry_eq(&quad.signature) => {
                 if let Some(mut existing_material) = sdf_materials.get_mut(&material) {
                     *existing_material = quad.material;
@@ -481,7 +481,7 @@ fn build_sdf_quad(
             Some(Color::NONE)
         }
     });
-    let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
+    let mut base = super::resolve_material(element_mat, panel.material(), effective_color);
     base.depth_bias = surface.draw_depth.depth_bias();
     let fill_color = base.base_color;
 
@@ -568,7 +568,7 @@ fn build_sdf_quad(
 
     let signature = PanelSdfSurface {
         command_index: surface.command_index,
-        draw_ordinal:  surface.draw_depth.ordinal(),
+        draw_depth:    surface.draw_depth,
         center:        vec2_bits(world_rect.center),
         mesh_size:     vec2_bits(mesh_size),
         corner_radii:  array4_bits(world_radii),
@@ -709,10 +709,12 @@ mod tests {
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::TextStyle;
+    use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::text::DiegeticTextMeasurer;
 
-    /// Measurer stub for a text-free panel tree; never invoked.
+    /// Minimal measurer for geometry tests that include text commands.
     fn zero_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
             measure_fn: Arc::new(|_: &str, measure: &TextMeasure| TextDimensions {
@@ -757,6 +759,93 @@ mod tests {
             },
         );
         builder.build()
+    }
+
+    fn text_toggle_tree(include_text: bool) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(Color::WHITE),
+            |builder| {
+                if include_text {
+                    builder.text("Alpha", TextStyle::new(10.0));
+                }
+            },
+        );
+        builder.build()
+    }
+
+    fn single_sdf_quad(app: &mut App) -> (Entity, PanelSdfSurface, f32) {
+        let entries: Vec<(Entity, PanelSdfSurface, Handle<SdfPanelMaterial>)> = {
+            let world = app.world_mut();
+            let mut query =
+                world.query::<(Entity, &PanelSdfSurface, &MeshMaterial3d<SdfPanelMaterial>)>();
+            query
+                .iter(world)
+                .map(|(entity, surface, material)| (entity, *surface, material.0.clone()))
+                .collect()
+        };
+        assert_eq!(entries.len(), 1, "expected exactly one SDF quad");
+        let (entity, surface, material) = entries.into_iter().next().expect("one SDF quad exists");
+        let oit_depth_offset = app
+            .world()
+            .resource::<Assets<SdfPanelMaterial>>()
+            .get(&material)
+            .expect("quad material exists")
+            .extension
+            .uniforms
+            .oit_depth_offset;
+        (entity, surface, oit_depth_offset)
+    }
+
+    #[test]
+    fn text_toggle_updates_sdf_signature_oit_depth_offset() {
+        let mut app = geometry_app();
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .with_tree(text_toggle_tree(true))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        app.update();
+        app.update();
+
+        let (entity_before, surface_before, material_offset_before) = single_sdf_quad(&mut app);
+        assert_eq!(
+            surface_before.draw_depth.oit_depth_offset().to_bits(),
+            (-constants::OIT_DEPTH_STEP).to_bits(),
+        );
+        assert_eq!(
+            material_offset_before.to_bits(),
+            surface_before.draw_depth.oit_depth_offset().to_bits(),
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, text_toggle_tree(false));
+        app.update();
+        app.update();
+
+        let (entity_after, surface_after, material_offset_after) = single_sdf_quad(&mut app);
+        assert_eq!(entity_after, entity_before);
+        assert_ne!(
+            surface_before.draw_depth.oit_depth_offset().to_bits(),
+            surface_after.draw_depth.oit_depth_offset().to_bits(),
+        );
+        assert_eq!(
+            surface_after.draw_depth.oit_depth_offset().to_bits(),
+            0.0_f32.to_bits(),
+        );
+        assert_eq!(
+            material_offset_after.to_bits(),
+            surface_after.draw_depth.oit_depth_offset().to_bits(),
+        );
     }
 
     #[test]
@@ -804,6 +893,11 @@ mod tests {
         // front: sorted bias rises and OIT offset rises (reverse-Z, positive =
         // closer).
         assert!(below.base.depth_bias < above.base.depth_bias);
+        assert_eq!(below.base.depth_bias.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(
+            above.base.depth_bias.to_bits(),
+            constants::LAYER_DEPTH_BIAS.to_bits()
+        );
         assert!(
             below.extension.uniforms.oit_depth_offset < above.extension.uniforms.oit_depth_offset
         );

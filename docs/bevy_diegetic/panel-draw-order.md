@@ -228,113 +228,164 @@ reconcile-on-text-toggle. Blockers carried into Phase 4a:
 | C | minor | `line.rs:526/598` | `PanelLineLayering` still derived from `draw_slot`, now a dead write (renderer uses `source.draw_depth`). Gate or remove; Phase 5 deletes it. |
 | D | blocker | `constants.rs:691`, `batching.rs:1215` | The spec-required render-level equivalence acceptance test is missing — codex rewrote the old value-match tests to assert the new values instead. This is the gate that would have caught A and B. |
 
-### Phase 4a — Text-batch z-index ordering on the screen view + reconcile/test fixes · status: todo
+### Phase 4a — z-index on the screen view for every element type + authoring + tests · status: done (uncommitted)
 
 #### Work Order
 
-**Goal:** Batched text orders correctly against per-command fill/line ordinals on
-the non-OIT screen view — a `z_index` raise/lower on text or on a fill works on
-screen, not only on the OIT world view — while default text stays a single shared
-batch across all panels. Reconcile no longer reuses an SDF quad with a stale OIT
-offset across a text toggle. The render-level equivalence and screen-ordering
-acceptance tests exist.
+**Goal:** The signed z-index (`DrawZIndex`, currently named `DrawLayer`) works
+uniformly on the non-OIT screen view for **every** element type — fills, borders,
+images (individual SDF/mesh draws), dividers/lines and text (batched). Raising or
+lowering any element with `±z` reorders it on screen, not only on the OIT world
+view; default content stays in single shared batches. Reconcile never reuses an
+SDF quad with a stale OIT offset across a text toggle. Real render-level
+equivalence and screen-ordering tests exist.
 
 **Spec:**
 
-**Blocker A — text-batch screen ordering (the model).** Ordering is *level-major*:
-sort first by z-level (the `i8` `z_index`, default `0`), then by the fixed
-`DrawStep` ladder (`Fill < Lines < Text`) within a level. Fills and lines are
-individual / per-command — each fill is its own SDF draw carrying its own
-ordinal-derived `depth_bias`. Text is *batched* (vertex-pulled): a batch is one
-draw with one `depth_bias` on the sorted screen view, so it cannot carry a
-per-command ordinal the way a fill can.
+**The model (level-major).** Sort first by z-level (the signed `i8`, default `0`),
+then by the fixed `DrawStep` ladder (`Fill < Lines < Text`) within a level.
+- **Fills, borders, images** are *individual* draws — each carries its own
+  level-banded `depth_bias`, so z-index already moves them on screen. No change;
+  the tests must confirm it.
+- **Lines and text** are *batched* (vertex-pulled). A batch is one draw with one
+  `depth_bias` on the sorted screen view, so it cannot carry a per-command ordinal.
+  Within a level a batch needs no per-command ordering: text always sits above the
+  level's fills/lines (the ladder), lines above the level's fills, and runs at one
+  level do not need to interleave. So each batched type needs exactly ONE screen
+  number per z-level.
 
-That is acceptable because text needs no per-command ordering within a level —
-within a level text always sits above that level's fills and lines (the ladder),
-and same-level text runs do not overlap. So text needs exactly ONE depth number
-per z-level.
+**Per-level band layout.** Level `L` occupies the `depth_bias` window
+`[L × DRAW_LEVEL_STRIDE, (L+1) × DRAW_LEVEL_STRIDE)` on the `LAYER_DEPTH_BIAS`
+scale. Within a level: fills/borders/images take the low sub-lanes by per-command
+ordinal; the **line batch** takes a reserved sub-lane near the top
+(`DRAW_LEVEL_GEOMETRY_LANES − 1`, i.e. `63` — restores the pre-flip line lane); the
+**text batch** takes the sub-lane just above it (`DRAW_LEVEL_TEXT_SUBLANE` = `64`).
+`DRAW_LEVEL_STRIDE` ≥ the per-panel ordinal bound the overflow guard enforces, so a
+panel's fills never reach the line/text sub-lanes. This generalizes the retired
+`DEFAULT_DRAW_LAYER = 64` text lane to one band per z-level — a NEW construct in
+the projection, not the old global `64`.
 
-Mechanism: **batch text per distinct z-level** — add `z_level` to the text
-`BatchKey` (`panel_text/batching.rs`). Each level's text batch gets a screen
-`depth_bias` on the SAME ordinal/`LAYER_DEPTH_BIAS` scale as fills, placed above
-every same-level fill and line and below the next level up. Reserve a fixed
-per-level band: level `L` occupies the `depth_bias` window
-`[L × LEVEL_STRIDE, (L+1) × LEVEL_STRIDE)`; same-level fills/lines occupy the lower
-part of the band by their per-command ordinal; the level's text batch takes a
-reserved text sub-lane at the top of the band. `LEVEL_STRIDE` must be ≥ the
-per-panel ordinal bound the overflow guard enforces, so a panel's fills never
-reach the text sub-lane. This is the retired `DEFAULT_DRAW_LAYER = 64` text lane
-generalized to one band per z-level — a NEW construct in the projection, not the
-old global `64`.
+**Blocker A — batched lines + text honor z-index on screen.**
+- Text: batch per distinct z-level (`z_level` on the text `BatchKey`); each level's
+  text batch material `depth_bias = text_batch_depth_bias(z_level)` (sub-lane `64`).
+  *(Implemented in the first 4a pass.)*
+- Lines: **same treatment** — add `z_level` to the line batch key
+  (`panel_lines/batching.rs`, `LineBatchKey`/`VisualBatchKey`) and set the line
+  batch material `depth_bias` from a per-level line sub-lane
+  (`line_batch_depth_bias(z_level)` = `level_sublane_depth_bias(z_level, 63)`),
+  replacing the fixed `BATCH_PANEL_LINE_DEPTH_BIAS` lane. **Defect this fixes:** the
+  Phase-4 change set `BATCH_PANEL_LINE_DEPTH_BIAS` to `LAYER_DEPTH_BIAS` (lane `1`,
+  down from the pre-flip `63`), so on the screen view any panel with ≥2 level-0
+  fills paints a fill over its dividers, and a z-raised line never rises. The
+  per-level line sub-lane (`63` at level 0) restores correct order and makes
+  z-raised lines rise per level, mirroring text.
 
-Result:
-- All default-level (`0`) text → ONE batch at one number → 1 draw regardless of
-  panel count or nesting depth (the `diegetic_text_stress` 1-batch invariant holds).
-- Text moved to a distinct level → its own batch, SHARED across all panels at that
-  level (one batch per distinct level, never per panel).
-- A `z=+1` background fill (individual draw, level-`+1` band) sits entirely above
-  level-`0` text; a `z=−1` text run gets its own batch in the level-`−1` band,
-  below level-`0` fills.
+Result: all default-level (`0`) text → ONE batch (the `diegetic_text_stress`
+1-batch invariant holds); default-level lines → ONE batch at lane `63`; a `z=+1`
+element of any type sits above level-`0` text; a `z=−1` text/line run gets its own
+batch in the level-`−1` band, below level-`0` fills. The OIT (world) path is
+unchanged from Phase 4 (per-fragment sort by the per-record `oit_depth_offset`).
 
-The OIT (world) path is already correct from Phase 4 and does NOT change: OIT
-sorts per fragment by the per-record `oit_depth_offset`, so a single text batch
-already orders per-command on the world view (D5 holds on OIT). Phase 4a changes
-only the screen `depth_bias` derivation for the text batch and the `z_level` batch
-split. Verify fills' screen `depth_bias` lands on the same level-banded scale
-(the dense ordinal already sorts level-major because `z_level` is the high-order
-sort term) so a higher-level fill outsorts lower-level text.
+**Blocker B — stale SDF OIT offset across a text toggle.** *(Implemented in the
+first 4a pass.)* The SDF reuse signature now stores the full `DrawCommandDepth`
+(`panel_geometry.rs:568`), so a `text_anchor` shift (text toggled on/off)
+invalidates reuse instead of keeping a stale `oit_depth_offset`.
 
-**Blocker B — stale SDF OIT offset across a text toggle.** Reuse is decided by
-`signature == quad.signature` (`panel_geometry.rs:280`). The signature stores
-`draw_ordinal` but not `oit_depth_offset`, which depends on `text_anchor` (the
-lowest `Text`-step ordinal). Toggling text on/off shifts `text_anchor`, changing a
-quad's `oit_depth_offset` while its `draw_ordinal`/geometry hold — so the quad is
-judged `Identical` and reused with a stale offset. Fix: store the full
-`DrawCommandDepth` (derives `PartialEq`) in the signature (`panel_geometry.rs:568`)
-so an offset shift invalidates reuse.
+**Blocker E — text z-index authoring (the missing trigger).** The z-level batching
+is mechanically correct but unreachable: text leaves are built with
+`..Element::default()` (`builder.rs:494`), so the text command's `z_index` is
+always `None`, and the only text-facing API (`TextStyle::with_draw_layer`) feeds
+the retired old-model cascade. Wire text to the **same signed `Element.draw_layer`
+field every other element uses** (the field Phase 2 added, renamed to `DrawZIndex`
+in Phase 6; `None` = level 0, positive = forward, negative = back). Expose it on
+the text-builder path so a text leaf can set `Element.draw_layer`; `push_command`
+already stamps `RenderCommand.z_index` from the element field, so no positioning
+change is needed once the leaf carries it. **Do NOT reconnect `TextStyle`'s
+`draw_layer`/cascade for ordering** — that is the retired absolute-layer path. One
+signed z-index field, uniform across fills, borders, images, lines, and text.
 
-**Blocker C — dead `PanelLineLayering` write.** `PanelLineLayering` is still
-derived from `draw_slot` (`line.rs:526/598`) and stored on `ResolvedPanelLine`,
-but the renderer no longer reads it for depth (lines use `source.draw_depth`). It
-is a dead write. Gate it `#[cfg_attr(not(test), expect(dead_code, …))]` here; full
-removal is Phase 5.
+**Blocker C — dead `PanelLineLayering` write → deferred to Phase 5.** Left
+unchanged in 4a (an `expect(dead_code)` gate is unfulfilled because the type is
+public API). Phase 5 deletes the struct and its derivation.
 
-**Blocker D — missing acceptance tests.** Phase 4's gate required a render-level
-equivalence test; codex instead rewrote the old value-match tests to assert the
-new values, which proves nothing about order-equivalence and would not catch A/B.
-Add three tests:
-1. **Render-level equivalence** — for representative no-override panels, post-flip
-   per-pass material values (`panel_geometry` `depth_bias`/`oit_depth_offset`, text
-   batch lane + per-run nudge, line batch lane + per-record offset) match their
-   pre-flip values.
-2. **Screen ordering** — on the `depth_bias` (screen) axis: with ≥3 fills, text
-   sorts above all default fills; a `z=+1` fill sorts above default text; a `z=−1`
-   text run sorts below default fills. This is the test that catches Blocker A.
-3. **Reconcile** — toggling text on/off changes each SDF quad's stored
-   `oit_depth_offset` (catches Blocker B).
+**Blocker D — real acceptance tests.** The first 4a test checked projection math,
+not the values handed to the GPU, and asserted the regressed line lane (`1`) as
+correct. Replace with:
+1. **Render-level equivalence** — for a representative no-override panel, the
+   actual spawned material values match the **pre-flip shipped model**:
+   `panel_geometry` `depth_bias`/`oit_depth_offset`, the text batch lane (`64`) +
+   per-run nudge, and the line batch lane (`63`) + per-record offset. Assert against
+   the pre-flip constants (line lane `63`, text lane `64`), not the new helpers, so
+   the test would fail on a regression like Blocker A.
+2. **Screen ordering** — on the `depth_bias` axis, for fills, lines, AND text: with
+   ≥3 fills, lines and text sort above all default fills; a `z=+1` element of each
+   type sorts above default text; a `z=−1` text/line run sorts below default fills.
+3. **Authoring** — a text leaf authored with `±z` produces a non-zero
+   `PanelTextZLevel` and lands in the matching level batch (catches Blocker E).
+4. **Reconcile** — toggling text on/off changes each SDF quad's stored
+   `oit_depth_offset` (catches Blocker B). *(Implemented.)*
 
-**Files:** `render/panel_text/batching.rs`, `render/panel_geometry.rs`,
-`render/constants.rs` (per-level band / text sub-lane construct + tests),
-`layout/line.rs`.
+**Module placement (follow-on to the extraction).** Move the material helpers that
+remained in `render/constants.rs` (`apply_glyph_sidedness`, `default_panel_material`,
+`resolve_material`) into a new `render/material.rs` — they are helpers, not
+constants. `constants.rs` keeps only literal constants; wire `mod material;` into
+`render/mod.rs` and update importers.
 
-**Constraints from prior phases:** Phase 4 (implemented, uncommitted) built one
-`DrawOrderProjection` per `ComputedDiegeticPanel` (`Vec<Option<DrawCommandDepth>>`,
-index-aligned with commands) feeding geometry/text/lines/reconcile from one source;
-`DrawCommandDepth { ordinal, depth_bias, oit_depth_offset }` derives `PartialEq`;
-`oit_depth_offset` is `text_anchor`-relative with the clamp removed; `OIT_MIN_DEPTH
-= 3e-6` in all three shaders + FNV refreshed; `classify_element_change` treats
-`draw_layer` as `VisualOnly`; the per-label `DrawLayer` cascade read
-(`batching.rs:237`) is already deleted — text level comes only from the element
-`z_index`; `draw_slot`/`DrawLayer`/`DEFAULT_DRAW_LAYER` are intact (Phase 5/6).
-The OIT/world depth path is correct; only the non-OIT screen text-batch path and
-the reuse signature need 4a fixes.
+**Files:** `render/panel_text/batching.rs`, `render/panel_lines/batching.rs`,
+`render/analytic_paths/batching.rs`, `render/draw_order.rs` (line sub-lane fn +
+tests), `render/constants.rs` (band constants; material helpers leave),
+`render/material.rs` (new), `render/mod.rs`, `layout/builder.rs` (text z authoring),
+`layout/engine/positioning.rs` (verify text leaf z stamps), `render/panel_geometry.rs`.
+
+**Constraints from prior phases:** Phase 4 (committed) built one
+`DrawOrderProjection` per `ComputedDiegeticPanel` feeding geometry/text/lines/
+reconcile from one source; `DrawCommandDepth { ordinal, z_level, depth_bias,
+oit_depth_offset }` derives `PartialEq`; `oit_depth_offset` is `text_anchor`-relative
+(no clamp); `OIT_MIN_DEPTH = 3e-6` in three shaders; the per-label `DrawLayer`
+cascade read is deleted. The first 4a pass added the text `z_level` batch split,
+`text_batch_depth_bias`, the per-level band constants, the full-`DrawCommandDepth`
+SDF signature (Blocker B), and moved the projection engine to `render/draw_order.rs`.
+`draw_slot`/`DrawLayer`/`DEFAULT_DRAW_LAYER` remain (Phase 5/6).
 
 **Acceptance gate:** `cargo build -p bevy_diegetic` clean, `cargo +nightly fmt`,
-`cargo nextest run -p bevy_diegetic` green including the three new tests, `cargo
-clippy -p bevy_diegetic --all-targets` no new warnings. Behavior: on a screen
-(non-OIT) panel a `z=+1` element renders above text and a `z=−1` text run renders
-below fills (the screen-ordering test); default text across N panels remains a
-single batch.
+`cargo nextest run -p bevy_diegetic` green including the new tests, `cargo clippy
+-p bevy_diegetic --all-targets` no new warnings. Behavior on a screen (non-OIT)
+panel: a `z=+1` element of any type renders above text; a `z=−1` text run renders
+below fills; dividers render above same-level fills regardless of fill count;
+default text and default lines each stay a single batch across N panels.
+
+#### Retrospective
+
+**What worked:**
+- The text per-level-batch model generalized cleanly to lines: `line_batch_depth_bias(z_level)` at sub-lane 63 + `z_level` on `LineBatchKey`, mirroring `text_batch_depth_bias` at 64. Both batched types now honor z-index on the screen view with one batch per distinct level shared across panels.
+- Text z-index authoring landed on the single signed `Element.draw_layer` field every other element uses (new `text_element`/`text_id_element` builders feed `El` to the text leaf); no positioning change needed since `push_command` already stamps `z_index` from the element field.
+- 416 tests pass; the new tests assert spawned material `depth_bias` per z-level (not projection math), so a fixed-lane regression now fails.
+
+**What deviated from the plan:**
+- The original Phase-4 review framed Blocker A as text-only. Implementation found the *same* batched-screen-lane defect in lines (Phase 4 had dropped `BATCH_PANEL_LINE_DEPTH_BIAS` from 63 to 1), so 4a's scope widened to "every element type" — fills/borders/images were already correct as individual draws.
+- `BATCH_PANEL_LINE_DEPTH_BIAS` was deleted, not gated dead-code, per the style guide's prefer-deletion rule.
+- Module structure: the draw-order engine was extracted to `render/draw_order.rs` and material helpers (`apply_glyph_sidedness`, `default_panel_material`, `resolve_material`) to `render/material.rs`; `constants.rs` is now constants-only. (Not in the original Work Order — surfaced during review.)
+- Two codex fix passes were needed: pass 1 (line lane + text authoring + tests + material module), pass 2 (raised/lowered text material-lane test + pinning the equivalence test to literal pre-flip lanes 63/64 instead of tautological helper-vs-itself assertions).
+
+**Surprises:**
+- `DrawCommandDepth` now carries `z_level`; `level_sublane_depth_bias(z_level, ordinal)` maps level `L` into the window `[L × DRAW_LEVEL_STRIDE, (L+1) × DRAW_LEVEL_STRIDE)` with `DRAW_LEVEL_STRIDE = 65`, `DRAW_LEVEL_GEOMETRY_LANES = DRAW_LEVEL_TEXT_SUBLANE = 64`. This is a real per-level screen cap (≤64 geometry items per level before spilling into the line/text sub-lanes) — a *new* ceiling Phase 5's guard rework must track, alongside the OIT budget.
+- `TextStyle::with_draw_layer` is deliberately left disconnected from ordering (a test pins that it does not split batches); the old per-label cascade is dead for ordering. Phase 5/6 still delete the machinery.
+
+**Implications for remaining phases:**
+- Phase 5: the overflow guard must warn on the smaller of (a) per-level band capacity `DRAW_LEVEL_GEOMETRY_LANES` and (b) the OIT budget (already folded into the Phase 5 Work Order). Also delete the `PanelLineLayering` struct outright (4a left it as a dead write — `expect(dead_code)` was unfulfilled on a public type).
+- Phase 6: the rename blast radius now includes `render/draw_order.rs` and `render/material.rs` (new files), the `text_element`/`text_id_element` builders, `PanelTextZLevel`, `line_batch_depth_bias`/`text_batch_depth_bias`, and the `DRAW_LEVEL_*` constants. The example should author raised/lowered text via `text_element(El::new().draw_layer(...))`, the now-working path.
+- Phase 7 (fill batching design): the per-level screen sub-lane scheme (geometry low, lines at 63, text at 64) and `line_batch_depth_bias`/`text_batch_depth_bias` are the precedent a batched-fill path reuses; lines + text are now the two worked examples of "one batch per (z_level, …), CPU-fixed screen lane + per-record OIT offset."
+
+### Phase 4a Review
+
+Architect re-review of Phases 5/6/7. Applied automatically (minor):
+- **Phase 5:** corrected `consumes_draw_slot` ref (`render.rs:130–132`); restated the overflow guard's current `draw_slot`/`DEFAULT_DRAW_LAYER` structure so a fresh codex doesn't reintroduce `draw_slot`; fixed the per-level count — `enumerate_ordinals` returns flat panel-global ranks, so the guard must group by `DrawCommandDepth.z_level()` (no per-level count API exists; add one); added the dead `BatchKey.layer` field/write deletions (`analytic_paths/batching.rs:60/432`, `panel_text/batching.rs:295`); fixed the acceptance gate to the smaller of band-capacity and OIT-budget ceilings.
+- **Phase 6:** widened the rename surface to the post-extraction files (`render/draw_order.rs`, `render/material.rs`, `text_element`/`text_id_element`, `PanelTextZLevel`, `line_batch_depth_bias`/`text_batch_depth_bias`, `DRAW_LEVEL_*`); corrected drifted line refs (`with_draw_layer:534`, `set_draw_layer:611`, `resolved.rs:90`, `attributes.rs:52/95/159`); re-pointed the parity test to `draw_order.rs:~552` and reconciled it with the tests Phase 4a already added; added "verify `EXPECTED_SHADER_FNV1A` before relying on no-refresh."
+- **Phase 7:** added the per-level 64-lane screen-band ceiling (`DRAW_LEVEL_GEOMETRY_LANES`) as a hard design constraint the batched-fill design must resolve, alongside the OIT budget.
+
+User decisions:
+- **Line-layering deletion is a public-API removal (approved full removal):** Phase 5 now enumerates the `pub` `PanelLineLayering` + `PanelLinePaintOrder`, their 4 re-exports, the `ResolvedPanelLineCommand.layering` field/accessor + `PanelLinePaintOrder::layering()` method, and the now-vestigial `PanelLinePaintOrder` enum collapse (+ `positioning.rs:313` seed and `integration_tests.rs:296/346` assertions).
+- **Cascade teardown owner (approved Phase 6):** the entire `DrawLayer`-cascade machinery + the `DEFAULT_DRAW_LAYER` constant are deleted in Phase 6 with the rename, not Phase 5. Phase 5 keeps `DEFAULT_DRAW_LAYER` (the cascade default) alive and only removes its non-cascade readers; both Work Orders updated to remove the prior "delete here or defer" ambiguity.
 
 ### Phase 5 — Delete the dead mechanism + rework the overflow check · status: todo
 
@@ -345,40 +396,85 @@ guard, re-pointed at the distinct-coplanar-ordinal count.
 
 **Spec:**
 
-- Delete `RenderCommandKind::consumes_draw_slot()` (`render.rs:132–145`),
-  `RenderCommand::draw_slot` (`render.rs:~32`), `EmissionCounters.draw_slot`
-  (`positioning.rs:35–60`), and `DEFAULT_DRAW_LAYER` (`cascade/constants.rs:20`).
+- Delete `RenderCommandKind::consumes_draw_slot()` (`render.rs:130–132`),
+  `RenderCommand::draw_slot` (`render.rs:~32`), and `EmissionCounters.draw_slot`
+  (`positioning.rs:35–60`). **`DEFAULT_DRAW_LAYER` is NOT deleted here** — it is the
+  `DrawLayer` cascade's default and is torn down with the cascade machinery in
+  Phase 6 (decision below). Phase 5 only removes `DEFAULT_DRAW_LAYER`'s *non-cascade*
+  readers (the dead `BatchKey.layer` writes and the overflow-guard comparison), so
+  the constant compiles cleanly until Phase 6.
+- **Dead `layer` field on the batch keys (Phase 4a left these as pure writes).**
+  Ordering now flows through `z_level`, so `BatchKey.layer` (set to
+  `DEFAULT_DRAW_LAYER`) is dead: `analytic_paths/batching.rs:60` declares
+  `layer: i8` and `:432` initializes it; `panel_text/batching.rs:295` writes it.
+  The analytic-paths `BatchKey` is locally owned — delete its `layer` field +
+  initializer (deleting `DEFAULT_DRAW_LAYER` will not compile until this is gone).
+  The text-side `BatchKey` may be an external (Slug) struct; if so, drop only the
+  `DEFAULT_DRAW_LAYER` write, leaving the field if it is not locally removable.
 - **Full `draw_slot`-reader inventory to delete/rework:** the counter is also read
   at `positioning.rs:314` to seed `PanelLinePaintOrder::Normal { draw_slot }` —
   delete that variant field plus `NORMAL_DEPTH_BIAS_STEP`/`NORMAL_OIT_DEPTH_STEP`
   and the `line.rs:526–532` derivation (their ordering moved to the Phase-4
-  ordinal). Drop the per-carrier `draw_slot` fields once Phase 4 re-keyed reconcile:
-  `PanelSdfSurface.draw_slot`, `PanelTextChild.draw_slot`,
+  ordinal). **Full line-layering public-API removal** (Phase 4a left it as a dead
+  store — `expect(dead_code)` was unfulfilled because the types are `pub`; nothing
+  reads `.layering()` for ordering, the renderer uses `source.draw_depth`). Remove,
+  as a semver-visible change (crate is 0.x): the `pub` types `PanelLineLayering`
+  *and* `PanelLinePaintOrder`; their 4 re-exports (`lib.rs:180–181`,
+  `layout/mod.rs:73–74`); the `layering` field on `ResolvedPanelLineCommand`
+  (`line.rs:171`), its `.layering()` accessor (`line.rs:458`), and the
+  `PanelLinePaintOrder::layering()` method (`line.rs:524–532`); the computation at
+  `line.rs:598`. After `draw_slot` leaves `PanelLinePaintOrder::Normal { draw_slot }`
+  (the enum's only variant) it is a vestigial single fieldless variant — collapse or
+  remove the enum and update its seed site (`positioning.rs:313`) and the
+  `integration_tests.rs:296/346` assertions. Drop the per-carrier `draw_slot` fields once
+  Phase 4 re-keyed reconcile: `PanelSdfSurface.draw_slot`, `PanelTextChild.draw_slot`,
   `PanelImageChild.draw_slot`. Deleting `RenderCommand::draw_slot` without these
   will not compile.
-- `render/panel_geometry.rs` — rework the overflow check (`:237–253`): it stays,
-  but warns when a panel's *distinct coplanar ordinal count* approaches the OIT
-  budget (`≈ focus-depth / OIT_DEPTH_STEP`), not when `draw_slot ≥ 64`. Source the
-  count from `enumerate_ordinals(...).iter().flatten().count()` (spans fills, lines,
-  AND text), not a reconstructed `draw_slot` max (which counts only slot-consuming
-  kinds). Past the budget, ordering degrades to best-effort OIT insertion order
-  (same far-panel degradation the current model has) — no silent truncation.
+- `render/panel_geometry.rs` — rework the overflow check (`:237–253`). The guard
+  currently reads `cmd.draw_slot` via `consumes_draw_slot()` and compares against
+  `DrawOrdinal::from(DrawLayer(DEFAULT_DRAW_LAYER))`; do not reintroduce `draw_slot`.
+  It must warn on the **smaller of two ceilings**, since Phase 4a's screen banding
+  added a per-level cap: (1) the per-level band capacity — the count of draw
+  commands **at a single z-level** must stay below `DRAW_LEVEL_GEOMETRY_LANES`
+  (`= 64`) so geometry never reaches the line sub-lane (`63`)/text sub-lane (`64`)
+  or spills into the next z-level's band; and (2) the OIT budget
+  (`≈ focus-depth / OIT_DEPTH_STEP`). **`enumerate_ordinals(...)` returns panel-global
+  ranks with the z-level discarded, so a flat `.flatten().count()` measures the whole
+  panel, not a level's band occupancy.** Group by z-level instead: the per-command
+  level is `DrawCommandDepth.z_level()` (`render/draw_order.rs`), and the projection
+  exposes only flat ordinals + `z_level`/`ordinal_index` — there is no per-level
+  count API, so add one (e.g. `DrawOrderProjection::level_occupancy()`) or count per
+  `z_level` at the guard. Past either ceiling, ordering degrades to best-effort OIT
+  insertion order — no silent truncation; emit the warning.
 - Restate "lines just under text" as `DrawStep::Lines < DrawStep::Text`, not
   `63 < DEFAULT_DRAW_LAYER`, wherever a comment references the deleted constant.
 
 **Files:** `layout/render.rs`, `layout/engine/positioning.rs`, `layout/line.rs`,
-`cascade/constants.rs`, `render/panel_geometry.rs`, `render/panel_text/layout.rs`,
-`render/panel_text/reconcile.rs` (carrier fields).
+`lib.rs` + `layout/mod.rs` (drop `PanelLineLayering`/`PanelLinePaintOrder` re-exports),
+`cascade/constants.rs`, `render/panel_geometry.rs`, `render/draw_order.rs` (per-level
+count helper), `render/analytic_paths/batching.rs` (dead `layer` field),
+`render/panel_text/batching.rs` (dead `layer` write), `render/panel_text/layout.rs`,
+`render/panel_text/reconcile.rs` (carrier fields), `tests/integration_tests.rs`
+(`PanelLinePaintOrder` assertions).
 
-**Constraints from prior phases:** Phase 4 re-keyed every depth read and every
+**Constraints from prior phases:** Phase 4/4a re-keyed every depth read and every
 reconcile carrier onto the enumerated ordinal, so `draw_slot` and
-`DEFAULT_DRAW_LAYER` have no remaining readers except the overflow guard. The
-`with_draw_layer` verb + `glyph_cascade.rs` `Override`/`Resolved<DrawLayer>`
-resolution + propagation/reconcile arms are old-model machinery — delete here or
-defer to Phase 6 with the rename (the cascade read was already removed in Phase 4).
+`DEFAULT_DRAW_LAYER` have no remaining *ordering* readers except the overflow guard
+and the dead `BatchKey.layer` writes. The draw-order engine now lives in
+`render/draw_order.rs`; the per-command level is `DrawCommandDepth.z_level()`, and
+the projection exposes only flat ordinals (`ordinal_index`) + `z_level` (no per-level
+count API). The `with_draw_layer`/`set_draw_layer` verbs + `glyph_cascade.rs`
+`Override`/`Resolved<DrawLayer>` resolution + propagation/reconcile arms are old-model
+machinery still fully wired (a test pins that they do not split batches). **Decision:
+Phase 6 owns the entire `DrawLayer`-cascade teardown** (verbs, `glyph_cascade.rs`
+observer, `Override`/`Resolved<DrawLayer>` resolution, the cascade declaration at
+`resolved.rs:90`, and the `DEFAULT_DRAW_LAYER` constant), done together with the
+rename — do NOT delete any cascade machinery or `DEFAULT_DRAW_LAYER` in Phase 5.
 
-**Acceptance gate:** `cargo build` clean with `draw_slot`/`DEFAULT_DRAW_LAYER`
-gone; `cargo nextest run` green; overflow warning fires only near the OIT budget.
+**Acceptance gate:** `cargo build` clean with `draw_slot` gone and the dead analytic
+`BatchKey.layer` field removed (`DEFAULT_DRAW_LAYER` + the cascade machinery survive
+to Phase 6); `cargo nextest run` green; overflow warning fires at the **smaller** of
+the per-level band-capacity ceiling (`DRAW_LEVEL_GEOMETRY_LANES`) and the OIT budget.
 
 ### Phase 6 — Flag-day rename + example + test/doc cleanup · status: todo
 
@@ -397,32 +493,68 @@ in-panel-overlay example, and finish test/doc cleanup.
   automatically — no hand-written reflection sites.
 - Rename via the editor: `DrawLayer → DrawZIndex`, `draw_layer → draw_zindex` —
   the `El`/`Element` field, `TextStyle` field (`text_props.rs:218`) + builder
-  (`:528`) + setter (`:610`), cascade declaration (`cascade/resolved.rs:82–93`),
-  verbs (`cascade/attributes.rs:51/95/159`), and readers (`reconcile.rs`,
-  `glyph_cascade.rs`, `panel_text/batching.rs`, `constants.rs`). Re-confirm every
-  cited line number at rename time.
+  `with_draw_layer` (`:534`) + setter `set_draw_layer` (`:611`), cascade declaration
+  (`cascade/resolved.rs:90`, `DrawLayer(i8)`), verbs
+  (`cascade/attributes.rs:52/95/159`), and readers (`reconcile.rs`,
+  `glyph_cascade.rs`, `panel_text/batching.rs`). **Post-extraction surface (Phase 4a)
+  the rename must also cover:** `render/draw_order.rs` (the engine — `DrawLayer`
+  import, `From<DrawLayer>`, `HierarchicalDrawKey.z_index: Option<DrawLayer>`, and the
+  test module's `ORDERED_LAYER_PAIRS`/`RAISED_LEVEL`/`LOWERED_LEVEL`), the
+  `text_element`/`text_id_element` builders (`layout/builder.rs`), `PanelTextZLevel`
+  (`panel_text/layout.rs`), and consider whether `line_batch_depth_bias`/
+  `text_batch_depth_bias`/`DRAW_LEVEL_*` (`render/draw_order.rs`, `render/constants.rs`)
+  read clearly post-rename. Re-confirm every cited line number at rename time.
 - Rewrite the example `examples/text_draw_layer.rs` → e.g. `panel_draw_order.rs`:
   one panel, a text child and a sibling overlay quad in the same tree, ordered with
   `DrawZIndex` and a hotkey toggle — not the current second-anchored-panel fake.
-- Rewrite `sorted_and_oit_orderings_agree_for_every_layer_pair`
-  (`constants.rs:~557`) over `(HierarchicalDrawKey, HierarchicalDrawKey)` pairs:
-  two unset commands at different steps; unset vs `z = 0` same step; unset vs set
-  across steps; raised pairs (D5 symmetric offset).
-- `coverage_probe.rs` `EXPECTED_SHADER_FNV1A` was already refreshed in Phase 4
+  Author raised/lowered text via the now-working `text_element(El::new()
+  .draw_layer(...), …)` path (Phase 4a), and a sibling overlay quad via
+  `El::draw_layer`.
+- The parity test `sorted_and_oit_orderings_agree_for_every_layer_pair` now lives in
+  `render/draw_order.rs:~552` (moved by the extraction) and already iterates
+  `(i8, i8)` layer pairs via `DrawOrdinal::from(DrawLayer(..))`; Phase 4a also added
+  `hierarchical_depth_bias_and_oit_orderings_agree` and the no-override material
+  equivalence test. Reconcile against those (do not describe the test as untouched):
+  generalize remaining coverage over `(HierarchicalDrawKey, HierarchicalDrawKey)`
+  pairs (unset at different steps; unset vs `z = 0` same step; unset vs set across
+  steps; raised/lowered pairs) only where not already covered.
+- `coverage_probe.rs` `EXPECTED_SHADER_FNV1A` was refreshed in Phase 4
   (the `OIT_MIN_DEPTH` retune). The rename does not touch shader text
   (`draw_layer` is passed as a precomputed offset through the existing shader
-  input), so **no further FNV refresh here**.
+  input), so **no further FNV refresh here** — but first **verify
+  `EXPECTED_SHADER_FNV1A` matches the current `analytic_path.wgsl`** (Phase 4a is
+  uncommitted and moved through two fix passes; confirm the hash before relying on
+  no-refresh).
+- **Tear down the entire `DrawLayer` cascade machinery here** (Phase 5 deliberately
+  left it wired): the `with_draw_layer`/`set_draw_layer` verbs (`text_props.rs`), the
+  `glyph_cascade.rs` seeding observer + propagation/reconcile arms, the
+  `Override`/`Resolved<DrawLayer>` resolution path, the cascade declaration
+  (`resolved.rs:90`), the `override_draw_layer`/`inherit_draw_layer`/`resolved_draw_layer`
+  verbs (`attributes.rs:52/95/159`), and the `DEFAULT_DRAW_LAYER` constant
+  (`cascade/constants.rs:20`). Doing this with the rename keeps the cascade
+  declaration, verbs, and `DEFAULT_DRAW_LAYER` coming out together so the rename
+  lands on a clean post-cascade surface. The test pinning that `TextStyle`
+  draw-layers do not split batches (`panel_text/batching.rs`) goes with them.
+  **Heads-up:** the Phase 4a tests that reference `DEFAULT_DRAW_LAYER` as the text
+  lane (the no-override equivalence pin, `ORDERED_LAYER_PAIRS` in `draw_order.rs`)
+  must be re-pointed to a literal `64`/`63` or a surviving constant when the
+  constant is deleted.
 - Delete `as-built/text-draw-layer.md` once the old mechanism is gone.
 
-**Files:** `examples/text_draw_layer.rs` (→ renamed), `render/constants.rs`
-(test), `layout/text_props.rs`, `cascade/resolved.rs`, `cascade/attributes.rs`,
-plus every renamed reference (editor-driven), and `docs/bevy_diegetic/as-built/text-draw-layer.md` (delete).
+**Files:** `examples/text_draw_layer.rs` (→ renamed), `render/draw_order.rs`
+(engine + parity test), `render/constants.rs` (`DRAW_LEVEL_*`), `layout/text_props.rs`,
+`layout/builder.rs` (`text_element`/`text_id_element`), `render/panel_text/layout.rs`
+(`PanelTextZLevel`), `cascade/resolved.rs`, `cascade/attributes.rs`,
+`cascade/constants.rs` (`DEFAULT_DRAW_LAYER` deletion), `render/panel_text/glyph_cascade.rs`
+(cascade machinery teardown), plus every renamed reference (editor-driven), and
+`docs/bevy_diegetic/as-built/text-draw-layer.md` (delete).
 
-**Constraints from prior phases:** Phase 4 already refreshed `EXPECTED_SHADER_FNV1A`.
-Phase 5 already deleted `DEFAULT_DRAW_LAYER` and the `draw_slot` machinery; if the
-`glyph_cascade.rs`/`with_draw_layer` machinery survived Phase 5, delete it as part
-of the rename here. The new model is fully wired into rendering — the rename is cosmetic
-(type/field names) and must not change ordering behavior.
+**Constraints from prior phases:** Phase 4 refreshed `EXPECTED_SHADER_FNV1A`. Phase 5
+deleted the `draw_slot` machinery and the line-layering types but **left
+`DEFAULT_DRAW_LAYER` and the whole `DrawLayer` cascade machinery intact** — Phase 6
+owns deleting them (the Spec bullet above), together with the rename. The new model
+is fully wired into rendering; the rename + cascade teardown must not change ordering
+behavior (a parity test guards it).
 
 **Acceptance gate:** compiles under the new names; example demonstrates in-panel
 overlay; parity test green over the new key; as-built doc removed; `cargo nextest
@@ -467,6 +599,15 @@ lines already batch; fills do not).
 - Decide batch granularity: one element batch per `(view, z-level, material class)`
   vs a single per-panel mega-buffer — weigh draw-call count against buffer-rebuild
   cost.
+- **Per-level screen-band ceiling (inherited from Phase 4a).** The screen `depth_bias`
+  axis gives each z-level only `DRAW_LEVEL_GEOMETRY_LANES = 64` geometry sub-lanes
+  (`DRAW_LEVEL_STRIDE = 65`; lines at `63`, text at `64`); `level_sublane_depth_bias`
+  saturates into the next band past that. Batching many fills into one draw does NOT
+  relax this — each fill still needs a distinct sub-lane on the screen view, so a
+  panel with >64 fills at one z-level already overflows the band. The design must
+  resolve how batched fills occupy the geometry sub-lanes (share them by per-record
+  ordinal? a finer intra-batch screen ordering? widen the band?) — the OIT path has
+  the focus-depth budget; the screen path has this hard 64-lane-per-level cap.
 
 **Files:** new design doc (e.g. `docs/bevy_diegetic/element-batching.md`); reads
 `render/panel_geometry.rs`, `render/panel_text/batching.rs`, `render/constants.rs`.

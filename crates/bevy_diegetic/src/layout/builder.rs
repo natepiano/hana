@@ -458,7 +458,23 @@ impl LayoutBuilder {
     /// to be looked up or retexted later.
     pub fn text(&mut self, text: impl Into<String>, config: TextStyle) -> &mut Self {
         let id = self.take_auto_id();
-        self.add_text(id, text, config)
+        self.add_text(id, El::default(), text, config)
+    }
+
+    /// Adds a text leaf with an [`El`] declaration.
+    ///
+    /// Use this when the text leaf itself needs element fields such as
+    /// [`El::draw_layer`]. The run is given a builder-minted
+    /// [`PanelFieldId::Auto`] id; use [`Self::text_id_element`] when the run
+    /// also needs an author-assigned id.
+    pub fn text_element(
+        &mut self,
+        el: El,
+        text: impl Into<String>,
+        config: TextStyle,
+    ) -> &mut Self {
+        let id = self.take_auto_id();
+        self.add_text(id, el, text, config)
     }
 
     /// Adds a text leaf with an author-assigned id, so it can be addressed at
@@ -483,26 +499,35 @@ impl LayoutBuilder {
         text: impl Into<String>,
         config: TextStyle,
     ) -> &mut Self {
-        self.add_text(id.into(), text, config)
+        self.add_text(id.into(), El::default(), text, config)
+    }
+
+    /// Adds a text leaf with an [`El`] declaration and an author-assigned id.
+    pub fn text_id_element(
+        &mut self,
+        id: impl Into<PanelFieldId>,
+        el: El,
+        text: impl Into<String>,
+        config: TextStyle,
+    ) -> &mut Self {
+        self.add_text(id.into(), el, text, config)
     }
 
     fn add_text(
         &mut self,
         id: PanelFieldId,
+        el: El,
         text: impl Into<String>,
         config: TextStyle,
     ) -> &mut Self {
         let parent = self.current_parent();
         self.tree.add_child(
             parent,
-            Element {
-                content: ElementContent::Text {
-                    id,
-                    text: text.into(),
-                    config,
-                },
-                ..Element::default()
-            },
+            el.into_element(ElementContent::Text {
+                id,
+                text: text.into(),
+                config,
+            }),
         );
         self
     }

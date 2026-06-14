@@ -40,6 +40,10 @@ pub struct PanelTextLayout {
     pub clip_rect:        Option<BoundingBox>,
 }
 
+/// Private batch-routing depth level for a panel-text run.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PanelTextZLevel(pub(super) i8);
+
 impl PanelTextLayout {
     /// Bit-equality over the layout fields a panel-text glyph mesh depends on,
     /// used to gate per-run rebuilds.

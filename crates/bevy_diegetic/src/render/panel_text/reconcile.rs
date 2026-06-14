@@ -7,6 +7,7 @@ use bevy::prelude::*;
 use super::PanelTextLayout;
 use super::PanelTextRuns;
 use super::TextRunOf;
+use super::layout::PanelTextZLevel;
 use crate::PanelFieldId;
 use crate::cascade;
 use crate::cascade::DrawLayer;
@@ -24,10 +25,9 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::clip;
-use crate::render::constants::DrawCommandDepth;
-use crate::render::constants::DrawOrderProjection;
-use crate::render::constants::DrawOrdinal;
 use crate::render::constants::TEXT_Z_OFFSET;
+use crate::render::draw_order::DrawCommandDepth;
+use crate::render::draw_order::DrawOrderProjection;
 use crate::render::world_text::TextContent;
 
 /// A reused panel-text child plus the components reconcile compares incoming
@@ -39,6 +39,7 @@ struct ReusableChild<'a> {
     text:       &'a TextContent,
     style:      &'a TextStyle,
     layout:     &'a PanelTextLayout,
+    z_level:    &'a PanelTextZLevel,
     alpha:      Option<&'a Override<TextAlpha>>,
     lighting:   Option<&'a Override<Lighting>>,
     sidedness:  Option<&'a Override<Sidedness>>,
@@ -111,6 +112,7 @@ fn collect_existing_text_children<'a>(
         &TextContent,
         &TextStyle,
         &PanelTextLayout,
+        &PanelTextZLevel,
         Option<&Override<TextAlpha>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
@@ -119,7 +121,7 @@ fn collect_existing_text_children<'a>(
 ) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
     for &entity in existing_run_entities {
-        let Ok((text, style, layout, alpha, lighting, sidedness, draw_layer)) =
+        let Ok((text, style, layout, z_level, alpha, lighting, sidedness, draw_layer)) =
             existing_runs.get(entity)
         else {
             continue;
@@ -131,6 +133,7 @@ fn collect_existing_text_children<'a>(
                 text,
                 style,
                 layout,
+                z_level,
                 alpha,
                 lighting,
                 sidedness,
@@ -159,6 +162,7 @@ pub(super) fn reconcile_panel_text_children(
         &TextContent,
         &TextStyle,
         &PanelTextLayout,
+        &PanelTextZLevel,
         Option<&Override<TextAlpha>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
@@ -213,6 +217,7 @@ pub(super) fn reconcile_panel_text_children(
             let label_sidedness = config.sidedness();
             let label_draw_layer = config.draw_layer();
             let style = config.for_shaping(Anchor::TopLeft);
+            let z_level = PanelTextZLevel(draw_depth.z_level());
             let panel_text_child = PanelTextLayout {
                 id: id.clone(),
                 line_index: *line_index,
@@ -238,6 +243,7 @@ pub(super) fn reconcile_panel_text_children(
                     text,
                     style,
                     layout: panel_text_child,
+                    z_level,
                     label_alpha,
                     label_lighting,
                     label_sidedness,
@@ -251,6 +257,7 @@ pub(super) fn reconcile_panel_text_children(
                     text,
                     style,
                     layout: panel_text_child,
+                    z_level,
                     label_alpha,
                     label_lighting,
                     label_sidedness,
@@ -267,7 +274,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -292,6 +299,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     text:             &'a str,
     style:            TextStyle,
     layout:           PanelTextLayout,
+    z_level:          PanelTextZLevel,
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<Lighting>,
     label_sidedness:  Option<Sidedness>,
@@ -309,6 +317,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         text,
         style,
         layout,
+        z_level,
         label_alpha,
         label_lighting,
         label_sidedness,
@@ -324,6 +333,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             TextContent::new(text.to_owned()),
             style,
             layout,
+            z_level,
             TextRunOf(panel_entity),
         ));
         spawned = child.id();
@@ -352,6 +362,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     text:             &'a str,
     style:            TextStyle,
     layout:           PanelTextLayout,
+    z_level:          PanelTextZLevel,
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<Lighting>,
     label_sidedness:  Option<Sidedness>,
@@ -374,6 +385,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         text,
         style,
         layout,
+        z_level,
         label_alpha,
         label_lighting,
         label_sidedness,
@@ -388,6 +400,9 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     }
     if !reusable.layout.gating_eq(&layout) {
         child.insert(layout);
+    }
+    if *reusable.z_level != z_level {
+        child.insert(z_level);
     }
     match label_alpha {
         Some(alpha_mode) => {
@@ -443,20 +458,20 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
 /// Marker plus cached reconcile inputs for an image child entity.
 ///
 /// `reconcile_panel_image_children` compares the incoming `handle` / `tint` /
-/// `bounds` / `draw_ordinal` against these cached values to decide whether to
+/// `bounds` / `draw_depth` against these cached values to decide whether to
 /// skip the child, mutate its tint in place, or rebuild its mesh and material.
 #[derive(Component, Clone, Debug)]
 pub(super) struct PanelImageChild {
     /// Index of the source element in the layout tree (the reuse key).
-    pub element_idx:  usize,
-    /// Dense panel-local ordinal the material's `depth_bias` derives from.
-    pub draw_ordinal: DrawOrdinal,
+    pub element_idx: usize,
+    /// Projected ordering values for the source image command.
+    pub draw_depth:  DrawCommandDepth,
     /// Image asset handle from the most recent build.
-    pub handle:       Handle<Image>,
+    pub handle:      Handle<Image>,
     /// Tint color from the most recent build.
-    pub tint:         Color,
+    pub tint:        Color,
     /// Layout bounds from the most recent build.
-    pub bounds:       BoundingBox,
+    pub bounds:      BoundingBox,
 }
 
 /// A reused image child plus the material handle reconcile mutates for a
@@ -517,11 +532,11 @@ pub(super) fn reconcile_panel_image_children(
                     clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
                     let draw_depth = computed.draw_order().depth_for(cmd_index)?;
                     Some(PanelImageChild {
-                        element_idx:  cmd.element_idx,
-                        draw_ordinal: draw_depth.ordinal(),
-                        handle:       handle.clone(),
-                        tint:         *tint,
-                        bounds:       cmd.bounds,
+                        element_idx: cmd.element_idx,
+                        draw_depth,
+                        handle: handle.clone(),
+                        tint: *tint,
+                        bounds: cmd.bounds,
                     })
                 },
                 _ => None,
@@ -594,13 +609,13 @@ struct ImageGeometry {
 
 /// Updates one reused image child against its cached inputs: skips it when
 /// nothing changed, mutates `base_color` in place on a tint-only change, or
-/// rebuilds its mesh and material when the handle, bounds, or command ordinal
+/// rebuilds its mesh and material when the handle, bounds, or command depth
 /// moved.
 ///
 /// Image tint has no cascade, so this comparison is the only no-op suppressor.
 /// Because `materials.get_mut` marks the asset modified on access, the tint
 /// branch is reached only when the cached tint actually differs (R5/F8). A
-/// `draw_ordinal` move rebuilds the material because `depth_bias` lives there.
+/// `draw_depth` move rebuilds the material because `depth_bias` lives there.
 fn reconcile_existing_image(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -612,7 +627,7 @@ fn reconcile_existing_image(
 ) {
     let cached = reusable.cached;
     let visuals_unchanged = cached.handle == incoming.handle
-        && cached.draw_ordinal == incoming.draw_ordinal
+        && cached.draw_depth == incoming.draw_depth
         && bounds_bits(&cached.bounds) == bounds_bits(&incoming.bounds);
 
     if visuals_unchanged {
@@ -666,7 +681,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: incoming.draw_ordinal.depth_bias(),
+        depth_bias: incoming.draw_depth.depth_bias(),
         ..default()
     });
 
