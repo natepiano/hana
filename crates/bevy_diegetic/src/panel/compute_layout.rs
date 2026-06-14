@@ -128,6 +128,7 @@ pub(super) fn compute_panel_layouts(
             && let Some(result) = computed.result_mut()
         {
             result.regenerate_commands(scaled_tree);
+            computed.refresh_draw_order_projection();
             events::trigger_panel_changed(&mut commands, entity, PanelChangeKind::VisualOnly);
             panel_count += 1;
             continue;

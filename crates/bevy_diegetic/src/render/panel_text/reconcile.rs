@@ -24,6 +24,8 @@ use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render::clip;
+use crate::render::constants::DrawCommandDepth;
+use crate::render::constants::DrawOrderProjection;
 use crate::render::constants::DrawOrdinal;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::world_text::TextContent;
@@ -43,12 +45,12 @@ struct ReusableChild<'a> {
     draw_layer: Option<&'a Override<DrawLayer>>,
 }
 
-/// One text render command resolved to its reconcile inputs: source
-/// `(element_idx, draw_slot)`, run `id`, per-run `line_index`, the string,
-/// its style, layout bounds, and the effective clip rect.
+/// One text render command resolved to its reconcile inputs: source element,
+/// command depth, run `id`, per-run `line_index`, the string, its style,
+/// layout bounds, and the effective clip rect.
 type PendingTextChild = (
     usize,
-    usize,
+    DrawCommandDepth,
     PanelFieldId,
     usize,
     String,
@@ -64,6 +66,7 @@ type PendingTextChild = (
 fn collect_text_commands(
     panel: &DiegeticPanel,
     commands: &[RenderCommand],
+    draw_order: &DrawOrderProjection,
     clip_rects: &[Option<BoundingBox>],
     viewport: BoundingBox,
 ) -> Vec<PendingTextChild> {
@@ -75,6 +78,7 @@ fn collect_text_commands(
             RenderCommandKind::Text { text, config } => {
                 let active_clip = clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)
                     .unwrap_or_else(clip::empty_clip);
+                let draw_depth = draw_order.depth_for(cmd_index)?;
                 let id = panel
                     .tree()
                     .element_field_id(cmd.element_idx)
@@ -87,7 +91,7 @@ fn collect_text_commands(
                 *counter += 1;
                 Some((
                     cmd.element_idx,
-                    cmd.draw_slot,
+                    draw_depth,
                     id,
                     line_index,
                     text.clone(),
@@ -99,6 +103,42 @@ fn collect_text_commands(
             _ => None,
         })
         .collect()
+}
+
+fn collect_existing_text_children<'a>(
+    existing_run_entities: &[Entity],
+    existing_runs: &'a Query<(
+        &TextContent,
+        &TextStyle,
+        &PanelTextLayout,
+        Option<&Override<TextAlpha>>,
+        Option<&Override<Lighting>>,
+        Option<&Override<Sidedness>>,
+        Option<&Override<DrawLayer>>,
+    )>,
+) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
+    let mut existing_by_key = HashMap::new();
+    for &entity in existing_run_entities {
+        let Ok((text, style, layout, alpha, lighting, sidedness, draw_layer)) =
+            existing_runs.get(entity)
+        else {
+            continue;
+        };
+        existing_by_key.insert(
+            (layout.id.clone(), layout.line_index),
+            ReusableChild {
+                entity,
+                text,
+                style,
+                layout,
+                alpha,
+                lighting,
+                sidedness,
+                draw_layer,
+            },
+        );
+    }
+    existing_by_key
 }
 
 /// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
@@ -145,37 +185,24 @@ pub(super) fn reconcile_panel_text_children(
         // content-stable, unlike the former `(element_idx, command_index)` pair
         // that a sibling reorder shifted (R7). Auto ids preserve that positional
         // behavior; named ids survive the reorder.
-        let text_commands = collect_text_commands(&panel, &result.commands, &clip_rects, viewport);
+        let text_commands = collect_text_commands(
+            &panel,
+            &result.commands,
+            computed.draw_order(),
+            &clip_rects,
+            viewport,
+        );
 
         // Source the panel's existing runs from `PanelTextRuns` (the typed
         // text-run index) rather than scanning every `TextContent` child and
         // filtering by parent. `None` means no run has spawned yet (first pass).
         let existing_run_entities: &[Entity] = panel_runs.map_or(&[][..], |runs| &**runs);
-        let mut existing_by_key: HashMap<(PanelFieldId, usize), ReusableChild> = HashMap::new();
-        for &entity in existing_run_entities {
-            let Ok((text, style, layout, alpha, lighting, sidedness, draw_layer)) =
-                existing_runs.get(entity)
-            else {
-                continue;
-            };
-            existing_by_key.insert(
-                (layout.id.clone(), layout.line_index),
-                ReusableChild {
-                    entity,
-                    text,
-                    style,
-                    layout,
-                    alpha,
-                    lighting,
-                    sidedness,
-                    draw_layer,
-                },
-            );
-        }
+        let existing_by_key = collect_existing_text_children(existing_run_entities, &existing_runs);
 
         let mut visited_keys: Vec<(PanelFieldId, usize)> = Vec::new();
         let mut text_index: HashMap<PanelFieldId, Entity> = HashMap::new();
-        for (element_idx, draw_slot, id, line_index, text, config, bounds, clip) in &text_commands {
+        for (element_idx, draw_depth, id, line_index, text, config, bounds, clip) in &text_commands
+        {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
             // `with_lighting` / `with_sidedness` / `with_draw_layer`) are
             // captured before `for_shaping()` clears them, then inserted as
@@ -190,7 +217,9 @@ pub(super) fn reconcile_panel_text_children(
                 id: id.clone(),
                 line_index: *line_index,
                 element_idx: *element_idx,
-                draw_slot: *draw_slot,
+                draw_ordinal: draw_depth.ordinal_index(),
+                depth_bias: draw_depth.depth_bias(),
+                oit_depth_offset: draw_depth.oit_depth_offset(),
                 bounds: *bounds,
                 scale_x,
                 scale_y,
@@ -414,23 +443,20 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
 /// Marker plus cached reconcile inputs for an image child entity.
 ///
 /// `reconcile_panel_image_children` compares the incoming `handle` / `tint` /
-/// `bounds` / `draw_slot` against these cached values to decide whether to
+/// `bounds` / `draw_ordinal` against these cached values to decide whether to
 /// skip the child, mutate its tint in place, or rebuild its mesh and material.
 #[derive(Component, Clone, Debug)]
 pub(super) struct PanelImageChild {
     /// Index of the source element in the layout tree (the reuse key).
-    pub element_idx: usize,
-    /// Geometry draw slot the material's `depth_bias` derives from. A sibling
-    /// geometry insert/remove shifts this without changing the visual inputs,
-    /// so it is gated like the rest to keep image layering correct under
-    /// reorder.
-    pub draw_slot:   usize,
+    pub element_idx:  usize,
+    /// Dense panel-local ordinal the material's `depth_bias` derives from.
+    pub draw_ordinal: DrawOrdinal,
     /// Image asset handle from the most recent build.
-    pub handle:      Handle<Image>,
+    pub handle:       Handle<Image>,
     /// Tint color from the most recent build.
-    pub tint:        Color,
+    pub tint:         Color,
     /// Layout bounds from the most recent build.
-    pub bounds:      BoundingBox,
+    pub bounds:       BoundingBox,
 }
 
 /// A reused image child plus the material handle reconcile mutates for a
@@ -489,12 +515,13 @@ pub(super) fn reconcile_panel_image_children(
             .filter_map(|(cmd_index, cmd)| match &cmd.kind {
                 RenderCommandKind::Image { handle, tint } => {
                     clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
+                    let draw_depth = computed.draw_order().depth_for(cmd_index)?;
                     Some(PanelImageChild {
-                        element_idx: cmd.element_idx,
-                        draw_slot:   cmd.draw_slot,
-                        handle:      handle.clone(),
-                        tint:        *tint,
-                        bounds:      cmd.bounds,
+                        element_idx:  cmd.element_idx,
+                        draw_ordinal: draw_depth.ordinal(),
+                        handle:       handle.clone(),
+                        tint:         *tint,
+                        bounds:       cmd.bounds,
                     })
                 },
                 _ => None,
@@ -567,13 +594,13 @@ struct ImageGeometry {
 
 /// Updates one reused image child against its cached inputs: skips it when
 /// nothing changed, mutates `base_color` in place on a tint-only change, or
-/// rebuilds its mesh and material when the handle, bounds, or command slot
+/// rebuilds its mesh and material when the handle, bounds, or command ordinal
 /// moved.
 ///
 /// Image tint has no cascade, so this comparison is the only no-op suppressor.
 /// Because `materials.get_mut` marks the asset modified on access, the tint
 /// branch is reached only when the cached tint actually differs (R5/F8). A
-/// `draw_slot` move rebuilds the material because `depth_bias` lives there.
+/// `draw_ordinal` move rebuilds the material because `depth_bias` lives there.
 fn reconcile_existing_image(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -585,7 +612,7 @@ fn reconcile_existing_image(
 ) {
     let cached = reusable.cached;
     let visuals_unchanged = cached.handle == incoming.handle
-        && cached.draw_slot == incoming.draw_slot
+        && cached.draw_ordinal == incoming.draw_ordinal
         && bounds_bits(&cached.bounds) == bounds_bits(&incoming.bounds);
 
     if visuals_unchanged {
@@ -639,7 +666,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: DrawOrdinal::from_draw_slot(incoming.draw_slot).depth_bias(),
+        depth_bias: incoming.draw_ordinal.depth_bias(),
         ..default()
     });
 
@@ -883,21 +910,23 @@ mod tests {
         let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
             .map(|line| {
                 let panel_text_child = PanelTextLayout {
-                    id:          id.clone(),
-                    line_index:  line,
-                    element_idx: 7,
-                    draw_slot:   line,
-                    bounds:      BoundingBox {
+                    id:               id.clone(),
+                    line_index:       line,
+                    element_idx:      7,
+                    draw_ordinal:     line,
+                    depth_bias:       line.to_f32() * LAYER_DEPTH_BIAS,
+                    oit_depth_offset: 0.0,
+                    bounds:           BoundingBox {
                         x:      0.0,
                         y:      line.to_f32() * 10.0,
                         width:  100.0,
                         height: 10.0,
                     },
-                    scale_x:     1.0,
-                    scale_y:     1.0,
-                    anchor_x:    0.0,
-                    anchor_y:    0.0,
-                    clip_rect:   None,
+                    scale_x:          1.0,
+                    scale_y:          1.0,
+                    anchor_x:         0.0,
+                    anchor_y:         0.0,
+                    clip_rect:        None,
                 };
                 (
                     Entity::from_raw_u32(line.try_into().expect("small")).expect("valid"),
@@ -1300,7 +1329,7 @@ mod tests {
 
     /// A single image leaf sized in panel units; `with_background` toggles the
     /// element's background, which prepends a rectangle command and shifts the
-    /// image's `draw_slot` without changing its `element_idx`.
+    /// image's command ordinal without changing its `element_idx`.
     fn one_image_tree(handle: Handle<Image>, tint: Color, with_background: bool) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         let mut element = El::new().size(10.0, 10.0);
@@ -1457,10 +1486,10 @@ mod tests {
     }
 
     #[test]
-    fn draw_slot_shift_rebuilds_material_so_depth_bias_stays_correct() {
+    fn ordinal_shift_rebuilds_material_so_depth_bias_stays_correct() {
         let mut app = image_reconcile_app();
         let handle = Handle::<Image>::default();
-        // No background: the image is the first geometry command (draw_slot 0).
+        // No background: the image is the first drawing command.
         let panel = spawn_image_panel(
             &mut app,
             one_image_tree(handle.clone(), Color::WHITE, false),
@@ -1471,11 +1500,11 @@ mod tests {
         assert_eq!(
             material_depth_bias(&app, &material_before).to_bits(),
             0.0_f32.to_bits(),
-            "the lone image sits at draw_slot 0"
+            "the lone image uses ordinal 0"
         );
 
         // Adding a background to the element prepends a rectangle command,
-        // shifting the image to draw_slot 1 while its element_idx is stable.
+        // shifting the image to ordinal 1 while its element_idx is stable.
         app.world_mut()
             .commands()
             .set_tree(panel, one_image_tree(handle, Color::WHITE, true));
@@ -1484,12 +1513,12 @@ mod tests {
         let (_, material_after) = single_image_child(&mut app);
         assert_ne!(
             material_before, material_after,
-            "a draw_slot shift rebuilds the material (a new asset)"
+            "an ordinal shift rebuilds the material (a new asset)"
         );
         assert_eq!(
             material_depth_bias(&app, &material_after).to_bits(),
             LAYER_DEPTH_BIAS.to_bits(),
-            "the rebuilt material picks up the shifted draw slot's depth bias"
+            "the rebuilt material picks up the shifted ordinal's depth bias"
         );
     }
 }

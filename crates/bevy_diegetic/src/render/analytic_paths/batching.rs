@@ -53,9 +53,8 @@ pub(crate) struct BatchKey {
     pub lighting:      Lighting,
     /// Resolved `Sidedness` cascade value.
     pub sidedness:     Sidedness,
-    /// Resolved `DrawLayer` cascade value, unwrapped to its inner `i8` at
-    /// this boundary — the attribute type derives no `Hash` (mirrors the
-    /// `TextAlpha` → [`BatchAlphaMode`] re-encoding).
+    /// Legacy text draw-layer slot kept until the old cascade field is removed.
+    /// Panel text depth is carried per run in [`RunRecord`].
     pub layer:         i8,
     /// The run's `GlyphShadowMode` (`Cast` batches cast, `None` batches carry
     /// `NotShadowCaster`).

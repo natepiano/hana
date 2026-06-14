@@ -111,9 +111,8 @@ pub struct PanelLinePrimitiveKey {
 pub enum PanelLinePaintOrder {
     /// Normal panel command order.
     Normal {
-        /// Geometry draw slot
-        /// ([`RenderCommand::draw_slot`](crate::layout::RenderCommand::draw_slot)) used by
-        /// backing/text-compatible depth lanes.
+        /// Legacy geometry draw slot retained until Phase 5 removes
+        /// `PanelLinePaintOrder`.
         draw_slot: usize,
     },
 }

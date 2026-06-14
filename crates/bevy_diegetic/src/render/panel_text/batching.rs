@@ -24,17 +24,17 @@ use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
-use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::PanelTextLayout;
 use super::PreparedPanelText;
 use crate::cascade::CascadeDefault;
-use crate::cascade::DrawLayer;
+use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::DrawStep;
 use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
@@ -70,21 +70,19 @@ pub struct DiegeticTextBatch;
 /// crossing — created, written, and swapped in the same frame, D4).
 ///
 /// Cascade inputs feeding [`BatchKey`] fields: each run's resolved
-/// alpha / lighting / sidedness / draw layer (with the global defaults for
-/// runs the cascade has not seeded) plus the changed-this-frame run set that
-/// triggers re-routing.
+/// alpha / lighting / sidedness (with the global defaults for runs the
+/// cascade has not seeded) plus the changed-this-frame run set that triggers
+/// re-routing.
 #[derive(SystemParam)]
 pub(super) struct BatchKeyCascades<'w, 's> {
     alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
     lightings:          Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
     sidednesses:        Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
     anti_aliases:       Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
-    draw_layers:        Query<'w, 's, &'static Resolved<DrawLayer>, With<TextContent>>,
     alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
     lighting_default:   Res<'w, CascadeDefault<Lighting>>,
     sidedness_default:  Res<'w, CascadeDefault<Sidedness>>,
     anti_alias_default: Res<'w, CascadeDefault<AntiAlias>>,
-    draw_layer_default: Res<'w, CascadeDefault<DrawLayer>>,
     changed: Query<
         'w,
         's,
@@ -97,7 +95,6 @@ pub(super) struct BatchKeyCascades<'w, 's> {
                 Changed<Resolved<Lighting>>,
                 Changed<Resolved<Sidedness>>,
                 Changed<Resolved<AntiAlias>>,
-                Changed<Resolved<DrawLayer>>,
             )>,
         ),
     >,
@@ -132,26 +129,20 @@ impl BatchKeyCascades<'_, '_> {
             .get(label)
             .map_or(self.anti_alias_default.0, |resolved| resolved.0)
     }
-
-    fn draw_layer(&self, label: Entity) -> DrawLayer {
-        self.draw_layers
-            .get(label)
-            .map_or(self.draw_layer_default.0, |resolved| resolved.0)
-    }
 }
 
 /// The query walks every run but touches only those whose text changed, whose
-/// resolved cascade value changed (alpha / lighting / sidedness / draw layer
-/// are batch-key fields, so the run re-routes through `upsert_run` and moves
-/// batches when the key differs), or that are not yet routed, so the system is
-/// self-healing: a skipped frame (e.g. a glyph not yet packed) re-routes on
-/// the next pass.
+/// resolved cascade value changed (alpha / lighting / sidedness are batch-key
+/// fields, so the run re-routes through `upsert_run` and moves batches when the
+/// key differs), whose layout ordering changed, or that are not yet routed, so
+/// the system is self-healing: a skipped frame (e.g. a glyph not yet packed)
+/// re-routes on the next pass.
 pub(super) fn update_panel_text_batches(
     runs: Query<
         (
             Entity,
             Ref<PreparedPanelText>,
-            &PanelTextLayout,
+            Ref<PanelTextLayout>,
             &ChildOf,
             &GlobalTransform,
             Option<&Visibility>,
@@ -186,12 +177,15 @@ pub(super) fn update_panel_text_batches(
     // Upload the shared glyph atlas once before the run loop — records only
     // index the atlas.
     let any_work = !cascade_changed.is_empty()
-        || runs.iter().any(|(label_entity, prepared, ..)| {
-            prepared.is_changed()
-                || !backend
-                    .batch_store()
-                    .is_routed(RunStorageKey::from(label_entity))
-        });
+        || runs
+            .iter()
+            .any(|(label_entity, prepared, panel_text_child, ..)| {
+                prepared.is_changed()
+                    || panel_text_child.is_changed()
+                    || !backend
+                        .batch_store()
+                        .is_routed(RunStorageKey::from(label_entity))
+            });
     let atlas = if any_work {
         backend.commit_glyph_atlas(&mut storage_buffers, &mut materials)
     } else {
@@ -211,6 +205,7 @@ pub(super) fn update_panel_text_batches(
             continue;
         }
         if !prepared.is_changed()
+            && !panel_text_child.is_changed()
             && !cascade_changed.contains(&label_entity)
             && backend.batch_store().is_routed(storage_key)
         {
@@ -234,14 +229,12 @@ pub(super) fn update_panel_text_batches(
             .cloned()
             .unwrap_or_else(constants::default_panel_material);
         let base_material = backend.batch_store_mut().intern_base_material(&base);
-        let draw_layer = cascades.draw_layer(label_entity);
-        let draw_ordinal = DrawOrdinal::from(draw_layer);
         let key = BatchKey {
             base_material,
             alpha: cascades.alpha(label_entity).into(),
             lighting: cascades.lighting(label_entity),
             sidedness: cascades.sidedness(label_entity),
-            layer: draw_layer.0,
+            layer: DEFAULT_DRAW_LAYER,
             shadow: prepared.shadow_mode,
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
         };
@@ -258,11 +251,8 @@ pub(super) fn update_panel_text_batches(
                 fill_color.alpha,
             ),
             render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
-            // The recorded slot is the one the next geometry command occupies,
-            // so the run already sits one layer above everything emitted
-            // before it.
-            depth_nudge:      panel_text_child.draw_slot.to_f32() * constants::LAYER_DEPTH_BIAS,
-            oit_depth_offset: draw_ordinal.oit_depth_offset(),
+            depth_nudge:      panel_text_child.depth_bias,
+            oit_depth_offset: panel_text_child.oit_depth_offset,
             aa_flags:         cascades.anti_alias(label_entity).aa_flags(),
         };
         backend
@@ -740,19 +730,15 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, Lighting::Unlit);
     constants::apply_glyph_sidedness(&mut base, key.sidedness);
-    // One bias/offset pair for the whole batch, derived from the key's draw
-    // layer: the bias orders the batch among backing commands on sorted
-    // (non-OIT) views, the OIT offset among them on OIT views (clamped at
-    // `0.0` from the default layer up, so opaque world geometry keeps depth
-    // authority). Per-run order inside the batch comes from the per-record
-    // depth nudge, which a per-material bias cannot express.
-    let text_ordinal = DrawOrdinal::from(DrawLayer(key.layer));
+    // The batch material keeps text batches in the `DrawStep::Text` lane; each
+    // run record carries the command-specific ordinal for sorted and OIT views.
+    let text_ordinal = DrawOrdinal::from_draw_step(DrawStep::Text);
     base.depth_bias = text_ordinal.depth_bias();
     render::batch_text_material(BatchTextMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
-        oit_depth_offset: text_ordinal.oit_depth_offset(),
+        oit_depth_offset: 0.0,
         supersample: anti_alias.supersamples(),
         aa_band: anti_alias.anisotropic(),
         curves: atlas.curves.clone(),
@@ -792,11 +778,13 @@ mod tests {
 
     use bevy::asset::AssetPlugin;
     use bevy::prelude::*;
+    use bevy_kana::ToF32;
 
     use super::*;
     use crate::Mm;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
+    use crate::cascade::DrawLayer;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
@@ -1129,7 +1117,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_with_distinct_draw_layers_route_to_distinct_batches() {
+    fn text_style_draw_layers_do_not_split_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
@@ -1140,35 +1128,26 @@ mod tests {
         settle(&mut app);
 
         let (batches, runs, _) = store_stats(&app);
-        assert_eq!(batches, 3, "three distinct layers split three batches");
+        assert_eq!(batches, 1, "text draw layers no longer split batches");
         assert_eq!(runs, 4);
-        assert_eq!(batch_layers(&app), vec![-3, 10, 64]);
-        assert_eq!(batch_entities(&mut app).len(), 3);
-        let store = app.world().resource::<GlyphCache>().batch_store();
-        let shared_layer_runs: usize = store
-            .batches()
-            .filter(|(key, _)| key.layer == 10)
-            .map(|(_, batch)| batch.run_count())
-            .sum();
-        assert_eq!(shared_layer_runs, 2, "same-layer runs share one batch");
+        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
+        assert_eq!(batch_entities(&mut app).len(), 1);
     }
 
     #[test]
-    fn label_spawned_with_a_draw_layer_override_routes_to_the_override_batch() {
+    fn label_spawned_with_a_draw_layer_override_uses_default_batch_key() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
-        // The run was never routed before, so it took the unrouted-run path —
-        // no `Changed<Resolved<DrawLayer>>` membership involved.
         assert_eq!(store_stats(&app), (1, 1, 5));
-        assert_eq!(batch_layers(&app), vec![10]);
+        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
     }
 
     #[test]
-    fn draw_layer_cascade_change_moves_the_run_and_reconciles_batch_entities() {
+    fn draw_layer_cascade_change_does_not_rekey_text_batches() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
@@ -1183,16 +1162,12 @@ mod tests {
         settle(&mut app);
 
         let (batches, runs, glyphs) = store_stats(&app);
-        assert_eq!(
-            batches, 2,
-            "the layer-changed run re-keys into its own batch"
-        );
+        assert_eq!(batches, 1, "draw-layer cascade no longer affects batches");
         assert_eq!(runs, 2);
-        assert_eq!(glyphs, 9, "no records were lost in the move");
-        assert_eq!(batch_layers(&app), vec![10, 64]);
+        assert_eq!(glyphs, 9);
+        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
         let entities = batch_entities(&mut app);
-        assert_eq!(entities.len(), 2, "the new key's batch entity spawned");
-        assert!(entities.contains(&default_entity));
+        assert_eq!(entities, vec![default_entity]);
 
         app.world_mut()
             .commands()
@@ -1201,46 +1176,53 @@ mod tests {
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 2, 9));
-        assert_eq!(batch_layers(&app), vec![64]);
+        assert_eq!(batch_layers(&app), vec![DEFAULT_DRAW_LAYER]);
         assert_eq!(
             batch_entities(&mut app),
             vec![default_entity],
-            "the emptied layer batch entity despawned; the default batch entity survived"
+            "the default batch entity survives draw-layer cascade changes"
         );
     }
 
     #[test]
-    fn default_layer_batch_material_reproduces_previous_values() {
+    fn text_step_batch_material_uses_text_lane() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
-        // Pre-DrawOrdinal constants: BATCH_TEXT_DEPTH_BIAS = 64.0 ×
-        // LAYER_DEPTH_BIAS and a hard-coded 0.0 OIT offset.
         let (depth_bias, oit_depth_offset) = batch_material_values(&app);
-        assert_eq!(depth_bias.to_bits(), 64.0f32.to_bits());
+        assert_eq!(
+            depth_bias.to_bits(),
+            DrawOrdinal::from_draw_step(DrawStep::Text)
+                .depth_bias()
+                .to_bits()
+        );
         assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
     }
 
+    fn run_record_depths(app: &App) -> Vec<(f32, f32)> {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let mut records: Vec<_> = store
+            .batches()
+            .flat_map(|(_, batch)| batch.run_records())
+            .map(|record| (record.depth_nudge, record.oit_depth_offset))
+            .collect();
+        records.sort_by(|left, right| left.0.total_cmp(&right.0));
+        records
+    }
+
     #[test]
-    fn layer_below_a_backing_sorts_between_neighboring_commands() {
+    fn text_run_records_use_command_ordinals() {
         let mut app = pipeline_app();
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(5)));
-        spawn_panel(&mut app, builder.build());
+        spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
-        let (depth_bias, oit_depth_offset) = batch_material_values(&app);
-        let lower_backing = DrawOrdinal::from_draw_slot(3);
-        let higher_backing = DrawOrdinal::from_draw_slot(7);
-        assert!(
-            lower_backing.depth_bias() < depth_bias && depth_bias < higher_backing.depth_bias(),
-            "the layer-5 batch sorts between slots 3 and 7 on the sorted axis"
-        );
-        assert!(
-            lower_backing.oit_depth_offset() < oit_depth_offset
-                && oit_depth_offset < higher_backing.oit_depth_offset(),
-            "the layer-5 batch sorts between slots 3 and 7 on the OIT axis"
+        assert_eq!(
+            run_record_depths(&app),
+            vec![
+                (0.0, 0.0),
+                (constants::LAYER_DEPTH_BIAS, constants::OIT_DEPTH_STEP),
+            ],
         );
     }
 

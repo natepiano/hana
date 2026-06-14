@@ -33,6 +33,7 @@ use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
+use crate::render::DrawOrderProjection;
 use crate::render::HairlineFade;
 
 /// A diegetic UI panel attached to a 3D entity.
@@ -692,6 +693,8 @@ pub struct ComputedDiegeticPanel {
     #[reflect(ignore)]
     result:             Option<LayoutResult>,
     #[reflect(ignore)]
+    draw_order:         DrawOrderProjection,
+    #[reflect(ignore)]
     field_records:      Vec<PanelFieldRecord>,
     #[reflect(ignore)]
     field_id_conflicts: Vec<crate::PanelFieldId>,
@@ -742,11 +745,25 @@ impl ComputedDiegeticPanel {
     #[must_use]
     pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
 
+    /// Returns the command-indexed draw-order projection for the latest result.
+    #[must_use]
+    pub(crate) const fn draw_order(&self) -> &DrawOrderProjection { &self.draw_order }
+
     /// Returns the computed layout result mutably, or `None` if not yet computed.
     pub(super) const fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
 
+    pub(super) fn refresh_draw_order_projection(&mut self) {
+        self.draw_order = self
+            .result
+            .as_ref()
+            .map_or_else(DrawOrderProjection::default, |result| {
+                DrawOrderProjection::from_commands(&result.commands)
+            });
+    }
+
     /// Stores the computed layout result.
     pub fn set_result(&mut self, result: LayoutResult) {
+        self.draw_order = DrawOrderProjection::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records.clear();
         self.field_id_conflicts.clear();
@@ -758,6 +775,7 @@ impl ComputedDiegeticPanel {
         field_records: Vec<PanelFieldRecord>,
         field_id_conflicts: Vec<crate::PanelFieldId>,
     ) {
+        self.draw_order = DrawOrderProjection::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;

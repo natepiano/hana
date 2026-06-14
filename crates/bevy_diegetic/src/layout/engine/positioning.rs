@@ -308,8 +308,8 @@ fn emit_line_commands(
         ),
         DrawOverflow::Visible => (clip_context.scissor, PanelLineClipPolicy::Inherited),
     };
-    // The slot the Lines command below will occupy, so lines layer on the
-    // same ordinal scale as the panel's other geometry.
+    // Phase 5 removes this legacy paint-order value after render no longer
+    // needs `PanelLinePaintOrder::Normal`.
     let paint_order = PanelLinePaintOrder::Normal {
         draw_slot: counters.draw_slot,
     };

@@ -659,7 +659,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material,
         editable,
         draw,
-        draw_layer: _,
+        draw_layer,
         anti_alias,
         hairline_fade,
         content,
@@ -681,7 +681,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material: n_material,
         editable: n_editable,
         draw: n_draw,
-        draw_layer: _,
+        draw_layer: n_draw_layer,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
         content: n_content,
@@ -715,7 +715,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    if draw != n_draw {
+    if draw != n_draw || draw_layer != n_draw_layer {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -836,6 +836,7 @@ mod tests {
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelFieldId;
+    use crate::cascade::DrawLayer;
     use crate::layout::Border;
     use crate::layout::Dimension;
     use crate::layout::El;
@@ -925,6 +926,19 @@ mod tests {
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
                 .background(Color::srgb(0.2, 0.3, 0.4)),
+        );
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn draw_layer_only_classifies_as_visual_only() {
+        let tree = root_tree(El::new().width(Sizing::GROW).height(Sizing::GROW));
+        let next = root_tree(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .draw_layer(DrawLayer(1)),
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);

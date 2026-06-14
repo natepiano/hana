@@ -15,6 +15,8 @@ use bevy::prelude::*;
 use super::PanelChildSystems;
 use super::clip;
 use super::constants;
+use super::constants::DrawCommandDepth;
+use super::constants::DrawOrderProjection;
 use super::constants::DrawOrdinal;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::sdf_material;
@@ -42,10 +44,8 @@ struct PanelSdfMesh;
 struct PanelSdfSurface {
     /// Render-command index — the quad's stable key across rebuilds.
     command_index: usize,
-    /// Geometry draw slot — drives the quad's layer/OIT depth ordering. Part
-    /// of the signature so a slot shift refreshes the material's two ordering
-    /// fields.
-    draw_slot:     usize,
+    /// Dense panel-local ordinal used by the quad's material ordering fields.
+    draw_ordinal:  DrawOrdinal,
     /// World-space transform center (x, y).
     center:        [u32; 2],
     /// World-space mesh size (full width, height).
@@ -126,9 +126,8 @@ struct ElementSurface {
     /// Index of the first render command for this element (the reconcile
     /// reuse key).
     command_index: usize,
-    /// Draw slot of the first render command for this element (for layer
-    /// ordering).
-    draw_slot:     usize,
+    /// Projected ordering values of the first render command for this element.
+    draw_depth:    DrawCommandDepth,
     /// Active clip rect in layout coordinates when this surface was
     /// gathered. `None` means unclipped.
     clip_rect:     Option<BoundingBox>,
@@ -189,6 +188,7 @@ fn build_panel_geometry(
         reconcile_sdf_quads(
             &context,
             &result.commands,
+            computed.draw_order(),
             &old_sdf,
             &mut meshes,
             &mut sdf_materials,
@@ -222,6 +222,7 @@ struct PanelReconcileContext<'a> {
 fn reconcile_sdf_quads(
     context: &PanelReconcileContext<'_>,
     render_commands: &[RenderCommand],
+    draw_order: &DrawOrderProjection,
     old_sdf: &Query<(
         Entity,
         &ChildOf,
@@ -252,7 +253,7 @@ fn reconcile_sdf_quads(
         );
     }
 
-    let gathered = gather_surfaces(context.panel, render_commands);
+    let gathered = gather_surfaces(context.panel, render_commands, draw_order);
     let desired = desired_surfaces(gathered);
 
     let mut existing: HashMap<usize, (Entity, PanelSdfSurface, Handle<SdfPanelMaterial>)> = old_sdf
@@ -361,7 +362,11 @@ struct GatheredCommands {
 ///
 /// Computes the active clip rect for each command via
 /// [`clip::compute_clip_rects`] and stores it on each surface and divider.
-fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> GatheredCommands {
+fn gather_surfaces(
+    panel: &DiegeticPanel,
+    commands: &[RenderCommand],
+    draw_order: &DrawOrderProjection,
+) -> GatheredCommands {
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
     let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
@@ -374,29 +379,32 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
                 let Some(active_clip) = active_clip else {
                     continue;
                 };
+                let Some(draw_depth) = draw_order.depth_for(cmd_index) else {
+                    continue;
+                };
                 if *source == RectangleSource::BetweenChildrenBorder {
                     dividers.push(ElementSurface {
-                        index:         usize::MAX,
-                        bounds:        cmd.bounds,
-                        fill_color:    Some(*color),
+                        index: usize::MAX,
+                        bounds: cmd.bounds,
+                        fill_color: Some(*color),
                         border_widths: [0.0; 4],
-                        border_color:  None,
+                        border_color: None,
                         command_index: cmd_index,
-                        draw_slot:     cmd.draw_slot,
-                        clip_rect:     Some(active_clip),
+                        draw_depth,
+                        clip_rect: Some(active_clip),
                     });
                 } else {
                     surfaces
                         .entry(cmd.element_idx)
                         .or_insert_with(|| ElementSurface {
-                            index:         cmd.element_idx,
-                            bounds:        cmd.bounds,
-                            fill_color:    None,
+                            index: cmd.element_idx,
+                            bounds: cmd.bounds,
+                            fill_color: None,
                             border_widths: [0.0; 4],
-                            border_color:  None,
+                            border_color: None,
                             command_index: cmd_index,
-                            draw_slot:     cmd.draw_slot,
-                            clip_rect:     Some(active_clip),
+                            draw_depth,
+                            clip_rect: Some(active_clip),
                         })
                         .fill_color = Some(*color);
                 }
@@ -405,17 +413,20 @@ fn gather_surfaces(panel: &DiegeticPanel, commands: &[RenderCommand]) -> Gathere
                 let Some(active_clip) = active_clip else {
                     continue;
                 };
+                let Some(draw_depth) = draw_order.depth_for(cmd_index) else {
+                    continue;
+                };
                 let surface = surfaces
                     .entry(cmd.element_idx)
                     .or_insert_with(|| ElementSurface {
-                        index:         cmd.element_idx,
-                        bounds:        cmd.bounds,
-                        fill_color:    None,
+                        index: cmd.element_idx,
+                        bounds: cmd.bounds,
+                        fill_color: None,
                         border_widths: [0.0; 4],
-                        border_color:  None,
+                        border_color: None,
                         command_index: cmd_index,
-                        draw_slot:     cmd.draw_slot,
-                        clip_rect:     Some(active_clip),
+                        draw_depth,
+                        clip_rect: Some(active_clip),
                     });
                 surface.border_widths = [
                     border.top.value,
@@ -470,9 +481,8 @@ fn build_sdf_quad(
             Some(Color::NONE)
         }
     });
-    let draw_ordinal = DrawOrdinal::from_draw_slot(surface.draw_slot);
     let mut base = constants::resolve_material(element_mat, panel.material(), effective_color);
-    base.depth_bias = draw_ordinal.depth_bias();
+    base.depth_bias = surface.draw_depth.depth_bias();
     let fill_color = base.base_color;
 
     let world_width = surface.bounds.width * points_to_world;
@@ -549,7 +559,7 @@ fn build_sdf_quad(
             border_widths: world_borders,
             border_color: surface.border_color,
             clip_rect,
-            oit_depth_offset: draw_ordinal.oit_depth_offset(),
+            oit_depth_offset: surface.draw_depth.oit_depth_offset(),
         },
     );
 
@@ -558,7 +568,7 @@ fn build_sdf_quad(
 
     let signature = PanelSdfSurface {
         command_index: surface.command_index,
-        draw_slot:     surface.draw_slot,
+        draw_ordinal:  surface.draw_depth.ordinal(),
         center:        vec2_bits(world_rect.center),
         mesh_size:     vec2_bits(mesh_size),
         corner_radii:  array4_bits(world_radii),
@@ -791,13 +801,20 @@ mod tests {
         assert!(below_index < above_index);
 
         // Both ordering mechanisms must put the higher command index in
-        // front: sorted bias rises, OIT offset rises (reverse-Z, positive =
-        // closer), and both backings stay behind default-layer text at 0.0.
+        // front: sorted bias rises and OIT offset rises (reverse-Z, positive =
+        // closer).
         assert!(below.base.depth_bias < above.base.depth_bias);
         assert!(
             below.extension.uniforms.oit_depth_offset < above.extension.uniforms.oit_depth_offset
         );
-        assert!(above.extension.uniforms.oit_depth_offset < 0.0);
+        assert_eq!(
+            below.extension.uniforms.oit_depth_offset.to_bits(),
+            0.0_f32.to_bits()
+        );
+        assert_eq!(
+            above.extension.uniforms.oit_depth_offset.to_bits(),
+            constants::OIT_DEPTH_STEP.to_bits()
+        );
 
         // The two quads are geometry- and color-identical, so the materials
         // must differ only in the two ordering fields: a command index must

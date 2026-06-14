@@ -8,7 +8,6 @@ use bevy::prelude::*;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToF32;
 
-use crate::cascade::DEFAULT_DRAW_LAYER;
 use crate::cascade::DrawLayer;
 use crate::layout::DrawStep;
 use crate::layout::RenderCommand;
@@ -31,9 +30,8 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 ///
 /// Calibration: `bevy_lagrange` syncs the perspective near plane to
 /// `radius × 0.001`, so a fragment at the camera's focus distance has
-/// `position.z = near / d ≈ 0.001`. The largest offset magnitude,
-/// `DEFAULT_DRAW_LAYER` steps (slot 0), must stay well below
-/// that or the offset drives `position.z` non-positive and
+/// `position.z = near / d ≈ 0.001`. A 64-ordinal offset span must stay well
+/// below that or the offset drives `position.z` non-positive and
 /// `pack_24bit_depth_8bit_alpha` in `oit_draw` saturates it to the
 /// cleared-background depth, where bevy's resolve pass drops every
 /// fragment whose alpha < 1.0. At `1e-6`, 64 steps total `6.4e-5`
@@ -50,13 +48,25 @@ pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
 
 /// Shared draw-order ordinal for a panel's coplanar children.
 ///
-/// Backing/image/line draw slots (`RenderCommand::draw_slot`) and text draw
-/// layers both convert into it; [`Self::depth_bias`] and
-/// [`Self::oit_depth_offset`] are the only derivations of the two per-material
-/// ordering fields, so any two ordinals composite in the same relative order
-/// on sorted and OIT views.
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+/// `HierarchicalDrawKey` projection assigns this dense rank once per
+/// `RenderCommand` stream. [`DrawOrderProjection`] converts it into the two
+/// material ordering fields so sorted and OIT views use the same order.
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) struct DrawOrdinal(i32);
+
+/// Per-command material ordering values derived from one panel-local ordinal.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct DrawCommandDepth {
+    ordinal:          DrawOrdinal,
+    depth_bias:       f32,
+    oit_depth_offset: f32,
+}
+
+/// Index-aligned draw-order projection for one panel's command stream.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct DrawOrderProjection {
+    depths: Vec<Option<DrawCommandDepth>>,
+}
 
 /// Sort key for draw commands: `DrawLayer`, then `DrawStep::ordinal`, then
 /// `RenderCommand` stream index.
@@ -72,15 +82,21 @@ pub(crate) struct HierarchicalDrawKey {
 /// Lines are vertex-pulled across many panels like text, so one batch render
 /// item cannot use a per-command material depth without fragmenting batches.
 /// The shader carries per-record command depth; this coarse lane keeps lines
-/// above backing quads and below text in sorted, non-OIT views.
-pub(crate) const BATCH_PANEL_LINE_DEPTH_BIAS: f32 = 63.0 * LAYER_DEPTH_BIAS;
+/// in the fixed `DrawStep::Lines` lane. Per-record data carries each command's
+/// panel-local ordinal.
+pub(crate) const BATCH_PANEL_LINE_DEPTH_BIAS: f32 = LAYER_DEPTH_BIAS;
 
 impl DrawOrdinal {
-    /// Converts a geometry draw slot, saturating at `i32::MAX`. A
-    /// saturated ordinal sits above every text layer (`i8`), so it
-    /// composites in front of all text on sorted views and clamps to the
-    /// `0.0` OIT offset — unreachable in practice (a panel would need
-    /// 2^31 geometry commands).
+    /// Converts a fixed draw step to its coarse batch ordinal.
+    pub(crate) const fn from_draw_step(step: DrawStep) -> Self {
+        Self(match step {
+            DrawStep::Fill => 0,
+            DrawStep::Lines => 1,
+            DrawStep::Text => 2,
+        })
+    }
+
+    /// Converts a legacy geometry draw slot, saturating at `i32::MAX`.
     pub(crate) fn from_draw_slot(draw_slot: usize) -> Self {
         Self(i32::try_from(draw_slot).unwrap_or(i32::MAX))
     }
@@ -90,14 +106,67 @@ impl DrawOrdinal {
     /// drawn back-to-front), so a higher ordinal composites in front.
     pub(crate) fn depth_bias(self) -> f32 { self.0.to_f32() * LAYER_DEPTH_BIAS }
 
-    /// OIT fragment depth offset, added to `position.z` before `oit_draw`
-    /// (reverse-Z: positive = closer). Clamped at `0.0`: ordinals below the
-    /// default text layer move backward from zero so default-layer text
-    /// composites over them, while ordinals at or above it stay at `0.0` so
-    /// unrelated opaque geometry keeps real depth authority over panel
-    /// content.
-    pub(crate) fn oit_depth_offset(self) -> f32 {
-        (self.0 - i32::from(DEFAULT_DRAW_LAYER)).min(0).to_f32() * OIT_DEPTH_STEP
+    /// Raw OIT fragment depth offset from rank zero.
+    #[cfg_attr(
+        not(test),
+        expect(
+            dead_code,
+            reason = "Phase 5 removes old ordinal helpers after render reads DrawOrderProjection"
+        )
+    )]
+    pub(crate) fn oit_depth_offset(self) -> f32 { self.0.to_f32() * OIT_DEPTH_STEP }
+
+    fn text_anchored_oit_depth_offset(self, text_anchor: Self) -> f32 {
+        (self.0 - text_anchor.0).to_f32() * OIT_DEPTH_STEP
+    }
+
+    pub(crate) fn to_usize(self) -> usize { usize::try_from(self.0).unwrap_or(usize::MAX) }
+}
+
+impl DrawCommandDepth {
+    fn new(ordinal: DrawOrdinal, text_anchor: DrawOrdinal) -> Self {
+        Self {
+            ordinal,
+            depth_bias: ordinal.depth_bias(),
+            oit_depth_offset: ordinal.text_anchored_oit_depth_offset(text_anchor),
+        }
+    }
+
+    /// Returns the dense panel-local command ordinal.
+    pub(crate) const fn ordinal(self) -> DrawOrdinal { self.ordinal }
+
+    /// Returns the ordinal as a nonnegative index.
+    pub(crate) fn ordinal_index(self) -> usize { self.ordinal.to_usize() }
+
+    /// Returns the `Transparent3d` sort bias for this command.
+    pub(crate) const fn depth_bias(self) -> f32 { self.depth_bias }
+
+    /// Returns the OIT `position.z` offset for this command.
+    pub(crate) const fn oit_depth_offset(self) -> f32 { self.oit_depth_offset }
+}
+
+impl DrawOrderProjection {
+    /// Builds the command-indexed projection from a full panel command stream.
+    pub(crate) fn from_commands(commands: &[RenderCommand]) -> Self {
+        let ordinals = enumerate_ordinals(commands);
+        let text_anchor = commands
+            .iter()
+            .enumerate()
+            .filter(|(_, command)| command.kind.draw_step() == Some(DrawStep::Text))
+            .filter_map(|(index, _)| ordinals[index])
+            .min()
+            .unwrap_or_default();
+        let depths = ordinals
+            .into_iter()
+            .map(|ordinal| ordinal.map(|ordinal| DrawCommandDepth::new(ordinal, text_anchor)))
+            .collect();
+        Self { depths }
+    }
+
+    /// Returns this command's projected depth values, or `None` for scissor
+    /// commands and out-of-range indices.
+    pub(crate) fn depth_for(&self, command_index: usize) -> Option<DrawCommandDepth> {
+        self.depths.get(command_index).copied().flatten()
     }
 }
 
@@ -123,16 +192,7 @@ impl PartialOrd for HierarchicalDrawKey {
 /// Enumerates draw-participating commands into panel-local dense ranks.
 ///
 /// The returned vector is index-aligned with `commands`; scissor commands map
-/// to `None`. Each `DrawOrdinal` stores the dense rank. Callers deriving the
-/// text-anchored OIT offset subtract the lowest `DrawStep::Text` rank, or `0`
-/// for panels with no text commands.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "render reads this projection after the draw-order migration"
-    )
-)]
+/// to `None`. Each `DrawOrdinal` stores the dense rank.
 pub(crate) fn enumerate_ordinals(commands: &[RenderCommand]) -> Vec<Option<DrawOrdinal>> {
     let mut keyed_commands = commands
         .iter()
@@ -250,6 +310,7 @@ mod tests {
     use bevy_kana::ToI32;
 
     use super::*;
+    use crate::cascade::DEFAULT_DRAW_LAYER;
     use crate::layout::Border;
     use crate::layout::BoundingBox;
     use crate::layout::RectangleSource;
@@ -357,7 +418,7 @@ mod tests {
         let step = command.kind.draw_step()?;
         let lane = match step {
             DrawStep::Fill => DrawOrdinal::from_draw_slot(command.draw_slot).0,
-            DrawStep::Lines => line_batch_lane(),
+            DrawStep::Lines => previous_line_batch_lane(),
             DrawStep::Text => i32::from(DEFAULT_DRAW_LAYER),
         };
         Some(ShippedOracleKey {
@@ -366,7 +427,11 @@ mod tests {
         })
     }
 
-    fn line_batch_lane() -> i32 { (BATCH_PANEL_LINE_DEPTH_BIAS / LAYER_DEPTH_BIAS).to_i32() }
+    fn current_line_batch_lane() -> i32 {
+        (BATCH_PANEL_LINE_DEPTH_BIAS / LAYER_DEPTH_BIAS).to_i32()
+    }
+
+    fn previous_line_batch_lane() -> i32 { i32::from(DEFAULT_DRAW_LAYER) - 1 }
 
     fn drawing_indices(commands: &[RenderCommand]) -> Vec<usize> {
         commands
@@ -420,8 +485,8 @@ mod tests {
     fn assert_pairwise_order_agreement(commands: &[RenderCommand]) {
         // `shipped_oracle_key` and `enumerate_ordinals` agree when each
         // `DrawStep::Fill` has a `RenderCommand::draw_slot` strictly below
-        // `line_batch_lane()` (`63`). At `draw_slot == 63`, the shipped lanes
-        // assign `DrawStep::Fill` and `DrawStep::Lines` the same lane and
+        // `previous_line_batch_lane()`. At the previous line lane, the shipped
+        // lanes assign `DrawStep::Fill` and `DrawStep::Lines` the same lane and
         // break the tie with `stream_index`; `HierarchicalDrawKey` sorts by
         // `DrawStep::ordinal` before `tree_order`, so `DrawStep::Fill` stays
         // below `DrawStep::Lines`.
@@ -497,28 +562,21 @@ mod tests {
                 low_ordinal.depth_bias() < high_ordinal.depth_bias(),
                 "sorted bias must rise from {low} to {high}",
             );
-            if low < DEFAULT_DRAW_LAYER {
-                assert!(
-                    low_ordinal.oit_depth_offset() < high_ordinal.oit_depth_offset(),
-                    "OIT offset must rise from {low} to {high}",
-                );
-            } else {
-                assert_eq!(
-                    low_ordinal.oit_depth_offset().to_bits(),
-                    high_ordinal.oit_depth_offset().to_bits(),
-                    "OIT offsets at or above the default layer are clamped equal",
-                );
-            }
+            assert!(
+                low_ordinal.oit_depth_offset() < high_ordinal.oit_depth_offset(),
+                "OIT offset must rise from {low} to {high}",
+            );
         }
     }
 
     #[test]
-    fn default_layer_reproduces_previous_batch_material_values() {
-        let text_ordinal = DrawOrdinal::from(DrawLayer(DEFAULT_DRAW_LAYER));
-        // Pre-DrawOrdinal constants: BATCH_TEXT_DEPTH_BIAS = 64.0 ×
-        // LAYER_DEPTH_BIAS and a hard-coded 0.0 OIT offset.
-        assert_eq!(text_ordinal.depth_bias().to_bits(), 64.0f32.to_bits());
-        assert_eq!(text_ordinal.oit_depth_offset().to_bits(), 0.0f32.to_bits());
+    fn draw_step_text_batch_lane_uses_text_step() {
+        let text_ordinal = DrawOrdinal::from_draw_step(DrawStep::Text);
+        assert_eq!(
+            text_ordinal.depth_bias().to_bits(),
+            (DrawOrdinal::from_draw_step(DrawStep::Lines).depth_bias() + LAYER_DEPTH_BIAS)
+                .to_bits()
+        );
     }
 
     #[test]
@@ -531,12 +589,11 @@ mod tests {
     }
 
     #[test]
-    fn backing_oit_offsets_stay_behind_default_text_and_rise_with_draw_slot() {
+    fn raw_oit_offsets_rise_with_draw_slot() {
         let default_layer = usize::try_from(DEFAULT_DRAW_LAYER).expect("default layer is positive");
         let mut previous = f32::NEG_INFINITY;
         for draw_slot in 0..default_layer {
             let offset = DrawOrdinal::from_draw_slot(draw_slot).oit_depth_offset();
-            assert!(offset < 0.0, "slot {draw_slot} must sit behind text");
             assert!(offset > previous, "offsets must rise with draw slot");
             previous = offset;
         }
@@ -562,9 +619,22 @@ mod tests {
     }
 
     #[test]
+    fn line_batch_lane_uses_lines_step() {
+        assert_eq!(
+            current_line_batch_lane(),
+            i32::from(DrawStep::Lines.ordinal()),
+        );
+    }
+
+    #[test]
     fn level_zero_fill_stays_below_lines_at_lane_boundary() {
-        let line_lane = usize::try_from(line_batch_lane()).expect("line lane is nonnegative");
-        assert_eq!(line_lane, 63, "line lane stays at the documented boundary");
+        let line_lane =
+            usize::try_from(previous_line_batch_lane()).expect("line lane is nonnegative");
+        assert_eq!(
+            line_lane,
+            usize::try_from(DEFAULT_DRAW_LAYER - 1).expect("default layer leaves a line lane"),
+            "previous line lane stays at the documented boundary",
+        );
 
         let mut commands = commands_from_kinds([(lines(), None), (rectangle(), None)]);
         commands[1].draw_slot = line_lane;
@@ -614,6 +684,31 @@ mod tests {
     fn hierarchical_depth_bias_and_oit_orderings_agree() {
         for commands in representative_streams() {
             assert_depth_bias_and_text_anchored_oit_agree(&commands);
+        }
+    }
+
+    #[test]
+    fn draw_order_projection_uses_enumerated_rank_and_text_anchor() {
+        for commands in representative_streams() {
+            let ordinals = enumerate_ordinals(&commands);
+            let text_anchor = text_anchor_rank(&commands, &ordinals);
+            let projection = DrawOrderProjection::from_commands(&commands);
+
+            for index in drawing_indices(&commands) {
+                let ordinal = ordinal_at(&ordinals, index);
+                let draw_depth = projection
+                    .depth_for(index)
+                    .expect("drawing command receives projected depth");
+                assert_eq!(draw_depth.ordinal(), ordinal);
+                assert_eq!(
+                    draw_depth.depth_bias().to_bits(),
+                    ordinal.depth_bias().to_bits(),
+                );
+                assert_eq!(
+                    draw_depth.oit_depth_offset().to_bits(),
+                    ((ordinal.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
+                );
+            }
         }
     }
 

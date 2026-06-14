@@ -24,7 +24,7 @@ pub struct RenderCommand {
     pub element_idx: usize,
     /// Optional authored draw layer from the source element.
     pub z_index:     Option<DrawLayer>,
-    /// Coplanar geometry draw slot, the panel-local `DrawOrdinal` source.
+    /// Legacy coplanar geometry draw slot kept until the counter is removed.
     ///
     /// Slot-consuming kinds ([`Rectangle`](RenderCommandKind::Rectangle),
     /// [`Border`](RenderCommandKind::Border), [`Image`](RenderCommandKind::Image),
@@ -50,7 +50,7 @@ pub enum RectangleSource {
 
 /// Fixed draw step derived from a [`RenderCommandKind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DrawStep {
+pub(crate) enum DrawStep {
     /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`], and
     /// [`RenderCommandKind::Image`] commands.
     Fill,
@@ -116,7 +116,7 @@ pub enum RenderCommandKind {
 impl RenderCommandKind {
     /// Returns the fixed [`DrawStep`] for commands that draw pixels.
     #[must_use]
-    pub const fn draw_step(&self) -> Option<DrawStep> {
+    pub(crate) const fn draw_step(&self) -> Option<DrawStep> {
         match self {
             Self::Rectangle { .. } | Self::Border { .. } | Self::Image { .. } => {
                 Some(DrawStep::Fill)
@@ -127,9 +127,7 @@ impl RenderCommandKind {
         }
     }
 
-    /// Whether this command occupies a [`RenderCommand::draw_slot`]. Text gets
-    /// its draw ordinal from `DrawLayer` and scissor commands draw nothing,
-    /// so neither consumes a slot.
+    /// Whether this command occupies a legacy [`RenderCommand::draw_slot`].
     #[must_use]
     pub const fn consumes_draw_slot(&self) -> bool {
         match self {

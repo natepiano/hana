@@ -58,6 +58,8 @@ use crate::render::VisualBatchKey;
 use crate::render::VisualMaterialInterner;
 use crate::render::VisualShadow;
 use crate::render::constants;
+use crate::render::constants::DrawCommandDepth;
+use crate::render::constants::DrawOrderProjection;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -344,6 +346,7 @@ struct PanelLineReconcileContext<'a> {
 
 struct LinePrimitiveSource<'a> {
     element_index: usize,
+    draw_depth:    DrawCommandDepth,
     line:          &'a ResolvedPanelLine,
     primitive:     &'a ResolvedPanelLinePrimitive,
 }
@@ -369,7 +372,6 @@ struct LineMergeKey {
 impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
     fn from(source: &LinePrimitiveSource<'_>) -> Self {
         let linear = source.primitive.color().to_linear();
-        let layering = source.line.layering();
         Self {
             element_index: source.element_index,
             color:         [
@@ -381,8 +383,8 @@ impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
             clip:          source.primitive.clip().map(bounding_box_bits),
             owner_bounds:  bounding_box_bits(source.line.owner_bounds()),
             layering:      [
-                layering.depth_bias.to_bits(),
-                layering.oit_depth_offset.to_bits(),
+                source.draw_depth.depth_bias().to_bits(),
+                source.draw_depth.oit_depth_offset().to_bits(),
             ],
         }
     }
@@ -499,7 +501,12 @@ pub(super) fn reconcile_panel_line_batches(
             panel_hairline_fade: panel_hairline_fade
                 .map_or(hairline_fade_default.0, |resolved| resolved.0),
         };
-        let records = collect_panel_records(&context, &result.commands, &mut store);
+        let records = collect_panel_records(
+            &context,
+            &result.commands,
+            computed.draw_order(),
+            &mut store,
+        );
         store.upsert_panel(panel_entity, records);
     }
 
@@ -523,25 +530,33 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
 fn collect_panel_records(
     context: &PanelLineReconcileContext<'_>,
     render_commands: &[RenderCommand],
+    draw_order: &DrawOrderProjection,
     store: &mut PanelLineBatchStore,
 ) -> Vec<(LineBatchKey, LineBatchRecord)> {
-    group_line_primitives(collect_line_primitives(render_commands))
+    group_line_primitives(collect_line_primitives(render_commands, draw_order))
         .into_iter()
         .filter_map(|group| build_panel_line_group(context, group, store))
         .map(|built| (built.batch_key, built.record))
         .collect()
 }
 
-fn collect_line_primitives(render_commands: &[RenderCommand]) -> Vec<LinePrimitiveSource<'_>> {
+fn collect_line_primitives<'a>(
+    render_commands: &'a [RenderCommand],
+    draw_order: &DrawOrderProjection,
+) -> Vec<LinePrimitiveSource<'a>> {
     let mut primitives = Vec::new();
-    for command in render_commands {
+    for (command_index, command) in render_commands.iter().enumerate() {
         let RenderCommandKind::Lines { lines } = &command.kind else {
+            continue;
+        };
+        let Some(draw_depth) = draw_order.depth_for(command_index) else {
             continue;
         };
         for line in lines {
             for primitive in line.primitives() {
                 primitives.push(LinePrimitiveSource {
                     element_index: command.element_idx,
+                    draw_depth,
                     line,
                     primitive,
                 });
@@ -591,11 +606,11 @@ fn build_panel_line_group(
     // group at the depth the front-most authoring order produced alone.
     let depth_bias = members
         .iter()
-        .map(|source| primitive_depth_bias(source.line, source.primitive))
+        .map(|source| primitive_depth_bias(source))
         .fold(f32::INFINITY, f32::min);
     let oit_depth_offset = members
         .iter()
-        .map(|source| primitive_oit_depth_offset(source.line, source.primitive))
+        .map(|source| primitive_oit_depth_offset(source))
         .fold(f32::INFINITY, f32::min);
     let base = constants::resolve_material(
         context.panel.tree().element_material(first.element_index),
@@ -651,26 +666,25 @@ fn build_panel_line_group(
     })
 }
 
-fn primitive_depth_bias(line: &ResolvedPanelLine, primitive: &ResolvedPanelLinePrimitive) -> f32 {
-    let line_depth = line_depth_order(line).to_f32().mul_add(
+fn primitive_depth_bias(source: &LinePrimitiveSource<'_>) -> f32 {
+    let line_depth = line_depth_order(source.line).to_f32().mul_add(
         PANEL_LINE_LINE_DEPTH_BIAS_STEP,
-        line.layering().depth_bias(),
+        source.draw_depth.depth_bias(),
     );
-    primitive
+    source
+        .primitive
         .part_order()
         .to_f32()
         .mul_add(PANEL_LINE_PART_DEPTH_BIAS_STEP, line_depth)
 }
 
-fn primitive_oit_depth_offset(
-    line: &ResolvedPanelLine,
-    primitive: &ResolvedPanelLinePrimitive,
-) -> f32 {
-    let line_depth = line_depth_order(line).to_f32().mul_add(
+fn primitive_oit_depth_offset(source: &LinePrimitiveSource<'_>) -> f32 {
+    let line_depth = line_depth_order(source.line).to_f32().mul_add(
         PANEL_LINE_LINE_OIT_DEPTH_STEP,
-        line.layering().oit_depth_offset(),
+        source.draw_depth.oit_depth_offset(),
     );
-    primitive
+    source
+        .primitive
         .part_order()
         .to_f32()
         .mul_add(PANEL_LINE_PART_OIT_DEPTH_STEP, line_depth)
@@ -1250,14 +1264,33 @@ mod tests {
     fn line_ordinal_contributes_to_depth_inside_grouped_command() {
         let first = test_line(0);
         let second = test_line(1);
+        let command_bounds = first.visual_bounds();
+        let commands = vec![RenderCommand {
+            bounds:      command_bounds,
+            element_idx: 0,
+            kind:        RenderCommandKind::Lines {
+                lines: vec![first.clone(), second.clone()],
+            },
+            z_index:     None,
+            draw_slot:   0,
+        }];
+        let draw_depth = draw_depth_for_command(&commands, 0);
+        let first_source = LinePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            line: &first,
+            primitive: &first.primitives()[0],
+        };
+        let second_source = LinePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            line: &second,
+            primitive: &second.primitives()[0],
+        };
 
+        assert!(primitive_depth_bias(&second_source) > primitive_depth_bias(&first_source));
         assert!(
-            primitive_depth_bias(&second, &second.primitives()[0])
-                > primitive_depth_bias(&first, &first.primitives()[0])
-        );
-        assert!(
-            primitive_oit_depth_offset(&second, &second.primitives()[0])
-                > primitive_oit_depth_offset(&first, &first.primitives()[0])
+            primitive_oit_depth_offset(&second_source) > primitive_oit_depth_offset(&first_source)
         );
     }
 
@@ -1323,7 +1356,8 @@ mod tests {
             draw_slot:   0,
         }];
 
-        let collected = collect_line_primitives(&commands);
+        let projection = DrawOrderProjection::from_commands(&commands);
+        let collected = collect_line_primitives(&commands, &projection);
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].primitive.clip(), Some(inherited_clip));
@@ -1550,6 +1584,17 @@ mod tests {
             color: Color::WHITE,
             hairline_fade: None,
             primitives: vec![primitive],
+        }
+    }
+
+    fn draw_depth_for_command(
+        commands: &[RenderCommand],
+        command_index: usize,
+    ) -> DrawCommandDepth {
+        let projection = DrawOrderProjection::from_commands(commands);
+        match projection.depth_for(command_index) {
+            Some(draw_depth) => draw_depth,
+            None => panic!("line command should receive draw depth"),
         }
     }
 }
