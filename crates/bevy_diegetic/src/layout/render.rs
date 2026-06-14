@@ -8,6 +8,7 @@ use super::Border;
 use super::BoundingBox;
 use super::ResolvedPanelLine;
 use super::TextStyle;
+use crate::cascade::DrawLayer;
 
 /// A single render command produced by the layout pass.
 ///
@@ -21,6 +22,8 @@ pub struct RenderCommand {
     pub kind:        RenderCommandKind,
     /// Index of the source element in the `LayoutTree`.
     pub element_idx: usize,
+    /// Optional authored draw layer from the source element.
+    pub z_index:     Option<DrawLayer>,
     /// Coplanar geometry draw slot, the panel-local `DrawOrdinal` source.
     ///
     /// Slot-consuming kinds ([`Rectangle`](RenderCommandKind::Rectangle),
@@ -43,6 +46,30 @@ pub enum RectangleSource {
     Background,
     /// Line drawn between children from a [`Border::between_children`] width.
     BetweenChildrenBorder,
+}
+
+/// Fixed draw step derived from a [`RenderCommandKind`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawStep {
+    /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`], and
+    /// [`RenderCommandKind::Image`] commands.
+    Fill,
+    /// [`RenderCommandKind::Lines`] commands.
+    Lines,
+    /// [`RenderCommandKind::Text`] commands.
+    Text,
+}
+
+impl DrawStep {
+    /// Returns the stable ordinal for `DrawStep` sort keys.
+    #[must_use]
+    pub const fn ordinal(self) -> u8 {
+        match self {
+            Self::Fill => 0,
+            Self::Lines => 1,
+            Self::Text => 2,
+        }
+    }
 }
 
 /// The specific visual to render.
@@ -87,6 +114,19 @@ pub enum RenderCommandKind {
 }
 
 impl RenderCommandKind {
+    /// Returns the fixed [`DrawStep`] for commands that draw pixels.
+    #[must_use]
+    pub const fn draw_step(&self) -> Option<DrawStep> {
+        match self {
+            Self::Rectangle { .. } | Self::Border { .. } | Self::Image { .. } => {
+                Some(DrawStep::Fill)
+            },
+            Self::Lines { .. } => Some(DrawStep::Lines),
+            Self::Text { .. } => Some(DrawStep::Text),
+            Self::ScissorStart | Self::ScissorEnd => None,
+        }
+    }
+
     /// Whether this command occupies a [`RenderCommand::draw_slot`]. Text gets
     /// its draw ordinal from `DrawLayer` and scissor commands draw nothing,
     /// so neither consumes a slot.
@@ -98,6 +138,65 @@ impl RenderCommandKind {
             | Self::Image { .. }
             | Self::Lines { .. } => true,
             Self::Text { .. } | Self::ScissorStart | Self::ScissorEnd => false,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const FILL_ORDINAL: u8 = 0;
+    const LINES_ORDINAL: u8 = 1;
+    const TEXT_ORDINAL: u8 = 2;
+
+    #[test]
+    fn draw_step_ordinals_are_fixed() {
+        assert_eq!(DrawStep::Fill.ordinal(), FILL_ORDINAL);
+        assert_eq!(DrawStep::Lines.ordinal(), LINES_ORDINAL);
+        assert_eq!(DrawStep::Text.ordinal(), TEXT_ORDINAL);
+    }
+
+    #[test]
+    fn render_command_kinds_map_to_draw_steps() {
+        let cases = [
+            (
+                RenderCommandKind::Rectangle {
+                    color:  Color::WHITE,
+                    source: RectangleSource::Background,
+                },
+                Some(DrawStep::Fill),
+            ),
+            (
+                RenderCommandKind::Border {
+                    border: Border::default(),
+                },
+                Some(DrawStep::Fill),
+            ),
+            (
+                RenderCommandKind::Image {
+                    handle: Handle::<Image>::default(),
+                    tint:   Color::WHITE,
+                },
+                Some(DrawStep::Fill),
+            ),
+            (
+                RenderCommandKind::Lines { lines: Vec::new() },
+                Some(DrawStep::Lines),
+            ),
+            (
+                RenderCommandKind::Text {
+                    text:   String::new(),
+                    config: TextStyle::default(),
+                },
+                Some(DrawStep::Text),
+            ),
+            (RenderCommandKind::ScissorStart, None),
+            (RenderCommandKind::ScissorEnd, None),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(kind.draw_step(), expected);
         }
     }
 }

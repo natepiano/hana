@@ -360,6 +360,13 @@ emission-order input feeding `tree_order`.
 - `render/panel_text/reconcile.rs` — re-key image-material rebuild on the
   ordinal/step instead of `draw_slot` (`:587–589`, material build `:642`); text
   reuse key `(PanelFieldId, line_index)` is unchanged.
+- `layout/element.rs` — `classify_element_change` must compare `draw_layer`
+  (Phase 2 left it destructured as `draw_layer: _`, inert). Once render reads
+  `z_index`, a `.draw_layer()`-only authoring change must classify as a
+  visual change so the command stream regenerates with the new ordinal —
+  otherwise it takes the `Identical` skip (`panel/compute_layout.rs:96`) and the
+  panel keeps stale depth. Acceptance: toggling only `draw_layer` re-orders the
+  element on screen.
 - Cross-cutting integration point (the one risk in this phase): the enumeration
   needs every command's `z_index` at panel-geometry time. Geometry `z_index`
   comes from the `Element` field (Phase 2); text `z_index` resolves through the

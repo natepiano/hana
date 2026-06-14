@@ -111,6 +111,7 @@ mod tests {
                 source: RectangleSource::Background,
             },
             element_idx: 0,
+            z_index: None,
             draw_slot: 0,
         }
     }
@@ -120,6 +121,7 @@ mod tests {
             bounds,
             kind: RenderCommandKind::ScissorStart,
             element_idx: 0,
+            z_index: None,
             draw_slot: 0,
         }
     }
@@ -129,6 +131,7 @@ mod tests {
             bounds,
             kind: RenderCommandKind::ScissorEnd,
             element_idx: 0,
+            z_index: None,
             draw_slot: 0,
         }
     }

@@ -1319,6 +1319,7 @@ mod tests {
             bounds:      primitive_bounds,
             element_idx: 1,
             kind:        RenderCommandKind::Lines { lines: vec![line] },
+            z_index:     None,
             draw_slot:   0,
         }];
 

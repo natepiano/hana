@@ -33,6 +33,7 @@ use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::cascade::DrawLayer;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -110,6 +111,8 @@ pub(super) struct Element {
     pub(super) editable:      Option<ImePanelField>,
     /// Optional paint-only draw data.
     pub(super) draw:          Option<PanelDraw>,
+    /// Optional `DrawLayer` stamped onto this element's render commands.
+    pub(super) draw_layer:    Option<DrawLayer>,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
     pub(super) anti_alias:    Option<AntiAlias>,
@@ -187,6 +190,7 @@ impl Default for Element {
             material:      None,
             editable:      None,
             draw:          None,
+            draw_layer:    None,
             anti_alias:    None,
             hairline_fade: None,
             content:       ElementContent::Empty,
@@ -655,6 +659,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material,
         editable,
         draw,
+        draw_layer: _,
         anti_alias,
         hairline_fade,
         content,
@@ -676,6 +681,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material: n_material,
         editable: n_editable,
         draw: n_draw,
+        draw_layer: _,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
         content: n_content,

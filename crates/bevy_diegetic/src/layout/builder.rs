@@ -51,6 +51,7 @@ use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelFieldId;
+use crate::cascade::DrawLayer;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -77,6 +78,7 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
+    draw_layer:    Option<DrawLayer>,
     anti_alias:    Option<AntiAlias>,
     hairline_fade: Option<HairlineFade>,
 }
@@ -252,6 +254,12 @@ impl El {
         self
     }
 
+    /// Sets the authored draw layer for this element's render commands.
+    pub const fn draw_layer(mut self, draw_layer: DrawLayer) -> Self {
+        self.draw_layer = Some(draw_layer);
+        self
+    }
+
     /// Overrides the anti-alias mode for this element's analytic line marks.
     ///
     /// Without an override the element inherits the panel entity's
@@ -293,6 +301,7 @@ impl El {
             material: self.material,
             editable: self.editable,
             draw: self.draw,
+            draw_layer: self.draw_layer,
             anti_alias: self.anti_alias,
             hairline_fade: self.hairline_fade,
             content,

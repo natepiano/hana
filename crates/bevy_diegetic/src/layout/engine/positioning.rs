@@ -5,6 +5,7 @@ use super::layout_engine::ComputedLayout;
 use super::sizing;
 use super::sizing::Axis;
 use super::wrapping::WrappedText;
+use crate::cascade::DrawLayer;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
 use crate::layout::Border;
@@ -35,15 +36,17 @@ struct EmissionCounters {
     draw_slot: usize,
 }
 
-/// Pushes one command, stamping its [`RenderCommand::draw_slot`]. Slot-consuming
-/// kinds take the current slot and advance the counter; text and scissor
-/// commands record the slot the next geometry command will occupy.
+/// Pushes one command, stamping its [`RenderCommand::draw_slot`] and
+/// [`RenderCommand::z_index`]. Slot-consuming kinds take the current slot and
+/// advance the counter; text and scissor commands record the slot the next
+/// geometry command will occupy.
 fn push_command(
     commands: &mut Vec<RenderCommand>,
     counters: &mut EmissionCounters,
     bounds: BoundingBox,
     kind: RenderCommandKind,
     element_idx: usize,
+    z_index: Option<DrawLayer>,
 ) {
     let draw_slot = counters.draw_slot;
     if kind.consumes_draw_slot() {
@@ -53,6 +56,7 @@ fn push_command(
         bounds,
         kind,
         element_idx,
+        z_index,
         draw_slot,
     });
 }
@@ -179,6 +183,7 @@ fn emit_up_traversal_commands(
             bounds,
             RenderCommandKind::Border { border: *border },
             index,
+            element.draw_layer,
         );
 
         // Between-children borders.
@@ -194,6 +199,7 @@ fn emit_up_traversal_commands(
             bounds,
             RenderCommandKind::ScissorEnd,
             index,
+            element.draw_layer,
         );
     }
 }
@@ -221,6 +227,7 @@ fn emit_down_traversal_commands(
                 source: RectangleSource::Background,
             },
             index,
+            element.draw_layer,
         );
     }
 
@@ -236,6 +243,7 @@ fn emit_down_traversal_commands(
             clip_bounds,
             RenderCommandKind::ScissorStart,
             index,
+            element.draw_layer,
         );
     }
 
@@ -249,7 +257,15 @@ fn emit_down_traversal_commands(
     } = element.content
     {
         emit_text_commands(
-            commands, counters, wrapped, config, text, bounds, index, font_scale,
+            commands,
+            counters,
+            wrapped,
+            config,
+            text,
+            bounds,
+            index,
+            font_scale,
+            element.draw_layer,
         );
     }
 
@@ -264,6 +280,7 @@ fn emit_down_traversal_commands(
                 tint,
             },
             index,
+            element.draw_layer,
         );
     }
 }
@@ -322,6 +339,7 @@ fn emit_line_commands(
         command_bounds,
         RenderCommandKind::Lines { lines },
         index,
+        element.draw_layer,
     );
 }
 
@@ -335,6 +353,7 @@ fn emit_text_commands(
     bounds: BoundingBox,
     index: usize,
     font_scale: f32,
+    z_index: Option<DrawLayer>,
 ) {
     // Render commands store font sizes in layout units so downstream
     // renderers don't need to know about the font unit conversion.
@@ -359,6 +378,7 @@ fn emit_text_commands(
                     config: scaled_config.clone(),
                 },
                 index,
+                z_index,
             );
         }
     } else {
@@ -372,6 +392,7 @@ fn emit_text_commands(
                 config: scaled_config,
             },
             index,
+            z_index,
         );
     }
 }
@@ -802,6 +823,7 @@ fn emit_between_borders(
                     source: RectangleSource::BetweenChildrenBorder,
                 },
                 parent_idx,
+                parent.draw_layer,
             );
         } else {
             let midpoint = (b_bounds.y - (a_bounds.y + a_bounds.height))
@@ -821,6 +843,7 @@ fn emit_between_borders(
                     source: RectangleSource::BetweenChildrenBorder,
                 },
                 parent_idx,
+                parent.draw_layer,
             );
         }
     }
