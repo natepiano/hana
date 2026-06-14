@@ -84,7 +84,7 @@ cascade_attr!(
     /// A text run's authored z-level on its panel's draw-order axis. The
     /// global default composites default-layer text above default-layer panel
     /// geometry; lower values render behind commands with higher draw layers.
-    DrawLayer(i8),
+    DrawZIndex(i8),
     default = DEFAULT_DRAW_LAYER,
     eq
 );

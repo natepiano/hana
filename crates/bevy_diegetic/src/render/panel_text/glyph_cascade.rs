@@ -2,7 +2,7 @@ use bevy::prelude::*;
 
 use crate::cascade;
 use crate::cascade::CascadeDefault;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::layout::Lighting;
@@ -30,12 +30,12 @@ pub(super) fn seed_panel_text_child_glyph(
     trigger: On<Add, TextContent>,
     lighting_overrides: Query<&Override<Lighting>>,
     sidedness_overrides: Query<&Override<Sidedness>>,
-    draw_layer_overrides: Query<&Override<DrawLayer>>,
+    draw_layer_overrides: Query<&Override<DrawZIndex>>,
     anti_alias_overrides: Query<&Override<AntiAlias>>,
     parents: Query<&ChildOf>,
     lighting_default: Res<CascadeDefault<Lighting>>,
     sidedness_default: Res<CascadeDefault<Sidedness>>,
-    draw_layer_default: Res<CascadeDefault<DrawLayer>>,
+    draw_layer_default: Res<CascadeDefault<DrawZIndex>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     mut commands: Commands,
 ) {
@@ -52,7 +52,7 @@ pub(super) fn seed_panel_text_child_glyph(
         &parents,
         sidedness_default.0,
     );
-    let draw_layer = cascade::resolve_walk::<DrawLayer>(
+    let draw_layer = cascade::resolve_walk::<DrawZIndex>(
         entity,
         &draw_layer_overrides,
         &parents,
@@ -113,14 +113,14 @@ mod tests {
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
-            .add_plugins(CascadePlugin::<DrawLayer>::default())
+            .add_plugins(CascadePlugin::<DrawZIndex>::default())
             .add_observer(seed_panel_text_child_glyph)
             .add_systems(PostUpdate, reconcile::reconcile_panel_text_children);
         app
     }
 
     /// One-label tree, optionally authoring a draw layer on the label.
-    fn label_tree(draw_layer: Option<DrawLayer>) -> LayoutTree {
+    fn label_tree(draw_layer: Option<DrawZIndex>) -> LayoutTree {
         let mut style = TextStyle::new(13.0);
         if let Some(layer) = draw_layer {
             style = style.with_draw_layer(layer);
@@ -131,11 +131,11 @@ mod tests {
     }
 
     /// Resolved draw layer of the scene's single panel label.
-    fn single_label_draw_layer(app: &mut App) -> DrawLayer {
+    fn single_label_draw_layer(app: &mut App) -> DrawZIndex {
         let mut query = app
             .world_mut()
-            .query_filtered::<&Resolved<DrawLayer>, With<TextContent>>();
-        let resolved: Vec<DrawLayer> = query.iter(app.world()).map(|r| r.0).collect();
+            .query_filtered::<&Resolved<DrawZIndex>, With<TextContent>>();
+        let resolved: Vec<DrawZIndex> = query.iter(app.world()).map(|r| r.0).collect();
         assert_eq!(resolved.len(), 1, "expected exactly one panel label");
         resolved[0]
     }
@@ -156,7 +156,7 @@ mod tests {
 
         assert_eq!(
             single_label_draw_layer(&mut app),
-            DrawLayer(DEFAULT_DRAW_LAYER)
+            DrawZIndex(DEFAULT_DRAW_LAYER)
         );
     }
 
@@ -165,7 +165,7 @@ mod tests {
         let mut app = test_app();
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
-            .with_tree(label_tree(Some(DrawLayer(10))))
+            .with_tree(label_tree(Some(DrawZIndex(10))))
             .build()
             .expect("test panel should build");
         app.world_mut().spawn(panel);
@@ -179,10 +179,10 @@ mod tests {
         // the global default.
         let mut overrides = app
             .world_mut()
-            .query_filtered::<&Override<DrawLayer>, With<TextContent>>();
-        let authored: Vec<DrawLayer> = overrides.iter(app.world()).map(|o| o.0).collect();
-        assert_eq!(authored, vec![DrawLayer(10)]);
-        assert_eq!(single_label_draw_layer(&mut app), DrawLayer(10));
+            .query_filtered::<&Override<DrawZIndex>, With<TextContent>>();
+        let authored: Vec<DrawZIndex> = overrides.iter(app.world()).map(|o| o.0).collect();
+        assert_eq!(authored, vec![DrawZIndex(10)]);
+        assert_eq!(single_label_draw_layer(&mut app), DrawZIndex(10));
     }
 
     #[test]
@@ -190,7 +190,7 @@ mod tests {
         let mut app = test_app();
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
-            .with_tree(label_tree(Some(DrawLayer(10))))
+            .with_tree(label_tree(Some(DrawZIndex(10))))
             .build()
             .expect("test panel should build");
         let panel_entity = app.world_mut().spawn(panel).id();
@@ -198,7 +198,7 @@ mod tests {
         for _ in 0..3 {
             app.update();
         }
-        assert_eq!(single_label_draw_layer(&mut app), DrawLayer(10));
+        assert_eq!(single_label_draw_layer(&mut app), DrawZIndex(10));
 
         // The label drops its own draw layer. `reconcile` removes the label's
         // `Override<DrawLayer>` (its update arm), and the propagation pass
@@ -211,7 +211,7 @@ mod tests {
         }
         assert_eq!(
             single_label_draw_layer(&mut app),
-            DrawLayer(DEFAULT_DRAW_LAYER)
+            DrawZIndex(DEFAULT_DRAW_LAYER)
         );
     }
 
@@ -223,14 +223,14 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(entity)
-            .override_draw_layer(DrawLayer(-3));
+            .override_draw_layer(DrawZIndex(-3));
         app.update();
         assert_eq!(
             app.world()
-                .get::<Resolved<DrawLayer>>(entity)
+                .get::<Resolved<DrawZIndex>>(entity)
                 .expect("override self-heals Resolved<DrawLayer>")
                 .0,
-            DrawLayer(-3)
+            DrawZIndex(-3)
         );
 
         app.world_mut()
@@ -240,10 +240,10 @@ mod tests {
         app.update();
         assert_eq!(
             app.world()
-                .get::<Resolved<DrawLayer>>(entity)
+                .get::<Resolved<DrawZIndex>>(entity)
                 .expect("inherit re-heals Resolved<DrawLayer>")
                 .0,
-            DrawLayer(DEFAULT_DRAW_LAYER)
+            DrawZIndex(DEFAULT_DRAW_LAYER)
         );
     }
 }

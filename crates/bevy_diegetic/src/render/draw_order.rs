@@ -28,7 +28,7 @@ use super::constants::DRAW_LEVEL_STRIDE;
 use super::constants::DRAW_LEVEL_TEXT_SUBLANE;
 use super::constants::LAYER_DEPTH_BIAS;
 use super::constants::OIT_DEPTH_STEP;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 use crate::layout::DrawStep;
 use crate::layout::RenderCommand;
 
@@ -67,7 +67,7 @@ pub(crate) struct DrawOrderProjection {
 /// `RenderCommand` stream index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct HierarchicalDrawKey {
-    z_index:    Option<DrawLayer>,
+    z_index:    Option<DrawZIndex>,
     step:       DrawStep,
     tree_order: u32,
 }
@@ -281,7 +281,7 @@ mod tests {
     use crate::layout::TextStyle;
     use crate::render::constants::DRAW_LEVEL_GEOMETRY_LANES;
 
-    const LOWERED_LEVEL: DrawLayer = DrawLayer(-1);
+    const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
     /// Z-level pairs `(low, high)` spanning negative, default, positive, and
     /// saturated ranges.
     const ORDERED_Z_LEVEL_PAIRS: [(i8, i8); 6] = [
@@ -292,7 +292,7 @@ mod tests {
         (63, 65),
         (65, i8::MAX),
     ];
-    const RAISED_LEVEL: DrawLayer = DrawLayer(1);
+    const RAISED_LEVEL: DrawZIndex = DrawZIndex(1);
 
     fn representative_streams() -> [Vec<RenderCommand>; 2] {
         [
@@ -319,7 +319,7 @@ mod tests {
     }
 
     fn commands_from_kinds<const N: usize>(
-        entries: [(RenderCommandKind, Option<DrawLayer>); N],
+        entries: [(RenderCommandKind, Option<DrawZIndex>); N],
     ) -> Vec<RenderCommand> {
         entries
             .into_iter()
@@ -407,7 +407,7 @@ mod tests {
     fn ranks_for_z_index(
         commands: &[RenderCommand],
         ordinals: &[Option<DrawOrdinal>],
-        z_index: DrawLayer,
+        z_index: DrawZIndex,
     ) -> Vec<i32> {
         commands
             .iter()
@@ -493,8 +493,8 @@ mod tests {
     fn sorted_and_oit_orderings_agree_for_every_z_level_pair() {
         for (low, high) in ORDERED_Z_LEVEL_PAIRS {
             let commands = commands_from_kinds([
-                (rectangle(), Some(DrawLayer(low))),
-                (rectangle(), Some(DrawLayer(high))),
+                (rectangle(), Some(DrawZIndex(low))),
+                (rectangle(), Some(DrawZIndex(high))),
             ]);
             let projection = DrawOrderProjection::from_commands(&commands);
             let low_depth = draw_depth_at(&projection, 0);

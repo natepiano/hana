@@ -122,7 +122,7 @@ mod plugin;
 mod resolved;
 
 pub use attributes::CascadeEntityCommandsExt;
-pub use attributes::DrawLayer;
+pub use attributes::DrawZIndex;
 pub use attributes::FontUnit;
 pub use attributes::TextAlpha;
 pub(crate) use attributes::apply_cascade_override;

@@ -32,6 +32,11 @@ use bevy::image::Image;
 use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
 
+use super::element::ChildOverflow;
+use super::element::Element;
+use super::element::ElementContent;
+use super::element::LayoutTree;
+use super::element::ScrollAnchor;
 use super::AlignX;
 use super::AlignY;
 use super::Border;
@@ -42,18 +47,13 @@ use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
-use super::element::ChildOverflow;
-use super::element::Element;
-use super::element::ElementContent;
-use super::element::LayoutTree;
-use super::element::ScrollAnchor;
+use crate::cascade::DrawZIndex;
+use crate::render::AntiAlias;
+use crate::render::HairlineFade;
 use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelFieldId;
-use crate::cascade::DrawLayer;
-use crate::render::AntiAlias;
-use crate::render::HairlineFade;
 
 /// Shorthand element declaration for the builder API.
 ///
@@ -78,7 +78,7 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
-    draw_layer:    Option<DrawLayer>,
+    draw_layer:    Option<DrawZIndex>,
     anti_alias:    Option<AntiAlias>,
     hairline_fade: Option<HairlineFade>,
 }
@@ -255,7 +255,7 @@ impl El {
     }
 
     /// Sets the authored draw layer for this element's render commands.
-    pub const fn draw_layer(mut self, draw_layer: DrawLayer) -> Self {
+    pub const fn draw_layer(mut self, draw_layer: DrawZIndex) -> Self {
         self.draw_layer = Some(draw_layer);
         self
     }
@@ -301,7 +301,7 @@ impl El {
             material: self.material,
             editable: self.editable,
             draw: self.draw,
-            draw_layer: self.draw_layer,
+            z_index: self.draw_layer,
             anti_alias: self.anti_alias,
             hairline_fade: self.hairline_fade,
             content,

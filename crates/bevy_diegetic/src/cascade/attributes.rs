@@ -4,7 +4,7 @@ use bevy::prelude::*;
 use super::CascadeDefault;
 use super::resolved;
 use super::resolved::CascadeAttr;
-pub use super::resolved::DrawLayer;
+pub use super::resolved::DrawZIndex;
 pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
@@ -49,7 +49,7 @@ pub trait CascadeEntityCommandsExt {
     fn inherit_sidedness(&mut self) -> &mut Self;
 
     /// Author this entity's draw layer.
-    fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self;
+    fn override_draw_layer(&mut self, draw_layer: DrawZIndex) -> &mut Self;
 
     /// Remove this entity's authored draw layer.
     fn inherit_draw_layer(&mut self) -> &mut Self;
@@ -92,11 +92,11 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_sidedness(&mut self) -> &mut Self { remove_cascade_override::<Sidedness>(self) }
 
-    fn override_draw_layer(&mut self, draw_layer: DrawLayer) -> &mut Self {
+    fn override_draw_layer(&mut self, draw_layer: DrawZIndex) -> &mut Self {
         apply_cascade_override(self, draw_layer)
     }
 
-    fn inherit_draw_layer(&mut self) -> &mut Self { remove_cascade_override::<DrawLayer>(self) }
+    fn inherit_draw_layer(&mut self) -> &mut Self { remove_cascade_override::<DrawZIndex>(self) }
 
     fn override_anti_alias(&mut self, anti_alias: AntiAlias) -> &mut Self {
         apply_cascade_override(self, anti_alias)
@@ -156,8 +156,8 @@ pub fn resolved_sidedness(world: &World, entity: Entity) -> Sidedness {
 /// Returns [`DrawLayer`] rather than the inner `i8` — the attribute type
 /// is the public draw-order vocabulary; the bare scalar never crosses the API.
 #[must_use]
-pub fn resolved_draw_layer(world: &World, entity: Entity) -> DrawLayer {
-    resolved_cascade::<DrawLayer>(world, entity)
+pub fn resolved_draw_layer(world: &World, entity: Entity) -> DrawZIndex {
+    resolved_cascade::<DrawZIndex>(world, entity)
 }
 
 /// Resolve an entity's current anti-alias mode.

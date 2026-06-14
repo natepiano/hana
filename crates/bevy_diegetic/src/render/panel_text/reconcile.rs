@@ -10,7 +10,7 @@ use super::TextRunOf;
 use super::layout::PanelTextZLevel;
 use crate::PanelFieldId;
 use crate::cascade;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -43,7 +43,7 @@ struct ReusableChild<'a> {
     alpha:      Option<&'a Override<TextAlpha>>,
     lighting:   Option<&'a Override<Lighting>>,
     sidedness:  Option<&'a Override<Sidedness>>,
-    draw_layer: Option<&'a Override<DrawLayer>>,
+    draw_layer: Option<&'a Override<DrawZIndex>>,
 }
 
 /// One text render command resolved to its reconcile inputs: source element,
@@ -116,7 +116,7 @@ fn collect_existing_text_children<'a>(
         Option<&Override<TextAlpha>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
-        Option<&Override<DrawLayer>>,
+        Option<&Override<DrawZIndex>>,
     )>,
 ) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
@@ -166,7 +166,7 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextAlpha>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
-        Option<&Override<DrawLayer>>,
+        Option<&Override<DrawZIndex>>,
     )>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -303,7 +303,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<Lighting>,
     label_sidedness:  Option<Sidedness>,
-    label_draw_layer: Option<DrawLayer>,
+    label_draw_layer: Option<DrawZIndex>,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
@@ -366,7 +366,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     label_alpha:      Option<AlphaMode>,
     label_lighting:   Option<Lighting>,
     label_sidedness:  Option<Sidedness>,
-    label_draw_layer: Option<DrawLayer>,
+    label_draw_layer: Option<DrawZIndex>,
 }
 
 /// Writes each gated component of a reused panel-text child only when it
@@ -449,7 +449,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         },
         None => {
             if reusable.draw_layer.is_some() {
-                cascade::remove_cascade_override::<DrawLayer>(&mut child);
+                cascade::remove_cascade_override::<DrawZIndex>(&mut child);
             }
         },
     }

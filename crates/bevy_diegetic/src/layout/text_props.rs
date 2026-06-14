@@ -13,7 +13,7 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -215,7 +215,7 @@ pub struct TextStyle {
     alpha_mode:     Option<AlphaMode>,
     /// Per-label draw-layer override. `None` = inherit from the
     /// `DrawLayer` cascade attribute.
-    draw_layer:     Option<DrawLayer>,
+    draw_layer:     Option<DrawZIndex>,
 }
 
 impl PartialEq for TextStyle {
@@ -363,7 +363,7 @@ impl TextStyle {
     /// `None` means the label inherits the panel-level override, then
     /// `CascadeDefault<DrawLayer>`.
     #[must_use]
-    pub const fn draw_layer(&self) -> Option<DrawLayer> { self.draw_layer }
+    pub const fn draw_layer(&self) -> Option<DrawZIndex> { self.draw_layer }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -531,7 +531,7 @@ impl TextStyle {
     /// [`for_shaping`](Self::for_shaping) and inserts `Override<DrawLayer>`
     /// on the label.
     #[must_use]
-    pub const fn with_draw_layer(mut self, draw_layer: DrawLayer) -> Self {
+    pub const fn with_draw_layer(mut self, draw_layer: DrawZIndex) -> Self {
         self.draw_layer = Some(draw_layer);
         self
     }
@@ -608,7 +608,7 @@ impl TextStyle {
     }
 
     /// Sets the per-label [`DrawLayer`] override.
-    pub const fn set_draw_layer(&mut self, draw_layer: DrawLayer) {
+    pub const fn set_draw_layer(&mut self, draw_layer: DrawZIndex) {
         self.draw_layer = Some(draw_layer);
     }
 

@@ -79,7 +79,7 @@ pub use cascade::CascadeDefaults;
 pub use cascade::CascadeEntityCommandsExt;
 pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
-pub use cascade::DrawLayer;
+pub use cascade::DrawZIndex;
 pub use cascade::FontUnit;
 pub use cascade::TextAlpha;
 pub use cascade::resolved_anti_alias;

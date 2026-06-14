@@ -1032,7 +1032,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
-    use crate::cascade::DrawLayer;
+    use crate::cascade::DrawZIndex;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelLinePrimitiveGeometry;
@@ -1091,7 +1091,7 @@ mod tests {
             .color(Color::WHITE)
     }
 
-    fn spawn_line_panel(app: &mut App, draw_layer: Option<DrawLayer>) -> Entity {
+    fn spawn_line_panel(app: &mut App, draw_layer: Option<DrawZIndex>) -> Entity {
         let mut line_element = El::new()
             .size(40.0, 20.0)
             .draw(PanelDraw::lines([horizontal_line()]));
@@ -1198,8 +1198,8 @@ mod tests {
     #[test]
     fn line_draw_layers_route_to_matching_level_batches() {
         let mut app = line_batch_app();
-        spawn_line_panel(&mut app, Some(DrawLayer(-1)));
-        spawn_line_panel(&mut app, Some(DrawLayer(1)));
+        spawn_line_panel(&mut app, Some(DrawZIndex(-1)));
+        spawn_line_panel(&mut app, Some(DrawZIndex(1)));
         settle(&mut app);
 
         let store = app.world().resource::<PanelLineBatchStore>();

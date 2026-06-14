@@ -38,7 +38,7 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::Direction;
-use bevy_diegetic::DrawLayer;
+use bevy_diegetic::DrawZIndex;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -81,11 +81,11 @@ const TOP_COLOR: Color = Color::srgb(1.0, 0.78, 0.30);
 /// Body runs: above the content panel's own backing geometry (background,
 /// divider, border — draw slots 0..=2) and below the shade backing's
 /// effective bias (its slot 0 plus the depth offset).
-const DIM_TEXT_LAYER: DrawLayer = DrawLayer(8);
+const DIM_TEXT_LAYER: DrawZIndex = DrawZIndex(8);
 /// Above the default layer (64). The sorted screen view honors the full
 /// value; OIT views clamp layers at or above the default to the default's
 /// offset, so this run composites like default text there.
-const TOP_TEXT_LAYER: DrawLayer = DrawLayer(72);
+const TOP_TEXT_LAYER: DrawZIndex = DrawZIndex(72);
 
 // layout (content units: millimeters on the world panel, scaled to logical
 // pixels on the screen panel)

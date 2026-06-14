@@ -822,7 +822,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
-    use crate::cascade::DrawLayer;
+    use crate::cascade::DrawZIndex;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -841,8 +841,8 @@ mod tests {
     use crate::text::DiegeticTextMeasurer;
     use crate::text::FontRegistry;
 
-    const LOWERED_LEVEL: DrawLayer = DrawLayer(-1);
-    const RAISED_LEVEL: DrawLayer = DrawLayer(1);
+    const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
+    const RAISED_LEVEL: DrawZIndex = DrawZIndex(1);
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -875,7 +875,7 @@ mod tests {
             .add_plugins(CascadePlugin::<TextAlpha>::default())
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
-            .add_plugins(CascadePlugin::<DrawLayer>::default())
+            .add_plugins(CascadePlugin::<DrawZIndex>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()
@@ -1269,9 +1269,9 @@ mod tests {
     fn text_style_draw_layers_do_not_split_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
-        builder.text("Beta", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
-        builder.text("Gamma", TextStyle::new(10.0).with_draw_layer(DrawLayer(-3)));
+        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
+        builder.text("Beta", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
+        builder.text("Gamma", TextStyle::new(10.0).with_draw_layer(DrawZIndex(-3)));
         builder.text("Delta", TextStyle::new(10.0));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
@@ -1286,7 +1286,7 @@ mod tests {
     fn label_spawned_with_a_draw_layer_override_uses_default_batch_key() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawLayer(10)));
+        builder.text("Alpha", TextStyle::new(10.0).with_draw_layer(DrawZIndex(10)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
@@ -1305,7 +1305,7 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(label)
-            .override_draw_layer(DrawLayer(10));
+            .override_draw_layer(DrawZIndex(10));
         settle(&mut app);
 
         let (batches, runs, glyphs) = store_stats(&app);

@@ -8,7 +8,7 @@ use super::Border;
 use super::BoundingBox;
 use super::ResolvedPanelLine;
 use super::TextStyle;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 
 /// A single render command produced by the layout pass.
 ///
@@ -23,7 +23,7 @@ pub struct RenderCommand {
     /// Index of the source element in the `LayoutTree`.
     pub element_idx: usize,
     /// Optional authored draw layer from the source element.
-    pub z_index:     Option<DrawLayer>,
+    pub z_index:     Option<DrawZIndex>,
 }
 
 /// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.

@@ -33,7 +33,7 @@ use super::Unit;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
-use crate::cascade::DrawLayer;
+use crate::cascade::DrawZIndex;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -111,8 +111,8 @@ pub(super) struct Element {
     pub(super) editable:      Option<ImePanelField>,
     /// Optional paint-only draw data.
     pub(super) draw:          Option<PanelDraw>,
-    /// Optional `DrawLayer` stamped onto this element's render commands.
-    pub(super) draw_layer:    Option<DrawLayer>,
+    /// Optional `DrawZIndex` stamped onto this element's render commands.
+    pub(super) z_index:    Option<DrawZIndex>,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
     pub(super) anti_alias:    Option<AntiAlias>,
@@ -190,7 +190,7 @@ impl Default for Element {
             material:      None,
             editable:      None,
             draw:          None,
-            draw_layer:    None,
+            z_index:    None,
             anti_alias:    None,
             hairline_fade: None,
             content:       ElementContent::Empty,
@@ -659,7 +659,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material,
         editable,
         draw,
-        draw_layer,
+        z_index: draw_layer,
         anti_alias,
         hairline_fade,
         content,
@@ -681,7 +681,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         material: n_material,
         editable: n_editable,
         draw: n_draw,
-        draw_layer: n_draw_layer,
+        z_index: n_draw_layer,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
         content: n_content,
@@ -836,7 +836,7 @@ mod tests {
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelFieldId;
-    use crate::cascade::DrawLayer;
+    use crate::cascade::DrawZIndex;
     use crate::layout::Border;
     use crate::layout::Dimension;
     use crate::layout::El;
@@ -938,7 +938,7 @@ mod tests {
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
-                .draw_layer(DrawLayer(1)),
+                .draw_layer(DrawZIndex(1)),
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
