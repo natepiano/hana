@@ -16,6 +16,11 @@ use super::QuadraticSegment;
 pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
+/// Fewest curves a band must hold. Band count is capped at
+/// `ceil(curve_count / this)` so a sparse path collapses toward one band and
+/// its distance scan sees every curve at any grazing angle, where the
+/// on-screen footprint exceeds a thin band's overlap.
+const MIN_CURVES_PER_BAND: usize = 256;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
 /// Bow-to-chord ratio below which a segment packs as exactly linear.
 ///
@@ -260,7 +265,7 @@ pub(super) struct BandLayout {
 impl BandLayout {
     /// Equal band counts on both axes with the text overlap margin.
     #[must_use]
-    const fn uniform(band_count: usize) -> Self {
+    pub(super) const fn uniform(band_count: usize) -> Self {
         Self {
             horizontal_count: band_count,
             vertical_count:   band_count,
@@ -273,10 +278,11 @@ impl BandLayout {
     /// distance scan sees every curve at any zoom); large merged paths split
     /// so the per-fragment curve loop stays short.
     #[must_use]
-    pub fn for_extents(bounds: Bounds, target_extent: f32) -> Self {
+    pub fn for_extents(bounds: Bounds, target_extent: f32, curve_count: usize) -> Self {
+        let curve_cap = band_cap_for_curves(curve_count);
         Self {
-            horizontal_count: band_count_for_extent(bounds.height(), target_extent),
-            vertical_count:   band_count_for_extent(bounds.width(), target_extent),
+            horizontal_count: band_count_for_extent(bounds.height(), target_extent).min(curve_cap),
+            vertical_count:   band_count_for_extent(bounds.width(), target_extent).min(curve_cap),
             overlap:          target_extent * 0.5,
         }
     }
@@ -289,6 +295,14 @@ fn band_count_for_extent(extent: f32, target_extent: f32) -> usize {
     (extent / target_extent)
         .ceil()
         .to_usize()
+        .clamp(1, DEFAULT_BAND_COUNT)
+}
+
+/// Largest band count a path of `curve_count` segments justifies, holding at
+/// least [`MIN_CURVES_PER_BAND`] curves per band.
+fn band_cap_for_curves(curve_count: usize) -> usize {
+    curve_count
+        .div_ceil(MIN_CURVES_PER_BAND)
         .clamp(1, DEFAULT_BAND_COUNT)
 }
 

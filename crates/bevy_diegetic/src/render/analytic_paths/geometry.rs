@@ -78,4 +78,14 @@ impl PathOutline {
             0.0
         }
     }
+
+    /// Total quadratic segments across all contours. Caps band splitting so a
+    /// sparse path is not divided into bands smaller than the distance scan.
+    #[must_use]
+    pub fn curve_count(&self) -> usize {
+        self.contours
+            .iter()
+            .map(|contour| contour.segments.len())
+            .sum()
+    }
 }

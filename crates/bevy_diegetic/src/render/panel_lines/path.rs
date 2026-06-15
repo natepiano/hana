@@ -23,6 +23,17 @@ const PANEL_LINE_REFERENCE_DESIGN_UNITS_PER_METER: f32 =
     Unit::Meters.to_points() * (PANEL_LINE_DESIGN_UNITS_PER_EM / PANEL_LINE_REFERENCE_EM_POINTS);
 const PANEL_LINE_MIN_STROKE_DESIGN_UNITS: f32 = 96.0;
 const PANEL_LINE_PADDING_DESIGN_UNITS: f32 = 16.0;
+/// World-unit floor for the instance-quad padding — the head-on baseline fringe
+/// around every panel-line quad. The screen-space coverage ramp at a grazing
+/// tilt (its world width grows ~1/cos(grazing), which a fixed-world pad would
+/// clip into a staircase) is handled separately and camera-correctly by the
+/// vertex stage: it expands each line corner by a fixed device-pixel margin
+/// (see `LINE_AA_MARGIN_PX` in `analytic_path_vertex_pull.wgsl`). That expansion
+/// runs only in the main pass, so this floor still covers the prepass/shadow
+/// quad and the design-unit proportional term for thick strokes. It inflates
+/// the transparent quad of every panel line (those fragments cover no stroke and
+/// `alpha_discard` before OIT, so the cost is fill, not OIT slots).
+const PANEL_LINE_AA_PADDING_WORLD: f32 = 0.01;
 
 /// Panel-local conversion values shared by every primitive from one panel.
 pub(super) struct PanelLinePathContext {
@@ -304,12 +315,13 @@ where
     any.then_some(Bounds { min, max })
 }
 
-/// Quad padding around the path in world units. The fixed `SDF_AA_PADDING`
-/// keeps sub-millimeter marks rasterizing at distance: a quad padded only in
-/// proportion to a 0.1mm stroke stops crossing pixel centers and the mark
-/// disappears entirely.
+/// Quad padding around the path in world units. The design-unit term keeps the
+/// proportional fringe for thick strokes; `PANEL_LINE_AA_PADDING_WORLD` floors
+/// it so a foreshortened screen-space AA ramp stays inside the quad instead of
+/// clipping to a hard edge (see the constant). `SDF_AA_PADDING` is subsumed by
+/// the larger floor.
 fn world_padding(design_units_per_world: f32) -> f32 {
-    (PANEL_LINE_PADDING_DESIGN_UNITS / design_units_per_world).max(crate::render::SDF_AA_PADDING)
+    (PANEL_LINE_PADDING_DESIGN_UNITS / design_units_per_world).max(PANEL_LINE_AA_PADDING_WORLD)
 }
 
 fn padded_bounds(bounds: Bounds, design_units_per_world: f32) -> Bounds {
@@ -484,7 +496,7 @@ mod tests {
         assert_eq!(contour.segments[0].start, Vec2::ZERO);
         assert_eq!(contour.segments[0].control, Vec2::new(5.0, 0.0) * scale);
         assert_eq!(contour.segments[0].end, Vec2::new(10.0, 0.0) * scale);
-        let padding = (PANEL_LINE_PADDING_DESIGN_UNITS / scale).max(crate::render::SDF_AA_PADDING);
+        let padding = (PANEL_LINE_PADDING_DESIGN_UNITS / scale).max(PANEL_LINE_AA_PADDING_WORLD);
         assert_vec2_near(path.rect_min, Vec2::new(-padding, -1.0 - padding));
         assert_vec2_near(
             path.rect_size,
@@ -541,7 +553,7 @@ mod tests {
         };
 
         let scale = PANEL_LINE_REFERENCE_DESIGN_UNITS_PER_METER;
-        let padding = (PANEL_LINE_PADDING_DESIGN_UNITS / scale).max(crate::render::SDF_AA_PADDING);
+        let padding = (PANEL_LINE_PADDING_DESIGN_UNITS / scale).max(PANEL_LINE_AA_PADDING_WORLD);
         assert_vec2_near(path.rect_min, Vec2::new(2.0 - padding, -1.0 - padding));
         assert_vec2_near(
             path.rect_size,

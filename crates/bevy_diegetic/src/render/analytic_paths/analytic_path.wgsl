@@ -68,6 +68,18 @@ const SQRT_3_OVER_2: f32 = 0.8660254037844386;
 const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
 const MAX_ANISO_SAMPLES: f32 = 16.0;
+// Convex-corner correction (line branch). When two edges meet at a convex corner
+// the single-nearest analytic straight-edge band over-covers along one edge's
+// extension (the grazing wing); the fragment is outside BOTH edges, so min with
+// the second-nearest edge's half-plane coverage clips it. The fix fires only when
+// the two field normals are angularly separated by at least this cross-product
+// magnitude (a real corner, not the antiparallel far side of a thin stroke).
+const CORNER_NORMAL_SEP: f32 = 0.15;
+// Diagnostic: when true the line branch returns a firing mask (dim line + bright
+// where the corner correction clipped coverage) instead of the corrected
+// coverage, so the gates can be verified to light only exterior corners. Set
+// false to render the actual corrected coverage.
+const CORNER_DEBUG_MASK: bool = false;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 // Mirrors AA_FLAG_SUPERSAMPLE / AA_FLAG_BAND in render/mod.rs — the
@@ -104,7 +116,7 @@ struct CurveRecord {
     bounds: vec4<f32>,
     // .xyz: precomputed closest-point cubic coefficients — .x and .y are the
     // point-independent terms of the normalized cubic
-    // exact_quadratic_distance_sq solves, .z is 1/|curve_delta|² (0 routes
+    // exact_quadratic_distance solves, .z is 1/|curve_delta|² (0 routes
     // the segment through the exact linear solve). .w: the owning contour's
     // narrowest stroke in design units (per-curve hairline dilation), 0.0
     // for undilated contours (text glyphs).
@@ -152,6 +164,20 @@ struct LaneTerms {
     adjusted: f32,
     // Dilation of the curve that won `adjusted`.
     dilation: f32,
+    // Design-space unit field gradient of the curve that won `adjusted`
+    // (direction from its closest point to `point`). The analytic AA band
+    // projects the screen footprint onto it; sign-independent for the band
+    // (|Jᵀn| == |Jᵀ(-n)|), so the medial-axis flip between a slab's two edges
+    // does not matter.
+    normal: vec2<f32>,
+    // Second-nearest silhouette in this lane (raw adjusted distance + its field
+    // gradient), for the line branch's convex-corner correction: a fragment
+    // outside a convex corner is outside both meeting edges, so the second
+    // edge's half-plane coverage clips the nearest edge's straight-edge
+    // over-cover. Sentinel 1e6 / (1,0) means no second edge was scanned. Text
+    // ignores these (it reads only the nearest).
+    adjusted2: f32,
+    normal2: vec2<f32>,
 }
 
 // Two-lane coverage accumulator. Curves split by fade policy: the exempt
@@ -174,8 +200,8 @@ struct CoverageTerms {
 
 fn empty_coverage_terms() -> CoverageTerms {
     return CoverageTerms(
-        LaneTerms(0, 1000000.0, 0.0),
-        LaneTerms(0, 1000000.0, 0.0),
+        LaneTerms(0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0)),
+        LaneTerms(0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0)),
         0.0,
     );
 }
@@ -185,10 +211,25 @@ fn empty_coverage_terms() -> CoverageTerms {
 // the cross-lane min with the winner's dilation.
 fn union_lane(terms: CoverageTerms) -> LaneTerms {
     let faded_wins = terms.faded.adjusted < terms.exempt.adjusted;
+    let first_adjusted = select(terms.exempt.adjusted, terms.faded.adjusted, faded_wins);
+    let first_dilation = select(terms.exempt.dilation, terms.faded.dilation, faded_wins);
+    let first_normal = select(terms.exempt.normal, terms.faded.normal, faded_wins);
+    // Union second-nearest = second smallest across the two lanes' (first, second)
+    // candidates: the losing lane's first vs the winning lane's own second.
+    let other_first_adjusted = select(terms.faded.adjusted, terms.exempt.adjusted, faded_wins);
+    let other_first_normal = select(terms.faded.normal, terms.exempt.normal, faded_wins);
+    let win_second_adjusted = select(terms.exempt.adjusted2, terms.faded.adjusted2, faded_wins);
+    let win_second_normal = select(terms.exempt.normal2, terms.faded.normal2, faded_wins);
+    let other_is_second = other_first_adjusted < win_second_adjusted;
+    let second_adjusted = select(win_second_adjusted, other_first_adjusted, other_is_second);
+    let second_normal = select(win_second_normal, other_first_normal, other_is_second);
     return LaneTerms(
         terms.exempt.winding + terms.faded.winding,
-        min(terms.exempt.adjusted, terms.faded.adjusted),
-        select(terms.exempt.dilation, terms.faded.dilation, faded_wins),
+        first_adjusted,
+        first_dilation,
+        first_normal,
+        second_adjusted,
+        second_normal,
     );
 }
 
@@ -353,25 +394,37 @@ fn solve_cubic_normed(a: f32, b: f32, c: f32, roots: ptr<function, array<f32, 3>
     return 1u;
 }
 
-// Squared distance from `point` to the segment. The on-curve closest-point
-// parameters are the roots of the cubic (B(t) − point)·B'(t) = 0; its two
-// point-independent coefficients and the 1/|curve_delta|² normalizer arrive
-// precomputed in curve.solver.xyz, the point-dependent terms are filled in
-// here. Endpoints compete with the in-range (t ∈ [0, 1]) roots; degenerate
-// curvature (solver.z == 0) falls back to the exact point–segment distance.
-fn exact_quadratic_distance_sq(
+// Squared distance from `point` to the segment plus the on-curve closest
+// point (the field gradient is the direction from it to `point`). The
+// closest-point parameters are the roots of the cubic (B(t) − point)·B'(t) =
+// 0; its two point-independent coefficients and the 1/|curve_delta|²
+// normalizer arrive precomputed in curve.solver.xyz, the point-dependent terms
+// are filled in here. Endpoints compete with the in-range (t ∈ [0, 1]) roots;
+// degenerate curvature (solver.z == 0) falls back to the exact point–segment
+// closest point.
+struct CurveDistance {
+    dist_sq: f32,
+    closest: vec2<f32>,
+}
+
+fn exact_quadratic_distance(
     curve: CurveRecord,
     point: vec2<f32>,
     start: vec2<f32>,
     control_delta: vec2<f32>,
     curve_delta: vec2<f32>,
     end: vec2<f32>,
-) -> f32 {
+) -> CurveDistance {
     let pv = point - start;
     var best_sq = dot(pv, pv);
+    var best_closest = start;
 
     let end_diff = end - point;
-    best_sq = min(best_sq, dot(end_diff, end_diff));
+    let end_sq = dot(end_diff, end_diff);
+    if end_sq < best_sq {
+        best_sq = end_sq;
+        best_closest = end;
+    }
 
     let inverse_curve_norm_sq = curve.solver.z;
     if inverse_curve_norm_sq > 0.0 {
@@ -387,14 +440,24 @@ fn exact_quadratic_distance_sq(
             if t >= 0.0 && t <= 1.0 {
                 let closest = start + control_delta * (2.0 * t) + curve_delta * (t * t);
                 let diff = closest - point;
-                best_sq = min(best_sq, dot(diff, diff));
+                let dist_sq = dot(diff, diff);
+                if dist_sq < best_sq {
+                    best_sq = dist_sq;
+                    best_closest = closest;
+                }
             }
         }
     } else {
-        return min(best_sq, point_line_distance_sq(point, start, end));
+        let foot = point_line_closest(point, start, end);
+        let diff = foot - point;
+        let dist_sq = dot(diff, diff);
+        if dist_sq < best_sq {
+            best_sq = dist_sq;
+            best_closest = foot;
+        }
     }
 
-    return best_sq;
+    return CurveDistance(best_sq, best_closest);
 }
 
 fn winding_for_t(curve: CurveRecord, point: vec2<f32>, t: f32) -> i32 {
@@ -453,6 +516,17 @@ fn curve_winding(curve: CurveRecord, point: vec2<f32>) -> i32 {
 }
 
 fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
+    // Line glyphs (min_feature > 0) render with the vertex-stage quad expansion
+    // (analytic_path_vertex_pull.wgsl LINE_AA_MARGIN_PX) so the grazing AA ramp
+    // clears the quad edge. The packed bounds are NOT expanded, so clipping
+    // winding here would zero the outward ramp and the grazing strided samples
+    // of a line that sits at a bounds edge (a box's top/bottom edge). The +x
+    // winding-ray math is valid outside the packed bounds, so do not early-out
+    // there for lines. DIAGNOSTIC: full bypass to confirm the bounds clip is the
+    // grazing dash/wing source; the keep version inflates by the scan margin.
+    if glyph.min_feature > 0.0 {
+        return false;
+    }
     let bounds_min = glyph_bounds_min(glyph);
     let bounds_max = bounds_min + glyph_bounds_size(glyph);
     return point.x < bounds_min.x ||
@@ -490,8 +564,15 @@ fn curve_dilation(curve: CurveRecord, hairline_target: f32) -> f32 {
 
 // Run one curve in the nearest-silhouette race for its lane: adjusted =
 // distance − that curve's dilation, so a more-dilated (thinner-stroke)
-// curve's silhouette wins at the same raw distance. The faded lane also
-// records the winner's fade exponent.
+// curve's silhouette wins at the same raw distance. The winner also records
+// the field gradient (normalized direction from its closest point to `point`)
+// for the analytic AA band, and the faded lane records the winner's fade
+// exponent.
+// A nearer curve demotes the lane's current nearest to second; an intermediate
+// curve replaces only the second. Dilation and the per-curve fade tracking stay
+// tied to the nearest (the second is used for the line branch's corner band and
+// the floor cap). The two lanes are inlined rather than routed through a
+// pointer-to-member helper to keep to the member-assignment form.
 fn accumulate_nearest(
     terms: ptr<function, CoverageTerms>,
     point: vec2<f32>,
@@ -499,16 +580,34 @@ fn accumulate_nearest(
     hairline_target: f32,
 ) {
     let dilation = curve_dilation(curve, hairline_target);
-    let adjusted = sqrt(curve_distance_sq(point, curve)) - dilation;
+    let distance = curve_distance(point, curve);
+    let adjusted = sqrt(distance.dist_sq) - dilation;
+    let to_point = point - distance.closest;
+    let to_point_len = length(to_point);
+    let normal = select(vec2<f32>(1.0, 0.0), to_point / to_point_len, to_point_len > ROOT_EPSILON);
     if curve.fade_exponent > 0.0 {
         if adjusted < (*terms).faded.adjusted {
+            (*terms).faded.adjusted2 = (*terms).faded.adjusted;
+            (*terms).faded.normal2 = (*terms).faded.normal;
             (*terms).faded.adjusted = adjusted;
             (*terms).faded.dilation = dilation;
+            (*terms).faded.normal = normal;
             (*terms).fade_exponent = curve.fade_exponent;
+        } else if adjusted < (*terms).faded.adjusted2 {
+            (*terms).faded.adjusted2 = adjusted;
+            (*terms).faded.normal2 = normal;
         }
-    } else if adjusted < (*terms).exempt.adjusted {
-        (*terms).exempt.adjusted = adjusted;
-        (*terms).exempt.dilation = dilation;
+    } else {
+        if adjusted < (*terms).exempt.adjusted {
+            (*terms).exempt.adjusted2 = (*terms).exempt.adjusted;
+            (*terms).exempt.normal2 = (*terms).exempt.normal;
+            (*terms).exempt.adjusted = adjusted;
+            (*terms).exempt.dilation = dilation;
+            (*terms).exempt.normal = normal;
+        } else if adjusted < (*terms).exempt.adjusted2 {
+            (*terms).exempt.adjusted2 = adjusted;
+            (*terms).exempt.normal2 = normal;
+        }
     }
 }
 
@@ -542,16 +641,15 @@ fn horizontal_coverage_terms(
     return terms;
 }
 
-fn point_line_distance_sq(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> f32 {
+fn point_line_closest(point: vec2<f32>, start: vec2<f32>, end: vec2<f32>) -> vec2<f32> {
     let edge = end - start;
     let edge_length_squared = max(dot(edge, edge), ROOT_EPSILON);
     let t = clamp(dot(point - start, edge) / edge_length_squared, 0.0, 1.0);
-    let diff = point - (start + edge * t);
-    return dot(diff, diff);
+    return start + edge * t;
 }
 
-fn curve_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
-    return exact_quadratic_distance_sq(
+fn curve_distance(point: vec2<f32>, curve: CurveRecord) -> CurveDistance {
+    return exact_quadratic_distance(
         curve,
         point,
         curve.start_delta.xy,
@@ -718,11 +816,20 @@ fn distance_coverage(
 
 // One signed-distance evaluation plus the faded lane's winning dilation and
 // fade exponent, so the aa_band consumers can apply the per-evaluation fade
-// factor. sd.x is the exempt lane, sd.y the whole-path union.
+// factor. sd.x is the exempt lane, sd.y the whole-path union. The two normals
+// are each lane's winning field gradient, for the analytic line band.
 struct SdSample {
     sd: vec2<f32>,
     dilation: f32,
     fade_exponent: f32,
+    exempt_normal: vec2<f32>,
+    union_normal: vec2<f32>,
+    // Second-nearest silhouette per lane (raw adjusted distance + field gradient),
+    // for the line branch's convex-corner correction. Sentinel 1e6 means none.
+    exempt_adjusted2: f32,
+    exempt_normal2: vec2<f32>,
+    union_adjusted2: f32,
+    union_normal2: vec2<f32>,
 }
 
 // One lane's signed design-space distance to its per-curve-dilated
@@ -760,6 +867,12 @@ fn signed_distance_sample(
         ),
         terms.faded.dilation,
         terms.fade_exponent,
+        terms.exempt.normal,
+        union_terms.normal,
+        terms.exempt.adjusted2,
+        terms.exempt.normal2,
+        union_terms.adjusted2,
+        union_terms.normal2,
     );
 }
 
@@ -778,6 +891,34 @@ fn signed_distance(
 // centered on the silhouette (sd 0). Negative sd (inside) → 1, positive → 0.
 fn band_coverage(sd: f32, band: f32) -> f32 {
     return clamp(0.5 - sd / band, 0.0, 1.0);
+}
+
+// Screen-space gradient magnitude |Jᵀn| of the signed distance for a KNOWN
+// field normal n (J = [dx | dy], the screen→design footprint Jacobian):
+// project the two footprint vectors onto n and take the length. Because n is
+// the analytic field gradient (from the nearest curve), not a finite
+// difference, this is exact at any view angle — no large along-edge step to
+// cross the medial-axis crease or overshoot the scan, so a straight thin line's
+// AA ramp stays a true 1px box filter from head-on to edge-on.
+fn analytic_band(normal: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> f32 {
+    return max(length(vec2<f32>(dot(normal, dx), dot(normal, dy))), ROOT_EPSILON);
+}
+
+// |Jᵀn| with the major footprint axis narrowed to the sub-sample spacing
+// (`inv_count` = 1/N). The well-resolved minor axis keeps full weight so a
+// straight edge stays a 1px ramp; the foreshortened major axis shrinks to the
+// stride spacing so the N strided samples TILE the footprint. This is the
+// analytic form of the text path's `d_minor + d_major * inv_count`.
+fn analytic_band_strided(
+    normal: vec2<f32>,
+    minor: vec2<f32>,
+    major: vec2<f32>,
+    inv_count: f32,
+) -> f32 {
+    return max(
+        length(vec2<f32>(dot(normal, minor), dot(normal, major) * inv_count)),
+        ROOT_EPSILON,
+    );
 }
 
 // Anisotropic supersample of the band coverage. A single band sample models the
@@ -834,6 +975,174 @@ fn aniso_band_coverage(
     return sum * inv_count;
 }
 
+// Convex-corner correction for one strided line sample, one lane. The nearest
+// edge's straight-edge band over-covers past a convex corner along that edge's
+// extension (the grazing wing); the corner exterior is outside the second meeting
+// edge too, so its half-plane coverage clips the over-cover via min. Gated so it
+// fires only where it should:
+//   - outside only (sd1 > 0): inside the fill, a concave junction (tick meeting a
+//     spine) is union-interior and must keep full coverage.
+//   - a real second edge was scanned (adjusted2 below the 1e6 sentinel).
+//   - angularly separated normals (|cross| >= CORNER_NORMAL_SEP): a genuine corner,
+//     not the antiparallel far side of a thin stroke (cross ~ 0) nor a parallel
+//     edge.
+//   - the second edge sits near the same point (adjusted2 within ~2x sd1 plus the
+//     well-resolved footprint): both edges' nearest point is the shared corner
+//     vertex, so their distances track; an unrelated far edge is rejected.
+// The second edge's band uses the same per-sample floor as the nearest edge.
+// Returns the corrected coverage.
+fn corner_coverage(
+    base_cov: f32,
+    sd1: f32,
+    adjusted2: f32,
+    normal2: vec2<f32>,
+    nearest_normal: vec2<f32>,
+    dilation: f32,
+    minor: vec2<f32>,
+    major: vec2<f32>,
+    inv_count: f32,
+    minor_len: f32,
+) -> f32 {
+    if sd1 <= 0.0 || adjusted2 > 100000.0 {
+        return base_cov;
+    }
+    let separation = abs(nearest_normal.x * normal2.y - nearest_normal.y * normal2.x);
+    if separation < CORNER_NORMAL_SEP {
+        return base_cov;
+    }
+    if adjusted2 > 2.0 * sd1 + minor_len {
+        return base_cov;
+    }
+    let band2 = analytic_band_strided(normal2, minor, major, inv_count);
+    let cov2 = band_coverage(adjusted2 - dilation, band2);
+    return min(base_cov, cov2);
+}
+
+// Hairline floor as a signed-distance offset for one line sample, one lane. The
+// floor pads a sub-pixel stroke to hairline_min_px screen px so a foreshortened
+// receding line stays a continuous hairline instead of aliasing into dots. It is
+// sized from the EDGE cross-stroke normal's full screen-space band |Jᵀn|: on a
+// straight edge that band is the true cross-stroke screen width, so the floor
+// keeps the line continuous without rounding it. The hazard is the convex vertex,
+// where the nearest point is the shared corner so the field normal goes RADIAL
+// (aligned with the foreshortened major axis), |Jᵀn| blows up, and the isotropic
+// SD offset rounds the corner outward into a wing. When a second edge is close,
+// the relation of the two field normals says which case it is:
+//   - antiparallel (dot ~ -1): the two sides of a genuine thin stroke -> keep the
+//     full floor (this is exactly where the line needs it).
+//   - separated (|cross| high, dot ~ 0): a real corner of two distinct edges ->
+//     cap with the smaller edge's floor (the perpendicular edge is well-resolved,
+//     so its floor is small) -> the convex cap stays ~hairline_min_px.
+//   - parallel (dot ~ +1): the vertex wedge, both edges report the same radial
+//     normal -> cap to the well-resolved minor-axis floor so the radial |Jᵀn|
+//     can't balloon the cap. |cross| alone can't see this case (it is ~0 for both
+//     antiparallel stroke sides and parallel wedge normals); the dot sign does.
+// All gates are smoothed and weighted by the second edge's closeness (w_dist) so
+// nothing pops as fragments cross the neighborhood.
+fn line_floor(
+    nearest_normal: vec2<f32>,
+    adjusted1: f32,
+    second_normal: vec2<f32>,
+    adjusted2: f32,
+    min_feature: f32,
+    ramp_band: f32,
+    minor_len: f32,
+    dx: vec2<f32>,
+    dy: vec2<f32>,
+) -> f32 {
+    let b1 = analytic_band(nearest_normal, dx, dy);
+    let d1 = max(0.0, (uniforms.hairline_min_px * b1 - min_feature) * 0.5);
+    if adjusted2 > 100000.0 {
+        return d1;
+    }
+    let b2 = analytic_band(second_normal, dx, dy);
+    let d2 = max(0.0, (uniforms.hairline_min_px * b2 - min_feature) * 0.5);
+    let d_minor = max(0.0, (uniforms.hairline_min_px * minor_len - min_feature) * 0.5);
+    let r = max(ramp_band, max(d1, d2));
+    let w_dist = 1.0 - smoothstep(r, 2.0 * r, adjusted2 - adjusted1);
+    let separation = abs(nearest_normal.x * second_normal.y - nearest_normal.y * second_normal.x);
+    let alignment = dot(nearest_normal, second_normal);
+    let w_corner = w_dist * smoothstep(0.20, 0.45, separation);
+    let w_vertex = w_dist * smoothstep(0.30, 0.70, alignment);
+    var d = mix(d1, min(d1, d2), w_corner);
+    d = mix(d, min(d, d_minor), w_vertex);
+    return d;
+}
+
+// Anisotropically supersampled analytic line coverage. A single analytic-band
+// evaluation is exact for a straight edge but over-covers a convex corner (the
+// grazing-angle ghost wing) and, on a hairline floored to a single screen pixel,
+// samples the AA ramp off the sub-pixel line center so coverage oscillates along
+// the foreshortened length. Stride N ~= the footprint anisotropy samples along
+// the longer footprint axis; each sample's ramp band is narrowed on that axis to
+// the stride spacing (`analytic_band_strided`) so the samples tile rather than
+// overlap as full-width ramps that would average back to the single-sample
+// over-cover. The hairline floor is sized per strided sample from the edge
+// cross-stroke normal's full band (line_floor), not the radial union normal that
+// balloons at a convex vertex, and capped against the second edge at a corner, so
+// a foreshortened straight edge stays a continuous sub-pixel hairline while the
+// convex cap stays bounded to ~hairline_min_px. No finite-difference band, so no
+// medial-axis wave; head-on the footprint is isotropic and N collapses to one
+// sample.
+fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph: GlyphRecord) -> f32 {
+    let footprint_max = max(length(dx), length(dy));
+    let scan_width = footprint_max * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
+    let scan_width_sq = scan_width * scan_width;
+    let len_dx = length(dx);
+    let len_dy = length(dy);
+    let major = select(dy, dx, len_dx >= len_dy);
+    let minor = select(dx, dy, len_dx >= len_dy);
+    let major_len = max(len_dx, len_dy);
+    let minor_len = max(min(len_dx, len_dy), ROOT_EPSILON);
+    let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
+    let inv_count = 1.0 / sample_count;
+    let count = u32(sample_count);
+
+    var sum = 0.0;
+    var fired = 0.0;
+    for (var index = 0u; index < count; index += 1u) {
+        let stride = (f32(index) + 0.5) * inv_count - 0.5;
+        let raw = signed_distance_sample(point + stride * major, scan_width_sq, 0.0, glyph);
+        // Ramp band: major axis narrowed to the stride spacing so the samples
+        // tile (integrates the corner wedge and the foreshortened line).
+        let exempt_band = analytic_band_strided(raw.exempt_normal, minor, major, inv_count);
+        let union_band = analytic_band_strided(raw.union_normal, minor, major, inv_count);
+        // Hairline floor sized per sample from each lane's edge cross-stroke
+        // normal (full band), capped at a convex corner against the second edge.
+        let exempt_floor = line_floor(
+            raw.exempt_normal, abs(raw.sd.x), raw.exempt_normal2, raw.exempt_adjusted2,
+            glyph.min_feature, exempt_band, minor_len, dx, dy,
+        );
+        let union_floor = line_floor(
+            raw.union_normal, abs(raw.sd.y), raw.union_normal2, raw.union_adjusted2,
+            glyph.min_feature, union_band, minor_len, dx, dy,
+        );
+        let exempt_raw = band_coverage(raw.sd.x - exempt_floor, exempt_band);
+        let union_raw = band_coverage(raw.sd.y - union_floor, union_band);
+        // Clip each lane's straight-edge over-cover against its second-nearest edge
+        // at a convex corner (gated inside corner_coverage).
+        let exempt = corner_coverage(
+            exempt_raw, raw.sd.x, raw.exempt_adjusted2, raw.exempt_normal2,
+            raw.exempt_normal, exempt_floor, minor, major, inv_count, minor_len,
+        );
+        let union_coverage = corner_coverage(
+            union_raw, raw.sd.y, raw.union_adjusted2, raw.union_normal2,
+            raw.union_normal, union_floor, minor, major, inv_count, minor_len,
+        );
+        fired = max(fired, max(exempt_raw - exempt, union_raw - union_coverage));
+        let fade_target = uniforms.hairline_min_px * analytic_band(raw.union_normal, dx, dy);
+        let fade = hairline_fade_factor(union_floor, fade_target, raw.fade_exponent);
+        sum += mix(exempt, union_coverage, fade);
+    }
+    let coverage = sum * inv_count;
+    if CORNER_DEBUG_MASK {
+        // Dim line everywhere, bright where the corner clip removed coverage, so
+        // the firing region can be checked to be exterior corners only.
+        return clamp(coverage * 0.2 + fired * 4.0, 0.0, 1.0);
+    }
+    return coverage;
+}
+
 fn render_coverage(
     uv: vec2<f32>,
     glyph: GlyphRecord,
@@ -850,37 +1159,32 @@ fn render_coverage(
     let dx = dpdx(point);
     let dy = dpdy(point);
 
-    // Hairline dilation: a contour whose stroke falls below
-    // uniforms.hairline_min_px on screen is rendered dilated to that width, so
-    // a ruler tick stays a uniform thin line instead of a sub-pixel sliver
-    // whose brightness depends on where it lands in the pixel grid. Each curve
-    // dilates by its own contour's deficit (solver.w), so a merged path mixing
-    // stroke widths dilates every member exactly to the floor. hairline_target
-    // is the floor in design units, sized from the well-resolved footprint
-    // axis so grazing-angle foreshortening cannot balloon the dilation;
-    // dilation_max (from the narrowest contour) sizes the distance scan.
-    // glyph.min_feature == 0 (text glyphs) disables.
-    var dilation_max = 0.0;
-    var hairline_target = 0.0;
-    if glyph.min_feature > 0.0 {
-        let pixel_design_units = min(pixel.x, pixel.y);
-        hairline_target = pixel_design_units * uniforms.hairline_min_px;
-        dilation_max = max(0.0, (hairline_target - glyph.min_feature) * 0.5);
-    }
+    // The finite-difference branches below only run for text (min_feature == 0),
+    // which never dilates, so the hairline floor is zero here. Lines
+    // (min_feature > 0) take the analytic branch, which sizes its own dilation
+    // from the analytic band.
+    let dilation_max = 0.0;
+    let hairline_target = 0.0;
 
-    // The two AA axes are independent. aa_band picks the edge-ramp width (scalar
-    // design-space `edge_width` vs. a screen-space band that holds ~1px per axis,
-    // so the convex-corner apron can't balloon at grazing). supersample picks 1
-    // sample vs. an anisotropic stride along the foreshortened axis, which
-    // integrates the along-footprint coverage a single sample can't capture (the
-    // grazing-angle corner wing). All four combinations are valid; the combined
-    // mode fixes both artifacts at once.
+    // Lines (min_feature > 0) use the analytic-gradient band (|Jᵀn|) with an
+    // analytic hairline floor, independent of the aa_flags AA mode, and are
+    // anisotropically supersampled across the footprint (the equivalent of the
+    // text Both mode, always on for lines): stride samples along the longer
+    // footprint axis integrate the sub-pixel hairline and the convex corner that
+    // a single center sample misses. Text (min_feature == 0) takes the
+    // aa_flags-selected finite-difference path below.
     var coverage: f32;
-    if (aa_flags & AA_FLAG_BAND) != 0u {
+    if glyph.min_feature > 0.0 {
+        coverage = analytic_line_coverage(point, dx, dy, glyph);
+    } else if (aa_flags & AA_FLAG_BAND) != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
         let scan_width = edge_width + dilation_max;
         let scan_width_sq = scan_width * scan_width;
         if (aa_flags & AA_FLAG_SUPERSAMPLE) != 0u {
+            // Supersampled screen-space band: the band sets the cross-stroke
+            // edge width (full interior coverage, so the stroke stays bright)
+            // and the stride samples integrate along the foreshortened axis at
+            // grazing. Text reaches here as the Both AA mode.
             coverage = aniso_band_coverage(point, dx, dy, scan_width_sq, hairline_target, glyph);
         } else {
             // Single sample: one full-footprint exempt/union band from the

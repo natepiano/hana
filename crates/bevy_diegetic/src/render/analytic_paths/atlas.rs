@@ -58,7 +58,19 @@ where
 
         for (key, path) in paths {
             let min_feature = path.min_feature();
-            let layout = BandLayout::for_extents(path.bounds, target_band_extent);
+            // Line paths (min_feature > 0) pack into a single band so every
+            // fragment scans every curve once. The anisotropic line stride
+            // samples at `point + stride * major` (major ~= the foreshortened
+            // footprint axis) reach a large fraction of a tight path's design
+            // extent at grazing; with a multi-band layout those samples land in
+            // a different or clamped band and the scan misses the nearest curve,
+            // producing periodic coverage dropouts and outward corner spurs. One
+            // band removes the locality assumption the stride violates.
+            let layout = if min_feature > 0.0 {
+                BandLayout::uniform(1)
+            } else {
+                BandLayout::for_extents(path.bounds, target_band_extent, path.curve_count())
+            };
             let packed = packing::build_packed_path_with_layout(path, layout);
             let record_index = self.path_records.len().to_u32();
             let curve_start = self.curves.len().to_u32();
