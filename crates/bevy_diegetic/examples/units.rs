@@ -25,7 +25,6 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -324,11 +323,7 @@ fn build_batch_count_panel_tree(display: BatchCountDisplay) -> LayoutTree {
         DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA),
         |builder| {
             builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0),
+                El::column().width(Sizing::FIT).height(Sizing::FIT).gap(2.0),
                 |builder| {
                     builder.text("Line Batches", title);
                     builder.text(format!("{}", stats.batches), value);
@@ -1188,69 +1183,62 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
         .mul_add(-10.0, height_millimeters.to_f32())
         - 5.0;
 
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            // ── Left column: labels ─────────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_align_x(AlignX::Right)
-                    .padding(Padding::new(
-                        Mm(0.0),
-                        PANEL_RULER_MM_LABEL_GAP,
-                        Mm(0.0),
-                        Mm(0.0),
-                    )),
-                |b| {
-                    // Top spacer.
-                    if top_spacer > 0.0 {
-                        b.with(
-                            El::new()
-                                .height(Sizing::fixed(Mm(top_spacer)))
-                                .width(Sizing::GROW),
-                            |_| {},
-                        );
-                    }
-                    // One 10mm block per cm, with text centered.
-                    for centimeter in (1..=last_centimeter_mark).rev() {
-                        b.with(
-                            El::new()
-                                .height(Sizing::fixed(Mm(10.0)))
-                                .width(Sizing::GROW)
-                                .child_align_x(AlignX::Right)
-                                .child_align_y(AlignY::Center),
-                            |b| {
-                                b.text(format!("{centimeter}"), label_style.clone());
-                            },
-                        );
-                    }
-                    // Bottom spacer (5mm below cm 1).
+    builder.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // ── Left column: labels ─────────────────────────────
+        b.with(
+            El::column()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .align_x(AlignX::Right)
+                .padding(Padding::new(
+                    Mm(0.0),
+                    PANEL_RULER_MM_LABEL_GAP,
+                    Mm(0.0),
+                    Mm(0.0),
+                )),
+            |b| {
+                // Top spacer.
+                if top_spacer > 0.0 {
                     b.with(
-                        El::new().height(Sizing::fixed(Mm(5.0))).width(Sizing::GROW),
+                        El::new()
+                            .height(Sizing::fixed(Mm(top_spacer)))
+                            .width(Sizing::GROW),
                         |_| {},
                     );
-                },
-            );
+                }
+                // One 10mm block per cm, with text centered.
+                for centimeter in (1..=last_centimeter_mark).rev() {
+                    b.with(
+                        El::new()
+                            .height(Sizing::fixed(Mm(10.0)))
+                            .width(Sizing::GROW)
+                            .align_x(AlignX::Right)
+                            .align_y(AlignY::Center),
+                        |b| {
+                            b.text(format!("{centimeter}"), label_style.clone());
+                        },
+                    );
+                }
+                // Bottom spacer (5mm below cm 1).
+                b.with(
+                    El::new().height(Sizing::fixed(Mm(5.0))).width(Sizing::GROW),
+                    |_| {},
+                );
+            },
+        );
 
-            // ── Right column: ticks + spine ─────────────────────
-            // All lines share one draw and merge into a single analytic
-            // path, so tick/spine junctions render without an anti-aliasing
-            // line; majors and the spine pin `HairlineFade::Full` per line
-            // while minors inherit the global fade.
-            ruler_track(
-                b,
-                Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
-                Sizing::fixed(Mm(height_millimeters.to_f32())),
-                metric_vertical_ruler_lines(height_millimeters, ruler_color),
-            );
-        },
-    );
+        // ── Right column: ticks + spine ─────────────────────
+        // All lines share one draw and merge into a single analytic
+        // path, so tick/spine junctions render without an anti-aliasing
+        // line; majors and the spine pin `HairlineFade::Full` per line
+        // while minors inherit the global fade.
+        ruler_track(
+            b,
+            Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
+            Sizing::fixed(Mm(height_millimeters.to_f32())),
+            metric_vertical_ruler_lines(height_millimeters, ruler_color),
+        );
+    });
 
     builder.build()
 }
@@ -1279,11 +1267,10 @@ fn build_imperial_panel_ruler(
     let label_style = TextStyle::new(Pt(8.0)).with_color(ruler_color);
 
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_y(AlignY::Bottom),
+            .align_y(AlignY::Bottom),
         |b| {
             // ── Left column: spine + ticks ──────────────────────
             ruler_track(
@@ -1295,11 +1282,10 @@ fn build_imperial_panel_ruler(
 
             // ── Right column: labels ────────────────────────────
             b.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_align_x(AlignX::Left)
+                    .align_x(AlignX::Left)
                     .padding(Padding::new(
                         PANEL_RULER_IN_LABEL_GAP,
                         In(0.0),
@@ -1320,8 +1306,8 @@ fn build_imperial_panel_ruler(
                             El::new()
                                 .height(Sizing::fixed(In(1.0)))
                                 .width(Sizing::GROW)
-                                .child_align_x(AlignX::Left)
-                                .child_align_y(AlignY::Center),
+                                .align_x(AlignX::Left)
+                                .align_y(AlignY::Center),
                             |b| {
                                 b.text(format!("{inch}"), label_style.clone());
                             },
@@ -1365,70 +1351,62 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
         .to_f32()
         .mul_add(-10.0, width_millimeters.to_f32() - 5.0);
 
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            // ── Top row: spine + ticks ──────────────────────────
-            ruler_track(
-                b,
-                Sizing::fixed(Mm(width_millimeters.to_f32())),
-                Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
-                metric_horizontal_ruler_lines(width_millimeters, ruler_color),
-            );
+    builder.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // ── Top row: spine + ticks ──────────────────────────
+        ruler_track(
+            b,
+            Sizing::fixed(Mm(width_millimeters.to_f32())),
+            Sizing::fixed(Mm(PANEL_RULER_CM_TICK.0 + PANEL_RULER_SPINE.0)),
+            metric_horizontal_ruler_lines(width_millimeters, ruler_color),
+        );
 
-            // ── Bottom row: labels ──────────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_align_y(AlignY::Top)
-                    .padding(Padding::new(
-                        Mm(0.0),
-                        Mm(0.0),
-                        PANEL_RULER_MM_LABEL_GAP,
-                        Mm(0.0),
-                    )),
-                |b| {
-                    // Left spacer (5mm to center of first cm block).
+        // ── Bottom row: labels ──────────────────────────────
+        b.with(
+            El::row()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .align_y(AlignY::Top)
+                .padding(Padding::new(
+                    Mm(0.0),
+                    Mm(0.0),
+                    PANEL_RULER_MM_LABEL_GAP,
+                    Mm(0.0),
+                )),
+            |b| {
+                // Left spacer (5mm to center of first cm block).
+                b.with(
+                    El::new().width(Sizing::fixed(Mm(5.0))).height(Sizing::GROW),
+                    |_| {},
+                );
+                for centimeter in 1..=last_label_centimeter {
                     b.with(
-                        El::new().width(Sizing::fixed(Mm(5.0))).height(Sizing::GROW),
+                        El::new()
+                            .width(Sizing::fixed(Mm(10.0)))
+                            .height(Sizing::GROW),
+                        |b| {
+                            b.with(
+                                El::column()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::GROW)
+                                    .align_x(AlignX::Center),
+                                |b| {
+                                    b.text(format!("{centimeter}"), label_style.clone());
+                                },
+                            );
+                        },
+                    );
+                }
+                if right_spacer > 0.0 {
+                    b.with(
+                        El::new()
+                            .width(Sizing::fixed(Mm(right_spacer)))
+                            .height(Sizing::GROW),
                         |_| {},
                     );
-                    for centimeter in 1..=last_label_centimeter {
-                        b.with(
-                            El::new()
-                                .width(Sizing::fixed(Mm(10.0)))
-                                .height(Sizing::GROW),
-                            |b| {
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::GROW)
-                                        .direction(Direction::TopToBottom)
-                                        .child_align_x(AlignX::Center),
-                                    |b| {
-                                        b.text(format!("{centimeter}"), label_style.clone());
-                                    },
-                                );
-                            },
-                        );
-                    }
-                    if right_spacer > 0.0 {
-                        b.with(
-                            El::new()
-                                .width(Sizing::fixed(Mm(right_spacer)))
-                                .height(Sizing::GROW),
-                            |_| {},
-                        );
-                    }
-                },
-            );
-        },
-    );
+                }
+            },
+        );
+    });
 
     builder.build()
 }
@@ -1441,67 +1419,59 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
     let last_label_inch = width_sixteenths / 16;
     let right_spacer = width_inches - 0.5 - last_label_inch.to_f32();
 
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            // ── Top row: spine + ticks ──────────────────────────
-            ruler_track(
-                b,
-                Sizing::fixed(In(width_inches)),
-                Sizing::fixed(In(PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0)),
-                imperial_horizontal_ruler_lines(width_sixteenths, ruler_color),
-            );
+    builder.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // ── Top row: spine + ticks ──────────────────────────
+        ruler_track(
+            b,
+            Sizing::fixed(In(width_inches)),
+            Sizing::fixed(In(PANEL_RULER_INCH_TICK.0 + PANEL_RULER_INCH_SPINE.0)),
+            imperial_horizontal_ruler_lines(width_sixteenths, ruler_color),
+        );
 
-            // ── Bottom row: labels ──────────────────────────────
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_align_y(AlignY::Top)
-                    .padding(Padding::new(
-                        In(0.0),
-                        In(0.0),
-                        PANEL_RULER_IN_LABEL_GAP,
-                        In(0.0),
-                    )),
-                |b| {
+        // ── Bottom row: labels ──────────────────────────────
+        b.with(
+            El::row()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .align_y(AlignY::Top)
+                .padding(Padding::new(
+                    In(0.0),
+                    In(0.0),
+                    PANEL_RULER_IN_LABEL_GAP,
+                    In(0.0),
+                )),
+            |b| {
+                b.with(
+                    El::new().width(Sizing::fixed(In(0.5))).height(Sizing::GROW),
+                    |_| {},
+                );
+                for inch in 1..=last_label_inch {
                     b.with(
-                        El::new().width(Sizing::fixed(In(0.5))).height(Sizing::GROW),
+                        El::new().width(Sizing::fixed(In(1.0))).height(Sizing::GROW),
+                        |b| {
+                            b.with(
+                                El::column()
+                                    .width(Sizing::GROW)
+                                    .height(Sizing::GROW)
+                                    .align_x(AlignX::Center),
+                                |b| {
+                                    b.text(format!("{inch}"), label_style.clone());
+                                },
+                            );
+                        },
+                    );
+                }
+                if right_spacer > 0.0 {
+                    b.with(
+                        El::new()
+                            .width(Sizing::fixed(In(right_spacer)))
+                            .height(Sizing::GROW),
                         |_| {},
                     );
-                    for inch in 1..=last_label_inch {
-                        b.with(
-                            El::new().width(Sizing::fixed(In(1.0))).height(Sizing::GROW),
-                            |b| {
-                                b.with(
-                                    El::new()
-                                        .width(Sizing::GROW)
-                                        .height(Sizing::GROW)
-                                        .direction(Direction::TopToBottom)
-                                        .child_align_x(AlignX::Center),
-                                    |b| {
-                                        b.text(format!("{inch}"), label_style.clone());
-                                    },
-                                );
-                            },
-                        );
-                    }
-                    if right_spacer > 0.0 {
-                        b.with(
-                            El::new()
-                                .width(Sizing::fixed(In(right_spacer)))
-                                .height(Sizing::GROW),
-                            |_| {},
-                        );
-                    }
-                },
-            );
-        },
-    );
+                }
+            },
+        );
+    });
 
     builder.build()
 }
@@ -1540,11 +1510,10 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
     let body = TextStyle::new(Pt(12.0)).with_color(A4_TEXT_COLOR);
 
     builder.with(
-        El::new()
+        El::column()
             .size(A4_WIDTH, A4_HEIGHT)
             .padding(Padding::all(Mm(15.0)))
-            .direction(Direction::TopToBottom)
-            .child_gap(Mm(4.0))
+            .gap(Mm(4.0))
             .background(Color::WHITE),
         |b| {
             build_font_samples_row(b, db);
@@ -1573,7 +1542,7 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .child_align_x(AlignX::Center)
+                    .align_x(AlignX::Center)
                     .border(db),
                 |b| {
                     b.with(El::new().border(db), |b| {
@@ -1590,11 +1559,10 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
 
 fn build_font_samples_row(b: &mut LayoutBuilder, db: Border) {
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(Mm(6.0))
-            .child_align_y(AlignY::Bottom)
+            .gap(Mm(6.0))
+            .align_y(AlignY::Bottom)
             .border(db),
         |b| {
             for (label, size) in [
@@ -1618,19 +1586,14 @@ fn build_two_column_article(
     db: Border,
 ) {
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(Mm(8.0))
+            .gap(Mm(8.0))
             .border(db),
         |b| {
             b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Mm(4.0))
-                    .border(db),
+                El::column().width(Sizing::GROW).gap(Mm(4.0)).border(db),
                 |b| {
                     debug_text(b, "Real Units, Real Sizes", heading.clone(), db);
                     debug_text(
@@ -1673,11 +1636,7 @@ fn build_two_column_article(
             );
 
             b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Mm(4.0))
-                    .border(db),
+                El::column().width(Sizing::GROW).gap(Mm(4.0)).border(db),
                 |b| {
                     debug_text(b, "Any Scale You Need", heading.clone(), db);
                     debug_text(
@@ -1731,11 +1690,10 @@ fn build_card_content(builder: &mut LayoutBuilder, debug: bool) {
     let db = debug_border(debug, DEBUG_OUTLINE);
 
     builder.with(
-        El::new()
+        El::column()
             .size(CARD_WIDTH, CARD_HEIGHT)
             .padding(Padding::all(In(0.15)))
-            .direction(Direction::TopToBottom)
-            .child_gap(In(0.04))
+            .gap(In(0.04))
             .background(Color::srgb(0.392, 0.584, 0.929)),
         |b| {
             debug_text(
@@ -1794,11 +1752,10 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
     let footer = TextStyle::new(INDEX_FOOTER_SIZE).with_color(INDEX_LABEL_COLOR);
 
     builder.with(
-        El::new()
+        El::column()
             .size(INDEX_WIDTH, INDEX_HEIGHT)
             .padding(Padding::all(In(0.2)))
-            .direction(Direction::TopToBottom)
-            .child_gap(In(0.08))
+            .gap(In(0.08))
             .background(INDEX_BG),
         |b| {
             debug_text(b, "Units API", heading.clone(), db);
@@ -1884,7 +1841,7 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
             b.with(
                 El::new()
                     .width(Sizing::GROW)
-                    .child_align_x(AlignX::Center)
+                    .align_x(AlignX::Center)
                     .border(db),
                 |b| {
                     b.with(El::new().border(db), |b| {
@@ -1909,30 +1866,14 @@ fn index_row(
     db: Border,
 ) {
     b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(In(0.12))
-            .border(db),
+        El::row().width(Sizing::GROW).gap(In(0.12)).border(db),
         |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(In(1.0)))
-                    .direction(Direction::TopToBottom)
-                    .border(db),
-                |b| {
-                    b.text(label_text, label.clone());
-                },
-            );
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .border(db),
-                |b| {
-                    b.text(code_text, code.clone());
-                },
-            );
+            b.with(El::column().width(Sizing::fixed(In(1.0))).border(db), |b| {
+                b.text(label_text, label.clone());
+            });
+            b.with(El::column().width(Sizing::GROW).border(db), |b| {
+                b.text(code_text, code.clone());
+            });
         },
     );
 }

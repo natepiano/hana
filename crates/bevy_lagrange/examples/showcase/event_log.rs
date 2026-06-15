@@ -1,7 +1,6 @@
 use bevy_diegetic::AlignY;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -140,22 +139,20 @@ fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(EVENT_LOG_CHILD_GAP),
+                    .gap(EVENT_LOG_CHILD_GAP),
                 |builder| {
                     builder.text(EVENT_LOG_TITLE, title);
                     title_divider(builder);
                     // Scroll viewport: fills the remaining height, clips overflow,
                     // and follows the tail (scrollback 0) until the user scrolls up.
                     builder.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::GROW)
                             .height(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(EVENT_LOG_ENTRY_GAP)
+                            .gap(EVENT_LOG_ENTRY_GAP)
                             .scroll_y_from_end(log.scrollback),
                         |builder| {
                             for entry in &log.entries {
@@ -189,11 +186,10 @@ fn title_divider(builder: &mut LayoutBuilder) {
 /// The two scroll/clear hints side by side, split by a vertical blue separator.
 fn footer_hints(builder: &mut LayoutBuilder, hint: &TextStyle) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(EVENT_LOG_CHILD_GAP)
-            .child_align_y(AlignY::Center),
+            .gap(EVENT_LOG_CHILD_GAP)
+            .align_y(AlignY::Center),
         |builder| {
             builder.text(LOG_SCROLL_HINT_TEXT, hint.clone());
             builder.with(

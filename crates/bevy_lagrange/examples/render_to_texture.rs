@@ -26,7 +26,6 @@ use bevy::render::render_resource::TextureFormat;
 use bevy::render::render_resource::TextureUsages;
 use bevy::window::PrimaryWindow;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -316,10 +315,7 @@ fn build_info_panel_layout(builder: &mut LayoutBuilder) {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(INFO_PANEL_GAP),
+                El::column().width(Sizing::GROW).gap(INFO_PANEL_GAP),
                 |builder| {
                     builder.text("How it works", title);
                     for line in INFO_PANEL_LINES {

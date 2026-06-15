@@ -253,20 +253,12 @@ fn nested_ruler_panel(config: SpinePanelConfig) -> Option<DiegeticPanel> {
 }
 
 fn nested_ruler_tree(config: SpinePanelConfig) -> LayoutTree {
-    use bevy_diegetic::Direction;
-
     let (ticks, spine) = nested_ruler_lines(config);
     let mut builder = LayoutBuilder::new(Mm(10.0), Mm(config.height_mm()));
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            add_label_space(b, config);
-            add_tick_track(b, ticks, spine);
-        },
-    );
+    builder.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        add_label_space(b, config);
+        add_tick_track(b, ticks, spine);
+    });
     builder.build()
 }
 
@@ -298,8 +290,6 @@ fn nested_ruler_lines(config: SpinePanelConfig) -> (Vec<PanelLine>, PanelLine) {
 }
 
 fn add_label_space(builder: &mut LayoutBuilder, config: SpinePanelConfig) {
-    use bevy_diegetic::Direction;
-
     if !config.labeled {
         // Same column geometry, no text: the discriminating variable is the
         // glyphs, not the layout.
@@ -308,11 +298,10 @@ fn add_label_space(builder: &mut LayoutBuilder, config: SpinePanelConfig) {
     }
 
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_align_x(AlignX::Right)
+            .align_x(AlignX::Right)
             .padding(Padding::new(Mm(0.0), Mm(1.0), Mm(0.0), Mm(0.0))),
         |b| add_labels(b, config),
     );
@@ -339,8 +328,8 @@ fn add_labels(builder: &mut LayoutBuilder, config: SpinePanelConfig) {
             El::new()
                 .height(Sizing::fixed(Mm(10.0)))
                 .width(Sizing::GROW)
-                .child_align_x(AlignX::Right)
-                .child_align_y(AlignY::Center),
+                .align_x(AlignX::Right)
+                .align_y(AlignY::Center),
             |b| {
                 b.text(format!("{centimeter}"), label_style.clone());
             },
@@ -353,13 +342,10 @@ fn add_labels(builder: &mut LayoutBuilder, config: SpinePanelConfig) {
 }
 
 fn add_tick_track(builder: &mut LayoutBuilder, ticks: Vec<PanelLine>, spine: PanelLine) {
-    use bevy_diegetic::Direction;
-
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::fixed(Mm(TICK_TRACK_MM + SPINE_WIDTH_MM)))
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
+            .height(Sizing::GROW),
         |b| {
             b.with(
                 El::new()

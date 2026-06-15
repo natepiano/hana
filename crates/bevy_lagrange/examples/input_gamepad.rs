@@ -19,7 +19,6 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -540,38 +539,35 @@ fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> L
         .with_shadow_mode(GlyphShadowMode::None);
 
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(style.size))
             .height(Sizing::fixed(style.size))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(style.row_gap)
+            .alignment(AlignX::Center, AlignY::Center)
+            .gap(style.row_gap)
             .padding(Padding::all(style.padding))
             .clip(),
     );
     builder.text(kind.title(), title_style);
     for (speed_label, controls) in idle_speed_groups(summary, kind.kind()) {
         builder.with(
-            El::new()
+            El::row()
                 .width(Sizing::GROW)
-                .direction(Direction::LeftToRight)
-                .child_alignment(AlignX::Left, AlignY::Center)
-                .child_gap(CONTROL_TABLE_COLUMN_GAP),
+                .alignment(AlignX::Left, AlignY::Center)
+                .gap(CONTROL_TABLE_COLUMN_GAP),
             |group| {
                 group.with(
                     El::new()
                         .width(Sizing::percent(SPEED_COLUMN_FRACTION))
-                        .child_alignment(AlignX::Left, AlignY::Center),
+                        .alignment(AlignX::Left, AlignY::Center),
                     |cell| {
                         cell.text(speed_label, label_style.clone());
                     },
                 );
                 group.with(
-                    El::new()
+                    El::column()
                         .width(Sizing::GROW)
-                        .direction(Direction::TopToBottom)
-                        .child_alignment(AlignX::Left, AlignY::Center)
-                        .child_gap(style.row_gap),
+                        .alignment(AlignX::Left, AlignY::Center)
+                        .gap(style.row_gap),
                     |column| {
                         for control in &controls {
                             column.text(control.clone(), label_style.clone());

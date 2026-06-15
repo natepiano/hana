@@ -15,7 +15,6 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontFeatureFlags;
@@ -312,12 +311,11 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
     let off_color = Color::srgb(0.7, 0.7, 0.7);
 
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(12.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(8.0)
+            .gap(8.0)
             .background(bg)
             .border(Border::all(1.0, border_color)),
         |b| {
@@ -359,18 +357,13 @@ fn build_feature_grid(
     column_border_color: Color,
 ) {
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_gap(12.0),
+            .gap(12.0),
         |b| {
             b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(12.0),
+                El::row().width(Sizing::GROW).height(Sizing::GROW).gap(12.0),
                 |b| {
                     build_feature_column(
                         b,
@@ -403,11 +396,7 @@ fn build_feature_grid(
                 },
             );
             b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(12.0),
+                El::row().width(Sizing::GROW).height(Sizing::GROW).gap(12.0),
                 |b| {
                     build_feature_column(
                         b,
@@ -489,21 +478,19 @@ fn build_feature_column(
         .with_color(label_color);
 
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(4.0)
+            .gap(4.0)
             .border(Border::all(0.75, column_border_color)),
         |b| {
             b.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(8.0)
-                    .child_align_y(AlignY::Top),
+                    .gap(8.0)
+                    .align_y(AlignY::Top),
                 |b| {
                     b.text(
                         title,
@@ -513,7 +500,7 @@ fn build_feature_column(
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .child_align_x(AlignX::Right),
+                            .align_x(AlignX::Right),
                         |b| {
                             b.text(font_name, font_name_config.clone());
                         },
@@ -535,26 +522,24 @@ fn build_sample_rows(
     off_config: &TextStyle,
 ) {
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_gap(0.0),
+            .gap(0.0),
         |b| {
             b.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::percent(0.11))
                     .padding(Padding::new(6.0, 4.0, 0.0, 4.0))
-                    .direction(Direction::LeftToRight)
-                    .child_gap(10.0)
-                    .child_align_y(AlignY::Bottom),
+                    .gap(10.0)
+                    .align_y(AlignY::Bottom),
                 |b| {
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .child_alignment(AlignX::Center, AlignY::Top),
+                            .alignment(AlignX::Center, AlignY::Top),
                         |b| {
                             b.text("Off", label_config.clone());
                         },
@@ -563,7 +548,7 @@ fn build_sample_rows(
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .child_alignment(AlignX::Center, AlignY::Top),
+                            .alignment(AlignX::Center, AlignY::Top),
                         |b| {
                             b.text("On", label_config.clone());
                         },
@@ -573,18 +558,17 @@ fn build_sample_rows(
 
             for &sample in samples {
                 b.with(
-                    El::new()
+                    El::row()
                         .width(Sizing::GROW)
                         .height(Sizing::GROW)
                         .padding(Padding::new(0.0, 4.0, 0.0, 4.0))
-                        .direction(Direction::LeftToRight)
-                        .child_gap(10.0),
+                        .gap(10.0),
                     |b| {
                         b.with(
                             El::new()
                                 .width(Sizing::GROW)
                                 .height(Sizing::GROW)
-                                .child_alignment(AlignX::Center, AlignY::Center),
+                                .alignment(AlignX::Center, AlignY::Center),
                             |b| {
                                 b.text(sample, off_config.clone());
                             },
@@ -593,7 +577,7 @@ fn build_sample_rows(
                             El::new()
                                 .width(Sizing::GROW)
                                 .height(Sizing::GROW)
-                                .child_alignment(AlignX::Center, AlignY::Center),
+                                .alignment(AlignX::Center, AlignY::Center),
                             |b| {
                                 b.text(sample, on_config.clone());
                             },

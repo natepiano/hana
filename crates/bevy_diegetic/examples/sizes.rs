@@ -20,7 +20,6 @@ use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
@@ -358,18 +357,16 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
 
     let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
     builder.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(PANEL_PAD))
-            .child_gap(ROW_SPACING)
+            .gap(ROW_SPACING)
             .border(Border::all(BORDER_WIDTH, BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
             for (label, sample_style) in sample_styles {
                 b.with(
-                    El::new()
-                        .direction(Direction::LeftToRight)
+                    El::row()
                         .width(Sizing::grow_min(0.0))
                         .height(Sizing::fit_min(0.0)),
                     |b| {
@@ -404,10 +401,9 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
 
     let mut builder = LayoutBuilder::new(NOTE_WIDTH, NOTE_HEIGHT);
     builder.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(NOTE_PAD))
-            .child_gap(2.5)
+            .gap(2.5)
             .border(Border::all(BORDER_WIDTH, BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),

@@ -39,7 +39,6 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticTextMeasurer;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -462,12 +461,11 @@ fn build_controls_panel() -> LayoutTree {
 
     let mut builder = LayoutBuilder::new(CONTROL_LAYOUT_WIDTH, CONTROL_LAYOUT_HEIGHT);
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .padding(Padding::all(0.002))
-            .direction(Direction::TopToBottom)
-            .child_gap(0.001)
+            .gap(0.001)
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
             .border(Border::all(0.0005, border_color)),
         |b| {
@@ -483,54 +481,35 @@ fn build_controls_panel() -> LayoutTree {
                 |_| {},
             );
             b.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(0.0015),
+                El::row().width(Sizing::FIT).height(Sizing::FIT).gap(0.0015),
                 |b| {
                     // Key column
-                    b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_align_x(AlignX::Center),
-                        |b| {
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("d", control_text_style.clone());
-                            });
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("s", control_text_style.clone());
-                            });
-                        },
-                    );
+                    b.with(El::column().align_x(AlignX::Center), |b| {
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("d", control_text_style.clone());
+                        });
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("s", control_text_style.clone());
+                        });
+                    });
                     // Arrow column
-                    b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_align_x(AlignX::Center),
-                        |b| {
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
-                            });
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
-                            });
-                        },
-                    );
+                    b.with(El::column().align_x(AlignX::Center), |b| {
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
+                        });
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
+                        });
+                    });
                     // Description column
-                    b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_align_x(AlignX::Left),
-                        |b| {
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("toggle debug", control_text_style.clone());
-                            });
-                            b.with(El::new().height(row_height), |b| {
-                                b.text("cycle size", control_text_style.clone());
-                            });
-                        },
-                    );
+                    b.with(El::column().align_x(AlignX::Left), |b| {
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("toggle debug", control_text_style.clone());
+                        });
+                        b.with(El::new().height(row_height), |b| {
+                            b.text("cycle size", control_text_style.clone());
+                        });
+                    });
                 },
             );
         },
@@ -664,22 +643,20 @@ fn build_diegetic_tree(rows: &[(String, String)], world_size: f32) -> LayoutTree
     // Scale factor: spatial values are proportional to world_size.
     let s = world_size / 160.0;
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(world_size))
             .height(Sizing::fixed(world_height))
             .padding(Padding::all(8.0 * s))
-            .direction(Direction::TopToBottom)
             .background(Color::srgb_u8(180, 96, 122)),
     );
 
     // Inset frame.
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(5.0 * s))
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0 * s)
+            .gap(5.0 * s)
             .border(Border::all(5.0 * s, Color::srgb_u8(255, 255, 255)))
             .background(Color::srgb_u8(56, 16, 24)),
         |b| {
@@ -699,36 +676,30 @@ fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
             .width(Sizing::GROW)
             .height(Sizing::grow_range(7.0 * s, HEADER_HEIGHT * s))
             .padding(Padding::new(5.0 * s, 5.0 * s, 4.0 * s, 4.0 * s))
-            .child_align_y(AlignY::Center)
+            .align_y(AlignY::Center)
             .background(Color::srgb_u8(52, 98, 90)),
         |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    // Title slot.
-                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextStyle::new(FONT_SIZE));
-                    });
-                    // Grow spacer.
-                    b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
-                        |_| {},
-                    );
-                    // Subtitle slot.
-                    b.with(
-                        El::new()
-                            .width(Sizing::FIT)
-                            .height(Sizing::GROW)
-                            .child_align_x(AlignX::Right),
-                        |b| {
-                            b.text("DIEGETIC LAYOUT", TextStyle::new(SUBTITLE_FONT_SIZE));
-                        },
-                    );
-                },
-            );
+            b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
+                // Title slot.
+                b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                    b.text("STATUS", TextStyle::new(FONT_SIZE));
+                });
+                // Grow spacer.
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
+                    |_| {},
+                );
+                // Subtitle slot.
+                b.with(
+                    El::new()
+                        .width(Sizing::FIT)
+                        .height(Sizing::GROW)
+                        .align_x(AlignX::Right),
+                    |b| {
+                        b.text("DIEGETIC LAYOUT", TextStyle::new(SUBTITLE_FONT_SIZE));
+                    },
+                );
+            });
         },
     );
 }
@@ -753,27 +724,20 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32)
             .background(Color::srgb_u8(22, 28, 34)),
         |b| {
             b.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .padding(Padding::all(5.0 * s))
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0 * s),
+                    .gap(2.0 * s),
                 |b| {
                     for (label, value) in rows {
-                        b.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::LeftToRight),
-                            |b| {
-                                b.text(label, TextStyle::new(FONT_SIZE));
-                                b.with(
-                                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
-                                    |_| {},
-                                );
-                                b.text(value, TextStyle::new(FONT_SIZE));
-                            },
-                        );
+                        b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
+                            b.text(label, TextStyle::new(FONT_SIZE));
+                            b.with(
+                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
+                                |_| {},
+                            );
+                            b.text(value, TextStyle::new(FONT_SIZE));
+                        });
                     }
 
                     // Spacer.

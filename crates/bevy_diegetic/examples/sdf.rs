@@ -34,7 +34,6 @@ use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::FontId;
 use bevy_diegetic::LayoutBuilder;
@@ -357,13 +356,12 @@ fn build_controls_panel() -> bevy_diegetic::LayoutTree {
             .border(Border::all(Px(2.0), CONTROLS_ACCENT)),
         |b| {
             b.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
                     .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(10.0))
-                    .child_align_y(AlignY::Center)
+                    .gap(Px(10.0))
+                    .align_y(AlignY::Center)
                     .corner_radius(CornerRadius::new(Px(11.0), Px(11.0), Px(11.0), Px(11.0)))
                     .background(CONTROLS_BACKGROUND)
                     .border(Border::all(Px(1.0), CONTROLS_BORDER)),
@@ -439,12 +437,11 @@ fn build_camera_help(b: &mut LayoutBuilder) {
             .border(Border::all(CAM_HELP_BORDER, CONTROLS_ACCENT)),
         |b| {
             b.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
                     .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(6.0))
+                    .gap(Px(6.0))
                     .corner_radius(CornerRadius::new(
                         CAM_HELP_INNER_RADIUS,
                         CAM_HELP_INNER_RADIUS,
@@ -457,24 +454,17 @@ fn build_camera_help(b: &mut LayoutBuilder) {
                     b.text("CAMERA", title);
 
                     b.with(
-                        El::new()
+                        El::row()
                             .width(Sizing::GROW)
                             .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Px(12.0)),
+                            .gap(Px(12.0)),
                         |b| {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Mouse", header.clone());
-                                    b.text("MMB drag → Orbit", label.clone());
-                                    b.text("Shift+MMB → Pan", label.clone());
-                                    b.text("Scroll → Zoom", label.clone());
-                                },
-                            );
+                            b.with(El::column().width(Sizing::GROW).gap(Px(4.0)), |b| {
+                                b.text("Mouse", header.clone());
+                                b.text("MMB drag → Orbit", label.clone());
+                                b.text("Shift+MMB → Pan", label.clone());
+                                b.text("Scroll → Zoom", label.clone());
+                            });
 
                             b.with(
                                 El::new()
@@ -484,19 +474,13 @@ fn build_camera_help(b: &mut LayoutBuilder) {
                                 |_| {},
                             );
 
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Trackpad", header.clone());
-                                    b.text("Scroll → Orbit", label.clone());
-                                    b.text("Shift+Scroll → Pan", label.clone());
-                                    b.text("Ctrl+Scroll → Zoom", label.clone());
-                                    b.text("Pinch → Zoom", label.clone());
-                                },
-                            );
+                            b.with(El::column().width(Sizing::GROW).gap(Px(4.0)), |b| {
+                                b.text("Trackpad", header.clone());
+                                b.text("Scroll → Orbit", label.clone());
+                                b.text("Shift+Scroll → Pan", label.clone());
+                                b.text("Ctrl+Scroll → Zoom", label.clone());
+                                b.text("Pinch → Zoom", label.clone());
+                            });
                         },
                     );
                 },

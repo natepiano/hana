@@ -3,7 +3,6 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -277,11 +276,10 @@ fn build_policy_layout(
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Px(POLICY_PANEL_GROUP_GAP))
+                    .gap(Px(POLICY_PANEL_GROUP_GAP))
                     .border(
                         Border::new()
                             .between_children(Px(EVENT_LOG_DIVIDER_THICKNESS))
@@ -352,28 +350,25 @@ fn build_group(
     rows: impl FnOnce(&mut LayoutBuilder),
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(Px(POLICY_PANEL_HEADER_GAP)),
+            .gap(Px(POLICY_PANEL_HEADER_GAP)),
         |builder| {
             builder.text(header, styles.header.clone());
             builder.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(Px(POLICY_PANEL_COLUMN_GAP))
-                    .child_align_y(AlignY::Center),
+                    .gap(Px(POLICY_PANEL_COLUMN_GAP))
+                    .align_y(AlignY::Center),
                 |builder| {
                     build_key_cell(builder, key, key_style);
                     builder.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(Px(POLICY_PANEL_ROW_GAP)),
+                            .gap(Px(POLICY_PANEL_ROW_GAP)),
                         rows,
                     );
                 },
@@ -387,7 +382,7 @@ fn build_key_cell(builder: &mut LayoutBuilder, key: &str, key_style: &TextStyle)
         El::new()
             .width(Sizing::fixed(Px(POLICY_PANEL_KEY_COLUMN_WIDTH)))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Center, AlignY::Center),
+            .alignment(AlignX::Center, AlignY::Center),
         |builder| {
             builder.text(format!("{key} {POLICY_PANEL_ARROW}"), key_style.clone());
         },
@@ -409,12 +404,11 @@ fn build_variant_row(
     };
 
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(Px(POLICY_PANEL_NAME_GAP))
-            .child_align_y(AlignY::Top),
+            .gap(Px(POLICY_PANEL_NAME_GAP))
+            .align_y(AlignY::Top),
         |builder| {
             builder.with(
                 El::new()

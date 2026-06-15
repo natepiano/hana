@@ -28,7 +28,6 @@ use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::FontUnit;
@@ -365,10 +364,7 @@ fn build_scene_frame_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
             .background(INVISIBLE_FRAME_BACKGROUND),
     );
     builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
+        El::row().width(Sizing::GROW).height(Sizing::GROW),
         |builder| {
             builder.with(
                 El::new()
@@ -380,7 +376,7 @@ fn build_scene_frame_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .child_alignment(AlignX::Center, AlignY::Center),
+                    .alignment(AlignX::Center, AlignY::Center),
                 |builder| build_panel_layout(builder, snapshot),
             );
         },
@@ -429,23 +425,21 @@ fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: Option<&HudSnapshot
     let unit_text = unit_line(PANEL_UNIT_PREFIX, Unit::Millimeters, "panel");
 
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(PANEL_DEMO_WIDTH))
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
             .padding(Padding::all(PANEL_FRAME_PAD))
-            .child_alignment(AlignX::Center, AlignY::Center)
+            .alignment(AlignX::Center, AlignY::Center)
             .corner_radius(CornerRadius::all(PANEL_RADIUS))
             .background(PANEL_FRAME_BACKGROUND)
             .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_ACCENT)),
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::fixed(PANEL_INNER_WIDTH))
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
                     .padding(Padding::all(PANEL_INNER_PAD))
-                    .child_gap(PANEL_ROW_GAP)
+                    .gap(PANEL_ROW_GAP)
                     .corner_radius(CornerRadius::all(PANEL_INNER_RADIUS))
                     .background(DEFAULT_PANEL_BACKGROUND)
                     .border(Border::all(PANEL_INNER_BORDER_WIDTH, PANEL_BORDER_DIM)),
@@ -649,10 +643,7 @@ fn build_hud_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
         .no_wrap();
 
     builder.with(
-        El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .direction(Direction::LeftToRight),
+        El::row().width(Sizing::FIT).height(Sizing::FIT),
         |builder| match snapshot {
             Some(snapshot) => {
                 build_hud_card(builder, |builder| {
@@ -671,12 +662,11 @@ fn build_hud_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
 
 fn build_hud_card(builder: &mut LayoutBuilder, build: impl FnOnce(&mut LayoutBuilder)) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::fixed(HUD_CARD_HEIGHT))
-            .direction(Direction::TopToBottom)
             .padding(Padding::all(HUD_PADDING))
-            .child_gap(HUD_ROW_GAP)
+            .gap(HUD_ROW_GAP)
             .corner_radius(CornerRadius::all(HUD_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)
             .border(Border::all(HUD_BORDER_WIDTH, PANEL_BORDER)),
@@ -692,11 +682,10 @@ fn build_controls_table(
     control_text: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(HUD_ROW_GAP),
+            .gap(HUD_ROW_GAP),
         |builder| {
             builder.text("Cascade controls", header.clone());
             controls_row(
@@ -760,11 +749,10 @@ fn controls_row(
     text_style: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(Px(6.0)),
+            .gap(Px(6.0)),
         |builder| {
             builder.with(
                 El::new()

@@ -28,7 +28,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -298,7 +297,7 @@ fn label_cell(builder: &mut LayoutBuilder, text: &str) {
         El::new()
             .width(Sizing::fixed(LABEL_COLUMN_WIDTH))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(text, status_label_style());
         },
@@ -324,7 +323,7 @@ fn value_cell(builder: &mut LayoutBuilder, text: &str, emphasis: CellEmphasis) {
         El::new()
             .width(Sizing::fixed(VALUE_COLUMN_WIDTH))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Right, AlignY::Center),
+            .alignment(AlignX::Right, AlignY::Center),
         |builder| {
             builder.text(text, style);
         },
@@ -340,12 +339,11 @@ fn table_row(
     emphasis: CellEmphasis,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(TABLE_COL_GAP)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(TABLE_COL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             label_cell(builder, label);
             value_cell(builder, now, emphasis);
@@ -371,11 +369,10 @@ fn build_status_overlay_tree(
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(TABLE_ROW_GAP),
+                    .gap(TABLE_ROW_GAP),
                 |builder| {
                     table_row(builder, "", "now", "5s max", CellEmphasis::Dim);
                     for index in 0..METRIC_LABELS.len() {
@@ -725,11 +722,10 @@ fn build_panel_tree(
     let mut builder = LayoutBuilder::new(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT);
 
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(COLUMN_GAP)
+            .gap(COLUMN_GAP)
             .padding(Padding::all(0.03))
             .border(Border::all(0.01, BORDER_COLOR)),
         |b| {
@@ -744,11 +740,10 @@ fn build_panel_tree(
                 let end = (row_cursor + col_rows).min(panel_start + panel_rows);
 
                 b.with(
-                    El::new()
+                    El::column()
                         .width(Sizing::fixed(COLUMN_WIDTH))
                         .height(Sizing::GROW)
-                        .direction(Direction::TopToBottom)
-                        .child_gap(0.01)
+                        .gap(0.01)
                         .padding(Padding::all(0.02))
                         .border(Border::all(0.01, BORDER_COLOR)),
                     |b| {
@@ -779,11 +774,10 @@ fn build_panel_tree(
                                 .with_color(color)
                                 .with_shadow_mode(GlyphShadowMode::None);
                             b.with(
-                                El::new()
+                                El::row()
                                     .width(Sizing::GROW)
                                     .height(Sizing::FIT)
-                                    .direction(Direction::LeftToRight)
-                                    .child_gap(ROW_SPACING),
+                                    .gap(ROW_SPACING),
                                 |b| {
                                     b.text(&label, config.clone());
                                     b.with(

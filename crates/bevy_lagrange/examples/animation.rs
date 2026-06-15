@@ -34,7 +34,6 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -500,11 +499,10 @@ fn emissive_text_material() -> StandardMaterial {
 
 fn face_label_tree(label: &str) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(FACE_LABEL_PANEL_SIZE))
             .height(Sizing::fixed(FACE_LABEL_PANEL_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
+            .alignment(AlignX::Center, AlignY::Center)
             .padding(Padding::all(FACE_LABEL_PADDING))
             .clip(),
     );
@@ -600,11 +598,10 @@ fn build_explainer_tree() -> LayoutTree {
     // Wrapped body text flows to the fixed box width.
     let body = TextStyle::new(LABEL_SIZE).with_color(EXPLAINER_BODY_COLOR);
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(EXPLAINER_BOX_WIDTH))
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(EXPLAINER_STACK_GAP),
+            .gap(EXPLAINER_STACK_GAP),
         |builder| {
             for explainer in &EXPLAINERS {
                 build_explainer_box(builder, explainer, &title, &body);
@@ -621,11 +618,10 @@ fn build_explainer_box(
     body: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(EXPLAINER_ROW_GAP)
+            .gap(EXPLAINER_ROW_GAP)
             .padding(Padding::all(EXPLAINER_PADDING))
             .corner_radius(CornerRadius::all(EXPLAINER_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)

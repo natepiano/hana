@@ -17,7 +17,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -602,11 +601,10 @@ fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset
         .no_wrap();
 
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(PRESET_ROW_GAP)
+            .gap(PRESET_ROW_GAP)
             .padding(Padding::all(PRESET_PANEL_PADDING))
             .corner_radius(CornerRadius::all(PRESET_PANEL_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)
@@ -641,11 +639,10 @@ fn build_preset_row(
     lights_style: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(PRESET_KEY_GAP),
+            .gap(PRESET_KEY_GAP),
         |builder| {
             builder.with(
                 El::new()
@@ -714,10 +711,9 @@ fn build_combined_panel() -> LayoutTree {
 
 fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(CARD_PAD))
-            .child_gap(CHILD_GAP)
+            .gap(CHILD_GAP)
             .background(DARK_BG)
             .corner_radius(CornerRadius::all(Mm(3.0)))
             .width(Sizing::grow_min(0.0))
@@ -727,9 +723,8 @@ fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_s
             b.text("Nested elements with fills", body_style.clone());
 
             b.with(
-                El::new()
-                    .direction(Direction::LeftToRight)
-                    .child_gap(CHILD_GAP)
+                El::row()
+                    .gap(CHILD_GAP)
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
@@ -785,10 +780,9 @@ fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_s
 
 fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(CARD_PAD))
-            .child_gap(CHILD_GAP)
+            .gap(CHILD_GAP)
             .border(Border::all(Mm(0.5), BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
@@ -818,9 +812,8 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
             );
 
             b.with(
-                El::new()
-                    .direction(Direction::TopToBottom)
-                    .child_gap(CHILD_GAP)
+                El::column()
+                    .gap(CHILD_GAP)
                     .border(Border::all(Mm(0.3), BORDER_COLOR).between_children(Mm(0.3)))
                     .padding(Padding::all(2.0))
                     .width(Sizing::grow_min(0.0))
@@ -837,10 +830,9 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
 
 fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
     b.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(CARD_PAD))
-            .child_gap(CHILD_GAP)
+            .gap(CHILD_GAP)
             .background(DARK_BG)
             .border(Border::all(Mm(0.5), BLUE_ACCENT))
             .corner_radius(CornerRadius::all(Mm(3.0)))
@@ -862,17 +854,15 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
             );
 
             b.with(
-                El::new()
-                    .direction(Direction::LeftToRight)
-                    .child_gap(CHILD_GAP)
+                El::row()
+                    .gap(CHILD_GAP)
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
                     // Overflow visible — second line spills past the box.
                     b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(1.0)
+                        El::column()
+                            .gap(1.0)
                             .background(BLUE_BG)
                             .border(Border::all(Mm(0.3), BLUE_ACCENT))
                             .padding(Padding::all(2.0))
@@ -885,9 +875,8 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                     );
                     // Overflow clipped — second line hidden at the boundary.
                     b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(1.0)
+                        El::column()
+                            .gap(1.0)
                             .clip()
                             .background(GREEN_BG)
                             .border(Border::all(Mm(0.3), GREEN_ACCENT))
@@ -903,9 +892,8 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
             );
 
             b.with(
-                El::new()
-                    .direction(Direction::TopToBottom)
-                    .child_gap(1.5)
+                El::column()
+                    .gap(1.5)
                     .background(BLUE_BG)
                     .border(Border::all(Mm(0.3), DIVIDER_COLOR).between_children(Mm(0.2)))
                     .padding(Padding::all(2.0))

@@ -58,7 +58,6 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticTextMut;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -1324,7 +1323,7 @@ fn label_cell_with_accent(
             .width(Sizing::fixed(LABEL_COLUMN_WIDTH))
             .height(Sizing::FIT)
             .padding(Padding::new(indent.left_padding(), 0.0, 0.0, 0.0))
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(text, style);
         },
@@ -1347,7 +1346,7 @@ fn value_cell_with_accent(
         El::new()
             .width(Sizing::fixed(VALUE_COLUMN_WIDTH))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Right, AlignY::Center),
+            .alignment(AlignX::Right, AlignY::Center),
         |builder| {
             builder.text(text, style);
         },
@@ -1362,12 +1361,11 @@ fn table_row(
     emphasis: CellEmphasis,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(TABLE_COL_GAP)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(TABLE_COL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             label_cell_with_accent(
                 builder,
@@ -1392,7 +1390,7 @@ fn table_subheader(
         El::new()
             .width(Sizing::fixed(STATUS_TABLE_WIDTH))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             label_cell_with_accent(builder, title, indent, CellEmphasis::Normal, accent);
         },
@@ -1414,7 +1412,7 @@ fn table_section_title(builder: &mut LayoutBuilder, title: &str) {
         El::new()
             .width(Sizing::fixed(STATUS_TABLE_WIDTH))
             .height(Sizing::FIT)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(title, stats_header_label_style());
         },
@@ -1432,11 +1430,10 @@ fn build_overlay_tree(now: &[String; METRIC_COUNT], max: &[String; METRIC_COUNT]
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(TABLE_ROW_GAP),
+                    .gap(TABLE_ROW_GAP),
                 |builder| {
                     table_row(
                         builder,
@@ -1518,11 +1515,10 @@ fn build_batch_stats_tree(rows: &[BatchStatsRow]) -> LayoutTree {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(STATS_GROUP_GAP),
+                    .gap(STATS_GROUP_GAP),
                 |builder| {
                     let last = rows.len().saturating_sub(1);
                     for (index, row) in rows.iter().enumerate() {
@@ -1539,25 +1535,23 @@ fn build_batch_stats_tree(rows: &[BatchStatsRow]) -> LayoutTree {
 /// lines below it, and a thin separator (omitted on the final group).
 fn stats_group(builder: &mut LayoutBuilder, row: &BatchStatsRow, last: bool) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(STATS_ROW_WIDTH))
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(STATS_INTRA_GAP),
+            .gap(STATS_INTRA_GAP),
         |builder| {
             // Header: label left, value pushed to the right edge.
             builder.with(
-                El::new()
+                El::row()
                     .width(Sizing::fixed(STATS_ROW_WIDTH))
                     .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_alignment(AlignX::Left, AlignY::Center),
+                    .alignment(AlignX::Left, AlignY::Center),
                 |builder| {
                     builder.with(
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .child_alignment(AlignX::Left, AlignY::Center),
+                            .alignment(AlignX::Left, AlignY::Center),
                         |builder| {
                             builder.text(row.label, stats_header_label_style());
                         },
@@ -1566,7 +1560,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &BatchStatsRow, last: bool) {
                         El::new()
                             .width(Sizing::FIT)
                             .height(Sizing::FIT)
-                            .child_alignment(AlignX::Right, AlignY::Center),
+                            .alignment(AlignX::Right, AlignY::Center),
                         |builder| {
                             builder.text(&row.value, stats_header_value_style());
                         },
@@ -1580,7 +1574,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &BatchStatsRow, last: bool) {
                     El::new()
                         .width(Sizing::fixed(STATS_ROW_WIDTH))
                         .height(Sizing::FIT)
-                        .child_alignment(AlignX::Left, AlignY::Top),
+                        .alignment(AlignX::Left, AlignY::Top),
                     |builder| {
                         builder.text(detail, stats_desc_style());
                     },
@@ -2254,20 +2248,18 @@ fn build_gpu_pipeline_tree(bars: &GpuPipelineBars) -> LayoutTree {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(GPU_PIPELINE_LABEL_GAP)
-                    .child_alignment(AlignX::Left, AlignY::Top),
+                    .gap(GPU_PIPELINE_LABEL_GAP)
+                    .alignment(AlignX::Left, AlignY::Top),
                 |builder| {
                     builder.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::FIT)
                             .height(Sizing::FIT)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(GPU_PIPELINE_LANE_GAP)
-                            .child_alignment(AlignX::Right, AlignY::Center),
+                            .gap(GPU_PIPELINE_LANE_GAP)
+                            .alignment(AlignX::Right, AlignY::Center),
                         |builder| {
                             lane_label(builder, "main world");
                             lane_label(builder, "render world");
@@ -2275,11 +2267,10 @@ fn build_gpu_pipeline_tree(bars: &GpuPipelineBars) -> LayoutTree {
                         },
                     );
                     builder.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(GPU_PIPELINE_LANE_GAP),
+                            .gap(GPU_PIPELINE_LANE_GAP),
                         |builder| {
                             let span = bars.axis.max(GPU_PIPELINE_MIN_AXIS_MS);
                             lane_bars(builder, span, &main_lane_segments(bars));
@@ -2306,7 +2297,7 @@ fn lane_label_with_color(builder: &mut LayoutBuilder, label: &str, color: Color)
         El::new()
             .width(Sizing::FIT)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_ROW_HEIGHT))
-            .child_alignment(AlignX::Right, AlignY::Center),
+            .alignment(AlignX::Right, AlignY::Center),
         |builder| {
             builder.text(label, gpu_pipeline_lane_label_style(color));
         },
@@ -2326,11 +2317,10 @@ fn gpu_pipeline_lane_label_style(color: Color) -> TextStyle {
 fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[TimelineSegment]) {
     let axis = axis_ms.max(GPU_PIPELINE_MIN_AXIS_MS);
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_ROW_HEIGHT))
-            .direction(Direction::LeftToRight)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             gpu_pipeline_track(builder, axis, segments);
         },
@@ -2339,11 +2329,10 @@ fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[TimelineSegm
 
 fn gpu_pipeline_track(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
-            .direction(Direction::TopToBottom)
-            .child_gap(-GPU_PIPELINE_LANE_HEIGHT)
+            .gap(-GPU_PIPELINE_LANE_HEIGHT)
             .background(GPU_PIPELINE_TRACK_COLOR),
         |builder| {
             gpu_pipeline_segment_row(builder, axis, segments);
@@ -2356,10 +2345,9 @@ fn gpu_pipeline_track(builder: &mut LayoutBuilder, axis: f32, segments: &[Timeli
 
 fn gpu_pipeline_segment_row(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
-            .direction(Direction::LeftToRight),
+            .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT)),
         |builder| {
             let mut used = 0.0;
             for segment in segments {
@@ -2393,7 +2381,7 @@ fn add_gpu_pipeline_segment(builder: &mut LayoutBuilder, fraction: f32, segment:
         .width(Sizing::percent(fraction))
         .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
         .padding(segment.alignment.padding())
-        .child_alignment(segment.alignment.align_x(), AlignY::Center);
+        .alignment(segment.alignment.align_x(), AlignY::Center);
     let cell = if segment.color.alpha() > 0.0 {
         cell.background(segment.color)
     } else {
@@ -2414,11 +2402,10 @@ fn gpu_pipeline_label_row(builder: &mut LayoutBuilder, axis: f32, segment: Timel
         return;
     }
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
-            .direction(Direction::LeftToRight)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             add_gpu_pipeline_position_spacer(builder, spacer_fraction);
             builder.with(
@@ -2426,7 +2413,7 @@ fn gpu_pipeline_label_row(builder: &mut LayoutBuilder, axis: f32, segment: Timel
                     .width(Sizing::percent(label_fraction))
                     .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
                     .padding(segment.alignment.padding())
-                    .child_alignment(segment.alignment.align_x(), AlignY::Center),
+                    .alignment(segment.alignment.align_x(), AlignY::Center),
                 |builder| {
                     builder.text(segment.label, gpu_pipeline_segment_label_style(segment));
                 },

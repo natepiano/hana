@@ -2,7 +2,6 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
@@ -111,12 +110,11 @@ pub fn build_diegetic_status_tree_with_style(
     style: DiegeticStatusTreeStyle,
 ) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(style.root_child_gap)
+            .gap(style.root_child_gap)
             .background(style.root_background),
     );
     build_diegetic_header(&mut builder, style);
@@ -274,14 +272,11 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
             .width(Sizing::GROW)
             .height(Sizing::grow_range(FONT_SIZE, 20.0))
             .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
-            .child_align_y(AlignY::Center)
+            .align_y(AlignY::Center)
             .background(style.header_background),
         |builder| {
             builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight),
+                El::row().width(Sizing::GROW).height(Sizing::FIT),
                 |builder| {
                     builder.with(
                         El::new().width(Sizing::FIT).height(Sizing::GROW),
@@ -300,7 +295,7 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
                         El::new()
                             .width(Sizing::FIT)
                             .height(Sizing::GROW)
-                            .child_align_x(AlignX::Right),
+                            .align_x(AlignX::Right),
                         |builder| {
                             builder.text(
                                 "BENCH",
@@ -326,18 +321,14 @@ fn build_diegetic_body(
             .background(style.body_background),
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .padding(Padding::all(5.0))
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0),
+                    .gap(2.0),
                 |builder| {
                     for (label, value) in rows {
                         builder.with(
-                            El::new()
-                                .width(Sizing::GROW)
-                                .height(Sizing::FIT)
-                                .direction(Direction::LeftToRight),
+                            El::row().width(Sizing::GROW).height(Sizing::FIT),
                             |builder| {
                                 builder.text(
                                     *label,

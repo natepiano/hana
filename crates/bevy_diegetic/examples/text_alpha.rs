@@ -21,7 +21,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CascadeDefault;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
@@ -343,13 +342,12 @@ fn build_controls(b: &mut LayoutBuilder) {
             .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
         |b| {
             b.with(
-                El::new()
+                El::row()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
                     .padding(Padding::new(Px(8.0), HUD_PADDING, Px(8.0), HUD_PADDING))
-                    .child_gap(HUD_GAP)
-                    .child_align_y(AlignY::Center)
+                    .gap(HUD_GAP)
+                    .align_y(AlignY::Center)
                     .clip()
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
@@ -389,12 +387,11 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
             .border(Border::all(Px(2.0), HUD_BORDER_ACCENT)),
         |b| {
             b.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
                     .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(8.0))
+                    .gap(Px(8.0))
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                 |b| {
@@ -403,22 +400,16 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
                         b.text("ALPHA MODES", title);
                     });
                     // Vertical list of modes 1..7; active is highlighted.
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
-                            .child_gap(Px(2.0)),
-                        |b| {
-                            for (idx, (mode, label)) in ALPHA_MODES.iter().enumerate() {
-                                let is_active =
-                                    std::mem::discriminant(mode) == std::mem::discriminant(&active);
-                                let chip_style = hud_text_style(is_active);
-                                b.with(El::new().width(Sizing::GROW), |b| {
-                                    b.text(format!("{} {}", idx + 1, label), chip_style);
-                                });
-                            }
-                        },
-                    );
+                    b.with(El::column().width(Sizing::GROW).gap(Px(2.0)), |b| {
+                        for (idx, (mode, label)) in ALPHA_MODES.iter().enumerate() {
+                            let is_active =
+                                std::mem::discriminant(mode) == std::mem::discriminant(&active);
+                            let chip_style = hud_text_style(is_active);
+                            b.with(El::new().width(Sizing::GROW), |b| {
+                                b.text(format!("{} {}", idx + 1, label), chip_style);
+                            });
+                        }
+                    });
                     // Divider.
                     b.with(
                         El::new()

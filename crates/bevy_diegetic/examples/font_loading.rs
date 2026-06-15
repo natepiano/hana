@@ -18,7 +18,6 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontLoadFailed;
@@ -182,12 +181,11 @@ fn setup(
 fn build_status_panel(text: &str) -> LayoutTree {
     let mut builder = LayoutBuilder::new(STATUS_LAYOUT_WIDTH, STATUS_LAYOUT_HEIGHT);
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
             .padding(Padding::all(0.002))
-            .direction(Direction::TopToBottom)
-            .child_gap(0.001)
+            .gap(0.001)
             .background(PANEL_BG)
             .border(Border::all(0.0005, PANEL_BORDER_COLOR)),
         |b| {

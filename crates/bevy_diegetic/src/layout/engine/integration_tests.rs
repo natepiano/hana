@@ -101,13 +101,13 @@ fn fixed_unit_gap_child() -> El {
 }
 
 fn scaled_unit_gap_tree(direction: Direction) -> LayoutTree {
+    let root = match direction {
+        Direction::LeftToRight => El::row(),
+        Direction::TopToBottom => El::column(),
+    };
     let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
     builder.with(
-        El::new()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .direction(direction)
-            .child_gap(UNIT_GAP_MM),
+        root.width(Sizing::FIT).height(Sizing::FIT).gap(UNIT_GAP_MM),
         |builder| {
             builder.with(fixed_unit_gap_child(), |_| {});
             builder.with(fixed_unit_gap_child(), |_| {});
@@ -150,19 +150,17 @@ fn add_aligned_table_row(
     action_min: f32,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(4.0)
-            .child_align_y(AlignY::Center),
+            .gap(4.0)
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(2.0),
+                    .gap(2.0),
                 |builder| {
                     for binding in bindings {
                         builder.text(*binding, style.clone());
@@ -543,16 +541,10 @@ fn single_grow_child_fills_parent() {
 #[test]
 fn two_grow_children_split_evenly_horizontal() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -566,16 +558,10 @@ fn two_grow_children_split_evenly_horizontal() {
 #[test]
 fn two_grow_children_split_evenly_vertical() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -588,23 +574,17 @@ fn two_grow_children_split_evenly_vertical() {
 #[test]
 fn grow_with_min_max() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            // This child wants to grow but is capped at 60.
-            b.with(
-                El::new()
-                    .width(Sizing::grow_range(0.0, 60.0))
-                    .height(Sizing::GROW),
-                |_| {},
-            );
-            // This child fills the rest.
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // This child wants to grow but is capped at 60.
+        b.with(
+            El::new()
+                .width(Sizing::grow_range(0.0, 60.0))
+                .height(Sizing::GROW),
+            |_| {},
+        );
+        // This child fills the rest.
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -708,10 +688,9 @@ fn fit_root_clamps_grow_children_content_under_max() {
     let text = "Hello";
     let expected_width = text_width(text, font_size) * 2.0;
     let mut b = LayoutBuilder::with_root(
-        El::new()
+        El::row()
             .width(Sizing::fit_range(0.0, 400.0))
-            .height(Sizing::FIT)
-            .direction(Direction::LeftToRight),
+            .height(Sizing::FIT),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
         b.text(text, TextStyle::new(font_size));
@@ -738,10 +717,9 @@ fn fit_root_caps_grow_children_content_at_max() {
     let font_size = 16.0;
     let expected_content_width = text_width(wide, font_size) * 2.0;
     let mut b = LayoutBuilder::with_root(
-        El::new()
+        El::row()
             .width(Sizing::fit_range(0.0, 400.0))
-            .height(Sizing::FIT)
-            .direction(Direction::LeftToRight),
+            .height(Sizing::FIT),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
         b.text(wide, TextStyle::new(font_size));
@@ -766,22 +744,16 @@ fn fit_root_caps_grow_children_content_at_max() {
 #[test]
 fn percent_sizing() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(
-                El::new().width(Sizing::percent(0.3)).height(Sizing::GROW),
-                |_| {},
-            );
-            b.with(
-                El::new().width(Sizing::percent(0.7)).height(Sizing::GROW),
-                |_| {},
-            );
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(
+            El::new().width(Sizing::percent(0.3)).height(Sizing::GROW),
+            |_| {},
+        );
+        b.with(
+            El::new().width(Sizing::percent(0.7)).height(Sizing::GROW),
+            |_| {},
+        );
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -844,11 +816,7 @@ fn asymmetric_padding() {
 fn child_gap_horizontal() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(10.0),
+        El::row().width(Sizing::GROW).height(Sizing::GROW).gap(10.0),
         |b| {
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
@@ -870,11 +838,10 @@ fn child_gap_horizontal() {
 fn child_gap_vertical() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0),
+            .gap(5.0),
         |b| {
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
@@ -938,11 +905,10 @@ fn column_unit_backed_gap_scales() {
 fn center_alignment_horizontal() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_x(AlignX::Center),
+            .align_x(AlignX::Center),
         |b| {
             b.with(
                 El::new()
@@ -967,11 +933,10 @@ fn center_alignment_horizontal() {
 fn right_alignment_horizontal() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_x(AlignX::Right),
+            .align_x(AlignX::Right),
         |b| {
             b.with(
                 El::new()
@@ -994,11 +959,10 @@ fn right_alignment_horizontal() {
 fn center_alignment_vertical() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_y(AlignY::Center),
+            .align_y(AlignY::Center),
         |b| {
             b.with(
                 El::new()
@@ -1022,11 +986,10 @@ fn center_alignment_vertical() {
 fn bottom_alignment_vertical() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_y(AlignY::Bottom),
+            .align_y(AlignY::Bottom),
         |b| {
             b.with(
                 El::new()
@@ -1051,26 +1014,20 @@ fn bottom_alignment_vertical() {
 #[test]
 fn left_to_right_positioning() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(60.0))
-                    .height(Sizing::fixed(40.0)),
-                |_| {},
-            );
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(80.0))
-                    .height(Sizing::fixed(40.0)),
-                |_| {},
-            );
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(
+            El::new()
+                .width(Sizing::fixed(60.0))
+                .height(Sizing::fixed(40.0)),
+            |_| {},
+        );
+        b.with(
+            El::new()
+                .width(Sizing::fixed(80.0))
+                .height(Sizing::fixed(40.0)),
+            |_| {},
+        );
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1085,26 +1042,20 @@ fn left_to_right_positioning() {
 #[test]
 fn top_to_bottom_positioning() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(60.0))
-                    .height(Sizing::fixed(30.0)),
-                |_| {},
-            );
-            b.with(
-                El::new()
-                    .width(Sizing::fixed(60.0))
-                    .height(Sizing::fixed(50.0)),
-                |_| {},
-            );
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(
+            El::new()
+                .width(Sizing::fixed(60.0))
+                .height(Sizing::fixed(30.0)),
+            |_| {},
+        );
+        b.with(
+            El::new()
+                .width(Sizing::fixed(60.0))
+                .height(Sizing::fixed(50.0)),
+            |_| {},
+        );
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1124,10 +1075,9 @@ fn top_to_bottom_positioning() {
 fn scroll_column(offset: f32) -> super::LayoutResult {
     let mut b = LayoutBuilder::new(200.0, 120.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(200.0))
             .height(Sizing::fixed(100.0))
-            .direction(Direction::TopToBottom)
             .scroll_y(offset),
         |b| {
             for _ in 0..4 {
@@ -1168,11 +1118,7 @@ fn clipped_container_fills_parent_not_content() {
     // ancestor instead of clipping/scrolling its own content.
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .clip(),
+        El::column().width(Sizing::GROW).height(Sizing::GROW).clip(),
         |b| {
             for _ in 0..4 {
                 b.with(
@@ -1194,10 +1140,9 @@ fn scroll_y_from_end_pins_to_bottom_at_zero() {
     // bottom, walking the last child's bottom edge to the viewport bottom.
     let mut b = LayoutBuilder::new(200.0, 120.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(200.0))
             .height(Sizing::fixed(100.0))
-            .direction(Direction::TopToBottom)
             .scroll_y_from_end(0.0),
         |b| {
             for _ in 0..4 {
@@ -1221,10 +1166,9 @@ fn scroll_y_from_end_walks_upward() {
     // scrollback 40 from a max of 100 leaves an effective offset of 60.
     let mut b = LayoutBuilder::new(200.0, 120.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(200.0))
             .height(Sizing::fixed(100.0))
-            .direction(Direction::TopToBottom)
             .scroll_y_from_end(40.0),
         |b| {
             for _ in 0..4 {
@@ -1246,10 +1190,9 @@ fn scroll_y_clamps_to_zero_when_content_fits() {
     // One 50px child in a 100px viewport: nothing to scroll, offset clamps to 0.
     let mut b = LayoutBuilder::new(200.0, 120.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(200.0))
             .height(Sizing::fixed(100.0))
-            .direction(Direction::TopToBottom)
             .scroll_y(40.0),
         |b| {
             b.with(
@@ -1269,44 +1212,38 @@ fn scroll_y_clamps_to_zero_when_content_fits() {
 #[test]
 fn overflow_compression_largest_first() {
     let mut b = LayoutBuilder::new(100.0, 50.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            // Total: 60 + 60 = 120, but parent is 100 wide.
-            // Both are Fit with Fixed(60) content. Clay's `minDimensions`
-            // propagates 60 from each child, so neither can compress below 60.
-            // Result: both stay at 60, overflowing the parent by 20.
-            b.with(
-                El::new()
-                    .width(Sizing::fit_range(0.0, 60.0))
-                    .height(Sizing::GROW),
-                |b| {
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(60.0))
-                            .height(Sizing::fixed(10.0)),
-                        |_| {},
-                    );
-                },
-            );
-            b.with(
-                El::new()
-                    .width(Sizing::fit_range(0.0, 60.0))
-                    .height(Sizing::GROW),
-                |b| {
-                    b.with(
-                        El::new()
-                            .width(Sizing::fixed(60.0))
-                            .height(Sizing::fixed(10.0)),
-                        |_| {},
-                    );
-                },
-            );
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // Total: 60 + 60 = 120, but parent is 100 wide.
+        // Both are Fit with Fixed(60) content. Clay's `minDimensions`
+        // propagates 60 from each child, so neither can compress below 60.
+        // Result: both stay at 60, overflowing the parent by 20.
+        b.with(
+            El::new()
+                .width(Sizing::fit_range(0.0, 60.0))
+                .height(Sizing::GROW),
+            |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(60.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            },
+        );
+        b.with(
+            El::new()
+                .width(Sizing::fit_range(0.0, 60.0))
+                .height(Sizing::GROW),
+            |b| {
+                b.with(
+                    El::new()
+                        .width(Sizing::fixed(60.0))
+                        .height(Sizing::fixed(10.0)),
+                    |_| {},
+                );
+            },
+        );
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1355,25 +1292,18 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
 
     let mut builder = LayoutBuilder::new(RULER_WIDTH, RULER_HEIGHT);
     builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
+        El::row().width(Sizing::GROW).height(Sizing::GROW),
         |builder| {
             builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom),
+                El::column().width(Sizing::GROW).height(Sizing::GROW),
                 |builder| {
                     builder.text("29", TextStyle::new(8.0).with_color(Color::WHITE));
                 },
             );
             builder.with(
-                El::new()
+                El::row()
                     .width(Sizing::fixed(TICK_TRACK_WIDTH + SPINE_WIDTH))
-                    .height(Sizing::fixed(RULER_HEIGHT))
-                    .direction(Direction::LeftToRight),
+                    .height(Sizing::fixed(RULER_HEIGHT)),
                 |builder| {
                     builder.with(
                         El::new()
@@ -1478,12 +1408,11 @@ fn nested_layout_header_body() {
     // Mimics the status cube layout: header + divider + body.
     let mut b = LayoutBuilder::new(160.0, 160.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0),
+            .gap(5.0),
         |b| {
             // Header: fixed height.
             b.with(
@@ -1547,11 +1476,10 @@ fn nested_layout_header_body() {
 fn children_positioned_after_padding() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::new(20.0, 10.0, 30.0, 5.0))
-            .direction(Direction::LeftToRight),
+            .padding(Padding::new(20.0, 10.0, 30.0, 5.0)),
         |b| {
             b.with(
                 El::new()
@@ -1577,19 +1505,13 @@ fn children_positioned_after_padding() {
 #[test]
 fn fixed_and_grow_siblings() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(
-                El::new().width(Sizing::fixed(50.0)).height(Sizing::GROW),
-                |_| {},
-            );
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(
+            El::new().width(Sizing::fixed(50.0)).height(Sizing::GROW),
+            |_| {},
+        );
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1605,11 +1527,10 @@ fn fixed_and_grow_siblings() {
 fn text_positioned_correctly() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .padding(Padding::all(10.0))
-            .direction(Direction::TopToBottom),
+            .padding(Padding::all(10.0)),
         |b| {
             b.text("Hello", TextStyle::new(16.0));
             b.text("World", TextStyle::new(16.0));
@@ -1641,20 +1562,14 @@ fn key_value_row_layout() {
     let value_width = text_width(value_text, font_size);
     let spacer_width = VIEWPORT - label_width - value_width;
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.text(label_text, TextStyle::new(font_size));
-            b.with(
-                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                |_| {},
-            );
-            b.text(value_text, TextStyle::new(font_size));
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text(label_text, TextStyle::new(font_size));
+        b.with(
+            El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+            |_| {},
+        );
+        b.text(value_text, TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1675,11 +1590,10 @@ fn fit_table_with_grow_rows_aligns_middle_column() {
     let action_min = text_width("Orbit", font_size);
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0)
+            .gap(5.0)
             .border(Border::new().between_children(1.0).color(Color::WHITE)),
         |builder| {
             add_aligned_table_row(
@@ -1792,15 +1706,11 @@ fn empty_tree_produces_no_commands() {
 fn between_children_borders_emitted() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .border(
-                Border::new()
-                    .color(Color::srgb_u8(255, 255, 255))
-                    .between_children(2.0),
-            ),
+        El::row().width(Sizing::GROW).height(Sizing::GROW).border(
+            Border::new()
+                .color(Color::srgb_u8(255, 255, 255))
+                .between_children(2.0),
+        ),
         |b| {
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
@@ -1845,15 +1755,9 @@ fn text_wraps_at_word_boundaries() {
     assert!(first_line_width > 80.0);
     assert!(test_width < 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text("Hello World Test", TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text("Hello World Test", TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1878,15 +1782,9 @@ fn text_wraps_at_word_boundaries() {
 fn text_no_wrap_overflows() {
     // "Hello World" in a narrow container with TextWrap::None.
     let mut b = LayoutBuilder::new(40.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text("Hello World", TextStyle::new(16.0).no_wrap());
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text("Hello World", TextStyle::new(16.0).no_wrap());
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1909,18 +1807,12 @@ fn text_wraps_at_newlines_only() {
     // "Line1\nLine2\nLine3" with TextWrap::Newlines in a wide container.
     let font_size = 16.0;
     let mut b = LayoutBuilder::new(500.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text(
-                "Line1\nLine2\nLine3",
-                TextStyle::new(font_size).wrap(TextWrap::Newlines),
-            );
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text(
+            "Line1\nLine2\nLine3",
+            TextStyle::new(font_size).wrap(TextWrap::Newlines),
+        );
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1947,15 +1839,9 @@ fn word_wrap_long_word_does_not_break() {
     // Container is only 80 wide. The word should NOT be broken — stays on one line.
     assert!(word_width > 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text(word, TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text(word, TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1982,15 +1868,9 @@ fn word_wrap_preserves_explicit_newlines() {
     assert!(first_paragraph_width < 50.0);
     assert!(second_paragraph_width < 50.0);
     let mut b = LayoutBuilder::new(50.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text("AA BB\nCC DD", TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text("AA BB\nCC DD", TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -2014,15 +1894,9 @@ fn word_wrap_preserves_explicit_newlines() {
 fn word_wrap_empty_string() {
     let font_size = 16.0;
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text("", TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.text("", TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -2038,15 +1912,9 @@ fn word_wrap_updates_parent_fit_height() {
     // Parent is Fit-height, child text wraps to 3 lines.
     // Parent height should grow to accommodate.
     let mut b = LayoutBuilder::new(80.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::FIT)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.text("Hello World Test", TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::FIT), |b| {
+        b.text("Hello World Test", TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -2067,19 +1935,13 @@ fn word_wrap_render_commands_per_line() {
     let first_line_width = text_width("AA BB", font_size);
     let second_line_width = text_width("CC", font_size);
     let mut b = LayoutBuilder::new(50.0, 200.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            // The first wrapped line fits in the container; the second starts
-            // one measured line height lower.
-            assert!(first_line_width < 50.0);
-            assert!(second_line_width < 50.0);
-            b.text("AA BB CC", TextStyle::new(font_size));
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        // The first wrapped line fits in the container; the second starts
+        // one measured line height lower.
+        assert!(first_line_width < 50.0);
+        assert!(second_line_width < 50.0);
+        b.text("AA BB CC", TextStyle::new(font_size));
+    });
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -2126,26 +1988,20 @@ fn fit_parent_sees_grow_children_content_height() {
             .width(Sizing::GROW)
             .height(Sizing::fixed(20.0))
             .padding(Padding::new(0.0, 0.0, 4.0, 4.0))
-            .child_align_y(AlignY::Center),
+            .align_y(AlignY::Center),
         |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextStyle::new(title_font_size));
-                    });
-                    b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                        |_| {},
-                    );
-                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("SUB", TextStyle::new(subtitle_font_size));
-                    });
-                },
-            );
+            b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
+                b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                    b.text("STATUS", TextStyle::new(title_font_size));
+                });
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                    |_| {},
+                );
+                b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                    b.text("SUB", TextStyle::new(subtitle_font_size));
+                });
+            });
         },
     );
     let tree = b.build();
@@ -2191,30 +2047,24 @@ fn compression_respects_content_minimum_symmetric() {
     // Our engine: `min_size()` = 0 (default Fit), so compression squashes
     // both to 40.
     let mut b = LayoutBuilder::new(80.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(50.0))
-                        .height(Sizing::fixed(10.0)),
-                    |_| {},
-                );
-            });
-            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(50.0))
-                        .height(Sizing::fixed(10.0)),
-                    |_| {},
-                );
-            });
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(50.0))
+                    .height(Sizing::fixed(10.0)),
+                |_| {},
+            );
+        });
+        b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(50.0))
+                    .height(Sizing::fixed(10.0)),
+                |_| {},
+            );
+        });
+    });
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 80.0, 100.0, 1.0);
@@ -2243,30 +2093,24 @@ fn compression_respects_content_minimum_asymmetric() {
     //
     // Our engine: compresses A from 60 to 50 (largest-first, 10px distributed).
     let mut b = LayoutBuilder::new(80.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::LeftToRight),
-        |b| {
-            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(60.0))
-                        .height(Sizing::fixed(10.0)),
-                    |_| {},
-                );
-            });
-            b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(30.0))
-                        .height(Sizing::fixed(10.0)),
-                    |_| {},
-                );
-            });
-        },
-    );
+    b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(60.0))
+                    .height(Sizing::fixed(10.0)),
+                |_| {},
+            );
+        });
+        b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(30.0))
+                    .height(Sizing::fixed(10.0)),
+                |_| {},
+            );
+        });
+    });
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 80.0, 100.0, 1.0);
@@ -2292,22 +2136,16 @@ fn cross_axis_grow_respects_content_minimum() {
     //
     // Our engine: Grow fills parent = 30. No content floor.
     let mut b = LayoutBuilder::new(30.0, 100.0);
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .direction(Direction::TopToBottom),
-        |b| {
-            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
-                b.with(
-                    El::new()
-                        .width(Sizing::fixed(50.0))
-                        .height(Sizing::fixed(10.0)),
-                    |_| {},
-                );
-            });
-        },
-    );
+    b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
+        b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(50.0))
+                    .height(Sizing::fixed(10.0)),
+                |_| {},
+            );
+        });
+    });
     let tree = b.build();
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, 30.0, 100.0, 1.0);
@@ -2338,12 +2176,11 @@ fn grow_body_compression_20_rows() {
         .collect();
 
     let mut b = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(size))
             .height(Sizing::fixed(size))
             .padding(Padding::all(8.0))
-            .direction(Direction::TopToBottom)
-            .child_gap(5.0),
+            .gap(5.0),
     );
     // Header: Grow height 10..20
     b.with(
@@ -2351,32 +2188,26 @@ fn grow_body_compression_20_rows() {
             .width(Sizing::GROW)
             .height(Sizing::grow_range(10.0, 20.0))
             .padding(Padding::new(5.0, 5.0, 4.0, 4.0))
-            .child_align_y(AlignY::Center),
+            .align_y(AlignY::Center),
         |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight),
-                |b| {
-                    b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                        b.text("STATUS", TextStyle::new(10.0));
-                    });
-                    b.with(
-                        El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                        |_| {},
-                    );
-                    b.with(
-                        El::new()
-                            .width(Sizing::FIT)
-                            .height(Sizing::GROW)
-                            .child_align_x(AlignX::Right),
-                        |b| {
-                            b.text("BENCH", TextStyle::new(10.0));
-                        },
-                    );
-                },
-            );
+            b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
+                b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
+                    b.text("STATUS", TextStyle::new(10.0));
+                });
+                b.with(
+                    El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                    |_| {},
+                );
+                b.with(
+                    El::new()
+                        .width(Sizing::FIT)
+                        .height(Sizing::GROW)
+                        .align_x(AlignX::Right),
+                    |b| {
+                        b.text("BENCH", TextStyle::new(10.0));
+                    },
+                );
+            });
         },
     );
     // Divider: Fixed 4
@@ -2387,27 +2218,20 @@ fn grow_body_compression_20_rows() {
     // Body: Grow
     b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |b| {
         b.with(
-            El::new()
+            El::column()
                 .width(Sizing::GROW)
                 .padding(Padding::all(5.0))
-                .direction(Direction::TopToBottom)
-                .child_gap(2.0),
+                .gap(2.0),
             |b| {
                 for (label, value) in &rows {
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::FIT)
-                            .direction(Direction::LeftToRight),
-                        |b| {
-                            b.text(*label, TextStyle::new(10.0));
-                            b.with(
-                                El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
-                                |_| {},
-                            );
-                            b.text(*value, TextStyle::new(10.0));
-                        },
-                    );
+                    b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
+                        b.text(*label, TextStyle::new(10.0));
+                        b.with(
+                            El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
+                            |_| {},
+                        );
+                        b.text(*value, TextStyle::new(10.0));
+                    });
                 }
             },
         );

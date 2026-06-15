@@ -18,7 +18,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
@@ -271,10 +270,9 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
 
     let mut builder = LayoutBuilder::new(PANEL_WIDTH, PANEL_HEIGHT);
     builder.with(
-        El::new()
-            .direction(Direction::LeftToRight)
+        El::row()
             .padding(Padding::all(OUTER_PADDING))
-            .child_gap(COLUMN_GAP)
+            .gap(COLUMN_GAP)
             .border(Border::all(Pt(1.0), BORDER_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
@@ -289,9 +287,8 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                 let spacing =
                     ((column_content_width - portrait_slot - landscape_slot) / 3.0).max(PAIR_GAP);
                 b.with(
-                    El::new()
-                        .direction(Direction::TopToBottom)
-                        .child_gap(ROW_SPACING)
+                    El::column()
+                        .gap(ROW_SPACING)
                         .border(Border::all(Pt(0.5), BORDER_COLOR))
                         .padding(Padding::xy(0.0, 6.0))
                         .width(Sizing::fixed(column_content_width))
@@ -330,9 +327,8 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
 
             // Commentary column.
             b.with(
-                El::new()
-                    .direction(Direction::TopToBottom)
-                    .child_gap(8.0)
+                El::column()
+                    .gap(8.0)
                     .border(Border::all(Pt(0.5), BORDER_COLOR))
                     .padding(Padding::all(6.0))
                     .width(Sizing::fixed(column_content_width))
@@ -398,26 +394,23 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
     };
 
     b.with(
-        El::new()
-            .direction(Direction::TopToBottom)
-            .child_gap(2.0)
+        El::column()
+            .gap(2.0)
             .width(Sizing::grow_min(0.0))
             .height(Sizing::fit_min(0.0)),
         |b| {
             b.text(label, params.name_style.clone());
 
             b.with(
-                El::new()
-                    .direction(Direction::LeftToRight)
-                    .child_gap(params.pair_spacing)
+                El::row()
+                    .gap(params.pair_spacing)
                     .padding(Padding::xy(params.pair_spacing, 0.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::fit_min(0.0)),
                 |b| {
                     b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(1.0)
+                        El::column()
+                            .gap(1.0)
                             .width(Sizing::fixed(params.portrait_slot))
                             .height(Sizing::fit_min(0.0)),
                         |b| {
@@ -432,9 +425,8 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
                         },
                     );
                     b.with(
-                        El::new()
-                            .direction(Direction::TopToBottom)
-                            .child_gap(1.0)
+                        El::column()
+                            .gap(1.0)
                             .width(Sizing::fixed(params.landscape_slot))
                             .height(Sizing::fit_min(0.0)),
                         |b| {

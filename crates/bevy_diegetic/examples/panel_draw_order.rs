@@ -5,7 +5,6 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::In;
@@ -86,10 +85,9 @@ fn setup(mut commands: Commands) {
 
 fn build_page(width: Mm, height: Mm) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .size(width, height)
             .padding(Padding::all(In(PAGE_PADDING_IN)))
-            .direction(Direction::TopToBottom)
             .corner_radius(CornerRadius::all(In(PAGE_RADIUS_IN)))
             .background(DEFAULT_PANEL_BACKGROUND.with_alpha(PANEL_BACKGROUND_ALPHA))
             .border(Border::all(In(PAGE_BORDER_IN), PAGE_BORDER_COLOR)),
@@ -121,7 +119,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::DrawZIndex;
 use bevy_diegetic::El;
 use bevy_diegetic::FitMax;
@@ -430,12 +427,12 @@ fn build_panel(state: DemoState, sweep_x: f32) -> Result<DiegeticPanel, PanelBui
 
 fn draw_order_tree(state: DemoState, sweep_x: f32) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .padding(Padding::all(PANEL_PADDING))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
+
+            .alignment(AlignX::Center, AlignY::Center)
             .corner_radius(CornerRadius::all(PANEL_RADIUS))
             .background(PANEL_COLOR)
             .border(Border::all(0.7, PANEL_BORDER)),
@@ -446,12 +443,12 @@ fn draw_order_tree(state: DemoState, sweep_x: f32) -> LayoutTree {
 
 fn demo_stack(builder: &mut LayoutBuilder, state: DemoState, sweep_x: f32) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::fixed(SWEEP_LANE_WIDTH))
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(-SWEEP_LANE_WIDTH)
-            .child_alignment(AlignX::Center, AlignY::Center),
+
+            .gap(-SWEEP_LANE_WIDTH)
+            .alignment(AlignX::Center, AlignY::Center),
         |builder| {
             text_lane(builder);
             sweep_band(builder, state, sweep_x);
@@ -461,12 +458,12 @@ fn demo_stack(builder: &mut LayoutBuilder, state: DemoState, sweep_x: f32) {
 
 fn text_lane(builder: &mut LayoutBuilder) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::fixed(SWEEP_LANE_WIDTH))
             .height(Sizing::FIT)
             .padding(Padding::xy(0.0, TEXT_VERTICAL_INSET))
-            .direction(Direction::LeftToRight)
-            .child_align_y(AlignY::Center),
+
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
                 El::new()
@@ -505,11 +502,11 @@ fn text_band(builder: &mut LayoutBuilder) {
 
 fn sweep_band(builder: &mut LayoutBuilder, state: DemoState, sweep_x: f32) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::fixed(SWEEP_LANE_WIDTH))
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_align_y(AlignY::Center),
+
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
                 El::new().width(Sizing::fixed(sweep_x)).height(Sizing::GROW),

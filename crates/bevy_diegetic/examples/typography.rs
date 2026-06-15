@@ -18,7 +18,6 @@ use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticTextMut;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Font;
 use bevy_diegetic::FontId;
@@ -431,7 +430,7 @@ fn build_fonts_panel(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .child_align_x(AlignX::Right),
+            .align_x(AlignX::Right),
         |b| {
             b.with(
                 El::new()
@@ -448,12 +447,11 @@ fn build_fonts_panel(
                     .border(Border::all(CAM_HELP_BORDER, HUD_BORDER_ACCENT)),
                 |b| {
                     b.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::FIT)
                             .height(Sizing::FIT)
                             .padding(Padding::all(Px(10.0)))
-                            .direction(Direction::TopToBottom)
-                            .child_gap(Px(6.0))
+                            .gap(Px(6.0))
                             .corner_radius(CornerRadius::new(
                                 CAM_HELP_INNER_RADIUS,
                                 CAM_HELP_INNER_RADIUS,
@@ -468,18 +466,16 @@ fn build_fonts_panel(
                                 TextStyle::new(fairy_dust::TITLE_SIZE).with_color(HUD_TITLE_COLOR),
                             );
                             b.with(
-                                El::new()
+                                El::row()
                                     .width(Sizing::FIT)
                                     .height(Sizing::FIT)
-                                    .direction(Direction::LeftToRight)
-                                    .child_gap(FONTS_PANEL_GAP),
+                                    .gap(FONTS_PANEL_GAP),
                                 |b| {
                                     b.with(
-                                        El::new()
+                                        El::column()
                                             .width(Sizing::fixed(FONTS_PANEL_KEY_WIDTH))
                                             .height(Sizing::FIT)
-                                            .direction(Direction::TopToBottom)
-                                            .child_align_x(AlignX::Center),
+                                            .align_x(AlignX::Center),
                                         |b| {
                                             for cell in &key_cells {
                                                 let ColumnCell::Text(text, config) = cell;
@@ -487,8 +483,8 @@ fn build_fonts_panel(
                                                     El::new()
                                                         .width(Sizing::GROW)
                                                         .height(row_height)
-                                                        .child_align_x(AlignX::Center)
-                                                        .child_align_y(AlignY::Center),
+                                                        .align_x(AlignX::Center)
+                                                        .align_y(AlignY::Center),
                                                     |b| {
                                                         b.text(*text, config.clone());
                                                     },
@@ -516,11 +512,10 @@ enum ColumnCell<'a> {
 /// Builds a column of fixed-height rows.
 fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[ColumnCell<'_>]) {
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_align_x(align),
+            .align_x(align),
         |b| {
             for cell in cells {
                 let ColumnCell::Text(text, config) = cell;
@@ -528,7 +523,7 @@ fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[Col
                     El::new()
                         .width(Sizing::FIT)
                         .height(row_height)
-                        .child_align_y(AlignY::Center),
+                        .align_y(AlignY::Center),
                     |b| {
                         b.text(*text, config.clone());
                     },

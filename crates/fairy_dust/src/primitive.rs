@@ -14,7 +14,6 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -261,12 +260,11 @@ pub fn cube_face_panel_tree(
     content: CubeFacePanelContent,
 ) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(style.size))
             .height(Sizing::fixed(style.size))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(style.row_gap)
+            .alignment(AlignX::Center, AlignY::Center)
+            .gap(style.row_gap)
             .padding(Padding::all(style.padding))
             .clip(),
     );

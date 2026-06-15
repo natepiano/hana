@@ -34,7 +34,6 @@ use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -570,11 +569,10 @@ fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::row()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .direction(Direction::LeftToRight)
-                    .child_gap(PANEL_COLUMN_GAP),
+                    .gap(PANEL_COLUMN_GAP),
                 |builder| {
                     build_column(
                         builder,
@@ -623,11 +621,10 @@ fn build_column<'a>(
     styles: &ColumnStyles,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(PANEL_ROW_GAP),
+            .gap(PANEL_ROW_GAP),
         |builder| {
             builder.text(header, styles.header.clone());
             for (label, active) in rows {

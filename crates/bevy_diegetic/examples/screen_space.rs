@@ -12,7 +12,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::Padding;
@@ -135,12 +134,11 @@ fn spawn_hud(commands: &mut Commands) {
                     .border(Border::all(2.0, BORDER_COLOR)),
                 |b| {
                     b.with(
-                        El::new()
+                        El::column()
                             .width(Sizing::GROW)
                             .height(Sizing::GROW)
-                            .direction(Direction::TopToBottom)
                             .padding(Padding::all(PANEL_PADDING))
-                            .child_gap(6.0)
+                            .gap(6.0)
                             .background(PANEL_BACKGROUND)
                             .border(Border::all(1.0, Color::srgba(0.2, 0.3, 0.6, 0.4))),
                         |b| {
@@ -153,11 +151,7 @@ fn spawn_hud(commands: &mut Commands) {
 
                             // Two-column layout.
                             b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .height(Sizing::GROW)
-                                    .direction(Direction::LeftToRight)
-                                    .child_gap(12.0),
+                                El::row().width(Sizing::GROW).height(Sizing::GROW).gap(12.0),
                                 |b| {
                                     // Left column — Ship Status.
                                     column(
@@ -234,20 +228,15 @@ fn divider(b: &mut LayoutBuilder) {
 
 fn column(b: &mut LayoutBuilder, title: &str, rows: &[(&str, &str, Color)]) {
     b.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(4.0),
+            .gap(4.0),
         |b| {
             b.text(title, TextStyle::new(HEADER_SIZE).with_color(HEADER_COLOR));
             for &(label, value, color) in rows {
                 b.with(
-                    El::new()
-                        .width(Sizing::GROW)
-                        .height(Sizing::FIT)
-                        .direction(Direction::LeftToRight)
-                        .child_gap(4.0),
+                    El::row().width(Sizing::GROW).height(Sizing::FIT).gap(4.0),
                     |b| {
                         b.text(label, TextStyle::new(BODY_SIZE).with_color(BODY_COLOR));
                         b.with(

@@ -9,7 +9,6 @@ use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::ImeAcceptCommit;
 use bevy_diegetic::ImeAppInputDisposition;
@@ -212,12 +211,11 @@ fn trigger_editor_open(
 }
 
 fn editable_text_tree(builder: &mut LayoutBuilder, state: &EditableTextState) {
-    let mut frame = El::new()
+    let mut frame = El::row()
         .width(Sizing::GROW)
         .height(Sizing::GROW)
         .padding(Padding::xy(TEXT_PADDING_X, TEXT_PADDING_Y))
-        .direction(Direction::LeftToRight)
-        .child_alignment(AlignX::Left, AlignY::Center)
+        .alignment(AlignX::Left, AlignY::Center)
         .corner_radius(CornerRadius::all(FIELD_CORNER_RADIUS));
     if state.mode == EditMode::Active {
         frame = frame.background(Color::NONE);

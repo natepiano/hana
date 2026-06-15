@@ -5,7 +5,6 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -401,15 +400,11 @@ fn build_title_bar_layout(
         .unwrap_or_else(super::default_inner_background);
     let orientation = title_bar.orientation;
     let row = match orientation {
-        TitleBarOrientation::Horizontal => El::new()
+        TitleBarOrientation::Horizontal => El::row()
             .width(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(TITLE_BAR_CHILD_GAP)
-            .child_align_y(AlignY::Center),
-        TitleBarOrientation::Vertical => El::new()
-            .width(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_gap(TITLE_BAR_CHILD_GAP),
+            .gap(TITLE_BAR_CHILD_GAP)
+            .align_y(AlignY::Center),
+        TitleBarOrientation::Vertical => El::column().width(Sizing::GROW).gap(TITLE_BAR_CHILD_GAP),
     };
     screen_panel_frame(builder, Sizing::FIT, Sizing::FIT, background, |builder| {
         builder.with(row, |builder| {
@@ -453,10 +448,7 @@ fn segmented_control_cell(
     active: &TextStyle,
     inactive: &TextStyle,
 ) {
-    let row = El::new()
-        .direction(Direction::LeftToRight)
-        .child_gap(TITLE_BAR_SEGMENT_GAP)
-        .child_align_y(AlignY::Center);
+    let row = El::row().gap(TITLE_BAR_SEGMENT_GAP).align_y(AlignY::Center);
     builder.with(row, |builder| {
         builder.text(&control.label, inactive.clone());
         for segment in &control.segments {

@@ -32,7 +32,6 @@ use crate::ComputedDiegeticPanel;
 use crate::DiegeticPanel;
 use crate::DiegeticPanelCommands;
 use crate::DiegeticTextMeasurer;
-use crate::Direction;
 use crate::El;
 use crate::LayoutBuilder;
 use crate::LayoutTree;
@@ -688,25 +687,23 @@ fn editor_text_style() -> TextStyle { TextStyle::new(EDITOR_FONT_SIZE).no_wrap()
 
 fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::xy(EDITOR_PADDING_X, EDITOR_PADDING_Y))
-            .child_gap(EDITOR_GAP)
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Left, AlignY::Center)
+            .gap(EDITOR_GAP)
+            .alignment(AlignX::Left, AlignY::Center)
             .background(EDITOR_BACKGROUND)
             .border(Border::all(EDITOR_BORDER_WIDTH, EDITOR_BORDER))
             .corner_radius(EDITOR_CORNER_RADIUS),
     );
 
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .direction(Direction::LeftToRight)
-            .child_gap(0.0)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(0.0)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| append_buffer(builder, snapshot),
     );
 
@@ -786,11 +783,10 @@ fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {
 
 fn add_caret(builder: &mut LayoutBuilder) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(0.0))
             .height(Sizing::GROW)
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.with(
                 El::new()

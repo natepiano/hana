@@ -20,7 +20,6 @@ use bevy_diegetic::CascadeEntityCommandsExt;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::In;
 use bevy_diegetic::LayoutBuilder;
@@ -241,7 +240,7 @@ fn fit_camera_on_start(
 ///
 /// Structure: outer border -> padding (visible gap) -> content background.
 /// Each padding side is labeled with its unit. Inner content shows
-/// `child_gap` and fixed sizing.
+/// `gap` and fixed sizing.
 fn build_demo() -> bevy_diegetic::LayoutTree {
     let code = TextStyle::new(Pt(7.0)).with_color(CODE_COLOR);
     let label = TextStyle::new(Pt(6.0)).with_color(LABEL_COLOR);
@@ -253,8 +252,7 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
     // Outer container: border + padding. The padding is the visible gap
     // between the border and the content background.
     builder.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::new(
                 Mm(5.0),   // left: Mm
                 Mm(5.0),   // right: Mm
@@ -270,10 +268,9 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
 
             // Content area with visible background.
             b.with(
-                El::new()
-                    .direction(Direction::TopToBottom)
+                El::column()
                     .padding(Padding::all(2.0))
-                    .child_gap(Mm(2.0))
+                    .gap(Mm(2.0))
                     .background(CONTENT_BG)
                     .border(Border::all(Mm(0.8), CODE_COLOR))
                     .width(Sizing::grow_min(0.0))
@@ -289,15 +286,14 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
                     // Border description.
                     b.text("Border::all(Mm(1.0), color)", code.clone());
 
-                    // child_gap description.
-                    b.text("child_gap(Mm(2.0)) — space between rows", code.clone());
+                    // Gap description.
+                    b.text("gap(Mm(2.0)) — space between rows", code.clone());
 
                     // Fixed-size boxes.
                     b.text("Sizing::fixed(Mm(8.0)):", code.clone());
                     b.with(
-                        El::new()
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Mm(2.0))
+                        El::row()
+                            .gap(Mm(2.0))
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::fit_min(0.0)),
                         |b| {
@@ -331,10 +327,9 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
 
     let mut builder = LayoutBuilder::new(NOTE_WIDTH, NOTE_HEIGHT);
     builder.with(
-        El::new()
-            .direction(Direction::TopToBottom)
+        El::column()
             .padding(Padding::all(NOTE_PAD))
-            .child_gap(2.5)
+            .gap(2.5)
             .border(Border::all(Mm(1.0), CODE_COLOR))
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
@@ -347,7 +342,7 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
                 note.clone(),
             );
             b.text(
-                "Padding, Border width, child_gap, Sizing, \
+                "Padding, Border width, gap, Sizing, \
                  and font size all take impl Into<Dimension>. \
                  This means you can mix units freely within \
                  a single element.",

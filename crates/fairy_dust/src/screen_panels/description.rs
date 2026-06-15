@@ -3,7 +3,6 @@
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -120,10 +119,7 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
         .unwrap_or_else(super::default_inner_background);
     screen_panel_frame(builder, panel.width, Sizing::FIT, background, |builder| {
         builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .direction(Direction::TopToBottom)
-                .child_gap(DESCRIPTION_CHILD_GAP),
+            El::column().width(Sizing::GROW).gap(DESCRIPTION_CHILD_GAP),
             |builder| {
                 builder.text(&panel.title, title);
                 for line in &panel.lines {

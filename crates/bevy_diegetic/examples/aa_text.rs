@@ -28,7 +28,6 @@ use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -759,11 +758,10 @@ fn build_aa_layout(builder: &mut LayoutBuilder, aa: AntiAlias, post: PostAa) {
             .no_wrap(),
     };
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(COLUMN_GAP)
+            .gap(COLUMN_GAP)
             .padding(Padding::all(PANEL_PADDING))
             .corner_radius(CornerRadius::all(PANEL_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)
@@ -799,11 +797,10 @@ fn build_column<'a>(
     styles: &ColumnStyles,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(ROW_GAP),
+            .gap(ROW_GAP),
         |builder| {
             builder.text(header, styles.header.clone());
             panel_divider(builder);
@@ -840,11 +837,10 @@ fn build_demo_panel_layout(builder: &mut LayoutBuilder, oit_enabled: bool, post:
     // Fixed-width container plus GROW boxes line the three boxes up on both
     // edges and give the info box's paragraphs a stable wrap width.
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::fixed(PANEL_BOX_WIDTH))
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(PANEL_STACK_GAP),
+            .gap(PANEL_STACK_GAP),
         |builder| {
             for demo in &DEMO_VIEWS {
                 build_demo_box(builder, demo, &title, &key, &body);
@@ -864,11 +860,10 @@ fn build_demo_box(
     body: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(ROW_GAP)
+            .gap(ROW_GAP)
             .padding(Padding::all(PANEL_PADDING))
             .corner_radius(CornerRadius::all(PANEL_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)
@@ -878,11 +873,10 @@ fn build_demo_box(
             panel_divider(builder);
             for &(keycap, description) in demo.rows {
                 builder.with(
-                    El::new()
+                    El::row()
                         .width(Sizing::FIT)
                         .height(Sizing::FIT)
-                        .direction(Direction::LeftToRight)
-                        .child_gap(KEY_GAP),
+                        .gap(KEY_GAP),
                     |builder| {
                         builder.text(keycap, key.clone());
                         builder.text(description, body.clone());
@@ -900,11 +894,10 @@ fn build_info_box(builder: &mut LayoutBuilder, title: &TextStyle, oit_enabled: b
     let body = TextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
     let (info_title, paragraphs) = info_copy(oit_enabled, post);
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(ROW_GAP)
+            .gap(ROW_GAP)
             .padding(Padding::all(PANEL_PADDING))
             .corner_radius(CornerRadius::all(PANEL_RADIUS))
             .background(DEFAULT_PANEL_BACKGROUND)
@@ -1040,12 +1033,11 @@ const STATUS_FIELD_POST: &str = "post";
 
 fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
             .height(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(CUBE_STATUS_PANEL_ROW_GAP)
+            .alignment(AlignX::Center, AlignY::Center)
+            .gap(CUBE_STATUS_PANEL_ROW_GAP)
             .padding(Padding::all(CUBE_COMPAT_PANEL_PADDING))
             .clip(),
     );
@@ -1065,11 +1057,10 @@ fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
 
 fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
             .height(Sizing::fixed(CUBE_COMPAT_PANEL_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
+            .alignment(AlignX::Center, AlignY::Center)
             .padding(Padding::all(CUBE_COMPAT_PANEL_PADDING))
             .clip(),
     );

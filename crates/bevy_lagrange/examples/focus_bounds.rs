@@ -15,7 +15,6 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor as PanelAnchor;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -269,12 +268,11 @@ fn emissive_text_material() -> StandardMaterial {
 
 fn build_story_panel_tree(lines: &'static [&'static str]) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
-        El::new()
+        El::column()
             .width(Sizing::fixed(FACE_PANEL_SIZE))
             .height(Sizing::fixed(FACE_PANEL_SIZE))
-            .direction(Direction::TopToBottom)
-            .child_alignment(AlignX::Center, AlignY::Center)
-            .child_gap(FACE_PANEL_ROW_GAP)
+            .alignment(AlignX::Center, AlignY::Center)
+            .gap(FACE_PANEL_ROW_GAP)
             .padding(Padding::all(FACE_PANEL_PADDING))
             .clip(),
     );

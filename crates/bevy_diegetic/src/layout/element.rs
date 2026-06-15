@@ -850,7 +850,6 @@ mod tests {
     use crate::layout::AlignX;
     use crate::layout::Border;
     use crate::layout::Dimension;
-    use crate::layout::Direction;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -1114,16 +1113,8 @@ mod tests {
 
     #[test]
     fn row_gap_change_classifies_as_layout_affecting() {
-        let tree = root_tree(
-            El::new()
-                .direction(Direction::LeftToRight)
-                .child_gap(SMALL_CHILD_GAP),
-        );
-        let next = root_tree(
-            El::new()
-                .direction(Direction::LeftToRight)
-                .child_gap(LARGE_CHILD_GAP),
-        );
+        let tree = root_tree(El::row().gap(SMALL_CHILD_GAP));
+        let next = root_tree(El::row().gap(LARGE_CHILD_GAP));
 
         assert_eq!(
             tree.classify_change(&next),
@@ -1133,16 +1124,8 @@ mod tests {
 
     #[test]
     fn column_alignment_change_classifies_as_layout_affecting() {
-        let tree = root_tree(
-            El::new()
-                .direction(Direction::TopToBottom)
-                .child_align_x(AlignX::Left),
-        );
-        let next = root_tree(
-            El::new()
-                .direction(Direction::TopToBottom)
-                .child_align_x(AlignX::Right),
-        );
+        let tree = root_tree(El::column().align_x(AlignX::Left));
+        let next = root_tree(El::column().align_x(AlignX::Right));
 
         assert_eq!(
             tree.classify_change(&next),
@@ -1152,8 +1135,8 @@ mod tests {
 
     #[test]
     fn row_to_column_change_classifies_as_layout_affecting() {
-        let tree = root_tree(El::new().direction(Direction::LeftToRight));
-        let next = root_tree(El::new().direction(Direction::TopToBottom));
+        let tree = root_tree(El::row());
+        let next = root_tree(El::column());
 
         assert_eq!(
             tree.classify_change(&next),

@@ -3,7 +3,6 @@
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Border;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -70,11 +69,10 @@ fn build_guidance_layout(
 
     screen_panels::screen_panel_frame(builder, Sizing::FIT, Sizing::FIT, background, |builder| {
         builder.with(
-            El::new()
+            El::column()
                 .width(Sizing::FIT)
                 .height(Sizing::FIT)
-                .direction(Direction::TopToBottom)
-                .child_gap(GUIDANCE_CHILD_GAP),
+                .gap(GUIDANCE_CHILD_GAP),
             |builder| {
                 builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());
                 builder.text(
@@ -113,11 +111,10 @@ fn build_guidance_table(
     };
 
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(Px(TABLE_GROUP_GAP))
+            .gap(Px(TABLE_GROUP_GAP))
             .border(
                 Border::new()
                     .between_children(TABLE_DIVIDER_WIDTH)
@@ -149,12 +146,11 @@ fn build_speed_block(
     active: &TextStyle,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(Px(TABLE_COLUMN_GAP))
-            .child_align_y(AlignY::Center),
+            .gap(Px(TABLE_COLUMN_GAP))
+            .align_y(AlignY::Center),
         |builder| {
             if matches!(speed_column, SpeedColumn::Shown) {
                 let block_active = snapshot.rows.iter().any(|row| {
@@ -203,11 +199,10 @@ fn build_speed_block(
 /// Zoom Out — while multi-speed presets keep the rows gap-separated and rely on
 /// the divider between their `Normal` / `Slow` blocks instead.
 fn action_rows_element(speed_column: SpeedColumn) -> El {
-    let element = El::new()
+    let element = El::column()
         .width(Sizing::GROW)
         .height(Sizing::FIT)
-        .direction(Direction::TopToBottom)
-        .child_gap(Px(TABLE_ROW_GAP));
+        .gap(Px(TABLE_ROW_GAP));
     match speed_column {
         SpeedColumn::Hidden => element.border(
             Border::new()
@@ -249,19 +244,17 @@ fn build_action_row(
     let action_style = if action_active { active } else { label };
 
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(Px(TABLE_COLUMN_GAP))
-            .child_align_y(AlignY::Center),
+            .gap(Px(TABLE_COLUMN_GAP))
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(Px(TABLE_ROW_GAP)),
+                    .gap(Px(TABLE_ROW_GAP)),
                 |builder| {
                     for row in rows {
                         let binding_style = if speed_matches

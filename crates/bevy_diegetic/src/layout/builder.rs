@@ -13,8 +13,8 @@
 //!
 //! ```ignore
 //! let tree = LayoutBuilder::new(160.0, 160.0)
-//!     .with(El::new().width(Sizing::GROW).height(Sizing::GROW).padding(Padding::all(8.0))
-//!           .direction(Direction::TopToBottom).background(Color::srgb_u8(180, 96, 122)),
+//!     .with(El::column().width(Sizing::GROW).height(Sizing::GROW).padding(Padding::all(8.0))
+//!           .background(Color::srgb_u8(180, 96, 122)),
 //!         |b| {
 //!             b.text("STATUS", TextConfig::new(7));
 //!             b.with(El::new().width(Sizing::GROW).height(Sizing::fixed(4.0))
@@ -88,6 +88,22 @@ impl El {
     /// Creates a new element declaration with default settings.
     pub fn new() -> Self { Self::default() }
 
+    /// Creates a left-to-right row element declaration.
+    pub fn row() -> Self {
+        Self {
+            direction: Direction::LeftToRight,
+            ..Self::default()
+        }
+    }
+
+    /// Creates a top-to-bottom column element declaration.
+    pub fn column() -> Self {
+        Self {
+            direction: Direction::TopToBottom,
+            ..Self::default()
+        }
+    }
+
     /// Sets the width sizing rule.
     ///
     /// Can be overridden by a subsequent `.size()` call (last wins).
@@ -136,6 +152,12 @@ impl El {
         self
     }
 
+    /// Sets the gap between adjacent row or column children.
+    pub fn gap(mut self, gap: impl Into<Dimension>) -> Self {
+        self.child_gap = gap.into();
+        self
+    }
+
     /// Sets the layout direction.
     pub const fn direction(mut self, direction: Direction) -> Self {
         self.direction = direction;
@@ -149,14 +171,33 @@ impl El {
         self
     }
 
+    /// Sets both horizontal and vertical child alignment.
+    pub const fn alignment(mut self, x: AlignX, y: AlignY) -> Self {
+        self.child_align_x = x;
+        self.child_align_y = y;
+        self
+    }
+
     /// Sets horizontal child alignment.
     pub const fn child_align_x(mut self, align: AlignX) -> Self {
         self.child_align_x = align;
         self
     }
 
+    /// Sets horizontal child alignment.
+    pub const fn align_x(mut self, align: AlignX) -> Self {
+        self.child_align_x = align;
+        self
+    }
+
     /// Sets vertical child alignment.
     pub const fn child_align_y(mut self, align: AlignY) -> Self {
+        self.child_align_y = align;
+        self
+    }
+
+    /// Sets vertical child alignment.
+    pub const fn align_y(mut self, align: AlignY) -> Self {
         self.child_align_y = align;
         self
     }

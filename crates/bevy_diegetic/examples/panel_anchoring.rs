@@ -17,7 +17,6 @@ use bevy_diegetic::AnchoredToPanel;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
@@ -360,7 +359,7 @@ fn build_panel_tree(background: Color, accent: Color, marker_anchor: Anchor) -> 
             .height(Sizing::GROW)
             .background(background)
             .border(Border::all(BORDER_WIDTH, accent))
-            .child_alignment(align_x, align_y),
+            .alignment(align_x, align_y),
         |builder| {
             builder.with(
                 El::new()
@@ -397,11 +396,10 @@ fn build_info_panel_tree(selection: AnchorSelection) -> LayoutTree {
         DEFAULT_PANEL_BACKGROUND,
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(INFO_SECTION_GAP),
+                    .gap(INFO_SECTION_GAP),
                 |builder| {
                     info_section(
                         builder,
@@ -435,11 +433,10 @@ fn info_section(
     depth_mm: Option<f32>,
 ) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(INFO_ROW_GAP),
+            .gap(INFO_ROW_GAP),
         |builder| {
             builder.text(role.title(), info_title_style(role.accent_color()));
             info_anchor_row(builder, label, value, active_index, role.accent_color());
@@ -457,12 +454,11 @@ fn info_depth_row(builder: &mut LayoutBuilder, depth_mm: f32, accent: Color) {
         info_value_style(accent)
     };
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(INFO_COL_GAP)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(INFO_COL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text("depth:", info_label_style());
             builder.text(format_depth_mm(depth_mm), value_style);
@@ -486,12 +482,11 @@ fn info_anchor_row(
     accent: Color,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(INFO_COL_GAP)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(INFO_COL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             info_anchor_text(builder, label, value, accent);
             info_anchor_grid(builder, active_index, accent);
@@ -501,12 +496,11 @@ fn info_anchor_row(
 
 fn info_anchor_text(builder: &mut LayoutBuilder, label: &str, value: &str, accent: Color) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(1.0)
-            .child_alignment(AlignX::Left, AlignY::Center),
+            .gap(1.0)
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(label, info_label_style());
             builder.text(value, info_value_style(accent));
@@ -516,11 +510,10 @@ fn info_anchor_text(builder: &mut LayoutBuilder, label: &str, value: &str, accen
 
 fn info_anchor_grid(builder: &mut LayoutBuilder, active_index: usize, accent: Color) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(INFO_GRID_GAP),
+            .gap(INFO_GRID_GAP),
         |builder| {
             for row in 0..INFO_GRID_SIDE {
                 info_anchor_grid_row(builder, row, active_index, accent);
@@ -536,11 +529,10 @@ fn info_anchor_grid_row(
     accent: Color,
 ) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(INFO_GRID_GAP),
+            .gap(INFO_GRID_GAP),
         |builder| {
             for column in 0..INFO_GRID_SIDE {
                 let index = row * INFO_GRID_SIDE + column;

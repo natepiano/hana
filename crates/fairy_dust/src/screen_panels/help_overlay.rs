@@ -5,7 +5,6 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::Direction;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
@@ -207,11 +206,10 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
         default_inner_background(),
         |builder| {
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .direction(Direction::TopToBottom)
-                    .child_gap(HELP_PANEL_CHILD_GAP),
+                    .gap(HELP_PANEL_CHILD_GAP),
                 |builder| {
                     build_title_row(builder, &title, &hint);
                     build_separator(builder);
@@ -224,12 +222,11 @@ fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
 
 fn build_title_row(builder: &mut LayoutBuilder, title: &TextStyle, hint: &TextStyle) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(HELP_TABLE_COLUMN_GAP)
-            .child_align_y(AlignY::Center),
+            .gap(HELP_TABLE_COLUMN_GAP)
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
                 El::new().width(Sizing::GROW).height(Sizing::FIT),
@@ -241,7 +238,7 @@ fn build_title_row(builder: &mut LayoutBuilder, title: &TextStyle, hint: &TextSt
                 El::new()
                     .width(Sizing::fixed(HELP_CLOSE_HINT_COLUMN_WIDTH))
                     .height(Sizing::FIT)
-                    .child_align_x(AlignX::Right),
+                    .align_x(AlignX::Right),
                 |builder| {
                     builder.text(CLOSE_HINT, hint.clone());
                 },
@@ -262,11 +259,10 @@ fn build_separator(builder: &mut LayoutBuilder) {
 
 fn build_shortcut_table(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, label: &TextStyle) {
     builder.with(
-        El::new()
+        El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::TopToBottom)
-            .child_gap(HELP_ROW_GAP),
+            .gap(HELP_ROW_GAP),
         |builder| {
             for row in shortcut_rows(shortcuts) {
                 build_shortcut_row(builder, row, label);
@@ -277,12 +273,11 @@ fn build_shortcut_table(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts, l
 
 fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextStyle) {
     builder.with(
-        El::new()
+        El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .direction(Direction::LeftToRight)
-            .child_gap(HELP_TABLE_COLUMN_GAP)
-            .child_align_y(AlignY::Center),
+            .gap(HELP_TABLE_COLUMN_GAP)
+            .align_y(AlignY::Center),
         |builder| {
             builder.with(
                 El::new()
