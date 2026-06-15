@@ -37,8 +37,8 @@ use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelDraw;
 use bevy_diegetic::PanelLine;
-use bevy_diegetic::PanelLineBatchPerfStats;
 use bevy_diegetic::PanelPoint;
+use bevy_diegetic::PanelShapeBatchPerfStats;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
@@ -180,7 +180,7 @@ struct BatchCountPanel;
 
 #[derive(Component, Clone, Copy, Default, PartialEq)]
 struct BatchCountDisplay {
-    stats: PanelLineBatchPerfStats,
+    stats: PanelShapeBatchPerfStats,
     fade:  HairlineFade,
 }
 
@@ -344,12 +344,8 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_PLANE_SIZE)
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.zoom_lower_limit = 0.000_000_1;
-            },
-            OrbitCamPreset::BlenderLike,
-        )
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .unclamped()
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)

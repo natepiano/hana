@@ -62,7 +62,11 @@ const SQRT_3_OVER_2: f32 = 0.866_025_4;
 const PX: f32 = 700.0 / 40.0;
 const ANISO: f32 = 12.0;
 const GT_SAMPLES: u32 = 24;
+// Mirror the shader caps in analytic_path.wgsl: the line/circle path
+// (corner_wing_reach) and the text band path (aniso_shader_fix) move with their
+// shader counterparts.
 const MAX_ANISO_SAMPLES: u32 = 16;
+const MAX_ANISO_SAMPLES_TEXT: u32 = 64;
 /// Footprint orientations whose worst over-coverage point lands on the apex
 /// (the acute convex corner). 90° is excluded — there the grazing footprint
 /// hits a base corner, a different case.
@@ -76,6 +80,9 @@ const FIX_MAX_ERROR: f32 = 0.08;
 const SUPER4_MIN_OVERCOVERAGE: f32 = 0.20;
 const FIX_IMPROVEMENT_OVER_SUPER4: f32 = 0.15;
 const EDGE_FIX_MAX_ERROR: f32 = 0.06;
+// Center-fragment dilation holds the convex-corner cap near the hairline radius
+// (~0.9px observed) at any grazing angle; per-sample dilation balloons to 3-8px.
+const CORNER_WING_MAX_REACH: f32 = 1.5;
 
 // ---- shader-math replica (mirrors analytic_path.wgsl exactly) --------------
 
@@ -778,7 +785,7 @@ fn worst_overcoverage(probe: &Probe, gt: &GroundTruth, dx: Vec2, dy: Vec2) -> Co
                     gt: reference,
                     single,
                     super4,
-                    fix_b: probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES),
+                    fix_b: probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT),
                     model_cause: band_coverage(sd_true, band_true),
                 };
             }
@@ -852,11 +859,123 @@ fn stride_does_not_alias_straight_edge() {
         let y = -7.5 + 12.5 * (k as f32) / 12.0;
         let point = Vec2::new(x, y);
         let reference = gt.coverage(point, dx, dy, GT_SAMPLES);
-        let fix = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+        let fix = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
         assert!(
             (fix - reference).abs() <= EDGE_FIX_MAX_ERROR,
             "y {y:.1}: stride fix {fix:.3} should track straight-edge ground truth {reference:.3} within {EDGE_FIX_MAX_ERROR}",
         );
+    }
+}
+
+/// CPU mirror of the line branch (single lane). `dil_mode`: 0 = no dilation,
+/// 1 = per-strided-sample dilation (attempt 1, the shader as-is), 2 = dilation
+/// sized ONCE from the center fragment's normal and reused across the stride
+/// (proposed fix). Returns coverage.
+fn line_cov(
+    gt: &GroundTruth,
+    point: Vec2,
+    dx: Vec2,
+    dy: Vec2,
+    min_feature: f32,
+    hairline_min_px: f32,
+    dil_mode: u32,
+) -> f32 {
+    let x_span_len = dx.length();
+    let y_span_len = dy.length();
+    let (major, minor, major_len, minor_len) = if x_span_len >= y_span_len {
+        (dx, dy, x_span_len, y_span_len.max(ROOT_EPSILON))
+    } else {
+        (dy, dx, y_span_len, x_span_len.max(ROOT_EPSILON))
+    };
+    let n_samp = (major_len / minor_len)
+        .ceil()
+        .clamp(1.0, MAX_ANISO_SAMPLES as f32);
+    let inv = 1.0 / n_samp;
+    let count = n_samp as u32;
+    let dilation_of = |normal: Vec2| {
+        let band_full = Vec2::new(normal.dot(dx), normal.dot(dy))
+            .length()
+            .max(ROOT_EPSILON);
+        ((hairline_min_px * band_full - min_feature) * 0.5).max(0.0)
+    };
+    let center_dilation = dilation_of(gt.signed_distance_and_normal(point).1);
+    let mut sum = 0.0;
+    for i in 0..count {
+        let s = (i as f32 + 0.5) * inv - 0.5;
+        let (sd, normal) = gt.signed_distance_and_normal(point + s * major);
+        let band_strided = Vec2::new(normal.dot(minor), normal.dot(major) * inv)
+            .length()
+            .max(ROOT_EPSILON);
+        let dilation = match dil_mode {
+            1 => dilation_of(normal),
+            2 => center_dilation,
+            _ => 0.0,
+        };
+        sum += (0.5 - (sd - dilation) / band_strided).clamp(0.0, 1.0);
+    }
+    sum * inv
+}
+
+/// Wing reach: farthest exterior fragment (ground-truth coverage ~0) still
+/// covered above 0.3, in screen pixels from the silhouette, for the given
+/// dilation mode.
+fn corner_wing_reach(gt: &GroundTruth, dx: Vec2, dy: Vec2, mode: u32) -> f32 {
+    let hairline_min_px = 1.5f32;
+    let min_feature = 8.0f32;
+    let margin = 6.0 * (dx.length() + dy.length());
+    let bmin = Vec2::new(420.0 - margin, -margin);
+    let bmax = Vec2::new(580.0 + margin, 700.0 + margin);
+    let (cols, rows) = (120usize, 120usize);
+    let mut max_reach = 0.0f32;
+    for r in 0..rows {
+        let y = bmin.y + (bmax.y - bmin.y) * (r as f32 + 0.5) / rows as f32;
+        for c in 0..cols {
+            let x = bmin.x + (bmax.x - bmin.x) * (c as f32 + 0.5) / cols as f32;
+            let p = Vec2::new(x, y);
+            if gt.coverage(p, dx, dy, GT_SAMPLES) > 0.05 {
+                continue;
+            }
+            if line_cov(gt, p, dx, dy, min_feature, hairline_min_px, mode) > 0.3 {
+                let (sd, normal) = gt.signed_distance_and_normal(p);
+                let band_full = Vec2::new(normal.dot(dx), normal.dot(dy))
+                    .length()
+                    .max(ROOT_EPSILON);
+                max_reach = max_reach.max(sd.abs() / band_full);
+            }
+        }
+    }
+    max_reach
+}
+
+/// The convex-corner wing on the line branch is the hairline dilation, and
+/// sizing it once from the center fragment (the shipping path, mode 2) bounds it
+/// to the hairline corner cap instead of letting the stride smear a
+/// grazing-inflated per-sample cap (mode 1) into a multi-pixel wing that grows
+/// with grazing. Mode 0 (no dilation) confirms the band model carries no
+/// over-cover of its own.
+#[test]
+fn center_dilation_bounds_corner_wing() {
+    let (_, segments) = sharp_corner_glyph();
+    let gt = GroundTruth { segments };
+    for &aniso in &[12.0f32, 24.0, 40.0] {
+        for &angle in &[75.0f32, 85.0] {
+            let (dx, dy) = footprint(angle, aniso, PX);
+            let per_sample = corner_wing_reach(&gt, dx, dy, 1);
+            let center = corner_wing_reach(&gt, dx, dy, 2);
+            let none = corner_wing_reach(&gt, dx, dy, 0);
+            assert!(
+                none < 0.05,
+                "aniso {aniso} angle {angle}: band model over-covers without dilation by {none:.2}px",
+            );
+            assert!(
+                center <= CORNER_WING_MAX_REACH,
+                "aniso {aniso} angle {angle}: center-dilation wing reach {center:.2}px exceeds {CORNER_WING_MAX_REACH}px (per-sample was {per_sample:.2}px)",
+            );
+            assert!(
+                per_sample > center + 0.5,
+                "aniso {aniso} angle {angle}: per-sample reach {per_sample:.2}px should exceed center {center:.2}px (the wing the fix removes)",
+            );
+        }
     }
 }
 
@@ -868,7 +987,7 @@ fn stride_does_not_alias_straight_edge() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0x19bc_c922_627c_a2ef;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xab5d_eec8_e7a4_9eab;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,
@@ -981,7 +1100,7 @@ fn run_tick_scan(probe: Probe, size: Vec2, band_count: usize) {
         let y = (step as f32).mul_add(du_per_px * 0.5, size.y);
         let point = Vec2::new(x, y);
         let (single, super4) = probe.aa_band_coverage(point, dx, dy);
-        let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+        let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
         let edge_width_sq = (du_per_px * EDGE_FILTER_WIDTH).powi(2);
         let sd = probe.signed_distance(point, edge_width_sq, 0.0);
         println!("  y={y:8.2} sd={sd:8.2} single={single:.3} super4={super4:.3} aniso={aniso:.3}");
@@ -1048,7 +1167,7 @@ fn spine_coverage_uniform_along_length_for_both_orientations() {
                 Vec2::new(along, size.y * 0.5)
             };
             let (single, _) = probe.aa_band_coverage(point, dx, dy);
-            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
             let cov = aniso.min(single);
             if cov < min_cov {
                 min_cov = cov;
@@ -1234,7 +1353,7 @@ fn units_ruler_sizes_cover_at_screen_scale() {
                 Vec2::new(along, size.y * 0.5)
             };
             let (single, _) = probe.aa_band_coverage(point, dx, dy);
-            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
             let cov = aniso.min(single);
             if cov < min_cov {
                 min_cov = cov;

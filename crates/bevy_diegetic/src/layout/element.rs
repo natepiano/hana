@@ -898,6 +898,7 @@ mod tests {
     use crate::layout::PanelCoord;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
+    use crate::layout::PanelShape;
     use crate::layout::Sizing;
     use crate::layout::TextStyle;
     use crate::layout::TextWrap;
@@ -1068,7 +1069,7 @@ mod tests {
         let tree = root_tree(El::new().draw(PanelDraw::lines([panel_line()])));
 
         assert_eq!(
-            tree.element_draw(0).map(|draw| draw.lines_ref().len()),
+            tree.element_draw(0).map(|draw| draw.shapes_ref().len()),
             Some(1)
         );
     }
@@ -1096,7 +1097,8 @@ mod tests {
         let scaled = tree.scaled(scale, scale);
         let line = scaled
             .element_draw(0)
-            .and_then(|draw| draw.lines_ref().first());
+            .and_then(|draw| draw.shapes_ref().first())
+            .and_then(PanelShape::as_line);
 
         assert_some_approx(
             line.and_then(|line| line.start().x().start_dimension())

@@ -9,9 +9,11 @@
 
 use std::time::Duration;
 
+use bevy::light::NotShadowReceiver;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
+use bevy_diegetic::AntiAlias;
 use bevy_diegetic::Border;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
@@ -23,6 +25,8 @@ use bevy_diegetic::Font;
 use bevy_diegetic::FontId;
 use bevy_diegetic::FontRegistered;
 use bevy_diegetic::FontRegistry;
+use bevy_diegetic::GlyphMetricVisibility;
+use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::OverlayBoundingBox;
 use bevy_diegetic::Padding;
@@ -36,6 +40,8 @@ use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
 
 const DISPLAY_SIZE: f32 = 0.48;
 const DISPLAY_Y: f32 = 0.5;
@@ -95,6 +101,22 @@ const FONT_KEYS: &[(&str, &str, KeyCode)] = &[
     ("6", "Liberation Serif", KeyCode::Digit6),
     ("7", "Noto Sans CJK SC", KeyCode::Digit7),
 ];
+
+/// Anti-alias cycle: (chip id, segment label, mode). `A` steps through them.
+const AA_MODES: [(&str, &str, AntiAlias); 4] = [
+    ("aa-off", "Off", AntiAlias::Off),
+    ("aa-anisotropic", "Anisotropic", AntiAlias::Anisotropic),
+    ("aa-supersample", "Supersample", AntiAlias::Supersample),
+    ("aa-both", "Both", AntiAlias::Both),
+];
+
+const fn chip_activation(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
 const CRIMSON_TEXT_REGULAR_FONT_ASSET_PATH: &str = "fonts/CrimsonText-Regular.ttf";
 const EB_GARAMOND_REGULAR_FONT_ASSET_PATH: &str = "fonts/EBGaramond-Regular.ttf";
 const LIBERATION_SANS_REGULAR_FONT_ASSET_PATH: &str = "fonts/LiberationSans-Regular.ttf";
@@ -139,11 +161,59 @@ struct FontsPanel;
 #[derive(Component)]
 struct CommentText;
 
-#[derive(Resource, Default, Clone, Copy, PartialEq, Eq)]
-enum OverlayState {
-    #[default]
-    On,
-    Off,
+#[derive(Resource, Clone, Copy, PartialEq, Eq)]
+struct TypographyFeatureState {
+    flags: u8,
+}
+
+impl TypographyFeatureState {
+    const OVERLAY: u8 = 1 << 0;
+    const GLYPH_METRICS: u8 = 1 << 1;
+    const FONT_METRICS: u8 = 1 << 2;
+    const LABELS: u8 = 1 << 3;
+    const SHADOW: u8 = 1 << 4;
+    const WORD_VISIBLE: u8 = 1 << 5;
+    const GROUND_VISIBLE: u8 = 1 << 6;
+
+    const fn has(self, flag: u8) -> bool { (self.flags & flag) != 0 }
+
+    const fn set(&mut self, flag: u8, value: bool) {
+        self.flags = if value {
+            self.flags | flag
+        } else {
+            self.flags & !flag
+        };
+    }
+
+    const fn toggle(&mut self, flag: u8) { self.flags ^= flag; }
+
+    const fn overlay(self) -> bool { self.has(Self::OVERLAY) }
+
+    const fn glyph_metrics(self) -> bool { self.has(Self::GLYPH_METRICS) }
+
+    const fn font_metrics(self) -> bool { self.has(Self::FONT_METRICS) }
+
+    const fn labels(self) -> bool { self.has(Self::LABELS) }
+
+    const fn shadow(self) -> bool { self.has(Self::SHADOW) }
+
+    const fn word_visible(self) -> bool { self.has(Self::WORD_VISIBLE) }
+
+    const fn ground_visible(self) -> bool { self.has(Self::GROUND_VISIBLE) }
+}
+
+impl Default for TypographyFeatureState {
+    fn default() -> Self {
+        Self {
+            flags: Self::OVERLAY
+                | Self::GLYPH_METRICS
+                | Self::FONT_METRICS
+                | Self::LABELS
+                | Self::SHADOW
+                | Self::WORD_VISIBLE
+                | Self::GROUND_VISIBLE,
+        }
+    }
 }
 
 #[derive(Resource, Default, Clone, Copy, PartialEq)]
@@ -159,6 +229,19 @@ enum CycleState {
 /// Marker for the main display text that the overlay toggle targets.
 #[derive(Component)]
 struct DisplayText;
+
+/// Marker on the translucent ground-plane entity so `G` can toggle its
+/// visibility (diagnostic: does the ground's OIT layer feed the grazing
+/// breakup).
+#[derive(Component)]
+struct GroundPlaneToggle;
+
+/// Authored display-word color. `W` toggles the word between this and the same
+/// color at alpha 0; alpha-0 glyphs are discarded before `oit_draw`, so they
+/// leave the OIT fragment pool entirely — isolating whether the co-rendered
+/// word glyphs drive the grazing breakup. Color is excluded from the layout
+/// hash, so the overlay (built from glyph extents) does not rebuild.
+const WORD_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
 
 /// Tracks which word in `DISPLAY_WORDS` is currently shown,
 /// with a repeat timer for hold-to-cycle.
@@ -201,7 +284,9 @@ fn main() {
             )),
         )
         .color(GROUND_COLOR)
+        .insert(GroundPlaneToggle)
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .unclamped()
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)
@@ -210,13 +295,46 @@ fn main() {
         .margin(ZOOM_TO_FIT_MARGIN)
         .with_restore_camera_on_restart()
         .with_title_bar(title_bar())
-        .wire_chip_to_state::<OverlayState, _>("T Overlay", |state| match state {
-            OverlayState::On => ControlActivation::Active,
-            OverlayState::Off => ControlActivation::Inactive,
+        .wire_chip_to_state::<TypographyFeatureState, _>("T Overlay", |state| {
+            if state.overlay() {
+                ControlActivation::Active
+            } else {
+                ControlActivation::Inactive
+            }
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("W Word", |state| {
+            chip_activation(state.word_visible())
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("G Ground", |state| {
+            chip_activation(state.ground_visible())
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("B Boxes", |state| {
+            chip_activation(state.glyph_metrics())
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("M Metrics", |state| {
+            chip_activation(state.font_metrics())
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("L Labels", |state| {
+            chip_activation(state.labels())
+        })
+        .wire_chip_to_state::<TypographyFeatureState, _>("S Shadow", |state| {
+            chip_activation(state.shadow())
         })
         .wire_chip_to_state::<CycleState, _>("←/→ Cycle Word", |state| match state {
             CycleState::Cycling { .. } => ControlActivation::Active,
             CycleState::Idle => ControlActivation::Inactive,
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[0].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[0].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[1].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[1].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[2].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[2].2)
+        })
+        .wire_chip_to_state::<AntiAlias, _>(AA_MODES[3].0, |anti_alias| {
+            chip_activation(*anti_alias == AA_MODES[3].2)
         })
         .with_camera_control_panel()
         .insert_resource(WordCycle {
@@ -226,7 +344,7 @@ fn main() {
         .insert_resource(SelectedFont(0))
         .init_resource::<FontHandles>()
         .init_resource::<HomeOverlayTarget>()
-        .init_resource::<OverlayState>()
+        .init_resource::<TypographyFeatureState>()
         .init_resource::<CycleState>()
         .init_resource::<RequestedFont>()
         .add_systems(Startup, setup)
@@ -237,6 +355,13 @@ fn main() {
         // T and the font digits run through Fairy Dust's shortcut binding,
         // which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyT, toggle_overlay)
+        .with_shortcut(KeyCode::KeyA, cycle_anti_alias)
+        .with_shortcut(KeyCode::KeyW, toggle_word_text)
+        .with_shortcut(KeyCode::KeyG, toggle_ground_plane)
+        .with_shortcut(KeyCode::KeyB, toggle_glyph_metrics)
+        .with_shortcut(KeyCode::KeyM, toggle_font_metrics)
+        .with_shortcut(KeyCode::KeyL, toggle_labels)
+        .with_shortcut(KeyCode::KeyS, toggle_overlay_shadow)
         .with_shortcut(KeyCode::Digit1, request_font_1)
         .with_shortcut(KeyCode::Digit2, request_font_2)
         .with_shortcut(KeyCode::Digit3, request_font_3)
@@ -252,7 +377,17 @@ fn main() {
 fn title_bar() -> TitleBar {
     TitleBar::new()
         .control("T Overlay")
+        .control("W Word")
+        .control("G Ground")
+        .control("B Boxes")
+        .control("M Metrics")
+        .control("L Labels")
+        .control("S Shadow")
         .control("←/→ Cycle Word")
+        .control(TitleBarControl::segmented(
+            "A",
+            AA_MODES.map(|(id, label, _)| TitleBarSegment::new(id, label)),
+        ))
 }
 
 fn setup(
@@ -271,7 +406,7 @@ fn setup(
         DisplayText,
         DiegeticText::world(initial_word)
             .size(DISPLAY_SIZE)
-            .color(Color::srgb(0.9, 0.9, 0.9))
+            .color(WORD_COLOR)
             .transform(Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z))
             .build(),
         TypographyOverlay::default().with_shadow(SurfaceShadow::On),
@@ -550,25 +685,180 @@ fn on_font_registered(
     }
 }
 
+fn overlay_from_state(state: TypographyFeatureState) -> TypographyOverlay {
+    let glyph_metrics = if state.glyph_metrics() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    let font_metrics = if state.font_metrics() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    let labels = if state.labels() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    let surface_shadow = if state.shadow() {
+        SurfaceShadow::On
+    } else {
+        SurfaceShadow::Off
+    };
+
+    TypographyOverlay {
+        glyph_metrics,
+        font_metrics,
+        labels,
+        surface_shadow,
+        ..TypographyOverlay::default()
+    }
+}
+
+/// `B` — toggles the per-glyph bounding boxes and origin dots.
+fn toggle_glyph_metrics(
+    mut overlays: Query<&mut TypographyOverlay, With<DisplayText>>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::GLYPH_METRICS);
+    let visibility = if state.glyph_metrics() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    for mut overlay in &mut overlays {
+        overlay.glyph_metrics = visibility;
+    }
+}
+
+/// `M` — toggles the font metric guide lines (ascent/cap/x-height/baseline/...).
+fn toggle_font_metrics(
+    mut overlays: Query<&mut TypographyOverlay, With<DisplayText>>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::FONT_METRICS);
+    let visibility = if state.font_metrics() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    for mut overlay in &mut overlays {
+        overlay.font_metrics = visibility;
+    }
+}
+
+/// `L` — toggles the overlay labels.
+fn toggle_labels(
+    mut overlays: Query<&mut TypographyOverlay, With<DisplayText>>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::LABELS);
+    let visibility = if state.labels() {
+        GlyphMetricVisibility::Shown
+    } else {
+        GlyphMetricVisibility::Hidden
+    };
+    for mut overlay in &mut overlays {
+        overlay.labels = visibility;
+    }
+}
+
+/// `S` — toggles shadows on the ground plane. Switching the ground to a
+/// `NotShadowReceiver` clears every shadow cast onto it — the word's and the
+/// overlay's — in one control; the overlay's own cast flag is kept in sync so
+/// it stops feeding the shadow map while off.
+fn toggle_overlay_shadow(
+    mut commands: Commands,
+    mut overlays: Query<&mut TypographyOverlay, With<DisplayText>>,
+    grounds: Query<Entity, With<GroundPlaneToggle>>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::SHADOW);
+    let surface_shadow = if state.shadow() {
+        SurfaceShadow::On
+    } else {
+        SurfaceShadow::Off
+    };
+    for mut overlay in &mut overlays {
+        overlay.surface_shadow = surface_shadow;
+    }
+    for ground in &grounds {
+        if state.shadow() {
+            commands.entity(ground).remove::<NotShadowReceiver>();
+        } else {
+            commands.entity(ground).insert(NotShadowReceiver);
+        }
+    }
+}
+
+/// `W` — toggles the display word between visible and alpha 0, and ties its
+/// cast shadow to that visibility (an alpha-0 word still fills the shadow map,
+/// so the shadow has to be turned off with the glyphs). The overlay is built
+/// from glyph extents, not color, so it is unaffected.
+fn toggle_word_text(
+    mut display: DiegeticTextMut<DisplayText>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::WORD_VISIBLE);
+    let color = if state.word_visible() {
+        WORD_COLOR
+    } else {
+        WORD_COLOR.with_alpha(0.0)
+    };
+    let shadow_mode = if state.word_visible() {
+        GlyphShadowMode::Cast
+    } else {
+        GlyphShadowMode::None
+    };
+    display.for_each_style_mut(|style| {
+        style.set_color(color);
+        style.set_shadow_mode(shadow_mode);
+    });
+}
+
+/// `G` — toggles the translucent ground plane's visibility.
+fn toggle_ground_plane(
+    mut grounds: Query<&mut Visibility, With<GroundPlaneToggle>>,
+    mut state: ResMut<TypographyFeatureState>,
+) {
+    state.toggle(TypographyFeatureState::GROUND_VISIBLE);
+    let target_visibility = if state.ground_visible() {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
+    for mut visibility in &mut grounds {
+        *visibility = target_visibility;
+    }
+}
+
 fn toggle_overlay(
     mut commands: Commands,
-    mut overlay_state: ResMut<OverlayState>,
+    mut state: ResMut<TypographyFeatureState>,
     with_overlay: Query<Entity, (With<DisplayText>, With<TypographyOverlay>)>,
     without_overlay: Query<Entity, (With<DisplayText>, Without<TypographyOverlay>)>,
 ) {
     if with_overlay.is_empty() {
         for entity in &without_overlay {
-            commands
-                .entity(entity)
-                .insert(TypographyOverlay::default().with_shadow(SurfaceShadow::On));
+            commands.entity(entity).insert(overlay_from_state(*state));
         }
-        *overlay_state = OverlayState::On;
+        state.set(TypographyFeatureState::OVERLAY, true);
     } else {
         for entity in &with_overlay {
             commands.entity(entity).remove::<TypographyOverlay>();
         }
-        *overlay_state = OverlayState::Off;
+        state.set(TypographyFeatureState::OVERLAY, false);
     }
+}
+
+/// `A` — steps the global anti-alias mode through [`AA_MODES`].
+fn cycle_anti_alias(mut anti_alias: ResMut<AntiAlias>) {
+    let current = AA_MODES
+        .iter()
+        .position(|(_, _, mode)| *mode == *anti_alias)
+        .unwrap_or(0);
+    *anti_alias = AA_MODES[(current + 1) % AA_MODES.len()].2;
 }
 
 fn cycle_word(

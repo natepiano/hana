@@ -7,7 +7,7 @@ use bevy::image::Image;
 use super::Border;
 use super::BoundingBox;
 use super::DrawZIndex;
-use super::ResolvedPanelLine;
+use super::ResolvedPanelShape;
 use super::TextStyle;
 
 /// A single render command produced by the layout pass.
@@ -45,8 +45,8 @@ pub(crate) enum DrawStep {
     /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`], and
     /// [`RenderCommandKind::Image`] commands.
     Fill,
-    /// [`RenderCommandKind::Lines`] commands.
-    Lines,
+    /// [`RenderCommandKind::Shapes`] commands.
+    Shapes,
     /// [`RenderCommandKind::Text`] commands.
     Text,
 }
@@ -57,7 +57,7 @@ impl DrawStep {
     pub const fn ordinal(self) -> u8 {
         match self {
             Self::Fill => 0,
-            Self::Lines => 1,
+            Self::Shapes => 1,
             Self::Text => 2,
         }
     }
@@ -93,9 +93,9 @@ pub enum RenderCommandKind {
         tint:   Color,
     },
     /// Resolved panel-local line primitives.
-    Lines {
+    Shapes {
         /// Resolved lines to render as one command group.
-        lines: Vec<ResolvedPanelLine>,
+        shapes: Vec<ResolvedPanelShape>,
     },
     /// Begin a clipping region. All subsequent commands until the matching
     /// [`ScissorEnd`](Self::ScissorEnd) are clipped to this bounding box.
@@ -112,7 +112,7 @@ impl RenderCommandKind {
             Self::Rectangle { .. } | Self::Border { .. } | Self::Image { .. } => {
                 Some(DrawStep::Fill)
             },
-            Self::Lines { .. } => Some(DrawStep::Lines),
+            Self::Shapes { .. } => Some(DrawStep::Shapes),
             Self::Text { .. } => Some(DrawStep::Text),
             Self::ScissorStart | Self::ScissorEnd => None,
         }
@@ -124,13 +124,13 @@ mod tests {
     use super::*;
 
     const FILL_ORDINAL: u8 = 0;
-    const LINES_ORDINAL: u8 = 1;
+    const SHAPES_ORDINAL: u8 = 1;
     const TEXT_ORDINAL: u8 = 2;
 
     #[test]
     fn draw_step_ordinals_are_fixed() {
         assert_eq!(DrawStep::Fill.ordinal(), FILL_ORDINAL);
-        assert_eq!(DrawStep::Lines.ordinal(), LINES_ORDINAL);
+        assert_eq!(DrawStep::Shapes.ordinal(), SHAPES_ORDINAL);
         assert_eq!(DrawStep::Text.ordinal(), TEXT_ORDINAL);
     }
 
@@ -158,8 +158,8 @@ mod tests {
                 Some(DrawStep::Fill),
             ),
             (
-                RenderCommandKind::Lines { lines: Vec::new() },
-                Some(DrawStep::Lines),
+                RenderCommandKind::Shapes { shapes: Vec::new() },
+                Some(DrawStep::Shapes),
             ),
             (
                 RenderCommandKind::Text {

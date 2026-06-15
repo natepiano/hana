@@ -70,8 +70,6 @@ pub struct ComputedGlyphMetrics {
     /// the visible overhang so the origin/advance callout tracks the displayed
     /// glyph cell.
     pub origin_x:  f32,
-    /// Glyph baseline origin Y in world units.
-    pub origin_y:  f32,
     /// Laid-out horizontal advance in world units.
     pub advance_x: f32,
 }

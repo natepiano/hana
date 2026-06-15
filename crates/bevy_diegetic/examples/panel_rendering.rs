@@ -173,7 +173,6 @@ fn main() {
                 cam.yaw = Some(HOME_YAW);
                 cam.pitch = Some(HOME_PITCH);
                 cam.zoom_sensitivity = 1.0;
-                cam.zoom_lower_limit = 0.000_000_1;
             },
             OrbitCamPreset::BlenderLike,
             (
@@ -187,6 +186,7 @@ fn main() {
                 TemporalAntiAliasing::default(),
             ),
         )
+        .unclamped()
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

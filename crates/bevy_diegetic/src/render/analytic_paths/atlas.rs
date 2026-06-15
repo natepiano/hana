@@ -57,9 +57,34 @@ where
         self.path_records.clear();
 
         for (key, path) in paths {
+            // Rebase each path to a unit-scale frame before packing. At
+            // REFERENCE-scale coordinates (~1e6 design units) the shader's
+            // field normal loses its direction to float32 cancellation and
+            // grazing lines wave; coverage is scale-invariant, so the only
+            // change is restored precision.
+            let (path, scale) = path.normalized();
             let min_feature = path.min_feature();
-            let layout = BandLayout::for_extents(path.bounds, target_band_extent);
-            let packed = packing::build_packed_path_with_layout(path, layout);
+            // Straight-edge convex line marks (min_feature > 0, every contour
+            // linear) pack as half-plane polygons: each contour's coverage is
+            // the product of its edges' band ramps, with no radial point field
+            // to bulge a grazing-corner wing. A curved contour (a Circle cap's
+            // ellipse arcs) keeps the single-band curve-distance scan; a tight
+            // line path packs into one band so every fragment scans every curve
+            // once (a multi-band layout misses the nearest curve at grazing).
+            let packed = if min_feature > 0.0 && packing::path_is_straight_polygon(&path) {
+                packing::build_packed_polygons(path)
+            } else {
+                let layout = if min_feature > 0.0 {
+                    BandLayout::uniform(1)
+                } else {
+                    BandLayout::for_extents(
+                        path.bounds,
+                        target_band_extent / scale,
+                        path.curve_count(),
+                    )
+                };
+                packing::build_packed_path_with_layout(path, layout)
+            };
             let record_index = self.path_records.len().to_u32();
             let curve_start = self.curves.len().to_u32();
             let band_start = self.bands.len().to_u32();

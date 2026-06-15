@@ -1,4 +1,4 @@
-# Panel Line API As-Built Review - 2026-06-10
+# Panel Shape API As-Built Review - 2026-06-10
 
 This document archives what was built for panel-owned line drawing in
 `bevy_diegetic`, the decisions that survived implementation, and the direction
@@ -79,7 +79,7 @@ Resolved line data includes:
 
 Identity is split by layer:
 
-- `PanelLineSourceKey` comes from layout and identifies the source element, draw
+- `PanelShapeSourceKey` comes from layout and identifies the source element, draw
   ordinal, line ordinal, and primitive ordinal.
 - `PanelLineRenderKey` prefixes the source key with the panel entity for
   retained renderer storage.
@@ -100,26 +100,27 @@ Clipping is resolved at layout time:
 
 ## Current Renderer
 
-The current panel-line adapter lives under `render/panel_lines/` and is
+The current panel-shape adapter lives under `render/panel_shapes/` and is
 registered by `RenderPlugin`.
 
 Implemented pieces:
 
 - `render/batch_key.rs` contains shared visual compatibility keys and material
   interning used by text and line batching.
-- `render/panel_lines/mod.rs` registers the plugin and systems.
-- `render/panel_lines/path.rs` converts groups of resolved shaft/cap primitives
+- `render/panel_shapes/mod.rs` registers the plugin and systems.
+- `render/panel_shapes/path.rs` converts groups of resolved shaft/cap primitives
   into one closed multi-contour analytic `PathOutline` plus clipped instance
   rect/UV data.
-- `render/panel_lines/batching.rs` groups same-styled primitives per element
+- `render/panel_shapes/batching.rs` groups same-styled primitives per element
   and routes them into retained cross-panel analytic path batches.
-- `render/panel_lines/primitive.rs` owns stable panel-line render identity.
+- `render/panel_shapes/primitive.rs` owns stable panel-shape render identity.
 - `render/analytic_paths/atlas.rs` owns the generic path atlas used by
   non-glyph path producers.
 - `render/analytic_paths/material.rs` / `analytic_path*.wgsl` provide the
   shared analytic coverage, AA, vertex-pulling, and material route.
-- `render/panel_lines/material.rs` and `panel_line_batch.wgsl` are no longer
-  registered; they remain only as temporary fallback/quarantine files.
+- The old dedicated line material (`material.rs`, `panel_line_batch.wgsl`) was
+  removed in commit `e925cbe`; the shared analytic path is the only registered
+  route.
 
 Within one element, same-styled line primitives merge into a single
 multi-contour analytic path before packing:
@@ -233,7 +234,7 @@ crates/bevy_diegetic/src/render/
     analytic_path_vertex_pull.wgsl
   panel_text/
     ...
-  panel_lines/
+  panel_shapes/
     batching.rs
     path.rs
     primitive.rs
@@ -264,7 +265,7 @@ The shared analytic path renderer should own:
 - batching and compatibility
 - AA and grazing-angle coverage behavior
 
-The current `render/panel_lines` module is now an adapter: it owns panel-line
+The current `render/panel_shapes` module is now an adapter: it owns panel-shape
 source identity, clipping, retained cleanup, and batch counters while feeding
 the shared analytic renderer.
 
@@ -360,9 +361,9 @@ Deliverables:
   rendering: either panel marks become stable analytic path runs, or the shared
   renderer gets a small source-kind wrapper around `VisualBatchKey`.
 - Introduce or select a generic path atlas / mark cache keyed by non-glyph
-  sources such as `PanelLinePrimitiveKey`.
+  sources such as `PanelShapePrimitiveKey`.
 - Add the panel-line path emitter, expected under `render/panel_lines/`, that
-  maps each `ResolvedPanelLinePrimitive` into renderer-owned `PathOutline`
+  maps each `ResolvedPanelShapePrimitive` into renderer-owned `PathOutline`
   data: straight line edges emit `QuadraticSegment`s with midpoint controls,
   and curved caps/marks emit true quadratic segments or explicit quadratic
   subdivisions.
@@ -370,7 +371,7 @@ Deliverables:
 - Convert `CalloutCap` primitives into compatible path contours.
 - Route line/cap contours into the existing analytic coverage, AA, material,
   and shader path; do not add another line-specific coverage implementation.
-- Preserve `PanelLineSourceKey`, including external/stable source ids for
+- Preserve `PanelShapeSourceKey`, including external/stable source ids for
   non-ordinal producers, plus clips, paint lanes, layering, and panel-local
   coordinate semantics.
 - Choose and implement the clipping policy explicitly: pre-clipped contours,
@@ -610,7 +611,7 @@ Acceptance:
 
 #### Phase C Review
 
-- Phase D drops the external `PanelLineSourceKey` deliverables (user-approved
+- Phase D drops the external `PanelShapeSourceKey` deliverables (user-approved
   2026-06-11): overlay marks are element-owned `PanelDraw::lines`; Phase E
   settles whether `External` gains semantics or is deleted, default element-
   owned trees.
@@ -658,9 +659,9 @@ As built:
 - **Per-line authoring**: `PanelLine::hairline_fade(HairlineFade)` /
   `LineStyle::hairline_fade` (`Option<HairlineFade>`, `None` inherits the
   element → panel → global resolution). Carried through
-  `ResolvedPanelLine::hairline_fade`; resolved per member in
-  `build_panel_line_group` and passed to `build_panel_line_path` as
-  `PanelLineMember { primitive, fade_exponent }`. The merge key is unchanged
+  `ResolvedPanelShape::hairline_fade`; resolved per member in
+  `build_panel_line_group` and passed to `build_panel_shape_path` as
+  `PanelShapeMember { primitive, fade_exponent }`. The merge key is unchanged
   — mixed fade policies share one group, one record, one batch.
 - **Fade is per-curve data**: `PathContour` and `CurveRecord` gained
   `fade_exponent` (curve stride 64 → 80 B, new encase assertion);
@@ -722,7 +723,7 @@ As built:
   `RunRecord`) and the heterogeneous-fade OIT regression case exercises
   per-curve fade after a global flip.
 
-### Phase D - Typography Overlay Migration
+### Phase D - Typography Overlay Migration (complete)
 
 Move the remaining typography overlay guide paths onto panel-backed analytic
 path marks. Existing transparent overlay panels stay; this phase targets the
@@ -740,7 +741,7 @@ Deliverables:
   on SDF rectangle borders.
 - Author overlay marks as ordinary element-owned `PanelDraw::lines` with
   element/draw/line ordinals (decision 2026-06-11: the external
-  `PanelLineSourceKey` deliverables are dropped — `External` has no producer,
+  `PanelShapeSourceKey` deliverables are dropped — `External` has no producer,
   no element-index/material/AA-fade resolution semantics, and the overlay's
   per-refresh tree rebuilds make element ordinals naturally stable; Phase E
   settles whether `External` gains semantics or is deleted).
@@ -798,73 +799,150 @@ Acceptance:
   entity, and assert zero stale records — "does not leave stale records" is
   not satisfiable by inspection alone.
 
-### Phase E - Planar Callout Unification
+#### Retrospective
 
-Add a transparent-panel-backed path for planar callouts.
+**What worked:**
 
-Deliverables:
+- Border-backed metric panels, arrow callouts, and dashed glyph pointers now
+  author `PanelDraw::lines` with `DrawOverflow::Visible`
+  (`metric_lines.rs::spawn_metric_guide_panel`,
+  `glyph.rs::spawn_glyph_metric_guides`); the per-dash `CalloutLine` entity
+  fan-out is gone.
+- `build_metric_gizmos` and its `callouts::draw_dimension_arrow` orphan were
+  deleted; the stale "drawn using Bevy's retained GizmoAsset" module doc is
+  gone.
+- Every guide element pins `El::hairline_fade(HairlineFade::Full)`
+  (`metric_lines.rs:317`, `glyph.rs:156,200,476`), so a global
+  `HairlineFade::Fade` cannot fade the debug overlay.
+- The churn acceptance is met by `recreated_guide_panels_leave_no_stale_records`
+  (`render/panel_shapes/batching.rs:1179`): recreate guide panels across
+  refreshes, assert zero batch records and zero panel-index entries keyed to a
+  dead panel entity.
 
-- Preserve `CalloutLine` as the standalone public API.
-- Add a mapping/classification slice that detects planar callouts, chooses or
-  creates the transparent panel, maps local/world `Vec3` endpoints into panel
-  coordinates, and preserves render layers.
-- Add a renderer-routing slice that routes planar callout shafts/caps through
-  the Phase B panel-line analytic path adapter; do not build another cap/shaft
-  renderer route. At phase start, choose the mark-identity route (decision
-  2026-06-11, default = (a)): (a) author callout marks as element-owned
-  `PanelDraw::lines` on the transparent panels this phase creates — uniform
-  element-index/material/AA-fade resolution, and delete
-  `PanelLineSourceKey::External` as dead code; or (b) keep the `External`
-  route, which then requires defining element-index, material, and AA/fade
-  resolution semantics for post-layout lines.
-- Route planar callout geometry through a transparent panel and shared analytic
-  path marks where possible.
-- Keep the direct callout renderer for non-coplanar cases or accepted
-  temporary exceptions.
-- Preserve `CalloutLine::surface_shadow` by grouping panel-backed callouts into
-  transparent panels with matching `SurfaceShadow`, or document a temporary
-  direct-renderer fallback for shadow modes that cannot map through a panel.
-- Define and document shadow policy for panel-backed callouts.
+**What deviated from the plan:**
 
-Acceptance:
+- Dots were planned as *exempt* non-line marks kept on `Mesh3d(Circle)`, and the
+  "Open Design Discussion — Non-Line Panel Marks" recorded "do not add this API
+  during Phase D." Instead `PanelShape { Line, Circle }` / `PanelCircle` was
+  added and the two advancement dots migrated to `glyph.rs::spawn_dot_panel`
+  (filled circles through the panel machinery). This supersedes the exempt
+  decision and partially answers the Non-Line Panel Marks question.
+- The whole renderer module and identity layer were renamed
+  `panel_lines` → `panel_shapes`, Line → Shape (`PanelShapeSourceKey`,
+  `PanelShapeBatchStore`, `ShapeBatchKey`, `ResolvedPanelShape`,
+  `build_panel_shape_path`, `PanelShapeMember`). At Phase D close-out this
+  document and its title were renamed to "Panel Shape API" /
+  `panel-shape-api.md` and the live module-tree references updated to
+  `panel_shapes`; residual "panel-line" doc-comments in code remain for Phase F.
+- Acceptance gap: "overlay guide lines remain visible under a global `Fade`" is
+  satisfied structurally by the `HairlineFade::Full` pins, but has no dedicated
+  overlay regression test; only the Phase C element-override test
+  (`panel_shapes/batching.rs`) exercises a global `Fade` flip.
 
-- A representative planar standalone callout and panel-backed callout match in
-  endpoints, insets, caps, thickness, color, and clipping. The parity
-  consumer is a synthetic/example callout authored for the test — the
-  typography overlay's callouts migrate to `PanelDraw::lines` in Phase D and
-  are not available as consumers here (decision 2026-06-11). Pixel-exact parity
-  is not achievable by design: the panel-backed route applies cascade-resolved
-  `AntiAlias` and hairline dilation while the direct renderer uses
-  `SdfPanelMaterial` AA with no dilation, so a callout thinner than the
-  hairline floor renders wider panel-backed. Restrict parity geometry to
-  at-floor-or-wider strokes, or state the expected divergence and comparison
-  tolerance in the test.
-- Panel-backed callouts batch with compatible panel marks.
-- Non-coplanar callouts remain supported or are rejected by a clear boundary.
+**Surprises:**
+
+- Bisecting the dots on the baseline required anchoring them to the *rendered*
+  baseline line's center (`layout_to_world_y(baseline) + metric_line_width/2`),
+  because `metric_guide_lines` shifts each line half a stroke toward the top.
+  The now-dead `ComputedGlyphMetrics::origin_y` field fell out and was removed.
+- Coplanar transparent `PanelCircle` dots composite *behind* the red baseline
+  (both transparent at the same draw slot). This z-order issue is deferred to
+  the separate z-index / draw-slot branch — not a D/E/F concern.
+
+**Implications for remaining phases:**
+
+- Phase E's mark-identity choice: `PanelShapeSourceKey::External` still has zero
+  producers (overlay marks ended up element-owned), so Phase E settles on route
+  (a) — element-owned `PanelDraw::lines`. `External` is kept-but-deferred per
+  `callouts.md` ("Avoid External as the first route"), not deleted.
+- Document reconciliation (filename/title → "Panel Shape", live `panel_lines`
+  module-tree references → `panel_shapes`, Non-Line Panel Marks section
+  superseded) was done at Phase D close-out; Phase F retains only the residual
+  `panel-line` doc-comment cleanup in code.
+
+#### Phase D Review
+
+- Phase E superseded by `docs/bevy_diegetic/callouts.md` (user-approved
+  2026-06-15): callouts.md is now the authoritative planar-callout plan; Phase E
+  collapses to a pointer carrying its sub-decisions (route (a), `External`
+  deferred, shadow grouping, net-new `Vec3`→`PanelPoint` projection, non-exact
+  parity) as inputs.
+- Phase E mark-identity settled as route (a) (element-owned panel marks);
+  `External` is retained-but-unused, NOT deleted — callouts.md "Avoid External
+  as the first route" overrides the architect's delete-as-dead recommendation.
+- Phase F SDF deliverable corrected: the named quarantined files
+  (`panel_lines/material.rs`, `panel_line_batch.wgsl`) were already deleted in
+  `e925cbe`; retargeted at the real dead code — the stale discriminant comment
+  in both `sdf_material.rs:45` and `sdf_panel.wgsl:70`, plus the unreachable
+  `sdf_kind == 4u..7u` branches in `sdf_panel.wgsl`.
+- Phase E gained notes (architect, minor): the `Vec3`→`PanelPoint` planar
+  projection is the only net-new work; shadow mode is a hard panel-grouping key;
+  no in-tree planar `CalloutLine` consumer remains after Phase D.
+- Phase F gained notes (architect, minor): rename-audit paths corrected to
+  `panel_shapes`; the cross-panel OIT regression must be sequenced against the
+  deferred z-index branch.
+- Open Design Discussion (Non-Line Panel Marks) marked superseded: `PanelShape`
+  / `PanelCircle` shipped in Phase D; remaining questions tracked in callouts.md.
+- This document was renamed to `panel-shape-api.md` and reconciled at close-out
+  (user-approved 2026-06-15).
+
+### Phase E - Planar Callout Unification (superseded by callouts.md)
+
+Planar callout unification is now planned in `docs/bevy_diegetic/callouts.md`,
+which subsumes this phase's intent at larger scope: a semantic callout facade
+(`DiegeticCallout::screen` / `world_on_plane`, `PanelCallout`), a neutral
+`CalloutSpec` shared spec, typestate space adapters, and units / targets /
+draw-order policy — all lowering to the same `PanelShape` analytic backend.
+This phase is retained only as the sub-decisions that feed that plan:
+
+- Mark-identity route is (a): element-owned `PanelDraw::lines` / `::shapes` on
+  transparent panels. `PanelShapeSourceKey::External` stays unused/deferred
+  (callouts.md "Avoid `External` as the first route") — it has zero producers
+  crate-wide today, but is kept until post-layout producers have explicit
+  lifecycle/ownership/cascade/cleanup semantics.
+- The genuinely net-new work is the `Vec3`→`PanelPoint` planar projection
+  (panel basis/normal from the two endpoints plus a reference axis; cf.
+  `callouts/render.rs::cap_perp`); the transparent-panel + element-owned
+  authoring it routes into is already proven by Phase D
+  (`glyph.rs::spawn_guide_panel`, `metric_lines.rs` arrow lines).
+- Shadow mode is a hard panel-grouping key: `CalloutLine::surface_shadow` is
+  per-callout while `DiegeticPanel::surface_shadow` is per-panel, so two
+  standalone callouts with different `SurfaceShadow` cannot share one backing
+  panel (matches callouts.md's render-context grouping list).
+- Keep the direct `CalloutLine` SDF renderer for non-coplanar cases.
+- Parity is not pixel-exact: the panel-backed route applies cascade-resolved
+  `AntiAlias` + hairline dilation, the direct `SdfPanelMaterial` route does
+  not, so a sub-floor stroke renders wider panel-backed. Restrict any parity
+  test to at-floor-or-wider strokes. There is no in-tree planar `CalloutLine`
+  consumer after Phase D, so the first real consumers arrive through
+  callouts.md.
+
+See `docs/bevy_diegetic/callouts.md` for the implementation outline and the
+units / targets / draw-order policy this phase did not cover.
 
 ### Phase F - Hardening And Archive Closeout
 
-Close the old-renderer gap after the shared path renderer has real
+Close hardening and documentation gaps after the shared path renderer has real
 consumers.
 
 Deliverables:
 
-- Remove the quarantined panel-line SDF files (`render/panel_lines/material.rs`,
-  `panel_line_batch.wgsl`) — they are the only removable SDF surface. The
-  shared `SdfPanelMaterial` / `SdfPrimitiveKind` path stays: panel backgrounds
-  and the Phase E non-coplanar callout fallback
-  (`callouts/render.rs` uses `Triangle` / `Circle` / `RoundedRect` /
-  `Diamond`) depend on it. Also fix the stale doc at
-  `render/sdf_material.rs` that still describes retired discriminants
-  ("`4` = line segment, `5..=7` = oriented cap forms") and remove any
-  matching dead WGSL branches.
-- Keep the as-built module summary current.
+- The bulk of the document reconciliation was done at Phase D close-out
+  (filename/title → "Panel Shape API" / `panel-shape-api.md`, live module-tree
+  references → `panel_shapes`, Non-Line Panel Marks section superseded). What
+  remains: clean up the residual `panel-line` doc-comments in code (e.g.
+  `panel_shapes/primitive.rs` calls `PanelShapeRenderKey` a "panel-line"
+  identity), and keep the as-built module summary current.
 - Rename text/glyph-compatible internal analytic-path names such as
   `TextMaterial`, `GlyphRecord`, and `GlyphInstanceRecord` to path-neutral
   names, or explicitly defer with a per-type rationale recorded in code. The
   rename touches reference sites across render and text modules (re-count at
-  phase start; Phase C added uses in `panel_lines/batching.rs` and
-  `panel_text/batching.rs`); stage it through the existing `PathRecord` /
+  phase start; the `panel_lines`→`panel_shapes` module rename is already done
+  uncommitted, so Phase C's added uses are now in `panel_shapes/batching.rs`
+  and `panel_text/batching.rs`); this deliverable also folds in the residual
+  Line→Shape doc-comment cleanup the Phase D rename left partial — e.g.
+  `panel_shapes/primitive.rs` still calls `PanelShapeRenderKey` a "panel-line"
+  identity. Stage it through the existing `PathRecord` /
   `PathInstanceRecord` aliases — first switch crate-internal uses to the
   aliases, then rename the definitions — so there is a compiling
   intermediate state. The rename audit also covers the Phase C surfaces: the
@@ -881,7 +959,11 @@ Deliverables:
   cross-panel batch whose runs carry different `aa_flags` and whose packed
   curves carry different `fade_exponent` values must composite and re-pack
   correctly after a global `AntiAlias` / `HairlineWidth` flip (Phase
-  C's headless test covers only the intra-panel case).
+  C's headless test covers only the intra-panel case). This test's
+  `oit_depth_offset` semantics may shift if the deferred z-index / draw-slot
+  branch (Phase D retrospective: coplanar `PanelCircle` dots compose behind the
+  baseline) lands first — sequence this check after that branch, or pin it to
+  draw-slot ordering explicitly.
 - Keep only cross-feature regression tests here; Phase B owns the focused path
   conversion, cleanup, clipping, and visual-bounds tests required before later
   consumers use the path renderer.
@@ -979,13 +1061,11 @@ crates/bevy_diegetic/src/
       packing.rs            # curve, band, path, instance, and run records
       analytic_path.wgsl
       analytic_path_vertex_pull.wgsl
-    panel_lines/
+    panel_shapes/
       mod.rs                # system registration
-      batching.rs           # retained analytic path batches for panel lines
+      batching.rs           # retained analytic path batches for panel shapes
       path.rs               # resolved line/cap primitive to PathOutline adapter
-      primitive.rs          # stable panel-line render identity
-      material.rs           # unregistered temporary fallback/quarantine
-      panel_line_batch.wgsl # unregistered temporary fallback/quarantine
+      primitive.rs          # stable panel-shape render identity
   callouts/
     caps.rs                 # shared CalloutCap resolution helpers
   examples/
@@ -1026,6 +1106,10 @@ Design questions to revisit:
 - What clipping, paint-order, stable-source-key, shadow, and material semantics
   should apply when the mark is not naturally a stroke/cap pair?
 
-Current decision: do not add this API during Phase D. Keep dots/circles in the
-typography example on their existing path unless a later phase explicitly adds
-non-line panel mark support.
+Superseded (Phase D, 2026-06-15): this API was added during Phase D —
+`PanelShape { Line, Circle }` / `PanelCircle` is public, packs as a filled
+contour (`panel_shapes/path.rs`), and the typography dots migrated to
+`glyph.rs::spawn_dot_panel`. The filled-circle and shared-store questions are
+answered; the remaining open questions (units, clipping/material semantics for
+non-stroke marks, semantic-vs-primitive layering) are now tracked in
+`docs/bevy_diegetic/callouts.md`. Phase F reconciles this section.

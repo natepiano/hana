@@ -353,7 +353,7 @@ mod tests {
         }
     }
 
-    fn lines() -> RenderCommandKind { RenderCommandKind::Lines { lines: Vec::new() } }
+    fn lines() -> RenderCommandKind { RenderCommandKind::Shapes { shapes: Vec::new() } }
 
     fn text() -> RenderCommandKind {
         RenderCommandKind::Text {
@@ -542,7 +542,7 @@ mod tests {
                 .into_iter()
                 .max()
                 .expect("representative streams include fill commands");
-            let line_min = ranks_for_step(&commands, &ordinals, DrawStep::Lines)
+            let line_min = ranks_for_step(&commands, &ordinals, DrawStep::Shapes)
                 .into_iter()
                 .min()
                 .expect("representative streams include line commands");

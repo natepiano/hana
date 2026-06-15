@@ -46,6 +46,7 @@ const OIT_MIN_DEPTH: f32 = 3e-6;
 
 #import bevy_diegetic::sdf_stroke::{
     centered_stroke_alpha,
+    distance_field_band,
     inflate_subpixel_half_size,
     stable_border_alpha,
     rect_strip_alpha,
@@ -250,10 +251,11 @@ fn inner_corner_radii(border_widths: vec4<f32>) -> vec4<f32> {
 }
 
 /// Anti-aliasing half-width from the screen-space rate of change of a
-/// distance field value. Using `fwidth(dist)` directly accounts for
-/// perspective foreshortening at extreme viewing angles.
+/// distance field value. Uses the exact L2 footprint `distance_field_band`
+/// rather than `fwidth`'s L1 sum, which over-covers diagonal-gradient
+/// corners at grazing angles.
 fn aa_width(dist: f32) -> f32 {
-    return fwidth(dist) * 0.75;
+    return distance_field_band(dist) * 0.75;
 }
 
 fn form_aa_width(dist: f32) -> f32 {

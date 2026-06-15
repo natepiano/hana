@@ -60,7 +60,7 @@ pub use perf::BatchPerfStats;
 use perf::DiagnosticsPlugin;
 pub use perf::DiegeticPerfStats;
 pub use perf::PanelGeometryPerfStats;
-pub use perf::PanelLineBatchPerfStats;
+pub use perf::PanelShapeBatchPerfStats;
 pub use perf::PanelTextPerfStats;
 pub use sizing::AnyUnit;
 pub use sizing::CompatibleUnits;

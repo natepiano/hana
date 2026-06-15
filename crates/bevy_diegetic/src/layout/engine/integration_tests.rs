@@ -45,12 +45,12 @@ use crate::layout::Padding;
 use crate::layout::PanelCoord;
 use crate::layout::PanelDraw;
 use crate::layout::PanelLine;
-use crate::layout::PanelLineSourceKey;
 use crate::layout::PanelPoint;
+use crate::layout::PanelShapeSourceKey;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
-use crate::layout::ResolvedPanelLine;
+use crate::layout::ResolvedPanelShape;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
@@ -136,11 +136,11 @@ fn scaled_unit_gap() -> f32 { Dimension::from(UNIT_GAP_MM).to_points(UNIT_GAP_LA
 
 fn scaled_unit_gap_child_side() -> f32 { UNIT_GAP_CHILD_SIDE * UNIT_GAP_LAYOUT_SCALE }
 
-fn line_commands(commands: &[RenderCommand]) -> Vec<&[ResolvedPanelLine]> {
+fn line_commands(commands: &[RenderCommand]) -> Vec<&[ResolvedPanelShape]> {
     commands
         .iter()
         .filter_map(|command| match &command.kind {
-            RenderCommandKind::Lines { lines } => Some(lines.as_slice()),
+            RenderCommandKind::Shapes { shapes } => Some(shapes.as_slice()),
             _ => None,
         })
         .collect()
@@ -260,7 +260,7 @@ fn draw_commands_do_not_change_layout_bounds_or_non_line_commands() {
     let draw_non_line_commands: Vec<_> = draw_result
         .commands
         .iter()
-        .filter(|command| !matches!(command.kind, RenderCommandKind::Lines { .. }))
+        .filter(|command| !matches!(command.kind, RenderCommandKind::Shapes { .. }))
         .collect();
     let base_non_line_commands: Vec<_> = base_result.commands.iter().collect();
     assert_eq!(draw_non_line_commands, base_non_line_commands);
@@ -327,7 +327,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
         matches!(kind, RenderCommandKind::Text { .. })
     });
     let line_index = command_index(&draw_result.commands, |kind| {
-        matches!(kind, RenderCommandKind::Lines { .. })
+        matches!(kind, RenderCommandKind::Shapes { .. })
     });
     let lines = line_commands(&draw_result.commands);
     let resolved = &lines[0][0];
@@ -365,7 +365,7 @@ fn overflow_visible_line_clips_only_to_explicit_clipped_ancestor() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
     let line_index = command_index(&result.commands, |kind| {
-        matches!(kind, RenderCommandKind::Lines { .. })
+        matches!(kind, RenderCommandKind::Shapes { .. })
     });
     let lines = line_commands(&result.commands);
     let resolved = &lines[0][0];
@@ -528,11 +528,11 @@ fn inserted_element_line_churns_later_ordinal_keys_without_stale_lines() {
     assert_eq!(updated_lines[0].len(), 3);
     assert_eq!(
         updated_lines[0][1].source_key,
-        PanelLineSourceKey::element(1, 0, 1)
+        PanelShapeSourceKey::element(1, 0, 1)
     );
     assert_eq!(
         updated_lines[0][2].source_key,
-        PanelLineSourceKey::element(1, 0, 2)
+        PanelShapeSourceKey::element(1, 0, 2)
     );
     assert_ne!(updated_lines[0][2].source_key, old_second_key);
 }
@@ -1732,7 +1732,7 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
         .commands
         .iter()
         .filter_map(|command| match &command.kind {
-            RenderCommandKind::Lines { lines } => Some(lines.len()),
+            RenderCommandKind::Shapes { shapes } => Some(shapes.len()),
             _ => None,
         })
         .sum::<usize>();

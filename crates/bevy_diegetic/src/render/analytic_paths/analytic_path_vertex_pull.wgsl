@@ -11,6 +11,7 @@
 #import bevy_pbr::{
     mesh_bindings::mesh,
     mesh_functions,
+    mesh_view_bindings::view,
     view_transformations::position_world_to_clip,
 }
 
@@ -43,6 +44,17 @@ struct RunRecord {
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<GlyphInstanceRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
 
+// Mirrors the leading fields of `GlyphRecord` in packing.rs. Only `min_feature`
+// is read here, to tell a panel-line quad (min_feature > 0, screen-space
+// hairline coverage) from a text glyph quad (min_feature 0).
+struct GlyphRecord {
+    bounds_min_size: vec4<f32>,
+    band_range: vec4<u32>,
+    min_feature: f32,
+}
+
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<GlyphRecord>;
+
 // Clip-space depth shift per depth_nudge layer unit, applied post-projection
 // so coplanar runs resolve to distinct depths. Provisional magnitude;
 // Step 3b verifies Geometry-mode layering against `panel_rendering`.
@@ -51,6 +63,21 @@ const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.000002;
 // World-space Y lift per recovered glyph index in debug-staircase mode.
 const GLYPH_PULL_DEBUG_STEP: f32 = 0.01;
 
+// Screen-space room, in device pixels, added around a panel-line quad for its
+// coverage ramp. That ramp is screen-space (~1px) plus any hairline dilation;
+// on a foreshortened panel its WORLD width grows ~1/cos(grazing), so a
+// fixed-world CPU quad pad clips it at a tilt and the line renders the quad's
+// hard edge as a staircase. The vertex stage expands each line corner so this
+// many pixels of ramp always fit. Over-expansion only adds transparent
+// fragments that discard before OIT.
+const LINE_AA_MARGIN_PX: f32 = 8.0;
+// Upper bound on the per-corner expansion, as a multiple of the quad's longer
+// side, so a near-edge-on panel (pixels-per-unit -> 0) cannot grow the quad
+// without bound.
+const LINE_AA_MARGIN_MAX_RATIO: f32 = 4.0;
+// Guards the reciprocals in the expansion math.
+const LINE_AA_EPSILON: f32 = 0.000001;
+
 struct PulledVertex {
     clip_position: vec4<f32>,
     world_position: vec4<f32>,
@@ -58,6 +85,21 @@ struct PulledVertex {
     uv: vec2<f32>,
     uv_b: vec2<f32>,
 }
+
+#ifndef PREPASS_PIPELINE
+// Panel-local distance whose projection along `world_axis` spans
+// LINE_AA_MARGIN_PX device pixels at the corner whose clip position is `clip`.
+// Uses the projection Jacobian d(ndc)/d(world): as the axis tilts toward
+// edge-on its pixels-per-unit shrinks, so the returned margin grows with the
+// grazing angle. `view` is the camera view (main pass only).
+fn line_aa_margin_local(world_axis: vec3<f32>, clip: vec4<f32>) -> f32 {
+    let d_clip = view.clip_from_world * vec4<f32>(world_axis, 0.0);
+    let inv_w = 1.0 / clip.w;
+    let d_ndc = (d_clip.xy - clip.xy * (d_clip.w * inv_w)) * inv_w;
+    let px_per_unit = 0.5 * length(d_ndc * view.viewport.zw);
+    return LINE_AA_MARGIN_PX / max(px_per_unit, LINE_AA_EPSILON);
+}
+#endif
 
 // Expands one inert-mesh vertex into its glyph-quad corner. Both vertex entry
 // points route through here, so the corner math and the depth nudge are one
@@ -96,7 +138,33 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // 0 = (left, top), 1 = (right, top), 2 = (right, bottom), 3 = (left, bottom).
     let corner_x = f32(corner == 1u || corner == 2u);
     let corner_top = f32(corner <= 1u);
-    let local = record.rect_min + vec2<f32>(corner_x, corner_top) * record.rect_size;
+    var local = record.rect_min + vec2<f32>(corner_x, corner_top) * record.rect_size;
+    // uv = padded glyph quad UVs (uv_min sits at the top-left corner).
+    var uv = record.uv_min + vec2<f32>(corner_x, 1.0 - corner_top) * record.uv_size;
+
+#ifndef PREPASS_PIPELINE
+    // Panel lines (min_feature > 0) only: grow the quad in the panel plane so
+    // the screen-space coverage ramp clears the quad edge at any grazing angle
+    // (see LINE_AA_MARGIN_PX). The margin is per panel-local axis, so the
+    // foreshortened axis expands more; uv shifts by the same affine
+    // rect->uv ratio, keeping the coverage field exact. Text is untouched.
+    if glyphs[record.atlas_index].min_feature > 0.0 {
+        let base_clip = position_world_to_clip((run.transform * vec4<f32>(local, 0.0, 1.0)).xyz);
+        let axis_x = (run.transform * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
+        let axis_y = (run.transform * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
+        let cap = max(record.rect_size.x, record.rect_size.y) * LINE_AA_MARGIN_MAX_RATIO;
+        let margin_x = min(line_aa_margin_local(axis_x, base_clip), cap);
+        let margin_y = min(line_aa_margin_local(axis_y, base_clip), cap);
+        let sign_x = corner_x * 2.0 - 1.0;
+        let sign_y = corner_top * 2.0 - 1.0;
+        local += vec2<f32>(sign_x * margin_x, sign_y * margin_y);
+        let inv_rect = vec2<f32>(1.0, 1.0) / max(record.rect_size, vec2<f32>(LINE_AA_EPSILON));
+        uv += vec2<f32>(
+            sign_x * margin_x * record.uv_size.x * inv_rect.x,
+            -sign_y * margin_y * record.uv_size.y * inv_rect.y,
+        );
+    }
+#endif
 
     var world = run.transform * vec4<f32>(local, 0.0, 1.0);
 #ifdef GLYPH_PULL_DEBUG_INDEX
@@ -113,10 +181,9 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // Records carry no normal: rotate layout-space +z by the run transform.
     out.world_normal = normalize((run.transform * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
 
-    // uv = padded glyph quad UVs (uv_min sits at the top-left corner);
     // uv_b.x = atlas record index, uv_b.y = run index, both recovered in the
     // fragment with u32(floor(..)).
-    out.uv = record.uv_min + vec2<f32>(corner_x, 1.0 - corner_top) * record.uv_size;
+    out.uv = uv;
     out.uv_b = vec2<f32>(f32(record.atlas_index), f32(record.run_index));
     return out;
 }

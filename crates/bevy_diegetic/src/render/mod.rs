@@ -10,7 +10,7 @@ mod constants;
 mod draw_order;
 mod material;
 mod panel_geometry;
-mod panel_lines;
+mod panel_shapes;
 mod panel_text;
 mod sdf_material;
 mod text_shaping;
@@ -68,7 +68,7 @@ pub(crate) use material::apply_glyph_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::resolve_material;
 use panel_geometry::PanelGeometryPlugin;
-use panel_lines::PanelLinePlugin;
+use panel_shapes::PanelShapePlugin;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
@@ -221,11 +221,8 @@ fn sync_anti_alias(
 /// up to this width, at full alpha.
 ///
 /// The applied device-pixel value is `logical_px ×` the primary window's
-/// scale factor, with a scale-dependent floor: 1.75 device pixels below
-/// scale 2 (low-DPI strokes need the extra width for clean anti-aliasing),
-/// 1.5 at scale 2 and above. Below 1.5 device pixels the anti-aliased
-/// profile alternates with pixel phase and near-vertical lines stairstep a
-/// full column at each crossover.
+/// scale factor, with a scale-dependent floor: 1.0 device pixels below
+/// scale 2, 1.5 at scale 2 and above.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Reflect)]
 #[reflect(Resource)]
 pub struct HairlineWidth {
@@ -300,9 +297,9 @@ impl HairlineFade {
 /// [`HairlineWidth`].
 const HAIRLINE_MIN_DEVICE_PX_HIGH_DPI: f32 = 1.5;
 
-/// Floor below scale factor 2: with fewer device pixels per stroke,
-/// anti-aliasing needs the extra width to render cleanly.
-const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.75;
+/// Floor below scale factor 2 — the minimum applied hairline width when there
+/// are few device pixels per stroke.
+const HAIRLINE_MIN_DEVICE_PX_LOW_DPI: f32 = 1.0;
 
 /// Mirrors [`HairlineWidth::fade`] into the attribute's cascade root default
 /// whenever the resource changes. The cascade write re-resolves every
@@ -369,7 +366,7 @@ impl Plugin for RenderPlugin {
             AnalyticPathPlugin,
             TextRenderPlugin,
             PanelGeometryPlugin,
-            PanelLinePlugin,
+            PanelShapePlugin,
         ))
         .init_resource::<AntiAlias>()
         .init_resource::<HairlineWidth>()

@@ -156,7 +156,6 @@ fn overlay_glyph_metrics(
             glyphs.push(ComputedGlyphMetrics {
                 rect,
                 origin_x: origin_x.min(rect[0]),
-                origin_y: -(glyph.baseline + glyph.y - anchor.y) * scale,
                 advance_x: glyph.advance * scale,
             });
         }

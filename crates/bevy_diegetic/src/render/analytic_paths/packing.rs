@@ -9,6 +9,7 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::Bounds;
+use super::PathContour;
 use super::PathOutline;
 use super::QuadraticSegment;
 
@@ -16,6 +17,11 @@ use super::QuadraticSegment;
 pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
+/// Fewest curves a band must hold. Band count is capped at
+/// `ceil(curve_count / this)` so a sparse path collapses toward one band and
+/// its distance scan sees every curve at any grazing angle, where the
+/// on-screen footprint exceeds a thin band's overlap.
+const MIN_CURVES_PER_BAND: usize = 256;
 const CURVE_DEGENERATE_EPS: f32 = 0.000_000_01;
 /// Bow-to-chord ratio below which a segment packs as exactly linear.
 ///
@@ -46,6 +52,13 @@ pub(crate) struct CurveRecord {
     /// winning (nearest) curve's exponent, so one merged path can mix fading
     /// and non-fading contours. `0.0` disables fade for this curve.
     pub fade_exponent: f32,
+    /// Outward unit normal of this segment's edge line, oriented by the owning
+    /// contour's winding. The line branch's convex-corner clip reads it as the
+    /// edge half-plane direction; the radial `normalize(point - closest)`
+    /// degenerates to the vertex direction past a corner, so it cannot stand in
+    /// here. `Vec2::ZERO` (text glyphs, degenerate edges) routes the shader back
+    /// to the radial normal.
+    pub edge_normal:   Vec2,
 }
 
 impl From<&QuadraticSegment> for CurveRecord {
@@ -85,6 +98,10 @@ impl From<&QuadraticSegment> for CurveRecord {
                 0.0,
             ),
             fade_exponent: 0.0,
+            // Winding is a per-contour property; the packer overwrites this from
+            // the owning contour's orientation. A lone segment has no winding, so
+            // it keeps the radial-fallback sentinel.
+            edge_normal:   Vec2::ZERO,
         }
     }
 }
@@ -259,7 +276,7 @@ pub(super) struct BandLayout {
 impl BandLayout {
     /// Equal band counts on both axes with the text overlap margin.
     #[must_use]
-    const fn uniform(band_count: usize) -> Self {
+    pub(super) const fn uniform(band_count: usize) -> Self {
         Self {
             horizontal_count: band_count,
             vertical_count:   band_count,
@@ -272,10 +289,11 @@ impl BandLayout {
     /// distance scan sees every curve at any zoom); large merged paths split
     /// so the per-fragment curve loop stays short.
     #[must_use]
-    pub fn for_extents(bounds: Bounds, target_extent: f32) -> Self {
+    pub fn for_extents(bounds: Bounds, target_extent: f32, curve_count: usize) -> Self {
+        let curve_cap = band_cap_for_curves(curve_count);
         Self {
-            horizontal_count: band_count_for_extent(bounds.height(), target_extent),
-            vertical_count:   band_count_for_extent(bounds.width(), target_extent),
+            horizontal_count: band_count_for_extent(bounds.height(), target_extent).min(curve_cap),
+            vertical_count:   band_count_for_extent(bounds.width(), target_extent).min(curve_cap),
             overlap:          target_extent * 0.5,
         }
     }
@@ -288,6 +306,14 @@ fn band_count_for_extent(extent: f32, target_extent: f32) -> usize {
     (extent / target_extent)
         .ceil()
         .to_usize()
+        .clamp(1, DEFAULT_BAND_COUNT)
+}
+
+/// Largest band count a path of `curve_count` segments justifies, holding at
+/// least [`MIN_CURVES_PER_BAND`] curves per band.
+fn band_cap_for_curves(curve_count: usize) -> usize {
+    curve_count
+        .div_ceil(MIN_CURVES_PER_BAND)
         .clamp(1, DEFAULT_BAND_COUNT)
 }
 
@@ -311,11 +337,13 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
         .contours
         .iter()
         .flat_map(|contour| {
-            contour.segments.iter().map(|segment| BandedSegment {
+            let chirality = contour_signed_area(contour).signum();
+            contour.segments.iter().map(move |segment| BandedSegment {
                 segment:       *segment,
                 orientation:   segment_orientation(segment),
                 min_feature:   contour.min_feature,
                 fade_exponent: contour.fade_exponent,
+                edge_normal:   segment_outward_normal(segment, chirality),
             })
         })
         .collect();
@@ -350,6 +378,74 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
     }
 }
 
+/// Whether every contour of `path` is a straight-edge polygon (each segment
+/// snaps to exactly linear under the same bow-to-chord test packing applies).
+/// Straight-edge convex marks (Segment rectangles, Triangle/Square/Diamond
+/// caps) render through the half-plane product path; a curved contour (a Circle
+/// cap's ellipse arcs) keeps the curve-distance path.
+#[must_use]
+pub(super) fn path_is_straight_polygon(path: &PathOutline) -> bool {
+    path.contours
+        .iter()
+        .flat_map(|contour| &contour.segments)
+        .all(segment_is_linear)
+}
+
+fn segment_is_linear(segment: &QuadraticSegment) -> bool {
+    let curve_delta = segment.end - 2.0 * segment.control + segment.start;
+    let chord_sq = (segment.end - segment.start).length_squared();
+    curve_delta.length_squared() < chord_sq * (CURVE_LINEAR_SNAP_RATIO * CURVE_LINEAR_SNAP_RATIO)
+}
+
+/// Packs each contour as one convex polygon for the half-plane product path:
+/// one band per contour holding its edges in contour order (no axis split, no
+/// sort, no overlap margin), each edge carrying its outward half-plane
+/// [`CurveRecord::edge_normal`], start point, contour stroke (`solver.w`), and
+/// fade exponent. `vertical_count` is `0` — the shader reads that as the
+/// polygon-mode sentinel and evaluates `analytic_polygon_coverage` instead of
+/// the curve-distance scan.
+#[must_use]
+pub(super) fn build_packed_polygons(path: PathOutline) -> PackedPath {
+    let bounds = path.bounds;
+    let mut curves = Vec::new();
+    let mut bands = Vec::with_capacity(path.contours.len());
+    for contour in &path.contours {
+        let chirality = contour_signed_area(contour).signum();
+        let start = curves.len().to_u32();
+        for segment in &contour.segments {
+            let normal = segment_outward_normal(segment, chirality);
+            let mut record = CurveRecord::from(segment);
+            // Per-edge hairline-floor dimension = the contour's perpendicular
+            // extent in this edge's outward normal. A stroke's long edge gets
+            // the (thin) width, so the floor pads it to one screen pixel; its
+            // cap gets the (long) length, so the floor never inflates the line
+            // past its ends (a foreshortened cap floor would paint a stray
+            // ~1px dot off the receding end).
+            record.solver.w = edge_slab_width(contour, segment, normal);
+            record.fade_exponent = contour.fade_exponent;
+            record.edge_normal = normal;
+            curves.push(record);
+        }
+        let count = curves.len().to_u32() - start;
+        if count == 0 {
+            continue;
+        }
+        bands.push(BandRecord {
+            start,
+            count,
+            y_min: 0.0,
+            y_max: 0.0,
+        });
+    }
+    PackedPath {
+        bounds,
+        horizontal_count: bands.len().to_u32(),
+        vertical_count: 0,
+        curves,
+        bands,
+    }
+}
+
 #[derive(Clone, Copy)]
 enum Axis {
     Horizontal,
@@ -369,6 +465,7 @@ struct BandedSegment {
     orientation:   CurveOrientation,
     min_feature:   f32,
     fade_exponent: f32,
+    edge_normal:   Vec2,
 }
 
 fn append_bands(
@@ -432,8 +529,55 @@ fn append_band_curves(
         let mut record = CurveRecord::from(&banded.segment);
         record.solver.w = banded.min_feature;
         record.fade_exponent = banded.fade_exponent;
+        record.edge_normal = banded.edge_normal;
         record
     }));
+}
+
+/// Signed area of the contour's start-point polygon. The sign gives the
+/// winding orientation (positive = counter-clockwise) that orients each
+/// segment's outward edge normal.
+fn contour_signed_area(contour: &PathContour) -> f32 {
+    let segments = &contour.segments;
+    let mut area = 0.0;
+    for index in 0..segments.len() {
+        let current = segments[index].start;
+        let next = segments[(index + 1) % segments.len()].start;
+        area += current.x.mul_add(next.y, -(next.x * current.y));
+    }
+    area * 0.5
+}
+
+/// Outward unit normal of a segment's edge line given the contour's winding
+/// chirality (`+1` counter-clockwise, `-1` clockwise). A counter-clockwise
+/// contour's outward direction is the chord's right perpendicular. Returns
+/// `Vec2::ZERO` for a degenerate (zero-length) chord so the shader keeps the
+/// radial fallback.
+fn segment_outward_normal(segment: &QuadraticSegment, chirality: f32) -> Vec2 {
+    let chord = segment.end - segment.start;
+    let length = chord.length();
+    if length <= CURVE_DEGENERATE_EPS {
+        return Vec2::ZERO;
+    }
+    Vec2::new(chord.y, -chord.x) / length * chirality
+}
+
+/// Perpendicular extent of `contour` in `normal`'s direction: the dimension the
+/// hairline floor pads for the edge with that outward normal. For a convex
+/// contour the edge's start sits on the supporting face, so this is the full
+/// slab thickness between that edge's line and the opposite vertex. Returns the
+/// contour stroke for a degenerate (zero-normal) edge.
+fn edge_slab_width(contour: &PathContour, segment: &QuadraticSegment, normal: Vec2) -> f32 {
+    if normal == Vec2::ZERO {
+        return contour.min_feature;
+    }
+    let edge_support = normal.dot(segment.start);
+    let min_support = contour
+        .segments
+        .iter()
+        .map(|other| normal.dot(other.start))
+        .fold(f32::INFINITY, f32::min);
+    (edge_support - min_support).max(0.0)
 }
 
 const fn segment_orientation(segment: &QuadraticSegment) -> CurveOrientation {

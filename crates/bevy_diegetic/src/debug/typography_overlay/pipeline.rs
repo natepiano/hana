@@ -136,7 +136,7 @@ pub fn build_typography_overlay(
         }
 
         if overlay.glyph_metrics == GlyphMetricVisibility::Shown {
-            glyph::spawn_glyph_metric_guides(&mut ctx, &font_context, computed, &mut assets);
+            glyph::spawn_glyph_metric_guides(&mut ctx, &font_context, computed);
         }
     }
 }

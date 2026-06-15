@@ -11,8 +11,9 @@ use crate::layout::BoundingBox;
 use crate::layout::ChildDivider;
 use crate::layout::DrawOverflow;
 use crate::layout::DrawZIndex;
-use crate::layout::PanelLineSourceKey;
-use crate::layout::ResolvedPanelLine;
+use crate::layout::PanelShape;
+use crate::layout::PanelShapeSourceKey;
+use crate::layout::ResolvedPanelShape;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
 use crate::layout::child_layout::ChildLayout;
@@ -22,8 +23,8 @@ use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
 use crate::layout::element::ScrollAnchor;
 use crate::layout::line;
-use crate::layout::line::PanelLineClipPolicy;
-use crate::layout::line::PanelLineResolveContext;
+use crate::layout::line::PanelShapeClipPolicy;
+use crate::layout::line::PanelShapeResolveContext;
 use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
@@ -251,7 +252,7 @@ fn emit_down_traversal_commands(
         );
     }
 
-    emit_line_commands(commands, element, bounds, index, clip_context);
+    emit_shape_commands(commands, element, bounds, index, clip_context);
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -287,7 +288,7 @@ fn emit_down_traversal_commands(
     }
 }
 
-fn emit_line_commands(
+fn emit_shape_commands(
     commands: &mut Vec<RenderCommand>,
     element: &Element,
     bounds: BoundingBox,
@@ -297,7 +298,7 @@ fn emit_line_commands(
     let Some(panel_draw) = element.draw.as_ref() else {
         return;
     };
-    if panel_draw.lines_ref().is_empty() {
+    if panel_draw.shapes_ref().is_empty() {
         return;
     }
 
@@ -305,33 +306,37 @@ fn emit_line_commands(
     let (clip, clip_policy) = match panel_draw.overflow_policy() {
         DrawOverflow::Clipped => (
             Some(clip_context.inherited),
-            PanelLineClipPolicy::OwnerBounds,
+            PanelShapeClipPolicy::OwnerBounds,
         ),
-        DrawOverflow::Visible => (clip_context.scissor, PanelLineClipPolicy::Inherited),
+        DrawOverflow::Visible => (clip_context.scissor, PanelShapeClipPolicy::Inherited),
     };
 
-    let mut lines = Vec::new();
-    for (line_ordinal, line) in panel_draw.lines_ref().iter().enumerate() {
-        let source_key = PanelLineSourceKey::element(index, 0, line_ordinal);
-        let context = PanelLineResolveContext::new(
+    let mut shapes = Vec::new();
+    for (shape_ordinal, shape) in panel_draw.shapes_ref().iter().enumerate() {
+        let source_key = PanelShapeSourceKey::element(index, 0, shape_ordinal);
+        let context = PanelShapeResolveContext::new(
             bounds,
             clip,
             clip_policy,
             source_command_index,
             source_key,
         );
-        if let Some(resolved_line) = line::resolve_panel_line(line, context) {
-            lines.push(resolved_line);
+        let resolved = match shape {
+            PanelShape::Line(line) => line::resolve_panel_line(line, context),
+            PanelShape::Circle(circle) => line::resolve_panel_circle(circle, context),
+        };
+        if let Some(resolved) = resolved {
+            shapes.push(resolved);
         }
     }
 
-    let Some(command_bounds) = line_command_bounds(&lines) else {
+    let Some(command_bounds) = line_command_bounds(&shapes) else {
         return;
     };
     push_command(
         commands,
         command_bounds,
-        RenderCommandKind::Lines { lines },
+        RenderCommandKind::Shapes { shapes },
         index,
         element.z_index,
     );
@@ -396,7 +401,7 @@ fn line_x_for_alignment(align: TextAlign, bounds: BoundingBox, line_width: f32) 
     }
 }
 
-fn line_command_bounds(lines: &[ResolvedPanelLine]) -> Option<BoundingBox> {
+fn line_command_bounds(lines: &[ResolvedPanelShape]) -> Option<BoundingBox> {
     let mut iter = lines.iter();
     let first = iter.next()?.visual_bounds;
     Some(iter.fold(first, |bounds, line| {
