@@ -68,7 +68,7 @@ before, ported to bevy 0.19. No default-on flip.
 - **`src/render/mod.rs`**: re-add `mod transparency;`, `pub use transparency::StableTransparency;`,
   register the 3 observers in `RenderPlugin::build`, re-add `pub(crate) use constants::OIT_DEPTH_STEP;`.
 - **`src/lib.rs`**: re-add `pub use render::StableTransparency;`.
-- **`src/render/constants.rs`**: re-add `OIT_DEPTH_STEP: f32 = 0.0001`.
+- **`src/render/constants.rs`**: re-add `OIT_DEPTH_STEP: f32 = 0.000_001` (1e-6).
 
 ### B. bevy_diegetic — shader OIT path (the bulk of the work)
 - **`src/text/slug/shaders/slug_text.wgsl`**: restore the `#ifdef OIT_ENABLED` block —
