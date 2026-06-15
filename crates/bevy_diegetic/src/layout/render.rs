@@ -22,8 +22,8 @@ pub struct RenderCommand {
     pub kind:        RenderCommandKind,
     /// Index of the source element in the `LayoutTree`.
     pub element_idx: usize,
-    /// Optional authored draw layer from the source element.
-    pub z_index:     Option<DrawZIndex>,
+    /// Authored draw layer from the source element.
+    pub z_index:     DrawZIndex,
 }
 
 /// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.

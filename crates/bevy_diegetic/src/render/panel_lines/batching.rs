@@ -1091,13 +1091,11 @@ mod tests {
             .color(Color::WHITE)
     }
 
-    fn spawn_line_panel(app: &mut App, z_index: Option<DrawZIndex>) -> Entity {
-        let mut line_element = El::new()
+    fn spawn_line_panel(app: &mut App, z_index: DrawZIndex) -> Entity {
+        let line_element = El::new()
             .size(40.0, 20.0)
-            .draw(PanelDraw::lines([horizontal_line()]));
-        if let Some(z_index) = z_index {
-            line_element = line_element.z_index(z_index);
-        }
+            .draw(PanelDraw::lines([horizontal_line()]))
+            .z_index(z_index);
         let panel = DiegeticPanel::world()
             .size(Mm(100.0), Mm(60.0))
             .layout(|builder| {
@@ -1164,8 +1162,8 @@ mod tests {
     #[test]
     fn default_lines_across_panels_share_one_level_zero_batch() {
         let mut app = line_batch_app();
-        spawn_line_panel(&mut app, None);
-        spawn_line_panel(&mut app, None);
+        spawn_line_panel(&mut app, DrawZIndex::default());
+        spawn_line_panel(&mut app, DrawZIndex::default());
         settle(&mut app);
 
         let store = app.world().resource::<PanelLineBatchStore>();
@@ -1198,8 +1196,8 @@ mod tests {
     #[test]
     fn line_z_indexes_route_to_matching_level_batches() {
         let mut app = line_batch_app();
-        spawn_line_panel(&mut app, Some(DrawZIndex(-1)));
-        spawn_line_panel(&mut app, Some(DrawZIndex(1)));
+        spawn_line_panel(&mut app, DrawZIndex(-1));
+        spawn_line_panel(&mut app, DrawZIndex(1));
         settle(&mut app);
 
         let store = app.world().resource::<PanelLineBatchStore>();
@@ -1388,7 +1386,7 @@ mod tests {
             kind:        RenderCommandKind::Lines {
                 lines: vec![first.clone(), second.clone()],
             },
-            z_index:     None,
+            z_index:     DrawZIndex::default(),
         }];
         let draw_depth = draw_depth_for_command(&commands, 0);
         let first_source = LinePrimitiveSource {
@@ -1463,7 +1461,7 @@ mod tests {
             bounds:      primitive_bounds,
             element_idx: 1,
             kind:        RenderCommandKind::Lines { lines: vec![line] },
-            z_index:     None,
+            z_index:     DrawZIndex::default(),
         }];
 
         let projection = DrawOrderProjection::from_commands(&commands);

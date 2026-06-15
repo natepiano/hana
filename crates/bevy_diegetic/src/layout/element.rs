@@ -111,8 +111,8 @@ pub(super) struct Element {
     pub(super) editable:      Option<ImePanelField>,
     /// Optional paint-only draw data.
     pub(super) draw:          Option<PanelDraw>,
-    /// Optional `DrawZIndex` stamped onto this element's render commands.
-    pub(super) z_index:       Option<DrawZIndex>,
+    /// `DrawZIndex` stamped onto this element's render commands.
+    pub(super) z_index:       DrawZIndex,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
     pub(super) anti_alias:    Option<AntiAlias>,
@@ -190,7 +190,7 @@ impl Default for Element {
             material:      None,
             editable:      None,
             draw:          None,
-            z_index:       None,
+            z_index:       DrawZIndex::default(),
             anti_alias:    None,
             hairline_fade: None,
             content:       ElementContent::Empty,

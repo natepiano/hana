@@ -164,9 +164,9 @@ pub enum Lighting {
 
 /// Panel-scoped authored draw-order z-index.
 ///
-/// `None` and `DrawZIndex(0)` use the default level; positive values move
-/// forward, and negative values move back.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+/// `DrawZIndex(0)` is the default level. Positive values move forward, and
+/// negative values move back.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Reflect)]
 pub struct DrawZIndex(pub i8);
 
 // ── TextStyle ────────────────────────────────────────────────────────────────

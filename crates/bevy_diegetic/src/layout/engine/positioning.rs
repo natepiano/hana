@@ -34,7 +34,7 @@ fn push_command(
     bounds: BoundingBox,
     kind: RenderCommandKind,
     element_idx: usize,
-    z_index: Option<DrawZIndex>,
+    z_index: DrawZIndex,
 ) {
     commands.push(RenderCommand {
         bounds,
@@ -319,7 +319,7 @@ fn emit_text_commands(
     bounds: BoundingBox,
     index: usize,
     font_scale: f32,
-    z_index: Option<DrawZIndex>,
+    z_index: DrawZIndex,
 ) {
     // Render commands store font sizes in layout units so downstream
     // renderers don't need to know about the font unit conversion.

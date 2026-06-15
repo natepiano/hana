@@ -89,6 +89,7 @@ mod tests {
     use bevy::color::Color;
 
     use super::*;
+    use crate::layout::DrawZIndex;
     use crate::layout::Mm;
     use crate::layout::RectangleSource;
     use crate::layout::Unit;
@@ -111,7 +112,7 @@ mod tests {
                 source: RectangleSource::Background,
             },
             element_idx: 0,
-            z_index: None,
+            z_index: DrawZIndex::default(),
         }
     }
 
@@ -120,7 +121,7 @@ mod tests {
             bounds,
             kind: RenderCommandKind::ScissorStart,
             element_idx: 0,
-            z_index: None,
+            z_index: DrawZIndex::default(),
         }
     }
 
@@ -129,7 +130,7 @@ mod tests {
             bounds,
             kind: RenderCommandKind::ScissorEnd,
             element_idx: 0,
-            z_index: None,
+            z_index: DrawZIndex::default(),
         }
     }
 

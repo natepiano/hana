@@ -78,7 +78,7 @@ pub struct El {
     material:      Option<Box<StandardMaterial>>,
     editable:      Option<ImePanelField>,
     draw:          Option<PanelDraw>,
-    z_index:       Option<DrawZIndex>,
+    z_index:       DrawZIndex,
     anti_alias:    Option<AntiAlias>,
     hairline_fade: Option<HairlineFade>,
 }
@@ -256,7 +256,7 @@ impl El {
 
     /// Sets the authored `z_index` for this element's render commands.
     pub const fn z_index(mut self, z_index: DrawZIndex) -> Self {
-        self.z_index = Some(z_index);
+        self.z_index = z_index;
         self
     }
 

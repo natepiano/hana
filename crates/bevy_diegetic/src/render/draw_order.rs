@@ -67,7 +67,7 @@ pub(crate) struct DrawOrderProjection {
 /// `RenderCommand` stream index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct HierarchicalDrawKey {
-    z_index:    Option<DrawZIndex>,
+    z_index:    DrawZIndex,
     step:       DrawStep,
     tree_order: u32,
 }
@@ -126,7 +126,7 @@ impl DrawCommandDepth {
     /// Returns the ordinal as a nonnegative index.
     pub(crate) fn ordinal_index(self) -> usize { self.ordinal.to_usize() }
 
-    /// Returns the command's authored z-level, with `None` projected to zero.
+    /// Returns the command's authored z-level.
     pub(crate) const fn z_level(self) -> i8 { self.z_level }
 
     /// Returns the `Transparent3d` sort bias for this command.
@@ -189,7 +189,7 @@ impl Ord for HierarchicalDrawKey {
 }
 
 impl HierarchicalDrawKey {
-    fn z_level(self) -> i8 { self.z_index.map_or(0_i8, |z_index| z_index.0) }
+    const fn z_level(self) -> i8 { self.z_index.0 }
 }
 
 impl PartialOrd for HierarchicalDrawKey {
@@ -297,29 +297,29 @@ mod tests {
     fn representative_streams() -> [Vec<RenderCommand>; 2] {
         [
             commands_from_kinds([
-                (rectangle(), None),
-                (text(), None),
-                (image(), None),
-                (lines(), None),
-                (text(), None),
-                (RenderCommandKind::ScissorStart, None),
-                (RenderCommandKind::ScissorEnd, None),
+                (rectangle(), DrawZIndex::default()),
+                (text(), DrawZIndex::default()),
+                (image(), DrawZIndex::default()),
+                (lines(), DrawZIndex::default()),
+                (text(), DrawZIndex::default()),
+                (RenderCommandKind::ScissorStart, DrawZIndex::default()),
+                (RenderCommandKind::ScissorEnd, DrawZIndex::default()),
             ]),
             commands_from_kinds([
-                (text(), None),
-                (lines(), None),
-                (rectangle(), None),
-                (RenderCommandKind::ScissorStart, None),
-                (border(), None),
-                (text(), None),
-                (RenderCommandKind::ScissorEnd, None),
-                (image(), None),
+                (text(), DrawZIndex::default()),
+                (lines(), DrawZIndex::default()),
+                (rectangle(), DrawZIndex::default()),
+                (RenderCommandKind::ScissorStart, DrawZIndex::default()),
+                (border(), DrawZIndex::default()),
+                (text(), DrawZIndex::default()),
+                (RenderCommandKind::ScissorEnd, DrawZIndex::default()),
+                (image(), DrawZIndex::default()),
             ]),
         ]
     }
 
     fn commands_from_kinds<const N: usize>(
-        entries: [(RenderCommandKind, Option<DrawZIndex>); N],
+        entries: [(RenderCommandKind, DrawZIndex); N],
     ) -> Vec<RenderCommand> {
         entries
             .into_iter()
@@ -412,7 +412,7 @@ mod tests {
         commands
             .iter()
             .enumerate()
-            .filter(|(_, command)| command.z_index == Some(z_index))
+            .filter(|(_, command)| command.z_index == z_index)
             .map(|(index, _)| ordinal_at(ordinals, index).0)
             .collect()
     }
@@ -461,8 +461,10 @@ mod tests {
 
     fn assert_no_override_projection_matches_previous_model(commands: &[RenderCommand]) {
         assert!(
-            commands.iter().all(|command| command.z_index.is_none()),
-            "no-override streams omit z_index overrides",
+            commands
+                .iter()
+                .all(|command| command.z_index == DrawZIndex::default()),
+            "no-override streams use the default z-index level",
         );
         let ordinals = enumerate_ordinals(commands);
         let projection = DrawOrderProjection::from_commands(commands);
@@ -493,8 +495,8 @@ mod tests {
     fn sorted_and_oit_orderings_agree_for_every_z_level_pair() {
         for (low, high) in ORDERED_Z_LEVEL_PAIRS {
             let commands = commands_from_kinds([
-                (rectangle(), Some(DrawZIndex(low))),
-                (rectangle(), Some(DrawZIndex(high))),
+                (rectangle(), DrawZIndex(low)),
+                (rectangle(), DrawZIndex(high)),
             ]);
             let projection = DrawOrderProjection::from_commands(&commands);
             let low_depth = draw_depth_at(&projection, 0);
@@ -527,11 +529,13 @@ mod tests {
     }
 
     #[test]
-    fn hierarchical_ordinals_order_steps_for_unset_z_index() {
+    fn hierarchical_ordinals_order_steps_for_default_z_index() {
         for commands in representative_streams() {
             assert!(
-                commands.iter().all(|command| command.z_index.is_none()),
-                "representative streams omit z_index overrides",
+                commands
+                    .iter()
+                    .all(|command| command.z_index == DrawZIndex::default()),
+                "representative streams use the default z-index level",
             );
             let ordinals = enumerate_ordinals(&commands);
             let fill_max = ranks_for_step(&commands, &ordinals, DrawStep::Fill)
@@ -574,14 +578,14 @@ mod tests {
     #[test]
     fn level_occupancy_counts_draw_commands_by_z_level() {
         let commands = commands_from_kinds([
-            (text(), Some(LOWERED_LEVEL)),
-            (rectangle(), None),
-            (RenderCommandKind::ScissorStart, None),
-            (lines(), None),
-            (RenderCommandKind::ScissorEnd, None),
-            (text(), None),
-            (image(), Some(RAISED_LEVEL)),
-            (border(), Some(RAISED_LEVEL)),
+            (text(), LOWERED_LEVEL),
+            (rectangle(), DrawZIndex::default()),
+            (RenderCommandKind::ScissorStart, DrawZIndex::default()),
+            (lines(), DrawZIndex::default()),
+            (RenderCommandKind::ScissorEnd, DrawZIndex::default()),
+            (text(), DrawZIndex::default()),
+            (image(), RAISED_LEVEL),
+            (border(), RAISED_LEVEL),
         ]);
         let projection = DrawOrderProjection::from_commands(&commands);
 
@@ -653,11 +657,11 @@ mod tests {
     #[test]
     fn screen_depth_bias_orders_fills_lines_and_text_by_z_level() {
         let default_commands = commands_from_kinds([
-            (rectangle(), None),
-            (rectangle(), None),
-            (rectangle(), None),
-            (lines(), None),
-            (text(), None),
+            (rectangle(), DrawZIndex::default()),
+            (rectangle(), DrawZIndex::default()),
+            (rectangle(), DrawZIndex::default()),
+            (lines(), DrawZIndex::default()),
+            (text(), DrawZIndex::default()),
         ]);
         let default_projection = DrawOrderProjection::from_commands(&default_commands);
         let default_line_depth_bias = line_batch_depth_bias(0);
@@ -671,15 +675,15 @@ mod tests {
         }
 
         let raised_fill_commands = commands_from_kinds([
-            (text(), None),
-            (rectangle(), Some(RAISED_LEVEL)),
-            (text(), None),
+            (text(), DrawZIndex::default()),
+            (rectangle(), RAISED_LEVEL),
+            (text(), DrawZIndex::default()),
         ]);
         let raised_fill_projection = DrawOrderProjection::from_commands(&raised_fill_commands);
         let raised_fill_depth_bias = raised_fill_commands
             .iter()
             .enumerate()
-            .find(|(_, command)| command.z_index == Some(RAISED_LEVEL))
+            .find(|(_, command)| command.z_index == RAISED_LEVEL)
             .map(|(index, _)| draw_depth_at(&raised_fill_projection, index).depth_bias())
             .expect("raised fill command receives projected depth");
         assert!(raised_fill_depth_bias.get() > default_text_depth_bias.get());
@@ -687,10 +691,10 @@ mod tests {
         assert!(text_batch_depth_bias(RAISED_LEVEL.0).get() > default_text_depth_bias.get());
 
         let lowered_text_commands = commands_from_kinds([
-            (text(), Some(LOWERED_LEVEL)),
-            (lines(), Some(LOWERED_LEVEL)),
-            (rectangle(), None),
-            (image(), None),
+            (text(), LOWERED_LEVEL),
+            (lines(), LOWERED_LEVEL),
+            (rectangle(), DrawZIndex::default()),
+            (image(), DrawZIndex::default()),
         ]);
         let lowered_text_projection = DrawOrderProjection::from_commands(&lowered_text_commands);
         let lowered_line_depth_bias = line_batch_depth_bias(LOWERED_LEVEL.0);
@@ -707,9 +711,9 @@ mod tests {
     #[test]
     fn z_index_overrides_move_commands_between_step_groups() {
         let raised_fill_commands = commands_from_kinds([
-            (text(), None),
-            (rectangle(), Some(RAISED_LEVEL)),
-            (text(), None),
+            (text(), DrawZIndex::default()),
+            (rectangle(), RAISED_LEVEL),
+            (text(), DrawZIndex::default()),
         ]);
         let raised_fill_ordinals = enumerate_ordinals(&raised_fill_commands);
         let raised_fill_rank =
@@ -727,9 +731,9 @@ mod tests {
         }
 
         let lowered_text_commands = commands_from_kinds([
-            (text(), Some(LOWERED_LEVEL)),
-            (rectangle(), None),
-            (image(), None),
+            (text(), LOWERED_LEVEL),
+            (rectangle(), DrawZIndex::default()),
+            (image(), DrawZIndex::default()),
         ]);
         let lowered_text_ordinals = enumerate_ordinals(&lowered_text_commands);
         let lowered_text_rank = ranks_for_z_index(
