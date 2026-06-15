@@ -62,7 +62,11 @@ const SQRT_3_OVER_2: f32 = 0.866_025_4;
 const PX: f32 = 700.0 / 40.0;
 const ANISO: f32 = 12.0;
 const GT_SAMPLES: u32 = 24;
+// Mirror the shader caps in analytic_path.wgsl: the line/circle path
+// (corner_wing_reach) and the text band path (aniso_shader_fix) move with their
+// shader counterparts.
 const MAX_ANISO_SAMPLES: u32 = 16;
+const MAX_ANISO_SAMPLES_TEXT: u32 = 64;
 /// Footprint orientations whose worst over-coverage point lands on the apex
 /// (the acute convex corner). 90° is excluded — there the grazing footprint
 /// hits a base corner, a different case.
@@ -781,7 +785,7 @@ fn worst_overcoverage(probe: &Probe, gt: &GroundTruth, dx: Vec2, dy: Vec2) -> Co
                     gt: reference,
                     single,
                     super4,
-                    fix_b: probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES),
+                    fix_b: probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT),
                     model_cause: band_coverage(sd_true, band_true),
                 };
             }
@@ -855,7 +859,7 @@ fn stride_does_not_alias_straight_edge() {
         let y = -7.5 + 12.5 * (k as f32) / 12.0;
         let point = Vec2::new(x, y);
         let reference = gt.coverage(point, dx, dy, GT_SAMPLES);
-        let fix = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+        let fix = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
         assert!(
             (fix - reference).abs() <= EDGE_FIX_MAX_ERROR,
             "y {y:.1}: stride fix {fix:.3} should track straight-edge ground truth {reference:.3} within {EDGE_FIX_MAX_ERROR}",
@@ -983,7 +987,7 @@ fn center_dilation_bounds_corner_wing() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0xf74c_389d_1829_96f3;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xd199_f50b_07e6_96f8;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,
@@ -1096,7 +1100,7 @@ fn run_tick_scan(probe: Probe, size: Vec2, band_count: usize) {
         let y = (step as f32).mul_add(du_per_px * 0.5, size.y);
         let point = Vec2::new(x, y);
         let (single, super4) = probe.aa_band_coverage(point, dx, dy);
-        let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+        let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
         let edge_width_sq = (du_per_px * EDGE_FILTER_WIDTH).powi(2);
         let sd = probe.signed_distance(point, edge_width_sq, 0.0);
         println!("  y={y:8.2} sd={sd:8.2} single={single:.3} super4={super4:.3} aniso={aniso:.3}");
@@ -1163,7 +1167,7 @@ fn spine_coverage_uniform_along_length_for_both_orientations() {
                 Vec2::new(along, size.y * 0.5)
             };
             let (single, _) = probe.aa_band_coverage(point, dx, dy);
-            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
             let cov = aniso.min(single);
             if cov < min_cov {
                 min_cov = cov;
@@ -1349,7 +1353,7 @@ fn units_ruler_sizes_cover_at_screen_scale() {
                 Vec2::new(along, size.y * 0.5)
             };
             let (single, _) = probe.aa_band_coverage(point, dx, dy);
-            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES);
+            let aniso = probe.aniso_shader_fix(point, dx, dy, MAX_ANISO_SAMPLES_TEXT);
             let cov = aniso.min(single);
             if cov < min_cov {
                 min_cov = cov;

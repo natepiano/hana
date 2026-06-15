@@ -25,9 +25,6 @@ pub(crate) use geometry::Bounds;
 pub(crate) use geometry::PathContour;
 pub(crate) use geometry::PathOutline;
 pub(crate) use geometry::QuadraticSegment;
-pub(crate) use material::BatchTextMaterialInput;
-pub(crate) use material::RenderMode;
-pub(crate) use material::TextMaterial;
 pub(crate) use material::batch_text_material;
 pub(crate) use material::set_batch_text_material_buffers;
 pub(crate) use material::set_text_material_anti_alias;
@@ -37,9 +34,12 @@ pub(crate) use material::set_text_material_hairline;
 pub(crate) use material::text_material_oit_depth_offset;
 #[cfg(feature = "batch_proof")]
 pub(crate) use material::toggle_text_material_debug_glyph_index;
+pub(crate) use material::BatchTextMaterialInput;
+pub(crate) use material::RenderMode;
+pub(crate) use material::TextMaterial;
+pub(crate) use packing::build_packed_path;
 pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
-pub(crate) use packing::DEFAULT_BAND_COUNT;
 pub(crate) use packing::GlyphInstanceRecord;
 pub(crate) use packing::GlyphOutline;
 pub(crate) use packing::GlyphRecord;
@@ -64,7 +64,7 @@ pub(crate) use packing::PathRecord;
 )]
 pub(crate) use packing::PathRunRecord;
 pub(crate) use packing::RunRecord;
-pub(crate) use packing::build_packed_path;
+pub(crate) use packing::DEFAULT_BAND_COUNT;
 
 use self::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 

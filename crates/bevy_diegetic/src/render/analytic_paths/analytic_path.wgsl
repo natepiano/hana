@@ -67,7 +67,19 @@ const DEGENERATE_EPS: f32 = 0.00000001;
 const SQRT_3_OVER_2: f32 = 0.8660254037844386;
 const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
-const MAX_ANISO_SAMPLES: f32 = 64.0;
+// Anisotropic sub-sample ceiling for the line/circle path
+// (analytic_line_coverage). The sample count tracks footprint anisotropy and
+// collapses to 1 head-on. The line path's convex-corner wing is handled by the
+// polygon corner correction, so this stays at the lower validated bound.
+const MAX_ANISO_SAMPLES: f32 = 16.0;
+// Anisotropic sub-sample ceiling for the text band path (aniso_band_coverage).
+// The sample count tracks footprint anisotropy and collapses to 1 head-on, so
+// the ceiling binds only past 64:1 grazing. At 64 the convex-corner over-coverage
+// on text (the grazing wing) stays suppressed up to that ratio; beyond it the
+// wing reappears, shrinking as the ceiling rises. A ratio-independent fix makes
+// the sample count adaptive at detected convex corners instead of a fixed
+// ceiling; deferred — the fixed ceiling holds for real viewing angles.
+const MAX_ANISO_SAMPLES_TEXT: f32 = 64.0;
 // Diagnostic: when true the line branch returns a firing mask (dim line + bright
 // where the corner correction clipped coverage) instead of the corrected
 // coverage, so the gates can be verified to light only exterior corners. Set
@@ -1026,7 +1038,7 @@ fn aniso_band_coverage(
     let minor = select(dx, dy, len_dx >= len_dy);
     let major_len = max(len_dx, len_dy);
     let minor_len = max(min(len_dx, len_dy), ROOT_EPSILON);
-    let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
+    let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES_TEXT);
     let inv_count = 1.0 / sample_count;
 
     // Per-evaluation (exempt / union) band widths from signed-distance

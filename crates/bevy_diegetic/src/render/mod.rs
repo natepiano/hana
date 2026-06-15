@@ -18,6 +18,14 @@ mod world_text;
 pub use analytic_line_probe::AnalyticLine;
 pub use analytic_line_probe::AnalyticLineProbe;
 pub use analytic_line_probe::AnalyticLineProbePlugin;
+pub(crate) use analytic_paths::batch_text_material;
+pub(crate) use analytic_paths::build_packed_path;
+pub(crate) use analytic_paths::set_batch_text_material_buffers;
+pub(crate) use analytic_paths::set_text_material_atlas;
+#[cfg(test)]
+pub(crate) use analytic_paths::text_material_oit_depth_offset;
+#[cfg(feature = "batch_proof")]
+pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
 use analytic_paths::AnalyticPathPlugin;
 pub(crate) use analytic_paths::BandRecord;
 pub(crate) use analytic_paths::BatchGpu;
@@ -25,7 +33,6 @@ pub(crate) use analytic_paths::BatchKey;
 pub(crate) use analytic_paths::BatchTextMaterialInput;
 pub(crate) use analytic_paths::Bounds;
 pub(crate) use analytic_paths::CurveRecord;
-pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
 pub(crate) use analytic_paths::GlyphAtlasHandles;
 pub(crate) use analytic_paths::GlyphBatchStore;
 pub(crate) use analytic_paths::GlyphInstanceRecord;
@@ -40,14 +47,7 @@ pub(crate) use analytic_paths::QuadraticSegment;
 pub(crate) use analytic_paths::RenderMode;
 pub(crate) use analytic_paths::RunRecord;
 pub(crate) use analytic_paths::TextMaterial;
-pub(crate) use analytic_paths::batch_text_material;
-pub(crate) use analytic_paths::build_packed_path;
-pub(crate) use analytic_paths::set_batch_text_material_buffers;
-pub(crate) use analytic_paths::set_text_material_atlas;
-#[cfg(test)]
-pub(crate) use analytic_paths::text_material_oit_depth_offset;
-#[cfg(feature = "batch_proof")]
-pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
+pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
 pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
@@ -58,10 +58,10 @@ use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+pub use constants::default_panel_material;
 pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
-pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
 use panel_shapes::PanelShapePlugin;
 pub use panel_text::DiegeticTextBatch;
@@ -73,19 +73,19 @@ pub use panel_text::PanelTextRuns;
 pub use panel_text::TextEdit;
 use panel_text::TextRenderPlugin;
 pub use panel_text::TextRunOf;
+pub(crate) use sdf_material::sdf_panel_material;
+pub(crate) use sdf_material::sdf_primitive_material;
 pub(crate) use sdf_material::SdfPanelMaterial;
 pub(crate) use sdf_material::SdfPanelMaterialInput;
 pub(crate) use sdf_material::SdfPrimitiveKind;
 pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
-pub(crate) use sdf_material::sdf_panel_material;
-pub(crate) use sdf_material::sdf_primitive_material;
 pub use transparency::StableTransparency;
+#[cfg(feature = "typography_overlay")]
+pub(crate) use world_text::emit_computed_world_text;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
 pub use world_text::TextContent;
 pub use world_text::WorldTextReady;
-#[cfg(feature = "typography_overlay")]
-pub(crate) use world_text::emit_computed_world_text;
 
 use crate::cascade::CascadeDefault;
 use crate::cascade::CascadeSet;

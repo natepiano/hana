@@ -328,7 +328,11 @@ mod tests {
         if curve_x <= point.x {
             return 0;
         }
-        if upward { 1 } else { -1 }
+        if upward {
+            1
+        } else {
+            -1
+        }
     }
 
     fn curve_winding(curve: &CurveRecord, point: Vec2) -> i32 {
