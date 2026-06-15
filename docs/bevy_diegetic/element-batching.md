@@ -106,17 +106,27 @@ the allocator is unit-tested.
   live slot's `StandardMaterial` through
   `StandardMaterial::as_bind_group_shader_type(&self, images: &RenderAssets<GpuImage>)`
   (the `AsBindGroupShaderType<StandardMaterialUniform>` impl, bevy_pbr
-  `pbr_material.rs:1066`) — where `RenderAssets<GpuImage>` resolves the
-  texture-handle fields to bind-array indices/flags — and uploads the
+  `pbr_material.rs:1066`) — which writes the scalar/vector PBR factors and the
+  texture-**present flags** into the uniform; it does NOT resolve texture handles to
+  bindless indices (those live in bevy_pbr's separate `StandardMaterialBindings`
+  array). `material-as-data` holds here only because diegetic fills/text carry no
+  per-element image texture (the Texture-boundary invariant), so the table needs
+  scalars + flags, never per-element texture indices — and uploads the
   `StandardMaterialUniform` values into the buffer. Reuse this uniform type and
-  conversion; do NOT define a parallel material struct. Bind the buffer at a fixed
-  group/slot reserved identically for fills, text, and lines.
+  conversion; do NOT define a parallel material struct. Bind the buffer at
+  `@binding(106)` — free across all diegetic layouts (100–105 used; bevy_pbr's
+  material array is `@binding(10)`) — reserved identically for fills, text, lines.
 - **Batch registry + ordered rebind.** Provide an API for a batch material to
   register its handle with the table. On growth (capacity change) the owning
   system reallocates the buffer and rewrites **every** registered batch material's
-  table-buffer handle in ONE ordered pass — before any batch material is
-  re-prepared and before the draw stream runs — so no batch reads a stale table
-  within a frame (honors the ShaderBuffer rebind hazard). The grow trigger is
+  table-buffer handle in ONE ordered pass. This rebind is a **render-world** system
+  (NOT the main-world `grow_batch_assets` pattern text uses today) ordered
+  `.after(ExtractSchedule).before(RenderSystems::PrepareAssets)`, so every batch
+  material's stock `prepare_assets::<M>` (registered via `MaterialPlugin`) sees the
+  rewritten handles the SAME frame and no batch reads a stale table-buffer handle
+  within a frame (honors the ShaderBuffer rebind hazard). Name the three systems:
+  the Extract step, the render-world prepare-and-upload system, and this
+  growth-detect + ordered-rebind system. The grow trigger is
   **global**: table size is the total live slot count across all panels and all
   element kinds, so a text-run change can grow the buffer and force a fill-batch
   handle rewrite the same frame — which is why the rewrite pass must touch every
@@ -125,6 +135,23 @@ the allocator is unit-tested.
 - **Version pin.** Add a `StandardMaterialUniform` `SHADER_SIZE` static-assert so a
   bevy minor upgrade that reorders/resizes the uniform fails the build rather than
   silently mis-reading the table.
+- **`MaterialRole` enum.** Define `MaterialRole { Fill, Border }` explicitly in
+  `material_table.rs` as the allocator key's third element
+  (`(panel_entity, command_index, MaterialRole)`).
+- **Statistics accessors (mandatory here, consumed by Phase 4).** Expose
+  `live_slot_count()`, `free_list_len()`, and `capacity()` on `SharedMaterialTable`,
+  unit-tested across alloc/set/free cycles.
+- **Free-list is frame-atomic.** Slots and the per-batch record buffers are both
+  rebuilt from one main-world reconcile snapshot and extracted/prepared together each
+  frame, so a freed-then-reused slot is always paired with its updated record — no
+  generation counter or delayed free-list.
+- **Interner→allocator note.** `BaseMaterialId` is repurposed from value-dedup (the
+  `VisualMaterialInterner`) to slot-identity (this allocator); both meanings coexist
+  through Phases 3–4 until Phase 5 deletes the interner. Note it so a reader does not
+  conflate them.
+- The `StandardMaterialUniform` struct has no cfg-gated fields, so its `SHADER_SIZE`
+  is stable across bevy feature flags (the gates live only in the conversion fn) — the
+  static-assert pins one deterministic size.
 - **Inert.** Gate any not-yet-called helper
   `#[cfg_attr(not(test), expect(dead_code, reason = "consumed by the fill batch in Phase 3"))]`.
 
@@ -140,7 +167,9 @@ the allocator is unit-tested.
 `cargo clippy -p bevy_diegetic --all-targets` no new warnings,
 `cargo nextest run -p bevy_diegetic` green. New unit tests: `alloc`/`free`/reuse
 keeps table size == live count; repeated `set` on one slot never grows the table;
-`free` then `alloc` returns the freed slot; the `StandardMaterialUniform`
+`free` then `alloc` returns the freed slot;
+`live_slot_count()`/`free_list_len()`/`capacity()` stay accurate across
+alloc/set/free; the `StandardMaterialUniform`
 `SHADER_SIZE` assert compiles. Nothing else references the table yet.
 
 ### Phase 2 — Re-home the overflow guard to a shared panel-draw-order limits system · status: todo
@@ -307,6 +336,25 @@ material share one batch.
   start** — text/lines reuse it unchanged in Phase 5, so the PBR-from-table path
   cannot drift between element kinds. Texture samples still come from the batch's
   bind group (why the texture set stays in the key).
+- **Complete the fragment entry point — prepass, OIT, border.** The shared function
+  is the material read; the new fill shader must also wire three paths the current
+  per-fill shader has:
+  - **Shadow prepass alpha.** Today `sdf_material.rs:165` feeds a `fill_alpha`
+    uniform for the prepass. The batched prepass fragment reads alpha from
+    `material_table[material_index].base_color.a` (same zero-`mesh_half_size`
+    early-out as the forward pass); the `material_table` bind group must be bound in
+    BOTH the prepass (`#ifdef PREPASS_PIPELINE`) and forward pipelines.
+  - **OIT path.** Show the complete fragment entry with the `#ifdef OIT_ENABLED`
+    conditional: read the per-record `oit_depth_offset` and call `oit_draw` exactly
+    as the text path does (`analytic_path.wgsl:985–995`); apply `depth_nudge` only
+    when OIT is absent.
+  - **Two-slot border composite.** A fill+border fragment composites fill PBR
+    (`material_index`) and the border via `border_material_index`; the border slot
+    supplies `base_color` (rgb + alpha) composited as the current `border_color`
+    path — the ring is not separately PBR-lit on its other factors.
+- **Padding early-out is new shader code.** `sdf_panel.wgsl` has no
+  zero-`mesh_half_size` guard today; the new fill shader adds the early-out before
+  the `material_table` read — net-new, not inherited.
 - **Reconcile.** Identity `(panel_entity, command_index)`; reuse signature stores
   the whole `DrawCommandDepth`. A material-value change (color/alpha/metallic/
   roughness/reflectance/emissive/`ior`) overwrites the element's table slot in
@@ -321,7 +369,9 @@ material share one batch.
 - **FNV tripwire.** The new fill shader is separate from `analytic_path.wgsl`
   (the only file `EXPECTED_SHADER_FNV1A` hashes). If `analytic_path.wgsl` is
   untouched, no refresh; verify `EXPECTED_SHADER_FNV1A` still matches before
-  relying on no-refresh.
+  relying on no-refresh. Add a **dedicated hash** for the new fill shader + the
+  shared `pbr_input_from_material_table` module (load-bearing across all kinds), so a
+  drift in either is caught rather than left unguarded.
 
 **Files:**
 - `render/panel_geometry.rs` — remove the per-fill `spawn_sdf_quad` path; gather
@@ -338,7 +388,10 @@ material share one batch.
 **Constraints from prior phases:** Phase 1 built `SharedMaterialTable` (per-element
 identity-keyed allocator + GPU `material_table` buffer + batch registry + ordered
 rebind), made `BaseMaterialId` `#[repr(transparent)]` + `ShaderType`, and pinned
-`StandardMaterialUniform` `SHADER_SIZE`. Phase 2 moved the overflow guard out of
+`StandardMaterialUniform` `SHADER_SIZE`, exposed `live_slot_count`/`free_list_len`/
+`capacity` accessors, defined `MaterialRole { Fill, Border }`, bound the table at
+`@binding(106)`, and pinned the render-world ordered rebind
+`.before(RenderSystems::PrepareAssets)`. Phase 2 moved the overflow guard out of
 `reconcile_sdf_quads` into `warn_panel_draw_order_limits`, so removing the per-quad
 SDF path here leaves the guard intact.
 
@@ -352,8 +405,15 @@ ONE batch and the CPU sort writes them in ordinal order; (3) **screen + OIT
 ordering** — a `z=+1` fill renders above default text; a `z=−1` fill below default
 fills, on both views; (4) **reconcile** — a material-only change rewrites the
 element's table slot and does not split/move the batch; a `text_anchor` toggle
-updates the stored `oit_depth_offset`. Behavior: a panel of many differently
-materialed fills emits one draw per `(view, panel, z_level, key)`.
+updates the stored `oit_depth_offset`; (5) **batch-key enforcement** — two fills differing only in a
+scalar PBR factor (e.g. `metallic`) share ONE batch, two differing in a texture
+binding split, and a test asserts fills carry no texture handles; (6) **prepass
+alpha** — a low-alpha fill casts a thin shadow, a zero-alpha fill casts none; (7)
+**OIT parity** — OIT-on and OIT-off render the fill batch identically; (8) **shared
+table under churn** — a panel with N text runs + M same-material fills keeps text in
+ONE batch and fills in ONE batch while fill color animates over frames. Behavior: a
+panel of many differently materialed fills emits one draw per
+`(view, panel, z_level, key)`.
 
 ### Phase 4 — Animated-color validation (example + statistics + tests) · status: todo
 
@@ -369,8 +429,8 @@ and batching is unaffected. Tests assert the same.
 - **Example** (`examples/element_batching.rs` or similar): one panel with many
   fills whose `base_color` animates per frame; an on-screen/log readout of the
   batch count and the table `(live, free, capacity)` numbers, updating live.
-- **Statistics accessors** on `SharedMaterialTable` (live slot count, free-list
-  length, buffer capacity) if not already exposed in Phase 1.
+- **Statistics readout** consumes the Phase 1 accessors (`live_slot_count`,
+  `free_list_len`, `capacity`) — built and tested in Phase 1, not here.
 - **Tests:** animating per-element color over N frames keeps the table live-slot
   count == element count and capacity stable (no growth); the batch count is
   unchanged by color animation (color is not a batch-key field). A capacity
@@ -434,7 +494,10 @@ ordered rebind and the `BaseMaterialId` GPU type. Phase 3 proved the table, the
 per-element allocator, the batch registration, and defined the shared
 `pbr_input_from_material_table` WGSL function — text/lines reuse all of it; the
 only new work is swapping the record's color field for the index and applying the
-shared shader change.
+shared shader change. Phase 3 also wired the prepass-alpha, OIT, and border fragment
+paths through the shared function and added the N-text + M-fill single-batch churn
+test — text/lines inherit the same fragment paths; re-assert the
+`diegetic_text_stress` single-batch invariant after the table swap.
 
 **Acceptance gate:** `cargo build -p bevy_diegetic` clean, `cargo +nightly fmt`,
 `cargo clippy -p bevy_diegetic --all-targets` no new warnings,
@@ -442,3 +505,39 @@ shared shader change.
 the `diegetic_text_stress` single-batch invariant. Current text/line content
 renders unchanged; a text/line run authored with a non-default metallic/roughness/
 emissive/reflectance/`ior` renders with that PBR variety from one shared table.
+
+## Team review
+
+A 2-cycle expert review (correctness, architecture, risk, type system, bevy/wgpu
+feasibility), grounded in bevy 0.19.0-rc.2 source. All findings were determined
+in-intent corrections; **0 open user decisions**. The determined fixes are folded
+into the Work Orders above (Phase 1: the corrected `as_bind_group_shader_type`
+wording, `@binding(106)`, the named systems + rebind pinned
+`.before(RenderSystems::PrepareAssets)`, `MaterialRole` enum, statistics accessors,
+frame-atomic free-list, `SHADER_SIZE` feature-flag stability; Phase 3: the prepass /
+OIT / two-slot-border fragment paths, padding early-out, batch-key + churn + FNV
+tests). This section keeps only the verification record and the rejected items so a
+future cycle does not relitigate.
+
+**Verified feasible (bevy 0.19.0-rc.2 source):** `as_bind_group_shader_type` writes
+scalars + texture-present flags only (not bindless indices) — `material-as-data`
+holds because diegetic fills/text carry no per-element texture; `apply_pbr_lighting`
+needs no new bind group (pure material-source swap); `@binding(106)` is free across
+diegetic layouts; `StandardMaterialUniform` has no cfg-gated struct fields so its
+`SHADER_SIZE` pin is feature-flag-stable; the ordered rebind is expressible
+`.before(RenderSystems::PrepareAssets)` against stock `MaterialPlugin` material prep.
+
+### Rejected
+
+- **Proliferating distinct newtypes** — `FillMaterialId`/`BorderMaterialId`,
+  `SortedBatchKey`/`OitBatchKey`, wrapping `FillRecord` depth fields in
+  `ScreenDepthBias`/`OitDepthOffset`. Declined: cuts against the common-naming /
+  unification intent (one `BaseMaterialId`, one `material_index` shared by fills,
+  text, lines). Correctness rests on the `SHADER_SIZE` static-asserts + the Phase 3
+  equivalence/collapse tests, not on type proliferation.
+- **2-frame-delay / generation-counter free-list** — declined: the free-list is
+  frame-atomic (slots + record buffers rebuilt from one reconcile snapshot, extracted
+  together), so no delayed free or generation counter is needed.
+- **Approach-1 rebind in render `Prepare` (one-frame growth latency)** — declined in
+  favor of pinning the rebind `.before(RenderSystems::PrepareAssets)` (same-frame, no
+  glitch), which is expressible against stock `MaterialPlugin`.

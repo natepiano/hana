@@ -35,6 +35,7 @@ use bevy::pbr::StandardMaterial;
 use super::AlignX;
 use super::AlignY;
 use super::Border;
+use super::ChildLayout;
 use super::CornerRadius;
 use super::Dimension;
 use super::Direction;
@@ -288,10 +289,12 @@ impl El {
             width: self.width,
             height: self.height,
             padding: self.padding,
-            child_gap: self.child_gap,
-            direction: self.direction,
-            child_align_x: self.child_align_x,
-            child_align_y: self.child_align_y,
+            child_layout: ChildLayout::for_direction(
+                self.direction,
+                self.child_gap,
+                self.child_align_x,
+                self.child_align_y,
+            ),
             background: self.background,
             border: self.border,
             corner_radius: self.corner_radius,

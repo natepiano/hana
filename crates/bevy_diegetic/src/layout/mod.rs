@@ -38,6 +38,7 @@
 //! - [`render`] — Render commands output by the engine.
 
 mod builder;
+mod child_layout;
 mod constants;
 mod draw;
 mod element;
@@ -53,6 +54,7 @@ mod units;
 
 pub use builder::El;
 pub use builder::LayoutBuilder;
+pub(crate) use child_layout::ChildLayout;
 pub use draw::DrawOverflow;
 pub use draw::PanelDraw;
 pub(crate) use element::FieldDisplayTextUpdate;

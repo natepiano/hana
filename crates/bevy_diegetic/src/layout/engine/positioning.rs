@@ -130,7 +130,7 @@ impl ChildStackContext<'_> {
         let base_y = origin.y + parent.padding.top.value + self.border_top - self.scroll_y;
         if self.is_horizontal {
             let cross_available = self.parent_size.y - parent.padding.vertical() - self.border_y;
-            let cross_offset = match parent.child_align_y {
+            let cross_offset = match parent.child_layout.align_y() {
                 AlignY::Top => 0.0,
                 AlignY::Center => (cross_available - child_size.y).max(0.0) * 0.5,
                 AlignY::Bottom => (cross_available - child_size.y).max(0.0),
@@ -138,7 +138,7 @@ impl ChildStackContext<'_> {
             Vec2::new(base_x + reverse_cursor, base_y + cross_offset)
         } else {
             let cross_available = self.parent_size.x - parent.padding.horizontal() - self.border_x;
-            let cross_offset = match parent.child_align_x {
+            let cross_offset = match parent.child_layout.align_x() {
                 AlignX::Left => 0.0,
                 AlignX::Center => (cross_available - child_size.x).max(0.0) * 0.5,
                 AlignX::Right => (cross_available - child_size.x).max(0.0),
@@ -487,7 +487,7 @@ fn child_stack_context<'a>(
             }
     });
     let gap_total = if children.len() > 1 {
-        parent.child_gap.value * (children.len() - 1).to_f32()
+        parent.child_layout.gap().value * (children.len() - 1).to_f32()
     } else {
         0.0
     };
@@ -517,13 +517,13 @@ fn child_stack_context<'a>(
         content_main,
     );
     let main_offset = if is_horizontal {
-        match parent.child_align_x {
+        match parent.child_layout.align_x() {
             AlignX::Left => 0.0,
             AlignX::Center => extra_main * 0.5,
             AlignX::Right => extra_main,
         }
     } else {
-        match parent.child_align_y {
+        match parent.child_layout.align_y() {
             AlignY::Top => 0.0,
             AlignY::Center => extra_main * 0.5,
             AlignY::Bottom => extra_main,
@@ -563,7 +563,7 @@ fn push_children_to_stack(
     }
 
     let parent_el = &tree.elements[index];
-    let is_horizontal = parent_el.direction == Direction::LeftToRight;
+    let is_horizontal = parent_el.child_layout.direction() == Direction::LeftToRight;
     let child_context = child_stack_context(
         parent_el,
         computed,
@@ -590,7 +590,7 @@ fn push_children_to_stack(
             visited:      false,
             clip_context: child_context.clip_context,
         });
-        reverse_cursor -= parent_el.child_gap.value;
+        reverse_cursor -= parent_el.child_layout.gap().value;
     }
 }
 
@@ -741,7 +741,7 @@ fn emit_between_borders(
         return;
     }
 
-    let is_horizontal = parent.direction == Direction::LeftToRight;
+    let is_horizontal = parent.child_layout.is_row();
 
     // Draw a line between each pair of adjacent children.
     for pair in children.windows(2) {

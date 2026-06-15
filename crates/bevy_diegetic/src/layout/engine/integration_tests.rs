@@ -28,6 +28,7 @@ use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
 use crate::layout::Border;
+use crate::layout::Dimension;
 use crate::layout::Direction;
 use crate::layout::DrawOverflow;
 use crate::layout::El;
@@ -35,6 +36,7 @@ use crate::layout::LayoutBuilder;
 use crate::layout::LayoutEngine;
 use crate::layout::LayoutTree;
 use crate::layout::MeasureTextFn;
+use crate::layout::Mm;
 use crate::layout::Padding;
 use crate::layout::PanelCoord;
 use crate::layout::PanelDraw;
@@ -54,6 +56,9 @@ use crate::layout::Unit;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 
+const UNIT_GAP_CHILD_SIDE: f32 = 10.0;
+const UNIT_GAP_LAYOUT_SCALE: f32 = 2.0;
+const UNIT_GAP_MM: Mm = Mm(2.0);
 const VIEWPORT: f32 = 200.0;
 
 fn monospace_measure() -> MeasureTextFn {
@@ -88,6 +93,34 @@ fn line_height(font_size: f32) -> f32 { font_size }
 fn text_height(line_count: u32, font_size: f32) -> f32 {
     line_count.to_f32() * line_height(font_size)
 }
+
+fn fixed_unit_gap_child() -> El {
+    El::new()
+        .width(Sizing::fixed(UNIT_GAP_CHILD_SIDE))
+        .height(Sizing::fixed(UNIT_GAP_CHILD_SIDE))
+}
+
+fn scaled_unit_gap_tree(direction: Direction) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .direction(direction)
+            .child_gap(UNIT_GAP_MM),
+        |builder| {
+            builder.with(fixed_unit_gap_child(), |_| {});
+            builder.with(fixed_unit_gap_child(), |_| {});
+        },
+    );
+    builder
+        .build()
+        .scaled(UNIT_GAP_LAYOUT_SCALE, UNIT_GAP_LAYOUT_SCALE)
+}
+
+fn scaled_unit_gap() -> f32 { Dimension::from(UNIT_GAP_MM).to_points(UNIT_GAP_LAYOUT_SCALE) }
+
+fn scaled_unit_gap_child_side() -> f32 { UNIT_GAP_CHILD_SIDE * UNIT_GAP_LAYOUT_SCALE }
 
 fn line_commands(commands: &[RenderCommand]) -> Vec<&[ResolvedPanelLine]> {
     commands
@@ -855,6 +888,48 @@ fn child_gap_vertical() {
     // 100 - 5 gap = 95 / 2 = 47.5 each.
     assert!(approx_eq(result.computed[2].height, 47.5));
     assert!(approx_eq(result.computed[3].height, 47.5));
+}
+
+#[test]
+fn row_unit_backed_gap_scales() {
+    let tree = scaled_unit_gap_tree(Direction::LeftToRight);
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(
+        &tree,
+        VIEWPORT * UNIT_GAP_LAYOUT_SCALE,
+        VIEWPORT * UNIT_GAP_LAYOUT_SCALE,
+        1.0,
+    );
+
+    let child_side = scaled_unit_gap_child_side();
+    let expected_second_x = child_side + scaled_unit_gap();
+    assert!(approx_eq(result.computed[3].bounds.x, expected_second_x));
+    assert!(approx_eq(
+        result.computed[1].width,
+        expected_second_x + child_side
+    ));
+}
+
+#[test]
+fn column_unit_backed_gap_scales() {
+    let tree = scaled_unit_gap_tree(Direction::TopToBottom);
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(
+        &tree,
+        VIEWPORT * UNIT_GAP_LAYOUT_SCALE,
+        VIEWPORT * UNIT_GAP_LAYOUT_SCALE,
+        1.0,
+    );
+
+    let child_side = scaled_unit_gap_child_side();
+    let expected_second_y = child_side + scaled_unit_gap();
+    assert!(approx_eq(result.computed[3].bounds.y, expected_second_y));
+    assert!(approx_eq(
+        result.computed[1].height,
+        expected_second_y + child_side
+    ));
 }
 
 // ── Alignment ────────────────────────────────────────────────────────────────

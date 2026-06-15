@@ -1,7 +1,7 @@
 use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
-use crate::layout::Direction;
+use crate::layout::ChildLayout;
 use crate::layout::Sizing;
 use crate::layout::constants::LAYOUT_EPSILON;
 use crate::layout::element::ChildOverflow;
@@ -72,7 +72,7 @@ pub(super) fn propagate_fit_sizes(
         return current_size;
     }
 
-    let is_along = is_layout_axis(element.direction, axis);
+    let is_along = is_layout_axis(&element.child_layout, axis);
 
     // Recurse into children first (post-order), accumulating sizes inline
     // to avoid per-call Vec allocation.
@@ -104,7 +104,7 @@ pub(super) fn propagate_fit_sizes(
     let border = border_inset(element, axis);
 
     let gap_total = if is_along && children.len() > 1 {
-        element.child_gap.value * (children.len() - 1).to_f32()
+        element.child_layout.gap().value * (children.len() - 1).to_f32()
     } else {
         0.0
     };
@@ -193,7 +193,7 @@ pub(super) fn size_along_axis(
 
         let parent_element = &tree.elements[parent_idx];
         let parent_size = get_size(computed[parent_idx], axis);
-        let is_along = is_layout_axis(parent_element.direction, axis);
+        let is_along = is_layout_axis(&parent_element.child_layout, axis);
 
         let padding = match axis {
             Axis::X => parent_element.padding.horizontal(),
@@ -203,7 +203,7 @@ pub(super) fn size_along_axis(
         let chrome = padding + border;
 
         let gap_total = if is_along && children.len() > 1 {
-            parent_element.child_gap.value * (children.len() - 1).to_f32()
+            parent_element.child_layout.gap().value * (children.len() - 1).to_f32()
         } else {
             0.0
         };
@@ -541,10 +541,10 @@ const fn set_min_size(computed: &mut ComputedLayout, axis: Axis, value: f32) {
     }
 }
 
-/// Returns `true` if `direction` lays out children along the given axis.
-const fn is_layout_axis(direction: Direction, axis: Axis) -> bool {
-    match (direction, axis) {
-        (Direction::LeftToRight, Axis::X) | (Direction::TopToBottom, Axis::Y) => true,
-        (Direction::LeftToRight, Axis::Y) | (Direction::TopToBottom, Axis::X) => false,
+/// Returns `true` if `child_layout` lays out children along the given axis.
+const fn is_layout_axis(child_layout: &ChildLayout, axis: Axis) -> bool {
+    match axis {
+        Axis::X => child_layout.is_row(),
+        Axis::Y => child_layout.is_column(),
     }
 }

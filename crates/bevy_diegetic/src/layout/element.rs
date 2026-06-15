@@ -19,12 +19,10 @@ use bevy::math::Vec2;
 use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
-use super::AlignX;
-use super::AlignY;
 use super::Border;
+use super::ChildLayout;
 use super::CornerRadius;
 use super::Dimension;
-use super::Direction;
 use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
@@ -81,14 +79,8 @@ pub(super) struct Element {
     pub(super) height:        Sizing,
     /// Interior padding.
     pub(super) padding:       Padding,
-    /// Gap between children along the layout `Direction`.
-    pub(super) child_gap:     Dimension,
-    /// Direction children are laid out.
-    pub(super) direction:     Direction,
-    /// Horizontal alignment of children.
-    pub(super) child_align_x: AlignX,
-    /// Vertical alignment of children.
-    pub(super) child_align_y: AlignY,
+    /// Direction, gap, and child alignment.
+    pub(super) child_layout:  ChildLayout,
     /// Optional background color.
     pub(super) background:    Option<Color>,
     /// Optional border.
@@ -174,13 +166,7 @@ impl Default for Element {
             width:         Sizing::FIT,
             height:        Sizing::FIT,
             padding:       Padding::default(),
-            child_gap:     Dimension {
-                value: 0.0,
-                unit:  None,
-            },
-            direction:     Direction::default(),
-            child_align_x: AlignX::default(),
-            child_align_y: AlignY::default(),
+            child_layout:  ChildLayout::default(),
             background:    None,
             border:        None,
             corner_radius: CornerRadius::ZERO,
@@ -617,10 +603,7 @@ impl LayoutTree {
             element.width = element.width.resolved(layout_scale);
             element.height = element.height.resolved(layout_scale);
             element.padding = element.padding.resolved(layout_scale);
-            element.child_gap = Dimension {
-                value: element.child_gap.to_points(layout_scale),
-                unit:  None,
-            };
+            element.child_layout = element.child_layout.to_points(layout_scale);
             if let Some(ref mut border) = element.border {
                 *border = border.resolved(layout_scale);
             }
@@ -646,10 +629,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         width,
         height,
         padding,
-        child_gap,
-        direction,
-        child_align_x,
-        child_align_y,
+        child_layout,
         background,
         border,
         corner_radius,
@@ -668,10 +648,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         width: n_width,
         height: n_height,
         padding: n_padding,
-        child_gap: n_child_gap,
-        direction: n_direction,
-        child_align_x: n_child_align_x,
-        child_align_y: n_child_align_y,
+        child_layout: n_child_layout,
         background: n_background,
         border: n_border,
         corner_radius: n_corner_radius,
@@ -690,10 +667,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     if width != n_width
         || height != n_height
         || padding != n_padding
-        || child_gap != n_child_gap
-        || direction != n_direction
-        || child_align_x != n_child_align_x
-        || child_align_y != n_child_align_y
+        || classify_child_layout_change(child_layout, n_child_layout)
+            == LayoutTreeChange::LayoutAffecting
         || overflow != n_overflow
         || scroll_offset != n_scroll_offset
         || scroll_anchor != n_scroll_anchor
@@ -729,6 +704,42 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     ));
 
     change.combine(classify_content_change(content, n_content))
+}
+
+fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> LayoutTreeChange {
+    match (old, next) {
+        (
+            ChildLayout::Row {
+                gap,
+                align_x,
+                align_y,
+            },
+            ChildLayout::Row {
+                gap: n_gap,
+                align_x: n_align_x,
+                align_y: n_align_y,
+            },
+        )
+        | (
+            ChildLayout::Column {
+                gap,
+                align_x,
+                align_y,
+            },
+            ChildLayout::Column {
+                gap: n_gap,
+                align_x: n_align_x,
+                align_y: n_align_y,
+            },
+        ) => {
+            if gap != n_gap || align_x != n_align_x || align_y != n_align_y {
+                LayoutTreeChange::LayoutAffecting
+            } else {
+                LayoutTreeChange::Identical
+            }
+        },
+        _ => LayoutTreeChange::LayoutAffecting,
+    }
 }
 
 fn classify_border_change(border: Option<Border>, next: Option<Border>) -> LayoutTreeChange {
@@ -836,8 +847,10 @@ mod tests {
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelFieldId;
+    use crate::layout::AlignX;
     use crate::layout::Border;
     use crate::layout::Dimension;
+    use crate::layout::Direction;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -848,6 +861,9 @@ mod tests {
     use crate::layout::Sizing;
     use crate::layout::TextStyle;
     use crate::layout::TextWrap;
+
+    const LARGE_CHILD_GAP: f32 = 2.0;
+    const SMALL_CHILD_GAP: f32 = 1.0;
 
     fn text_tree(text: &str, style: TextStyle) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -1089,6 +1105,55 @@ mod tests {
                 .padding(Padding::all(8.0))
                 .background(Color::BLACK),
         );
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn row_gap_change_classifies_as_layout_affecting() {
+        let tree = root_tree(
+            El::new()
+                .direction(Direction::LeftToRight)
+                .child_gap(SMALL_CHILD_GAP),
+        );
+        let next = root_tree(
+            El::new()
+                .direction(Direction::LeftToRight)
+                .child_gap(LARGE_CHILD_GAP),
+        );
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn column_alignment_change_classifies_as_layout_affecting() {
+        let tree = root_tree(
+            El::new()
+                .direction(Direction::TopToBottom)
+                .child_align_x(AlignX::Left),
+        );
+        let next = root_tree(
+            El::new()
+                .direction(Direction::TopToBottom)
+                .child_align_x(AlignX::Right),
+        );
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn row_to_column_change_classifies_as_layout_affecting() {
+        let tree = root_tree(El::new().direction(Direction::LeftToRight));
+        let next = root_tree(El::new().direction(Direction::TopToBottom));
 
         assert_eq!(
             tree.classify_change(&next),
