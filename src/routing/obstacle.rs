@@ -21,7 +21,7 @@ pub(super) enum Blockage {
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct Obstacle {
     pub(super) half_extents: Vec3,
-    position:                Vec3,
+    pub(super) position:     Vec3,
 }
 
 impl Obstacle {

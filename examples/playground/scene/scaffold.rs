@@ -3,7 +3,6 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 
-use super::astar;
 use super::cap_styles;
 use super::catenary;
 use super::constants::CAMERA_FOCUS_Y_MULTIPLIER;
@@ -19,10 +18,10 @@ use super::constants::SCENE_SPOTLIGHT_OUTER_ANGLE;
 use super::constants::SCENE_SPOTLIGHT_RANGE;
 use super::entity_attachment;
 use super::inside_view;
+use super::orthogonal_routing;
 use super::shared_hub;
 use super::solver_comparison;
 use crate::connector;
-use crate::constants::ASTAR_SECTION_INDEX;
 use crate::constants::CABLE_COLOR;
 use crate::constants::CAP_STYLES_SECTION_INDEX;
 use crate::constants::CATENARY_SECTION_INDEX;
@@ -35,6 +34,7 @@ use crate::constants::GROUND_WIDTH;
 use crate::constants::INSIDE_VIEW_SECTION_INDEX;
 use crate::constants::NODE_COLOR;
 use crate::constants::NODE_Y;
+use crate::constants::ORTHOGONAL_ROUTING_SECTION_INDEX;
 use crate::constants::SECTION_X;
 use crate::constants::SECTION_Z;
 use crate::constants::SHARED_HUB_SECTION_INDEX;
@@ -226,9 +226,9 @@ fn spawn_all_sections(
         commands,
         meshes,
         materials,
-        SECTION_X[ASTAR_SECTION_INDEX],
+        SECTION_X[ORTHOGONAL_ROUTING_SECTION_INDEX],
     ));
-    astar::setup_section_astar(
+    orthogonal_routing::setup_section_orthogonal_routing(
         commands,
         meshes,
         materials,

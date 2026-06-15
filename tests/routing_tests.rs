@@ -726,25 +726,102 @@ fn orthogonal_vertical_first_starts_with_y_move() {
 
 #[test]
 fn orthogonal_routes_around_obstacle() {
-    let planner = OrthogonalPlanner::new().with_margin(0.3);
+    let margin = 0.3;
+    let planner = OrthogonalPlanner::new().with_margin(margin);
     let start = Vec3::new(0.0, 0.0, 0.0);
     let end = Vec3::new(6.0, 0.0, 0.0);
+    let obstacle_half_extents = Vec3::new(2.0, 2.0, 2.0);
+    let obstacle_center = Vec3::new(3.0, 0.0, 0.0);
 
     // Place obstacle blocking the direct L-path bend point
-    let obstacles = vec![Obstacle::new(
-        Vec3::new(2.0, 2.0, 2.0),
-        Vec3::new(3.0, 0.0, 0.0),
-    )];
+    let obstacles = vec![Obstacle::new(obstacle_half_extents, obstacle_center)];
 
     let waypoints = planner.plan(start, end, &obstacles);
 
-    // Should have found an alternate path (not just start->end)
     assert!(
-        waypoints.len() >= 2,
-        "should produce a valid path around the obstacle"
+        waypoints.len() > 2,
+        "should route around the obstacle instead of returning a direct segment"
     );
 
     // All segments should still be axis-aligned
+    for pair in waypoints.windows(2) {
+        let delta = pair[1] - pair[0];
+        assert!(
+            delta.length() > TOLERANCE,
+            "routed path should not contain duplicate consecutive waypoints at {}",
+            pair[0]
+        );
+        let non_zero_axes = [delta.x, delta.y, delta.z]
+            .iter()
+            .filter(|v| v.abs() > TOLERANCE)
+            .count();
+        assert!(
+            non_zero_axes <= 1,
+            "routed segment from {} to {} is not axis-aligned (delta={delta})",
+            pair[0],
+            pair[1]
+        );
+    }
+
+    let expanded_min = obstacle_center - obstacle_half_extents - Vec3::splat(margin);
+    let expanded_max = obstacle_center + obstacle_half_extents + Vec3::splat(margin);
+
+    for pair in waypoints.windows(2) {
+        for step in 0..=20 {
+            let point = pair[0].lerp(pair[1], step.to_f32() / 20.0);
+            let inside_expanded_obstacle = point.x >= expanded_min.x
+                && point.x <= expanded_max.x
+                && point.y >= expanded_min.y
+                && point.y <= expanded_max.y
+                && point.z >= expanded_min.z
+                && point.z <= expanded_max.z;
+
+            assert!(
+                !inside_expanded_obstacle,
+                "routed segment from {} to {} intersects expanded obstacle at {point}",
+                pair[0], pair[1]
+            );
+        }
+    }
+}
+
+#[test]
+fn orthogonal_routes_around_multiple_obstacles_in_3d() {
+    let margin = 0.2;
+    let planner = OrthogonalPlanner::new().with_margin(margin);
+    let start = Vec3::new(-3.0, 0.0, -1.2);
+    let end = Vec3::new(3.0, 0.0, 1.2);
+    let obstacle_half_extents = Vec3::splat(0.8);
+    let obstacle_centers = [
+        Vec3::new(-0.9, -0.35, -1.2),
+        Vec3::new(0.0, 0.35, 0.0),
+        Vec3::new(0.9, 0.0, 1.2),
+    ];
+    let obstacles: Vec<Obstacle> = obstacle_centers
+        .iter()
+        .copied()
+        .map(|center| Obstacle::new(obstacle_half_extents, center))
+        .collect();
+
+    let waypoints = planner.plan(start, end, &obstacles);
+
+    assert!(
+        waypoints.len() > 4,
+        "multiple blockers at varied heights should force a 3D fallback route, got {waypoints:?}"
+    );
+    assert!(
+        waypoints
+            .windows(2)
+            .any(|pair| (pair[1].y - pair[0].y).abs() > TOLERANCE),
+        "route should include a vertical leg, got {waypoints:?}"
+    );
+    assert!(
+        waypoints
+            .windows(2)
+            .any(|pair| (pair[1].z - pair[0].z).abs() > TOLERANCE),
+        "route should include a depth leg, got {waypoints:?}"
+    );
+
     for pair in waypoints.windows(2) {
         let delta = pair[1] - pair[0];
         let non_zero_axes = [delta.x, delta.y, delta.z]
@@ -757,6 +834,27 @@ fn orthogonal_routes_around_obstacle() {
             pair[0],
             pair[1]
         );
+
+        for step in 0..=20 {
+            let point = pair[0].lerp(pair[1], step.to_f32() / 20.0);
+
+            for obstacle_center in obstacle_centers {
+                let expanded_min = obstacle_center - obstacle_half_extents - Vec3::splat(margin);
+                let expanded_max = obstacle_center + obstacle_half_extents + Vec3::splat(margin);
+                let inside_expanded_obstacle = point.x >= expanded_min.x
+                    && point.x <= expanded_max.x
+                    && point.y >= expanded_min.y
+                    && point.y <= expanded_max.y
+                    && point.z >= expanded_min.z
+                    && point.z <= expanded_max.z;
+
+                assert!(
+                    !inside_expanded_obstacle,
+                    "routed segment from {} to {} intersects expanded obstacle at {point}",
+                    pair[0], pair[1]
+                );
+            }
+        }
     }
 }
 

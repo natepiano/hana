@@ -18,7 +18,6 @@ pub(crate) const PLAYGROUND_WINDOW_TITLE: &str = "Playground";
 // cable
 pub(crate) const DEFAULT_CABLE_RESOLUTION: u32 = 0;
 pub(crate) const MIN_TAUT_CABLE_SLACK: f32 = 1.0;
-pub(crate) const OBSTACLE_HALF_EXTENTS: Vec3 = Vec3::new(0.8, 0.8, 0.8);
 pub(crate) const SLACK_NORMAL: f32 = 1.15;
 
 // camera
@@ -36,8 +35,8 @@ pub(crate) const DETACH_BUMP_BLUE: Color = Color::srgb(0.3, 0.5, 0.9);
 pub(crate) const DRAGGABLE_COLOR: Color = Color::srgb(0.2, 0.7, 0.7);
 pub(crate) const NAVIGATION_BAR_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.7);
 pub(crate) const NAVIGATION_BUTTON_BACKGROUND: Color = Color::srgba(1.0, 1.0, 1.0, 0.15);
-pub(crate) const NODE_COLOR: Color = Color::srgba(0.4, 0.6, 0.8, 0.4);
-pub(crate) const OBSTACLE_COLOR: Color = Color::srgba(0.8, 0.2, 0.2, 0.25);
+pub(crate) const NODE_COLOR: Color = Color::srgba(0.4, 0.6, 0.8, 0.9);
+pub(crate) const OBSTACLE_COLOR: Color = Color::srgb(0.8, 0.2, 0.2);
 pub(crate) const POINT_LIGHT_COLOR: Color = Color::srgb(1.0, 0.95, 0.8);
 pub(crate) const SECTION_INFO_BACKGROUND: Color = Color::srgba(0.0, 0.0, 0.0, 0.5);
 pub(crate) const TRANSPARENT_TUBE_COLOR: Color = Color::srgba(0.85, 0.55, 0.2, 0.2);
@@ -61,7 +60,6 @@ pub(crate) const DETACH_DEMO_SPHERE_RINGS: u32 = 16;
 pub(crate) const DETACH_DEMO_SPHERE_SECTORS: u32 = 16;
 
 // layout
-pub(crate) const ASTAR_SECTION_INDEX: usize = 5;
 pub(crate) const CAP_STYLES_SECTION_INDEX: usize = 1;
 pub(crate) const CAP_STYLE_RADIUS_MULTIPLIER: f32 = 5.0;
 pub(crate) const CAP_STYLE_TUBE_OFFSET: f32 = 0.8;
@@ -78,6 +76,7 @@ pub(crate) const INSIDE_VIEW_RADIUS_MULTIPLIER: f32 = 25.0;
 pub(crate) const INSIDE_VIEW_SECTION_INDEX: usize = 7;
 pub(crate) const NODE_CUBE_SIZE: f32 = 0.3;
 pub(crate) const NODE_Y: f32 = 2.0;
+pub(crate) const ORTHOGONAL_ROUTING_SECTION_INDEX: usize = 5;
 pub(crate) const RAY_EPSILON: f32 = 1e-6;
 pub(crate) const SECTION_COUNT: usize = 9;
 pub(crate) const SECTION_SPACING: f32 = 16.0;
@@ -87,7 +86,7 @@ pub(crate) const SECTION_TITLES: [&str; SECTION_COUNT] = [
     "Solver Comparison",
     "Entity Attachment",
     "Shared Hub",
-    "A* Routing",
+    "Orthogonal Routing",
     "Detach Policy",
     "Inside View",
     "Connector Model",

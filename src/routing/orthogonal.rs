@@ -110,6 +110,15 @@ impl OrthogonalPlanner {
         waypoints
     }
 
+    fn push_distinct_waypoint(waypoints: &mut Vec<Vec3>, waypoint: Vec3) {
+        if waypoints
+            .last()
+            .is_none_or(|last| last.distance_squared(waypoint) > f32::EPSILON)
+        {
+            waypoints.push(waypoint);
+        }
+    }
+
     /// Generate a U-shaped orthogonal path with `start`, `below_start`,
     /// `below_corner`, `below_end`, and `end` waypoints.
     fn u_path(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
@@ -122,12 +131,23 @@ impl OrthogonalPlanner {
             }),
         );
 
-        // Build `below_start`, `below_corner`, and `below_end` below both endpoints.
-        let below = start.y.min(end.y) - offset;
+        // Build `below_start`, `below_corner`, and `below_end` below the route
+        // endpoints and every obstacle's expanded lower face.
+        let route_min_y = start.y.min(end.y);
+        let obstacle_min_y = obstacles.iter().fold(route_min_y, |acc, obstacle| {
+            acc.min(obstacle.position.y - obstacle.half_extents.y - self.margin)
+        });
+        let below = obstacle_min_y - offset;
         let below_start = Vec3::new(start.x, below, start.z);
         let below_corner = Vec3::new(end.x, below, start.z);
         let below_end = Vec3::new(end.x, below, end.z);
-        vec![start, below_start, below_corner, below_end, end]
+
+        let mut waypoints = Vec::with_capacity(5);
+        for waypoint in [start, below_start, below_corner, below_end, end] {
+            Self::push_distinct_waypoint(&mut waypoints, waypoint);
+        }
+
+        waypoints
     }
 }
 

@@ -250,7 +250,12 @@ pub(crate) fn on_mesh_clicked(
     click: On<Pointer<Click>>,
     mut commands: Commands,
     selected: Query<Entity, With<Selected>>,
+    draggables: Query<(), With<Draggable>>,
 ) {
+    if draggables.get(click.entity).is_ok() {
+        return;
+    }
+
     entities::deselect_all(&mut commands, &selected);
 
     let clicked = click.entity;

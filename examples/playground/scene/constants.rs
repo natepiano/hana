@@ -5,9 +5,16 @@ use bevy::prelude::*;
 use crate::constants::DRAGGABLE_CUBE_SIZE;
 use crate::constants::NODE_CUBE_SIZE;
 
-// astar
-pub(super) const ASTAR_OBSTACLE_SIZE_MULTIPLIER: f32 = 2.0;
-pub(super) const ASTAR_SECTION_Z: f32 = 0.0;
+// orthogonal routing
+pub(super) const ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS: Vec3 = Vec3::splat(0.5);
+pub(super) const ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER: f32 = 2.0;
+pub(super) const ORTHOGONAL_ROUTING_END_Z: f32 = 1.2;
+pub(super) const ORTHOGONAL_ROUTING_OBSTACLE_OFFSETS: [Vec3; 3] = [
+    Vec3::new(-1.1, -0.35, ORTHOGONAL_ROUTING_START_Z),
+    Vec3::new(0.0, 0.35, 0.0),
+    Vec3::new(1.1, 0.0, ORTHOGONAL_ROUTING_END_Z),
+];
+pub(super) const ORTHOGONAL_ROUTING_START_Z: f32 = -1.2;
 
 // camera
 pub(super) const CAMERA_FOCUS_Y_MULTIPLIER: f32 = 0.5;

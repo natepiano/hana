@@ -71,7 +71,7 @@ fn main() {
                 sections::update_section_info_visibility,
                 input::handle_keyboard,
                 navigation::handle_navigation_buttons,
-                input::handle_drag,
+                (input::handle_drag, scene::sync_movable_obstacles).chain(),
                 animation::animate_tube_light,
             ),
         )
