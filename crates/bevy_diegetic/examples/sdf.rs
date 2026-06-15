@@ -1,13 +1,13 @@
 //! SDF primitive lab.
 //!
-//! Static comparison scene for experimenting with line rendering in world
-//! space. The first pass focuses on vertical line segments at multiple
-//! widths:
+//! Static comparison scene for line rendering in world space. Three rows show
+//! the same vertical stroke at six widths through different SDF paths:
 //! - raw line `sdf_kind = 4`
-//! - one-sided border-strip workaround
-//! - border-reference panel edges
-
-use std::time::Duration;
+//! - stretched rounded-rect `sdf_kind = 0`
+//! - border edge (the panel-border path)
+//!
+//! All three render through the crate's embedded `sdf_panel.wgsl`. Orbit to a
+//! grazing angle to compare line quality across the three approaches.
 
 use bevy::asset::Asset;
 use bevy::color::Alpha;
@@ -25,38 +25,14 @@ use bevy::reflect::TypePath;
 use bevy::render::render_resource::AsBindGroup;
 use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
-use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_brp_extras::PortDisplay;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
-use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Direction;
-use bevy_diegetic::El;
-use bevy_diegetic::FontId;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Pt;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
 use bevy_kana::ToF32;
-use bevy_lagrange::AnimateToFit;
-use bevy_lagrange::LagrangePlugin;
-use bevy_lagrange::OrbitCam;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::Anchor;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::TitleBar;
 
-const GROUND_SIZE: f32 = 8.0;
 const DISPLAY_Z: f32 = 2.2;
-
-const KEY_LIGHT_LUX: f32 = 15_000.0;
-const KEY_LIGHT_POS: Vec3 = Vec3::new(0.0, 2.5, 6.0);
-const REFLECTION_LIGHT_LEVEL: f32 = 150_000.0;
-const REFLECTION_LIGHT_POS: Vec3 = Vec3::new(0.7, 1.9, 6.2);
-const REFLECTION_TARGET: Vec3 = Vec3::new(0.15, 0.0, 1.7);
 
 // ── Grid layout ─────────────────────────────────────────────────────
 // Three SDF rows × six columns. Every row sits above the ground plane
@@ -101,52 +77,15 @@ const BORDER_EDGE_HIDDEN_HALVES: f32 = MESH_THICKNESS_MULTIPLIER - 1.0;
 // needs it explicitly — rows 1/2 already have ~10× stroke of implicit
 // padding from the thickness multiplier, which is plenty.
 const SDF_AA_PADDING: f32 = 0.002;
-const SDF_PANEL_SHADER_ASSET_PATH: &str = "shaders/sdf_panel.wgsl";
+const SDF_PANEL_SHADER_PATH: &str = "embedded://bevy_diegetic/shaders/sdf_panel.wgsl";
 
+// Camera home pose.
 const HOME_YAW: f32 = 0.0;
 const HOME_PITCH: f32 = 0.18;
 const HOME_MARGIN: f32 = 0.08;
-const HOME_DELAY_SECS: f32 = 0.1;
-const HOME_DURATION_MS: u64 = 900;
-
-const CONTROLS_WIDTH: Px = Px(170.0);
-const CONTROLS_HEIGHT: Px = Px(54.0);
-const CONTROLS_TITLE_SIZE: Pt = Pt(14.0);
-const CONTROLS_HINT_SIZE: Pt = Pt(11.0);
-const CONTROLS_RADIUS: Px = Px(14.0);
-const CONTROLS_BACKGROUND: Color = Color::srgba(0.02, 0.03, 0.07, 0.82);
-const CONTROLS_FRAME: Color = Color::srgba(0.01, 0.01, 0.03, 0.95);
-const CONTROLS_ACCENT: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
-const CONTROLS_BORDER: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-const CONTROLS_TITLE_COLOR: Color = Color::srgb(0.9, 0.95, 1.0);
-const CONTROLS_HINT_COLOR: Color = Color::srgba(0.7, 0.75, 0.85, 0.92);
-const CAMERA_HEADER_COLOR: Color = Color::srgb(1.0, 0.82, 0.52);
-const CONTROLS_DIVIDER_COLOR: Color = Color::srgba(0.15, 0.4, 0.6, 0.25);
-const CAM_HELP_WIDTH: Px = Px(280.0);
-const CAM_HELP_HEIGHT: Px = Px(160.0);
-const CAM_HELP_LABEL_SIZE: Pt = Pt(11.0);
-const CAM_HELP_HEADER_SIZE: Pt = Pt(13.0);
-const CAM_HELP_TITLE_SIZE: Pt = Pt(16.0);
-const CAM_HELP_RADIUS: Px = Px(15.0);
-const CAM_HELP_FRAME_PAD: Px = Px(2.0);
-const CAM_HELP_BORDER: Px = Px(2.0);
-const CAM_HELP_INSET: Px = Px(CAM_HELP_FRAME_PAD.0 + CAM_HELP_BORDER.0);
-const CAM_HELP_INNER_RADIUS: Px = Px(CAM_HELP_RADIUS.0 - CAM_HELP_INSET.0);
 
 #[derive(Component)]
 struct LabRoot;
-
-#[derive(Component)]
-struct ControlsPanel;
-
-#[derive(Component)]
-struct CameraHelpPanel;
-
-#[derive(Resource)]
-struct SceneBounds(Entity);
-
-#[derive(Resource)]
-struct HomeOnStart(Timer);
 
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
 struct ExampleSdfExtension {
@@ -171,31 +110,36 @@ struct ExampleSdfUniform {
 type ExampleSdfMaterial = ExtendedMaterial<StandardMaterial, ExampleSdfExtension>;
 
 impl MaterialExtension for ExampleSdfExtension {
-    fn fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_ASSET_PATH.into() }
+    fn fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_PATH.into() }
 
-    fn prepass_fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_ASSET_PATH.into() }
+    fn prepass_fragment_shader() -> ShaderRef { SDF_PANEL_SHADER_PATH.into() }
 }
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            DiegeticUiPlugin,
-            LagrangePlugin,
-            BrpExtrasPlugin::default().port_in_title(PortDisplay::NonDefault),
-            WindowManagerPlugin,
-            MaterialPlugin::<ExampleSdfMaterial>::default(),
-        ))
-        .insert_resource(HomeOnStart(Timer::from_seconds(
-            HOME_DELAY_SECS,
-            TimerMode::Once,
-        )))
-        .add_systems(Startup, setup)
-        .add_systems(Update, (fit_camera_on_start, home_camera))
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`.
+    fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .add_plugins(MaterialPlugin::<ExampleSdfMaterial>::default())
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_camera_home()
+        .yaw(HOME_YAW)
+        .pitch(HOME_PITCH)
+        .margin(HOME_MARGIN)
+        .with_title_bar(
+            TitleBar::new()
+                .with_title("SDF Line Lab")
+                .with_anchor(Anchor::TopLeft),
+        )
+        .with_camera_control_panel()
+        .add_systems(Startup, spawn_lab)
         .run();
 }
 
-fn setup(
+fn spawn_lab(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut std_materials: ResMut<Assets<StandardMaterial>>,
@@ -204,24 +148,20 @@ fn setup(
     let root = commands
         .spawn((LabRoot, Transform::IDENTITY, Visibility::Visible))
         .id();
-    let bounds = spawn_scene_bounds(&mut commands, root, &mut meshes, &mut std_materials);
-    commands.insert_resource(SceneBounds(bounds));
-
-    spawn_ground(&mut commands, &mut meshes, &mut std_materials);
-    spawn_lights(&mut commands);
-    spawn_camera(&mut commands);
-    spawn_controls_panel(&mut commands);
-    spawn_camera_help_panel(&mut commands);
+    spawn_scene_bounds(&mut commands, root, &mut meshes, &mut std_materials);
     spawn_labels(&mut commands, root);
     spawn_line_rows(&mut commands, root, &mut meshes, &mut sdf_materials);
 }
 
+/// Invisible rectangle spanning the lab content. Carries `CameraHomeTarget` so
+/// `.with_camera_home()` frames the whole grid — its mesh AABB is available
+/// immediately at startup, unlike the labels' text meshes.
 fn spawn_scene_bounds(
     commands: &mut Commands,
     parent: Entity,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
-) -> Entity {
+) {
     // Bounds frame the visible lab content: from just left of the row
     // labels to just right of the last column, and from the ground up
     // to just above the title.
@@ -237,285 +177,25 @@ fn spawn_scene_bounds(
         ROW_Z,
     );
 
-    commands
-        .spawn((
-            Name::new("SdfSceneBounds"),
-            NotShadowCaster,
-            Mesh3d(meshes.add(Rectangle::new(width, height))),
-            MeshMaterial3d(materials.add(StandardMaterial {
-                base_color: Color::NONE,
-                alpha_mode: AlphaMode::Blend,
-                unlit: true,
-                ..default()
-            })),
-            Transform::from_translation(center),
-            Visibility::Inherited,
-            ChildOf(parent),
-        ))
-        .id()
-}
-
-fn spawn_ground(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-) {
     commands.spawn((
-        Mesh3d(meshes.add(Plane3d::default().mesh().size(GROUND_SIZE, GROUND_SIZE))),
+        Name::new("SdfSceneBounds"),
+        CameraHomeTarget,
+        NotShadowCaster,
+        Mesh3d(meshes.add(Rectangle::new(width, height))),
         MeshMaterial3d(materials.add(StandardMaterial {
-            base_color: Color::srgb(0.08, 0.08, 0.08),
-            perceptual_roughness: 0.15,
-            metallic: 0.0,
-            double_sided: true,
-            cull_mode: None,
+            base_color: Color::NONE,
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
             ..default()
         })),
-        Transform::from_xyz(0.0, 0.0, DISPLAY_Z),
+        Transform::from_translation(center),
+        Visibility::Inherited,
+        ChildOf(parent),
     ));
-}
-
-fn spawn_lights(commands: &mut Commands) {
-    commands.spawn((
-        DirectionalLight {
-            illuminance: KEY_LIGHT_LUX,
-            shadow_maps_enabled: true,
-            ..default()
-        },
-        Transform::from_translation(KEY_LIGHT_POS)
-            .looking_at(Vec3::new(0.0, 1.0, DISPLAY_Z), Vec3::Y),
-    ));
-
-    commands.spawn((
-        SpotLight {
-            intensity: REFLECTION_LIGHT_LEVEL,
-            shadow_maps_enabled: false,
-            inner_angle: 0.22,
-            outer_angle: 0.38,
-            range: 12.0,
-            ..default()
-        },
-        Transform::from_translation(REFLECTION_LIGHT_POS).looking_at(REFLECTION_TARGET, Vec3::Y),
-    ));
-}
-
-fn spawn_camera(commands: &mut Commands) {
-    commands.spawn((OrbitCam {
-        focus: Vec3::new(0.0, 1.0, DISPLAY_Z),
-        radius: Some(4.2),
-        yaw: Some(0.0),
-        pitch: Some(0.18),
-        ..default()
-    },));
-}
-
-fn spawn_controls_panel(commands: &mut Commands) {
-    let unlit_material = bevy_diegetic::default_panel_material();
-    let unlit = StandardMaterial {
-        unlit: true,
-        ..unlit_material
-    };
-
-    let controls_panel = DiegeticPanel::screen()
-        .size(
-            Sizing::fixed(CONTROLS_WIDTH),
-            Sizing::fixed(CONTROLS_HEIGHT),
-        )
-        .anchor(Anchor::TopLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_controls_panel())
-        .build();
-    let Ok(controls_panel) = controls_panel else {
-        error!("failed to build controls HUD dimensions");
-        return;
-    };
-
-    commands.spawn((ControlsPanel, controls_panel, Transform::default()));
-}
-
-fn build_controls_panel() -> bevy_diegetic::LayoutTree {
-    let title = TextStyle::new(CONTROLS_TITLE_SIZE)
-        .with_font(FontId::MONOSPACE.0)
-        .with_color(CONTROLS_TITLE_COLOR);
-    let hint = TextStyle::new(CONTROLS_HINT_SIZE)
-        .with_font(FontId::MONOSPACE.0)
-        .with_color(CONTROLS_HINT_COLOR);
-
-    let mut builder = LayoutBuilder::new(CONTROLS_WIDTH, CONTROLS_HEIGHT);
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(Px(2.0)))
-            .corner_radius(CornerRadius::new(
-                CONTROLS_RADIUS,
-                CONTROLS_RADIUS,
-                CONTROLS_RADIUS,
-                CONTROLS_RADIUS,
-            ))
-            .background(CONTROLS_FRAME)
-            .border(Border::all(Px(2.0), CONTROLS_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::LeftToRight)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(10.0))
-                    .child_align_y(AlignY::Center)
-                    .corner_radius(CornerRadius::new(Px(11.0), Px(11.0), Px(11.0), Px(11.0)))
-                    .background(CONTROLS_BACKGROUND)
-                    .border(Border::all(Px(1.0), CONTROLS_BORDER)),
-                |b| {
-                    b.text("CONTROLS", title);
-                    hud_separator(b);
-                    b.text("H Home", hint);
-                },
-            );
-        },
-    );
-    builder.build()
-}
-
-fn spawn_camera_help_panel(commands: &mut Commands) {
-    let unlit_material = bevy_diegetic::default_panel_material();
-    let unlit = StandardMaterial {
-        unlit: true,
-        ..unlit_material
-    };
-
-    let camera_help_panel = DiegeticPanel::screen()
-        .size(
-            Sizing::fixed(CAM_HELP_WIDTH),
-            Sizing::fixed(CAM_HELP_HEIGHT),
-        )
-        .anchor(Anchor::BottomRight)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .layout(build_camera_help)
-        .build();
-    let Ok(camera_help_panel) = camera_help_panel else {
-        error!("failed to build camera help HUD dimensions");
-        return;
-    };
-
-    commands.spawn((CameraHelpPanel, camera_help_panel, Transform::default()));
-}
-
-fn hud_separator(b: &mut LayoutBuilder) {
-    b.with(
-        El::new()
-            .width(Sizing::fixed(Px(1.0)))
-            .height(Sizing::GROW)
-            .background(CONTROLS_DIVIDER_COLOR),
-        |_| {},
-    );
-}
-
-fn build_camera_help(b: &mut LayoutBuilder) {
-    let title = TextStyle::new(CAM_HELP_TITLE_SIZE)
-        .with_font(FontId::MONOSPACE.0)
-        .with_color(CONTROLS_TITLE_COLOR);
-    let header = TextStyle::new(CAM_HELP_HEADER_SIZE)
-        .with_font(FontId::MONOSPACE.0)
-        .with_color(CAMERA_HEADER_COLOR);
-    let label = TextStyle::new(CAM_HELP_LABEL_SIZE)
-        .with_font(FontId::MONOSPACE.0)
-        .with_color(CONTROLS_HINT_COLOR);
-
-    b.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::GROW)
-            .padding(Padding::all(CAM_HELP_FRAME_PAD))
-            .corner_radius(CornerRadius::new(
-                CAM_HELP_RADIUS,
-                CAM_HELP_RADIUS,
-                CAM_HELP_RADIUS,
-                CAM_HELP_RADIUS,
-            ))
-            .background(CONTROLS_FRAME)
-            .border(Border::all(CAM_HELP_BORDER, CONTROLS_ACCENT)),
-        |b| {
-            b.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .direction(Direction::TopToBottom)
-                    .padding(Padding::all(Px(10.0)))
-                    .child_gap(Px(6.0))
-                    .corner_radius(CornerRadius::new(
-                        CAM_HELP_INNER_RADIUS,
-                        CAM_HELP_INNER_RADIUS,
-                        CAM_HELP_INNER_RADIUS,
-                        CAM_HELP_INNER_RADIUS,
-                    ))
-                    .background(CONTROLS_BACKGROUND)
-                    .border(Border::all(Px(1.0), CONTROLS_BORDER)),
-                |b| {
-                    b.text("CAMERA", title);
-
-                    b.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::GROW)
-                            .direction(Direction::LeftToRight)
-                            .child_gap(Px(12.0)),
-                        |b| {
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Mouse", header.clone());
-                                    b.text("MMB drag → Orbit", label.clone());
-                                    b.text("Shift+MMB → Pan", label.clone());
-                                    b.text("Scroll → Zoom", label.clone());
-                                },
-                            );
-
-                            b.with(
-                                El::new()
-                                    .width(Sizing::fixed(Px(1.0)))
-                                    .height(Sizing::GROW)
-                                    .background(CONTROLS_DIVIDER_COLOR),
-                                |_| {},
-                            );
-
-                            b.with(
-                                El::new()
-                                    .width(Sizing::GROW)
-                                    .direction(Direction::TopToBottom)
-                                    .child_gap(Px(4.0)),
-                                |b| {
-                                    b.text("Trackpad", header.clone());
-                                    b.text("Scroll → Orbit", label.clone());
-                                    b.text("Shift+Scroll → Pan", label.clone());
-                                    b.text("Ctrl+Scroll → Zoom", label.clone());
-                                    b.text("Pinch → Zoom", label.clone());
-                                },
-                            );
-                        },
-                    );
-                },
-            );
-        },
-    );
 }
 
 fn spawn_labels(commands: &mut Commands, parent: Entity) {
     commands.entity(parent).with_children(|parent| {
-        // Title sits above all three rows.
-        parent.spawn(
-            DiegeticText::world("SDF Line Lab")
-                .size(0.14)
-                .color(Color::srgb(0.8, 0.9, 1.0))
-                .transform(Transform::from_xyz(0.0, TITLE_Y, DISPLAY_Z))
-                .build(),
-        );
-
         // Row labels: one per row, placed inline at ROW_LABEL_X so they
         // sit at the same height as the strokes they describe.
         for (text, y) in [
@@ -560,50 +240,6 @@ fn spawn_line_rows(
         spawn_raw_line(commands, root, meshes, materials, x, ROW_Y[0], width);
         spawn_stretched_rect(commands, root, meshes, materials, x, ROW_Y[1], width);
         spawn_border_edge(commands, root, meshes, materials, x, ROW_Y[2], width);
-    }
-}
-
-fn fit_camera_on_start(
-    time: Res<Time>,
-    mut home_on_start: ResMut<HomeOnStart>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    scene: Res<SceneBounds>,
-    mut initialized: Local<bool>,
-    mut commands: Commands,
-) {
-    if *initialized || !home_on_start.0.tick(time.delta()).just_finished() {
-        return;
-    }
-    *initialized = true;
-    trigger_home_camera(&cameras, scene.0, &mut commands);
-}
-
-fn home_camera(
-    keyboard: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<OrbitCam>>,
-    scene: Res<SceneBounds>,
-    mut commands: Commands,
-) {
-    if !keyboard.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-    trigger_home_camera(&cameras, scene.0, &mut commands);
-}
-
-fn trigger_home_camera(
-    cameras: &Query<Entity, With<OrbitCam>>,
-    target: Entity,
-    commands: &mut Commands,
-) {
-    for camera in cameras.iter() {
-        commands.trigger(
-            AnimateToFit::new(camera, target)
-                .yaw(HOME_YAW)
-                .pitch(HOME_PITCH)
-                .margin(HOME_MARGIN)
-                .duration(Duration::from_millis(HOME_DURATION_MS))
-                .easing(bevy::math::curve::easing::EaseFunction::CubicOut),
-        );
     }
 }
 

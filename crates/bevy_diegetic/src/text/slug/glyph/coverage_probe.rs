@@ -876,12 +876,12 @@ fn line_cov(
     hairline_min_px: f32,
     dil_mode: u32,
 ) -> f32 {
-    let len_dx = dx.length();
-    let len_dy = dy.length();
-    let (major, minor, major_len, minor_len) = if len_dx >= len_dy {
-        (dx, dy, len_dx, len_dy.max(ROOT_EPSILON))
+    let x_span_len = dx.length();
+    let y_span_len = dy.length();
+    let (major, minor, major_len, minor_len) = if x_span_len >= y_span_len {
+        (dx, dy, x_span_len, y_span_len.max(ROOT_EPSILON))
     } else {
-        (dy, dx, len_dy, len_dx.max(ROOT_EPSILON))
+        (dy, dx, y_span_len, x_span_len.max(ROOT_EPSILON))
     };
     let n_samp = (major_len / minor_len)
         .ceil()
@@ -931,7 +931,7 @@ fn corner_wing_reach(gt: &GroundTruth, dx: Vec2, dy: Vec2, mode: u32) -> f32 {
             if gt.coverage(p, dx, dy, GT_SAMPLES) > 0.05 {
                 continue;
             }
-            if line_cov(&gt, p, dx, dy, min_feature, hairline_min_px, mode) > 0.3 {
+            if line_cov(gt, p, dx, dy, min_feature, hairline_min_px, mode) > 0.3 {
                 let (sd, normal) = gt.signed_distance_and_normal(p);
                 let band_full = Vec2::new(normal.dot(dx), normal.dot(dy))
                     .length()
@@ -983,7 +983,7 @@ fn center_dilation_bounds_corner_wing() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0x8102_22ae_cb19_586b;
+    const EXPECTED_SHADER_FNV1A: u64 = 0xf74c_389d_1829_96f3;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,

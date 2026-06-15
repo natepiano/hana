@@ -8,7 +8,7 @@ pub(crate) mod batch_proof;
 mod clip;
 mod constants;
 mod panel_geometry;
-mod panel_lines;
+mod panel_shapes;
 mod panel_text;
 mod sdf_material;
 mod text_shaping;
@@ -63,7 +63,7 @@ pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub use constants::default_panel_material;
 use panel_geometry::PanelGeometryPlugin;
-use panel_lines::PanelLinePlugin;
+use panel_shapes::PanelShapePlugin;
 pub use panel_text::DiegeticTextBatch;
 pub use panel_text::DiegeticTextMut;
 pub use panel_text::PanelText;
@@ -361,7 +361,7 @@ impl Plugin for RenderPlugin {
             AnalyticPathPlugin,
             TextRenderPlugin,
             PanelGeometryPlugin,
-            PanelLinePlugin,
+            PanelShapePlugin,
         ))
         .init_resource::<AntiAlias>()
         .init_resource::<HairlineWidth>()

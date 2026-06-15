@@ -399,11 +399,11 @@ Implemented shared APIs are tracked in
   separate visible cube?
 - Should the example HUD support per-chip mouse-click activation (turn
   chips into buttons)?
-- Every `bevy_lagrange` example uses `sprinkle_example()`. Nine
-  `bevy_diegetic` examples still use raw `App::new()` (`sdf.rs`,
-  `side_by_side.rs`, `screen_space.rs`, `paper_sizes.rs`, `dimensions.rs`,
-  `sizes.rs`, `font_loading.rs`, `font_features.rs`,
-  `text_renderer_gpu_bench.rs`) — convert per this guide and drop manual
-  `add_plugins(DiegeticUiPlugin)` where conversion makes sense; `sdf` and
-  `side_by_side` were deliberately left raw during the shortcut migration,
-  so revisit that decision before converting them.
+- Every `bevy_lagrange` example uses `sprinkle_example()`. Eight
+  `bevy_diegetic` examples still use raw `App::new()` (`side_by_side.rs`,
+  `screen_space.rs`, `paper_sizes.rs`, `dimensions.rs`, `sizes.rs`,
+  `font_loading.rs`, `font_features.rs`, `text_renderer_gpu_bench.rs`) —
+  convert per this guide and drop manual `add_plugins(DiegeticUiPlugin)`
+  where conversion makes sense; `side_by_side` was deliberately left raw
+  during the shortcut migration, so revisit that decision before converting
+  it.

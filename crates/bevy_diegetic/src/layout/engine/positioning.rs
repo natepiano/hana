@@ -11,9 +11,10 @@ use crate::layout::Border;
 use crate::layout::BoundingBox;
 use crate::layout::Direction;
 use crate::layout::DrawOverflow;
-use crate::layout::PanelLinePaintOrder;
-use crate::layout::PanelLineSourceKey;
-use crate::layout::ResolvedPanelLine;
+use crate::layout::PanelShape;
+use crate::layout::PanelShapePaintOrder;
+use crate::layout::PanelShapeSourceKey;
+use crate::layout::ResolvedPanelShape;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
 use crate::layout::element::ChildOverflow;
@@ -22,8 +23,8 @@ use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
 use crate::layout::element::ScrollAnchor;
 use crate::layout::line;
-use crate::layout::line::PanelLineClipPolicy;
-use crate::layout::line::PanelLineResolveContext;
+use crate::layout::line::PanelShapeClipPolicy;
+use crate::layout::line::PanelShapeResolveContext;
 use crate::layout::render::RectangleSource;
 use crate::layout::render::RenderCommand;
 use crate::layout::render::RenderCommandKind;
@@ -239,7 +240,7 @@ fn emit_down_traversal_commands(
         );
     }
 
-    emit_line_commands(commands, counters, element, bounds, index, clip_context);
+    emit_shape_commands(commands, counters, element, bounds, index, clip_context);
 
     // Emit text render commands.
     if let ElementContent::Text {
@@ -268,7 +269,7 @@ fn emit_down_traversal_commands(
     }
 }
 
-fn emit_line_commands(
+fn emit_shape_commands(
     commands: &mut Vec<RenderCommand>,
     counters: &mut EmissionCounters,
     element: &Element,
@@ -279,7 +280,7 @@ fn emit_line_commands(
     let Some(panel_draw) = element.draw.as_ref() else {
         return;
     };
-    if panel_draw.lines_ref().is_empty() {
+    if panel_draw.shapes_ref().is_empty() {
         return;
     }
 
@@ -287,20 +288,20 @@ fn emit_line_commands(
     let (clip, clip_policy) = match panel_draw.overflow_policy() {
         DrawOverflow::Clipped => (
             Some(clip_context.inherited),
-            PanelLineClipPolicy::OwnerBounds,
+            PanelShapeClipPolicy::OwnerBounds,
         ),
-        DrawOverflow::Visible => (clip_context.scissor, PanelLineClipPolicy::Inherited),
+        DrawOverflow::Visible => (clip_context.scissor, PanelShapeClipPolicy::Inherited),
     };
     // The slot the Lines command below will occupy, so lines layer on the
     // same ordinal scale as the panel's other geometry.
-    let paint_order = PanelLinePaintOrder::Normal {
+    let paint_order = PanelShapePaintOrder::Normal {
         draw_slot: counters.draw_slot,
     };
 
     let mut lines = Vec::new();
-    for (line_ordinal, line) in panel_draw.lines_ref().iter().enumerate() {
-        let source_key = PanelLineSourceKey::element(index, 0, line_ordinal);
-        let context = PanelLineResolveContext::new(
+    for (shape_ordinal, shape) in panel_draw.shapes_ref().iter().enumerate() {
+        let source_key = PanelShapeSourceKey::element(index, 0, shape_ordinal);
+        let context = PanelShapeResolveContext::new(
             bounds,
             clip,
             clip_policy,
@@ -308,19 +309,23 @@ fn emit_line_commands(
             source_command_index,
             source_key,
         );
-        if let Some(resolved_line) = line::resolve_panel_line(line, context) {
+        let resolved = match shape {
+            PanelShape::Line(line) => line::resolve_panel_line(line, context),
+            PanelShape::Circle(circle) => line::resolve_panel_circle(circle, context),
+        };
+        if let Some(resolved_line) = resolved {
             lines.push(resolved_line);
         }
     }
 
-    let Some(command_bounds) = line_command_bounds(&lines) else {
+    let Some(command_bounds) = shape_command_bounds(&lines) else {
         return;
     };
     push_command(
         commands,
         counters,
         command_bounds,
-        RenderCommandKind::Lines { lines },
+        RenderCommandKind::Shapes { shapes: lines },
         index,
     );
 }
@@ -384,7 +389,7 @@ fn line_x_for_alignment(align: TextAlign, bounds: BoundingBox, line_width: f32) 
     }
 }
 
-fn line_command_bounds(lines: &[ResolvedPanelLine]) -> Option<BoundingBox> {
+fn shape_command_bounds(lines: &[ResolvedPanelShape]) -> Option<BoundingBox> {
     let mut iter = lines.iter();
     let first = iter.next()?.visual_bounds;
     Some(iter.fold(first, |bounds, line| {

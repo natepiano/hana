@@ -1,14 +1,12 @@
 //! Per-glyph overlay spawners: glyph bounding boxes, the "Bounding Box"
 //! callout, origin dots, and the advancement dimension arrow.
 
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
 
 use super::GlyphMetricVisibility;
 use super::pipeline::FontContext;
-use super::pipeline::OverlayAssets;
 use super::pipeline::OverlayContext;
 use super::scaling;
 use crate::callouts::CalloutCap;
@@ -28,12 +26,13 @@ use crate::layout::DrawOverflow;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
+use crate::layout::PanelCircle;
 use crate::layout::PanelDraw;
 use crate::layout::PanelLine;
 use crate::layout::PanelPoint;
+use crate::layout::PanelShape;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
-use crate::panel::SurfaceShadow;
 use crate::render::ComputedWorldText;
 use crate::render::HairlineFade;
 
@@ -81,7 +80,6 @@ pub(super) fn spawn_glyph_metric_guides(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
-    assets: &mut OverlayAssets<'_>,
 ) {
     spawn_glyph_box_panels(ctx, computed, BBOX_COLOR);
 
@@ -92,7 +90,7 @@ pub(super) fn spawn_glyph_metric_guides(
 
     // Origin dots + Advancement arrow below the first glyph.
     if !computed.glyphs.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        spawn_origin_and_advancement(ctx, font_context, computed, assets);
+        spawn_origin_and_advancement(ctx, font_context, computed);
     }
 }
 
@@ -304,7 +302,6 @@ fn spawn_origin_and_advancement(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
-    assets: &mut OverlayAssets<'_>,
 ) {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
     let z = CALLOUT_Z_OFFSET;
@@ -321,12 +318,19 @@ fn spawn_origin_and_advancement(
     );
 
     let origin_x = first.origin_x;
-    let origin_y = first.origin_y;
+    // The dots, brackets, and origin callout all anchor to the baseline. Sit
+    // them on the rendered baseline line, which `metric_guide_lines` centers
+    // half a stroke above the true baseline, so the red line bisects the dots.
+    let baseline_line_width =
+        scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
+    let origin_y = baseline_line_width.mul_add(
+        0.5,
+        scaling::layout_to_world_y(line_metrics.baseline, ctx.anchor_y, ctx.scale),
+    );
 
     // Origin dot — small filled circle at (origin, baseline).
-    spawn_overlay_dot(
+    spawn_dot_panel(
         ctx,
-        assets,
         dot_radius,
         Vec3::new(origin_x, origin_y, z),
         Color::WHITE,
@@ -370,9 +374,8 @@ fn spawn_origin_and_advancement(
 
     // Advancement end dot — filled circle at (origin + advance, baseline).
     let advance_end_x = origin_x + first.advance_x;
-    spawn_overlay_dot(
+    spawn_dot_panel(
         ctx,
-        assets,
         dot_radius,
         Vec3::new(advance_end_x, origin_y, z),
         Color::WHITE,
@@ -457,29 +460,48 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
     );
 }
 
-fn spawn_overlay_dot(
+/// Spawns a transparent world panel that draws one filled [`PanelCircle`] of
+/// `radius` centered at `position`. Pins [`HairlineFade::Full`] so the dot
+/// never fades with distance, matching [`spawn_guide_panel`].
+fn spawn_dot_panel(
     ctx: &mut OverlayContext<'_, '_, '_>,
-    assets: &mut OverlayAssets<'_>,
     radius: f32,
     position: Vec3,
     color: Color,
 ) {
-    let common = (
-        Mesh3d(assets.meshes.add(Circle::new(radius))),
-        MeshMaterial3d(assets.materials.add(StandardMaterial {
-            base_color: color,
-            unlit: true,
-            ..default()
-        })),
-        Transform::from_translation(position),
-    );
-    match ctx.overlay.surface_shadow {
-        SurfaceShadow::On => ctx.commands.entity(ctx.entity).with_child(common),
-        SurfaceShadow::Off => ctx
-            .commands
-            .entity(ctx.entity)
-            .with_child((common, NotShadowCaster)),
+    let size = radius * 2.0;
+    let tree = LayoutBuilder::with_root(
+        El::new()
+            .size(size, size)
+            .hairline_fade(HairlineFade::Full)
+            .draw(
+                PanelDraw::shapes([PanelShape::Circle(
+                    PanelCircle::new(PanelPoint::new(radius, radius), radius).color(color),
+                )])
+                .overflow(DrawOverflow::Visible),
+            ),
+    )
+    .build();
+
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+
+    let Ok(panel) = DiegeticPanel::world()
+        .size(size, size)
+        .anchor(Anchor::Center)
+        .surface_shadow(ctx.overlay.surface_shadow)
+        .material(material)
+        .with_tree(tree)
+        .build()
+    else {
+        return;
     };
+
+    ctx.commands
+        .entity(ctx.entity)
+        .with_child((panel, Transform::from_translation(position)));
 }
 
 /// Splits one line into dash segments. All dashes of the line stay in one

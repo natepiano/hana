@@ -48,7 +48,7 @@ pub struct DiegeticPerfStats {
     pub batch:          BatchPerfStats,
     /// Panel-line analytic path batch counters, written by
     /// `commit_panel_line_batch_buffers`.
-    pub line_batch:     PanelLineBatchPerfStats,
+    pub line_batch:     PanelShapeBatchPerfStats,
 }
 
 /// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
@@ -73,7 +73,7 @@ pub struct BatchPerfStats {
 
 /// Per-frame panel-line analytic path batch counters.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
-pub struct PanelLineBatchPerfStats {
+pub struct PanelShapeBatchPerfStats {
     /// Live vector-mark batch count.
     pub batches: usize,
     /// Analytic path instance records routed across all batches.

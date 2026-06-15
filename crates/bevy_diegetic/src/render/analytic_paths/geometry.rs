@@ -88,4 +88,47 @@ impl PathOutline {
             .map(|contour| contour.segments.len())
             .sum()
     }
+
+    /// Rescales the outline into a unit-scale frame (origin at `bounds.min`,
+    /// the longer extent mapped to `1.0`); returns the normalized outline and
+    /// the divided-out scale.
+    ///
+    /// At REFERENCE-scale coordinates (~1e6 design units) the shader field
+    /// normal `normalize(point - closest_point)` collapses to float32 round-off
+    /// and every grazing line waves. Unit-scale coordinates keep it exact. The
+    /// rebase runs in f64 so the f32 results carry full relative precision at
+    /// unit magnitude; coverage divides two distances, so the rescale cancels
+    /// out of the rendered result.
+    #[must_use]
+    pub fn normalized(self) -> (Self, f32) {
+        let extent = self.bounds.width().max(self.bounds.height());
+        if !extent.is_finite() || extent <= 0.0 {
+            return (self, 1.0);
+        }
+        let origin = self.bounds.min.as_dvec2();
+        let scale = f64::from(extent);
+        let rebase = |point: Vec2| ((point.as_dvec2() - origin) / scale).as_vec2();
+        let contours = self
+            .contours
+            .into_iter()
+            .map(|contour| PathContour {
+                segments:      contour
+                    .segments
+                    .into_iter()
+                    .map(|segment| QuadraticSegment {
+                        start:   rebase(segment.start),
+                        control: rebase(segment.control),
+                        end:     rebase(segment.end),
+                    })
+                    .collect(),
+                min_feature:   contour.min_feature / extent,
+                fade_exponent: contour.fade_exponent,
+            })
+            .collect();
+        let bounds = Bounds {
+            min: rebase(self.bounds.min),
+            max: rebase(self.bounds.max),
+        };
+        (Self { bounds, contours }, extent)
+    }
 }

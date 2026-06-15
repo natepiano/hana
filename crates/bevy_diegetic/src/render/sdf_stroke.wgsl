@@ -18,10 +18,20 @@ fn inflate_subpixel_half_size(
     return vec3<f32>(effective_half_size, coverage_scale);
 }
 
+// Exact screen-space footprint of a distance field: the L2 length of its
+// per-pixel change, length(vec2(dpdx(dist), dpdy(dist))). fwidth() returns
+// the L1 sum |dpdx| + |dpdy|, up to sqrt(2) larger when the gradient runs
+// diagonally in screen space. That surplus widens the corner anti-aliasing
+// band and over-covers corners at grazing angles. Axis-aligned edges, where
+// one derivative is near zero, are unchanged.
+fn distance_field_band(dist: f32) -> f32 {
+    return length(vec2<f32>(dpdx(dist), dpdy(dist)));
+}
+
 fn centered_stroke_alpha(outer_dist: f32, inner_dist: f32) -> f32 {
     let stroke_center = 0.5 * (outer_dist + inner_dist);
     let stroke_half_width = max(0.5 * (inner_dist - outer_dist), 0.0);
-    let stroke_aa = max(fwidth(stroke_center), 0.0001);
+    let stroke_aa = max(distance_field_band(stroke_center), 0.0001);
     let stroke_shape = 1.0 - smoothstep(
         stroke_half_width - stroke_aa,
         stroke_half_width + stroke_aa,

@@ -1,6 +1,7 @@
 //! Paint-only visual layers authored on layout elements.
 
 use super::PanelLine;
+use super::PanelShape;
 
 /// Paint-only primitives owned by one layout element.
 ///
@@ -14,7 +15,7 @@ pub struct PanelDraw {
 
 #[derive(Clone, Debug, PartialEq)]
 pub(super) enum PanelDrawKind {
-    Lines(Vec<PanelLine>),
+    Shapes(Vec<PanelShape>),
 }
 
 /// Whether a `PanelDraw` is clipped to the owning element.
@@ -28,11 +29,17 @@ pub enum DrawOverflow {
 }
 
 impl PanelDraw {
-    /// Creates a line draw layer.
+    /// Creates a draw layer from lines.
     #[must_use]
     pub fn lines(lines: impl IntoIterator<Item = PanelLine>) -> Self {
+        Self::shapes(lines.into_iter().map(PanelShape::Line))
+    }
+
+    /// Creates a draw layer from shapes (lines and filled forms).
+    #[must_use]
+    pub fn shapes(shapes: impl IntoIterator<Item = PanelShape>) -> Self {
         Self {
-            kind:     PanelDrawKind::Lines(lines.into_iter().collect()),
+            kind:     PanelDrawKind::Shapes(shapes.into_iter().collect()),
             overflow: DrawOverflow::Clipped,
         }
     }
@@ -48,11 +55,11 @@ impl PanelDraw {
     #[must_use]
     pub const fn overflow_policy(&self) -> DrawOverflow { self.overflow }
 
-    /// Returns the lines stored by this draw layer.
+    /// Returns the shapes stored by this draw layer.
     #[must_use]
-    pub fn lines_ref(&self) -> &[PanelLine] {
+    pub fn shapes_ref(&self) -> &[PanelShape] {
         match &self.kind {
-            PanelDrawKind::Lines(lines) => lines,
+            PanelDrawKind::Shapes(shapes) => shapes,
         }
     }
 
@@ -71,10 +78,10 @@ impl Default for PanelDraw {
 impl PanelDrawKind {
     fn scaled(&self, default_scale: f32) -> Self {
         match self {
-            Self::Lines(lines) => Self::Lines(
-                lines
+            Self::Shapes(shapes) => Self::Shapes(
+                shapes
                     .iter()
-                    .map(|line| line.scaled(default_scale))
+                    .map(|shape| shape.scaled(default_scale))
                     .collect(),
             ),
         }
@@ -96,7 +103,7 @@ mod tests {
         )]);
 
         assert_eq!(panel_draw.overflow_policy(), DrawOverflow::Clipped);
-        assert_eq!(panel_draw.lines_ref().len(), 1);
+        assert_eq!(panel_draw.shapes_ref().len(), 1);
     }
 
     #[test]
@@ -104,6 +111,6 @@ mod tests {
         let panel_draw = PanelDraw::default().overflow(DrawOverflow::Visible);
 
         assert_eq!(panel_draw.overflow_policy(), DrawOverflow::Visible);
-        assert!(panel_draw.lines_ref().is_empty());
+        assert!(panel_draw.shapes_ref().is_empty());
     }
 }

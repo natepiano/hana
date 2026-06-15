@@ -24,18 +24,18 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::path;
-use super::path::PanelLineMember;
-use super::path::PanelLinePathContext;
-use super::primitive::PanelLineRenderKey;
+use super::path::PanelShapeMember;
+use super::path::PanelShapePathContext;
+use super::primitive::PanelShapeRenderKey;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::layout::BoundingBox;
 use crate::layout::Lighting;
-use crate::layout::PanelLineSourceKey;
+use crate::layout::PanelShapeSourceKey;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
-use crate::layout::ResolvedPanelLine;
-use crate::layout::ResolvedPanelLinePrimitive;
+use crate::layout::ResolvedPanelShape;
+use crate::layout::ResolvedPanelShapePrimitive;
 use crate::layout::Sidedness;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -86,12 +86,12 @@ pub(super) struct DiegeticPanelLineBatch;
 /// panel-line lane so compatible marks can batch across panels and command
 /// indices.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct LineBatchKey {
+struct ShapeBatchKey {
     visual:              VisualBatchKey,
     material_depth_bias: u32,
 }
 
-impl LineBatchKey {
+impl ShapeBatchKey {
     const fn new(visual: VisualBatchKey, material_depth_bias: f32) -> Self {
         Self {
             visual,
@@ -104,7 +104,7 @@ impl LineBatchKey {
 
 /// GPU-side handles for one line path batch.
 #[derive(Debug)]
-struct LineBatchGpu {
+struct ShapeBatchGpu {
     instances:    Handle<ShaderBuffer>,
     run_table:    Handle<ShaderBuffer>,
     mesh:         Handle<Mesh>,
@@ -115,24 +115,24 @@ struct LineBatchGpu {
 
 /// One member primitive in a batch.
 #[derive(Debug)]
-struct LineBatchRecord {
-    key:      PanelLineRenderKey,
+struct ShapeBatchRecord {
+    key:      PanelShapeRenderKey,
     outline:  PathOutline,
     instance: GlyphInstanceRecord,
     run:      RunRecord,
 }
 
-/// One render entity + material + mesh per [`LineBatchKey`].
+/// One render entity + material + mesh per [`ShapeBatchKey`].
 #[derive(Debug, Default)]
-struct LineBatch {
+struct ShapeBatch {
     entity:        Option<Entity>,
-    gpu:           Option<LineBatchGpu>,
+    gpu:           Option<ShapeBatchGpu>,
     records_dirty: bool,
     bounds_dirty:  bool,
-    records:       Vec<LineBatchRecord>,
+    records:       Vec<ShapeBatchRecord>,
 }
 
-impl LineBatch {
+impl ShapeBatch {
     const fn is_empty(&self) -> bool { self.records.is_empty() }
 
     fn record_count(&self) -> u32 { self.records.len().to_u32() }
@@ -154,13 +154,13 @@ impl LineBatch {
         self.records.iter().map(|record| record.run).collect()
     }
 
-    fn push_record(&mut self, record: LineBatchRecord) {
+    fn push_record(&mut self, record: ShapeBatchRecord) {
         self.records.push(record);
         self.records_dirty = true;
         self.bounds_dirty = true;
     }
 
-    fn remove_record(&mut self, key: PanelLineRenderKey) {
+    fn remove_record(&mut self, key: PanelShapeRenderKey) {
         if let Some(index) = self.records.iter().position(|record| record.key == key) {
             self.records.remove(index);
             self.records_dirty = true;
@@ -189,17 +189,17 @@ impl LineBatch {
     }
 }
 
-/// Routes panel-line primitives into compatible cross-panel batches.
+/// Routes panel-shape primitives into compatible cross-panel batches.
 #[derive(Debug, Default, Resource)]
-pub(super) struct PanelLineBatchStore {
-    batches:     HashMap<LineBatchKey, LineBatch>,
-    panel_index: HashMap<Entity, Vec<(LineBatchKey, PanelLineRenderKey)>>,
+pub(super) struct PanelShapeBatchStore {
+    batches:     HashMap<ShapeBatchKey, ShapeBatch>,
+    panel_index: HashMap<Entity, Vec<(ShapeBatchKey, PanelShapeRenderKey)>>,
     interner:    VisualMaterialInterner,
-    atlas:       PathAtlas<PanelLineRenderKey>,
+    atlas:       PathAtlas<PanelShapeRenderKey>,
     atlas_dirty: bool,
 }
 
-impl PanelLineBatchStore {
+impl PanelShapeBatchStore {
     fn intern_base_material(&mut self, material: &StandardMaterial) -> BaseMaterialId {
         self.interner.intern_base_material(material)
     }
@@ -208,7 +208,7 @@ impl PanelLineBatchStore {
         self.interner.base_material(id)
     }
 
-    fn upsert_panel(&mut self, panel: Entity, records: Vec<(LineBatchKey, LineBatchRecord)>) {
+    fn upsert_panel(&mut self, panel: Entity, records: Vec<(ShapeBatchKey, ShapeBatchRecord)>) {
         self.remove_panel(panel);
         if !records.is_empty() {
             self.atlas_dirty = true;
@@ -242,7 +242,7 @@ impl PanelLineBatchStore {
         if !self.atlas_dirty {
             return;
         }
-        let paths: Vec<(PanelLineRenderKey, PathOutline)> = self
+        let paths: Vec<(PanelShapeRenderKey, PathOutline)> = self
             .batches
             .values()
             .flat_map(|batch| {
@@ -291,7 +291,7 @@ impl PanelLineBatchStore {
     }
 
     fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<LineBatchKey> = self
+        let empty: Vec<ShapeBatchKey> = self
             .batches
             .iter()
             .filter(|(_, batch)| batch.is_empty())
@@ -308,24 +308,24 @@ impl PanelLineBatchStore {
         entities
     }
 
-    fn batches(&self) -> impl Iterator<Item = (&LineBatchKey, &LineBatch)> { self.batches.iter() }
+    fn batches(&self) -> impl Iterator<Item = (&ShapeBatchKey, &ShapeBatch)> { self.batches.iter() }
 
-    fn batches_mut(&mut self) -> impl Iterator<Item = (&LineBatchKey, &mut LineBatch)> {
+    fn batches_mut(&mut self) -> impl Iterator<Item = (&ShapeBatchKey, &mut ShapeBatch)> {
         self.batches.iter_mut()
     }
 
-    fn get(&self, key: &LineBatchKey) -> Option<&LineBatch> { self.batches.get(key) }
+    fn get(&self, key: &ShapeBatchKey) -> Option<&ShapeBatch> { self.batches.get(key) }
 
-    fn get_mut(&mut self, key: &LineBatchKey) -> Option<&mut LineBatch> {
+    fn get_mut(&mut self, key: &ShapeBatchKey) -> Option<&mut ShapeBatch> {
         self.batches.get_mut(key)
     }
 }
 
-struct PanelLineReconcileContext<'a> {
+struct PanelShapeReconcileContext<'a> {
     panel_entity:        Entity,
     panel:               &'a DiegeticPanel,
     panel_transform:     Mat4,
-    path_context:        PanelLinePathContext,
+    path_context:        PanelShapePathContext,
     shadow:              VisualShadow,
     layers:              BatchRenderLayers,
     /// The panel entity's cascade-resolved lighting mode; every line on the
@@ -342,15 +342,15 @@ struct PanelLineReconcileContext<'a> {
     panel_hairline_fade: HairlineFade,
 }
 
-struct LinePrimitiveSource<'a> {
+struct ShapePrimitiveSource<'a> {
     element_index: usize,
-    line:          &'a ResolvedPanelLine,
-    primitive:     &'a ResolvedPanelLinePrimitive,
+    line:          &'a ResolvedPanelShape,
+    primitive:     &'a ResolvedPanelShapePrimitive,
 }
 
 struct BuiltPanelLinePrimitive {
-    batch_key: LineBatchKey,
-    record:    LineBatchRecord,
+    batch_key: ShapeBatchKey,
+    record:    ShapeBatchRecord,
 }
 
 /// Same-silhouette grouping key: primitives that agree on everything that
@@ -366,8 +366,8 @@ struct LineMergeKey {
     layering:      [u32; 2],
 }
 
-impl From<&LinePrimitiveSource<'_>> for LineMergeKey {
-    fn from(source: &LinePrimitiveSource<'_>) -> Self {
+impl From<&ShapePrimitiveSource<'_>> for LineMergeKey {
+    fn from(source: &ShapePrimitiveSource<'_>) -> Self {
         let linear = source.primitive.color().to_linear();
         let layering = source.line.layering();
         Self {
@@ -400,9 +400,9 @@ const fn bounding_box_bits(bounds: BoundingBox) -> [u32; 4] {
 /// Splits the primitive list into merge groups, preserving first-occurrence
 /// order so group identities stay stable across reconciles.
 fn group_line_primitives<'a>(
-    sources: Vec<LinePrimitiveSource<'a>>,
-) -> Vec<Vec<LinePrimitiveSource<'a>>> {
-    let mut groups: Vec<Vec<LinePrimitiveSource<'a>>> = Vec::new();
+    sources: Vec<ShapePrimitiveSource<'a>>,
+) -> Vec<Vec<ShapePrimitiveSource<'a>>> {
+    let mut groups: Vec<Vec<ShapePrimitiveSource<'a>>> = Vec::new();
     let mut group_indices: HashMap<LineMergeKey, usize> = HashMap::new();
     for source in sources {
         let key = LineMergeKey::from(&source);
@@ -449,7 +449,7 @@ pub(super) fn reconcile_panel_line_batches(
     sidedness_default: Res<CascadeDefault<Sidedness>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
-    mut store: ResMut<PanelLineBatchStore>,
+    mut store: ResMut<PanelShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<TextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
@@ -482,11 +482,11 @@ pub(super) fn reconcile_panel_line_batches(
         }
 
         let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let context = PanelLineReconcileContext {
+        let context = PanelShapeReconcileContext {
             panel_entity,
             panel,
             panel_transform: panel_transform.to_matrix(),
-            path_context: PanelLinePathContext {
+            path_context: PanelShapePathContext {
                 points_to_world: panel.points_to_world(),
                 anchor_x,
                 anchor_y,
@@ -521,26 +521,26 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
 }
 
 fn collect_panel_records(
-    context: &PanelLineReconcileContext<'_>,
+    context: &PanelShapeReconcileContext<'_>,
     render_commands: &[RenderCommand],
-    store: &mut PanelLineBatchStore,
-) -> Vec<(LineBatchKey, LineBatchRecord)> {
-    group_line_primitives(collect_line_primitives(render_commands))
+    store: &mut PanelShapeBatchStore,
+) -> Vec<(ShapeBatchKey, ShapeBatchRecord)> {
+    group_line_primitives(collect_shape_primitives(render_commands))
         .into_iter()
         .filter_map(|group| build_panel_line_group(context, group, store))
         .map(|built| (built.batch_key, built.record))
         .collect()
 }
 
-fn collect_line_primitives(render_commands: &[RenderCommand]) -> Vec<LinePrimitiveSource<'_>> {
+fn collect_shape_primitives(render_commands: &[RenderCommand]) -> Vec<ShapePrimitiveSource<'_>> {
     let mut primitives = Vec::new();
     for command in render_commands {
-        let RenderCommandKind::Lines { lines } = &command.kind else {
+        let RenderCommandKind::Shapes { shapes: lines } = &command.kind else {
             continue;
         };
         for line in lines {
             for primitive in line.primitives() {
-                primitives.push(LinePrimitiveSource {
+                primitives.push(ShapePrimitiveSource {
                     element_index: command.element_idx,
                     line,
                     primitive,
@@ -552,11 +552,11 @@ fn collect_line_primitives(render_commands: &[RenderCommand]) -> Vec<LinePrimiti
 }
 
 fn build_panel_line_group(
-    context: &PanelLineReconcileContext<'_>,
-    group: Vec<LinePrimitiveSource<'_>>,
-    store: &mut PanelLineBatchStore,
+    context: &PanelShapeReconcileContext<'_>,
+    group: Vec<ShapePrimitiveSource<'_>>,
+    store: &mut PanelShapeBatchStore,
 ) -> Option<BuiltPanelLinePrimitive> {
-    let members: Vec<&LinePrimitiveSource<'_>> = group
+    let members: Vec<&ShapePrimitiveSource<'_>> = group
         .iter()
         .filter(|source| !clipped_out(source.primitive.bounds(), source.primitive.clip()))
         .collect();
@@ -570,9 +570,9 @@ fn build_panel_line_group(
         .tree()
         .element_hairline_fade(first.element_index)
         .unwrap_or(context.panel_hairline_fade);
-    let path_members: Vec<PanelLineMember<'_>> = members
+    let path_members: Vec<PanelShapeMember<'_>> = members
         .iter()
-        .map(|source| PanelLineMember {
+        .map(|source| PanelShapeMember {
             primitive:     source.primitive,
             fade_exponent: source
                 .line
@@ -581,7 +581,7 @@ fn build_panel_line_group(
                 .fade_exponent(),
         })
         .collect();
-    let path = path::build_panel_line_path(
+    let path = path::build_panel_shape_path(
         &path_members,
         first.line.owner_bounds(),
         first.primitive.clip(),
@@ -611,8 +611,8 @@ fn build_panel_line_group(
         shadow: context.shadow,
         layers: context.layers.clone(),
     };
-    let batch_key = LineBatchKey::new(visual, constants::BATCH_PANEL_LINE_DEPTH_BIAS);
-    let key = PanelLineRenderKey {
+    let batch_key = ShapeBatchKey::new(visual, constants::BATCH_PANEL_LINE_DEPTH_BIAS);
+    let key = PanelShapeRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
     };
@@ -642,7 +642,7 @@ fn build_panel_line_group(
     };
     Some(BuiltPanelLinePrimitive {
         batch_key,
-        record: LineBatchRecord {
+        record: ShapeBatchRecord {
             key,
             outline: path.outline,
             instance,
@@ -651,7 +651,7 @@ fn build_panel_line_group(
     })
 }
 
-fn primitive_depth_bias(line: &ResolvedPanelLine, primitive: &ResolvedPanelLinePrimitive) -> f32 {
+fn primitive_depth_bias(line: &ResolvedPanelShape, primitive: &ResolvedPanelShapePrimitive) -> f32 {
     let line_depth = line_depth_order(line).to_f32().mul_add(
         PANEL_LINE_LINE_DEPTH_BIAS_STEP,
         line.layering().depth_bias(),
@@ -663,8 +663,8 @@ fn primitive_depth_bias(line: &ResolvedPanelLine, primitive: &ResolvedPanelLineP
 }
 
 fn primitive_oit_depth_offset(
-    line: &ResolvedPanelLine,
-    primitive: &ResolvedPanelLinePrimitive,
+    line: &ResolvedPanelShape,
+    primitive: &ResolvedPanelShapePrimitive,
 ) -> f32 {
     let line_depth = line_depth_order(line).to_f32().mul_add(
         PANEL_LINE_LINE_OIT_DEPTH_STEP,
@@ -676,10 +676,10 @@ fn primitive_oit_depth_offset(
         .mul_add(PANEL_LINE_PART_OIT_DEPTH_STEP, line_depth)
 }
 
-const fn line_depth_order(line: &ResolvedPanelLine) -> usize {
+const fn line_depth_order(line: &ResolvedPanelShape) -> usize {
     match line.source_key() {
-        PanelLineSourceKey::Element { line_ordinal, .. }
-        | PanelLineSourceKey::External { line_ordinal, .. } => line_ordinal,
+        PanelShapeSourceKey::Element { line_ordinal, .. }
+        | PanelShapeSourceKey::External { line_ordinal, .. } => line_ordinal,
     }
 }
 
@@ -690,7 +690,7 @@ fn clipped_out(bounds: BoundingBox, clip: Option<BoundingBox>) -> bool {
 fn reconcile_batch_entities(
     atlas: Option<&GlyphAtlasHandles>,
     anti_alias: AntiAlias,
-    store: &mut PanelLineBatchStore,
+    store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<TextMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -732,10 +732,10 @@ fn reconcile_batch_entities(
 }
 
 fn spawn_batch_entity(
-    key: &LineBatchKey,
+    key: &ShapeBatchKey,
     atlas: &GlyphAtlasHandles,
     anti_alias: AntiAlias,
-    store: &mut PanelLineBatchStore,
+    store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<TextMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -755,7 +755,7 @@ fn spawn_batch_entity(
         run_capacity,
     )));
     let mesh = meshes.add(inert_line_batch_mesh(capacity));
-    let material = materials.add(line_batch_material(LineBatchMaterialInput {
+    let material = materials.add(line_batch_material(ShapeBatchMaterialInput {
         base: store.base_material(key.visual.base_material).clone(),
         key,
         atlas,
@@ -778,7 +778,7 @@ fn spawn_batch_entity(
 
     if let Some(batch) = store.get_mut(key) {
         batch.entity = Some(entity);
-        batch.gpu = Some(LineBatchGpu {
+        batch.gpu = Some(ShapeBatchGpu {
             instances,
             run_table,
             mesh,
@@ -791,8 +791,8 @@ fn spawn_batch_entity(
 }
 
 fn grow_batch_assets(
-    key: &LineBatchKey,
-    store: &mut PanelLineBatchStore,
+    key: &ShapeBatchKey,
+    store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<TextMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -851,7 +851,7 @@ fn grow_batch_assets(
 }
 
 pub(super) fn update_panel_line_batch_bounds(
-    mut store: ResMut<PanelLineBatchStore>,
+    mut store: ResMut<PanelShapeBatchStore>,
     mut batch_entities: Query<
         (&mut Transform, &mut GlobalTransform, &mut Aabb),
         With<DiegeticPanelLineBatch>,
@@ -882,7 +882,7 @@ pub(super) fn update_panel_line_batch_bounds(
 }
 
 pub(super) fn commit_panel_line_batch_buffers(
-    mut store: ResMut<PanelLineBatchStore>,
+    mut store: ResMut<PanelShapeBatchStore>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
@@ -972,17 +972,17 @@ fn inert_line_batch_mesh(capacity: u32) -> Mesh {
     mesh
 }
 
-struct LineBatchMaterialInput<'a> {
+struct ShapeBatchMaterialInput<'a> {
     base:       StandardMaterial,
-    key:        &'a LineBatchKey,
+    key:        &'a ShapeBatchKey,
     atlas:      &'a GlyphAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
     anti_alias: AntiAlias,
 }
 
-fn line_batch_material(input: LineBatchMaterialInput<'_>) -> TextMaterial {
-    let LineBatchMaterialInput {
+fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> TextMaterial {
+    let ShapeBatchMaterialInput {
         mut base,
         key,
         atlas,
@@ -1025,11 +1025,11 @@ mod tests {
     use crate::cascade::CascadeSet;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
-    use crate::layout::PanelLineLayering;
-    use crate::layout::PanelLinePaintOrder;
-    use crate::layout::PanelLinePrimitiveGeometry;
-    use crate::layout::PanelLinePrimitiveKey;
-    use crate::layout::PanelLinePrimitiveKind;
+    use crate::layout::PanelShapeLayering;
+    use crate::layout::PanelShapePaintOrder;
+    use crate::layout::PanelShapePrimitiveGeometry;
+    use crate::layout::PanelShapePrimitiveKey;
+    use crate::layout::PanelShapePrimitiveKind;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::panel::HeadlessLayoutPlugin;
@@ -1059,7 +1059,7 @@ mod tests {
             .add_plugins(CascadePlugin::<Sidedness>::default())
             .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
-            .init_resource::<PanelLineBatchStore>()
+            .init_resource::<PanelShapeBatchStore>()
             .init_asset::<Mesh>()
             .init_asset::<TextMaterial>()
             .init_asset::<ShaderBuffer>()
@@ -1084,7 +1084,7 @@ mod tests {
     /// Per record: the run's AA flags and the packed outline's fade exponent
     /// (fade is per-curve data carried by the record's contours, not a run
     /// field).
-    fn sorted_run_fields(store: &PanelLineBatchStore) -> Vec<(u32, u32)> {
+    fn sorted_run_fields(store: &PanelShapeBatchStore) -> Vec<(u32, u32)> {
         let mut fields: Vec<(u32, u32)> = store
             .batches()
             .flat_map(|(_, batch)| &batch.records)
@@ -1135,7 +1135,7 @@ mod tests {
         }
 
         {
-            let store = app.world().resource::<PanelLineBatchStore>();
+            let store = app.world().resource::<PanelShapeBatchStore>();
             assert_eq!(
                 store.batches().count(),
                 1,
@@ -1160,7 +1160,7 @@ mod tests {
             app.update();
         }
 
-        let store = app.world().resource::<PanelLineBatchStore>();
+        let store = app.world().resource::<PanelShapeBatchStore>();
         assert_eq!(
             sorted_run_fields(store),
             vec![
@@ -1214,7 +1214,7 @@ mod tests {
                 app.update();
             }
 
-            let store = app.world().resource::<PanelLineBatchStore>();
+            let store = app.world().resource::<PanelShapeBatchStore>();
             let stale_records: Vec<Entity> = store
                 .batches()
                 .flat_map(|(_, batch)| &batch.records)
@@ -1238,7 +1238,7 @@ mod tests {
             );
         }
 
-        let store = app.world().resource::<PanelLineBatchStore>();
+        let store = app.world().resource::<PanelShapeBatchStore>();
         let record_count: usize = store.batches().map(|(_, batch)| batch.records.len()).sum();
         assert_eq!(
             record_count, 1,
@@ -1262,7 +1262,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_line_primitives_preserves_resolved_line_clip() {
+    fn collect_shape_primitives_preserves_resolved_line_clip() {
         let inherited_clip = BoundingBox {
             x:      0.0,
             y:      0.0,
@@ -1275,11 +1275,11 @@ mod tests {
             width:  10.0,
             height: 10.0,
         };
-        let source_key = PanelLineSourceKey::element(1, 0, 0);
-        let primitive = ResolvedPanelLinePrimitive {
-            source_key: PanelLinePrimitiveKey::new(source_key, 0),
-            kind:       PanelLinePrimitiveKind::Segment,
-            geometry:   PanelLinePrimitiveGeometry::Segment {
+        let source_key = PanelShapeSourceKey::element(1, 0, 0);
+        let primitive = ResolvedPanelShapePrimitive {
+            source_key: PanelShapePrimitiveKey::new(source_key, 0),
+            kind:       PanelShapePrimitiveKind::Segment,
+            geometry:   PanelShapePrimitiveGeometry::Segment {
                 start: Vec2::new(0.0, 0.0),
                 end:   Vec2::new(50.0, 0.0),
                 width: 2.0,
@@ -1295,14 +1295,14 @@ mod tests {
             part_order: 0,
         };
         let primitive_bounds = primitive.bounds();
-        let line = ResolvedPanelLine {
+        let line = ResolvedPanelShape {
             source_key,
             source_command_index: 0,
             owner_bounds: owner_clip,
             visual_bounds: primitive_bounds,
             clip: Some(inherited_clip),
-            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
-            layering: PanelLineLayering {
+            paint_order: PanelShapePaintOrder::Normal { draw_slot: 0 },
+            layering: PanelShapeLayering {
                 depth_bias:       0.0,
                 oit_depth_offset: 0.0,
             },
@@ -1318,11 +1318,11 @@ mod tests {
         let commands = vec![RenderCommand {
             bounds:      primitive_bounds,
             element_idx: 1,
-            kind:        RenderCommandKind::Lines { lines: vec![line] },
+            kind:        RenderCommandKind::Shapes { shapes: vec![line] },
             draw_slot:   0,
         }];
 
-        let collected = collect_line_primitives(&commands);
+        let collected = collect_shape_primitives(&commands);
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].primitive.clip(), Some(inherited_clip));
@@ -1330,7 +1330,7 @@ mod tests {
 
     #[test]
     fn two_panels_with_same_key_share_one_line_batch() {
-        let mut store = PanelLineBatchStore::default();
+        let mut store = PanelShapeBatchStore::default();
         let key = test_batch_key(&mut store);
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -1345,12 +1345,12 @@ mod tests {
         );
 
         assert_eq!(store.batches().count(), 1);
-        assert_eq!(store.get(&key).map(LineBatch::record_count), Some(2));
+        assert_eq!(store.get(&key).map(ShapeBatch::record_count), Some(2));
     }
 
     #[test]
     fn removing_a_panel_removes_only_its_line_records() {
-        let mut store = PanelLineBatchStore::default();
+        let mut store = PanelShapeBatchStore::default();
         let key = test_batch_key(&mut store);
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -1366,12 +1366,12 @@ mod tests {
 
         store.remove_panel(first_panel);
 
-        assert_eq!(store.get(&key).map(LineBatch::record_count), Some(1));
+        assert_eq!(store.get(&key).map(ShapeBatch::record_count), Some(1));
     }
 
     #[test]
     fn atlas_rebuild_compacts_surviving_panel_line_paths() {
-        let mut store = PanelLineBatchStore::default();
+        let mut store = PanelShapeBatchStore::default();
         let key = test_batch_key(&mut store);
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -1410,7 +1410,7 @@ mod tests {
 
     #[test]
     fn line_batch_bounds_use_instance_rects_and_run_transforms() {
-        let mut batch = LineBatch::default();
+        let mut batch = ShapeBatch::default();
         let mut record = test_batch_record(Entity::from_bits(1), 0);
         record.instance.rect_min = Vec2::new(1.0, 2.0);
         record.instance.rect_size = Vec2::new(3.0, 4.0);
@@ -1425,10 +1425,10 @@ mod tests {
         );
     }
 
-    fn test_batch_key(store: &mut PanelLineBatchStore) -> LineBatchKey {
+    fn test_batch_key(store: &mut PanelShapeBatchStore) -> ShapeBatchKey {
         let base = StandardMaterial::default();
         let base_material = store.intern_base_material(&base);
-        LineBatchKey::new(
+        ShapeBatchKey::new(
             VisualBatchKey {
                 base_material,
                 alpha: BatchAlphaMode::Blend,
@@ -1441,12 +1441,12 @@ mod tests {
         )
     }
 
-    fn test_batch_record(panel: Entity, primitive_ordinal: usize) -> LineBatchRecord {
-        LineBatchRecord {
-            key:      PanelLineRenderKey {
+    fn test_batch_record(panel: Entity, primitive_ordinal: usize) -> ShapeBatchRecord {
+        ShapeBatchRecord {
+            key:      PanelShapeRenderKey {
                 panel,
-                source: PanelLinePrimitiveKey::new(
-                    PanelLineSourceKey::element(primitive_ordinal, 0, 0),
+                source: PanelShapePrimitiveKey::new(
+                    PanelShapeSourceKey::element(primitive_ordinal, 0, 0),
                     0,
                 ),
             },
@@ -1505,12 +1505,12 @@ mod tests {
         }
     }
 
-    fn test_line(line_ordinal: usize) -> ResolvedPanelLine {
-        let source_key = PanelLineSourceKey::element(0, 0, line_ordinal);
-        let primitive = ResolvedPanelLinePrimitive {
-            source_key: PanelLinePrimitiveKey::new(source_key, 0),
-            kind:       PanelLinePrimitiveKind::Segment,
-            geometry:   PanelLinePrimitiveGeometry::Segment {
+    fn test_line(line_ordinal: usize) -> ResolvedPanelShape {
+        let source_key = PanelShapeSourceKey::element(0, 0, line_ordinal);
+        let primitive = ResolvedPanelShapePrimitive {
+            source_key: PanelShapePrimitiveKey::new(source_key, 0),
+            kind:       PanelShapePrimitiveKind::Segment,
+            geometry:   PanelShapePrimitiveGeometry::Segment {
                 start: Vec2::ZERO,
                 end:   Vec2::X,
                 width: 1.0,
@@ -1525,7 +1525,7 @@ mod tests {
             clip:       None,
             part_order: 0,
         };
-        ResolvedPanelLine {
+        ResolvedPanelShape {
             source_key,
             source_command_index: 0,
             owner_bounds: BoundingBox {
@@ -1536,8 +1536,8 @@ mod tests {
             },
             visual_bounds: primitive.bounds(),
             clip: None,
-            paint_order: PanelLinePaintOrder::Normal { draw_slot: 0 },
-            layering: PanelLineLayering {
+            paint_order: PanelShapePaintOrder::Normal { draw_slot: 0 },
+            layering: PanelShapeLayering {
                 depth_bias:       0.0,
                 oit_depth_offset: 0.0,
             },

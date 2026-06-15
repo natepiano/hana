@@ -6,7 +6,7 @@ use bevy::image::Image;
 
 use super::Border;
 use super::BoundingBox;
-use super::ResolvedPanelLine;
+use super::ResolvedPanelShape;
 use super::TextStyle;
 
 /// A single render command produced by the layout pass.
@@ -25,7 +25,7 @@ pub struct RenderCommand {
     ///
     /// Slot-consuming kinds ([`Rectangle`](RenderCommandKind::Rectangle),
     /// [`Border`](RenderCommandKind::Border), [`Image`](RenderCommandKind::Image),
-    /// [`Lines`](RenderCommandKind::Lines)) each occupy one slot in emission
+    /// [`Shapes`](RenderCommandKind::Shapes)) each occupy one slot in emission
     /// order. `Text` and scissor commands record the next slot without
     /// consuming it, so text-heavy panels don't inflate later geometry
     /// ordinals toward the default draw layer.
@@ -75,9 +75,9 @@ pub enum RenderCommandKind {
         tint:   Color,
     },
     /// Resolved panel-local line primitives.
-    Lines {
+    Shapes {
         /// Resolved lines to render as one command group.
-        lines: Vec<ResolvedPanelLine>,
+        shapes: Vec<ResolvedPanelShape>,
     },
     /// Begin a clipping region. All subsequent commands until the matching
     /// [`ScissorEnd`](Self::ScissorEnd) are clipped to this bounding box.
@@ -96,7 +96,7 @@ impl RenderCommandKind {
             Self::Rectangle { .. }
             | Self::Border { .. }
             | Self::Image { .. }
-            | Self::Lines { .. } => true,
+            | Self::Shapes { .. } => true,
             Self::Text { .. } | Self::ScissorStart | Self::ScissorEnd => false,
         }
     }

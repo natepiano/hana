@@ -6,9 +6,9 @@ use bevy::math::Vec2;
 use bevy_kana::ToF32;
 
 use crate::layout::BoundingBox;
-use crate::layout::PanelLinePrimitiveGeometry;
-use crate::layout::PanelLinePrimitiveKind;
-use crate::layout::ResolvedPanelLinePrimitive;
+use crate::layout::PanelShapePrimitiveGeometry;
+use crate::layout::PanelShapePrimitiveKind;
+use crate::layout::ResolvedPanelShapePrimitive;
 use crate::layout::Unit;
 use crate::render::Bounds;
 use crate::render::PathContour;
@@ -36,14 +36,14 @@ const PANEL_LINE_PADDING_DESIGN_UNITS: f32 = 16.0;
 const PANEL_LINE_AA_PADDING_WORLD: f32 = 0.01;
 
 /// Panel-local conversion values shared by every primitive from one panel.
-pub(super) struct PanelLinePathContext {
+pub(super) struct PanelShapePathContext {
     pub points_to_world: f32,
     pub anchor_x:        f32,
     pub anchor_y:        f32,
 }
 
 /// Renderer-owned path data and the clipped instance quad for one primitive.
-pub(super) struct PanelLinePath {
+pub(super) struct PanelShapePath {
     pub outline:   PathOutline,
     pub rect_min:  Vec2,
     pub rect_size: Vec2,
@@ -54,8 +54,8 @@ pub(super) struct PanelLinePath {
 /// One merge-group member: a resolved primitive plus its resolved hairline
 /// fade exponent (line override else element/panel resolution, encoded by
 /// [`HairlineFade::fade_exponent`](crate::HairlineFade::fade_exponent)).
-pub(super) struct PanelLineMember<'a> {
-    pub primitive:     &'a ResolvedPanelLinePrimitive,
+pub(super) struct PanelShapeMember<'a> {
+    pub primitive:     &'a ResolvedPanelShapePrimitive,
     pub fade_exponent: f32,
 }
 
@@ -75,12 +75,12 @@ struct MemberContour {
 /// keeps its own stroke width for per-curve hairline dilation and its own
 /// fade exponent, so fading and non-fading members coexist in the merged
 /// path.
-pub(super) fn build_panel_line_path(
-    members: &[PanelLineMember<'_>],
+pub(super) fn build_panel_shape_path(
+    members: &[PanelShapeMember<'_>],
     owner_bounds: BoundingBox,
     clip: Option<BoundingBox>,
-    context: &PanelLinePathContext,
-) -> Option<PanelLinePath> {
+    context: &PanelShapePathContext,
+) -> Option<PanelShapePath> {
     let contours: Vec<MemberContour> = members
         .iter()
         .filter_map(|member| member_contour(member, context))
@@ -90,7 +90,7 @@ pub(super) fn build_panel_line_path(
     let (rect_min, rect_size, uv_min, uv_size) =
         clipped_instance(translation, clip, owner_bounds, context)?;
     let outline = local_design_outline(contours, translation);
-    Some(PanelLinePath {
+    Some(PanelShapePath {
         outline,
         rect_min,
         rect_size,
@@ -102,15 +102,15 @@ pub(super) fn build_panel_line_path(
 /// One member's panel-space contour, world-unit narrowest stroke, and fade
 /// exponent.
 fn member_contour(
-    member: &PanelLineMember<'_>,
-    context: &PanelLinePathContext,
+    member: &PanelShapeMember<'_>,
+    context: &PanelShapePathContext,
 ) -> Option<MemberContour> {
     let (segments, min_feature) = match member.primitive.geometry() {
-        PanelLinePrimitiveGeometry::Segment { start, end, width } => (
+        PanelShapePrimitiveGeometry::Segment { start, end, width } => (
             segment_contour(start, end, width, context)?,
             width * context.points_to_world,
         ),
-        PanelLinePrimitiveGeometry::Form {
+        PanelShapePrimitiveGeometry::Form {
             center,
             axis,
             half_size,
@@ -139,7 +139,7 @@ fn segment_contour(
     start: Vec2,
     end: Vec2,
     width: f32,
-    context: &PanelLinePathContext,
+    context: &PanelShapePathContext,
 ) -> Option<Vec<QuadraticSegment>> {
     let start = layout_point_to_panel(start, context);
     let end = layout_point_to_panel(end, context);
@@ -158,11 +158,11 @@ fn segment_contour(
 }
 
 fn form_contour(
-    kind: PanelLinePrimitiveKind,
+    kind: PanelShapePrimitiveKind,
     center: Vec2,
     axis: Vec2,
     half_size: Vec2,
-    context: &PanelLinePathContext,
+    context: &PanelShapePathContext,
 ) -> Option<Vec<QuadraticSegment>> {
     if half_size.x <= 0.0 || half_size.y <= 0.0 {
         return None;
@@ -171,20 +171,20 @@ fn form_contour(
     let axis = layout_axis_to_panel(axis)?;
     let normal = perp(axis);
     match kind {
-        PanelLinePrimitiveKind::Segment => None,
-        PanelLinePrimitiveKind::Triangle => Some(polygon_segments(&[
+        PanelShapePrimitiveKind::Segment => None,
+        PanelShapePrimitiveKind::Triangle => Some(polygon_segments(&[
             center + axis * half_size.x,
             center - axis * half_size.x + normal * half_size.y,
             center - axis * half_size.x - normal * half_size.y,
         ])),
-        PanelLinePrimitiveKind::Circle => Some(ellipse_segments(center, axis, normal, half_size)),
-        PanelLinePrimitiveKind::Square => Some(polygon_segments(&[
+        PanelShapePrimitiveKind::Circle => Some(ellipse_segments(center, axis, normal, half_size)),
+        PanelShapePrimitiveKind::Square => Some(polygon_segments(&[
             center - axis * half_size.x - normal * half_size.y,
             center + axis * half_size.x - normal * half_size.y,
             center + axis * half_size.x + normal * half_size.y,
             center - axis * half_size.x + normal * half_size.y,
         ])),
-        PanelLinePrimitiveKind::Diamond => Some(polygon_segments(&[
+        PanelShapePrimitiveKind::Diamond => Some(polygon_segments(&[
             center + axis * half_size.x,
             center + normal * half_size.y,
             center - axis * half_size.x,
@@ -336,7 +336,7 @@ fn clipped_instance(
     translation: PathTranslation,
     clip: Option<BoundingBox>,
     owner_bounds: BoundingBox,
-    context: &PanelLinePathContext,
+    context: &PanelShapePathContext,
 ) -> Option<(Vec2, Vec2, Vec2, Vec2)> {
     let mut rect = PanelRect {
         min: translation.padded_bounds.min,
@@ -372,7 +372,7 @@ fn clipped_instance(
 const CLIP_EDGE_EPSILON: f32 = 0.001;
 
 /// Converts the resolved clip to panel space, granting AA fringe room on the
-/// edges the owner element contributed. `PanelLineClipPolicy::OwnerBounds`
+/// edges the owner element contributed. `PanelShapeClipPolicy::OwnerBounds`
 /// clips every draw line to its owner element, and a tightly-fitting element
 /// (the ruler spine's 0.2mm column) leaves the instance quad no padding — the
 /// anti-aliasing ramp is cut at the stroke edge and subpixel strokes stop
@@ -382,7 +382,7 @@ fn inflated_clip_rect(
     clip: BoundingBox,
     owner_bounds: BoundingBox,
     translation: PathTranslation,
-    context: &PanelLinePathContext,
+    context: &PanelShapePathContext,
 ) -> PanelRect {
     let mut rect = clip_rect_to_panel(clip, context);
     let padding = world_padding(translation.design_units_per_world);
@@ -405,7 +405,7 @@ fn inflated_clip_rect(
     rect
 }
 
-fn clip_rect_to_panel(clip: BoundingBox, context: &PanelLinePathContext) -> PanelRect {
+fn clip_rect_to_panel(clip: BoundingBox, context: &PanelShapePathContext) -> PanelRect {
     let left = clip.x.mul_add(context.points_to_world, -context.anchor_x);
     let right = (clip.x + clip.width).mul_add(context.points_to_world, -context.anchor_x);
     let top = -(clip.y.mul_add(context.points_to_world, -context.anchor_y));
@@ -416,7 +416,7 @@ fn clip_rect_to_panel(clip: BoundingBox, context: &PanelLinePathContext) -> Pane
     }
 }
 
-fn layout_point_to_panel(point: Vec2, context: &PanelLinePathContext) -> Vec2 {
+fn layout_point_to_panel(point: Vec2, context: &PanelShapePathContext) -> Vec2 {
     Vec2::new(
         point.x.mul_add(context.points_to_world, -context.anchor_x),
         -(point.y.mul_add(context.points_to_world, -context.anchor_y)),
@@ -459,9 +459,9 @@ mod tests {
     use crate::layout::LayoutEngine;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
-    use crate::layout::PanelLinePrimitiveKey;
-    use crate::layout::PanelLineSourceKey;
     use crate::layout::PanelPoint;
+    use crate::layout::PanelShapePrimitiveKey;
+    use crate::layout::PanelShapeSourceKey;
     use crate::layout::RenderCommandKind;
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
@@ -470,8 +470,8 @@ mod tests {
 
     const TEST_VEC2_EPSILON_SQUARED: f32 = 0.000_001;
 
-    const fn member(primitive: &ResolvedPanelLinePrimitive) -> PanelLineMember<'_> {
-        PanelLineMember {
+    const fn member(primitive: &ResolvedPanelShapePrimitive) -> PanelShapeMember<'_> {
+        PanelShapeMember {
             primitive,
             fade_exponent: 0.0,
         }
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn segment_emits_closed_rectangle_with_midpoint_quadratics() {
         let primitive = segment_primitive(None);
-        let Some(path) = build_panel_line_path(
+        let Some(path) = build_panel_shape_path(
             &[member(&primitive)],
             wide_owner_bounds(),
             None,
@@ -518,7 +518,7 @@ mod tests {
             height: 2.0,
         };
         let primitive = segment_primitive(Some(clip));
-        let Some(path) = build_panel_line_path(
+        let Some(path) = build_panel_shape_path(
             &[member(&primitive)],
             wide_owner_bounds(),
             Some(clip),
@@ -547,7 +547,7 @@ mod tests {
         };
         let primitive = segment_primitive(Some(clip));
         let Some(path) =
-            build_panel_line_path(&[member(&primitive)], clip, Some(clip), &test_context())
+            build_panel_shape_path(&[member(&primitive)], clip, Some(clip), &test_context())
         else {
             panic!("owner-clipped segment should build a path");
         };
@@ -563,10 +563,10 @@ mod tests {
 
     #[test]
     fn circle_form_emits_quadratic_arc_segments() {
-        let primitive = ResolvedPanelLinePrimitive {
-            source_key: PanelLinePrimitiveKey::new(PanelLineSourceKey::element(0, 0, 0), 0),
-            kind:       PanelLinePrimitiveKind::Circle,
-            geometry:   PanelLinePrimitiveGeometry::Form {
+        let primitive = ResolvedPanelShapePrimitive {
+            source_key: PanelShapePrimitiveKey::new(PanelShapeSourceKey::element(0, 0, 0), 0),
+            kind:       PanelShapePrimitiveKind::Circle,
+            geometry:   PanelShapePrimitiveGeometry::Form {
                 center:    Vec2::ZERO,
                 axis:      Vec2::X,
                 half_size: Vec2::new(2.0, 1.0),
@@ -582,7 +582,7 @@ mod tests {
             part_order: 0,
         };
 
-        let Some(path) = build_panel_line_path(
+        let Some(path) = build_panel_shape_path(
             &[member(&primitive)],
             wide_owner_bounds(),
             None,
@@ -602,11 +602,11 @@ mod tests {
         );
     }
 
-    fn segment_primitive(clip: Option<BoundingBox>) -> ResolvedPanelLinePrimitive {
-        ResolvedPanelLinePrimitive {
-            source_key: PanelLinePrimitiveKey::new(PanelLineSourceKey::element(0, 0, 0), 0),
-            kind: PanelLinePrimitiveKind::Segment,
-            geometry: PanelLinePrimitiveGeometry::Segment {
+    fn segment_primitive(clip: Option<BoundingBox>) -> ResolvedPanelShapePrimitive {
+        ResolvedPanelShapePrimitive {
+            source_key: PanelShapePrimitiveKey::new(PanelShapeSourceKey::element(0, 0, 0), 0),
+            kind: PanelShapePrimitiveKind::Segment,
+            geometry: PanelShapePrimitiveGeometry::Segment {
                 start: Vec2::ZERO,
                 end:   Vec2::new(10.0, 0.0),
                 width: 2.0,
@@ -623,8 +623,8 @@ mod tests {
         }
     }
 
-    const fn test_context() -> PanelLinePathContext {
-        PanelLinePathContext {
+    const fn test_context() -> PanelShapePathContext {
+        PanelShapePathContext {
             points_to_world: 1.0,
             anchor_x:        0.0,
             anchor_y:        0.0,
@@ -697,7 +697,7 @@ mod tests {
         // world panel Mm(10) x Mm(100), anchor BottomLeft
         let world_height = 0.1_f32;
         let points_to_world = world_height / viewport_height;
-        let context = PanelLinePathContext {
+        let context = PanelShapePathContext {
             points_to_world,
             anchor_x: 0.0,
             anchor_y: world_height,
@@ -705,12 +705,12 @@ mod tests {
 
         let mut spine_seen = false;
         for command in &result.commands {
-            let RenderCommandKind::Lines { lines } = &command.kind else {
+            let RenderCommandKind::Shapes { shapes: lines } = &command.kind else {
                 continue;
             };
             for (line_index, line) in lines.iter().enumerate() {
                 for primitive in line.primitives() {
-                    let Some(path) = build_panel_line_path(
+                    let Some(path) = build_panel_shape_path(
                         &[member(primitive)],
                         line.owner_bounds(),
                         primitive.clip(),
@@ -762,10 +762,10 @@ mod tests {
     #[test]
     fn live_conversion_segments_pack_exactly_linear() {
         for height_mm in [25.0_f32, 50.0, 75.0, 100.0] {
-            let primitive = ResolvedPanelLinePrimitive {
-                source_key: PanelLinePrimitiveKey::new(PanelLineSourceKey::element(0, 0, 0), 0),
-                kind:       PanelLinePrimitiveKind::Segment,
-                geometry:   PanelLinePrimitiveGeometry::Segment {
+            let primitive = ResolvedPanelShapePrimitive {
+                source_key: PanelShapePrimitiveKey::new(PanelShapeSourceKey::element(0, 0, 0), 0),
+                kind:       PanelShapePrimitiveKind::Segment,
+                geometry:   PanelShapePrimitiveGeometry::Segment {
                     start: Vec2::new(22.677_166, 0.0),
                     end:   Vec2::new(22.677_166, height_mm * 2.834_645_7),
                     width: 0.566_929_16,
@@ -780,13 +780,13 @@ mod tests {
                 clip:       None,
                 part_order: 0,
             };
-            let context = PanelLinePathContext {
+            let context = PanelShapePathContext {
                 points_to_world: 0.1 / 283.464_57,
                 anchor_x:        0.0,
                 anchor_y:        0.1,
             };
             let Some(path) =
-                build_panel_line_path(&[member(&primitive)], wide_owner_bounds(), None, &context)
+                build_panel_shape_path(&[member(&primitive)], wide_owner_bounds(), None, &context)
             else {
                 panic!("path should build");
             };

@@ -123,7 +123,7 @@ fn spawn_line_panel(mut commands: Commands) {
     let total = TIGHT_BOX_SIZES_M.iter().sum::<f32>();
     let mut left = -total * 0.5;
     for size in TIGHT_BOX_SIZES_M {
-        let center = Vec3::new(left + size * 0.5, TIGHT_BOX_Y_M, 0.0);
+        let center = Vec3::new(size.mul_add(0.5, left), TIGHT_BOX_Y_M, 0.0);
         spawn_tight_box(&mut commands, center, size, TIGHT_BOX_STROKE_M);
         left += size + 0.04;
     }
@@ -154,10 +154,12 @@ fn spawn_tight_box(commands: &mut Commands, center: Vec3, size: f32, line_width:
     )
     .build();
 
-    let mut material = StandardMaterial::default();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
+    let material = StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    };
 
     let Ok(panel) = DiegeticPanel::world()
         .size(size, size)
@@ -193,10 +195,12 @@ fn spawn_overlapping_panel(
     )
     .build();
 
-    let mut material = StandardMaterial::default();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
+    let material = StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default()
+    };
 
     let Ok(panel) = DiegeticPanel::world()
         .size(Mm(PANEL_W_MM), Mm(PANEL_H_MM))

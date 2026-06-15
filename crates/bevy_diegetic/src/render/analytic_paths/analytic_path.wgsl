@@ -67,19 +67,20 @@ const DEGENERATE_EPS: f32 = 0.00000001;
 const SQRT_3_OVER_2: f32 = 0.8660254037844386;
 const DISCARD_ALPHA: f32 = 0.02;
 const EDGE_FILTER_WIDTH: f32 = 1.2;
-const MAX_ANISO_SAMPLES: f32 = 16.0;
-// Convex-corner correction (line branch). When two edges meet at a convex corner
-// the single-nearest analytic straight-edge band over-covers along one edge's
-// extension (the grazing wing); the fragment is outside BOTH edges, so min with
-// the second-nearest edge's half-plane coverage clips it. The fix fires only when
-// the two field normals are angularly separated by at least this cross-product
-// magnitude (a real corner, not the antiparallel far side of a thin stroke).
-const CORNER_NORMAL_SEP: f32 = 0.15;
+const MAX_ANISO_SAMPLES: f32 = 64.0;
 // Diagnostic: when true the line branch returns a firing mask (dim line + bright
 // where the corner correction clipped coverage) instead of the corrected
 // coverage, so the gates can be verified to light only exterior corners. Set
 // false to render the actual corrected coverage.
 const CORNER_DEBUG_MASK: bool = false;
+// Diagnostic: paint line fragments (min_feature > 0) with an upstream coverage
+// input instead of coverage, to locate the grazing wave. 0 = off (real render);
+// 1 = union_normal as RGB (flat color on a straight edge; shimmer => directional
+// round-off in normalize(point - closest_point)); 2 = band |Jᵀn| as fract
+// contours (tests normal AND screen Jacobian); 3 = signed distance as fract
+// iso-distance contours (tests the closest-point solve).
+const LINE_DEBUG_MODE: i32 = 0;
+const LINE_DEBUG_SCALE: f32 = 8.0;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 // Mirrors AA_FLAG_SUPERSAMPLE / AA_FLAG_BAND in render/mod.rs — the
@@ -126,6 +127,12 @@ struct CurveRecord {
     // merged path can mix fading and non-fading contours. 0.0 disables fade
     // for this curve.
     fade_exponent: f32,
+    // Outward unit edge normal from the contour winding (packing.rs). The line
+    // branch's convex-corner clip reads it as the edge half-plane direction;
+    // the radial normalize(point - closest) goes to the vertex direction past a
+    // corner, so it can't stand in. (0,0) routes the clip back to the radial
+    // normal (text glyphs, degenerate edges).
+    edge_normal: vec2<f32>,
 }
 
 // One band's window into the band-ordered curve table: a horizontal band
@@ -178,6 +185,18 @@ struct LaneTerms {
     // ignores these (it reads only the nearest).
     adjusted2: f32,
     normal2: vec2<f32>,
+    // Outward edge-line normal (from the contour winding, CurveRecord.edge_normal)
+    // and signed perpendicular distance to that edge's line (outward positive) for
+    // the nearest and second-nearest curves. The convex-corner clip uses the
+    // SECOND edge's half-plane (edge_normal2/edge_perp2); the nearest pair exists
+    // so a new nearest can demote into the second slot. Distinct from normal/normal2
+    // (the radial field gradient the band and floor still use): past a convex vertex
+    // the radial normal goes to the vertex direction, but the edge normal stays the
+    // true edge half-plane.
+    edge_normal: vec2<f32>,
+    edge_perp: f32,
+    edge_normal2: vec2<f32>,
+    edge_perp2: f32,
 }
 
 // Two-lane coverage accumulator. Curves split by fade policy: the exempt
@@ -200,8 +219,14 @@ struct CoverageTerms {
 
 fn empty_coverage_terms() -> CoverageTerms {
     return CoverageTerms(
-        LaneTerms(0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0)),
-        LaneTerms(0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0)),
+        LaneTerms(
+            0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0),
+            vec2<f32>(1.0, 0.0), -1000000.0, vec2<f32>(1.0, 0.0), -1000000.0,
+        ),
+        LaneTerms(
+            0, 1000000.0, 0.0, vec2<f32>(1.0, 0.0), 1000000.0, vec2<f32>(1.0, 0.0),
+            vec2<f32>(1.0, 0.0), -1000000.0, vec2<f32>(1.0, 0.0), -1000000.0,
+        ),
         0.0,
     );
 }
@@ -216,13 +241,21 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
     let first_normal = select(terms.exempt.normal, terms.faded.normal, faded_wins);
     // Union second-nearest = second smallest across the two lanes' (first, second)
     // candidates: the losing lane's first vs the winning lane's own second.
+    let first_edge_normal = select(terms.exempt.edge_normal, terms.faded.edge_normal, faded_wins);
+    let first_edge_perp = select(terms.exempt.edge_perp, terms.faded.edge_perp, faded_wins);
     let other_first_adjusted = select(terms.faded.adjusted, terms.exempt.adjusted, faded_wins);
     let other_first_normal = select(terms.faded.normal, terms.exempt.normal, faded_wins);
+    let other_first_edge_normal = select(terms.faded.edge_normal, terms.exempt.edge_normal, faded_wins);
+    let other_first_edge_perp = select(terms.faded.edge_perp, terms.exempt.edge_perp, faded_wins);
     let win_second_adjusted = select(terms.exempt.adjusted2, terms.faded.adjusted2, faded_wins);
     let win_second_normal = select(terms.exempt.normal2, terms.faded.normal2, faded_wins);
+    let win_second_edge_normal = select(terms.exempt.edge_normal2, terms.faded.edge_normal2, faded_wins);
+    let win_second_edge_perp = select(terms.exempt.edge_perp2, terms.faded.edge_perp2, faded_wins);
     let other_is_second = other_first_adjusted < win_second_adjusted;
     let second_adjusted = select(win_second_adjusted, other_first_adjusted, other_is_second);
     let second_normal = select(win_second_normal, other_first_normal, other_is_second);
+    let second_edge_normal = select(win_second_edge_normal, other_first_edge_normal, other_is_second);
+    let second_edge_perp = select(win_second_edge_perp, other_first_edge_perp, other_is_second);
     return LaneTerms(
         terms.exempt.winding + terms.faded.winding,
         first_adjusted,
@@ -230,6 +263,10 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
         first_normal,
         second_adjusted,
         second_normal,
+        first_edge_normal,
+        first_edge_perp,
+        second_edge_normal,
+        second_edge_perp,
     );
 }
 
@@ -585,28 +622,48 @@ fn accumulate_nearest(
     let to_point = point - distance.closest;
     let to_point_len = length(to_point);
     let normal = select(vec2<f32>(1.0, 0.0), to_point / to_point_len, to_point_len > ROOT_EPSILON);
+    // Outward edge-line normal from the contour winding, with the radial normal as
+    // fallback when none was packed (text glyphs). edge_perp is the signed
+    // perpendicular distance to that edge's line (outward positive): negative
+    // inside the half-plane, so a straight run's far stroke side reads negative and
+    // the corner clip stays a no-op there.
+    let has_edge = dot(curve.edge_normal, curve.edge_normal) > 0.25;
+    let edge_n = select(normal, curve.edge_normal, has_edge);
+    let edge_p = dot(to_point, edge_n);
     if curve.fade_exponent > 0.0 {
         if adjusted < (*terms).faded.adjusted {
             (*terms).faded.adjusted2 = (*terms).faded.adjusted;
             (*terms).faded.normal2 = (*terms).faded.normal;
+            (*terms).faded.edge_normal2 = (*terms).faded.edge_normal;
+            (*terms).faded.edge_perp2 = (*terms).faded.edge_perp;
             (*terms).faded.adjusted = adjusted;
             (*terms).faded.dilation = dilation;
             (*terms).faded.normal = normal;
+            (*terms).faded.edge_normal = edge_n;
+            (*terms).faded.edge_perp = edge_p;
             (*terms).fade_exponent = curve.fade_exponent;
         } else if adjusted < (*terms).faded.adjusted2 {
             (*terms).faded.adjusted2 = adjusted;
             (*terms).faded.normal2 = normal;
+            (*terms).faded.edge_normal2 = edge_n;
+            (*terms).faded.edge_perp2 = edge_p;
         }
     } else {
         if adjusted < (*terms).exempt.adjusted {
             (*terms).exempt.adjusted2 = (*terms).exempt.adjusted;
             (*terms).exempt.normal2 = (*terms).exempt.normal;
+            (*terms).exempt.edge_normal2 = (*terms).exempt.edge_normal;
+            (*terms).exempt.edge_perp2 = (*terms).exempt.edge_perp;
             (*terms).exempt.adjusted = adjusted;
             (*terms).exempt.dilation = dilation;
             (*terms).exempt.normal = normal;
+            (*terms).exempt.edge_normal = edge_n;
+            (*terms).exempt.edge_perp = edge_p;
         } else if adjusted < (*terms).exempt.adjusted2 {
             (*terms).exempt.adjusted2 = adjusted;
             (*terms).exempt.normal2 = normal;
+            (*terms).exempt.edge_normal2 = edge_n;
+            (*terms).exempt.edge_perp2 = edge_p;
         }
     }
 }
@@ -692,6 +749,31 @@ fn nearest_vertical_curve(
 // silhouette test wants the union fill, not a per-lane one.
 fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
     if outside_glyph_bounds(point, glyph) {
+        return 0;
+    }
+    if is_polygon_mode(glyph) {
+        // Polygon mode has no banded crossing set; the silhouette is the union
+        // of the convex contours. Inside if the point lies inside every
+        // half-plane of any one contour.
+        let poly_start = glyph.band_range.x;
+        let poly_count = glyph.band_range.y;
+        for (var poly = 0u; poly < poly_count; poly += 1u) {
+            let group = bands[poly_start + poly];
+            var inside = group.count > 0u;
+            for (var offset = 0u; offset < group.count; offset += 1u) {
+                let edge = curves[group.start + offset];
+                if dot(edge.edge_normal, edge.edge_normal) < 0.25 {
+                    continue;
+                }
+                if dot(edge.edge_normal, point - edge.start_delta.xy) > 0.0 {
+                    inside = false;
+                    break;
+                }
+            }
+            if inside {
+                return 1;
+            }
+        }
         return 0;
     }
     let band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
@@ -830,6 +912,13 @@ struct SdSample {
     exempt_normal2: vec2<f32>,
     union_adjusted2: f32,
     union_normal2: vec2<f32>,
+    // Second-nearest edge half-plane per lane (outward edge normal + signed
+    // perpendicular distance), for the continuous convex-corner clip. Unlike the
+    // radial normal2, this stays the true edge direction past a vertex.
+    exempt_edge_normal2: vec2<f32>,
+    exempt_edge_perp2: f32,
+    union_edge_normal2: vec2<f32>,
+    union_edge_perp2: f32,
 }
 
 // One lane's signed design-space distance to its per-curve-dilated
@@ -873,6 +962,10 @@ fn signed_distance_sample(
         terms.exempt.normal2,
         union_terms.adjusted2,
         union_terms.normal2,
+        terms.exempt.edge_normal2,
+        terms.exempt.edge_perp2,
+        union_terms.edge_normal2,
+        union_terms.edge_perp2,
     );
 }
 
@@ -902,23 +995,6 @@ fn band_coverage(sd: f32, band: f32) -> f32 {
 // AA ramp stays a true 1px box filter from head-on to edge-on.
 fn analytic_band(normal: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>) -> f32 {
     return max(length(vec2<f32>(dot(normal, dx), dot(normal, dy))), ROOT_EPSILON);
-}
-
-// |Jᵀn| with the major footprint axis narrowed to the sub-sample spacing
-// (`inv_count` = 1/N). The well-resolved minor axis keeps full weight so a
-// straight edge stays a 1px ramp; the foreshortened major axis shrinks to the
-// stride spacing so the N strided samples TILE the footprint. This is the
-// analytic form of the text path's `d_minor + d_major * inv_count`.
-fn analytic_band_strided(
-    normal: vec2<f32>,
-    minor: vec2<f32>,
-    major: vec2<f32>,
-    inv_count: f32,
-) -> f32 {
-    return max(
-        length(vec2<f32>(dot(normal, minor), dot(normal, major) * inv_count)),
-        ROOT_EPSILON,
-    );
 }
 
 // Anisotropic supersample of the band coverage. A single band sample models the
@@ -978,43 +1054,42 @@ fn aniso_band_coverage(
 // Convex-corner correction for one strided line sample, one lane. The nearest
 // edge's straight-edge band over-covers past a convex corner along that edge's
 // extension (the grazing wing); the corner exterior is outside the second meeting
-// edge too, so its half-plane coverage clips the over-cover via min. Gated so it
-// fires only where it should:
+// edge too, so that edge's half-plane coverage clips the over-cover via min. The
+// clip is CONTINUOUS in the second edge's signed half-plane distance: it
+// saturates to 1 (no-op) where the point sits inside that edge (negative
+// edge_perp2 — every straight run, where the second-nearest curve is the
+// antiparallel far stroke side) and falls toward 0 only past the corner. The
+// second edge's outward normal (edge_normal2) comes from the contour winding, not
+// the radial normalize(point - vertex): past a convex vertex both edges' nearest
+// point is the shared corner, so their radial normals coincide and a normal-angle
+// gate would bail exactly along the wing. Gates that remain:
 //   - outside only (sd1 > 0): inside the fill, a concave junction (tick meeting a
 //     spine) is union-interior and must keep full coverage.
 //   - a real second edge was scanned (adjusted2 below the 1e6 sentinel).
-//   - angularly separated normals (|cross| >= CORNER_NORMAL_SEP): a genuine corner,
-//     not the antiparallel far side of a thin stroke (cross ~ 0) nor a parallel
-//     edge.
 //   - the second edge sits near the same point (adjusted2 within ~2x sd1 plus the
 //     well-resolved footprint): both edges' nearest point is the shared corner
 //     vertex, so their distances track; an unrelated far edge is rejected.
-// The second edge's band uses the same per-sample floor as the nearest edge.
-// Returns the corrected coverage.
+// The second edge's band is its own full |Jᵀ edge_normal2| and the clip subtracts
+// the same per-sample floor as the nearest edge. Returns the corrected coverage.
 fn corner_coverage(
     base_cov: f32,
     sd1: f32,
     adjusted2: f32,
-    normal2: vec2<f32>,
-    nearest_normal: vec2<f32>,
+    edge_normal2: vec2<f32>,
+    edge_perp2: f32,
     dilation: f32,
-    minor: vec2<f32>,
-    major: vec2<f32>,
-    inv_count: f32,
-    minor_len: f32,
+    dx: vec2<f32>,
+    dy: vec2<f32>,
+    norm_extent: f32,
 ) -> f32 {
     if sd1 <= 0.0 || adjusted2 > 100000.0 {
         return base_cov;
     }
-    let separation = abs(nearest_normal.x * normal2.y - nearest_normal.y * normal2.x);
-    if separation < CORNER_NORMAL_SEP {
+    if adjusted2 > 2.0 * sd1 + norm_extent {
         return base_cov;
     }
-    if adjusted2 > 2.0 * sd1 + minor_len {
-        return base_cov;
-    }
-    let band2 = analytic_band_strided(normal2, minor, major, inv_count);
-    let cov2 = band_coverage(adjusted2 - dilation, band2);
+    let band2 = analytic_band(edge_normal2, dx, dy);
+    let cov2 = band_coverage(edge_perp2 - dilation, band2);
     return min(base_cov, cov2);
 }
 
@@ -1069,65 +1144,169 @@ fn line_floor(
     return d;
 }
 
+// Polygon-mode sentinel: a line path (min_feature > 0) packed with no vertical
+// band is a set of convex half-plane polygons (packing::build_packed_polygons),
+// not a banded curve scan.
+fn is_polygon_mode(glyph: GlyphRecord) -> bool {
+    return glyph.min_feature > 0.0 && glyph.band_range.w == 0u;
+}
+
+// Convex-polygon coverage for straight-edge line marks (Segment rectangles,
+// Triangle arrowheads, Square/Diamond caps). Each contour is one convex polygon
+// = the intersection of its edges' outward half-planes; coverage is the PRODUCT
+// of per-edge 1px band ramps (band_coverage of the signed half-plane distance),
+// unioned (max) across the path's contours. No radial point-distance field
+// exists, so there is no rounded cap to bulge past a convex vertex — the
+// grazing-corner wing the nearest-curve SDF produced is gone. Past a corner the
+// point is outside two half-planes and the product collapses to the exact sharp
+// corner; on a straight run every edge but the nearest saturates to 1, so the
+// result is the single near-edge ramp (the wave-free tangent-stride look). Each
+// edge keeps its own full |Jᵀn| band (analytic_band), so the no-band-clamp
+// constraint holds. The exempt and faded fade lanes are unioned separately and
+// mixed by the winning faded polygon's hairline fade factor (sized from that
+// polygon's nearest, i.e. cross-stroke, edge), matching the curve path's fade
+// cascade; an all-Full path has fade_exponent 0 everywhere, so fade is 1 and the
+// result is the plain union.
+fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph: GlyphRecord) -> f32 {
+    let poly_start = glyph.band_range.x;
+    let poly_count = glyph.band_range.y;
+    var exempt_cov = 0.0;
+    var union_cov = 0.0;
+    var faded_best = 0.0;
+    var faded_floor = 0.0;
+    var faded_band = ROOT_EPSILON;
+    var faded_exponent = 0.0;
+    for (var poly = 0u; poly < poly_count; poly += 1u) {
+        let group = bands[poly_start + poly];
+        if group.count == 0u {
+            continue;
+        }
+        let fade_exponent = curves[group.start].fade_exponent;
+        var poly_cov = 1.0;
+        // Track the nearest edge (largest signed distance — least interior) for
+        // the fade representative: for a fragment inside a thin stroke that is
+        // the cross-stroke edge, whose band sizes the hairline fade target.
+        var near_d = -1000000.0;
+        var near_floor = 0.0;
+        var near_band = ROOT_EPSILON;
+        for (var offset = 0u; offset < group.count; offset += 1u) {
+            let edge = curves[group.start + offset];
+            let edge_normal = edge.edge_normal;
+            // A degenerate (zero-length) edge packs a zero normal; skip it so it
+            // does not multiply in a spurious 0.5 ramp.
+            if dot(edge_normal, edge_normal) < 0.25 {
+                continue;
+            }
+            let edge_point = edge.start_delta.xy;
+            let band = analytic_band(edge_normal, dx, dy);
+            // solver.w is this edge's perpendicular slab width (packing): a long
+            // edge's stroke width (floored to 1px), a cap's stroke length (never
+            // inflated), so the floor pads only the genuinely thin dimension.
+            let floor = max(0.0, (uniforms.hairline_min_px * band - edge.solver.w) * 0.5);
+            let signed = dot(edge_normal, point - edge_point);
+            poly_cov *= band_coverage(signed - floor, band);
+            if signed > near_d {
+                near_d = signed;
+                near_floor = floor;
+                near_band = band;
+            }
+        }
+        union_cov = max(union_cov, poly_cov);
+        if fade_exponent > 0.0 {
+            if poly_cov > faded_best {
+                faded_best = poly_cov;
+                faded_floor = near_floor;
+                faded_band = near_band;
+                faded_exponent = fade_exponent;
+            }
+        } else {
+            exempt_cov = max(exempt_cov, poly_cov);
+        }
+    }
+    let fade = hairline_fade_factor(faded_floor, uniforms.hairline_min_px * faded_band, faded_exponent);
+    return mix(exempt_cov, union_cov, fade);
+}
+
 // Anisotropically supersampled analytic line coverage. A single analytic-band
 // evaluation is exact for a straight edge but over-covers a convex corner (the
 // grazing-angle ghost wing) and, on a hairline floored to a single screen pixel,
 // samples the AA ramp off the sub-pixel line center so coverage oscillates along
-// the foreshortened length. Stride N ~= the footprint anisotropy samples along
-// the longer footprint axis; each sample's ramp band is narrowed on that axis to
-// the stride spacing (`analytic_band_strided`) so the samples tile rather than
-// overlap as full-width ramps that would average back to the single-sample
-// over-cover. The hairline floor is sized per strided sample from the edge
-// cross-stroke normal's full band (line_floor), not the radial union normal that
-// balloons at a convex vertex, and capped against the second edge at a corner, so
-// a foreshortened straight edge stays a continuous sub-pixel hairline while the
-// convex cap stays bounded to ~hairline_min_px. No finite-difference band, so no
-// medial-axis wave; head-on the footprint is isotropic and N collapses to one
-// sample.
+// the foreshortened length.
+//
+// The stride walks the EDGE TANGENT, not the screen-major footprint axis. The
+// center fragment's field normal fixes the edge frame; the tangent is its
+// perpendicular. Walking the major axis slides each sample sideways off a tilted
+// edge by sin(tilt) * step, so the nearest-curve solve jumps along the length and
+// coverage waves at grazing. Walking the tangent keeps every sample ON the edge:
+// a straight edge's signed distance is constant along it, so the N samples agree
+// and the average is the single-sample band — no wave. At a convex corner the
+// samples sweep toward the corner and corner_coverage clips the second edge.
+//
+// Because the stride carries no normal offset, the per-sample ramp band is the
+// FULL cross-stroke |Jᵀn| (analytic_band), not narrowed to the stride spacing —
+// the cross-stroke AA is carried entirely by that band width. The hairline floor
+// is sized per sample from the edge cross-stroke normal's full band (line_floor),
+// not the radial union normal that balloons at a convex vertex, and capped
+// against the second edge at a corner, so a foreshortened straight edge stays a
+// continuous sub-pixel hairline while the convex cap stays bounded to
+// ~hairline_min_px. Head-on the footprint is isotropic and N collapses to one.
 fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph: GlyphRecord) -> f32 {
     let footprint_max = max(length(dx), length(dy));
     let scan_width = footprint_max * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
     let scan_width_sq = scan_width * scan_width;
-    let len_dx = length(dx);
-    let len_dy = length(dy);
-    let major = select(dy, dx, len_dx >= len_dy);
-    let minor = select(dx, dy, len_dx >= len_dy);
-    let major_len = max(len_dx, len_dy);
-    let minor_len = max(min(len_dx, len_dy), ROOT_EPSILON);
-    let sample_count = clamp(ceil(major_len / minor_len), 1.0, MAX_ANISO_SAMPLES);
+
+    // Edge frame from the center fragment's field normal: the tangent is the
+    // stride direction, the normal sets the band width and the sub-sample count.
+    let center = signed_distance_sample(point, scan_width_sq, 0.0, glyph);
+    let normal = center.union_normal;
+    let tangent = vec2<f32>(-normal.y, normal.x);
+    // Footprint parallelogram support widths in that frame: extent along the
+    // tangent (what the stride tiles) and across the normal (|Jᵀn|, the
+    // cross-stroke band and the sub-sample spacing).
+    let tan_extent = abs(dot(dx, tangent)) + abs(dot(dy, tangent));
+    let norm_extent = analytic_band(normal, dx, dy);
+    let sample_count = clamp(ceil(tan_extent / norm_extent), 1.0, MAX_ANISO_SAMPLES);
     let inv_count = 1.0 / sample_count;
     let count = u32(sample_count);
+    let tangent_step = tangent * tan_extent;
+
+    // Hairline floor sized ONCE from the center fragment, reused across the
+    // stride. Per-sample sizing lets each sample's rotating radial normal at a
+    // convex vertex re-balloon the floor, and the union over the stride paints
+    // that into a multi-pixel wing; sizing it once from the center bounds the
+    // wing to ~hairline_min_px (coverage_probe::center_dilation_bounds_corner_wing,
+    // mode 2 vs mode 1). The straight-edge case is unaffected — along an edge the
+    // center normal IS the edge normal, so the floor matches the per-sample value.
+    let exempt_floor = line_floor(
+        center.exempt_normal, abs(center.sd.x), center.exempt_normal2, center.exempt_adjusted2,
+        glyph.min_feature, analytic_band(center.exempt_normal, dx, dy), norm_extent, dx, dy,
+    );
+    let union_floor = line_floor(
+        center.union_normal, abs(center.sd.y), center.union_normal2, center.union_adjusted2,
+        glyph.min_feature, analytic_band(center.union_normal, dx, dy), norm_extent, dx, dy,
+    );
 
     var sum = 0.0;
     var fired = 0.0;
     for (var index = 0u; index < count; index += 1u) {
         let stride = (f32(index) + 0.5) * inv_count - 0.5;
-        let raw = signed_distance_sample(point + stride * major, scan_width_sq, 0.0, glyph);
-        // Ramp band: major axis narrowed to the stride spacing so the samples
-        // tile (integrates the corner wedge and the foreshortened line).
-        let exempt_band = analytic_band_strided(raw.exempt_normal, minor, major, inv_count);
-        let union_band = analytic_band_strided(raw.union_normal, minor, major, inv_count);
-        // Hairline floor sized per sample from each lane's edge cross-stroke
-        // normal (full band), capped at a convex corner against the second edge.
-        let exempt_floor = line_floor(
-            raw.exempt_normal, abs(raw.sd.x), raw.exempt_normal2, raw.exempt_adjusted2,
-            glyph.min_feature, exempt_band, minor_len, dx, dy,
-        );
-        let union_floor = line_floor(
-            raw.union_normal, abs(raw.sd.y), raw.union_normal2, raw.union_adjusted2,
-            glyph.min_feature, union_band, minor_len, dx, dy,
-        );
+        let raw = signed_distance_sample(point + stride * tangent_step, scan_width_sq, 0.0, glyph);
+        // Full cross-stroke band per sample: the stride is pure tangent, so the
+        // samples carry no normal offset to tile against and the band stays the
+        // true 1px |Jᵀn| ramp width.
+        let exempt_band = analytic_band(raw.exempt_normal, dx, dy);
+        let union_band = analytic_band(raw.union_normal, dx, dy);
         let exempt_raw = band_coverage(raw.sd.x - exempt_floor, exempt_band);
         let union_raw = band_coverage(raw.sd.y - union_floor, union_band);
         // Clip each lane's straight-edge over-cover against its second-nearest edge
-        // at a convex corner (gated inside corner_coverage).
+        // half-plane at a convex corner (gated inside corner_coverage).
         let exempt = corner_coverage(
-            exempt_raw, raw.sd.x, raw.exempt_adjusted2, raw.exempt_normal2,
-            raw.exempt_normal, exempt_floor, minor, major, inv_count, minor_len,
+            exempt_raw, raw.sd.x, raw.exempt_adjusted2, raw.exempt_edge_normal2,
+            raw.exempt_edge_perp2, exempt_floor, dx, dy, norm_extent,
         );
         let union_coverage = corner_coverage(
-            union_raw, raw.sd.y, raw.union_adjusted2, raw.union_normal2,
-            raw.union_normal, union_floor, minor, major, inv_count, minor_len,
+            union_raw, raw.sd.y, raw.union_adjusted2, raw.union_edge_normal2,
+            raw.union_edge_perp2, union_floor, dx, dy, norm_extent,
         );
         fired = max(fired, max(exempt_raw - exempt, union_raw - union_coverage));
         let fade_target = uniforms.hairline_min_px * analytic_band(raw.union_normal, dx, dy);
@@ -1175,7 +1354,15 @@ fn render_coverage(
     // aa_flags-selected finite-difference path below.
     var coverage: f32;
     if glyph.min_feature > 0.0 {
-        coverage = analytic_line_coverage(point, dx, dy, glyph);
+        if is_polygon_mode(glyph) {
+            // Straight-edge convex marks: per-contour half-plane product, no
+            // radial field, no grazing-corner wing.
+            coverage = analytic_polygon_coverage(point, dx, dy, glyph);
+        } else {
+            // Curved line contour (a Circle cap's ellipse): the banded
+            // curve-distance scan, which has no sharp convex corner to wing.
+            coverage = analytic_line_coverage(point, dx, dy, glyph);
+        }
     } else if (aa_flags & AA_FLAG_BAND) != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
         let scan_width = edge_width + dilation_max;
@@ -1257,6 +1444,37 @@ fn fragment(
 #endif
 
     let glyph = glyphs[glyph_index(in.uv_b)];
+    // Diagnostic: paint line fragments with an upstream coverage input. The
+    // derivatives are taken under the const-only gate (uniform control flow)
+    // before the per-fragment min_feature branch.
+    if LINE_DEBUG_MODE != 0 {
+        let dbg_point = design_position(in.uv, glyph);
+        let dbg_dx = dpdx(dbg_point);
+        let dbg_dy = dpdy(dbg_point);
+        if glyph.min_feature > 0.0 {
+            let dbg_scan = max(length(dbg_dx), length(dbg_dy))
+                * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
+            let dbg = signed_distance_sample(dbg_point, dbg_scan * dbg_scan, 0.0, glyph);
+            var dbg_rgb: vec3<f32>;
+            if LINE_DEBUG_MODE == 1 {
+                dbg_rgb = vec3<f32>(dbg.union_normal * 0.5 + vec2<f32>(0.5), 0.5);
+            } else if LINE_DEBUG_MODE == 2 {
+                let dbg_band = analytic_band(dbg.union_normal, dbg_dx, dbg_dy);
+                dbg_rgb = vec3<f32>(fract(dbg_band * LINE_DEBUG_SCALE));
+            } else {
+                dbg_rgb = vec3<f32>(fract(dbg.sd.y * LINE_DEBUG_SCALE));
+            }
+            var dbg_out: FragmentOutput;
+            dbg_out.color = vec4<f32>(dbg_rgb, 1.0);
+#ifdef OIT_ENABLED
+            var dbg_pos = in.position;
+            dbg_pos.z = max(dbg_pos.z + run_oit_depth_offset(in.uv_b), OIT_MIN_DEPTH);
+            oit_draw(dbg_pos, dbg_out.color);
+            discard;
+#endif
+            return dbg_out;
+        }
+    }
     let fill_color = run_fill_color(in.uv_b);
     let coverage = render_coverage(
         in.uv,

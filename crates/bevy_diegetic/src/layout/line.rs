@@ -40,6 +40,19 @@ const ZERO_DIMENSION: Dimension = Dimension {
 };
 const DEFAULT_PERCENT: f32 = 0.0;
 
+/// An authored panel mark: a stroked line or a filled shape.
+///
+/// A `PanelDraw` owns an ordered list of these. Every variant resolves into the
+/// same primitive stream ([`ResolvedPanelShape`]) the renderer consumes, so all
+/// marks in one panel batch into a single analytic path.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PanelShape {
+    /// A stroked line segment with optional end caps.
+    Line(PanelLine),
+    /// A filled circle.
+    Circle(PanelCircle),
+}
+
 /// A line segment authored in an element's local panel coordinate space.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelLine {
@@ -48,6 +61,15 @@ pub struct PanelLine {
     style:       LineStyle,
     start_inset: Dimension,
     end_inset:   Dimension,
+}
+
+/// A filled circle authored in an element's local panel coordinate space.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelCircle {
+    center:        PanelPoint,
+    radius:        Dimension,
+    color:         Color,
+    hairline_fade: Option<HairlineFade>,
 }
 
 /// Visual style for a [`PanelLine`].
@@ -76,7 +98,7 @@ pub struct PanelCoord {
 
 /// Stable source identity for one resolved panel line.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum PanelLineSourceKey {
+pub enum PanelShapeSourceKey {
     /// Line authored in an element-owned `PanelDraw`.
     Element {
         /// Source element index in the `LayoutTree`.
@@ -99,16 +121,16 @@ pub enum PanelLineSourceKey {
 
 /// Stable source identity for one resolved line primitive.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub struct PanelLinePrimitiveKey {
+pub struct PanelShapePrimitiveKey {
     /// Source line this primitive belongs to.
-    pub line_source:       PanelLineSourceKey,
+    pub line_source:       PanelShapeSourceKey,
     /// Primitive ordinal within the line.
     pub primitive_ordinal: usize,
 }
 
 /// Paint lane assigned during panel-line resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelLinePaintOrder {
+pub enum PanelShapePaintOrder {
     /// Normal panel command order.
     Normal {
         /// Geometry draw slot
@@ -120,7 +142,7 @@ pub enum PanelLinePaintOrder {
 
 /// Numeric layering hints for a resolved line command.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PanelLineLayering {
+pub struct PanelShapeLayering {
     /// Material depth bias lane.
     pub(crate) depth_bias:       f32,
     /// OIT coplanar depth offset lane.
@@ -129,7 +151,7 @@ pub struct PanelLineLayering {
 
 /// Clip policy used by the pure panel-line resolver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum PanelLineClipPolicy {
+pub(crate) enum PanelShapeClipPolicy {
     /// Clip to the inherited panel/parent clip intersected with owner bounds.
     OwnerBounds,
     /// Clip to the inherited clip as given (`None` means unclipped) and
@@ -139,13 +161,13 @@ pub(crate) enum PanelLineClipPolicy {
 
 /// Input context for resolving one authored `PanelLine`.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PanelLineResolveContext {
+pub(crate) struct PanelShapeResolveContext {
     pub(crate) owner_bounds:         BoundingBox,
     pub(crate) inherited_clip:       Option<BoundingBox>,
-    pub(crate) clip_policy:          PanelLineClipPolicy,
-    pub(crate) paint_order:          PanelLinePaintOrder,
+    pub(crate) clip_policy:          PanelShapeClipPolicy,
+    pub(crate) paint_order:          PanelShapePaintOrder,
     pub(crate) source_command_index: usize,
-    pub(crate) source_key:           PanelLineSourceKey,
+    pub(crate) source_key:           PanelShapeSourceKey,
 }
 
 enum ResolvedLineClip {
@@ -155,9 +177,9 @@ enum ResolvedLineClip {
 
 /// A resolved panel line ready for renderer consumption.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedPanelLine {
+pub struct ResolvedPanelShape {
     /// Stable line source key.
-    pub(crate) source_key:           PanelLineSourceKey,
+    pub(crate) source_key:           PanelShapeSourceKey,
     /// Command index used when the line was resolved.
     pub(crate) source_command_index: usize,
     /// Owning element bounds in layout coordinates.
@@ -167,9 +189,9 @@ pub struct ResolvedPanelLine {
     /// Effective clip for this line.
     pub(crate) clip:                 Option<BoundingBox>,
     /// Paint lane selected for this line.
-    pub(crate) paint_order:          PanelLinePaintOrder,
+    pub(crate) paint_order:          PanelShapePaintOrder,
     /// Numeric depth/OIT hints for the renderer.
-    pub(crate) layering:             PanelLineLayering,
+    pub(crate) layering:             PanelShapeLayering,
     /// Resolved start tip after authored start inset.
     pub(crate) start:                Vec2,
     /// Resolved end tip after authored end inset.
@@ -186,12 +208,12 @@ pub struct ResolvedPanelLine {
     /// resolution.
     pub(crate) hairline_fade:        Option<HairlineFade>,
     /// Shaft and cap primitives in stable part order.
-    pub(crate) primitives:           Vec<ResolvedPanelLinePrimitive>,
+    pub(crate) primitives:           Vec<ResolvedPanelShapePrimitive>,
 }
 
 /// Geometry for one resolved line primitive.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub enum PanelLinePrimitiveGeometry {
+pub enum PanelShapePrimitiveGeometry {
     /// A stroked line segment.
     Segment {
         /// Segment start point.
@@ -214,7 +236,7 @@ pub enum PanelLinePrimitiveGeometry {
 
 /// Resolved primitive shape.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum PanelLinePrimitiveKind {
+pub enum PanelShapePrimitiveKind {
     /// Stroked segment or open-arrow wing.
     Segment,
     /// Filled triangular arrowhead.
@@ -229,13 +251,13 @@ pub enum PanelLinePrimitiveKind {
 
 /// A shaft or cap primitive resolved from a `PanelLine`.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ResolvedPanelLinePrimitive {
+pub struct ResolvedPanelShapePrimitive {
     /// Stable primitive source key.
-    pub(crate) source_key: PanelLinePrimitiveKey,
+    pub(crate) source_key: PanelShapePrimitiveKey,
     /// Primitive kind.
-    pub(crate) kind:       PanelLinePrimitiveKind,
+    pub(crate) kind:       PanelShapePrimitiveKind,
     /// Primitive geometry in layout coordinates.
-    pub(crate) geometry:   PanelLinePrimitiveGeometry,
+    pub(crate) geometry:   PanelShapePrimitiveGeometry,
     /// Resolved primitive color.
     pub(crate) color:      Color,
     /// Primitive visual bounds.
@@ -386,7 +408,96 @@ impl PanelLine {
     }
 }
 
-impl PanelLineSourceKey {
+impl PanelShape {
+    /// Returns the inner line when this shape is a [`PanelShape::Line`].
+    #[must_use]
+    pub const fn as_line(&self) -> Option<&PanelLine> {
+        match self {
+            Self::Line(line) => Some(line),
+            Self::Circle(_) => None,
+        }
+    }
+
+    /// Returns the inner circle when this shape is a [`PanelShape::Circle`].
+    #[must_use]
+    pub const fn as_circle(&self) -> Option<&PanelCircle> {
+        match self {
+            Self::Circle(circle) => Some(circle),
+            Self::Line(_) => None,
+        }
+    }
+
+    pub(crate) fn scaled(&self, default_scale: f32) -> Self {
+        match self {
+            Self::Line(line) => Self::Line(line.scaled(default_scale)),
+            Self::Circle(circle) => Self::Circle(circle.scaled(default_scale)),
+        }
+    }
+}
+
+impl From<PanelLine> for PanelShape {
+    fn from(line: PanelLine) -> Self { Self::Line(line) }
+}
+
+impl From<PanelCircle> for PanelShape {
+    fn from(circle: PanelCircle) -> Self { Self::Circle(circle) }
+}
+
+impl PanelCircle {
+    /// Creates a filled circle of `radius` centered at `center`.
+    #[must_use]
+    pub fn new(center: impl Into<PanelPoint>, radius: impl Into<Dimension>) -> Self {
+        Self {
+            center:        center.into(),
+            radius:        radius.into(),
+            color:         Color::WHITE,
+            hairline_fade: None,
+        }
+    }
+
+    /// Sets the fill color.
+    #[must_use]
+    pub const fn color(mut self, color: Color) -> Self {
+        self.color = color;
+        self
+    }
+
+    /// Overrides the hairline fade policy for this circle. Circles without an
+    /// override inherit the owning element's resolution, matching
+    /// [`PanelLine::hairline_fade`].
+    #[must_use]
+    pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
+        self.hairline_fade = Some(fade);
+        self
+    }
+
+    /// Returns the authored center point.
+    #[must_use]
+    pub const fn center(&self) -> &PanelPoint { &self.center }
+
+    /// Returns the authored radius.
+    #[must_use]
+    pub const fn radius_dimension(&self) -> Dimension { self.radius }
+
+    /// Returns the fill color.
+    #[must_use]
+    pub const fn color_value(&self) -> Color { self.color }
+
+    /// Returns the hairline fade override, if any.
+    #[must_use]
+    pub const fn hairline_fade_value(&self) -> Option<HairlineFade> { self.hairline_fade }
+
+    pub(crate) fn scaled(&self, default_scale: f32) -> Self {
+        Self {
+            center:        self.center.scaled(default_scale),
+            radius:        scaled_dimension(self.radius, default_scale),
+            color:         self.color,
+            hairline_fade: self.hairline_fade,
+        }
+    }
+}
+
+impl PanelShapeSourceKey {
     /// Creates an element-owned panel-line source key.
     #[must_use]
     pub const fn element(element_index: usize, draw_ordinal: usize, line_ordinal: usize) -> Self {
@@ -408,10 +519,10 @@ impl PanelLineSourceKey {
     }
 }
 
-impl PanelLinePrimitiveKey {
+impl PanelShapePrimitiveKey {
     /// Creates a primitive key under `line_source`.
     #[must_use]
-    pub const fn new(line_source: PanelLineSourceKey, primitive_ordinal: usize) -> Self {
+    pub const fn new(line_source: PanelShapeSourceKey, primitive_ordinal: usize) -> Self {
         Self {
             line_source,
             primitive_ordinal,
@@ -419,7 +530,7 @@ impl PanelLinePrimitiveKey {
     }
 }
 
-impl PanelLineLayering {
+impl PanelShapeLayering {
     /// Returns the material depth bias lane.
     #[must_use]
     pub const fn depth_bias(&self) -> f32 { self.depth_bias }
@@ -429,10 +540,10 @@ impl PanelLineLayering {
     pub const fn oit_depth_offset(&self) -> f32 { self.oit_depth_offset }
 }
 
-impl ResolvedPanelLine {
+impl ResolvedPanelShape {
     /// Returns the stable line source key.
     #[must_use]
-    pub const fn source_key(&self) -> PanelLineSourceKey { self.source_key }
+    pub const fn source_key(&self) -> PanelShapeSourceKey { self.source_key }
 
     /// Returns the command index used when this line was resolved.
     #[must_use]
@@ -452,11 +563,11 @@ impl ResolvedPanelLine {
 
     /// Returns this line's paint lane.
     #[must_use]
-    pub const fn paint_order(&self) -> PanelLinePaintOrder { self.paint_order }
+    pub const fn paint_order(&self) -> PanelShapePaintOrder { self.paint_order }
 
     /// Returns numeric layering hints for this line.
     #[must_use]
-    pub const fn layering(&self) -> PanelLineLayering { self.layering }
+    pub const fn layering(&self) -> PanelShapeLayering { self.layering }
 
     /// Returns the resolved start tip after authored start inset.
     #[must_use]
@@ -488,21 +599,21 @@ impl ResolvedPanelLine {
 
     /// Returns shaft and cap primitives in stable part order.
     #[must_use]
-    pub fn primitives(&self) -> &[ResolvedPanelLinePrimitive] { &self.primitives }
+    pub fn primitives(&self) -> &[ResolvedPanelShapePrimitive] { &self.primitives }
 }
 
-impl ResolvedPanelLinePrimitive {
+impl ResolvedPanelShapePrimitive {
     /// Returns the stable primitive source key.
     #[must_use]
-    pub const fn source_key(&self) -> PanelLinePrimitiveKey { self.source_key }
+    pub const fn source_key(&self) -> PanelShapePrimitiveKey { self.source_key }
 
     /// Returns the primitive kind.
     #[must_use]
-    pub const fn kind(&self) -> PanelLinePrimitiveKind { self.kind }
+    pub const fn kind(&self) -> PanelShapePrimitiveKind { self.kind }
 
     /// Returns the primitive geometry.
     #[must_use]
-    pub const fn geometry(&self) -> PanelLinePrimitiveGeometry { self.geometry }
+    pub const fn geometry(&self) -> PanelShapePrimitiveGeometry { self.geometry }
 
     /// Returns the resolved primitive color.
     #[must_use]
@@ -521,10 +632,10 @@ impl ResolvedPanelLinePrimitive {
     pub const fn part_order(&self) -> usize { self.part_order }
 }
 
-impl PanelLinePaintOrder {
-    fn layering(self) -> PanelLineLayering {
+impl PanelShapePaintOrder {
+    fn layering(self) -> PanelShapeLayering {
         match self {
-            Self::Normal { draw_slot } => PanelLineLayering {
+            Self::Normal { draw_slot } => PanelShapeLayering {
                 depth_bias:       draw_slot.to_f32() * NORMAL_DEPTH_BIAS_STEP,
                 oit_depth_offset: (draw_slot.to_f32() + 1.0) * NORMAL_OIT_DEPTH_STEP,
             },
@@ -532,14 +643,14 @@ impl PanelLinePaintOrder {
     }
 }
 
-impl PanelLineResolveContext {
+impl PanelShapeResolveContext {
     pub(crate) const fn new(
         owner_bounds: BoundingBox,
         inherited_clip: Option<BoundingBox>,
-        clip_policy: PanelLineClipPolicy,
-        paint_order: PanelLinePaintOrder,
+        clip_policy: PanelShapeClipPolicy,
+        paint_order: PanelShapePaintOrder,
         source_command_index: usize,
-        source_key: PanelLineSourceKey,
+        source_key: PanelShapeSourceKey,
     ) -> Self {
         Self {
             owner_bounds,
@@ -554,8 +665,8 @@ impl PanelLineResolveContext {
 
 pub(crate) fn resolve_panel_line(
     line: &PanelLine,
-    context: PanelLineResolveContext,
-) -> Option<ResolvedPanelLine> {
+    context: PanelShapeResolveContext,
+) -> Option<ResolvedPanelShape> {
     let width = positive_dimension(line.line_style().width_dimension())?;
     let cap_size = non_negative_dimension(line.line_style().cap_size_dimension())?;
     let start_inset = non_negative_dimension(line.start_inset_dimension())?;
@@ -636,7 +747,7 @@ pub(crate) fn resolve_panel_line(
         return None;
     }
 
-    Some(ResolvedPanelLine {
+    Some(ResolvedPanelShape {
         source_key: context.source_key,
         source_command_index: context.source_command_index,
         owner_bounds: context.owner_bounds,
@@ -651,6 +762,63 @@ pub(crate) fn resolve_panel_line(
         width,
         color,
         hairline_fade: line.line_style().hairline_fade_value(),
+        primitives,
+    })
+}
+
+pub(crate) fn resolve_panel_circle(
+    circle: &PanelCircle,
+    context: PanelShapeResolveContext,
+) -> Option<ResolvedPanelShape> {
+    let radius = positive_dimension(circle.radius_dimension())?;
+    let center = resolve_point(circle.center(), context.owner_bounds)?;
+    let color = circle.color_value();
+    let clip = match resolve_clip(
+        context.owner_bounds,
+        context.inherited_clip,
+        context.clip_policy,
+    ) {
+        ResolvedLineClip::Visible(clip) => clip,
+        ResolvedLineClip::FullyClipped => return None,
+    };
+    let layering = context.paint_order.layering();
+
+    let mut primitives = Vec::new();
+    push_form_primitive(
+        &mut primitives,
+        context.source_key,
+        PanelShapePrimitiveKind::Circle,
+        center,
+        Vec2::X,
+        Vec2::splat(radius),
+        color,
+        clip,
+    );
+
+    let visual_bounds = union_primitive_bounds(&primitives)?;
+    if let Some(clip_bounds) = clip
+        && visual_bounds.intersect(&clip_bounds).is_none()
+    {
+        return None;
+    }
+
+    // A circle has no shaft or caps; the line-shaped fields collapse to its
+    // center, and the renderer reads only the resolved primitives.
+    Some(ResolvedPanelShape {
+        source_key: context.source_key,
+        source_command_index: context.source_command_index,
+        owner_bounds: context.owner_bounds,
+        visual_bounds,
+        clip,
+        paint_order: context.paint_order,
+        layering,
+        start: center,
+        end: center,
+        shaft_start: center,
+        shaft_end: center,
+        width: radius * 2.0,
+        color,
+        hairline_fade: circle.hairline_fade_value(),
         primitives,
     })
 }
@@ -680,10 +848,10 @@ fn resolve_coord(coord: &PanelCoord, origin: f32, size: f32) -> Option<f32> {
 fn resolve_clip(
     owner_bounds: BoundingBox,
     inherited_clip: Option<BoundingBox>,
-    clip_policy: PanelLineClipPolicy,
+    clip_policy: PanelShapeClipPolicy,
 ) -> ResolvedLineClip {
     let clip = match clip_policy {
-        PanelLineClipPolicy::OwnerBounds => match inherited_clip {
+        PanelShapeClipPolicy::OwnerBounds => match inherited_clip {
             Some(inherited_clip) => {
                 let Some(intersection) = inherited_clip.intersect(&owner_bounds) else {
                     return ResolvedLineClip::FullyClipped;
@@ -692,14 +860,14 @@ fn resolve_clip(
             },
             None => owner_bounds,
         },
-        PanelLineClipPolicy::Inherited => return ResolvedLineClip::Visible(inherited_clip),
+        PanelShapeClipPolicy::Inherited => return ResolvedLineClip::Visible(inherited_clip),
     };
     ResolvedLineClip::Visible(Some(clip))
 }
 
 fn push_segment_primitive(
-    primitives: &mut Vec<ResolvedPanelLinePrimitive>,
-    line_source: PanelLineSourceKey,
+    primitives: &mut Vec<ResolvedPanelShapePrimitive>,
+    line_source: PanelShapeSourceKey,
     start: Vec2,
     end: Vec2,
     width: f32,
@@ -710,10 +878,10 @@ fn push_segment_primitive(
         return;
     };
     let primitive_ordinal = primitives.len();
-    primitives.push(ResolvedPanelLinePrimitive {
-        source_key: PanelLinePrimitiveKey::new(line_source, primitive_ordinal),
-        kind: PanelLinePrimitiveKind::Segment,
-        geometry: PanelLinePrimitiveGeometry::Segment { start, end, width },
+    primitives.push(ResolvedPanelShapePrimitive {
+        source_key: PanelShapePrimitiveKey::new(line_source, primitive_ordinal),
+        kind: PanelShapePrimitiveKind::Segment,
+        geometry: PanelShapePrimitiveGeometry::Segment { start, end, width },
         color,
         bounds,
         clip,
@@ -722,8 +890,8 @@ fn push_segment_primitive(
 }
 
 fn push_cap_primitives(
-    primitives: &mut Vec<ResolvedPanelLinePrimitive>,
-    line_source: PanelLineSourceKey,
+    primitives: &mut Vec<ResolvedPanelShapePrimitive>,
+    line_source: PanelShapeSourceKey,
     tip: Vec2,
     direction: Vec2,
     cap: &ResolvedCalloutCap,
@@ -744,8 +912,8 @@ fn push_cap_primitives(
 }
 
 fn push_cap_primitive(
-    primitives: &mut Vec<ResolvedPanelLinePrimitive>,
-    line_source: PanelLineSourceKey,
+    primitives: &mut Vec<ResolvedPanelShapePrimitive>,
+    line_source: PanelShapeSourceKey,
     tip: Vec2,
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
@@ -780,7 +948,7 @@ fn push_cap_primitive(
             push_form_primitive(
                 primitives,
                 line_source,
-                PanelLinePrimitiveKind::Triangle,
+                PanelShapePrimitiveKind::Triangle,
                 tip - axis * primitive.length,
                 axis,
                 Vec2::new(primitive.length, primitive.width),
@@ -792,7 +960,7 @@ fn push_cap_primitive(
             push_centered_cap_form(
                 primitives,
                 line_source,
-                PanelLinePrimitiveKind::Circle,
+                PanelShapePrimitiveKind::Circle,
                 tip,
                 direction,
                 primitive,
@@ -803,7 +971,7 @@ fn push_cap_primitive(
             push_centered_cap_form(
                 primitives,
                 line_source,
-                PanelLinePrimitiveKind::Square,
+                PanelShapePrimitiveKind::Square,
                 tip,
                 direction,
                 primitive,
@@ -814,7 +982,7 @@ fn push_cap_primitive(
             push_centered_cap_form(
                 primitives,
                 line_source,
-                PanelLinePrimitiveKind::Diamond,
+                PanelShapePrimitiveKind::Diamond,
                 tip,
                 direction,
                 primitive,
@@ -825,9 +993,9 @@ fn push_cap_primitive(
 }
 
 fn push_centered_cap_form(
-    primitives: &mut Vec<ResolvedPanelLinePrimitive>,
-    line_source: PanelLineSourceKey,
-    kind: PanelLinePrimitiveKind,
+    primitives: &mut Vec<ResolvedPanelShapePrimitive>,
+    line_source: PanelShapeSourceKey,
+    kind: PanelShapePrimitiveKind,
     tip: Vec2,
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
@@ -847,9 +1015,9 @@ fn push_centered_cap_form(
 }
 
 fn push_form_primitive(
-    primitives: &mut Vec<ResolvedPanelLinePrimitive>,
-    line_source: PanelLineSourceKey,
-    kind: PanelLinePrimitiveKind,
+    primitives: &mut Vec<ResolvedPanelShapePrimitive>,
+    line_source: PanelShapeSourceKey,
+    kind: PanelShapePrimitiveKind,
     center: Vec2,
     axis: Vec2,
     half_size: Vec2,
@@ -866,10 +1034,10 @@ fn push_form_primitive(
         return;
     };
     let primitive_ordinal = primitives.len();
-    primitives.push(ResolvedPanelLinePrimitive {
-        source_key: PanelLinePrimitiveKey::new(line_source, primitive_ordinal),
+    primitives.push(ResolvedPanelShapePrimitive {
+        source_key: PanelShapePrimitiveKey::new(line_source, primitive_ordinal),
         kind,
-        geometry: PanelLinePrimitiveGeometry::Form {
+        geometry: PanelShapePrimitiveGeometry::Form {
             center,
             axis,
             half_size,
@@ -917,7 +1085,7 @@ fn oriented_form_bounds(center: Vec2, axis: Vec2, half_size: Vec2) -> Option<Bou
     })
 }
 
-fn union_primitive_bounds(primitives: &[ResolvedPanelLinePrimitive]) -> Option<BoundingBox> {
+fn union_primitive_bounds(primitives: &[ResolvedPanelShapePrimitive]) -> Option<BoundingBox> {
     let mut iter = primitives.iter();
     let first = iter.next()?.bounds;
     Some(iter.fold(first, |bounds, primitive| {
@@ -1223,14 +1391,16 @@ mod tests {
     use super::DEFAULT_CAP_SIZE;
     use super::DEFAULT_LINE_WIDTH;
     use super::LineStyle;
+    use super::PanelCircle;
     use super::PanelCoord;
     use super::PanelLine;
-    use super::PanelLineClipPolicy;
-    use super::PanelLinePaintOrder;
-    use super::PanelLinePrimitiveKind;
-    use super::PanelLineResolveContext;
-    use super::PanelLineSourceKey;
     use super::PanelPoint;
+    use super::PanelShapeClipPolicy;
+    use super::PanelShapePaintOrder;
+    use super::PanelShapePrimitiveKind;
+    use super::PanelShapeResolveContext;
+    use super::PanelShapeSourceKey;
+    use super::resolve_panel_circle;
     use super::resolve_panel_line;
     use crate::BoundingBox;
     use crate::CalloutCap;
@@ -1323,7 +1493,7 @@ mod tests {
         let line = PanelLine::new((0.0, 0.0), (PanelCoord::end(0.0), 0.0));
         let resolved = resolve_panel_line(
             &line,
-            PanelLineResolveContext::new(
+            PanelShapeResolveContext::new(
                 owner_bounds(),
                 Some(BoundingBox {
                     x:      0.0,
@@ -1331,10 +1501,10 @@ mod tests {
                     width:  30.0,
                     height: 100.0,
                 }),
-                PanelLineClipPolicy::OwnerBounds,
-                PanelLinePaintOrder::Normal { draw_slot: 3 },
+                PanelShapeClipPolicy::OwnerBounds,
+                PanelShapePaintOrder::Normal { draw_slot: 3 },
                 3,
-                PanelLineSourceKey::element(1, 0, 0),
+                PanelShapeSourceKey::element(1, 0, 0),
             ),
         )
         .expect("line should resolve");
@@ -1361,13 +1531,13 @@ mod tests {
         };
         let resolved = resolve_panel_line(
             &line,
-            PanelLineResolveContext::new(
+            PanelShapeResolveContext::new(
                 owner_bounds(),
                 Some(inherited),
-                PanelLineClipPolicy::Inherited,
-                PanelLinePaintOrder::Normal { draw_slot: 0 },
+                PanelShapeClipPolicy::Inherited,
+                PanelShapePaintOrder::Normal { draw_slot: 0 },
                 0,
-                PanelLineSourceKey::element(1, 0, 0),
+                PanelShapeSourceKey::element(1, 0, 0),
             ),
         )
         .expect("visible overflow line should resolve");
@@ -1381,13 +1551,13 @@ mod tests {
         let line = PanelLine::new((0.0, 0.0), (PanelCoord::end(-30.0), 0.0));
         let resolved = resolve_panel_line(
             &line,
-            PanelLineResolveContext::new(
+            PanelShapeResolveContext::new(
                 owner_bounds(),
                 None,
-                PanelLineClipPolicy::Inherited,
-                PanelLinePaintOrder::Normal { draw_slot: 0 },
+                PanelShapeClipPolicy::Inherited,
+                PanelShapePaintOrder::Normal { draw_slot: 0 },
                 0,
-                PanelLineSourceKey::element(1, 0, 0),
+                PanelShapeSourceKey::element(1, 0, 0),
             ),
         )
         .expect("unclipped visible overflow line should resolve");
@@ -1406,10 +1576,19 @@ mod tests {
         let resolved = resolve_panel_line(&line, context()).expect("line should resolve");
 
         assert_eq!(resolved.primitives.len(), 4);
-        assert_eq!(resolved.primitives[0].kind, PanelLinePrimitiveKind::Segment);
-        assert_eq!(resolved.primitives[1].kind, PanelLinePrimitiveKind::Segment);
-        assert_eq!(resolved.primitives[2].kind, PanelLinePrimitiveKind::Segment);
-        assert_eq!(resolved.primitives[3].kind, PanelLinePrimitiveKind::Circle);
+        assert_eq!(
+            resolved.primitives[0].kind,
+            PanelShapePrimitiveKind::Segment
+        );
+        assert_eq!(
+            resolved.primitives[1].kind,
+            PanelShapePrimitiveKind::Segment
+        );
+        assert_eq!(
+            resolved.primitives[2].kind,
+            PanelShapePrimitiveKind::Segment
+        );
+        assert_eq!(resolved.primitives[3].kind, PanelShapePrimitiveKind::Circle);
         for (ordinal, primitive) in resolved.primitives.iter().enumerate() {
             assert_eq!(primitive.source_key.primitive_ordinal, ordinal);
             assert_eq!(primitive.part_order, ordinal);
@@ -1432,7 +1611,7 @@ mod tests {
             resolved
                 .primitives
                 .iter()
-                .all(|primitive| { primitive.kind == PanelLinePrimitiveKind::Circle })
+                .all(|primitive| { primitive.kind == PanelShapePrimitiveKind::Circle })
         );
     }
 
@@ -1447,8 +1626,29 @@ mod tests {
         assert!(resolve_panel_line(&zero_width, context()).is_none());
     }
 
-    fn context() -> PanelLineResolveContext {
-        PanelLineResolveContext::new(
+    #[test]
+    fn resolve_circle_emits_single_circle_primitive() {
+        let circle = PanelCircle::new((PanelCoord::start(5.0), PanelCoord::percent(0.5)), 4.0)
+            .color(Color::BLACK);
+        let resolved = resolve_panel_circle(&circle, context()).expect("circle should resolve");
+
+        assert_eq!(resolved.primitives.len(), 1);
+        assert_eq!(resolved.primitives[0].kind, PanelShapePrimitiveKind::Circle);
+        assert_eq!(resolved.color, Color::BLACK);
+        assert_eq!(resolved.start, bevy::math::Vec2::new(15.0, 60.0));
+    }
+
+    #[test]
+    fn resolve_circle_rejects_non_positive_or_non_finite_radius() {
+        let zero = PanelCircle::new((0.0, 0.0), 0.0);
+        let nan = PanelCircle::new((0.0, 0.0), f32::NAN);
+
+        assert!(resolve_panel_circle(&zero, context()).is_none());
+        assert!(resolve_panel_circle(&nan, context()).is_none());
+    }
+
+    fn context() -> PanelShapeResolveContext {
+        PanelShapeResolveContext::new(
             owner_bounds(),
             Some(BoundingBox {
                 x:      0.0,
@@ -1456,10 +1656,10 @@ mod tests {
                 width:  200.0,
                 height: 200.0,
             }),
-            PanelLineClipPolicy::OwnerBounds,
-            PanelLinePaintOrder::Normal { draw_slot: 0 },
+            PanelShapeClipPolicy::OwnerBounds,
+            PanelShapePaintOrder::Normal { draw_slot: 0 },
             0,
-            PanelLineSourceKey::element(1, 0, 0),
+            PanelShapeSourceKey::element(1, 0, 0),
         )
     }
 
