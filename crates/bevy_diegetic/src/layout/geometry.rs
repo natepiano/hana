@@ -188,43 +188,37 @@ impl From<f32> for CornerRadius {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Border {
     /// Left border width.
-    pub left:             Dimension,
+    pub left:   Dimension,
     /// Right border width.
-    pub right:            Dimension,
+    pub right:  Dimension,
     /// Top border width.
-    pub top:              Dimension,
+    pub top:    Dimension,
     /// Bottom border width.
-    pub bottom:           Dimension,
+    pub bottom: Dimension,
     /// Color of the border.
-    pub color:            Color,
-    /// Width of lines drawn between children (0 = none).
-    pub between_children: Dimension,
+    pub color:  Color,
 }
 
 impl Default for Border {
     fn default() -> Self {
         Self {
-            left:             Dimension {
+            left:   Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            right:            Dimension {
+            right:  Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            top:              Dimension {
+            top:    Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            bottom:           Dimension {
+            bottom: Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            color:            Color::BLACK,
-            between_children: Dimension {
-                value: 0.0,
-                unit:  None,
-            },
+            color:  Color::BLACK,
         }
     }
 }
@@ -234,27 +228,23 @@ impl Border {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            left:             Dimension {
+            left:   Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            right:            Dimension {
+            right:  Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            top:              Dimension {
+            top:    Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            bottom:           Dimension {
+            bottom: Dimension {
                 value: 0.0,
                 unit:  None,
             },
-            color:            Color::BLACK,
-            between_children: Dimension {
-                value: 0.0,
-                unit:  None,
-            },
+            color:  Color::BLACK,
         }
     }
 
@@ -268,10 +258,6 @@ impl Border {
             top: width,
             bottom: width,
             color,
-            between_children: Dimension {
-                value: 0.0,
-                unit:  None,
-            },
         }
     }
 
@@ -318,13 +304,6 @@ impl Border {
     #[must_use]
     pub const fn vertical(&self) -> f32 { self.top.value + self.bottom.value }
 
-    /// Sets the width of lines drawn between children.
-    #[must_use]
-    pub fn between_children(mut self, width: impl Into<Dimension>) -> Self {
-        self.between_children = width.into();
-        self
-    }
-
     /// Resolves all dimensions to points and returns a copy with plain values.
     ///
     /// Dimensions with an explicit unit convert via `unit.to_points()`.
@@ -333,27 +312,61 @@ impl Border {
     #[must_use]
     pub fn resolved(self, default_scale: f32) -> Self {
         Self {
-            left:             Dimension {
+            left:   Dimension {
                 value: self.left.to_points(default_scale),
                 unit:  None,
             },
-            right:            Dimension {
+            right:  Dimension {
                 value: self.right.to_points(default_scale),
                 unit:  None,
             },
-            top:              Dimension {
+            top:    Dimension {
                 value: self.top.to_points(default_scale),
                 unit:  None,
             },
-            bottom:           Dimension {
+            bottom: Dimension {
                 value: self.bottom.to_points(default_scale),
                 unit:  None,
             },
-            color:            self.color,
-            between_children: Dimension {
-                value: self.between_children.to_points(default_scale),
+            color:  self.color,
+        }
+    }
+}
+
+/// Separator drawn between adjacent row or column child slots.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChildDivider {
+    width: Dimension,
+    color: Color,
+}
+
+impl ChildDivider {
+    /// Creates a divider with an authored width and color.
+    #[must_use]
+    pub fn new(width: impl Into<Dimension>, color: Color) -> Self {
+        Self {
+            width: width.into(),
+            color,
+        }
+    }
+
+    /// Returns the divider width.
+    #[must_use]
+    pub(crate) const fn width(self) -> Dimension { self.width }
+
+    /// Returns the divider color.
+    #[must_use]
+    pub(crate) const fn color(self) -> Color { self.color }
+
+    /// Resolves the divider width to points and preserves its color.
+    #[must_use]
+    pub(crate) fn to_points(self, layout_scale: f32) -> Self {
+        Self {
+            width: Dimension {
+                value: self.width.to_points(layout_scale),
                 unit:  None,
             },
+            color: self.color,
         }
     }
 }

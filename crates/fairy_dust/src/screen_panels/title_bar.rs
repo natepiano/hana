@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::ChildLayoutState;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::El;
@@ -399,43 +400,71 @@ fn build_title_bar_layout(
         .background_color
         .unwrap_or_else(super::default_inner_background);
     let orientation = title_bar.orientation;
-    let row = match orientation {
-        TitleBarOrientation::Horizontal => El::row()
-            .width(Sizing::GROW)
-            .gap(TITLE_BAR_CHILD_GAP)
-            .align_y(AlignY::Center),
-        TitleBarOrientation::Vertical => El::column().width(Sizing::GROW).gap(TITLE_BAR_CHILD_GAP),
-    };
-    screen_panel_frame(builder, Sizing::FIT, Sizing::FIT, background, |builder| {
-        builder.with(row, |builder| {
-            builder.text(&title_bar.title, title);
-            for control in &title_bar.controls {
-                title_separator(builder, orientation);
-                if control.segments.is_empty() {
-                    let style = if state.is_active(&control.id) {
-                        active_control.clone()
-                    } else {
-                        inactive_control.clone()
-                    };
-                    builder.text(&control.label, style);
-                } else {
-                    segmented_control_cell(
-                        builder,
-                        control,
-                        state,
-                        &active_control,
-                        &inactive_control,
-                    );
-                }
-            }
+    screen_panel_frame(
+        builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        background,
+        |builder| match orientation {
+            TitleBarOrientation::Horizontal => build_title_bar_contents(
+                builder,
+                title_bar,
+                state,
+                orientation,
+                El::row()
+                    .width(Sizing::GROW)
+                    .gap(TITLE_BAR_CHILD_GAP)
+                    .align_y(AlignY::Center),
+                &title,
+                &active_control,
+                &inactive_control,
+            ),
+            TitleBarOrientation::Vertical => build_title_bar_contents(
+                builder,
+                title_bar,
+                state,
+                orientation,
+                El::column().width(Sizing::GROW).gap(TITLE_BAR_CHILD_GAP),
+                &title,
+                &active_control,
+                &inactive_control,
+            ),
+        },
+    );
+}
+
+fn build_title_bar_contents<L: ChildLayoutState>(
+    builder: &mut LayoutBuilder,
+    title_bar: &TitleBar,
+    state: &TitleBarControlState,
+    orientation: TitleBarOrientation,
+    container: El<L>,
+    title: &TextStyle,
+    active_control: &TextStyle,
+    inactive_control: &TextStyle,
+) {
+    builder.with(container, |builder| {
+        builder.text(&title_bar.title, title.clone());
+        for control in &title_bar.controls {
             title_separator(builder, orientation);
-            let help_style = if state.is_active(HELP_CONTROL) {
-                active_control
+            if control.segments.is_empty() {
+                let style = if state.is_active(&control.id) {
+                    active_control.clone()
+                } else {
+                    inactive_control.clone()
+                };
+                builder.text(&control.label, style);
             } else {
-                inactive_control
-            };
-            builder.text(HELP_CONTROL, help_style);
-        });
+                segmented_control_cell(builder, control, state, active_control, inactive_control);
+            }
+        }
+        title_separator(builder, orientation);
+        let help_style = if state.is_active(HELP_CONTROL) {
+            active_control.clone()
+        } else {
+            inactive_control.clone()
+        };
+        builder.text(HELP_CONTROL, help_style);
     });
 }
 

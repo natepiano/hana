@@ -2,7 +2,8 @@
 
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
-use bevy_diegetic::Border;
+use bevy_diegetic::ChildDivider;
+use bevy_diegetic::Column;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -115,11 +116,7 @@ fn build_guidance_table(
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .gap(Px(TABLE_GROUP_GAP))
-            .border(
-                Border::new()
-                    .between_children(TABLE_DIVIDER_WIDTH)
-                    .color(BORDER_DIM),
-            ),
+            .child_divider(ChildDivider::new(TABLE_DIVIDER_WIDTH, BORDER_DIM)),
         |builder| {
             for speed in speeds {
                 build_speed_block(
@@ -198,17 +195,15 @@ fn build_speed_block(
 /// `BlenderLike`) divide their rows with a border line — Orbit / Pan / Zoom In /
 /// Zoom Out — while multi-speed presets keep the rows gap-separated and rely on
 /// the divider between their `Normal` / `Slow` blocks instead.
-fn action_rows_element(speed_column: SpeedColumn) -> El {
+fn action_rows_element(speed_column: SpeedColumn) -> El<Column> {
     let element = El::column()
         .width(Sizing::GROW)
         .height(Sizing::FIT)
         .gap(Px(TABLE_ROW_GAP));
     match speed_column {
-        SpeedColumn::Hidden => element.border(
-            Border::new()
-                .between_children(TABLE_DIVIDER_WIDTH)
-                .color(BORDER_DIM),
-        ),
+        SpeedColumn::Hidden => {
+            element.child_divider(ChildDivider::new(TABLE_DIVIDER_WIDTH, BORDER_DIM))
+        },
         SpeedColumn::Shown => element,
     }
 }

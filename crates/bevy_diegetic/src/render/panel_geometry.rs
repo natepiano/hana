@@ -404,7 +404,7 @@ fn gather_surfaces(
                 let Some(draw_depth) = draw_order.depth_for(cmd_index) else {
                     continue;
                 };
-                if *source == RectangleSource::BetweenChildrenBorder {
+                if *source == RectangleSource::ChildDivider {
                     dividers.push(ElementSurface {
                         index: usize::MAX,
                         bounds: cmd.bounds,

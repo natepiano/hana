@@ -1,6 +1,6 @@
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
-use bevy_diegetic::Border;
+use bevy_diegetic::ChildDivider;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::El;
@@ -280,11 +280,10 @@ fn build_policy_layout(
                     .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .gap(Px(POLICY_PANEL_GROUP_GAP))
-                    .border(
-                        Border::new()
-                            .between_children(Px(EVENT_LOG_DIVIDER_THICKNESS))
-                            .color(EVENT_LOG_DIVIDER_COLOR),
-                    ),
+                    .child_divider(ChildDivider::new(
+                        Px(EVENT_LOG_DIVIDER_THICKNESS),
+                        EVENT_LOG_DIVIDER_COLOR,
+                    )),
                 |builder| {
                     let interrupt_key_style = if flash.interrupt.is_some() {
                         &styles.key_active

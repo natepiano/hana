@@ -7,7 +7,7 @@
 - **Project:** `bevy_diegetic` — workspace crate for retained-mode, Clay-inspired diegetic UI panels and text in Bevy 3D scenes.
 - **Stack:** Rust 2024 workspace; Bevy `0.19.0-rc.2`; `bevy_diegetic` default feature `typography_overlay`; layout uses `bevy_kana`, `parley`, `smallvec`, and dev parity checks against vendored `clay-layout`.
 - **Layout:** `crates/bevy_diegetic/src/layout/` — public `El` API, internal `Element` storage, sizing/positioning/wrapping/render commands; `crates/bevy_diegetic/src/layout/engine/*` — layout behavior/tests; `crates/bevy_diegetic/examples/`, `crates/bevy_lagrange/examples/`, and `crates/fairy_dust/src/` — call-site migration; `docs/bevy_diegetic/child-layout.md` — implementation plan; `crates/bevy_diegetic/tests/trybuild/**` — compile-fail/pass fixtures if added.
-- **Key files:** `crates/bevy_diegetic/src/layout/builder.rs:65` — current untyped `El` compatibility fields and setters; `crates/bevy_diegetic/src/layout/builder.rs:92` — `El::row()`; `crates/bevy_diegetic/src/layout/builder.rs:100` — `El::column()`; `crates/bevy_diegetic/src/layout/builder.rs:156` — `El::gap(...)`; `crates/bevy_diegetic/src/layout/builder.rs:175` — `El::alignment(...)`; `crates/bevy_diegetic/src/layout/builder.rs:328` — `El::into_element` lowers through `ChildLayout::for_direction(...)`; `crates/bevy_diegetic/src/layout/builder.rs:448` — `LayoutBuilder::with_root`; `crates/bevy_diegetic/src/layout/builder.rs:514` — `LayoutBuilder::text_element`; `crates/bevy_diegetic/src/layout/builder.rs:550` — `LayoutBuilder::text_id_element`; `crates/bevy_diegetic/src/layout/builder.rs:560` — private `LayoutBuilder::add_text`; `crates/bevy_diegetic/src/layout/builder.rs:595` — `LayoutBuilder::image`; `crates/bevy_diegetic/src/layout/child_layout.rs:8` — internal `ChildLayout` enum; `crates/bevy_diegetic/src/layout/child_layout.rs:33` — compatibility lowering helper; `crates/bevy_diegetic/src/layout/child_layout.rs:96` — gap unit scaling; `crates/bevy_diegetic/src/layout/element.rs:75` — current `Element` storage; `crates/bevy_diegetic/src/layout/element.rs:600` — `LayoutTree::scaled`; `crates/bevy_diegetic/src/layout/element.rs:709` — child-layout change classifier; `crates/bevy_diegetic/src/layout/mod.rs:54` — layout public exports; `crates/bevy_diegetic/src/layout/sizing.rs:225` — current `Direction`; `crates/bevy_diegetic/src/layout/geometry.rs:323` — `Border::between_children`; `crates/bevy_diegetic/src/layout/engine/sizing.rs:45` — fit-size propagation; `crates/bevy_diegetic/src/layout/engine/sizing.rs:156` — top-down sizing; `crates/bevy_diegetic/src/layout/engine/sizing.rs:545` — row/column `is_layout_axis` helper that overlay must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:566` — row/column-only `ChildLayout::direction()` use that Phase 5 must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:729` — between-child border emission; `crates/bevy_diegetic/src/layout/engine/wrapping.rs:240` — parent content width for wrapping; `crates/bevy_diegetic/src/layout/engine/integration_tests.rs:808` — existing gap/alignment tests; `crates/bevy_diegetic/Cargo.toml` — add `trybuild` dev-dependency if compile-fail tests are added; `crates/bevy_diegetic/examples/panel_draw_order.rs` — currently may be a text-fit probe with the old draw-order demo commented; rebuild the active overlay-based example in Phase 6; `crates/fairy_dust/src/camera_control_panel/layout.rs:201` — downstream helper returning bare `El`.
+- **Key files:** `crates/bevy_diegetic/src/layout/builder.rs:65` — generic public `El<L = Row>`; `crates/bevy_diegetic/src/layout/builder.rs:72` — public `Row`; `crates/bevy_diegetic/src/layout/builder.rs:79` — public `Column`; `crates/bevy_diegetic/src/layout/builder.rs:85` — sealed public `ChildLayoutState`; `crates/bevy_diegetic/src/layout/builder.rs:150` — `El::new()`; `crates/bevy_diegetic/src/layout/builder.rs:153` — `El::row()`; `crates/bevy_diegetic/src/layout/builder.rs:156` — row `.gap(...)`; `crates/bevy_diegetic/src/layout/builder.rs:162` — row `.child_divider(...)`; `crates/bevy_diegetic/src/layout/builder.rs:170` — `El::column()`; `crates/bevy_diegetic/src/layout/builder.rs:173` — column `.gap(...)`; `crates/bevy_diegetic/src/layout/builder.rs:179` — column `.child_divider(...)`; `crates/bevy_diegetic/src/layout/builder.rs:370` — `El::into_element` lowers row/column typestate into internal `ChildLayout` and normalizes text/image leaves; `crates/bevy_diegetic/src/layout/builder.rs:543` — generic `LayoutBuilder::with_root`; `crates/bevy_diegetic/src/layout/builder.rs:615` — generic `LayoutBuilder::text_element`; `crates/bevy_diegetic/src/layout/builder.rs:654` — generic `LayoutBuilder::text_id_element`; `crates/bevy_diegetic/src/layout/builder.rs:667` — private generic `LayoutBuilder::add_text`; `crates/bevy_diegetic/src/layout/builder.rs:705` — generic `LayoutBuilder::image`; `crates/bevy_diegetic/src/layout/child_layout.rs:8` — hidden internal `ChildLayout` enum; `crates/bevy_diegetic/src/layout/child_layout.rs:60` — child-divider access; `crates/bevy_diegetic/src/layout/child_layout.rs:76` — gap/divider unit scaling; `crates/bevy_diegetic/src/layout/element.rs:668` — child-layout change classifier use; `crates/bevy_diegetic/src/layout/element.rs:710` — child-layout change classifier; `crates/bevy_diegetic/src/layout/element.rs:750` — child-divider change classifier; `crates/bevy_diegetic/src/layout/element.rs:940` — text leaf normalization test; `crates/bevy_diegetic/src/layout/element.rs:956` — image leaf normalization test; `crates/bevy_diegetic/src/layout/mod.rs:55` and `crates/bevy_diegetic/src/lib.rs:149` — public row/column/trait exports; `crates/bevy_diegetic/src/layout/geometry.rs:189` — `Border`; `crates/bevy_diegetic/src/layout/geometry.rs:338` — `ChildDivider`; `crates/bevy_diegetic/src/layout/engine/sizing.rs:545` — row/column `is_layout_axis` helper that overlay must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:566` — row/column-only `is_row()` axis check that Phase 5 must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:729` — child-divider rectangle emission; `crates/bevy_diegetic/src/layout/engine/wrapping.rs:240` — parent content width for wrapping; `crates/bevy_diegetic/src/layout/engine/integration_tests.rs:808` — existing gap/alignment tests; `crates/bevy_diegetic/tests/trybuild.rs:4` — trybuild compile fixtures; `crates/bevy_diegetic/tests/trybuild/pass/typestate_helpers.rs:1` — row/column typestate compile-pass fixture; `crates/bevy_diegetic/examples/panel_draw_order.rs` — currently may be a text-fit probe with the old draw-order demo commented; rebuild the active overlay-based example in Phase 6.
 - **Build:** `cargo check -p bevy_diegetic --examples`; after call-site migration also run `cargo check --workspace --all-targets`.
 - **Test:** `cargo nextest run -p bevy_diegetic`.
 - **Lint:** `cargo clippy --workspace --all-targets`; `cargo +nightly fmt --all`; audit stale APIs with `rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(|child_gap\\(-" crates docs`.
@@ -153,7 +153,7 @@ Update row/column sizing and positioning code to read `child_layout` helpers. Be
 - Phase 2 now has to migrate deferred negative-gap sites away from `.direction(...)` while still recording them for Phase 6 overlay work, so Phase 4 can remove `.direction(...)` without a compile cliff.
 - Phase 3 now stores `ChildDivider` inside the row/column `ChildLayout` variants instead of adding unrelated `Element` fields.
 - Phase 4 now includes every `LayoutBuilder` entry point that accepts `El`, including `text_id_element(...)` and private `add_text(...)`.
-- Phase 5 now explicitly replaces row/column-only `ChildLayout::direction()` and `is_layout_axis(...)` assumptions with an overlay-aware axis-role branch.
+- Phase 5 now explicitly replaces row/column-only `is_row()`/`is_column()` and `is_layout_axis(...)` assumptions with an overlay-aware axis-role branch.
 - Phase 6 now rebuilds the active `panel_draw_order` example as an overlay-based `DrawZIndex` teaching example, even if the old negative-gap demo is only present in comments.
 
 ### Phase 2 — Row/column convenience API and call-site classification  · status: done (uncommitted)
@@ -266,11 +266,11 @@ Concrete parity and benchmark work:
 #### Phase 2 Review
 
 - Phase 3 now names `bevy_lagrange`, Fairy Dust, and render-command docs as `Border::between_children` migration scope, matching the live `rg -n "between_children" crates docs` audit.
-- Phase 4 now scopes stale public API cleanup around Diegetic production call sites, includes `child_align_x` / `child_align_y` in the audit, and carries the internal `ChildLayout::direction()` axis helper to Phase 5.
+- Phase 4 now scopes stale public API cleanup around Diegetic production call sites and includes `child_align_x` / `child_align_y` in the audit.
 - Phase 6 now preserves Clay reference declarations as final stale-API audit exceptions while still requiring visible Diegetic examples/docs to teach the new API.
 - Delegation Context line anchors were refreshed after Phase 2 shifted `builder.rs` locations.
 
-### Phase 3 — Split outer borders from child dividers  · status: todo
+### Phase 3 — Split outer borders from child dividers  · status: done (uncommitted)
 
 #### Work Order
 
@@ -354,7 +354,35 @@ Remove, deprecate, or stop using `Border::between_children`. If a compatibility 
 
 **Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes; `cargo check -p bevy_diegetic --examples` passes; row/column child divider rendering matches old between-child border behavior; `rg -n "between_children" crates docs` shows only compatibility/deprecation code or migration notes.
 
-### Phase 4 — Typestate row/column public API  · status: todo
+#### Retrospective
+
+**What worked:**
+
+- `ChildDivider` is public, exported from `bevy_diegetic`, stored inside row/column `ChildLayout`, scaled with layout units, and emitted as `RectangleSource::ChildDivider`.
+- `Border` no longer owns child divider state, and all production `Border::between_children(...)` call sites migrated to `El::child_divider(ChildDivider::new(...))`.
+
+**What deviated from the plan:**
+
+- `Border::between_children` was removed rather than kept as a temporary compatibility shim.
+- Phase 3 removed the internal `ChildLayout::direction()` helper earlier than the original later-phase notes expected, replacing the positioning caller with `is_row()`.
+
+**Surprises:**
+
+- The blind reviewer found one stale `RenderCommandKind::Rectangle` field comment that still says "between-children border"; this is a nit, not a behavioral issue.
+
+**Implications for remaining phases:**
+
+- Phase 4 can make `child_divider(...)` row/column-only directly; no `Border::between_children` compatibility bridge remains.
+- Phase 5 should no longer plan around replacing `ChildLayout::direction()`, because Phase 3 already removed that helper.
+
+#### Phase 3 Review
+
+- Phase 4 now uses `Border` as the common outer-border type, not `OuterBorder`, and re-exports row/column marker types from both `layout/mod.rs` and `lib.rs`.
+- Phase 4 now includes Bevy Lagrange downstream examples and the stale `RenderCommandKind::Rectangle` source-comment cleanup in its work scope.
+- Phase 4 now removes `.child_gap(...)`; `.gap(...)` is the only final row/column spacing method.
+- Phase 5 now treats `ChildLayout::direction()` as already removed, removes impossible legacy-divider handling, and adds row/column percent/grow regression coverage around the overlay content-box helper.
+
+### Phase 4 — Typestate row/column public API  · status: done (uncommitted)
 
 #### Work Order
 
@@ -391,7 +419,7 @@ struct CommonEl {
     align_x: AlignX,
     align_y: AlignY,
     background: Option<Color>,
-    border: Option<OuterBorder>,
+    border: Option<Border>,
     // remaining visual and behavior fields from the current El
 }
 ```
@@ -425,7 +453,7 @@ impl<L> El<L> {
     pub fn size<DM: DimensionMatch>(self, w: DM, h: DM) -> Self { ... }
     pub fn padding(self, padding: Padding) -> Self { ... }
     pub fn background(self, color: Color) -> Self { ... }
-    pub fn border(self, border: OuterBorder) -> Self { ... }
+    pub fn border(self, border: Border) -> Self { ... }
     pub fn z_index(self, z_index: DrawZIndex) -> Self { ... }
     pub fn align_x(self, align: AlignX) -> Self { ... }
     pub fn align_y(self, align: AlignY) -> Self { ... }
@@ -440,19 +468,19 @@ impl El<Row> {
     pub fn new() -> Self { Self::row() }
     pub fn row() -> Self { ... }
     pub fn gap(self, gap: impl Into<Dimension>) -> Self { ... }
-    pub fn child_gap(self, gap: impl Into<Dimension>) -> Self { ... } // temporary alias only
     pub fn child_divider(self, divider: ChildDivider) -> Self { ... }
 }
 
 impl El<Column> {
     pub fn column() -> Self { ... }
     pub fn gap(self, gap: impl Into<Dimension>) -> Self { ... }
-    pub fn child_gap(self, gap: impl Into<Dimension>) -> Self { ... } // temporary alias only
     pub fn child_divider(self, divider: ChildDivider) -> Self { ... }
 }
 ```
 
 Do not keep `.direction(...)` on `El<L>`. A runtime `Direction` argument cannot return `El<Row>` for one value and `El<Column>` for another without erasing the typestate. Phase 2 already migrated ordinary call sites away from `.direction(...)`; any stale use must be fixed in this phase.
+
+Do not keep `.child_gap(...)` on `El<Row>` or `El<Column>`. Phase 2 migrated production authoring to `.gap(...)`, and the final row/column typestate API should have one spacing name. Overlay compile-fail coverage should still include `El::overlay().child_gap(...)`, but it should fail because `child_gap` no longer exists anywhere on `El<L>`.
 
 Make `LayoutBuilder` methods generic:
 
@@ -509,6 +537,8 @@ impl LayoutBuilder {
 
 Text and image leaves can accept any `El<L>`, but their internal child layout is inert. Text/image leaf lowering must normalize the internal child layout to an exact default row with zero gap, no divider, and default alignment. Container lowering must preserve authored layout: `with_root(...)` and `with(...)` initially lower containers as `ElementContent::Empty`, but those nodes may receive children afterward.
 
+Clean up the stale Phase 3 review nit in `crates/bevy_diegetic/src/layout/render.rs`: the `RenderCommandKind::Rectangle { source }` field comment should refer to backgrounds and child dividers, not "between-children border."
+
 Update helper signatures deliberately:
 
 - helpers that return a known row use `El<Row>`;
@@ -521,7 +551,7 @@ Known downstream cases from the Phase 2 audit:
 - `crates/fairy_dust/src/camera_control_panel/layout.rs:201` returns a column element from `action_rows_element(...)`; change it to `El<Column>`.
 - `crates/fairy_dust/src/screen_panels/title_bar.rs` builds either a row or column into one local binding; split the orientation branches before assigning to a single typed `El<Row>` / `El<Column>` local.
 
-Phase 4 should remove or isolate public compatibility aliases deliberately, but it does not own the internal row/column-only axis replacement in the layout engine. Carry `crates/bevy_diegetic/src/layout/engine/positioning.rs:566` (`parent_el.child_layout.direction()`) forward to Phase 5, where overlay-aware axis roles are introduced.
+Phase 4 should remove or isolate public compatibility aliases deliberately, but it does not own the internal row/column-only axis replacement in the layout engine. Carry `crates/bevy_diegetic/src/layout/engine/sizing.rs:545` (`is_layout_axis(...)`) and `crates/bevy_diegetic/src/layout/engine/positioning.rs:566` (`parent_el.child_layout.is_row()`) forward to Phase 5, where overlay-aware axis roles are introduced.
 
 Add compile-pass tests, preferably through `trybuild`, for downstream-style helper signatures:
 
@@ -535,15 +565,42 @@ fn decorate<L: ChildLayoutState>(el: El<L>) -> El<L> { el.padding(Padding::all(1
 
 - `crates/bevy_diegetic/src/layout/builder.rs` — generic `El<L>`, marker types, common setters, row/column-only methods, generic builder methods including `text_id_element(...)` and private `add_text(...)`.
 - `crates/bevy_diegetic/src/layout/child_layout.rs` — public markers and sealed trait if this module owns them.
-- `crates/bevy_diegetic/src/layout/mod.rs` — re-export `Row`, `Column`, and `ChildLayoutState` beside `El`.
+- `crates/bevy_diegetic/src/layout/mod.rs` and `crates/bevy_diegetic/src/lib.rs` — re-export `Row`, `Column`, and `ChildLayoutState` beside `El`.
 - `crates/bevy_diegetic/src/layout/element.rs` — leaf normalization and classification updates.
-- `crates/fairy_dust/src/**/*.rs` and `crates/bevy_diegetic/examples/**/*.rs` — update helper signatures and stale call sites.
+- `crates/bevy_diegetic/src/layout/render.rs` — fix the stale `RenderCommandKind::Rectangle` source comment from the Phase 3 review.
+- `crates/fairy_dust/src/**/*.rs`, `crates/bevy_lagrange/examples/**/*.rs`, and `crates/bevy_diegetic/examples/**/*.rs` — update helper signatures and stale call sites.
 - `crates/bevy_diegetic/Cargo.toml` — add `trybuild` dev-dependency if compile-pass fixtures are introduced.
 - `crates/bevy_diegetic/tests/trybuild.rs` and `crates/bevy_diegetic/tests/trybuild/pass/*.rs` — compile-pass fixtures.
 
-**Constraints from prior phases:** Phase 1 added `ChildLayout::for_direction(...)`; Phase 2 migrated ordinary `.direction(...)`, `.child_gap(...)`, and `.child_alignment(...)` call sites while intentionally preserving Clay `Declaration` reference calls in parity tests, benchmark fixtures, and the Clay half of `side_by_side.rs`; Phase 3 split child dividers from outer border and stores dividers inside row/column `ChildLayout`, so dividers can now become row/column-only methods.
+**Constraints from prior phases:** Phase 1 added `ChildLayout::for_direction(...)`; Phase 2 migrated ordinary `.direction(...)`, `.child_gap(...)`, and `.child_alignment(...)` call sites while intentionally preserving Clay `Declaration` reference calls in parity tests, benchmark fixtures, and the Clay half of `side_by_side.rs`; Phase 3 split child dividers from outer border, removed `Border::between_children`, added public `ChildDivider`, stores dividers inside row/column `ChildLayout`, and removed the internal `ChildLayout::direction()` helper. The temporary untyped `El::child_divider(...)` exists only until Phase 4 moves dividers onto row/column states. The final spacing API is `.gap(...)`; Phase 4 removes `.child_gap(...)` rather than preserving a Clay-compatible alias.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes including compile-pass fixtures; `cargo check -p bevy_diegetic --examples` passes; `cargo check --workspace --all-targets` passes or every workspace crate touched by stale API errors is checked explicitly; `rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(" crates docs` shows no Diegetic production call sites outside migration notes, removed compatibility code, intentionally preserved Clay reference declarations, or internal row/column-only engine helpers explicitly carried to Phase 5.
+**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes including compile-pass fixtures; `cargo check -p bevy_diegetic --examples` passes; `cargo check --workspace --all-targets` passes or every workspace crate touched by stale API errors is checked explicitly; `rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(" crates docs` shows no Diegetic production call sites outside migration notes, removed compatibility code, or intentionally preserved Clay reference declarations.
+
+#### Retrospective
+
+**What worked:**
+
+- `El<L = Row>`, `Row`, `Column`, and sealed `ChildLayoutState` now make `.gap(...)` and `child_divider(...)` row/column-only while keeping common setters generic.
+- `LayoutBuilder` entry points now accept `El<L>` where `L: ChildLayoutState`, and text/image leaves normalize to default inert row child layout.
+
+**What deviated from the plan:**
+
+- The sealed trait exposes only private row metadata helpers, and `El::into_element(...)` constructs the internal `ChildLayout`; this keeps `ChildLayout` hidden and avoids private-interface warnings.
+
+**Surprises:**
+
+- Trybuild added enough compile cost that the implementation verification loop spent most of its time in isolated compile-pass fixtures.
+
+**Implications for remaining phases:**
+
+- Phase 5 can add `Overlay` directly beside the row/column typestate API instead of refactoring the public `El` shape again.
+- Phase 5 must update the sealed lowering path before implementing `El<Overlay>`, because the current private row/column helper lowers all non-row states as columns.
+
+#### Phase 4 Review
+
+- Delegation Context key-file anchors now describe the shipped `El<L = Row>`, `Row`, `Column`, sealed `ChildLayoutState`, generic builder methods, leaf-normalization tests, and trybuild fixtures.
+- Phase 5 now explicitly updates Phase 4's private sealed lowering path before accepting `El<Overlay>`, because the current helper is row/column-specific and treats any non-row state as `Column`.
+- Phase 5 constraints now name the shipped row/column typestate API and trybuild coverage so the overlay work order can be delegated without rediscovering Phase 4.
 
 ### Phase 5 — Overlay layout mode and compile-fail guarantees  · status: todo
 
@@ -600,7 +657,6 @@ Overlay semantics:
 - clipping behavior is unchanged;
 - scroll extents are axis-independent: horizontal scroll range is `max_child_extent_x - content_width`, vertical scroll range is `max_child_extent_y - content_height`, each clamped at zero;
 - child dividers are not part of overlay's public API;
-- legacy divider data, if any remains during migration, is ignored and classified as inert for overlay;
 - `DrawZIndex` controls render order exactly as it does for row and column children.
 
 Do not implement overlay as "cross axis on both axes." Replace `is_along` boolean logic with a child-layout classification:
@@ -614,11 +670,12 @@ enum AxisRole {
 }
 ```
 
-Do not make `ChildLayout::Overlay` fit through the Phase 1 compatibility helpers:
+Do not make `ChildLayout::Overlay` fit through the Phase 4 private row/column lowering helper:
 
-- `ChildLayout::direction()` must not return a fake row or column for overlay.
+- Do not reintroduce `ChildLayout::direction()` as a fake row/column compatibility helper for overlay.
 - `ChildLayout::is_row()` / `is_column()` and `engine/sizing.rs::is_layout_axis(...)` cannot be the only axis classification once overlay exists.
 - Replace row/column-only callers with an overlay-aware axis-role helper before adding the overlay variant.
+- Update the private sealed lowering path in `builder.rs` before accepting `El<Overlay>`: Phase 4's helper has `gap()`, `divider()`, and `is_row()`, and `El::into_element(...)` currently treats every non-row state as `Column`.
 
 Overlay sizing branch:
 
@@ -629,6 +686,8 @@ Overlay sizing branch:
 - no gap is subtracted or accumulated.
 
 Use one content-box helper for percent/grow sizing, wrapping, scroll extent, and positioning. Wrapping must subtract both padding and border so bordered overlay text does not wrap underneath the border.
+
+Scope that helper so existing row/column sizing behavior stays unchanged. Add targeted row/column regression tests for percent/grow sizing around `engine/sizing.rs::is_layout_axis(...)` before or while introducing the overlay-aware helper, so the overlay branch cannot silently change row/column layout.
 
 Split scroll anchoring by axis:
 
@@ -661,7 +720,7 @@ Also add compile-pass fixtures proving row/column `.gap(...)`, row/column `.chil
 
 - `crates/bevy_diegetic/src/layout/child_layout.rs` — add overlay variant, axis role helpers, scaling/classification variants.
 - `crates/bevy_diegetic/src/layout/builder.rs` — add `Overlay` marker and `El::overlay()`, preserve row/column-only gap/divider methods.
-- `crates/bevy_diegetic/src/layout/mod.rs` — re-export `Overlay`.
+- `crates/bevy_diegetic/src/layout/mod.rs` and `crates/bevy_diegetic/src/lib.rs` — re-export `Overlay`.
 - `crates/bevy_diegetic/src/layout/element.rs` — scroll-anchor split, overlay classification, leaf normalization tests.
 - `crates/bevy_diegetic/src/layout/engine/sizing.rs` — explicit overlay fit/percent/grow sizing.
 - `crates/bevy_diegetic/src/layout/engine/positioning.rs` — overlay positioning, independent scroll extents, no overlay child-divider emission.
@@ -670,9 +729,9 @@ Also add compile-pass fixtures proving row/column `.gap(...)`, row/column `.chil
 - `crates/bevy_diegetic/Cargo.toml` — add `trybuild` dev-dependency if not already added.
 - `crates/bevy_diegetic/tests/trybuild.rs`, `crates/bevy_diegetic/tests/trybuild/fail/*.rs`, `crates/bevy_diegetic/tests/trybuild/pass/*.rs` — compile-fail/pass fixtures.
 
-**Constraints from prior phases:** Phase 4 introduced generic `El<L>`, public row/column marker types, row/column-only gap/divider methods, and leaf normalization. Overlay must follow that public API shape and must not expose row/column-only methods.
+**Constraints from prior phases:** Phase 4 introduced generic `El<L = Row>`, public `Row`/`Column` marker types, sealed `ChildLayoutState`, row/column-only `.gap(...)` and `.child_divider(...)` methods, generic `LayoutBuilder` entry points, text/image leaf normalization, and trybuild compile-pass coverage. Overlay must follow that public API shape and must not expose row/column-only methods. Phase 4's private sealed lowering helper is row/column-specific: it exposes `gap()`, `divider()`, and `is_row()`, and `El::into_element(...)` lowers any non-row state as `Column`; Phase 5 must replace or extend that lowering before adding `El<Overlay>`.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes and includes `trybuild` cases; `cargo check -p bevy_diegetic --examples` passes; runtime tests cover overlay fit max sizing, top-left/center/bottom-right alignment, padding/border offsets, percent/grow sizing, independent scroll extents, `scroll_y_from_end(0.0)` not changing horizontal anchoring, bordered overlay text wrapping, no between-child divider commands for overlay, `DrawZIndex` ordering over overlapped children, and leaf marker normalization; code review confirms overlay is not routed through a fake `Direction` or a row/column-only `is_layout_axis(...)` result.
+**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes and includes `trybuild` cases; `cargo check -p bevy_diegetic --examples` passes; runtime tests cover overlay fit max sizing, top-left/center/bottom-right alignment, padding/border offsets, percent/grow sizing, independent scroll extents, `scroll_y_from_end(0.0)` not changing horizontal anchoring, bordered overlay text wrapping, no between-child divider commands for overlay, `DrawZIndex` ordering over overlapped children, leaf marker normalization, and row/column percent/grow sizing regressions around the new content-box helper; code review confirms overlay is not routed through a fake `Direction` or a row/column-only `is_layout_axis(...)` result.
 
 ### Phase 6 — Migrate overlap examples, docs, and final audits  · status: todo
 
@@ -738,7 +797,7 @@ cargo bench -p bevy_diegetic --bench layout_engine_raw --features bench_support
 cargo bench -p bevy_diegetic --bench panel_perf --features bench_support
 ```
 
-Do not substitute `cargo check --benches` for the benchmark runs in Phase 6. The benchmark commands must execute and complete, not merely compile. If one cannot run in the local environment, treat that as a Phase 6 blocker or document the exact environmental failure and rerun path before closeout.
+Do not substitute `cargo check --benches` for the benchmark runs in Phase 6. The benchmark commands must execute and complete, not merely compile.
 
 **Files:**
 

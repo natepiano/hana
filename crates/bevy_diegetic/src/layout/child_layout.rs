@@ -1,10 +1,10 @@
 use super::AlignX;
 use super::AlignY;
+use super::ChildDivider;
 use super::Dimension;
-use super::Direction;
 
 /// Internal child layout mode stored on [`Element`](super::element::Element).
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum ChildLayout {
     /// Children are laid out from left to right.
     Row {
@@ -14,6 +14,8 @@ pub(crate) enum ChildLayout {
         align_x: AlignX,
         /// Vertical child alignment.
         align_y: AlignY,
+        /// Optional separator between adjacent child slots.
+        divider: Option<ChildDivider>,
     },
     /// Children are laid out from top to bottom.
     Column {
@@ -23,42 +25,12 @@ pub(crate) enum ChildLayout {
         align_x: AlignX,
         /// Vertical child alignment.
         align_y: AlignY,
+        /// Optional separator between adjacent child slots.
+        divider: Option<ChildDivider>,
     },
 }
 
 impl ChildLayout {
-    /// Builds internal child layout storage from the compatibility builder
-    /// fields on [`El`](super::builder::El).
-    #[must_use]
-    pub(crate) const fn for_direction(
-        direction: Direction,
-        gap: Dimension,
-        align_x: AlignX,
-        align_y: AlignY,
-    ) -> Self {
-        match direction {
-            Direction::LeftToRight => Self::Row {
-                gap,
-                align_x,
-                align_y,
-            },
-            Direction::TopToBottom => Self::Column {
-                gap,
-                align_x,
-                align_y,
-            },
-        }
-    }
-
-    /// Returns the compatibility direction represented by this layout.
-    #[must_use]
-    pub(crate) const fn direction(&self) -> Direction {
-        match self {
-            Self::Row { .. } => Direction::LeftToRight,
-            Self::Column { .. } => Direction::TopToBottom,
-        }
-    }
-
     /// Returns the main-axis gap between adjacent children.
     #[must_use]
     pub(crate) const fn gap(&self) -> Dimension {
@@ -83,6 +55,14 @@ impl ChildLayout {
         }
     }
 
+    /// Returns the row or column child divider.
+    #[must_use]
+    pub(crate) const fn divider(&self) -> Option<ChildDivider> {
+        match self {
+            Self::Row { divider, .. } | Self::Column { divider, .. } => *divider,
+        }
+    }
+
     /// Returns whether children are laid out from left to right.
     #[must_use]
     pub(crate) const fn is_row(&self) -> bool { matches!(self, Self::Row { .. }) }
@@ -99,6 +79,7 @@ impl ChildLayout {
                 gap,
                 align_x,
                 align_y,
+                divider,
             } => Self::Row {
                 gap: Dimension {
                     value: gap.to_points(layout_scale),
@@ -106,11 +87,13 @@ impl ChildLayout {
                 },
                 align_x,
                 align_y,
+                divider: divider.map(|divider| divider.to_points(layout_scale)),
             },
             Self::Column {
                 gap,
                 align_x,
                 align_y,
+                divider,
             } => Self::Column {
                 gap: Dimension {
                     value: gap.to_points(layout_scale),
@@ -118,6 +101,7 @@ impl ChildLayout {
                 },
                 align_x,
                 align_y,
+                divider: divider.map(|divider| divider.to_points(layout_scale)),
             },
         }
     }
@@ -129,6 +113,7 @@ impl Default for ChildLayout {
             gap:     Dimension::default(),
             align_x: AlignX::default(),
             align_y: AlignY::default(),
+            divider: None,
         }
     }
 }

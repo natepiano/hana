@@ -28,6 +28,8 @@ use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
 use crate::layout::Border;
+use crate::layout::ChildDivider;
+use crate::layout::ChildLayoutState;
 use crate::layout::Dimension;
 use crate::layout::Direction;
 use crate::layout::DrawOverflow;
@@ -101,18 +103,28 @@ fn fixed_unit_gap_child() -> El {
 }
 
 fn scaled_unit_gap_tree(direction: Direction) -> LayoutTree {
-    let root = match direction {
-        Direction::LeftToRight => El::row(),
-        Direction::TopToBottom => El::column(),
-    };
+    match direction {
+        Direction::LeftToRight => scaled_unit_gap_tree_with_root(
+            El::row()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .gap(UNIT_GAP_MM),
+        ),
+        Direction::TopToBottom => scaled_unit_gap_tree_with_root(
+            El::column()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .gap(UNIT_GAP_MM),
+        ),
+    }
+}
+
+fn scaled_unit_gap_tree_with_root<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
     let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
-    builder.with(
-        root.width(Sizing::FIT).height(Sizing::FIT).gap(UNIT_GAP_MM),
-        |builder| {
-            builder.with(fixed_unit_gap_child(), |_| {});
-            builder.with(fixed_unit_gap_child(), |_| {});
-        },
-    );
+    builder.with(root, |builder| {
+        builder.with(fixed_unit_gap_child(), |_| {});
+        builder.with(fixed_unit_gap_child(), |_| {});
+    });
     builder
         .build()
         .scaled(UNIT_GAP_LAYOUT_SCALE, UNIT_GAP_LAYOUT_SCALE)
@@ -1594,7 +1606,7 @@ fn fit_table_with_grow_rows_aligns_middle_column() {
             .width(Sizing::FIT)
             .height(Sizing::FIT)
             .gap(5.0)
-            .border(Border::new().between_children(1.0).color(Color::WHITE)),
+            .child_divider(ChildDivider::new(1.0, Color::WHITE)),
         |builder| {
             add_aligned_table_row(
                 builder,
@@ -1643,7 +1655,7 @@ fn fit_table_with_grow_rows_aligns_middle_column() {
             matches!(
                 command.kind,
                 RenderCommandKind::Rectangle {
-                    source: RectangleSource::BetweenChildrenBorder,
+                    source: RectangleSource::ChildDivider,
                     ..
                 }
             )
@@ -1700,17 +1712,16 @@ fn empty_tree_produces_no_commands() {
     assert!(result.computed.is_empty());
 }
 
-// ── Between-children borders ─────────────────────────────────────────────────
+// ── Child dividers ───────────────────────────────────────────────────────────
 
 #[test]
-fn between_children_borders_emitted() {
+fn child_dividers_emitted() {
     let mut b = LayoutBuilder::new(200.0, 100.0);
     b.with(
-        El::row().width(Sizing::GROW).height(Sizing::GROW).border(
-            Border::new()
-                .color(Color::srgb_u8(255, 255, 255))
-                .between_children(2.0),
-        ),
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .child_divider(ChildDivider::new(2.0, Color::srgb_u8(255, 255, 255))),
         |b| {
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
             b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
@@ -1722,20 +1733,22 @@ fn between_children_borders_emitted() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
 
-    // Should have 2 between-children rectangles (3 children = 2 gaps).
+    // Three children produce two child-divider rectangles.
     let rect_commands: Vec<_> = result
         .commands
         .iter()
         .filter(|cmd| {
-            matches!(cmd.kind, RenderCommandKind::Rectangle { .. }) && cmd.element_idx == 1
+            matches!(
+                cmd.kind,
+                RenderCommandKind::Rectangle {
+                    source: RectangleSource::ChildDivider,
+                    ..
+                }
+            ) && cmd.element_idx == 1
         })
         .collect();
 
-    assert_eq!(
-        rect_commands.len(),
-        2,
-        "Should have 2 between-children border rectangles"
-    );
+    assert_eq!(rect_commands.len(), 2);
 }
 
 // ── Text wrapping ─────────────────────────────────────────────────────────────

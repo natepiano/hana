@@ -20,6 +20,7 @@ use bevy::pbr::StandardMaterial;
 use smallvec::SmallVec;
 
 use super::Border;
+use super::ChildDivider;
 use super::ChildLayout;
 use super::CornerRadius;
 use super::Dimension;
@@ -664,11 +665,11 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         content: n_content,
     } = next;
 
+    let child_layout_change = classify_child_layout_change(child_layout, n_child_layout);
     if width != n_width
         || height != n_height
         || padding != n_padding
-        || classify_child_layout_change(child_layout, n_child_layout)
-            == LayoutTreeChange::LayoutAffecting
+        || child_layout_change == LayoutTreeChange::LayoutAffecting
         || overflow != n_overflow
         || scroll_offset != n_scroll_offset
         || scroll_anchor != n_scroll_anchor
@@ -685,7 +686,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         return LayoutTreeChange::LayoutAffecting;
     }
 
-    let mut change = border_change;
+    let mut change = border_change.combine(child_layout_change);
     if background != n_background || corner_radius != n_corner_radius {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
@@ -713,11 +714,13 @@ fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> Layout
                 gap,
                 align_x,
                 align_y,
+                divider,
             },
             ChildLayout::Row {
                 gap: n_gap,
                 align_x: n_align_x,
                 align_y: n_align_y,
+                divider: n_divider,
             },
         )
         | (
@@ -725,20 +728,41 @@ fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> Layout
                 gap,
                 align_x,
                 align_y,
+                divider,
             },
             ChildLayout::Column {
                 gap: n_gap,
                 align_x: n_align_x,
                 align_y: n_align_y,
+                divider: n_divider,
             },
         ) => {
             if gap != n_gap || align_x != n_align_x || align_y != n_align_y {
                 LayoutTreeChange::LayoutAffecting
             } else {
-                LayoutTreeChange::Identical
+                classify_child_divider_change(*divider, *n_divider)
             }
         },
         _ => LayoutTreeChange::LayoutAffecting,
+    }
+}
+
+fn classify_child_divider_change(
+    divider: Option<ChildDivider>,
+    next: Option<ChildDivider>,
+) -> LayoutTreeChange {
+    match (divider, next) {
+        (None, None) => LayoutTreeChange::Identical,
+        (Some(divider), Some(next)) => {
+            if divider.width() != next.width() {
+                LayoutTreeChange::LayoutAffecting
+            } else if divider.color() != next.color() {
+                LayoutTreeChange::VisualOnly
+            } else {
+                LayoutTreeChange::Identical
+            }
+        },
+        (None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
     }
 }
 
@@ -752,7 +776,6 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
                 right,
                 top,
                 bottom,
-                between_children,
             } = border;
             let Border {
                 color: n_color,
@@ -760,14 +783,8 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
                 right: n_right,
                 top: n_top,
                 bottom: n_bottom,
-                between_children: n_between_children,
             } = next;
-            if left != n_left
-                || right != n_right
-                || top != n_top
-                || bottom != n_bottom
-                || between_children != n_between_children
-            {
+            if left != n_left || right != n_right || top != n_top || bottom != n_bottom {
                 LayoutTreeChange::LayoutAffecting
             } else if color != n_color {
                 LayoutTreeChange::VisualOnly
@@ -836,7 +853,9 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
 
 #[cfg(test)]
 mod tests {
+    use bevy::asset::Handle;
     use bevy::color::Color;
+    use bevy::image::Image;
 
     use super::FieldDisplayTextUpdate;
     use super::LayoutTree;
@@ -848,7 +867,11 @@ mod tests {
     use crate::Mm;
     use crate::PanelFieldId;
     use crate::layout::AlignX;
+    use crate::layout::AlignY;
     use crate::layout::Border;
+    use crate::layout::ChildDivider;
+    use crate::layout::ChildLayout;
+    use crate::layout::ChildLayoutState;
     use crate::layout::Dimension;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
@@ -889,10 +912,14 @@ mod tests {
         assert!(!auto.contains_text_id(&PanelFieldId::named("Hi")));
     }
 
-    fn root_tree(root: El) -> LayoutTree {
+    fn root_tree<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text("child", TextStyle::new(10.0));
         builder.build()
+    }
+
+    fn assert_default_leaf_child_layout(child_layout: ChildLayout) {
+        assert_eq!(child_layout, ChildLayout::default());
     }
 
     fn field_spec() -> ImeEditableFieldSpec {
@@ -907,6 +934,38 @@ mod tests {
             .end_inset(0.75)
             .start_cap(CalloutCap::arrow().length_dimension(Mm(2.0)))
             .end_cap(CalloutCap::circle().radius(1.5))
+    }
+
+    #[test]
+    fn text_leaf_normalizes_authored_child_layout() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_element(
+            El::column()
+                .gap(4.0)
+                .alignment(AlignX::Right, AlignY::Bottom)
+                .child_divider(ChildDivider::new(1.0, Color::WHITE)),
+            "child",
+            TextStyle::new(10.0),
+        );
+        let tree = builder.build();
+
+        assert_default_leaf_child_layout(tree.elements[1].child_layout);
+    }
+
+    #[test]
+    fn image_leaf_normalizes_authored_child_layout() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.image(
+            El::column()
+                .gap(4.0)
+                .alignment(AlignX::Right, AlignY::Bottom)
+                .child_divider(ChildDivider::new(1.0, Color::WHITE)),
+            Handle::<Image>::default(),
+            Color::WHITE,
+        );
+        let tree = builder.build();
+
+        assert_default_leaf_child_layout(tree.elements[1].child_layout);
     }
 
     fn approx_eq(a: f32, b: f32) -> bool { (a - b).abs() < f32::EPSILON }
@@ -1085,6 +1144,25 @@ mod tests {
     fn border_width_change_classifies_as_layout_affecting() {
         let tree = root_tree(El::new().border(Border::all(2.0, Color::WHITE)));
         let next = root_tree(El::new().border(Border::all(3.0, Color::WHITE)));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn divider_color_only_classifies_as_visual_only() {
+        let tree = root_tree(El::row().child_divider(ChildDivider::new(2.0, Color::WHITE)));
+        let next = root_tree(El::row().child_divider(ChildDivider::new(2.0, Color::BLACK)));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn divider_width_change_classifies_as_layout_affecting() {
+        let tree = root_tree(El::row().child_divider(ChildDivider::new(2.0, Color::WHITE)));
+        let next = root_tree(El::row().child_divider(ChildDivider::new(3.0, Color::WHITE)));
 
         assert_eq!(
             tree.classify_change(&next),

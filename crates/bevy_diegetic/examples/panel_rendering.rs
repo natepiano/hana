@@ -14,6 +14,7 @@ use bevy::render::camera::MipBias;
 use bevy::render::camera::TemporalJitter;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::ChildDivider;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
@@ -814,7 +815,8 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
             b.with(
                 El::column()
                     .gap(CHILD_GAP)
-                    .border(Border::all(Mm(0.3), BORDER_COLOR).between_children(Mm(0.3)))
+                    .border(Border::all(Mm(0.3), BORDER_COLOR))
+                    .child_divider(ChildDivider::new(Mm(0.3), BORDER_COLOR))
                     .padding(Padding::all(2.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
@@ -895,7 +897,8 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                 El::column()
                     .gap(1.5)
                     .background(BLUE_BG)
-                    .border(Border::all(Mm(0.3), DIVIDER_COLOR).between_children(Mm(0.2)))
+                    .border(Border::all(Mm(0.3), DIVIDER_COLOR))
+                    .child_divider(ChildDivider::new(Mm(0.2), DIVIDER_COLOR))
                     .padding(Padding::all(2.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),

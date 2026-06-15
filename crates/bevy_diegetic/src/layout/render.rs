@@ -28,15 +28,15 @@ pub struct RenderCommand {
 
 /// Distinguishes the origin of a [`RenderCommandKind::Rectangle`] command.
 ///
-/// Matching Clay, both element backgrounds and [`Border::between_children`]
-/// lines are emitted as `Rectangle` commands. This enum lets consumers
-/// (like the color-only fast path) apply the correct color source.
+/// Matching Clay, both element backgrounds and row/column child dividers are
+/// emitted as `Rectangle` commands. This enum lets consumers apply the correct
+/// color source.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RectangleSource {
     /// `Element` background fill.
     Background,
-    /// Line drawn between children from a [`Border::between_children`] width.
-    BetweenChildrenBorder,
+    /// Separator from a row or column [`ChildDivider`](super::ChildDivider).
+    ChildDivider,
 }
 
 /// Fixed draw step derived from a [`RenderCommandKind`].
@@ -70,7 +70,7 @@ pub enum RenderCommandKind {
     Rectangle {
         /// Fill color.
         color:  Color,
-        /// Whether this rectangle is a background or a between-children border.
+        /// Whether this rectangle is a background or child divider.
         source: RectangleSource,
     },
     /// A text string.

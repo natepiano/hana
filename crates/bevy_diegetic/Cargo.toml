@@ -50,6 +50,7 @@ clay-layout         = { workspace = true }
 criterion           = { workspace = true }
 fairy_dust          = { path = "../fairy_dust" }
 image               = { workspace = true, features = ["png"] }
+trybuild            = { workspace = true }
 wgpu                = "29"
 
 [[example]]

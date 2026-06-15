@@ -7,9 +7,8 @@ use super::sizing::Axis;
 use super::wrapping::WrappedText;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
-use crate::layout::Border;
 use crate::layout::BoundingBox;
-use crate::layout::Direction;
+use crate::layout::ChildDivider;
 use crate::layout::DrawOverflow;
 use crate::layout::DrawZIndex;
 use crate::layout::PanelLineSourceKey;
@@ -166,11 +165,12 @@ fn emit_up_traversal_commands(
             index,
             element.z_index,
         );
+    }
 
-        // Between-children borders.
-        if border.between_children.value > 0.0 {
-            emit_between_borders(tree, computed, commands, index, border);
-        }
+    if let Some(divider) = element.child_layout.divider()
+        && divider.width().value > 0.0
+    {
+        emit_child_dividers(tree, computed, commands, index, divider);
     }
 
     if matches!(element.overflow, ChildOverflow::Clipped) {
@@ -563,7 +563,7 @@ fn push_children_to_stack(
     }
 
     let parent_el = &tree.elements[index];
-    let is_horizontal = parent_el.child_layout.direction() == Direction::LeftToRight;
+    let is_horizontal = parent_el.child_layout.is_row();
     let child_context = child_stack_context(
         parent_el,
         computed,
@@ -722,16 +722,16 @@ pub(super) fn render_commands_from_geometry(
     commands
 }
 
-/// Emit border-between-children rectangles.
+/// Emits child-divider rectangles.
 ///
 /// Uses children's already-computed bounds (set during DFS first visit)
 /// to avoid re-computing positions.
-fn emit_between_borders(
+fn emit_child_dividers(
     tree: &LayoutTree,
     computed: &[ComputedLayout],
     commands: &mut Vec<RenderCommand>,
     parent_idx: usize,
-    border: &Border,
+    divider: ChildDivider,
 ) {
     let parent = &tree.elements[parent_idx];
     let parent_bounds = computed[parent_idx].bounds;
@@ -742,6 +742,8 @@ fn emit_between_borders(
     }
 
     let is_horizontal = parent.child_layout.is_row();
+    let width = divider.width().value;
+    let color = divider.color();
 
     // Draw a line between each pair of adjacent children.
     for pair in children.windows(2) {
@@ -751,18 +753,18 @@ fn emit_between_borders(
         if is_horizontal {
             let midpoint = (b_bounds.x - (a_bounds.x + a_bounds.width))
                 .mul_add(0.5, a_bounds.x + a_bounds.width);
-            let line_x = border.between_children.value.mul_add(-0.5, midpoint);
+            let line_x = width.mul_add(-0.5, midpoint);
             push_command(
                 commands,
                 BoundingBox {
-                    x:      line_x,
-                    y:      parent_bounds.y + parent.padding.top.value,
-                    width:  border.between_children.value,
+                    x: line_x,
+                    y: parent_bounds.y + parent.padding.top.value,
+                    width,
                     height: parent_bounds.height - parent.padding.vertical(),
                 },
                 RenderCommandKind::Rectangle {
-                    color:  border.color,
-                    source: RectangleSource::BetweenChildrenBorder,
+                    color,
+                    source: RectangleSource::ChildDivider,
                 },
                 parent_idx,
                 parent.z_index,
@@ -770,18 +772,18 @@ fn emit_between_borders(
         } else {
             let midpoint = (b_bounds.y - (a_bounds.y + a_bounds.height))
                 .mul_add(0.5, a_bounds.y + a_bounds.height);
-            let line_y = border.between_children.value.mul_add(-0.5, midpoint);
+            let line_y = width.mul_add(-0.5, midpoint);
             push_command(
                 commands,
                 BoundingBox {
                     x:      parent_bounds.x + parent.padding.left.value,
                     y:      line_y,
                     width:  parent_bounds.width - parent.padding.horizontal(),
-                    height: border.between_children.value,
+                    height: width,
                 },
                 RenderCommandKind::Rectangle {
-                    color:  border.color,
-                    source: RectangleSource::BetweenChildrenBorder,
+                    color,
+                    source: RectangleSource::ChildDivider,
                 },
                 parent_idx,
                 parent.z_index,
