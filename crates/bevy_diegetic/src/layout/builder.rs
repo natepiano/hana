@@ -36,7 +36,6 @@ use super::AlignX;
 use super::AlignY;
 use super::Border;
 use super::ChildDivider;
-use super::ChildLayout;
 use super::CornerRadius;
 use super::Dimension;
 use super::DrawZIndex;
@@ -44,6 +43,7 @@ use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
+use super::child_layout::ChildLayout;
 use super::element::ChildOverflow;
 use super::element::Element;
 use super::element::ElementContent;
@@ -81,6 +81,10 @@ pub struct Column {
     divider: Option<ChildDivider>,
 }
 
+/// Public overlay child-layout state for [`El`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Overlay;
+
 /// Public marker trait for child-layout states accepted by [`LayoutBuilder`].
 pub trait ChildLayoutState: private::Sealed {}
 
@@ -88,47 +92,51 @@ impl ChildLayoutState for Row {}
 
 impl ChildLayoutState for Column {}
 
+impl ChildLayoutState for Overlay {}
+
 #[derive(Clone, Debug)]
 struct CommonEl {
-    width:         Sizing,
-    height:        Sizing,
-    padding:       Padding,
-    align_x:       AlignX,
-    align_y:       AlignY,
-    background:    Option<Color>,
-    border:        Option<Border>,
-    corner_radius: CornerRadius,
-    overflow:      ChildOverflow,
-    scroll_offset: Vec2,
-    scroll_anchor: ScrollAnchor,
-    material:      Option<Box<StandardMaterial>>,
-    editable:      Option<ImePanelField>,
-    draw:          Option<PanelDraw>,
-    z_index:       DrawZIndex,
-    anti_alias:    Option<AntiAlias>,
-    hairline_fade: Option<HairlineFade>,
+    width:           Sizing,
+    height:          Sizing,
+    padding:         Padding,
+    align_x:         AlignX,
+    align_y:         AlignY,
+    background:      Option<Color>,
+    border:          Option<Border>,
+    corner_radius:   CornerRadius,
+    overflow:        ChildOverflow,
+    scroll_offset:   Vec2,
+    scroll_anchor_x: ScrollAnchor,
+    scroll_anchor_y: ScrollAnchor,
+    material:        Option<Box<StandardMaterial>>,
+    editable:        Option<ImePanelField>,
+    draw:            Option<PanelDraw>,
+    z_index:         DrawZIndex,
+    anti_alias:      Option<AntiAlias>,
+    hairline_fade:   Option<HairlineFade>,
 }
 
 impl Default for CommonEl {
     fn default() -> Self {
         Self {
-            width:         Sizing::FIT,
-            height:        Sizing::FIT,
-            padding:       Padding::default(),
-            align_x:       AlignX::default(),
-            align_y:       AlignY::default(),
-            background:    None,
-            border:        None,
-            corner_radius: CornerRadius::ZERO,
-            overflow:      ChildOverflow::Visible,
-            scroll_offset: Vec2::ZERO,
-            scroll_anchor: ScrollAnchor::Start,
-            material:      None,
-            editable:      None,
-            draw:          None,
-            z_index:       DrawZIndex::default(),
-            anti_alias:    None,
-            hairline_fade: None,
+            width:           Sizing::FIT,
+            height:          Sizing::FIT,
+            padding:         Padding::default(),
+            align_x:         AlignX::default(),
+            align_y:         AlignY::default(),
+            background:      None,
+            border:          None,
+            corner_radius:   CornerRadius::ZERO,
+            overflow:        ChildOverflow::Visible,
+            scroll_offset:   Vec2::ZERO,
+            scroll_anchor_x: ScrollAnchor::Start,
+            scroll_anchor_y: ScrollAnchor::Start,
+            material:        None,
+            editable:        None,
+            draw:            None,
+            z_index:         DrawZIndex::default(),
+            anti_alias:      None,
+            hairline_fade:   None,
         }
     }
 }
@@ -180,6 +188,11 @@ impl El<Column> {
         self.child_layout.divider = Some(divider);
         self
     }
+}
+
+impl El<Overlay> {
+    /// Creates an overlay element declaration.
+    pub fn overlay() -> Self { Self::default() }
 }
 
 impl<L> El<L> {
@@ -278,7 +291,7 @@ impl<L> El<L> {
     /// pass `f32::MAX` to pin to the bottom.
     pub const fn scroll_y(mut self, offset: f32) -> Self {
         self.common.scroll_offset.y = offset;
-        self.common.scroll_anchor = ScrollAnchor::Start;
+        self.common.scroll_anchor_y = ScrollAnchor::Start;
         self.common.overflow = ChildOverflow::Clipped;
         self
     }
@@ -291,7 +304,7 @@ impl<L> El<L> {
     /// Clamped during positioning to `[0, content - viewport]`.
     pub const fn scroll_y_from_end(mut self, scrollback: f32) -> Self {
         self.common.scroll_offset.y = scrollback;
-        self.common.scroll_anchor = ScrollAnchor::End;
+        self.common.scroll_anchor_y = ScrollAnchor::End;
         self.common.overflow = ChildOverflow::Clipped;
         self
     }
@@ -302,6 +315,7 @@ impl<L> El<L> {
     /// pass `f32::MAX` to pin to the right edge.
     pub const fn scroll_x(mut self, offset: f32) -> Self {
         self.common.scroll_offset.x = offset;
+        self.common.scroll_anchor_x = ScrollAnchor::Start;
         self.common.overflow = ChildOverflow::Clipped;
         self
     }
@@ -380,20 +394,8 @@ impl<L> El<L> {
             ElementContent::Text { .. } | ElementContent::Image { .. }
         ) {
             ChildLayout::default()
-        } else if private::Sealed::is_row(&child_layout) {
-            ChildLayout::Row {
-                gap:     private::Sealed::gap(&child_layout),
-                align_x: common.align_x,
-                align_y: common.align_y,
-                divider: private::Sealed::divider(&child_layout),
-            }
         } else {
-            ChildLayout::Column {
-                gap:     private::Sealed::gap(&child_layout),
-                align_x: common.align_x,
-                align_y: common.align_y,
-                divider: private::Sealed::divider(&child_layout),
-            }
+            private::Sealed::into_child_layout(child_layout, common.align_x, common.align_y)
         };
         Element {
             width: common.width,
@@ -405,7 +407,8 @@ impl<L> El<L> {
             corner_radius: common.corner_radius,
             overflow: common.overflow,
             scroll_offset: common.scroll_offset,
-            scroll_anchor: common.scroll_anchor,
+            scroll_anchor_x: common.scroll_anchor_x,
+            scroll_anchor_y: common.scroll_anchor_y,
             material: common.material,
             editable: common.editable,
             draw: common.draw,
@@ -418,33 +421,43 @@ impl<L> El<L> {
 }
 
 mod private {
-    use super::ChildDivider;
+    use super::AlignX;
+    use super::AlignY;
     use super::Column;
-    use super::Dimension;
+    use super::Overlay;
     use super::Row;
+    use crate::layout::child_layout::ChildLayout;
 
     pub trait Sealed {
-        fn gap(&self) -> Dimension;
-
-        fn divider(&self) -> Option<ChildDivider>;
-
-        fn is_row(&self) -> bool;
+        fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout;
     }
 
     impl Sealed for Row {
-        fn gap(&self) -> Dimension { self.gap }
-
-        fn divider(&self) -> Option<ChildDivider> { self.divider }
-
-        fn is_row(&self) -> bool { true }
+        fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout {
+            ChildLayout::Row {
+                gap: self.gap,
+                align_x,
+                align_y,
+                divider: self.divider,
+            }
+        }
     }
 
     impl Sealed for Column {
-        fn gap(&self) -> Dimension { self.gap }
+        fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout {
+            ChildLayout::Column {
+                gap: self.gap,
+                align_x,
+                align_y,
+                divider: self.divider,
+            }
+        }
+    }
 
-        fn divider(&self) -> Option<ChildDivider> { self.divider }
-
-        fn is_row(&self) -> bool { false }
+    impl Sealed for Overlay {
+        fn into_child_layout(self, align_x: AlignX, align_y: AlignY) -> ChildLayout {
+            ChildLayout::Overlay { align_x, align_y }
+        }
     }
 }
 

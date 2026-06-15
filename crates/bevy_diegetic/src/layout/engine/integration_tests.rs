@@ -28,11 +28,13 @@ use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
 use crate::layout::Border;
+use crate::layout::BoundingBox;
 use crate::layout::ChildDivider;
 use crate::layout::ChildLayoutState;
 use crate::layout::Dimension;
 use crate::layout::Direction;
 use crate::layout::DrawOverflow;
+use crate::layout::DrawZIndex;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutEngine;
@@ -773,6 +775,380 @@ fn percent_sizing() {
 
     assert!(approx_eq(result.computed[2].width, 60.0));
     assert!(approx_eq(result.computed[3].width, 140.0));
+}
+
+#[test]
+fn row_main_percent_still_subtracts_chrome_and_gap() {
+    let mut b = LayoutBuilder::new(200.0, 100.0);
+    b.with(
+        El::row()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .padding(Padding::all(10.0))
+            .border(Border::all(5.0, Color::WHITE))
+            .gap(10.0),
+        |b| {
+            b.with(
+                El::new().width(Sizing::percent(0.5)).height(Sizing::GROW),
+                |_| {},
+            );
+            b.with(
+                El::new().width(Sizing::percent(0.5)).height(Sizing::GROW),
+                |_| {},
+            );
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[2].width, 80.0));
+    assert!(approx_eq(result.computed[3].width, 80.0));
+    assert!(approx_eq(result.computed[2].height, 70.0));
+}
+
+#[test]
+fn row_cross_percent_keeps_existing_parent_size_basis() {
+    let mut b = LayoutBuilder::new(200.0, 100.0);
+    b.with(
+        El::row()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .padding(Padding::all(10.0))
+            .border(Border::all(5.0, Color::WHITE)),
+        |b| {
+            b.with(
+                El::new()
+                    .width(Sizing::fixed(20.0))
+                    .height(Sizing::percent(0.5)),
+                |_| {},
+            );
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[2].height, 50.0));
+}
+
+#[test]
+fn column_main_grow_still_splits_content_after_chrome_and_gap() {
+    let mut b = LayoutBuilder::new(200.0, 100.0);
+    b.with(
+        El::column()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0))
+            .padding(Padding::all(10.0))
+            .border(Border::all(5.0, Color::WHITE))
+            .gap(10.0),
+        |b| {
+            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+            b.with(El::new().width(Sizing::GROW).height(Sizing::GROW), |_| {});
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[2].height, 30.0));
+    assert!(approx_eq(result.computed[3].height, 30.0));
+    assert!(approx_eq(result.computed[2].width, 170.0));
+}
+
+// ── Overlay layout ───────────────────────────────────────────────────────────
+
+fn overlay_child_bounds(align_x: AlignX, align_y: AlignY) -> BoundingBox {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0))
+            .alignment(align_x, align_y),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(20.0))
+            .height(Sizing::fixed(10.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    result.computed[1].bounds
+}
+
+#[test]
+fn overlay_fit_uses_max_child_extent_and_chrome() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::new(3.0, 5.0, 7.0, 11.0))
+            .border(
+                Border::new()
+                    .left(2.0)
+                    .right(4.0)
+                    .top(6.0)
+                    .bottom(8.0)
+                    .color(Color::WHITE),
+            ),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(20.0))
+            .height(Sizing::fixed(30.0)),
+        |_| {},
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(50.0))
+            .height(Sizing::fixed(10.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[0].width, 64.0));
+    assert!(approx_eq(result.computed[0].height, 62.0));
+}
+
+#[test]
+fn overlay_top_left_alignment_positions_children_at_content_origin() {
+    let bounds = overlay_child_bounds(AlignX::Left, AlignY::Top);
+
+    assert!(approx_eq(bounds.x, 0.0));
+    assert!(approx_eq(bounds.y, 0.0));
+}
+
+#[test]
+fn overlay_center_alignment_positions_children_in_both_axes() {
+    let bounds = overlay_child_bounds(AlignX::Center, AlignY::Center);
+
+    assert!(approx_eq(bounds.x, 40.0));
+    assert!(approx_eq(bounds.y, 35.0));
+}
+
+#[test]
+fn overlay_bottom_right_alignment_positions_children_in_both_axes() {
+    let bounds = overlay_child_bounds(AlignX::Right, AlignY::Bottom);
+
+    assert!(approx_eq(bounds.x, 80.0));
+    assert!(approx_eq(bounds.y, 70.0));
+}
+
+#[test]
+fn overlay_positioning_uses_padding_and_border_offsets() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0))
+            .padding(Padding::new(3.0, 5.0, 7.0, 11.0))
+            .border(Border::new().left(2.0).top(6.0).color(Color::WHITE)),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(20.0))
+            .height(Sizing::fixed(10.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[1].bounds.x, 5.0));
+    assert!(approx_eq(result.computed[1].bounds.y, 13.0));
+}
+
+#[test]
+fn overlay_percent_and_grow_size_against_content_box() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(200.0))
+            .height(Sizing::fixed(100.0)),
+    );
+    b.with(
+        El::new().width(Sizing::GROW).height(Sizing::percent(0.5)),
+        |_| {},
+    );
+    b.with(
+        El::new().width(Sizing::percent(0.25)).height(Sizing::GROW),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[1].width, 200.0));
+    assert!(approx_eq(result.computed[1].height, 50.0));
+    assert!(approx_eq(result.computed[2].width, 50.0));
+    assert!(approx_eq(result.computed[2].height, 100.0));
+}
+
+#[test]
+fn overlay_scroll_extents_are_independent_per_axis() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0))
+            .scroll_x(70.0)
+            .scroll_y(50.0),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(150.0))
+            .height(Sizing::fixed(120.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[1].bounds.x, -50.0));
+    assert!(approx_eq(result.computed[1].bounds.y, -40.0));
+}
+
+#[test]
+fn scroll_y_from_end_does_not_change_horizontal_anchor() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0))
+            .scroll_x(10.0)
+            .scroll_y_from_end(0.0),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(150.0))
+            .height(Sizing::fixed(120.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(result.computed[1].bounds.x, -10.0));
+    assert!(approx_eq(result.computed[1].bounds.y, -40.0));
+}
+
+#[test]
+fn bordered_overlay_text_wraps_inside_content_box() {
+    let font_size = 10.0;
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(80.0))
+            .height(Sizing::fixed(100.0))
+            .border(Border::all(10.0, Color::WHITE)),
+    );
+    b.text("Hello World", TextStyle::new(font_size));
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+
+    assert!(approx_eq(
+        result.computed[1].height,
+        text_height(2, font_size)
+    ));
+}
+
+#[test]
+fn overlay_does_not_emit_between_child_dividers() {
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0)),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(20.0))
+            .height(Sizing::fixed(20.0)),
+        |_| {},
+    );
+    b.with(
+        El::new()
+            .width(Sizing::fixed(20.0))
+            .height(Sizing::fixed(20.0)),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let divider_count = result
+        .commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.kind,
+                RenderCommandKind::Rectangle {
+                    source: RectangleSource::ChildDivider,
+                    ..
+                }
+            )
+        })
+        .count();
+
+    assert_eq!(divider_count, 0);
+}
+
+#[test]
+fn overlay_overlapped_children_preserve_draw_z_index() {
+    const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
+    const RAISED_LEVEL: DrawZIndex = DrawZIndex(1);
+
+    let mut b = LayoutBuilder::with_root(
+        El::overlay()
+            .width(Sizing::fixed(100.0))
+            .height(Sizing::fixed(80.0)),
+    );
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .background(Color::BLACK)
+            .z_index(LOWERED_LEVEL),
+        |_| {},
+    );
+    b.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .background(Color::WHITE)
+            .z_index(RAISED_LEVEL),
+        |_| {},
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let background_commands = result
+        .commands
+        .iter()
+        .filter(|command| {
+            matches!(
+                command.kind,
+                RenderCommandKind::Rectangle {
+                    source: RectangleSource::Background,
+                    ..
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(background_commands.len(), 2);
+    assert_eq!(background_commands[0].bounds, background_commands[1].bounds);
+    assert_eq!(background_commands[0].z_index, LOWERED_LEVEL);
+    assert_eq!(background_commands[1].z_index, RAISED_LEVEL);
 }
 
 // ── Padding ──────────────────────────────────────────────────────────────────

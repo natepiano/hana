@@ -3,7 +3,7 @@ use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
 use super::sizing;
-use super::sizing::Axis;
+use super::sizing::ContentBox;
 use super::wrapping::WrappedText;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
@@ -15,6 +15,7 @@ use crate::layout::PanelLineSourceKey;
 use crate::layout::ResolvedPanelLine;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
+use crate::layout::child_layout::ChildLayout;
 use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
@@ -101,48 +102,74 @@ impl ClipContext {
 
 #[derive(Clone, Copy)]
 struct ChildStackContext<'a> {
-    parent:               &'a Element,
-    parent_size:          Vec2,
-    is_horizontal:        bool,
-    border_x:             f32,
-    border_y:             f32,
-    border_left:          f32,
-    border_top:           f32,
-    scroll_x:             f32,
-    scroll_y:             f32,
-    reverse_cursor_start: f32,
-    clip_context:         ClipContext,
+    parent:        &'a Element,
+    content_box:   ContentBox,
+    flow:          ChildFlow,
+    scroll_offset: Vec2,
+    clip_context:  ClipContext,
+}
+
+#[derive(Clone, Copy)]
+enum ChildFlow {
+    Row { reverse_cursor_start: f32 },
+    Column { reverse_cursor_start: f32 },
+    Overlay,
 }
 
 impl ChildStackContext<'_> {
     const fn child_main_size(&self, child_size: Vec2) -> f32 {
-        if self.is_horizontal {
-            child_size.x
-        } else {
-            child_size.y
+        match self.flow {
+            ChildFlow::Row { .. } => child_size.x,
+            ChildFlow::Column { .. } => child_size.y,
+            ChildFlow::Overlay => 0.0,
+        }
+    }
+
+    const fn reverse_cursor_start(&self) -> Option<f32> {
+        match self.flow {
+            ChildFlow::Row {
+                reverse_cursor_start,
+            }
+            | ChildFlow::Column {
+                reverse_cursor_start,
+            } => Some(reverse_cursor_start),
+            ChildFlow::Overlay => None,
         }
     }
 
     fn child_position(&self, origin: Vec2, reverse_cursor: f32, child_size: Vec2) -> Vec2 {
         let parent = self.parent;
-        let base_x = origin.x + parent.padding.left.value + self.border_left - self.scroll_x;
-        let base_y = origin.y + parent.padding.top.value + self.border_top - self.scroll_y;
-        if self.is_horizontal {
-            let cross_available = self.parent_size.y - parent.padding.vertical() - self.border_y;
-            let cross_offset = match parent.child_layout.align_y() {
-                AlignY::Top => 0.0,
-                AlignY::Center => (cross_available - child_size.y).max(0.0) * 0.5,
-                AlignY::Bottom => (cross_available - child_size.y).max(0.0),
-            };
-            Vec2::new(base_x + reverse_cursor, base_y + cross_offset)
-        } else {
-            let cross_available = self.parent_size.x - parent.padding.horizontal() - self.border_x;
-            let cross_offset = match parent.child_layout.align_x() {
-                AlignX::Left => 0.0,
-                AlignX::Center => (cross_available - child_size.x).max(0.0) * 0.5,
-                AlignX::Right => (cross_available - child_size.x).max(0.0),
-            };
-            Vec2::new(base_x + cross_offset, base_y + reverse_cursor)
+        let base = origin + self.content_box.origin - self.scroll_offset;
+        match self.flow {
+            ChildFlow::Row { .. } => {
+                let cross_offset = match parent.child_layout.align_y() {
+                    AlignY::Top => 0.0,
+                    AlignY::Center => (self.content_box.size.y - child_size.y).max(0.0) * 0.5,
+                    AlignY::Bottom => (self.content_box.size.y - child_size.y).max(0.0),
+                };
+                Vec2::new(base.x + reverse_cursor, base.y + cross_offset)
+            },
+            ChildFlow::Column { .. } => {
+                let cross_offset = match parent.child_layout.align_x() {
+                    AlignX::Left => 0.0,
+                    AlignX::Center => (self.content_box.size.x - child_size.x).max(0.0) * 0.5,
+                    AlignX::Right => (self.content_box.size.x - child_size.x).max(0.0),
+                };
+                Vec2::new(base.x + cross_offset, base.y + reverse_cursor)
+            },
+            ChildFlow::Overlay => {
+                let x_offset = match parent.child_layout.align_x() {
+                    AlignX::Left => 0.0,
+                    AlignX::Center => (self.content_box.size.x - child_size.x).max(0.0) * 0.5,
+                    AlignX::Right => (self.content_box.size.x - child_size.x).max(0.0),
+                };
+                let y_offset = match parent.child_layout.align_y() {
+                    AlignY::Top => 0.0,
+                    AlignY::Center => (self.content_box.size.y - child_size.y).max(0.0) * 0.5,
+                    AlignY::Bottom => (self.content_box.size.y - child_size.y).max(0.0),
+                };
+                Vec2::new(base.x + x_offset, base.y + y_offset)
+            },
         }
     }
 }
@@ -425,48 +452,34 @@ const fn empty_clip() -> BoundingBox {
 }
 
 /// Resolves the clamped per-axis scroll offset for a scrolling parent, returning
-/// `(0, 0)` for the common non-scrolling case. Each axis clamps to
+/// `Vec2::ZERO` for the common non-scrolling case. Each axis clamps to
 /// `[0, content - viewport]`; `End`-anchored axes measure the offset from the
 /// far edge so `0` pins to the bottom/right.
-fn resolve_scroll_offset(
-    parent_el: &Element,
-    computed: &[ComputedLayout],
-    children: &[usize],
-    is_horizontal: bool,
-    main_available: f32,
-    cross_available: f32,
-    content_main: f32,
-) -> (f32, f32) {
+fn resolve_scroll_offset(parent_el: &Element, max_scroll: Vec2) -> Vec2 {
     // A zero `Start` offset is a no-op; a zero `End` offset still resolves
     // (scrollback 0 pins to the end), so don't short-circuit it.
-    if parent_el.scroll_offset == Vec2::ZERO && parent_el.scroll_anchor == ScrollAnchor::Start {
-        return (0.0, 0.0);
+    if parent_el.scroll_offset == Vec2::ZERO
+        && parent_el.scroll_anchor_x == ScrollAnchor::Start
+        && parent_el.scroll_anchor_y == ScrollAnchor::Start
+    {
+        return Vec2::ZERO;
     }
 
-    let mut content_cross: f32 = 0.0;
-    for &idx in children {
-        let cross = if is_horizontal {
-            computed[idx].height
-        } else {
-            computed[idx].width
-        };
-        content_cross = content_cross.max(cross);
-    }
-
-    let max_main = (content_main - main_available).max(0.0);
-    let max_cross = (content_cross - cross_available).max(0.0);
-    let (max_x, max_y) = if is_horizontal {
-        (max_main, max_cross)
-    } else {
-        (max_cross, max_main)
-    };
-    let resolve = |offset: f32, max: f32| match parent_el.scroll_anchor {
+    let resolve = |offset: f32, max: f32, anchor: ScrollAnchor| match anchor {
         ScrollAnchor::Start => offset.clamp(0.0, max),
         ScrollAnchor::End => (max - offset).clamp(0.0, max),
     };
-    (
-        resolve(parent_el.scroll_offset.x, max_x),
-        resolve(parent_el.scroll_offset.y, max_y),
+    Vec2::new(
+        resolve(
+            parent_el.scroll_offset.x,
+            max_scroll.x,
+            parent_el.scroll_anchor_x,
+        ),
+        resolve(
+            parent_el.scroll_offset.y,
+            max_scroll.y,
+            parent_el.scroll_anchor_y,
+        ),
     )
 }
 
@@ -475,72 +488,94 @@ fn child_stack_context<'a>(
     computed: &[ComputedLayout],
     children: &[usize],
     parent_size: Vec2,
-    is_horizontal: bool,
     clip_context: ClipContext,
 ) -> ChildStackContext<'a> {
-    let children_main_size = children.iter().fold(0.0, |main_size, &idx| {
-        main_size
-            + if is_horizontal {
-                computed[idx].width
-            } else {
-                computed[idx].height
-            }
-    });
-    let gap_total = if children.len() > 1 {
-        parent.child_layout.gap().value * (children.len() - 1).to_f32()
-    } else {
-        0.0
-    };
-    let border_x = sizing::border_inset(parent, Axis::X);
-    let border_y = sizing::border_inset(parent, Axis::Y);
-    let border_left = sizing::border_leading(parent, Axis::X);
-    let border_top = sizing::border_leading(parent, Axis::Y);
-    let main_available = if is_horizontal {
-        parent_size.x - parent.padding.horizontal() - border_x
-    } else {
-        parent_size.y - parent.padding.vertical() - border_y
-    };
-    let content_main = children_main_size + gap_total;
-    let extra_main = (main_available - content_main).max(0.0);
-    let cross_available = if is_horizontal {
-        parent_size.y - parent.padding.vertical() - border_y
-    } else {
-        parent_size.x - parent.padding.horizontal() - border_x
-    };
-    let (scroll_x, scroll_y) = resolve_scroll_offset(
-        parent,
-        computed,
-        children,
-        is_horizontal,
-        main_available,
-        cross_available,
-        content_main,
+    let content_box = sizing::content_box(parent, parent_size);
+    let child_content_size = children_content_size(&parent.child_layout, computed, children);
+    let max_scroll = Vec2::new(
+        (child_content_size.x - content_box.size.x).max(0.0),
+        (child_content_size.y - content_box.size.y).max(0.0),
     );
-    let main_offset = if is_horizontal {
-        match parent.child_layout.align_x() {
-            AlignX::Left => 0.0,
-            AlignX::Center => extra_main * 0.5,
-            AlignX::Right => extra_main,
-        }
-    } else {
-        match parent.child_layout.align_y() {
-            AlignY::Top => 0.0,
-            AlignY::Center => extra_main * 0.5,
-            AlignY::Bottom => extra_main,
-        }
+    let scroll_offset = resolve_scroll_offset(parent, max_scroll);
+
+    let flow = match parent.child_layout {
+        ChildLayout::Row { .. } => {
+            let extra_main = (content_box.size.x - child_content_size.x).max(0.0);
+            let main_offset = match parent.child_layout.align_x() {
+                AlignX::Left => 0.0,
+                AlignX::Center => extra_main * 0.5,
+                AlignX::Right => extra_main,
+            };
+            ChildFlow::Row {
+                reverse_cursor_start: main_offset + child_content_size.x,
+            }
+        },
+        ChildLayout::Column { .. } => {
+            let extra_main = (content_box.size.y - child_content_size.y).max(0.0);
+            let main_offset = match parent.child_layout.align_y() {
+                AlignY::Top => 0.0,
+                AlignY::Center => extra_main * 0.5,
+                AlignY::Bottom => extra_main,
+            };
+            ChildFlow::Column {
+                reverse_cursor_start: main_offset + child_content_size.y,
+            }
+        },
+        ChildLayout::Overlay { .. } => ChildFlow::Overlay,
     };
+
     ChildStackContext {
         parent,
-        parent_size,
-        is_horizontal,
-        border_x,
-        border_y,
-        border_left,
-        border_top,
-        scroll_x,
-        scroll_y,
-        reverse_cursor_start: main_offset + children_main_size + gap_total,
+        content_box,
+        flow,
+        scroll_offset,
         clip_context,
+    }
+}
+
+fn children_content_size(
+    child_layout: &ChildLayout,
+    computed: &[ComputedLayout],
+    children: &[usize],
+) -> Vec2 {
+    let mut content_size = Vec2::ZERO;
+    for &idx in children {
+        let child_size = Vec2::new(computed[idx].width, computed[idx].height);
+        match child_layout {
+            ChildLayout::Row { .. } => {
+                content_size.x += child_size.x;
+                content_size.y = content_size.y.max(child_size.y);
+            },
+            ChildLayout::Column { .. } => {
+                content_size.x = content_size.x.max(child_size.x);
+                content_size.y += child_size.y;
+            },
+            ChildLayout::Overlay { .. } => {
+                content_size.x = content_size.x.max(child_size.x);
+                content_size.y = content_size.y.max(child_size.y);
+            },
+        }
+    }
+
+    match child_layout {
+        ChildLayout::Row { .. } => {
+            content_size.x += main_gap_total(child_layout, children.len());
+        },
+        ChildLayout::Column { .. } => {
+            content_size.y += main_gap_total(child_layout, children.len());
+        },
+        ChildLayout::Overlay { .. } => {},
+    }
+    content_size
+}
+
+fn main_gap_total(child_layout: &ChildLayout, child_count: usize) -> f32 {
+    if child_count > 1 {
+        child_layout
+            .main_gap()
+            .map_or(0.0, |gap| gap.value * (child_count - 1).to_f32())
+    } else {
+        0.0
     }
 }
 
@@ -563,34 +598,50 @@ fn push_children_to_stack(
     }
 
     let parent_el = &tree.elements[index];
-    let is_horizontal = parent_el.child_layout.is_row();
     let child_context = child_stack_context(
         parent_el,
         computed,
         children,
         Vec2::new(computed[index].width, computed[index].height),
-        is_horizontal,
         clip_context,
     );
 
-    // Walk children in reverse, subtracting each child's main size
-    // from the cursor to produce positions in stack-push order.
     let origin = Vec2::new(x, y);
-    let mut reverse_cursor = child_context.reverse_cursor_start;
-    for &child_idx in children.iter().rev() {
-        let child_size = Vec2::new(computed[child_idx].width, computed[child_idx].height);
-        let child_main = child_context.child_main_size(child_size);
-        reverse_cursor -= child_main;
-        let child_position = child_context.child_position(origin, reverse_cursor, child_size);
+    if let Some(mut reverse_cursor) = child_context.reverse_cursor_start() {
+        // Walk children in reverse, subtracting each child's main size from the
+        // cursor to produce positions in stack-push order.
+        let gap = parent_el
+            .child_layout
+            .main_gap()
+            .map_or(0.0, |gap| gap.value);
+        for &child_idx in children.iter().rev() {
+            let child_size = Vec2::new(computed[child_idx].width, computed[child_idx].height);
+            let child_main = child_context.child_main_size(child_size);
+            reverse_cursor -= child_main;
+            let child_position = child_context.child_position(origin, reverse_cursor, child_size);
 
-        stack.push(PositionStackEntry {
-            index:        child_idx,
-            x:            child_position.x,
-            y:            child_position.y,
-            visited:      false,
-            clip_context: child_context.clip_context,
-        });
-        reverse_cursor -= parent_el.child_layout.gap().value;
+            stack.push(PositionStackEntry {
+                index:        child_idx,
+                x:            child_position.x,
+                y:            child_position.y,
+                visited:      false,
+                clip_context: child_context.clip_context,
+            });
+            reverse_cursor -= gap;
+        }
+    } else {
+        for &child_idx in children.iter().rev() {
+            let child_size = Vec2::new(computed[child_idx].width, computed[child_idx].height);
+            let child_position = child_context.child_position(origin, 0.0, child_size);
+
+            stack.push(PositionStackEntry {
+                index:        child_idx,
+                x:            child_position.x,
+                y:            child_position.y,
+                visited:      false,
+                clip_context: child_context.clip_context,
+            });
+        }
     }
 }
 
@@ -741,7 +792,11 @@ fn emit_child_dividers(
         return;
     }
 
-    let is_horizontal = parent.child_layout.is_row();
+    let is_horizontal = match parent.child_layout {
+        ChildLayout::Row { .. } => true,
+        ChildLayout::Column { .. } => false,
+        ChildLayout::Overlay { .. } => return,
+    };
     let width = divider.width().value;
     let color = divider.color();
 

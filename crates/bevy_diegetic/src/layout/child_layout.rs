@@ -3,9 +3,18 @@ use super::AlignY;
 use super::ChildDivider;
 use super::Dimension;
 
+/// How a parent layout treats a specific axis for child sizing and positioning.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum AxisRole {
+    RowMain,
+    ColumnMain,
+    Cross,
+    Overlay,
+}
+
 /// Internal child layout mode stored on [`Element`](super::element::Element).
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) enum ChildLayout {
+pub enum ChildLayout {
     /// Children are laid out from left to right.
     Row {
         /// Main-axis spacing between adjacent children.
@@ -28,22 +37,23 @@ pub(crate) enum ChildLayout {
         /// Optional separator between adjacent child slots.
         divider: Option<ChildDivider>,
     },
+    /// Children are independently positioned inside the parent content box.
+    Overlay {
+        /// Horizontal child alignment.
+        align_x: AlignX,
+        /// Vertical child alignment.
+        align_y: AlignY,
+    },
 }
 
 impl ChildLayout {
-    /// Returns the main-axis gap between adjacent children.
-    #[must_use]
-    pub(crate) const fn gap(&self) -> Dimension {
-        match self {
-            Self::Row { gap, .. } | Self::Column { gap, .. } => *gap,
-        }
-    }
-
     /// Returns horizontal child alignment.
     #[must_use]
     pub(crate) const fn align_x(&self) -> AlignX {
         match self {
-            Self::Row { align_x, .. } | Self::Column { align_x, .. } => *align_x,
+            Self::Row { align_x, .. }
+            | Self::Column { align_x, .. }
+            | Self::Overlay { align_x, .. } => *align_x,
         }
     }
 
@@ -51,27 +61,51 @@ impl ChildLayout {
     #[must_use]
     pub(crate) const fn align_y(&self) -> AlignY {
         match self {
-            Self::Row { align_y, .. } | Self::Column { align_y, .. } => *align_y,
+            Self::Row { align_y, .. }
+            | Self::Column { align_y, .. }
+            | Self::Overlay { align_y, .. } => *align_y,
         }
     }
 
-    /// Returns the row or column child divider.
+    /// Returns the optional row or column child divider.
     #[must_use]
     pub(crate) const fn divider(&self) -> Option<ChildDivider> {
         match self {
             Self::Row { divider, .. } | Self::Column { divider, .. } => *divider,
+            Self::Overlay { .. } => None,
         }
     }
 
-    /// Returns whether children are laid out from left to right.
+    /// Returns the X-axis role for this child layout.
     #[must_use]
-    pub(crate) const fn is_row(&self) -> bool { matches!(self, Self::Row { .. }) }
+    pub(crate) const fn x_axis_role(&self) -> AxisRole {
+        match self {
+            Self::Row { .. } => AxisRole::RowMain,
+            Self::Column { .. } => AxisRole::Cross,
+            Self::Overlay { .. } => AxisRole::Overlay,
+        }
+    }
 
-    /// Returns whether children are laid out from top to bottom.
+    /// Returns the Y-axis role for this child layout.
     #[must_use]
-    pub(crate) const fn is_column(&self) -> bool { matches!(self, Self::Column { .. }) }
+    pub(crate) const fn y_axis_role(&self) -> AxisRole {
+        match self {
+            Self::Row { .. } => AxisRole::Cross,
+            Self::Column { .. } => AxisRole::ColumnMain,
+            Self::Overlay { .. } => AxisRole::Overlay,
+        }
+    }
 
-    /// Resolves the gap to points while preserving direction and alignment.
+    /// Returns the main-axis gap for row or column children.
+    #[must_use]
+    pub(crate) const fn main_gap(&self) -> Option<Dimension> {
+        match self {
+            Self::Row { gap, .. } | Self::Column { gap, .. } => Some(*gap),
+            Self::Overlay { .. } => None,
+        }
+    }
+
+    /// Resolves row/column dimensions to points while preserving alignment.
     #[must_use]
     pub(crate) fn to_points(self, layout_scale: f32) -> Self {
         match self {
@@ -103,6 +137,7 @@ impl ChildLayout {
                 align_y,
                 divider: divider.map(|divider| divider.to_points(layout_scale)),
             },
+            Self::Overlay { align_x, align_y } => Self::Overlay { align_x, align_y },
         }
     }
 }

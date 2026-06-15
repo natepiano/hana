@@ -1,7 +1,9 @@
+use bevy::math::Vec2;
 use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
 use super::layout_engine::MeasureTextFn;
+use super::sizing;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::element::ElementContent;
@@ -248,7 +250,12 @@ fn parent_content_width(
 ) -> f32 {
     if let Some(parent_idx) = parent_of[index] {
         let parent = &tree.elements[parent_idx];
-        computed[parent_idx].width - parent.padding.horizontal()
+        sizing::content_box(
+            parent,
+            Vec2::new(computed[parent_idx].width, computed[parent_idx].height),
+        )
+        .size
+        .x
     } else {
         computed[index].width
     }

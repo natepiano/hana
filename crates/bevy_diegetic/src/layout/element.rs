@@ -21,7 +21,6 @@ use smallvec::SmallVec;
 
 use super::Border;
 use super::ChildDivider;
-use super::ChildLayout;
 use super::CornerRadius;
 use super::Dimension;
 use super::DrawZIndex;
@@ -30,6 +29,7 @@ use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
 use super::Unit;
+use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelFieldId;
@@ -75,45 +75,47 @@ pub(super) enum ScrollAnchor {
 #[derive(Clone, Debug)]
 pub(super) struct Element {
     /// Width sizing rule.
-    pub(super) width:         Sizing,
+    pub(super) width:           Sizing,
     /// Height sizing rule.
-    pub(super) height:        Sizing,
+    pub(super) height:          Sizing,
     /// Interior padding.
-    pub(super) padding:       Padding,
-    /// Direction, gap, and child alignment.
-    pub(super) child_layout:  ChildLayout,
+    pub(super) padding:         Padding,
+    /// Child layout mode, spacing, and alignment.
+    pub(super) child_layout:    ChildLayout,
     /// Optional background color.
-    pub(super) background:    Option<Color>,
+    pub(super) background:      Option<Color>,
     /// Optional border.
-    pub(super) border:        Option<Border>,
+    pub(super) border:          Option<Border>,
     /// Corner radius for rounded backgrounds and borders.
-    pub(super) corner_radius: CornerRadius,
+    pub(super) corner_radius:   CornerRadius,
     /// How this element handles overflowing children (`Visible` or `Clipped`).
-    pub(super) overflow:      ChildOverflow,
+    pub(super) overflow:        ChildOverflow,
     /// Scroll offset (logical px) subtracted from child positions when this
     /// element clips. Clamped during positioning to `[0, content - viewport]`
-    /// per axis. Interpreted relative to [`Self::scroll_anchor`].
-    pub(super) scroll_offset: Vec2,
-    /// Which edge `scroll_offset` measures from.
-    pub(super) scroll_anchor: ScrollAnchor,
+    /// per axis. Interpreted relative to each axis' scroll anchor.
+    pub(super) scroll_offset:   Vec2,
+    /// Which horizontal edge `scroll_offset.x` measures from.
+    pub(super) scroll_anchor_x: ScrollAnchor,
+    /// Which vertical edge `scroll_offset.y` measures from.
+    pub(super) scroll_anchor_y: ScrollAnchor,
     /// Optional PBR material override for this element's surface (backgrounds, borders).
     /// When present, the rendering system uses this instead of the panel-level default.
     /// `base_color` is overridden by the layout color if both are set.
-    pub(super) material:      Option<Box<StandardMaterial>>,
+    pub(super) material:        Option<Box<StandardMaterial>>,
     /// Optional editable field contract.
-    pub(super) editable:      Option<ImePanelField>,
+    pub(super) editable:        Option<ImePanelField>,
     /// Optional paint-only draw data.
-    pub(super) draw:          Option<PanelDraw>,
+    pub(super) draw:            Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
-    pub(super) z_index:       DrawZIndex,
+    pub(super) z_index:         DrawZIndex,
     /// Optional anti-alias override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved mode.
-    pub(super) anti_alias:    Option<AntiAlias>,
+    pub(super) anti_alias:      Option<AntiAlias>,
     /// Optional hairline fade override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved policy.
-    pub(super) hairline_fade: Option<HairlineFade>,
+    pub(super) hairline_fade:   Option<HairlineFade>,
     /// Content of this element.
-    pub(super) content:       ElementContent,
+    pub(super) content:         ElementContent,
 }
 
 /// What an element contains.
@@ -164,23 +166,24 @@ impl LayoutTreeChange {
 impl Default for Element {
     fn default() -> Self {
         Self {
-            width:         Sizing::FIT,
-            height:        Sizing::FIT,
-            padding:       Padding::default(),
-            child_layout:  ChildLayout::default(),
-            background:    None,
-            border:        None,
-            corner_radius: CornerRadius::ZERO,
-            overflow:      ChildOverflow::Visible,
-            scroll_offset: Vec2::ZERO,
-            scroll_anchor: ScrollAnchor::Start,
-            material:      None,
-            editable:      None,
-            draw:          None,
-            z_index:       DrawZIndex::default(),
-            anti_alias:    None,
-            hairline_fade: None,
-            content:       ElementContent::Empty,
+            width:           Sizing::FIT,
+            height:          Sizing::FIT,
+            padding:         Padding::default(),
+            child_layout:    ChildLayout::default(),
+            background:      None,
+            border:          None,
+            corner_radius:   CornerRadius::ZERO,
+            overflow:        ChildOverflow::Visible,
+            scroll_offset:   Vec2::ZERO,
+            scroll_anchor_x: ScrollAnchor::Start,
+            scroll_anchor_y: ScrollAnchor::Start,
+            material:        None,
+            editable:        None,
+            draw:            None,
+            z_index:         DrawZIndex::default(),
+            anti_alias:      None,
+            hairline_fade:   None,
+            content:         ElementContent::Empty,
         }
     }
 }
@@ -636,7 +639,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius,
         overflow,
         scroll_offset,
-        scroll_anchor,
+        scroll_anchor_x,
+        scroll_anchor_y,
         material,
         editable,
         draw,
@@ -655,7 +659,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         corner_radius: n_corner_radius,
         overflow: n_overflow,
         scroll_offset: n_scroll_offset,
-        scroll_anchor: n_scroll_anchor,
+        scroll_anchor_x: n_scroll_anchor_x,
+        scroll_anchor_y: n_scroll_anchor_y,
         material: n_material,
         editable: n_editable,
         draw: n_draw,
@@ -672,7 +677,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         || child_layout_change == LayoutTreeChange::LayoutAffecting
         || overflow != n_overflow
         || scroll_offset != n_scroll_offset
-        || scroll_anchor != n_scroll_anchor
+        || scroll_anchor_x != n_scroll_anchor_x
+        || scroll_anchor_y != n_scroll_anchor_y
     {
         return LayoutTreeChange::LayoutAffecting;
     }
@@ -741,6 +747,19 @@ fn classify_child_layout_change(old: &ChildLayout, next: &ChildLayout) -> Layout
                 LayoutTreeChange::LayoutAffecting
             } else {
                 classify_child_divider_change(*divider, *n_divider)
+            }
+        },
+        (
+            ChildLayout::Overlay { align_x, align_y },
+            ChildLayout::Overlay {
+                align_x: n_align_x,
+                align_y: n_align_y,
+            },
+        ) => {
+            if align_x != n_align_x || align_y != n_align_y {
+                LayoutTreeChange::LayoutAffecting
+            } else {
+                LayoutTreeChange::Identical
             }
         },
         _ => LayoutTreeChange::LayoutAffecting,
@@ -870,7 +889,6 @@ mod tests {
     use crate::layout::AlignY;
     use crate::layout::Border;
     use crate::layout::ChildDivider;
-    use crate::layout::ChildLayout;
     use crate::layout::ChildLayoutState;
     use crate::layout::Dimension;
     use crate::layout::DrawZIndex;
@@ -883,6 +901,7 @@ mod tests {
     use crate::layout::Sizing;
     use crate::layout::TextStyle;
     use crate::layout::TextWrap;
+    use crate::layout::child_layout::ChildLayout;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
     const SMALL_CHILD_GAP: f32 = 1.0;
@@ -960,6 +979,32 @@ mod tests {
                 .gap(4.0)
                 .alignment(AlignX::Right, AlignY::Bottom)
                 .child_divider(ChildDivider::new(1.0, Color::WHITE)),
+            Handle::<Image>::default(),
+            Color::WHITE,
+        );
+        let tree = builder.build();
+
+        assert_default_leaf_child_layout(tree.elements[1].child_layout);
+    }
+
+    #[test]
+    fn text_leaf_normalizes_authored_overlay_child_layout() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text_element(
+            El::overlay().alignment(AlignX::Right, AlignY::Bottom),
+            "child",
+            TextStyle::new(10.0),
+        );
+        let tree = builder.build();
+
+        assert_default_leaf_child_layout(tree.elements[1].child_layout);
+    }
+
+    #[test]
+    fn image_leaf_normalizes_authored_overlay_child_layout() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.image(
+            El::overlay().alignment(AlignX::Right, AlignY::Bottom),
             Handle::<Image>::default(),
             Color::WHITE,
         );
@@ -1215,6 +1260,28 @@ mod tests {
     fn row_to_column_change_classifies_as_layout_affecting() {
         let tree = root_tree(El::row());
         let next = root_tree(El::column());
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn overlay_alignment_change_classifies_as_layout_affecting() {
+        let tree = root_tree(El::overlay().align_x(AlignX::Left));
+        let next = root_tree(El::overlay().align_x(AlignX::Right));
+
+        assert_eq!(
+            tree.classify_change(&next),
+            LayoutTreeChange::LayoutAffecting
+        );
+    }
+
+    #[test]
+    fn row_to_overlay_change_classifies_as_layout_affecting() {
+        let tree = root_tree(El::row());
+        let next = root_tree(El::overlay());
 
         assert_eq!(
             tree.classify_change(&next),

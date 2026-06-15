@@ -7,10 +7,10 @@
 - **Project:** `bevy_diegetic` — workspace crate for retained-mode, Clay-inspired diegetic UI panels and text in Bevy 3D scenes.
 - **Stack:** Rust 2024 workspace; Bevy `0.19.0-rc.2`; `bevy_diegetic` default feature `typography_overlay`; layout uses `bevy_kana`, `parley`, `smallvec`, and dev parity checks against vendored `clay-layout`.
 - **Layout:** `crates/bevy_diegetic/src/layout/` — public `El` API, internal `Element` storage, sizing/positioning/wrapping/render commands; `crates/bevy_diegetic/src/layout/engine/*` — layout behavior/tests; `crates/bevy_diegetic/examples/`, `crates/bevy_lagrange/examples/`, and `crates/fairy_dust/src/` — call-site migration; `docs/bevy_diegetic/child-layout.md` — implementation plan; `crates/bevy_diegetic/tests/trybuild/**` — compile-fail/pass fixtures if added.
-- **Key files:** `crates/bevy_diegetic/src/layout/builder.rs:65` — generic public `El<L = Row>`; `crates/bevy_diegetic/src/layout/builder.rs:72` — public `Row`; `crates/bevy_diegetic/src/layout/builder.rs:79` — public `Column`; `crates/bevy_diegetic/src/layout/builder.rs:85` — sealed public `ChildLayoutState`; `crates/bevy_diegetic/src/layout/builder.rs:150` — `El::new()`; `crates/bevy_diegetic/src/layout/builder.rs:153` — `El::row()`; `crates/bevy_diegetic/src/layout/builder.rs:156` — row `.gap(...)`; `crates/bevy_diegetic/src/layout/builder.rs:162` — row `.child_divider(...)`; `crates/bevy_diegetic/src/layout/builder.rs:170` — `El::column()`; `crates/bevy_diegetic/src/layout/builder.rs:173` — column `.gap(...)`; `crates/bevy_diegetic/src/layout/builder.rs:179` — column `.child_divider(...)`; `crates/bevy_diegetic/src/layout/builder.rs:370` — `El::into_element` lowers row/column typestate into internal `ChildLayout` and normalizes text/image leaves; `crates/bevy_diegetic/src/layout/builder.rs:543` — generic `LayoutBuilder::with_root`; `crates/bevy_diegetic/src/layout/builder.rs:615` — generic `LayoutBuilder::text_element`; `crates/bevy_diegetic/src/layout/builder.rs:654` — generic `LayoutBuilder::text_id_element`; `crates/bevy_diegetic/src/layout/builder.rs:667` — private generic `LayoutBuilder::add_text`; `crates/bevy_diegetic/src/layout/builder.rs:705` — generic `LayoutBuilder::image`; `crates/bevy_diegetic/src/layout/child_layout.rs:8` — hidden internal `ChildLayout` enum; `crates/bevy_diegetic/src/layout/child_layout.rs:60` — child-divider access; `crates/bevy_diegetic/src/layout/child_layout.rs:76` — gap/divider unit scaling; `crates/bevy_diegetic/src/layout/element.rs:668` — child-layout change classifier use; `crates/bevy_diegetic/src/layout/element.rs:710` — child-layout change classifier; `crates/bevy_diegetic/src/layout/element.rs:750` — child-divider change classifier; `crates/bevy_diegetic/src/layout/element.rs:940` — text leaf normalization test; `crates/bevy_diegetic/src/layout/element.rs:956` — image leaf normalization test; `crates/bevy_diegetic/src/layout/mod.rs:55` and `crates/bevy_diegetic/src/lib.rs:149` — public row/column/trait exports; `crates/bevy_diegetic/src/layout/geometry.rs:189` — `Border`; `crates/bevy_diegetic/src/layout/geometry.rs:338` — `ChildDivider`; `crates/bevy_diegetic/src/layout/engine/sizing.rs:545` — row/column `is_layout_axis` helper that overlay must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:566` — row/column-only `is_row()` axis check that Phase 5 must replace; `crates/bevy_diegetic/src/layout/engine/positioning.rs:729` — child-divider rectangle emission; `crates/bevy_diegetic/src/layout/engine/wrapping.rs:240` — parent content width for wrapping; `crates/bevy_diegetic/src/layout/engine/integration_tests.rs:808` — existing gap/alignment tests; `crates/bevy_diegetic/tests/trybuild.rs:4` — trybuild compile fixtures; `crates/bevy_diegetic/tests/trybuild/pass/typestate_helpers.rs:1` — row/column typestate compile-pass fixture; `crates/bevy_diegetic/examples/panel_draw_order.rs` — currently may be a text-fit probe with the old draw-order demo commented; rebuild the active overlay-based example in Phase 6.
+- **Key files:** `crates/bevy_diegetic/src/layout/builder.rs:65` — generic public `El<L = Row>`; `builder.rs:72` — public `Row`; `builder.rs:79` — public `Column`; `builder.rs:86` — public `Overlay`; `builder.rs:89` — sealed public `ChildLayoutState`; `builder.rs:156` — `El::new()` and `El::row()`; `builder.rs:164` and `builder.rs:181` — row/column `.gap(...)`; `builder.rs:170` and `builder.rs:187` — row/column `.child_divider(...)`; `builder.rs:193` — `El::overlay()`; `builder.rs:384` — `El::into_element` lowers typestate into internal `ChildLayout` and normalizes text/image leaves; `builder.rs:423` — private sealed lowering trait; `builder.rs:556` — generic `LayoutBuilder::with_root`; `builder.rs:628` — generic `LayoutBuilder::text_element`; `builder.rs:667` — generic `LayoutBuilder::text_id_element`; `builder.rs:680` — private generic `LayoutBuilder::add_text`; `builder.rs:718` — generic `LayoutBuilder::image`; `crates/bevy_diegetic/src/layout/child_layout.rs:8` — hidden `AxisRole`; `child_layout.rs:17` — internal `ChildLayout`; `child_layout.rs:41` — `ChildLayout::Overlay`; `child_layout.rs:72` — child-divider access returns `None` for overlay; `child_layout.rs:81` and `child_layout.rs:91` — axis-role helpers; `child_layout.rs:101` — row/column-only `main_gap`; `child_layout.rs:110` — gap/divider unit scaling; `crates/bevy_diegetic/src/layout/element.rs:98` — split scroll anchors; `element.rs:716` — child-layout change classifier; `element.rs:991` and `element.rs:1004` — overlay leaf normalization tests; `element.rs:1271` and `element.rs:1282` — overlay layout-change tests; `crates/bevy_diegetic/src/layout/mod.rs:55` and `crates/bevy_diegetic/src/lib.rs:149`/`:178` — public row/column/overlay/trait exports; `crates/bevy_diegetic/src/layout/geometry.rs:189` — `Border`; `geometry.rs:338` — `ChildDivider`; `crates/bevy_diegetic/src/layout/engine/sizing.rs:54` — shared content-box helper; `sizing.rs:316` — overlay child sizing; `sizing.rs:640` — `child_axis_role`; `crates/bevy_diegetic/src/layout/engine/positioning.rs:112` — row/column/overlay child flow; `positioning.rs:159` — overlay child positioning; `positioning.rs:492` — content-box scroll extents; `positioning.rs:794` — child-divider emission returns for overlay; `crates/bevy_diegetic/src/layout/engine/wrapping.rs:245` — parent content width uses border-aware content box; `crates/bevy_diegetic/src/layout/engine/integration_tests.rs:864` — overlay runtime tests; `crates/bevy_diegetic/tests/trybuild.rs:4` — trybuild compile fixtures; `crates/bevy_diegetic/tests/trybuild/pass/typestate_helpers.rs:1` — row/column/overlay typestate compile-pass fixture; `crates/bevy_diegetic/tests/trybuild/fail/overlay_*.rs` — invalid overlay API compile-fail fixtures; `crates/bevy_diegetic/examples/panel_draw_order.rs` — currently may be a text-fit probe with the old draw-order demo commented; rebuild the active overlay-based example in Phase 6.
 - **Build:** `cargo check -p bevy_diegetic --examples`; after call-site migration also run `cargo check --workspace --all-targets`.
 - **Test:** `cargo nextest run -p bevy_diegetic`.
-- **Lint:** `cargo clippy --workspace --all-targets`; `cargo +nightly fmt --all`; audit stale APIs with `rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(|child_gap\\(-" crates docs`.
+- **Lint:** `cargo clippy --workspace --all-targets`; `cargo +nightly fmt --all`; audit stale APIs with `rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(|child_gap\\(-" crates docs`, then classify intentional matches such as `tests/trybuild/fail/overlay_*.rs`, Clay reference declarations, and migration notes separately from Diegetic production/example usage.
 - **Style:** `zsh ~/.claude/scripts/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_diegetic_gpu_meter`; repo has `origin` owned by `natepiano`, so use `cargo +nightly fmt --all`, never plain `cargo fmt`; run Cargo-family commands directly and keep `sccache`/`RUSTC_WRAPPER` intact.
 - **Invariants:** Public API must make invalid overlay states unrepresentable: `El::overlay().gap(...)`, `.child_gap(...)`, `.direction(...)`, and child dividers must not compile; internal layout engine stays non-generic and lowers `El<L>` to a plain internal `ChildLayout`; `Row`, `Column`, `Overlay`, and `ChildLayoutState` are public where `El` is public, while internal `ChildLayout`/lowering trait stay hidden; row/column behavior remains unchanged; overlay has no gap, sizes by max child extent on both axes, positions every child in the content box, uses independent X/Y scroll extents, and never emits between-child dividers; text/image leaves normalize inert child layout state; `DrawZIndex` semantics are unchanged; negative-gap overlap patterns migrate to `El::overlay()` rather than `.gap(...)`.
 
@@ -602,7 +602,7 @@ fn decorate<L: ChildLayoutState>(el: El<L>) -> El<L> { el.padding(Padding::all(1
 - Phase 5 now explicitly updates Phase 4's private sealed lowering path before accepting `El<Overlay>`, because the current helper is row/column-specific and treats any non-row state as `Column`.
 - Phase 5 constraints now name the shipped row/column typestate API and trybuild coverage so the overlay work order can be delegated without rediscovering Phase 4.
 
-### Phase 5 — Overlay layout mode and compile-fail guarantees  · status: todo
+### Phase 5 — Overlay layout mode and compile-fail guarantees  · status: done (uncommitted)
 
 #### Work Order
 
@@ -733,6 +733,34 @@ Also add compile-pass fixtures proving row/column `.gap(...)`, row/column `.chil
 
 **Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes and includes `trybuild` cases; `cargo check -p bevy_diegetic --examples` passes; runtime tests cover overlay fit max sizing, top-left/center/bottom-right alignment, padding/border offsets, percent/grow sizing, independent scroll extents, `scroll_y_from_end(0.0)` not changing horizontal anchoring, bordered overlay text wrapping, no between-child divider commands for overlay, `DrawZIndex` ordering over overlapped children, leaf marker normalization, and row/column percent/grow sizing regressions around the new content-box helper; code review confirms overlay is not routed through a fake `Direction` or a row/column-only `is_layout_axis(...)` result.
 
+#### Retrospective
+
+**What worked:**
+
+- `Overlay`, `El::overlay()`, and `ChildLayout::Overlay` now follow the same typestate path as `Row` and `Column` without exposing row/column-only `.gap(...)` or `.child_divider(...)`.
+- The engine now uses explicit axis roles and a shared content-box helper for overlay sizing, positioning, scrolling, and bordered text wrapping.
+
+**What deviated from the plan:**
+
+- `trybuild` was already available, so Phase 5 did not need a `Cargo.toml` change.
+- The stale API audit now intentionally reports compile-fail fixtures for invalid overlay calls; Phase 6 must treat those fixtures as allowed matches.
+
+**Surprises:**
+
+- Replacing the row/column-only helpers also clarified scroll anchoring: `scroll_x(...)`, `scroll_y(...)`, and `scroll_y_from_end(...)` now preserve independent axis anchors.
+
+**Implications for remaining phases:**
+
+- Phase 6 can migrate overlap examples directly to `El::overlay()` without adding more layout-engine API.
+- Phase 6's stale API audit must distinguish real stale usage from trybuild fail fixtures that prove invalid API calls.
+
+#### Phase 5 Review
+
+- Phase 6 now stays scoped to example/doc migration and final verification because Phase 5 already shipped the overlay API and engine behavior.
+- Phase 6 now replaces the active `panel_draw_order` text-fit probe with an overlay-based `DrawZIndex` example, using the commented old demo only as reference.
+- Phase 6 now requires migrating `diegetic_text_stress` away from `-GPU_PIPELINE_LANE_HEIGHT`; inability to migrate that site is a blocker, not a documented exception.
+- Phase 6 stale API and negative-gap audits now explicitly allow trybuild fail fixtures while requiring active overlap sites to move to `El::overlay()`.
+
 ### Phase 6 — Migrate overlap examples, docs, and final audits  · status: todo
 
 #### Work Order
@@ -746,7 +774,7 @@ Migrate all intentional overlap patterns identified in Phase 2 to `El::overlay()
 Known Phase 2 audit findings to carry forward:
 
 - `crates/bevy_diegetic/examples/panel_draw_order.rs` had the old DrawZIndex overlap demo using `-SWEEP_LANE_WIDTH`; in this worktree the active example may instead be a text-only fit probe with the old demo commented out. Rebuild the active example as an overlay-based DrawZIndex teaching example rather than only migrating active negative-gap lanes.
-- `crates/bevy_diegetic/examples/diegetic_text_stress.rs` uses `-GPU_PIPELINE_LANE_HEIGHT` to overlap GPU lane labels and bars; migrate that pattern to overlay or document why it remains outside this phase.
+- `crates/bevy_diegetic/examples/diegetic_text_stress.rs` uses `-GPU_PIPELINE_LANE_HEIGHT` to overlap GPU lane labels and bars; migrate that pattern to overlay. Treat any inability to migrate this site as a Phase 6 blocker, not as a documented exception.
 
 The draw-order example should express layered panel content directly:
 
@@ -770,6 +798,14 @@ builder.with(
 
 `panel_draw_order` should be an active, visually useful DrawZIndex example. It should no longer use negative `child_gap` or negative `.gap(...)` to create overlap. Keep the example focused on `DrawZIndex`: behind/front changes only the sweep element's `DrawZIndex`. The example should teach that `DrawZIndex` is panel-scoped and named differently from Bevy UI's `ZIndex`.
 
+Phase 5 already shipped the needed overlay runtime support:
+
+- `El::overlay()` is public and re-exported from `bevy_diegetic`;
+- overlay children size against the parent content box with no gap or grow distribution;
+- overlay positions each child in the content box using `align_x` and `align_y`;
+- the shared content-box helper subtracts padding and border for sizing, wrapping, scrolling, and positioning;
+- overlay never emits between-child dividers and relies on normal `DrawZIndex` command ordering.
+
 Update docs and examples so new educational material teaches:
 
 - `El::row().gap(...)` for horizontal layout;
@@ -784,7 +820,21 @@ Final stale API audit:
 rg -n "\\.direction\\(|\\.child_gap\\(|child_align_x\\(|child_align_y\\(|child_alignment\\(" crates docs
 ```
 
+Intentional trybuild compile-fail fixtures under `crates/bevy_diegetic/tests/trybuild/fail/overlay_*.rs` and their `.stderr` snapshots are allowed stale-API matches because they prove invalid overlay calls do not compile. Do not count those fixtures as migration failures.
+
 Negative gap audit must catch both literal and named-constant overlap patterns. Do not rely only on `-0.1` regexes. Inspect any remaining negative gap call manually and either remove it or document why it is ordinary spacing rather than overlap.
+
+Concrete negative-gap audit:
+
+```sh
+rg -n "\\.gap\\(\\s*-" crates docs
+```
+
+If that misses a named negative constant introduced through a variable, run a focused follow-up for the known overlap constants:
+
+```sh
+rg -n "SWEEP_LANE_WIDTH|GPU_PIPELINE_LANE_HEIGHT|gap\\([^)]*LANE|gap\\([^)]*OVERLAP" crates docs
+```
 
 Run the Clay parity and benchmark verification as final proof, not just compile checks. Phase 2 already migrated the Diegetic side of the parity and benchmark fixtures; Phase 6 must prove the final typestate/overlay API still preserves those comparisons after all later API and engine changes.
 
@@ -801,19 +851,19 @@ Do not substitute `cargo check --benches` for the benchmark runs in Phase 6. The
 
 **Files:**
 
-- `crates/bevy_diegetic/examples/panel_draw_order.rs` — rewrite overlap lanes to `El::overlay()`.
-- `crates/bevy_diegetic/examples/diegetic_text_stress.rs` — migrate or justify negative-gap overlap pattern.
+- `crates/bevy_diegetic/examples/panel_draw_order.rs` — replace the active text-fit probe with an overlay-based DrawZIndex example; use the commented old demo only as reference.
+- `crates/bevy_diegetic/examples/diegetic_text_stress.rs` — migrate the negative-gap overlap pattern to `El::overlay()`.
 - `crates/bevy_diegetic/benches/layout_comparison.rs`, `crates/bevy_diegetic/benches/layout_engine_raw.rs`, `crates/bevy_diegetic/benches/panel_perf.rs`, and `crates/bevy_diegetic/benches/common/**/*.rs` — final Clay/Diegetic benchmark execution and any fixture fallout.
 - `crates/bevy_diegetic/examples/**/*.rs` — final stale API migration.
 - `crates/fairy_dust/src/**/*.rs` — final stale API migration.
 - `docs/**/*.md` — update examples and remove old layout teaching.
 - `docs/bevy_diegetic/child-layout.md` — update this plan's remaining constraints if a phase review discovers extra overlap sites.
 
-**Constraints from prior phases:** Phase 2 converted deferred overlap sites away from `.direction(...)` while preserving their negative `.gap(...)` values for this phase's audit; Phase 2 also established that Clay `Declaration` calls in parity tests, benchmark fixtures, and the Clay half of `side_by_side.rs` are reference layouts and are not targets for Diegetic API migration; Phase 5 added `El::overlay()` and proved overlay cannot accept row/column gap/divider methods. Use overlay for overlap, not negative row/column gaps.
+**Constraints from prior phases:** Phase 2 converted deferred overlap sites away from `.direction(...)` while preserving their negative `.gap(...)` values for this phase's audit; Phase 2 also established that Clay `Declaration` calls in parity tests, benchmark fixtures, and the Clay half of `side_by_side.rs` are reference layouts and are not targets for Diegetic API migration; Phase 5 added public `Overlay`/`El::overlay()` exports, `ChildLayout::Overlay`, explicit `AxisRole::Overlay`, content-box sizing/wrapping/scrolling/positioning, independent scroll anchors, overlay leaf normalization, overlay layout-change classification, and compile-fail fixtures proving overlay cannot accept `.gap(...)`, `.child_gap(...)`, `.direction(...)`, or `.child_divider(...)`. Use overlay for overlap, not negative row/column gaps.
 
 Deferred Phase 2 overlap sites:
 
 - `crates/bevy_diegetic/examples/panel_draw_order.rs` uses `El::row().gap(-SWEEP_LANE_WIDTH)` for the sweep-band overlap demo.
 - `crates/bevy_diegetic/examples/diegetic_text_stress.rs` uses `El::column().gap(-GPU_PIPELINE_LANE_HEIGHT)` for the GPU pipeline label overlap.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes; focused Clay parity run `cargo nextest run -p bevy_diegetic parity_` passes; `cargo check -p bevy_diegetic --examples` passes; `cargo check --workspace --all-targets` passes or any impossible workspace-wide failure is documented with a narrower checked set; `cargo +nightly fmt --all` passes; `cargo bench -p bevy_diegetic --bench layout_comparison --features bench_support`, `cargo bench -p bevy_diegetic --bench layout_engine_raw --features bench_support`, and `cargo bench -p bevy_diegetic --bench panel_perf --features bench_support` all execute successfully; stale API audit has no Diegetic production matches except compatibility/deprecation code, migration notes, trybuild fail fixtures that intentionally prove invalid calls, or Clay reference declarations; no intentional overlap remains implemented through negative row/column gaps; `panel_draw_order` runs and demonstrates overlay layering through `DrawZIndex`.
+**Acceptance gate:** `cargo nextest run -p bevy_diegetic` passes; focused Clay parity run `cargo nextest run -p bevy_diegetic parity_` passes; `cargo check -p bevy_diegetic --examples` passes; `cargo check --workspace --all-targets` passes or any impossible workspace-wide failure is documented with a narrower checked set; `cargo +nightly fmt --all` passes; `cargo bench -p bevy_diegetic --bench layout_comparison --features bench_support`, `cargo bench -p bevy_diegetic --bench layout_engine_raw --features bench_support`, and `cargo bench -p bevy_diegetic --bench panel_perf --features bench_support` all execute successfully; stale API audit has no Diegetic production matches except compatibility/deprecation code, migration notes, `crates/bevy_diegetic/tests/trybuild/fail/overlay_*.rs` and matching `.stderr` snapshots that intentionally prove invalid calls, or Clay reference declarations; negative-gap audit has no intentional overlap matches in active code; no intentional overlap remains implemented through negative row/column gaps; `panel_draw_order` runs and demonstrates overlay layering through `DrawZIndex`.

@@ -175,6 +175,7 @@ pub use layout::LineStyle;
 /// example for usage.
 pub use layout::MeasureTextFn;
 pub use layout::Mm;
+pub use layout::Overlay;
 pub use layout::Padding;
 pub use layout::PanelCoord;
 pub use layout::PanelDraw;

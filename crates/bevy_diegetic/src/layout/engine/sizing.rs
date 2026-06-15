@@ -1,8 +1,10 @@
+use bevy::math::Vec2;
 use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
-use crate::layout::ChildLayout;
 use crate::layout::Sizing;
+use crate::layout::child_layout::AxisRole;
+use crate::layout::child_layout::ChildLayout;
 use crate::layout::constants::LAYOUT_EPSILON;
 use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
@@ -14,6 +16,22 @@ use crate::layout::element::LayoutTree;
 pub(super) enum Axis {
     X,
     Y,
+}
+
+/// Parent content box after padding and border are removed.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct ContentBox {
+    pub(super) origin: Vec2,
+    pub(super) size:   Vec2,
+}
+
+impl ContentBox {
+    pub(super) const fn axis_size(self, axis: Axis) -> f32 {
+        match axis {
+            Axis::X => self.size.x,
+            Axis::Y => self.size.y,
+        }
+    }
 }
 
 /// Returns the total border inset for `element` along `axis`.
@@ -30,6 +48,23 @@ pub(super) fn border_leading(element: &Element, axis: Axis) -> f32 {
         Axis::X => b.left.value,
         Axis::Y => b.top.value,
     })
+}
+
+/// Returns the parent content box for a resolved element size.
+pub(super) fn content_box(element: &Element, parent_size: Vec2) -> ContentBox {
+    let border_left = border_leading(element, Axis::X);
+    let border_top = border_leading(element, Axis::Y);
+    ContentBox {
+        origin: Vec2::new(
+            element.padding.left.value + border_left,
+            element.padding.top.value + border_top,
+        ),
+        size:   Vec2::new(
+            (parent_size.x - element.padding.horizontal() - border_inset(element, Axis::X))
+                .max(0.0),
+            (parent_size.y - element.padding.vertical() - border_inset(element, Axis::Y)).max(0.0),
+        ),
+    }
 }
 
 /// Bottom-up pass: set `Fit` container sizes and propagate `minDimensions`.
@@ -72,7 +107,7 @@ pub(super) fn propagate_fit_sizes(
         return current_size;
     }
 
-    let is_along = is_layout_axis(&element.child_layout, axis);
+    let axis_role = child_axis_role(&element.child_layout, axis);
 
     // Recurse into children first (post-order), accumulating sizes inline
     // to avoid per-call Vec allocation.
@@ -81,7 +116,7 @@ pub(super) fn propagate_fit_sizes(
     for &child_idx in children {
         let child_size = propagate_fit_sizes(tree, computed, child_idx, axis);
         let child_min = get_min_size(computed[child_idx], axis);
-        if is_along {
+        if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain) {
             content_acc += child_size;
             min_acc += child_min;
         } else {
@@ -103,11 +138,15 @@ pub(super) fn propagate_fit_sizes(
     };
     let border = border_inset(element, axis);
 
-    let gap_total = if is_along && children.len() > 1 {
-        element.child_layout.gap().value * (children.len() - 1).to_f32()
-    } else {
-        0.0
-    };
+    let gap_total =
+        if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain) && children.len() > 1 {
+            element
+                .child_layout
+                .main_gap()
+                .map_or(0.0, |gap| gap.value * (children.len() - 1).to_f32())
+        } else {
+            0.0
+        };
 
     let chrome = padding + border;
 
@@ -119,7 +158,11 @@ pub(super) fn propagate_fit_sizes(
     let clipped = matches!(element.overflow, ChildOverflow::Clipped);
     let content_acc = if clipped { 0.0 } else { content_acc };
     let min_acc = if clipped { 0.0 } else { min_acc };
-    let gap_for_size = if clipped || !is_along { 0.0 } else { gap_total };
+    let gap_for_size = if clipped || matches!(axis_role, AxisRole::Cross | AxisRole::Overlay) {
+        0.0
+    } else {
+        gap_total
+    };
 
     let content_size = content_acc + chrome + gap_for_size;
     let min_from_children = min_acc + chrome + gap_for_size;
@@ -193,47 +236,71 @@ pub(super) fn size_along_axis(
 
         let parent_element = &tree.elements[parent_idx];
         let parent_size = get_size(computed[parent_idx], axis);
-        let is_along = is_layout_axis(&parent_element.child_layout, axis);
+        let axis_role = child_axis_role(&parent_element.child_layout, axis);
+        let parent_content_box = content_box(
+            parent_element,
+            Vec2::new(computed[parent_idx].width, computed[parent_idx].height),
+        );
+        let parent_content_size = parent_content_box.axis_size(axis);
 
         let padding = match axis {
             Axis::X => parent_element.padding.horizontal(),
             Axis::Y => parent_element.padding.vertical(),
         };
         let border = border_inset(parent_element, axis);
-        let chrome = padding + border;
 
-        let gap_total = if is_along && children.len() > 1 {
-            parent_element.child_layout.gap().value * (children.len() - 1).to_f32()
+        let gap_total = if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain)
+            && children.len() > 1
+        {
+            parent_element
+                .child_layout
+                .main_gap()
+                .map_or(0.0, |gap| gap.value * (children.len() - 1).to_f32())
         } else {
             0.0
         };
 
-        // Resolve Percent children first.
-        let available_for_percent = parent_size - chrome - gap_total;
-        for &child_idx in children {
-            let child_sizing = get_sizing(&tree.elements[child_idx], axis);
-            if let Sizing::Percent(frac) = child_sizing {
-                let size = (available_for_percent * frac).max(0.0);
-                set_size(&mut computed[child_idx], axis, size);
+        // Resolve Percent children first for row/column main-axis distribution.
+        let available_for_percent = parent_content_size - gap_total;
+        if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain) {
+            for &child_idx in children {
+                let child_sizing = get_sizing(&tree.elements[child_idx], axis);
+                if let Sizing::Percent(frac) = child_sizing {
+                    let size = (available_for_percent * frac).max(0.0);
+                    set_size(&mut computed[child_idx], axis, size);
+                }
             }
         }
 
-        if is_along {
-            size_children_along_axis(
-                tree,
-                computed,
-                parent_idx,
-                children,
-                axis,
-                AxisMetrics {
+        match axis_role {
+            AxisRole::RowMain | AxisRole::ColumnMain => {
+                size_children_along_axis(
+                    tree,
+                    computed,
+                    parent_idx,
+                    children,
+                    axis,
+                    AxisMetrics {
+                        parent_size,
+                        padding,
+                        border,
+                        gap_total,
+                    },
+                );
+            },
+            AxisRole::Cross => {
+                size_children_cross_axis(
+                    tree,
+                    computed,
+                    children,
+                    axis,
                     parent_size,
-                    padding,
-                    border,
-                    gap_total,
-                },
-            );
-        } else {
-            size_children_cross_axis(tree, computed, children, axis, parent_size, padding, border);
+                    parent_content_size,
+                );
+            },
+            AxisRole::Overlay => {
+                size_overlay_children(tree, computed, children, axis, parent_content_size);
+            },
         }
 
         // Enqueue children (reverse order so first child is popped first from stack).
@@ -242,6 +309,37 @@ pub(super) fn size_along_axis(
                 queue.push(child_idx);
             }
         }
+    }
+}
+
+/// Size overlay children independently against the parent's content box.
+fn size_overlay_children(
+    tree: &LayoutTree,
+    computed: &mut [ComputedLayout],
+    children: &[usize],
+    axis: Axis,
+    content_size: f32,
+) {
+    for &child_idx in children {
+        let child_element = &tree.elements[child_idx];
+        let child_sizing = get_sizing(child_element, axis);
+        let current = get_size(computed[child_idx], axis);
+        let min_dim = get_min_size(computed[child_idx], axis);
+
+        let new_size = match child_sizing {
+            Sizing::Grow { min, max } => content_size.clamp(min.value, max.value),
+            Sizing::Fit { min, max } => {
+                if current > f32::EPSILON {
+                    current.clamp(min.value, max.value)
+                } else {
+                    min.value
+                }
+            },
+            Sizing::Fixed(size) => size.value,
+            Sizing::Percent(frac) => (content_size * frac).max(0.0),
+        };
+
+        set_size(&mut computed[child_idx], axis, new_size.max(min_dim));
     }
 }
 
@@ -302,11 +400,8 @@ fn size_children_cross_axis(
     children: &[usize],
     axis: Axis,
     parent_size: f32,
-    padding: f32,
-    border: f32,
+    content_size: f32,
 ) {
-    let max_size = parent_size - padding - border;
-
     for &child_idx in children {
         let child_element = &tree.elements[child_idx];
         let child_sizing = get_sizing(child_element, axis);
@@ -314,7 +409,7 @@ fn size_children_cross_axis(
         let min_dim = get_min_size(computed[child_idx], axis);
 
         let new_size = match child_sizing {
-            Sizing::Grow { min, max } => max_size.clamp(min.value, max.value),
+            Sizing::Grow { min, max } => content_size.clamp(min.value, max.value),
             Sizing::Fit { min, max } => {
                 // Fit elements keep their propagated content size.
                 if current > f32::EPSILON {
@@ -541,10 +636,10 @@ const fn set_min_size(computed: &mut ComputedLayout, axis: Axis, value: f32) {
     }
 }
 
-/// Returns `true` if `child_layout` lays out children along the given axis.
-const fn is_layout_axis(child_layout: &ChildLayout, axis: Axis) -> bool {
+/// Returns how `child_layout` treats `axis`.
+pub(super) const fn child_axis_role(child_layout: &ChildLayout, axis: Axis) -> AxisRole {
     match axis {
-        Axis::X => child_layout.is_row(),
-        Axis::Y => child_layout.is_column(),
+        Axis::X => child_layout.x_axis_role(),
+        Axis::Y => child_layout.y_axis_role(),
     }
 }
