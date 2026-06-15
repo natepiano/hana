@@ -63,7 +63,7 @@ pub(crate) struct DrawOrderProjection {
     depths: Vec<Option<DrawCommandDepth>>,
 }
 
-/// Sort key for draw commands: `DrawLayer`, then `DrawStep::ordinal`, then
+/// Sort key for draw commands: `DrawZIndex`, then `DrawStep::ordinal`, then
 /// `RenderCommand` stream index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct HierarchicalDrawKey {
