@@ -31,6 +31,7 @@ use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
+use crate::panel::DiegeticPerfStats;
 use crate::panel::SurfaceShadow;
 
 /// Marker for SDF panel mesh entities.
@@ -109,7 +110,15 @@ impl Plugin for PanelGeometryPlugin {
             PostUpdate,
             build_panel_geometry.in_set(PanelChildSystems::Build),
         );
+        app.add_systems(Last, update_panel_geometry_perf_stats);
     }
+}
+
+fn update_panel_geometry_perf_stats(
+    sdf_quads: Query<(), With<PanelSdfMesh>>,
+    mut perf: ResMut<DiegeticPerfStats>,
+) {
+    perf.panel_geometry.sdf_quads = sdf_quads.iter().count();
 }
 
 /// Gathered fill + border data for a single element.

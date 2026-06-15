@@ -34,6 +34,8 @@ pub(super) const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/layout/compute_panels");
 pub(super) const DIAG_PANEL_RECONCILE_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel/reconcile_ms");
+pub(super) const DIAG_PANEL_SDF_QUADS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel/sdf_quads");
 pub(super) const DIAG_PANEL_TEXT_MESH_BUILD_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/mesh_build_ms");
 pub(super) const DIAG_PANEL_TEXT_PARLEY_MS: DiagnosticPath =

@@ -401,6 +401,8 @@ fn toggle_oit(
     }
 }
 
+// ── Measurement — StressDiagnosticsPlugin: main/render-thread timing & draw counts ──
+
 mod diagnostics {
     use super::*;
 
@@ -1730,12 +1732,18 @@ fn format_perf_snapshot(snapshot: PerfSnapshot) -> [String; METRIC_COUNT] {
 /// The Step-2 proof-counter values shown in the upper-right panel.
 #[derive(Default)]
 struct BatchStatsValues {
-    batches:         usize,
-    runs:            usize,
-    glyphs:          usize,
-    shadow_items:    u32,
+    text_batches:      usize,
+    text_runs:         usize,
+    text_glyphs:       usize,
+    text_instance_up:  usize,
+    text_run_table_up: usize,
+    line_batches:      usize,
+    line_records:      usize,
+    line_uploads:      usize,
+    sdf_quads:         usize,
+    shadow_items:      u32,
     /// Caster draws per shadow view (largest first).
-    shadow_per_view: Vec<u32>,
+    shadow_per_view:   Vec<u32>,
 }
 
 /// One batch-stats group: label/value header plus zero or more detail lines.
@@ -1767,22 +1775,63 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<BatchStatsRow> {
             details: Vec::new(),
         },
         BatchStatsRow {
-            label:   "text draw batches",
-            value:   values.batches.to_string(),
+            label:   "batched analytic draws",
+            value:   (values.text_batches + values.line_batches).to_string(),
             details: vec![
-                "1. world labels".to_string(),
-                "2. screen UI overlays".to_string(),
+                format!(
+                    "{} text + {} panel-line",
+                    values.text_batches, values.line_batches
+                ),
+                "text and panel lines use separate batch stores".to_string(),
             ],
         },
         BatchStatsRow {
-            label:   "runs",
-            value:   values.runs.to_string(),
+            label:   "sdf surface draws",
+            value:   values.sdf_quads.to_string(),
+            details: vec![
+                "backgrounds, borders, separator rectangles".to_string(),
+                "one retained PanelSdfMesh per surface".to_string(),
+            ],
+        },
+        BatchStatsRow {
+            label:   "text batches",
+            value:   values.text_batches.to_string(),
+            details: vec![
+                "GlyphBatchStore: compatible text shares draws".to_string(),
+                "labels and panel text route together by key".to_string(),
+            ],
+        },
+        BatchStatsRow {
+            label:   "text runs",
+            value:   values.text_runs.to_string(),
             details: vec!["text runs routed across all batches".to_string()],
         },
         BatchStatsRow {
             label:   "glyphs",
-            value:   values.glyphs.to_string(),
+            value:   values.text_glyphs.to_string(),
             details: vec!["glyph instances across all batches".to_string()],
+        },
+        BatchStatsRow {
+            label:   "panel-line batches",
+            value:   values.line_batches.to_string(),
+            details: vec![
+                "PanelLineBatchStore: compatible line primitives share draws".to_string(),
+            ],
+        },
+        BatchStatsRow {
+            label:   "line records",
+            value:   values.line_records.to_string(),
+            details: vec!["analytic path instances across line batches".to_string()],
+        },
+        BatchStatsRow {
+            label:   "buffer uploads",
+            value:   (values.text_instance_up + values.text_run_table_up + values.line_uploads)
+                .to_string(),
+            details: vec![
+                format!("text instances: {}", values.text_instance_up),
+                format!("text run table: {}", values.text_run_table_up),
+                format!("panel-line buffers: {}", values.line_uploads),
+            ],
         },
         BatchStatsRow {
             label:   "shadow",
@@ -1834,12 +1883,19 @@ fn update_batch_stats_panel(
     }
 
     let batch = &diegetic_perf.batch;
+    let line_batch = diegetic_perf.line_batch;
     let values = BatchStatsValues {
-        batches:         batch.batches,
-        runs:            batch.runs,
-        glyphs:          batch.glyph_records,
-        shadow_items:    draw_counts.shadow_items(),
-        shadow_per_view: draw_counts.shadow_per_view(),
+        text_batches:      batch.batches,
+        text_runs:         batch.runs,
+        text_glyphs:       batch.glyph_records,
+        text_instance_up:  batch.instance_uploads,
+        text_run_table_up: batch.run_table_uploads,
+        line_batches:      line_batch.batches,
+        line_records:      line_batch.records,
+        line_uploads:      line_batch.uploads,
+        sdf_quads:         diegetic_perf.panel_geometry.sdf_quads,
+        shadow_items:      draw_counts.shadow_items(),
+        shadow_per_view:   draw_counts.shadow_per_view(),
     };
     let rows = batch_stats_rows(&values);
     let mut key = String::new();
@@ -2310,10 +2366,10 @@ fn gpu_pipeline_lane_label_style(color: Color) -> TextStyle {
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-/// One lane's bar track: a grow-width track tinted [`GPU_PIPELINE_TRACK_COLOR`]
-/// with fractional-offset [`TimelineSegment`] blocks. Empty timeline spans
-/// become transparent spacers, so reading straight down at one x compares the
-/// same process-monotonic time on every lane.
+/// One lane's bar track: a grow-width overlay tinted
+/// [`GPU_PIPELINE_TRACK_COLOR`] with fractional-offset [`TimelineSegment`]
+/// blocks. Empty timeline spans become transparent spacers, so reading straight
+/// down at one x compares the same process-monotonic time on every lane.
 fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[TimelineSegment]) {
     let axis = axis_ms.max(GPU_PIPELINE_MIN_AXIS_MS);
     builder.with(
@@ -2329,10 +2385,9 @@ fn lane_bars(builder: &mut LayoutBuilder, axis_ms: f32, segments: &[TimelineSegm
 
 fn gpu_pipeline_track(builder: &mut LayoutBuilder, axis: f32, segments: &[TimelineSegment]) {
     builder.with(
-        El::column()
+        El::overlay()
             .width(Sizing::GROW)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_HEIGHT))
-            .gap(-GPU_PIPELINE_LANE_HEIGHT)
             .background(GPU_PIPELINE_TRACK_COLOR),
         |builder| {
             gpu_pipeline_segment_row(builder, axis, segments);

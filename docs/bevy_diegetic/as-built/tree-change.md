@@ -58,27 +58,29 @@ positioning while still producing a fresh render command list.
 ## Change Classification
 
 Classification should be exhaustive over stored tree fields. Adding a new field
-to `Element`, `ElementContent`, `Border`, or `LayoutTextStyle` should force us
-to decide whether that field is layout-affecting or visual-only. Implement this
-with exhaustive destructuring rather than field-by-field `if` chains so new
-fields fail compilation until they are classified.
+to `Element`, `ElementContent`, `ChildLayout`, `ChildDivider`, `Border`, or
+`LayoutTextStyle` should force us to decide whether that field is
+layout-affecting or visual-only. Implement this with exhaustive destructuring
+rather than field-by-field `if` chains so new fields fail compilation until they
+are classified.
 
 Layout-affecting examples:
 
 - tree root, element count, child order, child references
-- width, height, padding, child gap, direction, alignment
+- width, height, padding, child layout variant, row/column gap, alignment
 - text content
 - text measurement fields: font id, size, weight, slant, line height, letter
   spacing, word spacing, wrap mode, font features
-- border widths and between-children border width
+- outer border widths and row/column `ChildDivider` width
 - clip behavior
 
 Visual-only examples:
 
 - text color
 - background color, including adding or removing a background
-- border color, including adding or removing a zero-width visual border only if
-  command generation can represent it safely
+- outer border color, including adding or removing a zero-width visual border
+  only if command generation can represent it safely
+- row/column `ChildDivider` color
 - corner radius
 - material changes only after a dedicated comparator confirms the changed
   material data is visual-only; otherwise treat material changes as
@@ -288,8 +290,10 @@ Unit tests:
 - background add/remove classifies as `VisualOnly`
 - text content change classifies as `LayoutAffecting`
 - font size/id change classifies as `LayoutAffecting`
-- border color-only classifies as `VisualOnly`
-- border width change classifies as `LayoutAffecting`
+- outer border color-only classifies as `VisualOnly`
+- outer border width change classifies as `LayoutAffecting`
+- row/column `ChildDivider` color-only classifies as `VisualOnly`
+- row/column `ChildDivider` width change classifies as `LayoutAffecting`
 - combined visual and layout changes classify as `LayoutAffecting`
 - empty tree to populated tree, and populated tree to empty tree, classify as
   `LayoutAffecting`

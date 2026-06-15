@@ -238,6 +238,7 @@ pub use panel::PanelChanged;
 pub use panel::PanelDimensions;
 pub use panel::PanelDimensionsChanged;
 pub use panel::PanelFieldRecord;
+pub use panel::PanelGeometryPerfStats;
 pub use panel::PanelLineBatchPerfStats;
 pub use panel::PanelPlane;
 use panel::PanelPlugin;
