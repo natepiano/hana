@@ -237,7 +237,7 @@ Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-m
 **C. Share glyph outlines across labels** — DONE 2026-06-02
 - Store each glyph's outline once; labels point at the shared copy. See Finding — C.
 
-**D. Single source of truth + geometry-stable skip** — IN PROGRESS (current phase)
+**D. Single source of truth + geometry-stable skip** — DONE 2026-06-03
 - Started as "skip full layout on a text-only change," but the right fix is to
   remove the model that forces the every-other-frame toggle. See the phase plan
   below.
@@ -247,7 +247,7 @@ Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-m
 - Saves the alternating layout-solve CPU, removes the per-frame cache clone, and
   removes a 1-frame reflow lag.
 
-## Phase D (current) — tree as single source of truth, paired with a geometry-stable skip
+## Phase D — tree as single source of truth, paired with a geometry-stable skip
 
 ### The problem
 

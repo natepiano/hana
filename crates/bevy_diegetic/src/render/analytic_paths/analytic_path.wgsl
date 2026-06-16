@@ -4,13 +4,13 @@
 // panel lines (ticks + spine in one record).
 //
 // Inputs (packed by render/analytic_paths/packing.rs, structs mirrored
-// below — coverage_probe.rs hash-pins this file against its CPU mirror):
+// below):
 //   curves  — CurveRecord quadratic segments with precomputed
 //             distance-solver coefficients, per-contour hairline stroke
 //             width (solver.w), and per-contour fade exponent.
 //   bands   — BandRecord (start, count) windows into a band-ordered curve
-//             table. Each path has horizontal bands (y-slabs: every curve
-//             a +x ray from a point in the slab can cross) and vertical
+//             table. Each path has along-Y bands (y-slabs: every curve
+//             a +x ray from a point in the slab can cross) and along-X
 //             bands (x-slabs), so winding and nearest-distance scans touch
 //             a handful of curves, not the whole path.
 //   path_records  — PathRecord per packed path: design-space bounds, band table
@@ -18,7 +18,7 @@
 //   uv_a    — fractional position inside the path bounds quad.
 //   uv_b    — (path index, run index) as floats, constant per quad.
 //   per-run — fill color / render mode / OIT offset / AA flags from the
-//             RunRecord table under GLYPH_VERTEX_PULL, else from the
+//             RunRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS, else from the
 //             material's PathUniform.
 //
 // Evaluation: non-zero winding (inside/outside) + distance to the nearest
@@ -27,6 +27,12 @@
 // floor and faded back by each contour's fade exponent; fading and exempt
 // contours coexist in one path via the two-lane CoverageTerms evaluation.
 // Coverage then feeds PBR lighting and (when enabled) OIT.
+//
+// For coverage debugging, text/slug/glyph/coverage_probe.rs contains a CPU
+// model of the key distance, band, anisotropic sampling, convex-corner, and
+// hairline-fade logic below. Use it when changing coverage math or when GPU
+// visual debugging is not converging; shader plumbing changes do not need to
+// keep that probe in lockstep.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -144,17 +150,17 @@ struct CurveRecord {
     edge_normal: vec2<f32>,
 }
 
-// One band's window into the band-ordered curve table: a horizontal band
+// One band's window into the band-ordered curve table: an along-Y band
 // holds every curve whose y-extent overlaps that y-slab of the path (the
-// complete crossing set for a +x winding ray from inside the slab), a
-// vertical band the same by x. Band lookup derives the index from the
-// point's normalized coordinate; y_min/y_max are the band edges in design
+// complete crossing set for a +x winding ray from inside the slab), an
+// along-X band the same by x. Band lookup derives the index from the
+// point's normalized coordinate; range_min/range_max are the band edges in design
 // units.
 struct BandRecord {
     start: u32,
     count: u32,
-    y_min: f32,
-    y_max: f32,
+    range_min: f32,
+    range_max: f32,
 }
 
 // One packed path (font path or merged panel-line group).
@@ -162,7 +168,7 @@ struct PathRecord {
     // Design-space bounds: min in .xy, size in .zw. uv_a maps onto this
     // rectangle (see design_position).
     bounds_min_size: vec4<f32>,
-    // Band-table ranges: horizontal band start/count in .xy, vertical band
+    // Band-table ranges: along-Y band start/count in .xy, along-X band
     // start/count in .zw.
     band_range: vec4<u32>,
     // Narrowest dilating stroke across the path's contours, in design units;
@@ -284,7 +290,7 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<BandRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PathRecord>;
 
-#ifdef GLYPH_VERTEX_PULL
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
 // Mirrors `RunRecord` in `path/packing.rs` (std430, 96 B stride). Under the
 // vertex-pulling route a batch holds many runs, so the per-run values move
 // out of the material uniform into this table, indexed by the run index the
@@ -319,7 +325,7 @@ fn path_index(path_uv: vec2<f32>) -> u32 {
 // Per-run fill color: the run table under vertex pulling, the material
 // uniform on the per-run path.
 fn run_fill_color(path_uv: vec2<f32>) -> vec4<f32> {
-#ifdef GLYPH_VERTEX_PULL
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     return run_records[run_index(path_uv)].fill_color;
 #else
     return uniforms.fill_color;
@@ -328,7 +334,7 @@ fn run_fill_color(path_uv: vec2<f32>) -> vec4<f32> {
 
 // Per-run render mode (Text / PunchOut), sourced like `run_fill_color`.
 fn run_render_mode(path_uv: vec2<f32>) -> u32 {
-#ifdef GLYPH_VERTEX_PULL
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     return run_records[run_index(path_uv)].render_mode;
 #else
     return uniforms.render_mode;
@@ -338,7 +344,7 @@ fn run_render_mode(path_uv: vec2<f32>) -> u32 {
 // Per-run OIT z offset: the run table under vertex pulling, the material
 // uniform on the per-run path.
 fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
-#ifdef GLYPH_VERTEX_PULL
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     return run_records[run_index(path_uv)].oit_depth_offset;
 #else
     return uniforms.oit_depth_offset;
@@ -348,7 +354,7 @@ fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
 // Per-run anti-alias mode bits (AA_FLAG_SUPERSAMPLE | AA_FLAG_BAND), sourced
 // like `run_fill_color`.
 fn run_aa_flags(path_uv: vec2<f32>) -> u32 {
-#ifdef GLYPH_VERTEX_PULL
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     return run_records[run_index(path_uv)].aa_flags;
 #else
     var flags = 0u;
@@ -381,7 +387,7 @@ fn design_position(uv: vec2<f32>, path: PathRecord) -> vec2<f32> {
     );
 }
 
-fn horizontal_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+fn along_y_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
     let bounds_min = path_bounds_min(path);
     let bounds_size = path_bounds_size(path);
     let band_count = path.band_range.y;
@@ -393,7 +399,7 @@ fn horizontal_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
     return min(u32(normalized_y * f32(band_count)), band_count - 1u);
 }
 
-fn vertical_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+fn along_x_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
     let bounds_min = path_bounds_min(path);
     let bounds_size = path_bounds_size(path);
     let band_count = path.band_range.w;
@@ -677,21 +683,21 @@ fn accumulate_nearest(
     }
 }
 
-// One pass over the point's horizontal band: per-lane winding (the y-slab
+// One pass over the point's along-Y band: per-lane winding (the y-slab
 // band holds every curve a +x ray can cross, so the winding is complete
 // after this pass) plus nearest-distance candidates for curves whose AABB
 // is within scan_width.
-fn horizontal_coverage_terms(
+fn along_y_coverage_terms(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
     path: PathRecord,
 ) -> CoverageTerms {
     let include_winding = !outside_path_bounds(point, path);
-    let horizontal_band = bands[path.band_range.x + horizontal_band_index(point, path)];
+    let along_y_band = bands[path.band_range.x + along_y_band_index(point, path)];
     var terms = empty_coverage_terms();
-    for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
-        let curve = curves[horizontal_band.start + offset];
+    for (var offset = 0u; offset < along_y_band.count; offset += 1u) {
+        let curve = curves[along_y_band.start + offset];
         if include_winding {
             let winding = curve_winding(curve, point);
             if curve.fade_exponent > 0.0 {
@@ -731,21 +737,21 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
     return dot(diff, diff);
 }
 
-// Distance-only second pass over the point's vertical (x-slab) band: a
-// curve above or below the point can sit outside its horizontal band yet
+// Distance-only second pass over the point's along-X (x-slab) band: a
+// curve above or below the point can sit outside its along-Y band yet
 // inside the AA scan radius. Winding is already complete from the
-// horizontal pass.
-fn nearest_vertical_curve(
+// along-Y pass.
+fn nearest_along_x_curve(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
     path: PathRecord,
     initial: CoverageTerms,
 ) -> CoverageTerms {
-    let vertical_band = bands[path.band_range.z + vertical_band_index(point, path)];
+    let along_x_band = bands[path.band_range.z + along_x_band_index(point, path)];
     var terms = initial;
-    for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
-        let curve = curves[vertical_band.start + offset];
+    for (var offset = 0u; offset < along_x_band.count; offset += 1u) {
+        let curve = curves[along_x_band.start + offset];
         if curve_bounds_distance_sq(point, curve) <= scan_width_sq {
             accumulate_nearest(&terms, point, curve, hairline_target);
         }
@@ -754,7 +760,7 @@ fn nearest_vertical_curve(
 }
 
 // Non-zero winding number at `point` over ALL curves (both lanes), using the
-// point's horizontal band. Returns 0 outside the path bounds. The prepass
+// point's along-Y band. Returns 0 outside the path bounds. The prepass
 // silhouette test wants the union fill, not a per-lane one.
 fn winding_at(point: vec2<f32>, path: PathRecord) -> i32 {
     if outside_path_bounds(point, path) {
@@ -785,7 +791,7 @@ fn winding_at(point: vec2<f32>, path: PathRecord) -> i32 {
         }
         return 0;
     }
-    let band = bands[path.band_range.x + horizontal_band_index(point, path)];
+    let band = bands[path.band_range.x + along_y_band_index(point, path)];
     var winding = 0;
     for (var offset = 0u; offset < band.count; offset += 1u) {
         winding += curve_winding(curves[band.start + offset], point);
@@ -799,7 +805,7 @@ fn lane_winding_at(point: vec2<f32>, path: PathRecord) -> vec2<i32> {
     if outside_path_bounds(point, path) {
         return vec2<i32>(0, 0);
     }
-    let band = bands[path.band_range.x + horizontal_band_index(point, path)];
+    let band = bands[path.band_range.x + along_y_band_index(point, path)];
     var winding = vec2<i32>(0, 0);
     for (var offset = 0u; offset < band.count; offset += 1u) {
         let curve = curves[band.start + offset];
@@ -890,8 +896,8 @@ fn distance_coverage(
     // The distance scan must reach the most-dilated silhouette plus the AA ramp.
     let scan_width = edge_width + dilation_max;
     let scan_width_sq = scan_width * scan_width;
-    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, path);
-    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, path, terms);
+    var terms = along_y_coverage_terms(point, scan_width_sq, hairline_target, path);
+    terms = nearest_along_x_curve(point, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
     let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, edge_width, path);
 
@@ -954,8 +960,8 @@ fn signed_distance_sample(
     path: PathRecord,
 ) -> SdSample {
     let scan_width = sqrt(scan_width_sq);
-    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, path);
-    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, path, terms);
+    var terms = along_y_coverage_terms(point, scan_width_sq, hairline_target, path);
+    terms = nearest_along_x_curve(point, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
     let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, scan_width, path);
     return SdSample(
@@ -1153,7 +1159,7 @@ fn line_floor(
     return d;
 }
 
-// Polygon-mode sentinel: a line path (min_feature > 0) packed with no vertical
+// Polygon-mode sentinel: a line path (min_feature > 0) packed with no along-X
 // band is a set of convex half-plane polygons (packing::build_packed_polygons),
 // not a banded curve scan.
 fn is_polygon_mode(path: PathRecord) -> bool {

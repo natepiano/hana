@@ -98,9 +98,9 @@ where
             self.path_records.push(PathRecord::new(
                 packed.bounds(),
                 band_start,
-                packed.horizontal_count(),
-                band_start + packed.horizontal_count(),
-                packed.vertical_count(),
+                packed.horizontal_band_count(),
+                band_start + packed.horizontal_band_count(),
+                packed.vertical_band_count(),
                 min_feature,
             ));
             self.indices.insert(key, record_index);

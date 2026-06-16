@@ -10,8 +10,8 @@ use super::constants::DEFAULT_ROUGHNESS;
 use crate::layout::Sidedness;
 
 /// Configures a `StandardMaterial`'s `double_sided` and `cull_mode` fields from
-/// a [`Sidedness`] choice. Shared by glyph material builders.
-pub(crate) const fn apply_glyph_sidedness(base: &mut StandardMaterial, sidedness: Sidedness) {
+/// a [`Sidedness`] choice. Shared by shape and text material builders.
+pub(crate) const fn apply_sidedness(base: &mut StandardMaterial, sidedness: Sidedness) {
     match sidedness {
         Sidedness::DoubleSided => {
             base.double_sided = true;

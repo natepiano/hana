@@ -105,7 +105,7 @@ color glyph: glyph  -> N quads (one per layer)
 These are the types and the GPU layout the phases below build toward.
 
 - **`CachedGlyph` enum** — the glyph cache returns
-  `Monochrome(GlyphOutline) | Color(ColorGlyph)`. `ColorGlyph { layers:
+  `Monochrome(PackedPath) | Color(ColorGlyph)`. `ColorGlyph { layers:
   Vec<ColorLayer> }`; `ColorLayer { outline: Glyph, transform: Affine2, brush:
   Brush, clip: Option<Glyph> }`. `clip` is a COLRv1 `PaintGlyph` /
   `PaintClipBox` region captured as an outline (a clip box is converted to a
@@ -261,7 +261,7 @@ glyph skips that subtree. Every fallback logs once and never panics.
 Cache the flattened, packed color layers the same way `GlyphOutlineCache` caches
 monochrome packed glyphs, keyed off `GlyphKey` plus the new `Palette` field.
 Return the `CachedGlyph` enum. Adding the `Palette` field to `GlyphKey` and
-widening the cache accessor from `&GlyphOutline` to `&CachedGlyph` migrates the
+widening the cache accessor from `&PackedPath` to `&CachedGlyph` migrates the
 monochrome call sites in the same change. The accessor is a total `layer_iter()`
 (decision D1): `Color` yields its layers, `Monochrome` yields one synthetic
 `Solid(Foreground)` layer, so Phase 5 iterates both uniformly with no partial
@@ -473,7 +473,7 @@ in-intent outcome and are accepted; the three genuine choices are under
   brush/stop/quad counts and the overflow path so a pathological run is a named
   internal error, not silent truncation.
 - **M4 — Indices are checked newtypes. Accepted.** `Palette`, `BrushIndex`,
-  `LayerIndex`, `GlyphOutlineIndex` are newtypes with constructors that validate
+  `LayerIndex`, `PackedPathIndex` are newtypes with constructors that validate
   against the run's buffer lengths at pack time (this is what makes
   "an out-of-range index cannot reach the GPU" true rather than aspirational).
   Pin `Palette` as `u16` (CPAL palette-index width), palette 0 only for now.
@@ -676,14 +676,14 @@ the rest above is accepted.
   reasons: the type lens says `outline_ref()` re-introduces a partial accessor
   that panics on the `Color` variant (defeating the enum's exhaustiveness); the
   architecture lens says the enum itself adds a branch to the per-glyph mono hot
-  path that today returns `&GlyphOutline` directly.
+  path that today returns `&PackedPath` directly.
   *Impact:* sets the Phase 4 cache API and the Phase 5 expansion loop; wrong
   choice means a rewrite at integration or a latent panic.
   *Options:* (A) keep enum + `outline_ref()` as written; (B) keep the enum but
   replace `outline_ref()` with a total accessor (e.g. `layer_iter()` that yields
   one synthetic `Solid(Foreground)` layer for mono) so callers handle both
   variants uniformly and Phase 5 iterates layers identically; (C) drop the enum —
-  keep `get()` returning `&GlyphOutline` with an optional color-layer payload, so
+  keep `get()` returning `&PackedPath` with an optional color-layer payload, so
   the mono hot path keeps zero branching at the cost of the enum's explicitness.
   **Decision: B — keep `CachedGlyph` but replace `outline_ref()` with a total
   `layer_iter()` accessor (one synthetic `Solid(Foreground)` layer for mono); no

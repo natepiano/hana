@@ -26,8 +26,6 @@ pub(crate) use analytic_paths::BatchPathMaterialInput;
 pub(crate) use analytic_paths::Bounds;
 pub(crate) use analytic_paths::CurveRecord;
 pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
-pub(crate) use analytic_paths::GlyphOutline;
-#[cfg(test)]
 pub(crate) use analytic_paths::PackedPath;
 pub(crate) use analytic_paths::PathAtlas;
 pub(crate) use analytic_paths::PathAtlasHandles;
@@ -60,7 +58,7 @@ pub(crate) use constants::LAYER_DEPTH_BIAS;
 pub(crate) use constants::OIT_DEPTH_STEP;
 pub(crate) use constants::SDF_AA_PADDING;
 pub(crate) use draw_order::DrawOrderProjection;
-pub(crate) use material::apply_glyph_sidedness;
+pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::resolve_material;
 use panel_geometry::PanelGeometryPlugin;

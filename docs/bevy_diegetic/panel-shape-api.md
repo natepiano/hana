@@ -81,7 +81,7 @@ Identity is split by layer:
 
 - `PanelShapeSourceKey` comes from layout and identifies the source element, draw
   ordinal, line ordinal, and primitive ordinal.
-- `PanelLineRenderKey` prefixes the source key with the panel entity for
+- `PanelShapeRenderKey` prefixes the source key with the panel entity for
   retained renderer storage.
 
 Element-owned `PanelDraw::Lines(Vec<PanelLine>)` currently uses ordinal
@@ -747,7 +747,7 @@ Deliverables:
   settles whether `External` gains semantics or is deleted).
 - Keep overlay panel entities stable when retained renderer identity matters.
   If a metric refresh recreates overlay panels, treat the panel-entity portion
-  of `PanelLineRenderKey` as churn and verify stale cleanup explicitly.
+  of `PanelShapeRenderKey` as churn and verify stale cleanup explicitly.
 - Rebuild or update overlay panels on metric changes so renderer records refresh
   through normal panel lifecycle.
 - Remove or explicitly exempt retained gizmo/callout overlay line paths.
@@ -1055,9 +1055,9 @@ crates/bevy_diegetic/src/
     analytic_paths/
       mod.rs
       atlas.rs              # generic non-glyph path atlas
-      batching.rs           # text batch store and shared GPU handle types
+      batching.rs           # analytic path batch store (PathBatchStore) and shared GPU handle types
       geometry.rs           # Bounds / PathOutline / PathContour / QuadraticSegment
-      material.rs           # shared analytic-path TextMaterial route
+      material.rs           # shared analytic-path PathMaterial route
       packing.rs            # curve, band, path, instance, and run records
       analytic_path.wgsl
       analytic_path_vertex_pull.wgsl
@@ -1069,7 +1069,7 @@ crates/bevy_diegetic/src/
   callouts/
     caps.rs                 # shared CalloutCap resolution helpers
   examples/
-    units.rs                # panel-line-backed rulers and batch-count HUD
+    units.rs                # panel-shape-backed rulers and batch-count HUD
 ```
 
 The shared target stays under `render/`, not under `text/slug/runtime`, so text and

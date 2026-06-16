@@ -100,8 +100,8 @@ PathInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B st
   rect_size: vec2<f32>                              fill_color:  vec4<f32>
   uv_min:    vec2<f32>   // padded quad UVs         render_mode: u32         // Text / PunchOut
   uv_size:   vec2<f32>                              depth_nudge: f32
-  atlas_idx: u32         // PathRecord index
-  run_idx:   u32         // RunRecord index
+  atlas_index: u32       // PathRecord index
+  run_index:   u32       // RunRecord index
 ```
 
 PathInstanceRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
@@ -112,7 +112,7 @@ encase owns the padding, same as the existing `CurveRecord` / `BandRecord` /
 `Mat3x4` and the existing record structs only use `Vec4` / `UVec4` through
 `ShaderType`, so `Mat4` is the no-surprises choice; pack to 3×`Vec4` only if
 measurement justifies it. Both structs live in
-`src/text/slug/render/packing.rs` next to `CurveRecord` / `BandRecord` /
+`src/render/analytic_paths/packing.rs` next to `CurveRecord` / `BandRecord` /
 `PathRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
 layout assertions against the **GPU layout, not the Rust layout** —
 `size_of` measures the wrong thing; assert via `ShaderSize::SHADER_SIZE`
@@ -363,10 +363,10 @@ implementer's):
 
 ```rust
 struct PathBatchStore {
-    batches:   HashMap<BatchKey, GlyphBatch>,
+    batches:   HashMap<BatchKey, PathBatch>,
     run_index: HashMap<RunStorageKey, BatchKey>,  // which batch a run is in
 }
-struct GlyphBatch {
+struct PathBatch {
     entity:        Option<Entity>,               // the batch render entity
     glyph_records: Vec<PathInstanceRecord>,
     run_records:   Vec<RunRecord>,
@@ -688,7 +688,7 @@ toggle flipped in the gate examples.
   per-run `text_material()` keeps its placeholder 104/105 wiring untouched
   until Step 4. **The fragment run-table read lands here** (moved from Step
   3b, user-approved 2026-06-03): `specialize` pushes a def (e.g.
-  `GLYPH_VERTEX_PULL`) into the fragment defs when `vertex_pull` is set,
+  `FRAGMENT_DATA_FROM_BATCHED_PATHS`) into the fragment defs when `vertex_pull` is set,
   and `slug_text.wgsl`'s fragment sources `fill_color` / `render_mode`
   from `run_records[u32(floor(in.uv_b.y))]` under that def (uniform path
   otherwise — per-run materials unchanged). Without it a batch renders
@@ -818,7 +818,7 @@ toggle flipped in the gate examples.
     `render_coverage` applies the punch-out inversion and the prepass
     fragment calls it, so it does read `render_mode`. `render_coverage`
     now takes `render_mode` as a parameter, sourced from the run table
-    under `GLYPH_VERTEX_PULL` and from the uniform otherwise — shadow
+    under `FRAGMENT_DATA_FROM_BATCHED_PATHS` and from the uniform otherwise — shadow
     silhouettes of punch-out runs stay correct per run.
   - Batch entities carry `NoAutoAabb` (bevy 0.19) so `CalculateBounds`
     never installs a zero-extent box from the inert mesh; the union
@@ -1113,7 +1113,7 @@ toggle flipped in the gate examples.
     example pins `Sample4`.
   - *Punch-out:* rg sweep clean — the batched path reads `render_mode`
     per record from `prepared.render_mode` (`batching.rs` record build);
-    the material uniform is a placeholder under `GLYPH_VERTEX_PULL`.
+    the material uniform is a placeholder under `FRAGMENT_DATA_FROM_BATCHED_PATHS`.
     Visual: `slug_text`'s PunchOut row byte-identical across the flip
     (ImageMagick AE = 0 on the row crop), inverted coverage rendering.
   - *Depth-nudge layering (`panel_rendering`):* per-run reference

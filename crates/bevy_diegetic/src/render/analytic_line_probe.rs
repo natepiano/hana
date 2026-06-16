@@ -358,7 +358,7 @@ mod tests {
             != 0
     }
 
-    /// Mirrors the shader: pick the horizontal band by y, sum winding over only
+    /// Mirrors the shader: pick the along-Y band by y, sum winding over only
     /// that band's curves.
     fn banded_inside(packed: &PackedPath, bounds: Bounds, point: Vec2) -> bool {
         let band_count = packed.bands().len() / 2;
@@ -434,7 +434,7 @@ mod tests {
             let band = packed.bands()[index];
             println!(
                 "  band[{index}] start={} count={} y=[{:.1},{:.1}]",
-                band.start, band.count, band.y_min, band.y_max
+                band.start, band.count, band.range_min, band.range_max
             );
         }
         assert_eq!(

@@ -123,10 +123,12 @@ separators use `ChildDivider`, stored inside row/column `ChildLayout` and
 emitted as `RectangleSource::ChildDivider`. Overlay cannot hold or emit child
 dividers.
 
-Compile-time guarantees live in `crates/bevy_diegetic/tests/trybuild/**`:
+Opt-in compile-time guarantees live in `crates/bevy_diegetic/tests/trybuild/**`:
 row/column/overlay helper signatures compile, while `El::overlay().gap(...)`,
 `.child_gap(...)`, `.direction(...)`, and `.child_divider(...)` intentionally
-fail.
+fail. The `typestate_helper_signatures_compile` trybuild test is ignored by
+default because it is slow; run it when changing the public layout typestate
+helpers.
 
 ## Invariants
 

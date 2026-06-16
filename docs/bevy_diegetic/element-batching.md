@@ -32,7 +32,7 @@
   - `render/analytic_paths/analytic_path.wgsl` — `pbr_input_from_standard_material(in, is_front)` (`:967`), `apply_pbr_lighting(pbr_input)` (`:979`).
   - `shaders/sdf_panel.wgsl` — `pbr_input_from_standard_material(in, is_front)` (`:394`), `apply_pbr_lighting(pbr_input)` (`:461`).
   - `render/panel_text/batching.rs` — `update_panel_text_batches` (`:139`, main-world `PostUpdate`); `batch_material` (`:762`) writes `text_batch_depth_bias(key.z_level)` (`:774`); `commit_batch_buffers` (`:449`); `grow_batch_assets` (`:685`); `RunRecord.depth_nudge` write (`:317`).
-  - `render/panel_lines/batching.rs` — `PanelLineBatchStore` (`:191`) with a per-store `VisualMaterialInterner` (`:194`).
+  - `render/panel_shapes/batching.rs` — `PanelShapeBatchStore` (`:191`) with a per-store `VisualMaterialInterner` (`:194`).
   - `render/constants.rs` — `DRAW_LEVEL_GEOMETRY_LANES = 64` (`:8`), `DRAW_LEVEL_STRIDE = 65` (`:10`), `DRAW_LEVEL_TEXT_SUBLANE = 64` (`:12`), `OIT_DEPTH_STEP = 1e-6` (`:43`), `OIT_FOCUS_DEPTH = 0.001` (`:45`).
   - `layout/render.rs` — `RenderCommand.z_index: DrawZIndex` (`:26`); `RenderCommandKind` (`:68`; `Rectangle :70`, `Text :77`, `Border :84`, `Lines :96`, `ScissorStart`/`ScissorEnd`); `draw_step()` (`:110`).
   - `layout/text_props.rs` — `DrawZIndex` newtype (`:170`), default `DrawZIndex(0)`.
@@ -469,7 +469,7 @@ invariant holds.
   function (Phase 3) instead of `pbr_input_from_standard_material` + the per-run
   `fill_color` override (`analytic_path.wgsl:967`).
 - Replace the per-store `VisualMaterialInterner` in `analytic_paths/batching.rs`
-  and `panel_lines/batching.rs` (`:194`) with the shared `SharedMaterialTable`.
+  and `panel_shapes/batching.rs` (`:194`) with the shared `SharedMaterialTable`.
   Text/line batch materials **register** with it (Phase 1 registry). Each run
   allocates a per-element slot keyed by its reconcile identity and `set`s its
   current material; the table is the one shared buffer across fills, text, and
@@ -484,7 +484,7 @@ invariant holds.
   `SHADER_SIZE` re-assert.
 - `render/analytic_paths/analytic_path.wgsl` — read the shared table via
   `pbr_input_from_material_table`.
-- `render/analytic_paths/batching.rs`, `render/panel_lines/batching.rs`,
+- `render/analytic_paths/batching.rs`, `render/panel_shapes/batching.rs`,
   `render/panel_text/batching.rs` — interner → shared table; register batch
   materials.
 - `text/slug/glyph/coverage_probe.rs` — refresh `EXPECTED_SHADER_FNV1A`.

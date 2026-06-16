@@ -110,13 +110,13 @@ impl From<&QuadraticSegment> for CurveRecord {
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct BandRecord {
     /// First curve record for this band.
-    pub start: u32,
+    pub start:     u32,
     /// Number of curve records for this band.
-    pub count: u32,
+    pub count:     u32,
     /// Lower band edge in font design-space units on the banded axis.
-    pub y_min: f32,
+    pub range_min: f32,
     /// Upper band edge in font design-space units on the banded axis.
-    pub y_max: f32,
+    pub range_max: f32,
 }
 
 /// GPU path record for one unique path in a packed text run.
@@ -137,19 +137,19 @@ impl PathRecord {
     #[must_use]
     pub fn new(
         bounds: Bounds,
-        horizontal_start: u32,
-        horizontal_count: u32,
-        vertical_start: u32,
-        vertical_count: u32,
+        horizontal_band_start: u32,
+        horizontal_band_count: u32,
+        vertical_band_start: u32,
+        vertical_band_count: u32,
         min_feature: f32,
     ) -> Self {
         Self {
             bounds_min_size: Vec4::new(bounds.min.x, bounds.min.y, bounds.width(), bounds.height()),
             band_range: UVec4::new(
-                horizontal_start,
-                horizontal_count,
-                vertical_start,
-                vertical_count,
+                horizontal_band_start,
+                horizontal_band_count,
+                vertical_band_start,
+                vertical_band_count,
             ),
             min_feature,
         }
@@ -207,16 +207,12 @@ const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
 /// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct PackedPath {
-    bounds:           Bounds,
-    curves:           Vec<CurveRecord>,
-    bands:            Vec<BandRecord>,
-    horizontal_count: u32,
-    vertical_count:   u32,
+    bounds:                Bounds,
+    curves:                Vec<CurveRecord>,
+    bands:                 Vec<BandRecord>,
+    horizontal_band_count: u32,
+    vertical_band_count:   u32,
 }
-
-/// Compatibility alias for text path caches while text is bridged onto the
-/// shared path renderer.
-pub(crate) type GlyphOutline = PackedPath;
 
 impl PackedPath {
     /// Path bounds in local design-space units.
@@ -233,23 +229,23 @@ impl PackedPath {
 
     /// Number of horizontal bands (first in the band list).
     #[must_use]
-    pub const fn horizontal_count(&self) -> u32 { self.horizontal_count }
+    pub const fn horizontal_band_count(&self) -> u32 { self.horizontal_band_count }
 
     /// Number of vertical bands (after the horizontal bands).
     #[must_use]
-    pub const fn vertical_count(&self) -> u32 { self.vertical_count }
+    pub const fn vertical_band_count(&self) -> u32 { self.vertical_band_count }
 }
 
 /// Per-axis band counts and inclusion overlap for packing one path.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct BandLayout {
     /// Horizontal band count (splits the y extent).
-    pub horizontal_count: usize,
+    pub horizontal_band_count: usize,
     /// Vertical band count (splits the x extent).
-    pub vertical_count:   usize,
+    pub vertical_band_count:   usize,
     /// Design-unit margin around each band; curves within it are included so
     /// the distance scan near a band edge still sees them.
-    pub overlap:          f32,
+    pub overlap:               f32,
 }
 
 impl BandLayout {
@@ -257,9 +253,9 @@ impl BandLayout {
     #[must_use]
     pub(super) const fn uniform(band_count: usize) -> Self {
         Self {
-            horizontal_count: band_count,
-            vertical_count:   band_count,
-            overlap:          BAND_OVERLAP_EM_UNITS,
+            horizontal_band_count: band_count,
+            vertical_band_count:   band_count,
+            overlap:               BAND_OVERLAP_EM_UNITS,
         }
     }
 
@@ -271,9 +267,11 @@ impl BandLayout {
     pub fn for_extents(bounds: Bounds, target_extent: f32, curve_count: usize) -> Self {
         let curve_cap = band_cap_for_curves(curve_count);
         Self {
-            horizontal_count: band_count_for_extent(bounds.height(), target_extent).min(curve_cap),
-            vertical_count:   band_count_for_extent(bounds.width(), target_extent).min(curve_cap),
-            overlap:          target_extent * 0.5,
+            horizontal_band_count: band_count_for_extent(bounds.height(), target_extent)
+                .min(curve_cap),
+            vertical_band_count:   band_count_for_extent(bounds.width(), target_extent)
+                .min(curve_cap),
+            overlap:               target_extent * 0.5,
         }
     }
 }
@@ -296,20 +294,20 @@ fn band_cap_for_curves(curve_count: usize) -> usize {
         .clamp(1, DEFAULT_BAND_COUNT)
 }
 
-/// Builds horizontal and vertical band data for one quadratic path outline
+/// Builds along-Y and along-X band data for one quadratic path outline
 /// with equal per-axis band counts (the text path mode).
 #[must_use]
 pub(crate) fn build_packed_path(path: PathOutline, band_count: usize) -> PackedPath {
     build_packed_path_with_layout(path, BandLayout::uniform(band_count))
 }
 
-/// Builds horizontal and vertical band data for one quadratic path outline.
+/// Builds along-Y and along-X band data for one quadratic path outline.
 #[must_use]
 pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayout) -> PackedPath {
-    let horizontal_count = layout.horizontal_count.max(1);
-    let vertical_count = layout.vertical_count.max(1);
+    let horizontal_band_count = layout.horizontal_band_count.max(1);
+    let vertical_band_count = layout.vertical_band_count.max(1);
     let mut curves = Vec::new();
-    let mut bands = Vec::with_capacity(horizontal_count + vertical_count);
+    let mut bands = Vec::with_capacity(horizontal_band_count + vertical_band_count);
     let bounds = path.bounds;
 
     let oriented_segments: Vec<BandedSegment> = path
@@ -331,9 +329,9 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
         &oriented_segments,
         bounds.min.y,
         bounds.height(),
-        horizontal_count,
+        horizontal_band_count,
         layout.overlap,
-        Axis::Horizontal,
+        BandAxis::AlongY,
         &mut curves,
         &mut bands,
     );
@@ -341,9 +339,9 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
         &oriented_segments,
         bounds.min.x,
         bounds.width(),
-        vertical_count,
+        vertical_band_count,
         layout.overlap,
-        Axis::Vertical,
+        BandAxis::AlongX,
         &mut curves,
         &mut bands,
     );
@@ -352,8 +350,8 @@ pub(super) fn build_packed_path_with_layout(path: PathOutline, layout: BandLayou
         bounds,
         curves,
         bands,
-        horizontal_count: horizontal_count.to_u32(),
-        vertical_count: vertical_count.to_u32(),
+        horizontal_band_count: horizontal_band_count.to_u32(),
+        vertical_band_count: vertical_band_count.to_u32(),
     }
 }
 
@@ -380,7 +378,7 @@ fn segment_is_linear(segment: &QuadraticSegment) -> bool {
 /// one band per contour holding its edges in contour order (no axis split, no
 /// sort, no overlap margin), each edge carrying its outward half-plane
 /// [`CurveRecord::edge_normal`], start point, contour stroke (`solver.w`), and
-/// fade exponent. `vertical_count` is `0` — the shader reads that as the
+/// fade exponent. `vertical_band_count` is `0` — the shader reads that as the
 /// polygon-mode sentinel and evaluates `analytic_polygon_coverage` instead of
 /// the curve-distance scan.
 #[must_use]
@@ -412,23 +410,23 @@ pub(super) fn build_packed_polygons(path: PathOutline) -> PackedPath {
         bands.push(BandRecord {
             start,
             count,
-            y_min: 0.0,
-            y_max: 0.0,
+            range_min: 0.0,
+            range_max: 0.0,
         });
     }
     PackedPath {
         bounds,
-        horizontal_count: bands.len().to_u32(),
-        vertical_count: 0,
+        horizontal_band_count: bands.len().to_u32(),
+        vertical_band_count: 0,
         curves,
         bands,
     }
 }
 
 #[derive(Clone, Copy)]
-enum Axis {
-    Horizontal,
-    Vertical,
+enum BandAxis {
+    AlongY,
+    AlongX,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -453,7 +451,7 @@ fn append_bands(
     extent: f32,
     band_count: usize,
     overlap: f32,
-    axis: Axis,
+    band_axis: BandAxis,
     curves: &mut Vec<CurveRecord>,
     bands: &mut Vec<BandRecord>,
 ) {
@@ -471,14 +469,14 @@ fn append_bands(
             oriented_segments,
             band_min - overlap,
             band_max + overlap,
-            axis,
+            band_axis,
             curves,
         );
         bands.push(BandRecord {
             start,
             count: curves.len().to_u32() - start,
-            y_min: band_min,
-            y_max: band_max,
+            range_min: band_min,
+            range_max: band_max,
         });
     }
 }
@@ -487,22 +485,22 @@ fn append_band_curves(
     oriented_segments: &[BandedSegment],
     band_min: f32,
     band_max: f32,
-    axis: Axis,
+    band_axis: BandAxis,
     curves: &mut Vec<CurveRecord>,
 ) {
     let mut filtered: Vec<BandedSegment> = oriented_segments
         .iter()
         .copied()
-        .filter(|banded| overlaps_band(&banded.segment, band_min, band_max, axis))
-        .filter(|banded| match axis {
-            Axis::Horizontal => true,
-            Axis::Vertical => banded.orientation == CurveOrientation::Vertical,
+        .filter(|banded| overlaps_band(&banded.segment, band_min, band_max, band_axis))
+        .filter(|banded| match band_axis {
+            BandAxis::AlongY => true,
+            BandAxis::AlongX => banded.orientation == CurveOrientation::Vertical,
         })
         .collect();
 
     filtered.sort_by(|left, right| {
-        descending_band_sort_value(&right.segment, axis)
-            .total_cmp(&descending_band_sort_value(&left.segment, axis))
+        descending_band_sort_value(&right.segment, band_axis)
+            .total_cmp(&descending_band_sort_value(&left.segment, band_axis))
     });
     curves.extend(filtered.iter().map(|banded| {
         let mut record = CurveRecord::from(&banded.segment);
@@ -561,9 +559,9 @@ fn edge_slab_width(contour: &PathContour, segment: &QuadraticSegment, normal: Ve
 
 const fn segment_orientation(segment: &QuadraticSegment) -> CurveOrientation {
     let x_extent =
-        segment_axis_max(segment, Axis::Vertical) - segment_axis_min(segment, Axis::Vertical);
+        segment_axis_max(segment, BandAxis::AlongX) - segment_axis_min(segment, BandAxis::AlongX);
     let y_extent =
-        segment_axis_max(segment, Axis::Horizontal) - segment_axis_min(segment, Axis::Horizontal);
+        segment_axis_max(segment, BandAxis::AlongY) - segment_axis_min(segment, BandAxis::AlongY);
     if y_extent > x_extent {
         CurveOrientation::Vertical
     } else {
@@ -571,8 +569,8 @@ const fn segment_orientation(segment: &QuadraticSegment) -> CurveOrientation {
     }
 }
 
-fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis: Axis) -> bool {
-    // Axis-parallel edges (a horizontal line in a horizontal band, etc.) are kept:
+fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis: BandAxis) -> bool {
+    // Axis-parallel edges (e.g. a horizontal edge in an along-Y band) are kept:
     // they add 0 to winding (`curve_winding` returns 0 when the scanline is parallel)
     // but DO carry distance, which the signed-distance field needs. Dropping them
     // left the field blind to those edges, so it saturated to ±edge_width near them
@@ -582,24 +580,24 @@ fn overlaps_band(segment: &QuadraticSegment, band_min: f32, band_max: f32, axis:
     segment_min <= band_max && segment_max >= band_min
 }
 
-const fn segment_axis_min(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn segment_axis_min(segment: &QuadraticSegment, axis: BandAxis) -> f32 {
     match axis {
-        Axis::Horizontal => segment.start.y.min(segment.control.y).min(segment.end.y),
-        Axis::Vertical => segment.start.x.min(segment.control.x).min(segment.end.x),
+        BandAxis::AlongY => segment.start.y.min(segment.control.y).min(segment.end.y),
+        BandAxis::AlongX => segment.start.x.min(segment.control.x).min(segment.end.x),
     }
 }
 
-const fn segment_axis_max(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn segment_axis_max(segment: &QuadraticSegment, axis: BandAxis) -> f32 {
     match axis {
-        Axis::Horizontal => segment.start.y.max(segment.control.y).max(segment.end.y),
-        Axis::Vertical => segment.start.x.max(segment.control.x).max(segment.end.x),
+        BandAxis::AlongY => segment.start.y.max(segment.control.y).max(segment.end.y),
+        BandAxis::AlongX => segment.start.x.max(segment.control.x).max(segment.end.x),
     }
 }
 
-const fn descending_band_sort_value(segment: &QuadraticSegment, axis: Axis) -> f32 {
+const fn descending_band_sort_value(segment: &QuadraticSegment, axis: BandAxis) -> f32 {
     match axis {
-        Axis::Horizontal => segment.start.x.max(segment.control.x).max(segment.end.x),
-        Axis::Vertical => segment.start.y.max(segment.control.y).max(segment.end.y),
+        BandAxis::AlongY => segment.start.x.max(segment.control.x).max(segment.end.x),
+        BandAxis::AlongX => segment.start.y.max(segment.control.y).max(segment.end.y),
     }
 }
 

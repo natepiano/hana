@@ -84,7 +84,7 @@ pub struct PathExtension {
     /// Shared path record band-packed quadratic curve records.
     #[storage(101, read_only)]
     curves:       Handle<ShaderBuffer>,
-    /// Shared path horizontal/vertical band records.
+    /// Shared path along-Y/along-X band records.
     #[storage(102, read_only)]
     bands:        Handle<ShaderBuffer>,
     /// Shared path records, indexed by each atlas record's `atlas_index`.
@@ -159,7 +159,9 @@ impl MaterialExtension for PathExtension {
             // table (binding 105) instead of the material uniform, so a batch
             // renders every run with its own color and mode.
             if let Some(fragment) = descriptor.fragment.as_mut() {
-                fragment.shader_defs.push("GLYPH_VERTEX_PULL".into());
+                fragment
+                    .shader_defs
+                    .push("FRAGMENT_DATA_FROM_BATCHED_PATHS".into());
             }
         }
         Ok(())
@@ -199,7 +201,7 @@ pub(crate) struct BatchPathMaterialInput {
     pub aa_band:          bool,
     /// Shared path record band-packed quadratic curve records.
     pub curves:           Handle<ShaderBuffer>,
-    /// Shared path horizontal/vertical band records.
+    /// Shared path along-Y/along-X band records.
     pub bands:            Handle<ShaderBuffer>,
     /// Shared path records, indexed by each atlas record's `atlas_index`.
     pub path_records:     Handle<ShaderBuffer>,

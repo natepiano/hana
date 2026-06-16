@@ -7,7 +7,7 @@ use bevy_kana::ToU32;
 use crate::render::BandRecord;
 use crate::render::Bounds;
 use crate::render::CurveRecord;
-use crate::render::GlyphOutline;
+use crate::render::PackedPath;
 use crate::render::PathRecord;
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
@@ -119,7 +119,7 @@ impl TextRun {
 #[derive(Clone, Debug)]
 pub enum CachedGlyphOutline {
     /// Packed curve/band outline for a glyph that draws.
-    Visible(GlyphOutline),
+    Visible(PackedPath),
     /// The glyph has no visible outline; runs skip it without atlas work.
     Invisible,
 }

@@ -328,7 +328,7 @@ Reason rejected:
 
 Change:
 
-- Split `horizontal_coverage_terms` into an outside-bounds distance-only
+- Split `along_y_coverage_terms` into an outside-bounds distance-only
   loop and an inside-bounds winding-plus-distance loop.
 - This removed a per-curve `include_winding` branch from the common
   inside-glyph path.
@@ -1249,7 +1249,7 @@ operations inside the cubic is unlikely to help. Promising directions:
 (a) skip the cubic entirely on coherent wavefronts (per-glyph SDF
 prefilter so whole wavefronts exit before any cubic runs),
 (b) eliminate the double-cubic-per-curve in
-`nearest_vertical_curve_distance_sq` (the redundant-band experiment),
+`nearest_along_x_curve` (the redundant-band experiment),
 (c) reduce fragment count by tightening glyph quads (the procedure
 doc notes `2.78x` shaded-to-ink waste).
 
@@ -1349,15 +1349,15 @@ table).
 ## Skip vertical-band distance pass (rejected, 2026-05-23)
 
 **Hypothesis.** `distance_coverage` calls
-`nearest_vertical_curve_distance_sq` after
-`horizontal_coverage_terms`, adding a second per-curve loop that
-re-checks distance via the vertical band. Skipping this entirely
+`nearest_along_x_curve` after
+`along_y_coverage_terms`, adding a second per-curve loop that
+re-checks distance via the along-X band. Skipping this entirely
 eliminates the second band loop and cuts per-fragment curve work
 roughly in half. Quantifies how much the vertical band actually
 contributes to distance accuracy.
 
-**Setup.** `shaders/slug_text.wgsl`, replaced the
-`nearest_vertical_curve_distance_sq(...)` call with
+**Setup.** `shaders/analytic_path.wgsl`, replaced the
+`nearest_along_x_curve(...)` call with
 `terms.distance_sq` directly. 720-instance `text_renderer_gpu_bench`,
 AC power.
 
@@ -1478,7 +1478,7 @@ time: `y_extent > x_extent` → "vertical-assigned". All curves
 remain in the horizontal band (required for winding). Only
 vertical-assigned curves enter the vertical band. The flag is
 stored in `SlugCurveRecord::solver.w` (`1.0` = vertical-assigned).
-Shader change: in `horizontal_coverage_terms` the distance solve
+Shader change: in `along_y_coverage_terms` the distance solve
 is skipped when `solver.w >= 0.5`; the vertical-band loop already
 does only distance, so no change there. Per-segment flag is
 computed once per glyph (not once per band) — the `flat_map` over

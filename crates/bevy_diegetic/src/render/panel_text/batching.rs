@@ -755,7 +755,7 @@ struct BatchMaterialInput<'a> {
 /// values applied, the shared atlas buffers, the batch's record buffers, and
 /// the vertex-pulling route switched on. `fill_color` / `render_mode` in the
 /// uniform are placeholders — the fragment reads them per run from the run
-/// table under `GLYPH_VERTEX_PULL`.
+/// table under `FRAGMENT_DATA_FROM_BATCHED_PATHS`.
 fn batch_material(input: BatchMaterialInput<'_>) -> PathMaterial {
     let BatchMaterialInput {
         mut base,
@@ -767,7 +767,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathMaterial {
     } = input;
     base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
     base.unlit = matches!(key.lighting, Lighting::Unlit);
-    render::apply_glyph_sidedness(&mut base, key.sidedness);
+    render::apply_sidedness(&mut base, key.sidedness);
     base.depth_bias = draw_order::text_batch_depth_bias(key.z_level).get();
     render::batch_path_material(BatchPathMaterialInput {
         base,

@@ -998,7 +998,7 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathMaterial {
     } = input;
     base.alpha_mode = key.visual.alpha.into();
     base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
-    render::apply_glyph_sidedness(&mut base, key.visual.sidedness);
+    render::apply_sidedness(&mut base, key.visual.sidedness);
     base.depth_bias = key.depth_bias().get();
     render::batch_path_material(BatchPathMaterialInput {
         base,

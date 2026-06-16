@@ -38,11 +38,6 @@ pub(crate) use material::set_path_material_hairline;
 pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
 pub(crate) use packing::DEFAULT_BAND_COUNT;
-pub(crate) use packing::GlyphOutline;
-#[allow(
-    unused_imports,
-    reason = "shared path name re-exported for downstream consumers"
-)]
 pub(crate) use packing::PackedPath;
 pub(crate) use packing::PathInstanceRecord;
 pub(crate) use packing::PathRecord;
@@ -57,7 +52,7 @@ use self::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 pub(crate) struct PathAtlasHandles {
     /// Shared band-packed quadratic curve records.
     pub curves:       Handle<ShaderBuffer>,
-    /// Shared horizontal/vertical band records.
+    /// Shared along-Y/along-X band records.
     pub bands:        Handle<ShaderBuffer>,
     /// Shared path records, indexed by each instance record's `atlas_index`.
     pub path_records: Handle<ShaderBuffer>,

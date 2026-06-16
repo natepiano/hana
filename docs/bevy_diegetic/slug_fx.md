@@ -642,8 +642,7 @@ color from the background.
 
 ## 8. Folding the render-mode / shadow-mode matrix into composable effects
 
-> **Implemented in Phase 7 (2026-05-25).** The collapse described below has
-> landed: `GlyphRenderMode` is now `{Text, PunchOut}`, `GlyphShadowMode` is
+> **Implemented.** `GlyphRenderMode` is now `{Text, PunchOut}`, `GlyphShadowMode` is
 > `{None, Cast}`, and the shadow-proxy mesh is deleted. The rationale is
 > retained as written for context.
 
