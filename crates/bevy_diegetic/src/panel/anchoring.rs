@@ -192,16 +192,19 @@ impl Deref for PanelsAnchoredHere {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
-/// Resolver-owned screen position override for a panel's configured anchor.
+/// Resolver-owned screen pose override for a panel's configured anchor.
 ///
 /// `depth` is the resolved `translation.z` when the screen resolver produced
 /// one; `authored_depth` captures the pre-resolution z so removing the
-/// attachment restores it.
+/// attachment restores it. `rotation` and `authored_rotation` mirror that
+/// capture-and-restore path for the resolved in-plane z angle.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq)]
 pub(crate) struct ResolvedScreenPanelPosition {
-    pub(crate) anchor_position: Option<Vec2>,
-    pub(crate) depth:           Option<f32>,
-    pub(crate) authored_depth:  Option<f32>,
+    pub(crate) anchor_position:   Option<Vec2>,
+    pub(crate) depth:             Option<f32>,
+    pub(crate) authored_depth:    Option<f32>,
+    pub(crate) rotation:          Option<f32>,
+    pub(crate) authored_rotation: Option<f32>,
 }
 
 #[cfg(test)]

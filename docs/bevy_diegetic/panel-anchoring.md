@@ -31,9 +31,11 @@
 - **Key files:**
   - `panel/anchoring.rs` — `AnchoredToPanel` (23-38, `#[component(immutable)]`),
     `PanelAnchorOffset` (96-154, x/y/z `Dimension`), `PanelsAnchoredHere`
-    (157-179), `ResolvedScreenPanelPosition` (186-191:
+    (157-179), `ResolvedScreenPanelPosition` (202-208, as shipped through Phase 7:
     `anchor_position: Option<Vec2>`, `depth: Option<f32>`,
-    `authored_depth: Option<f32>` — Phase 7 adds `rotation: Option<f32>`).
+    `authored_depth: Option<f32>`, `rotation: Option<f32>`,
+    `authored_rotation: Option<f32>` — the `rotation`/`authored_rotation` pair is the
+    resolved in-plane z angle + captured authored angle, mirroring depth/authored_depth).
   - `panel/world_anchoring.rs` — `WorldAnchorReadParam::placement()` (93-141):
     ~line 126 `desired_rotation = plane_rotation(target_plane)`,
     `desired_translation = target_point - desired_rotation * source_offset`
@@ -44,15 +46,24 @@
   - `panel/anchor_geometry.rs` — `PanelScreenBounds::point(anchor)` (343),
     `PanelPlane` (367), `PanelPlane::from_panel()` (383-411),
     `PanelPlane::point(anchor)` (463-466).
-  - `screen_space/anchoring/rect.rs` — `ScreenPanelRect` (17-22: anchor_position,
-    anchor, size, layout_unit) — Phase 7 adds an in-plane angle. The Phase 7
-    narrative's "ScreenPanelBounds" is this `ScreenPanelRect` (resolver snapshot)
-    plus `PanelScreenBounds::point` (public geometry, `anchor_geometry.rs:343`).
+  - `screen_space/anchoring/rect.rs` — `ScreenPanelRect` (resolver snapshot;
+    anchor_position, anchor, size, `angle`, cached `bounds`, layout_unit; carries the
+    in-plane angle threaded through chains via `with_anchor_position_and_angle`).
+  - `screen_space/anchoring/projection.rs` (Phase 7) — `screen_in_plane_angle(Quat)
+    -> f32` (swing-twist projection of a pose rotation onto the screen plane; drops
+    out-of-plane rotation to 0), `rotate_screen_offset(Vec2, f32) -> Vec2`; both
+    `pub(in crate::screen_space)`, re-exported at `anchoring::`.
+  - `screen_space/anchoring/resolve.rs` (Phase 7) —
+    `resolve_screen_space_panel_attachments` (the screen resolver system) and
+    `AnchorResolveDiagnostics`; all screen pose/rotation tests live here.
   - `screen_space/mod.rs` — `position_screen_space_panels()` (191-254, writes
     `Transform.translation.x/y` + conditional z; Phase 7 adds a rotation write);
     `ScreenSpaceSystems` (52-56).
-  - `panel/mod.rs` — `PanelSystems` enum (94-109: … ResolvePanelAttachments,
-    PositionScreenSpace, RenderGizmos); anchor re-exports (19-31).
+  - `panel/mod.rs` — `PanelSystems` `SystemSet` enum (95-110: … ResolvePanelAttachments,
+    PositionScreenSpace, RenderGizmos); anchor re-exports (19-31). The world resolver
+    is scheduled in `HeadlessLayoutPlugin::build` (153-161) as
+    `(world_anchoring::restore_inactive_world_panel_poses,
+    world_anchoring::resolve_world_space_panel_attachments).chain().before(TransformSystems::Propagate)`.
   - `examples/panel_anchoring.rs` — current world static + keyboard anchoring demo.
   - `fairy_dust/src/orbit_cam.rs` (`FairyDustOrbitCam`), `camera_home.rs`
     (`CameraHomeTarget`, `CameraHomeEntity`, `CameraHomeConfig`), `builder/mod.rs`.
@@ -256,7 +267,7 @@ cargo nextest run -p bevy_diegetic screen_space::anchoring
 - No user decisions: every finding had a single determined outcome dictated by the
   shipped depth precedent or the existing screen-resolver coordinate frame.
 
-### Phase 7 — screen in-plane rotation and oriented-rect chains · status: todo
+### Phase 7 — screen in-plane rotation and oriented-rect chains · status: done (uncommitted)
 
 #### Work Order
 
@@ -408,6 +419,61 @@ cargo nextest run -p bevy_diegetic screen_space::anchoring
 cargo nextest run -p bevy_diegetic world_anchoring
 ```
 
+#### Retrospective
+
+**What worked:** Swing-twist projection `screen_in_plane_angle` (twist of `(w,z)`)
+cleanly drops out-of-plane rotation to angle 0 with no panic on the degenerate
+`(w,z)=(0,0)` case. The Layer 1 pivot is algebraically pin-invariant
+(`top_left = target_point − R(source_offset, θ)`). The `rotation`/`authored_rotation`
+pair mirrored the shipped depth precedent exactly; chains resolve in one update via
+graph-order rect-angle threading.
+
+**What deviated from the plan:** Two correctness gaps the Work Order did not name,
+caught by the blind reviewer and fixed in pass 1 — (a) `PanelAnchorOffset` on a
+rotated *target* must be rotated by `target_rect.angle()` (it is authored in
+target-panel layout units), and (b) depth ownership must key off whether *either*
+z input (`offset.z`, `pose.z`) is individually authored, not their sum, or two
+canceling z values wrongly drop depth ownership. `screen_space/anchoring/mod.rs` was
+split into `projection.rs` + `resolve.rs` (table-of-contents cleanup, user-directed,
+also fixed the pre-existing baseline bloat). `PanelScreenBounds::point` left
+unchanged — the oriented point is computed in the placer, so no public-API gate fired.
+
+**Surprises:** `screen_panel_rects` chooses a root target's rect angle from
+`authored_rotation` first, then live `Transform` — only matters for root targets that
+are never a source; a posed panel always reaches its angle via the placer's
+`with_anchor_position_and_angle` in graph order. `ScreenPanelRect` now caches `bounds`;
+`anchor_position` is a `pub(super)` field, so a future direct write would desync the
+cache (latent nit, not currently triggered).
+
+**Implications for remaining phases:** Phase 8 capability `4` (`R` reset) can rely on
+the `authored_rotation` restore — it shipped and is tested
+(`removing_panel_anchor_pose_restores_authored_rotation`). Capability `5`
+(rotated-target chain) is backed by the chain-angle threading and its test
+(`rotated_screen_target_repositions_dependent_in_same_chain_update`). No screen
+resolver changes remain for Phase 8.
+
+#### Phase 7 Review
+
+Architect re-evaluated the only remaining phase (Phase 8) against what Phase 7
+shipped. Phase 8 is not redundant and needs no re-scoping — it is consumer/demo
+work (the `PanelSystems` animation-ordering variant + the capability-selector
+example), unblocked by Phase 7. All findings were self-containment facts with single
+determined outcomes, folded straight in; no user decisions.
+
+- Delegation Context: refreshed the drifted `ResolvedScreenPanelPosition` signature
+  to the as-shipped five-field form (202-208); added the new `projection.rs` /
+  `resolve.rs` module entries; corrected the `PanelSystems` line ref to 95-110 and
+  noted the world-resolver scheduling site (153-161).
+- Phase 8 Constraints: named the exact scheduling site for the new ordering variant
+  (`panel/mod.rs:153-161`, `.before(resolve_world_space_panel_attachments)`), the
+  moved `resolve.rs`/`projection.rs` paths, and turned the cap-4 `authored_rotation`
+  hedge into a statement of fact (it shipped + is tested).
+- Phase 8 Spec: named a home for the `anchor_animation` tests (none matched the filter
+  — a new `mod anchor_animation` in `world_anchoring.rs` or `panel/anchor_animation.rs`).
+- Phase 8 Files: marked the `PanelSystems` variant PRE-APPROVED (no longer a gate) and
+  noted the fairy_dust move extends the existing `CameraHomeTarget`/`CameraHomeEntity`
+  surface rather than building fresh.
+
 ### Phase 8 — animation ordering and the demonstration example · status: todo
 
 #### Work Order
@@ -420,11 +486,12 @@ world-space explainer panel.
 
 - Name a `PostUpdate` ordering point for systems that write resolver-read animation
   inputs (`PanelAnchorPose`, relation insert/remove at state boundaries) before the
-  world attachment resolver. **If this becomes a public `PanelSystems` variant, get
-  explicit API approval during implementation.** Because the world resolver runs in
-  `PostUpdate` before `TransformSystems::Propagate`, writes before the resolver
-  affect the current frame and writes after it affect the next frame; tests must
-  show both.
+  world attachment resolver. **A public `PanelSystems` animation-ordering variant is
+  PRE-APPROVED** (user, 2026-06-16; `bevy_diegetic` is unpublished so widening the
+  public set is safe) — add it as a new `PanelSystems` variant, no further approval
+  needed. Because the world resolver runs in `PostUpdate` before
+  `TransformSystems::Propagate`, writes before the resolver affect the current frame
+  and writes after it affect the next frame; tests must show both.
 - Ownership modes for animation systems:
   1. no `AnchoredToPanel` component while the animation writes `Transform`
   2. animation writes `PanelAnchorPose`, and the resolver remains the only
@@ -466,7 +533,11 @@ world-space explainer panel.
   fairy_dust enhancement — a "look at this panel / return home" camera move usable
   beyond this example. **Get explicit API approval before landing any public
   fairy_dust surface for it.**
-- Cover the demos with an `anchor_animation` test filter.
+- Cover the demos with an `anchor_animation` test filter. No test currently matches
+  that filter — create the module. The same-frame/next-frame ordering assertions for
+  the new `PanelSystems` animation variant belong in a `#[cfg(test)] mod anchor_animation`
+  in `panel/world_anchoring.rs` (next to the resolver schedule they exercise), or a new
+  `panel/anchor_animation.rs` test module; pick one and name it so the filter resolves.
 
 World editable-field popup tracking is not part of the animation phase. If an
 example or test touches editable fields on world-anchored panels, document the
@@ -477,26 +548,44 @@ after `resolve_world_space_panel_attachments`. Do not mix that work into
 `panel_anchoring.rs` or the animation demos.
 
 **Files:**
-- `panel/mod.rs` — if a public `PanelSystems` variant is added for the animation
-  ordering point (API-approval gate).
+- `panel/mod.rs` — add the public `PanelSystems` animation-ordering variant
+  (PRE-APPROVED) to the enum (95-110) and wire it into the `PostUpdate` block
+  (153-161) `.before(world_anchoring::resolve_world_space_panel_attachments)`.
 - `examples/panel_anchoring.rs` — grow into the capability selector per
   `panel-anchoring-example.md`.
 - `fairy_dust/src/{orbit_cam,camera_home}.rs`, `builder/mod.rs` — optional "look at
   panel / return home" camera move (API-approval gate before any public surface).
+  `camera_home.rs` already exposes `pub CameraHomeTarget`, `pub CameraHomeEntity`, and
+  a fit-framing animation pipeline — extend that surface, do not build a fresh camera
+  system.
 
 **Constraints from prior phases:**
-- Phase 6: `PanelAnchorPose` exists; the world resolver composes it; the relation is
-  the sole transform writer while active.
+- Phase 6: `PanelAnchorPose { rotation: Quat, translation: Vec3 }` exists
+  (`panel/anchoring.rs`); the world resolver composes it; the relation is the sole
+  transform writer while active.
 - Phase 7: the screen resolver reads `PanelAnchorPose` (Layer 1 leaf spin, Layer 2
-  oriented chains), enabling capabilities `4` and `5`.
-- Capability 4's `R` reset depends on Phase 7's `authored_rotation` restore: when the
-  screen pose is cleared the panel must return to its authored rotation. If Phase 7
-  ships without the `authored_rotation` capture/restore pair, `R` silently leaves the
-  panel rotated. Verify Phase 7 landed that field before relying on cap-4 reset.
+  oriented chains), enabling capabilities `4` and `5`. The screen resolver lives in
+  `screen_space/anchoring/resolve.rs` (`resolve_screen_space_panel_attachments`) with
+  the projection helpers in `screen_space/anchoring/projection.rs`
+  (`screen_in_plane_angle`, `rotate_screen_offset`); all screen pose tests are in
+  `resolve.rs`. `ResolvedScreenPanelPosition` (`panel/anchoring.rs:202-208`) carries
+  the five fields incl. `rotation`/`authored_rotation`.
+- Capability 4's `R` reset relies on Phase 7's `authored_rotation` restore, which
+  shipped and is tested (`removing_panel_anchor_pose_restores_authored_rotation`,
+  `resolve.rs`): clearing the screen pose returns the panel to its authored rotation.
 - World resolver runs in `PostUpdate` before `TransformSystems::Propagate`: writes
-  before it are same-frame, writes after are next-frame.
-- Two API-approval gates in this phase: a public `PanelSystems` animation-ordering
-  variant, and any public fairy_dust camera "look at panel / return home" surface.
+  before it are same-frame, writes after are next-frame. It is scheduled in
+  `HeadlessLayoutPlugin::build` (`panel/mod.rs:153-161`) as
+  `(world_anchoring::restore_inactive_world_panel_poses,
+  world_anchoring::resolve_world_space_panel_attachments).chain().before(TransformSystems::Propagate)`.
+  The new `PanelSystems` animation-ordering variant (PRE-APPROVED) is added to the
+  `PanelSystems` enum (`panel/mod.rs:95-110`) and the animation systems run in it,
+  ordered `.before(world_anchoring::resolve_world_space_panel_attachments)` inside that
+  same `PostUpdate` block.
+- API-approval gates in this phase: the public `PanelSystems` animation-ordering
+  variant is **PRE-APPROVED** (user, 2026-06-16; `bevy_diegetic` unpublished). The
+  public fairy_dust camera "look at panel / return home" surface remains gated —
+  fairy_dust is a separate crate; get approval before landing it.
 
 **Acceptance gate:** `cargo check -p bevy_diegetic --example panel_anchoring` and
 `cargo nextest run -p bevy_diegetic anchor_animation` green, plus:

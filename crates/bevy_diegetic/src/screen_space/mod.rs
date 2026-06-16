@@ -250,6 +250,21 @@ fn position_screen_space_panels(
                 }
             },
         }
+        match resolved_position.rotation {
+            Some(angle) => {
+                if resolved_position.authored_rotation.is_none() {
+                    resolved_position.authored_rotation =
+                        Some(anchoring::screen_in_plane_angle(transform.rotation));
+                }
+                transform.rotation = Quat::from_rotation_z(angle);
+            },
+            None => {
+                if let Some(authored_rotation) = resolved_position.authored_rotation {
+                    transform.rotation = Quat::from_rotation_z(authored_rotation);
+                    resolved_position.authored_rotation = None;
+                }
+            },
+        }
     }
 }
 
