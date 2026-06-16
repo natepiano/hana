@@ -19,9 +19,9 @@ use super::GlyphOutlineCache;
 use super::TextRun;
 use crate::layout::ShapedGlyph;
 use crate::render;
-use crate::render::GlyphAtlasHandles;
-use crate::render::GlyphBatchStore;
-use crate::render::TextMaterial;
+use crate::render::PathAtlasHandles;
+use crate::render::PathBatchStore;
+use crate::render::PathMaterial;
 use crate::text::Font;
 use crate::text::slug::glyph::OutlineError;
 
@@ -68,9 +68,9 @@ pub(crate) struct GlyphCache {
     /// per font so run preparation never re-parses font tables per glyph.
     units_per_em:       HashMap<FontKey, f32>,
     /// Batched-records routing state.
-    batch_store:        GlyphBatchStore,
+    batch_store:        PathBatchStore,
     preprocess_version: u32,
-    atlas:              Option<GlyphAtlasHandles>,
+    atlas:              Option<PathAtlasHandles>,
     uploaded_revision:  u32,
 }
 
@@ -152,8 +152,8 @@ impl GlyphCache {
     pub fn commit_glyph_atlas(
         &mut self,
         storage_buffers: &mut Assets<ShaderBuffer>,
-        materials: &mut Assets<TextMaterial>,
-    ) -> Option<GlyphAtlasHandles> {
+        materials: &mut Assets<PathMaterial>,
+    ) -> Option<PathAtlasHandles> {
         if self.outline_cache.atlas_glyph_records().is_empty() {
             return None;
         }
@@ -164,20 +164,20 @@ impl GlyphCache {
             return Some(handles);
         }
         let had_atlas = self.atlas.is_some();
-        let handles = GlyphAtlasHandles {
-            curves: storage_buffers.add(ShaderBuffer::from(
+        let handles = PathAtlasHandles {
+            curves:       storage_buffers.add(ShaderBuffer::from(
                 self.outline_cache.atlas_curves().to_vec(),
             )),
-            bands:  storage_buffers.add(ShaderBuffer::from(
+            bands:        storage_buffers.add(ShaderBuffer::from(
                 self.outline_cache.atlas_bands().to_vec(),
             )),
-            glyphs: storage_buffers.add(ShaderBuffer::from(
+            path_records: storage_buffers.add(ShaderBuffer::from(
                 self.outline_cache.atlas_glyph_records().to_vec(),
             )),
         };
         if had_atlas {
             // Repoint only text-owned batch materials. Other analytic-path
-            // producers (panel lines, probes) share the TextMaterial asset
+            // producers (panel lines, probes) share the PathMaterial asset
             // type but own separate atlases.
             for (_, batch) in self.batch_store.batches() {
                 let Some(gpu) = &batch.gpu else {
@@ -186,11 +186,11 @@ impl GlyphCache {
                 let Some(mut material) = materials.get_mut(&gpu.material) else {
                     continue;
                 };
-                render::set_text_material_atlas(
+                render::set_path_material_atlas(
                     &mut material,
                     handles.curves.clone(),
                     handles.bands.clone(),
-                    handles.glyphs.clone(),
+                    handles.path_records.clone(),
                 );
             }
         }
@@ -205,10 +205,10 @@ impl GlyphCache {
 
     /// The glyph batch store (records, batch keys, GPU handles per batch).
     #[must_use]
-    pub const fn batch_store(&self) -> &GlyphBatchStore { &self.batch_store }
+    pub const fn batch_store(&self) -> &PathBatchStore { &self.batch_store }
 
     /// The glyph batch store, mutable.
-    pub const fn batch_store_mut(&mut self) -> &mut GlyphBatchStore { &mut self.batch_store }
+    pub const fn batch_store_mut(&mut self) -> &mut PathBatchStore { &mut self.batch_store }
 
     /// Stable key for a glyph in the current preprocessing profile.
     #[must_use]
@@ -246,7 +246,7 @@ mod tests {
         let mut backend = GlyphCache::default();
         prepare(&mut backend, "Typography");
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<TextMaterial>::default();
+        let mut materials = Assets::<PathMaterial>::default();
 
         let first = backend
             .commit_glyph_atlas(&mut storage_buffers, &mut materials)
@@ -262,7 +262,7 @@ mod tests {
             .expect("atlas handles persist across commits");
         assert_eq!(first.curves, second.curves);
         assert_eq!(first.bands, second.bands);
-        assert_eq!(first.glyphs, second.glyphs);
+        assert_eq!(first.path_records, second.path_records);
         assert_eq!(
             storage_buffers.len(),
             3,
@@ -275,7 +275,7 @@ mod tests {
         let mut backend = GlyphCache::default();
         prepare(&mut backend, "Typo");
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<TextMaterial>::default();
+        let mut materials = Assets::<PathMaterial>::default();
 
         let first = backend
             .commit_glyph_atlas(&mut storage_buffers, &mut materials)
@@ -290,14 +290,14 @@ mod tests {
             .expect("grown atlas should produce handles");
         assert_ne!(first.curves, second.curves);
         assert_ne!(first.bands, second.bands);
-        assert_ne!(first.glyphs, second.glyphs);
+        assert_ne!(first.path_records, second.path_records);
     }
 
     #[test]
     fn commit_glyph_atlas_with_no_packed_glyphs_creates_no_buffer() {
         let mut backend = GlyphCache::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<TextMaterial>::default();
+        let mut materials = Assets::<PathMaterial>::default();
 
         assert!(
             backend

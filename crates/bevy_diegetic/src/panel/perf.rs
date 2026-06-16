@@ -56,10 +56,9 @@ pub struct DiegeticPerfStats {
 
 /// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
 ///
-/// The Step-2 proof counters of `docs/bevy_diegetic/glyph_instancing.md`. The
-/// two upload counters are split to match the store's per-buffer dirty flags:
-/// a transform-only frame uploads only run tables, a same-count text edit
-/// only instance buffers, an unchanged frame nothing.
+/// The two upload counters are split to match the store's per-buffer dirty
+/// flags: a transform-only frame uploads only run tables, a same-count text
+/// edit only instance buffers, an unchanged frame nothing.
 #[derive(Clone, Debug, Default, Reflect)]
 pub struct BatchPerfStats {
     /// Live batch count (one render entity + one draw per pass each).

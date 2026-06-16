@@ -130,8 +130,8 @@ impl ShapedCacheKey {
 /// layout engine's `MeasureTextFn` (measurement half) clones the handle into its
 /// `'static` measure closure; the renderer's text shaper (run + measurement
 /// halves) holds it as a `Res`. All methods take `&self` and lock internally, so
-/// an insert through any handle is visible to every other handle — the layout
-/// pass no longer copies the maps each frame or discards the misses it computes.
+/// an insert through any handle is visible to every other handle, so the layout
+/// pass neither copies the maps each frame nor discards the misses it computes.
 #[derive(Resource, Clone, Default)]
 pub struct ShapedTextCache {
     inner: Arc<Mutex<ShapedTextCacheMaps>>,

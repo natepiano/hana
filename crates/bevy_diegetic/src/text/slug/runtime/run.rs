@@ -8,7 +8,7 @@ use crate::render::BandRecord;
 use crate::render::Bounds;
 use crate::render::CurveRecord;
 use crate::render::GlyphOutline;
-use crate::render::GlyphRecord;
+use crate::render::PathRecord;
 use crate::text::slug::glyph;
 use crate::text::slug::glyph::OutlineError;
 
@@ -142,7 +142,7 @@ pub struct GlyphOutlineCache {
     record_indices: HashMap<GlyphKey, u32>,
     curves:         Vec<CurveRecord>,
     bands:          Vec<BandRecord>,
-    glyph_records:  Vec<GlyphRecord>,
+    glyph_records:  Vec<PathRecord>,
     revision:       u32,
 }
 
@@ -163,7 +163,7 @@ impl GlyphOutlineCache {
 
     /// Shared glyph-record table indexed by each run's mesh.
     #[must_use]
-    pub fn atlas_glyph_records(&self) -> &[GlyphRecord] { &self.glyph_records }
+    pub fn atlas_glyph_records(&self) -> &[PathRecord] { &self.glyph_records }
 
     /// Append counter; bumps whenever a new glyph grows the atlas tables.
     #[must_use]
@@ -208,7 +208,7 @@ impl GlyphOutlineCache {
                         start: band.start + curve_start,
                         ..*band
                     }));
-                self.glyph_records.push(GlyphRecord::new(
+                self.glyph_records.push(PathRecord::new(
                     outline.bounds(),
                     band_start,
                     axis_band_count,

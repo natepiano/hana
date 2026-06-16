@@ -1797,7 +1797,7 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<BatchStatsRow> {
             label:   "text batches",
             value:   values.text_batches.to_string(),
             details: vec![
-                "GlyphBatchStore: compatible text shares draws".to_string(),
+                "PathBatchStore: compatible text/shapes share draws".to_string(),
                 "labels and panel text route together by key".to_string(),
             ],
         },

@@ -134,8 +134,7 @@ fn spawn_glyph_box_panels(
     }
 }
 
-/// Rectangle outline placed where the retired `Border::all` strips sat: each
-/// line is centered half a stroke inside its box edge.
+/// Rectangle outline: each line is centered half a stroke inside its box edge.
 fn build_box_outline_tree(width: f32, height: f32, line_width: f32, color: Color) -> LayoutTree {
     let inset = line_width * 0.5;
     let lines = [
@@ -297,6 +296,40 @@ fn spawn_bounding_box_callout(
     );
 }
 
+/// World-space placement of the origin and advancement-end dots, shared by the
+/// standalone dot panels here and the metric-guide panel that layers the dots
+/// above its baseline `PanelLine` when font metrics are also shown.
+pub(super) struct DotGeometry {
+    pub(super) radius:        f32,
+    pub(super) origin_x:      f32,
+    pub(super) advance_end_x: f32,
+    pub(super) baseline_y:    f32,
+}
+
+/// Derives the origin and advancement-end dot placement from the first glyph.
+/// `baseline_y` sits half a stroke above the true baseline, where
+/// `metric_guide_lines` centers the rendered baseline line, so a dot drawn at
+/// this center aligns with that line.
+pub(super) fn dot_geometry(
+    ctx: &OverlayContext<'_, '_, '_>,
+    font_context: &FontContext<'_>,
+    computed: &ComputedWorldText,
+) -> Option<DotGeometry> {
+    let first = computed.glyphs.first()?;
+    let baseline_line_width =
+        scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
+    let baseline_y = baseline_line_width.mul_add(
+        0.5,
+        scaling::layout_to_world_y(font_context.line.baseline, ctx.anchor_y, ctx.scale),
+    );
+    Some(DotGeometry {
+        radius: scaling::dot_radius(ctx.font_size, ctx.scale),
+        origin_x: first.origin_x,
+        advance_end_x: first.origin_x + first.advance_x,
+        baseline_y,
+    })
+}
+
 /// Spawns origin dots, origin label, advancement end dot, and advancement arrow.
 fn spawn_origin_and_advancement(
     ctx: &mut OverlayContext<'_, '_, '_>,
@@ -305,7 +338,16 @@ fn spawn_origin_and_advancement(
 ) {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
     let z = CALLOUT_Z_OFFSET;
-    let dot_radius = scaling::dot_radius(ctx.font_size, ctx.scale);
+
+    let Some(dots) = dot_geometry(ctx, font_context, computed) else {
+        return;
+    };
+    let DotGeometry {
+        radius: dot_radius,
+        origin_x,
+        advance_end_x,
+        baseline_y: origin_y,
+    } = dots;
 
     let first = &computed.glyphs[0];
     let first_mid_x = first.rect[0] + first.rect[2] / 2.0;
@@ -317,24 +359,19 @@ fn spawn_origin_and_advancement(
         ctx.scale,
     );
 
-    let origin_x = first.origin_x;
-    // The dots, brackets, and origin callout all anchor to the baseline. Sit
-    // them on the rendered baseline line, which `metric_guide_lines` centers
-    // half a stroke above the true baseline, so the red line bisects the dots.
-    let baseline_line_width =
-        scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
-    let origin_y = baseline_line_width.mul_add(
-        0.5,
-        scaling::layout_to_world_y(line_metrics.baseline, ctx.anchor_y, ctx.scale),
-    );
+    // The metric-guide panel draws these dots above its baseline line when font
+    // metrics are shown; spawn standalone dot panels only when it does not.
+    let draw_standalone_dots = ctx.overlay.font_metrics == GlyphMetricVisibility::Hidden;
 
     // Origin dot — small filled circle at (origin, baseline).
-    spawn_dot_panel(
-        ctx,
-        dot_radius,
-        Vec3::new(origin_x, origin_y, z),
-        Color::WHITE,
-    );
+    if draw_standalone_dots {
+        spawn_dot_panel(
+            ctx,
+            dot_radius,
+            Vec3::new(origin_x, origin_y, z),
+            Color::WHITE,
+        );
+    }
 
     // Origin label — centered between the bottom of the first
     // glyph's bbox and the Descent line.
@@ -373,13 +410,14 @@ fn spawn_origin_and_advancement(
     );
 
     // Advancement end dot — filled circle at (origin + advance, baseline).
-    let advance_end_x = origin_x + first.advance_x;
-    spawn_dot_panel(
-        ctx,
-        dot_radius,
-        Vec3::new(advance_end_x, origin_y, z),
-        Color::WHITE,
-    );
+    if draw_standalone_dots {
+        spawn_dot_panel(
+            ctx,
+            dot_radius,
+            Vec3::new(advance_end_x, origin_y, z),
+            Color::WHITE,
+        );
+    }
 
     // Advancement arrow — horizontal double-headed arrow below descent.
     let spacing = scaling::arrow_spacing(first.advance_x);
@@ -505,8 +543,7 @@ fn spawn_dot_panel(
 }
 
 /// Splits one line into dash segments. All dashes of the line stay in one
-/// guide-panel element, replacing the per-dash entity fan-out the old callout
-/// path spawned.
+/// guide-panel element.
 fn dashed_segments(
     start: Vec2,
     end: Vec2,

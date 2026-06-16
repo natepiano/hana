@@ -2,7 +2,7 @@
 //!
 //! Every visible resolved line primitive becomes one analytic path instance and
 //! one run record. Compatible records from any number of panels share one batch
-//! render entity, one inert quad mesh, one `TextMaterial`, and one path atlas.
+//! render entity, one inert quad mesh, one `PathMaterial`, and one path atlas.
 
 use std::collections::HashMap;
 
@@ -44,19 +44,19 @@ use crate::render;
 use crate::render::AntiAlias;
 use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
+use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
-use crate::render::BatchTextMaterialInput;
-use crate::render::GlyphAtlasHandles;
-use crate::render::GlyphInstanceRecord;
 use crate::render::HairlineFade;
 use crate::render::PathAtlas;
+use crate::render::PathInstanceRecord;
+use crate::render::PathMaterial;
 use crate::render::PathOutline;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
-use crate::render::TextMaterial;
 use crate::render::VisualBatchKey;
 use crate::render::VisualMaterialInterner;
 use crate::render::VisualShadow;
+use crate::render::analytic_paths::PathAtlasHandles;
 use crate::render::draw_order;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrderProjection;
@@ -105,7 +105,7 @@ struct ShapeBatchGpu {
     instances:    Handle<ShaderBuffer>,
     run_table:    Handle<ShaderBuffer>,
     mesh:         Handle<Mesh>,
-    material:     Handle<TextMaterial>,
+    material:     Handle<PathMaterial>,
     capacity:     u32,
     run_capacity: u32,
 }
@@ -115,7 +115,7 @@ struct ShapeBatchGpu {
 struct ShapeBatchRecord {
     key:      PanelShapeRenderKey,
     outline:  PathOutline,
-    instance: GlyphInstanceRecord,
+    instance: PathInstanceRecord,
     run:      RunRecord,
 }
 
@@ -136,11 +136,11 @@ impl ShapeBatch {
 
     fn run_count(&self) -> u32 { self.records.len().to_u32() }
 
-    fn instances(&self) -> Vec<GlyphInstanceRecord> {
+    fn instances(&self) -> Vec<PathInstanceRecord> {
         self.records
             .iter()
             .enumerate()
-            .map(|(index, record)| GlyphInstanceRecord {
+            .map(|(index, record)| PathInstanceRecord {
                 run_index: index.to_u32(),
                 ..record.instance
             })
@@ -266,8 +266,8 @@ impl PanelShapeBatchStore {
     fn commit_path_atlas(
         &mut self,
         storage_buffers: &mut Assets<ShaderBuffer>,
-        materials: &mut Assets<TextMaterial>,
-    ) -> Option<GlyphAtlasHandles> {
+        materials: &mut Assets<PathMaterial>,
+    ) -> Option<PathAtlasHandles> {
         let (atlas, uploaded) = self.atlas.upload(storage_buffers)?;
         if uploaded {
             for batch in self.batches.values() {
@@ -275,11 +275,11 @@ impl PanelShapeBatchStore {
                     continue;
                 };
                 if let Some(mut material) = materials.get_mut(&gpu.material) {
-                    render::set_text_material_atlas(
+                    render::set_path_material_atlas(
                         &mut material,
                         atlas.curves.clone(),
                         atlas.bands.clone(),
-                        atlas.glyphs.clone(),
+                        atlas.path_records.clone(),
                     );
                 }
             }
@@ -448,7 +448,7 @@ pub(super) fn reconcile_panel_line_batches(
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut store: ResMut<PanelShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<TextMaterial>>,
+    mut materials: ResMut<Assets<PathMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut commands: Commands,
 ) {
@@ -642,7 +642,7 @@ fn build_panel_line_group(
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
     };
-    let instance = GlyphInstanceRecord {
+    let instance = PathInstanceRecord {
         rect_min:    path.rect_min,
         rect_size:   path.rect_size,
         uv_min:      path.uv_min,
@@ -697,11 +697,11 @@ fn clipped_out(bounds: BoundingBox, clip: Option<BoundingBox>) -> bool {
 }
 
 fn reconcile_batch_entities(
-    atlas: Option<&GlyphAtlasHandles>,
+    atlas: Option<&PathAtlasHandles>,
     anti_alias: AntiAlias,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<TextMaterial>,
+    materials: &mut Assets<PathMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -742,11 +742,11 @@ fn reconcile_batch_entities(
 
 fn spawn_batch_entity(
     key: &ShapeBatchKey,
-    atlas: &GlyphAtlasHandles,
+    atlas: &PathAtlasHandles,
     anti_alias: AntiAlias,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<TextMaterial>,
+    materials: &mut Assets<PathMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -803,7 +803,7 @@ fn grow_batch_assets(
     key: &ShapeBatchKey,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<TextMaterial>,
+    materials: &mut Assets<PathMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -845,7 +845,7 @@ fn grow_batch_assets(
         return;
     };
     if let Some(mut material) = materials.get_mut(&gpu.material) {
-        render::set_batch_text_material_buffers(
+        render::set_batch_path_material_buffers(
             &mut material,
             instances.clone(),
             run_table.clone(),
@@ -926,15 +926,12 @@ pub(super) fn commit_panel_line_batch_buffers(
     perf.line_batch.uploads = uploads;
 }
 
-fn padded_line_instances(
-    records: &[GlyphInstanceRecord],
-    capacity: u32,
-) -> Vec<GlyphInstanceRecord> {
+fn padded_line_instances(records: &[PathInstanceRecord], capacity: u32) -> Vec<PathInstanceRecord> {
     let mut padded = Vec::with_capacity(capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         capacity.to_usize().max(records.len()),
-        GlyphInstanceRecord {
+        PathInstanceRecord {
             rect_min:    Vec2::ZERO,
             rect_size:   Vec2::ZERO,
             uv_min:      Vec2::ZERO,
@@ -984,13 +981,13 @@ fn inert_line_batch_mesh(capacity: u32) -> Mesh {
 struct ShapeBatchMaterialInput<'a> {
     base:       StandardMaterial,
     key:        &'a ShapeBatchKey,
-    atlas:      &'a GlyphAtlasHandles,
+    atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
     anti_alias: AntiAlias,
 }
 
-fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> TextMaterial {
+fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathMaterial {
     let ShapeBatchMaterialInput {
         mut base,
         key,
@@ -1003,7 +1000,7 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> TextMaterial {
     base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
     render::apply_glyph_sidedness(&mut base, key.visual.sidedness);
     base.depth_bias = key.depth_bias().get();
-    render::batch_text_material(BatchTextMaterialInput {
+    render::batch_path_material(BatchPathMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
@@ -1012,10 +1009,9 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> TextMaterial {
         aa_band: anti_alias.anisotropic(),
         curves: atlas.curves.clone(),
         bands: atlas.bands.clone(),
-        glyphs: atlas.glyphs.clone(),
+        path_records: atlas.path_records.clone(),
         instances,
         run_records: run_table,
-        debug_glyph_index: false,
     })
 }
 
@@ -1071,7 +1067,7 @@ mod tests {
             .init_resource::<HairlineWidth>()
             .init_resource::<PanelShapeBatchStore>()
             .init_asset::<Mesh>()
-            .init_asset::<TextMaterial>()
+            .init_asset::<PathMaterial>()
             .init_asset::<ShaderBuffer>()
             .add_systems(
                 Update,
@@ -1122,7 +1118,7 @@ mod tests {
         };
         let Some(material) = app
             .world()
-            .resource::<Assets<TextMaterial>>()
+            .resource::<Assets<PathMaterial>>()
             .get(&gpu.material)
         else {
             panic!("line batch material should exist");
@@ -1136,7 +1132,7 @@ mod tests {
         (
             key.z_level,
             material.base.depth_bias,
-            render::text_material_oit_depth_offset(material),
+            render::path_material_oit_depth_offset(material),
             records,
         )
     }
@@ -1205,7 +1201,7 @@ mod tests {
         levels.sort_unstable();
         assert_eq!(levels, vec![-1, 1]);
 
-        let materials = app.world().resource::<Assets<TextMaterial>>();
+        let materials = app.world().resource::<Assets<PathMaterial>>();
         let mut depth_biases: Vec<(i8, u32)> = store
             .batches()
             .map(|(key, batch)| {
@@ -1228,7 +1224,7 @@ mod tests {
         );
     }
 
-    /// Phase C acceptance: an element-level AA override renders with its own
+    /// An element-level AA override renders with its own
     /// mode while its sibling keeps the inherited mode without increasing the
     /// batch count, and a global `AntiAlias` / `HairlineWidth::fade`
     /// change applied after the override exists re-packs the non-overridden
@@ -1300,7 +1296,7 @@ mod tests {
         );
     }
 
-    /// Phase D acceptance: the typography overlay rebuilds its guide panels
+    /// The typography overlay rebuilds its guide panels
     /// by despawning and respawning them on every metric refresh, so the
     /// panel-entity portion of every batch key churns. Repeated recreation
     /// must leave zero records keyed to a dead panel entity.
@@ -1594,7 +1590,7 @@ mod tests {
                 ),
             },
             outline:  test_outline(),
-            instance: GlyphInstanceRecord {
+            instance: PathInstanceRecord {
                 rect_min:    Vec2::ZERO,
                 rect_size:   Vec2::ONE,
                 uv_min:      Vec2::ZERO,

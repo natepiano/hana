@@ -13,7 +13,7 @@ use super::PathContour;
 use super::PathOutline;
 use super::QuadraticSegment;
 
-/// Default number of horizontal bands packed per glyph.
+/// Default number of horizontal bands packed per path.
 pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
 
 const BAND_OVERLAP_EM_UNITS: f32 = 1.0;
@@ -45,7 +45,7 @@ pub(crate) struct CurveRecord {
     pub bounds:        Vec4,
     /// Distance-solver coefficients in `.xyz`; `.w` carries the owning
     /// contour's narrowest stroke in design units (per-curve hairline
-    /// dilation), 0.0 for undilated contours (text glyphs).
+    /// dilation), 0.0 for undilated contours (text paths).
     pub solver:        Vec4,
     /// Owning contour's resolved hairline fade exponent
     /// (`PathContour::fade_exponent`). Each coverage evaluation fades by the
@@ -56,7 +56,7 @@ pub(crate) struct CurveRecord {
     /// contour's winding. The line branch's convex-corner clip reads it as the
     /// edge half-plane direction; the radial `normalize(point - closest)`
     /// degenerates to the vertex direction past a corner, so it cannot stand in
-    /// here. `Vec2::ZERO` (text glyphs, degenerate edges) routes the shader back
+    /// here. `Vec2::ZERO` (text paths, degenerate edges) routes the shader back
     /// to the radial normal.
     pub edge_normal:   Vec2,
 }
@@ -119,21 +119,21 @@ pub(crate) struct BandRecord {
     pub y_max: f32,
 }
 
-/// GPU glyph record for one unique glyph in a packed text run.
+/// GPU path record for one unique path in a packed text run.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub(crate) struct GlyphRecord {
+pub(crate) struct PathRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
     /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
     pub band_range:      UVec4,
     /// Narrowest stroke of the path in design-space units; the shader dilates
     /// the silhouette so that stroke covers at least one screen pixel
-    /// (hairline rendering). `0.0` disables — text glyphs stay undilated.
+    /// (hairline rendering). `0.0` disables — text paths stay undilated.
     pub min_feature:     f32,
 }
 
-impl GlyphRecord {
-    /// Creates a glyph record that points into the combined run band buffer.
+impl PathRecord {
+    /// Creates a path record that points into the combined run band buffer.
     #[must_use]
     pub fn new(
         bounds: Bounds,
@@ -156,27 +156,27 @@ impl GlyphRecord {
     }
 }
 
-/// GPU record for one batched glyph quad. The vertex-pulling shader expands
+/// GPU record for one batched path quad. The vertex-pulling shader expands
 /// each record into four corners: positions from `rect_min`/`rect_size` in run
-/// layout space, padded glyph UVs from `uv_min`/`uv_size`, the shared-atlas
+/// layout space, padded path UVs from `uv_min`/`uv_size`, the shared-atlas
 /// slot through `atlas_index`, and the owning run through `run_index`.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub(crate) struct GlyphInstanceRecord {
+pub(crate) struct PathInstanceRecord {
     /// Quad minimum corner (left, bottom) in run layout space, clipped.
     pub rect_min:    Vec2,
     /// Quad size (width, height) in run layout space.
     pub rect_size:   Vec2,
-    /// Padded glyph UV at the quad's (left, top) corner.
+    /// Padded path UV at the quad's (left, top) corner.
     pub uv_min:      Vec2,
-    /// Padded glyph UV extent from `uv_min` toward (right, bottom).
+    /// Padded path UV extent from `uv_min` toward (right, bottom).
     pub uv_size:     Vec2,
-    /// Shared-atlas [`GlyphRecord`] index.
+    /// Shared-atlas [`PathRecord`] index.
     pub atlas_index: u32,
     /// [`RunRecord`] index within the same batch.
     pub run_index:   u32,
 }
 
-/// GPU record for one text run inside a batch: world placement plus the
+/// GPU record for one path run inside a batch: world placement plus the
 /// per-run values that batching moves out of the material uniform.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct RunRecord {
@@ -200,30 +200,9 @@ pub(crate) struct RunRecord {
 // WGSL mirror structs in `analytic_path_vertex_pull.wgsl` assume these strides.
 // `ShaderSize` measures the encase layout, not the Rust layout.
 const _: () = assert!(CurveRecord::SHADER_SIZE.get() == 80);
-const _: () = assert!(GlyphRecord::SHADER_SIZE.get() == 48);
-const _: () = assert!(GlyphInstanceRecord::SHADER_SIZE.get() == 40);
+const _: () = assert!(PathRecord::SHADER_SIZE.get() == 48);
+const _: () = assert!(PathInstanceRecord::SHADER_SIZE.get() == 40);
 const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
-
-/// Shared name for a renderer path atlas record.
-#[allow(
-    dead_code,
-    reason = "Phase A names shared path record types before Phase B consumes them"
-)]
-pub(crate) type PathRecord = GlyphRecord;
-
-/// Shared name for a batched path instance record.
-#[allow(
-    dead_code,
-    reason = "Phase A names shared path record types before Phase B consumes them"
-)]
-pub(crate) type PathInstanceRecord = GlyphInstanceRecord;
-
-/// Shared name for a batched path run record.
-#[allow(
-    dead_code,
-    reason = "Phase A names shared path record types before Phase B consumes them"
-)]
-pub(crate) type PathRunRecord = RunRecord;
 
 /// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
@@ -235,7 +214,7 @@ pub(crate) struct PackedPath {
     vertical_count:   u32,
 }
 
-/// Compatibility alias for text glyph caches while text is bridged onto the
+/// Compatibility alias for text path caches while text is bridged onto the
 /// shared path renderer.
 pub(crate) type GlyphOutline = PackedPath;
 
@@ -318,7 +297,7 @@ fn band_cap_for_curves(curve_count: usize) -> usize {
 }
 
 /// Builds horizontal and vertical band data for one quadratic path outline
-/// with equal per-axis band counts (the text glyph path).
+/// with equal per-axis band counts (the text path mode).
 #[must_use]
 pub(crate) fn build_packed_path(path: PathOutline, band_count: usize) -> PackedPath {
     build_packed_path_with_layout(path, BandLayout::uniform(band_count))
@@ -634,8 +613,8 @@ mod tests {
 
     use super::*;
 
-    fn glyph_record(seed: f32, atlas_index: u32, run_index: u32) -> GlyphInstanceRecord {
-        GlyphInstanceRecord {
+    fn glyph_record(seed: f32, atlas_index: u32, run_index: u32) -> PathInstanceRecord {
+        PathInstanceRecord {
             rect_min: Vec2::new(seed, seed + 0.5),
             rect_size: Vec2::new(seed + 1.0, seed + 1.5),
             uv_min: Vec2::new(-0.0625, -0.0625),
@@ -671,7 +650,7 @@ mod tests {
             "two records at a 40-byte stride"
         );
 
-        let mut decoded: Vec<GlyphInstanceRecord> = Vec::new();
+        let mut decoded: Vec<PathInstanceRecord> = Vec::new();
         StorageBuffer::new(encoded.as_ref().clone())
             .read(&mut decoded)
             .expect("records should decode");

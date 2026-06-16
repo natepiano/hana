@@ -38,7 +38,7 @@ pub(crate) struct PathContour {
     /// Quadratic segments in contour order.
     pub segments:      Vec<QuadraticSegment>,
     /// Narrowest stroke of this contour in design-space units, packed per
-    /// curve for hairline dilation. `0.0` disables — text glyph contours
+    /// curve for hairline dilation. `0.0` disables — text path contours
     /// stay undilated.
     pub min_feature:   f32,
     /// Resolved hairline fade exponent for this contour, packed per curve
@@ -46,7 +46,7 @@ pub(crate) struct PathContour {
     /// supplies the exponent for each coverage evaluation, so contours with
     /// different fade policies merge into one path without an anti-aliasing
     /// junction. `0.0` renders sub-floor strokes at full alpha
-    /// ([`HairlineFade::Full`](crate::HairlineFade::Full)); text glyph
+    /// ([`HairlineFade::Full`](crate::HairlineFade::Full)); text path
     /// contours carry `0.0` and are exempt regardless (dilation 0).
     pub fade_exponent: f32,
 }
@@ -62,7 +62,7 @@ pub(crate) struct PathOutline {
 
 impl PathOutline {
     /// Narrowest dilating stroke across all contours, forwarded to
-    /// `GlyphRecord::min_feature` so the shader sizes its distance scan for
+    /// `PathRecord::min_feature` so the shader sizes its distance scan for
     /// the largest dilation in the path. `0.0` when no contour dilates.
     #[must_use]
     pub fn min_feature(&self) -> f32 {

@@ -9,9 +9,9 @@ use bevy_kana::ToU32;
 
 use super::BandRecord;
 use super::CurveRecord;
-use super::GlyphRecord;
 use super::PathAtlasHandles;
 use super::PathOutline;
+use super::PathRecord;
 use super::packing;
 use super::packing::BandLayout;
 
@@ -21,7 +21,7 @@ pub(crate) struct PathAtlas<K> {
     indices:           HashMap<K, u32>,
     curves:            Vec<CurveRecord>,
     bands:             Vec<BandRecord>,
-    path_records:      Vec<GlyphRecord>,
+    path_records:      Vec<PathRecord>,
     revision:          u32,
     uploaded_revision: u32,
     handles:           Option<PathAtlasHandles>,
@@ -95,7 +95,7 @@ where
                     start: band.start + curve_start,
                     ..*band
                 }));
-            self.path_records.push(GlyphRecord::new(
+            self.path_records.push(PathRecord::new(
                 packed.bounds(),
                 band_start,
                 packed.horizontal_count(),
@@ -132,9 +132,9 @@ where
         }
 
         let handles = PathAtlasHandles {
-            curves: storage_buffers.add(ShaderBuffer::from(self.curves.clone())),
-            bands:  storage_buffers.add(ShaderBuffer::from(self.bands.clone())),
-            glyphs: storage_buffers.add(ShaderBuffer::from(self.path_records.clone())),
+            curves:       storage_buffers.add(ShaderBuffer::from(self.curves.clone())),
+            bands:        storage_buffers.add(ShaderBuffer::from(self.bands.clone())),
+            path_records: storage_buffers.add(ShaderBuffer::from(self.path_records.clone())),
         };
         self.uploaded_revision = self.revision;
         self.handles = Some(handles.clone());

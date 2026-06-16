@@ -277,14 +277,6 @@ pub use render::TextContent;
 pub use render::TextEdit;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
-#[cfg(feature = "batch_proof")]
-pub use render::batch_proof::GlyphBatchProof;
-#[cfg(feature = "batch_proof")]
-pub use render::batch_proof::GlyphBatchProofPlugin;
-#[cfg(feature = "batch_proof")]
-pub use render::batch_proof::force_capacity_growth;
-#[cfg(feature = "batch_proof")]
-pub use render::batch_proof::toggle_debug_index;
 pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;

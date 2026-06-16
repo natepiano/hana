@@ -3,8 +3,6 @@
 mod analytic_line_probe;
 mod analytic_paths;
 mod batch_key;
-#[cfg(feature = "batch_proof")]
-pub(crate) mod batch_proof;
 mod clip;
 mod constants;
 mod draw_order;
@@ -24,32 +22,30 @@ use analytic_paths::AnalyticPathPlugin;
 pub(crate) use analytic_paths::BandRecord;
 pub(crate) use analytic_paths::BatchGpu;
 pub(crate) use analytic_paths::BatchKey;
-pub(crate) use analytic_paths::BatchTextMaterialInput;
+pub(crate) use analytic_paths::BatchPathMaterialInput;
 pub(crate) use analytic_paths::Bounds;
 pub(crate) use analytic_paths::CurveRecord;
 pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
-pub(crate) use analytic_paths::GlyphAtlasHandles;
-pub(crate) use analytic_paths::GlyphBatchStore;
-pub(crate) use analytic_paths::GlyphInstanceRecord;
 pub(crate) use analytic_paths::GlyphOutline;
-pub(crate) use analytic_paths::GlyphRecord;
 #[cfg(test)]
 pub(crate) use analytic_paths::PackedPath;
 pub(crate) use analytic_paths::PathAtlas;
+pub(crate) use analytic_paths::PathAtlasHandles;
+pub(crate) use analytic_paths::PathBatchStore;
 pub(crate) use analytic_paths::PathContour;
+pub(crate) use analytic_paths::PathInstanceRecord;
+pub(crate) use analytic_paths::PathMaterial;
 pub(crate) use analytic_paths::PathOutline;
+pub(crate) use analytic_paths::PathRecord;
 pub(crate) use analytic_paths::QuadraticSegment;
 pub(crate) use analytic_paths::RenderMode;
 pub(crate) use analytic_paths::RunRecord;
-pub(crate) use analytic_paths::TextMaterial;
-pub(crate) use analytic_paths::batch_text_material;
+pub(crate) use analytic_paths::batch_path_material;
 pub(crate) use analytic_paths::build_packed_path;
-pub(crate) use analytic_paths::set_batch_text_material_buffers;
-pub(crate) use analytic_paths::set_text_material_atlas;
 #[cfg(test)]
-pub(crate) use analytic_paths::text_material_oit_depth_offset;
-#[cfg(feature = "batch_proof")]
-pub(crate) use analytic_paths::toggle_text_material_debug_glyph_index;
+pub(crate) use analytic_paths::path_material_oit_depth_offset;
+pub(crate) use analytic_paths::set_batch_path_material_buffers;
+pub(crate) use analytic_paths::set_path_material_atlas;
 pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
@@ -199,7 +195,7 @@ impl AntiAlias {
 fn sync_anti_alias(
     setting: Res<AntiAlias>,
     mut cascade_default: ResMut<CascadeDefault<AntiAlias>>,
-    mut materials: ResMut<Assets<TextMaterial>>,
+    mut materials: ResMut<Assets<PathMaterial>>,
 ) {
     if !setting.is_changed() {
         return;
@@ -208,7 +204,7 @@ fn sync_anti_alias(
         cascade_default.0 = *setting;
     }
     for (_, material) in materials.iter_mut() {
-        analytic_paths::set_text_material_anti_alias(
+        analytic_paths::set_path_material_anti_alias(
             material,
             setting.supersamples(),
             setting.anisotropic(),
@@ -323,8 +319,8 @@ fn sync_hairline_fade(
 fn sync_hairline_width(
     hairline_width: Res<HairlineWidth>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut materials: ResMut<Assets<TextMaterial>>,
-    mut material_events: MessageReader<AssetEvent<TextMaterial>>,
+    mut materials: ResMut<Assets<PathMaterial>>,
+    mut material_events: MessageReader<AssetEvent<PathMaterial>>,
     mut applied_device_px: Local<Option<f32>>,
 ) {
     let scale_factor = windows.iter().next().map_or(1.0, Window::scale_factor);
@@ -338,11 +334,11 @@ fn sync_hairline_width(
         *applied_device_px = Some(device_px);
         material_events.clear();
         for (_, material) in materials.iter_mut() {
-            analytic_paths::set_text_material_hairline(material, device_px);
+            analytic_paths::set_path_material_hairline(material, device_px);
         }
         return;
     }
-    let added: Vec<AssetId<TextMaterial>> = material_events
+    let added: Vec<AssetId<PathMaterial>> = material_events
         .read()
         .filter_map(|event| match event {
             AssetEvent::Added { id } => Some(*id),
@@ -351,7 +347,7 @@ fn sync_hairline_width(
         .collect();
     for id in added {
         if let Some(mut material) = materials.get_mut(id) {
-            analytic_paths::set_text_material_hairline(&mut material, device_px);
+            analytic_paths::set_path_material_hairline(&mut material, device_px);
         }
     }
 }

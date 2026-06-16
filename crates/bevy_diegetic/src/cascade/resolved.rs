@@ -149,7 +149,7 @@ pub(crate) struct Resolved<A: CascadeAttr>(pub A);
 /// Resolve attribute `A` for `entity` from [`World`] by walking up `ChildOf`.
 #[allow(
     dead_code,
-    reason = "Phase 2 command self-heal will use the World-based resolver"
+    reason = "World-based resolver not yet called; retained for command self-heal"
 )]
 pub(crate) fn resolve<A: CascadeAttr>(world: &World, entity: Entity, default: A) -> A {
     #[cfg(debug_assertions)]

@@ -1,6 +1,6 @@
 // Analytic path fragment shader: exact coverage for quadratic-Bezier
 // outlines, shared by slug text runs and merged panel-line paths. A
-// "glyph" here is one packed path — a font glyph or a whole merge group of
+// "path" here is one packed path — a font path or a whole merge group of
 // panel lines (ticks + spine in one record).
 //
 // Inputs (packed by render/analytic_paths/packing.rs, structs mirrored
@@ -9,21 +9,21 @@
 //             distance-solver coefficients, per-contour hairline stroke
 //             width (solver.w), and per-contour fade exponent.
 //   bands   — BandRecord (start, count) windows into a band-ordered curve
-//             table. Each glyph has horizontal bands (y-slabs: every curve
+//             table. Each path has horizontal bands (y-slabs: every curve
 //             a +x ray from a point in the slab can cross) and vertical
 //             bands (x-slabs), so winding and nearest-distance scans touch
 //             a handful of curves, not the whole path.
-//   glyphs  — GlyphRecord per packed path: design-space bounds, band table
+//   path_records  — PathRecord per packed path: design-space bounds, band table
 //             ranges, narrowest dilating stroke.
-//   uv_a    — fractional position inside the glyph bounds quad.
-//   uv_b    — (glyph index, run index) as floats, constant per quad.
+//   uv_a    — fractional position inside the path bounds quad.
+//   uv_b    — (path index, run index) as floats, constant per quad.
 //   per-run — fill color / render mode / OIT offset / AA flags from the
 //             RunRecord table under GLYPH_VERTEX_PULL, else from the
-//             material's TextUniform.
+//             material's PathUniform.
 //
 // Evaluation: non-zero winding (inside/outside) + distance to the nearest
 // curve (the AA ramp), both banded. Strokes thinner than
-// TextUniform.hairline_min_px on screen are dilated per curve to that
+// PathUniform.hairline_min_px on screen are dilated per curve to that
 // floor and faded back by each contour's fade exponent; fading and exempt
 // contours coexist in one path via the two-lane CoverageTerms evaluation.
 // Coverage then feeds PBR lighting and (when enabled) OIT.
@@ -97,7 +97,7 @@ const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 const AA_FLAG_SUPERSAMPLE: u32 = 1u;
 const AA_FLAG_BAND: u32 = 2u;
 
-struct TextUniform {
+struct PathUniform {
     fill_color: vec4<f32>,
     render_mode: u32,
     oit_depth_offset: f32,
@@ -129,7 +129,7 @@ struct CurveRecord {
     // exact_quadratic_distance solves, .z is 1/|curve_delta|² (0 routes
     // the segment through the exact linear solve). .w: the owning contour's
     // narrowest stroke in design units (per-curve hairline dilation), 0.0
-    // for undilated contours (text glyphs).
+    // for undilated contours (text paths).
     solver: vec4<f32>,
     // Owning contour's resolved hairline fade exponent; each coverage
     // evaluation fades by the winning (nearest) curve's exponent, so one
@@ -140,12 +140,12 @@ struct CurveRecord {
     // branch's convex-corner clip reads it as the edge half-plane direction;
     // the radial normalize(point - closest) goes to the vertex direction past a
     // corner, so it can't stand in. (0,0) routes the clip back to the radial
-    // normal (text glyphs, degenerate edges).
+    // normal (text paths, degenerate edges).
     edge_normal: vec2<f32>,
 }
 
 // One band's window into the band-ordered curve table: a horizontal band
-// holds every curve whose y-extent overlaps that y-slab of the glyph (the
+// holds every curve whose y-extent overlaps that y-slab of the path (the
 // complete crossing set for a +x winding ray from inside the slab), a
 // vertical band the same by x. Band lookup derives the index from the
 // point's normalized coordinate; y_min/y_max are the band edges in design
@@ -157,8 +157,8 @@ struct BandRecord {
     y_max: f32,
 }
 
-// One packed path (font glyph or merged panel-line group).
-struct GlyphRecord {
+// One packed path (font path or merged panel-line group).
+struct PathRecord {
     // Design-space bounds: min in .xy, size in .zw. uv_a maps onto this
     // rectangle (see design_position).
     bounds_min_size: vec4<f32>,
@@ -210,7 +210,7 @@ struct LaneTerms {
 
 // Two-lane coverage accumulator. Curves split by fade policy: the exempt
 // lane holds fade_exponent == 0 curves (never-fading contours, and every
-// text glyph), the faded lane holds fade_exponent > 0 curves. Contours are
+// text path), the faded lane holds fade_exponent > 0 curves. Contours are
 // wholly one lane, so each lane's winding is a valid winding number of its
 // own sub-geometry, and the lanes' windings sum to the whole path's. Final
 // alpha takes mix(exempt_coverage, union_coverage, fade_factor): at fade
@@ -279,13 +279,13 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
     );
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: TextUniform;
+@group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: PathUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<CurveRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<BandRecord>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<GlyphRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PathRecord>;
 
 #ifdef GLYPH_VERTEX_PULL
-// Mirrors `RunRecord` in `glyph/packing.rs` (std430, 96 B stride). Under the
+// Mirrors `RunRecord` in `path/packing.rs` (std430, 96 B stride). Under the
 // vertex-pulling route a batch holds many runs, so the per-run values move
 // out of the material uniform into this table, indexed by the run index the
 // vertex stage forwards in `uv_b.y`.
@@ -305,31 +305,31 @@ struct RunRecord {
 // integer (478.9999 for 479.0) on long sliver quads, so recovery must round —
 // a floor() here reads the previous record and the quad renders another
 // path's coverage.
-fn run_index(glyph_uv: vec2<f32>) -> u32 {
-    return u32(glyph_uv.y + 0.5);
+fn run_index(path_uv: vec2<f32>) -> u32 {
+    return u32(path_uv.y + 0.5);
 }
 #endif
 
-// uv_b.x carries the glyph table index; same rounding recovery as
+// uv_b.x carries the path table index; same rounding recovery as
 // run_index above.
-fn glyph_index(glyph_uv: vec2<f32>) -> u32 {
-    return u32(glyph_uv.x + 0.5);
+fn path_index(path_uv: vec2<f32>) -> u32 {
+    return u32(path_uv.x + 0.5);
 }
 
 // Per-run fill color: the run table under vertex pulling, the material
 // uniform on the per-run path.
-fn run_fill_color(glyph_uv: vec2<f32>) -> vec4<f32> {
+fn run_fill_color(path_uv: vec2<f32>) -> vec4<f32> {
 #ifdef GLYPH_VERTEX_PULL
-    return run_records[run_index(glyph_uv)].fill_color;
+    return run_records[run_index(path_uv)].fill_color;
 #else
     return uniforms.fill_color;
 #endif
 }
 
 // Per-run render mode (Text / PunchOut), sourced like `run_fill_color`.
-fn run_render_mode(glyph_uv: vec2<f32>) -> u32 {
+fn run_render_mode(path_uv: vec2<f32>) -> u32 {
 #ifdef GLYPH_VERTEX_PULL
-    return run_records[run_index(glyph_uv)].render_mode;
+    return run_records[run_index(path_uv)].render_mode;
 #else
     return uniforms.render_mode;
 #endif
@@ -337,9 +337,9 @@ fn run_render_mode(glyph_uv: vec2<f32>) -> u32 {
 
 // Per-run OIT z offset: the run table under vertex pulling, the material
 // uniform on the per-run path.
-fn run_oit_depth_offset(glyph_uv: vec2<f32>) -> f32 {
+fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
 #ifdef GLYPH_VERTEX_PULL
-    return run_records[run_index(glyph_uv)].oit_depth_offset;
+    return run_records[run_index(path_uv)].oit_depth_offset;
 #else
     return uniforms.oit_depth_offset;
 #endif
@@ -347,9 +347,9 @@ fn run_oit_depth_offset(glyph_uv: vec2<f32>) -> f32 {
 
 // Per-run anti-alias mode bits (AA_FLAG_SUPERSAMPLE | AA_FLAG_BAND), sourced
 // like `run_fill_color`.
-fn run_aa_flags(glyph_uv: vec2<f32>) -> u32 {
+fn run_aa_flags(path_uv: vec2<f32>) -> u32 {
 #ifdef GLYPH_VERTEX_PULL
-    return run_records[run_index(glyph_uv)].aa_flags;
+    return run_records[run_index(path_uv)].aa_flags;
 #else
     var flags = 0u;
     if uniforms.supersample != 0u {
@@ -362,29 +362,29 @@ fn run_aa_flags(glyph_uv: vec2<f32>) -> u32 {
 #endif
 }
 
-fn glyph_bounds_min(glyph: GlyphRecord) -> vec2<f32> {
-    return glyph.bounds_min_size.xy;
+fn path_bounds_min(path: PathRecord) -> vec2<f32> {
+    return path.bounds_min_size.xy;
 }
 
-fn glyph_bounds_size(glyph: GlyphRecord) -> vec2<f32> {
-    return glyph.bounds_min_size.zw;
+fn path_bounds_size(path: PathRecord) -> vec2<f32> {
+    return path.bounds_min_size.zw;
 }
 
-// uv_a → design-space point inside the glyph bounds. v flips: uv origin is
+// uv_a → design-space point inside the path bounds. v flips: uv origin is
 // top-left, design space is y-up.
-fn design_position(uv: vec2<f32>, glyph: GlyphRecord) -> vec2<f32> {
-    let bounds_min = glyph_bounds_min(glyph);
-    let bounds_size = glyph_bounds_size(glyph);
+fn design_position(uv: vec2<f32>, path: PathRecord) -> vec2<f32> {
+    let bounds_min = path_bounds_min(path);
+    let bounds_size = path_bounds_size(path);
     return bounds_min + vec2<f32>(
         uv.x * bounds_size.x,
         (1.0 - uv.y) * bounds_size.y,
     );
 }
 
-fn horizontal_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
-    let bounds_min = glyph_bounds_min(glyph);
-    let bounds_size = glyph_bounds_size(glyph);
-    let band_count = glyph.band_range.y;
+fn horizontal_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+    let bounds_min = path_bounds_min(path);
+    let bounds_size = path_bounds_size(path);
+    let band_count = path.band_range.y;
     let normalized_y = clamp(
         (point.y - bounds_min.y) / max(bounds_size.y, ROOT_EPSILON),
         0.0,
@@ -393,10 +393,10 @@ fn horizontal_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
     return min(u32(normalized_y * f32(band_count)), band_count - 1u);
 }
 
-fn vertical_band_index(point: vec2<f32>, glyph: GlyphRecord) -> u32 {
-    let bounds_min = glyph_bounds_min(glyph);
-    let bounds_size = glyph_bounds_size(glyph);
-    let band_count = glyph.band_range.w;
+fn vertical_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+    let bounds_min = path_bounds_min(path);
+    let bounds_size = path_bounds_size(path);
+    let band_count = path.band_range.w;
     let normalized_x = clamp(
         (point.x - bounds_min.x) / max(bounds_size.x, ROOT_EPSILON),
         0.0,
@@ -561,8 +561,8 @@ fn curve_winding(curve: CurveRecord, point: vec2<f32>) -> i32 {
         winding_for_t(curve, point, (-b + root) / (2.0 * a));
 }
 
-fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
-    // Line glyphs (min_feature > 0) render with the vertex-stage quad expansion
+fn outside_path_bounds(point: vec2<f32>, path: PathRecord) -> bool {
+    // Line paths (min_feature > 0) render with the vertex-stage quad expansion
     // (analytic_path_vertex_pull.wgsl LINE_AA_MARGIN_PX) so the grazing AA ramp
     // clears the quad edge. The packed bounds are NOT expanded, so clipping
     // winding here would zero the outward ramp and the grazing strided samples
@@ -570,11 +570,11 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
     // winding-ray math is valid outside the packed bounds, so do not early-out
     // there for lines. DIAGNOSTIC: full bypass to confirm the bounds clip is the
     // grazing dash/wing source; the keep version inflates by the scan margin.
-    if glyph.min_feature > 0.0 {
+    if path.min_feature > 0.0 {
         return false;
     }
-    let bounds_min = glyph_bounds_min(glyph);
-    let bounds_max = bounds_min + glyph_bounds_size(glyph);
+    let bounds_min = path_bounds_min(path);
+    let bounds_max = bounds_min + path_bounds_size(path);
     return point.x < bounds_min.x ||
         point.x > bounds_max.x ||
         point.y < bounds_min.y ||
@@ -586,7 +586,7 @@ fn outside_glyph_bounds(point: vec2<f32>, glyph: GlyphRecord) -> bool {
 // of rendering at full alpha. Both inputs come from the evaluation's winning
 // curve — its dilation (natural = hairline_target − 2 × dilation) and its
 // contour's fade_exponent — so contours with different fade policies coexist
-// in one merged path. dilation 0 (at-floor strokes, and text glyphs whose
+// in one merged path. dilation 0 (at-floor strokes, and text paths whose
 // curves carry solver.w = 0) gives factor 1; fade_exponent 0 disables (Full
 // policy).
 fn hairline_fade_factor(dilation: f32, hairline_target: f32, fade_exponent: f32) -> f32 {
@@ -632,7 +632,7 @@ fn accumulate_nearest(
     let to_point_len = length(to_point);
     let normal = select(vec2<f32>(1.0, 0.0), to_point / to_point_len, to_point_len > ROOT_EPSILON);
     // Outward edge-line normal from the contour winding, with the radial normal as
-    // fallback when none was packed (text glyphs). edge_perp is the signed
+    // fallback when none was packed (text paths). edge_perp is the signed
     // perpendicular distance to that edge's line (outward positive): negative
     // inside the half-plane, so a straight run's far stroke side reads negative and
     // the corner clip stays a no-op there.
@@ -685,10 +685,10 @@ fn horizontal_coverage_terms(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> CoverageTerms {
-    let include_winding = !outside_glyph_bounds(point, glyph);
-    let horizontal_band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    let include_winding = !outside_path_bounds(point, path);
+    let horizontal_band = bands[path.band_range.x + horizontal_band_index(point, path)];
     var terms = empty_coverage_terms();
     for (var offset = 0u; offset < horizontal_band.count; offset += 1u) {
         let curve = curves[horizontal_band.start + offset];
@@ -739,10 +739,10 @@ fn nearest_vertical_curve(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
     initial: CoverageTerms,
 ) -> CoverageTerms {
-    let vertical_band = bands[glyph.band_range.z + vertical_band_index(point, glyph)];
+    let vertical_band = bands[path.band_range.z + vertical_band_index(point, path)];
     var terms = initial;
     for (var offset = 0u; offset < vertical_band.count; offset += 1u) {
         let curve = curves[vertical_band.start + offset];
@@ -754,18 +754,18 @@ fn nearest_vertical_curve(
 }
 
 // Non-zero winding number at `point` over ALL curves (both lanes), using the
-// point's horizontal band. Returns 0 outside the glyph bounds. The prepass
+// point's horizontal band. Returns 0 outside the path bounds. The prepass
 // silhouette test wants the union fill, not a per-lane one.
-fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
-    if outside_glyph_bounds(point, glyph) {
+fn winding_at(point: vec2<f32>, path: PathRecord) -> i32 {
+    if outside_path_bounds(point, path) {
         return 0;
     }
-    if is_polygon_mode(glyph) {
+    if is_polygon_mode(path) {
         // Polygon mode has no banded crossing set; the silhouette is the union
         // of the convex contours. Inside if the point lies inside every
         // half-plane of any one contour.
-        let poly_start = glyph.band_range.x;
-        let poly_count = glyph.band_range.y;
+        let poly_start = path.band_range.x;
+        let poly_count = path.band_range.y;
         for (var poly = 0u; poly < poly_count; poly += 1u) {
             let group = bands[poly_start + poly];
             var inside = group.count > 0u;
@@ -785,7 +785,7 @@ fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
         }
         return 0;
     }
-    let band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    let band = bands[path.band_range.x + horizontal_band_index(point, path)];
     var winding = 0;
     for (var offset = 0u; offset < band.count; offset += 1u) {
         winding += curve_winding(curves[band.start + offset], point);
@@ -794,12 +794,12 @@ fn winding_at(point: vec2<f32>, glyph: GlyphRecord) -> i32 {
 }
 
 // Per-lane winding number at `point` (x = exempt lane, y = faded lane);
-// zero outside the glyph bounds.
-fn lane_winding_at(point: vec2<f32>, glyph: GlyphRecord) -> vec2<i32> {
-    if outside_glyph_bounds(point, glyph) {
+// zero outside the path bounds.
+fn lane_winding_at(point: vec2<f32>, path: PathRecord) -> vec2<i32> {
+    if outside_path_bounds(point, path) {
         return vec2<i32>(0, 0);
     }
-    let band = bands[glyph.band_range.x + horizontal_band_index(point, glyph)];
+    let band = bands[path.band_range.x + horizontal_band_index(point, path)];
     var winding = vec2<i32>(0, 0);
     for (var offset = 0u; offset < band.count; offset += 1u) {
         let curve = curves[band.start + offset];
@@ -816,14 +816,14 @@ fn lane_winding_at(point: vec2<f32>, glyph: GlyphRecord) -> vec2<i32> {
 // Whether any neighbor one filter-width away is outside the fill: x for the
 // exempt lane, y for the whole-path union (a lane's winding components sum
 // to the union's). A true outer silhouette has at least one outside
-// neighbor; an interior edge of a self-intersecting / overlapping glyph
+// neighbor; an interior edge of a self-intersecting / overlapping path
 // (e.g. the EB Garamond `g` neck) is filled on both sides, so all neighbors
 // stay inside.
-fn lanes_any_outside_neighbor(point: vec2<f32>, edge_width: f32, glyph: GlyphRecord) -> vec2<bool> {
-    let right = lane_winding_at(point + vec2<f32>(edge_width, 0.0), glyph);
-    let left = lane_winding_at(point - vec2<f32>(edge_width, 0.0), glyph);
-    let up = lane_winding_at(point + vec2<f32>(0.0, edge_width), glyph);
-    let down = lane_winding_at(point - vec2<f32>(0.0, edge_width), glyph);
+fn lanes_any_outside_neighbor(point: vec2<f32>, edge_width: f32, path: PathRecord) -> vec2<bool> {
+    let right = lane_winding_at(point + vec2<f32>(edge_width, 0.0), path);
+    let left = lane_winding_at(point - vec2<f32>(edge_width, 0.0), path);
+    let up = lane_winding_at(point + vec2<f32>(0.0, edge_width), path);
+    let down = lane_winding_at(point - vec2<f32>(0.0, edge_width), path);
     return vec2<bool>(
         right.x == 0 || left.x == 0 || up.x == 0 || down.x == 0,
         right.x + right.y == 0 || left.x + left.y == 0
@@ -869,11 +869,11 @@ fn lanes_no_outside_neighbor(
     union_terms: LaneTerms,
     point: vec2<f32>,
     edge_width: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> vec2<bool> {
     if lane_needs_neighbor_test(terms.exempt, edge_width)
         || lane_needs_neighbor_test(union_terms, edge_width) {
-        let any_outside = lanes_any_outside_neighbor(point, edge_width, glyph);
+        let any_outside = lanes_any_outside_neighbor(point, edge_width, path);
         return vec2<bool>(!any_outside.x, !any_outside.y);
     }
     return vec2<bool>(false, false);
@@ -884,16 +884,16 @@ fn distance_coverage(
     pixel: vec2<f32>,
     dilation_max: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
     // The distance scan must reach the most-dilated silhouette plus the AA ramp.
     let scan_width = edge_width + dilation_max;
     let scan_width_sq = scan_width * scan_width;
-    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
-    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
+    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, path);
+    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
-    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, edge_width, glyph);
+    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, edge_width, path);
 
     // The fade factor interpolates between only-exempt-visible (factor 0)
     // and the whole unfaded path (factor 1, the pre-fade single-winding
@@ -951,13 +951,13 @@ fn signed_distance_sample(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> SdSample {
     let scan_width = sqrt(scan_width_sq);
-    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, glyph);
-    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, glyph, terms);
+    var terms = horizontal_coverage_terms(point, scan_width_sq, hairline_target, path);
+    terms = nearest_vertical_curve(point, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
-    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, scan_width, glyph);
+    let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, scan_width, path);
     return SdSample(
         vec2<f32>(
             lane_signed_distance(terms.exempt, scan_width, no_outside.x),
@@ -984,9 +984,9 @@ fn signed_distance(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> vec2<f32> {
-    return signed_distance_sample(point, scan_width_sq, hairline_target, glyph).sd;
+    return signed_distance_sample(point, scan_width_sq, hairline_target, path).sd;
 }
 
 // Coverage from a signed distance and a screen-space band width: a 1px box ramp
@@ -1026,9 +1026,9 @@ fn aniso_band_coverage(
     dy: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    glyph: GlyphRecord,
+    path: PathRecord,
 ) -> f32 {
-    let sd_center = signed_distance(point, scan_width_sq, hairline_target, glyph);
+    let sd_center = signed_distance(point, scan_width_sq, hairline_target, path);
     let len_dx = length(dx);
     let len_dy = length(dy);
     let major = select(dy, dx, len_dx >= len_dy);
@@ -1040,8 +1040,8 @@ fn aniso_band_coverage(
 
     // Per-evaluation (exempt / union) band widths from signed-distance
     // differences.
-    let d_major = min(abs(signed_distance(point + major, scan_width_sq, hairline_target, glyph) - sd_center), vec2<f32>(major_len));
-    let d_minor = min(abs(signed_distance(point + minor, scan_width_sq, hairline_target, glyph) - sd_center), vec2<f32>(minor_len));
+    let d_major = min(abs(signed_distance(point + major, scan_width_sq, hairline_target, path) - sd_center), vec2<f32>(major_len));
+    let d_minor = min(abs(signed_distance(point + minor, scan_width_sq, hairline_target, path) - sd_center), vec2<f32>(minor_len));
     let per_band = max(d_minor + d_major * inv_count, vec2<f32>(ROOT_EPSILON));
 
     // Fade applies per stride sample from that sample's faded-lane winning
@@ -1051,7 +1051,7 @@ fn aniso_band_coverage(
     var sum = 0.0;
     for (var index = 0u; index < count; index += 1u) {
         let stride = (f32(index) + 0.5) * inv_count - 0.5;
-        let sample = signed_distance_sample(point + stride * major, scan_width_sq, hairline_target, glyph);
+        let sample = signed_distance_sample(point + stride * major, scan_width_sq, hairline_target, path);
         let exempt = band_coverage(sample.sd.x, per_band.x);
         let union_coverage = band_coverage(sample.sd.y, per_band.y);
         let fade = hairline_fade_factor(sample.dilation, hairline_target, sample.fade_exponent);
@@ -1156,8 +1156,8 @@ fn line_floor(
 // Polygon-mode sentinel: a line path (min_feature > 0) packed with no vertical
 // band is a set of convex half-plane polygons (packing::build_packed_polygons),
 // not a banded curve scan.
-fn is_polygon_mode(glyph: GlyphRecord) -> bool {
-    return glyph.min_feature > 0.0 && glyph.band_range.w == 0u;
+fn is_polygon_mode(path: PathRecord) -> bool {
+    return path.min_feature > 0.0 && path.band_range.w == 0u;
 }
 
 // Convex-polygon coverage for straight-edge line marks (Segment rectangles,
@@ -1176,9 +1176,9 @@ fn is_polygon_mode(glyph: GlyphRecord) -> bool {
 // polygon's nearest, i.e. cross-stroke, edge), matching the curve path's fade
 // cascade; an all-Full path has fade_exponent 0 everywhere, so fade is 1 and the
 // result is the plain union.
-fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph: GlyphRecord) -> f32 {
-    let poly_start = glyph.band_range.x;
-    let poly_count = glyph.band_range.y;
+fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PathRecord) -> f32 {
+    let poly_start = path.band_range.x;
+    let poly_count = path.band_range.y;
     var exempt_cov = 0.0;
     var union_cov = 0.0;
     var faded_best = 0.0;
@@ -1259,14 +1259,14 @@ fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, gly
 // against the second edge at a corner, so a foreshortened straight edge stays a
 // continuous sub-pixel hairline while the convex cap stays bounded to
 // ~hairline_min_px. Head-on the footprint is isotropic and N collapses to one.
-fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph: GlyphRecord) -> f32 {
+fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PathRecord) -> f32 {
     let footprint_max = max(length(dx), length(dy));
     let scan_width = footprint_max * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
     let scan_width_sq = scan_width * scan_width;
 
     // Edge frame from the center fragment's field normal: the tangent is the
     // stride direction, the normal sets the band width and the sub-sample count.
-    let center = signed_distance_sample(point, scan_width_sq, 0.0, glyph);
+    let center = signed_distance_sample(point, scan_width_sq, 0.0, path);
     let normal = center.union_normal;
     let tangent = vec2<f32>(-normal.y, normal.x);
     // Footprint parallelogram support widths in that frame: extent along the
@@ -1288,18 +1288,18 @@ fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph:
     // center normal IS the edge normal, so the floor matches the per-sample value.
     let exempt_floor = line_floor(
         center.exempt_normal, abs(center.sd.x), center.exempt_normal2, center.exempt_adjusted2,
-        glyph.min_feature, analytic_band(center.exempt_normal, dx, dy), norm_extent, dx, dy,
+        path.min_feature, analytic_band(center.exempt_normal, dx, dy), norm_extent, dx, dy,
     );
     let union_floor = line_floor(
         center.union_normal, abs(center.sd.y), center.union_normal2, center.union_adjusted2,
-        glyph.min_feature, analytic_band(center.union_normal, dx, dy), norm_extent, dx, dy,
+        path.min_feature, analytic_band(center.union_normal, dx, dy), norm_extent, dx, dy,
     );
 
     var sum = 0.0;
     var fired = 0.0;
     for (var index = 0u; index < count; index += 1u) {
         let stride = (f32(index) + 0.5) * inv_count - 0.5;
-        let raw = signed_distance_sample(point + stride * tangent_step, scan_width_sq, 0.0, glyph);
+        let raw = signed_distance_sample(point + stride * tangent_step, scan_width_sq, 0.0, path);
         // Full cross-stroke band per sample: the stride is pure tangent, so the
         // samples carry no normal offset to tile against and the band stays the
         // true 1px |Jᵀn| ramp width.
@@ -1333,7 +1333,7 @@ fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, glyph:
 
 fn render_coverage(
     uv: vec2<f32>,
-    glyph: GlyphRecord,
+    path: PathRecord,
     render_mode: u32,
     aa_flags: u32,
 ) -> f32 {
@@ -1342,7 +1342,7 @@ fn render_coverage(
     // non-uniform control flow where fwidth/dpdx/dpdy are undefined in WGSL.
     // Every derivative this function needs is computed here; in-branch ramp
     // widths are rebuilt from finite differences along dx/dy instead.
-    let point = design_position(uv, glyph);
+    let point = design_position(uv, path);
     let pixel = max(abs(fwidth(point)), vec2<f32>(ROOT_EPSILON));
     let dx = dpdx(point);
     let dy = dpdy(point);
@@ -1362,15 +1362,15 @@ fn render_coverage(
     // a single center sample misses. Text (min_feature == 0) takes the
     // aa_flags-selected finite-difference path below.
     var coverage: f32;
-    if glyph.min_feature > 0.0 {
-        if is_polygon_mode(glyph) {
+    if path.min_feature > 0.0 {
+        if is_polygon_mode(path) {
             // Straight-edge convex marks: per-contour half-plane product, no
             // radial field, no grazing-corner wing.
-            coverage = analytic_polygon_coverage(point, dx, dy, glyph);
+            coverage = analytic_polygon_coverage(point, dx, dy, path);
         } else {
             // Curved line contour (a Circle cap's ellipse): the banded
             // curve-distance scan, which has no sharp convex corner to wing.
-            coverage = analytic_line_coverage(point, dx, dy, glyph);
+            coverage = analytic_line_coverage(point, dx, dy, path);
         }
     } else if (aa_flags & AA_FLAG_BAND) != 0u {
         let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
@@ -1381,17 +1381,17 @@ fn render_coverage(
             // edge width (full interior coverage, so the stroke stays bright)
             // and the stride samples integrate along the foreshortened axis at
             // grazing. Text reaches here as the Both AA mode.
-            coverage = aniso_band_coverage(point, dx, dy, scan_width_sq, hairline_target, glyph);
+            coverage = aniso_band_coverage(point, dx, dy, scan_width_sq, hairline_target, path);
         } else {
             // Single sample: one full-footprint exempt/union band from the
             // center sample's screen-space distance change. Forward
             // differences along dx/dy stand in for fwidth(sd), which is
             // unavailable here — this branch is non-uniform flow (aa_flags is
             // per-run).
-            let center = signed_distance_sample(point, scan_width_sq, hairline_target, glyph);
+            let center = signed_distance_sample(point, scan_width_sq, hairline_target, path);
             let band = max(
-                abs(signed_distance(point + dx, scan_width_sq, hairline_target, glyph) - center.sd)
-                    + abs(signed_distance(point + dy, scan_width_sq, hairline_target, glyph) - center.sd),
+                abs(signed_distance(point + dx, scan_width_sq, hairline_target, path) - center.sd)
+                    + abs(signed_distance(point + dy, scan_width_sq, hairline_target, path) - center.sd),
                 vec2<f32>(ROOT_EPSILON),
             );
             let exempt = band_coverage(center.sd.x, band.x);
@@ -1404,13 +1404,13 @@ fn render_coverage(
         // grazing angles dx/dy stretch along the foreshortened axis, so the
         // samples integrate the coverage strip a single sample cannot capture.
         var sum = 0.0;
-        sum += distance_coverage(point + 0.375 * dx + 0.125 * dy, pixel, dilation_max, hairline_target, glyph);
-        sum += distance_coverage(point - 0.125 * dx + 0.375 * dy, pixel, dilation_max, hairline_target, glyph);
-        sum += distance_coverage(point - 0.375 * dx - 0.125 * dy, pixel, dilation_max, hairline_target, glyph);
-        sum += distance_coverage(point + 0.125 * dx - 0.375 * dy, pixel, dilation_max, hairline_target, glyph);
+        sum += distance_coverage(point + 0.375 * dx + 0.125 * dy, pixel, dilation_max, hairline_target, path);
+        sum += distance_coverage(point - 0.125 * dx + 0.375 * dy, pixel, dilation_max, hairline_target, path);
+        sum += distance_coverage(point - 0.375 * dx - 0.125 * dy, pixel, dilation_max, hairline_target, path);
+        sum += distance_coverage(point + 0.125 * dx - 0.375 * dy, pixel, dilation_max, hairline_target, path);
         coverage = sum * 0.25;
     } else {
-        coverage = distance_coverage(point, pixel, dilation_max, hairline_target, glyph);
+        coverage = distance_coverage(point, pixel, dilation_max, hairline_target, path);
     }
 
     if render_mode == RENDER_MODE_PUNCH_OUT {
@@ -1426,9 +1426,9 @@ fn fragment(in: VertexOutput) {
 #ifdef VERTEX_UVS_B
     // The shadow map stores a binary silhouette, so one winding test answers
     // it: keep fragments inside the outline (punch-out runs invert the test).
-    let glyph = glyphs[glyph_index(in.uv_b)];
-    let point = design_position(in.uv, glyph);
-    let inside = winding_at(point, glyph) != 0;
+    let path = path_records[path_index(in.uv_b)];
+    let point = design_position(in.uv, path);
+    let inside = winding_at(point, path) != 0;
     if inside == (run_render_mode(in.uv_b) == RENDER_MODE_PUNCH_OUT) {
         discard;
     }
@@ -1452,18 +1452,18 @@ fn fragment(
     discard;
 #endif
 
-    let glyph = glyphs[glyph_index(in.uv_b)];
+    let path = path_records[path_index(in.uv_b)];
     // Diagnostic: paint line fragments with an upstream coverage input. The
     // derivatives are taken under the const-only gate (uniform control flow)
     // before the per-fragment min_feature branch.
     if LINE_DEBUG_MODE != 0 {
-        let dbg_point = design_position(in.uv, glyph);
+        let dbg_point = design_position(in.uv, path);
         let dbg_dx = dpdx(dbg_point);
         let dbg_dy = dpdy(dbg_point);
-        if glyph.min_feature > 0.0 {
+        if path.min_feature > 0.0 {
             let dbg_scan = max(length(dbg_dx), length(dbg_dy))
                 * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
-            let dbg = signed_distance_sample(dbg_point, dbg_scan * dbg_scan, 0.0, glyph);
+            let dbg = signed_distance_sample(dbg_point, dbg_scan * dbg_scan, 0.0, path);
             var dbg_rgb: vec3<f32>;
             if LINE_DEBUG_MODE == 1 {
                 dbg_rgb = vec3<f32>(dbg.union_normal * 0.5 + vec2<f32>(0.5), 0.5);
@@ -1487,7 +1487,7 @@ fn fragment(
     let fill_color = run_fill_color(in.uv_b);
     let coverage = render_coverage(
         in.uv,
-        glyph,
+        path,
         run_render_mode(in.uv_b),
         run_aa_flags(in.uv_b),
     );

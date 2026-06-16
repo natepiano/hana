@@ -9,8 +9,7 @@
 //!   (`signed_distance` / `band_coverage`, inside-negative) and the Off/Supersample
 //!   `distance_coverage` path (inside-positive smoothstep), including per-curve hairline dilation
 //!   and the hairline fade factor — kept in sync with the shader by hand. The `distance_coverage`
-//!   mirror exists because the Phase B AA-Off sign inversion shipped through an `aa_band`-only
-//!   mirror,
+//!   mirror covers the Off/Supersample sign convention, which an `aa_band`-only mirror would miss,
 //! - an independent brute-force **ground truth** (`GroundTruth`) that counts inside/outside over
 //!   the footprint with no bands at all.
 //!
@@ -50,8 +49,8 @@ use crate::render::BandRecord;
 use crate::render::Bounds;
 use crate::render::CurveRecord;
 use crate::render::DEFAULT_BAND_COUNT;
-use crate::render::GlyphRecord;
 use crate::render::PackedPath;
+use crate::render::PathRecord;
 use crate::render::QuadraticSegment;
 
 const ROOT_EPSILON: f32 = 0.000_01;
@@ -87,7 +86,7 @@ const CORNER_WING_MAX_REACH: f32 = 1.5;
 // ---- shader-math replica (mirrors analytic_path.wgsl exactly) --------------
 
 struct Probe {
-    record: GlyphRecord,
+    record: PathRecord,
     curves: Vec<CurveRecord>,
     bands:  Vec<BandRecord>,
 }
@@ -732,7 +731,7 @@ fn build() -> (Probe, GroundTruth) {
     let packed = super::build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
     let band_count = (packed.bands().len() / 2) as u32;
     let probe = Probe {
-        record: GlyphRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
+        record: PathRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
         curves: packed.curves().to_vec(),
         bands:  packed.bands().to_vec(),
     };
@@ -987,7 +986,7 @@ fn center_dilation_bounds_corner_wing() {
 #[test]
 fn shader_mirror_matches_wgsl() {
     const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
-    const EXPECTED_SHADER_FNV1A: u64 = 0xab5d_eec8_e7a4_9eab;
+    const EXPECTED_SHADER_FNV1A: u64 = 0x4852_c4b8_1040_00a7;
     let actual = fnv1a_64(SHADER.as_bytes());
     assert_eq!(
         actual, EXPECTED_SHADER_FNV1A,
@@ -1039,7 +1038,7 @@ fn rectangle_probe_with_fade(
     let packed = super::build_packed_glyph(glyph, band_count);
     let band_count = (packed.bands().len() / 2) as u32;
     Probe {
-        record: GlyphRecord::new(
+        record: PathRecord::new(
             packed.bounds(),
             0,
             band_count,
@@ -1243,7 +1242,7 @@ fn atlas_packed_tall_spine_covers_full_length() {
             start: band.start + curve_start,
             ..*band
         }));
-        records.push(GlyphRecord::new(
+        records.push(PathRecord::new(
             packed.bounds(),
             band_start,
             axis_band_count,
@@ -1389,9 +1388,9 @@ fn subfloor_stroke_probe() -> Probe {
 /// The dilation contract, sign convention included: a sub-floor stroke
 /// dilated to the hairline floor must render exactly like a stroke whose
 /// natural width IS the floor, across the whole cross-axis profile, on the
-/// `distance_coverage` (AA Off) path. The Phase B sign inversion failed this
-/// — the inside-positive ramp applied the dilation with the inside-negative
-/// sign, eroding sub-floor strokes to hollow rims.
+/// `distance_coverage` (AA Off) path. The failure mode this guards: the
+/// inside-positive ramp applying the dilation with the inside-negative sign,
+/// eroding sub-floor strokes to hollow rims.
 #[test]
 fn dilated_subfloor_stroke_matches_at_floor_stroke_profile() {
     let dilated = subfloor_stroke_probe();
@@ -1562,7 +1561,7 @@ fn merged_mixed_fade_path_has_no_junction_dip() {
         let packed = super::build_packed_glyph(glyph, 1);
         let band_count = (packed.bands().len() / 2) as u32;
         Probe {
-            record: GlyphRecord::new(
+            record: PathRecord::new(
                 packed.bounds(),
                 0,
                 band_count,

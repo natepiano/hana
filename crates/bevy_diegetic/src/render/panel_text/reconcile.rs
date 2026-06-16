@@ -181,9 +181,9 @@ pub(super) fn reconcile_panel_text_children(
         let viewport = clip::panel_viewport(&panel);
         // Each text command carries its source element's run id (from the tree)
         // and a per-run line ordinal, so the reuse key is `(id, line_index)`:
-        // content-stable, unlike the former `(element_idx, command_index)` pair
-        // that a sibling reorder shifted (R7). Auto ids preserve that positional
-        // behavior; named ids survive the reorder.
+        // content-stable, unlike a positional `(element_idx, command_index)`
+        // pair that a sibling reorder would shift. Auto ids preserve that
+        // positional behavior; named ids survive the reorder.
         let text_commands = collect_text_commands(
             &panel,
             &result.commands,
@@ -585,7 +585,7 @@ struct ImageGeometry {
 ///
 /// Image tint has no cascade, so this comparison is the only no-op suppressor.
 /// Because `materials.get_mut` marks the asset modified on access, the tint
-/// branch is reached only when the cached tint actually differs (R5/F8). A
+/// branch is reached only when the cached tint actually differs. A
 /// `draw_depth` move rebuilds the material because `depth_bias` lives there.
 fn reconcile_existing_image(
     commands: &mut Commands,
@@ -1019,7 +1019,7 @@ mod tests {
         );
     }
 
-    // ── Panel↔run relationship lifecycle (Phase 4 `TextRunOf`/`PanelTextRuns`) ──
+    // ── Panel↔run relationship lifecycle (`TextRunOf`/`PanelTextRuns`) ──
 
     /// Records whether any panel's [`PanelTextRuns`] changed since the probe last
     /// ran, so a test can assert a reuse-only reconcile leaves the set untouched.

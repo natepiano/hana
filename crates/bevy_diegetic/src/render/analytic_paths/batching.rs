@@ -1,9 +1,9 @@
 //! Batch store for analytic path instancing: groups runs by batch key, owns
 //! each batch's CPU record vectors and GPU handles, and derives run ranges by
-//! rebuild (`docs/bevy_diegetic/glyph_instancing.md`, decision 4).
+//! rebuild.
 //!
-//! Membership has a single mutation point — [`GlyphBatchStore::upsert_run`] /
-//! [`GlyphBatchStore::remove_run`] update the run→batch index and the batch's
+//! Membership has a single mutation point — [`PathBatchStore::upsert_run`] /
+//! [`PathBatchStore::remove_run`] update the run→batch index and the batch's
 //! run set together — and ranges have a single writer: `rebuild` recomputes
 //! them from the live run set, so they cannot go stale relative to the record
 //! vectors they index. The store is plain data; the routing systems own all
@@ -26,8 +26,8 @@ use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
-use super::material::TextMaterial;
-use super::packing::GlyphInstanceRecord;
+use super::material::PathMaterial;
+use super::packing::PathInstanceRecord;
 use super::packing::RunRecord;
 use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
@@ -76,15 +76,15 @@ pub(crate) struct BatchKey {
 /// reliably (a missing render asset retries next frame).
 #[derive(Debug)]
 pub(crate) struct BatchGpu {
-    /// `GlyphInstanceRecord` storage buffer (binding 104), `capacity` records.
+    /// `PathInstanceRecord` storage buffer (binding 104), `capacity` records.
     pub instances:    Handle<ShaderBuffer>,
     /// `RunRecord` storage buffer (binding 105), `run_capacity` records.
     pub run_table:    Handle<ShaderBuffer>,
     /// Inert capacity-sized mesh; re-created and swapped on capacity growth.
     pub mesh:         Handle<Mesh>,
     /// The batch's material; its buffer handles are rewritten on growth.
-    pub material:     Handle<TextMaterial>,
-    /// Glyph-record capacity of `mesh` and `instances`.
+    pub material:     Handle<PathMaterial>,
+    /// Path-instance capacity of `mesh` and `instances`.
     pub capacity:     u32,
     /// Run-record capacity of `run_table`.
     pub run_capacity: u32,
@@ -94,25 +94,25 @@ pub(crate) struct BatchGpu {
 /// concatenated record vectors from, plus its derived range.
 #[derive(Debug)]
 struct BatchRun {
-    key:    RunStorageKey,
-    /// Glyph records in run order; `run_index` is stamped by `rebuild`.
-    glyphs: Vec<GlyphInstanceRecord>,
-    record: RunRecord,
-    /// This run's slots in the concatenated glyph records — derived state,
+    key:          RunStorageKey,
+    /// Path records in run order; `run_index` is stamped by `rebuild`.
+    path_records: Vec<PathInstanceRecord>,
+    record:       RunRecord,
+    /// This run's slots in the concatenated path records — derived state,
     /// written only by `rebuild`.
-    range:  Range<u32>,
+    range:        Range<u32>,
 }
 
 /// One render entity + one material + one mesh per [`BatchKey`]: the CPU
 /// record vectors the GPU tables upload from, the member runs they derive
 /// from, and the split dirty flags the commit system reads.
 #[derive(Debug, Default)]
-pub struct GlyphBatch {
+pub struct PathBatch {
     /// The batch render entity; `None` until the routing system spawns it.
     pub entity:          Option<Entity>,
     /// GPU handles; `None` until the routing system creates them.
     pub gpu:             Option<BatchGpu>,
-    /// Glyph records changed — the instance buffer needs an upload.
+    /// Path records changed — the instance buffer needs an upload.
     pub instances_dirty: bool,
     /// Run records changed — the run table needs an upload.
     pub run_table_dirty: bool,
@@ -120,15 +120,15 @@ pub struct GlyphBatch {
     /// recomputes this batch's bounds.
     pub bounds_dirty:    bool,
     runs:                Vec<BatchRun>,
-    glyph_records:       Vec<GlyphInstanceRecord>,
+    path_records:        Vec<PathInstanceRecord>,
     run_records:         Vec<RunRecord>,
 }
 
-impl GlyphBatch {
-    /// Concatenated glyph records, `run_index` stamped — the instance-buffer
+impl PathBatch {
+    /// Concatenated path records, `run_index` stamped — the instance-buffer
     /// upload payload.
     #[must_use]
-    pub fn glyph_records(&self) -> &[GlyphInstanceRecord] { &self.glyph_records }
+    pub fn path_records(&self) -> &[PathInstanceRecord] { &self.path_records }
 
     /// One record per member run — the run-table upload payload.
     #[must_use]
@@ -138,22 +138,22 @@ impl GlyphBatch {
     #[must_use]
     pub const fn run_count(&self) -> usize { self.runs.len() }
 
-    /// Number of glyph records across all member runs.
+    /// Number of path records across all member runs.
     #[must_use]
-    pub fn glyph_record_count(&self) -> u32 { self.glyph_records.len().to_u32() }
+    pub fn path_record_count(&self) -> u32 { self.path_records.len().to_u32() }
 
     /// Whether the last member run has left.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.runs.is_empty() }
 
-    /// World-space bounds over every glyph rect × its run transform, for the
+    /// World-space bounds over every path rect × its run transform, for the
     /// Aabb-union system. `None` when the batch holds no records.
     #[must_use]
     pub fn world_bounds(&self) -> Option<(Vec3, Vec3)> {
         let mut min = Vec3::MAX;
         let mut max = Vec3::MIN;
         let mut any = false;
-        for record in &self.glyph_records {
+        for record in &self.path_records {
             let run = &self.run_records[record.run_index.to_usize()];
             for (corner_x, corner_y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
                 let local = record.rect_min + Vec2::new(corner_x, corner_y) * record.rect_size;
@@ -175,17 +175,17 @@ impl GlyphBatch {
     /// stale relative to the vectors they index. Every record field is
     /// stamped from the run's source data — never defaulted.
     fn rebuild(&mut self) {
-        self.glyph_records.clear();
+        self.path_records.clear();
         self.run_records.clear();
         for (index, run) in self.runs.iter_mut().enumerate() {
-            let start = self.glyph_records.len().to_u32();
+            let start = self.path_records.len().to_u32();
             let run_index = index.to_u32();
-            self.glyph_records
-                .extend(run.glyphs.iter().map(|record| GlyphInstanceRecord {
+            self.path_records
+                .extend(run.path_records.iter().map(|record| PathInstanceRecord {
                     run_index,
                     ..*record
                 }));
-            run.range = start..self.glyph_records.len().to_u32();
+            run.range = start..self.path_records.len().to_u32();
             self.run_records.push(run.record);
         }
         self.instances_dirty = true;
@@ -196,12 +196,12 @@ impl GlyphBatch {
     fn push_run(
         &mut self,
         key: RunStorageKey,
-        glyphs: Vec<GlyphInstanceRecord>,
+        path_records: Vec<PathInstanceRecord>,
         record: RunRecord,
     ) {
         self.runs.push(BatchRun {
             key,
-            glyphs,
+            path_records,
             record,
             range: 0..0,
         });
@@ -221,17 +221,17 @@ impl GlyphBatch {
     fn update_run(
         &mut self,
         key: RunStorageKey,
-        glyphs: Vec<GlyphInstanceRecord>,
+        path_records: Vec<PathInstanceRecord>,
         record: RunRecord,
     ) {
         let Some(position) = self.position_of(key) else {
             return;
         };
-        if self.runs[position].glyphs.len() == glyphs.len() {
+        if self.runs[position].path_records.len() == path_records.len() {
             let run_index = position.to_u32();
             let range = self.runs[position].range.clone();
-            for (slot, source) in range.zip(glyphs.iter()) {
-                self.glyph_records[slot.to_usize()] = GlyphInstanceRecord {
+            for (slot, source) in range.zip(path_records.iter()) {
+                self.path_records[slot.to_usize()] = PathInstanceRecord {
                     run_index,
                     ..*source
                 };
@@ -240,12 +240,12 @@ impl GlyphBatch {
                 self.run_records[position] = record;
                 self.run_table_dirty = true;
             }
-            self.runs[position].glyphs = glyphs;
+            self.runs[position].path_records = path_records;
             self.runs[position].record = record;
             self.instances_dirty = true;
             self.bounds_dirty = true;
         } else {
-            self.runs[position].glyphs = glyphs;
+            self.runs[position].path_records = path_records;
             self.runs[position].record = record;
             self.rebuild();
         }
@@ -267,16 +267,16 @@ impl GlyphBatch {
     }
 }
 
-/// Routes every panel-text run to its batch: one [`GlyphBatch`] per
+/// Routes every panel-text run to its batch: one [`PathBatch`] per
 /// [`BatchKey`], a run→batch index, and the base-material interner.
 #[derive(Debug, Default)]
-pub(crate) struct GlyphBatchStore {
-    batches:   HashMap<BatchKey, GlyphBatch>,
+pub(crate) struct PathBatchStore {
+    batches:   HashMap<BatchKey, PathBatch>,
     run_index: HashMap<RunStorageKey, BatchKey>,
     interner:  VisualMaterialInterner,
 }
 
-impl GlyphBatchStore {
+impl PathBatchStore {
     /// Id for an authored base material, minting one on first sight.
     pub fn intern_base_material(&mut self, material: &StandardMaterial) -> BaseMaterialId {
         self.interner.intern_base_material(material)
@@ -299,13 +299,13 @@ impl GlyphBatchStore {
         &mut self,
         key: BatchKey,
         run: RunStorageKey,
-        glyphs: Vec<GlyphInstanceRecord>,
+        path_records: Vec<PathInstanceRecord>,
         record: RunRecord,
     ) {
         if let Some(current) = self.run_index.get(&run) {
             if *current == key {
                 if let Some(batch) = self.batches.get_mut(&key) {
-                    batch.update_run(run, glyphs, record);
+                    batch.update_run(run, path_records, record);
                 }
                 return;
             }
@@ -318,7 +318,7 @@ impl GlyphBatchStore {
         self.batches
             .entry(key.clone())
             .or_default()
-            .push_run(run, glyphs, record);
+            .push_run(run, path_records, record);
         self.run_index.insert(run, key);
     }
 
@@ -345,25 +345,24 @@ impl GlyphBatchStore {
     }
 
     /// All batches.
-    pub fn batches(&self) -> impl Iterator<Item = (&BatchKey, &GlyphBatch)> { self.batches.iter() }
+    pub fn batches(&self) -> impl Iterator<Item = (&BatchKey, &PathBatch)> { self.batches.iter() }
 
     /// All batches, mutable.
-    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&BatchKey, &mut GlyphBatch)> {
+    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&BatchKey, &mut PathBatch)> {
         self.batches.iter_mut()
     }
 
     /// One batch by key.
     #[must_use]
-    pub fn get(&self, key: &BatchKey) -> Option<&GlyphBatch> { self.batches.get(key) }
+    pub fn get(&self, key: &BatchKey) -> Option<&PathBatch> { self.batches.get(key) }
 
     /// One batch by key, mutable.
-    pub fn get_mut(&mut self, key: &BatchKey) -> Option<&mut GlyphBatch> {
+    pub fn get_mut(&mut self, key: &BatchKey) -> Option<&mut PathBatch> {
         self.batches.get_mut(key)
     }
 
     /// Drops batches whose last run left, returning their entities for the
-    /// routing system to despawn (the batch analogue of the R10 empty-run
-    /// path).
+    /// routing system to despawn (the batch analogue of the empty-run path).
     pub fn take_empty_batches(&mut self) -> Vec<Entity> {
         let empty: Vec<BatchKey> = self
             .batches
@@ -395,8 +394,8 @@ mod tests {
 
     use super::*;
 
-    fn glyph(rect_min: Vec2, atlas_index: u32) -> GlyphInstanceRecord {
-        GlyphInstanceRecord {
+    fn path_record(rect_min: Vec2, atlas_index: u32) -> PathInstanceRecord {
+        PathInstanceRecord {
             rect_min,
             rect_size: Vec2::ONE,
             uv_min: Vec2::ZERO,
@@ -417,7 +416,7 @@ mod tests {
         }
     }
 
-    fn key(store: &mut GlyphBatchStore, alpha: AlphaMode) -> BatchKey {
+    fn key(store: &mut PathBatchStore, alpha: AlphaMode) -> BatchKey {
         let id = store.intern_base_material(&StandardMaterial::default());
         BatchKey {
             base_material: id,
@@ -434,7 +433,7 @@ mod tests {
 
     #[test]
     fn two_runs_one_key_share_a_batch_with_contiguous_ranges() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
@@ -442,23 +441,23 @@ mod tests {
         store.upsert_run(
             batch_key.clone(),
             first,
-            vec![glyph(Vec2::ZERO, 0), glyph(Vec2::X, 1)],
+            vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)],
             record(Mat4::IDENTITY),
         );
         store.upsert_run(
             batch_key.clone(),
             second,
-            vec![glyph(Vec2::Y, 2)],
+            vec![path_record(Vec2::Y, 2)],
             record(Mat4::IDENTITY),
         );
 
         assert_eq!(store.batches().count(), 1);
         let batch = store.get(&batch_key).expect("batch should exist");
         assert_eq!(batch.run_count(), 2);
-        assert_eq!(batch.glyph_record_count(), 3);
+        assert_eq!(batch.path_record_count(), 3);
         // Records are concatenated in insertion order with run indices stamped.
         let stamped: Vec<u32> = batch
-            .glyph_records()
+            .path_records()
             .iter()
             .map(|record| record.run_index)
             .collect();
@@ -470,20 +469,20 @@ mod tests {
 
     #[test]
     fn removing_a_run_rebuilds_the_survivors_ranges() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
         store.upsert_run(
             batch_key.clone(),
             first,
-            vec![glyph(Vec2::ZERO, 0), glyph(Vec2::X, 1)],
+            vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)],
             record(Mat4::IDENTITY),
         );
         store.upsert_run(
             batch_key.clone(),
             second,
-            vec![glyph(Vec2::Y, 2)],
+            vec![path_record(Vec2::Y, 2)],
             record(Mat4::IDENTITY),
         );
 
@@ -492,22 +491,22 @@ mod tests {
         assert!(!store.is_routed(first));
         let batch = store.get(&batch_key).expect("batch should survive");
         assert_eq!(batch.run_count(), 1);
-        assert_eq!(batch.glyph_record_count(), 1);
+        assert_eq!(batch.path_record_count(), 1);
         // The surviving run shifted to index 0 and its records re-stamped.
-        assert_eq!(batch.glyph_records()[0].run_index, 0);
-        assert_eq!(batch.glyph_records()[0].atlas_index, 2);
+        assert_eq!(batch.path_records()[0].run_index, 0);
+        assert_eq!(batch.path_records()[0].atlas_index, 2);
     }
 
     #[test]
     fn same_count_edit_writes_in_place_without_touching_the_run_table() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         let run = run_key(1);
         let stamped = record(Mat4::IDENTITY);
         store.upsert_run(
             batch_key.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0), glyph(Vec2::X, 1)],
+            vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)],
             stamped,
         );
         {
@@ -521,18 +520,18 @@ mod tests {
         store.upsert_run(
             batch_key.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 5), glyph(Vec2::X, 6)],
+            vec![path_record(Vec2::ZERO, 5), path_record(Vec2::X, 6)],
             stamped,
         );
 
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert!(batch.instances_dirty, "glyph records changed");
+        assert!(batch.instances_dirty, "path records changed");
         assert!(
             !batch.run_table_dirty,
             "an unchanged run record must not dirty the run table"
         );
         let atlas: Vec<u32> = batch
-            .glyph_records()
+            .path_records()
             .iter()
             .map(|record| record.atlas_index)
             .collect();
@@ -541,45 +540,45 @@ mod tests {
 
     #[test]
     fn count_change_takes_the_rebuild_path() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         let run = run_key(1);
         store.upsert_run(
             batch_key.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
 
         store.upsert_run(
             batch_key.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0), glyph(Vec2::X, 1)],
+            vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)],
             record(Mat4::IDENTITY),
         );
 
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert_eq!(batch.glyph_record_count(), 2);
+        assert_eq!(batch.path_record_count(), 2);
         assert!(batch.run_table_dirty, "a rebuild re-uploads both buffers");
     }
 
     #[test]
     fn key_change_moves_the_run_between_batches() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let blend = key(&mut store, AlphaMode::Blend);
         let add = key(&mut store, AlphaMode::Add);
         let run = run_key(1);
         store.upsert_run(
             blend.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
 
         store.upsert_run(
             add.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
 
@@ -594,20 +593,25 @@ mod tests {
 
     #[test]
     fn move_then_remove_in_one_pass_leaves_both_maps_consistent() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let blend = key(&mut store, AlphaMode::Blend);
         let add = key(&mut store, AlphaMode::Add);
         let run = run_key(1);
         store.upsert_run(
             blend,
             run,
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
 
         // One routing pass: the run re-keys (a live cascade change) and is
         // removed (its label despawned) before any reconcile runs.
-        store.upsert_run(add, run, vec![glyph(Vec2::ZERO, 0)], record(Mat4::IDENTITY));
+        store.upsert_run(
+            add,
+            run,
+            vec![path_record(Vec2::ZERO, 0)],
+            record(Mat4::IDENTITY),
+        );
         store.remove_run(run);
 
         assert!(!store.is_routed(run));
@@ -623,13 +627,13 @@ mod tests {
 
     #[test]
     fn transform_update_dirties_the_run_table_only_on_change() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         let run = run_key(1);
         store.upsert_run(
             batch_key.clone(),
             run,
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
         {
@@ -655,7 +659,7 @@ mod tests {
 
     #[test]
     fn interner_assigns_one_id_per_distinct_material() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let default_id = store.intern_base_material(&StandardMaterial::default());
         let same_id = store.intern_base_material(&StandardMaterial::default());
         let tinted = StandardMaterial {
@@ -674,18 +678,18 @@ mod tests {
 
     #[test]
     fn world_bounds_unions_rects_across_run_transforms() {
-        let mut store = GlyphBatchStore::default();
+        let mut store = PathBatchStore::default();
         let batch_key = key(&mut store, AlphaMode::Blend);
         store.upsert_run(
             batch_key.clone(),
             run_key(1),
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::IDENTITY),
         );
         store.upsert_run(
             batch_key.clone(),
             run_key(2),
-            vec![glyph(Vec2::ZERO, 0)],
+            vec![path_record(Vec2::ZERO, 0)],
             record(Mat4::from_translation(Vec3::new(4.0, 0.0, -2.0))),
         );
 

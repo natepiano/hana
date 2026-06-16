@@ -310,8 +310,8 @@ Acceptance:
 
 **What deviated from the plan:**
 
-- The renderer still exposes glyph-compatible aliases such as `GlyphRecord` and
-  `GlyphInstanceRecord` while Phase B begins consuming the path names.
+- The renderer still exposes glyph-compatible aliases such as `PathRecord` and
+  `PathInstanceRecord` while Phase B begins consuming the path names.
 - The existing text batch key remains text-oriented, while the already-shared
   `VisualBatchKey` remains the generic render compatibility key for future path
   producers.
@@ -404,7 +404,7 @@ Acceptance:
   forms into closed `PathOutline` contours, including midpoint-control
   quadratics for straight edges and quadratic arc segments for circles.
 - `PanelLineBatchStore` kept panel-owned source cleanup while routing payloads
-  through `PathAtlas<PanelLineRenderKey>`, `GlyphInstanceRecord`, `RunRecord`,
+  through `PathAtlas<PanelLineRenderKey>`, `PathInstanceRecord`, `RunRecord`,
   and `TextMaterial`.
 
 **What deviated from the plan:**
@@ -665,7 +665,7 @@ As built:
   — mixed fade policies share one group, one record, one batch.
 - **Fade is per-curve data**: `PathContour` and `CurveRecord` gained
   `fade_exponent` (curve stride 64 → 80 B, new encase assertion);
-  `RunRecord.fade_exponent` and `TextUniform.hairline_fade_exponent` were
+  `RunRecord.fade_exponent` and `PathUniform.hairline_fade_exponent` were
   deleted (run stride 112 → 96 B; both WGSL mirrors, padded-payload tests,
   and every constructor updated). `aa_flags` stays per-record.
 - **Two-lane coverage evaluation** in `analytic_path.wgsl`: curves split into
@@ -934,7 +934,7 @@ Deliverables:
   `panel_shapes/primitive.rs` calls `PanelShapeRenderKey` a "panel-line"
   identity), and keep the as-built module summary current.
 - Rename text/glyph-compatible internal analytic-path names such as
-  `TextMaterial`, `GlyphRecord`, and `GlyphInstanceRecord` to path-neutral
+  `TextMaterial`, `PathRecord`, and `PathInstanceRecord` to path-neutral
   names, or explicitly defer with a per-type rationale recorded in code. The
   rename touches reference sites across render and text modules (re-count at
   phase start; the `panel_lines`→`panel_shapes` module rename is already done

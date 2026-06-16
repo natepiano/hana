@@ -363,12 +363,7 @@ fn fragment(
 
     // Outer alpha — centered smoothstep. 50%-alpha pixel lands
     // exactly on the requested edge, so rendered width matches the
-    // requested SDF half-size. Previously this used a one-sided
-    // `smoothstep(0, 2*base_aa, outer_dist)` to keep interior pixels
-    // fully opaque (avoiding seam double-blend where two panels share
-    // an edge at zero gap), but that fattened every stroke by ~1 px
-    // on each edge, visibly inflating thin geometry like callout shafts
-    // and fine borders.
+    // requested SDF half-size.
     let outer_alpha = (1.0 - smoothstep(-base_aa, base_aa, outer_dist)) * coverage_scale;
 
     // Discard fully outside fragments.

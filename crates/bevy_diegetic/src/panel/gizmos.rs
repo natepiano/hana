@@ -13,10 +13,6 @@ use crate::layout::RenderCommandKind;
 /// Gizmo group for diegetic panel debug wireframes.
 ///
 /// Enable or disable via Bevy's [`GizmoConfigStore`].
-///
-/// **Note:** This API is provisional. Once panels render real geometry
-/// (Phase 4), debug visualization will likely move to a per-panel debug
-/// mode rather than a separate gizmo group.
 #[derive(Default, Reflect, GizmoConfigGroup)]
 pub struct DiegeticPanelGizmoGroup;
 

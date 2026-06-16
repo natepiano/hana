@@ -92,7 +92,7 @@
 //!
 //! # Adding a cascade attribute
 //!
-//! For a new attribute with no existing plain-field history, add one
+//! For a new attribute with no existing plain field, add one
 //! `cascade_attr!(Name(Ty), default = value)` declaration in `cascade/resolved.rs`,
 //! three typed wrappers in `cascade/attributes.rs`
 //! (`override_name`, `inherit_name`, `resolved_name`), one

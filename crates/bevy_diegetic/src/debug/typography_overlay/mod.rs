@@ -38,9 +38,8 @@ use crate::panel::SurfaceShadow;
 /// child of `container`.
 ///
 /// The label's [`TextStyle`] anchor becomes the panel anchor, so the text sits at
-/// `transform` exactly as the bare-[`TextContent`](crate::TextContent) spawns did
-/// before [`DiegeticText`] one-element panels replaced the standalone world-text
-/// render path (a bare `TextContent` no longer renders on its own).
+/// `transform`. [`DiegeticText`] labels are one-element panels; a bare
+/// [`TextContent`](crate::TextContent) does not render on its own.
 pub(super) fn spawn_overlay_label(
     commands: &mut Commands,
     container: Entity,

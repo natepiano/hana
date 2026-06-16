@@ -209,8 +209,8 @@ fn panel_clip_rect_local(
 /// Stores the prepared run and readiness markers for one label.
 ///
 /// The label's `Resolved<TextAlpha>` is owned by the cascade (seeded by
-/// `seed_panel_child_alpha`, kept current by the propagation pass), so this is
-/// no longer where the label's alpha is computed.
+/// `seed_panel_child_alpha`, kept current by the propagation pass), not
+/// computed here.
 fn apply_panel_result(
     entity: Entity,
     panel_text: Option<PreparedPanelText>,

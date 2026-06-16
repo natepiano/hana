@@ -20,14 +20,14 @@ use super::constants::ANALYTIC_PATH_SHADER_PATH;
 use super::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 use crate::layout::GlyphRenderMode;
 
-/// Visible render mode for the text shader.
+/// Visible render mode for the path shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u32)]
 pub(crate) enum RenderMode {
     /// Normal coverage fill.
     #[default]
     Text     = 1,
-    /// Inverted coverage inside each glyph quad.
+    /// Inverted coverage inside each path quad.
     PunchOut = 2,
 }
 
@@ -44,12 +44,12 @@ impl From<GlyphRenderMode> for RenderMode {
     }
 }
 
-/// Material used by the text renderer.
-pub(crate) type TextMaterial = ExtendedMaterial<StandardMaterial, TextExtension>;
+/// Material used by the path renderer.
+pub(crate) type PathMaterial = ExtendedMaterial<StandardMaterial, PathExtension>;
 
-/// Uniforms consumed by the text shader.
+/// Uniforms consumed by the path shader.
 #[derive(Clone, Debug, ShaderType)]
-struct TextUniform {
+struct PathUniform {
     /// Linear fill color.
     fill_color:       Vec4,
     /// Visible render mode for this pass.
@@ -57,7 +57,7 @@ struct TextUniform {
     /// Per-layer depth offset applied to the OIT fragment position for coplanar
     /// layer ordering.
     oit_depth_offset: f32,
-    /// Non-zero enables sub-pixel supersampling of glyph coverage (anti-aliases
+    /// Non-zero enables sub-pixel supersampling of path coverage (anti-aliases
     /// grazing-angle edges without MSAA).
     supersample:      u32,
     /// Non-zero switches the edge AA band from the scalar design-space
@@ -65,76 +65,70 @@ struct TextUniform {
     /// which fixes the convex-corner flare at grazing angles.
     aa_band:          u32,
     /// Minimum on-screen stroke width in device pixels for hairline-dilated
-    /// paths (`GlyphRecord::min_feature > 0`). Mirrored from
+    /// paths (`PathRecord::min_feature > 0`). Mirrored from
     /// [`HairlineWidth`](crate::HairlineWidth) by `sync_hairline_width`.
     hairline_min_px:  f32,
 }
 
-/// Constructor default for `TextUniform::hairline_min_px`; `sync_hairline_width`
+/// Constructor default for `PathUniform::hairline_min_px`; `sync_hairline_width`
 /// replaces it with the window-scale-derived value on the asset-added event.
 const HAIRLINE_DEFAULT_DEVICE_PX: f32 = 2.0;
 
 /// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-#[bind_group_data(TextExtensionKey)]
-pub struct TextExtension {
+#[bind_group_data(PathExtensionKey)]
+pub struct PathExtension {
     /// Shader uniforms.
     #[uniform(100)]
-    uniforms:          TextUniform,
-    /// Shared glyph-atlas band-packed quadratic curve records.
+    uniforms:     PathUniform,
+    /// Shared path record band-packed quadratic curve records.
     #[storage(101, read_only)]
-    curves:            Handle<ShaderBuffer>,
-    /// Shared glyph-atlas horizontal/vertical band records.
+    curves:       Handle<ShaderBuffer>,
+    /// Shared path horizontal/vertical band records.
     #[storage(102, read_only)]
-    bands:             Handle<ShaderBuffer>,
-    /// Shared glyph-atlas records, indexed by each glyph record's `atlas_index`.
+    bands:        Handle<ShaderBuffer>,
+    /// Shared path records, indexed by each atlas record's `atlas_index`.
     #[storage(103, read_only)]
-    glyphs:            Handle<ShaderBuffer>,
-    /// Per-glyph instance records read by the vertex-pulling stage.
+    path_records: Handle<ShaderBuffer>,
+    /// Per-path instance records read by the vertex-pulling stage.
     #[storage(104, read_only, visibility(vertex))]
-    instances:         Handle<ShaderBuffer>,
+    instances:    Handle<ShaderBuffer>,
     /// Per-run records (world transform, fill color, render mode, depth
     /// nudge) read by the vertex-pulling stages.
     #[storage(105, read_only, visibility(vertex, fragment))]
-    run_records:       Handle<ShaderBuffer>,
+    run_records:  Handle<ShaderBuffer>,
     /// Routes this material's vertex stages (main, prepass, shadow) through
     /// `analytic_path_vertex_pull.wgsl` instead of the standard mesh vertex stage.
-    vertex_pull:       bool,
-    /// Vertex-pull debug aid: displaces each quad by its recovered glyph
-    /// index, making the slab-base subtraction visible as a staircase.
-    debug_glyph_index: bool,
+    vertex_pull:  bool,
 }
 
 #[cfg(test)]
-pub(crate) const fn text_material_oit_depth_offset(material: &TextMaterial) -> f32 {
+pub(crate) const fn path_material_oit_depth_offset(material: &PathMaterial) -> f32 {
     material.extension.uniforms.oit_depth_offset
 }
 
-/// Pipeline-specialization key for [`TextExtension`]: which vertex stage a
+/// Pipeline-specialization key for [`PathExtension`]: which vertex stage a
 /// material compiles against.
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-pub struct TextExtensionKey {
-    /// Mirror of [`TextExtension::vertex_pull`].
-    vertex_pull:       bool,
-    /// Mirror of [`TextExtension::debug_glyph_index`].
-    debug_glyph_index: bool,
+pub struct PathExtensionKey {
+    /// Mirror of [`PathExtension::vertex_pull`].
+    vertex_pull: bool,
 }
 
-impl From<&TextExtension> for TextExtensionKey {
-    fn from(extension: &TextExtension) -> Self {
+impl From<&PathExtension> for PathExtensionKey {
+    fn from(extension: &PathExtension) -> Self {
         Self {
-            vertex_pull:       extension.vertex_pull,
-            debug_glyph_index: extension.debug_glyph_index,
+            vertex_pull: extension.vertex_pull,
         }
     }
 }
 
-impl MaterialExtension for TextExtension {
+impl MaterialExtension for PathExtension {
     fn fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
     fn prepass_fragment_shader() -> ShaderRef { ANALYTIC_PATH_SHADER_PATH.into() }
 
-    // Standing contract of the text path: the camera depth prepass cannot
+    // Standing contract of the path renderer: the camera depth prepass cannot
     // run vertex-pull batches. Bevy strips the material bind group from
     // depth-only opaque prepass pipelines (`is_depth_only_opaque_prepass`),
     // and the vertex-pull vertex stage reads bindings 104/105 from that
@@ -161,12 +155,6 @@ impl MaterialExtension for TextExtension {
             // and stripped-group pipelines must keep the standard vertex
             // stage (see `material_group_is_stripped`).
             descriptor.vertex.shader = ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
-            if key.bind_group_data.debug_glyph_index {
-                descriptor
-                    .vertex
-                    .shader_defs
-                    .push("GLYPH_PULL_DEBUG_INDEX".into());
-            }
             // The fragment sources `fill_color` / `render_mode` from the run
             // table (binding 105) instead of the material uniform, so a batch
             // renders every run with its own color and mode.
@@ -194,39 +182,37 @@ fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
 }
 
 /// Inputs for one vertex-pulling batch material.
-pub(crate) struct BatchTextMaterialInput {
+pub(crate) struct BatchPathMaterialInput {
     /// Base material settings.
-    pub base:              StandardMaterial,
+    pub base:             StandardMaterial,
     /// Placeholder fill color; vertex-pulling fragments read per-run color from
     /// `run_records`.
-    pub fill_color:        Vec4,
+    pub fill_color:       Vec4,
     /// Placeholder render mode; vertex-pulling fragments read per-run mode from
     /// `run_records`.
-    pub render_mode:       RenderMode,
+    pub render_mode:      RenderMode,
     /// Per-layer depth offset for coplanar OIT layer ordering.
-    pub oit_depth_offset:  f32,
-    /// Whether the material supersamples the glyph footprint.
-    pub supersample:       bool,
+    pub oit_depth_offset: f32,
+    /// Whether the material supersamples the path footprint.
+    pub supersample:      bool,
     /// Whether the material uses the screen-space anisotropic edge band.
-    pub aa_band:           bool,
-    /// Shared glyph-atlas band-packed quadratic curve records.
-    pub curves:            Handle<ShaderBuffer>,
-    /// Shared glyph-atlas horizontal/vertical band records.
-    pub bands:             Handle<ShaderBuffer>,
-    /// Shared glyph-atlas records, indexed by each glyph record's `atlas_index`.
-    pub glyphs:            Handle<ShaderBuffer>,
-    /// Per-glyph instance records read by the vertex-pulling stage.
-    pub instances:         Handle<ShaderBuffer>,
+    pub aa_band:          bool,
+    /// Shared path record band-packed quadratic curve records.
+    pub curves:           Handle<ShaderBuffer>,
+    /// Shared path horizontal/vertical band records.
+    pub bands:            Handle<ShaderBuffer>,
+    /// Shared path records, indexed by each atlas record's `atlas_index`.
+    pub path_records:     Handle<ShaderBuffer>,
+    /// Per-path instance records read by the vertex-pulling stage.
+    pub instances:        Handle<ShaderBuffer>,
     /// Per-run records read by the vertex-pulling stage.
-    pub run_records:       Handle<ShaderBuffer>,
-    /// Whether to enable the glyph-index staircase debug displacement.
-    pub debug_glyph_index: bool,
+    pub run_records:      Handle<ShaderBuffer>,
 }
 
-/// Creates a vertex-pulling `TextMaterial` for one batch.
+/// Creates a vertex-pulling `PathMaterial` for one batch.
 #[must_use]
-pub(crate) fn batch_text_material(input: BatchTextMaterialInput) -> TextMaterial {
-    let BatchTextMaterialInput {
+pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathMaterial {
+    let BatchPathMaterialInput {
         base,
         fill_color,
         render_mode,
@@ -235,15 +221,14 @@ pub(crate) fn batch_text_material(input: BatchTextMaterialInput) -> TextMaterial
         aa_band,
         curves,
         bands,
-        glyphs,
+        path_records,
         instances,
         run_records,
-        debug_glyph_index,
     } = input;
     ExtendedMaterial {
         base,
-        extension: TextExtension {
-            uniforms: TextUniform {
+        extension: PathExtension {
+            uniforms: PathUniform {
                 fill_color,
                 render_mode: u32::from(render_mode),
                 oit_depth_offset,
@@ -253,19 +238,18 @@ pub(crate) fn batch_text_material(input: BatchTextMaterialInput) -> TextMaterial
             },
             curves,
             bands,
-            glyphs,
+            path_records,
             instances,
             run_records,
             vertex_pull: true,
-            debug_glyph_index,
         },
     }
 }
 
 /// Repoints a batch material at replacement record buffers after capacity
 /// growth.
-pub(crate) fn set_batch_text_material_buffers(
-    material: &mut TextMaterial,
+pub(crate) fn set_batch_path_material_buffers(
+    material: &mut PathMaterial,
     instances: Handle<ShaderBuffer>,
     run_records: Handle<ShaderBuffer>,
 ) {
@@ -273,40 +257,32 @@ pub(crate) fn set_batch_text_material_buffers(
     material.extension.run_records = run_records;
 }
 
-/// Repoints a text material at replacement shared-atlas buffers after the
+/// Repoints a path material at replacement shared-atlas buffers after the
 /// atlas grows. The batch record buffers (bindings 104/105) are per-batch,
 /// not atlas-owned, so they are untouched here.
-pub(crate) fn set_text_material_atlas(
-    material: &mut TextMaterial,
+pub(crate) fn set_path_material_atlas(
+    material: &mut PathMaterial,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,
-    glyphs: Handle<ShaderBuffer>,
+    path_records: Handle<ShaderBuffer>,
 ) {
     material.extension.curves = curves;
     material.extension.bands = bands;
-    material.extension.glyphs = glyphs;
+    material.extension.path_records = path_records;
 }
 
-/// Updates the hairline minimum stroke width (device pixels) on a text
+/// Updates the hairline minimum stroke width (device pixels) on a path
 /// material.
-pub(crate) const fn set_text_material_hairline(material: &mut TextMaterial, device_px: f32) {
+pub(crate) const fn set_path_material_hairline(material: &mut PathMaterial, device_px: f32) {
     material.extension.uniforms.hairline_min_px = device_px;
 }
 
-/// Updates the shader anti-aliasing switches on a text material.
-pub(crate) fn set_text_material_anti_alias(
-    material: &mut TextMaterial,
+/// Updates the shader anti-aliasing switches on a path material.
+pub(crate) fn set_path_material_anti_alias(
+    material: &mut PathMaterial,
     supersample: bool,
     aa_band: bool,
 ) {
     material.extension.uniforms.supersample = u32::from(supersample);
     material.extension.uniforms.aa_band = u32::from(aa_band);
-}
-
-/// Toggles the vertex-pull glyph-index debug displacement and returns the new
-/// state.
-#[cfg(feature = "batch_proof")]
-pub(crate) const fn toggle_text_material_debug_glyph_index(material: &mut TextMaterial) -> bool {
-    material.extension.debug_glyph_index = !material.extension.debug_glyph_index;
-    material.extension.debug_glyph_index
 }

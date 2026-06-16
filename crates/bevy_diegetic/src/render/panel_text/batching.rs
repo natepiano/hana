@@ -2,7 +2,7 @@
 //! routes every panel-text run into a per-[`BatchKey`] batch entity whose
 //! vertex shader pulls per-glyph and per-run records from GPU tables.
 //!
-//! Frame flow on the plan's schedule anchors: [`update_panel_text_batches`]
+//! Frame flow across the schedule anchors: [`update_panel_text_batches`]
 //! writes glyph/run records before `TransformSystems::Propagate`;
 //! [`write_batch_run_transforms`] copies propagated label transforms into run
 //! records after it; [`update_batch_bounds`] hand-writes each batch entity's
@@ -44,13 +44,13 @@ use crate::render::AntiAlias;
 use crate::render::BaseMaterialId;
 use crate::render::BatchGpu;
 use crate::render::BatchKey;
+use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
-use crate::render::BatchTextMaterialInput;
-use crate::render::GlyphAtlasHandles;
-use crate::render::GlyphInstanceRecord;
+use crate::render::PathInstanceRecord;
+use crate::render::PathMaterial;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
-use crate::render::TextMaterial;
+use crate::render::analytic_paths::PathAtlasHandles;
 use crate::render::draw_order;
 use crate::render::world_text::TextContent;
 use crate::text;
@@ -66,7 +66,7 @@ pub struct DiegeticTextBatch;
 /// Builds changed runs' glyph records, routes them through the batch store,
 /// and reconciles batch entities and GPU assets to the store's state (spawn
 /// on a key's first run, despawn on its last, mesh growth on a capacity
-/// crossing — created, written, and swapped in the same frame, D4).
+/// crossing — created, written, and swapped in the same frame).
 ///
 /// Cascade inputs feeding [`BatchKey`] fields: each run's resolved
 /// alpha / lighting / sidedness (with the global defaults for runs the
@@ -155,14 +155,14 @@ pub(super) fn update_panel_text_batches(
     anti_alias: Res<AntiAlias>,
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<TextMaterial>>,
+    mut materials: ResMut<Assets<PathMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
     let mesh_build_start = Instant::now();
 
-    // R10 analogue: an emptied or despawned run leaves its batch; the rebuild
+    // An emptied or despawned run leaves its batch; the rebuild
     // re-derives the survivors' ranges.
     for label_entity in emptied_runs.read() {
         backend
@@ -322,11 +322,11 @@ fn run_record_for(
 
 /// Inputs for [`reconcile_batch_entities`].
 struct ReconcileBatchEntities<'a, 'w, 's> {
-    atlas:           Option<&'a GlyphAtlasHandles>,
+    atlas:           Option<&'a PathAtlasHandles>,
     anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<TextMaterial>,
+    materials:       &'a mut Assets<PathMaterial>,
     storage_buffers: &'a mut Assets<ShaderBuffer>,
     commands:        &'a mut Commands<'w, 's>,
 }
@@ -353,7 +353,7 @@ fn reconcile_batch_entities(input: ReconcileBatchEntities<'_, '_, '_>) {
         match &batch.gpu {
             None => to_create.push(key.clone()),
             Some(gpu)
-                if batch.glyph_record_count() > gpu.capacity
+                if batch.path_record_count() > gpu.capacity
                     || batch.run_count().to_u32() > gpu.run_capacity =>
             {
                 to_grow.push(key.clone());
@@ -440,7 +440,7 @@ pub(super) fn update_batch_bounds(
 /// buffer per batch — and publishes the batch counters. The split dirty flags
 /// keep the uploads minimal: a transform-only frame uploads only the run
 /// table, a same-count text edit only the instance buffer, an unchanged frame
-/// nothing (the Phase D property).
+/// nothing.
 ///
 /// Every payload is padded to the buffer's capacity so its byte length never
 /// changes between growths — a constant-length `set_data` writes the existing
@@ -459,13 +459,13 @@ pub(super) fn commit_batch_buffers(
     for (_, batch) in backend.batch_store_mut().batches_mut() {
         batches += 1;
         runs += batch.run_count();
-        glyph_records += batch.glyph_record_count().to_usize();
+        glyph_records += batch.path_record_count().to_usize();
         if batch.gpu.is_none() {
             continue;
         }
         let instances_payload = batch.instances_dirty.then(|| {
             let capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.capacity);
-            padded_glyph_records(batch.glyph_records(), capacity)
+            padded_glyph_records(batch.path_records(), capacity)
         });
         let run_table_payload = batch.run_table_dirty.then(|| {
             let run_capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.run_capacity);
@@ -499,15 +499,12 @@ pub(super) fn commit_batch_buffers(
 /// Glyph records padded to `capacity` with zero-size quads: every corner of a
 /// padding quad coincides, so it rasterizes nothing, and the buffer's byte
 /// length stays constant between growths.
-fn padded_glyph_records(
-    records: &[GlyphInstanceRecord],
-    capacity: u32,
-) -> Vec<GlyphInstanceRecord> {
+fn padded_glyph_records(records: &[PathInstanceRecord], capacity: u32) -> Vec<PathInstanceRecord> {
     let mut padded = Vec::with_capacity(capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         capacity.to_usize().max(records.len()),
-        GlyphInstanceRecord {
+        PathInstanceRecord {
             rect_min:    Vec2::ZERO,
             rect_size:   Vec2::ZERO,
             uv_min:      Vec2::ZERO,
@@ -544,18 +541,18 @@ fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord
 /// each quad's padded rect and UVs clipped by `glyph_quad_extents`.
 /// `run_index` is `0` on every record — the batch store stamps it at rebuild.
 /// Returns `None` when a glyph is not yet packed.
-pub(crate) fn build_glyph_records(
+fn build_glyph_records(
     cache: &GlyphCache,
     prepared: &PreparedTextRun,
     clip_rect: Option<[f32; 4]>,
-) -> Option<Vec<GlyphInstanceRecord>> {
+) -> Option<Vec<PathInstanceRecord>> {
     let mut records = Vec::with_capacity(prepared.glyph_count());
     for glyph in prepared.glyphs() {
         let atlas_index = cache.atlas_index(glyph.key())?;
         let Some(extents) = text::glyph_quad_extents(*glyph, 1.0, clip_rect) else {
             continue;
         };
-        records.push(GlyphInstanceRecord {
+        records.push(PathInstanceRecord {
             rect_min: Vec2::new(extents.left, extents.bottom),
             rect_size: Vec2::new(extents.right - extents.left, extents.top - extents.bottom),
             uv_min: Vec2::new(extents.uv_left, extents.uv_top),
@@ -574,7 +571,7 @@ pub(crate) fn build_glyph_records(
 /// (values unread — the layout switches the `VERTEX_UVS_A/B` pipeline defs
 /// on) plus the static per-quad `U32` index pattern winding each quad
 /// `base, base+3, base+2, base, base+2, base+1`.
-pub(crate) fn inert_batch_mesh(capacity: u32) -> Mesh {
+fn inert_batch_mesh(capacity: u32) -> Mesh {
     let vertex_count = capacity.to_usize() * 4;
     let mut indices = Vec::with_capacity(capacity.to_usize() * 6);
     for quad in 0..capacity {
@@ -595,11 +592,11 @@ pub(crate) fn inert_batch_mesh(capacity: u32) -> Mesh {
 /// Inputs for [`spawn_batch_entity`].
 struct SpawnBatchEntity<'a, 'w, 's> {
     key:             &'a BatchKey,
-    atlas:           &'a GlyphAtlasHandles,
+    atlas:           &'a PathAtlasHandles,
     anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<TextMaterial>,
+    materials:       &'a mut Assets<PathMaterial>,
     storage_buffers: &'a mut Assets<ShaderBuffer>,
     commands:        &'a mut Commands<'w, 's>,
 }
@@ -621,9 +618,9 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
     let Some(batch) = backend.batch_store().get(key) else {
         return;
     };
-    let capacity = batch.glyph_record_count().next_power_of_two();
+    let capacity = batch.path_record_count().next_power_of_two();
     let run_capacity = batch.run_count().to_u32().next_power_of_two();
-    let glyph_records = padded_glyph_records(batch.glyph_records(), capacity);
+    let glyph_records = padded_glyph_records(batch.path_records(), capacity);
     let run_records = padded_run_records(batch.run_records(), run_capacity);
     let base = backend
         .batch_store()
@@ -679,14 +676,14 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
 /// Grows a batch past its capacity: new padded record buffers and a new inert
 /// mesh at the doubled capacities, the mesh swapped onto the entity and the
 /// material's buffer handles rewritten in place. The mesh draws the same
-/// frame (D4); the rewritten material re-prepares against the new buffers —
+/// frame; the rewritten material re-prepares against the new buffers —
 /// at worst one frame later (a missing render asset retries), during which
 /// the old buffers keep drawing the pre-growth content. No blink either way.
 fn grow_batch_assets(
     key: &BatchKey,
     backend: &mut GlyphCache,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<TextMaterial>,
+    materials: &mut Assets<PathMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -696,7 +693,7 @@ fn grow_batch_assets(
     let Some(entity) = batch.entity else {
         return;
     };
-    let required = batch.glyph_record_count();
+    let required = batch.path_record_count();
     let run_required = batch.run_count().to_u32();
     let (Some(current_capacity), Some(current_run_capacity)) = (
         batch.gpu.as_ref().map(|gpu| gpu.capacity),
@@ -714,7 +711,7 @@ fn grow_batch_assets(
     }
 
     let instances = storage_buffers.add(ShaderBuffer::from(padded_glyph_records(
-        batch.glyph_records(),
+        batch.path_records(),
         capacity,
     )));
     let run_table = storage_buffers.add(ShaderBuffer::from(padded_run_records(
@@ -728,7 +725,7 @@ fn grow_batch_assets(
         return;
     };
     if let Some(mut material) = materials.get_mut(&gpu.material) {
-        render::set_batch_text_material_buffers(
+        render::set_batch_path_material_buffers(
             &mut material,
             instances.clone(),
             run_table.clone(),
@@ -748,7 +745,7 @@ fn grow_batch_assets(
 struct BatchMaterialInput<'a> {
     base:       StandardMaterial,
     key:        &'a BatchKey,
-    atlas:      &'a GlyphAtlasHandles,
+    atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
     anti_alias: AntiAlias,
@@ -759,7 +756,7 @@ struct BatchMaterialInput<'a> {
 /// the vertex-pulling route switched on. `fill_color` / `render_mode` in the
 /// uniform are placeholders — the fragment reads them per run from the run
 /// table under `GLYPH_VERTEX_PULL`.
-fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
+fn batch_material(input: BatchMaterialInput<'_>) -> PathMaterial {
     let BatchMaterialInput {
         mut base,
         key,
@@ -772,7 +769,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
     base.unlit = matches!(key.lighting, Lighting::Unlit);
     render::apply_glyph_sidedness(&mut base, key.sidedness);
     base.depth_bias = draw_order::text_batch_depth_bias(key.z_level).get();
-    render::batch_text_material(BatchTextMaterialInput {
+    render::batch_path_material(BatchPathMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
@@ -781,10 +778,9 @@ fn batch_material(input: BatchMaterialInput<'_>) -> TextMaterial {
         aa_band: anti_alias.anisotropic(),
         curves: atlas.curves.clone(),
         bands: atlas.bands.clone(),
-        glyphs: atlas.glyphs.clone(),
+        path_records: atlas.path_records.clone(),
         instances,
         run_records: run_table,
-        debug_glyph_index: false,
     })
 }
 
@@ -881,7 +877,7 @@ mod tests {
             .init_resource::<AntiAlias>()
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
-            .init_asset::<TextMaterial>()
+            .init_asset::<PathMaterial>()
             .add_observer(alpha::seed_panel_text_child_alpha)
             .add_observer(glyph_cascade::seed_panel_text_child_glyph)
             .add_systems(
@@ -948,7 +944,7 @@ mod tests {
         let runs: usize = store.batches().map(|(_, batch)| batch.run_count()).sum();
         let glyphs: usize = store
             .batches()
-            .map(|(_, batch)| batch.glyph_record_count().to_usize())
+            .map(|(_, batch)| batch.path_record_count().to_usize())
             .sum();
         (batches, runs, glyphs)
     }
@@ -1142,7 +1138,7 @@ mod tests {
         let gpu = batch.gpu.as_ref().expect("batch should have GPU assets");
         let material = app
             .world()
-            .resource::<Assets<TextMaterial>>()
+            .resource::<Assets<PathMaterial>>()
             .get(&gpu.material)
             .expect("batch material asset should exist");
         (
@@ -1160,7 +1156,7 @@ mod tests {
 
     fn batch_material_depth_biases(app: &App) -> Vec<(i8, u32)> {
         let store = app.world().resource::<GlyphCache>().batch_store();
-        let materials = app.world().resource::<Assets<TextMaterial>>();
+        let materials = app.world().resource::<Assets<PathMaterial>>();
         let mut depth_biases: Vec<(i8, u32)> = store
             .batches()
             .map(|(key, batch)| {
@@ -1458,7 +1454,7 @@ mod tests {
     /// the padding fails here instead of at a parity screenshot.
     #[test]
     fn commit_payloads_keep_a_constant_length_between_growths() {
-        let glyph = GlyphInstanceRecord {
+        let glyph = PathInstanceRecord {
             rect_min:    Vec2::ZERO,
             rect_size:   Vec2::ONE,
             uv_min:      Vec2::ZERO,

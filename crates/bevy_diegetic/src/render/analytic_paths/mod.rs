@@ -15,7 +15,7 @@ mod packing;
 pub(crate) use atlas::PathAtlas;
 pub(crate) use batching::BatchGpu;
 pub(crate) use batching::BatchKey;
-pub(crate) use batching::GlyphBatchStore;
+pub(crate) use batching::PathBatchStore;
 use bevy::asset::embedded_asset;
 use bevy::asset::load_internal_asset;
 use bevy::pbr::MaterialPlugin;
@@ -25,44 +25,27 @@ pub(crate) use geometry::Bounds;
 pub(crate) use geometry::PathContour;
 pub(crate) use geometry::PathOutline;
 pub(crate) use geometry::QuadraticSegment;
-pub(crate) use material::BatchTextMaterialInput;
+pub(crate) use material::BatchPathMaterialInput;
+pub(crate) use material::PathMaterial;
 pub(crate) use material::RenderMode;
-pub(crate) use material::TextMaterial;
-pub(crate) use material::batch_text_material;
-pub(crate) use material::set_batch_text_material_buffers;
-pub(crate) use material::set_text_material_anti_alias;
-pub(crate) use material::set_text_material_atlas;
-pub(crate) use material::set_text_material_hairline;
+pub(crate) use material::batch_path_material;
 #[cfg(test)]
-pub(crate) use material::text_material_oit_depth_offset;
-#[cfg(feature = "batch_proof")]
-pub(crate) use material::toggle_text_material_debug_glyph_index;
+pub(crate) use material::path_material_oit_depth_offset;
+pub(crate) use material::set_batch_path_material_buffers;
+pub(crate) use material::set_path_material_anti_alias;
+pub(crate) use material::set_path_material_atlas;
+pub(crate) use material::set_path_material_hairline;
 pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
 pub(crate) use packing::DEFAULT_BAND_COUNT;
-pub(crate) use packing::GlyphInstanceRecord;
 pub(crate) use packing::GlyphOutline;
-pub(crate) use packing::GlyphRecord;
 #[allow(
     unused_imports,
-    reason = "Phase A exposes shared path names before Phase B consumes them"
+    reason = "shared path name re-exported for downstream consumers"
 )]
 pub(crate) use packing::PackedPath;
-#[allow(
-    unused_imports,
-    reason = "Phase A exposes shared path names before Phase B consumes them"
-)]
 pub(crate) use packing::PathInstanceRecord;
-#[allow(
-    unused_imports,
-    reason = "Phase A exposes shared path names before Phase B consumes them"
-)]
 pub(crate) use packing::PathRecord;
-#[allow(
-    unused_imports,
-    reason = "Phase A exposes shared path names before Phase B consumes them"
-)]
-pub(crate) use packing::PathRunRecord;
 pub(crate) use packing::RunRecord;
 pub(crate) use packing::build_packed_path;
 
@@ -73,15 +56,12 @@ use self::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 #[derive(Clone, Debug)]
 pub(crate) struct PathAtlasHandles {
     /// Shared band-packed quadratic curve records.
-    pub curves: Handle<ShaderBuffer>,
+    pub curves:       Handle<ShaderBuffer>,
     /// Shared horizontal/vertical band records.
-    pub bands:  Handle<ShaderBuffer>,
+    pub bands:        Handle<ShaderBuffer>,
     /// Shared path records, indexed by each instance record's `atlas_index`.
-    pub glyphs: Handle<ShaderBuffer>,
+    pub path_records: Handle<ShaderBuffer>,
 }
-
-/// Compatibility alias while text glyphs are bridged onto analytic paths.
-pub(crate) type GlyphAtlasHandles = PathAtlasHandles;
 
 pub(crate) struct AnalyticPathPlugin;
 
@@ -94,6 +74,6 @@ impl Plugin for AnalyticPathPlugin {
             "analytic_path_vertex_pull.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(MaterialPlugin::<TextMaterial>::default());
+        app.add_plugins(MaterialPlugin::<PathMaterial>::default());
     }
 }

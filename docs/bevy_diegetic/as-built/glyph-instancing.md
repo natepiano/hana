@@ -95,28 +95,28 @@ shadow passes.
 Two GPU tables plus a per-batch entity:
 
 ```text
-GlyphInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B stride)
+PathInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B stride)
   rect_min:  vec2<f32>   // layout space, clipped   transform:   mat4x4<f32> // label world matrix
   rect_size: vec2<f32>                              fill_color:  vec4<f32>
   uv_min:    vec2<f32>   // padded quad UVs         render_mode: u32         // Text / PunchOut
   uv_size:   vec2<f32>                              depth_nudge: f32
-  atlas_idx: u32         // GlyphRecord index
+  atlas_idx: u32         // PathRecord index
   run_idx:   u32         // RunRecord index
 ```
 
-GlyphInstanceRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
+PathInstanceRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
 40, already stride-aligned). RunRecord: 64 + 16 + 4 + 4 = 88, rounded to a
 96 array stride by encase (struct alignment 16) — **no explicit pad field**;
 encase owns the padding, same as the existing `CurveRecord` / `BandRecord` /
-`GlyphRecord` declarations. Transform encoding: `Mat4` — glam has no
+`PathRecord` declarations. Transform encoding: `Mat4` — glam has no
 `Mat3x4` and the existing record structs only use `Vec4` / `UVec4` through
 `ShaderType`, so `Mat4` is the no-surprises choice; pack to 3×`Vec4` only if
 measurement justifies it. Both structs live in
 `src/text/slug/render/packing.rs` next to `CurveRecord` / `BandRecord` /
-`GlyphRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
+`PathRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
 layout assertions against the **GPU layout, not the Rust layout** —
 `size_of` measures the wrong thing; assert via `ShaderSize::SHADER_SIZE`
-(`GlyphInstanceRecord` 40, RunRecord 96 — encase rounds struct size to its
+(`PathInstanceRecord` 40, RunRecord 96 — encase rounds struct size to its
 16-byte alignment per WGSL rules; confirmed against encase 0.12's
 `METADATA.min_size()`), plus a write-and-readback round-trip check.
 
@@ -303,7 +303,7 @@ text materials actually carry — `base_color`, texture handles (by
 fields — floats stored as `to_bits` u32s, textures as `AssetId` — so
 `derive(Hash, Eq)` is mechanical) in a
 `HashMap<InternedMaterialKey, BaseMaterialId>` plus a `Vec` for reverse
-lookup, living as a `GlyphBatchStore` field; entries are never freed
+lookup, living as a `PathBatchStore` field; entries are never freed
 (bounded by distinct text materials per session — a handful). Panels that
 never customize share the default id (the
 common case batches automatically; the codebase survey found ~30
@@ -362,13 +362,13 @@ the outline cache and `run_storage`. Sketch (final field names are the
 implementer's):
 
 ```rust
-struct GlyphBatchStore {
+struct PathBatchStore {
     batches:   HashMap<BatchKey, GlyphBatch>,
     run_index: HashMap<RunStorageKey, BatchKey>,  // which batch a run is in
 }
 struct GlyphBatch {
     entity:        Option<Entity>,               // the batch render entity
-    glyph_records: Vec<GlyphInstanceRecord>,
+    glyph_records: Vec<PathInstanceRecord>,
     run_records:   Vec<RunRecord>,
     runs:          Vec<(RunStorageKey, Range<u32>)>, // written ONLY by rebuild()
     instances:     Handle<ShaderBuffer>,
@@ -432,7 +432,7 @@ First cut — rebuild, don't allocate:
 - Ranges have a single writer: `rebuild()` recomputes `runs` as it rebuilds
   the record vectors — no other code path writes ranges, so they cannot go
   stale relative to the buffers they index.
-- Records are always fully stamped: `GlyphInstanceRecord` / `RunRecord`
+- Records are always fully stamped: `PathInstanceRecord` / `RunRecord`
   deliberately derive no `Default`, and `RenderMode` discriminants start
   at 1 (`Text = 1`, `PunchOut = 2`), so a forgotten `render_mode` stamp
   (0) would render as neither mode — `rebuild()` stamps every field from
@@ -564,7 +564,7 @@ gate examples. Flipping at runtime tears down the inactive path's products
 `On<Remove, DiegeticTextMesh>` observer handles the former, verified safe).
 The batch direction is a system, not an observer: when the toggle leaves
 `BatchedRecords`, the batch-path gating system despawns all
-`DiegeticTextBatch` entities and clears `GlyphBatchStore` (batches +
+`DiegeticTextBatch` entities and clears `PathBatchStore` (batches +
 `run_index`; the interner may persist — it is keying state only).
 Batch entities carry a marker component (`DiegeticTextBatch`) so BRP
 inspection can tell the two paths apart (Reflect-registered as of the
@@ -597,17 +597,8 @@ toggle flipped in the gate examples.
   implementation notes follow the gate description below.
   `slug_text_vertex_pull.wgsl` + the two
   storage bindings and vertex-stage overrides on `TextExtension`; the two
-  record structs in `packing.rs`; a minimal proof example (e.g.
-  `examples/glyph_batch_proof.rs`, removed or repurposed at Step 4) spawns
-  one hard-coded batch entity directly — `Mesh3d` (inert mesh) +
-  `MeshMaterial3d<TextMaterial>` with hand-written records, beside the
-  existing renderer. Atlas content comes from a real panel: the example
-  spawns one ordinary panel with a fixed string so shaping populates
-  `GlyphOutlineCache`, then reads the cache's records to hand-build
-  instance records with live atlas indices (the *records* are hand-written,
-  including the `RunRecord` transforms — fixed placements; the atlas is
-  not). Gate (operational): screenshots verify glyph placement/UVs against
-  the hand-written records; shading responds to a moved light; OIT toggled
+  record structs in `packing.rs`. Gate (operational): screenshots verify
+  glyph placement/UVs; shading responds to a moved light; OIT toggled
   per camera both ways; shadow silhouettes match glyph outlines; the depth
   nudge lives in **one shared function called by both vertex entry points**
   (identical by construction) and its prepass-pipeline consumer — the
@@ -627,32 +618,11 @@ toggle flipped in the gate examples.
   real unknowns (Material-framework vertex override +
   mesh-with-inert-vertices + `Mat4`-in-record) before structural work.
 
-  **Step 1 gate results (2026-06-03, all items pass).** Records land in
-  `text/slug/glyph/packing.rs` (the actual packing-record home; the doc's
-  `render/packing.rs` path was stale) with compile-time
-  `SHADER_SIZE` asserts (40 / 96 confirmed) plus two nextest encase
-  round-trip tests. Proof scaffolding: `src/render/batch_proof.rs` +
-  `examples/glyph_batch_proof.rs`, both behind a `batch_proof` cargo
-  feature (the `bench_support` pattern) so the default build carries none
-  of it; Step 4 deletes the feature. Gate evidence
-  (`/private/tmp/glyph_batch_proof/`): per-run source label and two
-  hand-placed batch runs (one yawed, distinct depth nudges) render
-  glyph-identical side by side; shadow silhouettes glyph-accurate via the
-  overridden prepass vertex stage; OIT toggled off/on per camera, both
-  correct; light swing changes glyph shading + shadows (322 k pixels);
-  `first_vertex_index` logged **4** at spawn (decoy mesh forces a nonzero
-  slab base) and **76** post-growth, with the `GLYPH_PULL_DEBUG_INDEX`
-  staircase starting at index 0 — the slab-base subtraction is exercised
-  and correct; forced growth 18 → 36 records cost **0.043 ms CPU** (the
-  hitch number) and the frame-stepped N / N+1 / N+2 captures are
-  **byte-identical** (ImageMagick AE = 0) — the swapped mesh drew the same
-  frame it was created, no blink (D4 confirmed on bevy 0.19.0-rc.2).
-
   **Implementation note (mechanical deviation, single correct outcome).**
   `vertex_shader()` / `prepass_vertex_shader()` are material-type-wide, so
   overriding them would route *per-run* materials through the pull shader
   too — Step 1 requires coexistence. Instead `TextExtension` carries a
-  `vertex_pull` flag (plus `debug_glyph_index`) in new
+  `vertex_pull` flag in new
   `#[bind_group_data(TextExtensionKey)]` key data, and
   `MaterialExtension::specialize` swaps `descriptor.vertex.shader` to the
   pull shader (loaded behind a `uuid_handle!` via `load_internal_asset!`)
@@ -674,32 +644,27 @@ toggle flipped in the gate examples.
   *What deviated:* per-material `specialize` swap instead of the planned
   `vertex_shader()` overrides (those are type-wide and would have broken
   per-run coexistence); records in `glyph/packing.rs` (the doc's
-  `render/packing.rs` path was stale); proof scaffolding behind a
-  `batch_proof` cargo feature; record building reuses a new
+  `render/packing.rs` path was stale); record building reuses a new
   `glyph_quad_extents` extraction shared with `push_glyph` rather than
   duplicating the rect/UV math.
   *Surprises:* every `TextMaterial` must bind *something* at 104/105 —
   the bind-group layout is material-type-wide — so per-run materials carry
   placeholder handles for as long as both paths coexist;
   `TextExtensionKey` bind-group data now exists and re-specializes on
-  material mutation (the debug staircase toggles live).
+  material mutation.
   *Implications for remaining phases:* Step 2's batch-material
   construction must set `vertex_pull: true` + real record buffers (and
   `text_material()`'s placeholder wiring stays for the per-run path until
   Step 4); Step 2's record building should call `glyph_quad_extents`;
-  Step 4 additionally deletes the `batch_proof` feature, module, example,
-  and the placeholder bindings (with the per-run path gone, 104/105 are
-  always real); the `#[cfg(feature = "batch_proof")]` gates on the record
-  re-exports come off in Step 2 when production code consumes them.
+  Step 4 additionally deletes the placeholder bindings (with the per-run
+  path gone, 104/105 are always real).
 
   **Step 1 review (architect re-evaluation of remaining phases).**
   - Fragment run-table read moved Step 3b → Step 2 (user-approved; D2
     amended) — Step 2's parity gate needs it for multi-color batches.
-  - Step 2 gained the Step-1 carry-over block: promote `inert_batch_mesh`
-    + the record-building loop from `batch_proof.rs`, model the batch
-    entity on `spawn_proof_batch`, batch material sets `vertex_pull: true`
-    with real buffers, and the explicit un-gating list for the
-    `batch_proof` cfg surface.
+  - Step 2 gained the Step-1 carry-over block: the `inert_batch_mesh` +
+    record-building loop, batch material sets `vertex_pull: true` with real
+    buffers.
   - Decision 4 gained the record-stamping rule (no `Default` on records;
     `RenderMode` starts at 1, a zero `render_mode` renders as neither
     mode).
@@ -710,24 +675,18 @@ toggle flipped in the gate examples.
     trusting the stale `:55-56` line ref.
 - **Step 2 — Batch store + routing.** DONE 2026-06-03; gate results,
   implementation notes, and the retrospective follow the gate description
-  below. `GlyphBatchStore` in `GlyphCache`;
+  below. `PathBatchStore` in `GlyphCache`;
   the transform-write, Aabb-union, and buffer-commit systems on the
   frame-flow anchors; all runs routed behind the decision-10 toggle (full
   batch key from day one — cascade *values* are read at insert; only
   re-keying on later changes waits for Step 3); `Aabb` or
-  `NoFrustumCulling` scaffolding. Step-1 carry-overs: promote
-  `inert_batch_mesh` and the `glyph_quad_extents`-based record-building
-  loop from `render/batch_proof.rs` (production-ready — don't re-derive
-  the rect/UV math), and model the batch-entity spawn on
-  `spawn_proof_batch`'s composition (`Mesh3d` + `MeshMaterial3d` + the
-  record-buffer/material trio). Batch-material construction sets
+  `NoFrustumCulling` scaffolding. The batch entity is composed of `Mesh3d`
+  (the `inert_batch_mesh`) + `MeshMaterial3d` + the record-buffer/material
+  trio, with the `glyph_quad_extents`-based record-building loop.
+  Batch-material construction sets
   `vertex_pull: true` with real `instances` / `run_records` buffers;
   per-run `text_material()` keeps its placeholder 104/105 wiring untouched
-  until Step 4. Un-gate the `batch_proof` cfg surface production code now
-  consumes: `PreparedTextRun::glyphs`, `GlyphCache::atlas_index`, and the
-  `GlyphInstanceRecord` / `RunRecord` / `TextExtension` / `TextUniform` /
-  `glyph_quad_extents` re-export chain (glyph / render / slug / text
-  `mod.rs`). **The fragment run-table read lands here** (moved from Step
+  until Step 4. **The fragment run-table read lands here** (moved from Step
   3b, user-approved 2026-06-03): `specialize` pushes a def (e.g.
   `GLYPH_VERTEX_PULL`) into the fragment defs when `vertex_pull` is set,
   and `slug_text.wgsl`'s fragment sources `fill_color` / `render_mode`
@@ -923,8 +882,7 @@ toggle flipped in the gate examples.
     `update_panel_text_alpha` removes the only alpha handler otherwise);
     a forced-growth gate comparing against expected post-growth content
     (closing the Step-1 gate hole permanently); the `NoFrustumCulling`
-    deliverable corrected (production never used it — only
-    `batch_proof.rs`, deleted with the feature); the scene-wide counter
+    deliverable corrected (production never used it); the scene-wide counter
     caveat on the final waterfall column.
   - `DiegeticTextBatch` is now `Reflect`-registered (decision-10's BRP
     -inspectability promise was unmet — a bare `Component` cannot filter a
@@ -949,7 +907,7 @@ toggle flipped in the gate examples.
   remain. Delete `warn_batched_alpha_change` (and its registration) once
   all three cascades re-route; until then note it covers only alpha — a
   live lighting/sidedness change under `BatchedRecords` is silently stale.
-  Gate: `GlyphBatchStore` + pipeline tests via cargo nextest — an
+  Gate: `PathBatchStore` + pipeline tests via cargo nextest — an
   alpha-mode change moves the run to the new key's batch; a value-only
   `fill_color` change stays in-batch as a record write; a shadow-mode
   change lands the run in the `NotShadowCaster`-keyed batch; a run that
@@ -1284,9 +1242,9 @@ toggle flipped in the gate examples.
   flip (3b review). The acceptance-table examples sweep run
   batched-by-default, waterfall captured under the new default. The
   sweep doubles as the **sorted-view composition check** (3b review):
-  eight examples request OIT on the main camera via `StableTransparency`
+  seven examples request OIT on the main camera via `StableTransparency`
   (`typography`, `slug_text`, `world_text`, `diegetic_text_stress`,
-  `diegetic_panel_stress`, `glyph_batch_proof`, `panel_rendering`,
+  `diegetic_panel_stress`, `panel_rendering`,
   `aa_text`) — the original "only `aa_text` and `panel_rendering`" claim
   was wrong — and OIT activation is now gated on the `oit_guard` shader
   patches (`render/oit_guard.rs`), falling back to sorted transparency
@@ -1443,10 +1401,9 @@ toggle flipped in the gate examples.
   plumbing and stays (4a review). (The production batch path never used
   `NoFrustumCulling` —
   batch entities carry a real hand-written `Aabb` + `NoAutoAabb` from
-  Step 2; the only `NoFrustumCulling` is in `batch_proof.rs`, deleted
-  wholesale with the feature.) `RunStorage` (the struct) is deleted;
+  Step 2.) `RunStorage` (the struct) is deleted;
   `RunStorageKey` stays — it is the run identifier in
-  `GlyphBatchStore.run_index`. Deleting the per-run path also deletes the
+  `PathBatchStore.run_index`. Deleting the per-run path also deletes the
   per-change material rewrites that masked the buffer rebind hazard — the
   capacity-padding / growth-handle-rewrite mechanism (Step 2, `BatchGpu`
   doc contract) must survive untouched, and the contract gains a headless
@@ -1488,7 +1445,7 @@ toggle flipped in the gate examples.
     `batch_store_mut().upsert_run` — both toggle-era cross-path
     debug_asserts went with their fields); `TextGeometryPath` +
     `apply_text_geometry_path` + every `run_if` gate (batch systems run
-    unconditionally); `GlyphBatchStore::drain_all`; `text_material` +
+    unconditionally); `PathBatchStore::drain_all`; `text_material` +
     `TextMaterialInput` + `text_material_fill_color` and the re-export
     chains; dead `FontKey::value` / `GlyphKey` accessors;
     `diegetic_text_stress`'s `B` toggle and stats `path` row.
@@ -1502,14 +1459,13 @@ toggle flipped in the gate examples.
     `commit_payloads_keep_a_constant_length_between_growths` pins the
     `BatchGpu` padding contract (payload length == capacity for 0..=8
     records).
-  - Tests 403/403 workspace (272/272 with `batch_proof`), clippy clean
-    (workspace + `batch_proof`, all targets), fmt.
+  - Tests 403/403 workspace, clippy clean (workspace, all targets), fmt.
   - Doc riders: `emoji.md` annotated (color-glyph layers land as N glyph
     records with a brush field, not layer-quads in run meshes);
     `enable_prepass() -> false` recorded as a standing contract at the
     definition site (any future prepass change must keep or consciously
     extend the `material_group_is_stripped` guard); `perf.rs` /
-    `alpha.rs` / `glyph_cascade.rs` / `batch_proof` docs re-pointed at
+    `alpha.rs` / `glyph_cascade.rs` docs re-pointed at
     `update_panel_text_batches`.
   - State parity under genuine guarded OIT (BRP, typography): 2 batches /
     53 runs / 429 glyph records, identical before and after the
@@ -1683,7 +1639,7 @@ compatibility, GPU-preprocessing compatibility).
 whole-asset-upload claim, the `text_material`-by-value claim, the toggle
 teardown safety (`On<Remove>` fires synchronously before flush), and every
 cited line ref including the bevy `extended_material.rs` ones. Corrections
-and refinements incorporated: GlyphInstanceRecord size corrected 48 → 40 B
+and refinements incorporated: PathInstanceRecord size corrected 48 → 40 B
 (std430; the ~28 KB figures → 24 KB); frame flow gained explicit schedule
 anchors (geometry write before Propagate, transform write after, Aabb union
 between `CalculateBounds` and `CheckVisibility`, buffer commit after both
@@ -1694,8 +1650,7 @@ default and override at most `unlit`, no texture customization (decision 2);
 Step 2 routing inconsistency fixed — all runs route under the toggle, full
 batch key at insert, only re-keying dynamics defer to Step 3 (decision 10);
 toggle resource named (`TextGeometryPath`); record structs placed in
-`packing.rs`; `GlyphBatchStore` sketch added (decision 4); Step 1 proof
-mechanism named (`glyph_batch_proof` example); `vertex_shader()` /
+`packing.rs`; `PathBatchStore` sketch added (decision 4); `vertex_shader()` /
 `prepass_vertex_shader()` additions and the shared-WGSL-file requirement
 spelled out (decision 1); `RunStorageKey` kept as the batch-store run id,
 `RunStorage` struct deleted (Step 4); typography-overlay claim turned into a

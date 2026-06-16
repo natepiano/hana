@@ -9,7 +9,7 @@
 
 Panel text and panel lines are now batched:
 
-- text routes through `GlyphBatchStore`
+- text routes through `PathBatchStore`
 - panel lines route through `PanelLineBatchStore`
 - each store keeps one render entity per compatibility key
 - per-run or per-primitive data lives in GPU buffers

@@ -18,11 +18,7 @@ pub use self::access::PanelTextReader;
 pub use self::access::TextEdit;
 use self::alpha::seed_panel_text_child_alpha;
 pub use self::batching::DiegeticTextBatch;
-#[cfg(feature = "batch_proof")]
-pub(crate) use self::batching::build_glyph_records;
 use self::batching::commit_batch_buffers;
-#[cfg(feature = "batch_proof")]
-pub(crate) use self::batching::inert_batch_mesh;
 use self::batching::update_batch_bounds;
 use self::batching::update_panel_text_batches;
 use self::batching::write_batch_run_transforms;

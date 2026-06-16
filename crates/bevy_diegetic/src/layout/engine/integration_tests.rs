@@ -692,7 +692,7 @@ fn fit_with_min_respects_minimum() {
     assert!(result.computed[1].width >= 100.0);
 }
 
-// ── Engine sanity: Fit root with Grow children (panel-size plan step 1) ──────
+// ── Engine sanity: Fit root with Grow children ──────────────────────────────
 
 #[test]
 fn fit_root_clamps_grow_children_content_under_max() {

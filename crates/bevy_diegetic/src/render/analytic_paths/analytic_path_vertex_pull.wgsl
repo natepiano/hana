@@ -1,8 +1,8 @@
-// Vertex-pulling stage for batched glyph text.
+// Vertex-pulling stage for batched path text.
 //
 // The batch mesh is inert: capacity-sized zeroed vertices whose only job is
 // switching the VERTEX_UVS_A / VERTEX_UVS_B pipeline defs on. Every visible
-// value is pulled from two storage tables — one GlyphInstanceRecord per glyph
+// value is pulled from two storage tables — one PathInstanceRecord per path
 // quad, one RunRecord per text run — indexed from the vertex index. One file
 // serves the main, prepass, and shadow pipelines: `#ifdef PREPASS_PIPELINE`
 // picks the entry point, and both call the same `pull_vertex` helper so the
@@ -21,8 +21,8 @@
 #import bevy_pbr::forward_io::VertexOutput
 #endif
 
-// Mirrors `GlyphInstanceRecord` in `glyph/packing.rs` (std430, 40 B stride).
-struct GlyphInstanceRecord {
+// Mirrors `PathInstanceRecord` in `path/packing.rs` (std430, 40 B stride).
+struct PathInstanceRecord {
     rect_min: vec2<f32>,
     rect_size: vec2<f32>,
     uv_min: vec2<f32>,
@@ -31,7 +31,7 @@ struct GlyphInstanceRecord {
     run_index: u32,
 }
 
-// Mirrors `RunRecord` in `glyph/packing.rs` (std430, 96 B stride).
+// Mirrors `RunRecord` in `path/packing.rs` (std430, 96 B stride).
 struct RunRecord {
     transform: mat4x4<f32>,
     fill_color: vec4<f32>,
@@ -41,27 +41,23 @@ struct RunRecord {
     aa_flags: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<GlyphInstanceRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathInstanceRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
 
-// Mirrors the leading fields of `GlyphRecord` in packing.rs. Only `min_feature`
+// Mirrors the leading fields of `PathRecord` in packing.rs. Only `min_feature`
 // is read here, to tell a panel-line quad (min_feature > 0, screen-space
-// hairline coverage) from a text glyph quad (min_feature 0).
-struct GlyphRecord {
+// hairline coverage) from a text path quad (min_feature 0).
+struct PathRecord {
     bounds_min_size: vec4<f32>,
     band_range: vec4<u32>,
     min_feature: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> glyphs: array<GlyphRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PathRecord>;
 
 // Clip-space depth shift per depth_nudge layer unit, applied post-projection
-// so coplanar runs resolve to distinct depths. Provisional magnitude;
-// Step 3b verifies Geometry-mode layering against `panel_rendering`.
+// so coplanar runs resolve to distinct depths.
 const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.000002;
-
-// World-space Y lift per recovered glyph index in debug-staircase mode.
-const GLYPH_PULL_DEBUG_STEP: f32 = 0.01;
 
 // Screen-space room, in device pixels, added around a panel-line quad for its
 // coverage ramp. That ramp is screen-space (~1px) plus any hairline dilation;
@@ -101,7 +97,7 @@ fn line_aa_margin_local(world_axis: vec3<f32>, clip: vec4<f32>) -> f32 {
 }
 #endif
 
-// Expands one inert-mesh vertex into its glyph-quad corner. Both vertex entry
+// Expands one inert-mesh vertex into its path-quad corner. Both vertex entry
 // points route through here, so the corner math and the depth nudge are one
 // code path for the main, prepass, and shadow passes.
 fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
@@ -109,21 +105,21 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
 
     // wgpu's vertex_index includes the draw's base_vertex, and the mesh
     // allocator packs meshes into shared slabs, so the slab base must come
-    // off before deriving glyph and corner (same correction as
+    // off before deriving path and corner (same correction as
     // bevy_pbr's wireframe.wgsl).
     let local_index = vertex_index - mesh[instance_index].first_vertex_index;
-    let glyph = local_index / 4u;
+    let path = local_index / 4u;
     let corner = local_index % 4u;
 
     // The index buffer is capacity-sized while the instance buffer is
     // live-sized: collapse the capacity tail to degenerate quads so
     // robustness clamping can never re-blend the last record.
-    if glyph >= arrayLength(&instances) {
+    if path >= arrayLength(&instances) {
         out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         return out;
     }
 
-    let record = instances[glyph];
+    let record = instances[path];
 
     // Bevy compiles shaders without bounds checks, so a run_index outside the
     // run table would read arbitrary memory and emit a quad anywhere on
@@ -134,12 +130,12 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     }
     let run = run_records[record.run_index];
 
-    // Corner order matches RunMeshBuilder::push_glyph:
+    // Corner order matches RunMeshBuilder::push_path:
     // 0 = (left, top), 1 = (right, top), 2 = (right, bottom), 3 = (left, bottom).
     let corner_x = f32(corner == 1u || corner == 2u);
     let corner_top = f32(corner <= 1u);
     var local = record.rect_min + vec2<f32>(corner_x, corner_top) * record.rect_size;
-    // uv = padded glyph quad UVs (uv_min sits at the top-left corner).
+    // uv = padded path quad UVs (uv_min sits at the top-left corner).
     var uv = record.uv_min + vec2<f32>(corner_x, 1.0 - corner_top) * record.uv_size;
 
 #ifndef PREPASS_PIPELINE
@@ -148,7 +144,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // (see LINE_AA_MARGIN_PX). The margin is per panel-local axis, so the
     // foreshortened axis expands more; uv shifts by the same affine
     // rect->uv ratio, keeping the coverage field exact. Text is untouched.
-    if glyphs[record.atlas_index].min_feature > 0.0 {
+    if path_records[record.atlas_index].min_feature > 0.0 {
         let base_clip = position_world_to_clip((run.transform * vec4<f32>(local, 0.0, 1.0)).xyz);
         let axis_x = (run.transform * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
         let axis_y = (run.transform * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
@@ -167,9 +163,6 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
 #endif
 
     var world = run.transform * vec4<f32>(local, 0.0, 1.0);
-#ifdef GLYPH_PULL_DEBUG_INDEX
-    world.y += f32(glyph) * GLYPH_PULL_DEBUG_STEP;
-#endif
     out.world_position = world;
 
     var clip = position_world_to_clip(world.xyz);

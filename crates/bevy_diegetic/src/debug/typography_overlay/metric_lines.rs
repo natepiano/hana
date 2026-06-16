@@ -4,6 +4,7 @@ use super::GlyphMetricVisibility;
 use super::TypographyOverlay;
 use super::constants::LEFT_OUTER_ARROW_SLOT;
 use super::constants::METRIC_RECT_WIDTH_SLOTS;
+use super::glyph;
 use super::labels;
 use super::pipeline::FontContext;
 use super::pipeline::GlyphExtents;
@@ -25,13 +26,16 @@ use crate::debug::constants::METRIC_LINE_Z_OFFSET;
 use crate::default_panel_material;
 use crate::layout::Anchor;
 use crate::layout::DrawOverflow;
+use crate::layout::DrawZIndex;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
 use crate::layout::LineMetricsSnapshot;
+use crate::layout::PanelCircle;
 use crate::layout::PanelDraw;
 use crate::layout::PanelLine;
 use crate::layout::PanelPoint;
+use crate::layout::PanelShape;
 use crate::panel::DiegeticPanel;
 use crate::render::ComputedWorldText;
 use crate::render::HairlineFade;
@@ -59,7 +63,7 @@ pub(super) fn spawn_font_metric_guides(
         arrow_spacing: first_glyph.map_or(0.0, |glyph| scaling::arrow_spacing(glyph.advance_x)),
     };
 
-    spawn_metric_guide_panel(ctx, font_context, &extents);
+    spawn_metric_guide_panel(ctx, font_context, computed, &extents);
 
     if ctx.overlay.labels == GlyphMetricVisibility::Shown {
         let metric_lines = metric_line_labels(font_context.font, font_context.line);
@@ -82,6 +86,7 @@ pub(super) fn spawn_font_metric_guides(
 fn spawn_metric_guide_panel(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
+    computed: &ComputedWorldText,
     extents: &GlyphExtents,
 ) {
     let line_specs = metric_line_specs(
@@ -112,7 +117,6 @@ fn spawn_metric_guide_panel(
     let line_width = scaling::metric_line_border_width(ctx.overlay, ctx.font_size, ctx.scale);
     let mut lines = metric_guide_lines(width, &line_specs, line_width);
     lines.extend(metric_arrow_lines(ctx, font_context, extents, width));
-    let tree = build_metric_guide_tree(width, height, lines);
 
     let mut material = default_panel_material();
     material.base_color = Color::NONE;
@@ -128,6 +132,9 @@ fn spawn_metric_guide_panel(
             line_metrics.baseline - line_metrics.ascent
         };
     let top_world = scaling::layout_to_world_y(top_layout, ctx.anchor_y, ctx.scale);
+
+    let dot_shapes = origin_dot_shapes(ctx, font_context, computed, x, top_world);
+    let tree = build_metric_guide_tree(width, height, lines, dot_shapes);
 
     let Ok(panel) = DiegeticPanel::world()
         .size(width, height)
@@ -200,10 +207,9 @@ fn metric_line_specs(
     specs
 }
 
-/// One horizontal [`PanelLine`] per metric, placed where the retired border
-/// strips sat: the first line hangs below the panel top edge, every other
-/// line sits above its spec offset. Specs at non-increasing offsets are
-/// skipped, matching the zero-height border segments the old tree dropped.
+/// One horizontal [`PanelLine`] per metric: the first line hangs below the
+/// panel top edge, every other line sits above its spec offset. Specs at
+/// non-increasing offsets are skipped.
 fn metric_guide_lines(
     width: f32,
     line_specs: &[MetricLineSpec],
@@ -306,18 +312,70 @@ fn metric_arrow_lines(
     .collect()
 }
 
-/// Single-element tree owning every metric guide line. The element pins
-/// [`HairlineFade::Full`] so debug guides never fade with distance, and the
-/// draw overflows visibly because the outermost arrow columns sit exactly on
+/// Origin and advancement-end dots authored in the metric panel's local space
+/// (top-left origin, y down). Empty unless both glyph metrics and labels are
+/// shown, matching the standalone dots in
+/// [`glyph::spawn_origin_and_advancement`](super::glyph). The metric panel's
+/// world transform places local `(0, 0)` at `(panel_x, top_world)`.
+fn origin_dot_shapes(
+    ctx: &OverlayContext<'_, '_, '_>,
+    font_context: &FontContext<'_>,
+    computed: &ComputedWorldText,
+    panel_x: f32,
+    top_world: f32,
+) -> Vec<PanelShape> {
+    if ctx.overlay.glyph_metrics != GlyphMetricVisibility::Shown
+        || ctx.overlay.labels != GlyphMetricVisibility::Shown
+    {
+        return Vec::new();
+    }
+    let Some(dots) = glyph::dot_geometry(ctx, font_context, computed) else {
+        return Vec::new();
+    };
+    let local_y = top_world - dots.baseline_y;
+    [dots.origin_x, dots.advance_end_x]
+        .into_iter()
+        .map(|world_x| {
+            PanelShape::Circle(
+                PanelCircle::new(PanelPoint::new(world_x - panel_x, local_y), dots.radius)
+                    .color(Color::WHITE),
+            )
+        })
+        .collect()
+}
+
+/// Overlay tree owning every metric guide line plus the origin dots. The lines
+/// and dots are separate full-panel children so they share the panel's local
+/// coordinate space; the dot child is raised one [`DrawZIndex`] level so the
+/// dots composite above the baseline line. Both children pin
+/// [`HairlineFade::Full`] so debug guides never fade with distance, and their
+/// draws overflow visibly because the outermost arrow columns sit exactly on
 /// the panel's left and right edges.
-fn build_metric_guide_tree(width: f32, height: f32, lines: Vec<PanelLine>) -> LayoutTree {
-    LayoutBuilder::with_root(
+fn build_metric_guide_tree(
+    width: f32,
+    height: f32,
+    lines: Vec<PanelLine>,
+    dot_shapes: Vec<PanelShape>,
+) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::overlay().size(width, height));
+    builder.with(
         El::new()
             .size(width, height)
             .hairline_fade(HairlineFade::Full)
             .draw(PanelDraw::lines(lines).overflow(DrawOverflow::Visible)),
-    )
-    .build()
+        |_| {},
+    );
+    if !dot_shapes.is_empty() {
+        builder.with(
+            El::new()
+                .size(width, height)
+                .hairline_fade(HairlineFade::Full)
+                .z_index(DrawZIndex(1))
+                .draw(PanelDraw::shapes(dot_shapes).overflow(DrawOverflow::Visible)),
+            |_| {},
+        );
+    }
+    builder.build()
 }
 
 /// `(label, layout_y)` pairs for the metric label spawner, in top-to-bottom

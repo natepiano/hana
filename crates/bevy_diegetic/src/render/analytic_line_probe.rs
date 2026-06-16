@@ -1,10 +1,10 @@
 //! Standalone analytic-path line probe.
 //!
 //! Bypasses panel-line resolution and layout entirely: an authored
-//! [`AnalyticLine`] component is converted directly into one glyph-style
+//! [`AnalyticLine`] component is converted directly into one path-style
 //! analytic batch (packed rectangle outline -> atlas buffers -> one instance +
-//! one run -> the shared `TextMaterial`). This is the minimum path that proves
-//! the glyph renderer draws a crisp stroked line, and a reference to compare
+//! one run -> the shared `PathMaterial`). This is the minimum path that proves
+//! the path renderer draws a crisp stroked line, and a reference to compare
 //! the panel-line ruler route against.
 
 use bevy::asset::RenderAssetUsages;
@@ -16,20 +16,20 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 
 use super::AntiAlias;
-use super::BatchTextMaterialInput;
+use super::BatchPathMaterialInput;
 use super::Bounds;
-use super::GlyphInstanceRecord;
-use super::GlyphRecord;
 use super::PathContour;
+use super::PathInstanceRecord;
+use super::PathMaterial;
 use super::PathOutline;
+use super::PathRecord;
 use super::QuadraticSegment;
 use super::RenderMode;
 use super::RunRecord;
-use super::TextMaterial;
 
 /// Design-space units assigned to the stroke (thin) axis. Fixing the thin axis
 /// at a healthy resolution keeps the anti-aliased edge sharp no matter how long
-/// or thin the line is, the same way a glyph stem always packs into ~1000
+/// or thin the line is, the same way a path stem always packs into ~1000
 /// font units regardless of point size.
 const STROKE_DESIGN_UNITS: f32 = 128.0;
 /// Anti-aliasing fringe added around the outline, in design units. Converted to
@@ -102,7 +102,7 @@ fn build_analytic_lines(
         Or<(Changed<AnalyticLine>, Changed<Transform>)>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<TextMaterial>>,
+    mut materials: ResMut<Assets<PathMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut commands: Commands,
 ) {
@@ -117,7 +117,7 @@ fn build_analytic_lines(
         ) else {
             commands
                 .entity(entity)
-                .remove::<(Mesh3d, MeshMaterial3d<TextMaterial>)>();
+                .remove::<(Mesh3d, MeshMaterial3d<PathMaterial>)>();
             continue;
         };
         commands.entity(entity).insert((
@@ -132,14 +132,14 @@ fn build_analytic_lines(
 
 struct BuiltLine {
     mesh:     Handle<Mesh>,
-    material: Handle<TextMaterial>,
+    material: Handle<PathMaterial>,
 }
 
 fn build_line(
     line: &AnalyticLine,
     place: Mat4,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<TextMaterial>,
+    materials: &mut Assets<PathMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
 ) -> Option<BuiltLine> {
     let delta = line.end - line.start;
@@ -162,7 +162,7 @@ fn build_line(
     // PANEL_LINE_BAND_TARGET_DESIGN_UNITS).
     let packed = super::build_packed_path(rectangle_outline(design), 1);
     let band_count = u32::try_from(packed.bands().len() / 2).ok()?;
-    let glyph = GlyphRecord::new(
+    let path_record = PathRecord::new(
         packed.bounds(),
         0,
         band_count,
@@ -173,7 +173,7 @@ fn build_line(
 
     let curves = storage_buffers.add(ShaderBuffer::from(packed.curves().to_vec()));
     let bands = storage_buffers.add(ShaderBuffer::from(packed.bands().to_vec()));
-    let glyphs = storage_buffers.add(ShaderBuffer::from(vec![glyph]));
+    let path_records = storage_buffers.add(ShaderBuffer::from(vec![path_record]));
 
     // Local frame: origin at the segment midpoint, +X along the segment, +Y
     // across the stroke. The run transform rotates and places that frame into
@@ -181,7 +181,7 @@ fn build_line(
     let design_to_world = line.width / design.y;
     let padding = PADDING_DESIGN_UNITS * design_to_world;
     let half = Vec2::new(length, line.width) * 0.5;
-    let instance = GlyphInstanceRecord {
+    let instance = PathInstanceRecord {
         rect_min:    -half - Vec2::splat(padding),
         rect_size:   half * 2.0 + Vec2::splat(padding * 2.0),
         uv_min:      Vec2::new(
@@ -216,7 +216,7 @@ fn build_line(
     let material = materials.add(line_material(LineMaterialBuffers {
         curves,
         bands,
-        glyphs,
+        path_records,
         instances,
         run_records,
     }));
@@ -266,14 +266,14 @@ fn inert_quad_mesh() -> Mesh {
 }
 
 struct LineMaterialBuffers {
-    curves:      Handle<ShaderBuffer>,
-    bands:       Handle<ShaderBuffer>,
-    glyphs:      Handle<ShaderBuffer>,
-    instances:   Handle<ShaderBuffer>,
-    run_records: Handle<ShaderBuffer>,
+    curves:       Handle<ShaderBuffer>,
+    bands:        Handle<ShaderBuffer>,
+    path_records: Handle<ShaderBuffer>,
+    instances:    Handle<ShaderBuffer>,
+    run_records:  Handle<ShaderBuffer>,
 }
 
-fn line_material(buffers: LineMaterialBuffers) -> TextMaterial {
+fn line_material(buffers: LineMaterialBuffers) -> PathMaterial {
     let base = StandardMaterial {
         base_color: Color::WHITE,
         unlit: true,
@@ -282,7 +282,7 @@ fn line_material(buffers: LineMaterialBuffers) -> TextMaterial {
         alpha_mode: AlphaMode::Blend,
         ..default()
     };
-    super::batch_text_material(BatchTextMaterialInput {
+    super::batch_path_material(BatchPathMaterialInput {
         base,
         fill_color: Vec4::ONE,
         render_mode: RenderMode::Text,
@@ -291,10 +291,9 @@ fn line_material(buffers: LineMaterialBuffers) -> TextMaterial {
         aa_band: true,
         curves: buffers.curves,
         bands: buffers.bands,
-        glyphs: buffers.glyphs,
+        path_records: buffers.path_records,
         instances: buffers.instances,
         run_records: buffers.run_records,
-        debug_glyph_index: false,
     })
 }
 
