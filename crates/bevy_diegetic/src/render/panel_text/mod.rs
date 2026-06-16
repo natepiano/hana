@@ -77,11 +77,6 @@ impl Plugin for TextRenderPlugin {
         app.init_resource::<TextShapingContext>();
         app.init_resource::<ShapedTextCache>();
         app.init_resource::<DiegeticPerfStats>();
-        app.register_type::<DiegeticTextBatch>();
-        // Reflection parity only; the `#[relationship]` derive installs the
-        // maintenance hooks, so the set populates without these registrations.
-        app.register_type::<TextRunOf>();
-        app.register_type::<PanelTextRuns>();
         app.add_systems(
             PostUpdate,
             (

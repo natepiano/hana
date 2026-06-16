@@ -456,11 +456,10 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     builder.build()
 }
 
-/// Registers [`DiegeticText`] reflection.
 pub(crate) struct DiegeticTextPlugin;
 
 impl Plugin for DiegeticTextPlugin {
-    fn build(&self, app: &mut App) { app.register_type::<DiegeticText>(); }
+    fn build(&self, _app: &mut App) {}
 }
 
 #[cfg(test)]

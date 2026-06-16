@@ -364,9 +364,8 @@ impl Plugin for RenderPlugin {
         ))
         .init_resource::<AntiAlias>()
         .init_resource::<HairlineWidth>()
-        // Bevy registers the OIT type without `ReflectComponent`; adding it
-        // enables reflection-based (BRP) edits of OIT settings on a live camera.
-        .register_type::<OrderIndependentTransparencySettings>()
+        // Bevy registers the OIT type without `ReflectComponent`; this enables
+        // reflection-based (BRP) edits of OIT settings on a live camera.
         .register_type_data::<OrderIndependentTransparencySettings, ReflectComponent>()
         // The cascade-root mirrors must land before propagation so a global
         // change reaches every `Resolved<A>` the same frame.
