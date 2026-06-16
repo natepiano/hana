@@ -16,6 +16,7 @@ mod perf;
 mod sizing;
 mod world_anchoring;
 
+pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchor_geometry::PanelAnchorEdge;
 pub use anchor_geometry::PanelAnchorEdgeEndpoints;
 pub use anchor_geometry::PanelAnchorGeometryError;
@@ -25,16 +26,16 @@ pub use anchor_geometry::PanelAnchorPoints;
 pub use anchor_geometry::PanelPlane;
 pub use anchor_geometry::PanelScreenBounds;
 pub use anchor_geometry::ResolvedPanelAnchorGeometry;
-pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
+pub use anchoring::PanelAnchorPose;
 pub use anchoring::PanelsAnchoredHere;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use attachment_resolver::resolve_panel_attachments;
 pub(crate) use attachment_resolver::AttachmentResolveAction;
 pub(crate) use attachment_resolver::AttachmentResolveCandidate;
 pub(crate) use attachment_resolver::AttachmentResolveDiagnostics;
 pub(crate) use attachment_resolver::AttachmentResolveReasons;
-pub(crate) use attachment_resolver::resolve_panel_attachments;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -47,12 +48,12 @@ pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
+pub(crate) use events::trigger_panel_dimensions_changed;
 pub(crate) use events::LastPanelDimensions;
 pub use events::PanelChangeKind;
 pub use events::PanelChanged;
 pub use events::PanelDimensions;
 pub use events::PanelDimensionsChanged;
-pub(crate) use events::trigger_panel_dimensions_changed;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
@@ -134,9 +135,6 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<ShapedTextCache>()
             .init_resource::<CascadeDefaults>()
             .init_resource::<WorldAnchorResolveDiagnostics>()
-            .register_type::<AnchoredToPanel>()
-            .register_type::<PanelAnchorOffset>()
-            .register_type::<PanelsAnchoredHere>()
             .configure_sets(
                 Update,
                 (

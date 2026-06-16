@@ -1,9 +1,535 @@
-# Anchor to panel
+# Panel anchoring
 
-Status: **implementation plan**. This is the point-to-point attachment feature:
-place one panel by pinning one of its anchor points to one anchor point on
-another panel. It is intentionally separate from span-driven sizing
-([`constrained-screen-sizing.md`](constrained-screen-sizing.md)).
+> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Point-to-point panel
+> attachment — pin one panel's anchor point to another panel's anchor point, in
+> screen and world space, with optional z offset, anchored rotation
+> (`PanelAnchorPose`), and animation. Separate from span-driven sizing
+> ([`constrained-screen-sizing.md`](constrained-screen-sizing.md)). Phases 1–5
+> shipped; Phases 6–8 are the live zone.
+
+## Delegation Context
+<!-- Shared across all phases. /plan:delegate prepends this to every dispatch. -->
+
+- **Project:** `bevy_diegetic` — diegetic UI layout engine for Bevy (in-world
+  panels, Clay-inspired layout).
+- **Stack:** Rust + Bevy 0.19.0-rc.2; bevy_lagrange (orbit camera),
+  bevy_enhanced_input, parley/ttf-parser (text).
+- **Layout:**
+  ```
+  crates/bevy_diegetic/src/
+    panel/anchoring.rs            — AnchoredToPanel, PanelAnchorOffset, PanelsAnchoredHere, ResolvedScreenPanelPosition; Phase 6 adds PanelAnchorPose, Phase 7 grows ResolvedScreenPanelPosition
+    panel/world_anchoring.rs      — PostUpdate world resolver; Phase 6 composes pose rotation
+    panel/attachment_resolver.rs  — shared graph/cycle/diagnostics
+    panel/anchor_geometry.rs      — PanelPlane, PanelScreenBounds, PanelAnchorGeometryParam, point()/edge()
+    panel/mod.rs                  — PanelSystems enum; anchor-type re-exports
+    screen_space/anchoring/{mod,rect,placement,candidate,window}.rs — screen resolver; Phase 7 adds in-plane rotation
+    screen_space/mod.rs           — position_screen_space_panels; ScreenSpaceSystems
+    lib.rs                        — public re-exports
+  crates/fairy_dust/src/{orbit_cam,camera_home}.rs, builder/mod.rs — Phase 8 camera move
+  crates/bevy_diegetic/examples/panel_anchoring.rs — Phase 8 capability selector
+  ```
+- **Key files:**
+  - `panel/anchoring.rs` — `AnchoredToPanel` (23-38, `#[component(immutable)]`),
+    `PanelAnchorOffset` (96-154, x/y/z `Dimension`), `PanelsAnchoredHere`
+    (157-179), `ResolvedScreenPanelPosition` (186-191:
+    `anchor_position: Option<Vec2>`, `depth: Option<f32>`,
+    `authored_depth: Option<f32>` — Phase 7 adds `rotation: Option<f32>`).
+  - `panel/world_anchoring.rs` — `WorldAnchorReadParam::placement()` (93-141):
+    ~line 126 `desired_rotation = plane_rotation(target_plane)`,
+    `desired_translation = target_point - desired_rotation * source_offset`
+    (Phase 6 composition site); `restore_inactive_world_panel_poses()` (26-46);
+    `resolve_world_space_panel_attachments()` (49-83).
+  - `panel/attachment_resolver.rs` — `resolve_panel_attachments()` (51-85),
+    `AttachmentGraph` (88+), shared by both resolvers.
+  - `panel/anchor_geometry.rs` — `PanelScreenBounds::point(anchor)` (343),
+    `PanelPlane` (367), `PanelPlane::from_panel()` (383-411),
+    `PanelPlane::point(anchor)` (463-466).
+  - `screen_space/anchoring/rect.rs` — `ScreenPanelRect` (17-22: anchor_position,
+    anchor, size, layout_unit) — Phase 7 adds an in-plane angle. The Phase 7
+    narrative's "ScreenPanelBounds" is this `ScreenPanelRect` (resolver snapshot)
+    plus `PanelScreenBounds::point` (public geometry, `anchor_geometry.rs:343`).
+  - `screen_space/mod.rs` — `position_screen_space_panels()` (191-254, writes
+    `Transform.translation.x/y` + conditional z; Phase 7 adds a rotation write);
+    `ScreenSpaceSystems` (52-56).
+  - `panel/mod.rs` — `PanelSystems` enum (94-109: … ResolvePanelAttachments,
+    PositionScreenSpace, RenderGizmos); anchor re-exports (19-31).
+  - `examples/panel_anchoring.rs` — current world static + keyboard anchoring demo.
+  - `fairy_dust/src/orbit_cam.rs` (`FairyDustOrbitCam`), `camera_home.rs`
+    (`CameraHomeTarget`, `CameraHomeEntity`, `CameraHomeConfig`), `builder/mod.rs`.
+  - `PanelAnchorPose` does not yet exist — Phase 6 introduces it.
+- **Build:** `cargo check -p bevy_diegetic`
+- **Test:** `cargo nextest run -p bevy_diegetic` (never `cargo test`); filters:
+  `world_anchoring`, `screen_space::anchoring`, `anchor_animation`.
+- **Lint:** `cargo +nightly fmt --all -- --check`; `cargo clippy -p bevy_diegetic --all-targets`.
+- **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_diegetic_gpu_meter`
+- **Invariants:**
+  - `AnchoredToPanel` is `#[component(immutable)]`; retarget by replacement only.
+  - While a relation is active the resolver is the only `Transform` writer for
+    that panel; animation writes resolver-read components (`PanelAnchorPose`),
+    never `Transform`.
+  - `ResolvedScreenPanelPosition` is reconciled — write a field only when its
+    value changed (no stale `Changed<>`); `None` per field means "use the
+    authored value."
+  - Screen and world resolvers own edges by source coordinate space; no
+    cross-space attachments (diagnosed, not partially resolved).
+  - Screen resolver runs in `Update` after `FlushObserverCommands`; world resolver
+    runs in `PostUpdate` before `TransformSystems::Propagate`.
+  - `PanelAnchorOffset` dimensions are authored in target-panel layout units;
+    resolvers convert to screen logical pixels or world meters.
+  - No `ChildOf` parent/child for attachment; target despawn detaches dependents
+    without despawning them.
+  - Attachments pin one point — never compute width or height.
+
+## Phases
+
+### Phase 6 — anchored rotation: `PanelAnchorPose` and the world resolver · status: done (uncommitted)
+
+#### Work Order
+
+**Goal:** A public, user-insertable `PanelAnchorPose` component that the **world**
+resolver reads beside an active `AnchoredToPanel`, rotating and displacing the
+panel about its pinned anchor point while the pin stays fixed. The screen resolver
+does not read it yet (Phase 7).
+
+**Spec:**
+
+Add a mutable component the resolver reads beside an active `AnchoredToPanel`.
+`PanelAnchorPose` is a **public, user-insertable** component: a user puts it on an
+entity they control to rotate and animate an attached panel. The relationship
+stays the exact snap constraint — while an `AnchoredToPanel` is active the resolver
+is the only transform writer for that panel, and animation writes this
+resolver-read component, never `Transform` directly. This phase introduces the
+component and wires the **world** resolver; the **screen** resolver reads it in
+Phase 7.
+
+```rust
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Default)]
+pub struct PanelAnchorPose {
+    /// Rotation about the pinned anchor point, in the target-plane frame.
+    pub rotation: Quat,
+    /// Translation from the pinned anchor point, in plane-frame meters.
+    pub translation: Vec3,
+}
+```
+
+- Rotation is authored in the target-plane frame (`right`, `up`, `normal`).
+  Normal-axis rotation spins the panel coplanar on its pin; right/up-axis rotation
+  hinges it off the target surface; an arbitrary `Quat` covers any direction.
+- The resolver composes `plane_rotation(target_plane) * pose.rotation` and keeps
+  the existing translation equation `target_point - desired_rotation *
+  source_offset` (`world_anchoring.rs` `placement()`, ~line 126). Because
+  translation is derived from the anchor point and the rotated source offset, the
+  pinned `source_anchor` stays fixed for any rotation — pivot-at-pin needs no extra
+  math.
+- `pose.translation` displaces the pin point in the plane frame after the static
+  `PanelAnchorOffset` is applied, in meters: animation code works in world units;
+  layout-unit conversion stays an authoring convenience of the static offset.
+- The component is separate from `AnchoredToPanel` because the relationship is
+  `#[component(immutable)]`: re-inserting it every frame to animate would churn the
+  `PanelsAnchoredHere` reverse index. The relation states what the panel is pinned
+  to; `PanelAnchorPose` states the pose about that pin and is mutable for
+  animation.
+- `PanelAnchorPose` is honored in both coordinate spaces with different
+  interpretations. World (this phase): the full `Quat` in the target-plane frame —
+  it can hinge the panel off the target surface. Screen (Phase 7): the pose is
+  projected onto the screen plane. The component is space-agnostic; each resolver
+  interprets it. Until Phase 7 lands a screen panel's pose is inert because the
+  screen resolver does not yet read it — an unfinished wire completed in Phase 7,
+  not a by-design ignore.
+
+This extends the attachment contract from position-only to position plus
+orientation. Attachments still never compute width or height.
+
+**Files:**
+- `panel/anchoring.rs` — add `PanelAnchorPose` next to the other anchor types.
+- `panel/mod.rs`, `lib.rs` — re-export `PanelAnchorPose`.
+- `panel/world_anchoring.rs` — in `WorldAnchorReadParam::placement()` (~93-141, the
+  `desired_rotation`/`desired_translation` computation at ~line 126), read an
+  optional `PanelAnchorPose` on the source and compose
+  `plane_rotation(target_plane) * pose.rotation`; apply `pose.translation`
+  (plane-frame meters) after the static `PanelAnchorOffset`. Leave
+  `AnchoredWorldPanelPose` capture/restore (26-46) untouched — the pose is resolver
+  input, not authored transform.
+- `HeadlessLayoutPlugin` registration — add `app.register_type::<PanelAnchorPose>()`.
+
+**Constraints from prior phases:**
+- Phase 2: `PanelPlane` (`anchor_geometry.rs:367`) provides the orthonormal
+  target-plane basis via `PanelPlane::from_panel` and `PanelPlane::point(anchor)`;
+  it rejects sheared / non-orthonormal planes.
+- Phase 3: the world resolver lives in `world_anchoring.rs`, runs in `PostUpdate`
+  before `TransformSystems::Propagate`, uses `TransformHelper` for current
+  target/parent globals, and owns position + default plane orientation while the
+  relation is active. `AnchoredWorldPanelPose` captures/restores the authored local
+  transform on detach / invalid target / skip / cycle — `PanelAnchorPose` must not
+  interfere with that record.
+- Phase 5: `PanelAnchorOffset` carries `z: Dimension`; the world resolver already
+  displaces the pinned target point along `target_plane.normal()`. `pose.translation`
+  is applied after that static offset.
+
+**Acceptance gate:** `cargo nextest run -p bevy_diegetic world_anchoring` green, plus:
+- normal-axis `PanelAnchorPose` rotation spins the dependent coplanar while the
+  pinned `source_anchor` point stays fixed (assert the world-space anchor point
+  before and after rotation)
+- right/up-axis rotation hinges the dependent off the target plane; pinned point
+  still fixed
+- `pose.translation` displaces the pin in the plane frame in meters, after the
+  static `PanelAnchorOffset`
+- pose composes with target rotation: a rotated target plane plus a pose rotation
+  produces `plane_rotation * pose.rotation`
+- removing `PanelAnchorPose` returns the dependent to the plain snapped placement
+  without touching the captured `AnchoredWorldPanelPose`
+- a screen panel's `PanelAnchorPose` has no effect in this phase; the screen
+  resolver does not read it until Phase 7
+
+Closeout:
+```sh
+cargo +nightly fmt --all -- --check
+cargo nextest run -p bevy_diegetic world_anchoring
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+```
+
+#### Retrospective
+
+**What worked:**
+- `PanelAnchorPose` landed exactly as specified; the existing
+  `target_point - desired_rotation * source_offset` equation made pivot-at-pin
+  invariance fall out with no extra math. Both reviewers confirmed the pin is
+  fixed under any rotation.
+- The `has_pose` → `has_authored_pose` rename cleanly separated the new
+  `PanelAnchorPose` query from the pre-existing `AnchoredWorldPanelPose` capture
+  gate; the two stayed independent as required.
+
+**What deviated from the plan:**
+- Added `Default` to the `derive` list (`PanelAnchorPose` is `#[derive(... Default)]`).
+  Required: the spec's `#[reflect(Component, PartialEq, Debug, Default)]` demands a
+  `Default` impl, and the resolver reads the pose via
+  `anchor_poses.get(source).copied().unwrap_or_default()` so a missing component is
+  identity. The spec's derive line omitted `Default` while its reflect line named it
+  — the implementation resolved that inconsistency.
+- Plane-frame translation is applied via a new `plane_frame_translation(plane, v)`
+  helper = `right*x + up*y + normal*z`. Note the y-sign differs from the **static**
+  `PanelAnchorOffset` path, which uses `- up*y` (layout y-down). `pose.translation`
+  is authored in plane-frame meters with +y = plane up; the static offset stays
+  y-down layout units. Locked by `panel_anchor_pose_translation_displaces_pin_after_static_offset`.
+
+**Surprises:**
+- The world `placement()` reads the pose unconditionally (`unwrap_or_default`) rather
+  than gating on `AnchoredToPanel` presence — fine because `placement()` only runs
+  for active world candidates, but later phases must keep pose reads inside the
+  resolver's active-candidate path, not in a free-standing system.
+
+**Implications for remaining phases:**
+- Phase 7: `PanelAnchorPose` and its world composition now exist; Phase 7 wires the
+  **screen** interpretation only and must not touch `world_anchoring.rs`. The screen
+  projection takes the same `Quat` and reduces it to one in-plane angle θ.
+- Phase 7: the screen-inert behavior is already covered by
+  `screen_attachment_ignores_panel_anchor_pose_until_screen_pose_resolution_lands`
+  in `screen_space/anchoring/mod.rs` — Phase 7 must update or replace that test when
+  it makes the screen pose live.
+- Phase 8: the world animation demos (capabilities 2, 3) can drive `PanelAnchorPose`
+  now; the resolver consumes it as the sole transform writer.
+
+#### Phase 6 Review
+
+- Phase 7 (struct): grew the planned `ResolvedScreenPanelPosition` to add
+  `authored_rotation: Option<f32>` alongside `rotation` — the cited depth precedent
+  is a restore *pair* (`depth`/`authored_depth`), so restore-on-release needs the
+  matching authored field; a lone `rotation` field can't meet the "authored rotation
+  restored" acceptance bullet.
+- Phase 7 (Layer 1): corrected the pivot to the pinned `source_anchor` point
+  (`target_point`), not `anchor_position` — the two diverge when
+  `source_anchor != panel.anchor()`; added an acceptance bullet for that case.
+- Phase 7 (Layer 2): named the real seam — `ScreenPanelRect` has no `point()`;
+  oriented math computes in the placer to leave public `PanelScreenBounds::point`
+  unchanged (flagged as an API gate if it instead grows an oriented method), and the
+  chain angle threads through `with_anchor_position`.
+- Phase 7 (constraints): added the Phase 6 y-sign fact (`pose.translation` is +y-up;
+  screen is y-down, so `translation.y` is negated), the exact shipped `PanelAnchorPose`
+  signature, and the instruction to convert the Phase-6 placeholder inert test
+  `screen_attachment_ignores_panel_anchor_pose_until_screen_pose_resolution_lands`
+  into a live-pose assertion.
+- Phase 8: pinned the release handoff to the proven "keep relation active + animate
+  `PanelAnchorPose`" path; noted capability 3's per-link hinge frame compounds on the
+  parent's plane; recorded that capability 4's `R` reset depends on Phase 7's
+  `authored_rotation` restore.
+- No user decisions: every finding had a single determined outcome dictated by the
+  shipped depth precedent or the existing screen-resolver coordinate frame.
+
+### Phase 7 — screen in-plane rotation and oriented-rect chains · status: todo
+
+#### Work Order
+
+**Goal:** The screen resolver honors `PanelAnchorPose`, locked to the screen plane:
+a leaf spins in place about its pin (Layer 1), and a rotated screen target
+re-anchors the panels pinned to it (Layer 2), with chains resolving in one update.
+
+**Spec:**
+
+The screen resolver honors `PanelAnchorPose`, locked to the screen plane. A screen
+panel rotates and animates in place, and a rotated screen panel re-anchors the
+panels pinned to it.
+
+**Locked-to-plane semantics.** The shared screen camera is orthographic and faces
+the screen plane, so only rotation about the view normal keeps a panel in that
+plane. Project the authored `pose.rotation` to its rotation-about-view-normal — a
+single in-plane angle θ. Apply `pose.translation.xy` as an in-plane slide and
+`pose.translation.z` through the existing draw-order depth channel (Phase 5).
+Out-of-plane rotation components are dropped. Document this as "screen honors
+in-plane rotation; out-of-plane rotation has no screen effect" — the panel cannot
+leave the plane. It is a defined projection, not an ignore.
+
+**Full-pose `ResolvedScreenPanelPosition`.** Grow the override component to carry
+the resolved in-plane angle **and the captured authored rotation** beside the
+existing fields. The depth precedent this mirrors is a *pair* — `depth` plus
+`authored_depth` — so rotation needs the same pair to restore the user's authored
+`Transform.rotation` on release:
+
+```rust
+pub(crate) struct ResolvedScreenPanelPosition {
+    pub(crate) anchor_position:  Option<Vec2>,
+    pub(crate) depth:            Option<f32>,
+    pub(crate) authored_depth:   Option<f32>,
+    pub(crate) rotation:         Option<f32>, // resolved in-plane angle (radians)
+    pub(crate) authored_rotation: Option<f32>, // captured authored z-angle, restored on release
+}
+```
+
+`position_screen_space_panels` writes `Transform.rotation =
+Quat::from_rotation_z(angle)` only when the resolver produced a rotation, otherwise
+the authored rotation is kept — the same `None`/`Some` fallback rule x/y/z already
+follow. On release (pose removed / relation detached) the placer restores
+`authored_rotation` exactly as `authored_depth` restores authored z today
+(`screen_space/mod.rs` depth-restore path). The single-writer rule is preserved:
+the resolver owns rotation for attached panels; an unattached screen panel's
+rotation stays user-owned because placement only writes the fields the resolver
+resolved.
+
+**Layer 1 — a leaf spins on its pin.** A screen panel that nothing is pinned to
+rotates about its **pinned `source_anchor` point** — the point that lands on the
+target (`target_point` in the placer), NOT the panel's configured `anchor_position`.
+The two coincide only when `source_anchor == panel.anchor()`; when they differ
+(see `attachment_math_handles_different_panel_and_source_anchors`,
+`screen_space/anchoring/mod.rs`) the pivot must still be the pinned point. The
+placer applies the in-plane rotation about that pinned point: the pin stays fixed
+and the panel's top-left re-derives from `pin + R2D(θ) · (top_left − pin)`. The
+pinned `source_anchor` point's screen coordinate is invariant under rotation.
+
+**Layer 2 — oriented-rect anchor math.** When a panel that *is* an anchor target
+rotates, its anchor points move, so its dependents must track them. The screen
+resolver snapshot (`ScreenPanelRect`, `screen_space/anchoring/rect.rs`) carries the
+in-plane angle, and the placer's anchor-point lookup becomes the oriented form
+`center + R2D(θ) · (anchor.offset(size) − center_offset)`. `ScreenPanelRect` has no
+`point()` method today — it produces a `PanelScreenBounds` via `.bounds()` and the
+placer calls `target_bounds.point(...)` (`screen_space/anchoring/placement.rs`,
+~line 122), where `PanelScreenBounds::point` (`anchor_geometry.rs:343`) is
+axis-aligned (`top_left + anchor_offset`). Prefer computing the oriented point in
+the placer from the rect's angle + `anchor.offset(size)`, leaving the public
+`PanelScreenBounds::point` signature unchanged; **if `PanelScreenBounds` instead
+gains an oriented `point` method that is a public-API addition — get approval.**
+The chain snapshot must thread the angle: the placer propagates resolved placement
+to downstream links via `rects.insert(source, source_rect.with_anchor_position(...))`
+(`placement.rs`, ~line 137), so a rotated source that becomes a downstream target
+must also carry its in-plane angle into its `ScreenPanelRect` (extend
+`with_anchor_position` or add an angle-carrying variant) or the next link reads an
+axis-aligned target. A dependent pinned to a rotated target's anchor lands on the
+rotated point; chains `A → B → C` of rotated screen panels resolve in graph order,
+each link reading its target's oriented bounds.
+
+**Files:**
+- `panel/anchoring.rs` — grow `ResolvedScreenPanelPosition` (186-191) with
+  `rotation: Option<f32>` and `authored_rotation: Option<f32>` (the restore pair,
+  mirroring `depth`/`authored_depth`).
+- `screen_space/mod.rs` — `position_screen_space_panels()` (191-254): write
+  `Transform.rotation = Quat::from_rotation_z(angle)` only when the resolver
+  produced a rotation; capture `authored_rotation` on first resolve and restore it
+  on release, exactly as the existing depth-restore path handles `authored_depth`.
+- `screen_space/anchoring/rect.rs` — `ScreenPanelRect` (17-22): carry the in-plane
+  angle; thread it through `with_anchor_position` (or an angle-carrying variant) so
+  a rotated source propagates its angle to downstream links.
+- `screen_space/anchoring/{placement,mod}.rs` — read source `PanelAnchorPose`,
+  project to in-plane angle θ, apply the Layer 1 pin rotation about the pinned
+  `source_anchor` point (`target_point`, not `anchor_position`), and compute the
+  Layer 2 oriented anchor point in the placer (`center + R2D(θ)·(anchor.offset(size)
+  − center_offset)`), leaving public `PanelScreenBounds::point` axis-aligned.
+- `screen_space/anchoring/mod.rs` (tests) — convert the Phase-6 placeholder test
+  `screen_attachment_ignores_panel_anchor_pose_until_screen_pose_resolution_lands`
+  into a live-pose assertion. That test currently asserts a screen panel's pose is
+  inert (`transform.rotation == Quat::IDENTITY`, `anchor_position` unchanged) using
+  `rotation: FRAC_PI_2`, `translation: (10,20,30)`; with Phase 7 live that panel
+  gains the resolved angle and an in-plane `translation.xy` slide, so the assertion
+  must flip.
+
+**Constraints from prior phases:**
+- Phase 5: the screen placer tracks depth per entity beside `desired_positions`;
+  `ResolvedScreenPanelPosition` already carries `depth` and `authored_depth`, and
+  `position_screen_space_panels` writes `translation.z` only when the resolver
+  produced a depth. Phase 7 adds the parallel `rotation` + `authored_rotation`
+  fields on the same `None`/`Some` capture-and-restore rule. The `authored_rotation`
+  half is required to meet the "authored rotation is restored" acceptance bullet —
+  a lone `rotation: Option<f32>` has nowhere to stash the user's authored angle.
+- Phase 6: `PanelAnchorPose` shipped with the exact signature
+  `#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)] { rotation:
+  Quat, translation: Vec3 }`; the world resolver reads it via
+  `anchor_poses.get(source).copied().unwrap_or_default()` and the screen resolver
+  does **not** yet — this phase wires it. Phase 7 does not touch the world resolver.
+- Phase 6 y-sign convention: `pose.translation` is authored in plane-frame meters
+  with **+y = plane up** (world helper `plane_frame_translation` = `right*x + up*y +
+  normal*z`). The screen resolver works in **y-down window pixels** (`anchor_position.y`
+  grows downward; `screen_space/mod.rs:238` does `half_height - anchor_position.y`),
+  exactly as the static `PanelAnchorOffset` path already differs (`- up*y`).
+  Phase 7 must negate `pose.translation.y` when applying the in-plane slide so the
+  screen interpretation matches the world +y-up authoring.
+- The placeholder screen-inert test from Phase 6 (named in Files) must be converted
+  by this phase, not left asserting inertness.
+
+**Acceptance gate:** `cargo nextest run -p bevy_diegetic screen_space::anchoring`
+green (with the Phase-6 placeholder inert test converted to a live-pose assertion),
+plus:
+- a leaf screen panel with a normal-axis pose spins about its pinned `source_anchor`
+  point; that pinned point's screen coordinate is invariant before and after
+  rotation, including a case where `source_anchor != panel.anchor()`
+- an out-of-plane pose rotation has no screen effect; the panel stays axis-aligned
+  in the plane (documented projection, not a panic or skip)
+- `pose.translation.xy` slides the panel in-plane with +y-up honored against the
+  y-down screen frame; `pose.translation.z` routes through the Phase 5 depth channel
+- a rotated screen target repositions its dependent onto the rotated anchor point
+  (oriented point computed in the placer; public `PanelScreenBounds::point` unchanged)
+- a screen chain `A → B → C` with per-link rotation resolves in one update (each
+  link's `ScreenPanelRect` carries its angle through the chain snapshot)
+- removing `PanelAnchorPose` restores axis-aligned placement: `rotation` returns to
+  `None` and `authored_rotation` is restored, the same `None → Some → None`
+  transition x/y/z follow
+
+Closeout:
+```sh
+cargo +nightly fmt --all -- --check
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+cargo nextest run -p bevy_diegetic world_anchoring
+```
+
+### Phase 8 — animation ordering and the demonstration example · status: todo
+
+#### Work Order
+
+**Goal:** A named `PostUpdate` ordering point for animation systems that write
+resolver-read inputs, plus the capability-selector demonstration example with a
+world-space explainer panel.
+
+**Spec:**
+
+- Name a `PostUpdate` ordering point for systems that write resolver-read animation
+  inputs (`PanelAnchorPose`, relation insert/remove at state boundaries) before the
+  world attachment resolver. **If this becomes a public `PanelSystems` variant, get
+  explicit API approval during implementation.** Because the world resolver runs in
+  `PostUpdate` before `TransformSystems::Propagate`, writes before the resolver
+  affect the current frame and writes after it affect the next frame; tests must
+  show both.
+- Ownership modes for animation systems:
+  1. no `AnchoredToPanel` component while the animation writes `Transform`
+  2. animation writes `PanelAnchorPose`, and the resolver remains the only
+     transform writer
+  3. animation inserts or removes the relation only at state boundaries
+- Release handoff: the **proven default** is to keep the relation active and animate
+  `PanelAnchorPose` — Phase 6 shipped this as the sole-writer path
+  (`removing_panel_anchor_pose_returns_to_plain_snap_without_recapturing_authored_pose`),
+  and `AnchoredWorldPanelPose` is the authored-pose record restored only on detach
+  (`restore_inactive_world_panel_poses`). Use that path. Only if a demo genuinely
+  removes an active world relation mid-animation does the same-frame release-pose
+  capture protocol apply, so Phase 3 authored-pose restoration does not snap the
+  panel away before the animation starts.
+- The demonstration grows `examples/panel_anchoring.rs` into a capability-selector
+  UI, specified in
+  [`panel-anchoring-example.md`](panel-anchoring-example.md): number keys pick the
+  active capability, `Space` runs its animation, arrows cycle anchors, `R` resets.
+  The capabilities span the feature set across both spaces:
+  - `1` world anchor selection (cycle source/target anchors) — exists
+  - `2` world lift & spin while attached (z offset + normal-axis pose rotation, pin
+    fixed)
+  - `3` world hinge chain unwrap (per-link right-axis pose rotation about each
+    pinned `BottomCenter`). Each link's plane is its target's (parent's) plane —
+    the resolver copies target plane rotation — so a child's `pose.rotation`
+    composes on the parent's already-hinged frame; the chain's rotations compound
+    down the links. Author the unwrap angles expecting that relative-to-parent frame,
+    not a world-absolute one.
+  - `4` screen spin-in-place, locked to the plane (Phase 7 Layer 1)
+  - `5` screen rotated-target chain (Phase 7 Layer 2: a rotating screen panel drags
+    the panels pinned to it)
+  - Relations stay active throughout; the animation system writes only
+    `PanelAnchorPose` before the resolver, never `Transform`. Do not extend
+    `AnchoredToPanel` beyond point-to-point snapping to model hinge motion — point
+    snap plus pose rotation covers it.
+- The explainer is a **world-space** `DiegeticPanel` placed *behind* the main demo,
+  carrying expansive text about the active capability. An orbit-cam control flies
+  the camera to it (zoom and pan) to read, then returns to the main event; sitting
+  behind the action keeps it from occluding. This likely motivates a reusable
+  fairy_dust enhancement — a "look at this panel / return home" camera move usable
+  beyond this example. **Get explicit API approval before landing any public
+  fairy_dust surface for it.**
+- Cover the demos with an `anchor_animation` test filter.
+
+World editable-field popup tracking is not part of the animation phase. If an
+example or test touches editable fields on world-anchored panels, document the
+existing propagated-transform timing or add a separate editor-specific fix.
+Deferred follow-up: if same-frame popup tracking for world-anchored editable fields
+becomes required, handle it in an editor-specific task that covers `ime/editor.rs`
+after `resolve_world_space_panel_attachments`. Do not mix that work into
+`panel_anchoring.rs` or the animation demos.
+
+**Files:**
+- `panel/mod.rs` — if a public `PanelSystems` variant is added for the animation
+  ordering point (API-approval gate).
+- `examples/panel_anchoring.rs` — grow into the capability selector per
+  `panel-anchoring-example.md`.
+- `fairy_dust/src/{orbit_cam,camera_home}.rs`, `builder/mod.rs` — optional "look at
+  panel / return home" camera move (API-approval gate before any public surface).
+
+**Constraints from prior phases:**
+- Phase 6: `PanelAnchorPose` exists; the world resolver composes it; the relation is
+  the sole transform writer while active.
+- Phase 7: the screen resolver reads `PanelAnchorPose` (Layer 1 leaf spin, Layer 2
+  oriented chains), enabling capabilities `4` and `5`.
+- Capability 4's `R` reset depends on Phase 7's `authored_rotation` restore: when the
+  screen pose is cleared the panel must return to its authored rotation. If Phase 7
+  ships without the `authored_rotation` capture/restore pair, `R` silently leaves the
+  panel rotated. Verify Phase 7 landed that field before relying on cap-4 reset.
+- World resolver runs in `PostUpdate` before `TransformSystems::Propagate`: writes
+  before it are same-frame, writes after are next-frame.
+- Two API-approval gates in this phase: a public `PanelSystems` animation-ordering
+  variant, and any public fairy_dust camera "look at panel / return home" surface.
+
+**Acceptance gate:** `cargo check -p bevy_diegetic --example panel_anchoring` and
+`cargo nextest run -p bevy_diegetic anchor_animation` green, plus:
+- writes to `PanelAnchorPose` before the world resolver affect the current frame;
+  writes after it affect the next frame, using the named ordering point
+- pose animation is consumed by the resolver rather than writing the same transform
+  after the resolver
+- capability `2` lift/spin keeps the relation active and never writes `Transform`
+  directly
+- capability `3` chained unwrap animates per-link pose rotation; relations stay
+  active; no extension of `AnchoredToPanel` beyond point snapping
+- the static `panel_anchoring.rs` pass documents reset and detach behavior for
+  `AnchoredWorldPanelPose`: whether reset removes the relation, refreshes the
+  captured authored pose, or leaves the resolver-owned pose intact
+- mixed screen/world animation tests are only needed for animation-specific paths;
+  do not duplicate the base resolver ownership tests from Phase 3
+
+Closeout:
+```sh
+cargo +nightly fmt --all -- --check
+cargo check -p bevy_diegetic --example panel_anchoring
+cargo nextest run -p bevy_diegetic anchor_animation
+cargo nextest run -p bevy_diegetic
+```
+
+## Archive — shipped design and completed phases (1–5)
+
+Everything below is archived reference: the original design narrative for the
+shipped foundation (Phases 1–5) and the completed-phase records. The live zone is
+the Delegation Context and Phases 6–8 above. The Phase 6–8 narrative in
+`## Implementation Phases` is the design source compiled into the Work Orders above
+and is marked superseded. Full as-built rationale will be distilled by
+`/plan:to_as_built` after Phase 8.
 
 ## Intent
 
@@ -1215,7 +1741,7 @@ Mechanics:
   on `PanelAnchorOffset` instead of the originally planned sub-pixel
   caveat, which assumed child z stepping that does not exist.
 
-### Phase 6 — anchored rotation: `PanelAnchorPose` and the world resolver
+### Phase 6 — anchored rotation (superseded; compiled into the Phase 6 Work Order above)
 
 Add a mutable component the resolver reads beside an active `AnchoredToPanel`.
 `PanelAnchorPose` is a **public, user-insertable** component: a user puts it on
@@ -1269,7 +1795,7 @@ pub struct PanelAnchorPose {
 This extends the attachment contract from position-only to position plus
 orientation. Attachments still never compute width or height.
 
-### Phase 7 — screen in-plane rotation and oriented-rect chains
+### Phase 7 — screen rotation (superseded; compiled into the Phase 7 Work Order above)
 
 The screen resolver honors `PanelAnchorPose`, locked to the screen plane. A
 screen panel rotates and animates in place, and a rotated screen panel
@@ -1336,7 +1862,7 @@ Acceptance gate (tests listed under Phase 7 tests):
   returns to `None` and the authored rotation is restored, the same
   `None → Some → None` transition x/y/z follow
 
-### Phase 8 — animation ordering and the demonstration example
+### Phase 8 — animation (superseded; compiled into the Phase 8 Work Order above)
 
 - Name a `PostUpdate` ordering point for systems that write resolver-read
   animation inputs (`PanelAnchorPose`, relation insert/remove at state

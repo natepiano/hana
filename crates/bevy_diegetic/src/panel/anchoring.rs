@@ -76,6 +76,20 @@ impl FromWorld for AnchoredToPanel {
 
 const fn placeholder_entity() -> Entity { Entity::PLACEHOLDER }
 
+/// Mutable pose applied by attachment resolvers around a pinned panel anchor.
+///
+/// [`AnchoredToPanel`] defines which panel points are pinned. `PanelAnchorPose`
+/// is mutable resolver input, so animation systems can rotate or translate an
+/// attached panel without replacing the relationship component.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Default)]
+pub struct PanelAnchorPose {
+    /// Rotation about the pinned anchor point, in the target-plane frame.
+    pub rotation:    Quat,
+    /// Translation from the pinned anchor point, in plane-frame meters.
+    pub translation: Vec3,
+}
+
 /// Offset from a target panel anchor point.
 ///
 /// Coordinates are authored in panel-local layout space: positive x moves
@@ -204,6 +218,7 @@ mod tests {
 
     use super::AnchoredToPanel;
     use super::PanelAnchorOffset;
+    use super::PanelAnchorPose;
     use super::PanelsAnchoredHere;
     use crate::HeadlessLayoutPlugin;
     use crate::Mm;
@@ -302,7 +317,7 @@ mod tests {
     }
 
     #[test]
-    fn relationship_types_are_registered_without_reflect_component_mutation() {
+    fn anchor_types_are_registered_with_expected_reflect_component_data() {
         let mut app = App::new();
         app.add_plugins(HeadlessLayoutPlugin);
 
@@ -322,11 +337,17 @@ mod tests {
             .expect("PanelAnchorOffset is registered")
             .data::<ReflectComponent>()
             .is_some();
+        let pose_has_reflect_component = registry
+            .get(TypeId::of::<PanelAnchorPose>())
+            .expect("PanelAnchorPose is registered")
+            .data::<ReflectComponent>()
+            .is_some();
         drop(registry);
 
         assert!(!source_has_reflect_component);
         assert!(!reverse_has_reflect_component);
         assert!(!offset_has_reflect_component);
+        assert!(pose_has_reflect_component);
     }
 
     #[test]

@@ -234,6 +234,7 @@ pub use panel::PanelAnchorGeometryParam;
 pub use panel::PanelAnchorOffset;
 pub use panel::PanelAnchorPoint;
 pub use panel::PanelAnchorPoints;
+pub use panel::PanelAnchorPose;
 pub use panel::PanelBuildError;
 pub use panel::PanelChangeKind;
 pub use panel::PanelChanged;

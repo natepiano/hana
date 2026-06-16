@@ -12,6 +12,7 @@ use super::AttachmentResolveReasons;
 use super::CoordinateSpace;
 use super::DiegeticPanel;
 use super::PanelAnchorGeometryError;
+use super::PanelAnchorPose;
 use super::PanelPlane;
 use super::resolve_panel_attachments;
 use crate::layout::Anchor;
@@ -84,9 +85,10 @@ pub(super) fn resolve_world_space_panel_attachments(
 
 #[derive(SystemParam)]
 pub(super) struct WorldAnchorReadParam<'w, 's> {
-    transforms: TransformHelper<'w, 's>,
-    local:      Query<'w, 's, &'static Transform>,
-    parents:    Query<'w, 's, &'static ChildOf>,
+    transforms:   TransformHelper<'w, 's>,
+    local:        Query<'w, 's, &'static Transform>,
+    parents:      Query<'w, 's, &'static ChildOf>,
+    anchor_poses: Query<'w, 's, &'static PanelAnchorPose>,
 }
 
 impl WorldAnchorReadParam<'_, '_> {
@@ -97,7 +99,7 @@ impl WorldAnchorReadParam<'_, '_> {
         target: Entity,
         target_panel: &DiegeticPanel,
         attachment: AnchoredToPanel,
-        has_pose: bool,
+        has_authored_pose: bool,
     ) -> Result<WorldAnchorPlacement, WorldAnchorResolveSkip> {
         let source_transform = self
             .local
@@ -119,10 +121,12 @@ impl WorldAnchorReadParam<'_, '_> {
             return Err(WorldAnchorResolveSkip::SourcePanelPlaneInvalid);
         }
 
-        let target_point = target_anchor_point(target_panel, target_plane, attachment)?;
+        let anchor_pose = self.anchor_poses.get(source).copied().unwrap_or_default();
+        let target_point = target_anchor_point(target_panel, target_plane, attachment)?
+            + plane_frame_translation(target_plane, anchor_pose.translation);
         let source_offset =
             scaled_source_anchor_offset(source_panel, attachment.source_anchor, source_scale);
-        let desired_rotation = plane_rotation(target_plane);
+        let desired_rotation = plane_rotation(target_plane) * anchor_pose.rotation;
         let desired_translation = target_point - desired_rotation * source_offset;
         let desired_global = GlobalTransform::from(Transform {
             translation: desired_translation,
@@ -130,7 +134,7 @@ impl WorldAnchorReadParam<'_, '_> {
             scale:       source_scale,
         });
         let local_transform = self.desired_local_transform(source, desired_global)?;
-        let captured_pose = (!has_pose).then_some(AnchoredWorldPanelPose {
+        let captured_pose = (!has_authored_pose).then_some(AnchoredWorldPanelPose {
             authored_transform: *source_transform,
         });
 
@@ -277,14 +281,14 @@ fn world_anchor_placement(
     let Ok((_, target_panel)) = panels.get(target) else {
         return Err(WorldAnchorResolveSkip::TargetWithoutPanel);
     };
-    let has_pose = poses.get(source).is_ok();
+    let has_authored_pose = poses.get(source).is_ok();
     params.p0().placement(
         source,
         source_panel,
         target,
         target_panel,
         attachment,
-        has_pose,
+        has_authored_pose,
     )
 }
 
@@ -369,6 +373,10 @@ fn target_offset_meters(
         offset.y * target_size.y / panel_size.y,
         offset.z * target_size.x / panel_size.x,
     ))
+}
+
+fn plane_frame_translation(plane: PanelPlane, translation: Vec3) -> Vec3 {
+    plane.right() * translation.x + plane.up() * translation.y + plane.normal() * translation.z
 }
 
 fn scaled_source_anchor_offset(
@@ -466,6 +474,10 @@ fn validate_supported_parent_transform(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected values"
+)]
 mod tests {
     use std::sync::Arc;
 
@@ -479,6 +491,8 @@ mod tests {
     use crate::HeadlessLayoutPlugin;
     use crate::Mm;
     use crate::PanelAnchorOffset;
+    use crate::PanelAnchorPose;
+    use crate::PanelPlane;
     use crate::Px;
     use crate::layout::Anchor;
     use crate::layout::TextDimensions;
@@ -546,6 +560,19 @@ mod tests {
         let transform = app.world().get::<GlobalTransform>(entity).copied();
         assert!(transform.is_some(), "entity should have GlobalTransform");
         transform.unwrap_or_default()
+    }
+
+    fn panel_plane(app: &App, entity: Entity) -> PanelPlane {
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("entity should have DiegeticPanel");
+        PanelPlane::from_panel(panel, &global_transform(app, entity))
+            .expect("panel should have a valid world plane")
+    }
+
+    fn panel_anchor_point(app: &App, entity: Entity, anchor: Anchor) -> Vec3 {
+        panel_plane(app, entity).point(anchor)
     }
 
     fn assert_current_diagnostic(
@@ -743,6 +770,189 @@ mod tests {
         let source_transform = transform(&app, source);
         assert_close_3d(source_transform.translation, Vec3::new(2.0, 4.0, 0.0));
         assert_close_quat(source_transform.rotation, target_rotation);
+    }
+
+    #[test]
+    fn panel_anchor_pose_normal_rotation_spins_coplanar_about_fixed_pin() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::Center, Anchor::Center),
+            ))
+            .id();
+
+        app.update();
+
+        let target_pin = panel_anchor_point(&app, target, Anchor::Center);
+        assert_close_3d(panel_anchor_point(&app, source, Anchor::Center), target_pin);
+
+        let pose_rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        app.world_mut().entity_mut(source).insert(PanelAnchorPose {
+            rotation:    pose_rotation,
+            translation: Vec3::ZERO,
+        });
+        app.update();
+
+        assert_close_3d(panel_anchor_point(&app, source, Anchor::Center), target_pin);
+        assert_close_quat(transform(&app, source).rotation, pose_rotation);
+        assert_close_3d(panel_plane(&app, source).normal(), Vec3::Z);
+    }
+
+    #[test]
+    fn panel_anchor_pose_right_axis_rotation_hinges_about_fixed_pin() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let pose_rotation = Quat::from_rotation_x(std::f32::consts::FRAC_PI_2);
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::Center, Anchor::Center),
+                PanelAnchorPose {
+                    rotation:    pose_rotation,
+                    translation: Vec3::ZERO,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_close_3d(
+            panel_anchor_point(&app, source, Anchor::Center),
+            panel_anchor_point(&app, target, Anchor::Center),
+        );
+        assert_close_quat(transform(&app, source).rotation, pose_rotation);
+        assert_close_3d(panel_plane(&app, source).normal(), Vec3::NEG_Y);
+    }
+
+    #[test]
+    fn panel_anchor_pose_translation_displaces_pin_after_static_offset() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::TopLeft)
+                    .with_offset(PanelAnchorOffset::new(Mm(25.0), Mm(50.0)).with_z(Mm(30.0))),
+                PanelAnchorPose {
+                    rotation:    Quat::IDENTITY,
+                    translation: Vec3::new(0.5, 0.25, 0.75),
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_close_3d(
+            panel_anchor_point(&app, source, Anchor::TopLeft),
+            Vec3::new(1.75, 1.75, 1.05),
+        );
+    }
+
+    #[test]
+    fn panel_anchor_pose_composes_after_target_plane_rotation() {
+        let mut app = app_with_world_anchoring();
+        let target_rotation = Quat::from_rotation_y(std::f32::consts::FRAC_PI_2);
+        let pose_rotation = Quat::from_rotation_z(std::f32::consts::FRAC_PI_2);
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(1.0, 2.0, 0.0).with_rotation(target_rotation),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::default(),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::TopLeft),
+                PanelAnchorPose {
+                    rotation:    pose_rotation,
+                    translation: Vec3::ZERO,
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_close_quat(
+            transform(&app, source).rotation,
+            target_rotation * pose_rotation,
+        );
+    }
+
+    #[test]
+    fn removing_panel_anchor_pose_returns_to_plain_snap_without_recapturing_authored_pose() {
+        let mut app = app_with_world_anchoring();
+        let target = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                Transform::from_xyz(2.0, 1.0, 0.0),
+            ))
+            .id();
+        let authored = Transform::from_xyz(-1.0, -2.0, 0.0);
+        let source = app
+            .world_mut()
+            .spawn((
+                world_panel(Anchor::TopLeft),
+                authored,
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
+                PanelAnchorPose {
+                    rotation:    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                    translation: Vec3::new(0.25, 0.5, 0.0),
+                },
+            ))
+            .id();
+
+        app.update();
+        assert_eq!(
+            app.world()
+                .get::<AnchoredWorldPanelPose>(source)
+                .map(|pose| pose.authored_transform),
+            Some(authored)
+        );
+
+        app.world_mut()
+            .entity_mut(source)
+            .remove::<PanelAnchorPose>();
+        app.update();
+
+        let source_transform = transform(&app, source);
+        assert_close_3d(source_transform.translation, Vec3::new(2.0, 0.0, 0.0));
+        assert_close_quat(source_transform.rotation, Quat::IDENTITY);
+        assert_eq!(
+            app.world()
+                .get::<AnchoredWorldPanelPose>(source)
+                .map(|pose| pose.authored_transform),
+            Some(authored)
+        );
     }
 
     #[test]

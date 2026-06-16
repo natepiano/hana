@@ -82,6 +82,7 @@ mod tests {
     use crate::Fit;
     use crate::HeadlessLayoutPlugin;
     use crate::PanelAnchorOffset;
+    use crate::PanelAnchorPose;
     use crate::PanelDimensionsChanged;
     use crate::PanelSystems;
     use crate::Pt;
@@ -275,6 +276,44 @@ mod tests {
             .expect("source has resolved position");
         assert_eq!(resolved.anchor_position, Some(Vec2::new(100.0, 141.0)));
         assert_translation(&app, source, Vec2::new(-300.0, 159.0));
+    }
+
+    #[test]
+    fn screen_attachment_ignores_panel_anchor_pose_until_screen_pose_resolution_lands() {
+        let mut app = app_with_window();
+        let target = app
+            .world_mut()
+            .spawn(fixed_screen_panel(
+                Vec2::new(200.0, 40.0),
+                Anchor::TopLeft,
+                Vec2::new(100.0, 100.0),
+            ))
+            .id();
+        let source = app
+            .world_mut()
+            .spawn((
+                fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
+                AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
+                    .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
+                PanelAnchorPose {
+                    rotation:    Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                    translation: Vec3::new(10.0, 20.0, 30.0),
+                },
+            ))
+            .id();
+
+        app.update();
+
+        assert_eq!(
+            resolved_anchor_position(&app, source),
+            Some(Vec2::new(100.0, 141.0))
+        );
+        assert_translation(&app, source, Vec2::new(-300.0, 159.0));
+        let transform = app
+            .world()
+            .get::<Transform>(source)
+            .expect("panel has transform");
+        assert_eq!(transform.rotation, Quat::IDENTITY);
     }
 
     #[test]
