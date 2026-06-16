@@ -1,9 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
-use super::enum_preset::OrbitCamPresetLayer;
-use super::enum_preset::PresetLayerSet;
 use super::keyboard::OrbitCamKeyboardPreset;
 use super::simple_mouse::OrbitCamSimpleMousePreset;
 use crate::input::bindings::OrbitCamBindings;
@@ -59,12 +56,6 @@ impl Default for OrbitCamSimpleMouseKeyboardPreset {
 
 impl OrbitCamPresetConfig for OrbitCamSimpleMouseKeyboardPreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())
-            .profile(OrbitCamBindingsProfile::LayeredPreset {
-                layers: PresetLayerSet::empty()
-                    .with_layer(OrbitCamPresetLayer::SimpleMouse)
-                    .with_layer(OrbitCamPresetLayer::Keyboard),
-            })
-            .build()
+        self.build_into(OrbitCamBindings::builder()).build()
     }
 }

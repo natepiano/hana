@@ -38,7 +38,9 @@ pub use config::CameraInputRouting;
 pub use config::CameraInputRoutingConfig;
 pub use config::NoPositionFallback;
 pub(crate) use latches::CameraInputSourceLatches;
+pub(crate) use latches::OrbitCamSlowModeLatches;
 use latches::clear_latches_on_mode_replaced;
+use latches::toggle_slow_mode_latches;
 use snapshot::CameraRoutingSnapshot;
 use snapshot::CameraRoutingSnapshotFlags;
 use snapshot::collect_camera_snapshots;
@@ -82,11 +84,14 @@ impl Plugin for OrbitCamRoutingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraInputRoutingConfig>()
             .init_resource::<CameraInputSourceLatches>()
+            .init_resource::<OrbitCamSlowModeLatches>()
             .init_resource::<ResolvedOrbitCamInputRoute>()
             .add_observer(clear_latches_on_mode_replaced)
             .add_systems(
                 PreUpdate,
-                resolve_camera_input_routing.in_set(OrbitCamInputInternalSet::Routing),
+                (resolve_camera_input_routing, toggle_slow_mode_latches)
+                    .chain()
+                    .in_set(OrbitCamInputInternalSet::Routing),
             );
     }
 }
@@ -109,6 +114,9 @@ fn resolve_camera_input_routing(world: &mut World) {
         latches.recover_unavailable_latches(&available_cameras);
         latches.clone()
     };
+    world
+        .resource_mut::<OrbitCamSlowModeLatches>()
+        .recover_unavailable_latches(&available_cameras);
 
     let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras, &latches);
     let mut resolved = ResolvedOrbitCamInputRoute {
@@ -207,6 +215,7 @@ mod tests {
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamInputModeReplaced;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamResolvedBindings;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     fn test_app() -> App {
@@ -297,6 +306,100 @@ mod tests {
                 .resource::<CameraInputSourceLatches>()
                 .mouse_latch()
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn slow_mode_latch_toggles_on_press_edge() -> Result<(), &'static str> {
+        let mut app = test_app();
+        app.init_resource::<ButtonInput<KeyCode>>();
+        let bindings = OrbitCamPreset::BlenderLike
+            .to_bindings()
+            .map_err(|_| "preset should build")?;
+        let camera = spawn_camera(
+            app.world_mut(),
+            (
+                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+                OrbitCamResolvedBindings(bindings),
+            ),
+        );
+        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::CapsLock);
+
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear_just_pressed(KeyCode::CapsLock);
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
+        );
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .release(KeyCode::CapsLock);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::CapsLock);
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mode_replacement_clears_slow_latch_without_slow_mode() {
+        let mut app = test_app();
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Manual);
+        app.world_mut()
+            .resource_mut::<OrbitCamSlowModeLatches>()
+            .toggle(camera);
+
+        app.world_mut()
+            .entity_mut(camera)
+            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+
+        assert!(
+            !app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
+        );
+    }
+
+    #[test]
+    fn stale_slow_latches_are_recovered_during_routing() {
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+        );
+        app.world_mut()
+            .resource_mut::<OrbitCamSlowModeLatches>()
+            .toggle(camera);
+        let _ = app.world_mut().despawn(camera);
+
+        app.update();
+
+        assert!(
+            !app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
         );
     }
 

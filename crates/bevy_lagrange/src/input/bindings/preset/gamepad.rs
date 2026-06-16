@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
 use crate::input::ControlSpeed;
 use crate::input::bindings::CameraInputGamepadSelectionPolicy;
 use crate::input::bindings::InputDeadZone;
@@ -39,10 +38,7 @@ impl OrbitCamGamepadPreset {
     /// Starts a tuning builder from this preset.
     #[must_use]
     pub const fn customize(self) -> OrbitCamGamepadPresetBuilder {
-        OrbitCamGamepadPresetBuilder {
-            preset:     self,
-            customized: false,
-        }
+        OrbitCamGamepadPresetBuilder { preset: self }
     }
 
     /// Builds the zero-config gamepad preset.
@@ -191,17 +187,14 @@ impl Default for OrbitCamGamepadPreset {
 
 impl OrbitCamPresetConfig for OrbitCamGamepadPreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())?
-            .profile(OrbitCamBindingsProfile::GamepadPreset { customized: false })
-            .build()
+        self.build_into(OrbitCamBindings::builder())?.build()
     }
 }
 
 /// Fluent tuning builder for [`OrbitCamGamepadPreset`].
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct OrbitCamGamepadPresetBuilder {
-    preset:     OrbitCamGamepadPreset,
-    customized: bool,
+    preset: OrbitCamGamepadPreset,
 }
 
 impl OrbitCamGamepadPresetBuilder {
@@ -209,7 +202,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn orbit_scale(mut self, orbit_scale: f32) -> Self {
         self.preset.orbit_scale = orbit_scale;
-        self.customized = true;
         self
     }
 
@@ -217,7 +209,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn slow_orbit_scale(mut self, slow_orbit_scale: f32) -> Self {
         self.preset.slow_orbit_scale = slow_orbit_scale;
-        self.customized = true;
         self
     }
 
@@ -225,7 +216,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn pan_scale(mut self, pan_scale: f32) -> Self {
         self.preset.pan_scale = pan_scale;
-        self.customized = true;
         self
     }
 
@@ -233,7 +223,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn slow_pan_scale(mut self, slow_pan_scale: f32) -> Self {
         self.preset.slow_pan_scale = slow_pan_scale;
-        self.customized = true;
         self
     }
 
@@ -241,7 +230,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn zoom_scale(mut self, zoom_scale: f32) -> Self {
         self.preset.zoom_scale = zoom_scale;
-        self.customized = true;
         self
     }
 
@@ -249,7 +237,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn slow_zoom_scale(mut self, slow_zoom_scale: f32) -> Self {
         self.preset.slow_zoom_scale = slow_zoom_scale;
-        self.customized = true;
         self
     }
 
@@ -257,7 +244,6 @@ impl OrbitCamGamepadPresetBuilder {
     #[must_use]
     pub const fn stick_dead_zone(mut self, stick_dead_zone: InputDeadZone) -> Self {
         self.preset.stick_dead_zone = stick_dead_zone;
-        self.customized = true;
         self
     }
 
@@ -268,12 +254,7 @@ impl OrbitCamGamepadPresetBuilder {
     /// Returns [`OrbitCamBindingsError`] when generated descriptors fail
     /// validation.
     pub fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.preset
-            .build_into(OrbitCamBindings::builder())?
-            .profile(OrbitCamBindingsProfile::GamepadPreset {
-                customized: self.customized,
-            })
-            .build()
+        self.preset.build_into(OrbitCamBindings::builder())?.build()
     }
 }
 

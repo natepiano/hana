@@ -22,12 +22,12 @@ use super::PinchGestureZoom;
 use super::action_set::BindingRoutePolicy;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
+use super::descriptor::OrbitCamSlowMode;
 use super::error::OrbitCamBindingsError;
 #[cfg(test)]
 use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
 use super::held_binding::OrbitCamInputBinding;
-use super::preset::OrbitCamBindingsProfile;
 use super::validate;
 use crate::input::CameraInteractionSources;
 #[cfg(test)]
@@ -49,7 +49,7 @@ pub struct OrbitCamBindingsDescriptor {
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
     pub(super) zoom_inversion:   ZoomInversion,
     pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
-    pub(super) profile:          OrbitCamBindingsProfile,
+    pub(super) slow_mode:        Option<OrbitCamSlowMode>,
 }
 
 impl TryFrom<OrbitCamBindingsDescriptor> for OrbitCamBindings {
@@ -144,8 +144,10 @@ impl OrbitCamBindingsBuilder {
         self
     }
 
-    pub(super) const fn profile(mut self, profile: OrbitCamBindingsProfile) -> Self {
-        self.descriptor.profile = profile;
+    /// Sets the slow-mode policy.
+    #[must_use]
+    pub const fn slow_mode(mut self, slow_mode: OrbitCamSlowMode) -> Self {
+        self.descriptor.slow_mode = Some(slow_mode);
         self
     }
 

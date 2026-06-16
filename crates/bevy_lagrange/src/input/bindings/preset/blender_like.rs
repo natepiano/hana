@@ -2,13 +2,13 @@ use bevy::prelude::*;
 use bevy_enhanced_input::prelude::ModKeys;
 
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
-use super::enum_preset::PresetLayerSet;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamMouseDrag;
 use crate::input::bindings::OrbitCamMouseWheelZoom;
 use crate::input::bindings::OrbitCamPinchZoom;
+use crate::input::bindings::OrbitCamScalePolicy;
+use crate::input::bindings::OrbitCamSlowMode;
 use crate::input::bindings::OrbitCamTrackpadScroll;
 use crate::input::bindings::error::OrbitCamBindingsError;
 
@@ -21,6 +21,7 @@ pub struct OrbitCamBlenderLikePreset {
 }
 
 impl OrbitCamBlenderLikePreset {
+    const DEFAULT_NORMAL_SCALE: f32 = 1.0;
     const DEFAULT_SLOW_SCALE: f32 = 0.15;
     const MAX_SLOW_SCALE: f32 = 1.0;
     const MIN_SLOW_SCALE: f32 = 0.0;
@@ -76,6 +77,18 @@ impl OrbitCamBlenderLikePreset {
     }
 
     fn add_to(self, builder: OrbitCamBindingsBuilder) -> OrbitCamBindingsBuilder {
+        let builder = if let Some(toggle_key) = self.slow_toggle_key {
+            builder.slow_mode(OrbitCamSlowMode {
+                toggle_key,
+                scale: OrbitCamScalePolicy {
+                    normal: Self::DEFAULT_NORMAL_SCALE,
+                    slow:   self.slow_scale,
+                },
+            })
+        } else {
+            builder
+        };
+
         builder
             .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
             .orbit(OrbitCamTrackpadScroll::default())
@@ -99,10 +112,6 @@ impl Default for OrbitCamBlenderLikePreset {
 
 impl OrbitCamPresetConfig for OrbitCamBlenderLikePreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())?
-            .profile(OrbitCamBindingsProfile::LayeredPreset {
-                layers: PresetLayerSet::blender_like(),
-            })
-            .build()
+        self.build_into(OrbitCamBindings::builder())?.build()
     }
 }

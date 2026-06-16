@@ -1,7 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamInputBinding;
@@ -47,8 +46,6 @@ impl OrbitCamKeyboardPreset {
 
 impl OrbitCamPresetConfig for OrbitCamKeyboardPreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())
-            .profile(OrbitCamBindingsProfile::KeyboardPreset { customized: false })
-            .build()
+        self.build_into(OrbitCamBindings::builder()).build()
     }
 }

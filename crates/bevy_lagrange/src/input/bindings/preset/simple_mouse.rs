@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
-use super::enum_preset::PresetLayerSet;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamMouseDrag;
@@ -43,10 +41,6 @@ impl OrbitCamSimpleMousePreset {
 
 impl OrbitCamPresetConfig for OrbitCamSimpleMousePreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())
-            .profile(OrbitCamBindingsProfile::LayeredPreset {
-                layers: PresetLayerSet::simple_mouse(),
-            })
-            .build()
+        self.build_into(OrbitCamBindings::builder()).build()
     }
 }

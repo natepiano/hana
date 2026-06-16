@@ -24,9 +24,8 @@ use super::bindings::InputAxisTransform;
 use super::bindings::InputBindingDescriptor;
 use super::bindings::InputBindingEntry;
 use super::constants::APP_AUTHORED_INPUT_ROW_LABEL;
-use super::constants::BINDINGS_MODE_LABEL;
+use super::constants::CUSTOM_BINDINGS_MODE_VALUE;
 use super::constants::CUSTOM_INPUT_ROW_LABEL;
-use super::constants::CUSTOM_MODE_VALUE;
 use super::constants::GAMEPAD_BINDING_SOURCE_LABEL;
 use super::constants::GAMEPAD_BINDINGS_ROW_LABEL;
 use super::constants::INPUT_BINDING_SOURCE_LABEL;
@@ -41,7 +40,7 @@ use super::constants::ORBIT_CAM_CAMERA_LABEL;
 use super::constants::PINCH_SOURCE_LABEL;
 use super::constants::PINCH_ZOOM_IN_LABEL;
 use super::constants::PINCH_ZOOM_OUT_LABEL;
-use super::constants::PRESET_MODE_LABEL;
+use super::constants::PRESET_MODE_VALUE;
 use super::constants::SMOOTH_SCROLL_ZOOM_IN_LABEL;
 use super::constants::SMOOTH_SCROLL_ZOOM_OUT_LABEL;
 use super::constants::TOUCH_SOURCE_LABEL;
@@ -126,20 +125,19 @@ pub fn describe_orbit_cam_controls(mode: &OrbitCamInputMode) -> OrbitCamControlS
     match mode {
         OrbitCamInputMode::Preset(preset) => describe_preset(*preset),
         OrbitCamInputMode::Bindings(bindings) => {
-            describe_bindings(BINDINGS_MODE_LABEL, CUSTOM_MODE_VALUE, bindings)
+            describe_bindings(INPUT_MODE_LABEL, CUSTOM_BINDINGS_MODE_VALUE, bindings)
         },
         OrbitCamInputMode::Manual => describe_manual_controls(),
     }
 }
 
 fn describe_preset(preset: OrbitCamPreset) -> OrbitCamControlSummary {
-    let mode_value = preset_mode_value(preset);
     match preset.to_bindings() {
-        Ok(bindings) => describe_bindings(PRESET_MODE_LABEL, mode_value, &bindings),
+        Ok(bindings) => describe_bindings(INPUT_MODE_LABEL, PRESET_MODE_VALUE, &bindings),
         Err(_) => OrbitCamControlSummary {
             camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
-            mode_label:   PRESET_MODE_LABEL.to_string(),
-            mode_value:   mode_value.to_string(),
+            mode_label:   INPUT_MODE_LABEL.to_string(),
+            mode_value:   PRESET_MODE_VALUE.to_string(),
             rows:         Vec::new(),
         },
     }
@@ -760,17 +758,6 @@ const fn source_stem(sources: CameraInteractionSources) -> &'static str {
     }
 }
 
-const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
-    match preset {
-        OrbitCamPreset::SimpleMouse => "SimpleMouse",
-        OrbitCamPreset::BlenderLike => "BlenderLike",
-        OrbitCamPreset::Keyboard => "Keyboard",
-        OrbitCamPreset::SimpleMouseKeyboard => "SimpleMouseKeyboard",
-        OrbitCamPreset::BlenderLikeKeyboard => "BlenderLikeKeyboard",
-        OrbitCamPreset::Gamepad => "Gamepad",
-    }
-}
-
 fn control_row(
     kind: OrbitCamInteractionKind,
     label: impl Into<String>,
@@ -789,8 +776,31 @@ fn control_row(
 mod tests {
     use super::*;
     use crate::input::OrbitCamBindingsError;
+    use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamMouseDrag;
+
+    #[test]
+    fn summary_labels_follow_input_mode_variant() -> Result<(), OrbitCamBindingsError> {
+        let preset_summary =
+            describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike));
+        assert_eq!(preset_summary.mode_label, "Input");
+        assert_eq!(preset_summary.mode_value, "preset input");
+
+        let tuned_bindings = OrbitCamBlenderLikePreset::default()
+            .slow_scale(0.25)
+            .build()?;
+        let bindings_summary =
+            describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(tuned_bindings));
+        assert_eq!(bindings_summary.mode_label, "Input");
+        assert_eq!(bindings_summary.mode_value, "custom bindings");
+
+        let manual_summary = describe_orbit_cam_controls(&OrbitCamInputMode::Manual);
+        assert_eq!(manual_summary.mode_label, "Input");
+        assert_eq!(manual_summary.mode_value, "manual input");
+
+        Ok(())
+    }
 
     #[test]
     fn blender_like_summary_reflects_preset_bindings() {
@@ -799,8 +809,8 @@ mod tests {
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.camera_label, "OrbitCam");
-        assert_eq!(summary.mode_label, "Preset");
-        assert_eq!(summary.mode_value, "BlenderLike");
+        assert_eq!(summary.mode_label, "Input");
+        assert_eq!(summary.mode_value, "preset input");
         assert!(labels.contains(&"mmb drag"));
         assert!(labels.contains(&"smooth-scroll"));
         assert!(labels.contains(&"shift+mmb drag"));
@@ -843,8 +853,8 @@ mod tests {
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
         let labels = summary_labels(&summary);
 
-        assert_eq!(summary.mode_label, "Bindings");
-        assert_eq!(summary.mode_value, "Custom");
+        assert_eq!(summary.mode_label, "Input");
+        assert_eq!(summary.mode_value, "custom bindings");
         assert!(labels.contains(&"rmb drag"));
         assert!(!labels.contains(&"mmb drag"));
 
@@ -892,7 +902,7 @@ mod tests {
             describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad));
         let labels = summary_labels(&summary);
 
-        assert_eq!(summary.mode_value, "Gamepad");
+        assert_eq!(summary.mode_value, "preset input");
         assert!(labels.contains(&"rs"));
         assert!(labels.contains(&"rb+rs"));
         assert!(labels.contains(&"ls"));
@@ -928,7 +938,7 @@ mod tests {
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.mode_label, "Input");
-        assert_eq!(summary.mode_value, "Manual");
+        assert_eq!(summary.mode_value, "manual input");
         assert!(labels.contains(&"app-authored input"));
         assert!(summary.rows.iter().all(|row| {
             row.camera_interaction_sources

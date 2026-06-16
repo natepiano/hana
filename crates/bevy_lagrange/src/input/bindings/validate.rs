@@ -25,6 +25,8 @@ use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
 use super::descriptor::InputBindingDescriptor;
 use super::descriptor::InputBindingEntry;
+use super::descriptor::OrbitCamScalePolicy;
+use super::descriptor::OrbitCamSlowMode;
 use super::error::OrbitCamBindingsError;
 use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamGatePolarity;
@@ -48,6 +50,7 @@ pub fn validate_bindings(
     validate_held_entries(PAN_ACTION_NAME, &descriptor.pan)?;
     validate_held_entries(ZOOM_SMOOTH_ACTION_NAME, &descriptor.zoom_smooth)?;
     validate_impulse_entries(ZOOM_COARSE_ACTION_NAME, &descriptor.zoom_coarse)?;
+    validate_slow_mode(descriptor.slow_mode.as_ref())?;
 
     Ok(OrbitCamBindings {
         orbit:            OrbitCamOrbitActionBindings(held_descriptors_to_set(
@@ -79,7 +82,7 @@ pub fn validate_bindings(
         gamepad:          descriptor.gamepad,
         zoom_inversion:   descriptor.zoom_inversion,
         button_drag_zoom: descriptor.button_drag_zoom,
-        profile:          descriptor.profile,
+        slow_mode:        descriptor.slow_mode.clone(),
     })
 }
 
@@ -168,6 +171,25 @@ fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError
     let upper = dead_zone.upper_threshold;
     if !lower.is_finite() || !upper.is_finite() || lower < 0.0 || upper > 1.0 || lower >= upper {
         return Err(OrbitCamBindingsError::InvalidDeadZone);
+    }
+    Ok(())
+}
+
+fn validate_slow_mode(slow_mode: Option<&OrbitCamSlowMode>) -> Result<(), OrbitCamBindingsError> {
+    let Some(slow_mode) = slow_mode else {
+        return Ok(());
+    };
+    validate_scale_policy(&slow_mode.scale)
+}
+
+fn validate_scale_policy(policy: &OrbitCamScalePolicy) -> Result<(), OrbitCamBindingsError> {
+    if !policy.normal.is_finite()
+        || !policy.slow.is_finite()
+        || policy.normal <= 0.0
+        || policy.slow <= 0.0
+        || policy.slow > policy.normal
+    {
+        return Err(OrbitCamBindingsError::InvalidScale);
     }
     Ok(())
 }

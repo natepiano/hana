@@ -229,6 +229,24 @@ impl InputDeadZone {
     }
 }
 
+/// Normal and slow scalar multipliers for per-camera slow mode.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+pub struct OrbitCamScalePolicy {
+    /// Scale used when slow mode is inactive.
+    pub normal: f32,
+    /// Scale used when slow mode is active.
+    pub slow:   f32,
+}
+
+/// Key-driven slow-mode policy stored on validated orbit-camera bindings.
+#[derive(Clone, Debug, PartialEq, Reflect)]
+pub struct OrbitCamSlowMode {
+    /// Key whose press edge toggles slow mode for the routed camera.
+    pub toggle_key: KeyCode,
+    /// Scale policy applied while resolving camera input.
+    pub scale:      OrbitCamScalePolicy,
+}
+
 /// Whether a held binding is scaled by frame delta.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum InputDeltaScale {

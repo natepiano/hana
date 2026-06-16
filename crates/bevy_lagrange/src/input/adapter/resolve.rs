@@ -20,6 +20,7 @@ use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::ModKeys;
 use bevy_enhanced_input::prelude::TriggerState;
 
+use super::AdapterScale;
 use super::inject::OrbitCamAdapterFrameSources;
 use super::install::OrbitCamInputActionEntities;
 use super::install::OrbitCamInstalledBindings;
@@ -33,6 +34,7 @@ use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamManual;
 use crate::input::OrbitCamOrbitAction;
 use crate::input::OrbitCamPanAction;
+use crate::input::OrbitCamSlowModeLatches;
 use crate::input::OrbitCamZoomCoarseAction;
 use crate::input::OrbitCamZoomSmoothAction;
 use crate::input::ResolvedOrbitCamInputRoute;
@@ -53,6 +55,7 @@ use crate::input::actions::OrbitCamZoomSmoothSlowAction;
 )]
 pub(super) fn resolve_actions_into_orbit_cam_input(
     route: Res<ResolvedOrbitCamInputRoute>,
+    slow_latches: Res<OrbitCamSlowModeLatches>,
     mut cameras: Query<
         (
             Entity,
@@ -88,6 +91,8 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
         let zoom_engaged = bool_action_active(actions.zoom_engaged, &bool_actions.zoom, &states);
         let pan_overrides_orbit =
             pan_overrides_orbit(&bindings.0, keyboard.as_deref(), mouse_buttons.as_deref());
+        let adapter_scale =
+            AdapterScale::from_bindings(&bindings.0, slow_latches.is_active(camera));
         let orbit_sources = held_sources_for_state(
             HeldEngagement::from(orbit_engaged),
             bindings.0.orbit().entries(),
@@ -113,24 +118,24 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
         if orbit_engaged && !pan_overrides_orbit {
             let normal = action_value(actions.orbit, &vec2_actions.orbit);
             let slow = action_value(actions.orbit_slow, &vec2_actions.orbit_slow);
-            input.orbit_pixels_with_sources(normal + slow, orbit_sources);
+            input.orbit_pixels_with_sources(adapter_scale.vec2(normal + slow), orbit_sources);
             input.set_orbit_speed(vec2_speed(slow));
         }
         if pan_engaged {
             let normal = action_value(actions.pan, &vec2_actions.pan);
             let slow = action_value(actions.pan_slow, &vec2_actions.pan_slow);
-            input.pan_pixels_with_sources(normal + slow, pan_sources);
+            input.pan_pixels_with_sources(adapter_scale.vec2(normal + slow), pan_sources);
             input.set_pan_speed(vec2_speed(slow));
         }
         if zoom_engaged {
             let normal = action_value(actions.zoom_smooth, &f32_actions.zoom_smooth);
             let slow = action_value(actions.zoom_smooth_slow, &f32_actions.zoom_smooth_slow);
-            input.zoom_smooth_with_sources(normal + slow, zoom_smooth_sources);
+            input.zoom_smooth_with_sources(adapter_scale.f32(normal + slow), zoom_smooth_sources);
             input.set_zoom_speed(f32_speed(slow));
         }
         if action_state_active(actions.zoom_coarse, &states) {
             input.zoom_coarse_with_sources(
-                action_value(actions.zoom_coarse, &f32_actions.zoom_coarse),
+                adapter_scale.f32(action_value(actions.zoom_coarse, &f32_actions.zoom_coarse)),
                 actions.zoom_coarse_sources,
             );
         }

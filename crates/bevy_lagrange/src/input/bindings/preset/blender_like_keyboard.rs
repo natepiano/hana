@@ -2,9 +2,6 @@ use bevy::prelude::*;
 
 use super::blender_like::OrbitCamBlenderLikePreset;
 use super::config::OrbitCamPresetConfig;
-use super::enum_preset::OrbitCamBindingsProfile;
-use super::enum_preset::OrbitCamPresetLayer;
-use super::enum_preset::PresetLayerSet;
 use super::keyboard::OrbitCamKeyboardPreset;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
@@ -62,12 +59,6 @@ impl Default for OrbitCamBlenderLikeKeyboardPreset {
 
 impl OrbitCamPresetConfig for OrbitCamBlenderLikeKeyboardPreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        self.build_into(OrbitCamBindings::builder())?
-            .profile(OrbitCamBindingsProfile::LayeredPreset {
-                layers: PresetLayerSet::empty()
-                    .with_layer(OrbitCamPresetLayer::BlenderLike)
-                    .with_layer(OrbitCamPresetLayer::Keyboard),
-            })
-            .build()
+        self.build_into(OrbitCamBindings::builder())?.build()
     }
 }

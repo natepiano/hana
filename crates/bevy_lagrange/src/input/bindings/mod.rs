@@ -60,6 +60,8 @@ pub use descriptor::InputBindingModifiers;
 pub use descriptor::InputBindingScale;
 pub use descriptor::InputDeadZone;
 pub use descriptor::InputDeltaScale;
+pub use descriptor::OrbitCamScalePolicy;
+pub use descriptor::OrbitCamSlowMode;
 pub(crate) use descriptor::mod_keys_pressed;
 pub use error::OrbitCamBindingsError;
 pub use held_binding::BindingGates;
@@ -68,18 +70,14 @@ pub use held_binding::OrbitCamGateInput;
 pub use held_binding::OrbitCamGatePolarity;
 pub use held_binding::OrbitCamHeldBinding;
 pub use held_binding::OrbitCamInputBinding;
-pub use preset::OrbitCamBindingsProfile;
 pub use preset::OrbitCamBlenderLikeKeyboardPreset;
 pub use preset::OrbitCamBlenderLikePreset;
 pub use preset::OrbitCamGamepadPreset;
 pub use preset::OrbitCamGamepadPresetBuilder;
 pub use preset::OrbitCamKeyboardPreset;
 pub use preset::OrbitCamPreset;
-pub use preset::OrbitCamPresetLayer;
-pub use preset::OrbitCamPresetLayers;
 pub use preset::OrbitCamSimpleMouseKeyboardPreset;
 pub use preset::OrbitCamSimpleMousePreset;
-pub use preset::PresetLayerSet;
 pub use validate::validate_bindings;
 
 /// Validated runtime binding specification for an `OrbitCam`.
@@ -99,7 +97,7 @@ pub struct OrbitCamBindings {
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
     pub(super) zoom_inversion:   ZoomInversion,
     pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
-    pub(super) profile:          OrbitCamBindingsProfile,
+    pub(super) slow_mode:        Option<OrbitCamSlowMode>,
 }
 
 /// Whether the pinch gesture is wired up as a zoom input.
@@ -169,9 +167,9 @@ impl OrbitCamBindings {
     #[must_use]
     pub const fn button_drag_zoom(&self) -> Option<OrbitCamButtonDragZoom> { self.button_drag_zoom }
 
-    /// Returns descriptive preset/profile metadata for these bindings.
+    /// Returns the slow-mode policy.
     #[must_use]
-    pub const fn profile(&self) -> OrbitCamBindingsProfile { self.profile }
+    pub const fn slow_mode(&self) -> Option<&OrbitCamSlowMode> { self.slow_mode.as_ref() }
 }
 
 #[cfg(test)]
@@ -201,6 +199,7 @@ mod tests {
         assert_eq!(simple.trackpad_zoom().len(), 1);
         assert_eq!(simple.pinch_zoom(), PinchGestureZoom::Enabled);
         assert!(simple.touch().is_none());
+        assert!(simple.slow_mode().is_none());
 
         let blender = OrbitCamPreset::BlenderLike.to_bindings()?;
         assert_eq!(blender.orbit().len(), 1);
@@ -210,6 +209,7 @@ mod tests {
         assert_eq!(blender.trackpad_zoom().len(), 1);
         assert!(blender.mouse_wheel_zoom().is_some());
         assert_eq!(blender.pinch_zoom(), PinchGestureZoom::Enabled);
+        assert!(blender.slow_mode().is_some());
 
         let [pan] = blender.pan().entries() else {
             assert_eq!(blender.pan().entries().len(), 1);
@@ -224,21 +224,29 @@ mod tests {
         assert_eq!(keyboard.orbit().len(), 1);
         assert_eq!(keyboard.pan().len(), 1);
         assert_eq!(keyboard.zoom_smooth().len(), 1);
-        assert_eq!(
-            keyboard.profile(),
-            OrbitCamBindingsProfile::KeyboardPreset { customized: false }
-        );
+        assert!(keyboard.slow_mode().is_none());
+
+        let blender_keyboard = OrbitCamBlenderLikeKeyboardPreset::default().build()?;
+        assert!(blender_keyboard.slow_mode().is_some());
 
         let gamepad = OrbitCamPreset::Gamepad.to_bindings()?;
         assert_eq!(gamepad.gamepad(), CameraInputGamepadSelectionPolicy::Active);
         assert_eq!(gamepad.orbit().len(), 2);
         assert_eq!(gamepad.pan().len(), 2);
         assert_eq!(gamepad.zoom_smooth().len(), 4);
-        assert_eq!(
-            gamepad.profile(),
-            OrbitCamBindingsProfile::GamepadPreset { customized: false }
-        );
+        assert!(gamepad.slow_mode().is_none());
 
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_default_builds_slow_mode() -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBlenderLikePreset::default().build()?;
+
+        assert_eq!(
+            bindings.slow_mode().map(|slow_mode| slow_mode.toggle_key),
+            Some(KeyCode::CapsLock)
+        );
         Ok(())
     }
 
@@ -273,30 +281,6 @@ mod tests {
             OrbitCamPreset::BlenderLike.to_bindings()?,
             OrbitCamBlenderLikePreset::default().build()?
         );
-        Ok(())
-    }
-
-    #[test]
-    fn composed_presets_use_layer_builder() -> Result<(), OrbitCamBindingsError> {
-        let bindings = OrbitCamPresetLayers::new()
-            .with_blender_like()
-            .with_keyboard()
-            .build()?;
-
-        assert_eq!(bindings.orbit().len(), 2);
-        assert_eq!(bindings.pan().len(), 2);
-        assert_eq!(bindings.zoom_smooth().len(), 1);
-        assert!(matches!(
-            bindings.profile(),
-            OrbitCamBindingsProfile::LayeredPreset { .. }
-        ));
-        let layers = match bindings.profile() {
-            OrbitCamBindingsProfile::LayeredPreset { layers } => layers,
-            _ => PresetLayerSet::empty(),
-        };
-        assert!(layers.contains(OrbitCamPresetLayer::BlenderLike));
-        assert!(layers.contains(OrbitCamPresetLayer::Keyboard));
-
         Ok(())
     }
 

@@ -22,9 +22,44 @@ use bevy_enhanced_input::prelude::InputConditionAppExt;
 use install::OrbitCamAdapterDiagnostics;
 use install::OrbitCamBindingGateCondition;
 
+use super::OrbitCamBindings;
+use super::OrbitCamScalePolicy;
 use crate::system_sets::OrbitCamInputInternalSet;
 
 pub(crate) struct OrbitCamInputAdapterPlugin;
+
+pub(super) fn apply_scale(value: f32, policy: &OrbitCamScalePolicy, slow_active: bool) -> f32 {
+    value
+        * if slow_active {
+            policy.slow
+        } else {
+            policy.normal
+        }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct AdapterScale<'a> {
+    policy:      Option<&'a OrbitCamScalePolicy>,
+    slow_active: bool,
+}
+
+impl<'a> AdapterScale<'a> {
+    pub(super) fn from_bindings(bindings: &'a OrbitCamBindings, slow_active: bool) -> Self {
+        Self {
+            policy: bindings.slow_mode().map(|slow_mode| &slow_mode.scale),
+            slow_active,
+        }
+    }
+
+    pub(super) fn f32(self, value: f32) -> f32 {
+        self.policy
+            .map_or(value, |policy| apply_scale(value, policy, self.slow_active))
+    }
+
+    pub(super) fn vec2(self, value: Vec2) -> Vec2 {
+        Vec2::new(self.f32(value.x), self.f32(value.y))
+    }
+}
 
 impl Plugin for OrbitCamInputAdapterPlugin {
     fn build(&self, app: &mut App) {
@@ -84,7 +119,8 @@ mod tests {
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
     use crate::input::ControlSpeed;
-    use crate::input::OrbitCamBindings;
+    use super::OrbitCamBindings;
+    use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
     use crate::input::OrbitCamInputBinding;
@@ -142,6 +178,8 @@ mod tests {
 
     type TestResult = Result<(), &'static str>;
 
+    const SLOW_SCALE: f32 = 0.5;
+
     fn camera_input(app: &App, camera: Entity) -> Result<&OrbitCamInput, &'static str> {
         app.world()
             .get::<OrbitCamInput>(camera)
@@ -150,6 +188,22 @@ mod tests {
 
     fn assert_f32_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= f32::EPSILON);
+    }
+
+    fn spawn_slow_blender_like_camera(app: &mut App) -> Result<Entity, &'static str> {
+        let bindings = OrbitCamBlenderLikePreset::default()
+            .slow_scale(SLOW_SCALE)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(app, camera);
+        Ok(camera)
+    }
+
+    fn press_slow_toggle(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::CapsLock);
     }
 
     #[test]
@@ -385,6 +439,114 @@ mod tests {
     }
 
     #[test]
+    fn blender_like_slow_latch_scales_mouse_drag_orbit() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(8.0, -4.0);
+
+        app.update();
+
+        assert_eq!(
+            camera_input(&app, camera)?.orbit(),
+            OrbitDelta::from(Vec2::new(4.0, -2.0))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_mouse_drag_pan() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(8.0, -4.0);
+
+        app.update();
+
+        assert_eq!(
+            camera_input(&app, camera)?.pan().pixels(),
+            Vec2::new(4.0, -2.0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_trackpad_orbit() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        assert_eq!(
+            camera_input(&app, camera)?.orbit(),
+            OrbitDelta::from(Vec2::new(2.0, 3.0))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_trackpad_pan() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        assert_eq!(
+            camera_input(&app, camera)?.pan().pixels(),
+            Vec2::new(2.0, 3.0)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_trackpad_zoom() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ControlLeft);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(4.0, 6.0),
+        };
+
+        app.update();
+
+        assert_f32_close(
+            camera_input(&app, camera)?.zoom_smooth().amount(),
+            6.0 * PIXEL_SCROLL_SCALE * SLOW_SCALE,
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pixel_scroll_adapter_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
         let bindings = OrbitCamBindings::builder()
@@ -428,6 +590,38 @@ mod tests {
             2.0 * PINCH_GESTURE_AMPLIFICATION,
         );
         assert!(input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_wheel_zoom() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Line,
+            delta: Vec2::new(0.0, 6.0),
+        };
+
+        app.update();
+
+        assert_f32_close(camera_input(&app, camera)?.zoom_coarse().amount(), 3.0);
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_latch_scales_pinch_zoom() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        press_slow_toggle(&mut app);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        assert_f32_close(
+            camera_input(&app, camera)?.zoom_smooth().amount(),
+            2.0 * PINCH_GESTURE_AMPLIFICATION * SLOW_SCALE,
+        );
         Ok(())
     }
 
