@@ -151,112 +151,155 @@ fn wrap_text_newlines(
 ///    `initialize_leaf_sizes` instead of re-calling the measure function. If the cached width fits
 ///    within the element's post-sizing width, the text won't reflow, so we skip wrapping entirely.
 ///
-/// 2. **Lazy `parent_of`** — the parent lookup table (one `Vec<Option<usize>>` the size of the
-///    element array) is only built if a text element actually needs wrapping. For layouts where all
-///    text fits without reflowing, this allocation and O(N) build cost are avoided completely.
+/// 2. **Parent-aware traversal** — the pass walks from the root and carries the
+///    current parent's content width, avoiding a separate parent lookup table.
 pub(super) fn rewrap_text_elements(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],
     measure: &MeasureTextFn,
     font_scale: f32,
 ) -> (Vec<Option<WrappedText>>, bool) {
-    let mut wrapped: Vec<Option<WrappedText>> = (0..tree.len()).map(|_| None).collect();
+    let mut wrapped = Vec::new();
     let mut any_changed = false;
 
-    // Parent lookup for finding each text element's container width.
-    // Cheap O(N) build — far less expensive than the ~1000 measure() calls
-    // that the cached-width fast path eliminates.
-    let parent_of = build_parent_of(tree);
-
-    for (index, element) in tree.elements.iter().enumerate() {
-        if let ElementContent::Text {
-            ref text,
-            ref config,
-            ..
-        } = element.content
-        {
-            let result = match config.wrap_mode() {
-                TextWrap::Words => {
-                    let max_width = parent_content_width(tree, computed, &parent_of, index);
-                    // Fast path: compare the cached natural text width (measured
-                    // once in `initialize_leaf_sizes`) against the parent's
-                    // content area. If the text fits and has no explicit
-                    // newlines, wrapping would produce one identical line — skip.
-                    // Uses the cached width to avoid re-calling the measure fn.
-                    let natural_width = computed[index].natural_text_width;
-                    if !text.contains('\n') && natural_width <= max_width {
-                        continue;
-                    }
-                    wrap_text_words(text, config, max_width, measure, font_scale)
-                },
-                TextWrap::Newlines => {
-                    // Fast path: no explicit newlines means a single line.
-                    if !text.contains('\n') {
-                        continue;
-                    }
-                    wrap_text_newlines(text, config, measure, font_scale)
-                },
-                TextWrap::None => continue,
-            };
-
-            // Track whether wrapping actually changed element sizes.
-            let old_width = computed[index].width;
-            let old_height = computed[index].height;
-
-            // Update width to the widest wrapped line, clamped by sizing rules.
-            let max_line_width = result.lines.iter().map(|l| l.width).fold(0.0_f32, f32::max);
-            if element.width.is_fit() {
-                computed[index].width =
-                    max_line_width.clamp(element.width.min_size(), element.width.max_size());
-            }
-
-            // Update height from the wrapped line count.
-            let new_height = result.line_height * result.lines.len().to_f32();
-            computed[index].height =
-                new_height.clamp(element.height.min_size(), element.height.max_size());
-
-            if (computed[index].width - old_width).abs() > f32::EPSILON
-                || (computed[index].height - old_height).abs() > f32::EPSILON
-            {
-                any_changed = true;
-            }
-
-            wrapped[index] = Some(result);
-        }
+    if let Some(root) = tree.root {
+        let root_width = computed[root].width;
+        rewrap_subtree(
+            tree,
+            computed,
+            measure,
+            font_scale,
+            &mut wrapped,
+            &mut any_changed,
+            root,
+            root_width,
+        );
     }
 
     (wrapped, any_changed)
 }
 
-/// Builds a parent-index lookup table (child index → parent index).
-fn build_parent_of(tree: &LayoutTree) -> Vec<Option<usize>> {
-    let mut parent_of: Vec<Option<usize>> = vec![None; tree.len()];
-    for idx in 0..tree.len() {
-        for &child in tree.children_of(idx) {
-            parent_of[child] = Some(idx);
-        }
+fn rewrap_subtree(
+    tree: &LayoutTree,
+    computed: &mut [ComputedLayout],
+    measure: &MeasureTextFn,
+    font_scale: f32,
+    wrapped: &mut Vec<Option<WrappedText>>,
+    any_changed: &mut bool,
+    index: usize,
+    parent_content_width: f32,
+) {
+    let element = &tree.elements[index];
+    if let ElementContent::Text {
+        ref text,
+        ref config,
+        ..
+    } = element.content
+        && let Some(result) = wrapped_text_result(
+            text,
+            config,
+            computed[index].natural_text_width,
+            parent_content_width,
+            measure,
+            font_scale,
+        )
+    {
+        apply_wrapped_text(tree, computed, wrapped, any_changed, index, result);
     }
-    parent_of
+
+    let children = tree.children_of(index);
+    if children.is_empty() {
+        return;
+    }
+
+    let child_content_width = sizing::content_box(
+        element,
+        Vec2::new(computed[index].width, computed[index].height),
+    )
+    .size
+    .x;
+    for &child in children {
+        rewrap_subtree(
+            tree,
+            computed,
+            measure,
+            font_scale,
+            wrapped,
+            any_changed,
+            child,
+            child_content_width,
+        );
+    }
 }
 
-/// Returns the available content width from the parent of element at `index`.
-///
-/// Falls back to the element's own computed width if it has no parent.
-fn parent_content_width(
-    tree: &LayoutTree,
-    computed: &[ComputedLayout],
-    parent_of: &[Option<usize>],
-    index: usize,
-) -> f32 {
-    if let Some(parent_idx) = parent_of[index] {
-        let parent = &tree.elements[parent_idx];
-        sizing::content_box(
-            parent,
-            Vec2::new(computed[parent_idx].width, computed[parent_idx].height),
-        )
-        .size
-        .x
-    } else {
-        computed[index].width
+fn wrapped_text_result(
+    text: &str,
+    config: &TextStyle,
+    natural_width: f32,
+    parent_content_width: f32,
+    measure: &MeasureTextFn,
+    font_scale: f32,
+) -> Option<WrappedText> {
+    match config.wrap_mode() {
+        TextWrap::Words => {
+            // Fast path: compare the cached natural text width (measured
+            // once in `initialize_leaf_sizes`) against the parent's
+            // content area. If the text fits and has no explicit
+            // newlines, wrapping would produce one identical line — skip.
+            // Uses the cached width to avoid re-calling the measure fn.
+            if !text.contains('\n') && natural_width <= parent_content_width {
+                None
+            } else {
+                Some(wrap_text_words(
+                    text,
+                    config,
+                    parent_content_width,
+                    measure,
+                    font_scale,
+                ))
+            }
+        },
+        TextWrap::Newlines => {
+            // Fast path: no explicit newlines means a single line.
+            if text.contains('\n') {
+                Some(wrap_text_newlines(text, config, measure, font_scale))
+            } else {
+                None
+            }
+        },
+        TextWrap::None => None,
     }
+}
+
+fn apply_wrapped_text(
+    tree: &LayoutTree,
+    computed: &mut [ComputedLayout],
+    wrapped: &mut Vec<Option<WrappedText>>,
+    any_changed: &mut bool,
+    index: usize,
+    result: WrappedText,
+) {
+    let element = &tree.elements[index];
+    let old_width = computed[index].width;
+    let old_height = computed[index].height;
+
+    let max_line_width = result.lines.iter().map(|l| l.width).fold(0.0_f32, f32::max);
+    if element.width.is_fit() {
+        computed[index].width =
+            max_line_width.clamp(element.width.min_size(), element.width.max_size());
+    }
+
+    let new_height = result.line_height * result.lines.len().to_f32();
+    computed[index].height = new_height.clamp(element.height.min_size(), element.height.max_size());
+
+    if (computed[index].width - old_width).abs() > f32::EPSILON
+        || (computed[index].height - old_height).abs() > f32::EPSILON
+    {
+        *any_changed = true;
+    }
+
+    if wrapped.is_empty() {
+        wrapped.resize_with(tree.len(), || None);
+    }
+    wrapped[index] = Some(result);
 }

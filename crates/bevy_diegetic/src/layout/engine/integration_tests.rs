@@ -21,6 +21,9 @@
 
 use std::sync::Arc;
 
+use super::layout_engine::ComputedLayout;
+use super::sizing;
+use super::sizing::Axis;
 use bevy::color::Color;
 use bevy_kana::ToF32;
 
@@ -96,6 +99,67 @@ fn line_height(font_size: f32) -> f32 { font_size }
 
 fn text_height(line_count: u32, font_size: f32) -> f32 {
     line_count.to_f32() * line_height(font_size)
+}
+
+fn initialized_layouts(tree: &LayoutTree) -> Vec<ComputedLayout> {
+    let measure = monospace_measure();
+    let mut computed = vec![ComputedLayout::default(); tree.len()];
+    for (index, element) in tree.elements.iter().enumerate() {
+        computed[index].width = match element.width {
+            Sizing::Fixed(size) => size.value,
+            _ => 0.0,
+        };
+        computed[index].height = match element.height {
+            Sizing::Fixed(size) => size.value,
+            _ => 0.0,
+        };
+
+        if let ElementContent::Text { text, config, .. } = &element.content {
+            let dims = measure(text, &config.as_measure().scaled(1.0));
+            computed[index].natural_text_width = dims.width;
+            if element.width.is_fit() {
+                computed[index].width = dims
+                    .width
+                    .clamp(element.width.min_size(), element.width.max_size());
+            }
+            if element.height.is_fit() {
+                computed[index].height = dims
+                    .height
+                    .clamp(element.height.min_size(), element.height.max_size());
+            }
+        }
+    }
+    computed
+}
+
+fn assert_layouts_match(actual: &[ComputedLayout], expected: &[ComputedLayout]) {
+    assert_eq!(actual.len(), expected.len());
+    for (index, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+        assert!(
+            approx_eq(actual.width, expected.width),
+            "width mismatch at {index}: {} != {}",
+            actual.width,
+            expected.width
+        );
+        assert!(
+            approx_eq(actual.height, expected.height),
+            "height mismatch at {index}: {} != {}",
+            actual.height,
+            expected.height
+        );
+        assert!(
+            approx_eq(actual.min_width, expected.min_width),
+            "min_width mismatch at {index}: {} != {}",
+            actual.min_width,
+            expected.min_width
+        );
+        assert!(
+            approx_eq(actual.min_height, expected.min_height),
+            "min_height mismatch at {index}: {} != {}",
+            actual.min_height,
+            expected.min_height
+        );
+    }
 }
 
 fn fixed_unit_gap_child() -> El {
@@ -535,6 +599,59 @@ fn inserted_element_line_churns_later_ordinal_keys_without_stale_lines() {
         PanelShapeSourceKey::element(1, 0, 2)
     );
     assert_ne!(updated_lines[0][2].source_key, old_second_key);
+}
+
+#[test]
+fn fused_fit_propagation_matches_separate_axis_passes() {
+    let mut builder = LayoutBuilder::with_root(
+        El::column()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .padding(Padding::new(3.0, 4.0, 5.0, 6.0))
+            .border(
+                Border::new()
+                    .left(1.0)
+                    .right(2.0)
+                    .top(3.0)
+                    .bottom(4.0)
+                    .color(Color::WHITE),
+            )
+            .gap(2.0),
+    );
+    builder.with(
+        El::row()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .gap(4.0),
+        |builder| {
+            builder.text("Alpha", TextStyle::new(10.0));
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(15.0))
+                    .height(Sizing::fixed(7.0)),
+                |_| {},
+            );
+        },
+    );
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(12.0))
+            .clip(),
+        |builder| {
+            builder.text("Beta", TextStyle::new(8.0));
+        },
+    );
+    let tree = builder.build();
+
+    let mut separate = initialized_layouts(&tree);
+    sizing::propagate_fit_sizes(&tree, &mut separate, 0, Axis::X);
+    sizing::propagate_fit_sizes(&tree, &mut separate, 0, Axis::Y);
+
+    let mut fused = initialized_layouts(&tree);
+    sizing::propagate_fit_sizes_xy(&tree, &mut fused, 0);
+
+    assert_layouts_match(&fused, &separate);
 }
 
 // ── Grow sizing ──────────────────────────────────────────────────────────────
@@ -2125,6 +2242,80 @@ fn child_dividers_emitted() {
         .collect();
 
     assert_eq!(rect_commands.len(), 2);
+}
+
+#[test]
+fn cached_geometry_regeneration_preserves_up_traversal_commands() {
+    let mut builder = LayoutBuilder::new(120.0, 80.0);
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .border(Border::all(2.0, Color::WHITE))
+            .child_divider(ChildDivider::new(1.0, Color::BLACK))
+            .clip(),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(20.0))
+                    .background(Color::srgb(0.1, 0.2, 0.3)),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(20.0))
+                    .background(Color::srgb(0.3, 0.2, 0.1)),
+                |_| {},
+            );
+        },
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
+    let mut regenerated = result.clone();
+
+    regenerated.regenerate_commands(&tree);
+
+    assert_eq!(regenerated.commands, result.commands);
+    let border_count = regenerated
+        .commands
+        .iter()
+        .filter(|command| command.element_idx == 1)
+        .filter(|command| matches!(command.kind, RenderCommandKind::Border { .. }))
+        .count();
+    let divider_count = regenerated
+        .commands
+        .iter()
+        .filter(|command| command.element_idx == 1)
+        .filter(|command| {
+            matches!(
+                command.kind,
+                RenderCommandKind::Rectangle {
+                    source: RectangleSource::ChildDivider,
+                    ..
+                }
+            )
+        })
+        .count();
+    let scissor_start_count = regenerated
+        .commands
+        .iter()
+        .filter(|command| command.element_idx == 1)
+        .filter(|command| matches!(command.kind, RenderCommandKind::ScissorStart))
+        .count();
+    let scissor_end_count = regenerated
+        .commands
+        .iter()
+        .filter(|command| command.element_idx == 1)
+        .filter(|command| matches!(command.kind, RenderCommandKind::ScissorEnd))
+        .count();
+
+    assert_eq!(border_count, 1);
+    assert_eq!(divider_count, 1);
+    assert_eq!(scissor_start_count, 1);
+    assert_eq!(scissor_end_count, 1);
 }
 
 // ── Text wrapping ─────────────────────────────────────────────────────────────

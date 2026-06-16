@@ -279,11 +279,10 @@ impl DiegeticPanel {
     /// Returns whether the cache changed.
     ///
     /// `El.text` is the single source for run text; the child
-    /// [`TextContent`](crate::TextContent) is derived output reconcile rewrites
-    /// from the tree. The public edit path (`PanelText` / `DiegeticTextMut` via
-    /// `TextEdit`) calls this to change a run's string. Skips the revision bump
-    /// (and so the layout) when the string already matches, which also keeps the
-    /// measurer off an unchanged cached string.
+    /// [`TextContent`](crate::TextContent) is derived output — reconcile overwrites
+    /// it from the tree each frame. The public edit path (`PanelText` / `DiegeticTextMut`
+    /// via `TextEdit`) calls this to change a run's string. Skips the revision bump
+    /// when the string is unchanged, avoiding a layout pass and a cache lookup.
     pub(crate) fn sync_run_text_cache(&mut self, index: usize, text: &str) -> bool {
         if self.tree.set_element_text(index, text) {
             self.tree_revision = self.tree_revision.wrapping_add(1);
@@ -498,7 +497,7 @@ fn set_tree_command(
         return;
     };
     let change = panel.tree.classify_change(&next_tree);
-    classification.record(change);
+    classification.record_tree_change(change);
     panel.tree = next_tree;
     panel.tree_revision = panel.tree_revision.wrapping_add(1);
     // Drop stale id → entity mappings so a lookup for a run the new tree no
@@ -585,24 +584,55 @@ pub(super) fn seed_panel_overrides(
 /// Per-frame tree-change classification consumed by the panel layout system.
 #[derive(Component, Default)]
 pub(crate) struct DiegeticPanelChangeClassification {
-    pending: Option<LayoutTreeChange>,
+    pending:                      Option<LayoutTreeChange>,
+    tree_visual_geometry_stable:  bool,
 }
 
 impl DiegeticPanelChangeClassification {
-    pub(super) fn record(&mut self, change: LayoutTreeChange) {
-        self.pending = Some(match self.pending.take() {
+    fn record(&mut self, change: LayoutTreeChange) {
+        self.pending = Some(match self.pending {
             None => change,
             Some(prior) => prior.combine(change),
         });
+    }
+
+    pub(super) fn record_tree_change(&mut self, change: LayoutTreeChange) {
+        let prior = self.pending;
+        let prior_stable = self.tree_visual_geometry_stable;
+        self.record(change);
+
+        self.tree_visual_geometry_stable = match self.pending {
+            Some(LayoutTreeChange::VisualOnly) => match change {
+                LayoutTreeChange::VisualOnly => match prior {
+                    None | Some(LayoutTreeChange::Identical) => true,
+                    Some(LayoutTreeChange::VisualOnly) => prior_stable,
+                    Some(LayoutTreeChange::LayoutAffecting) => false,
+                },
+                LayoutTreeChange::Identical => prior_stable,
+                LayoutTreeChange::LayoutAffecting => false,
+            },
+            Some(LayoutTreeChange::Identical | LayoutTreeChange::LayoutAffecting) | None => false,
+        };
     }
 
     /// Records a run-text edit as `VisualOnly`: a text change moves no other
     /// element, so `compute_panel_layouts` re-measures only the edited leaf and
     /// takes the geometry-stable skip when its box is unchanged. Combining with a
     /// same-frame `LayoutAffecting` change still resolves to a full solve.
-    pub(crate) fn note_text_edit(&mut self) { self.record(LayoutTreeChange::VisualOnly); }
+    pub(crate) fn note_text_edit(&mut self) {
+        self.record(LayoutTreeChange::VisualOnly);
+        self.tree_visual_geometry_stable = false;
+    }
 
-    pub(super) const fn take(&mut self) -> Option<LayoutTreeChange> { self.pending.take() }
+    pub(super) fn take_with_tree_visual_geometry_stable(
+        &mut self,
+    ) -> (Option<LayoutTreeChange>, bool) {
+        let pending = self.pending.take();
+        let tree_visual_geometry_stable =
+            pending == Some(LayoutTreeChange::VisualOnly) && self.tree_visual_geometry_stable;
+        self.tree_visual_geometry_stable = false;
+        (pending, tree_visual_geometry_stable)
+    }
 
     pub(super) const fn pending(&self) -> Option<LayoutTreeChange> { self.pending }
 }
@@ -814,9 +844,11 @@ impl DiegeticPanel {
     reason = "tests should panic if fixture panel construction fails"
 )]
 mod tests {
+    use super::DiegeticPanelChangeClassification;
     use super::DiegeticPanel;
     use super::ScaledLayoutTreeCache;
     use crate::LayoutBuilder;
+    use crate::layout::LayoutTreeChange;
     use crate::TextStyle;
 
     fn test_tree(text: &str) -> crate::LayoutTree {
@@ -849,6 +881,25 @@ mod tests {
         let _ = cache.get_or_update(&tree, 1, 4.0, 5.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 4);
+    }
+
+    #[test]
+    fn same_frame_text_edit_clears_tree_visual_geometry_stability() {
+        let mut classification = DiegeticPanelChangeClassification::default();
+
+        classification.record_tree_change(LayoutTreeChange::VisualOnly);
+        assert_eq!(
+            classification.take_with_tree_visual_geometry_stable(),
+            (Some(LayoutTreeChange::VisualOnly), true)
+        );
+
+        classification.record_tree_change(LayoutTreeChange::VisualOnly);
+        classification.note_text_edit();
+
+        assert_eq!(
+            classification.take_with_tree_visual_geometry_stable(),
+            (Some(LayoutTreeChange::VisualOnly), false)
+        );
     }
 
     #[cfg(feature = "bench_support")]

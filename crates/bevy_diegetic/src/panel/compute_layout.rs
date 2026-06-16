@@ -92,7 +92,8 @@ pub(super) fn compute_panel_layouts(
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 
-        let pending_change = tree_change.take();
+        let (pending_change, tree_visual_geometry_stable) =
+            tree_change.take_with_tree_visual_geometry_stable();
         if matches!(pending_change, Some(LayoutTreeChange::Identical))
             && computed.result().is_some()
         {
@@ -110,13 +111,13 @@ pub(super) fn compute_panel_layouts(
         let viewport_width = panel_ref.width() * layout_to_points;
         let viewport_height = panel_ref.height() * layout_to_points;
 
-        // Geometry-stable skip: a text-only edit (recorded as `VisualOnly`)
-        // whose changed leaves still measure to the same box can reuse the
-        // cached geometry and only regenerate the render-command stream, leaving
-        // the engine solve for genuine reflow. `can_reuse_geometry` re-measures
-        // the leaves and rejects anything the reuse would render wrong.
-        if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
-            && computed.result().is_some_and(|result| {
+        // Geometry-stable skip: regenerate render commands from cached positions
+        // without re-running the layout solve. Safe only when a text-only edit
+        // (`VisualOnly`) leaves every leaf's box unchanged — verified by
+        // `can_reuse_geometry`, which re-measures the leaves and rejects anything
+        // the reuse would render wrong.
+        let can_reuse_geometry = tree_visual_geometry_stable
+            || computed.result().is_some_and(|result| {
                 result.can_reuse_geometry(
                     scaled_tree,
                     &cached_measure,
@@ -124,7 +125,9 @@ pub(super) fn compute_panel_layouts(
                     viewport_height,
                     1.0,
                 )
-            })
+            });
+        if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
+            && can_reuse_geometry
             && let Some(result) = computed.result_mut()
         {
             result.regenerate_commands(scaled_tree);
@@ -163,8 +166,6 @@ pub(super) fn compute_panel_layouts(
 /// on a miss it falls back to the parley-backed [`DiegeticTextMeasurer`] and
 /// inserts the result back into the shared cache, so measurements computed
 /// during layout persist for the renderer instead of being discarded each frame.
-/// The handle clone plus closure allocation is part of the layout wall time in
-/// [`DiegeticPerfStats::compute_ms`](super::perf::DiegeticPerfStats).
 fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer) -> MeasureTextFn {
     let cache_handle = cache.clone();
     let parley_fn = Arc::clone(&measurer.measure_fn);
@@ -179,11 +180,10 @@ fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer
     })
 }
 
-/// Writes a finished layout result back onto the panel.
+/// Finalizes a completed layout pass onto the panel.
 ///
-/// Records content bounds (converted to world units) and the editable-field
-/// records, warning on duplicate field ids. This is part of the layout wall time
-/// in [`DiegeticPerfStats::compute_ms`](super::perf::DiegeticPerfStats).
+/// Records content bounds (converted to world units) and editable-field
+/// records, warning on duplicate field ids.
 fn commit_layout_result(
     computed: &mut ComputedDiegeticPanel,
     panel_ref: &DiegeticPanel,

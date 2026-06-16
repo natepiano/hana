@@ -97,9 +97,8 @@ impl LayoutEngine {
         // Initialize leaf sizes (text measurement, fixed values).
         self.initialize_leaf_sizes(tree, &mut computed, font_scale);
 
-        // Propagate Fit container sizes bottom-up from their children.
-        sizing::propagate_fit_sizes(tree, &mut computed, root, Axis::X);
-        sizing::propagate_fit_sizes(tree, &mut computed, root, Axis::Y);
+        // Propagate initial Fit container sizes bottom-up from their children.
+        sizing::propagate_fit_sizes_xy(tree, &mut computed, root);
 
         // Phase 1: Size along X axis (BFS top-down).
         sizing::size_along_axis(tree, &mut computed, root, Axis::X, viewport_width);
@@ -217,10 +216,12 @@ impl LayoutResult {
         };
 
         debug_assert_eq!(self.computed.len(), tree.len());
-        debug_assert_eq!(self.wrapped.len(), tree.len());
+        debug_assert!(self.wrapped.is_empty() || self.wrapped.len() == tree.len());
         debug_assert_eq!(self.structure_hash, tree.structure_hash());
 
-        if self.computed.len() != tree.len() || self.wrapped.len() != tree.len() {
+        if self.computed.len() != tree.len()
+            || (!self.wrapped.is_empty() && self.wrapped.len() != tree.len())
+        {
             return;
         }
 
@@ -262,7 +263,7 @@ impl LayoutResult {
         font_scale: f32,
     ) -> bool {
         if self.computed.len() != tree.len()
-            || self.wrapped.len() != tree.len()
+            || (!self.wrapped.is_empty() && self.wrapped.len() != tree.len())
             || self.structure_hash != tree.structure_hash()
             || self.viewport_width.to_bits() != viewport_width.to_bits()
             || self.viewport_height.to_bits() != viewport_height.to_bits()
@@ -275,10 +276,16 @@ impl LayoutResult {
             let ElementContent::Text { text, config, .. } = &element.content else {
                 return true;
             };
-            // A wrapped leaf's cached lines hold the old string, and a newline in
-            // the new text would itself force wrapping; in either case the reused
-            // command stream cannot carry the new glyphs, so a full solve runs.
-            if self.wrapped[index].is_some() || text.contains('\n') {
+            // A wrapped leaf's cached line-break offsets index into the old string;
+            // the same offsets in a new string point to the wrong positions, so the
+            // reused command stream would emit the wrong glyphs. A newline in the
+            // new text also forces re-wrapping. Either case requires a full solve.
+            if self
+                .wrapped
+                .get(index)
+                .is_some_and(Option::is_some)
+                || text.contains('\n')
+            {
                 return false;
             }
             // Bit-exact: the same cache-backed measure over the same text and

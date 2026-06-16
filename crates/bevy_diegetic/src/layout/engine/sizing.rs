@@ -154,7 +154,6 @@ pub(super) fn propagate_fit_sizes(
     // overflow (and may scroll), so it reports only its own chrome to ancestors.
     // Without this, a scrollable container's min size equals its full content,
     // forcing every ancestor to grow to the content instead of clipping it.
-    // Matches Clay's scroll-container rule.
     let clipped = matches!(element.overflow, ChildOverflow::Clipped);
     let content_acc = if clipped { 0.0 } else { content_acc };
     let min_acc = if clipped { 0.0 } else { min_acc };
@@ -190,6 +189,148 @@ pub(super) fn propagate_fit_sizes(
 
     // Percent elements: return content size so ancestor Fit elements
     // can account for it, but don't set the computed size yet.
+    content_size
+}
+
+/// Bottom-up initial pass for both layout axes.
+///
+/// X and Y fit propagation are independent before wrapping, so the initial
+/// solve can compute both axes in one post-order traversal. The single-axis
+/// pass remains for the wrap-corrected Y-only propagation after text reflow.
+pub(super) fn propagate_fit_sizes_xy(
+    tree: &LayoutTree,
+    computed: &mut [ComputedLayout],
+    index: usize,
+) -> Vec2 {
+    let element = &tree.elements[index];
+    let children = tree.children_of(index);
+    let width_sizing = get_sizing(element, Axis::X);
+    let height_sizing = get_sizing(element, Axis::Y);
+
+    if children.is_empty() {
+        let current_width = computed[index].width;
+        let current_height = computed[index].height;
+        let min_width = 0.0_f32.clamp(width_sizing.min_size(), width_sizing.max_size());
+        let min_height = if matches!(element.content, ElementContent::Text { .. }) {
+            current_height.clamp(height_sizing.min_size(), height_sizing.max_size())
+        } else {
+            0.0_f32.clamp(height_sizing.min_size(), height_sizing.max_size())
+        };
+        computed[index].min_width = min_width;
+        computed[index].min_height = min_height;
+        return Vec2::new(current_width, current_height);
+    }
+
+    let x_axis_role = child_axis_role(&element.child_layout, Axis::X);
+    let y_axis_role = child_axis_role(&element.child_layout, Axis::Y);
+    let mut content_x = 0.0_f32;
+    let mut content_y = 0.0_f32;
+    let mut min_x = 0.0_f32;
+    let mut min_y = 0.0_f32;
+
+    for &child_idx in children {
+        let child_size = propagate_fit_sizes_xy(tree, computed, child_idx);
+        let child_min_x = computed[child_idx].min_width;
+        let child_min_y = computed[child_idx].min_height;
+
+        if matches!(x_axis_role, AxisRole::RowMain | AxisRole::ColumnMain) {
+            content_x += child_size.x;
+            min_x += child_min_x;
+        } else {
+            content_x = content_x.max(child_size.x);
+            min_x = min_x.max(child_min_x);
+        }
+
+        if matches!(y_axis_role, AxisRole::RowMain | AxisRole::ColumnMain) {
+            content_y += child_size.y;
+            min_y += child_min_y;
+        } else {
+            content_y = content_y.max(child_size.y);
+            min_y = min_y.max(child_min_y);
+        }
+    }
+
+    let width = finish_propagated_axis(
+        element,
+        &mut computed[index],
+        Axis::X,
+        children.len(),
+        content_x,
+        min_x,
+    );
+    let height = finish_propagated_axis(
+        element,
+        &mut computed[index],
+        Axis::Y,
+        children.len(),
+        content_y,
+        min_y,
+    );
+
+    Vec2::new(width, height)
+}
+
+fn finish_propagated_axis(
+    element: &Element,
+    computed: &mut ComputedLayout,
+    axis: Axis,
+    child_count: usize,
+    content_acc: f32,
+    min_acc: f32,
+) -> f32 {
+    let sizing = get_sizing(element, axis);
+    let axis_role = child_axis_role(&element.child_layout, axis);
+
+    if let Sizing::Fixed(size) = sizing {
+        let min = 0.0_f32.clamp(sizing.min_size(), sizing.max_size());
+        set_min_size(computed, axis, min);
+        return size.value;
+    }
+
+    let padding = match axis {
+        Axis::X => element.padding.horizontal(),
+        Axis::Y => element.padding.vertical(),
+    };
+    let border = border_inset(element, axis);
+
+    let gap_total = if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain)
+        && child_count > 1
+    {
+        element
+            .child_layout
+            .main_gap()
+            .map_or(0.0, |gap| gap.value * (child_count - 1).to_f32())
+    } else {
+        0.0
+    };
+
+    let chrome = padding + border;
+    let clipped = matches!(element.overflow, ChildOverflow::Clipped);
+    let content_acc = if clipped { 0.0 } else { content_acc };
+    let min_acc = if clipped { 0.0 } else { min_acc };
+    let gap_for_size = if clipped || matches!(axis_role, AxisRole::Cross | AxisRole::Overlay) {
+        0.0
+    } else {
+        gap_total
+    };
+
+    let content_size = content_acc + chrome + gap_for_size;
+    let min_from_children = min_acc + chrome + gap_for_size;
+    let clamped_min = min_from_children.clamp(sizing.min_size(), sizing.max_size());
+    set_min_size(computed, axis, clamped_min);
+
+    if sizing.is_fit() {
+        let clamped = content_size.clamp(sizing.min_size(), sizing.max_size());
+        set_size(computed, axis, clamped);
+        return clamped;
+    }
+
+    if sizing.is_grow() {
+        let clamped = content_size.clamp(sizing.min_size(), sizing.max_size());
+        set_size(computed, axis, clamped);
+        return clamped;
+    }
+
     content_size
 }
 

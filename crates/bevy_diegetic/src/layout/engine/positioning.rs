@@ -61,11 +61,10 @@ struct GeometryStackEntry {
     clip_context: ClipContext,
 }
 
-/// Clip state threaded down the DFS. `inherited` starts at the viewport and
-/// narrows at every [`ChildOverflow::Clipped`] ancestor — it clips owner-bound
-/// content. `scissor` carries only the [`ChildOverflow::Clipped`] ancestor
-/// intersections (no viewport seed), so overflow-visible panel lines escape
-/// the panel viewport but still respect explicit scissor regions.
+/// Clip state threaded down the DFS.
+/// `inherited` = viewport ∩ every [`ChildOverflow::Clipped`] ancestor; applied to owner-bound content.
+/// `scissor`   = only explicit [`ChildOverflow::Clipped`] ancestors (no viewport); line geometry that
+///               overflows a panel is not clipped to the panel viewport, but still respects these regions.
 #[derive(Clone, Copy)]
 struct ClipContext {
     inherited: BoundingBox,
@@ -212,6 +211,17 @@ fn emit_up_traversal_commands(
     }
 }
 
+fn needs_up_traversal(element: &Element) -> bool {
+    // Keep this predicate in sync with `emit_up_traversal_commands`: skipping a
+    // required second visit can drop borders/dividers or unbalance scissors.
+    element.border.is_some()
+        || element
+            .child_layout
+            .divider()
+            .is_some_and(|divider| divider.width().value > 0.0)
+        || matches!(element.overflow, ChildOverflow::Clipped)
+}
+
 /// Emits background, scissor-start, and text render commands during the
 /// down-traversal (first visit) of the DFS positioning pass.
 fn emit_down_traversal_commands(
@@ -355,7 +365,13 @@ fn emit_text_commands(
 ) {
     // Render commands store font sizes in layout units so downstream
     // renderers don't need to know about the font unit conversion.
-    let scaled_config = config.scaled(font_scale);
+    // `TextStyle::scaled(1.0)` is intentionally an identity transform; avoid
+    // the multiply path in per-text command emission after trees are pre-scaled.
+    let scaled_config = if font_scale.to_bits() == 1.0_f32.to_bits() {
+        config.clone()
+    } else {
+        config.scaled(font_scale)
+    };
 
     if let Some(wrap_result) = wrapped {
         // Wrapped text: emit one command per line.
@@ -696,7 +712,7 @@ pub(super) fn position_and_render(
             emit_down_traversal_commands(
                 &mut commands,
                 element,
-                wrapped[index].as_ref(),
+                wrapped.get(index).and_then(Option::as_ref),
                 bounds,
                 index,
                 font_scale,
@@ -704,10 +720,12 @@ pub(super) fn position_and_render(
             );
 
             let child_clip = entry.clip_context.child(element, bounds);
-            stack.push(PositionStackEntry {
-                visited: true,
-                ..entry
-            });
+            if needs_up_traversal(element) {
+                stack.push(PositionStackEntry {
+                    visited: true,
+                    ..entry
+                });
+            }
             push_children_to_stack(
                 tree, computed, &mut stack, index, entry.x, entry.y, child_clip,
             );
@@ -754,7 +772,7 @@ pub(super) fn render_commands_from_geometry(
         emit_down_traversal_commands(
             &mut commands,
             element,
-            wrapped[index].as_ref(),
+            wrapped.get(index).and_then(Option::as_ref),
             bounds,
             index,
             font_scale,
@@ -762,10 +780,12 @@ pub(super) fn render_commands_from_geometry(
         );
 
         let child_clip = entry.clip_context.child(element, bounds);
-        stack.push(GeometryStackEntry {
-            visited: true,
-            ..entry
-        });
+        if needs_up_traversal(element) {
+            stack.push(GeometryStackEntry {
+                visited: true,
+                ..entry
+            });
+        }
         for &child_idx in tree.children_of(index).iter().rev() {
             stack.push(GeometryStackEntry {
                 index:        child_idx,

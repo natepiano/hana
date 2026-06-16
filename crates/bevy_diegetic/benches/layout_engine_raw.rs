@@ -12,6 +12,10 @@
 //! - **`build_tree_only`**: public `LayoutBuilder` tree construction.
 //! - **`scale_tree_only`**: unit conversion via `LayoutTree::scaled`.
 //! - **`raw_compute_prebuilt_tree`**: `LayoutEngine::compute` on an already built and scaled tree.
+//! - **`raw_compute_prebuilt_unscaled_tree`**: `LayoutEngine::compute` on an already built
+//!   unscaled tree, matching the direct layout-comparison viewport and font scale.
+//! - **`build_compute_unscaled_tree`**: build the unscaled tree and immediately compute it,
+//!   matching the Diegetic side of `layout_comparison`.
 //! - **`regenerate_commands_only`**: visual-only command regeneration from cached geometry.
 //! - **`layout_tree_diff_*`**: field-by-field tree change classification cost.
 //!
@@ -83,6 +87,36 @@ fn bench_raw_status_panel(
                 black_box(&tree),
                 black_box(viewport_size),
                 black_box(viewport_size),
+                black_box(1.0),
+            );
+            black_box(result);
+        });
+    });
+
+    group.bench_function("raw_compute_prebuilt_unscaled_tree", |b| {
+        let tree = build_diegetic_status_tree(rows);
+        let engine = LayoutEngine::new(monospace_measure_text_fn());
+
+        b.iter(|| {
+            let result = engine.compute(
+                black_box(&tree),
+                black_box(PANEL_SIZE),
+                black_box(PANEL_SIZE),
+                black_box(1.0),
+            );
+            black_box(result);
+        });
+    });
+
+    group.bench_function("build_compute_unscaled_tree", |b| {
+        let engine = LayoutEngine::new(monospace_measure_text_fn());
+
+        b.iter(|| {
+            let tree = build_diegetic_status_tree(black_box(rows));
+            let result = engine.compute(
+                black_box(&tree),
+                black_box(PANEL_SIZE),
+                black_box(PANEL_SIZE),
                 black_box(1.0),
             );
             black_box(result);
