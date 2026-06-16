@@ -293,16 +293,15 @@ fn finish_propagated_axis(
     };
     let border = border_inset(element, axis);
 
-    let gap_total = if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain)
-        && child_count > 1
-    {
-        element
-            .child_layout
-            .main_gap()
-            .map_or(0.0, |gap| gap.value * (child_count - 1).to_f32())
-    } else {
-        0.0
-    };
+    let gap_total =
+        if matches!(axis_role, AxisRole::RowMain | AxisRole::ColumnMain) && child_count > 1 {
+            element
+                .child_layout
+                .main_gap()
+                .map_or(0.0, |gap| gap.value * (child_count - 1).to_f32())
+        } else {
+            0.0
+        };
 
     let chrome = padding + border;
     let clipped = matches!(element.overflow, ChildOverflow::Clipped);

@@ -151,8 +151,8 @@ fn wrap_text_newlines(
 ///    `initialize_leaf_sizes` instead of re-calling the measure function. If the cached width fits
 ///    within the element's post-sizing width, the text won't reflow, so we skip wrapping entirely.
 ///
-/// 2. **Parent-aware traversal** — the pass walks from the root and carries the
-///    current parent's content width, avoiding a separate parent lookup table.
+/// 2. **Parent-aware traversal** — the pass walks from the root and carries the current parent's
+///    content width, avoiding a separate parent lookup table.
 pub(super) fn rewrap_text_elements(
     tree: &LayoutTree,
     computed: &mut [ComputedLayout],

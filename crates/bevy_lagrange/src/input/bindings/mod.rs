@@ -69,11 +69,16 @@ pub use held_binding::OrbitCamGatePolarity;
 pub use held_binding::OrbitCamHeldBinding;
 pub use held_binding::OrbitCamInputBinding;
 pub use preset::OrbitCamBindingsProfile;
+pub use preset::OrbitCamBlenderLikeKeyboardPreset;
+pub use preset::OrbitCamBlenderLikePreset;
 pub use preset::OrbitCamGamepadPreset;
 pub use preset::OrbitCamGamepadPresetBuilder;
+pub use preset::OrbitCamKeyboardPreset;
 pub use preset::OrbitCamPreset;
 pub use preset::OrbitCamPresetLayer;
 pub use preset::OrbitCamPresetLayers;
+pub use preset::OrbitCamSimpleMouseKeyboardPreset;
+pub use preset::OrbitCamSimpleMousePreset;
 pub use preset::PresetLayerSet;
 pub use validate::validate_bindings;
 
@@ -234,6 +239,40 @@ mod tests {
             OrbitCamBindingsProfile::GamepadPreset { customized: false }
         );
 
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_preset_validates_slow_scale() {
+        assert!(
+            OrbitCamBlenderLikePreset::default()
+                .slow_scale(0.25)
+                .build()
+                .is_ok()
+        );
+        assert_eq!(
+            OrbitCamBlenderLikePreset::default().slow_scale(2.0).build(),
+            Err(OrbitCamBindingsError::InvalidScale)
+        );
+    }
+
+    #[test]
+    fn gamepad_preset_rejects_slow_scales_above_fast_scales() {
+        assert_eq!(
+            OrbitCamGamepadPreset::default()
+                .customize()
+                .slow_orbit_scale(2000.0)
+                .build(),
+            Err(OrbitCamBindingsError::InvalidScale)
+        );
+    }
+
+    #[test]
+    fn preset_enum_delegates_to_blender_like_config() -> Result<(), OrbitCamBindingsError> {
+        assert_eq!(
+            OrbitCamPreset::BlenderLike.to_bindings()?,
+            OrbitCamBlenderLikePreset::default().build()?
+        );
         Ok(())
     }
 

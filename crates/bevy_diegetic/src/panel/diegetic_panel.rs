@@ -584,8 +584,8 @@ pub(super) fn seed_panel_overrides(
 /// Per-frame tree-change classification consumed by the panel layout system.
 #[derive(Component, Default)]
 pub(crate) struct DiegeticPanelChangeClassification {
-    pending:                      Option<LayoutTreeChange>,
-    tree_visual_geometry_stable:  bool,
+    pending:                     Option<LayoutTreeChange>,
+    tree_visual_geometry_stable: bool,
 }
 
 impl DiegeticPanelChangeClassification {
@@ -844,12 +844,12 @@ impl DiegeticPanel {
     reason = "tests should panic if fixture panel construction fails"
 )]
 mod tests {
-    use super::DiegeticPanelChangeClassification;
     use super::DiegeticPanel;
+    use super::DiegeticPanelChangeClassification;
     use super::ScaledLayoutTreeCache;
     use crate::LayoutBuilder;
-    use crate::layout::LayoutTreeChange;
     use crate::TextStyle;
+    use crate::layout::LayoutTreeChange;
 
     fn test_tree(text: &str) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);

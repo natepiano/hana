@@ -12,8 +12,8 @@
 //! - **`build_tree_only`**: public `LayoutBuilder` tree construction.
 //! - **`scale_tree_only`**: unit conversion via `LayoutTree::scaled`.
 //! - **`raw_compute_prebuilt_tree`**: `LayoutEngine::compute` on an already built and scaled tree.
-//! - **`raw_compute_prebuilt_unscaled_tree`**: `LayoutEngine::compute` on an already built
-//!   unscaled tree, matching the direct layout-comparison viewport and font scale.
+//! - **`raw_compute_prebuilt_unscaled_tree`**: `LayoutEngine::compute` on an already built unscaled
+//!   tree, matching the direct layout-comparison viewport and font scale.
 //! - **`build_compute_unscaled_tree`**: build the unscaled tree and immediately compute it,
 //!   matching the Diegetic side of `layout_comparison`.
 //! - **`regenerate_commands_only`**: visual-only command regeneration from cached geometry.

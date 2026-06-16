@@ -280,12 +280,7 @@ impl LayoutResult {
             // the same offsets in a new string point to the wrong positions, so the
             // reused command stream would emit the wrong glyphs. A newline in the
             // new text also forces re-wrapping. Either case requires a full solve.
-            if self
-                .wrapped
-                .get(index)
-                .is_some_and(Option::is_some)
-                || text.contains('\n')
-            {
+            if self.wrapped.get(index).is_some_and(Option::is_some) || text.contains('\n') {
                 return false;
             }
             // Bit-exact: the same cache-backed measure over the same text and

@@ -62,9 +62,10 @@ struct GeometryStackEntry {
 }
 
 /// Clip state threaded down the DFS.
-/// `inherited` = viewport ∩ every [`ChildOverflow::Clipped`] ancestor; applied to owner-bound content.
-/// `scissor`   = only explicit [`ChildOverflow::Clipped`] ancestors (no viewport); line geometry that
-///               overflows a panel is not clipped to the panel viewport, but still respects these regions.
+/// `inherited` = viewport ∩ every [`ChildOverflow::Clipped`] ancestor; applied to owner-bound
+/// content. `scissor`   = only explicit [`ChildOverflow::Clipped`] ancestors (no viewport); line
+/// geometry that               overflows a panel is not clipped to the panel viewport, but still
+/// respects these regions.
 #[derive(Clone, Copy)]
 struct ClipContext {
     inherited: BoundingBox,

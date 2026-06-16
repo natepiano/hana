@@ -1,109 +1,111 @@
 # OrbitCam Preset API
 
-This document captures the planned preset API shape.
+> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Replaces the layer/profile model with concrete preset config structs, `OrbitCam::*` spawn helpers, and CapsLock slow mode for BlenderLike presets.
 
-The design goal is that casual users spawn a preset camera with one helper, while users who need changes can start from the same preset defaults and override only the pieces they care about.
+## Delegation Context
 
-## Decisions
+- **Project:** bevy_lagrange — Bevy orbit camera with pan, orbit, zoom-to-fit, queued animations, and trackpad support
+- **Stack:** Rust, Bevy 0.19.0-rc.2, bevy_enhanced_input 0.26.0-rc.1
+- **Layout:**
+  - `crates/bevy_lagrange/src/input/bindings/` — validated binding specs, preset configs, builder, descriptors, validation, error types
+  - `crates/bevy_lagrange/src/input/bindings/preset/` — module directory (Phase 1); `mod.rs`, `config.rs`, `enum_preset.rs`, `simple_mouse.rs`, `blender_like.rs`, `keyboard.rs`, `simple_mouse_keyboard.rs`, `blender_like_keyboard.rs`, `gamepad.rs`
+  - `crates/bevy_lagrange/src/input/bindings/descriptor.rs` — binding descriptor types; `InputDeadZone` pattern is the model for `OrbitCamScalePolicy` (Phase 3)
+  - `crates/bevy_lagrange/src/input/bindings/builder.rs` — `OrbitCamBindingsDescriptor` + `OrbitCamBindingsBuilder`; `profile` field removed in Phase 2
+  - `crates/bevy_lagrange/src/input/bindings/validate.rs` — `validate_bindings`; scale/deadzone validation pattern
+  - `crates/bevy_lagrange/src/input/bindings/error.rs` — `OrbitCamBindingsError` enum; used for preset validation errors
+  - `crates/bevy_lagrange/src/input/bindings/mod.rs` — module exports; `OrbitCamBindings` struct; profile field removed in Phase 2
+  - `crates/bevy_lagrange/src/input/routing/latches.rs` — `CameraInputSourceLatches`, `recover_unavailable_latches`, `clear_latches_on_mode_replaced`; extended for slow-mode latches in Phase 3
+  - `crates/bevy_lagrange/src/input/routing/mod.rs` — routing dispatcher
+  - `crates/bevy_lagrange/src/input/adapter/mod.rs` — input adapter; extended for slow-mode scaling in Phase 3
+  - `crates/bevy_lagrange/src/input/mod.rs` — input subsystem root; export cleanup in Phase 2
+  - `crates/bevy_lagrange/src/input/modes.rs` — `OrbitCamInputMode` and `OrbitCamInputModeDraft` enums
+  - `crates/bevy_lagrange/src/orbit_cam/mod.rs` — `OrbitCam` component; re-exports from `preset_helpers` in Phase 4
+  - `crates/bevy_lagrange/src/lib.rs` — crate root exports; profile/layer removals in Phase 2, preset config additions in Phase 4
+  - `crates/bevy_lagrange/examples/input_preset_simple.rs` — updated in Phase 5
+  - `crates/bevy_lagrange/examples/input_preset_blender_like.rs` — updated in Phase 5
+  - `crates/bevy_lagrange/examples/input_gamepad.rs` — updated in Phase 5
+  - `crates/bevy_lagrange/examples/input_keyboard.rs` — updated in Phase 5
+  - `crates/bevy_lagrange/examples/input_manual.rs` — updated in Phase 5
+- **Key files:**
+  - `crates/bevy_lagrange/src/input/bindings/preset/enum_preset.rs` — `OrbitCamPreset` enum + `to_bindings()`; legacy types `OrbitCamBindingsProfile`, `OrbitCamPresetLayer`, `PresetLayerSet`, `OrbitCamPresetLayers` (all deleted in Phase 2)
+  - `crates/bevy_lagrange/src/input/bindings/preset/blender_like.rs` — `OrbitCamBlenderLikePreset` with `zoom_mod_keys`, `slow_toggle_key`, `slow_scale` fields; validation in `build_into`
+  - `crates/bevy_lagrange/src/input/bindings/preset/gamepad.rs` — `OrbitCamGamepadPreset` + `OrbitCamGamepadPresetBuilder`; scale/dead-zone validation
+  - `crates/bevy_lagrange/src/input/bindings/preset/config.rs` — `pub(super) trait OrbitCamPresetConfig: Sized`
+  - `crates/bevy_lagrange/src/input/bindings/descriptor.rs` — lines 24–32: `HeldBindingDescriptor`; lines 36–42: `ActionBindingDescriptor`; lines 137–190: `InputBindingModifiers`; lines 214–230: `InputDeadZone`
+  - `crates/bevy_lagrange/src/input/bindings/builder.rs` — lines 36–53: `OrbitCamBindingsDescriptor` with `profile` field; line 147: `profile()` method
+  - `crates/bevy_lagrange/src/input/bindings/validate.rs` — lines 44–83: `validate_bindings`
+  - `crates/bevy_lagrange/src/input/bindings/error.rs` — all lines; `OrbitCamBindingsError` with `InvalidScale` (line 39), `InvalidDeadZone` (line 41)
+  - `crates/bevy_lagrange/src/input/bindings/mod.rs` — lines 80–98: `OrbitCamBindings` struct; line 97: `profile` field; lines 166–169: `profile()` getter; lines 71–77: layer/profile exports
+  - `crates/bevy_lagrange/src/input/routing/latches.rs` — lines 25–88: `CameraInputSourceLatches`; lines 67–83: `recover_unavailable_latches`; lines 90–95: `clear_latches_on_mode_replaced`
+  - `crates/bevy_lagrange/src/input/modes.rs` — lines 43–51: `OrbitCamInputMode` `#[non_exhaustive]`; lines 84–90: `OrbitCamInputModeDraft` `#[non_exhaustive]`
+  - `crates/bevy_lagrange/src/lib.rs` — line 87: `OrbitCamBindingsProfile`; lines 92–93: gamepad preset exports; lines 133–135: `OrbitCamPreset`, `OrbitCamPresetLayer`, `OrbitCamPresetLayers`; line 148: `PresetLayerSet`
+- **Build:** `cargo build -p bevy_lagrange`
+- **Test:** `cargo nextest run -p bevy_lagrange`
+- **Lint:** `cargo clippy -p bevy_lagrange && cargo +nightly fmt`
+- **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_lagrange_presets`
+- **Invariants:**
+  - `OrbitCamInputMode` and `OrbitCamPreset` remain `#[non_exhaustive]`
+  - `OrbitCamInputModeDraft` remains `#[non_exhaustive]`
+  - All binding validation happens before `build()` returns `Ok`
+  - Preset configs validate preset-specific invariants before descriptor construction — before any builder mutation
+  - `OrbitCamScalePolicy` is a plain struct (mirrors `InputDeadZone`); validation at preset `build()` time, not at struct construction
+  - Slow-mode latch is per-camera entity (mirrors `CameraInputSourceLatches` pattern in `routing/latches.rs`)
+  - `clear_latches_on_mode_replaced` and `recover_unavailable_latches` must cover slow-mode latches
+  - No public examples show exhaustive match over `#[non_exhaustive]` enums without a wildcard arm
+  - `OrbitCamPresetBundle` does not exist — helpers return `impl Bundle`
 
-- Keep `OrbitCamInputMode` as the runtime mode component.
-- Keep `OrbitCamPreset` as the compact built-in preset selector.
-- Add ergonomic `OrbitCam` helpers so most users do not need to write `OrbitCamInputMode` directly.
-- Add concrete configurable preset types as the source of truth for preset defaults.
-- Put fluent tuning methods directly on concrete preset config structs.
-- Remove `OrbitCamPresetLayers`, `OrbitCamPresetLayer`, and `PresetLayerSet`.
-- Remove `OrbitCamBindingsProfile`.
-- Treat tuned preset bindings as `OrbitCamInputMode::Bindings`, displayed as custom bindings.
-- Keep preset config traits crate-owned or sealed. Public users extend controls through `OrbitCamBindings::builder()`.
+## Phases
 
-## Runtime Mode Model
+### Phase 1 — Preset module restructure + concrete preset config structs  · status: done
 
-`OrbitCamInputMode` remains necessary. It is the component that selects the input runtime behavior for an `OrbitCam`.
+#### Work Order
+
+**Goal:** Replace `preset.rs` with a `preset/` module directory and implement all concrete preset config structs with fluent setters, validation, and `OrbitCamPreset::to_bindings()` delegation. Slow-mode runtime behavior is excluded (Phase 3); `OrbitCamBlenderLikePreset` gets the `slow_scale` field and build-time validation only.
+
+**Spec:**
+
+Module structure — replace `crates/bevy_lagrange/src/input/bindings/preset.rs` with:
+
+```
+input/bindings/preset/
+  mod.rs                     — re-export public preset API
+  config.rs                  — sealed OrbitCamPresetConfig trait
+  enum_preset.rs             — OrbitCamPreset enum + to_bindings()
+  simple_mouse.rs            — OrbitCamSimpleMousePreset
+  blender_like.rs            — OrbitCamBlenderLikePreset
+  keyboard.rs                — OrbitCamKeyboardPreset
+  simple_mouse_keyboard.rs   — OrbitCamSimpleMouseKeyboardPreset
+  blender_like_keyboard.rs   — OrbitCamBlenderLikeKeyboardPreset
+  gamepad.rs                 — OrbitCamGamepadPreset
+```
+
+Sealed trait (crate-private, in `preset/config.rs`):
 
 ```rust
-pub enum OrbitCamInputMode {
-    Preset(OrbitCamPreset),
-    Bindings(OrbitCamBindings),
-    Manual,
+trait OrbitCamPresetConfig: Sized {
+    fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError>;
 }
 ```
 
-These variants are the only mode model users should have to understand:
-
-| Mode | Meaning |
-| --- | --- |
-| `Preset(OrbitCamPreset)` | Built-in default input mapping |
-| `Bindings(OrbitCamBindings)` | App-owned or tuned validated bindings |
-| `Manual` | App code writes camera intent through `OrbitCamManualInputWriter` |
-
-The new constructors hide this component for common spawn paths; they do not replace it internally.
-
-`OrbitCamInputMode` and `OrbitCamPreset` should remain `#[non_exhaustive]` for future extension. Public docs should avoid exhaustive downstream `match` examples unless they include a wildcard arm.
-
-## User-Facing Tiers
-
-| User goal | API |
-| --- | --- |
-| Spawn a default preset camera | `OrbitCam::blender_like()` |
-| Spawn a camera with tuned preset bindings | `OrbitCam::with_bindings(bindings)` |
-| Spawn a manually driven camera | `OrbitCam::manual()` |
-| Build tuned preset bindings | `OrbitCamBlenderLikePreset::default().slow_scale(0.25).build()?` |
-| Fully custom controls | `OrbitCamBindings::builder()` |
-
-The common path should be this small:
+`Sized` bound is correct — trait is not intended for `dyn`; each concrete preset is consumed by value. Each concrete preset also exposes an inherent `build()` delegating to the trait so users never import the trait:
 
 ```rust
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::blender_like(),
-));
+impl OrbitCamBlenderLikePreset {
+    pub fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
+        <Self as OrbitCamPresetConfig>::build(self)
+    }
+}
 ```
 
-Equivalent helpers:
+Private `build_into` for composed preset reuse:
 
 ```rust
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::simple_mouse(),
-));
-
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::gamepad(),
-));
-
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::manual(),
-));
+fn build_into(self, builder: OrbitCamBindingsBuilder) -> Result<OrbitCamBindingsBuilder, OrbitCamBindingsError>
 ```
 
-Helpers should exist for every built-in preset:
+Child configs validate their own invariants inside `build_into` BEFORE mutating the builder. If validation fails, return the error before any builder mutation (no partial state).
 
-| Preset | Helper |
-| --- | --- |
-| `SimpleMouse` | `OrbitCam::simple_mouse()` |
-| `BlenderLike` | `OrbitCam::blender_like()` |
-| `Keyboard` | `OrbitCam::keyboard()` |
-| `SimpleMouseKeyboard` | `OrbitCam::simple_mouse_keyboard()` |
-| `BlenderLikeKeyboard` | `OrbitCam::blender_like_keyboard()` |
-| `Gamepad` | `OrbitCam::gamepad()` |
-
-`OrbitCam` already requires `Camera3d`, `OrbitCamInput`, `OrbitCamInputContext`, and `OrbitCamInputMode`, so these helpers do not need to include `Camera3d`.
-
-## Source of Truth
-
-Concrete configurable preset types are the implementation source of truth.
-
-`OrbitCamPreset::BlenderLike` delegates to `OrbitCamBlenderLikePreset::default().build()`.
-
-`OrbitCamPreset::Gamepad` delegates to `OrbitCamGamepadPreset::default().build()`.
-
-`OrbitCamPreset::SimpleMouse` delegates to `OrbitCamSimpleMousePreset::default().build()`.
-
-`OrbitCamPreset::Keyboard` delegates to `OrbitCamKeyboardPreset::default().build()`.
-
-Composed enum presets should also delegate to concrete source-of-truth code, not to a public layer builder:
+`OrbitCamPreset::to_bindings()` delegation (verbatim):
 
 ```rust
 impl OrbitCamPreset {
@@ -115,59 +117,13 @@ impl OrbitCamPreset {
             Self::SimpleMouseKeyboard => OrbitCamSimpleMouseKeyboardPreset::default().build(),
             Self::BlenderLikeKeyboard => OrbitCamBlenderLikeKeyboardPreset::default().build(),
             Self::Gamepad => OrbitCamGamepadPreset::default().build(),
+            _ => unreachable!(),
         }
     }
 }
 ```
 
-The enum remains useful as the compact default selector, but it should not duplicate binding construction logic.
-
-Composed preset config structs should compose child configs directly:
-
-```rust
-pub struct OrbitCamBlenderLikeKeyboardPreset {
-    pointer:  OrbitCamBlenderLikePreset,
-    keyboard: OrbitCamKeyboardPreset,
-}
-```
-
-Each concrete preset family should expose private `build_into(builder)` helpers so composed presets reuse the child preset logic without reintroducing public layers or duplicating binding construction.
-
-Composed presets should still be configurable without exposing layers. They should provide child-config setters and common pass-through setters:
-
-```rust
-let bindings = OrbitCamBlenderLikeKeyboardPreset::default()
-    .blender_like(OrbitCamBlenderLikePreset::default().slow_scale(0.25))
-    .build()?;
-```
-
-`OrbitCamBlenderLikeKeyboardPreset` inherits BlenderLike slow mode by default. Users can tune or disable it through the composed config's BlenderLike child.
-
-## Configurable Preset Build Contract
-
-Each concrete preset config exposes an inherent `build()` method:
-
-```rust
-impl OrbitCamBlenderLikePreset {
-    pub fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        <Self as OrbitCamPresetConfig>::build(self)
-    }
-}
-```
-
-This keeps tuned preset examples small. Users should not need to import a trait just to call `.build()?`.
-
-Inside the crate, each concrete preset config implements a shared crate-owned or sealed trait:
-
-```rust
-trait OrbitCamPresetConfig: Sized {
-    fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError>;
-}
-```
-
-`Sized` is enough because preset configs are concrete values consumed by `build(self)`. The trait is not intended for `dyn OrbitCamPresetConfig`; each concrete preset type stores its own configuration.
-
-Example:
+`OrbitCamBlenderLikePreset` struct and defaults:
 
 ```rust
 pub struct OrbitCamBlenderLikePreset {
@@ -185,91 +141,177 @@ impl Default for OrbitCamBlenderLikePreset {
         }
     }
 }
-
-impl OrbitCamPresetConfig for OrbitCamBlenderLikePreset {
-    fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-        // Builds validated Blender-like bindings.
-    }
-}
 ```
 
-The trait defines internal common behavior. The concrete preset type owns whatever storage it needs.
+Fluent setters on all preset configs consume and return `self`: `.zoom_mod_keys(ModKeys)`, `.slow_toggle_key(Option<KeyCode>)`, `.slow_scale(f32)`.
 
-This trait is not the public extension model. External users who need new control schemes should build `OrbitCamBindings` directly.
-
-## Customization Surface
-
-Users should not need configurable preset types for defaults. They use them only when overriding defaults:
-
-```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_scale(0.25)
-    .build()?;
-
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::with_bindings(bindings),
-));
-```
-
-Disable a default:
-
-```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_toggle_key(None)
-    .build()?;
-```
-
-Tune gamepad:
-
-```rust
-let bindings = OrbitCamGamepadPreset::default()
-    .slow_orbit_scale(160.0)
-    .slow_pan_scale(120.0)
-    .build()?;
-```
-
-Do not keep a separate public `OrbitCamGamepadPresetBuilder`. With `OrbitCamBindingsProfile` removed, the `customized` flag and `.customize()` indirection are no longer needed. Each concrete preset config should provide fluent setters directly.
-
-Preset config `build()` methods should validate preset-specific numeric invariants before producing bindings. For slow mode, `slow_scale` must be finite and should be greater than `0.0` and less than or equal to `1.0`, so slow mode cannot invert or amplify input.
-
-Validation should live in each concrete config's `build()` method before descriptor construction:
+Validation invariants (enforce in each `build()` before descriptor construction; use existing `OrbitCamBindingsError` variants — no new error types for v0):
 
 | Config | Invariants |
 | --- | --- |
-| `OrbitCamBlenderLikePreset` | `slow_scale` is finite, greater than `0.0`, and less than or equal to `1.0` when slow mode is enabled |
-| `OrbitCamGamepadPreset` | fast and slow orbit, pan, and zoom scales are finite and non-negative |
-| `OrbitCamGamepadPreset` | slow scale values are no greater than their corresponding fast scale values |
-| `OrbitCamGamepadPreset` | stick dead-zone lower and upper bounds are finite, ordered, and inside the accepted input range |
-| Composed presets | child config validation runs through the child `build_into` path |
+| `OrbitCamBlenderLikePreset` | `slow_scale` finite, > 0.0, ≤ 1.0 when slow mode enabled (`slow_toggle_key.is_some()`) |
+| `OrbitCamGamepadPreset` | fast and slow orbit/pan/zoom scales finite and non-negative |
+| `OrbitCamGamepadPreset` | slow scale ≤ corresponding fast scale |
+| `OrbitCamGamepadPreset` | stick dead-zone lower and upper bounds finite, ordered, inside accepted input range |
+| Composed presets | child validation runs inside `build_into` before builder mutation |
 
-Later preset-specific tunables should add their own invariants at the config layer, not rely only on generic binding validation.
+`OrbitCamBlenderLikeKeyboardPreset` composition:
 
-## Built-In BlenderLike Slow Mode
+```rust
+pub struct OrbitCamBlenderLikeKeyboardPreset {
+    pointer:  OrbitCamBlenderLikePreset,
+    keyboard: OrbitCamKeyboardPreset,
+}
+```
 
-`OrbitCamPreset::BlenderLike` should include Lagrange's slow mode by default.
+Child-config setters replace the field entirely (no merge):
 
-Default:
+```rust
+pub fn blender_like(mut self, preset: OrbitCamBlenderLikePreset) -> Self {
+    self.pointer = preset; self
+}
+pub fn keyboard(mut self, preset: OrbitCamKeyboardPreset) -> Self {
+    self.keyboard = preset; self
+}
+```
 
-| Setting | Value |
-| --- | --- |
-| Slow toggle | `KeyCode::CapsLock` |
-| Slow behavior | Reduces orbit, pan, and zoom scale |
-| Default slow scale | `0.15` |
+`OrbitCamBlenderLikeKeyboardPreset` inherits BlenderLike slow mode from its `pointer` child by default.
 
-CapsLock slow mode is a Lagrange-maintained toggle state, not a held key gate and not the operating system CapsLock text state. Pressing CapsLock toggles Lagrange slow mode on or off for the camera input context.
+`OrbitCamPresetLayers` and `OrbitCamBindingsProfile` still exist in this phase but are no longer called by `to_bindings()`. They are deleted in Phase 2.
 
-The existing held-binding gate model is not sufficient for this by itself because those gates are active only while the gate input is pressed.
+**Files:**
+- `crates/bevy_lagrange/src/input/bindings/preset.rs` — delete; replaced by directory
+- `crates/bevy_lagrange/src/input/bindings/preset/mod.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/config.rs` — new; sealed trait
+- `crates/bevy_lagrange/src/input/bindings/preset/enum_preset.rs` — new; `OrbitCamPreset` + `to_bindings()`
+- `crates/bevy_lagrange/src/input/bindings/preset/simple_mouse.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/keyboard.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/simple_mouse_keyboard.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like_keyboard.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/preset/gamepad.rs` — new
+- `crates/bevy_lagrange/src/input/bindings/mod.rs` — update preset module path
 
-The implementation should add a small typed runtime contract:
+**Constraints from prior phases:** None (first phase).
 
-- Preset configs emit a validated slow-mode descriptor, for example `OrbitCamSlowMode { toggle_key, scale }` or an equivalent `OrbitCamRuntimeGate::SlowMode`.
-- The adapter owns a private per-camera slow-mode latch, tied to the routed `OrbitCamInputContext`.
-- The latch toggles on the key edge, not on key-repeat and not from the operating system CapsLock text state.
-- Slow mode applies only to the camera whose input context receives the routed toggle.
-- When a camera's mode or bindings no longer reference slow mode, the adapter ignores or resets that camera's slow latch.
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; `OrbitCamBlenderLikePreset::default().slow_scale(0.25).build()` returns `Ok`; `OrbitCamBlenderLikePreset::default().slow_scale(2.0).build()` returns `Err`; `OrbitCamGamepadPreset` slow > fast returns `Err`; `OrbitCamPreset::BlenderLike.to_bindings()` delegates to `OrbitCamBlenderLikePreset::default().build()`.
 
-Slow scaling must cover every BlenderLike movement source:
+#### Retrospective
+
+**What worked:** Module split clean; all 109 tests pass including 3 new acceptance gate tests; validation-before-mutation invariant held throughout; `OrbitCamPresetLayers::build_with_profile` rewritten to delegate to concrete preset `build_into` methods (behavioral equivalence verified by existing `composed_presets_use_layer_builder` test).
+
+**What deviated from the plan:**
+- `_ => unreachable!()` removed from `to_bindings()` — `#[non_exhaustive]` inside the defining crate makes the wildcard an unreachable-pattern warning; the spec included it for external-crate matches but that context is wrong here.
+- New preset config types (`OrbitCamBlenderLikePreset`, `OrbitCamKeyboardPreset`, etc.) exported from `bindings/mod.rs`, `input/mod.rs`, and `lib.rs` in this phase — Phase 4 listed adding these to `lib.rs` as its work, but codex correctly added them here since they were already public-facing types.
+
+**Surprises:**
+- `OrbitCamSimpleMousePreset` and `OrbitCamKeyboardPreset` are unit structs (no fields) — composed preset setters (`simple_mouse()`, `keyboard()`) replace the whole child field rather than mutating it, which is consistent with the spec but worth noting for Phase 2's deletion scope.
+- `OrbitCamPresetLayers::build_with_profile` (still alive, in `enum_preset.rs`) now delegates to concrete preset `build_into` methods; Phase 2 deletes it along with the rest of the layer types.
+
+**Implications for remaining phases:**
+- Phase 2: `OrbitCamPresetLayers` is in `preset/enum_preset.rs` (not a separate file); delete the whole struct and its methods from that file. Also delete `OrbitCamPresetLayer`, `PresetLayerSet`, and `OrbitCamBindingsProfile` from `enum_preset.rs`. The `composed_presets_use_layer_builder` test in `bindings/mod.rs` exercises `OrbitCamPresetLayers` directly — remove it in Phase 2.
+- Phase 4: Preset config type exports to `lib.rs` (the table in Phase 4's Spec) are already present — Phase 4 only needs to add `OrbitCam::*` spawn helpers in `orbit_cam/preset_helpers.rs`.
+
+### Phase 1 Review
+
+- **Phase 2 Work Order updated:** Added 5 preset files (`blender_like.rs`, `simple_mouse.rs`, `keyboard.rs`, `simple_mouse_keyboard.rs`, `gamepad.rs`) to Files — all call `.profile()` and must be updated before `OrbitCamBindingsProfile` is deleted. Added `.profile()` removal ordering guidance, named both affected tests explicitly (`composed_presets_use_layer_builder`, `presets_validate_through_shared_path`), added constraint that `_ => unreachable!()` arm is absent from `to_bindings()`, and tightened acceptance gate greps.
+- **Phase 3 Work Order updated:** Added `OrbitCamBindings.slow_mode: Option<OrbitCamSlowMode>` field spec (completing the implicit data-flow path from `build()` to adapter); added `bindings/mod.rs`, `builder.rs`, `validate.rs`, `routing/mod.rs` to Files; updated acceptance gate criterion 1 to be unit-testable against `OrbitCamBindings.slow_mode`.
+- **Phase 4 Work Order updated:** Removed the 6-type export table (all six types already exported in Phase 1); removed `lib.rs` from Files.
+- **Phase 5 Work Order updated:** Replaced ambiguous gamepad/keyboard helper mention with explicit tuple path guidance; removed the `input_keyboard.rs` "custom bindings" stale-text task (text not present in the file).
+- **Phase 5 Work Order updated (user decision):** `input_preset_simple.rs` drops all scaffolding (`apply_example_orbit_cam_limits`, `FairyDustOrbitCam`, `SimpleMouseCamera`, explicit field overrides) — it is the canonical one-liner demo, showing exactly what using a preset looks like and nothing else.
+
+---
+
+### Phase 2 — Profile and layer plumbing removal  · status: todo
+
+#### Work Order
+
+**Goal:** Delete `OrbitCamBindingsProfile`, `OrbitCamPresetLayers`, `OrbitCamPresetLayer`, `PresetLayerSet`, and the `profile` field from all binding types. Label model is now `OrbitCamInputMode` only.
+
+**Spec:**
+
+Remove `profile` from bindings:
+- `OrbitCamBindings` (`bindings/mod.rs` line 97): remove `profile` field and `profile()` getter (lines 166–169)
+- `OrbitCamBindingsDescriptor` (`builder.rs` lines 36–53): remove `profile` field
+- `OrbitCamBindingsBuilder` (`builder.rs` line 147): remove `profile()` method
+- `validate_bindings` (`validate.rs` lines 44–83): remove profile copy-through
+
+Remove from exports:
+- `input/bindings/mod.rs` lines 71–77: remove `OrbitCamBindingsProfile`, `OrbitCamPresetLayer`, `OrbitCamPresetLayers`, `PresetLayerSet`
+- `input/mod.rs`: remove same
+- `lib.rs` line 87: remove `OrbitCamBindingsProfile`; lines 133–135: remove `OrbitCamPresetLayer`, `OrbitCamPresetLayers`; line 148: remove `PresetLayerSet`
+
+Delete dead types from `preset/enum_preset.rs`:
+- `OrbitCamPresetLayers`, `OrbitCamPresetLayer`, `PresetLayerSet`, `OrbitCamBindingsProfile` — Phase 1 rewrote `to_bindings()` to not use them; delete entirely from that file.
+
+Remove `.profile()` calls from all six concrete preset files — do this BEFORE removing `OrbitCamBindingsProfile` from the type system, otherwise all six files fail to compile simultaneously:
+- `preset/blender_like.rs` (lines 103–108): remove `.profile(OrbitCamBindingsProfile::LayeredPreset { layers: PresetLayerSet::blender_like() })` call
+- `preset/simple_mouse.rs`: remove `.profile(...)` call
+- `preset/keyboard.rs`: remove `.profile(...)` call
+- `preset/simple_mouse_keyboard.rs`: remove `.profile(...)` call
+- `preset/blender_like_keyboard.rs`: remove `.profile(...)` call
+- `preset/gamepad.rs`: remove `.profile(...)` call
+
+Update `describe_orbit_cam_controls` so labels derive only from `OrbitCamInputMode`:
+- `Preset(preset)` → preset input
+- `Bindings(bindings)` → custom bindings
+- `Manual` → manual input
+- Tuned preset bindings (from e.g. `OrbitCamBlenderLikePreset::build()`) become `Bindings` and display as custom bindings
+
+Update `OrbitCamInputModeDraft::Bindings(OrbitCamBindingsDescriptor)`: remove profile/layer fields from descriptor reflection. Reflected mode drafts remain three concepts: preset, bindings, manual.
+
+Remove profile and layer assertions from tests. Named tests to update or remove:
+- `composed_presets_use_layer_builder` in `bindings/mod.rs` — exercises `OrbitCamPresetLayers` directly; remove the entire test
+- `presets_validate_through_shared_path` in `bindings/mod.rs` (lines 228–239) — asserts `.profile()` returns `OrbitCamBindingsProfile::KeyboardPreset` and `OrbitCamBindingsProfile::GamepadPreset`; remove those profile assertions
+
+**Files:**
+- `crates/bevy_lagrange/src/input/bindings/mod.rs` — remove `profile` field, `profile()` getter, layer/profile exports
+- `crates/bevy_lagrange/src/input/bindings/builder.rs` — remove `profile` field from `OrbitCamBindingsDescriptor`; remove `profile()` from builder
+- `crates/bevy_lagrange/src/input/bindings/validate.rs` — remove profile copy-through
+- `crates/bevy_lagrange/src/input/bindings/preset/enum_preset.rs` — delete `OrbitCamPresetLayers`, `OrbitCamPresetLayer`, `PresetLayerSet`, `OrbitCamBindingsProfile`
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like.rs` — remove `.profile()` call from `OrbitCamPresetConfig::build`
+- `crates/bevy_lagrange/src/input/bindings/preset/simple_mouse.rs` — remove `.profile()` call
+- `crates/bevy_lagrange/src/input/bindings/preset/keyboard.rs` — remove `.profile()` call
+- `crates/bevy_lagrange/src/input/bindings/preset/simple_mouse_keyboard.rs` — remove `.profile()` call
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like_keyboard.rs` — remove `.profile()` call
+- `crates/bevy_lagrange/src/input/bindings/preset/gamepad.rs` — remove `.profile()` call
+- `crates/bevy_lagrange/src/input/mod.rs` — remove layer/profile exports
+- `crates/bevy_lagrange/src/lib.rs` — remove lines 87, 133–135, 148 (profile/layer exports)
+- `crates/bevy_lagrange/src/input/describe.rs` (or equivalent) — update label derivation from `OrbitCamInputMode`
+- Tests — remove profile/layer assertions
+
+**Constraints from prior phases:**
+- Phase 1 rewrote `OrbitCamPreset::to_bindings()` to delegate to concrete preset configs; `OrbitCamPresetLayers` is no longer called by `to_bindings()` and is safe to delete.
+- `OrbitCamPresetLayers`, `OrbitCamPresetLayer`, `PresetLayerSet`, `OrbitCamBindingsProfile` all live in `preset/enum_preset.rs` — delete them all from that file.
+- `OrbitCamPresetLayers::build_with_profile` still exists (delegates to concrete preset `build_into`); delete it with the rest.
+- The `composed_presets_use_layer_builder` test in `crates/bevy_lagrange/src/input/bindings/mod.rs` exercises `OrbitCamPresetLayers` directly — remove it in this phase.
+- Preset config type exports (`OrbitCamBlenderLikePreset`, `OrbitCamKeyboardPreset`, etc.) are already in `bindings/mod.rs`, `input/mod.rs`, and `lib.rs` from Phase 1; Phase 2 does not need to add them, only remove the profile/layer exports.
+- `to_bindings()` in `enum_preset.rs` has NO `_ => unreachable!()` wildcard arm — Phase 1 correctly removed it (it is an unreachable-pattern warning inside the defining crate for `#[non_exhaustive]`). Do not add it back.
+
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; `rg 'OrbitCamBindingsProfile' crates/bevy_lagrange/src/` returns nothing; `rg 'OrbitCamPresetLayers' crates/bevy_lagrange/src/` returns nothing; `rg '\.profile(' crates/bevy_lagrange/src/input/bindings/` returns nothing; `profile` field absent from `OrbitCamBindings`; `describe_orbit_cam_controls` test covers all three `OrbitCamInputMode` variants; `composed_presets_use_layer_builder` test absent from `bindings/mod.rs`.
+
+---
+
+### Phase 3 — BlenderLike CapsLock slow mode  · status: todo
+
+#### Work Order
+
+**Goal:** Add `OrbitCamScalePolicy`, the per-camera slow-mode latch, and BlenderLike CapsLock slow mode. All seven BlenderLike input sources apply slow scaling when the latch is active.
+
+**Spec:**
+
+New type `OrbitCamScalePolicy` — plain struct, validated at preset `build()` time (mirrors `InputDeadZone` at `descriptor.rs` lines 214–230; NOT a newtype; NOT validated at construction):
+
+```rust
+pub struct OrbitCamScalePolicy {
+    pub normal: f32,
+    pub slow: f32,
+}
+```
+
+Home: `crates/bevy_lagrange/src/input/bindings/descriptor.rs` alongside `InputDeadZone`.
+
+Embed `OrbitCamScalePolicy` in the relevant descriptor types for all seven slow-coverage sources:
 
 | Source | Slow coverage |
 | --- | --- |
@@ -281,227 +323,97 @@ Slow scaling must cover every BlenderLike movement source:
 | Trackpad zoom | scaled |
 | Pinch zoom | scaled |
 
-Preset modules may use private descriptor-construction helpers or extend the typed binding wrappers so scale/gate metadata can apply consistently to held bindings, trackpad bindings, wheel bindings, and pinch bindings. The adapter should execute validated descriptors; preset config code owns the meaning of `slow_scale`.
-
-The implementation should choose one descriptor model before coding. Either add a shared scale policy that each relevant descriptor can carry, or add per-source typed descriptors with base and slow scale fields for trackpad, wheel, and pinch inputs. Tests should cover every source listed in the slow coverage table.
-
-This is an intentional Lagrange extension to Blender-like controls. It avoids using Blender-reserved navigation chords:
-
-| Chord | Reserved for |
-| --- | --- |
-| `Shift` | Pan |
-| `Ctrl` | Zoom |
-| `Alt` | Orbit center, axis align, orbit snap |
-| `Ctrl + Shift` | Dolly view |
-| Backquote | View/navigation pie menu |
-
-Users who dislike CapsLock slow mode can override or disable it through `OrbitCamBlenderLikePreset`.
-
-## OrbitCam Preset Bundle
-
-Add a small public bundle for ergonomic camera spawning:
+Adapter applies scale uniformly — single function, no per-source duplication:
 
 ```rust
-#[derive(Bundle)]
-pub struct OrbitCamPresetBundle {
-    pub orbit_cam: OrbitCam,
-    pub input_mode: OrbitCamInputMode,
+fn apply_scale(value: f32, policy: &OrbitCamScalePolicy, slow_active: bool) -> f32 {
+    value * if slow_active { policy.slow } else { policy.normal }
 }
 ```
 
-Suggested constructors:
+Slow-mode latch — per-camera entity, same pattern as `CameraInputSourceLatches` (`routing/latches.rs` lines 25–88):
+- Add a parallel resource for slow-mode latches keyed by camera `Entity`
+- Latch toggles on key EDGE (key-press event — not key-repeat, not OS CapsLock text state)
+- Extend `recover_unavailable_latches` (lines 67–83) to clear slow latches for despawned cameras
+- Extend `clear_latches_on_mode_replaced` observer (lines 90–95) to reset slow latch to `off` when a camera's mode/bindings no longer reference slow mode
+
+Slow-mode descriptor emitted by `OrbitCamBlenderLikePreset::build()`:
 
 ```rust
-impl OrbitCamPresetBundle {
-    pub fn new(preset: OrbitCamPreset) -> Self {
-        Self {
-            orbit_cam: OrbitCam::default(),
-            input_mode: OrbitCamInputMode::Preset(preset),
-        }
-    }
-
-    pub fn bindings(bindings: OrbitCamBindings) -> Self {
-        Self {
-            orbit_cam: OrbitCam::default(),
-            input_mode: OrbitCamInputMode::Bindings(bindings),
-        }
-    }
-
-    pub fn manual() -> Self {
-        Self {
-            orbit_cam: OrbitCam::default(),
-            input_mode: OrbitCamInputMode::Manual,
-        }
-    }
-
-    pub fn with_orbit_cam_preset(orbit_cam: OrbitCam, preset: OrbitCamPreset) -> Self {
-        Self {
-            orbit_cam,
-            input_mode: OrbitCamInputMode::Preset(preset),
-        }
-    }
-
-    pub fn with_orbit_cam_bindings(orbit_cam: OrbitCam, bindings: OrbitCamBindings) -> Self {
-        Self {
-            orbit_cam,
-            input_mode: OrbitCamInputMode::Bindings(bindings),
-        }
-    }
-
-    pub fn with_manual_orbit_cam(orbit_cam: OrbitCam) -> Self {
-        Self {
-            orbit_cam,
-            input_mode: OrbitCamInputMode::Manual,
-        }
-    }
-
-    pub fn with_orbit_cam(orbit_cam: OrbitCam, mode: OrbitCamInputMode) -> Self {
-        Self {
-            orbit_cam,
-            input_mode: mode,
-        }
-    }
+pub struct OrbitCamSlowMode {
+    pub toggle_key: KeyCode,
+    pub scale: OrbitCamScalePolicy,
 }
 ```
 
-Suggested `OrbitCam` helpers:
+`OrbitCamBlenderLikePreset::build()` emits `OrbitCamSlowMode` when `slow_toggle_key.is_some()`. The `slow_scale` field becomes `OrbitCamScalePolicy { normal: 1.0, slow: slow_scale }`.
+
+`OrbitCamBindings` and `OrbitCamBindingsDescriptor` each gain a `slow_mode: Option<OrbitCamSlowMode>` field. `OrbitCamBindingsBuilder` gains a `slow_mode(OrbitCamSlowMode) -> Self` method. Inside `OrbitCamBlenderLikePreset`'s `OrbitCamPresetConfig::build` impl, call `builder.slow_mode(OrbitCamSlowMode { toggle_key, scale })` before `.build()` when `slow_toggle_key.is_some()`. The adapter reads `OrbitCamBindings.slow_mode` to determine the toggle key and arm the latch system.
+
+Slow mode applies ONLY to the camera whose input context receives the routed toggle.
+
+`OrbitCamBlenderLikeKeyboardPreset` inherits slow mode from `pointer: OrbitCamBlenderLikePreset` automatically.
+
+**Files:**
+- `crates/bevy_lagrange/src/input/bindings/descriptor.rs` — add `OrbitCamScalePolicy` and `OrbitCamSlowMode` structs; embed `OrbitCamScalePolicy` in relevant descriptor types
+- `crates/bevy_lagrange/src/input/bindings/mod.rs` — add `slow_mode: Option<OrbitCamSlowMode>` field to `OrbitCamBindings`
+- `crates/bevy_lagrange/src/input/bindings/builder.rs` — add `slow_mode: Option<OrbitCamSlowMode>` field to `OrbitCamBindingsDescriptor`; add `slow_mode(OrbitCamSlowMode) -> Self` builder method
+- `crates/bevy_lagrange/src/input/bindings/validate.rs` — pass `slow_mode` through validation into `OrbitCamBindings`
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like.rs` — update `OrbitCamPresetConfig::build` to call `builder.slow_mode(...)` when `slow_toggle_key.is_some()`
+- `crates/bevy_lagrange/src/input/routing/latches.rs` — add slow-mode latch resource; extend `recover_unavailable_latches` and `clear_latches_on_mode_replaced`
+- `crates/bevy_lagrange/src/input/routing/mod.rs` — register the new key-press edge system that reads `OrbitCamBindings.slow_mode.toggle_key` and toggles the slow-mode latch
+- `crates/bevy_lagrange/src/input/adapter/mod.rs` — add `apply_scale`; apply slow scaling for all seven sources
+
+**Constraints from prior phases:**
+- Phase 1 added `OrbitCamBlenderLikePreset` with `slow_scale: f32` field, fluent setter, and validation. Phase 3 adds the descriptor plumbing from `build()` to the adapter.
+- Phase 2 removed `OrbitCamBindingsProfile`; bindings no longer carry profile metadata.
+
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green including: (1) `OrbitCamBlenderLikePreset::default().build()` returns `OrbitCamBindings` with `slow_mode.is_some()` and all 7 source descriptors carrying `OrbitCamScalePolicy`; (2) latch toggles on CapsLock press edge, not repeat; (3) mode change resets slow latch to off; (4) camera despawn clears slow latch; (5) `slow_scale(2.0).build()` returns `Err`; (6) non-BlenderLike preset produces `OrbitCamBindings` with `slow_mode == None`.
+
+---
+
+### Phase 4 — OrbitCam spawn helpers + public exports  · status: todo
+
+#### Work Order
+
+**Goal:** Add `OrbitCam::blender_like()`, `OrbitCam::simple_mouse()`, and all other preset/bindings/manual helpers returning `impl Bundle`. Export concrete preset config types from the crate root.
+
+**Spec:**
+
+New file: `crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs`
+
+All helpers return `impl Bundle` — a `(OrbitCam, OrbitCamInputMode)` tuple. No named `OrbitCamPresetBundle` type exists or is exported:
 
 ```rust
 impl OrbitCam {
-    pub fn simple_mouse() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::SimpleMouse)
+    pub fn simple_mouse() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse))
     }
-
-    pub fn blender_like() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::BlenderLike)
+    pub fn blender_like() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
     }
-
-    pub fn gamepad() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::Gamepad)
+    pub fn gamepad() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad))
     }
-
-    pub fn keyboard() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::Keyboard)
+    pub fn keyboard() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard))
     }
-
-    pub fn simple_mouse_keyboard() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::SimpleMouseKeyboard)
+    pub fn simple_mouse_keyboard() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouseKeyboard))
     }
-
-    pub fn blender_like_keyboard() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::new(OrbitCamPreset::BlenderLikeKeyboard)
+    pub fn blender_like_keyboard() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLikeKeyboard))
     }
-
-    pub fn with_bindings(bindings: OrbitCamBindings) -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::bindings(bindings)
+    pub fn with_bindings(bindings: OrbitCamBindings) -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Bindings(bindings))
     }
-
-    pub fn manual() -> OrbitCamPresetBundle {
-        OrbitCamPresetBundle::manual()
+    pub fn manual() -> impl Bundle {
+        (OrbitCam::default(), OrbitCamInputMode::Manual)
     }
 }
 ```
 
-The constructor names should be snake_case. `simple_mouse` is clearer than `simple` because the enum preset is `SimpleMouse`.
-
-When users need to configure `OrbitCam` fields and still avoid writing `OrbitCamInputMode`, they can use the bundle constructor directly:
-
-```rust
-let orbit_cam = OrbitCam {
-    target_focus: Vec3::Y,
-    target_radius: 8.0,
-    ..default()
-};
-
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCamPresetBundle::with_orbit_cam_preset(orbit_cam, OrbitCamPreset::BlenderLike),
-));
-```
-
-`with_orbit_cam(orbit_cam, mode)` is the low-level escape hatch for code that intentionally wants to pass `OrbitCamInputMode` directly. Examples should prefer the mode-specific constructors above.
-
-`OrbitCam::*` helpers are bundle factories. They return `OrbitCamPresetBundle`, not a bare `OrbitCam` component.
-
-## Cleanup
-
-Remove these existing public API concepts:
-
-| Existing item | Action | Reason |
-| --- | --- | --- |
-| `OrbitCamPresetLayers` | Remove | Layer composition is another model users have to learn |
-| `OrbitCamPresetLayer` | Remove | Only exists to support public layer composition |
-| `PresetLayerSet` | Remove | Only exists to store layer metadata |
-| `OrbitCamBindingsProfile` | Remove | Duplicates concepts already covered by `OrbitCamInputMode`; only useful for labels |
-
-After this cleanup:
-
-- `OrbitCamInputMode::Preset(preset)` displays as preset input.
-- `OrbitCamInputMode::Bindings(bindings)` displays as custom bindings.
-- `OrbitCamInputMode::Manual` displays as manual input.
-- Tuned preset bindings are treated as custom bindings once built.
-
-This keeps the public mental model small: preset, bindings, manual.
-
-The cleanup must remove profile/layer plumbing completely:
-
-- Remove `profile` from `OrbitCamBindings`.
-- Remove `profile` from `OrbitCamBindingsDescriptor`.
-- Remove `OrbitCamBindingsBuilder::profile`.
-- Remove `OrbitCamBindings::profile()`.
-- Remove profile copy-through in validation.
-- Remove `OrbitCamBindingsProfile` exports from `input/bindings/mod.rs`, `input/mod.rs`, and `lib.rs`.
-- Remove profile and layer assertions from tests.
-- Update `describe_orbit_cam_controls` so labels derive only from `OrbitCamInputMode`.
-- Update reflected input-mode descriptors and tests so `OrbitCamInputModeDraft::Bindings(OrbitCamBindingsDescriptor)` no longer exposes profile or layer metadata.
-- Reflected mode drafts should remain the same three concepts: preset, bindings, manual.
-
-## Public Exports
-
-Export these from the crate root for ergonomic examples:
-
-| Type | Export path |
-| --- | --- |
-| `OrbitCamPresetBundle` | `bevy_lagrange::OrbitCamPresetBundle` |
-| `OrbitCamSimpleMousePreset` | `bevy_lagrange::OrbitCamSimpleMousePreset` |
-| `OrbitCamBlenderLikePreset` | `bevy_lagrange::OrbitCamBlenderLikePreset` |
-| `OrbitCamKeyboardPreset` | `bevy_lagrange::OrbitCamKeyboardPreset` |
-| `OrbitCamSimpleMouseKeyboardPreset` | `bevy_lagrange::OrbitCamSimpleMouseKeyboardPreset` |
-| `OrbitCamBlenderLikeKeyboardPreset` | `bevy_lagrange::OrbitCamBlenderLikeKeyboardPreset` |
-| `OrbitCamGamepadPreset` | `bevy_lagrange::OrbitCamGamepadPreset` |
-
-## Proposed Module Structure
-
-Keep the public preset API under `input::bindings`, but split preset implementation by preset family:
-
-| Path | Responsibility |
-| --- | --- |
-| `input/bindings/preset/mod.rs` | Re-export public preset API and shared private helpers |
-| `input/bindings/preset/config.rs` | crate-owned or sealed preset build trait and shared validation helpers |
-| `input/bindings/preset/enum_preset.rs` | `OrbitCamPreset` enum and `to_bindings` delegation |
-| `input/bindings/preset/simple_mouse.rs` | `OrbitCamSimpleMousePreset` defaults and direct fluent tuning methods |
-| `input/bindings/preset/blender_like.rs` | `OrbitCamBlenderLikePreset`, CapsLock slow-mode defaults, Blender-like binding construction |
-| `input/bindings/preset/keyboard.rs` | `OrbitCamKeyboardPreset` defaults and direct fluent tuning methods |
-| `input/bindings/preset/simple_mouse_keyboard.rs` | `OrbitCamSimpleMouseKeyboardPreset` composition |
-| `input/bindings/preset/blender_like_keyboard.rs` | `OrbitCamBlenderLikeKeyboardPreset` composition |
-| `input/bindings/preset/gamepad.rs` | `OrbitCamGamepadPreset` and direct fluent tuning methods |
-
-Add spawn helpers near `OrbitCam`:
-
-| Path | Responsibility |
-| --- | --- |
-| `orbit_cam/preset_bundle.rs` | `OrbitCamPresetBundle` and `OrbitCam::simple_mouse`, `OrbitCam::blender_like`, `OrbitCam::gamepad`, `OrbitCam::with_bindings`, `OrbitCam::manual` |
-| `orbit_cam/mod.rs` | Core `OrbitCam` component and re-export of preset bundle |
-
-This keeps preset construction out of `orbit_cam/mod.rs`, while still making the spawn helpers discoverable from `OrbitCam`.
-
-Replace the existing flat `input/bindings/preset.rs` file with the `input/bindings/preset/` module directory in the same change that updates `input/bindings/mod.rs` exports.
-
-## Teaching Sequence
-
-Docs and examples should teach the API in this order:
-
-1. Default preset camera
+Common spawn path:
 
 ```rust
 commands.spawn((
@@ -510,124 +422,75 @@ commands.spawn((
 ));
 ```
 
-2. Tuned preset bindings
+When `OrbitCam` fields need configuring, use the explicit tuple ("I know what I'm doing" path — no helper):
 
 ```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_scale(0.25)
-    .build()?;
-
 commands.spawn((
     Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::with_bindings(bindings),
+    OrbitCam { target_focus: Vec3::Y, target_radius: 8.0, ..default() },
+    OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
 ));
 ```
 
-3. Fully custom bindings
+`orbit_cam/mod.rs` adds `mod preset_helpers` and re-exports the `OrbitCam` impl block.
+
+Public exports to `lib.rs`: all six preset config types were exported from `lib.rs` in Phase 1 and are already accessible at `bevy_lagrange::OrbitCamBlenderLikePreset` etc. Phase 4 has no `lib.rs` work.
+
+**Files:**
+- `crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs` — new; all `OrbitCam::*` helpers
+- `crates/bevy_lagrange/src/orbit_cam/mod.rs` — add `mod preset_helpers`; re-export helpers
+
+**Constraints from prior phases:**
+- Phase 1 added all concrete preset config types under `input/bindings/preset/`.
+- Phase 2 cleaned up `lib.rs` profile/layer exports; this phase adds the new preset config exports.
+- `OrbitCamPreset`, `OrbitCamBindings`, `OrbitCamInputMode` all available in scope.
+
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; `OrbitCam::blender_like()` and `OrbitCam::with_bindings(bindings)` compile; `bevy_lagrange::OrbitCamBlenderLikePreset` accessible from crate root; `rg 'OrbitCamPresetBundle' crates/bevy_lagrange/src/lib.rs` returns nothing.
+
+---
+
+### Phase 5 — Example updates  · status: todo
+
+#### Work Order
+
+**Goal:** Update the six input examples to use the new preset API. `input_preset_simple.rs` becomes the canonical one-liner demo. `input_preset_blender_like.rs` becomes the primary tuned-preset demo.
+
+**Spec:**
+
+`input_preset_simple.rs` — canonical one-liner demo; drop all scaffolding (`apply_example_orbit_cam_limits`, `FairyDustOrbitCam`, `SimpleMouseCamera`, explicit `OrbitCam` field overrides). The example shows exactly what using a preset looks like and nothing else:
 
 ```rust
-let bindings = OrbitCamBindings::builder()
-    // Custom app bindings.
-    .build()?;
-
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::with_bindings(bindings),
-));
+fn spawn_camera(mut commands: Commands) {
+    commands.spawn((
+        Transform::from_xyz(0.0, 1.5, 5.0),
+        OrbitCam::simple_mouse(),
+    ));
+}
 ```
 
-Tuned presets and fully custom controls both become `OrbitCamInputMode::Bindings` at runtime and display as custom bindings. The difference is where the bindings come from: a preset config for tuned presets, or `OrbitCamBindings::builder()` for fully custom controls.
+`input_preset_blender_like.rs` — primary example for preset input modification:
+- Build from `OrbitCamBlenderLikePreset::default().slow_scale(0.25).build()?`
+- Spawn with `OrbitCam::with_bindings(bindings)`
+- Document that CapsLock toggles slow orbit, pan, and zoom
+- Explain this is BlenderLike-derived even though it displays as custom bindings at runtime
+- Include a disable-slow comment: `OrbitCamBlenderLikePreset::default().slow_toggle_key(None).build()?`
 
-## Example Updates
+`input_gamepad.rs` and `input_keyboard.rs` — both configure `OrbitCam` fields (radius, focus) and call `apply_example_orbit_cam_limits`; use the explicit tuple path: `(OrbitCam { ..default() }, OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad))` / `Keyboard`. `OrbitCam::gamepad()` / `OrbitCam::keyboard()` helpers return `(OrbitCam::default(), ...)` and cannot be composed with field overrides.
 
-Implementation should update examples so they teach the new tiers:
+`input_manual.rs` — use `OrbitCam::manual()` if no field overrides are needed; otherwise use the explicit tuple path.
 
-| Example | Update |
-| --- | --- |
-| `input_preset_simple.rs` | Use `OrbitCam::simple_mouse()` |
-| `input_preset_blender_like.rs` | Use tuned `OrbitCamBlenderLikePreset` bindings to demonstrate input modification, for example changing `slow_scale`, and document that CapsLock toggles slow orbit, pan, and zoom |
-| `input_gamepad.rs` | Use `OrbitCam::gamepad()` |
-| `input_keyboard.rs` | Use `OrbitCam::keyboard()` and fix stale text that says custom bindings |
-| `input_manual.rs` | Use `OrbitCam::manual()` |
-| `input_custom.rs` | Keep showing `OrbitCamBindings::builder()` and `OrbitCam::with_bindings(bindings)` |
-| `basic.rs` | Use the Fairy Dust preset bundle helper so the explicit camera `Transform` remains visible |
-| `focus_bounds.rs` | Use the Fairy Dust preset helper with the existing `OrbitCam` configuration hook |
-| `follow_target.rs` | Use the Fairy Dust preset helper with the existing `OrbitCam` configuration hook |
-| `animation.rs` | Use the Fairy Dust preset helper and keep animation chip wiring source-specific |
-| `pausing.rs` | Use the Fairy Dust preset helper while keeping `OrbitCam::time_source = TimeSource::Real` explicit |
-| `zoom_to_fit.rs` | Use the Fairy Dust preset helper for the canonical camera |
-| `orthographic.rs` | Use the Fairy Dust preset bundle helper so the `Projection` component remains explicit |
-| `programmatic_control.rs` | Use the Fairy Dust preset bundle helper so the example marker remains explicit |
-| `showcase/*` | Keep manual camera spawning when the example needs the camera entity; attach `FairyDustOrbitCam` explicitly |
-| `bevy_diegetic` Fairy Dust examples | Use Fairy Dust preset helpers for canonical `BlenderLike` cameras, including bundle helpers when examples add projection or render settings |
+`input_custom.rs` — keep as-is; shows `OrbitCamBindings::builder()` and `OrbitCam::with_bindings(bindings)`.
 
-Add or extend one example section for tuned presets. Include both a slow-scale tuning snippet and a disable-default snippet:
+**Files:**
+- `crates/bevy_lagrange/examples/input_preset_simple.rs` — simplify to use `OrbitCam::simple_mouse()`
+- `crates/bevy_lagrange/examples/input_preset_blender_like.rs` — rewrite to use `OrbitCamBlenderLikePreset` + `OrbitCam::with_bindings()`
+- `crates/bevy_lagrange/examples/input_gamepad.rs` — update to use helper or explicit tuple
+- `crates/bevy_lagrange/examples/input_keyboard.rs` — update to use helper; fix stale text
+- `crates/bevy_lagrange/examples/input_manual.rs` — update to use `OrbitCam::manual()` or explicit tuple
 
-```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_scale(0.25)
-    .build()?;
+**Constraints from prior phases:**
+- Phase 1 added `OrbitCamBlenderLikePreset` with `.slow_scale()` and `.slow_toggle_key()` setters.
+- Phase 3 implemented CapsLock slow mode; `input_preset_blender_like.rs` demonstrates it.
+- Phase 4 added `OrbitCam::simple_mouse()`, `OrbitCam::with_bindings()`, and all helpers.
 
-commands.spawn((
-    Transform::from_xyz(0.0, 1.5, 5.0),
-    OrbitCam::with_bindings(bindings),
-));
-```
-
-```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_toggle_key(None)
-    .build()?;
-```
-
-## Fairy Dust And Example Follow-Through
-
-Fold this preset plan through Fairy Dust after the core `bevy_lagrange` API lands.
-
-### Fairy Dust Docs
-
-Update `docs/fairy_dust/canonical_example.md` so the camera section teaches Fairy Dust as the normal front end for examples:
-
-- Default Fairy Dust camera: `.with_orbit_cam_preset(configure, OrbitCamPreset::BlenderLike)`.
-- Tuned preset camera: build bindings from a concrete preset config, then pass them to `.with_orbit_cam_bindings(configure, bindings)`.
-- Manual camera motion: `.with_orbit_cam_manual(configure)`.
-- Extra camera-side components: use the matching `_bundle` helper.
-- Low-level `.with_orbit_cam(configure, bundle)` stays an escape hatch, not the teaching path.
-
-The tuned preset example should show the slow amount explicitly:
-
-```rust
-let bindings = OrbitCamBlenderLikePreset::default()
-    .slow_scale(0.25)
-    .build()?;
-
-fairy_dust::sprinkle_example()
-    .with_orbit_cam_bindings(|_| {}, bindings);
-```
-
-That doc should also say tuned preset bindings display as custom bindings in the camera panel, because they become `OrbitCamInputMode::Bindings` after `build()`.
-
-### Fairy Dust API
-
-The current Fairy Dust builder shape already matches the plan:
-
-- `with_orbit_cam_preset` and `with_orbit_cam_preset_bundle`
-- `with_orbit_cam_bindings` and `with_orbit_cam_bindings_bundle`
-- `with_orbit_cam_manual` and `with_orbit_cam_manual_bundle`
-
-Keep that shape. Do not make Fairy Dust accept `OrbitCamPresetBundle` directly, because Fairy Dust owns the `OrbitCam` configuration hook and the bundle would bring a second `OrbitCam` component. If helper docs mention the old default from `with_orbit_cam_configured`, update the wording so canonical examples prefer the mode-specific helpers.
-
-Fairy Dust camera panel labeling should continue to derive from `OrbitCamInputMode`: presets show as preset input, tuned preset bindings show as custom bindings, and manual mode shows as manual input.
-
-### Example Validation
-
-Validated example categories:
-
-| Category | Examples | Plan |
-| --- | --- | --- |
-| Fairy Dust managed camera | `basic.rs`, `focus_bounds.rs`, `follow_target.rs`, `animation.rs`, `pausing.rs`, `zoom_to_fit.rs`, `orthographic.rs`, `programmatic_control.rs` | Keep using Fairy Dust orbit-camera helpers; use `_bundle` variants when examples add `Transform`, `Projection`, or marker components |
-| Raw Lagrange input examples | `input_preset_simple.rs`, `input_preset_blender_like.rs`, `input_gamepad.rs`, `input_keyboard.rs`, `input_manual.rs`, `input_custom.rs` | Keep explicit camera spawning because these examples teach camera input APIs; update them to the new `OrbitCam` helper and preset-config APIs |
-| Camera-system examples | `render_to_texture.rs`, `viewports_windows.rs`, `swapped_axis.rs`, `showcase/*` | Keep manual camera spawning where the example needs camera entities, render targets, multiple routed cameras, or unusual setup; still use Fairy Dust for app shell, HUD, lighting, home targets, and panels when possible |
-| Diegetic examples | `crates/bevy_diegetic/examples/*` using Fairy Dust | Prefer Fairy Dust preset helpers; use bindings helpers only for tuned preset input demonstrations |
-
-`input_preset_blender_like.rs` should be the primary example for preset input modification. It should build `OrbitCamBlenderLikePreset::default().slow_scale(...).build()?`, spawn with `OrbitCam::with_bindings(bindings)`, and explain that this is still BlenderLike-derived even though it displays as custom bindings at runtime.
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; all five examples compile; `input_preset_simple.rs` contains `OrbitCam::simple_mouse()`; `input_preset_blender_like.rs` builds from `OrbitCamBlenderLikePreset::default()` and spawns via `OrbitCam::with_bindings()`.

@@ -21,12 +21,12 @@
 
 use std::sync::Arc;
 
-use super::layout_engine::ComputedLayout;
-use super::sizing;
-use super::sizing::Axis;
 use bevy::color::Color;
 use bevy_kana::ToF32;
 
+use super::layout_engine::ComputedLayout;
+use super::sizing;
+use super::sizing::Axis;
 use crate::constants::MONOSPACE_WIDTH_RATIO;
 use crate::layout::AlignX;
 use crate::layout::AlignY;
@@ -619,10 +619,7 @@ fn fused_fit_propagation_matches_separate_axis_passes() {
             .gap(2.0),
     );
     builder.with(
-        El::row()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .gap(4.0),
+        El::row().width(Sizing::FIT).height(Sizing::FIT).gap(4.0),
         |builder| {
             builder.text("Alpha", TextStyle::new(10.0));
             builder.with(
