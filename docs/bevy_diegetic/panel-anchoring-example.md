@@ -1,51 +1,65 @@
 # Panel anchoring example
 
-Status: **started**. `examples/panel_anchoring.rs` now covers Demo 1. The
-animation demos remain planned for the later Phase 4 passes described in
-[`anchor-to-panel.md`](anchor-to-panel.md).
+Status: **started**. `examples/panel_anchoring.rs` covers capability 1 (world
+anchor selection). The remaining capabilities are the Phase 6–8 passes described
+in [`panel-anchoring.md`](panel-anchoring.md).
 
 ## Goal
 
-Show that panel anchors are useful both as exact layout constraints and as
-readable geometry for animation systems.
+Show panel anchors as both exact layout constraints and as readable geometry for
+animation, across **world** and **screen** space, in one scene driven by the
+keyboard.
 
-`examples/panel_anchoring.rs` starts with the Phase 3 world-anchoring behavior.
-Phase 1 screen-space anchoring remains covered by `diegetic_text_stress`.
+`examples/panel_anchoring.rs` is a capability selector: number keys pick the
+active capability, `Space` runs its animation, arrows cycle anchors, `R` resets.
+A world-space explainer panel narrates the active capability. Phase 1 screen
+point anchoring stays covered by `diegetic_text_stress`.
 
-The example should grow into three compact demos in one scene:
-
-1. a world-space panel anchored to another panel, with hot keys cycling the
-   source and target anchor points
-   (**implemented**)
-2. an attached panel that lifts off its target along the plane normal and spins
-   on its pinned anchor point via animated `PanelAnchorPose`
-3. a three-panel chain that unwraps like hinged panels by animating per-link
-   pose rotation about each pinned point
+| key | capability | space | status |
+|----|----|----|----|
+| `1` | anchor selection — cycle source/target anchors | world | implemented |
+| `2` | lift & spin while attached | world | planned (Phase 8) |
+| `3` | hinge chain unwrap | world | planned (Phase 8) |
+| `4` | spin in place, locked to the plane | screen | planned (Phase 8) |
+| `5` | rotated panel drags its followers | screen | planned (Phase 8) |
 
 ## Controls
 
-Use visible title-bar controls if this becomes a full UI example, but keep the
-first code path simple:
-
 | key | action |
 |-----|--------|
-| `1` | focus the anchor-selection demo |
-| `2` | focus the lift-and-spin pose demo |
-| `3` | focus the chained unwrap demo |
+| `1`–`5` | select the active capability |
 | left / right arrows | cycle the dependent panel's source anchor |
 | up / down arrows | cycle the target panel's target anchor |
-| `Space` | toggle the active animation |
-| `R` | reset the active demo |
+| `Space` | run / toggle the active capability's animation |
+| `R` | reset the active capability |
+| `Tab` | fly the orbit cam to the explainer panel, then back to the main event |
 
 Reset behavior must be explicit before implementation because active world
-attachments capture an authored pose in `AnchoredWorldPanelPose`. For Demo 1,
-`R` restores the default source and target anchor selections while leaving the
-relation active. The dependent remains resolver-owned and snaps to the default
-anchor pair. If a later control removes `AnchoredToPanel`, document whether it
-restores the captured authored pose or first refreshes that captured pose from
-the current resolved placement.
+attachments capture an authored pose in `AnchoredWorldPanelPose`:
 
-## Demo 1 — world-space point anchoring
+- Capability 1: `R` restores the default source/target anchor pair, relation
+  stays active, dependent stays resolver-owned and snaps to the default pair.
+- Capabilities 2–5: `R` returns the active `PanelAnchorPose` to identity
+  (flush / folded / unrotated). Document whether any control that removes
+  `AnchoredToPanel` restores the captured authored pose or first refreshes that
+  captured pose from the current resolved placement.
+
+## Explainer panel
+
+The explainer is a **world-space** `DiegeticPanel` placed *behind* the main demo
+carrying expansive text about the active capability — what you are seeing, the
+active anchor pair / pose values, and which keys apply right now. Because it is a
+full world panel and not a cramped screen HUD, it can hold real paragraphs.
+
+`Tab` flies the orbit cam to the explainer (zoom and pan) so it fills the view,
+then returns to the main event. Sitting behind the action means the explainer
+never occludes the demo. This likely motivates a reusable fairy_dust enhancement
+— a "look at this panel / return home" camera move usable beyond this example.
+Get explicit API approval before landing any public fairy_dust surface for it.
+
+This example dogfoods world anchoring to lay out its own explanatory UI.
+
+## Capability 1 — world point anchoring (implemented)
 
 Scene:
 
@@ -54,8 +68,8 @@ Scene:
 - relation: dependent source anchor anchored to target anchor
 - each world panel renders only a shaded in-panel square at its selected anchor
   position
-- bottom-left info panel names the selected anchors and shows matching 3x3
-  reference grids
+- the explainer names the selected anchors and shows matching 3x3 reference
+  grids
 
 Behavior:
 
@@ -71,11 +85,11 @@ Purpose:
 - makes all nine anchor points visible and selectable
 - proves `source_anchor` and `target_anchor` are independent
 
-## Demo 2 — animated pose while attached
+## Capability 2 — world lift & spin while attached
 
 Scene:
 
-- the Demo 1 dependent panel stays attached via `AnchoredToPanel`
+- the capability 1 dependent panel stays attached via `AnchoredToPanel`
 - a `PanelAnchorPose` component on the dependent carries the animated rotation
   and pin displacement
 
@@ -96,22 +110,19 @@ Purpose:
   the animatable input
 - makes the pivot-at-pin behavior visible — the pinned anchor point does not
   move while rotation and lift change
-- exercises the z offset and rotation math from Phases 4.2 and 4.3 in one
-  visual
+- exercises the z offset (Phase 5) and rotation (Phase 6) math in one visual
 
-## Demo 3 — chained panels and unwrap
+## Capability 3 — world hinge chain unwrap
 
 Scene:
 
-- three panels: `A`, `B`, `C`
+- three world panels: `A`, `B`, `C`
 - static point relations:
   - `B` `BottomCenter` anchored to `A` `TopCenter`
   - `C` `BottomCenter` anchored to `B` `TopCenter`
 - each dependent carries a `PanelAnchorPose` whose right-axis rotation is the
   hinge angle
 - the chain starts folded upward, then unwraps into a coplanar strip
-
-Anchor intent:
 
 ```text
 B BottomCenter = A TopCenter
@@ -122,9 +133,8 @@ Behavior:
 
 - When folded, each link's pose rotation tilts it about its pinned
   `BottomCenter` point.
-- `Space` animates the pose rotations toward identity, making the panels
-  unwrap into one coplanar strip.
-- Toggling again folds the chain back up.
+- `Space` animates the pose rotations toward identity, making the panels unwrap
+  into one coplanar strip. Toggling again folds the chain back up.
 - Hinge gizmo visuals may read `PanelAnchorEdge` geometry from Phase 2;
   `AnchoredToPanel` itself stays point-to-point.
 
@@ -135,34 +145,82 @@ Purpose:
 - demonstrates that point snap plus pose rotation covers hinged motion without
   an edge constraint in the relationship
 
-## Implementation Notes
+## Capability 4 — screen spin in place, locked to the plane
+
+Scene:
+
+- a screen panel anchored to another screen panel; the dependent is a leaf
+  (nothing is pinned to it)
+- a `PanelAnchorPose` on the dependent carries a normal-axis rotation
+
+Behavior:
+
+- `Space` spins the dependent about its pinned anchor point, in the screen
+  plane. The pinned anchor point stays fixed on screen; the panel rotates around
+  it.
+- The panel cannot leave the screen plane: an authored out-of-plane rotation has
+  no effect (a control that sets one is visibly inert), demonstrating the
+  locked-to-plane projection from Phase 7.
+
+Purpose:
+
+- shows `PanelAnchorPose` is honored on screen, not ignored — it is the same
+  component as the world demos, projected onto the screen plane
+- exercises Phase 7 Layer 1 (a leaf spins on its pin) and the full-pose
+  `ResolvedScreenPanelPosition`
+
+## Capability 5 — screen rotated-target chain
+
+Scene:
+
+- a short screen chain: a root screen panel with one or two dependents pinned to
+  its anchor points
+- the root carries a `PanelAnchorPose` rotation
+
+Behavior:
+
+- `Space` rotates the root in the screen plane. Its anchor points move with it,
+  and the dependents track to the rotated anchor points — the followers swing to
+  follow the root.
+- Resolves in one update across the chain.
+
+Purpose:
+
+- exercises Phase 7 Layer 2 (oriented-rect anchor math): a rotating screen
+  *target* re-anchors the panels pinned to it
+- proves screen chains stay correct under rotation, the screen analog of the
+  world hinge chain
+
+## Implementation notes
 
 Keep the example mostly visual and focused:
 
 - use large text labels directly on the panels
 - draw optional gizmo lines between active anchor points
-- keep all panels in front of the camera with a shallow angle so the hinge
-  motion is readable
-- avoid adding constrained sizing; every panel can use fixed or fit size
+- keep the world panels in front of the camera at a shallow angle so the hinge
+  motion is readable; keep the explainer behind them
+- avoid constrained sizing; every panel can use fixed or fit size
 - do not make animation part of `AnchoredToPanel`; animation systems write
-  `PanelAnchorPose` and the resolver remains the only transform writer for
+  `PanelAnchorPose` and the resolver stays the only transform writer for
   attached panels
 
 ## Dependencies
 
-This example depends on the phases in [`anchor-to-panel.md`](anchor-to-panel.md):
+This example depends on the phases in [`panel-anchoring.md`](panel-anchoring.md):
 
 | item | earliest phase | reason |
 |------|----------------|--------|
 | title/perf panel screen anchoring in `diegetic_text_stress` | Phase 1 | proves the relationship model, observer flushes, graph behavior, and same-frame screen placement |
 | anchor geometry read smoke test | Phase 2 | proves public `point` and `edge` geometry is fresh enough for consumers |
-| Demo 1: selectable world-space anchor points | Phase 3 | needs world-to-world attachment, target-plane math, and no-lag transform scheduling |
-| Demo 2: lift-and-spin pose animation | Phase 4.4 | needs z offset (4.2), `PanelAnchorPose` rotation (4.3), and the animation ordering point (4.4) |
-| Demo 3: chained unwrap | Phase 4.4 | needs `PanelAnchorPose` hinge rotation per link (4.3) and the animation ordering point (4.4) |
+| Capability 1: selectable world anchor points | Phase 3 | world-to-world attachment, target-plane math, no-lag transform scheduling |
+| Capability 2: world lift & spin | Phase 8 | z offset (5), `PanelAnchorPose` rotation (6), animation ordering (8) |
+| Capability 3: world hinge chain | Phase 8 | `PanelAnchorPose` hinge per link (6), animation ordering (8) |
+| Capability 4: screen spin in place | Phase 8 | screen in-plane rotation (7), animation ordering (8) |
+| Capability 5: screen rotated-target chain | Phase 8 | screen oriented-rect chains (7), animation ordering (8) |
+| world explainer + orbit-cam fly-to | Phase 8 | the demonstration UI; may add a reusable fairy_dust camera enhancement |
 
-The example should not land as one large change. Add the static or screen-backed
-pieces as soon as their phase exists, then expand the same example file as
-world anchoring and animation inputs become available.
+The example should not land as one large change. Add each capability as soon as
+its phase exists, expanding the same example file.
 
 ## Closeout
 
@@ -171,7 +229,7 @@ world anchoring and animation inputs become available.
 | Phase 1 | `cargo check -p bevy_diegetic --example diegetic_text_stress` |
 | Phase 2 | `cargo nextest run -p bevy_diegetic anchor_geometry_consumer` |
 | Phase 3 | `cargo check -p bevy_diegetic --example panel_anchoring` |
-| Phase 4 | `cargo check -p bevy_diegetic --example panel_anchoring` plus `cargo nextest run -p bevy_diegetic anchor_animation` |
+| Phase 8 | `cargo check -p bevy_diegetic --example panel_anchoring` plus `cargo nextest run -p bevy_diegetic anchor_animation` |
 
 Complete example closeout:
 

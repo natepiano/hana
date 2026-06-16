@@ -23,9 +23,9 @@ bottom-right.
 
 An attachment pins one point and therefore determines position only. It does not
 compute width or height. Width or height driven by two references is a separate
-span constraint handled by constrained screen sizing. Phase 4 extends placement
-with an optional z offset and a pose (rotation and displacement about the pinned
-point); attachments still never compute width or height.
+span constraint handled by constrained screen sizing. Later phases extend
+placement with an optional z offset and a pose (rotation and displacement about
+the pinned point); attachments still never compute width or height.
 
 Attachment is a layout relationship, not transform ownership:
 
@@ -148,17 +148,17 @@ dimension system as panel sizing and text sizing:
 pub struct PanelAnchorOffset {
     x: Dimension,
     y: Dimension,
-    z: Dimension, // added in Phase 4.2, default zero
+    z: Dimension, // added in Phase 5, default zero
 }
 
 impl PanelAnchorOffset {
     pub const ZERO: Self;
 
     pub fn new(x: impl Into<Dimension>, y: impl Into<Dimension>) -> Self;
-    pub fn with_z(self, z: impl Into<Dimension>) -> Self; // Phase 4.2
+    pub fn with_z(self, z: impl Into<Dimension>) -> Self; // Phase 5
     pub const fn x(self) -> Dimension;
     pub const fn y(self) -> Dimension;
-    pub const fn z(self) -> Dimension; // Phase 4.2
+    pub const fn z(self) -> Dimension; // Phase 5
 }
 ```
 
@@ -1169,22 +1169,14 @@ and keyboard-driven world anchoring.
 - `panel-anchoring-example.md` now requires explicit reset/detach behavior for
   `AnchoredWorldPanelPose`.
 
-### Phase 4 — z offset, anchored rotation, and animation
-
-Phase 4 extends point anchoring with the remaining rigid placement inputs —
-depth and orientation — then makes them animatable. The relationship stays the
-exact snap constraint: an active `AnchoredToPanel` means the resolver is the
-only transform writer for that panel. Animation never writes `Transform`
-directly while a relation is active; it writes resolver-read inputs.
-
-#### Phase 4.1 — static and keyboard-driven world anchoring example (complete)
+### Phase 4 — static and keyboard-driven world anchoring example (complete)
 
 `examples/panel_anchoring.rs` covers the Demo 1 behavior from
 [`panel-anchoring-example.md`](panel-anchoring-example.md): world-to-world
 `AnchoredToPanel` with hot keys cycling the source and target anchors. This
 proved the Phase 3 resolver in an example before animation work.
 
-#### Phase 4.2 — anchor z offset (complete)
+### Phase 5 — anchor z offset (complete)
 
 Add `z: Dimension` to `PanelAnchorOffset`, default zero. `new(x, y)` keeps its
 two-argument signature; add a `with_z(impl Into<Dimension>)` builder and a
@@ -1223,12 +1215,16 @@ Mechanics:
   on `PanelAnchorOffset` instead of the originally planned sub-pixel
   caveat, which assumed child z stepping that does not exist.
 
-#### Phase 4.3 — anchored rotation
+### Phase 6 — anchored rotation: `PanelAnchorPose` and the world resolver
 
-Add a mutable component the world resolver reads beside an active
-`AnchoredToPanel` (proposed name `PanelAnchorPose`; this replaces the earlier
-`PanelAnchorPoseOffset` / `PanelAnchorPostAlignment` candidates — get explicit
-API approval before landing):
+Add a mutable component the resolver reads beside an active `AnchoredToPanel`.
+`PanelAnchorPose` is a **public, user-insertable** component: a user puts it on
+an entity they control to rotate and animate an attached panel. The relationship
+stays the exact snap constraint — while an `AnchoredToPanel` is active the
+resolver is the only transform writer for that panel, and animation writes this
+resolver-read component, never `Transform` directly. This phase introduces the
+component and wires the **world** resolver; the **screen** resolver reads it in
+Phase 7.
 
 ```rust
 #[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
@@ -1260,17 +1256,87 @@ pub struct PanelAnchorPose {
   churn the `PanelsAnchoredHere` reverse index. The relation states what the
   panel is pinned to; `PanelAnchorPose` states the pose about that pin and is
   mutable for animation.
-- Scope: world resolver only. The screen resolver ignores `PanelAnchorPose`
-  rotation in this phase — the rect-based screen model assumes axis-aligned
-  panels, and a rotated chain target would need rotated-corner anchor math
-  plus a full-pose `ResolvedScreenPanelPosition`. If screen rotation becomes
-  required, plan it as a separate pass; under the orthographic screen camera
-  it renders as foreshortening with no perspective, which limits its value.
+- `PanelAnchorPose` is honored in both coordinate spaces with different
+  interpretations. World (this phase): the full `Quat` in the target-plane
+  frame, as above — it can hinge the panel off the target surface. Screen
+  (Phase 7): the pose is projected onto the screen plane — in-plane rotation
+  about the view normal is honored, out-of-plane rotation is projected out so
+  the panel cannot leave the plane. The component is space-agnostic; each
+  resolver interprets it. Until Phase 7 lands a screen panel's pose is inert
+  because the screen resolver does not yet read it — an unfinished wire
+  completed in Phase 7, not a by-design ignore.
 
 This extends the attachment contract from position-only to position plus
 orientation. Attachments still never compute width or height.
 
-#### Phase 4.4 — animation ordering and demos
+### Phase 7 — screen in-plane rotation and oriented-rect chains
+
+The screen resolver honors `PanelAnchorPose`, locked to the screen plane. A
+screen panel rotates and animates in place, and a rotated screen panel
+re-anchors the panels pinned to it.
+
+**Locked-to-plane semantics.** The shared screen camera is orthographic and
+faces the screen plane, so only rotation about the view normal keeps a panel in
+that plane. Project the authored `pose.rotation` to its rotation-about-view-
+normal — a single in-plane angle θ. Apply `pose.translation.xy` as an in-plane
+slide and `pose.translation.z` through the existing draw-order depth channel
+(Phase 5). Out-of-plane rotation components are dropped. Document this as
+"screen honors in-plane rotation; out-of-plane rotation has no screen effect" —
+the panel cannot leave the plane. It is a defined projection, not an ignore.
+
+**Full-pose `ResolvedScreenPanelPosition`.** Grow the override component to carry
+the resolved in-plane angle beside the existing fields:
+
+```rust
+pub(crate) struct ResolvedScreenPanelPosition {
+    pub(crate) anchor_position: Option<Vec2>,
+    pub(crate) depth:           Option<f32>,
+    pub(crate) authored_depth:  Option<f32>,
+    pub(crate) rotation:        Option<f32>, // in-plane angle (radians)
+}
+```
+
+`position_screen_space_panels` writes `Transform.rotation =
+Quat::from_rotation_z(angle)` only when the resolver produced a rotation,
+otherwise the authored rotation is kept — the same `None`/`Some` fallback rule
+x/y/z already follow. The single-writer rule is preserved: the resolver owns
+rotation for attached panels; an unattached screen panel's rotation stays
+user-owned because placement only writes the fields the resolver resolved.
+
+**Layer 1 — a leaf spins on its pin.** A screen panel that nothing is pinned to
+rotates about its own pinned anchor point. The placer applies the in-plane
+rotation about the resolved pin: `anchor_position` (the pinned point) stays
+fixed and the panel's top-left re-derives from `pin + R2D(θ) · (top_left −
+pin)`. The pinned anchor point's screen coordinate is invariant under rotation.
+
+**Layer 2 — oriented-rect anchor math.** When a panel that *is* an anchor target
+rotates, its anchor points move, so its dependents must track them.
+`ScreenPanelBounds` (`screen_space/anchoring/rect.rs`) carries the in-plane
+angle, and `point(anchor)` becomes the oriented form `center + R2D(θ) ·
+(anchor.offset(size) − center_offset)`. A dependent pinned to a rotated target's
+anchor lands on the rotated point; chains `A → B → C` of rotated screen panels
+resolve in graph order, each link reading its target's oriented bounds.
+
+Constraints from prior phases: Phase 5 added the depth channel and per-entity
+depth tracking in the screen placer; Phase 6 added `PanelAnchorPose` and the
+world resolver. Phase 7 extends the screen resolver/placer
+(`screen_space/anchoring/`, `screen_space/mod.rs`) and `ScreenPanelBounds`
+(`screen_space/anchoring/rect.rs`); it does not touch the world resolver.
+
+Acceptance gate (tests listed under Phase 7 tests):
+
+- a leaf screen panel with a normal-axis pose spins about its pin; the pinned
+  anchor point's screen coordinate is invariant
+- an out-of-plane pose rotation has no screen effect; the panel stays in the
+  plane (documented projection, not a panic or skip)
+- a rotated screen target repositions its dependent onto the rotated anchor
+  point
+- a screen chain `A → B → C` with per-link rotation resolves in one update
+- removing `PanelAnchorPose` restores axis-aligned placement: `rotation`
+  returns to `None` and the authored rotation is restored, the same
+  `None → Some → None` transition x/y/z follow
+
+### Phase 8 — animation ordering and the demonstration example
 
 - Name a `PostUpdate` ordering point for systems that write resolver-read
   animation inputs (`PanelAnchorPose`, relation insert/remove at state
@@ -1289,23 +1355,35 @@ orientation. Attachments still never compute width or height.
   the demo. Either keep the relation active and animate `PanelAnchorPose`, or
   add a same-frame release-pose capture protocol so authored-pose restoration
   from Phase 3 does not snap the panel away before the animation starts.
-- Demos in `examples/panel_anchoring.rs`, specified in
-  [`panel-anchoring-example.md`](panel-anchoring-example.md):
-  - Demo 2 — pose animation while attached: the dependent lifts off the target
-    along the plane normal (`pose.translation.z`) and spins on its pin
-    (normal-axis `pose.rotation`), then settles back flush. The relation stays
-    active the whole time.
-  - Demo 3 — chained hinge unwrap: each link animates right-axis
-    `pose.rotation` about its pinned `BottomCenter` point; the chain unfolds
-    into a coplanar strip and folds back. Relations stay active; hinge gizmo
-    visuals may read `PanelAnchorEdge` geometry from Phase 2. Do not extend
+- The demonstration grows `examples/panel_anchoring.rs` into a
+  capability-selector UI, specified in
+  [`panel-anchoring-example.md`](panel-anchoring-example.md): number keys pick
+  the active capability, `Space` runs its animation, arrows cycle anchors, `R`
+  resets. The capabilities span the feature set across both spaces:
+  - `1` world anchor selection (cycle source/target anchors) — exists
+  - `2` world lift & spin while attached (z offset + normal-axis pose rotation,
+    pin fixed)
+  - `3` world hinge chain unwrap (per-link right-axis pose rotation about each
+    pinned `BottomCenter`)
+  - `4` screen spin-in-place, locked to the plane (Phase 7 Layer 1)
+  - `5` screen rotated-target chain (Phase 7 Layer 2: a rotating screen panel
+    drags the panels pinned to it)
+  - Relations stay active throughout; the animation system writes only
+    `PanelAnchorPose` before the resolver, never `Transform`. Do not extend
     `AnchoredToPanel` beyond point-to-point snapping to model hinge motion —
     point snap plus pose rotation covers it.
+- The explainer is a **world-space** `DiegeticPanel` placed *behind* the main
+  demo, carrying expansive text about the active capability. An orbit-cam
+  control flies the camera to it (zoom and pan) to read, then returns to the
+  main event; sitting behind the action keeps it from occluding. This likely
+  motivates a reusable fairy_dust enhancement — a "look at this panel / return
+  home" camera move usable beyond this example. Get explicit API approval before
+  landing any public fairy_dust surface for it.
 - Cover the demos with an `anchor_animation` test filter.
 
-World editable-field popup tracking is not part of Phase 4. If an example or
-test touches editable fields on world-anchored panels, document the existing
-propagated-transform timing or add a separate editor-specific fix.
+World editable-field popup tracking is not part of the animation phase. If an
+example or test touches editable fields on world-anchored panels, document the
+existing propagated-transform timing or add a separate editor-specific fix.
 
 Deferred follow-up: if same-frame popup tracking for world-anchored editable
 fields becomes required, handle it in an editor-specific task that covers
@@ -1418,9 +1496,9 @@ work into `panel_anchoring.rs` or the animation demos.
 - the resolver runs before transform propagation and produces current
   `GlobalTransform` after propagation
 
-### Phase 4 tests / examples
+### Phase 5–8 tests / examples
 
-Phase 4.2 — z offset:
+Phase 5 — z offset:
 
 - world z offset displaces the dependent along the target plane normal by the
   authored dimension converted with the target density; literal expected
@@ -1437,7 +1515,7 @@ Phase 4.2 — z offset:
 - zero z offset leaves `translation.z` untouched for unattached panels and
   panels authored without depth
 
-Phase 4.3 — anchored rotation:
+Phase 6 — anchored rotation (world):
 
 - normal-axis `PanelAnchorPose` rotation spins the dependent coplanar while
   the pinned `source_anchor` point stays fixed (assert the world-space anchor
@@ -1450,10 +1528,23 @@ Phase 4.3 — anchored rotation:
   rotation produces `plane_rotation * pose.rotation`
 - removing `PanelAnchorPose` returns the dependent to the plain snapped
   placement without touching the captured `AnchoredWorldPanelPose`
-- screen panels with `PanelAnchorPose` resolve position as before; rotation is
-  ignored and documented as world-only
+- a screen panel's `PanelAnchorPose` has no effect in this phase; the screen
+  resolver does not read it until Phase 7
 
-Phase 4.4 — animation:
+Phase 7 — screen rotation (locked to plane):
+
+- a leaf screen panel with a normal-axis pose spins about its pin; the pinned
+  anchor point's screen coordinate is invariant before and after rotation
+- an out-of-plane pose rotation has no screen effect; the panel stays
+  axis-aligned in the plane (documented projection, not a panic or skip)
+- a rotated screen target repositions its dependent onto the rotated anchor
+  point (oriented `ScreenPanelBounds::point`)
+- a screen chain `A -> B -> C` with per-link rotation resolves in one update
+- removing `PanelAnchorPose` restores axis-aligned placement: `rotation`
+  returns to `None` and the authored rotation is restored, the same
+  `None -> Some -> None` transition x/y/z follow
+
+Phase 8 — animation:
 
 - writes to `PanelAnchorPose` before the world resolver affect the current
   frame; writes after it affect the next frame, using the named ordering point
@@ -1500,7 +1591,7 @@ cargo nextest run -p bevy_diegetic screen_space::anchoring
 cargo nextest run -p bevy_diegetic
 ```
 
-Phase 4.2 closeout:
+Phase 5 closeout:
 
 ```sh
 cargo +nightly fmt --all -- --check
@@ -1509,7 +1600,7 @@ cargo nextest run -p bevy_diegetic screen_space::anchoring
 cargo nextest run -p bevy_diegetic world_anchoring
 ```
 
-Phase 4.3 closeout:
+Phase 6 closeout:
 
 ```sh
 cargo +nightly fmt --all -- --check
@@ -1517,7 +1608,15 @@ cargo nextest run -p bevy_diegetic world_anchoring
 cargo nextest run -p bevy_diegetic screen_space::anchoring
 ```
 
-Phase 4.4 closeout:
+Phase 7 closeout:
+
+```sh
+cargo +nightly fmt --all -- --check
+cargo nextest run -p bevy_diegetic screen_space::anchoring
+cargo nextest run -p bevy_diegetic world_anchoring
+```
+
+Phase 8 closeout:
 
 ```sh
 cargo +nightly fmt --all -- --check
