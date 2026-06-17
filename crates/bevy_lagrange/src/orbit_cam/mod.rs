@@ -1,6 +1,7 @@
 //! `OrbitCam` component, systems, and helpers.
 
 mod controller;
+mod preset_helpers;
 
 use bevy::prelude::*;
 pub(crate) use controller::orbit_cam;
@@ -122,6 +123,8 @@ const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
 /// Tags an entity as capable of panning and orbiting.
 ///
 /// Provides a way to configure the camera's behaviour and controls.
+///
+/// Use preset helpers such as [`OrbitCam::blender_like`] for common input modes.
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
@@ -134,10 +137,7 @@ const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
 /// #         .run();
 /// # }
 /// fn setup(mut commands: Commands) {
-///     commands.spawn((
-///         Transform::from_translation(Vec3::new(0.0, 1.5, 5.0)),
-///         OrbitCam::default(),
-///     ));
+///     commands.spawn((Transform::from_xyz(0.0, 1.5, 5.0), OrbitCam::blender_like()));
 /// }
 /// ```
 #[derive(Component, Reflect, Copy, Clone, Debug, PartialEq)]

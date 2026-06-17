@@ -414,7 +414,7 @@ Slow mode applies ONLY to the camera whose input context receives the routed tog
 
 ---
 
-### Phase 4 — OrbitCam spawn helpers + public exports  · status: todo
+### Phase 4 — OrbitCam spawn helpers + public exports  · status: done
 
 #### Work Order
 
@@ -492,9 +492,26 @@ Public exports to `lib.rs`: all six preset config types were exported from `lib.
 
 **Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; `OrbitCam::blender_like()`, `OrbitCam::simple_mouse()`, `OrbitCam::with_bindings(bindings)`, and `OrbitCam::manual()` compile; `OrbitCam::with_bindings(OrbitCamPreset::SimpleMouse.to_bindings().unwrap())` compiles and produces `OrbitCamInputMode::Bindings(_)`; `crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs` exists; `rg 'OrbitCamPresetBundle' crates/bevy_lagrange/src/lib.rs` returns nothing.
 
+#### Retrospective
+
+**What worked:** All 8 helpers in `preset_helpers.rs` match spec; `#[must_use]` added to every helper (not in spec, appropriate); 122 tests pass; `rg 'OrbitCamPresetBundle'` returns nothing.
+
+**What deviated from the plan:**
+- `latches.rs` `is_active` widened from `pub(super)` to `pub(crate)` — Phase 3 codex set it `pub(super)` (visible only inside `routing/`), but callers in `adapter/inject.rs` and `adapter/resolve.rs` are siblings of `routing/`, not sub-modules; `cargo build` failed with E0624; fix applied here.
+
+**Surprises:** None.
+
+**Implications for remaining phases:**
+- Phase 5: `OrbitCam::with_bindings` and `OrbitCam::simple_mouse` are now available; `input_preset_simple.rs` rewrite and `input_preset_blender_like.rs` spawn update can proceed as specified.
+
+### Phase 4 Review
+
+- **Phase 5 Work Order updated:** Added `spawn_face_labels` line 150 update instruction — `const PRESET` removal breaks the `describe_orbit_cam_controls` call; codex must update `spawn_face_labels` to query `OrbitCamInputMode` from the camera entity.
+- **Phase 5 Work Order updated:** Corrected `input_manual.rs` entry — spawn is already on the explicit tuple path (line 118 has `OrbitCamInputMode::Manual`); entry now says "already on explicit tuple path; verify compile, no spawn change needed".
+
 ---
 
-### Phase 5 — Example updates  · status: todo
+### Phase 5 — Example updates  · status: done
 
 #### Work Order
 
@@ -520,6 +537,7 @@ fn spawn_camera(mut commands: Commands) {
 - Explain this is BlenderLike-derived even though it displays as custom bindings at runtime
 - Include a disable-slow comment: `OrbitCamBlenderLikePreset::default().slow_toggle_key(None).build()?`
 - Add a comment on `BlenderLikeCamera` (the face-panel marker component) that it is only required by the fairy_dust example library to drive the interactive cube faces; production code does not need it
+- `spawn_face_labels` (line 150) calls `describe_orbit_cam_controls(&OrbitCamInputMode::Preset(PRESET))` — `const PRESET` is being removed; update `spawn_face_labels` to query the camera's `OrbitCamInputMode` component instead: add `cameras: Query<&OrbitCamInputMode, With<BlenderLikeCamera>>` param and use `let Ok(mode) = cameras.single() else { return; }; let summary = describe_orbit_cam_controls(mode);`
 
 `input_gamepad.rs` and `input_keyboard.rs` — both configure `OrbitCam` fields (radius, focus) and call `apply_example_orbit_cam_limits`; use the explicit tuple path: `(OrbitCam { ..default() }, OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad))` / `Keyboard`. `OrbitCam::gamepad()` / `OrbitCam::keyboard()` helpers return `(OrbitCam::default(), ...)` and cannot be composed with field overrides.
 
@@ -532,11 +550,99 @@ fn spawn_camera(mut commands: Commands) {
 - `crates/bevy_lagrange/examples/input_preset_blender_like.rs` — targeted update: retain face-panel showcase; replace spawn to use `OrbitCamBlenderLikePreset::default().slow_scale(0.25).build()?` + `OrbitCam::with_bindings(bindings)`; add marker comment; add CapsLock and disable-slow comments
 - `crates/bevy_lagrange/examples/input_gamepad.rs` — already on the explicit tuple path; may need zero changes; verify it compiles cleanly after Phase 4
 - `crates/bevy_lagrange/examples/input_keyboard.rs` — already on the explicit tuple path; may need zero changes; fix any stale text
-- `crates/bevy_lagrange/examples/input_manual.rs` — update spawn to use explicit tuple path (already has field overrides, cannot use `OrbitCam::manual()`)
+- `crates/bevy_lagrange/examples/input_manual.rs` — already on explicit tuple path (`OrbitCamInputMode::Manual` at line 118); verify compile, no spawn change needed
 
 **Constraints from prior phases:**
 - Phase 1 added `OrbitCamBlenderLikePreset` with `.slow_scale()` and `.slow_toggle_key()` setters.
 - Phase 3 implemented CapsLock slow mode and must be fully tested before Phase 5 ships `input_preset_blender_like.rs` — the CapsLock demonstration is only functionally correct after Phase 3's latch system is in place.
-- Phase 4 added `OrbitCam::simple_mouse()`, `OrbitCam::with_bindings()`, and all helpers.
+- Phase 4 added `OrbitCam::simple_mouse()`, `OrbitCam::with_bindings()`, and all helpers in `crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs`. All helpers are `#[must_use]` and return `impl Bundle`. Phase 5 can use these directly.
+- Phase 4 fixed `OrbitCamSlowModeLatches::is_active` to `pub(crate)` — no further visibility changes needed in example files.
 
 **Acceptance gate:** `cargo nextest run -p bevy_lagrange` green; all five examples compile; `input_preset_simple.rs` contains `OrbitCam::simple_mouse()`; `input_preset_blender_like.rs` builds from `OrbitCamBlenderLikePreset::default()` and spawns via `OrbitCam::with_bindings()`.
+
+#### Retrospective
+
+**What worked:** Clean 334→16 line rewrite of `input_preset_simple.rs`; `spawn_face_labels` query-pattern for `OrbitCamInputMode` worked first try; 122 tests pass + all examples compile.
+
+**What deviated from the plan:**
+- `input_preset_simple.rs` includes `LagrangePlugin` — required for camera input processing; not in spec but necessary.
+- `spawn_camera` in `blender_like.rs` uses `let Ok(bindings) = ... else { error!(); return; }` instead of `?` — correct since the function cannot return `Result`.
+- `apply_example_orbit_cam_limits` and camera field overrides (`focus`, `yaw`, `pitch`, `radius`) removed from `blender_like.rs` spawn — cosmetic behavior change within spec scope ("update the spawn only").
+- `input_gamepad.rs` received two stale-comment fixes (`wire_chip_to_state` → `wire_chip_to_activation`) not explicitly scoped by spec; correct cleanup.
+- `input_keyboard.rs`, `input_manual.rs`, `input_custom.rs`: zero changes (all already on correct paths).
+
+**Surprises:** None.
+
+**Implications for remaining phases:** None — this is the final phase.
+
+### Phase 5 Review
+
+No remaining phases; review confirms all five phases complete.
+
+---
+
+### Phase 6 — Slow-mode refinement: Alt+S default, 5% scale, single-layer scaling  · status: done (uncommitted)
+
+#### Work Order
+
+**Goal:** Refine the shipped slow-mode feature in response to use: move the toggle off CapsLock onto a modifier combo, make slow genuinely slow, consolidate the scaling to one layer, and make the BlenderLike example present as a preset rather than custom bindings.
+
+**Spec:**
+
+Toggle gains a modifier:
+- `OrbitCamSlowMode` gains `mod_keys: ModKeys` (`descriptor.rs`) — modifier keys held with `toggle_key` for the toggle edge to fire.
+- `OrbitCamBlenderLikePreset` gains `slow_toggle_mod_keys: ModKeys` field + `.slow_toggle_mod_keys()` setter; default toggle is `KeyCode::KeyS` + `ModKeys::ALT` (was `KeyCode::CapsLock`, no modifier). `build_into` passes `mod_keys` into the emitted `OrbitCamSlowMode`.
+- `install.rs` binds the toggle action with `Binding::Keyboard { key: toggle_key, mod_keys }` (was `ModKeys::empty()`).
+- Alt avoids collision with BlenderLike's Shift=pan / Ctrl=zoom modifiers.
+
+Default scale:
+- `OrbitCamBlenderLikePreset::DEFAULT_SLOW_SCALE` 0.15 → 0.05.
+
+Single-layer scaling:
+- All `AdapterScale` application removed from `inject.rs`; scaling applied once in `resolve.rs` on the `adapter_orbit`/`adapter_pan`/`adapter_zoom_coarse`/`adapter_zoom_smooth` blocks, matching the held-input path (which was already resolve-only).
+- The slow-latch toggle moved into `resolve.rs` (`ResMut<OrbitCamSlowModeLatches>`, fires on the `slow_mode_toggle` action `Fired` state); `routing/mod.rs` toggle plumbing removed.
+
+Example presentation:
+- `input_preset_blender_like.rs` spawns `OrbitCam::blender_like()` (`OrbitCamInputMode::Preset`) instead of `OrbitCam::with_bindings(OrbitCamBlenderLikePreset::default().slow_scale(0.25).build()?)`. Tuned bindings resolve to `OrbitCamInputMode::Bindings`, which `describe_orbit_cam_controls` labels "custom bindings" — misrepresenting the example. Preset mode labels "preset input" correctly; custom bindings are already demonstrated by `input_custom.rs`.
+
+Enum size:
+- `mod_keys` pushed `OrbitCamInputMode::Bindings` (and the `OrbitCamInputModeDraft` mirror) over the 200-byte `large_enum_variant` threshold. Added `#[allow(clippy::large_enum_variant, reason = …)]` to both — a handful of `OrbitCamInputMode` components exist per app, so inlining beats per-camera heap indirection from boxing.
+
+**Files:**
+- `crates/bevy_lagrange/src/input/bindings/descriptor.rs` — `OrbitCamSlowMode.mod_keys`
+- `crates/bevy_lagrange/src/input/bindings/preset/blender_like.rs` — `slow_toggle_mod_keys` field/setter/default; `DEFAULT_SLOW_SCALE` 0.05; toggle default KeyS+ALT
+- `crates/bevy_lagrange/src/input/bindings/mod.rs` — toggle-default test (`Some((KeyCode::KeyS, ModKeys::ALT))`)
+- `crates/bevy_lagrange/src/input/adapter/install.rs` — bind toggle with `mod_keys`
+- `crates/bevy_lagrange/src/input/adapter/inject.rs` — remove all `AdapterScale` application
+- `crates/bevy_lagrange/src/input/adapter/resolve.rs` — scale adapter blocks; move slow-latch toggle here
+- `crates/bevy_lagrange/src/input/adapter/mod.rs` — toggle-edge test rewritten for the Alt+S combo
+- `crates/bevy_lagrange/src/input/actions.rs` — slow-toggle action
+- `crates/bevy_lagrange/src/input/routing/mod.rs`, `routing/latches.rs` — toggle moved out of routing
+- `crates/bevy_lagrange/src/input/modes.rs` — `large_enum_variant` allow on both enums
+- `crates/bevy_lagrange/examples/input_preset_blender_like.rs` — spawn `OrbitCam::blender_like()`; docs updated
+
+**Constraints from prior phases:**
+- Phase 3 emitted `OrbitCamSlowMode { toggle_key, scale }` and applied scaling in both `inject.rs` and `resolve.rs`; Phase 6 adds `mod_keys` and collapses scaling to resolve-only.
+- Phase 5 set the example to `OrbitCam::with_bindings(tuned)`; Phase 6 supersedes that with `OrbitCam::blender_like()` Preset mode.
+
+**Acceptance gate:** `cargo nextest run -p bevy_lagrange` green (122 tests); BlenderLike default toggle is `KeyS`+`ALT`; default slow scale 0.05; trackpad orbit scaled exactly once (`0.05×`) in steady-state slow mode; `input_preset_blender_like.rs` displays "preset input"; `cargo clippy` clean.
+
+#### Retrospective
+
+**What worked:** Single-layer scaling (resolve-only) matches the held-input path and removes the inject/resolve double-application; 122 tests green; the existing slow-latch tests already exercise the latch-active input frame, so they guard against re-introducing inject-layer scaling.
+
+**What deviated from the plan (supersedes earlier phases):**
+- Toggle CapsLock → KeyS+ALT (supersedes Phase 1/3 default `KeyCode::CapsLock`).
+- `DEFAULT_SLOW_SCALE` 0.15 → 0.05 (supersedes Phase 1 default).
+- Example spawn `OrbitCam::with_bindings(tuned slow_scale(0.25))` → `OrbitCam::blender_like()` Preset (supersedes Phase 5 Spec and Phase 3 Review Finding 5 Option A). Reason: tuned bindings render as "custom bindings"; `input_custom.rs` already owns that demo.
+- Slow scaling moved entirely to `resolve.rs` (supersedes Phase 3's inject+resolve application).
+
+**Surprises:**
+- `mod_keys` on `OrbitCamSlowMode` tipped `OrbitCamInputMode` past the `large_enum_variant` 200-byte threshold; resolved with an `#[allow]` (boxing rejected — per-app camera count is tiny).
+- A reported "orbit reverses and won't stop after Alt+S" was **not** a camera bug — a controller-boundary trace showed monotonic single-direction coast-and-converge (orientation never flipped, input never reversed sign). The motion read as a reversing camera was the `with_cube_spin` showcase cube, amplified by 5% slow making the camera's own drift tiny.
+
+**Implications for remaining phases:** None — plan complete.
+
+### Phase 6 Review
+
+No remaining phases; the plan is complete. Phase 6 documents post-ship refinements only.

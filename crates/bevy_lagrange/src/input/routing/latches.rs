@@ -14,7 +14,6 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use super::ResolvedOrbitCamInputRoute;
 use crate::input::CameraInteractionSources;
 use crate::input::OrbitCamInputModeReplaced;
 use crate::input::OrbitCamResolvedBindings;
@@ -131,28 +130,5 @@ pub(super) fn clear_latches_on_mode_replaced(
         .is_ok_and(|bindings| bindings.0.slow_mode().is_some());
     if !has_slow_mode {
         slow_latches.clear_camera(replaced.camera);
-    }
-}
-
-pub(super) fn toggle_slow_mode_latches(
-    route: Res<ResolvedOrbitCamInputRoute>,
-    keyboard: Option<Res<ButtonInput<KeyCode>>>,
-    bindings: Query<&OrbitCamResolvedBindings>,
-    mut slow_latches: ResMut<OrbitCamSlowModeLatches>,
-) {
-    let Some(camera) = route.routed_camera() else {
-        return;
-    };
-    let Ok(bindings) = bindings.get(camera) else {
-        return;
-    };
-    let Some(slow_mode) = bindings.0.slow_mode() else {
-        return;
-    };
-    let Some(keyboard) = keyboard else {
-        return;
-    };
-    if keyboard.just_pressed(slow_mode.toggle_key) {
-        slow_latches.toggle(camera);
     }
 }

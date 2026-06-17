@@ -41,6 +41,12 @@ struct ModeReconciliation {
 #[derive(Component, Clone, Debug, PartialEq, Reflect)]
 #[reflect(Component, Default)]
 #[non_exhaustive]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "one OrbitCamInputMode Component exists per camera (a handful ever), so \
+              inlining the full binding set in `Bindings` is cheaper than a per-camera \
+              heap indirection from boxing"
+)]
 pub enum OrbitCamInputMode {
     /// Built-in preset mode.
     Preset(OrbitCamPreset),
@@ -82,6 +88,11 @@ pub struct OrbitCamInputModeDescriptor {
 #[cfg(feature = "reflect-input-modes")]
 #[derive(Clone, Debug, PartialEq, Reflect)]
 #[non_exhaustive]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "draft mirror of OrbitCamInputMode; one per camera at most, so inlining \
+              the binding descriptor in `Bindings` beats a per-camera heap indirection"
+)]
 pub enum OrbitCamInputModeDraft {
     /// Built-in preset mode.
     Preset(OrbitCamPreset),

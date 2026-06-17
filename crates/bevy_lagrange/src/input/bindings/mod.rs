@@ -244,8 +244,10 @@ mod tests {
         let bindings = OrbitCamBlenderLikePreset::default().build()?;
 
         assert_eq!(
-            bindings.slow_mode().map(|slow_mode| slow_mode.toggle_key),
-            Some(KeyCode::CapsLock)
+            bindings
+                .slow_mode()
+                .map(|slow_mode| (slow_mode.toggle_key, slow_mode.mod_keys)),
+            Some((KeyCode::KeyS, ModKeys::ALT))
         );
         Ok(())
     }

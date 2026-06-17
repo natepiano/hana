@@ -26,7 +26,6 @@ use bevy_enhanced_input::prelude::ActionValue;
 use bevy_enhanced_input::prelude::CustomInputs;
 use bevy_enhanced_input::prelude::ModKeys;
 
-use super::AdapterScale;
 use super::install::OrbitCamAdapterCustomInputs;
 use super::install::OrbitCamInstalledBindings;
 use super::install::TrackpadBindingCondition;
@@ -38,7 +37,6 @@ use crate::input::CameraInteractionSources;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamButtonDragZoomAxis;
 use crate::input::OrbitCamInputContextGated;
-use crate::input::OrbitCamSlowModeLatches;
 use crate::input::OrbitCamTouchBinding;
 use crate::input::OrbitCamTrackpadScroll;
 use crate::input::PinchGestureZoom;
@@ -58,7 +56,6 @@ pub(super) struct OrbitCamAdapterFrameSources {
 
 pub(super) fn inject_adapter_actions(
     route: Res<ResolvedOrbitCamInputRoute>,
-    slow_latches: Res<OrbitCamSlowModeLatches>,
     scroll: Option<Res<AccumulatedMouseScroll>>,
     motion: Option<Res<AccumulatedMouseMotion>>,
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
@@ -120,8 +117,6 @@ pub(super) fn inject_adapter_actions(
         let trackpad_selection =
             selected_trackpad_binding(&bindings.0, scroll, keyboard.as_deref());
         refresh_trackpad_conditions(camera, trackpad_selection, &mut trackpad_conditions);
-        let adapter_scale =
-            AdapterScale::from_bindings(&bindings.0, slow_latches.is_active(camera));
         let contributions = adapter_contributions(
             &bindings.0,
             scroll,
@@ -129,7 +124,6 @@ pub(super) fn inject_adapter_actions(
             pinch,
             &touch_gestures,
             trackpad_selection,
-            adapter_scale,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
         );
@@ -155,41 +149,21 @@ fn adapter_contributions(
     pinch: f32,
     touch_gestures: &TouchGestures,
     trackpad_selection: Option<TrackpadScrollCandidate>,
-    adapter_scale: AdapterScale<'_>,
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> AdapterContributions {
     let mut contributions = AdapterContributions::default();
-    apply_mouse_wheel_zoom_contribution(bindings, scroll, adapter_scale, &mut contributions);
-    apply_trackpad_scroll_contribution(
-        scroll,
-        trackpad_selection,
-        adapter_scale,
-        &mut contributions,
-    );
-    apply_pinch_contribution(
-        bindings,
-        pinch,
-        adapter_scale,
-        keyboard,
-        mouse_buttons,
-        &mut contributions,
-    );
-    apply_touch_contribution(bindings, touch_gestures, adapter_scale, &mut contributions);
-    apply_button_drag_zoom_contribution(
-        bindings,
-        mouse_motion,
-        adapter_scale,
-        mouse_buttons,
-        &mut contributions,
-    );
+    apply_mouse_wheel_zoom_contribution(bindings, scroll, &mut contributions);
+    apply_trackpad_scroll_contribution(scroll, trackpad_selection, &mut contributions);
+    apply_pinch_contribution(bindings, pinch, keyboard, mouse_buttons, &mut contributions);
+    apply_touch_contribution(bindings, touch_gestures, &mut contributions);
+    apply_button_drag_zoom_contribution(bindings, mouse_motion, mouse_buttons, &mut contributions);
     contributions
 }
 
 fn apply_mouse_wheel_zoom_contribution(
     bindings: &OrbitCamBindings,
     scroll: AccumulatedMouseScroll,
-    adapter_scale: AdapterScale<'_>,
     contributions: &mut AdapterContributions,
 ) {
     if bindings.mouse_wheel_zoom().is_none() {
@@ -199,7 +173,7 @@ fn apply_mouse_wheel_zoom_contribution(
         return;
     }
 
-    contributions.zoom_coarse += adapter_scale.f32(zoom_signed(scroll.delta.y, bindings));
+    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings);
     contributions.sources.zoom_coarse = contributions
         .sources
         .zoom_coarse
@@ -209,14 +183,13 @@ fn apply_mouse_wheel_zoom_contribution(
 fn apply_trackpad_scroll_contribution(
     scroll: AccumulatedMouseScroll,
     selection: Option<TrackpadScrollCandidate>,
-    adapter_scale: AdapterScale<'_>,
     contributions: &mut AdapterContributions,
 ) {
     if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Pixel {
         return;
     }
 
-    contributions.trackpad = adapter_scale.vec2(scroll.delta);
+    contributions.trackpad = scroll.delta;
     match selection.map(|selection| selection.target) {
         Some(TrackpadScrollTarget::Orbit) => {
             contributions.sources.orbit = contributions
@@ -333,7 +306,6 @@ const fn trackpad_target_priority(target: TrackpadScrollTarget) -> usize {
 fn apply_pinch_contribution(
     bindings: &OrbitCamBindings,
     pinch: f32,
-    adapter_scale: AdapterScale<'_>,
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
@@ -345,8 +317,7 @@ fn apply_pinch_contribution(
         return;
     }
 
-    contributions.zoom_smooth +=
-        adapter_scale.f32(zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings));
+    contributions.zoom_smooth += zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
@@ -397,7 +368,6 @@ fn trackpad_modifier_active(
 fn apply_touch_contribution(
     bindings: &OrbitCamBindings,
     touch_gestures: &TouchGestures,
-    adapter_scale: AdapterScale<'_>,
     contributions: &mut AdapterContributions,
 ) {
     let Some(touch) = bindings.touch() else {
@@ -425,21 +395,21 @@ fn apply_touch_contribution(
     };
 
     if orbit != Vec2::ZERO {
-        contributions.orbit += adapter_scale.vec2(orbit);
+        contributions.orbit += orbit;
         contributions.sources.orbit = contributions
             .sources
             .orbit
             .union(CameraInteractionSources::TOUCH);
     }
     if pan != Vec2::ZERO {
-        contributions.pan += adapter_scale.vec2(pan);
+        contributions.pan += pan;
         contributions.sources.pan = contributions
             .sources
             .pan
             .union(CameraInteractionSources::TOUCH);
     }
     if zoom != 0.0 {
-        contributions.zoom_smooth += adapter_scale.f32(zoom_signed(zoom, bindings));
+        contributions.zoom_smooth += zoom_signed(zoom, bindings);
         contributions.sources.zoom_smooth = contributions
             .sources
             .zoom_smooth
@@ -450,7 +420,6 @@ fn apply_touch_contribution(
 fn apply_button_drag_zoom_contribution(
     bindings: &OrbitCamBindings,
     mouse_motion: Vec2,
-    adapter_scale: AdapterScale<'_>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
@@ -469,8 +438,7 @@ fn apply_button_drag_zoom_contribution(
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,
     };
 
-    contributions.zoom_smooth +=
-        adapter_scale.f32(zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings));
+    contributions.zoom_smooth += zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings);
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth

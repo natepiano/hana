@@ -48,6 +48,7 @@ use crate::input::actions::OrbitCamPanEngagedAction;
 use crate::input::actions::OrbitCamPanSlowAction;
 use crate::input::actions::OrbitCamZoomEngagedAction;
 use crate::input::actions::OrbitCamZoomSmoothSlowAction;
+use crate::input::routing;
 
 #[allow(
     clippy::too_many_lines,
@@ -55,7 +56,7 @@ use crate::input::actions::OrbitCamZoomSmoothSlowAction;
 )]
 pub(super) fn resolve_actions_into_orbit_cam_input(
     route: Res<ResolvedOrbitCamInputRoute>,
-    slow_latches: Res<OrbitCamSlowModeLatches>,
+    mut slow_latches: ResMut<OrbitCamSlowModeLatches>,
     mut cameras: Query<
         (
             Entity,
@@ -86,13 +87,22 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
             continue;
         }
 
+        if states
+            .get(actions.slow_mode_toggle)
+            .is_ok_and(|state| *state == TriggerState::Fired)
+        {
+            routing::toggle_slow_mode_latch(&mut slow_latches, camera);
+        }
+
         let orbit_engaged = bool_action_active(actions.orbit_engaged, &bool_actions.orbit, &states);
         let pan_engaged = bool_action_active(actions.pan_engaged, &bool_actions.pan, &states);
         let zoom_engaged = bool_action_active(actions.zoom_engaged, &bool_actions.zoom, &states);
         let pan_overrides_orbit =
             pan_overrides_orbit(&bindings.0, keyboard.as_deref(), mouse_buttons.as_deref());
-        let adapter_scale =
-            AdapterScale::from_bindings(&bindings.0, slow_latches.is_active(camera));
+        let adapter_scale = AdapterScale::from_bindings(
+            &bindings.0,
+            routing::is_slow_mode_active(&slow_latches, camera),
+        );
         let orbit_sources = held_sources_for_state(
             HeldEngagement::from(orbit_engaged),
             bindings.0.orbit().entries(),
@@ -142,31 +152,34 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
 
         if action_state_active(actions.adapter_orbit, &states) {
             input.orbit_pixels_with_sources(
-                action_value(actions.adapter_orbit, &vec2_actions.adapter_orbit),
+                adapter_scale.vec2(action_value(
+                    actions.adapter_orbit,
+                    &vec2_actions.adapter_orbit,
+                )),
                 frame_sources.orbit,
             );
         }
         if action_state_active(actions.adapter_pan, &states) {
             input.pan_pixels_with_sources(
-                action_value(actions.adapter_pan, &vec2_actions.adapter_pan),
+                adapter_scale.vec2(action_value(actions.adapter_pan, &vec2_actions.adapter_pan)),
                 frame_sources.pan,
             );
         }
         if action_state_active(actions.adapter_zoom_coarse, &states) {
             input.zoom_coarse_with_sources(
-                action_value(
+                adapter_scale.f32(action_value(
                     actions.adapter_zoom_coarse,
                     &f32_actions.adapter_zoom_coarse,
-                ),
+                )),
                 frame_sources.zoom_coarse,
             );
         }
         if action_state_active(actions.adapter_zoom_smooth, &states) {
             input.zoom_smooth_with_sources(
-                action_value(
+                adapter_scale.f32(action_value(
                     actions.adapter_zoom_smooth,
                     &f32_actions.adapter_zoom_smooth,
-                ),
+                )),
                 frame_sources.zoom_smooth,
             );
         }

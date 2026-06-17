@@ -15,14 +15,15 @@ use crate::input::bindings::error::OrbitCamBindingsError;
 /// Configures Blender-style pointer and smooth-scroll camera controls.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct OrbitCamBlenderLikePreset {
-    zoom_mod_keys:   ModKeys,
-    slow_toggle_key: Option<KeyCode>,
-    slow_scale:      f32,
+    zoom_mod_keys:        ModKeys,
+    slow_toggle_key:      Option<KeyCode>,
+    slow_toggle_mod_keys: ModKeys,
+    slow_scale:           f32,
 }
 
 impl OrbitCamBlenderLikePreset {
     const DEFAULT_NORMAL_SCALE: f32 = 1.0;
-    const DEFAULT_SLOW_SCALE: f32 = 0.15;
+    const DEFAULT_SLOW_SCALE: f32 = 0.05;
     const MAX_SLOW_SCALE: f32 = 1.0;
     const MIN_SLOW_SCALE: f32 = 0.0;
 
@@ -47,6 +48,13 @@ impl OrbitCamBlenderLikePreset {
     #[must_use]
     pub const fn slow_toggle_key(mut self, slow_toggle_key: Option<KeyCode>) -> Self {
         self.slow_toggle_key = slow_toggle_key;
+        self
+    }
+
+    /// Sets the modifier keys held with the toggle key to fire the slow-mode toggle.
+    #[must_use]
+    pub const fn slow_toggle_mod_keys(mut self, slow_toggle_mod_keys: ModKeys) -> Self {
+        self.slow_toggle_mod_keys = slow_toggle_mod_keys;
         self
     }
 
@@ -80,6 +88,7 @@ impl OrbitCamBlenderLikePreset {
         let builder = if let Some(toggle_key) = self.slow_toggle_key {
             builder.slow_mode(OrbitCamSlowMode {
                 toggle_key,
+                mod_keys: self.slow_toggle_mod_keys,
                 scale: OrbitCamScalePolicy {
                     normal: Self::DEFAULT_NORMAL_SCALE,
                     slow:   self.slow_scale,
@@ -103,9 +112,10 @@ impl OrbitCamBlenderLikePreset {
 impl Default for OrbitCamBlenderLikePreset {
     fn default() -> Self {
         Self {
-            zoom_mod_keys:   ModKeys::CONTROL,
-            slow_toggle_key: Some(KeyCode::CapsLock),
-            slow_scale:      Self::DEFAULT_SLOW_SCALE,
+            zoom_mod_keys:        ModKeys::CONTROL,
+            slow_toggle_key:      Some(KeyCode::KeyS),
+            slow_toggle_mod_keys: ModKeys::ALT,
+            slow_scale:           Self::DEFAULT_SLOW_SCALE,
         }
     }
 }

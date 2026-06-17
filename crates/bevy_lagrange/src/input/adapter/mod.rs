@@ -106,6 +106,7 @@ mod tests {
     use bevy_enhanced_input::prelude::DeltaScale;
     use bevy_enhanced_input::prelude::Scale;
 
+    use super::OrbitCamBindings;
     use super::OrbitCamInputAdapterPlugin;
     use super::inject::OrbitCamTouchAdapterOverride;
     use super::install::OrbitCamBindingGateCondition;
@@ -119,7 +120,6 @@ mod tests {
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
     use crate::input::ControlSpeed;
-    use super::OrbitCamBindings;
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
@@ -200,10 +200,19 @@ mod tests {
         Ok(camera)
     }
 
+    /// Fires the Alt+S slow-mode toggle edge and releases the keys, leaving the
+    /// camera's slow latch active for the caller's following update. Releasing
+    /// the modifier keeps a later mouse drag from being read as a gated gesture.
     fn press_slow_toggle(app: &mut App) {
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::CapsLock);
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::AltLeft);
+            keyboard.press(KeyCode::KeyS);
+        }
+        app.update();
+        let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+        keyboard.release(KeyCode::AltLeft);
+        keyboard.release(KeyCode::KeyS);
     }
 
     #[test]
@@ -443,6 +452,42 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_slow_blender_like_camera(&mut app)?;
         press_slow_toggle(&mut app);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(8.0, -4.0);
+
+        app.update();
+
+        assert_eq!(
+            camera_input(&app, camera)?.orbit(),
+            OrbitDelta::from(Vec2::new(4.0, -2.0))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn blender_like_slow_toggle_does_not_repeat_while_held() -> TestResult {
+        let mut app = test_app();
+        let camera = spawn_slow_blender_like_camera(&mut app)?;
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::AltLeft);
+            keyboard.press(KeyCode::KeyS);
+        }
+
+        // Hold the combo across two updates: the Press edge fires on the first,
+        // and the latch must stay active rather than toggle back off on the second.
+        app.update();
+        app.update();
+
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.release(KeyCode::AltLeft);
+            keyboard.release(KeyCode::KeyS);
+        }
         app.world_mut()
             .resource_mut::<ButtonInput<MouseButton>>()
             .press(MouseButton::Middle);

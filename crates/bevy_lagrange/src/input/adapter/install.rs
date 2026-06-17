@@ -44,6 +44,7 @@ use bevy_enhanced_input::prelude::InputAction;
 use bevy_enhanced_input::prelude::InputCondition;
 use bevy_enhanced_input::prelude::ModKeys;
 use bevy_enhanced_input::prelude::Negate;
+use bevy_enhanced_input::prelude::Press;
 use bevy_enhanced_input::prelude::Scale;
 use bevy_enhanced_input::prelude::SwizzleAxis;
 use bevy_enhanced_input::prelude::TriggerState;
@@ -85,6 +86,7 @@ use crate::input::actions::OrbitCamOrbitEngagedAction;
 use crate::input::actions::OrbitCamOrbitSlowAction;
 use crate::input::actions::OrbitCamPanEngagedAction;
 use crate::input::actions::OrbitCamPanSlowAction;
+use crate::input::actions::OrbitCamSlowModeToggleAction;
 use crate::input::actions::OrbitCamZoomEngagedAction;
 use crate::input::actions::OrbitCamZoomSmoothSlowAction;
 use crate::input::modes;
@@ -106,6 +108,7 @@ pub(super) struct OrbitCamInputActionEntities {
     pub(super) zoom_smooth:         Entity,
     pub(super) zoom_smooth_slow:    Entity,
     pub(super) zoom_engaged:        Entity,
+    pub(super) slow_mode_toggle:    Entity,
     pub(super) adapter_orbit:       Entity,
     pub(super) adapter_pan:         Entity,
     pub(super) adapter_zoom_coarse: Entity,
@@ -302,6 +305,7 @@ struct SpawnedInputActions {
     zoom_smooth:         Entity,
     zoom_smooth_slow:    Entity,
     zoom_engaged:        Entity,
+    slow_mode_toggle:    Entity,
     adapter_orbit:       Entity,
     adapter_pan:         Entity,
     adapter_zoom_coarse: Entity,
@@ -321,6 +325,7 @@ impl SpawnedInputActions {
             self.zoom_smooth,
             self.zoom_smooth_slow,
             self.zoom_engaged,
+            self.slow_mode_toggle,
             self.adapter_orbit,
             self.adapter_pan,
             self.adapter_zoom_coarse,
@@ -357,6 +362,7 @@ impl SpawnedInputActions {
             zoom_smooth:         self.zoom_smooth,
             zoom_smooth_slow:    self.zoom_smooth_slow,
             zoom_engaged:        self.zoom_engaged,
+            slow_mode_toggle:    self.slow_mode_toggle,
             adapter_orbit:       self.adapter_orbit,
             adapter_pan:         self.adapter_pan,
             adapter_zoom_coarse: self.adapter_zoom_coarse,
@@ -418,6 +424,7 @@ fn spawn_input_actions(world: &mut World, camera: Entity) -> SpawnedInputActions
         zoom_smooth:         spawn_action::<OrbitCamZoomSmoothAction>(world, camera),
         zoom_smooth_slow:    spawn_action::<OrbitCamZoomSmoothSlowAction>(world, camera),
         zoom_engaged:        spawn_action::<OrbitCamZoomEngagedAction>(world, camera),
+        slow_mode_toggle:    spawn_action::<OrbitCamSlowModeToggleAction>(world, camera),
         adapter_orbit:       spawn_action::<OrbitCamAdapterOrbitAction>(world, camera),
         adapter_pan:         spawn_action::<OrbitCamAdapterPanAction>(world, camera),
         adapter_zoom_coarse: spawn_action::<OrbitCamAdapterZoomCoarseAction>(world, camera),
@@ -479,6 +486,21 @@ fn spawn_camera_action_bindings(
             &mut gate_actions,
             entities,
         );
+    }
+    if let Some(slow_mode) = bindings.slow_mode() {
+        world
+            .entity_mut(actions.slow_mode_toggle)
+            .insert(Press::default());
+        let entity = spawn_single_binding(
+            world,
+            actions.slow_mode_toggle,
+            OrbitCamInputInstallationOf(camera),
+            Binding::Keyboard {
+                key:      slow_mode.toggle_key,
+                mod_keys: slow_mode.mod_keys,
+            },
+        );
+        entities.push(entity);
     }
 }
 

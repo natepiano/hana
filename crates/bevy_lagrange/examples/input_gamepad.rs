@@ -1,8 +1,8 @@
 //! Spawns an `OrbitCam` with `OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad)`
 //! and wires `GamepadButton::South` to an `AnimateToFit` home animation. The
 //! `GamepadHomeBegin` / `GamepadHomeEnd` events drive the title-bar chip via
-//! `wire_chip_to_events`, and a `GamepadConnection` resource drives the
-//! connection chip via `wire_chip_to_state`. Cube faces show the preset's
+//! `wire_chip_to_events`, and a `GamepadConnection` resource updates the
+//! connection chip via `wire_chip_to_activation`. Cube faces show the preset's
 //! orbit / pan / zoom controls and light up while sticks and triggers move.
 //!
 //! Controls:
@@ -120,7 +120,7 @@ fn main() {
 //   1. `spawn_camera` installs `OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad)` so Lagrange
 //      reads the gamepad sticks and triggers for orbit, pan, and zoom.
 //   2. `update_gamepad_connection` polls `Query<&Gamepad>` and updates `GamepadConnection`; the
-//      connection chip is driven through `wire_chip_to_state`.
+//      connection chip is updated through `wire_chip_to_activation`.
 //   3. `home_on_gamepad_south` watches `GamepadButton::South`, triggers `AnimateToFit` to fly the
 //      camera back to the home pose, and fires `GamepadHomeBegin` so the home chip lights up.
 //   4. `finish_gamepad_home` observes `AnimationEnd` from `AnimationSource::AnimateToFit` and fires

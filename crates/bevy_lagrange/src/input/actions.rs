@@ -85,6 +85,10 @@ pub(super) struct OrbitCamAdapterZoomCoarseAction;
 #[action_output(f32)]
 pub(super) struct OrbitCamAdapterZoomSmoothAction;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, InputAction)]
+#[action_output(bool)]
+pub(super) struct OrbitCamSlowModeToggleAction;
+
 macro_rules! impl_camera_action {
     ($action:ty) => {
         impl sealed::Sealed for $action {}

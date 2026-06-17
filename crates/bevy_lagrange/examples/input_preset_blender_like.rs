@@ -1,6 +1,7 @@
-//! Spawns an `OrbitCam` with `OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)`.
-//! The cube faces show the preset's orbit / pan / zoom controls and light up
-//! while pointer input is active.
+//! Attaches the Blender-like input preset with `OrbitCam::blender_like`.
+//! Alt+S toggles slow orbit, pan, and zoom (5% scale).
+//!
+//! The cube faces display the resulting `OrbitCamInputMode::Preset` rows.
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
@@ -11,7 +12,6 @@ use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
@@ -23,7 +23,6 @@ use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::HoldState;
 use fairy_dust::ReleaseHold;
 use fairy_dust::TitleBar;
-use fairy_dust::apply_example_orbit_cam_limits;
 use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
@@ -60,38 +59,31 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// BLENDER-LIKE PRESET — OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike).
+// BLENDER-LIKE PRESET — OrbitCam::blender_like input mode.
 // ═════════════════════════════════════════════════════════════════════════════
 
-const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
 const CAMERA_PITCH: f32 = 0.45;
-const CAMERA_RADIUS: f32 = 6.0;
 const CAMERA_YAW: f32 = 0.55;
 const HOME_MARGIN: f32 = 0.5;
-const PRESET: OrbitCamPreset = OrbitCamPreset::BlenderLike;
 
+/// Marks the `OrbitCam` used by the `fairy_dust` face-panel showcase for
+/// `OrbitCamInputMode` and `OrbitCamInteractionState` queries.
+///
+/// Production code using `OrbitCam::blender_like` does not need this marker.
 #[derive(Component)]
 struct BlenderLikeCamera;
 
 fn spawn_camera(mut commands: Commands) {
-    let mut camera = OrbitCam {
-        focus: CAMERA_FOCUS,
-        yaw: Some(CAMERA_YAW),
-        pitch: Some(CAMERA_PITCH),
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
-    apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
-        camera,
-        OrbitCamInputMode::Preset(PRESET),
+        Transform::from_xyz(0.0, 1.5, 5.0),
+        OrbitCam::blender_like(),
         BlenderLikeCamera,
         FairyDustOrbitCam,
     ));
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CUBE FACE PANELS — preset orbit / pan / zoom controls that light on input.
+// CUBE FACE PANELS — Blender-like binding controls that light on input.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const FACE_PANEL_STYLE: CubeFacePanelStyle = {
@@ -130,7 +122,7 @@ impl FaceLabel {
     }
 }
 
-/// Holds the preset's described controls so idle/active face labels share the
+/// Holds the binding set's described controls so idle/active face labels share the
 /// camera control panel's vocabulary.
 #[derive(Resource)]
 struct FaceGuidance(OrbitCamControlSummary);
@@ -142,12 +134,19 @@ struct FaceLabelHold {
     zoom:  ReleaseHold<Vec<String>>,
 }
 
-fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<BlenderLikeCube>>) {
+fn spawn_face_labels(
+    mut commands: Commands,
+    cubes: Query<Entity, With<BlenderLikeCube>>,
+    cameras: Query<&OrbitCamInputMode, With<BlenderLikeCamera>>,
+) {
     let Ok(cube) = cubes.single() else {
         return;
     };
+    let Ok(mode) = cameras.single() else {
+        return;
+    };
 
-    let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Preset(PRESET));
+    let summary = describe_orbit_cam_controls(mode);
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
             spawn_face_panel(parent, face, FaceLabel::Orbit, &summary);

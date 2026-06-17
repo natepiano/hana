@@ -243,6 +243,8 @@ pub struct OrbitCamScalePolicy {
 pub struct OrbitCamSlowMode {
     /// Key whose press edge toggles slow mode for the routed camera.
     pub toggle_key: KeyCode,
+    /// Modifier keys held with `toggle_key` for the toggle to fire.
+    pub mod_keys:   ModKeys,
     /// Scale policy applied while resolving camera input.
     pub scale:      OrbitCamScalePolicy,
 }

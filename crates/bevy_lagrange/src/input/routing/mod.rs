@@ -40,7 +40,6 @@ pub use config::NoPositionFallback;
 pub(crate) use latches::CameraInputSourceLatches;
 pub(crate) use latches::OrbitCamSlowModeLatches;
 use latches::clear_latches_on_mode_replaced;
-use latches::toggle_slow_mode_latches;
 use snapshot::CameraRoutingSnapshot;
 use snapshot::CameraRoutingSnapshotFlags;
 use snapshot::collect_camera_snapshots;
@@ -48,6 +47,14 @@ use snapshot::collect_window_snapshots;
 
 use super::CameraInputSurfaceMetrics;
 use crate::system_sets::OrbitCamInputInternalSet;
+
+pub(super) fn is_slow_mode_active(slow_latches: &OrbitCamSlowModeLatches, camera: Entity) -> bool {
+    slow_latches.is_active(camera)
+}
+
+pub(super) fn toggle_slow_mode_latch(slow_latches: &mut OrbitCamSlowModeLatches, camera: Entity) {
+    slow_latches.toggle(camera);
+}
 
 /// Result of the per-frame input routing pass: which `OrbitCam` (if any)
 /// currently owns input, plus the cursor-surface metrics and blocker reasons
@@ -89,9 +96,7 @@ impl Plugin for OrbitCamRoutingPlugin {
             .add_observer(clear_latches_on_mode_replaced)
             .add_systems(
                 PreUpdate,
-                (resolve_camera_input_routing, toggle_slow_mode_latches)
-                    .chain()
-                    .in_set(OrbitCamInputInternalSet::Routing),
+                resolve_camera_input_routing.in_set(OrbitCamInputInternalSet::Routing),
             );
     }
 }
@@ -215,7 +220,6 @@ mod tests {
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamInputModeReplaced;
     use crate::input::OrbitCamPreset;
-    use crate::input::OrbitCamResolvedBindings;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     fn test_app() -> App {
@@ -307,60 +311,6 @@ mod tests {
                 .mouse_latch()
                 .is_none()
         );
-    }
-
-    #[test]
-    fn slow_mode_latch_toggles_on_press_edge() -> Result<(), &'static str> {
-        let mut app = test_app();
-        app.init_resource::<ButtonInput<KeyCode>>();
-        let bindings = OrbitCamPreset::BlenderLike
-            .to_bindings()
-            .map_err(|_| "preset should build")?;
-        let camera = spawn_camera(
-            app.world_mut(),
-            (
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-                OrbitCamResolvedBindings(bindings),
-            ),
-        );
-        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::CapsLock);
-
-        app.update();
-
-        assert!(
-            app.world()
-                .resource::<OrbitCamSlowModeLatches>()
-                .is_active(camera)
-        );
-
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .clear_just_pressed(KeyCode::CapsLock);
-        app.update();
-
-        assert!(
-            app.world()
-                .resource::<OrbitCamSlowModeLatches>()
-                .is_active(camera)
-        );
-
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .release(KeyCode::CapsLock);
-        app.world_mut()
-            .resource_mut::<ButtonInput<KeyCode>>()
-            .press(KeyCode::CapsLock);
-        app.update();
-
-        assert!(
-            !app.world()
-                .resource::<OrbitCamSlowModeLatches>()
-                .is_active(camera)
-        );
-        Ok(())
     }
 
     #[test]
