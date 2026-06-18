@@ -3,7 +3,7 @@
 Status: **proposal**. This is the span-driven screen-space sizing feature:
 derive a screen panel's width or height from two external anchor references. It
 is intentionally separate from point placement
-([`panel-anchoring.md`](panel-anchoring.md)).
+([`as-built/panel-anchoring.md`](as-built/panel-anchoring.md)).
 
 ## Goal
 
