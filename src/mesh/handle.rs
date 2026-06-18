@@ -37,12 +37,9 @@ pub(super) fn on_geometry_computed(
     trigger: On<Insert, ComputedCableGeometry>,
     cables: Query<CableMeshQuery>,
     endpoints: Query<&CableEndpoint>,
-    meshes: Option<ResMut<Assets<Mesh>>>,
+    mut meshes: ResMut<Assets<Mesh>>,
     mut commands: Commands,
 ) {
-    let Some(mut meshes) = meshes else {
-        return;
-    };
     let cable_entity = trigger.event_target();
     let Ok((computed_cable_geometry, cable_mesh_config, children, mesh_handle, _)) =
         cables.get(cable_entity)

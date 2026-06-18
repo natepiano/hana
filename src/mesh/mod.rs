@@ -27,5 +27,7 @@ pub use tube::generate_tube_mesh;
 pub(super) struct MeshPlugin;
 
 impl Plugin for MeshPlugin {
-    fn build(&self, app: &mut App) { app.add_observer(handle::on_geometry_computed); }
+    fn build(&self, app: &mut App) {
+        app.add_observer(handle::on_geometry_computed.run_if(resource_exists::<Assets<Mesh>>));
+    }
 }
