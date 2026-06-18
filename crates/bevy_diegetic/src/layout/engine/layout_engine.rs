@@ -117,15 +117,8 @@ impl LayoutEngine {
 
         // Phase 4: Position elements and generate the complete render
         // command stream (DFS).
-        let commands = positioning::position_and_render(
-            tree,
-            &mut computed,
-            root,
-            &wrapped,
-            viewport_width,
-            viewport_height,
-            font_scale,
-        );
+        let commands =
+            positioning::position_and_render(tree, &mut computed, root, &wrapped, font_scale);
 
         LayoutResult {
             computed,
@@ -230,8 +223,6 @@ impl LayoutResult {
             &self.computed,
             root,
             &self.wrapped,
-            self.viewport_width,
-            self.viewport_height,
             self.font_scale,
         );
     }

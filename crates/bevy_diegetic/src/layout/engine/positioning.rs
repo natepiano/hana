@@ -464,25 +464,19 @@ fn element_scissor_bounds(element: &Element, bounds: BoundingBox) -> BoundingBox
     }
 }
 
-/// Root DFS clip derived from the panel viewport. A `Fit` panel's size is not
-/// resolved when layout first runs, so its viewport arrives zero-area; a
-/// non-positive axis clips to an unbounded extent so owner-bounds draws clip to
-/// their owner element rather than to an empty rectangle.
-fn root_viewport_clip(viewport_width: f32, viewport_height: f32) -> BoundingBox {
-    const UNBOUNDED_EXTENT: f32 = 1.0e7;
+/// Root DFS clip: the panel's own laid-out box. `size_along_axis` resolves the
+/// root element to its real size during the sizing pass — content size for a
+/// `Fit` panel, viewport-derived for `Grow`/`Percent`, declared size for
+/// `Fixed` — so this is the correct owner-bounds clip on the very first solve,
+/// before the panel's stored dimensions (`panel.width()`/`height()`) are written
+/// back. A `Fit` screen panel's stored size lags one solve, but its root element
+/// is already content-sized here.
+const fn root_box_clip(width: f32, height: f32) -> BoundingBox {
     BoundingBox {
-        x:      0.0,
-        y:      0.0,
-        width:  if viewport_width > 0.0 {
-            viewport_width
-        } else {
-            UNBOUNDED_EXTENT
-        },
-        height: if viewport_height > 0.0 {
-            viewport_height
-        } else {
-            UNBOUNDED_EXTENT
-        },
+        x: 0.0,
+        y: 0.0,
+        width,
+        height,
     }
 }
 
@@ -695,12 +689,10 @@ pub(super) fn position_and_render(
     computed: &mut [ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    viewport_width: f32,
-    viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let viewport_clip = root_viewport_clip(viewport_width, viewport_height);
+    let root_clip = root_box_clip(computed[root].width, computed[root].height);
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(PositionStackEntry {
@@ -708,7 +700,7 @@ pub(super) fn position_and_render(
         x:            0.0,
         y:            0.0,
         visited:      false,
-        clip_context: ClipContext::root(viewport_clip),
+        clip_context: ClipContext::root(root_clip),
     });
 
     while let Some(entry) = stack.pop() {
@@ -758,18 +750,16 @@ pub(super) fn render_commands_from_geometry(
     computed: &[ComputedLayout],
     root: usize,
     wrapped: &[Option<WrappedText>],
-    viewport_width: f32,
-    viewport_height: f32,
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let viewport_clip = root_viewport_clip(viewport_width, viewport_height);
+    let root_clip = root_box_clip(computed[root].bounds.width, computed[root].bounds.height);
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(GeometryStackEntry {
         index:        root,
         visited:      false,
-        clip_context: ClipContext::root(viewport_clip),
+        clip_context: ClipContext::root(root_clip),
     });
 
     while let Some(entry) = stack.pop() {

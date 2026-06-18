@@ -740,6 +740,70 @@ mod tests {
         );
     }
 
+    /// A `Fit` screen panel runs its first solve before `resolve_screen_axis`
+    /// writes `panel.width()` back, so the viewport arrives zero-area. The root
+    /// clip is seeded from the solved root box (content-sized for `Fit`), not the
+    /// zero viewport, so an owner-bounds draw line must survive that first solve
+    /// rather than clipping against an empty rectangle.
+    #[test]
+    fn screen_fit_panel_emits_owner_clipped_line_on_first_solve() {
+        let mut app = make_app();
+        app.world_mut().spawn((
+            Window {
+                resolution: (1600_u32, 900_u32).into(),
+                ..Default::default()
+            },
+            PrimaryWindow,
+        ));
+        app.add_plugins(ScreenSpacePlugin);
+
+        let panel = DiegeticPanel::screen()
+            .size(Fit, Fit)
+            .layout(|b| {
+                b.with(
+                    crate::El::new()
+                        .width(crate::Sizing::fixed(Px(40.0)))
+                        .height(crate::Sizing::fixed(Px(12.0)))
+                        .draw(crate::PanelDraw::lines([crate::PanelLine::new(
+                            crate::PanelPoint::new(
+                                crate::PanelCoord::start(0.0),
+                                crate::PanelCoord::percent(0.5),
+                            ),
+                            crate::PanelPoint::new(
+                                crate::PanelCoord::end(0.0),
+                                crate::PanelCoord::percent(0.5),
+                            ),
+                        )
+                        .width(Px(1.0))
+                        .color(Color::WHITE)])),
+                    |_| {},
+                );
+            })
+            .build()
+            .expect("Fit screen panel with a connector line should build");
+
+        let entity = app.world_mut().spawn(panel).id();
+
+        // One update runs the first solve, where panel.width() is still 0.
+        app.update();
+
+        let computed = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel must exist");
+        let shape_commands = computed
+            .result()
+            .expect("layout result must exist")
+            .commands
+            .iter()
+            .filter(|command| matches!(command.kind, RenderCommandKind::Shapes { .. }))
+            .count();
+        assert_eq!(
+            shape_commands, 1,
+            "owner-bounds line must be emitted on the first (zero-viewport) solve",
+        );
+    }
+
     #[test]
     fn screen_anchor_offsets_equal_panel_size_for_all_sizing_modes() {
         let mut app = make_app();

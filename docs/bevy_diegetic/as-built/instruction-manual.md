@@ -271,33 +271,6 @@ Per word row: `[ word (FIT) ][ feeder cell (grow_min(MIN)) ]` inside a `Fit`-wid
 - **Line drawn off the element.** `PanelDraw` resolves in the element's *local* box; check you attached it to the element whose box you meant, and that `start`/`end`/`percent` are measured from the right edge.
 - **Panel border vanished / geometry shifted after adding an edge marker.** You positioned an overflowing shape with a layout `El` child + (negative) padding, which inflates the box. Use the overflow recipe in §8 instead.
 - **Percent child smaller than expected.** `Percent` is a fraction of the parent's *content* area (after padding and gaps), not its outer size (§7).
-- **`PanelDraw` lines/shapes render on one panel but not another with the same code.** A `Screen` panel sized `Fit` solves its first layout at viewport `(0,0)`; `OwnerBounds`-clipped draws are dropped at that solve and only return on a later solve at a resolved viewport. Whether that later solve happens is incidental to how often the panel re-sets its tree. See §15.
-
----
-
-## 15. Screen `Fit` panels: the zero-viewport first solve (`positioning.rs`)
-
-A `Screen` panel sized `Fit` has `panel.width()`/`panel.height()` equal to `0` until the screen-space sizing pass (`resolve_screen_axis`) writes the resolved content size back. So `compute_panel_layouts` runs the panel's **first** layout solve with `viewport_width = viewport_height = 0` (`compute_layout.rs:111`). A `World` `Fixed` panel never sees this — its size is non-zero from frame 1.
-
-What the zero viewport breaks: `PanelDraw::lines`/`PanelDraw::shapes` default to `DrawOverflow::Clipped` → `PanelShapeClipPolicy::OwnerBounds` (§8). At a zero-area viewport the root clip is empty, so `resolve_panel_line`/`resolve_panel_circle` return `None` and the geometry is **dropped from that solve's commands**. Text is not clipped this way, so labels render while drawn lines vanish — the exact signature of "the words highlight but the connector arrows never appear."
-
-Why a later solve matters, and why it is not guaranteed:
-
-- A `VisualOnly` recolor (§12) reuses the **cached** zero-viewport geometry. It can recolor commands that exist; it cannot resurrect lines that were never emitted. Toggling a connector's color does nothing if the line was dropped at the only solve.
-- Only a fresh full solve (`LayoutAffecting` or the initial solve) at a **resolved** viewport re-emits the lines.
-
-Whether a panel ever gets that resolved-viewport solve depends on whether its tree is re-set with a *layout-affecting* (content) change on a frame after its width resolved. A color-only re-set is `VisualOnly` and reuses the cached zero-viewport geometry (so it cannot bring the lines back). Measured on the camera control panel — the same `Fit` screen panel in both examples — the deciding factor is the default-preset coincidence, not timing:
-
-The panel spawns showing a placeholder built from `OrbitCamInputMode::default()`, and `OrbitCamPreset::default()` is **`SimpleMouse`** (`bindings/preset/enum_preset.rs`). `rebind_panel_on_route_change` then rebuilds the panel from the bound camera's *real* preset.
-
-- **`basic` / `SimpleMouse`:** the real preset equals the default the panel was born with → the rebuild is byte-identical → classified `Identical`, no re-solve. The panel keeps its single `vw=0 vh=0` solve forever, connectors dropped.
-- **`input_preset_blender_like` / `BlenderLike`:** the real preset differs from the default → the rebuild is a genuine content change → `LayoutAffecting` re-solve at `vw=168.9 vh=188.8`, after the viewport resolved → connectors survive.
-
-So the bug surfaced **only** on `SimpleMouse` and on no other preset, because `SimpleMouse` is the one preset whose real content matches the spawn-time default and therefore never forces the second solve.
-
-The fix (do not re-derive this): `root_viewport_clip` (`positioning.rs:471`) treats a non-positive viewport axis as unbounded (`1e7`). The first zero-viewport solve then clips `OwnerBounds` draws to their owner element box instead of to an empty rectangle, so connector geometry survives the very first solve regardless of any later re-solve. Both DFS entry points (`position_and_render`, `render_commands_from_geometry`) route their root clip through it.
-
-If you are debugging dropped `PanelDraw` geometry on a `Fit` screen panel: confirm the first solve's viewport, not the color. A line dropped by an empty `OwnerBounds` clip is a `None` from `resolve_panel_line`, and color is never a culling factor there.
 
 ---
 
@@ -311,4 +284,3 @@ If you are debugging dropped `PanelDraw` geometry on a `Fit` screen panel: confi
 - Text: `crates/bevy_diegetic/src/layout/text_props.rs`
 - Change classification: `crates/bevy_diegetic/src/layout/element.rs` (`classify_change`), `as-built/tree-change.md`
 - Connector example: `crates/fairy_dust/src/connector.rs`, `crates/fairy_dust/src/camera_control_panel/layout.rs`
-- Zero-viewport root clip (§15): `crates/bevy_diegetic/src/layout/engine/positioning.rs` (`root_viewport_clip`), viewport source `crates/bevy_diegetic/src/panel/compute_layout.rs:111`
