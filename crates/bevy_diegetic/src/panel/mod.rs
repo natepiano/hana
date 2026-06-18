@@ -107,6 +107,11 @@ pub enum PanelSystems {
     /// Runs gizmo reconciliation
     /// (`render_debug_gizmos`).
     RenderGizmos,
+    /// `PostUpdate` ordering point for animation systems that write
+    /// resolver-read inputs — `PanelAnchorPose`, and relation insert/remove at
+    /// state boundaries — before `resolve_world_space_panel_attachments`.
+    /// Writes here land this frame; writes after the resolver land next frame.
+    AnimateAnchorPose,
 }
 
 /// Headless layout runner — schedules `compute_panel_layouts` on `Update`
@@ -149,6 +154,11 @@ impl Plugin for HeadlessLayoutPlugin {
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),
+            )
+            .configure_sets(
+                PostUpdate,
+                PanelSystems::AnimateAnchorPose
+                    .before(world_anchoring::resolve_world_space_panel_attachments),
             )
             .add_systems(
                 PostUpdate,

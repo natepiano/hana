@@ -264,7 +264,6 @@ pub enum ControlActivation {
     Inactive,
 }
 
-/// Mutable highlight state for a spawned [`TitleBar`].
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TitleBarControlState {
     active_controls: Vec<String>,

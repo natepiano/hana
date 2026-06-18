@@ -1161,4 +1161,84 @@ mod tests {
             WorldAnchorResolveSkip::MixedCoordinateSpace,
         );
     }
+
+    mod anchor_animation {
+        use super::*;
+        use crate::panel::PanelSystems;
+        use crate::panel::world_anchoring;
+
+        const LIFT: f32 = 0.5;
+
+        #[derive(Resource)]
+        struct PoseLift(f32);
+
+        fn lift_anchored_pose(lift: Res<PoseLift>, mut poses: Query<&mut PanelAnchorPose>) {
+            for mut pose in &mut poses {
+                pose.translation.z = lift.0;
+            }
+        }
+
+        fn spawn_lift_scene(app: &mut App) -> (Entity, Entity) {
+            let target = app
+                .world_mut()
+                .spawn((
+                    world_panel(Anchor::TopLeft),
+                    Transform::from_xyz(1.0, 2.0, 0.0),
+                ))
+                .id();
+            let source = app
+                .world_mut()
+                .spawn((
+                    world_panel(Anchor::TopLeft),
+                    Transform::default(),
+                    AnchoredToPanel::new(target, Anchor::Center, Anchor::Center),
+                    PanelAnchorPose {
+                        rotation:    Quat::IDENTITY,
+                        translation: Vec3::ZERO,
+                    },
+                ))
+                .id();
+            (target, source)
+        }
+
+        #[test]
+        fn pose_written_in_animation_set_lands_this_frame() {
+            let mut app = app_with_world_anchoring();
+            app.insert_resource(PoseLift(LIFT));
+            app.add_systems(
+                PostUpdate,
+                lift_anchored_pose.in_set(PanelSystems::AnimateAnchorPose),
+            );
+            let (target, source) = spawn_lift_scene(&mut app);
+
+            app.update();
+
+            let target_pin = panel_anchor_point(&app, target, Anchor::Center);
+            assert_close_3d(
+                panel_anchor_point(&app, source, Anchor::Center),
+                target_pin + Vec3::Z * LIFT,
+            );
+        }
+
+        #[test]
+        fn pose_written_after_resolver_lands_next_frame() {
+            let mut app = app_with_world_anchoring();
+            app.insert_resource(PoseLift(LIFT));
+            app.add_systems(
+                PostUpdate,
+                lift_anchored_pose.after(world_anchoring::resolve_world_space_panel_attachments),
+            );
+            let (target, source) = spawn_lift_scene(&mut app);
+
+            app.update();
+            let target_pin = panel_anchor_point(&app, target, Anchor::Center);
+            assert_close_3d(panel_anchor_point(&app, source, Anchor::Center), target_pin);
+
+            app.update();
+            assert_close_3d(
+                panel_anchor_point(&app, source, Anchor::Center),
+                target_pin + Vec3::Z * LIFT,
+            );
+        }
+    }
 }
