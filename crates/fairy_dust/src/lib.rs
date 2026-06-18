@@ -112,12 +112,17 @@ pub use restart_camera::RestartCameraRestore;
 pub use restart_camera::RestoreWindowAnimation;
 pub use screen_panels::ControlActivation;
 pub use screen_panels::DescriptionPanel;
+pub use screen_panels::StatsPanelRow;
 pub use screen_panels::TitleBar;
 pub use screen_panels::TitleBarControl;
 pub use screen_panels::TitleBarOrientation;
 pub use screen_panels::TitleBarSegment;
 pub use screen_panels::TitleChip;
 pub use screen_panels::TitleChipActivation;
+pub use screen_panels::diegetic_stats_panel;
+pub use screen_panels::diegetic_stats_tree;
+pub use screen_panels::fps_stats_panel;
+pub use screen_panels::gpu_meter_panel;
 pub use screen_panels::screen_panel_frame;
 pub use screen_panels::screen_panel_material;
 

@@ -7,6 +7,8 @@ mod clip;
 mod constants;
 mod draw_order;
 mod material;
+#[cfg(test)]
+mod material_slot_lifetime_probe;
 mod panel_geometry;
 mod panel_shapes;
 mod panel_text;

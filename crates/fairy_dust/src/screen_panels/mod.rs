@@ -3,6 +3,7 @@
 mod constants;
 mod description;
 mod help_overlay;
+mod performance;
 mod title_bar;
 
 use bevy::picking::Pickable;
@@ -17,6 +18,11 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::default_panel_material;
 pub use description::DescriptionPanel;
+pub use performance::StatsPanelRow;
+pub use performance::diegetic_stats_panel;
+pub use performance::diegetic_stats_tree;
+pub use performance::fps_stats_panel;
+pub use performance::gpu_meter_panel;
 pub use title_bar::ControlActivation;
 pub use title_bar::TitleBar;
 pub use title_bar::TitleBarControl;

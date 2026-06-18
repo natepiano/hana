@@ -53,19 +53,16 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::AnchoredToPanel;
 use bevy_diegetic::AntiAlias;
-use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::DiegeticTextMut;
 use bevy_diegetic::El;
-use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelAnchorOffset;
-use bevy_diegetic::Percent;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
@@ -84,11 +81,15 @@ use diagnostics::timeline_duration_ms;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::StatsPanelRow;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
+use fairy_dust::diegetic_stats_panel;
+use fairy_dust::diegetic_stats_tree;
+use fairy_dust::fps_stats_panel;
+use fairy_dust::gpu_meter_panel;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
 
 // ── App — plugin wiring, resources, startup/update systems, shortcuts ────────
 
@@ -974,20 +975,8 @@ const SUB_ROW_INDENT: f32 = 12.0;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const PERF_PEAK_WINDOW_SECS: f32 = 5.0;
 const MILLISECONDS_PER_SECOND: f32 = 1000.0;
-/// Larger text on the label/value header line of each batch-stats group.
+/// Larger text for section labels in the left perf panel.
 const STATS_HEADER_FONT_SIZE: f32 = 15.0;
-/// Smaller text on the description line under each header.
-const STATS_DESC_FONT_SIZE: f32 = 9.0;
-/// Dim color for the description line.
-const STATS_DESC_COLOR: Color = Color::srgba(0.60, 0.66, 0.76, 0.68);
-/// Fixed width of each group: the label/value header spans it and the
-/// description wraps within it. Wider than the diagnostics overlay so most
-/// descriptions read on one line.
-const STATS_ROW_WIDTH: f32 = 260.0;
-/// Vertical gap between the header, description, and separator inside a group.
-const STATS_INTRA_GAP: f32 = 2.0;
-/// Vertical gap between groups.
-const STATS_GROUP_GAP: f32 = 6.0;
 
 /// Label hierarchy for the perf table.
 #[derive(Clone, Copy)]
@@ -1177,18 +1166,10 @@ struct LastDisplayedBatchStats {
 }
 
 fn spawn_status_overlay(mut commands: Commands) {
-    let unlit = screen_panel_material();
-    let built = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::TopLeft)
-        .screen_position(0.0, 0.0)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_overlay_tree(
-            &INITIAL_METRICS.map(String::from),
-            &INITIAL_METRICS.map(String::from),
-        ))
-        .build();
+    let built = fps_stats_panel(build_overlay_tree(
+        &INITIAL_METRICS.map(String::from),
+        &INITIAL_METRICS.map(String::from),
+    ));
     match built {
         Ok(built) => {
             commands.spawn((StatusPanel, built, Transform::default()));
@@ -1198,16 +1179,7 @@ fn spawn_status_overlay(mut commands: Commands) {
 }
 
 fn spawn_batch_stats_overlay(mut commands: Commands) {
-    let unlit = screen_panel_material();
-    let built = DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::TopRight)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_batch_stats_tree(&batch_stats_rows(
-            &BatchStatsValues::default(),
-        )))
-        .build();
+    let built = diegetic_stats_panel(&batch_stats_rows(&BatchStatsValues::default()));
     match built {
         Ok(built) => {
             commands.spawn((BatchStatsPanel, built, Transform::default()));
@@ -1285,18 +1257,6 @@ fn perf_header_value_style() -> TextStyle {
 fn stats_header_label_style() -> TextStyle {
     TextStyle::new(STATS_HEADER_FONT_SIZE)
         .with_color(STATUS_LABEL_COLOR)
-        .with_shadow_mode(GlyphShadowMode::None)
-}
-
-fn stats_header_value_style() -> TextStyle {
-    TextStyle::new(STATS_HEADER_FONT_SIZE)
-        .with_color(STATUS_TEXT_COLOR)
-        .with_shadow_mode(GlyphShadowMode::None)
-}
-
-fn stats_desc_style() -> TextStyle {
-    TextStyle::new(STATS_DESC_FONT_SIZE)
-        .with_color(STATS_DESC_COLOR)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
@@ -1506,95 +1466,6 @@ fn build_overlay_tree(now: &[String; METRIC_COUNT], max: &[String; METRIC_COUNT]
     builder.build()
 }
 
-/// Builds the upper-right batch-stats panel: one group per counter, each a
-/// label/value header line, smaller detail lines, and a thin separator.
-fn build_batch_stats_tree(rows: &[BatchStatsRow]) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    screen_panel_frame(
-        &mut builder,
-        Sizing::FIT,
-        Sizing::FIT,
-        DEFAULT_PANEL_BACKGROUND,
-        |builder| {
-            builder.with(
-                El::column()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .gap(STATS_GROUP_GAP),
-                |builder| {
-                    let last = rows.len().saturating_sub(1);
-                    for (index, row) in rows.iter().enumerate() {
-                        stats_group(builder, row, index == last);
-                    }
-                },
-            );
-        },
-    );
-    builder.build()
-}
-
-/// One batch-stats group: a larger label/value header line, smaller detail
-/// lines below it, and a thin separator (omitted on the final group).
-fn stats_group(builder: &mut LayoutBuilder, row: &BatchStatsRow, last: bool) {
-    builder.with(
-        El::column()
-            .width(Sizing::fixed(STATS_ROW_WIDTH))
-            .height(Sizing::FIT)
-            .gap(STATS_INTRA_GAP),
-        |builder| {
-            // Header: label left, value pushed to the right edge.
-            builder.with(
-                El::row()
-                    .width(Sizing::fixed(STATS_ROW_WIDTH))
-                    .height(Sizing::FIT)
-                    .alignment(AlignX::Left, AlignY::Center),
-                |builder| {
-                    builder.with(
-                        El::new()
-                            .width(Sizing::GROW)
-                            .height(Sizing::FIT)
-                            .alignment(AlignX::Left, AlignY::Center),
-                        |builder| {
-                            builder.text(row.label, stats_header_label_style());
-                        },
-                    );
-                    builder.with(
-                        El::new()
-                            .width(Sizing::FIT)
-                            .height(Sizing::FIT)
-                            .alignment(AlignX::Right, AlignY::Center),
-                        |builder| {
-                            builder.text(&row.value, stats_header_value_style());
-                        },
-                    );
-                },
-            );
-            // Detail lines: smaller text, wraps within the group width. Rows
-            // without details (e.g. `profile`) only render their header.
-            for detail in &row.details {
-                builder.with(
-                    El::new()
-                        .width(Sizing::fixed(STATS_ROW_WIDTH))
-                        .height(Sizing::FIT)
-                        .alignment(AlignX::Left, AlignY::Top),
-                    |builder| {
-                        builder.text(detail, stats_desc_style());
-                    },
-                );
-            }
-            if !last {
-                builder.with(
-                    El::new()
-                        .width(Sizing::fixed(STATS_ROW_WIDTH))
-                        .height(Sizing::fixed(PANEL_SEPARATOR_THICKNESS))
-                        .background(PANEL_SEPARATOR_COLOR),
-                    |_builder| {},
-                );
-            }
-        },
-    );
-}
-
 fn update_status_panel(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
@@ -1746,98 +1617,59 @@ struct BatchStatsValues {
     shadow_per_view:   Vec<u32>,
 }
 
-/// One batch-stats group: label/value header plus zero or more detail lines.
-struct BatchStatsRow {
-    label:   &'static str,
-    value:   String,
-    details: Vec<String>,
-}
-
 /// Label, value, and detail lines for each batch-stats group. The `batches`
 /// details enumerate the batch keys this scene routes to (fixed); the `shadow`
 /// details are the live per-view breakdown that produced the number this frame,
 /// read from the render phases.
-fn batch_stats_rows(values: &BatchStatsValues) -> Vec<BatchStatsRow> {
+fn batch_stats_rows(values: &BatchStatsValues) -> Vec<StatsPanelRow> {
     vec![
-        BatchStatsRow {
-            label:   "profile",
-            value:   if cfg!(debug_assertions) {
+        StatsPanelRow::new(
+            "profile",
+            if cfg!(debug_assertions) {
                 "debug"
             } else {
                 "release"
-            }
-            .to_string(),
-            details: Vec::new(),
-        },
-        BatchStatsRow {
-            label:   "world text labels",
-            value:   LABEL_COUNT.to_string(),
-            details: Vec::new(),
-        },
-        BatchStatsRow {
-            label:   "batched analytic draws",
-            value:   (values.text_batches + values.line_batches).to_string(),
-            details: vec![
-                format!(
-                    "{} text + {} panel-line",
-                    values.text_batches, values.line_batches
-                ),
-                "text and panel lines use separate batch stores".to_string(),
-            ],
-        },
-        BatchStatsRow {
-            label:   "sdf surface draws",
-            value:   values.sdf_quads.to_string(),
-            details: vec![
-                "backgrounds, borders, separator rectangles".to_string(),
-                "one retained PanelSdfMesh per surface".to_string(),
-            ],
-        },
-        BatchStatsRow {
-            label:   "text batches",
-            value:   values.text_batches.to_string(),
-            details: vec![
-                "PathBatchStore: compatible text/shapes share draws".to_string(),
-                "labels and panel text route together by key".to_string(),
-            ],
-        },
-        BatchStatsRow {
-            label:   "text runs",
-            value:   values.text_runs.to_string(),
-            details: vec!["text runs routed across all batches".to_string()],
-        },
-        BatchStatsRow {
-            label:   "glyphs",
-            value:   values.text_glyphs.to_string(),
-            details: vec!["glyph instances across all batches".to_string()],
-        },
-        BatchStatsRow {
-            label:   "panel-line batches",
-            value:   values.line_batches.to_string(),
-            details: vec![
-                "PanelLineBatchStore: compatible line primitives share draws".to_string(),
-            ],
-        },
-        BatchStatsRow {
-            label:   "line records",
-            value:   values.line_records.to_string(),
-            details: vec!["analytic path instances across line batches".to_string()],
-        },
-        BatchStatsRow {
-            label:   "buffer uploads",
-            value:   (values.text_instance_up + values.text_run_table_up + values.line_uploads)
-                .to_string(),
-            details: vec![
-                format!("text instances: {}", values.text_instance_up),
-                format!("text run table: {}", values.text_run_table_up),
-                format!("panel-line buffers: {}", values.line_uploads),
-            ],
-        },
-        BatchStatsRow {
-            label:   "shadow",
-            value:   values.shadow_items.to_string(),
-            details: shadow_details(&values.shadow_per_view),
-        },
+            },
+        ),
+        StatsPanelRow::new("world text labels", LABEL_COUNT.to_string()),
+        StatsPanelRow::new(
+            "batched analytic draws",
+            (values.text_batches + values.line_batches).to_string(),
+        )
+        .details([
+            format!(
+                "{} text + {} panel-line",
+                values.text_batches, values.line_batches
+            ),
+            "text and panel lines use separate batch stores".to_string(),
+        ]),
+        StatsPanelRow::new("sdf surface draws", values.sdf_quads.to_string()).details([
+            "backgrounds, borders, separator rectangles".to_string(),
+            "one retained PanelSdfMesh per surface".to_string(),
+        ]),
+        StatsPanelRow::new("text batches", values.text_batches.to_string()).details([
+            "PathBatchStore: compatible text/shapes share draws".to_string(),
+            "labels and panel text route together by key".to_string(),
+        ]),
+        StatsPanelRow::new("text runs", values.text_runs.to_string())
+            .detail("text runs routed across all batches"),
+        StatsPanelRow::new("glyphs", values.text_glyphs.to_string())
+            .detail("glyph instances across all batches"),
+        StatsPanelRow::new("panel-line batches", values.line_batches.to_string())
+            .detail("PanelLineBatchStore: compatible line primitives share draws"),
+        StatsPanelRow::new("line records", values.line_records.to_string())
+            .detail("analytic path instances across line batches"),
+        StatsPanelRow::new(
+            "buffer uploads",
+            (values.text_instance_up + values.text_run_table_up + values.line_uploads).to_string(),
+        )
+        .details([
+            format!("text instances: {}", values.text_instance_up),
+            format!("text run table: {}", values.text_run_table_up),
+            format!("panel-line buffers: {}", values.line_uploads),
+        ]),
+        StatsPanelRow::new("shadow", values.shadow_items.to_string())
+            .details(shadow_details(&values.shadow_per_view)),
     ]
 }
 
@@ -1900,7 +1732,7 @@ fn update_batch_stats_panel(
     let rows = batch_stats_rows(&values);
     let mut key = String::new();
     for row in &rows {
-        key.push_str(row.label);
+        key.push_str(&row.label);
         key.push('=');
         key.push_str(&row.value);
         key.push('|');
@@ -1912,7 +1744,7 @@ fn update_batch_stats_panel(
     if key != last_displayed.text {
         last_displayed.text.clone_from(&key);
         for entity in &panels {
-            commands.set_tree(entity, build_batch_stats_tree(&rows));
+            commands.set_tree(entity, diegetic_stats_tree(&rows));
         }
     }
 }
@@ -2075,10 +1907,8 @@ const GPU_PIPELINE_LANE_ROW_HEIGHT: f32 = 21.0;
 const GPU_PIPELINE_MIN_AXIS_MS: f32 = 1.0;
 /// Timeline spacers thinner than this track fraction are dropped.
 const GPU_PIPELINE_MIN_SEGMENT_FRACTION: f32 = 0.001;
-/// Screen-width fraction occupied by the GPU pipeline visualization.
-const GPU_PIPELINE_PANEL_WIDTH_FRACTION: f32 = 0.8;
 /// Segment label font size in panel pixels.
-const GPU_PIPELINE_SEGMENT_LABEL_FONT_SIZE: f32 = STATS_DESC_FONT_SIZE;
+const GPU_PIPELINE_SEGMENT_LABEL_FONT_SIZE: f32 = 9.0;
 /// Edge padding for leading- and trailing-aligned segment labels.
 const GPU_PIPELINE_SEGMENT_EDGE_LABEL_PADDING: f32 = 6.0;
 
@@ -2275,14 +2105,7 @@ impl TimelineSegment {
 }
 
 fn spawn_gpu_pipeline_overlay(mut commands: Commands) {
-    let unlit = screen_panel_material();
-    let built = DiegeticPanel::screen()
-        .size(Percent(GPU_PIPELINE_PANEL_WIDTH_FRACTION), Fit)
-        .anchor(Anchor::BottomLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(build_gpu_pipeline_tree(&GpuPipelineBars::default()))
-        .build();
+    let built = gpu_meter_panel(build_gpu_pipeline_tree(&GpuPipelineBars::default()));
     match built {
         Ok(built) => {
             commands.spawn((GpuPipelinePanel, built, Transform::default()));
