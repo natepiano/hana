@@ -11,9 +11,6 @@ use bevy_kana::ToU32;
 
 use super::target_position::TargetPosition;
 use super::winit_info::X11FrameCompensated;
-use crate::ManagedWindow;
-use crate::Platform;
-use crate::WindowKey;
 use crate::constants::MILLIS_PER_SECOND;
 use crate::constants::PRIMARY_MONITOR_INDEX;
 use crate::constants::SETTLE_STABILITY_SECS;
@@ -21,6 +18,9 @@ use crate::constants::SETTLE_TIMEOUT_SECS;
 use crate::events::WindowRestoreMismatch;
 use crate::events::WindowRestored;
 use crate::monitors::CurrentMonitor;
+use crate::ManagedWindow;
+use crate::Platform;
+use crate::WindowKey;
 
 /// Tracks the two-timer settling state after restore completes.
 #[derive(Debug, Clone, Reflect)]
@@ -125,24 +125,30 @@ fn check_settle_matches(
 }
 
 #[derive(Clone, Copy)]
-enum MatchState {
+enum Comparison {
     Match,
     Mismatch,
 }
 
-impl From<bool> for MatchState {
-    fn from(matches: bool) -> Self { if matches { Self::Match } else { Self::Mismatch } }
+impl From<bool> for Comparison {
+    fn from(matches: bool) -> Self {
+        if matches {
+            Self::Match
+        } else {
+            Self::Mismatch
+        }
+    }
 }
 
-impl MatchState {
+impl Comparison {
     const fn is_match(self) -> bool { matches!(self, Self::Match) }
 }
 
 struct SettleComparison {
-    position: MatchState,
-    size:     MatchState,
-    mode:     MatchState,
-    monitor:  MatchState,
+    position: Comparison,
+    size:     Comparison,
+    mode:     Comparison,
+    monitor:  Comparison,
 }
 
 impl SettleComparison {
