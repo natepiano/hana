@@ -3,11 +3,13 @@
 //! components, and supplies the label helpers used by the layout pass.
 
 use bevy::prelude::*;
+use bevy_enhanced_input::prelude::ModKeys;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::OrbitCamSlowMode;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 
@@ -17,10 +19,11 @@ use super::guidance::CameraGuidanceRow;
 
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
 pub(super) struct CameraGuidanceSnapshot {
-    pub(super) camera_label: String,
-    pub(super) mode_label:   String,
-    pub(super) mode_value:   String,
-    pub(super) rows:         Vec<CameraGuidanceRow>,
+    pub(super) camera_label:            String,
+    pub(super) mode_label:              String,
+    pub(super) mode_value:              String,
+    pub(super) slow_mode_binding_label: Option<String>,
+    pub(super) rows:                    Vec<CameraGuidanceRow>,
 }
 
 pub(super) fn resolve_guidance_snapshot(
@@ -43,6 +46,7 @@ pub(super) fn resolve_guidance_snapshot(
                 .unwrap_or_else(|| "OrbitCam".to_string()),
             mode_label: guidance.mode_label.clone().unwrap_or(mode_label),
             mode_value: guidance.mode_value.clone().unwrap_or(mode_value),
+            slow_mode_binding_label: slow_mode_binding_label(mode),
             rows,
         };
     }
@@ -52,10 +56,11 @@ pub(super) fn resolve_guidance_snapshot(
         describe_orbit_cam_controls,
     );
     CameraGuidanceSnapshot {
-        camera_label: name_label.or(title_label).unwrap_or(summary.camera_label),
-        mode_label:   summary.mode_label,
-        mode_value:   summary.mode_value,
-        rows:         summary.rows.into_iter().map(Into::into).collect(),
+        camera_label:            name_label.or(title_label).unwrap_or(summary.camera_label),
+        mode_label:              summary.mode_label,
+        mode_value:              summary.mode_value,
+        slow_mode_binding_label: slow_mode_binding_label(mode),
+        rows:                    summary.rows.into_iter().map(Into::into).collect(),
     }
 }
 
@@ -83,6 +88,22 @@ const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
         OrbitCamPreset::BlenderLikeKeyboard => "BlenderLikeKeyboard",
         OrbitCamPreset::Gamepad => "Gamepad",
         _ => "Custom",
+    }
+}
+
+fn slow_mode_binding_label(mode: Option<&OrbitCamInputMode>) -> Option<String> {
+    let slow_mode = match mode? {
+        OrbitCamInputMode::Preset(preset) => preset.to_bindings().ok()?.slow_mode().cloned(),
+        OrbitCamInputMode::Bindings(bindings) => bindings.slow_mode().cloned(),
+        _ => None,
+    }?;
+    Some(slow_mode_binding_hint(&slow_mode).to_string())
+}
+
+const fn slow_mode_binding_hint(slow_mode: &OrbitCamSlowMode) -> &'static str {
+    match (slow_mode.toggle_key, slow_mode.mod_keys) {
+        (KeyCode::KeyS, ModKeys::ALT) => "alt-s",
+        _ => "slow",
     }
 }
 
@@ -187,5 +208,27 @@ mod tests {
             CameraInteractionSources::NONE,
             Some(ZoomDirection::In)
         ));
+    }
+
+    #[test]
+    fn blender_like_snapshot_includes_slow_mode_binding_hint() {
+        let snapshot = resolve_guidance_snapshot(
+            None,
+            None,
+            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)),
+        );
+
+        assert_eq!(snapshot.slow_mode_binding_label.as_deref(), Some("alt-s"));
+    }
+
+    #[test]
+    fn simple_mouse_snapshot_omits_slow_mode_hint() {
+        let snapshot = resolve_guidance_snapshot(
+            None,
+            None,
+            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)),
+        );
+
+        assert_eq!(snapshot.slow_mode_binding_label, None);
     }
 }

@@ -35,6 +35,7 @@ use crate::input::OrbitCamManual;
 use crate::input::OrbitCamOrbitAction;
 use crate::input::OrbitCamPanAction;
 use crate::input::OrbitCamSlowModeLatches;
+use crate::input::OrbitCamSlowModeState;
 use crate::input::OrbitCamZoomCoarseAction;
 use crate::input::OrbitCamZoomSmoothAction;
 use crate::input::ResolvedOrbitCamInputRoute;
@@ -64,6 +65,7 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
             &OrbitCamInputActionEntities,
             &OrbitCamAdapterFrameSources,
             Option<&OrbitCamInputContextGated>,
+            Option<&mut OrbitCamSlowModeState>,
             &mut OrbitCamInput,
         ),
         Without<OrbitCamManual>,
@@ -75,7 +77,9 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
     keyboard: Option<Res<ButtonInput<KeyCode>>>,
     mouse_buttons: Option<Res<ButtonInput<MouseButton>>>,
 ) {
-    for (camera, bindings, actions, frame_sources, gated, mut input) in &mut cameras {
+    for (camera, bindings, actions, frame_sources, gated, slow_mode_state, mut input) in
+        &mut cameras
+    {
         input.clear();
         if route.routed_camera() != Some(camera)
             || route.metrics_for(camera).is_none()
@@ -93,16 +97,17 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
         {
             routing::toggle_slow_mode_latch(&mut slow_latches, camera);
         }
+        let slow_mode_active = routing::is_slow_mode_active(&slow_latches, camera);
+        if let Some(mut state) = slow_mode_state {
+            state.set_active(slow_mode_active);
+        }
 
         let orbit_engaged = bool_action_active(actions.orbit_engaged, &bool_actions.orbit, &states);
         let pan_engaged = bool_action_active(actions.pan_engaged, &bool_actions.pan, &states);
         let zoom_engaged = bool_action_active(actions.zoom_engaged, &bool_actions.zoom, &states);
         let pan_overrides_orbit =
             pan_overrides_orbit(&bindings.0, keyboard.as_deref(), mouse_buttons.as_deref());
-        let adapter_scale = AdapterScale::from_bindings(
-            &bindings.0,
-            routing::is_slow_mode_active(&slow_latches, camera),
-        );
+        let adapter_scale = AdapterScale::from_bindings(&bindings.0, slow_mode_active);
         let orbit_sources = held_sources_for_state(
             HeldEngagement::from(orbit_engaged),
             bindings.0.orbit().entries(),

@@ -96,6 +96,27 @@ pub(crate) struct OrbitCamSlowModeLatches {
     active_cameras: HashSet<Entity>,
 }
 
+/// Read-only state describing whether an `OrbitCam`'s toggled slow mode is
+/// active.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Default)]
+pub struct OrbitCamSlowModeState {
+    active: bool,
+}
+
+impl OrbitCamSlowModeState {
+    /// Returns `true` while the camera's toggled slow mode is active.
+    #[must_use]
+    pub const fn is_active(self) -> bool { self.active }
+
+    /// Creates a component state from an active flag.
+    #[must_use]
+    pub const fn from_active(active: bool) -> Self { Self { active } }
+
+    /// Updates whether the camera's toggled slow mode is active.
+    pub const fn set_active(&mut self, active: bool) { self.active = active; }
+}
+
 impl OrbitCamSlowModeLatches {
     pub(super) fn is_active(&self, camera: Entity) -> bool { self.active_cameras.contains(&camera) }
 

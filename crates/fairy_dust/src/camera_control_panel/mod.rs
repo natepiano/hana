@@ -29,6 +29,7 @@ use bevy_lagrange::OrbitCamInteractionSourcesChanged;
 use bevy_lagrange::OrbitCamInteractionSpeedChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
+use bevy_lagrange::OrbitCamSlowModeState;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
@@ -74,6 +75,7 @@ pub(crate) fn install(app: &mut App) {
         PostUpdate,
         (
             rebind_panel_on_route_change,
+            track_slow_mode_state,
             track_live_zoom_direction,
             tick_highlight_release,
             repaint_panel_display,
@@ -139,6 +141,7 @@ fn rebind_panel_on_route_change(
         Option<&Name>,
         Option<&CameraGuidance>,
         Option<&OrbitCamInteractionState>,
+        Option<&OrbitCamSlowModeState>,
         Option<&OrbitCamInputMode>,
     )>,
     orbit_cameras: Query<Entity, With<OrbitCamInputMode>>,
@@ -168,12 +171,15 @@ fn rebind_panel_on_route_change(
     let Some(cam) = routed else {
         return;
     };
-    let Ok((name, guidance, state, mode)) = cameras.get(cam) else {
+    let Ok((name, guidance, state, slow_mode, mode)) = cameras.get(cam) else {
         return;
     };
 
     let snapshot = resolve_guidance_snapshot(name, guidance, mode);
-    let display = CameraGuidanceDisplay::from_interaction_state(state.copied().unwrap_or_default());
+    let display = CameraGuidanceDisplay::from_camera_state(
+        state.copied().unwrap_or_default(),
+        slow_mode.is_some_and(|state| state.is_active()),
+    );
     *display_state = CameraGuidanceDisplayState::from_display(display);
     commands.entity(panel_entity).insert(snapshot.clone());
     commands.set_tree(
@@ -216,6 +222,21 @@ fn refresh_on_sources_changed(
         return;
     }
     display.set_sources(event.kind, event.current);
+}
+
+fn track_slow_mode_state(
+    cameras: Query<&OrbitCamSlowModeState>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    let Some(camera) = panel_marker.bound_camera else {
+        return;
+    };
+    display.set_slow_mode_active(
+        cameras
+            .get(camera)
+            .is_ok_and(|slow_mode| slow_mode.is_active()),
+    );
 }
 
 /// Mirrors the bound camera's reported zoom direction onto the panel display

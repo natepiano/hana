@@ -39,6 +39,7 @@ pub use config::CameraInputRoutingConfig;
 pub use config::NoPositionFallback;
 pub(crate) use latches::CameraInputSourceLatches;
 pub(crate) use latches::OrbitCamSlowModeLatches;
+pub use latches::OrbitCamSlowModeState;
 use latches::clear_latches_on_mode_replaced;
 use snapshot::CameraRoutingSnapshot;
 use snapshot::CameraRoutingSnapshotFlags;
@@ -119,9 +120,11 @@ fn resolve_camera_input_routing(world: &mut World) {
         latches.recover_unavailable_latches(&available_cameras);
         latches.clone()
     };
-    world
-        .resource_mut::<OrbitCamSlowModeLatches>()
-        .recover_unavailable_latches(&available_cameras);
+    let slow_latches = {
+        let mut slow_latches = world.resource_mut::<OrbitCamSlowModeLatches>();
+        slow_latches.recover_unavailable_latches(&available_cameras);
+        slow_latches.clone()
+    };
 
     let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras, &latches);
     let mut resolved = ResolvedOrbitCamInputRoute {
@@ -138,6 +141,7 @@ fn resolve_camera_input_routing(world: &mut World) {
             OrbitCamInputContextGated {
                 context_gate: ContextGate::from(!blockers.is_blocked()),
             },
+            OrbitCamSlowModeState::from_active(slow_latches.is_active(snapshot.entity)),
         ));
         resolved.metrics.insert(snapshot.entity, snapshot.metrics);
         resolved.blockers.insert(snapshot.entity, blockers);

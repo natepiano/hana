@@ -152,6 +152,7 @@ pub(super) use routing::OrbitCamInputBlockers;
 pub(super) use routing::OrbitCamInputContextGated;
 pub(super) use routing::OrbitCamRoutingPlugin;
 pub(crate) use routing::OrbitCamSlowModeLatches;
+pub use routing::OrbitCamSlowModeState;
 pub use routing::ResolvedOrbitCamInputRoute;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;

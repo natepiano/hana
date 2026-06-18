@@ -47,6 +47,7 @@ pub(super) struct CameraGuidanceDisplayState {
     pan_speed:               Option<ControlSpeed>,
     zoom_speed:              Option<ControlSpeed>,
     zoom_direction:          Option<ZoomDirection>,
+    slow_mode_active:        bool,
     releases:                ReleaseCountdowns,
     pub(super) render_state: RenderState,
 }
@@ -58,27 +59,29 @@ impl Default for CameraGuidanceDisplayState {
 impl CameraGuidanceDisplayState {
     pub(super) const fn from_display(display: CameraGuidanceDisplay) -> Self {
         Self {
-            orbit:          display.orbit,
-            pan:            display.pan,
-            zoom:           display.zoom,
-            orbit_speed:    display.orbit_speed,
-            pan_speed:      display.pan_speed,
-            zoom_speed:     display.zoom_speed,
-            zoom_direction: display.zoom_direction,
-            releases:       ReleaseCountdowns::empty(),
-            render_state:   RenderState::Idle,
+            orbit:            display.orbit,
+            pan:              display.pan,
+            zoom:             display.zoom,
+            orbit_speed:      display.orbit_speed,
+            pan_speed:        display.pan_speed,
+            zoom_speed:       display.zoom_speed,
+            zoom_direction:   display.zoom_direction,
+            slow_mode_active: display.slow_mode_active,
+            releases:         ReleaseCountdowns::empty(),
+            render_state:     RenderState::Idle,
         }
     }
 
     pub(super) const fn display(self) -> CameraGuidanceDisplay {
         CameraGuidanceDisplay {
-            orbit:          self.orbit,
-            pan:            self.pan,
-            zoom:           self.zoom,
-            orbit_speed:    self.orbit_speed,
-            pan_speed:      self.pan_speed,
-            zoom_speed:     self.zoom_speed,
-            zoom_direction: self.zoom_direction,
+            orbit:            self.orbit,
+            pan:              self.pan,
+            zoom:             self.zoom,
+            orbit_speed:      self.orbit_speed,
+            pan_speed:        self.pan_speed,
+            zoom_speed:       self.zoom_speed,
+            zoom_direction:   self.zoom_direction,
+            slow_mode_active: self.slow_mode_active,
         }
     }
 
@@ -147,6 +150,13 @@ impl CameraGuidanceDisplayState {
             self.render_state = RenderState::Pending;
         }
     }
+
+    pub(super) const fn set_slow_mode_active(&mut self, active: bool) {
+        if self.slow_mode_active != active {
+            self.slow_mode_active = active;
+            self.render_state = RenderState::Pending;
+        }
+    }
 }
 
 fn tick_release_countdown(
@@ -170,25 +180,30 @@ fn tick_release_countdown(
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CameraGuidanceDisplay {
-    pub(super) orbit:          CameraInteractionSources,
-    pub(super) pan:            CameraInteractionSources,
-    pub(super) zoom:           CameraInteractionSources,
-    pub(super) orbit_speed:    Option<ControlSpeed>,
-    pub(super) pan_speed:      Option<ControlSpeed>,
-    pub(super) zoom_speed:     Option<ControlSpeed>,
-    pub(super) zoom_direction: Option<ZoomDirection>,
+    pub(super) orbit:            CameraInteractionSources,
+    pub(super) pan:              CameraInteractionSources,
+    pub(super) zoom:             CameraInteractionSources,
+    pub(super) orbit_speed:      Option<ControlSpeed>,
+    pub(super) pan_speed:        Option<ControlSpeed>,
+    pub(super) zoom_speed:       Option<ControlSpeed>,
+    pub(super) zoom_direction:   Option<ZoomDirection>,
+    pub(super) slow_mode_active: bool,
 }
 
 impl CameraGuidanceDisplay {
-    pub(super) const fn from_interaction_state(state: OrbitCamInteractionState) -> Self {
+    pub(super) const fn from_camera_state(
+        state: OrbitCamInteractionState,
+        slow_mode_active: bool,
+    ) -> Self {
         Self {
-            orbit:          state.orbit_sources(),
-            pan:            state.pan_sources(),
-            zoom:           state.zoom_sources(),
-            orbit_speed:    state.speed(OrbitCamInteractionKind::Orbit),
-            pan_speed:      state.speed(OrbitCamInteractionKind::Pan),
-            zoom_speed:     state.speed(OrbitCamInteractionKind::Zoom),
+            orbit: state.orbit_sources(),
+            pan: state.pan_sources(),
+            zoom: state.zoom_sources(),
+            orbit_speed: state.speed(OrbitCamInteractionKind::Orbit),
+            pan_speed: state.speed(OrbitCamInteractionKind::Pan),
+            zoom_speed: state.speed(OrbitCamInteractionKind::Zoom),
             zoom_direction: state.zoom_direction(),
+            slow_mode_active,
         }
     }
 
@@ -202,6 +217,8 @@ impl CameraGuidanceDisplay {
     }
 
     pub(super) const fn zoom_direction(self) -> Option<ZoomDirection> { self.zoom_direction }
+
+    pub(super) const fn slow_mode_active(self) -> bool { self.slow_mode_active }
 
     pub(super) const fn speed(self, kind: OrbitCamInteractionKind) -> Option<ControlSpeed> {
         match kind {
@@ -308,5 +325,22 @@ mod tests {
         assert!(display.display().pan.is_empty());
         assert_eq!(display.releases.pan, None);
         assert_eq!(display.render_state, RenderState::Pending);
+    }
+
+    #[test]
+    fn slow_mode_active_marks_pending_only_on_change() {
+        let mut display = CameraGuidanceDisplayState::default();
+
+        display.set_slow_mode_active(false);
+        assert!(!display.display().slow_mode_active);
+        assert_eq!(display.render_state, RenderState::Idle);
+
+        display.set_slow_mode_active(true);
+        assert!(display.display().slow_mode_active);
+        assert_eq!(display.render_state, RenderState::Pending);
+
+        display.render_state = RenderState::Idle;
+        display.set_slow_mode_active(true);
+        assert_eq!(display.render_state, RenderState::Idle);
     }
 }

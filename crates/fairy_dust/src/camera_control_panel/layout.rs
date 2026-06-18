@@ -33,6 +33,7 @@ use super::constants::TABLE_COLUMN_GAP;
 use super::constants::TABLE_DIVIDER_WIDTH;
 use super::constants::TABLE_GROUP_GAP;
 use super::constants::TABLE_ROW_GAP;
+use super::constants::TABLE_SECTION_DIVIDER_GAP;
 use super::constants::TRUNK_END_GAP;
 use super::display::CameraGuidanceDisplay;
 use super::snapshot;
@@ -126,7 +127,7 @@ fn build_guidance_table(
         El::column()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .gap(Px(TABLE_GROUP_GAP))
+            .gap(Px(TABLE_SECTION_DIVIDER_GAP))
             .child_divider(ChildDivider::new(TABLE_DIVIDER_WIDTH, BORDER_DIM)),
         |builder| {
             for speed in speeds {
@@ -140,6 +141,90 @@ fn build_guidance_table(
                     active,
                 );
             }
+            if let Some(binding_label) = snapshot.slow_mode_binding_label.as_deref() {
+                build_slow_mode_row(
+                    builder,
+                    binding_label,
+                    display.slow_mode_active(),
+                    label,
+                    active,
+                );
+            }
+        },
+    );
+}
+
+fn build_slow_mode_row(
+    builder: &mut LayoutBuilder,
+    binding_label: &str,
+    slow_mode_active: bool,
+    label: &TextStyle,
+    active: &TextStyle,
+) {
+    let style = if slow_mode_active { active } else { label };
+    let connector_color = if slow_mode_active {
+        ACTIVE_COLOR
+    } else {
+        Color::NONE
+    };
+    let spacer_layout = SpacerLayout {
+        word_count:        1,
+        label_line_height: LABEL_LINE_HEIGHT,
+        row_gap:           Px(TABLE_ROW_GAP),
+        line_width:        CONNECTOR_LINE_WIDTH,
+        cap_size:          CONNECTOR_CAP_SIZE,
+        level_epsilon:     CONNECTOR_LEVEL_EPSILON,
+        trunk_end_gap:     TRUNK_END_GAP,
+        colors:            ConnectorColors {
+            active: ACTIVE_COLOR,
+            idle:   Color::NONE,
+        },
+    };
+    let spacer_lines =
+        connector::spacer_lines(spacer_layout, &[slow_mode_active], slow_mode_active);
+
+    builder.with(
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(Px(0.0))
+            .align_y(AlignY::Center),
+        |builder| {
+            builder.with(
+                El::row()
+                    .width(Sizing::GROW)
+                    .height(Sizing::fixed(LABEL_LINE_HEIGHT))
+                    .align_y(AlignY::Center),
+                |builder| {
+                    builder.text(binding_label, style.clone());
+                    builder.with(
+                        El::new()
+                            .width(Sizing::grow_min(FEEDER_CELL_MIN))
+                            .height(Sizing::GROW)
+                            .draw(PanelDraw::lines([connector::feeder_line(
+                                FEEDER_START_GAP,
+                                CONNECTOR_LINE_WIDTH,
+                                connector_color,
+                            )])),
+                        |_| {},
+                    );
+                },
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(SPACER_WIDTH))
+                    .height(Sizing::GROW)
+                    .draw(PanelDraw::lines(spacer_lines)),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
+                    .height(Sizing::FIT),
+                |builder| {
+                    builder.text("Slow", style.clone());
+                },
+            );
         },
     );
 }
@@ -210,12 +295,19 @@ fn action_rows_element(speed_column: SpeedColumn) -> El<Column> {
     let element = El::column()
         .width(Sizing::GROW)
         .height(Sizing::FIT)
-        .gap(Px(TABLE_GROUP_GAP));
+        .gap(Px(action_row_group_gap(speed_column)));
     match speed_column {
         SpeedColumn::Hidden => {
             element.child_divider(ChildDivider::new(TABLE_DIVIDER_WIDTH, BORDER_DIM))
         },
         SpeedColumn::Shown => element,
+    }
+}
+
+const fn action_row_group_gap(speed_column: SpeedColumn) -> f32 {
+    match speed_column {
+        SpeedColumn::Hidden => TABLE_SECTION_DIVIDER_GAP,
+        SpeedColumn::Shown => TABLE_GROUP_GAP,
     }
 }
 

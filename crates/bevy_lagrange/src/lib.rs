@@ -139,6 +139,7 @@ pub use input::OrbitCamScalePolicy;
 pub use input::OrbitCamSimpleMouseKeyboardPreset;
 pub use input::OrbitCamSimpleMousePreset;
 pub use input::OrbitCamSlowMode;
+pub use input::OrbitCamSlowModeState;
 pub use input::OrbitCamTouchBinding;
 pub use input::OrbitCamTrackpadScroll;
 pub use input::OrbitCamZoomBinding;
