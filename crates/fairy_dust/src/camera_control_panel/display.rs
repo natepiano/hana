@@ -1,7 +1,9 @@
 //! Display state: mirrors the per-kind interaction sources, speed, and live
 //! zoom direction the panel highlights. lagrange debounces the reported sources
-//! (see `bevy_lagrange::OrbitCamReportingDebounce`), so the panel holds nothing
-//! itself — it stores whatever lagrange reports and rebuilds when that changes.
+//! (see `bevy_lagrange::OrbitCamReportingDebounce`), and the panel holds
+//! released sources briefly so highlights can fade after input ends.
+
+use std::time::Duration;
 
 use bevy::prelude::*;
 use bevy_lagrange::CameraInteractionSources;
@@ -10,11 +12,30 @@ use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::ZoomDirection;
 
+use super::constants::HIGHLIGHT_RELEASE_HOLD;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) enum RenderState {
     #[default]
     Idle,
     Pending,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ReleaseCountdowns {
+    orbit: Option<Duration>,
+    pan:   Option<Duration>,
+    zoom:  Option<Duration>,
+}
+
+impl ReleaseCountdowns {
+    const fn empty() -> Self {
+        Self {
+            orbit: None,
+            pan:   None,
+            zoom:  None,
+        }
+    }
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
@@ -26,6 +47,7 @@ pub(super) struct CameraGuidanceDisplayState {
     pan_speed:               Option<ControlSpeed>,
     zoom_speed:              Option<ControlSpeed>,
     zoom_direction:          Option<ZoomDirection>,
+    releases:                ReleaseCountdowns,
     pub(super) render_state: RenderState,
 }
 
@@ -43,6 +65,7 @@ impl CameraGuidanceDisplayState {
             pan_speed:      display.pan_speed,
             zoom_speed:     display.zoom_speed,
             zoom_direction: display.zoom_direction,
+            releases:       ReleaseCountdowns::empty(),
             render_state:   RenderState::Idle,
         }
     }
@@ -59,21 +82,41 @@ impl CameraGuidanceDisplayState {
         }
     }
 
-    /// Mirrors a kind's reported interaction sources. lagrange has already
-    /// debounced them, so the panel stores them verbatim and rebuilds on change.
+    /// Mirrors a kind's reported interaction sources and holds the displayed
+    /// sources through the panel release window.
     pub(super) fn set_sources(
         &mut self,
         kind: OrbitCamInteractionKind,
         sources: CameraInteractionSources,
     ) {
-        let slot = match kind {
-            OrbitCamInteractionKind::Orbit => &mut self.orbit,
-            OrbitCamInteractionKind::Pan => &mut self.pan,
-            OrbitCamInteractionKind::Zoom => &mut self.zoom,
+        let (slot, release) = match kind {
+            OrbitCamInteractionKind::Orbit => (&mut self.orbit, &mut self.releases.orbit),
+            OrbitCamInteractionKind::Pan => (&mut self.pan, &mut self.releases.pan),
+            OrbitCamInteractionKind::Zoom => (&mut self.zoom, &mut self.releases.zoom),
             _ => return,
         };
+
+        if sources.is_empty() {
+            if !slot.is_empty() {
+                *release = Some(HIGHLIGHT_RELEASE_HOLD);
+            }
+            return;
+        }
+
         if *slot != sources {
             *slot = sources;
+            self.render_state = RenderState::Pending;
+        }
+        *release = None;
+    }
+
+    pub(super) fn tick_highlight_release(&mut self, delta: Duration) {
+        let orbit_expired =
+            tick_release_countdown(&mut self.orbit, &mut self.releases.orbit, delta);
+        let pan_expired = tick_release_countdown(&mut self.pan, &mut self.releases.pan, delta);
+        let zoom_expired = tick_release_countdown(&mut self.zoom, &mut self.releases.zoom, delta);
+
+        if orbit_expired || pan_expired || zoom_expired {
             self.render_state = RenderState::Pending;
         }
     }
@@ -104,6 +147,25 @@ impl CameraGuidanceDisplayState {
             self.render_state = RenderState::Pending;
         }
     }
+}
+
+fn tick_release_countdown(
+    sources: &mut CameraInteractionSources,
+    release: &mut Option<Duration>,
+    delta: Duration,
+) -> bool {
+    let Some(remaining) = release.as_mut() else {
+        return false;
+    };
+    let next = remaining.saturating_sub(delta);
+    if next == Duration::ZERO {
+        *sources = CameraInteractionSources::NONE;
+        *release = None;
+        return true;
+    }
+
+    *remaining = next;
+    false
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -183,6 +245,13 @@ mod tests {
 
         display.set_sources(
             OrbitCamInteractionKind::Orbit,
+            CameraInteractionSources::NONE,
+        );
+        assert_eq!(display.releases.orbit, None);
+        assert_eq!(display.render_state, RenderState::Idle);
+
+        display.set_sources(
+            OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::MOUSE,
         );
         assert_eq!(display.display().orbit, CameraInteractionSources::MOUSE);
@@ -196,12 +265,48 @@ mod tests {
         );
         assert_eq!(display.render_state, RenderState::Idle);
 
-        // Clearing the sources (lagrange has ended the interaction) rebuilds.
+        // The release hold keeps the displayed sources stable until its
+        // countdown elapses.
         display.set_sources(
             OrbitCamInteractionKind::Orbit,
             CameraInteractionSources::NONE,
         );
-        assert!(display.display().orbit.is_empty());
+        assert_eq!(display.display().orbit, CameraInteractionSources::MOUSE);
+        assert_eq!(display.releases.orbit, Some(HIGHLIGHT_RELEASE_HOLD));
+        assert_eq!(display.render_state, RenderState::Idle);
+
+        display.set_sources(
+            OrbitCamInteractionKind::Orbit,
+            CameraInteractionSources::MOUSE,
+        );
+        assert_eq!(display.display().orbit, CameraInteractionSources::MOUSE);
+        assert_eq!(display.releases.orbit, None);
+        assert_eq!(display.render_state, RenderState::Idle);
+    }
+
+    #[test]
+    fn release_countdown_clears_sources_and_marks_pending() {
+        let mut display = CameraGuidanceDisplayState::default();
+
+        display.set_sources(
+            OrbitCamInteractionKind::Pan,
+            CameraInteractionSources::KEYBOARD,
+        );
+        display.render_state = RenderState::Idle;
+        display.set_sources(OrbitCamInteractionKind::Pan, CameraInteractionSources::NONE);
+
+        let partial_delta = HIGHLIGHT_RELEASE_HOLD / 2;
+        display.tick_highlight_release(partial_delta);
+        assert_eq!(display.display().pan, CameraInteractionSources::KEYBOARD);
+        assert_eq!(
+            display.releases.pan,
+            Some(HIGHLIGHT_RELEASE_HOLD.saturating_sub(partial_delta)),
+        );
+        assert_eq!(display.render_state, RenderState::Idle);
+
+        display.tick_highlight_release(HIGHLIGHT_RELEASE_HOLD);
+        assert!(display.display().pan.is_empty());
+        assert_eq!(display.releases.pan, None);
         assert_eq!(display.render_state, RenderState::Pending);
     }
 }

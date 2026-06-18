@@ -464,6 +464,28 @@ fn element_scissor_bounds(element: &Element, bounds: BoundingBox) -> BoundingBox
     }
 }
 
+/// Root DFS clip derived from the panel viewport. A `Fit` panel's size is not
+/// resolved when layout first runs, so its viewport arrives zero-area; a
+/// non-positive axis clips to an unbounded extent so owner-bounds draws clip to
+/// their owner element rather than to an empty rectangle.
+fn root_viewport_clip(viewport_width: f32, viewport_height: f32) -> BoundingBox {
+    const UNBOUNDED_EXTENT: f32 = 1.0e7;
+    BoundingBox {
+        x:      0.0,
+        y:      0.0,
+        width:  if viewport_width > 0.0 {
+            viewport_width
+        } else {
+            UNBOUNDED_EXTENT
+        },
+        height: if viewport_height > 0.0 {
+            viewport_height
+        } else {
+            UNBOUNDED_EXTENT
+        },
+    }
+}
+
 const fn empty_clip() -> BoundingBox {
     BoundingBox {
         x:      0.0,
@@ -678,12 +700,7 @@ pub(super) fn position_and_render(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let viewport_clip = BoundingBox {
-        x:      0.0,
-        y:      0.0,
-        width:  viewport_width,
-        height: viewport_height,
-    };
+    let viewport_clip = root_viewport_clip(viewport_width, viewport_height);
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(PositionStackEntry {
@@ -746,12 +763,7 @@ pub(super) fn render_commands_from_geometry(
     font_scale: f32,
 ) -> Vec<RenderCommand> {
     let mut commands = Vec::with_capacity(tree.len() * 2);
-    let viewport_clip = BoundingBox {
-        x:      0.0,
-        y:      0.0,
-        width:  viewport_width,
-        height: viewport_height,
-    };
+    let viewport_clip = root_viewport_clip(viewport_width, viewport_height);
 
     let mut stack = Vec::with_capacity(tree.len());
     stack.push(GeometryStackEntry {

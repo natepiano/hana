@@ -37,6 +37,7 @@ mod brp_extras;
 mod builder;
 mod camera_control_panel;
 mod camera_home;
+mod connector;
 mod constants;
 mod cube_spin;
 mod lighting;

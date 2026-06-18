@@ -9,11 +9,11 @@ pub(super) const ORBIT_CAM_CAMERA_LABEL: &str = "OrbitCam";
 
 // mode labels
 pub(super) const INPUT_MODE_LABEL: &str = "Input";
+pub(super) const PRESET_MODE_LABEL: &str = "Preset";
 
 // mode values
 pub(super) const CUSTOM_BINDINGS_MODE_VALUE: &str = "custom bindings";
 pub(super) const MANUAL_MODE_VALUE: &str = "manual input";
-pub(super) const PRESET_MODE_VALUE: &str = "preset input";
 
 // row labels
 pub(super) const APP_AUTHORED_INPUT_ROW_LABEL: &str = "app-authored input";

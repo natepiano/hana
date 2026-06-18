@@ -302,6 +302,8 @@ Remove profile and layer assertions from tests. Named tests to update or remove:
 **Surprises:**
 - `OrbitCamControlSummary.mode_value` is now purely variant-keyed, not preset-name-keyed — "preset input" for all `Preset(_)` variants regardless of which preset.
 
+> **Correction (2026-06-17):** the uniform `Input: preset input` label was reverted on user review — it read as a downgrade from the prior `Preset: BlenderLike`. `Preset(preset)` now reports `mode_label = "Preset"` and `mode_value = preset.name()` (per-preset name restored via `OrbitCamPreset::name()`); the `PRESET_MODE_VALUE` constant was removed and `PRESET_MODE_LABEL = "Preset"` added. `Bindings`/`Manual` keep the `Input` label. The `control_summary.rs` tests now assert `Preset` / `BlenderLike` / `Gamepad`.
+
 **Implications for remaining phases:**
 - Phase 3: label system lives in `control_summary.rs` + `constants.rs` (not `describe.rs`); no Phase 3 work affects this.
 - Phase 4: `lib.rs` profile/layer exports confirmed removed; Phase 4 only adds `preset_helpers.rs`.

@@ -40,7 +40,7 @@ use super::constants::ORBIT_CAM_CAMERA_LABEL;
 use super::constants::PINCH_SOURCE_LABEL;
 use super::constants::PINCH_ZOOM_IN_LABEL;
 use super::constants::PINCH_ZOOM_OUT_LABEL;
-use super::constants::PRESET_MODE_VALUE;
+use super::constants::PRESET_MODE_LABEL;
 use super::constants::SMOOTH_SCROLL_ZOOM_IN_LABEL;
 use super::constants::SMOOTH_SCROLL_ZOOM_OUT_LABEL;
 use super::constants::TOUCH_SOURCE_LABEL;
@@ -133,11 +133,11 @@ pub fn describe_orbit_cam_controls(mode: &OrbitCamInputMode) -> OrbitCamControlS
 
 fn describe_preset(preset: OrbitCamPreset) -> OrbitCamControlSummary {
     match preset.to_bindings() {
-        Ok(bindings) => describe_bindings(INPUT_MODE_LABEL, PRESET_MODE_VALUE, &bindings),
+        Ok(bindings) => describe_bindings(PRESET_MODE_LABEL, preset.name(), &bindings),
         Err(_) => OrbitCamControlSummary {
             camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
-            mode_label:   INPUT_MODE_LABEL.to_string(),
-            mode_value:   PRESET_MODE_VALUE.to_string(),
+            mode_label:   PRESET_MODE_LABEL.to_string(),
+            mode_value:   preset.name().to_string(),
             rows:         Vec::new(),
         },
     }
@@ -784,8 +784,8 @@ mod tests {
     fn summary_labels_follow_input_mode_variant() -> Result<(), OrbitCamBindingsError> {
         let preset_summary =
             describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike));
-        assert_eq!(preset_summary.mode_label, "Input");
-        assert_eq!(preset_summary.mode_value, "preset input");
+        assert_eq!(preset_summary.mode_label, "Preset");
+        assert_eq!(preset_summary.mode_value, "BlenderLike");
 
         let tuned_bindings = OrbitCamBlenderLikePreset::default()
             .slow_scale(0.25)
@@ -809,8 +809,8 @@ mod tests {
         let labels = summary_labels(&summary);
 
         assert_eq!(summary.camera_label, "OrbitCam");
-        assert_eq!(summary.mode_label, "Input");
-        assert_eq!(summary.mode_value, "preset input");
+        assert_eq!(summary.mode_label, "Preset");
+        assert_eq!(summary.mode_value, "BlenderLike");
         assert!(labels.contains(&"mmb drag"));
         assert!(labels.contains(&"smooth-scroll"));
         assert!(labels.contains(&"shift+mmb drag"));
@@ -902,7 +902,7 @@ mod tests {
             describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad));
         let labels = summary_labels(&summary);
 
-        assert_eq!(summary.mode_value, "preset input");
+        assert_eq!(summary.mode_value, "Gamepad");
         assert!(labels.contains(&"rs"));
         assert!(labels.contains(&"rb+rs"));
         assert!(labels.contains(&"ls"));

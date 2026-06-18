@@ -104,7 +104,14 @@ pub(super) fn propagate_fit_sizes(
             0.0_f32.clamp(sizing.min_size(), sizing.max_size())
         };
         set_min_size(&mut computed[index], axis, leaf_min);
-        return current_size;
+        // Floor a childless leaf to its `min`: a `grow_min`/`fit_min` leaf has no
+        // content of its own, so its `min` is the size it must contribute to a
+        // `Fit` ancestor. Returning `current_size` alone (0 for such a leaf) lets
+        // the floor reach only `min_acc`, which a `Fit` parent ignores unless it
+        // is already narrower than the floor — so the reserved space vanishes.
+        let sized = current_size.max(leaf_min);
+        set_size(&mut computed[index], axis, sized);
+        return sized;
     }
 
     let axis_role = child_axis_role(&element.child_layout, axis);
@@ -218,7 +225,13 @@ pub(super) fn propagate_fit_sizes_xy(
         };
         computed[index].min_width = min_width;
         computed[index].min_height = min_height;
-        return Vec2::new(current_width, current_height);
+        // Floor a childless leaf to its `min` so a `grow_min`/`fit_min` leaf
+        // reserves space in a `Fit` ancestor (see `propagate_fit_sizes`).
+        let sized_width = current_width.max(min_width);
+        let sized_height = current_height.max(min_height);
+        computed[index].width = sized_width;
+        computed[index].height = sized_height;
+        return Vec2::new(sized_width, sized_height);
     }
 
     let x_axis_role = child_axis_role(&element.child_layout, Axis::X);

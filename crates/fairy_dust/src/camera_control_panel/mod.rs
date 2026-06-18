@@ -75,6 +75,7 @@ pub(crate) fn install(app: &mut App) {
         (
             rebind_panel_on_route_change,
             track_live_zoom_direction,
+            tick_highlight_release,
             repaint_panel_display,
         )
             .chain(),
@@ -203,8 +204,6 @@ fn refresh_on_interaction_ended(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    // lagrange already held the reported sources through the debounce window, so
-    // the ended interaction clears immediately here.
     display.set_sources(event.kind, CameraInteractionSources::NONE);
 }
 
@@ -234,6 +233,10 @@ fn track_live_zoom_direction(
     if let Ok(state) = cameras.get(camera) {
         display.set_zoom_direction(state.zoom_direction());
     }
+}
+
+fn tick_highlight_release(time: Res<Time>, panel: Single<&mut CameraGuidanceDisplayState>) {
+    panel.into_inner().tick_highlight_release(time.delta());
 }
 
 fn refresh_on_speed_changed(

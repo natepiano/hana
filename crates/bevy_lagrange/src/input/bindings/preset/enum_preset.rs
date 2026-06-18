@@ -30,6 +30,19 @@ pub enum OrbitCamPreset {
 }
 
 impl OrbitCamPreset {
+    /// Returns the preset's display name.
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::SimpleMouse => "SimpleMouse",
+            Self::BlenderLike => "BlenderLike",
+            Self::Keyboard => "Keyboard",
+            Self::SimpleMouseKeyboard => "SimpleMouseKeyboard",
+            Self::BlenderLikeKeyboard => "BlenderLikeKeyboard",
+            Self::Gamepad => "Gamepad",
+        }
+    }
+
     /// Converts this preset into validated custom bindings.
     ///
     /// # Errors

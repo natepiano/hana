@@ -8,6 +8,7 @@ use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
+use bevy_diegetic::PanelDraw;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
@@ -17,18 +18,28 @@ use bevy_lagrange::ZoomDirection;
 
 use super::constants::ACTION_COLUMN_WIDTH;
 use super::constants::ACTIVE_COLOR;
+use super::constants::CONNECTOR_CAP_SIZE;
+use super::constants::CONNECTOR_LEVEL_EPSILON;
+use super::constants::CONNECTOR_LINE_WIDTH;
+use super::constants::FEEDER_CELL_MIN;
+use super::constants::FEEDER_START_GAP;
 use super::constants::GUIDANCE_CHILD_GAP;
 use super::constants::HEADER_COLOR;
 use super::constants::LABEL_COLOR;
+use super::constants::LABEL_LINE_HEIGHT;
+use super::constants::SPACER_WIDTH;
 use super::constants::SPEED_LABEL_COLUMN_WIDTH;
-use super::constants::TABLE_ACTION_ARROW;
 use super::constants::TABLE_COLUMN_GAP;
 use super::constants::TABLE_DIVIDER_WIDTH;
 use super::constants::TABLE_GROUP_GAP;
 use super::constants::TABLE_ROW_GAP;
+use super::constants::TRUNK_END_GAP;
 use super::display::CameraGuidanceDisplay;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
+use crate::connector;
+use crate::connector::ConnectorColors;
+use crate::connector::SpacerLayout;
 use crate::constants::BORDER_DIM;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
@@ -199,7 +210,7 @@ fn action_rows_element(speed_column: SpeedColumn) -> El<Column> {
     let element = El::column()
         .width(Sizing::GROW)
         .height(Sizing::FIT)
-        .gap(Px(TABLE_ROW_GAP));
+        .gap(Px(TABLE_GROUP_GAP));
     match speed_column {
         SpeedColumn::Hidden => {
             element.child_divider(ChildDivider::new(TABLE_DIVIDER_WIDTH, BORDER_DIM))
@@ -232,17 +243,32 @@ fn build_action_row(
         return;
     }
 
-    let action_active = speed_matches
-        && rows
-            .iter()
-            .any(|row| snapshot::row_active(row, active_sources, live_zoom_direction));
-    let action_style = if action_active { active } else { label };
+    let word_active = rows
+        .iter()
+        .map(|row| speed_matches && snapshot::row_active(row, active_sources, live_zoom_direction))
+        .collect::<Vec<_>>();
+    let group_active = word_active.iter().any(|&active| active);
+    let action_style = if group_active { active } else { label };
+    let spacer_layout = SpacerLayout {
+        word_count:        rows.len(),
+        label_line_height: LABEL_LINE_HEIGHT,
+        row_gap:           Px(TABLE_ROW_GAP),
+        line_width:        CONNECTOR_LINE_WIDTH,
+        cap_size:          CONNECTOR_CAP_SIZE,
+        level_epsilon:     CONNECTOR_LEVEL_EPSILON,
+        trunk_end_gap:     TRUNK_END_GAP,
+        colors:            ConnectorColors {
+            active: ACTIVE_COLOR,
+            idle:   Color::NONE,
+        },
+    };
+    let spacer_lines = connector::spacer_lines(spacer_layout, &word_active, group_active);
 
     builder.with(
         El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .gap(Px(TABLE_COLUMN_GAP))
+            .gap(Px(0.0))
             .align_y(AlignY::Center),
         |builder| {
             builder.with(
@@ -251,22 +277,42 @@ fn build_action_row(
                     .height(Sizing::FIT)
                     .gap(Px(TABLE_ROW_GAP)),
                 |builder| {
-                    for row in rows {
-                        let binding_style = if speed_matches
-                            && snapshot::row_active(row, active_sources, live_zoom_direction)
-                        {
-                            active
-                        } else {
-                            label
-                        };
-                        builder.text(row.label(), binding_style.clone());
+                    for (row, &is_active) in rows.iter().zip(&word_active) {
+                        let binding_style = if is_active { active } else { label };
+                        let connector_color = if is_active { ACTIVE_COLOR } else { Color::NONE };
+                        builder.with(
+                            El::row()
+                                .width(Sizing::GROW)
+                                .height(Sizing::fixed(LABEL_LINE_HEIGHT))
+                                .align_y(AlignY::Center),
+                            |builder| {
+                                builder.text(row.label(), binding_style.clone());
+                                builder.with(
+                                    El::new()
+                                        .width(Sizing::grow_min(FEEDER_CELL_MIN))
+                                        .height(Sizing::GROW)
+                                        .draw(PanelDraw::lines([connector::feeder_line(
+                                            FEEDER_START_GAP,
+                                            CONNECTOR_LINE_WIDTH,
+                                            connector_color,
+                                        )])),
+                                    |_| {},
+                                );
+                            },
+                        );
                     }
                 },
             );
-            builder.text(TABLE_ACTION_ARROW, action_style.clone());
             builder.with(
                 El::new()
-                    .width(Sizing::fit_min(ACTION_COLUMN_WIDTH))
+                    .width(Sizing::fixed(SPACER_WIDTH))
+                    .height(Sizing::GROW)
+                    .draw(PanelDraw::lines(spacer_lines)),
+                |_| {},
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
                     builder.text(
