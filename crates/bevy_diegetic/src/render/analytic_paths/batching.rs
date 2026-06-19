@@ -422,7 +422,7 @@ mod tests {
             base_material: id,
             alpha:         alpha.into(),
             lighting:      Lighting::Lit,
-            sidedness:     Sidedness::DoubleSided,
+            sidedness:     Sidedness::BothSides,
             z_level:       0,
             shadow:        GlyphShadowMode::Cast,
             layers:        BatchRenderLayers(RenderLayers::layer(0)),

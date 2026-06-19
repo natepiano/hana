@@ -3,6 +3,7 @@ use std::time::Duration;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 
+use super::fit_anchor::FitAnchor;
 use crate::constants::DEFAULT_FIT_MARGIN;
 
 /// Context for a zoom-to-fit operation routed through `PlayAnimation`.
@@ -24,15 +25,19 @@ pub struct ZoomContext {
 pub struct ZoomToFit {
     /// The camera entity to zoom.
     #[event_target]
-    pub camera:   Entity,
+    pub(crate) camera:    Entity,
     /// The entity to frame.
-    pub target:   Entity,
+    pub(crate) target:    Entity,
     /// Fraction of screen to leave as margin.
-    pub margin:   f32,
+    pub(crate) margin:    f32,
+    /// Screen-space anchor used after the target has been fitted.
+    pub(crate) anchor:    FitAnchor,
+    /// Pixel offset from the selected anchor, using positive x right and positive y down.
+    pub(crate) offset_px: Vec2,
     /// Animation duration (`ZERO` for instant).
-    pub duration: Duration,
+    pub(crate) duration:  Duration,
     /// Easing curve for the animation.
-    pub easing:   EaseFunction,
+    pub(crate) easing:    EaseFunction,
 }
 
 impl ZoomToFit {
@@ -43,6 +48,8 @@ impl ZoomToFit {
             camera,
             target,
             margin: DEFAULT_FIT_MARGIN,
+            anchor: FitAnchor::Center,
+            offset_px: Vec2::ZERO,
             duration: Duration::ZERO,
             easing: EaseFunction::CubicOut,
         }
@@ -52,6 +59,23 @@ impl ZoomToFit {
     #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.margin = margin;
+        self
+    }
+
+    /// Sets which fitted bounds point should land on the matching viewport point.
+    #[must_use]
+    pub const fn anchor(mut self, anchor: FitAnchor) -> Self {
+        self.anchor = anchor;
+        self
+    }
+
+    /// Sets a pixel offset from the selected anchor.
+    ///
+    /// Positive x moves the fitted bounds right. Positive y moves them down,
+    /// matching Bevy's screen-space coordinate convention.
+    #[must_use]
+    pub const fn offset_px(mut self, offset_px: Vec2) -> Self {
+        self.offset_px = offset_px;
         self
     }
 

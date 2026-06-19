@@ -264,13 +264,6 @@ impl ScreenSpaceBounds {
 
         Some((bounds, depths))
     }
-
-    /// Returns the center of the bounds in normalized screen space.
-    pub(crate) const fn center(&self) -> (f32, f32) {
-        let center_x = (self.min_normalized_x + self.max_normalized_x) * 0.5;
-        let center_y = (self.min_normalized_y + self.max_normalized_y) * 0.5;
-        (center_x, center_y)
-    }
 }
 
 // ============================================================================

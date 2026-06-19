@@ -18,6 +18,7 @@ use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::Anchor;
 use crate::camera_home;
 use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
@@ -56,6 +57,23 @@ impl<S> CameraHomeBuilder<S> {
     #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.config.margin = margin;
+        self
+    }
+
+    /// Sets where the fitted home bounds should land in the viewport.
+    #[must_use]
+    pub const fn anchor(mut self, anchor: Anchor) -> Self {
+        self.config.anchor = anchor;
+        self
+    }
+
+    /// Sets a pixel offset from the selected home anchor.
+    ///
+    /// Positive x moves the fitted home bounds right. Positive y moves them
+    /// down, matching Bevy's screen-space coordinate convention.
+    #[must_use]
+    pub const fn offset_px(mut self, offset_px: Vec2) -> Self {
+        self.config.offset_px = offset_px;
         self
     }
 

@@ -22,6 +22,8 @@ use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::Anchor;
+use crate::bloom;
 use crate::brp_extras;
 use crate::camera_control_panel;
 use crate::camera_control_panel::CameraControlPanelBackground;
@@ -30,6 +32,8 @@ use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::cube_spin;
 use crate::cube_spin::CubeSpinConfig;
+use crate::environment_map;
+use crate::hdr;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
 use crate::primitive::PrimitiveConfig;
@@ -59,6 +63,15 @@ impl<S> SprinkleBuilder<S> {
     #[must_use]
     pub fn with_brp_extras(mut self) -> Self {
         brp_extras::install(&mut self.app);
+        self
+    }
+
+    /// Enable HDR output on every camera (current and later-spawned). Required
+    /// for over-bright (>1.0) colors to survive a multi-camera diegetic render
+    /// chain — any camera left in LDR clamps them at that step.
+    #[must_use]
+    pub fn with_hdr(mut self) -> Self {
+        hdr::install(&mut self.app);
         self
     }
 
@@ -245,6 +258,8 @@ impl<S> SprinkleBuilder<S> {
                 pitch:             0.0,
                 duration:          crate::constants::HOME_DEFAULT_DURATION,
                 margin:            crate::constants::HOME_DEFAULT_MARGIN,
+                anchor:            Anchor::Center,
+                offset_px:         Vec2::ZERO,
                 title_bar_control: HomeTitleBarControl::Shown,
             },
         }
@@ -447,6 +462,31 @@ impl SprinkleBuilder<WithOrbitCam> {
     #[must_use]
     pub fn with_stable_transparency(mut self) -> Self {
         transparency::install(&mut self.app);
+        self
+    }
+
+    /// Add a thresholded bloom to the orbit camera so over-bright (>1.0) colors
+    /// glow while normal-range content stays crisp. `Bloom` requires HDR; pair
+    /// with [`with_hdr`](Self::with_hdr) so every camera in a multi-camera
+    /// render chain keeps the over-bright values.
+    #[must_use]
+    pub fn with_bloom(mut self) -> Self {
+        bloom::install(&mut self.app);
+        self
+    }
+
+    /// Insert an [`EnvironmentMapLight`] on the orbit camera, lighting PBR
+    /// surfaces (panel backgrounds and text glyphs both run `apply_pbr_lighting`)
+    /// with diffuse ambient fill and specular reflection from a bundled
+    /// `pisa` cathedral HDRI. The cubemaps are embedded, so no runtime
+    /// `assets/` directory is required.
+    ///
+    /// A sharp specular glint only appears on a metallic, low-roughness
+    /// surface; on the default rough-dielectric panel material the visible
+    /// effect is the diffuse ambient term.
+    #[must_use]
+    pub fn with_environment_map(mut self) -> Self {
+        environment_map::install(&mut self.app);
         self
     }
 

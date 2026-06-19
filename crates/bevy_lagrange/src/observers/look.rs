@@ -16,6 +16,7 @@ use crate::events::AnimationBegin;
 use crate::events::AnimationEnd;
 use crate::events::AnimationReason;
 use crate::events::AnimationSource;
+use crate::events::FitAnchor;
 use crate::events::LookAt;
 use crate::events::LookAtAndZoomToFit;
 use crate::events::PlayAnimation;
@@ -132,6 +133,8 @@ pub(super) fn on_look_at_and_zoom_to_fit(
             yaw,
             pitch,
             margin,
+            anchor: FitAnchor::Center,
+            offset_px: Vec2::ZERO,
             projection,
             camera: camera_component,
         },

@@ -103,7 +103,7 @@ pub fn cube_face_text(
         DiegeticText::world(text)
             .size(text_size)
             .color(color)
-            .sidedness(Sidedness::OneSided)
+            .sidedness(Sidedness::FrontOnly)
             .transform(face.local_transform(cube_size * 0.5))
             .build(),
     )

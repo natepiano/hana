@@ -1572,7 +1572,7 @@ mod tests {
                 base_material,
                 alpha: BatchAlphaMode::Blend,
                 lighting: Lighting::Lit,
-                sidedness: Sidedness::DoubleSided,
+                sidedness: Sidedness::BothSides,
                 shadow: VisualShadow::Cast,
                 layers: BatchRenderLayers(RenderLayers::layer(0)),
             },

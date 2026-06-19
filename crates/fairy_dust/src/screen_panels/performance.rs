@@ -19,12 +19,15 @@ use super::screen_panel_frame;
 use super::screen_panel_material;
 use crate::DEFAULT_PANEL_BACKGROUND;
 
-const STATS_HEADER_FONT_SIZE: f32 = 15.0;
+const STATS_HEADER_FONT_SIZE: f32 = 11.25;
+const STATS_SECTION_FONT_SIZE: f32 = 10.0;
 const STATS_DESC_FONT_SIZE: f32 = 9.0;
 const STATS_DESC_COLOR: Color = Color::srgba(0.60, 0.66, 0.76, 0.68);
 const STATS_ROW_WIDTH: f32 = 260.0;
 const STATS_INTRA_GAP: f32 = 2.0;
 const STATS_GROUP_GAP: f32 = 6.0;
+const STATS_SECTION_GAP: f32 = 8.0;
+const STATS_DETAIL_INDENT: f32 = 8.0;
 const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
 const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
 const PANEL_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
@@ -40,6 +43,15 @@ pub struct StatsPanelRow {
     pub value:   String,
     /// Optional explanatory detail lines below the label/value row.
     pub details: Vec<String>,
+}
+
+/// One named group of related [`StatsPanelRow`] values.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct StatsPanelSection {
+    /// Optional section title shown above this section's rows.
+    pub title: String,
+    /// Rows displayed inside this section.
+    pub rows:  Vec<StatsPanelRow>,
 }
 
 impl StatsPanelRow {
@@ -68,6 +80,26 @@ impl StatsPanelRow {
     }
 }
 
+impl StatsPanelSection {
+    /// Creates a section from a title and rows.
+    #[must_use]
+    pub fn new(title: impl Into<String>, rows: impl IntoIterator<Item = StatsPanelRow>) -> Self {
+        Self {
+            title: title.into(),
+            rows:  rows.into_iter().collect(),
+        }
+    }
+
+    /// Creates an untitled section from rows.
+    #[must_use]
+    pub fn untitled(rows: impl IntoIterator<Item = StatsPanelRow>) -> Self {
+        Self {
+            title: String::new(),
+            rows:  rows.into_iter().collect(),
+        }
+    }
+}
+
 /// Creates the standard top-right diegetic stats panel.
 ///
 /// The caller owns the counters and update cadence; this helper owns only the
@@ -78,13 +110,28 @@ impl StatsPanelRow {
 /// Returns [`PanelBuildError`] if the generated screen-space
 /// [`DiegeticPanel`] fails layout validation.
 pub fn diegetic_stats_panel(rows: &[StatsPanelRow]) -> Result<DiegeticPanel, PanelBuildError> {
+    diegetic_stats_sections_panel(&[StatsPanelSection::untitled(rows.iter().cloned())])
+}
+
+/// Creates the standard top-right diegetic stats panel from named sections.
+///
+/// The caller owns the counters and update cadence; this helper owns only the
+/// Fairy Dust screen-panel styling and sectioned row layout.
+///
+/// # Errors
+///
+/// Returns [`PanelBuildError`] if the generated screen-space
+/// [`DiegeticPanel`] fails layout validation.
+pub fn diegetic_stats_sections_panel(
+    sections: &[StatsPanelSection],
+) -> Result<DiegeticPanel, PanelBuildError> {
     let unlit = screen_panel_material();
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopRight)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(diegetic_stats_tree(rows))
+        .with_tree(diegetic_stats_sections_tree(sections))
         .build()
 }
 
@@ -132,6 +179,13 @@ pub fn gpu_meter_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildErro
 /// Builds the reusable row-group tree used by [`diegetic_stats_panel`].
 #[must_use]
 pub fn diegetic_stats_tree(rows: &[StatsPanelRow]) -> LayoutTree {
+    diegetic_stats_sections_tree(&[StatsPanelSection::untitled(rows.iter().cloned())])
+}
+
+/// Builds the reusable sectioned row tree used by
+/// [`diegetic_stats_sections_panel`].
+#[must_use]
+pub fn diegetic_stats_sections_tree(sections: &[StatsPanelSection]) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -143,11 +197,11 @@ pub fn diegetic_stats_tree(rows: &[StatsPanelRow]) -> LayoutTree {
                 El::column()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .gap(STATS_GROUP_GAP),
+                    .gap(STATS_SECTION_GAP),
                 |builder| {
-                    let last = rows.len().saturating_sub(1);
-                    for (index, row) in rows.iter().enumerate() {
-                        stats_group(builder, row, index == last);
+                    let last = sections.len().saturating_sub(1);
+                    for (index, section) in sections.iter().enumerate() {
+                        stats_section(builder, section, index == last);
                     }
                 },
             );
@@ -174,7 +228,42 @@ fn stats_desc_style() -> TextStyle {
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow, last: bool) {
+fn stats_section_label_style() -> TextStyle {
+    TextStyle::new(STATS_SECTION_FONT_SIZE)
+        .bold()
+        .with_color(STATUS_LABEL_COLOR)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn stats_section(builder: &mut LayoutBuilder, section: &StatsPanelSection, last: bool) {
+    builder.with(
+        El::column()
+            .width(Sizing::fixed(STATS_ROW_WIDTH))
+            .height(Sizing::FIT)
+            .gap(STATS_GROUP_GAP),
+        |builder| {
+            if !section.title.is_empty() {
+                builder.with(
+                    El::new()
+                        .width(Sizing::fixed(STATS_ROW_WIDTH))
+                        .height(Sizing::FIT)
+                        .alignment(AlignX::Left, AlignY::Center),
+                    |builder| {
+                        builder.text(&section.title, stats_section_label_style());
+                    },
+                );
+            }
+            for row in &section.rows {
+                stats_group(builder, row);
+            }
+            if !last {
+                stats_separator(builder);
+            }
+        },
+    );
+}
+
+fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
     builder.with(
         El::column()
             .width(Sizing::fixed(STATS_ROW_WIDTH))
@@ -212,21 +301,28 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow, last: bool) {
                     El::new()
                         .width(Sizing::fixed(STATS_ROW_WIDTH))
                         .height(Sizing::FIT)
+                        .padding(bevy_diegetic::Padding::new(
+                            STATS_DETAIL_INDENT,
+                            0.0,
+                            0.0,
+                            0.0,
+                        ))
                         .alignment(AlignX::Left, AlignY::Top),
                     |builder| {
                         builder.text(detail, stats_desc_style());
                     },
                 );
             }
-            if !last {
-                builder.with(
-                    El::new()
-                        .width(Sizing::fixed(STATS_ROW_WIDTH))
-                        .height(Sizing::fixed(PANEL_SEPARATOR_THICKNESS))
-                        .background(PANEL_SEPARATOR_COLOR),
-                    |_builder| {},
-                );
-            }
         },
+    );
+}
+
+fn stats_separator(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(STATS_ROW_WIDTH))
+            .height(Sizing::fixed(PANEL_SEPARATOR_THICKNESS))
+            .background(PANEL_SEPARATOR_COLOR),
+        |_builder| {},
     );
 }

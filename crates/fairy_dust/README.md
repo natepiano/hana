@@ -20,6 +20,11 @@ fairy_dust::sprinkle_example()
     .run();
 ```
 
+When `.with_camera_home()` is installed, the home fit can be positioned in the
+viewport with `.anchor(Anchor::TopLeft)` and adjusted with
+`.offset_px(Vec2::new(x, y))`. The default remains centered with no pixel
+offset.
+
 ## Typestate
 
 The builder is parameterized by a state marker (`NoOrbitCam` / `WithOrbitCam`).

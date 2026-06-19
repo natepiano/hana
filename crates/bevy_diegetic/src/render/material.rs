@@ -13,13 +13,17 @@ use crate::layout::Sidedness;
 /// a [`Sidedness`] choice. Shared by shape and text material builders.
 pub(crate) const fn apply_sidedness(base: &mut StandardMaterial, sidedness: Sidedness) {
     match sidedness {
-        Sidedness::DoubleSided => {
+        Sidedness::BothSides => {
             base.double_sided = true;
             base.cull_mode = None;
         },
-        Sidedness::OneSided => {
+        Sidedness::FrontOnly => {
             base.double_sided = false;
             base.cull_mode = Some(Face::Back);
+        },
+        Sidedness::BackOnly => {
+            base.double_sided = false;
+            base.cull_mode = Some(Face::Front);
         },
     }
 }

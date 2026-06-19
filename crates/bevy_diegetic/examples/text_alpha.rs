@@ -212,7 +212,7 @@ fn setup(
                 DiegeticText::world("HELLO")
                     .size(0.22)
                     .color(Color::srgb(0.9, 0.3, 0.1))
-                    .sidedness(Sidedness::OneSided)
+                    .sidedness(Sidedness::FrontOnly)
                     .transform(Transform::from_xyz(0.0, 0.0, 0.501))
                     .build(),
             );

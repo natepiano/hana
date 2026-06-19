@@ -21,9 +21,9 @@ pub(crate) const RESTART_CAMERA_RESTORE_DURATION: Duration = Duration::from_secs
 pub(crate) const CARGO_BIN: &str = "cargo";
 pub(crate) const CARGO_EXAMPLE_FLAG: &str = "--example";
 pub(crate) const CARGO_EXAMPLES_DIR: &str = "examples";
+pub(crate) const CARGO_MANIFEST_PATH_FLAG: &str = "--manifest-path";
 pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
 pub(crate) const CARGO_RELEASE_FLAG: &str = "--release";
-pub(crate) const CARGO_TARGET_DIR: &str = "target";
 
 // cascade shadow
 // Matches Bevy's non-webgl default. The auto-fit only narrows the cascade

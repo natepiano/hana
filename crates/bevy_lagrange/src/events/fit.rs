@@ -5,6 +5,7 @@ use bevy::prelude::*;
 
 use super::constants::DEFAULT_ANIMATE_TO_FIT_PITCH;
 use super::constants::DEFAULT_ANIMATE_TO_FIT_YAW;
+use super::fit_anchor::FitAnchor;
 use crate::constants::DEFAULT_FIT_MARGIN;
 
 /// Animates the camera to a caller-specified orientation while framing a target entity.
@@ -13,19 +14,23 @@ use crate::constants::DEFAULT_FIT_MARGIN;
 pub struct AnimateToFit {
     /// The camera entity.
     #[event_target]
-    pub camera:   Entity,
+    pub(crate) camera:    Entity,
     /// The entity to frame.
-    pub target:   Entity,
+    pub(crate) target:    Entity,
     /// Final yaw in radians.
-    pub yaw:      f32,
+    pub(crate) yaw:       f32,
     /// Final pitch in radians.
-    pub pitch:    f32,
+    pub(crate) pitch:     f32,
     /// Fraction of screen to leave as margin.
-    pub margin:   f32,
+    pub(crate) margin:    f32,
+    /// Screen-space anchor used after the target has been fitted.
+    pub(crate) anchor:    FitAnchor,
+    /// Pixel offset from the selected anchor, using positive x right and positive y down.
+    pub(crate) offset_px: Vec2,
     /// Animation duration (`ZERO` for instant).
-    pub duration: Duration,
+    pub(crate) duration:  Duration,
     /// Easing curve for the animation.
-    pub easing:   EaseFunction,
+    pub(crate) easing:    EaseFunction,
 }
 
 impl AnimateToFit {
@@ -38,6 +43,8 @@ impl AnimateToFit {
             yaw: DEFAULT_ANIMATE_TO_FIT_YAW,
             pitch: DEFAULT_ANIMATE_TO_FIT_PITCH,
             margin: DEFAULT_FIT_MARGIN,
+            anchor: FitAnchor::Center,
+            offset_px: Vec2::ZERO,
             duration: Duration::ZERO,
             easing: EaseFunction::CubicOut,
         }
@@ -61,6 +68,23 @@ impl AnimateToFit {
     #[must_use]
     pub const fn margin(mut self, margin: f32) -> Self {
         self.margin = margin;
+        self
+    }
+
+    /// Sets which fitted bounds point should land on the matching viewport point.
+    #[must_use]
+    pub const fn anchor(mut self, anchor: FitAnchor) -> Self {
+        self.anchor = anchor;
+        self
+    }
+
+    /// Sets a pixel offset from the selected anchor.
+    ///
+    /// Positive x moves the fitted bounds right. Positive y moves them down,
+    /// matching Bevy's screen-space coordinate convention.
+    #[must_use]
+    pub const fn offset_px(mut self, offset_px: Vec2) -> Self {
+        self.offset_px = offset_px;
         self
     }
 

@@ -14,53 +14,207 @@ use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CalloutCap;
-use bevy_diegetic::ChildDivider;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::El;
+use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelCircle;
+use bevy_diegetic::PanelCoord;
 use bevy_diegetic::PanelDraw;
 use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
+use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::StatsPanelRow;
+use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
-use fairy_dust::diegetic_stats_panel;
-use fairy_dust::diegetic_stats_tree;
+use fairy_dust::diegetic_stats_sections_panel;
+use fairy_dust::diegetic_stats_sections_tree;
+use fairy_dust::screen_panel_frame;
+use fairy_dust::screen_panel_material;
 
-const PANEL_W: f32 = 120.0;
-const PANEL_H: f32 = 92.0;
-const PANEL_GAP: f32 = 0.16;
+const PANEL_W: f32 = 170.0;
+const PANEL_H: f32 = 132.0;
+const PANEL_GAP_X: f32 = 0.012;
+const PANEL_GAP_Y: f32 = 0.012;
 const MM_TO_WORLD: f32 = 0.001;
-const PANEL_STEP_X: f32 = (PANEL_W * MM_TO_WORLD) + PANEL_GAP;
+const PANEL_WORLD_W: f32 = PANEL_W * MM_TO_WORLD;
+const PANEL_WORLD_H: f32 = PANEL_H * MM_TO_WORLD;
+const PANEL_STEP_X: f32 = PANEL_WORLD_W + PANEL_GAP_X;
+const PANEL_STEP_Y: f32 = PANEL_WORLD_H + PANEL_GAP_Y;
+const PANEL_GRID_CENTER_Y: f32 = 0.17;
+const PANEL_HOME_PAD: f32 = 0.012;
 const GROUND_SIZE: f32 = 1.45;
-const HOME_FOCUS: Vec3 = Vec3::new(0.0, 0.08, 0.0);
-const HOME_RADIUS: f32 = 0.95;
-const HOME_PITCH: f32 = 0.18;
+const HOME_FOCUS: Vec3 = Vec3::new(0.0, PANEL_GRID_CENTER_Y, 0.0);
+const HOME_RADIUS: f32 = 0.50;
+const HOME_PITCH: f32 = 0.0;
+const HOME_MARGIN: f32 = 0.15;
+// Point light placed in front of and up-left of the metallic center card
+// (world center ~(-0.091, 0.242, 0), front face +Z) to land a specular glint.
+const GLINT_LIGHT_POS: Vec3 = Vec3::new(-0.13, 0.30, 0.16);
+const GLINT_LIGHT_LUMENS: f32 = 2000.0;
 
 const AUTHORED_PANELS: usize = 4;
-const AUTHORED_SDF_FILLS: usize = 22;
-const AUTHORED_SDF_BORDERS: usize = 15;
-const AUTHORED_TEXT_RUNS: usize = 23;
-const AUTHORED_SHAPE_GROUPS: usize = 9;
-const AUTHORED_SHAPE_PRIMITIVES: usize = 20;
+
+// Authored content each panel draws, counted by family. Each panel renders its
+// own copy in the upper-right corner; the global "authored content" totals are
+// the sum of these four, so per-panel and aggregate readouts stay consistent.
+// One El background = one sdf fill, one El border = one sdf border, one
+// `builder.text` = one text run, one `PanelDraw::shapes` = one shape group.
+const SDF_PANEL_STATS: PanelStats = PanelStats {
+    sdf_fills:        4,
+    sdf_borders:      5,
+    text_runs:        10,
+    shape_groups:     0,
+    shape_primitives: 0,
+};
+const TEXT_PANEL_STATS: PanelStats = PanelStats {
+    sdf_fills:        8,
+    sdf_borders:      3,
+    text_runs:        22,
+    shape_groups:     0,
+    shape_primitives: 0,
+};
+const SHAPE_PANEL_STATS: PanelStats = PanelStats {
+    sdf_fills:        3,
+    sdf_borders:      4,
+    text_runs:        8,
+    shape_groups:     3,
+    shape_primitives: 7,
+};
+const MIXED_PANEL_STATS: PanelStats = PanelStats {
+    sdf_fills:        5,
+    sdf_borders:      2,
+    text_runs:        15,
+    shape_groups:     1,
+    shape_primitives: 3,
+};
+
+const AUTHORED_SDF_FILLS: usize = SDF_PANEL_STATS.sdf_fills
+    + TEXT_PANEL_STATS.sdf_fills
+    + SHAPE_PANEL_STATS.sdf_fills
+    + MIXED_PANEL_STATS.sdf_fills;
+const AUTHORED_SDF_BORDERS: usize = SDF_PANEL_STATS.sdf_borders
+    + TEXT_PANEL_STATS.sdf_borders
+    + SHAPE_PANEL_STATS.sdf_borders
+    + MIXED_PANEL_STATS.sdf_borders;
+const AUTHORED_TEXT_RUNS: usize = SDF_PANEL_STATS.text_runs
+    + TEXT_PANEL_STATS.text_runs
+    + SHAPE_PANEL_STATS.text_runs
+    + MIXED_PANEL_STATS.text_runs;
+const AUTHORED_SHAPE_GROUPS: usize = SDF_PANEL_STATS.shape_groups
+    + TEXT_PANEL_STATS.shape_groups
+    + SHAPE_PANEL_STATS.shape_groups
+    + MIXED_PANEL_STATS.shape_groups;
+const AUTHORED_SHAPE_PRIMITIVES: usize = SDF_PANEL_STATS.shape_primitives
+    + TEXT_PANEL_STATS.shape_primitives
+    + SHAPE_PANEL_STATS.shape_primitives
+    + MIXED_PANEL_STATS.shape_primitives;
 
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
+// Placeholder value for the `material table` stats rows until the batching phases
+// land. Plan Phase 5 replaces each with its observed counter.
+const MATERIAL_TABLE_PENDING: &str = "pending";
+
+// Author's prediction of how many draw batches each on-screen panel collapses
+// into, per render family. Batches merge globally by compatibility key, and SDF
+// surfaces are not batched yet (the material-table plan's Phase 5 adds that), so
+// these are intent values the live `actual` row is reconciled against. Columns
+// are text, shape, sdf — the order the ledger renders.
+struct PanelExpected {
+    label: &'static str,
+    text:  usize,
+    shape: usize,
+    sdf:   usize,
+}
+
+const EXPECTED_BATCHES: [PanelExpected; 8] = [
+    PanelExpected {
+        label: "Title",
+        text:  1,
+        shape: 0,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "Info",
+        text:  1,
+        shape: 0,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "Camera",
+        text:  1,
+        shape: 0,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "SDF",
+        text:  1,
+        shape: 0,
+        sdf:   2,
+    },
+    PanelExpected {
+        label: "Text",
+        text:  5,
+        shape: 0,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "Shapes",
+        text:  1,
+        shape: 1,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "Mixed",
+        text:  1,
+        shape: 1,
+        sdf:   1,
+    },
+    PanelExpected {
+        label: "Expected",
+        text:  1,
+        shape: 0,
+        sdf:   1,
+    },
+];
+
+// Per-family column colors, matching `panel_stats_block`: text green, shape
+// yellow, sdf blue.
+const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BLUE];
+const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
+const LEDGER_FONT_SIZE: f32 = 10.0;
+const LEDGER_LABEL_WIDTH: f32 = 74.0;
+const LEDGER_NUM_WIDTH: f32 = 40.0;
+const LEDGER_ROW_GAP: f32 = 2.0;
+const LEDGER_CELL_GAP: f32 = 4.0;
+const LEDGER_TABLE_WIDTH: f32 = LEDGER_LABEL_WIDTH + 3.0 * (LEDGER_NUM_WIDTH + LEDGER_CELL_GAP);
+const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
-const ROW_GAP: f32 = 3.0;
+const ROW_GAP: f32 = 4.0;
+const TITLE_FONT_SIZE: f32 = 18.75;
+const SUBTITLE_FONT_SIZE: f32 = 17.0;
+const BODY_FONT_SIZE: f32 = 15.75;
+const SMALL_FONT_SIZE: f32 = 12.75;
+const MATERIAL_GROUP_TITLE_FONT_SIZE: f32 = 18.0;
+const STATS_FONT_SIZE: f32 = 12.0;
+const SWATCH_FONT_SIZE: f32 = 31.5;
+const MIXED_LABEL_WIDTH: f32 = 58.0;
+const MIXED_ROW_BG: Color = Color::srgba(0.14, 0.16, 0.20, 0.92);
 const CARD_BG: Color = Color::srgba(0.055, 0.065, 0.075, 0.94);
 const CARD_BG_ALT: Color = Color::srgba(0.075, 0.055, 0.075, 0.94);
 const CARD_BORDER: Color = Color::srgba(0.34, 0.56, 0.72, 0.75);
@@ -69,14 +223,55 @@ const ACCENT_BLUE: Color = Color::srgb(0.24, 0.62, 0.95);
 const ACCENT_GREEN: Color = Color::srgb(0.32, 0.88, 0.54);
 const ACCENT_YELLOW: Color = Color::srgb(0.95, 0.78, 0.24);
 const ACCENT_RED: Color = Color::srgb(0.95, 0.34, 0.30);
+// Over-bright warm readout. Base color is a material-table value, so boosting it
+// past 1.0 keeps the run in the Shared group's single batch (unlike `Unlit`,
+// which the plan classifies as a pipeline splitter).
+const EMISSIVE_WARM: Color = Color::linear_rgb(3.6, 2.3, 0.2);
+// Sharp cool-white glint. `metallic` is a material-table value, so this row stays
+// in the Shared group's single batch. Kept at full range (<=1.0) so it reads as a
+// crisp highlight without crossing the bloom threshold the warm readout owns.
+const GLINT: Color = Color::linear_rgb(0.95, 0.97, 1.0);
 const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
+// Dark cell background shared by the divergent cases that stay legible on dark.
+const DIVERGENT_CASE_BG: Color = Color::srgba(0.02, 0.03, 0.04, 0.38);
+// Light cell for the alpha case: `AlphaMode::Multiply` multiplies its ink into
+// the background and vanishes on dark, so the Opaque/Multiply pair sits on a
+// light swatch where multiply reads as a tint. Caption and ink go dark to match.
+const ALPHA_CELL_BG: Color = Color::srgb(0.82, 0.84, 0.88);
+const ALPHA_CELL_INK: Color = Color::srgb(0.10, 0.12, 0.16);
+const ALPHA_CELL_CAPTION: Color = Color::srgba(0.28, 0.32, 0.40, 0.95);
+
+/// Authored draw counts for one panel, split by render family. Drives both the
+/// panel's own upper-right readout and the summed global "authored content"
+/// totals.
+#[derive(Clone, Copy)]
+struct PanelStats {
+    /// Element backgrounds, each one authored SDF fill surface.
+    sdf_fills:        usize,
+    /// Element borders, each one authored SDF border surface.
+    sdf_borders:      usize,
+    /// `builder.text` runs.
+    text_runs:        usize,
+    /// `PanelDraw::shapes` layers, each one analytic shape group.
+    shape_groups:     usize,
+    /// Total stroked/filled marks across all shape groups.
+    shape_primitives: usize,
+}
+
+impl PanelStats {
+    /// Fills plus borders: the panel's total authored SDF surfaces.
+    const fn sdf_surfaces(self) -> usize { self.sdf_fills + self.sdf_borders }
+}
 
 #[derive(Component)]
 struct BatchValidationPanel;
 
 #[derive(Component)]
 struct BatchValidationStatsPanel;
+
+#[derive(Component)]
+struct BatchValidationLedgerPanel;
 
 #[derive(Resource, Default)]
 struct LastDisplayedStats {
@@ -88,6 +283,7 @@ fn main() {
     // `fairy_dust::sprinkle_example`.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
+        .with_hdr()
         .with_perf_mode()
         .with_save_window_position()
         .with_studio_lighting()
@@ -103,9 +299,13 @@ fn main() {
             OrbitCamPreset::BlenderLike,
         )
         .with_stable_transparency()
+        .with_bloom()
+        .with_environment_map()
         .with_camera_home()
         .yaw(0.0)
         .pitch(HOME_PITCH)
+        .margin(HOME_MARGIN)
+        .anchor(Anchor::CenterLeft)
         .with_title_bar(
             TitleBar::new()
                 .with_title("Batch Validation")
@@ -113,21 +313,28 @@ fn main() {
         )
         .with_camera_control_panel()
         .init_resource::<LastDisplayedStats>()
-        .add_systems(Startup, (spawn_validation_panels, spawn_stats_panel))
+        .add_systems(
+            Startup,
+            (
+                spawn_validation_panels,
+                spawn_stats_panel,
+                spawn_expected_batches_panel,
+            ),
+        )
         .add_systems(Update, update_stats_panel)
         .run();
 }
 
-fn spawn_validation_panels(mut commands: Commands) {
+fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let sdf_fill_image = asset_server.load("textures/array_texture.png");
     let panels = [
-        ("sdf-surfaces", build_sdf_surface_panel()),
+        ("sdf-surfaces", build_sdf_surface_panel(sdf_fill_image)),
         ("text-materials", build_text_panel()),
         ("analytic-shapes", build_shape_panel()),
         ("mixed-stack", build_mixed_panel()),
     ];
-    let left = -PANEL_STEP_X * 1.5;
     for (index, (name, tree)) in panels.into_iter().enumerate() {
-        let x = index.to_f32().mul_add(PANEL_STEP_X, left);
+        let (x, y) = panel_grid_position(index);
         let panel = validation_panel(tree, index);
         match panel {
             Ok(panel) => {
@@ -136,7 +343,7 @@ fn spawn_validation_panels(mut commands: Commands) {
                     BatchValidationPanel,
                     CameraHomeTarget,
                     panel,
-                    Transform::from_xyz(x, 0.08, 0.0),
+                    Transform::from_xyz(x, y, 0.0),
                 ));
             },
             Err(error) => error!("batch_validation: failed to build {name}: {error}"),
@@ -144,9 +351,50 @@ fn spawn_validation_panels(mut commands: Commands) {
     }
     commands.spawn((
         CameraHomeTarget,
-        Aabb::from_min_max(Vec3::new(-0.72, -0.02, -0.12), Vec3::new(0.72, 0.26, 0.12)),
+        Aabb::from_min_max(
+            Vec3::new(
+                -PANEL_STEP_X.mul_add(0.5, PANEL_WORLD_W.mul_add(0.5, PANEL_HOME_PAD)),
+                PANEL_WORLD_H.mul_add(
+                    -0.5,
+                    PANEL_STEP_Y.mul_add(-0.5, PANEL_GRID_CENTER_Y) - PANEL_HOME_PAD,
+                ),
+                -PANEL_HOME_PAD,
+            ),
+            Vec3::new(
+                PANEL_STEP_X.mul_add(0.5, PANEL_WORLD_W.mul_add(0.5, PANEL_HOME_PAD)),
+                PANEL_WORLD_H.mul_add(
+                    0.5,
+                    PANEL_STEP_Y.mul_add(0.5, PANEL_GRID_CENTER_Y) + PANEL_HOME_PAD,
+                ),
+                PANEL_HOME_PAD,
+            ),
+        ),
         Transform::default(),
     ));
+    // Small point light in front of the metallic center card, offset up-left so
+    // its specular reflection localizes into a glint on that card. Studio lights
+    // are broad and only produce a uniform sheen on a flat metal facing the
+    // camera; a point light's direction varies across the surface, so the
+    // highlight lands as a hot spot.
+    commands.spawn((
+        Name::new("glint key light"),
+        PointLight {
+            intensity: GLINT_LIGHT_LUMENS,
+            range: 0.3,
+            radius: 0.0,
+            shadow_maps_enabled: false,
+            ..default()
+        },
+        Transform::from_translation(GLINT_LIGHT_POS),
+    ));
+}
+
+fn panel_grid_position(index: usize) -> (f32, f32) {
+    let column = (index % 2).to_f32();
+    let row = (index / 2).to_f32();
+    let x = (column - 0.5) * PANEL_STEP_X;
+    let y = (0.5 - row).mul_add(PANEL_STEP_Y, PANEL_GRID_CENTER_Y);
+    (x, y)
 }
 
 fn validation_panel(
@@ -168,12 +416,21 @@ fn validation_panel(
 }
 
 fn spawn_stats_panel(mut commands: Commands) {
-    let rows = validation_stats_rows(None, 0.0, 0.0);
-    match diegetic_stats_panel(&rows) {
+    let sections = validation_stats_sections(None, 0.0, 0.0);
+    match diegetic_stats_sections_panel(&sections) {
         Ok(panel) => {
             commands.spawn((BatchValidationStatsPanel, panel, Transform::default()));
         },
         Err(error) => error!("batch_validation: failed to build stats panel: {error}"),
+    }
+}
+
+fn spawn_expected_batches_panel(mut commands: Commands) {
+    match build_expected_batches_panel(None) {
+        Ok(panel) => {
+            commands.spawn((BatchValidationLedgerPanel, panel, Transform::default()));
+        },
+        Err(error) => error!("batch_validation: failed to build expected-batches panel: {error}"),
     }
 }
 
@@ -182,6 +439,7 @@ fn update_stats_panel(
     diagnostics: Res<DiagnosticsStore>,
     diegetic_perf: Res<DiegeticPerfStats>,
     panels: Query<Entity, With<BatchValidationStatsPanel>>,
+    ledger_panels: Query<Entity, With<BatchValidationLedgerPanel>>,
     mut last: ResMut<LastDisplayedStats>,
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
@@ -196,82 +454,262 @@ fn update_stats_panel(
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(Diagnostic::smoothed);
-    let rows = validation_stats_rows(Some(&diegetic_perf), fps.unwrap_or(0.0), time.delta_secs());
-    let key = stats_key(&rows);
+    let sections =
+        validation_stats_sections(Some(&diegetic_perf), fps.unwrap_or(0.0), time.delta_secs());
+    let key = stats_key(&sections);
     if key == last.key {
         return;
     }
     last.key = key;
     for panel in &panels {
-        commands.set_tree(panel, diegetic_stats_tree(&rows));
+        commands.set_tree(panel, diegetic_stats_sections_tree(&sections));
+    }
+    for panel in &ledger_panels {
+        commands.set_tree(panel, expected_batches_tree(Some(&diegetic_perf)));
     }
 }
 
-fn validation_stats_rows(
+fn validation_stats_sections(
     perf: Option<&DiegeticPerfStats>,
     fps: f64,
     frame_secs: f32,
-) -> Vec<StatsPanelRow> {
+) -> Vec<StatsPanelSection> {
     let perf = perf.cloned().unwrap_or_default();
     let batch = &perf.batch;
     let shape_batch = perf.line_batch;
     let sdf_quads = perf.panel_geometry.sdf_quads;
     let current_draws = sdf_quads + batch.batches + shape_batch.batches;
     vec![
-        StatsPanelRow::new(
-            "profile",
-            if cfg!(debug_assertions) {
-                "debug"
-            } else {
-                "release"
-            },
+        StatsPanelSection::new(
+            "frame",
+            [
+                StatsPanelRow::new(
+                    "profile",
+                    if cfg!(debug_assertions) {
+                        "debug"
+                    } else {
+                        "release"
+                    },
+                ),
+                StatsPanelRow::new("fps", format!("{fps:.0}"))
+                    .detail(format!("frame: {:.2} ms", frame_secs * 1000.0)),
+            ],
         ),
-        StatsPanelRow::new("fps", format!("{fps:.0}"))
-            .detail(format!("frame: {:.2} ms", frame_secs * 1000.0)),
-        StatsPanelRow::new("authored panels", AUTHORED_PANELS.to_string())
-            .detail("four world panels, each a different batching case"),
-        StatsPanelRow::new("sdf fills", AUTHORED_SDF_FILLS.to_string())
-            .detail(format!("live SDF quads today: {sdf_quads}")),
-        StatsPanelRow::new("sdf borders", AUTHORED_SDF_BORDERS.to_string())
-            .detail("fills and borders should become SDF batch records"),
-        StatsPanelRow::new("text runs", batch.runs.to_string())
-            .detail(format!("authored target: {AUTHORED_TEXT_RUNS}")),
-        StatsPanelRow::new("text glyphs", batch.glyph_records.to_string())
-            .detail("live glyph instance records"),
-        StatsPanelRow::new("shape groups", AUTHORED_SHAPE_GROUPS.to_string())
-            .detail(format!("path records today: {}", shape_batch.records)),
-        StatsPanelRow::new("shape primitives", AUTHORED_SHAPE_PRIMITIVES.to_string())
-            .detail("lines, arrows, circles, dividers"),
-        StatsPanelRow::new("draws today", current_draws.to_string()).detail(format!(
-            "sdf {sdf_quads} + text {} + shapes {}",
-            batch.batches, shape_batch.batches
-        )),
-        StatsPanelRow::new("material table", "pending")
-            .detail("row/build/upload counts land with the batching phases"),
+        StatsPanelSection::new(
+            "authored content",
+            [
+                StatsPanelRow::new("panels", AUTHORED_PANELS.to_string())
+                    .detail("four world panels, each a different batching case"),
+                StatsPanelRow::new("sdf fills", AUTHORED_SDF_FILLS.to_string()),
+                StatsPanelRow::new("sdf borders", AUTHORED_SDF_BORDERS.to_string())
+                    .detail("fills and borders should become SDF batch records"),
+                StatsPanelRow::new("text runs", AUTHORED_TEXT_RUNS.to_string()),
+                StatsPanelRow::new("shape groups", AUTHORED_SHAPE_GROUPS.to_string()),
+                StatsPanelRow::new("shape primitives", AUTHORED_SHAPE_PRIMITIVES.to_string())
+                    .detail("lines, arrows, circles, dividers"),
+            ],
+        ),
+        StatsPanelSection::new(
+            "observed renderer",
+            [
+                StatsPanelRow::new("sdf quads", sdf_quads.to_string()),
+                StatsPanelRow::new("text batches", batch.batches.to_string()),
+                StatsPanelRow::new("text runs", batch.runs.to_string()),
+                StatsPanelRow::new("text glyphs", batch.glyph_records.to_string())
+                    .detail("live glyph instance records"),
+                StatsPanelRow::new("shape batches", shape_batch.batches.to_string()),
+                StatsPanelRow::new("path records", shape_batch.records.to_string()),
+                StatsPanelRow::new("draws today", current_draws.to_string()).detail(format!(
+                    "sdf {sdf_quads} + text {} + shapes {}",
+                    batch.batches, shape_batch.batches
+                )),
+            ],
+        ),
+        StatsPanelSection::new(
+            "material table",
+            [
+                StatsPanelRow::new("sdf batches", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("sdf records", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("sdf uploads", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("table rows", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("table bytes", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("table capacity", MATERIAL_TABLE_PENDING)
+                    .detail("placeholders; observed values wire in at plan Phase 5"),
+            ],
+        ),
     ]
 }
 
-fn stats_key(rows: &[StatsPanelRow]) -> String {
+fn stats_key(sections: &[StatsPanelSection]) -> String {
     let mut key = String::new();
-    for row in rows {
-        key.push_str(&row.label);
-        key.push('=');
-        key.push_str(&row.value);
+    for section in sections {
+        key.push_str(&section.title);
         key.push('|');
-        for detail in &row.details {
-            key.push_str(detail);
+        for row in &section.rows {
+            key.push_str(&row.label);
+            key.push('=');
+            key.push_str(&row.value);
             key.push('|');
+            for detail in &row.details {
+                key.push_str(detail);
+                key.push('|');
+            }
         }
     }
     key
 }
 
-fn build_sdf_surface_panel() -> LayoutTree {
+fn build_expected_batches_panel(
+    perf: Option<&DiegeticPerfStats>,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+    let unlit = screen_panel_material();
+    DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::BottomLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(expected_batches_tree(perf))
+        .build()
+}
+
+// The bottom-left ledger: a title, a header row, one row per panel with its
+// predicted text/shape/sdf batch counts, then a `predicted` totals row (the
+// column sums) and a live `actual` row pulled from the renderer counters.
+fn expected_batches_tree(perf: Option<&DiegeticPerfStats>) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(LEDGER_ROW_GAP),
+                |builder| {
+                    builder.text("expected batches", ledger_title_style());
+                    ledger_row(
+                        builder,
+                        "",
+                        TEXT_MUTED,
+                        ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
+                    );
+                    let mut totals = [0_usize; 3];
+                    for panel in &EXPECTED_BATCHES {
+                        ledger_row(
+                            builder,
+                            panel.label,
+                            TEXT_MUTED,
+                            [
+                                panel.text.to_string(),
+                                panel.shape.to_string(),
+                                panel.sdf.to_string(),
+                            ],
+                        );
+                        totals[0] += panel.text;
+                        totals[1] += panel.shape;
+                        totals[2] += panel.sdf;
+                    }
+                    ledger_separator(builder);
+                    ledger_row(
+                        builder,
+                        "predicted",
+                        TEXT_MAIN,
+                        [
+                            totals[0].to_string(),
+                            totals[1].to_string(),
+                            totals[2].to_string(),
+                        ],
+                    );
+                    let perf = perf.cloned().unwrap_or_default();
+                    ledger_row(
+                        builder,
+                        "actual",
+                        TEXT_MAIN,
+                        [
+                            perf.batch.batches.to_string(),
+                            perf.line_batch.batches.to_string(),
+                            perf.panel_geometry.sdf_quads.to_string(),
+                        ],
+                    );
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+// One table row: a fixed-width left label cell plus three right-aligned numeric
+// cells colored by family (text/shape/sdf).
+fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cells: [String; 3]) {
+    builder.with(
+        El::row()
+            .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
+            .height(Sizing::FIT)
+            .gap(LEDGER_CELL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::fixed(LEDGER_LABEL_WIDTH))
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text(label, ledger_cell_style(label_color));
+                },
+            );
+            for (cell, color) in cells.into_iter().zip(LEDGER_FAMILY_COLORS) {
+                builder.with(
+                    El::new()
+                        .width(Sizing::fixed(LEDGER_NUM_WIDTH))
+                        .height(Sizing::FIT)
+                        .alignment(AlignX::Right, AlignY::Center),
+                    |builder| {
+                        builder.text(cell, ledger_cell_style(color));
+                    },
+                );
+            }
+        },
+    );
+}
+
+fn ledger_separator(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
+            .height(Sizing::fixed(1.0))
+            .background(LEDGER_SEPARATOR_COLOR),
+        |_builder| {},
+    );
+}
+
+fn ledger_title_style() -> TextStyle {
+    TextStyle::new(LEDGER_TITLE_FONT_SIZE)
+        .bold()
+        .with_color(TEXT_MAIN)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn ledger_cell_style(color: Color) -> TextStyle {
+    TextStyle::new(LEDGER_FONT_SIZE)
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+// Four SDF fills laid out 2x2. The colored / metallic / emissive cards differ
+// only in StandardMaterial table values (base_color, metallic, emissive), so
+// post-material-table they share one SDF batch. The image card carries a
+// `base_color_texture`, a batch-compatibility splitter, so it forms its own
+// batch — the SDF column's predicted 2 batches in the expected-batches ledger.
+fn build_sdf_surface_panel(image: Handle<Image>) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
         "SDF fills + borders",
-        "nested cards, borders, dividers",
+        "three batch together, image splits",
+        SDF_PANEL_STATS,
     );
     builder.with(
         El::row()
@@ -279,19 +717,50 @@ fn build_sdf_surface_panel() -> LayoutTree {
             .height(Sizing::GROW)
             .gap(ROW_GAP),
         |builder| {
-            for column in 0..3 {
-                builder.with(
-                    El::column()
-                        .width(Sizing::GROW)
-                        .height(Sizing::GROW)
-                        .gap(ROW_GAP),
-                    |builder| {
-                        for row in 0..3 {
-                            swatch_card(builder, column, row);
-                        }
-                    },
-                );
-            }
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
+                |builder| {
+                    sdf_fill_card(
+                        builder,
+                        "base color",
+                        "table value",
+                        colored_fill_material(),
+                        ACCENT_BLUE,
+                    );
+                    sdf_fill_card(
+                        builder,
+                        "metallic",
+                        "table value",
+                        metallic_glint_material(),
+                        ACCENT_GREEN,
+                    );
+                },
+            );
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
+                |builder| {
+                    sdf_fill_card(
+                        builder,
+                        "emissive",
+                        "table value",
+                        emissive_fill_material(),
+                        ACCENT_YELLOW,
+                    );
+                    sdf_fill_card(
+                        builder,
+                        "image",
+                        "texture splits",
+                        image_fill_material(image),
+                        ACCENT_RED,
+                    );
+                },
+            );
         },
     );
     builder.build()
@@ -302,61 +771,61 @@ fn build_text_panel() -> LayoutTree {
     panel_header(
         &mut builder,
         "Text material cases",
-        "shared style, varied scalar values",
+        "same batch values vs split keys",
+        TEXT_PANEL_STATS,
     );
-    for (label, value, color) in [
-        ("base color", "cool blue", ACCENT_BLUE),
-        ("emissive", "warm readout", ACCENT_YELLOW),
-        ("roughness", "matte copy", TEXT_MUTED),
-        ("alpha split", "transparent row", ACCENT_GREEN),
-        ("override", "separate material handle", ACCENT_RED),
-    ] {
-        builder.with(
-            El::row()
-                .width(Sizing::GROW)
-                .height(Sizing::FIT)
-                .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
-                .corner_radius(CornerRadius::all(Mm(1.5)))
-                .background(Color::srgba(0.02, 0.03, 0.04, 0.38))
-                .alignment(AlignX::Left, AlignY::Center),
-            |builder| {
-                builder.with(
-                    El::new().width(Sizing::fixed(34.0)).height(Sizing::FIT),
-                    |builder| {
-                        builder.text(label, body_style(TEXT_MUTED));
-                    },
-                );
-                builder.text(value, body_style(color));
-            },
-        );
-    }
-    builder.build()
-}
-
-fn build_shape_panel() -> LayoutTree {
-    let mut builder = panel_root();
-    panel_header(&mut builder, "Analytic shapes", "lines, arrows, circles");
-    for (index, color) in [ACCENT_BLUE, ACCENT_GREEN, ACCENT_YELLOW]
-        .into_iter()
-        .enumerate()
-    {
-        builder.with(
-            El::new()
-                .width(Sizing::GROW)
-                .height(Sizing::fixed(16.0))
-                .draw(PanelDraw::shapes(shape_row(index, color))),
-            |_builder| {},
-        );
-    }
     builder.with(
         El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .gap(ROW_GAP),
         |builder| {
-            shape_badge(builder, "circle");
-            shape_badge(builder, "arrow");
-            shape_badge(builder, "line");
+            material_group(
+                builder,
+                "Shared group",
+                "varies table values",
+                &[
+                    ("base color", "cool blue", ACCENT_BLUE),
+                    ("emissive", "warm readout", EMISSIVE_WARM),
+                    ("metallic", "sharp glint", GLINT),
+                ],
+                ACCENT_GREEN,
+            );
+            divergent_group(builder);
+        },
+    );
+    builder.build()
+}
+
+fn build_shape_panel() -> LayoutTree {
+    let mut builder = panel_root();
+    panel_header(
+        &mut builder,
+        "Analytic shapes",
+        "groups own primitives",
+        SHAPE_PANEL_STATS,
+    );
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(ROW_GAP),
+        |builder| {
+            shape_group_card(builder, 0, "Arrow shape", "line + arrow cap", ACCENT_BLUE);
+            shape_group_card(
+                builder,
+                1,
+                "Marker shape",
+                "circle + guide line",
+                ACCENT_GREEN,
+            );
+            shape_group_card(
+                builder,
+                2,
+                "Callout shape",
+                "line + two end caps",
+                ACCENT_YELLOW,
+            );
         },
     );
     builder.build()
@@ -364,21 +833,60 @@ fn build_shape_panel() -> LayoutTree {
 
 fn build_mixed_panel() -> LayoutTree {
     let mut builder = panel_root();
-    panel_header(&mut builder, "Mixed stack", "SDF surface + text + shapes");
+    panel_header(
+        &mut builder,
+        "Mixed stack",
+        "one panel, several draw families",
+        MIXED_PANEL_STATS,
+    );
     builder.with(
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .gap(ROW_GAP)
-            .child_divider(ChildDivider::new(
-                Mm(0.35),
-                Color::srgba(0.5, 0.7, 0.9, 0.55),
-            )),
+            .gap(ROW_GAP),
         |builder| {
-            mixed_row(builder, "panel fill", "SDF record", ACCENT_BLUE);
-            mixed_row(builder, "run A", "Path text", ACCENT_GREEN);
-            mixed_row(builder, "run B", "same batch?", ACCENT_YELLOW);
-            mixed_row(builder, "shape", "Path primitive", ACCENT_RED);
+            mixed_row(
+                builder,
+                "SDF surface",
+                "fill + border",
+                "2 records",
+                ACCENT_BLUE,
+                Border::all(Mm(0.4), ACCENT_BLUE),
+            );
+            mixed_row(
+                builder,
+                "Text run A",
+                "shared material",
+                "1 run",
+                ACCENT_GREEN,
+                Border::new(),
+            );
+            mixed_row(
+                builder,
+                "Text run B",
+                "different color",
+                "same batch",
+                ACCENT_YELLOW,
+                Border::new(),
+            );
+            mixed_shape_row(
+                builder,
+                "Shape group",
+                "line + caps",
+                "3 primitives",
+                ACCENT_RED,
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
+                    .background(MIXED_ROW_BG)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text("Expected: SDF + text + path batches", body_style(TEXT_MAIN));
+                },
+            );
         },
     );
     builder.build()
@@ -396,134 +904,523 @@ fn panel_root() -> LayoutBuilder {
     )
 }
 
-fn panel_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str) {
+fn panel_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str, stats: PanelStats) {
     builder.with(
-        El::column()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .gap(1.0)
-            .padding(Padding::new(1.0, 1.0, 0.0, 2.0)),
+            .gap(ROW_GAP)
+            .padding(Padding::new(1.0, 1.0, 0.0, 2.0))
+            .alignment(AlignX::Left, AlignY::Top),
         |builder| {
-            builder.text(title, title_style());
-            builder.text(subtitle, small_style(TEXT_MUTED));
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .gap(1.0),
+                |builder| {
+                    builder.text(title, title_style());
+                    builder.text(subtitle, subtitle_style(TEXT_MUTED));
+                },
+            );
+            panel_stats_block(builder, stats);
         },
     );
 }
 
-fn swatch_card(builder: &mut LayoutBuilder, column: usize, row: usize) {
-    let accent = match (column + row) % 4 {
-        0 => ACCENT_BLUE,
-        1 => ACCENT_GREEN,
-        2 => ACCENT_YELLOW,
-        _ => ACCENT_RED,
-    };
+// The panel's own authored counts, drawn small in the upper-right corner.
+fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
+    builder.with(
+        El::column()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .gap(0.5)
+            .alignment(AlignX::Right, AlignY::Top),
+        |builder| {
+            builder.text(
+                format!("sdf {}", stats.sdf_surfaces()),
+                stats_style(ACCENT_BLUE),
+            );
+            builder.text(
+                format!("text {}", stats.text_runs),
+                stats_style(ACCENT_GREEN),
+            );
+            builder.text(
+                format!("shapes {}", stats.shape_groups),
+                stats_style(ACCENT_YELLOW),
+            );
+        },
+    );
+}
+
+fn material_group(
+    builder: &mut LayoutBuilder,
+    title: &str,
+    subtitle: &str,
+    rows: &[(&str, &str, Color)],
+    border: Color,
+) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(ROW_GAP)
+            .padding(Padding::all(Mm(2.0)))
+            .background(Color::srgba(0.02, 0.03, 0.04, 0.30))
+            .border(Border::all(Mm(0.3), border))
+            .corner_radius(CornerRadius::all(Mm(1.3))),
+        |builder| {
+            builder.text(title, material_group_title_style());
+            builder.text(subtitle, small_style(TEXT_MUTED));
+            for (label, value, color) in rows {
+                material_case_block(builder, label, value, *color);
+            }
+        },
+    );
+}
+
+// Each case stacks a muted caption above its value. The value owns the full
+// group width and wraps, so the long divergent-group strings cannot clip at the
+// card edge the way a fixed-label-width row did.
+fn material_case_block(builder: &mut LayoutBuilder, label: &str, value: &str, color: Color) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(1.0)
+            .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
+            .corner_radius(CornerRadius::all(Mm(1.5)))
+            .background(Color::srgba(0.02, 0.03, 0.04, 0.38))
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text(label, small_style(TEXT_MUTED));
+            builder.text(value, body_style(color));
+        },
+    );
+}
+
+// The Divergent group authors text runs that actually carry the batch splitters,
+// so each one forms its own text batch (observable in `batch.batches` / the
+// ledger's `actual` text count). The default-style captions and the BothSides
+// cull run share the panel's one shared text batch; the four divergent runs
+// (Opaque, Multiply, FrontOnly, BackOnly) add four more — the ledger's Text=5.
+fn divergent_group(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(ROW_GAP)
+            .padding(Padding::all(Mm(2.0)))
+            .background(Color::srgba(0.02, 0.03, 0.04, 0.30))
+            .border(Border::all(Mm(0.3), ACCENT_RED))
+            .corner_radius(CornerRadius::all(Mm(1.3))),
+        |builder| {
+            builder.text("Divergent group", material_group_title_style());
+            builder.text("splits compatibility", small_style(TEXT_MUTED));
+            divergent_alpha_case(builder);
+            divergent_texture_case(builder);
+            divergent_cull_case(builder);
+        },
+    );
+}
+
+// Alpha-mode split: two runs that both diverge from the panel default
+// `AlphaMode::Blend`. `Opaque` routes through Mask(0.0) (hard-edged silhouette);
+// `Multiply` tints its ink into the light cell. Each is its own text batch.
+fn divergent_alpha_case(builder: &mut LayoutBuilder) {
+    divergent_case_shell(
+        builder,
+        "alpha mode",
+        ALPHA_CELL_BG,
+        ALPHA_CELL_CAPTION,
+        |builder| {
+            builder.text(
+                "Opaque",
+                body_style(ALPHA_CELL_INK).with_alpha_mode(AlphaMode::Opaque),
+            );
+            builder.text(
+                "Multiply",
+                body_style(ALPHA_CELL_INK).with_alpha_mode(AlphaMode::Multiply),
+            );
+        },
+    );
+}
+
+// Texture split for text is deferred — text glyphs cannot carry a
+// `base_color_texture` until the texture feature lands (plan Phase 8). The SDF
+// panel demonstrates the texture splitter today; this stays a placeholder.
+fn divergent_texture_case(builder: &mut LayoutBuilder) {
+    divergent_case_shell(
+        builder,
+        "texture",
+        DIVERGENT_CASE_BG,
+        TEXT_MUTED,
+        |builder| {
+            builder.text("text texture: plan Phase 8", body_style(TEXT_MUTED));
+        },
+    );
+}
+
+// Cull-mode split: three runs, one per `Sidedness`. `FrontOnly` and `BackOnly`
+// each form their own text batch; `BothSides` matches the panel default and
+// joins the shared batch. `BackOnly` culls front faces, so it is invisible from
+// the front camera and only legible when the orbit camera swings behind.
+fn divergent_cull_case(builder: &mut LayoutBuilder) {
+    divergent_case_shell(
+        builder,
+        "cull mode",
+        DIVERGENT_CASE_BG,
+        TEXT_MUTED,
+        |builder| {
+            builder.text(
+                "FrontOnly",
+                body_style(ACCENT_RED).with_sidedness(Sidedness::FrontOnly),
+            );
+            builder.text(
+                "BackOnly",
+                body_style(ACCENT_RED).with_sidedness(Sidedness::BackOnly),
+            );
+            builder.text(
+                "BothSides",
+                body_style(ACCENT_RED).with_sidedness(Sidedness::BothSides),
+            );
+        },
+    );
+    builder.text("back hidden from front", small_style(TEXT_MUTED));
+}
+
+// A divergent case: a captioned cell whose value runs wrap in a row, so each
+// run keeps its own `TextStyle` (and thus its own batch key) instead of being
+// merged into one descriptive string.
+fn divergent_case_shell(
+    builder: &mut LayoutBuilder,
+    caption: &str,
+    cell_bg: Color,
+    caption_color: Color,
+    values: impl FnOnce(&mut LayoutBuilder),
+) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(1.0)
+            .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
+            .corner_radius(CornerRadius::all(Mm(1.5)))
+            .background(cell_bg)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text(caption, small_style(caption_color));
+            builder.with(
+                El::row()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .gap(ROW_GAP),
+                values,
+            );
+        },
+    );
+}
+
+// One SDF fill: an El with a material background and a border (rendered in a
+// single quad), captioned with its material name and role. The label/caption
+// column carries no background, so it adds no SDF surface — only the outer El.
+fn sdf_fill_card(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    caption: &str,
+    material: StandardMaterial,
+    accent: Color,
+) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(2.0))
-            .background(Color::srgba(
-                column.to_f32().mul_add(0.025, 0.03),
-                0.045,
-                0.055,
-                0.82,
-            ))
+            .material(material)
             .border(Border::all(Mm(0.3), accent))
             .corner_radius(CornerRadius::all(Mm(1.4)))
             .alignment(AlignX::Center, AlignY::Center),
         |builder| {
-            builder.text(
-                format!("{}:{}", column + 1, row + 1),
-                small_style(TEXT_MAIN),
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(1.0)
+                    .alignment(AlignX::Center, AlignY::Center),
+                |builder| {
+                    builder.text(label, swatch_style(accent));
+                    builder.text(caption, small_style(TEXT_MUTED));
+                },
             );
         },
     );
 }
 
-fn shape_row(index: usize, color: Color) -> Vec<bevy_diegetic::PanelShape> {
-    let y = 8.0;
-    let index_factor = index.to_f32();
-    let base = index_factor * 4.0;
-    vec![
-        PanelLine::new(
-            PanelPoint::new(4.0, y),
-            PanelPoint::new(34.0, y + base * 0.2),
-        )
-        .width(Mm(0.45))
-        .color(color)
-        .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.0))
-        .into(),
-        PanelCircle::new(PanelPoint::new(48.0, y), Mm(index_factor.mul_add(0.4, 2.2)))
-            .color(color)
-            .into(),
-        PanelLine::new(
-            PanelPoint::new(60.0, y + 4.0),
-            PanelPoint::new(104.0, y - 4.0),
-        )
-        .width(Mm(index_factor.mul_add(0.1, 0.25)))
-        .color(color)
-        .start_cap(CalloutCap::circle().radius(1.8))
-        .end_cap(CalloutCap::diamond().width(3.0).height(3.0))
-        .into(),
-    ]
+// Matte dielectric SDF fill. Differs from the metallic and emissive cards only
+// in StandardMaterial table values, so the three share a batch.
+fn colored_fill_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.12, 0.26, 0.42);
+    material
 }
 
-fn shape_badge(builder: &mut LayoutBuilder, label: &str) {
-    builder.with(
-        El::new()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(18.0))
-            .background(Color::srgba(0.02, 0.03, 0.04, 0.42))
-            .border(Border::all(Mm(0.25), CARD_BORDER_WARM))
-            .corner_radius(CornerRadius::all(Mm(1.2)))
-            .alignment(AlignX::Center, AlignY::Center),
-        |builder| {
-            builder.text(label, body_style(TEXT_MAIN));
-        },
-    );
+// Brushed-metal SDF fill: full metallic with a moderate roughness that spreads
+// and dims the reflected environment map, with a near-white base color tinting
+// it. Keeps `default_panel_material`'s double-sided / no-cull setup so the
+// diegetic panel still renders from both faces.
+fn metallic_glint_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.22, 0.38, 0.72);
+    material.metallic = 1.0;
+    material.perceptual_roughness = 0.55;
+    material.reflectance = 0.9;
+    material
 }
 
-fn mixed_row(builder: &mut LayoutBuilder, label: &str, value: &str, color: Color) {
+// Emissive SDF fill: a warm self-lit readout color. `emissive` is a table value,
+// so this stays batch-compatible with the colored and metallic cards.
+fn emissive_fill_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.06, 0.05, 0.03);
+    material.emissive = EMISSIVE_WARM.into();
+    material
+}
+
+// Image SDF fill: a white base color modulated by `base_color_texture`, sampled
+// over the quad UV. The texture handle is a batch-compatibility splitter, so this
+// card forms its own SDF batch separate from the three table-value cards.
+fn image_fill_material(image: Handle<Image>) -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::WHITE;
+    material.base_color_texture = Some(image);
+    material
+}
+
+// Each card draws only the shape its label names. The shapes live in their own
+// strip element to the right of the label, so they resolve against that
+// element's local space: every row spans `start(3)` to `end(6)`, vertically
+// centered, which makes all three lines the same length regardless of width.
+fn shape_strip(index: usize, color: Color) -> Vec<bevy_diegetic::PanelShape> {
+    // A fresh line spanning the strip width, built per row because `PanelLine`
+    // and `PanelPoint` move on each builder call. The end inset varies: a
+    // centered end cap (circle/diamond) extends half its size past its end
+    // point, but the arrowhead tip lands on its end point, so the arrow's line
+    // ends further right to reach the same rightmost point.
+    let span = |end_inset: f32| {
+        PanelLine::new(
+            PanelPoint::new(PanelCoord::start(Mm(3.0)), PanelCoord::percent(0.5)),
+            PanelPoint::new(PanelCoord::end(Mm(end_inset)), PanelCoord::percent(0.5)),
+        )
+        .color(color)
+    };
+    match index {
+        // Arrow shape: one stroked line with an arrow end cap.
+        0 => vec![
+            span(3.6)
+                .width(Mm(0.5))
+                .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2))
+                .into(),
+        ],
+        // Marker shape: a guide line ending in a filled circle marker.
+        1 => vec![
+            span(6.0)
+                .width(Mm(0.45))
+                .end_cap(CalloutCap::circle().radius(2.4))
+                .into(),
+        ],
+        // Callout shape: one line bracketed by a start cap and an end cap.
+        _ => vec![
+            span(6.0)
+                .width(Mm(0.4))
+                .start_cap(CalloutCap::circle().radius(1.8))
+                .end_cap(CalloutCap::diamond().width(3.0).height(3.0))
+                .into(),
+        ],
+    }
+}
+
+fn shape_group_card(
+    builder: &mut LayoutBuilder,
+    index: usize,
+    label: &str,
+    detail: &str,
+    color: Color,
+) {
     builder.with(
         El::row()
             .width(Sizing::GROW)
-            .height(Sizing::GROW)
+            .height(Sizing::fixed(28.0))
             .gap(ROW_GAP)
-            .padding(Padding::new(2.0, 2.0, 2.0, 2.0))
-            .background(Color::srgba(0.02, 0.03, 0.04, 0.34))
-            .draw(PanelDraw::lines([PanelLine::new(
-                PanelPoint::new(4.0, 4.0),
-                PanelPoint::new(106.0, 4.0),
-            )
-            .width(Mm(0.3))
-            .color(color)])),
+            .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
+            .background(Color::srgba(0.02, 0.03, 0.04, 0.42))
+            .border(Border::all(Mm(0.25), CARD_BORDER_WARM))
+            .corner_radius(CornerRadius::all(Mm(1.2)))
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.with(
-                El::new().width(Sizing::fixed(42.0)).height(Sizing::FIT),
+                El::column()
+                    .width(Sizing::fixed(70.0))
+                    .height(Sizing::FIT)
+                    .gap(1.0),
                 |builder| {
                     builder.text(label, body_style(color));
+                    builder.text(detail, small_style(TEXT_MUTED));
                 },
             );
-            builder.text(value, body_style(TEXT_MAIN));
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .draw(PanelDraw::shapes(shape_strip(index, color))),
+                |_builder| {},
+            );
         },
     );
 }
 
-fn title_style() -> TextStyle {
-    TextStyle::new(8.0)
+// The Shape group row's draw family, drawn in the shape strip below the text:
+// one stroked line plus a start and end cap — the three analytic primitives the
+// row's "line + caps" / "3 primitives" readout describes. The circle start cap
+// sits on the line's first point so it touches the stroke.
+fn mixed_shape_group(color: Color) -> PanelDraw {
+    PanelDraw::shapes([
+        PanelLine::new(PanelPoint::new(6.0, 4.0), PanelPoint::new(146.0, 4.0))
+            .width(Mm(0.5))
+            .color(color)
+            .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2))
+            .into(),
+        PanelCircle::new(PanelPoint::new(6.0, 4.0), Mm(2.0))
+            .color(color)
+            .into(),
+    ])
+}
+
+// The label / value / count text shared by every mixed row.
+fn mixed_row_body(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    value: &str,
+    count: &str,
+    color: Color,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(MIXED_LABEL_WIDTH))
+            .height(Sizing::FIT),
+        |builder| {
+            builder.text(label, body_style(color));
+        },
+    );
+    builder.with(
+        El::new().width(Sizing::GROW).height(Sizing::FIT),
+        |builder| {
+            builder.text(value, body_style(TEXT_MAIN));
+        },
+    );
+    builder.text(count, body_style(TEXT_MUTED));
+}
+
+fn mixed_row(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    value: &str,
+    count: &str,
+    color: Color,
+    border: Border,
+) {
+    builder.with(
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(15.0))
+            .gap(ROW_GAP)
+            .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
+            .background(MIXED_ROW_BG)
+            .border(border)
+            .corner_radius(CornerRadius::all(Mm(1.0)))
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| mixed_row_body(builder, label, value, count, color),
+    );
+}
+
+// Taller than a text row: the label/value/count sit on top and the analytic
+// shape group draws in its own strip below, so the line and caps no longer
+// overlap the text.
+fn mixed_shape_row(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    value: &str,
+    count: &str,
+    color: Color,
+) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::fixed(26.0))
+            .gap(2.0)
+            .padding(Padding::new(4.0, 4.0, 4.0, 3.0))
+            .background(MIXED_ROW_BG)
+            .corner_radius(CornerRadius::all(Mm(1.0)))
+            .alignment(AlignX::Left, AlignY::Top),
+        |builder| {
+            builder.with(
+                El::row()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .gap(ROW_GAP),
+                |builder| mixed_row_body(builder, label, value, count, color),
+            );
+            builder.with(
+                El::new()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .draw(mixed_shape_group(color)),
+                |_builder| {},
+            );
+        },
+    );
+}
+
+fn material_group_title_style() -> TextStyle {
+    TextStyle::new(MATERIAL_GROUP_TITLE_FONT_SIZE)
         .bold()
         .with_color(TEXT_MAIN)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
+fn title_style() -> TextStyle {
+    TextStyle::new(TITLE_FONT_SIZE)
+        .bold()
+        .with_color(TEXT_MAIN)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn stats_style(color: Color) -> TextStyle {
+    TextStyle::new(STATS_FONT_SIZE)
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn subtitle_style(color: Color) -> TextStyle {
+    TextStyle::new(SUBTITLE_FONT_SIZE)
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn swatch_style(color: Color) -> TextStyle {
+    TextStyle::new(SWATCH_FONT_SIZE)
+        .bold()
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
 fn body_style(color: Color) -> TextStyle {
-    TextStyle::new(5.3)
+    TextStyle::new(BODY_FONT_SIZE)
         .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
 fn small_style(color: Color) -> TextStyle {
-    TextStyle::new(4.0)
+    TextStyle::new(SMALL_FONT_SIZE)
         .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
 }

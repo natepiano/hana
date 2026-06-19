@@ -134,18 +134,25 @@ pub enum GlyphShadowMode {
     Cast,
 }
 
-/// Whether glyph meshes render both faces or only the front face.
+/// Which face(s) of a glyph mesh render, by back/front-face culling.
 ///
-/// World text defaults to double-sided; screen text defaults to one-sided.
+/// World text defaults to both faces; screen text defaults to front-only.
 /// The cascade carries the contextual default (`Sidedness` is a cascade
 /// attribute); a per-label value on [`TextStyle`] overrides it.
+///
+/// On a transparent panel the front and back faces are both viewable, so
+/// `FrontOnly` and `BackOnly` author labels visible from one side only.
+/// Back-only glyphs read mirror-reversed when viewed from behind; a future
+/// reverse-text feature flips them to read correctly.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
 pub enum Sidedness {
     /// Render both faces with no culling (default).
     #[default]
-    DoubleSided,
-    /// Render only the front face with back-face culling.
-    OneSided,
+    BothSides,
+    /// Render only the front face (cull the back). Visible from the front.
+    FrontOnly,
+    /// Render only the back face (cull the front). Visible from behind.
+    BackOnly,
 }
 
 /// Whether glyph materials respond to scene lighting.
@@ -206,7 +213,7 @@ pub struct TextStyle {
     render_mode:    GlyphRenderMode,
     shadow_mode:    GlyphShadowMode,
     /// Per-label sidedness override. `None` = inherit from the `Sidedness`
-    /// cascade attribute (world panels default `DoubleSided`, screen `OneSided`).
+    /// cascade attribute (world panels default `BothSides`, screen `FrontOnly`).
     sidedness:      Option<Sidedness>,
     /// Per-label lighting override. `None` = inherit from the `Lighting`
     /// cascade attribute (world panels default `Lit`, screen `Unlit`).

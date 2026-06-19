@@ -575,7 +575,7 @@ pub(super) fn seed_panel_overrides(
     }
     if is_screen {
         cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
-        cascade::apply_cascade_override(&mut entity_commands, Sidedness::OneSided);
+        cascade::apply_cascade_override(&mut entity_commands, Sidedness::FrontOnly);
     } else if material_unlit {
         cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
     }

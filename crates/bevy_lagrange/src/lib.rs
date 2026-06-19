@@ -38,6 +38,7 @@ pub use events::AnimationRejected;
 pub use events::AnimationSource;
 pub use events::CameraMoveBegin;
 pub use events::CameraMoveEnd;
+pub use events::FitAnchor;
 pub use events::LookAt;
 pub use events::LookAtAndZoomToFit;
 pub use events::PlayAnimation;

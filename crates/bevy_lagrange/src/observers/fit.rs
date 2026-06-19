@@ -46,6 +46,8 @@ pub(super) fn on_zoom_to_fit(
     let margin = zoom.margin;
     let duration = zoom.duration;
     let easing = zoom.easing;
+    let anchor = zoom.anchor;
+    let offset_px = zoom.offset_px;
 
     let Ok((mut orbit_cam, projection, camera_component)) = camera_query.get_mut(camera) else {
         return;
@@ -67,6 +69,8 @@ pub(super) fn on_zoom_to_fit(
             yaw: orbit_cam.target_yaw,
             pitch: orbit_cam.target_pitch,
             margin,
+            anchor,
+            offset_px,
             projection,
             camera: camera_component,
         },
@@ -163,6 +167,8 @@ pub(super) fn on_animate_to_fit(
     let margin = event.margin;
     let duration = event.duration;
     let easing = event.easing;
+    let anchor = event.anchor;
+    let offset_px = event.offset_px;
 
     let Ok((mut orbit_cam, projection, camera_component)) = camera_query.get_mut(camera) else {
         return;
@@ -175,6 +181,8 @@ pub(super) fn on_animate_to_fit(
             yaw,
             pitch,
             margin,
+            anchor,
+            offset_px,
             projection,
             camera: camera_component,
         },

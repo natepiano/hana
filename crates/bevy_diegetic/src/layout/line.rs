@@ -940,7 +940,7 @@ fn push_centered_cap_form(
         primitives,
         line_source,
         kind,
-        tip - direction * half_size.x,
+        tip,
         direction,
         half_size,
         primitive.color,

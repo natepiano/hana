@@ -103,10 +103,16 @@ Frame a target entity in the camera view:
 commands.trigger(
     ZoomToFit::new(camera, target)
         .margin(0.15)
+        .anchor(FitAnchor::Center)
         .duration(Duration::from_millis(800))
         .easing(EaseFunction::CubicOut),
 );
 ```
+
+Use `.anchor(FitAnchor::TopLeft)` / `.anchor(FitAnchor::BottomRight)` to place
+the fitted projected bounds against a viewport edge or corner. Add
+`.offset_px(Vec2::new(x, y))` when that placement needs a screen-pixel offset;
+positive x moves right and positive y moves down.
 
 ### Look at
 

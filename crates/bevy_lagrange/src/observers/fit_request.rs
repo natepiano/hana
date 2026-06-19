@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 
+use crate::events::FitAnchor;
 use crate::fit;
 use crate::fit::FitSolution;
 use crate::projection;
@@ -11,6 +12,8 @@ pub(super) struct FitRequest<'a> {
     pub(super) yaw:        f32,
     pub(super) pitch:      f32,
     pub(super) margin:     f32,
+    pub(super) anchor:     FitAnchor,
+    pub(super) offset_px:  Vec2,
     pub(super) projection: &'a Projection,
     pub(super) camera:     &'a Camera,
 }
@@ -44,6 +47,8 @@ pub(super) fn prepare_fit_for_target(
         request.yaw,
         request.pitch,
         request.margin,
+        request.anchor,
+        request.offset_px,
         request.projection,
         request.camera,
     )

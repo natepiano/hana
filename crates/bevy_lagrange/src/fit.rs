@@ -26,6 +26,7 @@ use super::constants::VERTICAL_DIMENSION_LABEL;
 use super::projection;
 use super::projection::ProjectionMode;
 use super::projection::ScreenSpaceBounds;
+use crate::events::FitAnchor;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).
 /// For example, a margin of 0.08 returns 1.087 (8% margin).
@@ -142,6 +143,7 @@ struct FitParameters {
     orthographic_fixed_distance: Option<f32>,
     projection_mode:             ProjectionMode,
     zoom_multiplier:             f32,
+    viewport_size:               Option<Vec2>,
 }
 
 /// Calculates the optimal radius and centered focus to fit pre-extracted vertices in the camera
@@ -160,6 +162,8 @@ pub(crate) fn calculate_fit(
     yaw: f32,
     pitch: f32,
     margin: f32,
+    anchor: FitAnchor,
+    offset_px: Vec2,
     projection: &Projection,
     camera: &Camera,
 ) -> Result<FitSolution, FitError> {
@@ -189,9 +193,13 @@ pub(crate) fn calculate_fit(
         return Err(FitError::UnsupportedProjection);
     };
 
-    let aspect_ratio =
-        projection::projection_aspect_ratio(projection, camera.logical_viewport_size())
-            .ok_or(FitError::NoViewport)?;
+    let viewport_size = camera.logical_viewport_size();
+    if has_pixel_offset(offset_px) && !viewport_can_map_pixels(viewport_size) {
+        return Err(FitError::NoViewport);
+    }
+
+    let aspect_ratio = projection::projection_aspect_ratio(projection, viewport_size)
+        .ok_or(FitError::NoViewport)?;
 
     let parameters = FitParameters {
         rotation: Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0),
@@ -199,6 +207,7 @@ pub(crate) fn calculate_fit(
         orthographic_fixed_distance,
         projection_mode,
         zoom_multiplier: zoom_margin_multiplier(clamped_margin),
+        viewport_size,
     };
 
     let object_radius = points
@@ -212,7 +221,15 @@ pub(crate) fn calculate_fit(
         object_radius,
         projection,
         &parameters,
+        anchor,
+        offset_px,
     )
+}
+
+fn has_pixel_offset(offset_px: Vec2) -> bool { offset_px.length_squared() > f32::EPSILON }
+
+fn viewport_can_map_pixels(viewport_size: Option<Vec2>) -> bool {
+    viewport_size.is_some_and(|size| size.x > f32::EPSILON && size.y > f32::EPSILON)
 }
 
 /// Determines which screen dimension constrains the fit and returns the current margin,
@@ -265,6 +282,8 @@ fn binary_search_for_fit(
     object_radius: f32,
     projection: &Projection,
     parameters: &FitParameters,
+    anchor: FitAnchor,
+    offset_px: Vec2,
 ) -> Result<FitSolution, FitError> {
     let mut min_radius = object_radius * MIN_RADIUS_MULTIPLIER;
     let mut max_radius = object_radius * MAX_RADIUS_MULTIPLIER;
@@ -272,6 +291,7 @@ fn binary_search_for_fit(
     let mut best_focus = Position(geometric_center);
     let mut best_error = f32::INFINITY;
     let mut bounds_search = BoundsSearch::NeverProjectable;
+    let mut converged = false;
 
     debug!("Binary search starting: range [{min_radius:.1}, {max_radius:.1}]");
 
@@ -338,10 +358,8 @@ fn binary_search_for_fit(
             debug!(
                 "Iteration {iteration}: Converged to best radius {best_radius:.3} error={best_error:.5}"
             );
-            return Ok(FitSolution {
-                radius: best_radius,
-                focus:  best_focus,
-            });
+            converged = true;
+            break;
         }
     }
 
@@ -349,13 +367,25 @@ fn binary_search_for_fit(
         return Err(FitError::PointsBehindCamera);
     }
 
-    warn!(
-        "Binary search did not converge in {MAX_ITERATIONS} iterations. Using best radius {best_radius:.1}"
+    if !converged {
+        warn!(
+            "Binary search did not converge in {MAX_ITERATIONS} iterations. Using best radius {best_radius:.1}"
+        );
+    }
+
+    let focus = refine_focus_anchoring(
+        points,
+        *best_focus,
+        best_radius,
+        projection,
+        parameters,
+        anchor,
+        offset_px,
     );
 
     Ok(FitSolution {
         radius: best_radius,
-        focus:  best_focus,
+        focus:  Position(focus),
     })
 }
 
@@ -406,6 +436,31 @@ fn refine_focus_centering(
     projection: &Projection,
     parameters: &FitParameters,
 ) -> Vec3 {
+    refine_focus_anchoring(
+        points,
+        initial_focus,
+        radius,
+        projection,
+        parameters,
+        FitAnchor::Center,
+        Vec2::ZERO,
+    )
+}
+
+/// Shifts the camera focus so the selected projected bounds anchor lands on
+/// the matching viewport anchor.
+///
+/// The final `offset_px` uses screen coordinates: positive x moves right,
+/// positive y moves down.
+fn refine_focus_anchoring(
+    points: &[Vec3],
+    initial_focus: Vec3,
+    radius: f32,
+    projection: &Projection,
+    parameters: &FitParameters,
+    anchor: FitAnchor,
+    offset_px: Vec2,
+) -> Vec3 {
     let rotation = parameters.rotation;
     let aspect_ratio = parameters.aspect_ratio;
     let orthographic_fixed_distance = parameters.orthographic_fixed_distance;
@@ -426,14 +481,18 @@ fn refine_focus_centering(
         else {
             break;
         };
-        let (cx, cy) = bounds.center();
-        if cx.abs() < CENTERING_TOLERANCE && cy.abs() < CENTERING_TOLERANCE {
+        let current_anchor = bounds_anchor_point(&bounds, anchor);
+        let target_anchor =
+            viewport_anchor_point(&bounds, parameters.viewport_size, anchor, offset_px);
+        let delta = current_anchor - target_anchor;
+        if delta.x.abs() < CENTERING_TOLERANCE && delta.y.abs() < CENTERING_TOLERANCE {
             break;
         }
 
-        // Centering depths: perspective uses harmonic mean for perspective-correct
-        // centering. Ortho uses 1.0 since projection is depth-independent.
-        let (centering_depth_x, centering_depth_y) = match projection_mode {
+        // Lateral correction depths: perspective uses harmonic mean for
+        // perspective-correct placement. Ortho uses 1.0 since projection is
+        // depth-independent.
+        let (correction_depth_x, correction_depth_y) = match projection_mode {
             ProjectionMode::Orthographic => (1.0, 1.0),
             ProjectionMode::Perspective => (
                 2.0 * depths.min_x * depths.max_x / (depths.min_x + depths.max_x),
@@ -441,9 +500,53 @@ fn refine_focus_centering(
             ),
         };
 
-        focus += camera_right * cx * centering_depth_x + camera_up * cy * centering_depth_y;
+        focus +=
+            camera_right * delta.x * correction_depth_x + camera_up * delta.y * correction_depth_y;
     }
     focus
+}
+
+fn bounds_anchor_point(bounds: &ScreenSpaceBounds, anchor: FitAnchor) -> Vec2 {
+    let (anchor_x, anchor_y) = anchor.offset_fraction();
+    let x = (bounds.max_normalized_x - bounds.min_normalized_x)
+        .mul_add(anchor_x, bounds.min_normalized_x);
+    let y = (bounds.min_normalized_y - bounds.max_normalized_y)
+        .mul_add(anchor_y, bounds.max_normalized_y);
+    Vec2::new(x, y)
+}
+
+fn viewport_anchor_point(
+    bounds: &ScreenSpaceBounds,
+    viewport_size: Option<Vec2>,
+    anchor: FitAnchor,
+    offset_px: Vec2,
+) -> Vec2 {
+    let (anchor_x, anchor_y) = anchor.offset_fraction();
+    let viewport_width = bounds.half_extent_x * 2.0;
+    let viewport_height = bounds.half_extent_y * 2.0;
+    let x = -bounds.half_extent_x + viewport_width * anchor_x;
+    let y = bounds.half_extent_y - viewport_height * anchor_y;
+    let offset = normalized_pixel_offset(bounds, viewport_size, offset_px);
+
+    Vec2::new(x + offset.x, y + offset.y)
+}
+
+fn normalized_pixel_offset(
+    bounds: &ScreenSpaceBounds,
+    viewport_size: Option<Vec2>,
+    offset_px: Vec2,
+) -> Vec2 {
+    let Some(viewport_size) = viewport_size else {
+        return Vec2::ZERO;
+    };
+    if !viewport_can_map_pixels(Some(viewport_size)) {
+        return Vec2::ZERO;
+    }
+
+    Vec2::new(
+        offset_px.x / viewport_size.x * bounds.half_extent_x * 2.0,
+        -offset_px.y / viewport_size.y * bounds.half_extent_y * 2.0,
+    )
 }
 
 #[cfg(test)]
@@ -453,18 +556,50 @@ fn refine_focus_centering(
 )]
 mod tests {
     use bevy::prelude::Camera;
+    use bevy::prelude::EulerRot;
+    use bevy::prelude::GlobalTransform;
     use bevy::prelude::OrthographicProjection;
     use bevy::prelude::PerspectiveProjection;
     use bevy::prelude::Projection;
+    use bevy::prelude::Quat;
     use bevy::prelude::Rect;
+    use bevy::prelude::Transform;
+    use bevy::prelude::Vec2;
     use bevy::prelude::Vec3;
 
+    use super::CENTERING_TOLERANCE;
     use super::FitError;
+    use super::FitSolution;
+    use super::ScreenSpaceBounds;
     use super::calculate_fit;
+    use super::projection;
     use crate::constants::DEFAULT_FIT_MARGIN;
+    use crate::events::FitAnchor;
 
     fn default_perspective() -> Projection {
         Projection::Perspective(PerspectiveProjection::default())
+    }
+
+    fn projected_bounds(
+        points: &[Vec3],
+        fit: FitSolution,
+        yaw: f32,
+        pitch: f32,
+        projection: &Projection,
+        camera: &Camera,
+    ) -> ScreenSpaceBounds {
+        let aspect_ratio =
+            projection::projection_aspect_ratio(projection, camera.logical_viewport_size())
+                .expect("test projection should have an aspect ratio");
+        let rotation = Quat::from_euler(EulerRot::YXZ, yaw, -pitch, 0.0);
+        let camera_position = *fit.focus + rotation * Vec3::new(0.0, 0.0, fit.radius);
+        let camera_global = GlobalTransform::from(
+            Transform::from_translation(camera_position).with_rotation(rotation),
+        );
+        let (bounds, _) =
+            ScreenSpaceBounds::from_points(points, &camera_global, projection, aspect_ratio)
+                .expect("test fit should project its points");
+        bounds
     }
 
     #[test]
@@ -481,6 +616,8 @@ mod tests {
             0.0,
             0.0,
             DEFAULT_FIT_MARGIN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         );
@@ -500,6 +637,8 @@ mod tests {
             0.0,
             0.0,
             DEFAULT_FIT_MARGIN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         );
@@ -518,7 +657,17 @@ mod tests {
             Vec3::new(1.0, 1.0, 0.0),
         ];
 
-        let result = calculate_fit(&points, Vec3::ZERO, 0.0, 0.0, 5.0, &projection, &camera);
+        let result = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            5.0,
+            FitAnchor::Center,
+            Vec2::ZERO,
+            &projection,
+            &camera,
+        );
 
         let fit = result.expect("fit should succeed with clamped margin");
         assert!(fit.radius.is_finite());
@@ -542,11 +691,74 @@ mod tests {
             0.0,
             0.0,
             f32::NAN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         );
 
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn calculate_fit_can_anchor_bounds_top_left() {
+        let projection = default_perspective();
+        let camera = Camera::default();
+        let points = [
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        ];
+
+        let fit = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            DEFAULT_FIT_MARGIN,
+            FitAnchor::TopLeft,
+            Vec2::ZERO,
+            &projection,
+            &camera,
+        )
+        .expect("top-left anchored fit should succeed");
+        let bounds = projected_bounds(&points, fit, 0.0, 0.0, &projection, &camera);
+
+        assert!(
+            (bounds.min_normalized_x + bounds.half_extent_x).abs() < CENTERING_TOLERANCE,
+            "left edge should land on viewport left edge: {bounds:?}",
+        );
+        assert!(
+            (bounds.max_normalized_y - bounds.half_extent_y).abs() < CENTERING_TOLERANCE,
+            "top edge should land on viewport top edge: {bounds:?}",
+        );
+    }
+
+    #[test]
+    fn calculate_fit_requires_viewport_for_pixel_offset() {
+        let projection = default_perspective();
+        let camera = Camera::default();
+        let points = [
+            Vec3::new(-1.0, -1.0, 0.0),
+            Vec3::new(1.0, -1.0, 0.0),
+            Vec3::new(-1.0, 1.0, 0.0),
+            Vec3::new(1.0, 1.0, 0.0),
+        ];
+
+        let result = calculate_fit(
+            &points,
+            Vec3::ZERO,
+            0.0,
+            0.0,
+            DEFAULT_FIT_MARGIN,
+            FitAnchor::TopLeft,
+            Vec2::new(16.0, 16.0),
+            &projection,
+            &camera,
+        );
+
+        assert!(matches!(result, Err(FitError::NoViewport)));
     }
 
     /// Flat quad in XZ at Y=0, camera at pitch=0 (edge-on). The vertical screen
@@ -574,6 +786,8 @@ mod tests {
             0.0,
             0.0,
             DEFAULT_FIT_MARGIN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         )
@@ -611,6 +825,8 @@ mod tests {
             0.0,
             0.001,
             DEFAULT_FIT_MARGIN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         )
@@ -639,6 +855,8 @@ mod tests {
             0.0,
             0.0,
             DEFAULT_FIT_MARGIN,
+            FitAnchor::Center,
+            Vec2::ZERO,
             &projection,
             &camera,
         )

@@ -297,9 +297,9 @@ Status legend: `proposed` = awaiting author choice.
   (c) the builders set explicit defaults at construction. Touches the user's
   standing rule against silently-wrong rendering.
   **→ DECIDED: (b) promote `Lighting` + `Sidedness` to cascade
-  attributes.** Global `CascadeDefault` = world values (`Lit` / `DoubleSided`);
+  attributes.** Global `CascadeDefault` = world values (`Lit` / `BothSides`);
   the screen-panel construction bridge stamps `Override<Lighting>(Unlit)` /
-  `Override<Sidedness>(OneSided)`, exactly as `CascadeDefaults.panel_font_unit`
+  `Override<Sidedness>(FrontOnly)`, exactly as `CascadeDefaults.panel_font_unit`
   seeds `Override<FontUnit>` today. Children inherit; per-entity override still
   works. This is the documented field-promotion migration in `cascade/mod.rs`
   (lines 89–100), not new infrastructure — covers the listed inventory
@@ -321,7 +321,7 @@ Status legend: `proposed` = awaiting author choice.
   cascade resolves `None`: panel → panel font unit, standalone `WorldText` →
   world cascade (meters), and `ScreenText`'s one-element panel seeds
   `Override<FontUnit>(px)` at construction — the *same* bridge that stamps
-  `Unlit`/`OneSided` in D2. Result: `ScreenText` + `24.0` → 24px, `WorldText` +
+  `Unlit`/`FrontOnly` in D2. Result: `ScreenText` + `24.0` → 24px, `WorldText` +
   `24.0` → cascade unit, `Mm(10.0)` → 10mm everywhere. Explicit units never
   flip. Cost is one extra seed in the D2 construction bridge.
 
@@ -492,11 +492,11 @@ into Bucket 1. Explicit `Px/Pt/Mm/In` callers are unaffected.
 6. Promote `Lighting` + `Sidedness` to cascade attributes:
    `cascade_attr!` declarations, typed `override_*` / `inherit_*` / `resolved_*`
    wrappers, `CascadePlugin::<_>::default()` lines, render read sites switched to
-   `Resolved<_>`. Global `CascadeDefault` = `Lit` / `DoubleSided` (world) (D2).
+   `Resolved<_>`. Global `CascadeDefault` = `Lit` / `BothSides` (world) (D2).
 7. Implement `WorldText` / `ScreenText` as fluent builders that build a
    one-element `DiegeticPanel` internally and return the spawn bundle (D1, D8).
 8. The screen-panel construction bridge seeds `Override<FontUnit>(px)`,
-   `Override<Lighting>(Unlit)`, `Override<Sidedness>(OneSided)` —
+   `Override<Lighting>(Unlit)`, `Override<Sidedness>(FrontOnly)` —
    one bridge covering D2 + D3 screen defaults.
 9. Delete `world_scale` (field + `with_world_scale` / `set_world_scale` /
    `world_scale`) and the `Without<PanelTextChild>` standalone render path; world
@@ -593,7 +593,7 @@ Single-correct-outcome refinements to the plan above (not user forks):
 
 - **R6 — Screen defaults are seeded inline at construction, not deferred.** The
   D2/D3 bridge inserts `Override<FontUnit>(Pixels)`, `Override<Lighting>(Unlit)`,
-  `Override<Sidedness>(OneSided)` on the panel entity *during* `build()`
+  `Override<Sidedness>(FrontOnly)` on the panel entity *during* `build()`
   (mirroring the existing `seed_panel_overrides` on `Added<DiegeticPanel>`), not
   via a next-frame observer — else screen text flashes Lit/meters on frame 1.
   Precedence holds: per-entity override > panel override > global default, so a
@@ -733,9 +733,9 @@ Single-correct-outcome refinements to the plan above (not user forks):
   field into `Override`" would force every existing panel (whose styles default
   `Lit`) to `Lit`, regressing the unlit HUD panels. Resolution (user-approved):
   make `TextStyle` lighting/sidedness `Option` (mirroring `alpha_mode`) —
-  `None` = inherit. Global `CascadeDefault` = `Lit` / `DoubleSided` (world);
+  `None` = inherit. Global `CascadeDefault` = `Lit` / `BothSides` (world);
   `seed_panel_overrides` stamps `Override<TextLighting>(Unlit)` /
-  `Override<TextSidedness>(OneSided)` for **screen** panels and
+  `Override<TextSidedness>(FrontOnly)` for **screen** panels and
   `Override<TextLighting>(Unlit)` for any panel whose `text_material` is unlit;
   a label that sets `.with_lighting`/`.with_unlit`/`.with_sidedness` is captured
   as its own `Override` in `reconcile_panel_text_children` (spawn + reuse) and

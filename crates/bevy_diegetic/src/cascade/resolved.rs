@@ -81,10 +81,10 @@ cascade_attr!(
 // screen-panel construction bridge overrides it to `Unlit`. Consumed by both
 // glyph runs and panel lines.
 cascade_attr!(existing Lighting, default = Lighting::Lit);
-// Sidedness cascade attribute. Global default is `DoubleSided` (world text);
-// the screen-panel construction bridge overrides it to `OneSided`. Consumed by
+// Sidedness cascade attribute. Global default is `BothSides` (world text);
+// the screen-panel construction bridge overrides it to `FrontOnly`. Consumed by
 // both glyph runs and panel lines.
-cascade_attr!(existing Sidedness, default = Sidedness::DoubleSided);
+cascade_attr!(existing Sidedness, default = Sidedness::BothSides);
 // Anti-alias mode cascade attribute. The `AntiAlias` resource is the
 // authored global; `sync_anti_alias` mirrors it into
 // `CascadeDefault<AntiAlias>` as the cascade root default.

@@ -18,7 +18,7 @@ use crate::render::world_text::TextContent;
 /// authored `TextStyle::with_lighting` / `with_sidedness`, and
 /// `override_anti_alias` authors anti-alias state — then climbs `ChildOf` to
 /// the panel's override (seeded by `seed_panel_overrides` for screen panels
-/// and unlit-material panels), else the global default (`Lit` / `DoubleSided`
+/// and unlit-material panels), else the global default (`Lit` / `BothSides`
 /// / `Both`). `update_panel_text_batches` reads lighting and sidedness as
 /// batch-key fields and anti-alias mode as a per-run record field.
 /// Later changes flow through the propagation pass, not this observer. The

@@ -33,6 +33,7 @@
 //! HUD panels) ensure the required plugin is registered exactly once via
 //! `ensure_plugin`, regardless of how many capabilities pull it in.
 
+mod bloom;
 mod brp_extras;
 mod builder;
 mod camera_control_panel;
@@ -40,6 +41,8 @@ mod camera_home;
 mod connector;
 mod constants;
 mod cube_spin;
+mod environment_map;
+mod hdr;
 mod lighting;
 mod orbit_cam;
 mod primitive;
@@ -113,6 +116,7 @@ pub use restart_camera::RestoreWindowAnimation;
 pub use screen_panels::ControlActivation;
 pub use screen_panels::DescriptionPanel;
 pub use screen_panels::StatsPanelRow;
+pub use screen_panels::StatsPanelSection;
 pub use screen_panels::TitleBar;
 pub use screen_panels::TitleBarControl;
 pub use screen_panels::TitleBarOrientation;
@@ -120,6 +124,8 @@ pub use screen_panels::TitleBarSegment;
 pub use screen_panels::TitleChip;
 pub use screen_panels::TitleChipActivation;
 pub use screen_panels::diegetic_stats_panel;
+pub use screen_panels::diegetic_stats_sections_panel;
+pub use screen_panels::diegetic_stats_sections_tree;
 pub use screen_panels::diegetic_stats_tree;
 pub use screen_panels::fps_stats_panel;
 pub use screen_panels::gpu_meter_panel;

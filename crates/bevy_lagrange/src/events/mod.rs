@@ -43,6 +43,7 @@
 mod animation;
 mod constants;
 mod fit;
+mod fit_anchor;
 mod look;
 mod zoom;
 
@@ -56,6 +57,7 @@ pub use animation::CameraMoveEnd;
 pub use animation::PlayAnimation;
 pub use fit::AnimateToFit;
 pub use fit::SetFitTarget;
+pub use fit_anchor::FitAnchor;
 pub use look::LookAt;
 pub use look::LookAtAndZoomToFit;
 pub use zoom::ZoomBegin;

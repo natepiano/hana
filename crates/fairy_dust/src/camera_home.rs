@@ -18,6 +18,7 @@ use std::time::Duration;
 use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
+use bevy_diegetic::Anchor;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
@@ -27,6 +28,7 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::FitAnchor;
 use bevy_lagrange::OrbitCamInteractionStarted;
 
 use crate::constants::HOME_CONTROL;
@@ -75,6 +77,8 @@ pub(crate) struct CameraHomeConfig {
     pub pitch:             f32,
     pub duration:          Duration,
     pub margin:            f32,
+    pub anchor:            Anchor,
+    pub offset_px:         Vec2,
     pub title_bar_control: HomeTitleBarControl,
 }
 
@@ -297,6 +301,35 @@ fn spawn_home_marker(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     commands.insert_resource(CameraHomeEntity(entity));
 }
 
+const fn fit_anchor(anchor: Anchor) -> FitAnchor {
+    match anchor {
+        Anchor::TopLeft => FitAnchor::TopLeft,
+        Anchor::TopCenter => FitAnchor::TopCenter,
+        Anchor::TopRight => FitAnchor::TopRight,
+        Anchor::CenterLeft => FitAnchor::CenterLeft,
+        Anchor::Center => FitAnchor::Center,
+        Anchor::CenterRight => FitAnchor::CenterRight,
+        Anchor::BottomLeft => FitAnchor::BottomLeft,
+        Anchor::BottomCenter => FitAnchor::BottomCenter,
+        Anchor::BottomRight => FitAnchor::BottomRight,
+    }
+}
+
+const fn home_fit(
+    camera: Entity,
+    home: Entity,
+    config: &CameraHomeConfig,
+    duration: Duration,
+) -> AnimateToFit {
+    AnimateToFit::new(camera, home)
+        .yaw(config.yaw)
+        .pitch(config.pitch)
+        .margin(config.margin)
+        .anchor(fit_anchor(config.anchor))
+        .offset_px(config.offset_px)
+        .duration(duration)
+}
+
 /// Whether the snap can fire: with marked entities present, wait until at
 /// least one (or one of its descendants) has an [`Aabb`] so the union the
 /// cube was sized to is meaningful.
@@ -346,13 +379,7 @@ fn snap_home_on_ready(
         *state = InitialAnimateState::Fired;
         return;
     }
-    commands.trigger(
-        AnimateToFit::new(camera, home.0)
-            .yaw(config.yaw)
-            .pitch(config.pitch)
-            .margin(config.margin)
-            .duration(Duration::ZERO),
-    );
+    commands.trigger(home_fit(camera, home.0, &config, Duration::ZERO));
     *state = InitialAnimateState::Fired;
 }
 
@@ -374,13 +401,7 @@ fn handle_home_key(
     if !target_meshes_ready(&targets, &children, &aabbs) {
         return;
     }
-    commands.trigger(
-        AnimateToFit::new(camera, home.0)
-            .yaw(config.yaw)
-            .pitch(config.pitch)
-            .margin(config.margin)
-            .duration(config.duration),
-    );
+    commands.trigger(home_fit(camera, home.0, &config, config.duration));
 }
 
 fn refit_on_window_resized(
@@ -410,13 +431,7 @@ fn refit_on_window_resized(
     if !target_meshes_ready(&targets, &children, &aabbs) {
         return;
     }
-    commands.trigger(
-        AnimateToFit::new(camera, home.0)
-            .yaw(config.yaw)
-            .pitch(config.pitch)
-            .margin(config.margin)
-            .duration(Duration::ZERO),
-    );
+    commands.trigger(home_fit(camera, home.0, &config, Duration::ZERO));
 }
 
 /// Whether an animation lifecycle event is the home fit.
