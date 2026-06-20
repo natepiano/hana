@@ -24,7 +24,7 @@ trybuild = "1"
 ttf-parser = "0.25"
 
 # dev-dependencies
-bevy_brp_extras     = "0.20.0"
+bevy_brp_extras     = "0.20.1"
 bevy_lagrange       = { path = "crates/bevy_lagrange" }
 bevy_window_manager = "0.21.0"
 clay-layout         = { path = "vendor/clay-layout" }
