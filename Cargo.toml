@@ -38,20 +38,20 @@ wildcard_imports        = "allow"
 missing_docs = "deny"
 
 [dependencies]
-bevy = { version = "0.19.0-rc.2", default-features = false, features = [
+bevy = { version = "0.19.0", default-features = false, features = [
   "bevy_asset",
   "bevy_gizmos",
   "bevy_mesh",
   "bevy_pbr",
   "bevy_render",
 ] }
-bevy_kana = "0.1.0-rc.1"
+bevy_kana = "0.1.0"
 
 [[example]]
 name = "playground"
 path = "examples/playground/main.rs"
 
 [dev-dependencies]
-bevy            = { version = "0.19.0-rc.2", features = ["default"] }
-bevy_brp_extras = "0.20.0-rc.1"
-bevy_lagrange   = { version = "0.0.4-rc.1", features = ["fit_overlay"] }
+bevy            = { version = "0.19.0", features = ["default"] }
+bevy_brp_extras = "0.20.1"
+bevy_lagrange   = { version = "0.0.4", features = ["fit_overlay"] }
