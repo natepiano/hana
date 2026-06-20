@@ -48,7 +48,7 @@ pub struct SavedPanelWorldState {
 }
 
 impl SavedPanelWorldState {
-    pub(in crate::panel) fn from_panel(
+    pub(super) fn from_panel(
         panel: &DiegeticPanel,
         transform: &Transform,
         resolved_font_unit: Unit,
@@ -186,7 +186,7 @@ mod tests {
             &transform,
             Unit::Millimeters,
             crate::Lighting::Lit,
-            crate::Sidedness::DoubleSided,
+            crate::Sidedness::BothSides,
             Some(&render_layers),
         );
         let saved_without_layers = SavedPanelWorldState::from_panel(
@@ -194,7 +194,7 @@ mod tests {
             &transform,
             Unit::Millimeters,
             crate::Lighting::Lit,
-            crate::Sidedness::DoubleSided,
+            crate::Sidedness::BothSides,
             None,
         );
 
@@ -216,7 +216,7 @@ mod tests {
             &transform,
             Unit::Millimeters,
             crate::Lighting::Lit,
-            crate::Sidedness::DoubleSided,
+            crate::Sidedness::BothSides,
             None,
         );
 
@@ -240,7 +240,7 @@ mod tests {
             &transform,
             Unit::Millimeters,
             crate::Lighting::Lit,
-            crate::Sidedness::DoubleSided,
+            crate::Sidedness::BothSides,
             None,
         );
         let saved_size = saved.world_size();

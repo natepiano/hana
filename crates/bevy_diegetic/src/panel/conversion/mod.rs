@@ -8,6 +8,8 @@ mod screen;
 mod screen_handoff;
 mod world;
 
+use bevy::camera::visibility::RenderLayers;
+use bevy::prelude::*;
 pub use error::PanelProjectionError;
 pub use projection::PanelProjectionParam;
 pub use projection::PanelScreenProjection;
@@ -26,3 +28,34 @@ pub use world::PanelWorldConversionParam;
 pub use world::PanelWorldTarget;
 pub(crate) use world::apply_world_conversion;
 pub(crate) use world::validate_world_conversion;
+
+use super::DiegeticPanel;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
+use crate::layout::Unit;
+
+pub(super) fn saved_world_state_from_panel(
+    panel: &DiegeticPanel,
+    transform: &Transform,
+    resolved_font_unit: Unit,
+    resolved_lighting: Lighting,
+    resolved_sidedness: Sidedness,
+    render_layers: Option<&RenderLayers>,
+) -> SavedPanelWorldState {
+    SavedPanelWorldState::from_panel(
+        panel,
+        transform,
+        resolved_font_unit,
+        resolved_lighting,
+        resolved_sidedness,
+        render_layers,
+    )
+}
+
+pub(super) const fn panel_screen_handoff(
+    camera: Entity,
+    conversion: PanelScreenConversion,
+    distance: f32,
+) -> PanelScreenHandoff {
+    PanelScreenHandoff::new(camera, conversion, distance)
+}

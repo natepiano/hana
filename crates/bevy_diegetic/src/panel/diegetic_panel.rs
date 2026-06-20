@@ -20,6 +20,7 @@ use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
 use super::constants::PANEL_RESIZE_EPSILON;
+use super::conversion;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
@@ -587,14 +588,14 @@ impl ScreenConversionSource<'_> {
         panel: &DiegeticPanel,
         transform: &Transform,
     ) -> SavedPanelWorldState {
-        SavedPanelWorldState::from_panel(
+        conversion::saved_world_state_from_panel(
             panel,
             transform,
             self.font_unit(),
             self.lighting_resolved
                 .map_or(Lighting::Lit, |resolved| resolved.0),
             self.sidedness_resolved
-                .map_or(Sidedness::DoubleSided, |resolved| resolved.0),
+                .map_or(Sidedness::BothSides, |resolved| resolved.0),
             self.render_layers,
         )
     }
@@ -908,8 +909,8 @@ fn prepare_world_panel_for_screen_conversion(
         Resolved(FontUnit(Unit::Pixels)),
         Override(Lighting::Unlit),
         Resolved(Lighting::Unlit),
-        Override(Sidedness::OneSided),
-        Resolved(Sidedness::OneSided),
+        Override(Sidedness::FrontOnly),
+        Resolved(Sidedness::FrontOnly),
     ));
     true
 }
@@ -926,7 +927,9 @@ fn screen_handoff(
     if !distance.is_finite() || distance <= 0.0 {
         return None;
     }
-    Some(PanelScreenHandoff::new(camera, conversion, distance))
+    Some(conversion::panel_screen_handoff(
+        camera, conversion, distance,
+    ))
 }
 
 const fn fixed_pixel_sizing(value: f32) -> Sizing {

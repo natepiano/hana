@@ -16,7 +16,7 @@ pub struct PanelScreenHandoff {
 }
 
 impl PanelScreenHandoff {
-    pub(in crate::panel) const fn new(
+    pub(super) const fn new(
         camera: Entity,
         conversion: PanelScreenConversion,
         distance: f32,
