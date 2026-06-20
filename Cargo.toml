@@ -13,7 +13,7 @@ rust-version = "1.92.0"
 version      = "0.0.2-dev"
 
 [dependencies]
-bevy = { version = "0.19.0-rc.2", default-features = false, features = [
+bevy = { version = "0.19.0", default-features = false, features = [
   "bevy_asset",
   "bevy_color",
   "bevy_core_pipeline",
@@ -26,26 +26,26 @@ bevy = { version = "0.19.0-rc.2", default-features = false, features = [
   "bevy_world_serialization",
   "std",
 ] }
-bevy_kana = "0.1.0-rc.1"
-bevy_render = "0.19.0-rc.2"
+bevy_kana = "0.1.0"
+bevy_render = "0.19.0"
 bytemuck = "1"
 nonmax = "0.5"
 rand = "0.10.1"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { version = "0.4.2", features = ["wasm_js"] }
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
 
 [dev-dependencies]
-bevy = { version = "0.19.0-rc.2", features = [
+bevy = { version = "0.19.0", features = [
   "bevy_animation",
   "bevy_anti_alias",
   "bevy_gltf",
   "bevy_post_process",
   "scene",
 ] }
-bevy_brp_extras = "0.20.0-rc.1"
-bevy_lagrange = { version = "0.0.4-rc.1", features = ["fit_overlay"] }
-bevy_window_manager = "0.21.0-rc.2"
+bevy_brp_extras = "0.20.1"
+bevy_lagrange = { version = "0.0.4", features = ["fit_overlay"] }
+bevy_window_manager = "0.21.0"
 
 
 [[example]]
