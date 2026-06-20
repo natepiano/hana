@@ -77,6 +77,16 @@ Regenerate `Cargo.lock` and commit.
 - Archive `github.com/<owner>/<crate_name>` via the GitHub UI.
 - Stop pushing to `<source_repo_path>`. Future commits land in `bevy_hana`.
 
+### 10. Remove the local standalone checkout
+
+Only after everything above is done — workspace builds/tests green, `git log --follow` resolves the full history in-tree, and the GitHub repo is archived — delete the local source clone:
+
+```bash
+rm -rf <source_repo_path>
+```
+
+`git subtree add` does not transfer the source repo's reflog or tags, so `<source_repo_path>` is the only copy of those until it's archived. Do not remove it before step 9 completes.
+
 ## Definition of done
 
 - `crates/<crate_name>/` exists with full git history (`git log --follow` works; `git blame` resolves through the move).
@@ -85,3 +95,4 @@ Regenerate `Cargo.lock` and commit.
 - Workspace dep entry is `{ path = "crates/<crate_name>" }`; consumers use `workspace = true`.
 - Nightly style config processes `<crate_name>` alongside the existing workspace crates.
 - Standalone GitHub repo archived with pointer commit on README.
+- Local standalone checkout (`<source_repo_path>`) removed once history is confirmed in-tree and the repo is archived.
