@@ -1130,7 +1130,7 @@ dependencies = [
 
 [[package]]
 name = "bevy_lagrange"
-version = "0.0.4"
+version = "0.0.5-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
