@@ -9,7 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera). Thank you
 > for graciously allowing this project to build on your foundation.
 
-## [Unreleased]
+## [0.0.4] - 2026-06-20
+
+### Added
+- `OrbitCamSlowMode` and `OrbitCamSlowModeState` — first-class slow control speed;
+  BlenderLike preset adapters scale orbit/pan/zoom while a slow modifier is held, and the
+  active speed is surfaced through `OrbitCamInteractionState`.
+- `OrbitCamScalePolicy` — configurable input-scaling policy for orbit-cam adapters.
+- Per-preset marker types — `OrbitCamSimpleMousePreset`, `OrbitCamSimpleMouseKeyboardPreset`,
+  `OrbitCamBlenderLikePreset`, `OrbitCamBlenderLikeKeyboardPreset`, `OrbitCamKeyboardPreset` —
+  plus preset helper constructors.
+- `FitAnchor` event.
+
+### Changed
+- Update to Bevy 0.19.0 (stable) from the `0.19.0-rc.2` release candidate.
+- Modularize orbit-cam presets into per-preset modules.
+
+### Removed
+- Remove `OrbitCamBindingsProfile`, `OrbitCamPresetLayer`, `OrbitCamPresetLayers`, and
+  `PresetLayerSet` — superseded by the per-preset types (breaking).
 
 ## [0.0.4-rc.1] - 2026-06-05
 
