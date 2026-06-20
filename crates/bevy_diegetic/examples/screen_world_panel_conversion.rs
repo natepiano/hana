@@ -87,7 +87,7 @@ enum PanelSpace {
 }
 
 impl PanelSpace {
-    fn from_panel(panel: &DiegeticPanel) -> Self {
+    const fn from_panel(panel: &DiegeticPanel) -> Self {
         if panel.coordinate_space().is_screen() {
             Self::Screen
         } else {
@@ -215,7 +215,7 @@ fn operation_enabled(enabled: &[OperationKey], operation: OperationKey) -> bool 
     enabled.contains(&operation)
 }
 
-fn enabled_text_color(enabled: bool) -> Color {
+const fn enabled_text_color(enabled: bool) -> Color {
     if enabled {
         TEXT_COLOR
     } else {
@@ -313,9 +313,9 @@ impl PanelConversionRequest {
     const SCREEN_TO_WORLD_IMMEDIATE: u8 = 13;
     const SCREEN_TO_SCREEN_IMMEDIATE: u8 = 14;
 
-    fn request(&mut self, action: u8) { self.action = action; }
+    const fn request(&mut self, action: u8) { self.action = action; }
 
-    fn take(&mut self) -> u8 {
+    const fn take(&mut self) -> u8 {
         let action = self.action;
         self.action = Self::NONE;
         action
@@ -1089,11 +1089,12 @@ fn update_panel_status_trees(
     transitions: Query<(Entity, &PanelTransition)>,
     mut commands: Commands,
 ) {
-    let mut clear_flash = false;
-    if let Some(flash) = &mut highlights.flash {
+    let clear_flash = if let Some(flash) = &mut highlights.flash {
         flash.timer.tick(time.delta());
-        clear_flash = flash.timer.just_finished();
-    }
+        flash.timer.just_finished()
+    } else {
+        false
+    };
     if clear_flash {
         highlights.flash = None;
     }

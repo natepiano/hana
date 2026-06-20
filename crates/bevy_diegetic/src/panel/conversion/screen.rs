@@ -80,7 +80,7 @@ impl PanelScreenTarget {
         self
     }
 
-    pub(crate) fn resolve(
+    pub(super) fn resolve(
         self,
         panel: &DiegeticPanel,
         computed: &ComputedDiegeticPanel,
@@ -360,6 +360,11 @@ fn projected_content_size(
 }
 
 #[cfg(test)]
+#[allow(
+    clippy::float_cmp,
+    reason = "tests compare exact expected layout values"
+)]
+#[allow(clippy::panic, reason = "tests should panic on unexpected values")]
 mod tests {
     use super::PanelScreenConversion;
     use crate::layout::Sizing;

@@ -80,15 +80,15 @@ impl PanelWorldTarget {
     }
 
     #[cfg(test)]
-    pub(crate) const fn transform_value(&self) -> Option<Transform> { self.transform }
+    pub(super) const fn transform_value(&self) -> Option<Transform> { self.transform }
 
     #[cfg(test)]
-    pub(crate) const fn anchor_value(&self) -> Option<Anchor> { self.anchor }
+    pub(super) const fn anchor_value(&self) -> Option<Anchor> { self.anchor }
 
     #[cfg(test)]
-    pub(crate) const fn world_height_value(&self) -> Option<f32> { self.world_height }
+    pub(super) const fn world_height_value(&self) -> Option<f32> { self.world_height }
 
-    pub(crate) fn resolve(
+    pub(super) fn resolve(
         self,
         panel: &DiegeticPanel,
         projection: PanelScreenProjection,
@@ -104,7 +104,7 @@ impl PanelWorldTarget {
         )
     }
 
-    pub(crate) fn resolve_screen_conversion(
+    pub(super) fn resolve_screen_conversion(
         self,
         panel: &DiegeticPanel,
         conversion: PanelScreenConversion,

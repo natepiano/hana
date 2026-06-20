@@ -48,7 +48,7 @@ pub struct SavedPanelWorldState {
 }
 
 impl SavedPanelWorldState {
-    pub(crate) fn from_panel(
+    pub(in crate::panel) fn from_panel(
         panel: &DiegeticPanel,
         transform: &Transform,
         resolved_font_unit: Unit,
@@ -108,7 +108,7 @@ impl SavedPanelWorldState {
         Vec2::new(width, height)
     }
 
-    pub(crate) fn world_conversion(
+    pub(super) fn world_conversion(
         &self,
         projection: PanelWorldProjection,
     ) -> PanelWorldConversion {

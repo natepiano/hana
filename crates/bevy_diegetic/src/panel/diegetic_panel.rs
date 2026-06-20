@@ -709,7 +709,7 @@ pub(super) fn apply_pending_panel_conversions(
                     &mut commands,
                     &cameras,
                     &mut panel,
-                    &mut transform,
+                    &transform,
                     &mut classification,
                     saved,
                     source,
@@ -729,7 +729,7 @@ pub(super) fn apply_pending_panel_conversions(
                     &mut resolved_position,
                     source,
                     prepared_screen,
-                )
+                );
             },
             PendingPanelConversion::World(conversion) => apply_panel_world_conversion_now(
                 entity,
@@ -829,7 +829,7 @@ fn begin_panel_to_screen_now(
     commands: &mut Commands<'_, '_>,
     cameras: &Query<&GlobalTransform, With<Camera>>,
     panel: &mut DiegeticPanel,
-    transform: &mut Transform,
+    transform: &Transform,
     classification: &mut DiegeticPanelChangeClassification,
     saved: Option<&SavedPanelWorldState>,
     source: ScreenConversionSource<'_>,
@@ -850,10 +850,10 @@ fn begin_panel_to_screen_now(
         saved,
         source,
     ) {
-        if let Ok(camera_transform) = cameras.get(camera) {
-            if let Some(handoff) = screen_handoff(camera, conversion, camera_transform, transform) {
-                commands.entity(entity).insert(handoff);
-            }
+        if let Ok(camera_transform) = cameras.get(camera)
+            && let Some(handoff) = screen_handoff(camera, conversion, camera_transform, transform)
+        {
+            commands.entity(entity).insert(handoff);
         }
         classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
     }

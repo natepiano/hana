@@ -16,6 +16,8 @@ use super::PanelWorldConversion;
 use super::PanelWorldTarget;
 use super::SavedPanelWorldState;
 use crate::layout::Anchor;
+use crate::layout::Sizing;
+use crate::layout::Unit;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
@@ -230,7 +232,7 @@ impl PanelProjectionParam<'_, '_> {
         Ok(PanelWorldProjection::from_conversion(panel, conversion))
     }
 
-    pub(crate) fn conversion_for_screen_projection(
+    pub(super) fn conversion_for_screen_projection(
         &self,
         panel: Entity,
         projection: PanelScreenProjection,
@@ -416,13 +418,13 @@ pub struct PanelWorldProjection {
     /// Panel viewport size in `layout_unit`.
     pub panel_size:          Vec2,
     /// Panel layout unit after conversion.
-    pub layout_unit:         crate::layout::Unit,
+    pub layout_unit:         Unit,
     /// Target anchor.
     pub anchor:              Anchor,
     /// World-space width rule.
-    pub width:               crate::layout::Sizing,
+    pub width:               Sizing,
     /// World-space height rule.
-    pub height:              crate::layout::Sizing,
+    pub height:              Sizing,
     /// Target world width in meters.
     pub world_width:         Option<f32>,
     /// Target world height in meters.
