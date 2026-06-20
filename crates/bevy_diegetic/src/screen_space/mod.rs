@@ -4,6 +4,7 @@ mod anchoring;
 mod constants;
 
 use anchoring::AnchorResolveDiagnostics;
+pub(crate) use anchoring::screen_in_plane_angle;
 use bevy::camera::Camera3d;
 use bevy::camera::Camera3dDepthTextureUsage;
 use bevy::camera::ClearColorConfig;
@@ -80,6 +81,9 @@ impl Plugin for ScreenSpacePlugin {
             .add_systems(
                 Update,
                 (
+                    setup_changed_screen_space_views
+                        .before(resolve_screen_space_panel_dimensions)
+                        .in_set(ScreenSpaceSystems::ResolveDimensions),
                     resolve_screen_space_panel_dimensions
                         .in_set(ScreenSpaceSystems::ResolveDimensions),
                     ApplyDeferred.in_set(ScreenSpaceSystems::FlushDimensionObservers),
@@ -287,7 +291,12 @@ fn window_size_map(windows: &Query<(Entity, &Window)>) -> HashMap<Entity, (f32, 
 /// - `Fit`      → the last-computed content size, clamped to `[min, max]`, with
 ///   `max.unwrap_or(window_axis)` as the growth budget on frame 1.
 /// - `Grow`     → the window axis clamped to `[min, max]`.
-fn resolve_screen_axis(sizing: Sizing, window_axis: f32, content: f32, current: f32) -> f32 {
+pub(crate) fn resolve_screen_axis(
+    sizing: Sizing,
+    window_axis: f32,
+    content: f32,
+    current: f32,
+) -> f32 {
     match sizing {
         Sizing::Fixed(dim) => dim.value,
         Sizing::Percent(frac) => window_axis * frac,
@@ -330,6 +339,43 @@ fn setup_screen_space_view(
     let Ok(panel) = panels.get(trigger.entity) else {
         return;
     };
+    setup_screen_space_view_for_panel(
+        trigger.entity,
+        panel,
+        &cameras,
+        &lights,
+        &primary,
+        &mut commands,
+    );
+}
+
+fn setup_changed_screen_space_views(
+    panels: Query<(Entity, &DiegeticPanel), Changed<DiegeticPanel>>,
+    cameras: Query<&ScreenSpaceCamera>,
+    lights: Query<&ScreenSpaceLight>,
+    primary: Query<Entity, With<PrimaryWindow>>,
+    mut commands: Commands,
+) {
+    for (entity, panel) in &panels {
+        setup_screen_space_view_for_panel(
+            entity,
+            panel,
+            &cameras,
+            &lights,
+            &primary,
+            &mut commands,
+        );
+    }
+}
+
+fn setup_screen_space_view_for_panel(
+    entity: Entity,
+    panel: &DiegeticPanel,
+    cameras: &Query<&ScreenSpaceCamera>,
+    lights: &Query<&ScreenSpaceLight>,
+    primary: &Query<Entity, With<PrimaryWindow>>,
+    commands: &mut Commands,
+) {
     let CoordinateSpace::Screen {
         camera_order,
         ref render_layers,
@@ -339,13 +385,11 @@ fn setup_screen_space_view(
     else {
         return;
     };
-    let Some(window_entity) = resolve_window_ref(window_ref, &primary) else {
+    let Some(window_entity) = resolve_window_ref(window_ref, primary) else {
         return;
     };
 
-    commands
-        .entity(trigger.entity)
-        .insert(render_layers.clone());
+    commands.entity(entity).insert(render_layers.clone());
 
     let camera_exists = cameras.iter().any(|cam| {
         cam.order == camera_order

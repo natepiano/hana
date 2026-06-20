@@ -614,6 +614,17 @@ impl TextStyle {
         copy
     }
 
+    /// Returns a copy whose numeric font dimensions are expressed in `unit`.
+    ///
+    /// Used when a panel conversion resolves authored text sizes into a new
+    /// source unit before the normal panel layout pass runs again.
+    #[must_use]
+    pub(crate) fn scaled_as_unit(&self, factor: f32, unit: Unit) -> Self {
+        let mut copy = self.scaled(factor);
+        copy.unit = Some(unit);
+        copy
+    }
+
     /// Returns a copy prepared for text shaping at the given anchor.
     ///
     /// Forces [`TextWrap::None`] and [`TextAlign::Left`] and clears the unit /

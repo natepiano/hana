@@ -7,6 +7,7 @@ mod attachment_resolver;
 mod builder;
 mod compute_layout;
 mod constants;
+mod conversion;
 mod coordinate_space;
 mod diegetic_panel;
 mod events;
@@ -41,6 +42,24 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
+pub use conversion::PanelProjectionError;
+pub use conversion::PanelProjectionParam;
+pub use conversion::PanelScreenConversion;
+pub use conversion::PanelScreenConversionParam;
+pub use conversion::PanelScreenHandoff;
+pub use conversion::PanelScreenProjection;
+pub use conversion::PanelScreenTarget;
+pub use conversion::PanelWorldConversion;
+pub use conversion::PanelWorldConversionParam;
+pub use conversion::PanelWorldProjection;
+pub use conversion::PanelWorldTarget;
+pub use conversion::SavedPanelScreenState;
+pub use conversion::SavedPanelWorldState;
+pub(crate) use conversion::apply_screen_conversion;
+pub(crate) use conversion::apply_screen_root_sizing;
+pub(crate) use conversion::apply_world_conversion;
+pub(crate) use conversion::validate_screen_conversion;
+pub(crate) use conversion::validate_world_conversion;
 pub use coordinate_space::CoordinateSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
@@ -95,6 +114,8 @@ use crate::render::HairlineFade;
 pub enum PanelSystems {
     /// Applies deferred tree replacement commands before layout responds.
     ApplyTreeChanges,
+    /// Applies queued coordinate-space conversions before layout responds.
+    ApplyConversions,
     /// Runs `compute_panel_layouts`.
     ComputeLayout,
     /// Runs `resolve_world_panel_fit`
@@ -143,7 +164,8 @@ impl Plugin for HeadlessLayoutPlugin {
             .configure_sets(
                 Update,
                 (
-                    PanelSystems::ApplyTreeChanges.before(PanelSystems::ComputeLayout),
+                    PanelSystems::ApplyTreeChanges.before(PanelSystems::ApplyConversions),
+                    PanelSystems::ApplyConversions.before(PanelSystems::ComputeLayout),
                     PanelSystems::ResolveWorldFit.after(PanelSystems::ComputeLayout),
                 ),
             )
@@ -151,6 +173,13 @@ impl Plugin for HeadlessLayoutPlugin {
                 Update,
                 (
                     ApplyDeferred.in_set(PanelSystems::ApplyTreeChanges),
+                    (
+                        ApplyDeferred,
+                        diegetic_panel::apply_pending_panel_conversions,
+                        ApplyDeferred,
+                    )
+                        .chain()
+                        .in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
                 ),

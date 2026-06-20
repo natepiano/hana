@@ -626,6 +626,40 @@ impl LayoutTree {
         }
         tree
     }
+
+    /// Returns a copy of this tree authored in screen-pixel source values.
+    ///
+    /// The first pass resolves the existing authored dimensions into layout
+    /// points. The second pass converts those resolved point values into pixel
+    /// source values so a screen-space panel with `Unit::Pixels` renders the
+    /// same relative content size as the original world panel projection.
+    #[must_use]
+    pub(crate) fn screen_source_scaled(
+        &self,
+        layout_to_points: f32,
+        font_to_points: f32,
+        points_to_pixels: f32,
+    ) -> Self {
+        let mut tree = self.scaled(layout_to_points, font_to_points);
+        for element in &mut tree.elements {
+            element.width = element.width.resolved(points_to_pixels);
+            element.height = element.height.resolved(points_to_pixels);
+            element.padding = element.padding.resolved(points_to_pixels);
+            element.child_layout = element.child_layout.to_points(points_to_pixels);
+            if let Some(ref mut border) = element.border {
+                *border = border.resolved(points_to_pixels);
+            }
+            element.corner_radius = element.corner_radius.resolved(points_to_pixels);
+            if let Some(ref mut panel_draw) = element.draw {
+                *panel_draw = panel_draw.scaled(points_to_pixels);
+            }
+            element.scroll_offset *= points_to_pixels;
+            if let ElementContent::Text { ref mut config, .. } = element.content {
+                *config = config.scaled_as_unit(points_to_pixels, Unit::Pixels);
+            }
+        }
+        tree
+    }
 }
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
@@ -876,6 +910,7 @@ mod tests {
     use bevy::color::Color;
     use bevy::image::Image;
 
+    use super::ElementContent;
     use super::FieldDisplayTextUpdate;
     use super::LayoutTree;
     use super::LayoutTreeChange;
@@ -902,10 +937,12 @@ mod tests {
     use crate::layout::Sizing;
     use crate::layout::TextStyle;
     use crate::layout::TextWrap;
+    use crate::layout::Unit;
     use crate::layout::child_layout::ChildLayout;
 
     const LARGE_CHILD_GAP: f32 = 2.0;
     const SMALL_CHILD_GAP: f32 = 1.0;
+    const FLOAT_TOLERANCE: f32 = 0.001;
 
     fn text_tree(text: &str, style: TextStyle) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -936,6 +973,50 @@ mod tests {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text("child", TextStyle::new(10.0));
         builder.build()
+    }
+
+    #[test]
+    fn screen_source_scaled_resolves_world_units_to_pixel_source_values() {
+        let mut builder = LayoutBuilder::with_root(
+            El::column()
+                .width(Sizing::fixed(Mm(20.0)))
+                .height(Sizing::fixed(Mm(10.0)))
+                .padding(Padding::all(Mm(2.0))),
+        );
+        builder.text("child", TextStyle::new(3.0));
+        let tree = builder.build();
+
+        let millimeters_to_points = Unit::Millimeters.to_points();
+        let points_to_pixels = 2.0;
+        let scaled = tree.screen_source_scaled(
+            millimeters_to_points,
+            millimeters_to_points,
+            points_to_pixels,
+        );
+
+        assert!(matches!(scaled.elements[0].width, Sizing::Fixed(_)));
+        let Sizing::Fixed(width) = scaled.elements[0].width else {
+            return;
+        };
+        let expected_width = 20.0 * millimeters_to_points * points_to_pixels;
+        assert!((width.value - expected_width).abs() < FLOAT_TOLERANCE);
+        assert_eq!(width.unit, None);
+
+        let padding = scaled.elements[0].padding;
+        let expected_padding = 2.0 * millimeters_to_points * points_to_pixels;
+        assert!((padding.left.value - expected_padding).abs() < FLOAT_TOLERANCE);
+        assert_eq!(padding.left.unit, None);
+
+        assert!(matches!(
+            &scaled.elements[1].content,
+            ElementContent::Text { .. }
+        ));
+        let ElementContent::Text { config, .. } = &scaled.elements[1].content else {
+            return;
+        };
+        let expected_text_size = 3.0 * millimeters_to_points * points_to_pixels;
+        assert!((config.size() - expected_text_size).abs() < FLOAT_TOLERANCE);
+        assert_eq!(config.unit(), Some(Unit::Pixels));
     }
 
     fn assert_default_leaf_child_layout(child_layout: ChildLayout) {

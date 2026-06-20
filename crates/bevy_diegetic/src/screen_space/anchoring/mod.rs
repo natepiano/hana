@@ -16,6 +16,6 @@ pub(super) fn rotate_screen_offset(offset: Vec2, angle: f32) -> Vec2 {
     projection::rotate_screen_offset(offset, angle)
 }
 
-pub(super) fn screen_in_plane_angle(rotation: Quat) -> f32 {
+pub(crate) fn screen_in_plane_angle(rotation: Quat) -> f32 {
     projection::screen_in_plane_angle(rotation)
 }

@@ -2,18 +2,31 @@
 
 use std::collections::HashMap;
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use bevy::window::WindowRef;
 
+use super::PanelScreenConversion;
+use super::PanelScreenHandoff;
+use super::PanelWorldConversion;
 use super::ResolvedScreenPanelPosition;
+use super::SavedPanelWorldState;
+use super::apply_screen_conversion;
+use super::apply_screen_root_sizing;
+use super::apply_world_conversion;
 use super::builder::DiegeticPanelBuilder;
 use super::builder::NeedsSize;
 use super::builder::Screen;
 use super::builder::World;
+use super::constants::PANEL_RESIZE_EPSILON;
 use super::coordinate_space::CoordinateSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::events::LastPanelDimensions;
 use super::field::PanelFieldRecord;
+use super::validate_screen_conversion;
+use super::validate_world_conversion;
 use crate::cascade;
 use crate::cascade::CascadeDefault;
 use crate::cascade::CascadeDefaults;
@@ -23,6 +36,7 @@ use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
+use crate::layout::Dimension;
 use crate::layout::InvalidSize;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -30,6 +44,7 @@ use crate::layout::LayoutTreeChange;
 use crate::layout::Lighting;
 use crate::layout::PanelSize;
 use crate::layout::Sidedness;
+use crate::layout::Sizing;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
@@ -218,6 +233,10 @@ impl DiegeticPanel {
     #[must_use]
     pub const fn coordinate_space(&self) -> &CoordinateSpace { &self.coordinate_space }
 
+    pub(crate) const fn authored_world_width(&self) -> Option<f32> { self.world_width }
+
+    pub(crate) const fn authored_world_height(&self) -> Option<f32> { self.world_height }
+
     /// Resolves a text run's [`PanelFieldId`](crate::PanelFieldId) to the entity
     /// reconcile materialized for it (its `line_index == 0` child), or `None` if
     /// no run carries that id.
@@ -267,11 +286,17 @@ impl DiegeticPanel {
     /// For optimized visual-only updates, prefer
     /// [`DiegeticPanelCommands::set_tree`]. A direct component
     /// method cannot update the sibling change-classification component.
+    pub(crate) fn replace_tree_full_rebuild(&mut self, tree: LayoutTree) {
+        self.tree = tree;
+        self.tree_revision = self.tree_revision.wrapping_add(1);
+        self.text_index.clear();
+    }
+
+    /// Bench-support wrapper for [`Self::replace_tree_full_rebuild`].
     #[cfg(feature = "bench_support")]
     #[doc(hidden)]
     pub fn set_tree_full_rebuild(&mut self, tree: LayoutTree) {
-        self.tree = tree;
-        self.tree_revision = self.tree_revision.wrapping_add(1);
+        self.replace_tree_full_rebuild(tree);
     }
 
     /// Writes a run-text edit into the authoritative `El.text` tree and bumps the
@@ -464,16 +489,12 @@ impl DiegeticPanel {
 
 /// Extension methods for mutating diegetic panels through [`Commands`].
 ///
-/// This trait is an ergonomic wrapper around Bevy's
-/// [`Commands::run_system_cached_with`]. Replacing a tree has two effects:
-/// it stores the new tree on [`DiegeticPanel`], and it records a pending
-/// `Identical` / `VisualOnly` / `LayoutAffecting` decision for the later layout
-/// system to consume. That pending decision is stored on an internal sibling
-/// component, not on [`DiegeticPanel`] itself, so a plain `&mut DiegeticPanel`
-/// method would update the tree but lose the information needed to skip layout.
-/// Keeping the wrapper here lets callers use a focused panel API instead of
-/// exposing the cached-system function and its tuple input structure as public
-/// surface.
+/// This trait is an ergonomic wrapper around panel mutations that need more
+/// schedule coordination than a plain `&mut DiegeticPanel` method can provide.
+/// Tree replacement records a pending layout-change classification, and
+/// coordinate-space conversions are applied by the panel pipeline before layout
+/// and screen placement run. Keeping the wrapper here lets callers use a focused
+/// panel API without learning those internal components or schedule fences.
 pub trait DiegeticPanelCommands {
     /// Queues a layout-tree replacement that records whether the change is
     /// visual-only or layout-affecting.
@@ -481,11 +502,146 @@ pub trait DiegeticPanelCommands {
     /// The queued setter is deferred. Schedule systems that call this before
     /// panel layout systems when the update must be visible in the same frame.
     fn set_tree(&mut self, entity: Entity, tree: LayoutTree);
+
+    /// Starts an animated conversion of an existing world panel to screen space.
+    ///
+    /// The panel remains world-space, but its visual source is normalized to the
+    /// screen conversion's pixel sizing so the final handoff can switch cameras
+    /// without rebuilding the visual tree. The final handoff should use
+    /// [`Self::finish_panel_to_screen`].
+    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>;
+
+    /// Queues a resolved conversion of an existing panel to screen space.
+    ///
+    /// `conversion` can be a [`PanelScreenConversion`] or any type that converts
+    /// into one, including [`PanelScreenProjection`](super::PanelScreenProjection).
+    /// This is the advanced resolved-data path; higher-level callers should
+    /// prefer [`PanelScreenConversionParam::to_screen_at`](super::PanelScreenConversionParam::to_screen_at).
+    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>;
+
+    /// Queues a resolved conversion of an existing panel to screen space without
+    /// saving a screen handoff camera.
+    ///
+    /// This is primarily for advanced callers applying their own saved-state
+    /// policy.
+    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>;
+
+    /// Queues a resolved conversion of an existing panel to world space.
+    ///
+    /// This is the advanced resolved-data path; higher-level callers should
+    /// prefer [`PanelWorldConversionParam::to_world`](super::PanelWorldConversionParam::to_world)
+    /// or [`PanelWorldConversionParam::to_world_at`](super::PanelWorldConversionParam::to_world_at).
+    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    where
+        C: Into<PanelWorldConversion>;
+}
+
+#[derive(Component, Clone)]
+pub(super) enum PendingPanelConversion {
+    BeginScreen {
+        camera:     Entity,
+        conversion: PanelScreenConversion,
+    },
+    Screen {
+        camera:     Option<Entity>,
+        conversion: PanelScreenConversion,
+    },
+    World(PanelWorldConversion),
+}
+
+#[derive(Component, Clone, Copy)]
+pub(super) struct PreparedPanelScreenConversion {
+    size: Vec2,
+}
+
+impl PreparedPanelScreenConversion {
+    fn matches(self, size: Vec2) -> bool {
+        (self.size.x - size.x).abs() <= PANEL_RESIZE_EPSILON
+            && (self.size.y - size.y).abs() <= PANEL_RESIZE_EPSILON
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ScreenConversionSource<'a> {
+    defaults:           &'a CascadeDefaults,
+    font_resolved:      Option<&'a Resolved<FontUnit>>,
+    lighting_resolved:  Option<&'a Resolved<Lighting>>,
+    sidedness_resolved: Option<&'a Resolved<Sidedness>>,
+    render_layers:      Option<&'a RenderLayers>,
+}
+
+impl ScreenConversionSource<'_> {
+    fn font_unit(self) -> Unit {
+        self.font_resolved
+            .map_or(self.defaults.panel_font_unit, |resolved| resolved.0.0)
+    }
+
+    fn saved_world_state(
+        self,
+        panel: &DiegeticPanel,
+        transform: &Transform,
+    ) -> SavedPanelWorldState {
+        SavedPanelWorldState::from_panel(
+            panel,
+            transform,
+            self.font_unit(),
+            self.lighting_resolved
+                .map_or(Lighting::Lit, |resolved| resolved.0),
+            self.sidedness_resolved
+                .map_or(Sidedness::DoubleSided, |resolved| resolved.0),
+            self.render_layers,
+        )
+    }
 }
 
 impl DiegeticPanelCommands for Commands<'_, '_> {
     fn set_tree(&mut self, entity: Entity, tree: LayoutTree) {
         self.run_system_cached_with(set_tree_command, (entity, tree));
+    }
+
+    fn begin_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>,
+    {
+        self.entity(entity)
+            .insert(PendingPanelConversion::BeginScreen {
+                camera,
+                conversion: conversion.into(),
+            });
+    }
+
+    fn finish_panel_to_screen<C>(&mut self, entity: Entity, camera: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>,
+    {
+        self.entity(entity).insert(PendingPanelConversion::Screen {
+            camera:     Some(camera),
+            conversion: conversion.into(),
+        });
+    }
+
+    fn apply_panel_screen_conversion<C>(&mut self, entity: Entity, conversion: C)
+    where
+        C: Into<PanelScreenConversion>,
+    {
+        self.entity(entity).insert(PendingPanelConversion::Screen {
+            camera:     None,
+            conversion: conversion.into(),
+        });
+    }
+
+    fn apply_panel_world_conversion<C>(&mut self, entity: Entity, conversion: C)
+    where
+        C: Into<PanelWorldConversion>,
+    {
+        self.entity(entity)
+            .insert(PendingPanelConversion::World(conversion.into()));
     }
 }
 
@@ -498,11 +654,357 @@ fn set_tree_command(
     };
     let change = panel.tree.classify_change(&next_tree);
     classification.record_tree_change(change);
-    panel.tree = next_tree;
-    panel.tree_revision = panel.tree_revision.wrapping_add(1);
-    // Drop stale id → entity mappings so a lookup for a run the new tree no
-    // longer contains returns `None` before reconcile rebuilds the index.
-    panel.text_index.clear();
+    panel.replace_tree_full_rebuild(next_tree);
+}
+
+pub(super) fn apply_pending_panel_conversions(
+    defaults: Res<CascadeDefaults>,
+    mut commands: Commands,
+    primary: Query<Entity, With<PrimaryWindow>>,
+    windows: Query<&Window>,
+    cameras: Query<&GlobalTransform, With<Camera>>,
+    mut panels: Query<(
+        Entity,
+        &PendingPanelConversion,
+        &mut DiegeticPanel,
+        &mut Transform,
+        &mut DiegeticPanelChangeClassification,
+        &mut ResolvedScreenPanelPosition,
+        Option<&Resolved<FontUnit>>,
+        Option<&Resolved<Lighting>>,
+        Option<&Resolved<Sidedness>>,
+        Option<&SavedPanelWorldState>,
+        Option<&PreparedPanelScreenConversion>,
+        Option<&RenderLayers>,
+    )>,
+) {
+    for (
+        entity,
+        pending,
+        mut panel,
+        mut transform,
+        mut classification,
+        mut resolved_position,
+        font_resolved,
+        lighting_resolved,
+        sidedness_resolved,
+        saved,
+        prepared_screen,
+        source_render_layers,
+    ) in &mut panels
+    {
+        let source = ScreenConversionSource {
+            defaults: &defaults,
+            font_resolved,
+            lighting_resolved,
+            sidedness_resolved,
+            render_layers: source_render_layers,
+        };
+        match pending.clone() {
+            PendingPanelConversion::BeginScreen { camera, conversion } => {
+                begin_panel_to_screen_now(
+                    entity,
+                    camera,
+                    conversion,
+                    &mut commands,
+                    &cameras,
+                    &mut panel,
+                    &mut transform,
+                    &mut classification,
+                    saved,
+                    source,
+                );
+            },
+            PendingPanelConversion::Screen { camera, conversion } => {
+                apply_panel_screen_conversion_now(
+                    entity,
+                    camera,
+                    conversion,
+                    &mut commands,
+                    &primary,
+                    &windows,
+                    &cameras,
+                    &mut panel,
+                    &mut transform,
+                    &mut resolved_position,
+                    source,
+                    prepared_screen,
+                )
+            },
+            PendingPanelConversion::World(conversion) => apply_panel_world_conversion_now(
+                entity,
+                conversion,
+                &mut commands,
+                &mut panel,
+                &mut transform,
+                &mut classification,
+                saved,
+                &mut resolved_position,
+            ),
+        }
+        commands.entity(entity).remove::<PendingPanelConversion>();
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "screen conversion applies one coordinated ECS handoff"
+)]
+fn apply_panel_screen_conversion_now(
+    entity: Entity,
+    camera: Option<Entity>,
+    conversion: PanelScreenConversion,
+    commands: &mut Commands<'_, '_>,
+    primary: &Query<Entity, With<PrimaryWindow>>,
+    windows: &Query<&Window>,
+    cameras: &Query<&GlobalTransform, With<Camera>>,
+    panel: &mut DiegeticPanel,
+    transform: &mut Transform,
+    resolved_position: &mut ResolvedScreenPanelPosition,
+    source: ScreenConversionSource<'_>,
+    prepared_screen: Option<&PreparedPanelScreenConversion>,
+) {
+    if let Err(error) = validate_screen_conversion(&conversion) {
+        warn!("failed to convert panel {entity:?} to screen space: {error}");
+        return;
+    }
+    let was_world_panel = !panel.coordinate_space().is_screen();
+    let rotation = conversion.rotation;
+    let anchor_position = conversion.anchor_position;
+    let render_layers = conversion.render_layers.clone();
+    let handoff_conversion = conversion.clone();
+    let window_size = screen_conversion_window_size(&conversion, primary, windows);
+    let prepared = prepared_screen.is_some_and(|prepared| prepared.matches(conversion.size));
+    if was_world_panel
+        && !prepared
+        && !prepare_world_panel_for_screen_conversion(
+            entity,
+            &conversion,
+            commands,
+            panel,
+            transform,
+            None,
+            source,
+        )
+    {
+        return;
+    }
+    let handoff = camera
+        .and_then(|camera| {
+            cameras
+                .get(camera)
+                .ok()
+                .map(|transform| (camera, transform))
+        })
+        .and_then(|(camera, camera_transform)| {
+            screen_handoff(camera, handoff_conversion, camera_transform, transform)
+        });
+    if let Err(error) = apply_screen_conversion(panel, conversion) {
+        warn!("failed to convert panel {entity:?} to screen space: {error}");
+        return;
+    }
+    transform.translation.z = 0.0;
+    if let Some(window_size) = window_size {
+        let half_size = window_size * 0.5;
+        transform.translation.x = anchor_position.x - half_size.x;
+        transform.translation.y = half_size.y - anchor_position.y;
+    }
+    transform.rotation = Quat::from_rotation_z(rotation);
+    transform.scale = Vec3::ONE;
+    *resolved_position = ResolvedScreenPanelPosition::default();
+    let mut entity_commands = commands.entity(entity);
+    entity_commands.insert(render_layers);
+    if let Some(handoff) = handoff.filter(|_| was_world_panel) {
+        entity_commands.insert(handoff);
+    }
+    if was_world_panel {
+        entity_commands.remove::<PreparedPanelScreenConversion>();
+    }
+}
+
+fn begin_panel_to_screen_now(
+    entity: Entity,
+    camera: Entity,
+    conversion: PanelScreenConversion,
+    commands: &mut Commands<'_, '_>,
+    cameras: &Query<&GlobalTransform, With<Camera>>,
+    panel: &mut DiegeticPanel,
+    transform: &mut Transform,
+    classification: &mut DiegeticPanelChangeClassification,
+    saved: Option<&SavedPanelWorldState>,
+    source: ScreenConversionSource<'_>,
+) {
+    if let Err(error) = validate_screen_conversion(&conversion) {
+        warn!("failed to prepare panel {entity:?} for screen conversion: {error}");
+        return;
+    }
+    if panel.coordinate_space().is_screen() {
+        return;
+    }
+    if prepare_world_panel_for_screen_conversion(
+        entity,
+        &conversion,
+        commands,
+        panel,
+        transform,
+        saved,
+        source,
+    ) {
+        if let Ok(camera_transform) = cameras.get(camera) {
+            if let Some(handoff) = screen_handoff(camera, conversion, camera_transform, transform) {
+                commands.entity(entity).insert(handoff);
+            }
+        }
+        classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
+    }
+}
+
+fn prepare_world_panel_for_screen_conversion(
+    entity: Entity,
+    conversion: &PanelScreenConversion,
+    commands: &mut Commands<'_, '_>,
+    panel: &mut DiegeticPanel,
+    transform: &Transform,
+    saved: Option<&SavedPanelWorldState>,
+    source: ScreenConversionSource<'_>,
+) -> bool {
+    let old_world_width = panel.world_width();
+    let old_world_height = panel.world_height();
+    let old_points_to_world = panel.points_to_world();
+    let points_to_pixels = old_points_to_world * (conversion.size.y / old_world_height);
+    if !points_to_pixels.is_finite() || points_to_pixels <= 0.0 {
+        warn!("failed to scale panel {entity:?} tree for screen conversion: invalid source scale");
+        return false;
+    }
+
+    if saved.is_none() {
+        commands
+            .entity(entity)
+            .insert(source.saved_world_state(panel, transform));
+    }
+
+    let mut tree = panel.tree().screen_source_scaled(
+        panel.layout_unit().to_points(),
+        source.font_unit().to_points(),
+        points_to_pixels,
+    );
+    apply_screen_root_sizing(&mut tree, conversion.width, conversion.height);
+    panel.replace_tree_full_rebuild(tree);
+    panel.width = conversion.size.x;
+    panel.height = conversion.size.y;
+    panel.layout_unit = Unit::Pixels;
+    panel.font_unit = Some(Unit::Pixels);
+    panel.world_width = Some(old_world_width);
+    panel.world_height = Some(old_world_height);
+    panel.coordinate_space = CoordinateSpace::World {
+        width:  fixed_pixel_sizing(conversion.size.x),
+        height: fixed_pixel_sizing(conversion.size.y),
+    };
+    commands.entity(entity).insert((
+        PreparedPanelScreenConversion {
+            size: conversion.size,
+        },
+        Override(FontUnit(Unit::Pixels)),
+        Resolved(FontUnit(Unit::Pixels)),
+        Override(Lighting::Unlit),
+        Resolved(Lighting::Unlit),
+        Override(Sidedness::OneSided),
+        Resolved(Sidedness::OneSided),
+    ));
+    true
+}
+
+fn screen_handoff(
+    camera: Entity,
+    conversion: PanelScreenConversion,
+    camera_transform: &GlobalTransform,
+    panel_transform: &Transform,
+) -> Option<PanelScreenHandoff> {
+    let camera_transform = camera_transform.compute_transform();
+    let forward = camera_transform.rotation * Vec3::NEG_Z;
+    let distance = (panel_transform.translation - camera_transform.translation).dot(forward);
+    if !distance.is_finite() || distance <= 0.0 {
+        return None;
+    }
+    Some(PanelScreenHandoff::new(camera, conversion, distance))
+}
+
+const fn fixed_pixel_sizing(value: f32) -> Sizing {
+    Sizing::Fixed(Dimension {
+        value,
+        unit: Some(Unit::Pixels),
+    })
+}
+
+fn screen_conversion_window_size(
+    conversion: &PanelScreenConversion,
+    primary: &Query<Entity, With<PrimaryWindow>>,
+    windows: &Query<&Window>,
+) -> Option<Vec2> {
+    let entity = match conversion.window {
+        WindowRef::Primary => primary.single().ok()?,
+        WindowRef::Entity(entity) => entity,
+    };
+    let window = windows.get(entity).ok()?;
+    let size = Vec2::new(window.width(), window.height());
+    (size.is_finite() && size.x > 0.0 && size.y > 0.0).then_some(size)
+}
+
+fn apply_panel_world_conversion_now(
+    entity: Entity,
+    conversion: PanelWorldConversion,
+    commands: &mut Commands<'_, '_>,
+    panel: &mut DiegeticPanel,
+    transform: &mut Transform,
+    classification: &mut DiegeticPanelChangeClassification,
+    saved: Option<&SavedPanelWorldState>,
+    resolved_position: &mut ResolvedScreenPanelPosition,
+) {
+    if let Err(error) = validate_world_conversion(&conversion) {
+        warn!("failed to convert panel {entity:?} to world space: {error}");
+        return;
+    }
+    let saved = if conversion.restore_saved_world {
+        let Some(saved) = saved.cloned() else {
+            warn!("failed to convert panel {entity:?} to saved world space: no saved world state");
+            return;
+        };
+        Some(saved)
+    } else {
+        None
+    };
+    let next_transform = conversion.transform;
+    if let Some(saved) = saved.as_ref() {
+        if let Err(error) = saved.apply_world_conversion(panel, &conversion) {
+            warn!("failed to convert panel {entity:?} to saved world space: {error}");
+            return;
+        }
+        classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
+    } else if let Err(error) = apply_world_conversion(panel, conversion) {
+        warn!("failed to convert panel {entity:?} to world space: {error}");
+        return;
+    }
+    *transform = next_transform;
+    *resolved_position = ResolvedScreenPanelPosition::default();
+    let mut entity_commands = commands.entity(entity);
+    if let Some(saved) = saved {
+        entity_commands.insert((
+            Override(FontUnit(saved.resolved_font_unit)),
+            Resolved(FontUnit(saved.resolved_font_unit)),
+            Override(saved.resolved_lighting),
+            Resolved(saved.resolved_lighting),
+            Override(saved.resolved_sidedness),
+            Resolved(saved.resolved_sidedness),
+        ));
+        if let Some(render_layers) = saved.render_layers {
+            entity_commands.insert(render_layers);
+        } else {
+            entity_commands.remove::<RenderLayers>();
+        }
+    } else {
+        entity_commands.remove::<RenderLayers>();
+    }
+    entity_commands.remove::<PreparedPanelScreenConversion>();
 }
 
 /// Spawn-time authoring bridge for panel cascade overrides.
@@ -844,11 +1346,27 @@ impl DiegeticPanel {
     reason = "tests should panic if fixture panel construction fails"
 )]
 mod tests {
+    use bevy::prelude::*;
+    use bevy::window::PrimaryWindow;
+    use bevy::window::Window;
+    use bevy::window::WindowRef;
+
+    use super::CoordinateSpace;
     use super::DiegeticPanel;
     use super::DiegeticPanelChangeClassification;
+    use super::DiegeticPanelCommands;
+    use super::PanelScreenHandoff;
+    use super::PendingPanelConversion;
+    use super::PreparedPanelScreenConversion;
+    use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
+    use crate::DiegeticTextMeasurer;
+    use crate::HeadlessLayoutPlugin;
     use crate::LayoutBuilder;
+    use crate::Mm;
+    use crate::PanelScreenConversion;
     use crate::TextStyle;
+    use crate::Unit;
     use crate::layout::LayoutTreeChange;
 
     fn test_tree(text: &str) -> crate::LayoutTree {
@@ -900,6 +1418,129 @@ mod tests {
             classification.take_with_tree_visual_geometry_stable(),
             (Some(LayoutTreeChange::VisualOnly), false)
         );
+    }
+
+    #[test]
+    fn begin_screen_conversion_preserves_world_state_until_handoff() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .font_unit(Unit::Millimeters)
+            .world_height(0.5)
+            .with_tree(test_tree("prepare"))
+            .build()
+            .expect("world panel should build");
+        let camera = app
+            .world_mut()
+            .spawn((
+                Camera::default(),
+                GlobalTransform::from(Transform::from_xyz(0.0, 0.0, 5.0)),
+            ))
+            .id();
+        let entity = app
+            .world_mut()
+            .spawn((panel, Transform::from_scale(Vec3::new(2.0, 2.0, 1.0))))
+            .id();
+        let conversion =
+            PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0));
+
+        app.world_mut()
+            .commands()
+            .begin_panel_to_screen(entity, camera, conversion.clone());
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should still exist");
+        assert!(matches!(
+            panel.coordinate_space(),
+            CoordinateSpace::World { .. }
+        ));
+        assert_eq!(panel.width(), 200.0);
+        assert_eq!(panel.height(), 100.0);
+        assert_eq!(panel.layout_unit(), Unit::Pixels);
+        assert_eq!(panel.font_unit(), Some(Unit::Pixels));
+        assert_eq!(panel.world_width(), 1.0);
+        assert_eq!(panel.world_height(), 0.5);
+        assert!(app.world().get::<SavedPanelWorldState>(entity).is_some());
+        assert!(app.world().get::<PanelScreenHandoff>(entity).is_some());
+        assert!(
+            app.world()
+                .get::<PreparedPanelScreenConversion>(entity)
+                .is_some()
+        );
+
+        app.world_mut()
+            .commands()
+            .finish_panel_to_screen(entity, camera, conversion);
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should still exist");
+        assert!(panel.coordinate_space().is_screen());
+        assert!(
+            app.world()
+                .get::<PreparedPanelScreenConversion>(entity)
+                .is_none()
+        );
+        assert!(app.world().get::<SavedPanelWorldState>(entity).is_some());
+    }
+
+    #[test]
+    fn queued_screen_conversion_applies_in_panel_pipeline_and_resets_scale() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.insert_resource(DiegeticTextMeasurer::default());
+        app.add_plugins(HeadlessLayoutPlugin);
+        let window = app
+            .world_mut()
+            .spawn((
+                Window {
+                    resolution: (800_u32, 600_u32).into(),
+                    ..default()
+                },
+                PrimaryWindow,
+            ))
+            .id();
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .font_unit(Unit::Points)
+            .world_height(0.5)
+            .with_tree(test_tree("convert"))
+            .build()
+            .expect("world panel should build");
+        let entity = app
+            .world_mut()
+            .spawn((panel, Transform::from_scale(Vec3::new(2.0, 3.0, 4.0))))
+            .id();
+        let conversion =
+            PanelScreenConversion::at_pixels(Vec2::new(400.0, 300.0), Vec2::new(200.0, 100.0))
+                .window(WindowRef::Entity(window));
+
+        app.world_mut()
+            .commands()
+            .apply_panel_screen_conversion(entity, conversion);
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel should still exist");
+        assert!(panel.coordinate_space().is_screen());
+        assert!(app.world().get::<PendingPanelConversion>(entity).is_none());
+        let transform = app
+            .world()
+            .get::<Transform>(entity)
+            .expect("panel transform should still exist");
+        assert_eq!(transform.translation, Vec3::ZERO);
+        assert_eq!(transform.rotation, Quat::IDENTITY);
+        assert_eq!(transform.scale, Vec3::ONE);
     }
 
     #[cfg(feature = "bench_support")]

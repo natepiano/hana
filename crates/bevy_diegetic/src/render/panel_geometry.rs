@@ -502,7 +502,6 @@ fn build_sdf_quad(
     anchor_y: f32,
 ) -> BuiltSdfQuad {
     let element_mat = panel.tree().element_material(surface.index);
-    let corner_radius = panel.tree().element_corner_radius(surface.index);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -518,9 +517,7 @@ fn build_sdf_quad(
 
     let world_width = surface.bounds.width * points_to_world;
     let world_height = surface.bounds.height * points_to_world;
-    let world_radii = corner_radius
-        .to_array()
-        .map(|radius| radius * points_to_world);
+    let world_radii = world_corner_radii(panel, surface.index, points_to_world);
     let world_borders = surface.border_widths.map(|width| width * points_to_world);
 
     let half_width = world_width * 0.5;
@@ -615,6 +612,19 @@ fn build_sdf_quad(
         center: world_rect.center,
         signature,
     }
+}
+
+fn world_corner_radii(
+    panel: &DiegeticPanel,
+    element_index: usize,
+    points_to_world: f32,
+) -> [f32; 4] {
+    panel
+        .tree()
+        .element_corner_radius(element_index)
+        .resolved(panel.layout_unit().to_points())
+        .to_array()
+        .map(|radius| radius * points_to_world)
 }
 
 /// Spawns one SDF quad as a child of `panel_entity`, tagged with its signature.
@@ -734,6 +744,7 @@ mod tests {
 
     use super::*;
     use crate::Mm;
+    use crate::layout::CornerRadius;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
@@ -741,6 +752,7 @@ mod tests {
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
+    use crate::layout::Unit;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::text::DiegeticTextMeasurer;
@@ -845,6 +857,56 @@ mod tests {
             .uniforms
             .oit_depth_offset;
         (entity, surface, oit_depth_offset)
+    }
+
+    fn single_sdf_material(app: &mut App) -> SdfPanelMaterial {
+        let materials: Vec<Handle<SdfPanelMaterial>> = {
+            let world = app.world_mut();
+            let mut query = world.query::<&MeshMaterial3d<SdfPanelMaterial>>();
+            query
+                .iter(world)
+                .map(|material| material.0.clone())
+                .collect()
+        };
+        assert_eq!(materials.len(), 1, "expected exactly one SDF material");
+        app.world()
+            .resource::<Assets<SdfPanelMaterial>>()
+            .get(&materials[0])
+            .expect("quad material exists")
+            .clone()
+    }
+
+    fn rounded_root_tree() -> LayoutTree {
+        let builder = LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .corner_radius(CornerRadius::all(Mm(4.0)))
+                .background(Color::WHITE),
+        );
+        builder.build()
+    }
+
+    #[test]
+    fn sdf_corner_radii_resolve_authored_units_before_world_scaling() {
+        let mut app = geometry_app();
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .world_height(0.5)
+                .with_tree(rounded_root_tree())
+                .build()
+                .expect("panel should build"),
+        );
+        app.update();
+        app.update();
+
+        let material = single_sdf_material(&mut app);
+        let points_to_world = 0.5 / (50.0 * Unit::Millimeters.to_points());
+        let expected_radius = 4.0 * Unit::Millimeters.to_points() * points_to_world;
+        let actual_radius = material.extension.uniforms.corner_radii.x;
+
+        assert!((actual_radius - expected_radius).abs() < 0.001);
     }
 
     #[test]
