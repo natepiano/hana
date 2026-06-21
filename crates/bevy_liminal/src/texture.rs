@@ -18,6 +18,12 @@ use super::constants::OUTLINE_TEXTURE_BASE_MIP_ONLY;
 use super::constants::OUTLINE_TEXTURE_SINGLE_LAYER;
 use super::extract::ActiveOutlineModes;
 
+#[derive(Clone, Copy)]
+pub(crate) enum PingPongState {
+    PrimaryInput,
+    SecondaryInput,
+}
+
 #[derive(Clone, Component)]
 pub(crate) struct FloodTextures {
     pub(crate) ping_pong_state: PingPongState,
@@ -32,12 +38,6 @@ pub(crate) struct FloodTextures {
     pub(crate) appearance:      CachedTexture,
     /// Stores per-mesh owner ID in x channel — only allocated when hull outlines are active
     pub(crate) owner:           Option<CachedTexture>,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) enum PingPongState {
-    PrimaryInput,
-    SecondaryInput,
 }
 
 impl FloodTextures {
