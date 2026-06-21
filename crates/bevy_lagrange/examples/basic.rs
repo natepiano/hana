@@ -6,6 +6,9 @@ use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::TitleBar;
 
+// app / title bar
+const EXAMPLE_TITLE: &str = "Basic";
+
 // camera
 const CAMERA_TRANSLATION: Vec3 = Vec3::new(0.0, 1.5, 5.0);
 
@@ -41,7 +44,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Basic")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft),
         )
         .with_camera_control_panel()

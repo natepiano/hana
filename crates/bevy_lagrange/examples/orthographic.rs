@@ -20,6 +20,8 @@ use fairy_dust::CubeFaceLabel;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
+const EXAMPLE_TITLE: &str = "Orthographic";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -48,7 +50,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Orthographic")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(ORTHOGRAPHIC_CONTROL)
                 .control(PERSPECTIVE_CONTROL),

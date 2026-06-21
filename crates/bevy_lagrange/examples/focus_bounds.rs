@@ -35,6 +35,8 @@ use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleChipActivation;
 
+const EXAMPLE_TITLE: &str = "Focus Bounds";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -54,7 +56,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Focus Bounds")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(PAUSE_CONTROL)
                 .control(BOUNDS_SMALLER_CONTROL)
@@ -171,6 +173,7 @@ const FACE_PANEL_PADDING: f32 = 0.06;
 const FACE_PANEL_ROW_GAP: f32 = 0.025;
 const FACE_PANEL_SIZE: f32 = CUBE_SIZE * 0.88;
 const FACE_PANEL_TEXT_SIZE: f32 = 56.0;
+const STORY_PANEL_NAME: &str = "Focus bounds story panel";
 
 const BOUNDS_SHAPE_LINES: &[&str] = &["OrbitCam has", "focus_bounds_shape", "set to a cuboid"];
 const BOUNDS_ORIGIN_LINES: &[&str] =
@@ -203,7 +206,7 @@ fn spawn_story_panel(
     match story_panel(lines) {
         Ok(panel) => {
             parent.spawn((
-                Name::new("Focus bounds story panel"),
+                Name::new(STORY_PANEL_NAME),
                 panel,
                 face_panel_transform(face),
             ));

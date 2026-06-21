@@ -61,6 +61,10 @@ use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_panel_with_tree;
 use fairy_dust::cube_face_transform;
 
+const CUBE_SPIN_CHIP_ID: &str = "cube_spin_pause";
+const CUBE_SPIN_CHIP_LABEL: &str = "GamepadButton::West - Pause";
+const EXAMPLE_TITLE: &str = "Gamepad";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .insert_resource(
@@ -83,16 +87,18 @@ fn main() {
         .without_title_bar_control()
         .with_title_bar(
             TitleBar::new()
-                .with_title("Gamepad")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(GAMEPAD_HOME_CONTROL)
                 .control(GAMEPAD_CONNECTED_CONTROL),
         )
         .wire_chip_to_activation::<GamepadConnection>(GAMEPAD_CONNECTED_CONTROL)
         .wire_chip_to_events::<GamepadHomeBegin, GamepadHomeEnd>(GAMEPAD_HOME_CONTROL)
-        .with_cube_spin_config::<GamepadInputCube>(CubeSpinConfig::new().without_key().with_chip(
-            TitleChip::new("cube_spin_pause", "GamepadButton::West - Pause"),
-        ))
+        .with_cube_spin_config::<GamepadInputCube>(
+            CubeSpinConfig::new()
+                .without_key()
+                .with_chip(TitleChip::new(CUBE_SPIN_CHIP_ID, CUBE_SPIN_CHIP_LABEL)),
+        )
         .init_resource::<GamepadConnection>()
         .init_resource::<GamepadHomeAnimation>()
         .insert_resource(FaceLabelHold::default())
@@ -273,8 +279,23 @@ const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle {
     active_body_size: 56.0,
     ..CubeFacePanelStyle::for_cube(CUBE_SIZE)
 };
+const GAMEPAD_FACE_PANEL_NAME: &str = "Gamepad input face panel";
+const ORBIT_CONTROL_LABEL: &str = "rs";
+const ORBIT_SLOW_CONTROL_LABEL: &str = "rb+rs";
+const PAN_CONTROL_LABEL: &str = "ls";
+const PAN_SLOW_CONTROL_LABEL: &str = "lb+ls";
 const STICK_ACTIVE_THRESHOLD: f32 = 0.18;
+const STICK_DOWN_LABEL: &str = "down";
+const STICK_LEFT_LABEL: &str = "left";
+const STICK_RIGHT_LABEL: &str = "right";
+const STICK_UP_LABEL: &str = "up";
 const TRIGGER_ACTIVE_THRESHOLD: f32 = 0.05;
+const ZOOM_DIRECTION_IN_LABEL: &str = "In";
+const ZOOM_DIRECTION_OUT_LABEL: &str = "Out";
+const ZOOM_IN_CONTROL_LABEL: &str = "rt";
+const ZOOM_IN_SLOW_CONTROL_LABEL: &str = "rb+rt";
+const ZOOM_OUT_CONTROL_LABEL: &str = "lt";
+const ZOOM_OUT_SLOW_CONTROL_LABEL: &str = "lb+lt";
 /// Gap between the idle table's speed column and its controls column.
 const CONTROL_TABLE_COLUMN_GAP: f32 = CUBE_SIZE * 0.04;
 /// Width of the idle table's `normal` / `slow` speed column, as a fraction of
@@ -393,7 +414,7 @@ fn spawn_face_panel(
     match cube_face_panel_with_tree(FACE_PANEL_STYLE.size, idle_grid_tree(kind, summary)) {
         Ok(panel) => {
             parent.spawn((
-                Name::new("Gamepad input face panel"),
+                Name::new(GAMEPAD_FACE_PANEL_NAME),
                 kind,
                 panel,
                 cube_face_transform(face, CUBE_SIZE),
@@ -425,9 +446,13 @@ fn active_orbit_content(
     }
 
     let slow = speed == ControlSpeed::Slow;
-    let control = spell_out_control(if slow { "rb+rs" } else { "rs" });
+    let control = spell_out_control(if slow {
+        ORBIT_SLOW_CONTROL_LABEL
+    } else {
+        ORBIT_CONTROL_LABEL
+    });
     Some(CubeFacePanelContent::active(
-        slow_title("Orbit", slow),
+        slow_title(GamepadFaceLabel::Orbit.title(), slow),
         vec![control, stick_direction(stick)],
     ))
 }
@@ -444,9 +469,13 @@ fn active_pan_content(
     }
 
     let slow = speed == ControlSpeed::Slow;
-    let control = spell_out_control(if slow { "lb+ls" } else { "ls" });
+    let control = spell_out_control(if slow {
+        PAN_SLOW_CONTROL_LABEL
+    } else {
+        PAN_CONTROL_LABEL
+    });
     Some(CubeFacePanelContent::active(
-        slow_title("Pan", slow),
+        slow_title(GamepadFaceLabel::Pan.title(), slow),
         vec![control, stick_direction(stick)],
     ))
 }
@@ -465,10 +494,18 @@ fn active_zoom_content(
 
     let mut lines = Vec::new();
     if zoom_in_trigger > TRIGGER_ACTIVE_THRESHOLD {
-        lines.push(spell_out_control(if slow { "rb+rt" } else { "rt" }));
+        lines.push(spell_out_control(if slow {
+            ZOOM_IN_SLOW_CONTROL_LABEL
+        } else {
+            ZOOM_IN_CONTROL_LABEL
+        }));
     }
     if zoom_out_trigger > TRIGGER_ACTIVE_THRESHOLD {
-        lines.push(spell_out_control(if slow { "lb+lt" } else { "lt" }));
+        lines.push(spell_out_control(if slow {
+            ZOOM_OUT_SLOW_CONTROL_LABEL
+        } else {
+            ZOOM_OUT_CONTROL_LABEL
+        }));
     }
 
     if lines.is_empty() {
@@ -493,11 +530,16 @@ fn slow_title(base: &str, slow: bool) -> String {
 /// The zoom face title, naming the direction the engaged trigger drives — the
 /// right trigger zooms in, the left zooms out — plus the `Slow` gate when held.
 fn zoom_title(slow: bool, zooming_in: bool) -> String {
-    let direction = if zooming_in { "In" } else { "Out" };
-    if slow {
-        format!("Zoom Slow {direction}")
+    let direction = if zooming_in {
+        ZOOM_DIRECTION_IN_LABEL
     } else {
-        format!("Zoom {direction}")
+        ZOOM_DIRECTION_OUT_LABEL
+    };
+    let face_title = GamepadFaceLabel::Zoom.title();
+    if slow {
+        format!("{face_title} Slow {direction}")
+    } else {
+        format!("{face_title} {direction}")
     }
 }
 
@@ -633,14 +675,14 @@ fn trigger_value(gamepad: &Gamepad, button: GamepadButton) -> f32 {
 fn stick_direction(stick: Vec2) -> String {
     let mut parts = Vec::new();
     if stick.y > STICK_ACTIVE_THRESHOLD {
-        parts.push("up");
+        parts.push(STICK_UP_LABEL);
     } else if stick.y < -STICK_ACTIVE_THRESHOLD {
-        parts.push("down");
+        parts.push(STICK_DOWN_LABEL);
     }
     if stick.x > STICK_ACTIVE_THRESHOLD {
-        parts.push("right");
+        parts.push(STICK_RIGHT_LABEL);
     } else if stick.x < -STICK_ACTIVE_THRESHOLD {
-        parts.push("left");
+        parts.push(STICK_LEFT_LABEL);
     }
     parts.join(" + ")
 }

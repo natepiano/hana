@@ -68,6 +68,8 @@ use fairy_dust::TitleBar;
 use fairy_dust::cube_face_transform;
 use fairy_dust::example_cube_on_ground;
 
+const EXAMPLE_TITLE: &str = "Animation";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -82,7 +84,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Animation")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(MANUAL_CONTROL)
                 .control(PLAY_CONTROL)
@@ -243,21 +245,21 @@ fn toggle_manual(
     mut manual: ResMut<ManualAnimationState>,
     mut orbit_cam_query: Query<(Entity, &mut OrbitCam)>,
 ) {
-    let Ok((camera, mut cam)) = orbit_cam_query.single_mut() else {
+    let Ok((camera, mut orbit_cam)) = orbit_cam_query.single_mut() else {
         return;
     };
 
     if manual.mode == ManualAnimationMode::Active {
-        stop_manual(&mut commands, &mut manual, camera, &mut cam);
+        stop_manual(&mut commands, &mut manual, camera, &mut orbit_cam);
     } else {
         manual.mode = ManualAnimationMode::Active;
         commands.entity(camera).insert(CameraInputDisabled);
-        cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-        cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-        cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-        if let (Some(yaw), Some(pitch)) = (cam.yaw, cam.pitch) {
-            cam.target_yaw = yaw;
-            cam.target_pitch = pitch;
+        orbit_cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        orbit_cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        orbit_cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        if let (Some(yaw), Some(pitch)) = (orbit_cam.yaw, orbit_cam.pitch) {
+            orbit_cam.target_yaw = yaw;
+            orbit_cam.target_pitch = pitch;
         }
     }
 }
@@ -315,10 +317,10 @@ fn stop_manual_on_animation_begin(
     if manual.mode != ManualAnimationMode::Active {
         return;
     }
-    let Ok((camera, mut cam)) = orbit_cam_query.single_mut() else {
+    let Ok((camera, mut orbit_cam)) = orbit_cam_query.single_mut() else {
         return;
     };
-    stop_manual(&mut commands, &mut manual, camera, &mut cam);
+    stop_manual(&mut commands, &mut manual, camera, &mut orbit_cam);
 }
 
 /// Per-frame manual animation; only runs when the resource flag is active.
@@ -330,15 +332,15 @@ fn manual_animate(
     if manual.mode != ManualAnimationMode::Active {
         return;
     }
-    for mut cam in &mut query {
-        cam.target_yaw =
-            MANUAL_ORBIT_YAW_RADIANS_PER_SECOND.mul_add(time.delta_secs(), cam.target_yaw);
-        cam.target_pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
-        cam.radius = Some(
+    for mut orbit_cam in &mut query {
+        orbit_cam.target_yaw =
+            MANUAL_ORBIT_YAW_RADIANS_PER_SECOND.mul_add(time.delta_secs(), orbit_cam.target_yaw);
+        orbit_cam.target_pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
+        orbit_cam.radius = Some(
             (((time.elapsed_secs_wrapped() * MANUAL_ORBIT_RADIUS_FREQUENCY).cos() + 1.0) * 0.5)
                 .mul_add(MANUAL_ORBIT_RADIUS_DELTA, MANUAL_ORBIT_RADIUS_BASE),
         );
-        cam.force_update();
+        orbit_cam.force_update();
     }
 }
 
@@ -348,14 +350,14 @@ fn stop_manual(
     commands: &mut Commands,
     manual: &mut ManualAnimationState,
     camera: Entity,
-    cam: &mut OrbitCam,
+    orbit_cam: &mut OrbitCam,
 ) {
     if manual.mode == ManualAnimationMode::Active {
         manual.mode = ManualAnimationMode::Inactive;
         commands.entity(camera).remove::<CameraInputDisabled>();
-        cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
-        cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
-        cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        orbit_cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        orbit_cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        orbit_cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
     }
 }
 
@@ -522,11 +524,13 @@ fn face_label_tree(label: &str) -> LayoutTree {
 // ═════════════════════════════════════════════════════════════════════════════
 
 const EXPLAINER_BOX_WIDTH: Px = Px(264.0);
+const EXPLAINER_DIVIDER_HEIGHT: Px = Px(1.0);
 const EXPLAINER_PADDING: Px = Px(10.0);
 const EXPLAINER_RADIUS: Px = Px(10.0);
 const EXPLAINER_BORDER_WIDTH: Px = Px(1.0);
 const EXPLAINER_ROW_GAP: Px = Px(4.0);
 const EXPLAINER_STACK_GAP: Px = Px(8.0);
+const EXPLAINER_PANEL_NAME: &str = "Animation explainer panel";
 const EXPLAINER_HEADER_COLOR: Color = Color::srgb(0.95, 0.95, 0.97);
 const EXPLAINER_BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const EXPLAINER_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.4);
@@ -578,11 +582,7 @@ fn spawn_explainer_panel(mut commands: Commands) {
 
     match panel {
         Ok(panel) => {
-            commands.spawn((
-                Name::new("Animation explainer panel"),
-                panel,
-                Transform::default(),
-            ));
+            commands.spawn((Name::new(EXPLAINER_PANEL_NAME), panel, Transform::default()));
         },
         Err(error) => {
             error!("animation: failed to build explainer panel: {error}");
@@ -641,7 +641,7 @@ fn explainer_divider(builder: &mut LayoutBuilder) {
     builder.with(
         El::new()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(Px(1.0)))
+            .height(Sizing::fixed(EXPLAINER_DIVIDER_HEIGHT))
             .background(EXPLAINER_BORDER_COLOR),
         |_| {},
     );

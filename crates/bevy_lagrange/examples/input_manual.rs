@@ -34,6 +34,8 @@ use fairy_dust::TitleBar;
 use fairy_dust::apply_example_orbit_cam_limits;
 use fairy_dust::cube_face_label;
 
+const EXAMPLE_TITLE: &str = "Manual Input";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -51,7 +53,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Manual Input")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft),
         )
         .with_cube_spin::<ManualInputCube>()
@@ -224,6 +226,9 @@ const PAN_FACE_KEYS: [(KeyCode, &str); 4] = [
     (KeyCode::KeyD, "D"),
 ];
 const ZOOM_FACE_KEYS: [(KeyCode, &str); 2] = [(KeyCode::Equal, "+"), (KeyCode::Minus, "-")];
+const ORBIT_FACE_TITLE: &str = "Orbit";
+const PAN_FACE_TITLE: &str = "Pan";
+const ZOOM_FACE_TITLE: &str = "Zoom";
 
 #[derive(Resource, Default)]
 struct FaceLabelHold {
@@ -280,21 +285,21 @@ fn update_face_labels(
         time.delta(),
         pressed_key_label(&keys, &ORBIT_FACE_KEYS),
         ORBIT_LABEL,
-        "Orbit",
+        ORBIT_FACE_TITLE,
     );
     let pan = held_label(
         &mut hold.pan,
         time.delta(),
         pressed_key_label(&keys, &PAN_FACE_KEYS),
         PAN_LABEL,
-        "Pan",
+        PAN_FACE_TITLE,
     );
     let zoom = held_label(
         &mut hold.zoom,
         time.delta(),
         pressed_key_label(&keys, &ZOOM_FACE_KEYS),
         KEYBOARD_ZOOM_LABEL,
-        "Zoom",
+        ZOOM_FACE_TITLE,
     );
 
     labels.for_each_mut(|kind, label| {
@@ -311,17 +316,17 @@ fn update_face_labels(
 
 fn orbit_face_label(keys: &ButtonInput<KeyCode>) -> String {
     let pressed = pressed_key_label(keys, &ORBIT_FACE_KEYS);
-    action_face_label("Orbit", ORBIT_LABEL, pressed.as_deref())
+    action_face_label(ORBIT_FACE_TITLE, ORBIT_LABEL, pressed.as_deref())
 }
 
 fn pan_face_label(keys: &ButtonInput<KeyCode>) -> String {
     let pressed = pressed_key_label(keys, &PAN_FACE_KEYS);
-    action_face_label("Pan", PAN_LABEL, pressed.as_deref())
+    action_face_label(PAN_FACE_TITLE, PAN_LABEL, pressed.as_deref())
 }
 
 fn zoom_face_label(keys: &ButtonInput<KeyCode>) -> String {
     let pressed = pressed_key_label(keys, &ZOOM_FACE_KEYS);
-    action_face_label("Zoom", KEYBOARD_ZOOM_LABEL, pressed.as_deref())
+    action_face_label(ZOOM_FACE_TITLE, KEYBOARD_ZOOM_LABEL, pressed.as_deref())
 }
 
 fn pressed_key_label(keys: &ButtonInput<KeyCode>, bindings: &[(KeyCode, &str)]) -> Option<String> {

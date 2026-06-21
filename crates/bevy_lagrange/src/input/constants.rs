@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 // action names
 pub(super) const ORBIT_ACTION_NAME: &str = "OrbitCamOrbitAction";
 pub(super) const PAN_ACTION_NAME: &str = "OrbitCamPanAction";
@@ -6,6 +8,9 @@ pub(super) const ZOOM_SMOOTH_ACTION_NAME: &str = "OrbitCamZoomSmoothAction";
 
 // camera labels
 pub(super) const ORBIT_CAM_CAMERA_LABEL: &str = "OrbitCam";
+
+// debounce durations
+pub(super) const DEFAULT_REPORTING_DEBOUNCE: Duration = Duration::from_millis(100);
 
 // mode labels
 pub(super) const INPUT_MODE_LABEL: &str = "Input";

@@ -17,6 +17,8 @@ use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
 
+const EXAMPLE_TITLE: &str = "Programmatic Control";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -34,7 +36,7 @@ fn main() {
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .with_title_bar(
             TitleBar::new()
-                .with_title("Programmatic Control")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(HOME_CONTROL),
         )

@@ -273,6 +273,7 @@ fn cube_rotator_system(time: Res<Time>, mut query: Query<&mut Transform, With<Ma
 // ═════════════════════════════════════════════════════════════════════════════
 
 const INFO_PANEL_GAP: Px = Px(6.0);
+const INFO_PANEL_HEADING: &str = "How it works";
 const INFO_PANEL_WIDTH: Px = Px(430.0);
 const INFO_TEXT_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 const INFO_PANEL_LINES: [&str; 3] = [
@@ -317,7 +318,7 @@ fn build_info_panel_layout(builder: &mut LayoutBuilder) {
             builder.with(
                 El::column().width(Sizing::GROW).gap(INFO_PANEL_GAP),
                 |builder| {
-                    builder.text("How it works", title);
+                    builder.text(INFO_PANEL_HEADING, title);
                     for line in INFO_PANEL_LINES {
                         builder.text(line, body.clone());
                     }

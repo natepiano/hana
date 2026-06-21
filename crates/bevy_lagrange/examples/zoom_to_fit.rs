@@ -32,6 +32,8 @@ use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_label;
 
+const EXAMPLE_TITLE: &str = "Zoom to Fit";
+
 // Camera home pose.
 const HOME_PITCH: f32 = 0.46;
 const HOME_MARGIN: f32 = 0.7;
@@ -78,7 +80,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Zoom to Fit")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(ZOOM_CONTROL)
                 .control(LOOK_CONTROL)

@@ -27,6 +27,8 @@ use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
 
+const EXAMPLE_TITLE: &str = "Pausing";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -45,7 +47,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Pausing")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(PAUSE_CONTROL),
         )
@@ -159,9 +161,11 @@ const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle {
 
 const CAMERA_LABEL: &str = "OrbitCam";
 const CAMERA_TIME_SOURCE_LABEL: &str = "TimeSource::Real";
+const CAMERA_TIME_SOURCE_PANEL_NAME: &str = "Camera time source panel";
 const GAME_PAUSED_LABEL: &str = "Game Paused";
-const GAME_UNPAUSED_LABEL: &str = "Game Unpaused";
 const GAME_TIME_SOURCE_LABEL: &str = "TimeSource::Virtual";
+const GAME_TIME_SOURCE_PANEL_NAME: &str = "Game time source panel";
+const GAME_UNPAUSED_LABEL: &str = "Game Unpaused";
 
 #[derive(Component)]
 struct GameStatusPanel;
@@ -187,14 +191,14 @@ fn spawn_face_panels(mut commands: Commands, cube_query: Query<Entity, With<Cube
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
             parent.spawn((
-                Name::new("Camera time source panel"),
+                Name::new(CAMERA_TIME_SOURCE_PANEL_NAME),
                 camera_panel.clone(),
                 cube_face_transform(face, CUBE_SIZE),
             ));
         }
         for face in [Face::Left, Face::Right] {
             parent.spawn((
-                Name::new("Game time source panel"),
+                Name::new(GAME_TIME_SOURCE_PANEL_NAME),
                 GameStatusPanel,
                 game_panel.clone(),
                 cube_face_transform(face, CUBE_SIZE),

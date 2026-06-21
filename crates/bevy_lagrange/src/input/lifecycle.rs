@@ -18,6 +18,7 @@ use super::OrbitCamInteractionStarted;
 use super::OrbitCamInteractionState;
 use super::ResolvedOrbitCamInputRoute;
 use super::ZoomDirection;
+use super::constants::DEFAULT_REPORTING_DEBOUNCE;
 use crate::system_sets::OrbitCamInputPhase;
 
 /// Settle delay that smooths the reported interaction state — both the active
@@ -42,7 +43,7 @@ use crate::system_sets::OrbitCamInputPhase;
 pub struct OrbitCamReportingDebounce(pub Duration);
 
 impl Default for OrbitCamReportingDebounce {
-    fn default() -> Self { Self(Duration::from_millis(100)) }
+    fn default() -> Self { Self(DEFAULT_REPORTING_DEBOUNCE) }
 }
 
 #[derive(Clone, Copy, Debug)]

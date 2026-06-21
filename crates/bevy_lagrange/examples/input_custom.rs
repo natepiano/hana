@@ -52,6 +52,8 @@ use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
 
+const EXAMPLE_TITLE: &str = "Custom Bindings";
+
 fn main() {
     let Ok(bindings) = custom_bindings() else {
         error!("custom camera bindings failed to validate");
@@ -80,7 +82,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Custom Bindings")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(INPUT_DISABLED_CONTROL),
         )
@@ -199,6 +201,8 @@ const fn activation_for(active: bool) -> ControlActivation {
 // CUBE FACE PANELS — live face panels showing active custom input sources.
 // ═════════════════════════════════════════════════════════════════════════════
 
+const DISABLED_FACE_STATUS: &str = "Disabled";
+const FACE_PANEL_NAME: &str = "Custom input face panel";
 const FACE_PANEL_STYLE: CubeFacePanelStyle = CubeFacePanelStyle::for_cube(CUBE_SIZE);
 
 #[derive(Component)]
@@ -288,9 +292,9 @@ fn update_face_labels(
     let (orbit, pan, zoom) = if disabled.is_some() {
         hold.clear();
         (
-            CubeFacePanelContent::active("Orbit", ["Disabled"]),
-            CubeFacePanelContent::active("Pan", ["Disabled"]),
-            CubeFacePanelContent::active("Zoom", ["Disabled"]),
+            CubeFacePanelContent::active(CustomFaceLabel::Orbit.title(), [DISABLED_FACE_STATUS]),
+            CubeFacePanelContent::active(CustomFaceLabel::Pan.title(), [DISABLED_FACE_STATUS]),
+            CubeFacePanelContent::active(CustomFaceLabel::Zoom.title(), [DISABLED_FACE_STATUS]),
         )
     } else {
         (
@@ -376,7 +380,7 @@ fn spawn_face_panel(
     match cube_face_panel(FACE_PANEL_STYLE, content) {
         Ok(panel) => {
             parent.spawn((
-                Name::new("Custom input face panel"),
+                Name::new(FACE_PANEL_NAME),
                 kind,
                 panel,
                 cube_face_transform(face, CUBE_SIZE),

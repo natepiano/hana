@@ -61,6 +61,8 @@ use fairy_dust::TitleBar;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 
+const EXAMPLE_TITLE: &str = "Swapped Axis";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -76,7 +78,7 @@ fn main() {
         .insert(GroundPlane)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Swapped Axis")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft),
         )
         .with_camera_home()
@@ -646,8 +648,17 @@ fn build_column<'a>(
 
 const AXIS_GIZMO_LENGTH: f32 = 2.0;
 const AXIS_X_COLOR: Color = Color::srgb(0.90, 0.20, 0.20);
+const AXIS_X_INDEX: usize = 0;
+const AXIS_X_NEGATIVE_LABEL: &str = "-x";
+const AXIS_X_POSITIVE_LABEL: &str = "+x";
 const AXIS_Y_COLOR: Color = Color::srgb(0.20, 0.80, 0.25);
+const AXIS_Y_INDEX: usize = 1;
+const AXIS_Y_NEGATIVE_LABEL: &str = "-y";
+const AXIS_Y_POSITIVE_LABEL: &str = "+y";
 const AXIS_Z_COLOR: Color = Color::srgb(0.30, 0.45, 0.95);
+const AXIS_Z_INDEX: usize = 2;
+const AXIS_Z_NEGATIVE_LABEL: &str = "-z";
+const AXIS_Z_POSITIVE_LABEL: &str = "+z";
 
 // Axis labels — billboarded world text just past each arrow tip.
 const AXIS_LABEL_SIZE: f32 = 0.11;
@@ -659,6 +670,7 @@ const LABEL_OCCLUSION_THRESHOLD: f32 = 0.6;
 // front, up for the one behind).
 const LABEL_DEPTH_LIFT: f32 = 0.15;
 const HOME_TARGET_HALF_EXTENT: f32 = AXIS_GIZMO_LENGTH + AXIS_LABEL_OFFSET + AXIS_LABEL_SIZE * 0.5;
+const HOME_TARGET_NAME: &str = "Swapped axis home bounds";
 const HOME_TARGET_SIZE: f32 = HOME_TARGET_HALF_EXTENT * 2.0;
 
 // Transition — each axis line orbits to its target over this long.
@@ -711,7 +723,7 @@ fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>, mut meshes: ResMut<A
     // Open in the default engine's world-axis layout.
     let dirs = engine_axis_dirs(*engine);
     commands.spawn((
-        Name::new("Swapped axis home bounds"),
+        Name::new(HOME_TARGET_NAME),
         CameraHomeTarget,
         Mesh3d(meshes.add(Cuboid::from_size(Vec3::splat(HOME_TARGET_SIZE)))),
         Transform::default(),
@@ -729,9 +741,24 @@ fn spawn_gizmo(mut commands: Commands, engine: Res<Engine>, mut meshes: ResMut<A
         ))
         .with_children(|root| {
             for (axis, color, positive, negative) in [
-                (0usize, AXIS_X_COLOR, "+x", "-x"),
-                (1, AXIS_Y_COLOR, "+y", "-y"),
-                (2, AXIS_Z_COLOR, "+z", "-z"),
+                (
+                    AXIS_X_INDEX,
+                    AXIS_X_COLOR,
+                    AXIS_X_POSITIVE_LABEL,
+                    AXIS_X_NEGATIVE_LABEL,
+                ),
+                (
+                    AXIS_Y_INDEX,
+                    AXIS_Y_COLOR,
+                    AXIS_Y_POSITIVE_LABEL,
+                    AXIS_Y_NEGATIVE_LABEL,
+                ),
+                (
+                    AXIS_Z_INDEX,
+                    AXIS_Z_COLOR,
+                    AXIS_Z_POSITIVE_LABEL,
+                    AXIS_Z_NEGATIVE_LABEL,
+                ),
             ] {
                 spawn_label(root, axis, 1.0, color, positive);
                 spawn_label(root, axis, -1.0, color, negative);

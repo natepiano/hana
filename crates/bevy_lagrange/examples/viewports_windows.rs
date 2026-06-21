@@ -33,6 +33,9 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
 
+// app / title bar
+const EXAMPLE_TITLE: &str = "Viewports & Windows";
+
 // camera
 const MINIMAP_CAMERA_ORDER: isize = 1;
 const MINIMAP_CAMERA_TRANSLATION: Vec3 = Vec3::new(1.0, 1.5, 4.0);
@@ -125,7 +128,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Viewports & Windows")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(HOME_CONTROL),
         )
@@ -311,14 +314,14 @@ fn home_on_keypress(
     let Some(home) = home else {
         return;
     };
-    let Some(cam) = route.routed_camera() else {
+    let Some(routed_camera) = route.routed_camera() else {
         return;
     };
-    let Some(&pose) = homes.0.get(&cam) else {
+    let Some(&pose) = homes.0.get(&routed_camera) else {
         return;
     };
     commands.trigger(
-        AnimateToFit::new(cam, home.0)
+        AnimateToFit::new(routed_camera, home.0)
             .yaw(pose.yaw)
             .pitch(pose.pitch)
             .duration(HOME_DURATION)

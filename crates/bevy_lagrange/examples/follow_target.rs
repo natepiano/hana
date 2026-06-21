@@ -36,6 +36,8 @@ use fairy_dust::Face;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleChipActivation;
 
+const EXAMPLE_TITLE: &str = "Follow Target";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -55,7 +57,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Follow Target")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(PAUSE_CONTROL),
         )
@@ -164,6 +166,7 @@ fn camera_follow(
 // ═════════════════════════════════════════════════════════════════════════════
 
 const TRACK_RING_COLOR: Color = Color::srgba(0.78, 0.82, 0.86, 0.85);
+const TRACK_RING_NAME: &str = "Cube orbit track";
 const TRACK_RING_RESOLUTION: u32 = 128;
 const TRACK_RING_THICKNESS: f32 = 0.035;
 const TRACK_RING_Y: f32 = 0.006;
@@ -174,7 +177,7 @@ fn spawn_track_ring(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     commands.spawn((
-        Name::new("Cube orbit track"),
+        Name::new(TRACK_RING_NAME),
         Mesh3d(
             meshes.add(
                 Annulus::new(
@@ -208,6 +211,7 @@ const FACE_PANEL_PADDING: f32 = 0.06;
 const FACE_PANEL_ROW_GAP: f32 = 0.025;
 const FACE_PANEL_SIZE: f32 = CUBE_SIZE * 0.88;
 const FACE_PANEL_TEXT_SIZE: f32 = 56.0;
+const STORY_PANEL_NAME: &str = "Follow target story panel";
 
 const ANIMATE_CUBE_LINES: &[&str] = &["animate_cube moves", "the cube in a", "horizontal circle"];
 const CAMERA_FOCUS_LINES: &[&str] = &["camera focus is", "updated to be", "centered on the cube"];
@@ -239,7 +243,7 @@ fn spawn_story_panel(
     match story_panel(lines) {
         Ok(panel) => {
             parent.spawn((
-                Name::new("Follow target story panel"),
+                Name::new(STORY_PANEL_NAME),
                 panel,
                 face_panel_transform(face),
             ));

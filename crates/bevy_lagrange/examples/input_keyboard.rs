@@ -27,6 +27,8 @@ use fairy_dust::TitleBar;
 use fairy_dust::apply_example_orbit_cam_limits;
 use fairy_dust::cube_face_label;
 
+const EXAMPLE_TITLE: &str = "Keyboard Bindings";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .insert_resource(
@@ -48,7 +50,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Keyboard Bindings")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft),
         )
         .with_cube_spin::<KeyboardInputCube>()

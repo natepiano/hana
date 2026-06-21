@@ -27,6 +27,8 @@ use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
 
+const EXAMPLE_TITLE: &str = "Blender-Like";
+
 fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -44,7 +46,7 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
-                .with_title("Blender-Like")
+                .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft),
         )
         .with_cube_spin::<BlenderLikeCube>()
@@ -93,6 +95,7 @@ const FACE_PANEL_STYLE: CubeFacePanelStyle = {
     style.active_body_size *= 1.5;
     style
 };
+const FACE_PANEL_NAME: &str = "Blender-like face panel";
 
 #[derive(Component)]
 struct BlenderLikeCube;
@@ -311,7 +314,7 @@ fn spawn_face_panel(
     match cube_face_panel(FACE_PANEL_STYLE, content) {
         Ok(panel) => {
             parent.spawn((
-                Name::new("Blender-like face panel"),
+                Name::new(FACE_PANEL_NAME),
                 kind,
                 panel,
                 cube_face_transform(face, CUBE_SIZE),
