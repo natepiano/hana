@@ -1,0 +1,18 @@
+[package]
+authors.workspace    = true
+categories           = []
+description          = "bevy_valence provides the bonds that create interesting patterns"
+edition.workspace    = true
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_valence"
+keywords             = []
+license.workspace    = true
+name                 = "bevy_valence"
+readme               = "README.md"
+repository.workspace = true
+version = "0.1.0"
+
+[lints]
+workspace = true
+
+[dependencies]
+bevy.workspace = true
