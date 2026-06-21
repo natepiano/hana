@@ -35,8 +35,10 @@ Keep `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`, `CHANGELOG.md`, `NOTICE` — 
 
 Match the existing workspace-member pattern (e.g. `bevy_diegetic`): thin per-crate manifest, workspace-shared values via `*.workspace = true`, per-crate-distinct values stay declared per-crate. Concretely:
 
-- `edition.workspace = true`, `license.workspace = true`, `readme.workspace = true`, `[lints] workspace = true`, `authors.workspace = true`.
-- `name`, `version`, `description`, `keywords`, `categories`, `homepage`, `repository` stay per-crate (the workspace defaults don't match what each crate advertises on crates.io).
+- `edition.workspace = true`, `license.workspace = true`, `authors.workspace = true`, `repository.workspace = true`, `[lints] workspace = true`. `repository.workspace = true` resolves to the monorepo (`https://github.com/<owner>/<repo>`), which is correct now that the crate lives there.
+- `readme = "README.md"` stays per-crate (there is no workspace `readme` default).
+- `name`, `version`, `description`, `keywords`, `categories`, `homepage` stay per-crate (the workspace defaults don't match what each crate advertises on crates.io).
+- **Rewrite `homepage`** — the incoming manifest points it at the standalone repo (`https://github.com/<owner>/<crate_name>`), which gets archived in step 10. Repoint it to the crate's subdir in the host monorepo: `https://github.com/<owner>/<repo>/tree/main/crates/<crate_name>` (e.g. `https://github.com/natepiano/hana/tree/main/crates/<crate_name>`), matching the existing members. Leaving the old URL sends crates.io / docs.rs visitors to the dead archived repo.
 - Move shared dep version declarations (`bevy`, etc.) up into root `[workspace.dependencies]`; per-crate `Cargo.toml` then references them via `dep = { workspace = true, features = [...] }`.
 - Remove the dev-dep self-reference (`<crate_name> = { path = ".", ... }`) if present — examples and tests inside the crate access it by name automatically once it's a workspace member.
 
@@ -93,8 +95,19 @@ Everything through step 8 is in-tree and reversible. Steps 10–11 are outward-f
 
 ### 10. Archive the standalone repo
 
-- Push a final pointer commit on the standalone repo's `README.md`: "moved to `bevy_hana/crates/<crate_name>/`".
-- Archive `github.com/<owner>/<crate_name>` via the GitHub UI.
+- **Replace** the standalone repo's `README.md` with a **pure pointer** — delete the former content entirely (title, badges, docs, everything) and leave only a short "this repository has moved" notice linking to the crate's new home. The old content is preserved in git history; a stripped-down README makes the move unmistakable to anyone landing on the archived repo. Do not keep the old README and prepend a banner — replace it. Commit and push.
+  - Point at the **GitHub** path, which uses the host repo's GitHub name — that is not always the local workspace dir name. Here the workspace lives in `~/rust/bevy_hana/` locally but the GitHub repo is `natepiano/hana` (the local dir is renamed only to avoid colliding with a separate private `hana` checkout). So the pointer URL is `https://github.com/natepiano/hana/tree/main/crates/<crate_name>`, not `…/bevy_hana/…`.
+  - Keep it terse — a title and the link, nothing else:
+
+    ```markdown
+    # <crate_name> — moved
+
+    This repository has moved into the **hana** monorepo:
+
+    ➡️ **https://github.com/natepiano/hana/tree/main/crates/<crate_name>**
+    ```
+- Archive via `gh repo archive <owner>/<crate_name> --yes` (or the GitHub UI). Confirm with `gh repo view <owner>/<crate_name> --json isArchived`.
+- Archived repos are **read-only** — pushes are rejected. To amend the README after archiving, `gh repo unarchive <owner>/<crate_name>`, push, then re-archive.
 - Stop pushing to `<source_repo_path>`. Future commits land in `bevy_hana`.
 
 ### 11. Remove the local standalone checkout
