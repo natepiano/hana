@@ -268,7 +268,7 @@ measured cost; revisit only if the Material route hits a wall in Step 1.
 (BaseMaterialId, alpha_mode, lighting, sidedness, shadow_mode, RenderLayers)
 ```
 
-**`BatchKey` is a dedicated struct, not a tuple of bevy types** — the bevy
+**`PathBatchKey` is a dedicated struct, not a tuple of bevy types** — the bevy
 types don't qualify as map keys: `AlphaMode` has a manual `Eq` impl but no
 `Hash` (`Mask(f32)`; `alpha.rs:64`), `RenderLayers` derives `Eq` but not
 `Hash`, and the cascade
@@ -363,8 +363,8 @@ implementer's):
 
 ```rust
 struct PathBatchStore {
-    batches:   HashMap<BatchKey, PathBatch>,
-    run_index: HashMap<RunStorageKey, BatchKey>,  // which batch a run is in
+    batches:   HashMap<PathBatchKey, PathBatch>,
+    run_index: HashMap<RunStorageKey, PathBatchKey>,  // which batch a run is in
 }
 struct PathBatch {
     entity:        Option<Entity>,               // the batch render entity
@@ -857,7 +857,7 @@ toggle flipped in the gate examples.
   key) — 3a wires cascade-change detection into the batch path and adds
   the store-level tests; Step 4 must keep the padding/growth mechanism
   when it deletes the per-run path — with per-run material rewrites gone,
-  nothing masks the rebind hazard anywhere, so the `BatchGpu` doc comment
+  nothing masks the rebind hazard anywhere, so the `PathBatchResources` doc comment
   is the contract; Step 4's placeholder-binding removal (104/105 always
   real) is unaffected.
 
@@ -965,7 +965,7 @@ toggle flipped in the gate examples.
        own depth, `GreaterEqual` + write; prepass was early-z only), and
        per-run materials never read material data in the prepass either.
     2. `batch_material` maps resolved `Opaque` → `Mask(0.0)` on the GPU
-       material only (the `BatchKey` keeps the user's `Opaque` identity).
+       material only (the `PathBatchKey` keeps the user's `Opaque` identity).
        Cutoff 0 never discards by alpha; the coverage discards cut the
        glyph outlines; depth writes, nothing blends — same main-pass
        pixels. `MAY_DISCARD` pipelines keep the material bind group, so
@@ -994,7 +994,7 @@ toggle flipped in the gate examples.
   - Two unplanned code fixes shipped with the phase:
     `TextExtension::enable_prepass() -> false` and `batch_material`
     mapping resolved `Opaque` → `Mask(0.0)` (GPU material only; the
-    `BatchKey` keeps `Opaque`) — see implementation notes above.
+    `PathBatchKey` keeps `Opaque`) — see implementation notes above.
   - `update_panel_text_batches` hit bevy's 16-system-param limit; the
     cascade inputs were going to be grouped anyway, the limit just made
     it mandatory.
@@ -1043,7 +1043,7 @@ toggle flipped in the gate examples.
     updated for batched behavior; prepass absence attributed to
     3a-on-both-paths, not to the flip.
   - Step 4b's gate gained a headless constant-byte-length test for the
-    padding contract (previously guarded only by the `BatchGpu` doc
+    padding contract (previously guarded only by the `PathBatchResources` doc
     comment and parity screenshots).
   - Confirmed, no change needed: punch-out is verification-only (shader
     plumbing fully landed); 4a's dependency on 3a's re-routing is
@@ -1062,7 +1062,7 @@ toggle flipped in the gate examples.
   so no-shadow is the only achievable batched output. The guard is also
   the catch-all for any future mode or engine change that strips the
   material group. Rider: consolidate the alpha remapping into one named
-  function with the invariant documented (`BatchKey.alpha` keeps the
+  function with the invariant documented (`PathBatchKey.alpha` keeps the
   user's authored mode; the GPU material may differ). Then:
   punch-out verification; clip
   move; depth-nudge layering verified against `panel_rendering`; the
@@ -1103,7 +1103,7 @@ toggle flipped in the gate examples.
     pipelines, renders correctly, casts no shadow, zero log errors — the
     pre-fix wgpu validation crash is gone. Rider landed:
     `batch_gpu_alpha_mode` is the one named remap site (invariant in its
-    doc comment: `BatchKey.alpha` keeps the authored mode).
+    doc comment: `PathBatchKey.alpha` keeps the authored mode).
   - *Alpha-mode × MSAA matrix (`text_alpha`, `Msaa::Sample4`, batched):*
     all 7 modes validated live — Blend, Premultiplied, AlphaToCoverage
     (MSAA-on routing), Add, Multiply (no shadow — accepted parity
@@ -1405,7 +1405,7 @@ toggle flipped in the gate examples.
   `RunStorageKey` stays — it is the run identifier in
   `PathBatchStore.run_index`. Deleting the per-run path also deletes the
   per-change material rewrites that masked the buffer rebind hazard — the
-  capacity-padding / growth-handle-rewrite mechanism (Step 2, `BatchGpu`
+  capacity-padding / growth-handle-rewrite mechanism (Step 2, `PathBatchResources`
   doc contract) must survive untouched, and the contract gains a headless
   test: padded commit payloads keep a constant byte length between
   growths (`padded_glyph_records` / `padded_run_records` length equals
@@ -1457,7 +1457,7 @@ toggle flipped in the gate examples.
     (`instances == glyphs`) removed — bindings 104/105 are always real.
   - New headless test
     `commit_payloads_keep_a_constant_length_between_growths` pins the
-    `BatchGpu` padding contract (payload length == capacity for 0..=8
+    `PathBatchResources` padding contract (payload length == capacity for 0..=8
     records).
   - Tests 403/403 workspace, clippy clean (workspace, all targets), fmt.
   - Doc riders: `emoji.md` annotated (color-glyph layers land as N glyph
@@ -1665,7 +1665,7 @@ Determined fixes incorporated: `Indices::U32` + POSITION-only inert mesh +
 in-shader normal from run rotation (Target model); `first_vertex_index`
 subtraction for slab-allocated meshes — `@builtin(vertex_index)` includes
 `base_vertex` (Target model + Step 1 gate); `visibility(vertex)` on the new
-storage bindings (decision 1); `BatchKey` dedicated struct — `AlphaMode` not
+storage bindings (decision 1); `PathBatchKey` dedicated struct — `AlphaMode` not
 `Eq`/`Hash`, `RenderLayers` and cascade wrappers not `Hash` (decision 2);
 interner concretized (`InternedMaterialKey`, map + vec, never freed)
 (decision 2); prepass-parity scope made precise — blend/OIT text skips the

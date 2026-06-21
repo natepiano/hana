@@ -322,7 +322,7 @@ impl DiamondCap {
     }
 }
 
-/// Decoration that can appear at either end of a [`CalloutLine`](super::CalloutLine).
+/// Decoration that can appear at either end of a [`PanelLine`](crate::PanelLine).
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[expect(
     private_interfaces,
@@ -480,26 +480,6 @@ impl CalloutCap {
         }
     }
 
-    pub(crate) fn shaft_inset(
-        self,
-        default_size: f32,
-        resolve_dimension: impl Fn(Dimension) -> f32,
-    ) -> f32 {
-        match self {
-            Self::None => 0.0,
-            Self::Arrow(cap) => resolve_or_default(cap.length, default_size, &resolve_dimension),
-            Self::Circle(cap) => {
-                resolve_or_default(cap.radius, default_size * 0.5, &resolve_dimension)
-            },
-            Self::Square(cap) => {
-                resolve_or_default(cap.size, default_size, &resolve_dimension) * 0.5
-            },
-            Self::Diamond(cap) => {
-                resolve_or_default(cap.width, default_size, &resolve_dimension) * 0.5
-            },
-        }
-    }
-
     pub(crate) fn scaled_dimensions(self, default_scale: f32) -> Self {
         match self {
             Self::None => Self::None,
@@ -598,10 +578,6 @@ impl CalloutCap {
             },
         }
     }
-}
-
-pub(crate) fn resolve_cap_dimension(dimension: Dimension, default_meters_per_unit: f32) -> f32 {
-    dimension.to_meters(default_meters_per_unit)
 }
 
 pub(crate) fn resolve_or_default(

@@ -1,5 +1,5 @@
 //! Batched-records text geometry (`docs/bevy_diegetic/glyph_instancing.md`):
-//! routes every panel-text run into a per-[`BatchKey`] batch entity whose
+//! routes every panel-text run into a per-[`PathBatchKey`] batch entity whose
 //! vertex shader pulls per-glyph and per-run records from GPU tables.
 //!
 //! Panel-text batch schedule: [`update_panel_text_batches`]
@@ -42,12 +42,12 @@ use crate::panel::DiegeticPerfStats;
 use crate::render;
 use crate::render::AntiAlias;
 use crate::render::BaseMaterialId;
-use crate::render::BatchGpu;
-use crate::render::BatchKey;
 use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
+use crate::render::PathBatchKey;
+use crate::render::PathBatchResources;
+use crate::render::PathExtendedMaterial;
 use crate::render::PathInstanceRecord;
-use crate::render::PathMaterial;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
 use crate::render::analytic_paths::PathAtlasHandles;
@@ -68,12 +68,12 @@ pub struct DiegeticTextBatch;
 /// on a key's first run, despawn on its last, mesh growth on a capacity
 /// crossing — created, written, and swapped in the same frame).
 ///
-/// Cascade inputs feeding [`BatchKey`] fields: each run's resolved
+/// Cascade inputs feeding [`PathBatchKey`] fields: each run's resolved
 /// alpha / lighting / sidedness (with the global defaults for runs the
 /// cascade has not seeded) plus the changed-this-frame run set that triggers
 /// re-routing.
 #[derive(SystemParam)]
-pub(super) struct BatchKeyCascades<'w, 's> {
+pub(super) struct PathBatchKeyCascades<'w, 's> {
     alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
     lightings:          Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
     sidednesses:        Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
@@ -99,7 +99,7 @@ pub(super) struct BatchKeyCascades<'w, 's> {
     >,
 }
 
-impl BatchKeyCascades<'_, '_> {
+impl PathBatchKeyCascades<'_, '_> {
     /// Runs whose resolved cascade value transitioned this frame. The
     /// propagation pass is inequality-guarded, so membership means a real
     /// transition.
@@ -151,11 +151,11 @@ pub(super) fn update_panel_text_batches(
     >,
     mut emptied_runs: RemovedComponents<PreparedPanelText>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
-    cascades: BatchKeyCascades,
+    cascades: PathBatchKeyCascades,
     anti_alias: Res<AntiAlias>,
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<PathMaterial>>,
+    mut materials: ResMut<Assets<PathExtendedMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
@@ -282,10 +282,10 @@ fn batch_key_for_run(
     label_entity: Entity,
     panel_layers: Option<&RenderLayers>,
     prepared: &PreparedPanelText,
-    cascades: &BatchKeyCascades<'_, '_>,
+    cascades: &PathBatchKeyCascades<'_, '_>,
     z_level: PanelTextZLevel,
-) -> BatchKey {
-    BatchKey {
+) -> PathBatchKey {
+    PathBatchKey {
         base_material,
         alpha: cascades.alpha(label_entity).into(),
         lighting: cascades.lighting(label_entity),
@@ -326,7 +326,7 @@ struct ReconcileBatchEntities<'a, 'w, 's> {
     anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<PathMaterial>,
+    materials:       &'a mut Assets<PathExtendedMaterial>,
     storage_buffers: &'a mut Assets<ShaderBuffer>,
     commands:        &'a mut Commands<'w, 's>,
 }
@@ -445,7 +445,7 @@ pub(super) fn update_batch_bounds(
 /// Every payload is padded to the buffer's capacity so its byte length never
 /// changes between growths — a constant-length `set_data` writes the existing
 /// wgpu buffer in place, which the material's bind group observes without a
-/// re-prepare (see [`BatchGpu`](crate::render::BatchGpu)).
+/// re-prepare (see [`PathBatchResources`](crate::render::PathBatchResources)).
 pub(super) fn commit_batch_buffers(
     mut backend: ResMut<GlyphCache>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
@@ -591,12 +591,12 @@ fn inert_batch_mesh(capacity: u32) -> Mesh {
 
 /// Inputs for [`spawn_batch_entity`].
 struct SpawnBatchEntity<'a, 'w, 's> {
-    key:             &'a BatchKey,
+    key:             &'a PathBatchKey,
     atlas:           &'a PathAtlasHandles,
     anti_alias:      AntiAlias,
     backend:         &'a mut GlyphCache,
     meshes:          &'a mut Assets<Mesh>,
-    materials:       &'a mut Assets<PathMaterial>,
+    materials:       &'a mut Assets<PathExtendedMaterial>,
     storage_buffers: &'a mut Assets<ShaderBuffer>,
     commands:        &'a mut Commands<'w, 's>,
 }
@@ -656,7 +656,7 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
 
     if let Some(batch) = backend.batch_store_mut().get_mut(key) {
         batch.entity = Some(entity);
-        batch.gpu = Some(BatchGpu {
+        batch.gpu = Some(PathBatchResources {
             instances,
             run_table,
             mesh,
@@ -680,10 +680,10 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
 /// at worst one frame later (a missing render asset retries), during which
 /// the old buffers keep drawing the pre-growth content. No blink either way.
 fn grow_batch_assets(
-    key: &BatchKey,
+    key: &PathBatchKey,
     backend: &mut GlyphCache,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PathMaterial>,
+    materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -744,7 +744,7 @@ fn grow_batch_assets(
 /// Inputs for [`batch_material`].
 struct BatchMaterialInput<'a> {
     base:       StandardMaterial,
-    key:        &'a BatchKey,
+    key:        &'a PathBatchKey,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
@@ -756,7 +756,7 @@ struct BatchMaterialInput<'a> {
 /// the vertex-pulling route switched on. `fill_color` / `render_mode` in the
 /// uniform are placeholders — the fragment reads them per run from the run
 /// table under `FRAGMENT_DATA_FROM_BATCHED_PATHS`.
-fn batch_material(input: BatchMaterialInput<'_>) -> PathMaterial {
+fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
     let BatchMaterialInput {
         mut base,
         key,
@@ -784,7 +784,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathMaterial {
 }
 
 /// Maps a batch's authored alpha mode to the one written on the GPU material.
-/// Invariant: [`BatchKey::alpha`] always keeps the user's authored mode — only
+/// Invariant: [`PathBatchKey::alpha`] always keeps the user's authored mode — only
 /// the material differs, and only where bevy's pipeline routing requires it.
 ///
 /// `Opaque` becomes `Mask(0.0)`: opaque casters take bevy's depth-only shadow
@@ -876,7 +876,7 @@ mod tests {
             .init_resource::<AntiAlias>()
             .init_asset::<Mesh>()
             .init_asset::<ShaderBuffer>()
-            .init_asset::<PathMaterial>()
+            .init_asset::<PathExtendedMaterial>()
             .add_observer(alpha::seed_panel_text_child_alpha)
             .add_observer(glyph_cascade::seed_panel_text_child_glyph)
             .add_systems(
@@ -1137,7 +1137,7 @@ mod tests {
         let gpu = batch.gpu.as_ref().expect("batch should have GPU assets");
         let material = app
             .world()
-            .resource::<Assets<PathMaterial>>()
+            .resource::<Assets<PathExtendedMaterial>>()
             .get(&gpu.material)
             .expect("batch material asset should exist");
         (
@@ -1155,7 +1155,7 @@ mod tests {
 
     fn batch_material_depth_biases(app: &App) -> Vec<(i8, u32)> {
         let store = app.world().resource::<GlyphCache>().batch_store();
-        let materials = app.world().resource::<Assets<PathMaterial>>();
+        let materials = app.world().resource::<Assets<PathExtendedMaterial>>();
         let mut depth_biases: Vec<(i8, u32)> = store
             .batches()
             .map(|(key, batch)| {
@@ -1446,7 +1446,7 @@ mod tests {
         );
     }
 
-    /// The `BatchGpu` doc contract: every commit payload is padded to the
+    /// The `PathBatchResources` doc contract: every commit payload is padded to the
     /// buffer's capacity, so its byte length never changes between growths —
     /// a constant-length `set_data` writes the existing wgpu buffer in place
     /// and live material bind groups keep reading it. A refactor that drops

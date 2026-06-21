@@ -3,7 +3,7 @@
 //! Bypasses panel-line resolution and layout entirely: an authored
 //! [`AnalyticLine`] component is converted directly into one path-style
 //! analytic batch (packed rectangle outline -> atlas buffers -> one instance +
-//! one run -> the shared `PathMaterial`). This is the minimum path that proves
+//! one run -> the shared `PathExtendedMaterial`). This is the minimum path that proves
 //! the path renderer draws a crisp stroked line, and a reference to compare
 //! the panel-line ruler route against.
 
@@ -19,8 +19,8 @@ use super::AntiAlias;
 use super::BatchPathMaterialInput;
 use super::Bounds;
 use super::PathContour;
+use super::PathExtendedMaterial;
 use super::PathInstanceRecord;
-use super::PathMaterial;
 use super::PathOutline;
 use super::PathRecord;
 use super::QuadraticSegment;
@@ -102,7 +102,7 @@ fn build_analytic_lines(
         Or<(Changed<AnalyticLine>, Changed<Transform>)>,
     >,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<PathMaterial>>,
+    mut materials: ResMut<Assets<PathExtendedMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut commands: Commands,
 ) {
@@ -117,7 +117,7 @@ fn build_analytic_lines(
         ) else {
             commands
                 .entity(entity)
-                .remove::<(Mesh3d, MeshMaterial3d<PathMaterial>)>();
+                .remove::<(Mesh3d, MeshMaterial3d<PathExtendedMaterial>)>();
             continue;
         };
         commands.entity(entity).insert((
@@ -132,14 +132,14 @@ fn build_analytic_lines(
 
 struct BuiltLine {
     mesh:     Handle<Mesh>,
-    material: Handle<PathMaterial>,
+    material: Handle<PathExtendedMaterial>,
 }
 
 fn build_line(
     line: &AnalyticLine,
     place: Mat4,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PathMaterial>,
+    materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
 ) -> Option<BuiltLine> {
     let delta = line.end - line.start;
@@ -273,7 +273,7 @@ struct LineMaterialBuffers {
     run_records:  Handle<ShaderBuffer>,
 }
 
-fn line_material(buffers: LineMaterialBuffers) -> PathMaterial {
+fn line_material(buffers: LineMaterialBuffers) -> PathExtendedMaterial {
     let base = StandardMaterial {
         base_color: Color::WHITE,
         unlit: true,

@@ -46,7 +46,7 @@ impl From<GlyphRenderMode> for RenderMode {
 }
 
 /// Material used by the path renderer.
-pub(crate) type PathMaterial = ExtendedMaterial<StandardMaterial, PathExtension>;
+pub(crate) type PathExtendedMaterial = ExtendedMaterial<StandardMaterial, PathExtension>;
 
 /// Uniforms consumed by the path shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -104,7 +104,7 @@ pub struct PathExtension {
 }
 
 #[cfg(test)]
-pub(crate) const fn path_material_oit_depth_offset(material: &PathMaterial) -> f32 {
+pub(crate) const fn path_material_oit_depth_offset(material: &PathExtendedMaterial) -> f32 {
     material.extension.uniforms.oit_depth_offset
 }
 
@@ -210,9 +210,9 @@ pub(crate) struct BatchPathMaterialInput {
     pub run_records:      Handle<ShaderBuffer>,
 }
 
-/// Creates a vertex-pulling `PathMaterial` for one batch.
+/// Creates a vertex-pulling `PathExtendedMaterial` for one batch.
 #[must_use]
-pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathMaterial {
+pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathExtendedMaterial {
     let BatchPathMaterialInput {
         base,
         fill_color,
@@ -249,7 +249,7 @@ pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathMaterial
 /// Repoints a batch material at replacement record buffers after capacity
 /// growth.
 pub(crate) fn set_batch_path_material_buffers(
-    material: &mut PathMaterial,
+    material: &mut PathExtendedMaterial,
     instances: Handle<ShaderBuffer>,
     run_records: Handle<ShaderBuffer>,
 ) {
@@ -261,7 +261,7 @@ pub(crate) fn set_batch_path_material_buffers(
 /// atlas grows. The batch record buffers (bindings 104/105) are per-batch,
 /// not atlas-owned, so they are untouched here.
 pub(crate) fn set_path_material_atlas(
-    material: &mut PathMaterial,
+    material: &mut PathExtendedMaterial,
     curves: Handle<ShaderBuffer>,
     bands: Handle<ShaderBuffer>,
     path_records: Handle<ShaderBuffer>,
@@ -273,12 +273,18 @@ pub(crate) fn set_path_material_atlas(
 
 /// Updates the hairline minimum stroke width (device pixels) on a path
 /// material.
-pub(crate) const fn set_path_material_hairline(material: &mut PathMaterial, device_px: f32) {
+pub(crate) const fn set_path_material_hairline(
+    material: &mut PathExtendedMaterial,
+    device_px: f32,
+) {
     material.extension.uniforms.hairline_min_px = device_px;
 }
 
 /// Updates the shader anti-aliasing switches on a path material.
-pub(crate) fn set_path_material_anti_alias(material: &mut PathMaterial, anti_alias: AntiAlias) {
+pub(crate) fn set_path_material_anti_alias(
+    material: &mut PathExtendedMaterial,
+    anti_alias: AntiAlias,
+) {
     material.extension.uniforms.supersample = u32::from(anti_alias.supersamples());
     material.extension.uniforms.aa_band = u32::from(anti_alias.anisotropic());
 }

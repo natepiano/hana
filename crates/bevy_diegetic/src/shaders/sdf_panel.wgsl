@@ -63,10 +63,9 @@ struct SdfPanelUniform {
     border_widths: vec4<f32>,
     /// Border color in linear RGBA.
     border_color:  vec4<f32>,
-    /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond, `4` = line segment, `5..=7` = oriented cap forms.
+    /// SDF selector; panels always use `0` (rounded rect).
     sdf_kind:      u32,
-    /// Extra parameters for custom SDF forms.
+    /// Extra SDF-form parameters; zero for panels.
     sdf_params:    vec4<f32>,
     /// Alpha of the fill/base color. Lets the prepass distinguish
     /// filled panels from border-only panels.

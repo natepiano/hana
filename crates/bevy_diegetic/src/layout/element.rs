@@ -1224,7 +1224,8 @@ mod tests {
             line.map(|line| {
                 line.line_style()
                     .start_cap_value()
-                    .shaft_inset(99.0, |dimension| dimension.value)
+                    .resolved_primitives(99.0, Color::WHITE, |dimension| dimension.value)
+                    .shaft_inset
             }),
             expected_arrow_inset,
         );
@@ -1232,7 +1233,8 @@ mod tests {
             line.map(|line| {
                 line.line_style()
                     .end_cap_value()
-                    .shaft_inset(99.0, |dimension| dimension.value)
+                    .resolved_primitives(99.0, Color::WHITE, |dimension| dimension.value)
+                    .shaft_inset
             }),
             4.5,
         );

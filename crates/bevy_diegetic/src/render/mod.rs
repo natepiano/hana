@@ -22,8 +22,6 @@ pub use analytic_line_probe::AnalyticLineProbe;
 pub use analytic_line_probe::AnalyticLineProbePlugin;
 use analytic_paths::AnalyticPathPlugin;
 pub(crate) use analytic_paths::BandRecord;
-pub(crate) use analytic_paths::BatchGpu;
-pub(crate) use analytic_paths::BatchKey;
 pub(crate) use analytic_paths::BatchPathMaterialInput;
 pub(crate) use analytic_paths::Bounds;
 pub(crate) use analytic_paths::CurveRecord;
@@ -31,10 +29,12 @@ pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
 pub(crate) use analytic_paths::PackedPath;
 pub(crate) use analytic_paths::PathAtlas;
 pub(crate) use analytic_paths::PathAtlasHandles;
+pub(crate) use analytic_paths::PathBatchKey;
+pub(crate) use analytic_paths::PathBatchResources;
 pub(crate) use analytic_paths::PathBatchStore;
 pub(crate) use analytic_paths::PathContour;
+pub(crate) use analytic_paths::PathExtendedMaterial;
 pub(crate) use analytic_paths::PathInstanceRecord;
-pub(crate) use analytic_paths::PathMaterial;
 pub(crate) use analytic_paths::PathOutline;
 pub(crate) use analytic_paths::PathRecord;
 pub(crate) use analytic_paths::QuadraticSegment;
@@ -56,9 +56,6 @@ use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-pub(crate) use constants::LAYER_DEPTH_BIAS;
-pub(crate) use constants::OIT_DEPTH_STEP;
-pub(crate) use constants::SDF_AA_PADDING;
 pub(crate) use draw_order::DrawOrderProjection;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
@@ -74,12 +71,6 @@ pub use panel_text::PanelTextRuns;
 pub use panel_text::TextEdit;
 use panel_text::TextRenderPlugin;
 pub use panel_text::TextRunOf;
-pub(crate) use sdf_material::SdfPanelMaterial;
-pub(crate) use sdf_material::SdfPanelMaterialInput;
-pub(crate) use sdf_material::SdfPrimitiveKind;
-pub(crate) use sdf_material::SdfPrimitiveMaterialInput;
-pub(crate) use sdf_material::sdf_panel_material;
-pub(crate) use sdf_material::sdf_primitive_material;
 pub use transparency::StableTransparency;
 #[cfg(feature = "typography_overlay")]
 pub use world_text::ComputedWorldText;
@@ -195,7 +186,7 @@ impl AntiAlias {
 fn sync_anti_alias(
     setting: Res<AntiAlias>,
     mut cascade_default: ResMut<CascadeDefault<AntiAlias>>,
-    mut materials: ResMut<Assets<PathMaterial>>,
+    mut materials: ResMut<Assets<PathExtendedMaterial>>,
 ) {
     if !setting.is_changed() {
         return;
@@ -315,8 +306,8 @@ fn sync_hairline_fade(
 fn sync_hairline_width(
     hairline_width: Res<HairlineWidth>,
     windows: Query<&Window, With<PrimaryWindow>>,
-    mut materials: ResMut<Assets<PathMaterial>>,
-    mut material_events: MessageReader<AssetEvent<PathMaterial>>,
+    mut materials: ResMut<Assets<PathExtendedMaterial>>,
+    mut material_events: MessageReader<AssetEvent<PathExtendedMaterial>>,
     mut applied_device_px: Local<Option<f32>>,
 ) {
     let scale_factor = windows.iter().next().map_or(1.0, Window::scale_factor);
@@ -334,7 +325,7 @@ fn sync_hairline_width(
         }
         return;
     }
-    let added: Vec<AssetId<PathMaterial>> = material_events
+    let added: Vec<AssetId<PathExtendedMaterial>> = material_events
         .read()
         .filter_map(|event| match event {
             AssetEvent::Added { id } => Some(*id),

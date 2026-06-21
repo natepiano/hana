@@ -26,7 +26,7 @@ use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
-use super::material::PathMaterial;
+use super::material::PathExtendedMaterial;
 use super::packing::PathInstanceRecord;
 use super::packing::RunRecord;
 use crate::layout::GlyphShadowMode;
@@ -43,7 +43,7 @@ use crate::text::RunStorageKey;
 /// `fill_color`, `render_mode`, and the depth nudge are stored per run in
 /// [`RunRecord`]s, so they do not split.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct BatchKey {
+pub(crate) struct PathBatchKey {
     /// Interned authored base material (`DiegeticPanel::text_material` or the
     /// library default).
     pub base_material: BaseMaterialId,
@@ -75,7 +75,7 @@ pub(crate) struct BatchKey {
 /// buffer assets and rewrites the material's handles, which re-prepares
 /// reliably (a missing render asset retries next frame).
 #[derive(Debug)]
-pub(crate) struct BatchGpu {
+pub(crate) struct PathBatchResources {
     /// `PathInstanceRecord` storage buffer (binding 104), `capacity` records.
     pub instances:    Handle<ShaderBuffer>,
     /// `RunRecord` storage buffer (binding 105), `run_capacity` records.
@@ -83,7 +83,7 @@ pub(crate) struct BatchGpu {
     /// Inert capacity-sized mesh; re-created and swapped on capacity growth.
     pub mesh:         Handle<Mesh>,
     /// The batch's material; its buffer handles are rewritten on growth.
-    pub material:     Handle<PathMaterial>,
+    pub material:     Handle<PathExtendedMaterial>,
     /// Path-instance capacity of `mesh` and `instances`.
     pub capacity:     u32,
     /// Run-record capacity of `run_table`.
@@ -103,7 +103,7 @@ struct BatchRun {
     range:        Range<u32>,
 }
 
-/// One render entity + one material + one mesh per [`BatchKey`]: the CPU
+/// One render entity + one material + one mesh per [`PathBatchKey`]: the CPU
 /// record vectors the GPU tables upload from, the member runs they derive
 /// from, and the split dirty flags the commit system reads.
 #[derive(Debug, Default)]
@@ -111,7 +111,7 @@ pub struct PathBatch {
     /// The batch render entity; `None` until the routing system spawns it.
     pub entity:          Option<Entity>,
     /// GPU handles; `None` until the routing system creates them.
-    pub gpu:             Option<BatchGpu>,
+    pub gpu:             Option<PathBatchResources>,
     /// Path records changed — the instance buffer needs an upload.
     pub instances_dirty: bool,
     /// Run records changed — the run table needs an upload.
@@ -268,11 +268,11 @@ impl PathBatch {
 }
 
 /// Routes every panel-text run to its batch: one [`PathBatch`] per
-/// [`BatchKey`], a run→batch index, and the base-material interner.
+/// [`PathBatchKey`], a run→batch index, and the base-material interner.
 #[derive(Debug, Default)]
 pub(crate) struct PathBatchStore {
-    batches:   HashMap<BatchKey, PathBatch>,
-    run_index: HashMap<RunStorageKey, BatchKey>,
+    batches:   HashMap<PathBatchKey, PathBatch>,
+    run_index: HashMap<RunStorageKey, PathBatchKey>,
     interner:  VisualMaterialInterner,
 }
 
@@ -297,7 +297,7 @@ impl PathBatchStore {
     /// with [`Self::remove_run`].
     pub fn upsert_run(
         &mut self,
-        key: BatchKey,
+        key: PathBatchKey,
         run: RunStorageKey,
         path_records: Vec<PathInstanceRecord>,
         record: RunRecord,
@@ -345,26 +345,28 @@ impl PathBatchStore {
     }
 
     /// All batches.
-    pub fn batches(&self) -> impl Iterator<Item = (&BatchKey, &PathBatch)> { self.batches.iter() }
+    pub fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &PathBatch)> {
+        self.batches.iter()
+    }
 
     /// All batches, mutable.
-    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&BatchKey, &mut PathBatch)> {
+    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&PathBatchKey, &mut PathBatch)> {
         self.batches.iter_mut()
     }
 
     /// One batch by key.
     #[must_use]
-    pub fn get(&self, key: &BatchKey) -> Option<&PathBatch> { self.batches.get(key) }
+    pub fn get(&self, key: &PathBatchKey) -> Option<&PathBatch> { self.batches.get(key) }
 
     /// One batch by key, mutable.
-    pub fn get_mut(&mut self, key: &BatchKey) -> Option<&mut PathBatch> {
+    pub fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut PathBatch> {
         self.batches.get_mut(key)
     }
 
     /// Drops batches whose last run left, returning their entities for the
     /// routing system to despawn (the batch analogue of the empty-run path).
     pub fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<BatchKey> = self
+        let empty: Vec<PathBatchKey> = self
             .batches
             .iter()
             .filter(|(_, batch)| batch.is_empty())
@@ -416,9 +418,9 @@ mod tests {
         }
     }
 
-    fn key(store: &mut PathBatchStore, alpha: AlphaMode) -> BatchKey {
+    fn key(store: &mut PathBatchStore, alpha: AlphaMode) -> PathBatchKey {
         let id = store.intern_base_material(&StandardMaterial::default());
-        BatchKey {
+        PathBatchKey {
             base_material: id,
             alpha:         alpha.into(),
             lighting:      Lighting::Lit,

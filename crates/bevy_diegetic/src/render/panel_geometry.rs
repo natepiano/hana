@@ -23,8 +23,8 @@ use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderProjection;
 use super::sdf_material;
-use super::sdf_material::SdfPanelMaterial;
-use super::sdf_material::SdfPanelMaterialInput;
+use super::sdf_material::LegacySdfExtendedMaterial;
+use super::sdf_material::LegacySdfExtendedMaterialInput;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -105,7 +105,7 @@ impl Plugin for PanelGeometryPlugin {
             "sdf_stroke.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(MaterialPlugin::<SdfPanelMaterial>::default());
+        app.add_plugins(MaterialPlugin::<LegacySdfExtendedMaterial>::default());
         app.add_systems(
             PostUpdate,
             build_panel_geometry.in_set(PanelChildSystems::Build),
@@ -167,12 +167,12 @@ fn build_panel_geometry(
         Entity,
         &ChildOf,
         &PanelSdfSurface,
-        &MeshMaterial3d<SdfPanelMaterial>,
+        &MeshMaterial3d<LegacySdfExtendedMaterial>,
     )>,
     old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
-    mut sdf_materials: ResMut<Assets<SdfPanelMaterial>>,
+    mut sdf_materials: ResMut<Assets<LegacySdfExtendedMaterial>>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, computed, panel_layers) in &changed_panels {
@@ -237,10 +237,10 @@ fn reconcile_sdf_quads(
         Entity,
         &ChildOf,
         &PanelSdfSurface,
-        &MeshMaterial3d<SdfPanelMaterial>,
+        &MeshMaterial3d<LegacySdfExtendedMaterial>,
     )>,
     meshes: &mut Assets<Mesh>,
-    sdf_materials: &mut Assets<SdfPanelMaterial>,
+    sdf_materials: &mut Assets<LegacySdfExtendedMaterial>,
     commands: &mut Commands,
 ) {
     let occupancy = draw_order.level_occupancy();
@@ -272,16 +272,17 @@ fn reconcile_sdf_quads(
     let gathered = gather_surfaces(context.panel, render_commands, draw_order);
     let desired = desired_surfaces(gathered);
 
-    let mut existing: HashMap<usize, (Entity, PanelSdfSurface, Handle<SdfPanelMaterial>)> = old_sdf
-        .iter()
-        .filter(|(_, child_of, ..)| child_of.parent() == context.panel_entity)
-        .map(|(entity, _, signature, material)| {
-            (
-                signature.command_index,
-                (entity, *signature, material.0.clone()),
-            )
-        })
-        .collect();
+    let mut existing: HashMap<usize, (Entity, PanelSdfSurface, Handle<LegacySdfExtendedMaterial>)> =
+        old_sdf
+            .iter()
+            .filter(|(_, child_of, ..)| child_of.parent() == context.panel_entity)
+            .map(|(entity, _, signature, material)| {
+                (
+                    signature.command_index,
+                    (entity, *signature, material.0.clone()),
+                )
+            })
+            .collect();
 
     for surface in &desired {
         let quad = build_sdf_quad(
@@ -486,7 +487,7 @@ fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
 /// center, and the [`PanelSdfSurface`] signature describing what it was built
 /// from.
 struct BuiltSdfQuad {
-    material:  SdfPanelMaterial,
+    material:  LegacySdfExtendedMaterial,
     mesh_size: Vec2,
     center:    Vec2,
     signature: PanelSdfSurface,
@@ -580,7 +581,7 @@ fn build_sdf_quad(
 
     let material = sdf_material::sdf_panel_material(
         base,
-        SdfPanelMaterialInput {
+        LegacySdfExtendedMaterialInput {
             half_size: Vec2::new(half_width, half_height),
             mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
             corner_radii: world_radii,
@@ -632,7 +633,7 @@ fn spawn_sdf_quad(
     quad: BuiltSdfQuad,
     context: &PanelReconcileContext<'_>,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<SdfPanelMaterial>,
+    materials: &mut Assets<LegacySdfExtendedMaterial>,
     commands: &mut Commands,
 ) {
     let mesh = meshes.add(Rectangle::new(quad.mesh_size.x, quad.mesh_size.y));
@@ -790,7 +791,7 @@ mod tests {
         app.add_plugins(AssetPlugin::default());
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
-        app.init_asset::<SdfPanelMaterial>();
+        app.init_asset::<LegacySdfExtendedMaterial>();
         app.insert_resource(zero_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
         app.add_systems(PostUpdate, build_panel_geometry);
@@ -837,10 +838,13 @@ mod tests {
     }
 
     fn single_sdf_quad(app: &mut App) -> (Entity, PanelSdfSurface, f32) {
-        let entries: Vec<(Entity, PanelSdfSurface, Handle<SdfPanelMaterial>)> = {
+        let entries: Vec<(Entity, PanelSdfSurface, Handle<LegacySdfExtendedMaterial>)> = {
             let world = app.world_mut();
-            let mut query =
-                world.query::<(Entity, &PanelSdfSurface, &MeshMaterial3d<SdfPanelMaterial>)>();
+            let mut query = world.query::<(
+                Entity,
+                &PanelSdfSurface,
+                &MeshMaterial3d<LegacySdfExtendedMaterial>,
+            )>();
             query
                 .iter(world)
                 .map(|(entity, surface, material)| (entity, *surface, material.0.clone()))
@@ -850,7 +854,7 @@ mod tests {
         let (entity, surface, material) = entries.into_iter().next().expect("one SDF quad exists");
         let oit_depth_offset = app
             .world()
-            .resource::<Assets<SdfPanelMaterial>>()
+            .resource::<Assets<LegacySdfExtendedMaterial>>()
             .get(&material)
             .expect("quad material exists")
             .extension
@@ -859,10 +863,10 @@ mod tests {
         (entity, surface, oit_depth_offset)
     }
 
-    fn single_sdf_material(app: &mut App) -> SdfPanelMaterial {
-        let materials: Vec<Handle<SdfPanelMaterial>> = {
+    fn single_sdf_material(app: &mut App) -> LegacySdfExtendedMaterial {
+        let materials: Vec<Handle<LegacySdfExtendedMaterial>> = {
             let world = app.world_mut();
-            let mut query = world.query::<&MeshMaterial3d<SdfPanelMaterial>>();
+            let mut query = world.query::<&MeshMaterial3d<LegacySdfExtendedMaterial>>();
             query
                 .iter(world)
                 .map(|material| material.0.clone())
@@ -870,7 +874,7 @@ mod tests {
         };
         assert_eq!(materials.len(), 1, "expected exactly one SDF material");
         app.world()
-            .resource::<Assets<SdfPanelMaterial>>()
+            .resource::<Assets<LegacySdfExtendedMaterial>>()
             .get(&materials[0])
             .expect("quad material exists")
             .clone()
@@ -970,14 +974,15 @@ mod tests {
         app.update();
         app.update();
 
-        let mut quads: Vec<(usize, SdfPanelMaterial)> = {
+        let mut quads: Vec<(usize, LegacySdfExtendedMaterial)> = {
             let world = app.world_mut();
-            let mut query = world.query::<(&PanelSdfSurface, &MeshMaterial3d<SdfPanelMaterial>)>();
-            let pairs: Vec<(usize, Handle<SdfPanelMaterial>)> = query
+            let mut query =
+                world.query::<(&PanelSdfSurface, &MeshMaterial3d<LegacySdfExtendedMaterial>)>();
+            let pairs: Vec<(usize, Handle<LegacySdfExtendedMaterial>)> = query
                 .iter(world)
                 .map(|(surface, material)| (surface.command_index, material.0.clone()))
                 .collect();
-            let materials = world.resource::<Assets<SdfPanelMaterial>>();
+            let materials = world.resource::<Assets<LegacySdfExtendedMaterial>>();
             pairs
                 .into_iter()
                 .map(|(command_index, handle)| {

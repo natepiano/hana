@@ -40,12 +40,12 @@ pub(crate) use slug::glyph_quad_extents;
 
 use self::slug::SlugPlugin;
 #[cfg(test)]
-use crate::render::PathMaterial;
+use crate::render::PathExtendedMaterial;
 
 pub(crate) struct TextPlugin;
 
 #[cfg(test)]
-pub(super) const fn text_material_oit_depth_offset(material: &PathMaterial) -> f32 {
+pub(super) const fn text_material_oit_depth_offset(material: &PathExtendedMaterial) -> f32 {
     slug::text_material_oit_depth_offset(material)
 }
 

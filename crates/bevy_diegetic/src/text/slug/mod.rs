@@ -19,12 +19,12 @@ pub(crate) use runtime::PreparedTextRun;
 pub(crate) use runtime::RunStorageKey;
 
 #[cfg(test)]
-use crate::render::PathMaterial;
+use crate::render::PathExtendedMaterial;
 
 pub(super) struct SlugPlugin;
 
 #[cfg(test)]
-pub(super) const fn text_material_oit_depth_offset(material: &PathMaterial) -> f32 {
+pub(super) const fn text_material_oit_depth_offset(material: &PathExtendedMaterial) -> f32 {
     render::text_material_oit_depth_offset(material)
 }
 

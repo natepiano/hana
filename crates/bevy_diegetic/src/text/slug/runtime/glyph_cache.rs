@@ -21,7 +21,7 @@ use crate::layout::ShapedGlyph;
 use crate::render;
 use crate::render::PathAtlasHandles;
 use crate::render::PathBatchStore;
-use crate::render::PathMaterial;
+use crate::render::PathExtendedMaterial;
 use crate::text::Font;
 use crate::text::slug::glyph::OutlineError;
 
@@ -152,7 +152,7 @@ impl GlyphCache {
     pub fn commit_glyph_atlas(
         &mut self,
         storage_buffers: &mut Assets<ShaderBuffer>,
-        materials: &mut Assets<PathMaterial>,
+        materials: &mut Assets<PathExtendedMaterial>,
     ) -> Option<PathAtlasHandles> {
         if self.outline_cache.atlas_glyph_records().is_empty() {
             return None;
@@ -177,7 +177,7 @@ impl GlyphCache {
         };
         if had_atlas {
             // Repoint only text-owned batch materials. Other analytic-path
-            // producers (panel lines, probes) share the PathMaterial asset
+            // producers (panel lines, probes) share the PathExtendedMaterial asset
             // type but own separate atlases.
             for (_, batch) in self.batch_store.batches() {
                 let Some(gpu) = &batch.gpu else {
@@ -246,7 +246,7 @@ mod tests {
         let mut backend = GlyphCache::default();
         prepare(&mut backend, "Typography");
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<PathMaterial>::default();
+        let mut materials = Assets::<PathExtendedMaterial>::default();
 
         let first = backend
             .commit_glyph_atlas(&mut storage_buffers, &mut materials)
@@ -275,7 +275,7 @@ mod tests {
         let mut backend = GlyphCache::default();
         prepare(&mut backend, "Typo");
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<PathMaterial>::default();
+        let mut materials = Assets::<PathExtendedMaterial>::default();
 
         let first = backend
             .commit_glyph_atlas(&mut storage_buffers, &mut materials)
@@ -297,7 +297,7 @@ mod tests {
     fn commit_glyph_atlas_with_no_packed_glyphs_creates_no_buffer() {
         let mut backend = GlyphCache::default();
         let mut storage_buffers = Assets::<ShaderBuffer>::default();
-        let mut materials = Assets::<PathMaterial>::default();
+        let mut materials = Assets::<PathExtendedMaterial>::default();
 
         assert!(
             backend

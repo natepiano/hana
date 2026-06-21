@@ -72,8 +72,6 @@ use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
-pub use callouts::CalloutLine;
-use callouts::CalloutPlugin;
 pub use cascade::CascadeDefault;
 pub use cascade::CascadeDefaults;
 pub use cascade::CascadeEntityCommandsExt;
@@ -311,7 +309,7 @@ use text::TextPlugin;
 
 /// Bevy plugin that adds diegetic UI panel support.
 ///
-/// Composes layout, rendering, text, callouts, and screen-space overlay
+/// Composes layout, rendering, text, and screen-space overlay
 /// support into a single plugin. Insert [`CascadeDefaults`] or
 /// [`CascadeDefault<A>`](CascadeDefault) resources before adding this plugin;
 /// they take effect through the child plugins at build time.
@@ -334,7 +332,6 @@ impl Plugin for DiegeticUiPlugin {
             ImePlugin,
             ScreenSpacePlugin,
             RenderPlugin,
-            CalloutPlugin,
             DiegeticTextPlugin,
             #[cfg(feature = "typography_overlay")]
             TypographyOverlayPlugin,

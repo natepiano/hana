@@ -24,7 +24,7 @@ use crate::constants::EMBEDDED_SDF_PANEL_SHADER_PATH;
 
 /// The full SDF panel material type: `StandardMaterial` extended with
 /// SDF rounded rectangle rendering.
-pub(crate) type SdfPanelMaterial = ExtendedMaterial<StandardMaterial, SdfPanelExtension>;
+pub(crate) type LegacySdfExtendedMaterial = ExtendedMaterial<StandardMaterial, LegacySdfExtension>;
 
 /// Uniform data for the SDF panel extension shader.
 #[derive(Clone, Debug, ShaderType)]
@@ -41,10 +41,9 @@ pub(crate) struct SdfPanelUniform {
     pub border_widths:    Vec4,
     /// Border color in linear RGBA.
     pub border_color:     Vec4,
-    /// SDF selector. `0` = rounded rect, `1` = triangle, `2` = circle,
-    /// `3` = diamond, `4` = line segment, `5..=7` = oriented cap forms.
+    /// SDF selector; panels always use `0` (rounded rect).
     pub sdf_kind:         u32,
-    /// Extra parameters for custom SDF forms.
+    /// Extra SDF-form parameters; zero for panels.
     pub sdf_params:       Vec4,
     /// Alpha of the fill/base color. Used by the shadow prepass to
     /// distinguish filled surfaces from border-only rings.
@@ -67,13 +66,13 @@ pub(crate) struct SdfPanelUniform {
 /// The extension shader computes per-fragment alpha from the signed
 /// distance field and composites fill + border colors before lighting.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
-pub(crate) struct SdfPanelExtension {
+pub(crate) struct LegacySdfExtension {
     /// SDF shader uniforms.
     #[uniform(100)]
     pub uniforms: SdfPanelUniform,
 }
 
-impl MaterialExtension for SdfPanelExtension {
+impl MaterialExtension for LegacySdfExtension {
     fn fragment_shader() -> ShaderRef { EMBEDDED_SDF_PANEL_SHADER_PATH.into() }
 
     /// Use the SDF shader for the depth/shadow prepass so rounded corners clip
@@ -81,29 +80,8 @@ impl MaterialExtension for SdfPanelExtension {
     fn prepass_fragment_shader() -> ShaderRef { EMBEDDED_SDF_PANEL_SHADER_PATH.into() }
 }
 
-/// Rust-side selector for the SDF form used by the panel shader.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum SdfPrimitiveKind {
-    #[default]
-    RoundedRect,
-    Triangle,
-    Circle,
-    Diamond,
-}
-
-impl From<SdfPrimitiveKind> for u32 {
-    fn from(sdf_primitive_kind: SdfPrimitiveKind) -> Self {
-        match sdf_primitive_kind {
-            SdfPrimitiveKind::RoundedRect => 0,
-            SdfPrimitiveKind::Triangle => 1,
-            SdfPrimitiveKind::Circle => 2,
-            SdfPrimitiveKind::Diamond => 3,
-        }
-    }
-}
-
 /// Inputs for a rounded-rectangle panel material.
-pub(crate) struct SdfPanelMaterialInput {
+pub(crate) struct LegacySdfExtendedMaterialInput {
     pub half_size:        Vec2,
     pub mesh_half_size:   Vec2,
     pub corner_radii:     [f32; 4],
@@ -113,51 +91,16 @@ pub(crate) struct SdfPanelMaterialInput {
     pub oit_depth_offset: f32,
 }
 
-/// Inputs for a non-rectangular SDF material.
-pub(crate) struct SdfPrimitiveMaterialInput {
-    pub half_size:          Vec2,
-    pub mesh_half_size:     Vec2,
-    pub corner_radii:       [f32; 4],
-    pub border_widths:      [f32; 4],
-    pub border_color:       Option<Color>,
-    pub sdf_primitive_kind: SdfPrimitiveKind,
-    pub params:             Vec4,
-    pub clip_rect:          Vec4,
-    pub oit_depth_offset:   f32,
-}
-
-/// Creates a new [`SdfPanelMaterial`] from a resolved base `StandardMaterial`.
+/// Creates a new [`LegacySdfExtendedMaterial`] from a resolved base `StandardMaterial`.
 ///
 /// The base material's PBR properties (roughness, metallic, reflectance,
 /// `base_color`) are preserved. `alpha_mode`, `double_sided`, and `cull_mode`
 /// are overridden for panel rendering.
 #[must_use]
 pub(crate) fn sdf_panel_material(
-    base: StandardMaterial,
-    input: SdfPanelMaterialInput,
-) -> SdfPanelMaterial {
-    sdf_primitive_material(
-        base,
-        SdfPrimitiveMaterialInput {
-            half_size:          input.half_size,
-            mesh_half_size:     input.mesh_half_size,
-            corner_radii:       input.corner_radii,
-            border_widths:      input.border_widths,
-            border_color:       input.border_color,
-            sdf_primitive_kind: SdfPrimitiveKind::RoundedRect,
-            params:             Vec4::ZERO,
-            clip_rect:          input.clip_rect,
-            oit_depth_offset:   input.oit_depth_offset,
-        },
-    )
-}
-
-/// Creates a new [`SdfPanelMaterial`] with an explicit SDF selector.
-#[must_use]
-pub(crate) fn sdf_primitive_material(
     mut base: StandardMaterial,
-    input: SdfPrimitiveMaterialInput,
-) -> SdfPanelMaterial {
+    input: LegacySdfExtendedMaterialInput,
+) -> LegacySdfExtendedMaterial {
     base.double_sided = true;
     base.cull_mode = None;
     // SDF provides its own per-fragment alpha — always use Blend.
@@ -176,15 +119,15 @@ pub(crate) fn sdf_primitive_material(
 
     ExtendedMaterial {
         base,
-        extension: SdfPanelExtension {
+        extension: LegacySdfExtension {
             uniforms: SdfPanelUniform {
                 half_size: input.half_size,
                 mesh_half_size: input.mesh_half_size,
                 corner_radii: Vec4::from_array(input.corner_radii),
                 border_widths: Vec4::from_array(input.border_widths),
                 border_color: border_linear,
-                sdf_kind: input.sdf_primitive_kind.into(),
-                sdf_params: input.params,
+                sdf_kind: 0,
+                sdf_params: Vec4::ZERO,
                 fill_alpha,
                 clip_rect: input.clip_rect,
                 oit_depth_offset: input.oit_depth_offset,

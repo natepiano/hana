@@ -13,8 +13,8 @@ mod material;
 mod packing;
 
 pub(crate) use atlas::PathAtlas;
-pub(crate) use batching::BatchGpu;
-pub(crate) use batching::BatchKey;
+pub(crate) use batching::PathBatchKey;
+pub(crate) use batching::PathBatchResources;
 pub(crate) use batching::PathBatchStore;
 use bevy::asset::embedded_asset;
 use bevy::asset::load_internal_asset;
@@ -26,7 +26,7 @@ pub(crate) use geometry::PathContour;
 pub(crate) use geometry::PathOutline;
 pub(crate) use geometry::QuadraticSegment;
 pub(crate) use material::BatchPathMaterialInput;
-pub(crate) use material::PathMaterial;
+pub(crate) use material::PathExtendedMaterial;
 pub(crate) use material::RenderMode;
 pub(crate) use material::batch_path_material;
 #[cfg(test)]
@@ -69,6 +69,6 @@ impl Plugin for AnalyticPathPlugin {
             "analytic_path_vertex_pull.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(MaterialPlugin::<PathMaterial>::default());
+        app.add_plugins(MaterialPlugin::<PathExtendedMaterial>::default());
     }
 }

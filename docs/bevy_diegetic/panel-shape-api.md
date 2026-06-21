@@ -629,7 +629,7 @@ Acceptance:
   between the panel-backed and direct routes and restricts parity geometry or
   tolerance accordingly.
 - Phase F's SDF deliverable is split into removable (quarantined panel-line
-  files) vs retained (`SdfPanelMaterial` for backgrounds and the non-coplanar
+  files) vs retained (`LegacySdfExtendedMaterial` for backgrounds and the non-coplanar
   callout fallback), plus the stale `sdf_material.rs` discriminant doc.
 - Phase F's rename audit now covers the Phase C mirror surfaces (`RunRecord`
   WGSL mirrors, `AA_FLAG_*` pair, coverage-probe tripwire) and re-counts the
@@ -911,7 +911,7 @@ This phase is retained only as the sub-decisions that feed that plan:
   panel (matches callouts.md's render-context grouping list).
 - Keep the direct `CalloutLine` SDF renderer for non-coplanar cases.
 - Parity is not pixel-exact: the panel-backed route applies cascade-resolved
-  `AntiAlias` + hairline dilation, the direct `SdfPanelMaterial` route does
+  `AntiAlias` + hairline dilation, the direct `LegacySdfExtendedMaterial` route does
   not, so a sub-floor stroke renders wider panel-backed. Restrict any parity
   test to at-floor-or-wider strokes. There is no in-tree planar `CalloutLine`
   consumer after Phase D, so the first real consumers arrive through
@@ -1057,7 +1057,7 @@ crates/bevy_diegetic/src/
       atlas.rs              # generic non-glyph path atlas
       batching.rs           # analytic path batch store (PathBatchStore) and shared GPU handle types
       geometry.rs           # Bounds / PathOutline / PathContour / QuadraticSegment
-      material.rs           # shared analytic-path PathMaterial route
+      material.rs           # shared analytic-path PathExtendedMaterial route
       packing.rs            # curve, band, path, instance, and run records
       analytic_path.wgsl
       analytic_path_vertex_pull.wgsl

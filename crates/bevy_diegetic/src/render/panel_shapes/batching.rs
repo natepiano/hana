@@ -2,7 +2,7 @@
 //!
 //! Every visible resolved line primitive becomes one analytic path instance and
 //! one run record. Compatible records from any number of panels share one batch
-//! render entity, one inert quad mesh, one `PathMaterial`, and one path atlas.
+//! render entity, one inert quad mesh, one `PathExtendedMaterial`, and one path atlas.
 
 use std::collections::HashMap;
 
@@ -48,8 +48,8 @@ use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
 use crate::render::HairlineFade;
 use crate::render::PathAtlas;
+use crate::render::PathExtendedMaterial;
 use crate::render::PathInstanceRecord;
-use crate::render::PathMaterial;
 use crate::render::PathOutline;
 use crate::render::RenderMode;
 use crate::render::RunRecord;
@@ -105,7 +105,7 @@ struct ShapeBatchGpu {
     instances:    Handle<ShaderBuffer>,
     run_table:    Handle<ShaderBuffer>,
     mesh:         Handle<Mesh>,
-    material:     Handle<PathMaterial>,
+    material:     Handle<PathExtendedMaterial>,
     capacity:     u32,
     run_capacity: u32,
 }
@@ -266,7 +266,7 @@ impl PanelShapeBatchStore {
     fn commit_path_atlas(
         &mut self,
         storage_buffers: &mut Assets<ShaderBuffer>,
-        materials: &mut Assets<PathMaterial>,
+        materials: &mut Assets<PathExtendedMaterial>,
     ) -> Option<PathAtlasHandles> {
         let (atlas, uploaded) = self.atlas.upload(storage_buffers)?;
         if uploaded {
@@ -448,7 +448,7 @@ pub(super) fn reconcile_panel_line_batches(
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     mut store: ResMut<PanelShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<PathMaterial>>,
+    mut materials: ResMut<Assets<PathExtendedMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut commands: Commands,
 ) {
@@ -701,7 +701,7 @@ fn reconcile_batch_entities(
     anti_alias: AntiAlias,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PathMaterial>,
+    materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -746,7 +746,7 @@ fn spawn_batch_entity(
     anti_alias: AntiAlias,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PathMaterial>,
+    materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -803,7 +803,7 @@ fn grow_batch_assets(
     key: &ShapeBatchKey,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<PathMaterial>,
+    materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
     commands: &mut Commands,
 ) {
@@ -987,7 +987,7 @@ struct ShapeBatchMaterialInput<'a> {
     anti_alias: AntiAlias,
 }
 
-fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathMaterial {
+fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMaterial {
     let ShapeBatchMaterialInput {
         mut base,
         key,
@@ -1066,7 +1066,7 @@ mod tests {
             .init_resource::<HairlineWidth>()
             .init_resource::<PanelShapeBatchStore>()
             .init_asset::<Mesh>()
-            .init_asset::<PathMaterial>()
+            .init_asset::<PathExtendedMaterial>()
             .init_asset::<ShaderBuffer>()
             .add_systems(
                 Update,
@@ -1117,7 +1117,7 @@ mod tests {
         };
         let Some(material) = app
             .world()
-            .resource::<Assets<PathMaterial>>()
+            .resource::<Assets<PathExtendedMaterial>>()
             .get(&gpu.material)
         else {
             panic!("line batch material should exist");
@@ -1200,7 +1200,7 @@ mod tests {
         levels.sort_unstable();
         assert_eq!(levels, vec![-1, 1]);
 
-        let materials = app.world().resource::<Assets<PathMaterial>>();
+        let materials = app.world().resource::<Assets<PathExtendedMaterial>>();
         let mut depth_biases: Vec<(i8, u32)> = store
             .batches()
             .map(|(key, batch)| {
