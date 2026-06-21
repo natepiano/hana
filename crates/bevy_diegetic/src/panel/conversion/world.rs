@@ -183,7 +183,7 @@ impl PanelWorldTarget {
             height,
             world_width,
             world_height,
-            restore_saved_world: false,
+            restore_saved_world: SavedWorldRestoreMode::Skip,
         };
         validate_world_conversion(&conversion)?;
         Ok(conversion)
@@ -212,8 +212,20 @@ pub struct PanelWorldConversion {
     /// Target world height in meters.
     pub world_height:        Option<f32>,
     /// Whether applying this conversion should restore saved world-authored panel data.
-    pub restore_saved_world: bool,
+    pub restore_saved_world: SavedWorldRestoreMode,
 }
+
+/// Controls whether a world conversion restores saved panel data.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum SavedWorldRestoreMode {
+    /// Use the current projection directly and skip saved-world restoration.
+    #[default]
+    Skip,
+    /// Restore saved world settings after projection.
+    Restore,
+}
+
+impl SavedWorldRestoreMode {}
 
 impl From<PanelWorldProjection> for PanelWorldConversion {
     fn from(projection: PanelWorldProjection) -> Self {

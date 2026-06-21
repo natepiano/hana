@@ -19,6 +19,7 @@ use bevy::shader::ShaderRef;
 use super::constants::ANALYTIC_PATH_SHADER_PATH;
 use super::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 use crate::layout::GlyphRenderMode;
+use crate::render::AntiAlias;
 
 /// Visible render mode for the path shader.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -195,10 +196,8 @@ pub(crate) struct BatchPathMaterialInput {
     pub render_mode:      RenderMode,
     /// Per-layer depth offset for coplanar OIT layer ordering.
     pub oit_depth_offset: f32,
-    /// Whether the material supersamples the path footprint.
-    pub supersample:      bool,
-    /// Whether the material uses the screen-space anisotropic edge band.
-    pub aa_band:          bool,
+    /// Anti-aliasing mode packed into the path shader uniforms.
+    pub anti_alias:       AntiAlias,
     /// Shared path record band-packed quadratic curve records.
     pub curves:           Handle<ShaderBuffer>,
     /// Shared path along-Y/along-X band records.
@@ -219,8 +218,7 @@ pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathMaterial
         fill_color,
         render_mode,
         oit_depth_offset,
-        supersample,
-        aa_band,
+        anti_alias,
         curves,
         bands,
         path_records,
@@ -234,8 +232,8 @@ pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathMaterial
                 fill_color,
                 render_mode: u32::from(render_mode),
                 oit_depth_offset,
-                supersample: u32::from(supersample),
-                aa_band: u32::from(aa_band),
+                supersample: u32::from(anti_alias.supersamples()),
+                aa_band: u32::from(anti_alias.anisotropic()),
                 hairline_min_px: HAIRLINE_DEFAULT_DEVICE_PX,
             },
             curves,
@@ -280,11 +278,7 @@ pub(crate) const fn set_path_material_hairline(material: &mut PathMaterial, devi
 }
 
 /// Updates the shader anti-aliasing switches on a path material.
-pub(crate) fn set_path_material_anti_alias(
-    material: &mut PathMaterial,
-    supersample: bool,
-    aa_band: bool,
-) {
-    material.extension.uniforms.supersample = u32::from(supersample);
-    material.extension.uniforms.aa_band = u32::from(aa_band);
+pub(crate) fn set_path_material_anti_alias(material: &mut PathMaterial, anti_alias: AntiAlias) {
+    material.extension.uniforms.supersample = u32::from(anti_alias.supersamples());
+    material.extension.uniforms.aa_band = u32::from(anti_alias.anisotropic());
 }

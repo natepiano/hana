@@ -26,6 +26,7 @@ pub use screen_handoff::PanelScreenHandoff;
 pub use world::PanelWorldConversion;
 pub use world::PanelWorldConversionParam;
 pub use world::PanelWorldTarget;
+pub use world::SavedWorldRestoreMode;
 pub(crate) use world::apply_world_conversion;
 pub(crate) use world::validate_world_conversion;
 

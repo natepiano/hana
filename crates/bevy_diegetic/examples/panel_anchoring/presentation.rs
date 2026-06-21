@@ -1,5 +1,5 @@
-//! Small shared helpers: easing and the world-panel materials used by both the
-//! anchor-demo and hinge-chain scenes.
+//! Easing and world-panel materials shared by the anchor-demo and hinge-chain
+//! scenes.
 
 use bevy::prelude::*;
 use bevy_diegetic::default_panel_material;

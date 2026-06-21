@@ -30,9 +30,9 @@ use fairy_dust::TitleChipActivation;
 use crate::anchor_demo::AnchorChain;
 use crate::anchor_demo::AnchorTile;
 use crate::constants::*;
+use crate::presentation::smoothstep;
 use crate::scene::ActiveCapability;
 use crate::scene::ModeMorph;
-use crate::util::smoothstep;
 
 /// Direction a hinge ease is moving the chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

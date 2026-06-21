@@ -81,7 +81,7 @@ impl ModeMorph {
 
     /// Eased progress on `[0, 1]`.
     fn progress(self) -> f32 {
-        crate::util::smoothstep((self.timer / MODE_MORPH_SECS).clamp(0.0, 1.0))
+        crate::presentation::smoothstep((self.timer / MODE_MORPH_SECS).clamp(0.0, 1.0))
     }
 }
 

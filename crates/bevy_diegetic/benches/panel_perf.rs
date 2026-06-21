@@ -22,7 +22,7 @@
 //!
 //! Run with `cargo bench --bench panel_perf`.
 
-mod common;
+mod fixtures;
 
 use std::hint::black_box;
 
@@ -30,20 +30,20 @@ use bevy::prelude::*;
 use bevy_diegetic::ComputedDiegeticPanel;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
-use common::app::create_bench_app;
-use common::panels::PANEL_SIZE;
-use common::panels::RESIZED_PANEL_SIZE;
-use common::panels::bench_panel;
-use common::panels::build_diegetic_status_tree;
-use common::panels::build_diegetic_status_tree_with_text_color;
-use common::rows::ROW_COUNTS;
-use common::rows::StatusRow;
-use common::rows::generate_status_rows;
 use criterion::BenchmarkGroup;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
 use criterion::measurement::WallTime;
+use fixtures::app::create_bench_app;
+use fixtures::panels::PANEL_SIZE;
+use fixtures::panels::RESIZED_PANEL_SIZE;
+use fixtures::panels::bench_panel;
+use fixtures::panels::build_diegetic_status_tree;
+use fixtures::panels::build_diegetic_status_tree_with_text_color;
+use fixtures::rows::ROW_COUNTS;
+use fixtures::rows::StatusRow;
+use fixtures::rows::generate_status_rows;
 
 type PanelBenchGroup<'a> = BenchmarkGroup<'a, WallTime>;
 

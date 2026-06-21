@@ -21,25 +21,25 @@
 //!
 //! Run with `cargo bench --bench layout_engine_raw --features bench_support`.
 
-mod common;
+mod fixtures;
 
 use std::hint::black_box;
 
 use bevy::color::Color;
 use bevy_diegetic::bench_support::LayoutEngine;
 use bevy_diegetic::bench_support::LayoutTreeChange;
-use common::measurement::monospace_measure_text_fn;
-use common::panels::DiegeticStatusTreeStyle;
-use common::panels::PANEL_SIZE;
-use common::panels::build_diegetic_status_tree;
-use common::panels::build_diegetic_status_tree_with_style;
-use common::panels::layout_to_points;
-use common::rows::ROW_COUNTS;
-use common::rows::StatusRow;
-use common::rows::generate_status_rows;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use fixtures::measurement::monospace_measure_text_fn;
+use fixtures::panels::DiegeticStatusTreeStyle;
+use fixtures::panels::PANEL_SIZE;
+use fixtures::panels::build_diegetic_status_tree;
+use fixtures::panels::build_diegetic_status_tree_with_style;
+use fixtures::panels::layout_to_points;
+use fixtures::rows::ROW_COUNTS;
+use fixtures::rows::StatusRow;
+use fixtures::rows::generate_status_rows;
 
 fn bench_raw_layout(c: &mut Criterion) {
     let scale = layout_to_points(PANEL_SIZE);

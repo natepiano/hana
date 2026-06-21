@@ -16,23 +16,23 @@
 //!
 //! Run with `cargo bench -p bevy_diegetic --bench layout_comparison --features bench_support`.
 
-mod common;
+mod fixtures;
 
 use std::hint::black_box;
 
 use bevy_diegetic::bench_support::LayoutEngine;
 use clay_layout::Clay;
-use common::measurement::clay_monospace_measure;
-use common::measurement::monospace_measure_text_fn;
-use common::panels::PANEL_SIZE;
-use common::panels::build_clay_status_panel;
-use common::panels::build_diegetic_status_tree;
-use common::rows::ROW_COUNTS;
-use common::rows::StatusRow;
-use common::rows::generate_status_rows;
 use criterion::Criterion;
 use criterion::criterion_group;
 use criterion::criterion_main;
+use fixtures::measurement::clay_monospace_measure;
+use fixtures::measurement::monospace_measure_text_fn;
+use fixtures::panels::PANEL_SIZE;
+use fixtures::panels::build_clay_status_panel;
+use fixtures::panels::build_diegetic_status_tree;
+use fixtures::rows::ROW_COUNTS;
+use fixtures::rows::StatusRow;
+use fixtures::rows::generate_status_rows;
 
 fn run_clay_layout(clay: &mut Clay, rows: &[StatusRow]) {
     let mut layout = clay.begin::<(), ()>();

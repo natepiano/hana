@@ -6,6 +6,7 @@ use bevy::prelude::*;
 use super::PanelWorldConversion;
 use super::PanelWorldProjection;
 use super::PanelWorldTarget;
+use super::SavedWorldRestoreMode;
 use crate::layout::Anchor;
 use crate::layout::LayoutTree;
 use crate::layout::Lighting;
@@ -139,7 +140,7 @@ impl SavedPanelWorldState {
             height,
             world_width: self.world_width,
             world_height: self.world_height,
-            restore_saved_world: true,
+            restore_saved_world: SavedWorldRestoreMode::Restore,
         }
     }
 
@@ -171,6 +172,7 @@ mod tests {
     use bevy::prelude::*;
 
     use super::SavedPanelWorldState;
+    use super::SavedWorldRestoreMode;
     use crate::DiegeticPanel;
     use crate::Mm;
     use crate::TextStyle;
@@ -257,7 +259,7 @@ mod tests {
             height:              crate::Sizing::fixed(crate::Px(120.0)),
             world_width:         Some(projected_size.x),
             world_height:        Some(projected_size.y),
-            restore_saved_world: false,
+            restore_saved_world: SavedWorldRestoreMode::Skip,
         });
 
         assert_eq!(conversion.panel_size, Vec2::new(100.0, 40.0));

@@ -204,11 +204,7 @@ fn sync_anti_alias(
         cascade_default.0 = *setting;
     }
     for (_, material) in materials.iter_mut() {
-        analytic_paths::set_path_material_anti_alias(
-            material,
-            setting.supersamples(),
-            setting.anisotropic(),
-        );
+        analytic_paths::set_path_material_anti_alias(material, *setting);
     }
 }
 

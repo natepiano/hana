@@ -15,6 +15,7 @@ use super::PanelScreenTarget;
 use super::PanelWorldConversion;
 use super::PanelWorldTarget;
 use super::SavedPanelWorldState;
+use super::SavedWorldRestoreMode;
 use crate::layout::Anchor;
 use crate::layout::Sizing;
 use crate::layout::Unit;
@@ -430,7 +431,7 @@ pub struct PanelWorldProjection {
     /// Target world height in meters.
     pub world_height:        Option<f32>,
     /// Whether applying this projection should restore saved world-authored panel data.
-    pub restore_saved_world: bool,
+    pub restore_saved_world: SavedWorldRestoreMode,
 }
 
 impl PanelWorldProjection {

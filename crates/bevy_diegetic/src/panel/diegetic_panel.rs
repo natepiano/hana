@@ -967,7 +967,10 @@ fn apply_panel_world_conversion_now(
         warn!("failed to convert panel {entity:?} to world space: {error}");
         return;
     }
-    let saved = if conversion.restore_saved_world {
+    let saved = if matches!(
+        conversion.restore_saved_world,
+        conversion::SavedWorldRestoreMode::Restore
+    ) {
         let Some(saved) = saved.cloned() else {
             warn!("failed to convert panel {entity:?} to saved world space: no saved world state");
             return;

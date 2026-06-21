@@ -41,11 +41,11 @@ use crate::hinge::advance_hinge;
 use crate::hinge::build_hinge_number_tree;
 use crate::hinge::hinge_accent;
 use crate::hinge::hinge_paused;
+use crate::presentation::panel_material;
+use crate::presentation::smoothstep;
+use crate::presentation::text_material;
 use crate::scene::ActiveCapability;
 use crate::scene::ModeMorph;
-use crate::util::panel_material;
-use crate::util::smoothstep;
-use crate::util::text_material;
 
 /// A tile in the shared chain used by every capability. `order` is its fixed
 /// position along the chain (`0` = the origin). Tile `0` is the unanchored origin
