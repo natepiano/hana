@@ -752,8 +752,13 @@ fn example_sdf_material(
     };
     let fill_alpha = base.base_color.alpha();
     let border_linear: Vec4 = border_color.map_or(Vec4::ZERO, |c| {
-        let l: LinearRgba = c.into();
-        Vec4::new(l.red, l.green, l.blue, l.alpha)
+        let linear_rgba: LinearRgba = c.into();
+        Vec4::new(
+            linear_rgba.red,
+            linear_rgba.green,
+            linear_rgba.blue,
+            linear_rgba.alpha,
+        )
     });
 
     ExtendedMaterial {

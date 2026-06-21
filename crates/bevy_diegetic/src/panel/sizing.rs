@@ -329,34 +329,34 @@ mod tests {
 
     #[test]
     fn fit_to_sizing_is_unbounded_fit() {
-        let s: Sizing = <Fit as PanelSizing<Screen>>::to_sizing(Fit);
-        assert!(matches!(s, Sizing::Fit { .. }));
-        assert!(s.is_fit());
+        let sizing: Sizing = <Fit as PanelSizing<Screen>>::to_sizing(Fit);
+        assert!(matches!(sizing, Sizing::Fit { .. }));
+        assert!(sizing.is_fit());
     }
 
     #[test]
     fn fitmax_to_sizing_caps_max() {
         let fm = FitMax(Px(400.0).into());
-        let s: Sizing = <FitMax as PanelSizing<Screen>>::to_sizing(fm);
-        match s {
+        let sizing: Sizing = <FitMax as PanelSizing<Screen>>::to_sizing(fm);
+        match sizing {
             Sizing::Fit { min, max } => {
                 assert_eq!(min.value, 0.0);
                 assert_eq!(max.value, 400.0);
             },
-            _ => panic!("expected Sizing::Fit, got {s:?}"),
+            _ => panic!("expected Sizing::Fit, got {sizing:?}"),
         }
     }
 
     #[test]
     fn percent_to_sizing() {
-        let s: Sizing = <Percent as PanelSizing<Screen>>::to_sizing(Percent(0.25));
-        assert!(matches!(s, Sizing::Percent(f) if (f - 0.25).abs() < 1e-6));
+        let sizing: Sizing = <Percent as PanelSizing<Screen>>::to_sizing(Percent(0.25));
+        assert!(matches!(sizing, Sizing::Percent(f) if (f - 0.25).abs() < 1e-6));
     }
 
     #[test]
     fn grow_to_sizing_is_unbounded_grow() {
-        let s: Sizing = <Grow as PanelSizing<Screen>>::to_sizing(Grow);
-        assert!(s.is_grow());
+        let sizing: Sizing = <Grow as PanelSizing<Screen>>::to_sizing(Grow);
+        assert!(sizing.is_grow());
     }
 
     #[test]

@@ -91,8 +91,10 @@ impl Plugin for TextRenderPlugin {
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),
         );
-        // The batched-records geometry on its frame-flow anchors
-        // (glyph_instancing plan, frame flow steps 2-5).
+        // `update_panel_text_batches` is ordered by the `.after(...)` and
+        // `.before(TransformSystems::Propagate)` calls below; the later systems
+        // update run transforms, refresh batch `Aabb`s, and upload dirty record
+        // buffers.
         app.add_systems(
             PostUpdate,
             (

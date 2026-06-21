@@ -2,7 +2,7 @@
 //! routes every panel-text run into a per-[`BatchKey`] batch entity whose
 //! vertex shader pulls per-glyph and per-run records from GPU tables.
 //!
-//! Frame flow across the schedule anchors: [`update_panel_text_batches`]
+//! Panel-text batch schedule: [`update_panel_text_batches`]
 //! writes glyph/run records before `TransformSystems::Propagate`;
 //! [`write_batch_run_transforms`] copies propagated label transforms into run
 //! records after it; [`update_batch_bounds`] hand-writes each batch entity's

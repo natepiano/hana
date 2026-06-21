@@ -165,8 +165,13 @@ pub(crate) fn sdf_primitive_material(
     let fill_alpha = base.base_color.alpha();
 
     let border_linear: Vec4 = input.border_color.map_or(Vec4::ZERO, |color| {
-        let linear: LinearRgba = color.into();
-        Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
+        let linear_rgba: LinearRgba = color.into();
+        Vec4::new(
+            linear_rgba.red,
+            linear_rgba.green,
+            linear_rgba.blue,
+            linear_rgba.alpha,
+        )
     });
 
     ExtendedMaterial {
