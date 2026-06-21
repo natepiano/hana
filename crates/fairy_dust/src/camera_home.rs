@@ -31,8 +31,11 @@ use bevy_lagrange::AnimationSource;
 use bevy_lagrange::FitAnchor;
 use bevy_lagrange::OrbitCamInteractionStarted;
 
+use crate::constants::AABB_CORNER_SIGNS;
+use crate::constants::HOME_AABB_GIZMO_COLOR;
 use crate::constants::HOME_CONTROL;
 use crate::constants::HOME_KEY;
+use crate::constants::MIN_HOME_CUBE_SCALE;
 use crate::ensure_plugin;
 use crate::orbit_cam::FairyDustOrbitCam;
 use crate::restart_camera::RestartCameraRestore;
@@ -105,11 +108,6 @@ enum AtHome {
     Yes,
     No,
 }
-
-/// Color of the home AABB wireframe drawn by [`draw_home_aabb_gizmo`] while
-/// [`HomeAabbGizmoVisible`] is on. Bright orange so it reads against the
-/// usual dark background.
-const HOME_AABB_GIZMO_COLOR: Color = Color::srgb(1.0, 0.5, 0.0);
 
 /// Tracks whether [`draw_home_aabb_gizmo`] is currently drawing a wireframe
 /// of the home cube. Toggled by **Ctrl+Shift+A** — undocumented debug
@@ -191,25 +189,6 @@ fn spawn_home_actions(mut commands: Commands) {
         ]),
     ));
 }
-
-/// Minimum cube scale along any axis. Text and other planar geometry can give
-/// a union with zero extent in one axis; the fit math handles a zero-extent
-/// vertex cloud poorly, so floor each axis to a small positive value.
-const MIN_HOME_CUBE_SCALE: f32 = 0.001;
-
-/// The 8 corner sign-patterns of a unit AABB, used to transform a local
-/// [`Aabb`] into a world-space bound by walking each corner through a
-/// [`GlobalTransform`].
-const AABB_CORNER_SIGNS: [Vec3; 8] = [
-    Vec3::new(-1.0, -1.0, -1.0),
-    Vec3::new(1.0, -1.0, -1.0),
-    Vec3::new(-1.0, 1.0, -1.0),
-    Vec3::new(1.0, 1.0, -1.0),
-    Vec3::new(-1.0, -1.0, 1.0),
-    Vec3::new(1.0, -1.0, 1.0),
-    Vec3::new(-1.0, 1.0, 1.0),
-    Vec3::new(1.0, 1.0, 1.0),
-];
 
 /// World-space union of every [`CameraHomeTarget`] entity and its
 /// descendants' [`Aabb`]s. Returns `(center, size)` of the union box, or

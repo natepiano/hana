@@ -18,14 +18,10 @@
 use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 
+use crate::constants::DIFFUSE_MAP;
+use crate::constants::ENV_LIGHT_INTENSITY;
+use crate::constants::SPECULAR_MAP;
 use crate::orbit_cam::FairyDustOrbitCam;
-
-const DIFFUSE_MAP: &str = "embedded://fairy_dust/environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2";
-const SPECULAR_MAP: &str = "embedded://fairy_dust/environment_maps/pisa_specular_rgb9e5_zstd.ktx2";
-
-/// Scales the environment map's contribution to lighting. Matches the value
-/// used by the `hana` editor camera.
-const ENV_LIGHT_INTENSITY: f32 = 2000.0;
 
 pub(crate) fn install(app: &mut App) {
     embedded_asset!(app, "environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2");

@@ -13,12 +13,11 @@ use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::PlayAnimation;
 
+use crate::constants::POSE_ENV;
+use crate::constants::POSE_FIELD_COUNT;
+use crate::constants::POSE_FIELD_SEPARATOR;
 use crate::constants::RESTART_CAMERA_RESTORE_DURATION;
 use crate::orbit_cam::FairyDustOrbitCam;
-
-const POSE_ENV: &str = "FAIRY_DUST_RESTART_CAMERA_POSE";
-const POSE_FIELD_COUNT: usize = 6;
-const POSE_FIELD_SEPARATOR: char = ',';
 
 /// Resource inserted when restart-camera restoration is enabled.
 ///

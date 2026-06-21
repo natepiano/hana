@@ -5,12 +5,11 @@
 //!     [`DiegeticTextMut<M>`], keyed on a marker component — one call, `labels.set(text)`,
 //!     regardless of coordinate space.
 //!   - `DiegeticPanel::world` / `DiegeticPanel::screen` (panels with a named field) mutate through
-//!     [`PanelText::set_text`], keyed on a [`PanelFieldId`] — the id-addressed path for a run
-//!     inside a panel tree.
+//!     [`PanelText::set_text`], keyed on a [`PanelFieldId`] for a named run in a panel tree.
 //!
-//! The takeaway: a marker-addressed standalone label uses `DiegeticTextMut<M>`;
-//! a named run on a panel uses `PanelText` + `PanelFieldId`. Same `TextContent`
-//! underneath, two addressing front doors.
+//! Both APIs write the same `TextContent` storage: standalone labels address it
+//! through `DiegeticTextMut<M>`, while panel fields address it through
+//! `PanelText` and `PanelFieldId`.
 
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;

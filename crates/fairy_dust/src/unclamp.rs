@@ -9,11 +9,8 @@
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
 
+use crate::constants::UNCLAMPED_ZOOM_LOWER_LIMIT;
 use crate::orbit_cam::FairyDustOrbitCam;
-
-/// Zoom floor left in place after unclamping. `zoom_lower_limit` is not
-/// optional and must stay > 0, or the camera sticks at radius 0.
-const UNCLAMPED_ZOOM_LOWER_LIMIT: f32 = 1e-9;
 
 pub(crate) fn install(app: &mut App) { app.add_observer(unclamp_limits); }
 

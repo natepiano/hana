@@ -7,8 +7,8 @@ use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
 use bevy_diegetic::Px;
 
-const CENTER_FRACTION: f32 = 0.5;
-const SPACER_EDGE_OFFSET: Px = Px(0.0);
+use crate::constants::CENTER_FRACTION;
+use crate::constants::SPACER_EDGE_OFFSET;
 
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct ConnectorColors {

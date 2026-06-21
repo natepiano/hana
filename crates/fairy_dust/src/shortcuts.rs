@@ -22,19 +22,7 @@
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
 
-/// Keys whose press, while held, suppresses every bare example shortcut. Bare
-/// shortcuts fire only when none of these is down, mirroring the `BlockBy` that
-/// guards Fairy Dust's own bei chords.
-const MODIFIER_KEYS: [KeyCode; 8] = [
-    KeyCode::ControlLeft,
-    KeyCode::ControlRight,
-    KeyCode::ShiftLeft,
-    KeyCode::ShiftRight,
-    KeyCode::AltLeft,
-    KeyCode::AltRight,
-    KeyCode::SuperLeft,
-    KeyCode::SuperRight,
-];
+use crate::constants::MODIFIER_KEYS;
 
 /// When a registered shortcut's system runs relative to the key press.
 #[derive(Clone, Copy)]

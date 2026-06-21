@@ -8,13 +8,47 @@ use bevy::prelude::Vec3;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 
+// aabb
+/// The 8 corner sign-patterns of a unit AABB, used by lighting and camera-home
+/// systems to transform local bounds into world space through a `GlobalTransform`.
+pub(crate) const AABB_CORNER_SIGNS: [Vec3; 8] = [
+    Vec3::new(-1.0, -1.0, -1.0),
+    Vec3::new(1.0, -1.0, -1.0),
+    Vec3::new(-1.0, 1.0, -1.0),
+    Vec3::new(1.0, 1.0, -1.0),
+    Vec3::new(-1.0, -1.0, 1.0),
+    Vec3::new(1.0, -1.0, 1.0),
+    Vec3::new(-1.0, 1.0, 1.0),
+    Vec3::new(1.0, 1.0, 1.0),
+];
+
+// bloom
+pub(crate) const BLOOM_INTENSITY: f32 = 0.25;
+/// Only pixels brighter than this (pre-tonemap luminance) contribute to bloom.
+/// Lit colored text and mesh content peak above 1.0 under studio lighting, so the
+/// threshold sits above them and below the over-bright emissive readout, which
+/// is the only content meant to glow.
+pub(crate) const BLOOM_THRESHOLD: f32 = 3.0;
+pub(crate) const BLOOM_THRESHOLD_SOFTNESS: f32 = 0.2;
+
 // camera home
+/// Color of the home AABB wireframe drawn by `draw_home_aabb_gizmo` while
+/// `HomeAabbGizmoVisible` is on. Bright orange so it reads against the usual
+/// dark background.
+pub(crate) const HOME_AABB_GIZMO_COLOR: Color = Color::srgb(1.0, 0.5, 0.0);
 pub(crate) const HOME_CONTROL: &str = "H Home";
 pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
 pub(crate) const HOME_KEY: KeyCode = KeyCode::KeyH;
+/// Minimum cube scale along any axis. Text and other planar geometry can give
+/// a union with zero extent in one axis; the fit math handles a zero-extent
+/// vertex cloud poorly, so floor each axis to a small positive value.
+pub(crate) const MIN_HOME_CUBE_SCALE: f32 = 0.001;
 
 // camera restart
+pub(crate) const POSE_ENV: &str = "FAIRY_DUST_RESTART_CAMERA_POSE";
+pub(crate) const POSE_FIELD_COUNT: usize = 6;
+pub(crate) const POSE_FIELD_SEPARATOR: char = ',';
 pub(crate) const RESTART_CAMERA_RESTORE_DURATION: Duration = Duration::from_secs(2);
 
 // cargo restart
@@ -62,6 +96,10 @@ pub(crate) const CASCADE_REFIT_EPSILON: f32 = 0.01;
 // clear color
 pub(crate) const CLEAR_COLOR: Color = Color::srgb(0.012, 0.014, 0.018);
 
+// connectors
+pub(crate) const CENTER_FRACTION: f32 = 0.5;
+pub(crate) const SPACER_EDGE_OFFSET: Px = Px(0.0);
+
 // cube defaults
 pub(crate) const CUBE_DEFAULT_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
 pub(crate) const CUBE_DEFAULT_SIZE: f32 = 1.0;
@@ -75,6 +113,15 @@ pub const EXAMPLE_CUBE_SIZE: f32 = CUBE_DEFAULT_SIZE;
 pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
     Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
 }
+
+// environment map
+pub(crate) const DIFFUSE_MAP: &str =
+    "embedded://fairy_dust/environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2";
+/// Scales the environment map's contribution to lighting. Matches the value
+/// used by the `hana` editor camera.
+pub(crate) const ENV_LIGHT_INTENSITY: f32 = 2000.0;
+pub(crate) const SPECULAR_MAP: &str =
+    "embedded://fairy_dust/environment_maps/pisa_specular_rgb9e5_zstd.ktx2";
 
 // face text
 /// Outward offset for a face label so it does not z-fight the cube surface.
@@ -111,6 +158,14 @@ pub(crate) const KEY_SHADOW_NORMAL_BIAS: f32 = 0.7;
 /// rest at `info` so example-side `info!`/`warn!` calls remain visible.
 pub const LOG_FILTER: &str = "info,wgpu=error,naga=error,bevy_winit=warn,bevy_render=warn";
 
+// orbit cam
+/// Canonical pitch limit for examples that manually spawn an `OrbitCam`.
+pub(crate) const EXAMPLE_ORBIT_CAM_PITCH_LIMIT: f32 = std::f32::consts::TAU / 3.0;
+/// Canonical lower zoom/radius limit for examples that manually spawn an `OrbitCam`.
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT: f32 = 0.1;
+/// Canonical upper zoom/radius limit for examples that manually spawn an `OrbitCam`.
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_UPPER_LIMIT: f32 = 20.0;
+
 // point light
 pub(crate) const POINT_LIGHT_COLOR: Color = Color::srgb(0.45, 0.68, 1.0);
 pub(crate) const POINT_LIGHT_INTENSITY: f32 = 1_900.0;
@@ -119,6 +174,21 @@ pub(crate) const POINT_LIGHT_RANGE: f32 = 6.0;
 
 // shadow map
 pub(crate) const SHADOW_MAP_SIZE: usize = 4096;
+
+// shortcuts
+/// Keys whose press, while held, suppresses every bare example shortcut. Bare
+/// shortcuts fire only when none of these is down, mirroring the `BlockBy` that
+/// guards Fairy Dust's own bei chords.
+pub(crate) const MODIFIER_KEYS: [KeyCode; 8] = [
+    KeyCode::ControlLeft,
+    KeyCode::ControlRight,
+    KeyCode::ShiftLeft,
+    KeyCode::ShiftRight,
+    KeyCode::AltLeft,
+    KeyCode::AltRight,
+    KeyCode::SuperLeft,
+    KeyCode::SuperRight,
+];
 
 // target
 pub(crate) const TARGET: Vec3 = Vec3::new(0.0, 0.45, 0.0);
@@ -155,3 +225,8 @@ pub const TITLE_SIZE: Pt = Pt(14.0);
 /// Canonical HUD body / label size. Used by `fairy_dust` panels and re-exported
 /// for ad-hoc panels that want to match the built-in look.
 pub const LABEL_SIZE: Pt = Pt(11.0);
+
+// unclamp
+/// Zoom floor left in place after unclamping. `zoom_lower_limit` is not
+/// optional and must stay > 0, or the camera sticks at radius 0.
+pub(crate) const UNCLAMPED_ZOOM_LOWER_LIMIT: f32 = 1e-9;

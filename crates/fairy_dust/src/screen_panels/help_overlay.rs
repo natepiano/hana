@@ -19,6 +19,9 @@ use bevy_kana::event;
 use super::ControlActivation;
 use super::TitleBarControlState;
 use super::constants::BODY_COLOR;
+use super::constants::CAMERA_PRESET_KEYS;
+use super::constants::CAMERA_PRESET_LABEL;
+use super::constants::CLOSE_HINT;
 use super::constants::DIVIDER_COLOR;
 use super::constants::HELP_CLOSE_CONTEXT_PRIORITY;
 use super::constants::HELP_CLOSE_HINT_COLUMN_WIDTH;
@@ -29,6 +32,11 @@ use super::constants::HELP_PANEL_CHILD_GAP;
 use super::constants::HELP_ROW_GAP;
 use super::constants::HELP_SEPARATOR_HEIGHT;
 use super::constants::HELP_TABLE_COLUMN_GAP;
+use super::constants::HELP_TITLE;
+use super::constants::HOME_AABB_KEYS;
+use super::constants::HOME_AABB_LABEL;
+use super::constants::SCREEN_PANEL_KEYS;
+use super::constants::SCREEN_PANEL_LABEL;
 use super::default_inner_background;
 use super::screen_panel_frame;
 use super::screen_panel_material;
@@ -40,21 +48,13 @@ use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 use crate::ensure_plugin;
 
-const HELP_TITLE: &str = "Keyboard Shortcuts";
-const CLOSE_HINT: &str = "Esc to close";
-const HOME_AABB_KEYS: &str = "ctrl-shift-A";
-const HOME_AABB_LABEL: &str = "Show bounding box for camera home AnimateToFit";
-const SCREEN_PANEL_KEYS: &str = "ctrl-shift-L";
-const SCREEN_PANEL_LABEL: &str = "Toggle screen space panels off/on";
-const CAMERA_PRESET_KEYS: &str = "shift-C";
-const CAMERA_PRESET_LABEL: &str = "Cycle camera presets and panel off";
-
 /// Always-active context holding the Shift+/ toggle.
 #[derive(Component)]
 struct HelpContext;
 
-/// Higher-priority context that rides on the open overlay entity and consumes
-/// Esc, so closing the overlay doesn't also fire a caller's Esc binding.
+/// Higher-priority context inserted on the `KeyboardShortcutHelp` overlay
+/// entity. It owns the `CloseHelp`/Esc action while that entity exists and
+/// consumes Esc so closing the overlay does not also fire a caller's Esc binding.
 #[derive(Component)]
 struct HelpCloseContext;
 

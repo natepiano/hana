@@ -15,24 +15,23 @@ use bevy_diegetic::Percent;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 
+use super::constants::GPU_METER_PANEL_WIDTH_FRACTION;
+use super::constants::PANEL_SEPARATOR_COLOR;
+use super::constants::PANEL_SEPARATOR_THICKNESS;
+use super::constants::STATS_DESC_COLOR;
+use super::constants::STATS_DESC_FONT_SIZE;
+use super::constants::STATS_DETAIL_INDENT;
+use super::constants::STATS_GROUP_GAP;
+use super::constants::STATS_HEADER_FONT_SIZE;
+use super::constants::STATS_INTRA_GAP;
+use super::constants::STATS_ROW_WIDTH;
+use super::constants::STATS_SECTION_FONT_SIZE;
+use super::constants::STATS_SECTION_GAP;
+use super::constants::STATUS_LABEL_COLOR;
+use super::constants::STATUS_TEXT_COLOR;
 use super::screen_panel_frame;
 use super::screen_panel_material;
 use crate::DEFAULT_PANEL_BACKGROUND;
-
-const STATS_HEADER_FONT_SIZE: f32 = 11.25;
-const STATS_SECTION_FONT_SIZE: f32 = 10.0;
-const STATS_DESC_FONT_SIZE: f32 = 9.0;
-const STATS_DESC_COLOR: Color = Color::srgba(0.60, 0.66, 0.76, 0.68);
-const STATS_ROW_WIDTH: f32 = 260.0;
-const STATS_INTRA_GAP: f32 = 2.0;
-const STATS_GROUP_GAP: f32 = 6.0;
-const STATS_SECTION_GAP: f32 = 8.0;
-const STATS_DETAIL_INDENT: f32 = 8.0;
-const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
-const STATUS_LABEL_COLOR: Color = Color::srgba(0.7, 0.78, 0.92, 0.85);
-const PANEL_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
-const PANEL_SEPARATOR_THICKNESS: f32 = 1.0;
-const GPU_METER_PANEL_WIDTH_FRACTION: f32 = 0.8;
 
 /// One label/value group in a reusable instrumentation stats panel.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]

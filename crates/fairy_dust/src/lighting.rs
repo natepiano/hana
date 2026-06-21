@@ -7,6 +7,7 @@ use bevy::light::CascadeShadowConfigBuilder;
 use bevy::light::DirectionalLightShadowMap;
 use bevy::prelude::*;
 
+use crate::constants::AABB_CORNER_SIGNS;
 use crate::constants::CASCADE_CAMERA_HEADROOM;
 use crate::constants::CASCADE_COUNT;
 use crate::constants::CASCADE_FIRST_BOUND_HEADROOM;
@@ -122,19 +123,6 @@ fn spawn_studio_lights(mut commands: Commands, config: Res<StudioLightingConfig>
         Transform::from_translation(POINT_LIGHT_POS),
     ));
 }
-
-/// The 8 corner sign-patterns of a unit AABB, used to walk a local [`Aabb`]
-/// into world space through a [`GlobalTransform`].
-const AABB_CORNER_SIGNS: [Vec3; 8] = [
-    Vec3::new(-1.0, -1.0, -1.0),
-    Vec3::new(1.0, -1.0, -1.0),
-    Vec3::new(-1.0, 1.0, -1.0),
-    Vec3::new(1.0, 1.0, -1.0),
-    Vec3::new(-1.0, -1.0, 1.0),
-    Vec3::new(1.0, -1.0, 1.0),
-    Vec3::new(-1.0, 1.0, 1.0),
-    Vec3::new(1.0, 1.0, 1.0),
-];
 
 /// Fits the key light's shadow cascade to the scene and the active camera,
 /// re-running each frame so the cascade re-adjusts when the projection toggles.
