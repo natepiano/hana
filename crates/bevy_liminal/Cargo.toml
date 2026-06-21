@@ -1,0 +1,100 @@
+[package]
+authors      = ["Karl Gylleus <karl.gylleus@gmail.com>"]
+categories   = ["game-engines", "rendering"]
+description  = "A Bevy plugin for rendering 3d mesh outlines."
+edition      = "2024"
+exclude      = [".github/", "assets/"]
+keywords     = ["bevy", "gamedev", "graphics", "outline"]
+license      = "MIT OR Apache-2.0"
+name         = "bevy_liminal"
+readme       = "README.md"
+repository   = "https://github.com/natepiano/bevy_liminal"
+rust-version = "1.92.0"
+version      = "0.1.0-dev"
+
+[dependencies]
+bevy = { version = "0.19.0", default-features = false, features = [
+  "bevy_asset",
+  "bevy_color",
+  "bevy_core_pipeline",
+  "bevy_image",
+  "bevy_log",
+  "bevy_mesh",
+  "bevy_pbr",
+  "bevy_render",
+  "bevy_shader",
+  "bevy_world_serialization",
+  "std",
+] }
+bevy_kana = "0.1.0"
+bevy_render = "0.19.0"
+bytemuck = "1"
+nonmax = "0.5"
+rand = "0.10.1"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { version = "0.4.3", features = ["wasm_js"] }
+
+[dev-dependencies]
+bevy = { version = "0.19.0", features = [
+  "bevy_animation",
+  "bevy_anti_alias",
+  "bevy_gltf",
+  "bevy_post_process",
+  "scene",
+] }
+bevy_brp_extras = "0.20.1"
+bevy_lagrange = { version = "0.0.4", features = ["fit_overlay"] }
+bevy_window_manager = "0.21.0"
+
+
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+
+
+[[example]]
+name = "intersecting"
+path = "examples/intersecting.rs"
+
+[[example]]
+name = "transparent"
+path = "examples/transparent.rs"
+
+[[example]]
+name = "msaa"
+path = "examples/msaa.rs"
+
+[[example]]
+name = "benchmark"
+path = "examples/benchmark/main.rs"
+
+[[example]]
+name = "all_modes"
+
+[lints.clippy]
+# Our strict lints
+allow_attributes_without_reason = "deny"
+expect_used                     = "deny"
+panic                           = "deny"
+self_named_module_files         = "deny" # use module/mod.rs (directory form) when a module has submodules
+unreachable                     = "deny"
+unwrap_used                     = "deny"
+
+# Enable lint groups as errors (with lower priority so allows can override)
+all      = { level = "deny", priority = -1 }
+cargo    = { level = "deny", priority = -1 }
+nursery  = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
+# Allow specific lints that conflict with common patterns
+multiple_crate_versions = "allow"
+needless_pass_by_value  = "allow"
+option_if_let_else      = "allow" # False positives with Bevy reflect macros
+redundant_pub_crate     = "allow" # cargo mend is the visibility authority, not clippy
+too_many_arguments      = "allow" # Bevy systems often require many params
+type_complexity         = "allow" # Bevy query types are inherently complex
+wildcard_imports        = "allow" # Bevy prelude convention
+
+[lints.rust]
+missing_docs = "deny"
