@@ -1,41 +1,18 @@
 [package]
-authors     = ["natepiano"]
-categories  = ["game-development", "game-engines"]
-description = "Ergonomic, opinionated utilities for Bevy — type-safe math, input wiring, and more"
-edition     = "2024"
-homepage    = "https://github.com/natepiano/bevy_kana"
-keywords    = ["bevy", "ecs", "gamedev", "input", "math"]
-license     = "MIT OR Apache-2.0"
-name        = "bevy_kana"
-repository  = "https://github.com/natepiano/bevy_kana"
-version     = "0.2.0-dev"
+authors.workspace    = true
+categories           = ["game-development", "game-engines"]
+description          = "Ergonomic, opinionated utilities for Bevy — type-safe math, input wiring, and more"
+edition.workspace    = true
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_kana"
+keywords             = ["bevy", "ecs", "gamedev", "input", "math"]
+license.workspace    = true
+name                 = "bevy_kana"
+readme               = "README.md"
+repository.workspace = true
+version              = "0.2.0-dev"
 
-[lints.clippy]
-# Our strict lints
-allow_attributes_without_reason = "deny"
-expect_used                     = "deny"
-panic                           = "deny"
-self_named_module_files         = "deny" # use module/mod.rs (directory form) when a module has submodules
-unreachable                     = "deny"
-unwrap_used                     = "deny"
-
-# Enable lint groups as errors (with lower priority so allows can override)
-all      = { level = "deny", priority = -1 }
-cargo    = { level = "deny", priority = -1 }
-nursery  = { level = "deny", priority = -1 }
-pedantic = { level = "deny", priority = -1 }
-
-# Allow specific lints that conflict with common patterns
-multiple_crate_versions = "allow"
-needless_pass_by_value  = "allow"
-option_if_let_else      = "allow"
-redundant_pub_crate     = "allow" # cargo mend is the visibility authority, not clippy
-too_many_arguments      = "allow"
-type_complexity         = "allow"
-wildcard_imports        = "allow"
-
-[lints.rust]
-missing_docs = "deny"
+[lints]
+workspace = true
 
 [features]
 default = ["math"]
@@ -43,7 +20,5 @@ input   = ["dep:bevy_enhanced_input"]
 math    = []
 
 [dependencies]
-bevy = { version = "0.19.0", default-features = false }
-bevy_enhanced_input = { version = "0.26.0", optional = true, default-features = false, features = [
-  "reflect",
-] }
+bevy                = { workspace = true }
+bevy_enhanced_input = { workspace = true, optional = true }

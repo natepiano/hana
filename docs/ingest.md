@@ -63,21 +63,41 @@ Existing consumers (other workspace crates that already declared `<crate_name> =
 
 Regenerate `Cargo.lock` and commit.
 
-### 8. Update nightly style config
+### 8. Update nightly clean-fix config
 
-`~/.claude/scripts/nightly/nightly-rust.conf` lists every workspace crate the nightly clean/build/style-eval/style-fix flow processes. Add an entry for the new crate, matching the existing `<name>=<workspace-path>` format:
+`~/.claude/scripts/clean-fix/clean-fix.conf` drives the nightly clean/build/mend and style-eval/fix flow. Paths are relative to `~/rust/`. Two independent allowlists, with **different granularity for workspaces**:
 
-```
-<crate_name>=bevy_hana/crates/<crate_name>
-```
+- `[build]` — directories to clean/build/mend. A workspace is listed by its **root** (one entry; the whole workspace shares one `target/`). Add the host workspace root if it isn't already present:
 
-### 9. Archive the standalone repo
+  ```
+  bevy_hana
+  ```
+
+- `[targets]` — directories to style eval/review/fix. Workspace members are listed **individually** as `<workspace>/crates/<member>` (not the workspace root). Add the new crate as an active entry, alongside the other `bevy_hana/crates/*` members:
+
+  ```
+  bevy_hana/crates/<crate_name>
+  ```
+
+  Point members at the **primary** `bevy_hana` workspace, not the `bevy_hana_bevy_update` worktree — the primary is the canonical style target. Prefix a line with `#CLEAN_FIX_SKIP# ` only if you deliberately want to register a member but hold it out of the style flow.
+
+Do **not** delete the standalone repo's own entries here yet — `[build] <crate_name>` and any `<crate_name>_bevy_update` rows still point at live checkouts until step 11. Removing them is part of repo retirement.
+
+### 9. Checkpoint — summarize and confirm before retiring the standalone repo
+
+Everything through step 8 is in-tree and reversible. Steps 10–11 are outward-facing (a push plus a GitHub archive) and destructive (a local delete), so stop here:
+
+- Summarize what landed — crate at `crates/<crate_name>/` with history preserved, manifest on the workspace pattern, dep switched to path, build/examples/tests/smoke-test results, clean-fix.conf enrollment.
+- Ask the user whether they are ready to retire the standalone repo: the `README.md` pointer commit + GitHub archive (step 10) and the local checkout deletion (step 11).
+- Proceed past this point only on an explicit go-ahead.
+
+### 10. Archive the standalone repo
 
 - Push a final pointer commit on the standalone repo's `README.md`: "moved to `bevy_hana/crates/<crate_name>/`".
 - Archive `github.com/<owner>/<crate_name>` via the GitHub UI.
 - Stop pushing to `<source_repo_path>`. Future commits land in `bevy_hana`.
 
-### 10. Remove the local standalone checkout
+### 11. Remove the local standalone checkout
 
 Only after everything above is done — workspace builds/tests green, `git log --follow` resolves the full history in-tree, and the GitHub repo is archived — delete the local source clone:
 
@@ -85,7 +105,9 @@ Only after everything above is done — workspace builds/tests green, `git log -
 rm -rf <source_repo_path>
 ```
 
-`git subtree add` does not transfer the source repo's reflog or tags, so `<source_repo_path>` is the only copy of those until it's archived. Do not remove it before step 9 completes.
+`git subtree add` does not transfer the source repo's reflog or tags, so `<source_repo_path>` is the only copy of those until it's archived. Do not remove it before step 10 completes.
+
+Then prune the now-dead standalone entries from `~/.claude/scripts/clean-fix/clean-fix.conf` (added back in step 8's note): remove `[build] <crate_name>` plus any `<crate_name>_bevy_update` rows in `[build]`/`[targets]`. The crate's nightly coverage now comes from the `bevy_hana` workspace-root `[build]` entry and the `bevy_hana/crates/<crate_name>` `[targets]` entry.
 
 ## Definition of done
 
@@ -93,6 +115,6 @@ rm -rf <source_repo_path>
 - Per-crate `Cargo.toml` matches the workspace pattern; inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml`/`.github/` removed.
 - Bevy feature set minimized; workspace builds + examples + tests all green.
 - Workspace dep entry is `{ path = "crates/<crate_name>" }`; consumers use `workspace = true`.
-- Nightly style config processes `<crate_name>` alongside the existing workspace crates.
+- Nightly `clean-fix.conf` covers the crate: `bevy_hana` in `[build]` (workspace root) and `bevy_hana/crates/<crate_name>` in `[targets]` (per-member).
 - Standalone GitHub repo archived with pointer commit on README.
 - Local standalone checkout (`<source_repo_path>`) removed once history is confirmed in-tree and the repo is archived.
