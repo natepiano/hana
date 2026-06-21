@@ -1901,6 +1901,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_valence"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "bevy_window"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

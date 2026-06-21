@@ -1,1 +1,1 @@
-//! bevy_valence
+//! `bevy_valence`

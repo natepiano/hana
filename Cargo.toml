@@ -11,13 +11,13 @@ repository = "https://github.com/natepiano/hana"
 version    = "0.0.1"
 
 [workspace.dependencies]
-bevy_valence = { path = "crates/bevy_valence" }
 bevy = { version = "0.19.0", default-features = false }
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
 ] }
 bevy_kana = { path = "crates/bevy_kana" }
 bevy_render = "0.19.0"
+bevy_valence = { path = "crates/bevy_valence" }
 bitflags = "2"
 bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
