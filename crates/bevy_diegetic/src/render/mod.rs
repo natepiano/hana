@@ -15,7 +15,6 @@ mod material_table;
 mod panel_geometry;
 mod panel_shapes;
 mod panel_text;
-mod sdf_material;
 mod text_shaping;
 mod transparency;
 mod world_text;

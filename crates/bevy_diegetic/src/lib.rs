@@ -323,9 +323,18 @@ pub struct DiegeticUiPlugin;
 
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
-        embedded_asset!(app, "render/material_table.wgsl");
-        embedded_asset!(app, "shaders/sdf_panel.wgsl");
-        embedded_asset!(app, "shaders/sdf_material_table.wgsl");
+        bevy::asset::load_internal_asset!(
+            app,
+            crate::constants::MATERIAL_TABLE_SHADER_HANDLE,
+            "render/material_table.wgsl",
+            bevy::shader::Shader::from_wgsl
+        );
+        bevy::asset::load_internal_asset!(
+            app,
+            crate::constants::SDF_MATERIAL_TABLE_SHADER_HANDLE,
+            "shaders/sdf_material_table.wgsl",
+            bevy::shader::Shader::from_wgsl
+        );
         embedded_asset!(app, "shaders/sdf_panel_vertex_pull.wgsl");
 
         app.init_resource::<CascadeDefaults>();

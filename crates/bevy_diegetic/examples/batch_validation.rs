@@ -477,8 +477,8 @@ fn validation_stats_sections(
     let perf = perf.cloned().unwrap_or_default();
     let batch = &perf.batch;
     let shape_batch = perf.line_batch;
-    let sdf_quads = perf.panel_geometry.sdf_quads;
-    let current_draws = sdf_quads + batch.batches + shape_batch.batches;
+    let sdf = perf.panel_geometry;
+    let current_draws = sdf.sdf_batches + batch.batches + shape_batch.batches;
     vec![
         StatsPanelSection::new(
             "frame",
@@ -512,7 +512,8 @@ fn validation_stats_sections(
         StatsPanelSection::new(
             "observed renderer",
             [
-                StatsPanelRow::new("sdf quads", sdf_quads.to_string()),
+                StatsPanelRow::new("sdf batches", sdf.sdf_batches.to_string()),
+                StatsPanelRow::new("sdf records", sdf.sdf_records.to_string()),
                 StatsPanelRow::new("text batches", batch.batches.to_string()),
                 StatsPanelRow::new("text runs", batch.runs.to_string()),
                 StatsPanelRow::new("text glyphs", batch.glyph_records.to_string())
@@ -520,21 +521,19 @@ fn validation_stats_sections(
                 StatsPanelRow::new("shape batches", shape_batch.batches.to_string()),
                 StatsPanelRow::new("path records", shape_batch.records.to_string()),
                 StatsPanelRow::new("draws today", current_draws.to_string()).detail(format!(
-                    "sdf {sdf_quads} + text {} + shapes {}",
-                    batch.batches, shape_batch.batches
+                    "sdf {} + text {} + shapes {}",
+                    sdf.sdf_batches, batch.batches, shape_batch.batches
                 )),
             ],
         ),
         StatsPanelSection::new(
             "material table",
             [
-                StatsPanelRow::new("sdf batches", MATERIAL_TABLE_PENDING),
-                StatsPanelRow::new("sdf records", MATERIAL_TABLE_PENDING),
-                StatsPanelRow::new("sdf uploads", MATERIAL_TABLE_PENDING),
+                StatsPanelRow::new("sdf uploads", sdf.sdf_uploads.to_string()),
                 StatsPanelRow::new("table rows", MATERIAL_TABLE_PENDING),
                 StatsPanelRow::new("table bytes", MATERIAL_TABLE_PENDING),
                 StatsPanelRow::new("table capacity", MATERIAL_TABLE_PENDING)
-                    .detail("placeholders; observed values wire in at plan Phase 5"),
+                    .detail("table rows and capacity wire in at plan Phase 5"),
             ],
         ),
     ]
@@ -631,7 +630,7 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>) -> LayoutTree {
                         [
                             perf.batch.batches.to_string(),
                             perf.line_batch.batches.to_string(),
-                            perf.panel_geometry.sdf_quads.to_string(),
+                            perf.panel_geometry.sdf_batches.to_string(),
                         ],
                     );
                 },

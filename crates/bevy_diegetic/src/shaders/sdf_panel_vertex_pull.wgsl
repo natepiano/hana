@@ -198,7 +198,9 @@ fn pull_sdf_vertex(vertex_index: u32, instance_index: u32) -> PulledSdfVertex {
     out.box_uv = vec2<f32>(0.0);
     out.record_index = 4294967295u;
 
-    _ = sdf_mesh_records;
+    // Keep binding 108 referenced for layout parity without loading the
+    // runtime-sized array (a whole-array load fails naga validation).
+    _ = arrayLength(&sdf_mesh_records);
 
     let local_index = vertex_index - mesh[instance_index].first_vertex_index;
     let record_index = local_index / 4u;

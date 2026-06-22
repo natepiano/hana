@@ -43,7 +43,7 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 ///
 /// Panels much farther than the camera focus shrink `position.z` below
 /// the 64-step budget (z = near/d crosses `6.4e-5` at ~15.6× the orbit
-/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl` and
+/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel_vertex_pull.wgsl` and
 /// `analytic_path.wgsl` keeps those fragments
 /// storable; past the bound their coplanar ordering collapses to OIT-list
 /// insertion order instead of going invisible.
@@ -65,10 +65,6 @@ pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
 pub(crate) const SDF_AA_PADDING: f32 = 0.001;
-/// `SdfPanelUniform::sdf_kind` value for rounded-rectangle panel surfaces.
-pub(crate) const SDF_KIND_ROUNDED_RECT: u32 = 0;
-/// `SdfPanelUniform::sdf_params` value for rounded-rectangle panel surfaces.
-pub(crate) const SDF_ROUNDED_RECT_PARAMS: Vec4 = Vec4::ZERO;
 /// Internal-asset handle for the `sdf_stroke.wgsl` shader.
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");

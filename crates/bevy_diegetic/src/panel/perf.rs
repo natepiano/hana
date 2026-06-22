@@ -9,7 +9,9 @@ use bevy_kana::ToF64;
 use super::constants::DIAG_LAYOUT_COMPUTE_MS;
 use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
 use super::constants::DIAG_PANEL_RECONCILE_MS;
-use super::constants::DIAG_PANEL_SDF_QUADS;
+use super::constants::DIAG_PANEL_SDF_BATCHES;
+use super::constants::DIAG_PANEL_SDF_RECORDS;
+use super::constants::DIAG_PANEL_SDF_UPLOADS;
 use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
 use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
@@ -50,7 +52,7 @@ pub struct DiegeticPerfStats {
     /// Panel-line analytic path batch counters, written by
     /// `commit_panel_shape_batch_buffers`.
     pub line_batch:     PanelShapeBatchPerfStats,
-    /// SDF panel surface counters, written from live `PanelSdfMesh` entities.
+    /// SDF panel surface batch counters, written by `commit_sdf_batch_buffers`.
     pub panel_geometry: PanelGeometryPerfStats,
 }
 
@@ -87,10 +89,13 @@ pub struct PanelShapeBatchPerfStats {
 /// Per-frame panel geometry counters.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
 pub struct PanelGeometryPerfStats {
-    /// Live SDF surface quads for panel backgrounds, borders, and divider
-    /// rectangles. These are retained panel surface draws, not batched analytic
-    /// path instances.
-    pub sdf_quads: usize,
+    /// Live SDF batch render entities for panel backgrounds, borders, and
+    /// divider rectangles.
+    pub sdf_batches: usize,
+    /// Live SDF records routed across all SDF batches.
+    pub sdf_records: usize,
+    /// SDF record-buffer uploads this frame.
+    pub sdf_uploads: usize,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -153,7 +158,9 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
             Diagnostic::new(DIAG_PANEL_RECONCILE_MS).with_suffix(" ms"),
-            Diagnostic::new(DIAG_PANEL_SDF_QUADS),
+            Diagnostic::new(DIAG_PANEL_SDF_BATCHES),
+            Diagnostic::new(DIAG_PANEL_SDF_RECORDS),
+            Diagnostic::new(DIAG_PANEL_SDF_UPLOADS),
             Diagnostic::new(DIAG_PANEL_TEXT_TOTAL_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
@@ -176,8 +183,14 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || perf.compute_panels.to_f64());
     diagnostics.add_measurement(&DIAG_PANEL_RECONCILE_MS, || f64::from(perf.reconcile_ms));
-    diagnostics.add_measurement(&DIAG_PANEL_SDF_QUADS, || {
-        perf.panel_geometry.sdf_quads.to_f64()
+    diagnostics.add_measurement(&DIAG_PANEL_SDF_BATCHES, || {
+        perf.panel_geometry.sdf_batches.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_SDF_RECORDS, || {
+        perf.panel_geometry.sdf_records.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_SDF_UPLOADS, || {
+        perf.panel_geometry.sdf_uploads.to_f64()
     });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_TOTAL_MS, || {
         f64::from(perf.panel_text.total_ms)

@@ -1,8 +1,8 @@
-//! Private batched SDF fill route backed by the frame material table.
+//! Batched SDF fill route backed by the frame material table.
 //!
 //! Builds typed SDF fill/border records and their material-table rows in one
-//! frame-local pass. The route is private/test-only: production panel fills
-//! still render through `PanelSdfMesh`, and batch entities are spawned hidden.
+//! frame-local pass. Production panel backgrounds, borders, and divider
+//! rectangles render through visible `DiegeticSdfFillBatch` entities.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -64,13 +64,40 @@ use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
 use crate::panel::DiegeticPanel;
+use crate::panel::DiegeticPerfStats;
 
 /// Render material used by batched SDF fill and border records.
 pub(crate) type SdfExtendedMaterial = ExtendedMaterial<StandardMaterial, SdfExtension>;
 
-/// Marker inserted on private SDF fill batch entities.
-#[derive(Component)]
+/// Marker inserted on private SDF fill batch entities, BRP-inspectable.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub(crate) struct DiegeticSdfFillBatch;
+
+/// BRP-inspectable snapshot of one built GPU SDF record's resolved fields.
+#[derive(Clone, Copy, Debug, Reflect)]
+pub(crate) struct SdfRecordSnapshot {
+    /// `SdfRenderRecord::fill_material` slot id (`u32::MAX` when not authored).
+    pub fill_material:   u32,
+    /// `SdfRenderRecord::border_material` slot id (`u32::MAX` when not authored).
+    pub border_material: u32,
+    /// `SdfRenderRecord::paint_mask` role bits.
+    pub paint_mask:      u32,
+    /// SDF rounded-rect half-size.
+    pub half_size:       Vec2,
+    /// Quad half-size including AA padding.
+    pub mesh_half_size:  Vec2,
+    /// SDF fragment flags.
+    pub flags:           u32,
+}
+
+/// Per-frame diagnostic snapshot of built SDF GPU records, BRP-inspectable.
+#[derive(Debug, Default, Reflect, Resource)]
+#[reflect(Resource)]
+pub(crate) struct SdfRecordDiagnostics {
+    /// Live (non-padding) record snapshots committed this frame.
+    pub records: Vec<SdfRecordSnapshot>,
+}
 
 /// One SDF role inside a resolved panel surface.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -195,7 +222,6 @@ impl SdfPaintMask {
 
     /// Returns the raw bit field written to WGSL.
     #[must_use]
-    #[cfg(test)]
     pub(crate) const fn bits(self) -> u32 { self.bits }
 
     /// Returns an empty role mask for capacity-tail records.
@@ -460,11 +486,33 @@ pub(crate) struct SdfBatch {
     pub entity:        Option<Entity>,
     /// GPU handles; `None` before the first GPU allocation.
     pub gpu:           Option<SdfBatchResources>,
-    /// Records changed and need a padded buffer upload.
-    pub records_dirty: bool,
-    /// Bounds need recomputation before visibility checks.
-    pub bounds_dirty:  bool,
+    /// Record-buffer upload state for this batch.
+    pub record_upload: ChangeState,
+    /// Bounds recomputation state for this batch.
+    pub bounds_update: ChangeState,
     records:           Vec<ResolvedSdfBatchRecord>,
+}
+
+/// Change state for SDF batch records and bounds.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum ChangeState {
+    /// The tracked value matches the current batch data.
+    #[default]
+    Unchanged,
+    /// The tracked value must be recomputed or uploaded.
+    Changed,
+}
+
+impl ChangeState {
+    /// Marks the tracked value for recomputation or upload.
+    pub(crate) const fn mark_changed(&mut self) { *self = Self::Changed; }
+
+    /// Marks the tracked value as matching the current batch data.
+    pub(crate) const fn mark_unchanged(&mut self) { *self = Self::Unchanged; }
+
+    /// Returns whether the tracked value needs recomputation or upload.
+    #[must_use]
+    pub(crate) const fn is_changed(self) -> bool { matches!(self, Self::Changed) }
 }
 
 impl SdfBatch {
@@ -509,15 +557,15 @@ impl SdfBatch {
             self.records.push(record);
         }
         self.sort_records();
-        self.records_dirty = true;
-        self.bounds_dirty = true;
+        self.record_upload.mark_changed();
+        self.bounds_update.mark_changed();
     }
 
     fn remove_record(&mut self, key: SdfRecordKey) {
         if let Some(position) = self.position_of(key) {
             self.records.remove(position);
-            self.records_dirty = true;
-            self.bounds_dirty = true;
+            self.record_upload.mark_changed();
+            self.bounds_update.mark_changed();
         }
     }
 
@@ -764,15 +812,16 @@ pub(crate) fn sdf_batch_material(input: SdfBatchMaterialInput) -> SdfExtendedMat
 /// 0.001` is read from the retained material table when a fill role is present;
 /// border-only records skip the fill row and route the transparent interior as
 /// empty. `Opaque`, `Mask`, `Blend`, `Premultiplied`, `Add`, `Multiply`, and
-/// `AlphaToCoverage` remain stored in `PipelineCompatibility`; only casting
-/// opaque batches map their GPU material to `Mask(0.0)` so Bevy keeps the
-/// material bind group available to the SDF vertex and fragment stages.
+/// `AlphaToCoverage` remain stored in `PipelineCompatibility`. A shadow-casting
+/// opaque batch maps to `Mask(0.0)` so Bevy keeps the material bind group on the
+/// shadow/prepass pipeline (the SDF prepass shader reads the table for
+/// `fill_alpha`); a non-casting opaque batch enters no prepass and stays
+/// `Opaque`, rendering in the opaque phase like a normal Bevy mesh.
 #[must_use]
 pub(crate) fn sdf_batch_alpha_mode(alpha: BatchAlphaMode, shadow: VisualShadow) -> AlphaMode {
-    let authored = AlphaMode::from(alpha);
-    match (shadow, authored) {
-        (VisualShadow::Cast, AlphaMode::Opaque) => AlphaMode::Mask(0.0),
-        (_, mode) => mode,
+    match (AlphaMode::from(alpha), shadow) {
+        (AlphaMode::Opaque, VisualShadow::Cast) => AlphaMode::Mask(0.0),
+        (mode, _) => mode,
     }
 }
 
@@ -875,7 +924,7 @@ fn append_sdf_role(
         SdfMaterialRole::Fill => &surface.fill_material,
         SdfMaterialRole::Border => &surface.border_material,
     };
-    if !material.authored {
+    if !material.authorship.is_authored() {
         return SdfRoleAppend::NotAuthored;
     }
     if !builder.has_remaining_rows(1) {
@@ -885,7 +934,7 @@ fn append_sdf_role(
     let base_material = if let Some(base_material) = material.base_material {
         base_material
     } else {
-        default_material = material::default_panel_material();
+        default_material = sdf_fallback_panel_material();
         &default_material
     };
     let input = SdfMaterialSlotInput {
@@ -901,6 +950,12 @@ fn append_sdf_role(
         MaterialSlotAppend::Appended(appended) => SdfRoleAppend::Appended(appended),
         MaterialSlotAppend::DroppedLimit => SdfRoleAppend::DroppedLimit,
     }
+}
+
+fn sdf_fallback_panel_material() -> StandardMaterial {
+    let mut material = material::default_panel_material();
+    material.alpha_mode = AlphaMode::Blend;
+    material
 }
 
 /// Assigns contiguous run ordinals to already-sorted SDF records.
@@ -957,12 +1012,14 @@ impl SdfRunCompatibility {
     }
 }
 
-/// Render plugin for the private SDF fill material type.
+/// Render plugin for the SDF fill batch material type.
 pub(super) struct FillBatchPlugin;
 
 impl Plugin for FillBatchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SdfBatchStore>()
+            .init_resource::<DiegeticPerfStats>()
+            .init_resource::<SdfRecordDiagnostics>()
             .add_plugins(MaterialPlugin::<SdfExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -1067,18 +1124,20 @@ fn update_sdf_batch_world_transforms(
     );
 
     for (_, batch) in store.batches_mut() {
-        let mut changed = false;
+        let mut transform_update = ChangeState::Unchanged;
         for record in &mut batch.records {
             let Ok(panel_transform) = panel_transforms.get(record.record_key.panel) else {
                 continue;
             };
             let previous = record.transform;
             record.update_world_transform(panel_transform);
-            changed |= record.transform != previous;
+            if record.transform != previous {
+                transform_update.mark_changed();
+            }
         }
-        if changed {
-            batch.records_dirty = true;
-            batch.bounds_dirty = true;
+        if transform_update.is_changed() {
+            batch.record_upload.mark_changed();
+            batch.bounds_update.mark_changed();
         }
     }
 }
@@ -1220,7 +1279,7 @@ pub(crate) fn spawn_sdf_batch_entity(
         DiegeticSdfFillBatch,
         Mesh3d(mesh.clone()),
         MeshMaterial3d(material.clone()),
-        Visibility::Hidden,
+        Visibility::Inherited,
         NoAutoAabb,
         Aabb::default(),
         key.layers.0.clone(),
@@ -1236,7 +1295,7 @@ pub(crate) fn spawn_sdf_batch_entity(
         material,
         capacity,
     });
-    batch.records_dirty = false;
+    batch.record_upload.mark_unchanged();
 }
 
 /// Grows one SDF batch's buffers and inert mesh to fit its live records.
@@ -1278,7 +1337,7 @@ pub(crate) fn grow_sdf_batch_assets(
     gpu.mesh_records = mesh_records;
     gpu.mesh = mesh;
     gpu.capacity = capacity;
-    batch.records_dirty = false;
+    batch.record_upload.mark_unchanged();
 }
 
 /// Updates SDF batch entity placement and local `Aabb` from record bounds.
@@ -1294,7 +1353,7 @@ pub(crate) fn update_sdf_batch_bounds(
     material_table::record_sdf_driver_run(&mut run_order, material_table::SDF_DRIVER_BOUNDS);
 
     for (_, batch) in store.batches_mut() {
-        if !batch.bounds_dirty {
+        if !batch.bounds_update.is_changed() {
             continue;
         }
         let Some(entity) = batch.entity else {
@@ -1313,7 +1372,7 @@ pub(crate) fn update_sdf_batch_bounds(
             center:       Vec3A::ZERO,
             half_extents: Vec3A::from((max - min) * 0.5),
         };
-        batch.bounds_dirty = false;
+        batch.bounds_update.mark_unchanged();
     }
 }
 
@@ -1322,23 +1381,46 @@ pub(crate) fn commit_sdf_batch_buffers(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
     mut store: ResMut<SdfBatchStore>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut perf: ResMut<DiegeticPerfStats>,
+    mut diagnostics: ResMut<SdfRecordDiagnostics>,
 ) {
     #[cfg(test)]
     material_table::record_sdf_driver_run(&mut run_order, material_table::SDF_DRIVER_COMMIT);
 
+    let mut uploads = 0_usize;
+    let mut batches = 0_usize;
+    let mut records = 0_usize;
+    diagnostics.records.clear();
     for (_, batch) in store.batches_mut() {
-        if !batch.records_dirty {
+        batches += 1;
+        records += batch.records().len();
+        for resolved in batch.records() {
+            let record = SdfRenderRecord::from_resolved(resolved);
+            diagnostics.records.push(SdfRecordSnapshot {
+                fill_material:   record.fill_material.as_u32(),
+                border_material: record.border_material.as_u32(),
+                paint_mask:      record.paint_mask.bits(),
+                half_size:       record.half_size,
+                mesh_half_size:  record.mesh_half_size,
+                flags:           record.flags,
+            });
+        }
+        if !batch.record_upload.is_changed() {
             continue;
         }
         let Some(gpu) = &batch.gpu else {
             continue;
         };
         let payload = padded_sdf_render_records(batch.records(), gpu.capacity);
-        batch.records_dirty = false;
+        batch.record_upload.mark_unchanged();
         if let Some(mut buffer) = storage_buffers.get_mut(&gpu.records) {
             buffer.set_data(payload);
+            uploads += 1;
         }
     }
+    perf.panel_geometry.sdf_batches = batches;
+    perf.panel_geometry.sdf_records = records;
+    perf.panel_geometry.sdf_uploads = uploads;
 }
 
 #[cfg(test)]
@@ -1378,12 +1460,11 @@ mod tests {
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::layout::TextStyle;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::panel::SurfaceShadow;
     use crate::render::PathExtendedMaterial;
-    use crate::render::constants::SDF_KIND_ROUNDED_RECT;
-    use crate::render::constants::SDF_ROUNDED_RECT_PARAMS;
     use crate::render::material_table::FrameMaterialSlotAppend;
     use crate::render::material_table::FrameMaterialTableBuild;
     use crate::render::material_table::INVALID_GPU_MATERIAL_SLOT;
@@ -1395,6 +1476,7 @@ mod tests {
     use crate::render::panel_geometry::PanelGeometryPlugin;
     use crate::render::panel_geometry::ResolvedSdfMaterial;
     use crate::render::panel_geometry::ResolvedSdfSurface;
+    use crate::render::panel_geometry::SdfRoleAuthorship;
     use crate::text::DiegeticTextMeasurer;
 
     const SDF_SETTLE_FRAMES: usize = 3;
@@ -1475,6 +1557,31 @@ mod tests {
         builder.build()
     }
 
+    /// Text-command state used by `text_toggle_tree`.
+    #[derive(Clone, Copy)]
+    enum TextContentState {
+        /// The tree includes one text command after the background.
+        Present,
+        /// The tree includes only the background command.
+        Removed,
+    }
+
+    fn text_toggle_tree(text_content_state: TextContentState) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
+        builder.with(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .background(Color::WHITE),
+            |builder| {
+                if matches!(text_content_state, TextContentState::Present) {
+                    builder.text("Alpha", TextStyle::new(10.0));
+                }
+            },
+        );
+        builder.build()
+    }
+
     fn topology_churn_tree(survivor: Color, added: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
         builder.with(
@@ -1526,6 +1633,22 @@ mod tests {
             .world_mut()
             .query_filtered::<Entity, With<DiegeticSdfFillBatch>>();
         query.iter(app.world()).count()
+    }
+
+    fn live_sdf_batch_entities(app: &mut App) -> Vec<Entity> {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<DiegeticSdfFillBatch>>();
+        let mut entities: Vec<Entity> = query.iter(app.world()).collect();
+        entities.sort_by_key(|entity| entity.to_bits());
+        entities
+    }
+
+    fn sdf_batch_visibilities(app: &mut App) -> Vec<Visibility> {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<&Visibility, With<DiegeticSdfFillBatch>>();
+        query.iter(app.world()).copied().collect()
     }
 
     fn linear_color(color: Color) -> Vec4 {
@@ -1716,7 +1839,12 @@ mod tests {
         let mut builder = FrameMaterialTableBuilder::default();
         builder.clear(0);
         let material = StandardMaterial::default();
-        let surface = resolved_surface_for_test(0, &material, true, true);
+        let surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
 
         let append = append_sdf_record_materials(&mut builder, &surface);
 
@@ -1730,7 +1858,12 @@ mod tests {
         let mut builder = FrameMaterialTableBuilder::default();
         builder.clear(1);
         let material = StandardMaterial::default();
-        let surface = resolved_surface_for_test(0, &material, true, true);
+        let surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
 
         let append = append_sdf_record_materials(&mut builder, &surface);
 
@@ -1743,12 +1876,43 @@ mod tests {
     fn two_role_append_keeps_fill_and_border_when_both_rows_fit() {
         let mut builder = FrameMaterialTableBuilder::default();
         let material = StandardMaterial::default();
-        let surface = resolved_surface_for_test(0, &material, true, true);
+        let surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
         builder.clear(2);
         let append = append_sdf_record_materials(&mut builder, &surface)
             .expect("both authored roles fit when two rows remain");
 
         assert_eq!(builder.row_count(), 2);
+        assert!(matches!(append.fill, SdfPaintMaterial::Authored(_)));
+        assert!(matches!(append.border, SdfPaintMaterial::Authored(_)));
+    }
+
+    #[test]
+    fn sdf_fallback_material_uses_blend_for_roles_without_base_material() {
+        let mut builder = FrameMaterialTableBuilder::default();
+        let material = StandardMaterial {
+            alpha_mode: AlphaMode::Opaque,
+            ..Default::default()
+        };
+        let mut surface = resolved_surface_for_test(
+            0,
+            &material,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Authored,
+        );
+        surface.fill_material.base_material = None;
+        surface.border_material.base_material = None;
+        builder.clear(2);
+
+        let append = append_sdf_record_materials(&mut builder, &surface)
+            .expect("color-authored SDF roles should append fallback material rows");
+
+        assert_eq!(builder.row_count(), 2);
+        assert_eq!(append.pipeline_compatibility.alpha, BatchAlphaMode::Blend);
         assert!(matches!(append.fill, SdfPaintMaterial::Authored(_)));
         assert!(matches!(append.border, SdfPaintMaterial::Authored(_)));
     }
@@ -1812,50 +1976,60 @@ mod tests {
 
     #[test]
     fn alpha_mode_and_culling_configure_sdf_batch_material() {
-        for cull_mode in [None, Some(Face::Back), Some(Face::Front)] {
-            let mut pipeline_compatibility = PipelineCompatibility::from(&StandardMaterial {
-                alpha_mode: AlphaMode::Opaque,
-                double_sided: cull_mode.is_none(),
-                cull_mode,
-                unlit: true,
-                fog_enabled: false,
-                deferred_lighting_pass_id: 3,
-                ..Default::default()
-            });
-            pipeline_compatibility.double_sided = cull_mode.is_none();
-            let key = SdfBatchKey {
-                panel_entity: Entity::from_bits(1),
-                z_level: 0,
-                layers: BatchRenderLayers(RenderLayers::layer(0)),
-                shadow: VisualShadow::Cast,
-                contiguous_drawn_run: ContiguousDrawnRun::default(),
-                pipeline_compatibility,
-                resource_compatibility: ResourceCompatibility::from(&StandardMaterial::default()),
-            };
-            let material = sdf_batch_material(SdfBatchMaterialInput {
-                key,
-                records: Handle::default(),
-                mesh_records: Handle::default(),
-            });
+        for shadow in [VisualShadow::None, VisualShadow::Cast] {
+            for cull_mode in [None, Some(Face::Back), Some(Face::Front)] {
+                let mut pipeline_compatibility = PipelineCompatibility::from(&StandardMaterial {
+                    alpha_mode: AlphaMode::Opaque,
+                    double_sided: cull_mode.is_none(),
+                    cull_mode,
+                    unlit: true,
+                    fog_enabled: false,
+                    deferred_lighting_pass_id: 3,
+                    ..Default::default()
+                });
+                pipeline_compatibility.double_sided = cull_mode.is_none();
+                let key = SdfBatchKey {
+                    panel_entity: Entity::from_bits(1),
+                    z_level: 0,
+                    layers: BatchRenderLayers(RenderLayers::layer(0)),
+                    shadow,
+                    contiguous_drawn_run: ContiguousDrawnRun::default(),
+                    pipeline_compatibility,
+                    resource_compatibility: ResourceCompatibility::from(
+                        &StandardMaterial::default(),
+                    ),
+                };
+                let material = sdf_batch_material(SdfBatchMaterialInput {
+                    key,
+                    records: Handle::default(),
+                    mesh_records: Handle::default(),
+                });
 
-            assert_eq!(material.base.alpha_mode, AlphaMode::Mask(0.0));
-            assert_eq!(material.base.cull_mode, cull_mode);
-            assert_eq!(material.base.double_sided, cull_mode.is_none());
-            assert!(material.base.unlit);
-            assert!(!material.base.fog_enabled);
-            assert_eq!(material.base.deferred_lighting_pass_id, 3);
+                let expected_alpha = match shadow {
+                    VisualShadow::Cast => AlphaMode::Mask(0.0),
+                    VisualShadow::None => AlphaMode::Opaque,
+                };
+                assert_eq!(material.base.alpha_mode, expected_alpha);
+                assert_eq!(material.base.cull_mode, cull_mode);
+                assert_eq!(material.base.double_sided, cull_mode.is_none());
+                assert!(material.base.unlit);
+                assert!(!material.base.fog_enabled);
+                assert_eq!(material.base.deferred_lighting_pass_id, 3);
+            }
         }
     }
 
     #[test]
-    fn non_casting_opaque_sdf_batches_keep_authored_alpha_mode() {
-        assert_eq!(
-            sdf_batch_alpha_mode(AlphaMode::Opaque.into(), VisualShadow::None),
-            AlphaMode::Opaque
-        );
+    fn opaque_sdf_batches_use_mask_gpu_alpha_mode() {
+        // Casting opaque batches map to Mask(0.0) to retain the material group on
+        // the shadow/prepass pipeline; non-casting opaque batches stay Opaque.
         assert_eq!(
             sdf_batch_alpha_mode(AlphaMode::Opaque.into(), VisualShadow::Cast),
             AlphaMode::Mask(0.0)
+        );
+        assert_eq!(
+            sdf_batch_alpha_mode(AlphaMode::Opaque.into(), VisualShadow::None),
+            AlphaMode::Opaque
         );
         for mode in [
             AlphaMode::Mask(0.25),
@@ -1865,7 +2039,9 @@ mod tests {
             AlphaMode::Multiply,
             AlphaMode::AlphaToCoverage,
         ] {
-            assert_eq!(sdf_batch_alpha_mode(mode.into(), VisualShadow::Cast), mode);
+            for shadow in [VisualShadow::None, VisualShadow::Cast] {
+                assert_eq!(sdf_batch_alpha_mode(mode.into(), shadow), mode);
+            }
         }
     }
 
@@ -1879,9 +2055,24 @@ mod tests {
             alpha_mode: AlphaMode::Add,
             ..Default::default()
         };
-        let surface_0 = resolved_surface_for_test(0, &material_a, true, false);
-        let surface_1 = resolved_surface_for_test(1, &material_b, true, false);
-        let surface_2 = resolved_surface_for_test(2, &material_a, true, false);
+        let surface_0 = resolved_surface_for_test(
+            0,
+            &material_a,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        let surface_1 = resolved_surface_for_test(
+            1,
+            &material_b,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        let surface_2 = resolved_surface_for_test(
+            2,
+            &material_a,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
         let records = assign_contiguous_runs(vec![
             (slots_for_test(0, &material_a), &surface_0),
             (slots_for_test(1, &material_b), &surface_1),
@@ -1976,6 +2167,27 @@ mod tests {
     }
 
     #[test]
+    fn sdf_batch_entities_spawn_visible_for_production_route() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let visibilities = sdf_batch_visibilities(&mut app);
+
+        assert_eq!(visibilities.len(), 1);
+        assert!(
+            visibilities
+                .iter()
+                .all(|visibility| *visibility != Visibility::Hidden),
+            "production SDF batch entities must not spawn hidden"
+        );
+    }
+
+    #[test]
     fn unchanged_sdf_frame_rewrites_only_the_material_table_buffer() {
         let mut app = sdf_pipeline_app();
         spawn_sdf_panel(
@@ -1996,6 +2208,68 @@ mod tests {
         assert_eq!(modified_asset_events::<SdfExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<PathExtendedMaterial>(&app), 0);
         assert_eq!(modified_asset_events::<ShaderBuffer>(&app), 1);
+    }
+
+    #[test]
+    fn text_toggle_updates_sdf_oit_depth_offset_without_replacing_batch_entity() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            text_toggle_tree(TextContentState::Present),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entity_before = live_sdf_batch_entities(&mut app);
+        let records_before = sdf_records(&app);
+        assert_eq!(entity_before.len(), 1);
+        assert_eq!(records_before.len(), 1);
+        assert_eq!(
+            records_before[0].oit_depth_offset.to_bits(),
+            (-crate::render::constants::OIT_DEPTH_STEP).to_bits()
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, text_toggle_tree(TextContentState::Removed));
+        settle_sdf_pipeline(&mut app);
+
+        let entity_after = live_sdf_batch_entities(&mut app);
+        let records_after = sdf_records(&app);
+        assert_eq!(entity_after, entity_before);
+        assert_eq!(records_after.len(), 1);
+        assert_eq!(
+            records_after[0].oit_depth_offset.to_bits(),
+            0.0_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn color_only_sdf_updates_keep_the_batch_entity() {
+        let mut app = sdf_pipeline_app();
+        let panel = spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::WHITE),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let entity_before = live_sdf_batch_entities(&mut app);
+        assert_eq!(entity_before.len(), 1);
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, single_surface_tree(Color::srgb(0.7, 0.2, 0.1)));
+        settle_sdf_pipeline(&mut app);
+
+        let entity_after = live_sdf_batch_entities(&mut app);
+        let records_after = sdf_records(&app);
+        assert_eq!(entity_after, entity_before);
+        assert_eq!(records_after.len(), 1);
+        assert_eq!(
+            fill_row_color(&app, &records_after[0]),
+            linear_color(Color::srgb(0.7, 0.2, 0.1))
+        );
     }
 
     #[test]
@@ -2241,6 +2515,17 @@ mod tests {
             ..Default::default()
         };
 
+        add_sdf_stripped_material_group_def(&mut descriptor, false);
+        assert!(descriptor.vertex.shader_defs.is_empty());
+        assert!(
+            descriptor
+                .fragment
+                .as_ref()
+                .expect("fragment state should exist")
+                .shader_defs
+                .is_empty()
+        );
+
         add_sdf_stripped_material_group_def(&mut descriptor, true);
 
         let stripped = ShaderDefVal::from("SDF_STRIPPED_MATERIAL_GROUP");
@@ -2282,22 +2567,22 @@ mod tests {
     fn resolved_surface_for_test(
         command_index: usize,
         material: &StandardMaterial,
-        fill_authored: bool,
-        border_authored: bool,
+        fill_authorship: SdfRoleAuthorship,
+        border_authorship: SdfRoleAuthorship,
     ) -> ResolvedSdfSurface<'_> {
         ResolvedSdfSurface {
             panel_entity:    Entity::from_bits(1),
             command_index:   CommandIndex::from(command_index),
             draw_depth:      draw_depth_for_test(command_index),
             fill_material:   ResolvedSdfMaterial {
-                authored:      fill_authored,
+                authorship:    fill_authorship,
                 base_material: Some(material),
-                color:         fill_authored.then_some(Color::WHITE),
+                color:         fill_authorship.is_authored().then_some(Color::WHITE),
             },
             border_material: ResolvedSdfMaterial {
-                authored:      border_authored,
+                authorship:    border_authorship,
                 base_material: Some(material),
-                color:         border_authored.then_some(Color::BLACK),
+                color:         border_authorship.is_authored().then_some(Color::BLACK),
             },
             local_center:    Vec2::ZERO,
             local_transform: Transform::IDENTITY,
@@ -2308,8 +2593,6 @@ mod tests {
             clip_rect:       Vec4::new(-1.0, -1.0, 1.0, 1.0),
             render_layers:   RenderLayers::layer(0),
             surface_shadow:  SurfaceShadow::Off,
-            sdf_kind:        SDF_KIND_ROUNDED_RECT,
-            sdf_params:      SDF_ROUNDED_RECT_PARAMS,
         }
     }
 

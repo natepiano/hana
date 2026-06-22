@@ -219,7 +219,7 @@ impl SdfPaintMaterial {
 /// scalar fields without a depth-map resource, lightmap exposure, and
 /// feature-gated texture-channel values whose textures are absent remain
 /// deferred until a render-family design intentionally consumes them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, ShaderType)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Reflect, ShaderType)]
 pub(crate) struct MaterialSlotValues {
     /// `StandardMaterialUniform::base_color` read by material-table shaders.
     pub base_color:                     Vec4,
@@ -407,7 +407,8 @@ where
 }
 
 /// Current-frame dense material-table payload extracted with record buffers.
-#[derive(Clone, Debug, Default, Resource)]
+#[derive(Clone, Debug, Default, Reflect, Resource)]
+#[reflect(Resource)]
 pub(crate) struct FrameMaterialTable {
     /// Dense material rows in producer traversal order for this frame.
     rows: Vec<MaterialSlotValues>,
@@ -456,7 +457,7 @@ impl FrameMaterialTable {
 }
 
 /// Append-only material-table builder for one main-world frame.
-#[derive(Debug)]
+#[derive(Debug, Reflect)]
 pub(crate) struct FrameMaterialTableBuilder {
     /// Dense rows appended by current-frame producers.
     rows:            Vec<MaterialSlotValues>,
@@ -544,7 +545,8 @@ impl FrameMaterialTableBuilder {
 }
 
 /// Main-world owner for the frame table builder and frozen output.
-#[derive(Debug, Resource)]
+#[derive(Debug, Reflect, Resource)]
+#[reflect(Resource)]
 pub(crate) struct FrameMaterialTableBuild {
     /// Single builder shared by SDF, text, and panel-shape producers.
     builder:   FrameMaterialTableBuilder,
@@ -591,15 +593,18 @@ impl FrameMaterialTableBuild {
 }
 
 /// Main-world material-table storage-buffer handle and capacity.
-#[derive(Clone, Debug, Default, Resource)]
+#[derive(Clone, Debug, Default, Reflect, Resource)]
+#[reflect(Resource)]
 pub(crate) struct MaterialTableBuffer {
     /// Shader buffer asset handle registered on batch materials.
+    #[reflect(ignore)]
     pub handle:      Option<Handle<ShaderBuffer>>,
     /// Row capacity represented by `handle`.
     pub capacity:    u32,
     /// Number of buffer assets allocated for table capacity growth.
     pub allocations: u32,
     /// Table-buffer handle last rebound into all registered path materials.
+    #[reflect(ignore)]
     bound_handle:    Option<Handle<ShaderBuffer>>,
 }
 
@@ -627,11 +632,13 @@ pub(crate) struct ExtractedFrameMaterialTable {
 }
 
 /// One path batch material registered for material-table rebinding.
-#[derive(Debug)]
+#[derive(Debug, Reflect)]
 struct RegisteredPathMaterial {
     /// Batch material handle.
+    #[reflect(ignore)]
     material:     Handle<PathExtendedMaterial>,
     /// Table-buffer handle last written to `PathExtension::material_table`.
+    #[reflect(ignore)]
     bound_handle: Option<Handle<ShaderBuffer>>,
 }
 
@@ -642,11 +649,13 @@ impl RegisteredPathMaterial {
 }
 
 /// One SDF batch material registered for material-table rebinding.
-#[derive(Debug)]
+#[derive(Debug, Reflect)]
 struct RegisteredSdfMaterial {
     /// Batch material handle.
+    #[reflect(ignore)]
     material:     Handle<SdfExtendedMaterial>,
     /// Table-buffer handle last written to `SdfExtension::material_table`.
+    #[reflect(ignore)]
     bound_handle: Option<Handle<ShaderBuffer>>,
 }
 
@@ -657,7 +666,8 @@ impl RegisteredSdfMaterial {
 }
 
 /// Registered batch material handles that need table-buffer rebinding.
-#[derive(Debug, Default, Resource)]
+#[derive(Debug, Default, Reflect, Resource)]
+#[reflect(Resource)]
 pub(crate) struct BatchMaterialTableRegistry {
     /// Path batch material handles keyed by their owning batch entity.
     path_materials: HashMap<Entity, RegisteredPathMaterial>,
@@ -1226,6 +1236,7 @@ fn synthetic_color(index: usize) -> Color {
     reason = "tests should panic on unexpected fixture setup"
 )]
 mod tests {
+    use bevy::asset::AssetPlugin;
     use bevy::ecs::schedule::NodeId;
     use bevy::ecs::schedule::Schedule;
     use bevy::ecs::schedule::Schedules;
@@ -1241,6 +1252,7 @@ mod tests {
     use crate::render::PathAtlasHandles;
     use crate::render::RenderMode;
     use crate::render::batch_key::BatchAlphaMode;
+    use crate::render::fill_batch::FillBatchPlugin;
     use crate::render::panel_shapes::PanelShapePlugin;
     use crate::render::panel_text::TextRenderPlugin;
 
@@ -1716,7 +1728,13 @@ mod tests {
     #[test]
     fn batch_system_sets_resolve_before_material_table_update() {
         let mut app = App::new();
-        app.add_plugins((MaterialTablePlugin, TextRenderPlugin, PanelShapePlugin));
+        app.add_plugins(AssetPlugin::default());
+        app.add_plugins((
+            MaterialTablePlugin,
+            TextRenderPlugin,
+            PanelShapePlugin,
+            FillBatchPlugin,
+        ));
         let batch_system_names = with_initialized_post_update(&mut app, |schedule| {
             let update_text = schedule
                 .systems()
@@ -1760,9 +1778,12 @@ mod tests {
 
         for required in [
             "register_path_batch_materials",
+            "register_sdf_batch_materials",
             "reconcile_panel_line_batches",
+            "reconcile_sdf_batch_entities",
             "commit_batch_buffers",
             "commit_panel_line_batch_buffers",
+            "commit_sdf_batch_buffers",
         ] {
             assert!(
                 batch_system_names

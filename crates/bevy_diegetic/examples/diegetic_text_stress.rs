@@ -1611,7 +1611,9 @@ struct BatchStatsValues {
     line_batches:      usize,
     line_records:      usize,
     line_uploads:      usize,
-    sdf_quads:         usize,
+    sdf_batches:       usize,
+    sdf_records:       usize,
+    sdf_uploads:       usize,
     shadow_items:      u32,
     /// Caster draws per shadow view (largest first).
     shadow_per_view:   Vec<u32>,
@@ -1643,10 +1645,12 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<StatsPanelRow> {
             ),
             "text and panel lines use separate batch stores".to_string(),
         ]),
-        StatsPanelRow::new("sdf surface draws", values.sdf_quads.to_string()).details([
+        StatsPanelRow::new("sdf batches", values.sdf_batches.to_string()).details([
             "backgrounds, borders, separator rectangles".to_string(),
-            "one retained PanelSdfMesh per surface".to_string(),
+            "visible SDF batch entities".to_string(),
         ]),
+        StatsPanelRow::new("sdf records", values.sdf_records.to_string())
+            .detail("panel chrome records across all SDF batches"),
         StatsPanelRow::new("text batches", values.text_batches.to_string()).details([
             "PathBatchStore: compatible text/shapes share draws".to_string(),
             "labels and panel text route together by key".to_string(),
@@ -1661,12 +1665,17 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<StatsPanelRow> {
             .detail("analytic path instances across line batches"),
         StatsPanelRow::new(
             "buffer uploads",
-            (values.text_instance_up + values.text_run_table_up + values.line_uploads).to_string(),
+            (values.text_instance_up
+                + values.text_run_table_up
+                + values.line_uploads
+                + values.sdf_uploads)
+                .to_string(),
         )
         .details([
             format!("text instances: {}", values.text_instance_up),
             format!("text run table: {}", values.text_run_table_up),
             format!("panel-line buffers: {}", values.line_uploads),
+            format!("sdf buffers: {}", values.sdf_uploads),
         ]),
         StatsPanelRow::new("shadow", values.shadow_items.to_string())
             .details(shadow_details(&values.shadow_per_view)),
@@ -1716,6 +1725,7 @@ fn update_batch_stats_panel(
 
     let batch = &diegetic_perf.batch;
     let line_batch = diegetic_perf.line_batch;
+    let sdf = diegetic_perf.panel_geometry;
     let values = BatchStatsValues {
         text_batches:      batch.batches,
         text_runs:         batch.runs,
@@ -1725,7 +1735,9 @@ fn update_batch_stats_panel(
         line_batches:      line_batch.batches,
         line_records:      line_batch.records,
         line_uploads:      line_batch.uploads,
-        sdf_quads:         diegetic_perf.panel_geometry.sdf_quads,
+        sdf_batches:       sdf.sdf_batches,
+        sdf_records:       sdf.sdf_records,
+        sdf_uploads:       sdf.sdf_uploads,
         shadow_items:      draw_counts.shadow_items(),
         shadow_per_view:   draw_counts.shadow_per_view(),
     };
