@@ -35,6 +35,7 @@ pub(crate) use material::set_batch_path_material_buffers;
 pub(crate) use material::set_path_material_anti_alias;
 pub(crate) use material::set_path_material_atlas;
 pub(crate) use material::set_path_material_hairline;
+pub(crate) use material::set_path_material_table_buffer;
 pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
 pub(crate) use packing::DEFAULT_BAND_COUNT;

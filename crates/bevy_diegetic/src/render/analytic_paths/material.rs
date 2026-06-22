@@ -81,26 +81,29 @@ const HAIRLINE_DEFAULT_DEVICE_PX: f32 = 2.0;
 pub struct PathExtension {
     /// Shader uniforms.
     #[uniform(100)]
-    uniforms:     PathUniform,
+    uniforms:       PathUniform,
     /// Shared path record band-packed quadratic curve records.
     #[storage(101, read_only)]
-    curves:       Handle<ShaderBuffer>,
+    curves:         Handle<ShaderBuffer>,
     /// Shared path along-Y/along-X band records.
     #[storage(102, read_only)]
-    bands:        Handle<ShaderBuffer>,
+    bands:          Handle<ShaderBuffer>,
     /// Shared path records, indexed by each atlas record's `atlas_index`.
     #[storage(103, read_only)]
-    path_records: Handle<ShaderBuffer>,
+    path_records:   Handle<ShaderBuffer>,
     /// Per-path instance records read by the vertex-pulling stage.
     #[storage(104, read_only, visibility(vertex))]
-    instances:    Handle<ShaderBuffer>,
+    instances:      Handle<ShaderBuffer>,
     /// Per-run records (world transform, fill color, render mode, depth
     /// nudge) read by the vertex-pulling stages.
     #[storage(105, read_only, visibility(vertex, fragment))]
-    run_records:  Handle<ShaderBuffer>,
+    run_records:    Handle<ShaderBuffer>,
+    /// Shared `MaterialSlotValues` table read by migrated path fragments.
+    #[storage(106, read_only, visibility(fragment))]
+    material_table: Handle<ShaderBuffer>,
     /// Routes this material's vertex stages (main, prepass, shadow) through
     /// `analytic_path_vertex_pull.wgsl` instead of the standard mesh vertex stage.
-    vertex_pull:  bool,
+    vertex_pull:    bool,
 }
 
 #[cfg(test)]
@@ -241,6 +244,7 @@ pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathExtended
             path_records,
             instances,
             run_records,
+            material_table: Handle::default(),
             vertex_pull: true,
         },
     }
@@ -255,6 +259,14 @@ pub(crate) fn set_batch_path_material_buffers(
 ) {
     material.extension.instances = instances;
     material.extension.run_records = run_records;
+}
+
+/// Repoints a path batch material at the current frame material table buffer.
+pub(crate) fn set_path_material_table_buffer(
+    material: &mut PathExtendedMaterial,
+    material_table: Handle<ShaderBuffer>,
+) {
+    material.extension.material_table = material_table;
 }
 
 /// Repoints a path material at replacement shared-atlas buffers after the

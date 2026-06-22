@@ -23,6 +23,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 
 use bevy_kana::ToF32;
+use bevy_kana::ToU32;
 
 use super::constants::DRAW_LEVEL_FILL_SUBLANE;
 use super::constants::DRAW_LEVEL_GEOMETRY_LANES;
@@ -47,6 +48,20 @@ pub(crate) struct CommandIndex(
 pub(crate) struct ElementIndex(
     /// Slot in the `LayoutTree` element vector.
     usize,
+);
+
+/// Zero-based ordinal of a panel-shape source inside one panel's command stream.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ShapeOrdinal(
+    /// Source ordinal assigned while traversing panel-shape commands.
+    u32,
+);
+
+/// Zero-based ordinal of a primitive inside one resolved panel-shape source.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct PrimitiveOrdinal(
+    /// Primitive ordinal assigned while expanding one panel-shape source.
+    u32,
 );
 
 /// Shared draw-order ordinal for a panel's coplanar children.
@@ -111,6 +126,34 @@ impl ElementIndex {
 
 impl From<usize> for ElementIndex {
     fn from(value: usize) -> Self { Self(value) }
+}
+
+impl From<usize> for ShapeOrdinal {
+    fn from(value: usize) -> Self { Self(value.to_u32()) }
+}
+
+impl ShapeOrdinal {
+    /// Returns the panel-shape source ordinal as the GPU-friendly row value.
+    #[must_use]
+    #[expect(
+        dead_code,
+        reason = "Phase 9 panel-shape records will write this ordinal into GPU records"
+    )]
+    pub(crate) const fn as_u32(self) -> u32 { self.0 }
+}
+
+impl From<usize> for PrimitiveOrdinal {
+    fn from(value: usize) -> Self { Self(value.to_u32()) }
+}
+
+impl PrimitiveOrdinal {
+    /// Returns the primitive ordinal as the GPU-friendly row value.
+    #[must_use]
+    #[expect(
+        dead_code,
+        reason = "Phase 9 panel-shape records will write this ordinal into GPU records"
+    )]
+    pub(crate) const fn as_u32(self) -> u32 { self.0 }
 }
 
 impl ScreenDepthBias {

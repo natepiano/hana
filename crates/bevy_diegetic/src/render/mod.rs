@@ -10,6 +10,7 @@ mod draw_order_limits;
 mod material;
 #[cfg(test)]
 mod material_slot_lifetime_probe;
+mod material_table;
 mod panel_geometry;
 mod panel_shapes;
 mod panel_text;
@@ -47,6 +48,7 @@ pub(crate) use analytic_paths::build_packed_path;
 pub(crate) use analytic_paths::path_material_oit_depth_offset;
 pub(crate) use analytic_paths::set_batch_path_material_buffers;
 pub(crate) use analytic_paths::set_path_material_atlas;
+pub(crate) use analytic_paths::set_path_material_table_buffer;
 pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
@@ -60,10 +62,21 @@ use bevy::window::PrimaryWindow;
 pub(crate) use draw_order::CommandIndex;
 pub(crate) use draw_order::DrawOrderProjection;
 pub(crate) use draw_order::ElementIndex;
+#[expect(
+    unused_imports,
+    reason = "Phase 2 publishes shared ordinals before Phase 9 panel-shape routing consumes them"
+)]
+pub(crate) use draw_order::PrimitiveOrdinal;
+#[expect(
+    unused_imports,
+    reason = "Phase 2 publishes shared ordinals before Phase 9 panel-shape routing consumes them"
+)]
+pub(crate) use draw_order::ShapeOrdinal;
 use draw_order_limits::warn_panel_draw_order_limits;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::resolve_material;
+use material_table::MaterialTablePlugin;
 use panel_geometry::PanelGeometryPlugin;
 use panel_shapes::PanelShapePlugin;
 pub use panel_text::DiegeticTextBatch;
@@ -358,6 +371,7 @@ pub(crate) struct RenderPlugin;
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            MaterialTablePlugin,
             AnalyticPathPlugin,
             TextRenderPlugin,
             PanelGeometryPlugin,

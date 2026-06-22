@@ -30,6 +30,8 @@ pub use self::relationship::PanelTextRuns;
 pub use self::relationship::TextRunOf;
 use self::shaping::shape_panel_text_children;
 use super::PanelChildSystems;
+use super::material_table;
+use super::material_table::BatchResourcesReady;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
@@ -100,15 +102,23 @@ impl Plugin for TextRenderPlugin {
             (
                 update_panel_text_batches
                     .after(shape_panel_text_children)
-                    .before(TransformSystems::Propagate),
-                write_batch_run_transforms.after(TransformSystems::Propagate),
+                    .before(TransformSystems::Propagate)
+                    .before(BatchResourcesReady),
+                material_table::register_path_batch_materials::<DiegeticTextBatch>
+                    .after(update_panel_text_batches)
+                    .in_set(BatchResourcesReady),
+                write_batch_run_transforms
+                    .after(TransformSystems::Propagate)
+                    .in_set(BatchResourcesReady),
                 update_batch_bounds
                     .after(write_batch_run_transforms)
                     .after(VisibilitySystems::CalculateBounds)
-                    .before(VisibilitySystems::CheckVisibility),
+                    .before(VisibilitySystems::CheckVisibility)
+                    .in_set(BatchResourcesReady),
                 commit_batch_buffers
                     .after(update_panel_text_batches)
-                    .after(write_batch_run_transforms),
+                    .after(write_batch_run_transforms)
+                    .in_set(BatchResourcesReady),
             ),
         );
     }
