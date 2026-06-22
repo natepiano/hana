@@ -7,6 +7,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
@@ -18,7 +19,6 @@ use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
 use bevy_liminal::OutlineMethod;
 use bevy_liminal::OverlapMode;
-use bevy_window_manager::WindowManagerPlugin;
 
 // camera and lighting
 const CAMERA_FOCUS: Vec3 = Vec3::ZERO;

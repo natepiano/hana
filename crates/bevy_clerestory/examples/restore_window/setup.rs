@@ -4,7 +4,7 @@ use bevy::ui::UiTargetCamera;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
 use bevy::window::WindowResolution;
-use bevy_window_manager::ManagedWindow;
+use bevy_clerestory::ManagedWindow;
 
 use super::constants::FONT_SIZE;
 use super::constants::MANAGED_WINDOW_NAME_PREFIX;

@@ -2,7 +2,7 @@
 # Usage: windows_detect_zed_monitor.ps1 <mon0_x> <mon0_y> <mon0_scale> <mon1_x> <mon1_y> <mon1_scale>
 # Outputs: "0" or "1" for the Bevy monitor index, or exits with error
 #
-# Finds the Zed window titled "bevy_window_manager" (handles multiple Zed windows)
+# Finds the Zed window titled "bevy_clerestory" (handles multiple Zed windows)
 # Matches Windows monitor to Bevy monitor by comparing positions (accounting for scale)
 
 param(
@@ -83,7 +83,7 @@ public class Win32Monitor {
     }
 
     public static IntPtr ZedWindow = IntPtr.Zero;
-    public static string TargetTitle = "bevy_window_manager";
+    public static string TargetTitle = "bevy_clerestory";
 
     public static bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam) {
         if (!IsWindowVisible(hWnd)) return true;
@@ -131,7 +131,7 @@ if ($monitors.Count -eq 0) {
 $zedHwnd = [Win32Monitor]::FindZedWindow()
 
 if ($zedHwnd -eq [IntPtr]::Zero) {
-    Write-Error "ERROR: Could not find Zed window titled 'bevy_window_manager'"
+    Write-Error "ERROR: Could not find Zed window titled 'bevy_clerestory'"
     exit 1
 }
 

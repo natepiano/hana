@@ -9,6 +9,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -27,7 +28,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_window_manager::WindowManagerPlugin;
 
 /// World-space panel height. Width follows the window aspect ratio.
 const PANEL_WORLD_HEIGHT: f32 = 3.1;

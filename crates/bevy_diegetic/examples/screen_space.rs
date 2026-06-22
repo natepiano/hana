@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
@@ -20,7 +21,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_window_manager::WindowManagerPlugin;
 
 const PANEL_WIDTH: f32 = 480.0;
 const PANEL_HEIGHT: f32 = 310.0;

@@ -12,12 +12,12 @@ version    = "0.0.1"
 
 [workspace.dependencies]
 bevy = { version = "0.19.0", default-features = false }
+bevy_diagnostic = "0.19.0"
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
 ] }
 bevy_kana = { path = "crates/bevy_kana" }
 bevy_render = "0.19.0"
-bevy_valence = { path = "crates/bevy_valence" }
 bitflags = "2"
 bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
@@ -30,12 +30,15 @@ trybuild = "1"
 ttf-parser = "0.25"
 
 # dev-dependencies
-bevy_brp_extras     = "0.20.1"
-bevy_lagrange       = { path = "crates/bevy_lagrange" }
-bevy_window_manager = "0.21.0"
-clay-layout         = { path = "vendor/clay-layout" }
-criterion           = { version = "0.8.2", features = ["html_reports"] }
-float-cmp           = "0.10.0"
+bevy_brp_extras = "0.20.1"
+bevy_clerestory = { path = "crates/bevy_clerestory" }
+bevy_diegetic   = { path = "crates/bevy_diegetic" }
+bevy_lagrange   = { path = "crates/bevy_lagrange" }
+bevy_valence    = { path = "crates/bevy_valence" }
+clay-layout     = { path = "vendor/clay-layout" }
+criterion       = { version = "0.8.2", features = ["html_reports"] }
+fairy_dust      = { path = "crates/fairy_dust" }
+float-cmp       = "0.10.0"
 
 [workspace.lints.clippy]
 # Our strict lints

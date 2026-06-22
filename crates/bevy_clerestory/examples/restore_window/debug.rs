@@ -5,7 +5,7 @@ use bevy::window::WindowMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WINIT_WINDOWS;
-use bevy_window_manager::Monitors;
+use bevy_clerestory::Monitors;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 enum FocusState {

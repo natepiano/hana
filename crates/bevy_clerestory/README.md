@@ -1,9 +1,9 @@
-# bevy_window_manager
+# bevy_clerestory
 
-[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natemccoy/bevy_window_manager#license)
-[![Crates.io](https://img.shields.io/crates/v/bevy_window_manager.svg)](https://crates.io/crates/bevy_window_manager)
-[![Downloads](https://img.shields.io/crates/d/bevy_window_manager.svg)](https://crates.io/crates/bevy_window_manager)
-[![CI](https://github.com/natepiano/bevy_window_manager/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/bevy_window_manager/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory#license)
+[![Crates.io](https://img.shields.io/crates/v/bevy_clerestory.svg)](https://crates.io/crates/bevy_clerestory)
+[![Downloads](https://img.shields.io/crates/d/bevy_clerestory.svg)](https://crates.io/crates/bevy_clerestory)
+[![CI](https://github.com/natepiano/hana/actions/workflows/ci.yml/badge.svg)](https://github.com/natepiano/hana/actions/workflows/ci.yml)
 
 
 A Bevy plugin for window state persistence and multi-monitor utilities.
@@ -14,7 +14,7 @@ Originally created as a mechanism to restore the `PrimaryWindow` to its last kno
 
 The first discovered issue is that winit uses the scale factor of the focused window from which you launch the application. And if the target monitor for the app has a different scale factor, then that will get factored into the size and position calculations resulting in something you definitely don't want.
 
-`bevy_window_manager` plugin works around this issue by using winit directly to capture actual monitor position/size/scale and comparing it to the target position/size for the window and does the conversions correctly.
+`bevy_clerestory` plugin works around this issue by using winit directly to capture actual monitor position/size/scale and comparing it to the target position/size for the window and does the conversions correctly.
 
 Windows has similar scale factor issues, plus additional quirks like invisible window borders that prevent precise placement. Linux X11 has its own quirks with window manager keyboard shortcuts not firing position events. This plugin now supports macOS, Windows, and Linux (X11 and Wayland) with workarounds for platform-specific issues (see [Platform Support](#platform-support) for details).
 
@@ -24,7 +24,7 @@ Future directions include comprehensive multi-monitor lifecycle support.
 
 ```rust
 use bevy::prelude::*;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_clerestory::WindowManagerPlugin;
 
 fn main() {
     App::new()
@@ -42,7 +42,7 @@ cargo run --example restore_window
 
 ## API
 
-This crate exposes several types for working with monitors and windows beyond the plugin itself. See [docs.rs](https://docs.rs/bevy_window_manager) for full API documentation.
+This crate exposes several types for working with monitors and windows beyond the plugin itself. See [docs.rs](https://docs.rs/bevy_clerestory) for full API documentation.
 
 ### `Monitors` Resource
 
@@ -84,7 +84,7 @@ fn my_system(q: Query<(&Window, &CurrentMonitor), With<PrimaryWindow>>) {
 Add `ManagedWindow` to any secondary window to opt it into save/restore:
 
 ```rust
-use bevy_window_manager::ManagedWindow;
+use bevy_clerestory::ManagedWindow;
 
 commands.spawn((
     Window {
@@ -105,8 +105,8 @@ Control what happens when windows are closed with `ManagedWindowPersistence`:
 - `ActiveOnly` — only currently open windows are persisted
 
 ```rust
-use bevy_window_manager::ManagedWindowPersistence;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_clerestory::ManagedWindowPersistence;
+use bevy_clerestory::WindowManagerPlugin;
 
 app.add_plugins(WindowManagerPlugin::with_persistence(ManagedWindowPersistence::ActiveOnly));
 ```
@@ -131,13 +131,9 @@ Legacy state files (unversioned and v1) are still accepted on read and migrated 
 
 ## Version Compatibility
 
-| bevy_window_manager | Bevy |
+| bevy_clerestory | Bevy |
 |---------------------|------|
-| 0.21                | 0.19 |
-| 0.20                | 0.18 |
-| 0.19                | 0.18 |
-| 0.18                | 0.18 |
-| 0.17                | 0.17 |
+| 0.1                 | 0.19 |
 
 ## Platform Support
 
@@ -184,12 +180,12 @@ In your `Cargo.toml`, you can selectively enable features:
 
 ```toml
 [dependencies]
-bevy_window_manager = { version = "0.21", default-features = false, features = ["workaround-winit-4341"] }
+bevy_clerestory = { version = "0.1", default-features = false, features = ["workaround-winit-4341"] }
 ```
 
 ## License
 
-`bevy_window_manager` is free, open source and permissively licensed!
+`bevy_clerestory` is free, open source and permissively licensed!
 Except where noted (below and/or in individual files), all code in this repository is dual-licensed under either:
 
 * MIT License ([LICENSE-MIT](LICENSE-MIT) or [http://opensource.org/licenses/MIT](http://opensource.org/licenses/MIT))

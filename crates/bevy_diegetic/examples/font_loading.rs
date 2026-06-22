@@ -13,6 +13,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_diegetic::Border;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
@@ -33,7 +34,6 @@ use bevy_kana::ToF32;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::WindowManagerPlugin;
 
 const ZOOM_MARGIN_TEXT: f32 = 0.3;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;

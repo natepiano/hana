@@ -54,7 +54,9 @@ use crate::constants::RON_HEADER;
 /// Typed identifier for persisted window state.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Reflect)]
 pub enum WindowKey {
+    /// The application's primary window.
     Primary,
+    /// A secondary managed window, identified by its name.
     Managed(String),
 }
 

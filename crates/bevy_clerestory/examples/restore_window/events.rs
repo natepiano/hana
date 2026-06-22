@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use bevy::prelude::*;
 use bevy::window::WindowMode;
-use bevy_window_manager::WindowRestoreMismatch;
-use bevy_window_manager::WindowRestored;
+use bevy_clerestory::WindowRestoreMismatch;
+use bevy_clerestory::WindowRestored;
 
 #[derive(Event, Reflect)]
 #[reflect(Event)]

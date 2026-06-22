@@ -158,7 +158,7 @@ pub(crate) fn load_target_position(
         .get(&WindowKey::Primary)
         .cloned()
     else {
-        debug!("[load_target_position] No saved bevy_window_manager state, showing window");
+        debug!("[load_target_position] No saved bevy_clerestory state, showing window");
         commands.queue(|world: &mut World| {
             let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
             if let Some(mut window) = query.iter_mut(world).next() {

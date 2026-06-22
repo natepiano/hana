@@ -18,8 +18,8 @@ mod constants;
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
-use bevy_window_manager::CurrentMonitor;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_clerestory::CurrentMonitor;
+use bevy_clerestory::WindowManagerPlugin;
 
 use self::constants::APP_NAME;
 use self::constants::FONT_SIZE;

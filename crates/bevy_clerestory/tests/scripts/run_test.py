@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single-test runner for bevy_window_manager integration tests (v3).
+"""Single-test runner for bevy_clerestory integration tests (v3).
 
 Usage:
   # Prebuild:
@@ -61,12 +61,12 @@ MAX_POLLS: Final = 200  # 10s timeout
 
 COMP_WINDOW: Final = "bevy_window::window::Window"
 COMP_PRIMARY: Final = "bevy_window::window::PrimaryWindow"
-COMP_MANAGED: Final = "bevy_window_manager::managed::ManagedWindow"
-COMP_CURRENT_MONITOR: Final = "bevy_window_manager::monitors::CurrentMonitor"
-COMP_LAUNCH_INFO: Final = "bevy_window_manager::restore::target_position::target::RestoreDiagnostics"
-COMP_MONITORS: Final = "bevy_window_manager::monitors::Monitors"
+COMP_MANAGED: Final = "bevy_clerestory::managed::ManagedWindow"
+COMP_CURRENT_MONITOR: Final = "bevy_clerestory::monitors::CurrentMonitor"
+COMP_LAUNCH_INFO: Final = "bevy_clerestory::restore::target_position::target::RestoreDiagnostics"
+COMP_MONITORS: Final = "bevy_clerestory::monitors::Monitors"
 COMP_MONITOR: Final = "bevy_window::monitor::Monitor"
-COMP_PERSISTENCE: Final = "bevy_window_manager::managed::ManagedWindowPersistence"
+COMP_PERSISTENCE: Final = "bevy_clerestory::managed::ManagedWindowPersistence"
 RES_RESTORED: Final = "restore_window::events::WindowRestoredReceived"
 RES_MISMATCH: Final = "restore_window::events::WindowRestoreMismatchReceived"
 RES_SETTLED_COUNT: Final = "restore_window::events::WindowsSettledCount"
@@ -1717,7 +1717,7 @@ def run_test(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="bevy_window_manager test runner v3")
+    parser = argparse.ArgumentParser(description="bevy_clerestory test runner v3")
     _ = parser.add_argument("--prebuild", action="store_true", help="Build both binary variants")
     _ = parser.add_argument("--discover", action="store_true", help="Discovery mode")
     _ = parser.add_argument("--human-setup", action="store_true", help="Setup human test (write RON, launch app, print instructions)")

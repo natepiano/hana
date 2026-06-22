@@ -7,11 +7,11 @@ use bevy::window::Monitor;
 use bevy::window::VideoMode;
 use bevy::window::VideoModeSelection;
 use bevy::window::WindowMode;
-use bevy_window_manager::CurrentMonitor;
-use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::Monitors;
+use bevy_clerestory::CurrentMonitor;
+use bevy_clerestory::ManagedWindow;
+use bevy_clerestory::Monitors;
 #[cfg(target_os = "linux")]
-use bevy_window_manager::Platform;
+use bevy_clerestory::Platform;
 use dirs::config_dir;
 
 use super::constants::ACTIVE_VIDEO_MODE_SUFFIX;

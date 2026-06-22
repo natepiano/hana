@@ -27,6 +27,7 @@ use bevy::render::render_resource::ShaderType;
 use bevy::shader::ShaderRef;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
@@ -46,7 +47,6 @@ use bevy_kana::ToF32;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
-use bevy_window_manager::WindowManagerPlugin;
 
 const GROUND_SIZE: f32 = 8.0;
 const DISPLAY_Z: f32 = 2.2;

@@ -50,7 +50,7 @@ use crate::unclamp;
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
 impl<S> SprinkleBuilder<S> {
-    /// Add a `bevy_window_manager` `WindowManagerPlugin` so window position
+    /// Add a `bevy_clerestory` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
     #[must_use]
     pub fn with_save_window_position(mut self) -> Self {

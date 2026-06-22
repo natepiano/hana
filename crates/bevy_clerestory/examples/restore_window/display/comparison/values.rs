@@ -1,8 +1,8 @@
 use bevy::prelude::Window;
 use bevy::window::WindowPosition;
+use bevy_clerestory::CurrentMonitor;
 use bevy_kana::ToI32;
 use bevy_kana::ToU32;
-use bevy_window_manager::CurrentMonitor;
 
 use crate::constants::AUTOMATIC_TEXT;
 use crate::constants::COMPARISON_COLUMN_PADDING;

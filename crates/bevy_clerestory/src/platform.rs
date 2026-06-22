@@ -26,9 +26,13 @@ use super::restore::WindowRestoreState;
 /// this enum rather than ad-hoc `cfg!()` / `is_wayland()` checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Resource)]
 pub enum Platform {
+    /// macOS.
     MacOs,
+    /// Windows.
     Windows,
+    /// Linux running an X11 session.
     X11,
+    /// Linux running a Wayland session.
     Wayland,
 }
 
@@ -71,9 +75,11 @@ impl Platform {
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     pub fn detect() -> Self { compile_error!("Unsupported platform") }
 
+    /// Whether this is the Linux X11 platform.
     #[must_use]
     pub const fn is_x11(self) -> bool { matches!(self, Self::X11) }
 
+    /// Whether this is the Linux Wayland platform.
     #[must_use]
     pub const fn is_wayland(self) -> bool { matches!(self, Self::Wayland) }
 

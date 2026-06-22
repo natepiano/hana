@@ -1,7 +1,7 @@
 # Moves Zed window to a target Bevy monitor (Windows)
 # Usage: windows_move_zed_to_monitor.ps1 <target_index> <mon0_x> <mon0_y> <mon0_scale> <mon1_x> <mon1_y> <mon1_scale>
 #
-# Finds the Zed window titled "bevy_window_manager" (handles multiple Zed windows)
+# Finds the Zed window titled "bevy_clerestory" (handles multiple Zed windows)
 # Matches Bevy monitor to Windows monitor by position, then moves window there
 # Positions it in the left half of the target monitor
 
@@ -102,7 +102,7 @@ public class Win32Window {
     }
 
     public static IntPtr ZedWindow = IntPtr.Zero;
-    public static string TargetTitle = "bevy_window_manager";
+    public static string TargetTitle = "bevy_clerestory";
 
     public static bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam) {
         if (!IsWindowVisible(hWnd)) return true;
@@ -183,7 +183,7 @@ if ($winMonitorIndex -lt 0) {
 $zedHwnd = [Win32Window]::FindZedWindow()
 
 if ($zedHwnd -eq [IntPtr]::Zero) {
-    Write-Error "ERROR: Could not find Zed window titled 'bevy_window_manager'"
+    Write-Error "ERROR: Could not find Zed window titled 'bevy_clerestory'"
     exit 1
 }
 

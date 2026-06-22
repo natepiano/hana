@@ -14,6 +14,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_brp_extras::PortDisplay;
+use bevy_clerestory::WindowManagerPlugin;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::CascadeEntityCommandsExt;
@@ -32,7 +33,6 @@ use bevy_diegetic::Unit;
 use bevy_lagrange::LagrangePlugin;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::ZoomToFit;
-use bevy_window_manager::WindowManagerPlugin;
 
 // ── Layout ───────────────────────────────────────────────────────────
 const DEMO_WIDTH: f32 = 90.0; // mm

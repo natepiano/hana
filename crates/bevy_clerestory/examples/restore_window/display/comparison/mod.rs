@@ -6,7 +6,7 @@ use bevy::prelude::ChildSpawnerCommands;
 use bevy::prelude::Color;
 use bevy::prelude::TextFont;
 use bevy::prelude::Window;
-use bevy_window_manager::CurrentMonitor;
+use bevy_clerestory::CurrentMonitor;
 
 use crate::events::CachedMismatchState;
 use crate::events::CachedRestoredState;

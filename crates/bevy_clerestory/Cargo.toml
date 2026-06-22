@@ -1,35 +1,38 @@
 [package]
-categories  = ["game-development", "gui"]
-description = "Bevy plugin for primary window restoration and multi-monitor support"
-edition     = "2024"
-keywords    = ["bevy", "gamedev", "monitor", "multi-monitor", "window"]
-license     = "MIT OR Apache-2.0"
-name        = "bevy_window_manager"
-repository  = "https://github.com/natepiano/bevy_window_manager"
-version     = "0.22.0-dev"
+authors.workspace    = true
+categories           = ["game-development", "gui"]
+description          = "Bevy plugin for primary window restoration and multi-monitor support"
+edition.workspace    = true
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory"
+keywords             = ["bevy", "gamedev", "monitor", "multi-monitor", "window"]
+license.workspace    = true
+name                 = "bevy_clerestory"
+readme               = "README.md"
+repository.workspace = true
+version              = "0.1.0"
 
 [lib]
-name = "bevy_window_manager"
+name = "bevy_clerestory"
 path = "src/lib.rs"
 
 [dependencies]
-bevy = { version = "0.19.0", default-features = false, features = [
+bevy = { workspace = true, features = [
   "bevy_log",
   "bevy_window",
   "bevy_winit",
   "wayland",
   "x11",
 ] }
-bevy_diagnostic = "0.19.0"
-bevy_kana = "0.1.0"
+bevy_diagnostic = { workspace = true }
+bevy_kana = { workspace = true }
 
 dirs  = "6.0"
 ron   = "0.12"
 serde = { version = "1.0", features = ["derive"] }
 
 [dev-dependencies]
-bevy            = "0.19.0"
-bevy_brp_extras = "0.20.0"
+bevy            = { workspace = true, features = ["default_font"] }
+bevy_brp_extras = { workspace = true }
 tempfile        = "3"
 
 [target.'cfg(windows)'.dependencies]
@@ -130,31 +133,5 @@ workaround-winit-4443 = []
 #   WAYLAND_DISPLAY= cargo run --example restore_window
 workaround-winit-4445 = []
 
-[lints.clippy]
-# Groups
-all      = { level = "deny", priority = -1 }
-cargo    = { level = "deny", priority = -1 }
-nursery  = { level = "deny", priority = -1 }
-pedantic = { level = "deny", priority = -1 }
-
-# Forbidden
-allow_attributes_without_reason = "deny"
-expect_used                     = "deny"
-panic                           = "deny"
-self_named_module_files         = "deny" # use module/mod.rs (directory form) when a module has submodules
-unreachable                     = "deny"
-unwrap_used                     = "deny"
-
-# Standard allows
-multiple_crate_versions = "allow"
-redundant_pub_crate     = "allow" # cargo mend is the visibility authority, not clippy
-
-# Bevy-specific allows
-needless_pass_by_value = "allow"
-option_if_let_else     = "allow"
-too_many_arguments     = "allow"
-type_complexity        = "allow"
-wildcard_imports       = "allow"
-
-[profile.dev.package."*"]
-opt-level = 3
+[lints]
+workspace = true

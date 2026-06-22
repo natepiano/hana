@@ -2,11 +2,11 @@ use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowPosition;
+use bevy_clerestory::CurrentMonitor;
+use bevy_clerestory::ManagedWindow;
+use bevy_clerestory::ManagedWindowPersistence;
+use bevy_clerestory::Monitors;
 use bevy_kana::ToU32;
-use bevy_window_manager::CurrentMonitor;
-use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::ManagedWindowPersistence;
-use bevy_window_manager::Monitors;
 
 use super::super::constants::AUTOMATIC_TEXT;
 use super::super::constants::DEFAULT_COLOR;

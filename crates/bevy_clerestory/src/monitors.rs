@@ -41,6 +41,7 @@ pub struct MonitorInfo {
 #[derive(Resource, Reflect)]
 #[reflect(Resource)]
 pub struct Monitors {
+    /// Monitors in sort order: primary (at 0,0) first, then by position.
     pub list: Vec<MonitorInfo>,
 }
 

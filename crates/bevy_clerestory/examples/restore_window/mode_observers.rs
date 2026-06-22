@@ -6,10 +6,10 @@ use bevy::window::MonitorSelection;
 use bevy::window::VideoMode;
 use bevy::window::VideoModeSelection;
 use bevy::window::WindowMode;
-use bevy_window_manager::CurrentMonitor;
-use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::ManagedWindowPersistence;
-use bevy_window_manager::Monitors;
+use bevy_clerestory::CurrentMonitor;
+use bevy_clerestory::ManagedWindow;
+use bevy_clerestory::ManagedWindowPersistence;
+use bevy_clerestory::Monitors;
 
 use super::events::ClearStateAndQuit;
 use super::events::QuitApp;

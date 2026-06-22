@@ -26,7 +26,7 @@ use std::env::var;
 use bevy::pbr::PbrPlugin;
 use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
-use bevy_window_manager::WindowManagerPlugin;
+use bevy_clerestory::WindowManagerPlugin;
 use constants::PRIMARY_WINDOW_TITLE;
 use constants::TEST_MODE_ENV_VAR;
 use events::MismatchStates;

@@ -613,6 +613,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_clerestory"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_diagnostic",
+ "bevy_kana 0.2.0-dev",
+ "dirs",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "raw-window-handle",
+ "ron",
+ "serde",
+ "tempfile",
+ "windows",
+ "x11rb",
+]
+
+[[package]]
 name = "bevy_clipboard"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -744,9 +763,9 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_clerestory",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
- "bevy_window_manager",
  "bitflags 2.13.0",
  "clay-layout",
  "criterion",
@@ -1141,10 +1160,10 @@ version = "0.0.5-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_clerestory",
  "bevy_diegetic",
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
- "bevy_window_manager",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
@@ -1182,10 +1201,10 @@ version = "0.1.0-dev"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_clerestory",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "bevy_render",
- "bevy_window_manager",
  "bytemuck",
  "getrandom 0.4.3",
  "nonmax",
@@ -1924,25 +1943,6 @@ dependencies = [
  "log",
  "raw-window-handle",
  "serde",
-]
-
-[[package]]
-name = "bevy_window_manager"
-version = "0.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ea8cf210394bb10a9f0ded5a6860e8e445709663e6a465707a9fb54fb687cf73"
-dependencies = [
- "bevy",
- "bevy_diagnostic",
- "bevy_kana 0.1.0",
- "dirs",
- "objc2 0.6.4",
- "objc2-app-kit 0.3.2",
- "raw-window-handle",
- "ron",
- "serde",
- "windows",
- "x11rb",
 ]
 
 [[package]]
@@ -2805,11 +2805,11 @@ version = "0.0.1"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
+ "bevy_clerestory",
  "bevy_diegetic",
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
- "bevy_window_manager",
 ]
 
 [[package]]
@@ -5474,6 +5474,19 @@ name = "target-triple"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "591ef38edfb78ca4771ee32cf494cb8771944bee237a9b91fc9c1424ac4b777b"
+
+[[package]]
+name = "tempfile"
+version = "3.27.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
+dependencies = [
+ "fastrand",
+ "getrandom 0.4.3",
+ "once_cell",
+ "rustix 1.1.4",
+ "windows-sys 0.61.2",
+]
 
 [[package]]
 name = "termcolor"

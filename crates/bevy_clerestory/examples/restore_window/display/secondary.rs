@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 use bevy::window::Monitor;
-use bevy_window_manager::CurrentMonitor;
-use bevy_window_manager::ManagedWindow;
-use bevy_window_manager::Monitors;
+use bevy_clerestory::CurrentMonitor;
+use bevy_clerestory::ManagedWindow;
+use bevy_clerestory::Monitors;
 
 use super::super::constants::DEFAULT_COLOR;
 use super::super::constants::FONT_SIZE;

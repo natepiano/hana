@@ -177,7 +177,7 @@ Orders below.
 
 **Acceptance gate:** `cargo build --workspace` green; `cargo build --workspace --examples` green.
 
-### Phase 4 — Verify, smoke-test, lock + clean-fix enrollment  · status: todo
+### Phase 4 — Verify, smoke-test, lock + clean-fix enrollment  · status: done
 
 #### Work Order
 
@@ -213,7 +213,7 @@ Orders below.
 
 **Acceptance gate:** user explicitly approves retiring the standalone repo.
 
-### Phase 6 — Retire source repo + crates.io  · status: todo
+### Phase 6 — Retire source repo + crates.io  · status: done
 
 #### Work Order
 
@@ -236,7 +236,7 @@ Orders below.
 
 **Acceptance gate:** `bevy_window_manager` final release on crates.io, **un-yanked**; `gh … isArchived` is `true`.
 
-### Phase 7 — Remove local checkout + prune clean-fix.conf  · status: todo
+### Phase 7 — Remove local checkout + prune clean-fix.conf  · status: done
 
 #### Work Order
 
