@@ -1,0 +1,57 @@
+[package]
+authors     = ["natepiano"]
+categories  = ["game-development", "rendering"]
+description = "Physics-based 3D cable routing with catenary geometry and automatic pathfinding for Bevy"
+edition     = "2024"
+homepage    = "https://github.com/natepiano/bevy_catenary"
+keywords    = ["3d", "bevy", "cable", "catenary", "routing"]
+license     = "MIT OR Apache-2.0"
+name        = "bevy_catenary"
+repository  = "https://github.com/natepiano/bevy_catenary"
+version     = "0.1.0"
+
+[lints.clippy]
+# Our strict lints
+allow_attributes_without_reason = "deny"
+expect_used                     = "deny"
+panic                           = "deny"
+self_named_module_files         = "deny" # use module/mod.rs (directory form) when a module has submodules
+unreachable                     = "deny"
+unwrap_used                     = "deny"
+
+# Enable lint groups as errors (with lower priority so allows can override)
+all      = { level = "deny", priority = -1 }
+cargo    = { level = "deny", priority = -1 }
+nursery  = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+
+# Allow specific lints that conflict with Bevy patterns
+multiple_crate_versions = "allow"
+needless_pass_by_value  = "allow"
+option_if_let_else      = "allow"
+redundant_pub_crate     = "allow" # cargo mend is the visibility authority, not clippy
+too_many_arguments      = "allow"
+type_complexity         = "allow"
+wildcard_imports        = "allow"
+
+[lints.rust]
+missing_docs = "deny"
+
+[dependencies]
+bevy = { version = "0.19.0", default-features = false, features = [
+  "bevy_asset",
+  "bevy_gizmos",
+  "bevy_mesh",
+  "bevy_pbr",
+  "bevy_render",
+] }
+bevy_kana = "0.1.0"
+
+[[example]]
+name = "playground"
+path = "examples/playground/main.rs"
+
+[dev-dependencies]
+bevy            = { version = "0.19.0", features = ["default"] }
+bevy_brp_extras = "0.20.1"
+bevy_lagrange   = { version = "0.0.4", features = ["fit_overlay"] }
