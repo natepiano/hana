@@ -4,11 +4,12 @@
 //! command stream to a screen [`ScreenDepthBias`] and an OIT
 //! [`OitDepthOffset`].
 //!
-//! Each z-level owns one screen band. Panel geometry commands use the low
-//! sub-lanes, while line and text commands are batched across panels. The
-//! shared line and text batches use fixed, panel-independent sub-lanes above
-//! geometry, so one z-level is capped at [`DRAW_LEVEL_GEOMETRY_LANES`] draw
-//! commands.
+//! Each z-level owns one screen band. The shared SDF fill batch uses the first
+//! sub-lane, panel geometry commands use the next
+//! [`DRAW_LEVEL_GEOMETRY_LANES`] sub-lanes, and line/text batches use fixed
+//! panel-independent sub-lanes. One z-level is capped at
+//! [`DRAW_LEVEL_GEOMETRY_LANES`] draw commands before command ordinals reach
+//! the shared line/text lanes.
 //!
 //! [`OitDepthOffset`] is a panel-global ordinal span added to `position.z` and
 //! packed into 24-bit depth. [`OIT_DEPTH_STEP`] keeps adjacent layers about 17
@@ -23,7 +24,9 @@ use std::collections::BTreeMap;
 
 use bevy_kana::ToF32;
 
+use super::constants::DRAW_LEVEL_FILL_SUBLANE;
 use super::constants::DRAW_LEVEL_GEOMETRY_LANES;
+use super::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
 use super::constants::DRAW_LEVEL_STRIDE;
 use super::constants::DRAW_LEVEL_TEXT_SUBLANE;
 use super::constants::LAYER_DEPTH_BIAS;
@@ -31,6 +34,20 @@ use super::constants::OIT_DEPTH_STEP;
 use crate::layout::DrawStep;
 use crate::layout::DrawZIndex;
 use crate::layout::RenderCommand;
+
+/// Zero-based index of a `RenderCommand` inside one panel's command stream.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct CommandIndex(
+    /// Slot in the `LayoutResult::commands` vector.
+    usize,
+);
+
+/// Zero-based index of an `Element` inside one panel's layout tree.
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub(crate) struct ElementIndex(
+    /// Slot in the `LayoutTree` element vector.
+    usize,
+);
 
 /// Shared draw-order ordinal for a panel's coplanar children.
 ///
@@ -79,6 +96,23 @@ struct EnumeratedDrawCommand {
     level_ordinal: i32,
 }
 
+impl From<usize> for CommandIndex {
+    fn from(value: usize) -> Self { Self(value) }
+}
+
+impl ElementIndex {
+    /// Sentinel used for child-divider rectangles that have no source element.
+    pub(crate) const CHILD_DIVIDER: Self = Self(usize::MAX);
+
+    /// Returns the index into the panel's `LayoutTree`.
+    #[must_use]
+    pub(crate) const fn get(self) -> usize { self.0 }
+}
+
+impl From<usize> for ElementIndex {
+    fn from(value: usize) -> Self { Self(value) }
+}
+
 impl ScreenDepthBias {
     #[must_use]
     pub(crate) const fn get(self) -> f32 { self.0 }
@@ -114,7 +148,7 @@ impl DrawCommandDepth {
         Self {
             ordinal,
             z_level,
-            screen_depth_bias: level_sublane_depth_bias(z_level, level_ordinal),
+            screen_depth_bias: geometry_depth_bias(z_level, level_ordinal),
             oit_depth_offset: ordinal.text_anchored_oit_depth_offset(text_anchor),
         }
     }
@@ -196,6 +230,11 @@ impl PartialOrd for HierarchicalDrawKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
+/// `Transparent3d` sort bias for one z-level's shared SDF fill batch.
+pub(crate) fn fill_batch_depth_bias(z_level: i8) -> ScreenDepthBias {
+    level_sublane_depth_bias(z_level, DRAW_LEVEL_FILL_SUBLANE)
+}
+
 /// `Transparent3d` sort bias for one z-level's shared text batch.
 pub(crate) fn text_batch_depth_bias(z_level: i8) -> ScreenDepthBias {
     level_sublane_depth_bias(z_level, DRAW_LEVEL_TEXT_SUBLANE)
@@ -203,7 +242,19 @@ pub(crate) fn text_batch_depth_bias(z_level: i8) -> ScreenDepthBias {
 
 /// `Transparent3d` sort bias for one z-level's shared line batch.
 pub(crate) fn line_batch_depth_bias(z_level: i8) -> ScreenDepthBias {
-    level_sublane_depth_bias(z_level, DRAW_LEVEL_GEOMETRY_LANES - 1)
+    level_sublane_depth_bias(
+        z_level,
+        DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES - 1,
+    )
+}
+
+fn geometry_depth_bias(z_level: i8, level_ordinal: i32) -> ScreenDepthBias {
+    let depth_bias = level_sublane_depth_bias(
+        z_level,
+        DRAW_LEVEL_GEOMETRY_START_SUBLANE.saturating_add(level_ordinal),
+    );
+    debug_assert!(fill_batch_depth_bias(z_level).get() < depth_bias.get());
+    depth_bias
 }
 
 fn level_sublane_depth_bias(z_level: i8, level_ordinal: i32) -> ScreenDepthBias {
@@ -279,7 +330,9 @@ mod tests {
     use crate::layout::RectangleSource;
     use crate::layout::RenderCommandKind;
     use crate::layout::TextStyle;
+    use crate::render::constants::DRAW_LEVEL_FILL_SUBLANE;
     use crate::render::constants::DRAW_LEVEL_GEOMETRY_LANES;
+    use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
 
     const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
     /// Z-level pairs `(low, high)` spanning negative, default, positive, and
@@ -459,7 +512,7 @@ mod tests {
         }
     }
 
-    fn assert_no_override_projection_matches_previous_model(commands: &[RenderCommand]) {
+    fn assert_no_override_projection_uses_geometry_sublanes(commands: &[RenderCommand]) {
         assert!(
             commands
                 .iter()
@@ -478,8 +531,8 @@ mod tests {
             assert_eq!(draw_depth.ordinal(), ordinal);
             assert_eq!(
                 draw_depth.depth_bias().get().to_bits(),
-                ordinal.depth_bias().get().to_bits(),
-                "no-override command {index} keeps its previous screen depth bias",
+                geometry_depth_bias(0, ordinal.0).get().to_bits(),
+                "no-override command {index} uses the geometry screen sublane",
             );
             assert_eq!(
                 draw_depth.oit_depth_offset().get().to_bits(),
@@ -521,11 +574,46 @@ mod tests {
                 .to_bits()
         );
         assert!(
-            level_sublane_depth_bias(0, DRAW_LEVEL_GEOMETRY_LANES - 1).get()
+            level_sublane_depth_bias(
+                0,
+                DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES - 1,
+            )
+            .get()
                 < text_batch_depth_bias(0).get()
         );
         assert!(text_batch_depth_bias(0).get() < level_sublane_depth_bias(1, 0).get());
         assert!(text_batch_depth_bias(-1).get() < level_sublane_depth_bias(0, 0).get());
+    }
+
+    #[test]
+    fn fill_batch_depth_bias_uses_level_fill_sublane() {
+        assert_eq!(
+            fill_batch_depth_bias(0).get().to_bits(),
+            level_sublane_depth_bias(0, DRAW_LEVEL_FILL_SUBLANE)
+                .get()
+                .to_bits()
+        );
+        assert!(fill_batch_depth_bias(0).get() < geometry_depth_bias(0, 0).get());
+        assert!(fill_batch_depth_bias(0).get() < line_batch_depth_bias(0).get());
+        assert!(fill_batch_depth_bias(0).get() < text_batch_depth_bias(0).get());
+    }
+
+    #[test]
+    fn fill_batch_depth_bias_interleaves_between_z_levels() {
+        assert_eq!(
+            fill_batch_depth_bias(RAISED_LEVEL.0).get().to_bits(),
+            level_sublane_depth_bias(RAISED_LEVEL.0, DRAW_LEVEL_FILL_SUBLANE)
+                .get()
+                .to_bits()
+        );
+        assert!(
+            text_batch_depth_bias(0).get() < fill_batch_depth_bias(RAISED_LEVEL.0).get(),
+            "raised fill batch must draw in front of default text",
+        );
+        assert!(
+            text_batch_depth_bias(LOWERED_LEVEL.0).get() < fill_batch_depth_bias(0).get(),
+            "default fill batch must draw in front of lowered text",
+        );
     }
 
     #[test]
@@ -559,10 +647,14 @@ mod tests {
     fn line_batch_depth_bias_uses_level_line_sublane() {
         assert_eq!(
             line_batch_depth_bias(0).get().to_bits(),
-            level_sublane_depth_bias(0, DRAW_LEVEL_GEOMETRY_LANES - 1)
-                .get()
-                .to_bits()
+            level_sublane_depth_bias(
+                0,
+                DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES - 1,
+            )
+            .get()
+            .to_bits()
         );
+        assert!(fill_batch_depth_bias(0).get() < line_batch_depth_bias(0).get());
         assert!(line_batch_depth_bias(0).get() < text_batch_depth_bias(0).get());
         assert!(line_batch_depth_bias(0).get() < level_sublane_depth_bias(1, 0).get());
         assert!(line_batch_depth_bias(-1).get() < level_sublane_depth_bias(0, 0).get());
@@ -621,9 +713,9 @@ mod tests {
     }
 
     #[test]
-    fn no_override_projection_and_batch_lanes_match_previous_model() {
+    fn no_override_projection_uses_batch_lane_layout() {
         for commands in representative_streams() {
-            assert_no_override_projection_matches_previous_model(&commands);
+            assert_no_override_projection_uses_geometry_sublanes(&commands);
         }
     }
 
@@ -642,7 +734,7 @@ mod tests {
                 assert_eq!(draw_depth.ordinal(), ordinal);
                 assert_eq!(
                     draw_depth.depth_bias().get().to_bits(),
-                    level_sublane_depth_bias(draw_depth.z_level(), ordinal.0)
+                    geometry_depth_bias(draw_depth.z_level(), ordinal.0)
                         .get()
                         .to_bits(),
                 );
@@ -666,9 +758,11 @@ mod tests {
         let default_projection = DrawOrderProjection::from_commands(&default_commands);
         let default_line_depth_bias = line_batch_depth_bias(0);
         let default_text_depth_bias = text_batch_depth_bias(0);
+        let default_fill_batch_depth_bias = fill_batch_depth_bias(0);
         for (index, command) in default_commands.iter().enumerate() {
             if command.kind.draw_step() == Some(DrawStep::Fill) {
                 let fill_depth_bias = draw_depth_at(&default_projection, index).depth_bias();
+                assert!(default_fill_batch_depth_bias.get() < fill_depth_bias.get());
                 assert!(fill_depth_bias.get() < default_line_depth_bias.get());
                 assert!(fill_depth_bias.get() < default_text_depth_bias.get());
             }

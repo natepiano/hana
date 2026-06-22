@@ -87,6 +87,10 @@ pub(crate) struct LegacySdfExtendedMaterialInput {
     pub corner_radii:     [f32; 4],
     pub border_widths:    [f32; 4],
     pub border_color:     Option<Color>,
+    /// `SdfPanelUniform::sdf_kind` selector resolved by `ResolvedSdfSurface`.
+    pub sdf_kind:         u32,
+    /// `SdfPanelUniform::sdf_params` payload resolved by `ResolvedSdfSurface`.
+    pub sdf_params:       Vec4,
     pub clip_rect:        Vec4,
     pub oit_depth_offset: f32,
 }
@@ -126,8 +130,8 @@ pub(crate) fn sdf_panel_material(
                 corner_radii: Vec4::from_array(input.corner_radii),
                 border_widths: Vec4::from_array(input.border_widths),
                 border_color: border_linear,
-                sdf_kind: 0,
-                sdf_params: Vec4::ZERO,
+                sdf_kind: input.sdf_kind,
+                sdf_params: input.sdf_params,
                 fill_alpha,
                 clip_rect: input.clip_rect,
                 oit_depth_offset: input.oit_depth_offset,

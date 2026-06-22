@@ -1040,7 +1040,7 @@ mod tests {
     use crate::render::HairlineWidth;
     use crate::render::PathContour;
     use crate::render::QuadraticSegment;
-    use crate::render::constants::DRAW_LEVEL_GEOMETRY_LANES;
+    use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::text::DiegeticTextMeasurer;
 
@@ -1170,20 +1170,16 @@ mod tests {
 
         let (z_level, material_depth_bias, material_oit_offset, records) =
             one_line_batch_values(&app);
-        let previous_line_lane = (DRAW_LEVEL_GEOMETRY_LANES - 1).to_f32() * LAYER_DEPTH_BIAS;
         assert_eq!(z_level, 0);
-        assert_eq!(
-            previous_line_lane.to_bits(),
-            draw_order::line_batch_depth_bias(0).get().to_bits()
-        );
         assert_eq!(
             material_depth_bias.to_bits(),
             draw_order::line_batch_depth_bias(0).get().to_bits()
         );
         assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
+        let default_command_depth = DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * LAYER_DEPTH_BIAS;
         assert_eq!(
             records,
-            vec![(0.0, 0.0), (0.0, 0.0)],
+            vec![(default_command_depth, 0.0), (default_command_depth, 0.0)],
             "per-record offsets stay in the run table"
         );
     }

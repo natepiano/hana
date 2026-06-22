@@ -709,6 +709,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
@@ -1483,9 +1484,10 @@ mod tests {
         app.update();
 
         let (_, material_before) = single_image_child(&mut app);
+        let first_command_depth = DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * LAYER_DEPTH_BIAS;
         assert_eq!(
             material_depth_bias(&app, &material_before).to_bits(),
-            0.0_f32.to_bits(),
+            first_command_depth.to_bits(),
             "the lone image uses ordinal 0"
         );
 
@@ -1503,7 +1505,7 @@ mod tests {
         );
         assert_eq!(
             material_depth_bias(&app, &material_after).to_bits(),
-            LAYER_DEPTH_BIAS.to_bits(),
+            (first_command_depth + LAYER_DEPTH_BIAS).to_bits(),
             "the rebuilt material picks up the shifted ordinal's depth bias"
         );
     }

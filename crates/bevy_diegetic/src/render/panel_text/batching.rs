@@ -1296,11 +1296,15 @@ mod tests {
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
+        let first_command_depth =
+            constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * constants::LAYER_DEPTH_BIAS;
+        let second_command_depth = (constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE + 1).to_f32()
+            * constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             run_record_depths(&app),
             vec![
-                (0.0, 0.0),
-                (constants::LAYER_DEPTH_BIAS, constants::OIT_DEPTH_STEP),
+                (first_command_depth, 0.0),
+                (second_command_depth, constants::OIT_DEPTH_STEP),
             ],
         );
     }

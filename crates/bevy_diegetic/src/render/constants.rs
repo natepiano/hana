@@ -4,12 +4,19 @@ use bevy::asset::uuid_handle;
 use bevy::prelude::*;
 
 // layer ordering
-/// Number of non-text screen sort lanes reserved inside one z-level band.
+/// Screen sort lane used by the batched SDF fill. Lower sort ordinals draw
+/// first and stay behind later lanes: fill backgrounds use lane 0,
+/// per-command geometry uses lanes 1..=64, and text uses lane 65.
+pub(crate) const DRAW_LEVEL_FILL_SUBLANE: i32 = 0;
+/// Number of per-command geometry screen sort lanes inside one z-level band.
 pub(crate) const DRAW_LEVEL_GEOMETRY_LANES: i32 = 64;
+/// First screen sort lane available to panel-owned geometry commands.
+pub(crate) const DRAW_LEVEL_GEOMETRY_START_SUBLANE: i32 = DRAW_LEVEL_FILL_SUBLANE + 1;
 /// Number of screen sort lanes reserved for each z-level.
 pub(crate) const DRAW_LEVEL_STRIDE: i32 = DRAW_LEVEL_TEXT_SUBLANE + 1;
 /// Screen sort lane used by batched text inside each z-level band.
-pub(crate) const DRAW_LEVEL_TEXT_SUBLANE: i32 = DRAW_LEVEL_GEOMETRY_LANES;
+pub(crate) const DRAW_LEVEL_TEXT_SUBLANE: i32 =
+    DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES;
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.
@@ -58,6 +65,10 @@ pub(super) const DEFAULT_ROUGHNESS: f32 = 0.95;
 /// Gives the exterior anti-aliasing ramp room to render — without this, the
 /// mesh edge coincides with the SDF boundary and the AA fade-out is clipped.
 pub(crate) const SDF_AA_PADDING: f32 = 0.001;
+/// `SdfPanelUniform::sdf_kind` value for rounded-rectangle panel surfaces.
+pub(crate) const SDF_KIND_ROUNDED_RECT: u32 = 0;
+/// `SdfPanelUniform::sdf_params` value for rounded-rectangle panel surfaces.
+pub(crate) const SDF_ROUNDED_RECT_PARAMS: Vec4 = Vec4::ZERO;
 /// Internal-asset handle for the `sdf_stroke.wgsl` shader.
 pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
     uuid_handle!("536f3741-5418-4d7a-a0b2-8cfb1d30e8a1");

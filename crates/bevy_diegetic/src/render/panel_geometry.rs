@@ -11,14 +11,12 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::picking::mesh_picking::ray_cast::RayCastBackfaces;
 use bevy::prelude::*;
-use bevy_kana::ToUsize;
 
+use super::CommandIndex;
+use super::ElementIndex;
 use super::PanelChildSystems;
 use super::clip;
 use super::constants;
-use super::constants::DRAW_LEVEL_GEOMETRY_LANES;
-use super::constants::OIT_DEPTH_STEP;
-use super::constants::OIT_FOCUS_DEPTH;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderProjection;
@@ -45,16 +43,16 @@ struct PanelSdfMesh;
 #[derive(Component, Clone, Copy, PartialEq)]
 struct PanelSdfSurface {
     /// Render-command index — the quad's stable key across rebuilds.
-    command_index: usize,
+    command_index: CommandIndex,
     /// Projected ordering values used by the quad's material.
     draw_depth:    DrawCommandDepth,
-    /// World-space transform center (x, y).
+    /// Panel-local transform center (x, y).
     center:        [u32; 2],
-    /// World-space mesh size (full width, height).
+    /// Panel-local mesh size (full width, height).
     mesh_size:     [u32; 2],
-    /// World-space per-corner radii [TL, TR, BR, BL].
+    /// Panel-local per-corner radii [TL, TR, BR, BL].
     corner_radii:  [u32; 4],
-    /// World-space border widths [top, right, bottom, left].
+    /// Panel-local border widths [top, right, bottom, left].
     border_widths: [u32; 4],
     /// Clip rect in local quad space [left, bottom, right, top].
     clip_rect:     [u32; 4],
@@ -87,13 +85,6 @@ struct PanelInteractionMesh {
     center: [u32; 2],
 }
 
-/// Whether shadow casting is enabled or suppressed for panel meshes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ShadowMode {
-    Enabled,
-    Suppressed,
-}
-
 /// Plugin that adds panel geometry rendering (backgrounds and borders).
 pub(super) struct PanelGeometryPlugin;
 
@@ -122,9 +113,9 @@ fn update_panel_geometry_perf_stats(
 }
 
 /// Gathered fill + border data for a single element.
-struct ElementSurface {
+pub(crate) struct ElementSurface {
     /// `Element` index in the layout tree.
-    index:         usize,
+    index:         ElementIndex,
     /// Bounding box from the render command.
     bounds:        BoundingBox,
     /// Fill color (from Rectangle command), if any.
@@ -135,7 +126,7 @@ struct ElementSurface {
     border_color:  Option<Color>,
     /// Index of the first render command for this element (the reconcile
     /// reuse key).
-    command_index: usize,
+    command_index: CommandIndex,
     /// Projected ordering values of the first render command for this element.
     draw_depth:    DrawCommandDepth,
     /// Active clip rect in layout coordinates when this surface was
@@ -187,11 +178,7 @@ fn build_panel_geometry(
             points_to_world: panel.points_to_world(),
             anchor_x,
             anchor_y,
-            shadow_mode: if panel.surface_shadow() == SurfaceShadow::Off {
-                ShadowMode::Suppressed
-            } else {
-                ShadowMode::Enabled
-            },
+            surface_shadow: panel.surface_shadow(),
             layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
         };
 
@@ -215,14 +202,21 @@ fn build_panel_geometry(
 }
 
 /// Shared per-panel inputs for one reconcile pass, derived once from the panel.
-struct PanelReconcileContext<'a> {
-    panel_entity:    Entity,
-    panel:           &'a DiegeticPanel,
-    points_to_world: f32,
-    anchor_x:        f32,
-    anchor_y:        f32,
-    shadow_mode:     ShadowMode,
-    layer:           RenderLayers,
+pub(crate) struct PanelReconcileContext<'a> {
+    /// Panel entity that owns the resolved SDF surfaces.
+    pub(crate) panel_entity:    Entity,
+    /// Source panel that provides layout scale, materials, and shadow policy.
+    pub(crate) panel:           &'a DiegeticPanel,
+    /// Conversion factor from layout points to panel-local world units.
+    pub(crate) points_to_world: f32,
+    /// Panel-local horizontal anchor offset.
+    pub(crate) anchor_x:        f32,
+    /// Panel-local vertical anchor offset.
+    pub(crate) anchor_y:        f32,
+    /// Surface shadow policy copied onto each resolved SDF surface.
+    pub(crate) surface_shadow:  SurfaceShadow,
+    /// Render layers copied onto each resolved SDF surface.
+    pub(crate) layer:           RenderLayers,
 }
 
 /// Reconciles a panel's SDF quads against its render commands: identical
@@ -243,55 +237,26 @@ fn reconcile_sdf_quads(
     sdf_materials: &mut Assets<LegacySdfExtendedMaterial>,
     commands: &mut Commands,
 ) {
-    let occupancy = draw_order.level_occupancy();
-    if let Some((z_level, level_count)) = occupancy.iter().copied().max_by_key(|(_, count)| *count)
-        && per_level_band_overflows(level_count)
-    {
-        warn_once!(
-            "panel {:?} has {} draw commands at z-level {}, reaching the per-level screen band \
-             cap ({}); coplanar geometry at that level reaches the shared line/text sub-lanes",
-            context.panel_entity,
-            level_count,
-            z_level,
-            per_level_band_capacity(),
-        );
-    }
-
-    let panel_total = occupancy.iter().map(|(_, count)| *count).sum();
-    if oit_total_overflows(panel_total) {
-        warn_once!(
-            "panel {:?} has {} total draw commands, reaching the OIT depth budget ({}); the \
-             panel-global ordinal span exhausts 24-bit OIT depth headroom and coplanar ordering \
-             degrades to OIT-list insertion order",
-            context.panel_entity,
-            panel_total,
-            oit_depth_budget(),
-        );
-    }
-
     let gathered = gather_surfaces(context.panel, render_commands, draw_order);
     let desired = desired_surfaces(gathered);
 
-    let mut existing: HashMap<usize, (Entity, PanelSdfSurface, Handle<LegacySdfExtendedMaterial>)> =
-        old_sdf
-            .iter()
-            .filter(|(_, child_of, ..)| child_of.parent() == context.panel_entity)
-            .map(|(entity, _, signature, material)| {
-                (
-                    signature.command_index,
-                    (entity, *signature, material.0.clone()),
-                )
-            })
-            .collect();
+    let mut existing: HashMap<
+        CommandIndex,
+        (Entity, PanelSdfSurface, Handle<LegacySdfExtendedMaterial>),
+    > = old_sdf
+        .iter()
+        .filter(|(_, child_of, ..)| child_of.parent() == context.panel_entity)
+        .map(|(entity, _, signature, material)| {
+            (
+                signature.command_index,
+                (entity, *signature, material.0.clone()),
+            )
+        })
+        .collect();
 
     for surface in &desired {
-        let quad = build_sdf_quad(
-            surface,
-            context.panel,
-            context.points_to_world,
-            context.anchor_x,
-            context.anchor_y,
-        );
+        let resolved = resolve_sdf_surface(surface, context);
+        let quad = build_sdf_quad_from_resolved(&resolved);
         match existing.remove(&quad.signature.command_index) {
             // Identical — leave the quad untouched.
             Some((_, signature, _)) if signature == quad.signature => {},
@@ -305,10 +270,10 @@ fn reconcile_sdf_quads(
             // Geometry moved, or a brand-new surface — respawn this quad.
             Some((entity, ..)) => {
                 commands.entity(entity).despawn();
-                spawn_sdf_quad(quad, context, meshes, sdf_materials, commands);
+                spawn_sdf_quad(quad, meshes, sdf_materials, commands);
             },
             None => {
-                spawn_sdf_quad(quad, context, meshes, sdf_materials, commands);
+                spawn_sdf_quad(quad, meshes, sdf_materials, commands);
             },
         }
     }
@@ -318,21 +283,6 @@ fn reconcile_sdf_quads(
         commands.entity(entity).despawn();
     }
 }
-
-fn per_level_band_capacity() -> usize {
-    usize::try_from(DRAW_LEVEL_GEOMETRY_LANES).unwrap_or(usize::MAX)
-}
-
-fn per_level_band_overflows(busiest: usize) -> bool { busiest >= per_level_band_capacity() }
-
-fn oit_depth_budget() -> usize {
-    if OIT_DEPTH_STEP <= 0.0 {
-        return usize::MAX;
-    }
-    (OIT_FOCUS_DEPTH / OIT_DEPTH_STEP).floor().to_usize()
-}
-
-fn oit_total_overflows(panel_total: usize) -> bool { panel_total >= oit_depth_budget() }
 
 /// Reconciles the invisible full-panel interaction quad: it is respawned only
 /// when the panel's world size or center changed, and left untouched otherwise.
@@ -386,7 +336,7 @@ fn reconcile_interaction_mesh(
 // ── Helpers ─────────────────────────────────────────────────────────────────
 
 struct GatheredCommands {
-    surfaces: HashMap<usize, ElementSurface>,
+    surfaces: HashMap<ElementIndex, ElementSurface>,
     dividers: Vec<ElementSurface>,
 }
 
@@ -401,7 +351,7 @@ fn gather_surfaces(
 ) -> GatheredCommands {
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
-    let mut surfaces: HashMap<usize, ElementSurface> = HashMap::new();
+    let mut surfaces: HashMap<ElementIndex, ElementSurface> = HashMap::new();
     let mut dividers: Vec<ElementSurface> = Vec::new();
 
     for (cmd_index, cmd) in commands.iter().enumerate() {
@@ -414,27 +364,29 @@ fn gather_surfaces(
                 let Some(draw_depth) = draw_order.depth_for(cmd_index) else {
                     continue;
                 };
+                let command_index = CommandIndex::from(cmd_index);
                 if *source == RectangleSource::ChildDivider {
                     dividers.push(ElementSurface {
-                        index: usize::MAX,
+                        index: ElementIndex::CHILD_DIVIDER,
                         bounds: cmd.bounds,
                         fill_color: Some(*color),
                         border_widths: [0.0; 4],
                         border_color: None,
-                        command_index: cmd_index,
+                        command_index,
                         draw_depth,
                         clip_rect: Some(active_clip),
                     });
                 } else {
+                    let element_index = ElementIndex::from(cmd.element_idx);
                     surfaces
-                        .entry(cmd.element_idx)
+                        .entry(element_index)
                         .or_insert_with(|| ElementSurface {
-                            index: cmd.element_idx,
+                            index: element_index,
                             bounds: cmd.bounds,
                             fill_color: None,
                             border_widths: [0.0; 4],
                             border_color: None,
-                            command_index: cmd_index,
+                            command_index,
                             draw_depth,
                             clip_rect: Some(active_clip),
                         })
@@ -448,15 +400,17 @@ fn gather_surfaces(
                 let Some(draw_depth) = draw_order.depth_for(cmd_index) else {
                     continue;
                 };
+                let command_index = CommandIndex::from(cmd_index);
+                let element_index = ElementIndex::from(cmd.element_idx);
                 let surface = surfaces
-                    .entry(cmd.element_idx)
+                    .entry(element_index)
                     .or_insert_with(|| ElementSurface {
-                        index: cmd.element_idx,
+                        index: element_index,
                         bounds: cmd.bounds,
                         fill_color: None,
                         border_widths: [0.0; 4],
                         border_color: None,
-                        command_index: cmd_index,
+                        command_index,
                         draw_depth,
                         clip_rect: Some(active_clip),
                     });
@@ -483,26 +437,104 @@ fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
     desired
 }
 
+/// Borrowed `StandardMaterial` source plus the layout color override for one
+/// SDF material slot.
+pub(crate) struct ResolvedSdfMaterial<'a> {
+    /// Element or panel material used as the `StandardMaterial` base; `None`
+    /// connects this slot to `default_panel_material()`.
+    pub(crate) base_material: Option<&'a StandardMaterial>,
+    /// Layout color applied to `StandardMaterial::base_color` when the old
+    /// adapter or future frame table builds the owned material.
+    pub(crate) color:         Option<Color>,
+}
+
+impl ResolvedSdfMaterial<'_> {
+    fn to_standard_material(&self) -> StandardMaterial {
+        let mut material = self
+            .base_material
+            .cloned()
+            .unwrap_or_else(super::default_panel_material);
+
+        if let Some(color) = self.color {
+            material.base_color = color;
+        }
+
+        material
+    }
+}
+
+/// Render-neutral resolved SDF surface shared by the old quad adapter and the
+/// future fill-batch builder.
+pub(crate) struct ResolvedSdfSurface<'a> {
+    /// Entity of the `DiegeticPanel` that owns this surface.
+    pub(crate) panel_entity:    Entity,
+    /// Command identity inside the panel's `LayoutResult::commands` stream.
+    pub(crate) command_index:   CommandIndex,
+    /// Full draw-depth projection for sorted and OIT ordering.
+    pub(crate) draw_depth:      DrawCommandDepth,
+    /// Fill material input consumed by `sdf_material::sdf_panel_material` and
+    /// the future SDF material table.
+    pub(crate) fill_material:   ResolvedSdfMaterial<'a>,
+    /// Border material input consumed by the SDF uniform builder and the
+    /// future SDF material table.
+    pub(crate) border_material: ResolvedSdfMaterial<'a>,
+    /// Panel-local center of the SDF mesh child.
+    pub(crate) local_center:    Vec2,
+    /// Panel-local transform inserted on the old `PanelSdfMesh` child.
+    pub(crate) local_transform: Transform,
+    /// Panel-local half size of the SDF form.
+    pub(crate) sdf_half_size:   Vec2,
+    /// Panel-local half size of the quad mesh, including `SDF_AA_PADDING`.
+    pub(crate) mesh_half_size:  Vec2,
+    /// Panel-local per-corner radii [TL, TR, BR, BL].
+    pub(crate) corner_radii:    [f32; 4],
+    /// Panel-local border widths [top, right, bottom, left].
+    pub(crate) border_widths:   [f32; 4],
+    /// Panel-local clip rect [left, bottom, right, top] after padding
+    /// expansion.
+    pub(crate) clip_rect:       Vec4,
+    /// Render layers copied to the old child and future fill batch records.
+    pub(crate) render_layers:   RenderLayers,
+    /// Surface shadow policy copied to the old child and future fill batch
+    /// records.
+    pub(crate) surface_shadow:  SurfaceShadow,
+    /// `SdfPanelUniform::sdf_kind` selector for this surface.
+    pub(crate) sdf_kind:        u32,
+    /// `SdfPanelUniform::sdf_params` payload for this surface.
+    pub(crate) sdf_params:      Vec4,
+}
+
 /// An SDF quad ready to spawn or recolor: its material, mesh size, world
 /// center, and the [`PanelSdfSurface`] signature describing what it was built
 /// from.
 struct BuiltSdfQuad {
-    material:  LegacySdfExtendedMaterial,
-    mesh_size: Vec2,
-    center:    Vec2,
-    signature: PanelSdfSurface,
+    /// Entity of the `DiegeticPanel` that owns the old `PanelSdfMesh` child.
+    panel_entity:    Entity,
+    /// Legacy extended material inserted on the old `PanelSdfMesh` child.
+    material:        LegacySdfExtendedMaterial,
+    /// Panel-local mesh size inserted into `Rectangle`.
+    mesh_size:       Vec2,
+    /// Panel-local transform inserted on the old `PanelSdfMesh` child.
+    local_transform: Transform,
+    /// Render layers inserted on the old `PanelSdfMesh` child.
+    render_layers:   RenderLayers,
+    /// Shadow policy inserted on the old `PanelSdfMesh` child.
+    surface_shadow:  SurfaceShadow,
+    /// Signature used by `reconcile_sdf_quads` to diff old and new children.
+    signature:       PanelSdfSurface,
 }
 
-/// Resolves a surface into a [`BuiltSdfQuad`] — pure computation, no asset or
-/// entity mutation. The caller decides whether to spawn, recolor, or skip.
-fn build_sdf_quad(
+/// Resolves an [`ElementSurface`] into render-neutral SDF data.
+///
+/// This performs only pre-propagation panel-local math. `StandardMaterial`
+/// ownership and `StandardMaterial::depth_bias` assignment stay in
+/// [`build_sdf_quad_from_resolved`].
+pub(crate) fn resolve_sdf_surface<'a>(
     surface: &ElementSurface,
-    panel: &DiegeticPanel,
-    points_to_world: f32,
-    anchor_x: f32,
-    anchor_y: f32,
-) -> BuiltSdfQuad {
-    let element_mat = panel.tree().element_material(surface.index);
+    context: &PanelReconcileContext<'a>,
+) -> ResolvedSdfSurface<'a> {
+    let element_mat = context.panel.tree().element_material(surface.index.get());
+    let base_material = element_mat.or_else(|| context.panel.material());
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -512,17 +544,17 @@ fn build_sdf_quad(
             Some(Color::NONE)
         }
     });
-    let mut base = super::resolve_material(element_mat, panel.material(), effective_color);
-    base.depth_bias = surface.draw_depth.depth_bias().get();
-    let fill_color = base.base_color;
 
-    let world_width = surface.bounds.width * points_to_world;
-    let world_height = surface.bounds.height * points_to_world;
-    let world_radii = world_corner_radii(panel, surface.index, points_to_world);
-    let world_borders = surface.border_widths.map(|width| width * points_to_world);
+    let local_width = surface.bounds.width * context.points_to_world;
+    let local_height = surface.bounds.height * context.points_to_world;
+    let corner_radii =
+        panel_local_corner_radii(context.panel, surface.index, context.points_to_world);
+    let border_widths = surface
+        .border_widths
+        .map(|width| width * context.points_to_world);
 
-    let half_width = world_width * 0.5;
-    let half_height = world_height * 0.5;
+    let half_width = local_width * 0.5;
+    let half_height = local_height * 0.5;
 
     // Mesh is slightly larger than the SDF form so the exterior
     // anti-aliasing ramp has fragments to render on.
@@ -565,11 +597,11 @@ fn build_sdf_quad(
         },
         |clip_rect| {
             let (cx, cy) = surface.bounds.center();
-            let left = (clip_rect.x - cx) * points_to_world;
-            let right = (clip_rect.x + clip_rect.width - cx) * points_to_world;
+            let left = (clip_rect.x - cx) * context.points_to_world;
+            let right = (clip_rect.x + clip_rect.width - cx) * context.points_to_world;
             // Layout Y-down → local Y-up.
-            let top = -(clip_rect.y - cy) * points_to_world;
-            let bottom = -(clip_rect.y + clip_rect.height - cy) * points_to_world;
+            let top = -(clip_rect.y - cy) * context.points_to_world;
+            let bottom = -(clip_rect.y + clip_rect.height - cy) * context.points_to_world;
             Vec4::new(
                 left - pad,
                 bottom.min(top) - pad,
@@ -579,50 +611,93 @@ fn build_sdf_quad(
         },
     );
 
+    let local_center = bounds_to_panel_local_center(
+        &surface.bounds,
+        context.points_to_world,
+        context.anchor_x,
+        context.anchor_y,
+    );
+
+    ResolvedSdfSurface {
+        panel_entity: context.panel_entity,
+        command_index: surface.command_index,
+        draw_depth: surface.draw_depth,
+        fill_material: ResolvedSdfMaterial {
+            base_material,
+            color: effective_color,
+        },
+        border_material: ResolvedSdfMaterial {
+            base_material,
+            color: surface.border_color,
+        },
+        local_center,
+        local_transform: Transform::from_xyz(local_center.x, local_center.y, 0.0),
+        sdf_half_size: Vec2::new(half_width, half_height),
+        mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
+        corner_radii,
+        border_widths,
+        clip_rect,
+        render_layers: context.layer.clone(),
+        surface_shadow: context.surface_shadow,
+        sdf_kind: constants::SDF_KIND_ROUNDED_RECT,
+        sdf_params: constants::SDF_ROUNDED_RECT_PARAMS,
+    }
+}
+
+/// Adapts a [`ResolvedSdfSurface`] to the old per-quad renderer.
+fn build_sdf_quad_from_resolved(surface: &ResolvedSdfSurface<'_>) -> BuiltSdfQuad {
+    let mut base = surface.fill_material.to_standard_material();
+    base.depth_bias = surface.draw_depth.depth_bias().get();
+    let fill_color = base.base_color;
+
     let material = sdf_material::sdf_panel_material(
         base,
         LegacySdfExtendedMaterialInput {
-            half_size: Vec2::new(half_width, half_height),
-            mesh_half_size: Vec2::new(mesh_half_width, mesh_half_height),
-            corner_radii: world_radii,
-            border_widths: world_borders,
-            border_color: surface.border_color,
-            clip_rect,
+            half_size:        surface.sdf_half_size,
+            mesh_half_size:   surface.mesh_half_size,
+            corner_radii:     surface.corner_radii,
+            border_widths:    surface.border_widths,
+            border_color:     surface.border_material.color,
+            sdf_kind:         surface.sdf_kind,
+            sdf_params:       surface.sdf_params,
+            clip_rect:        surface.clip_rect,
             oit_depth_offset: surface.draw_depth.oit_depth_offset().get(),
         },
     );
 
-    let world_rect = bounds_to_world_rect(&surface.bounds, points_to_world, anchor_x, anchor_y);
-    let mesh_size = Vec2::new(mesh_half_width * 2.0, mesh_half_height * 2.0);
+    let mesh_size = surface.mesh_half_size * 2.0;
 
     let signature = PanelSdfSurface {
         command_index: surface.command_index,
         draw_depth:    surface.draw_depth,
-        center:        vec2_bits(world_rect.center),
+        center:        vec2_bits(surface.local_center),
         mesh_size:     vec2_bits(mesh_size),
-        corner_radii:  array4_bits(world_radii),
-        border_widths: array4_bits(world_borders),
-        clip_rect:     vec4_bits(clip_rect),
+        corner_radii:  array4_bits(surface.corner_radii),
+        border_widths: array4_bits(surface.border_widths),
+        clip_rect:     vec4_bits(surface.clip_rect),
         fill_color:    color_bits(fill_color),
-        border_color:  surface.border_color.map_or([0; 4], color_bits),
+        border_color:  surface.border_material.color.map_or([0; 4], color_bits),
     };
 
     BuiltSdfQuad {
+        panel_entity: surface.panel_entity,
         material,
         mesh_size,
-        center: world_rect.center,
+        local_transform: surface.local_transform,
+        render_layers: surface.render_layers.clone(),
+        surface_shadow: surface.surface_shadow,
         signature,
     }
 }
 
-fn world_corner_radii(
+fn panel_local_corner_radii(
     panel: &DiegeticPanel,
-    element_index: usize,
+    element_index: ElementIndex,
     points_to_world: f32,
 ) -> [f32; 4] {
     panel
         .tree()
-        .element_corner_radius(element_index)
+        .element_corner_radius(element_index.get())
         .resolved(panel.layout_unit().to_points())
         .to_array()
         .map(|radius| radius * points_to_world)
@@ -631,7 +706,6 @@ fn world_corner_radii(
 /// Spawns one SDF quad as a child of `panel_entity`, tagged with its signature.
 fn spawn_sdf_quad(
     quad: BuiltSdfQuad,
-    context: &PanelReconcileContext<'_>,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<LegacySdfExtendedMaterial>,
     commands: &mut Commands,
@@ -643,18 +717,18 @@ fn spawn_sdf_quad(
         quad.signature,
         Mesh3d(mesh),
         MeshMaterial3d(material),
-        Transform::from_xyz(quad.center.x, quad.center.y, 0.0),
-        context.layer.clone(),
+        quad.local_transform,
+        quad.render_layers,
     );
-    match context.shadow_mode {
-        ShadowMode::Suppressed => {
+    match quad.surface_shadow {
+        SurfaceShadow::Off => {
             commands
-                .entity(context.panel_entity)
+                .entity(quad.panel_entity)
                 .with_child((base_components, NotShadowCaster));
         },
-        ShadowMode::Enabled => {
+        SurfaceShadow::On => {
             commands
-                .entity(context.panel_entity)
+                .entity(quad.panel_entity)
                 .with_child(base_components);
         },
     }
@@ -713,24 +787,18 @@ fn color_bits(color: Color) -> [u32; 4] {
     ]
 }
 
-struct WorldRect {
-    center: Vec2,
-}
-
-fn bounds_to_world_rect(
+fn bounds_to_panel_local_center(
     bounds: &BoundingBox,
     points_to_world: f32,
     anchor_x: f32,
     anchor_y: f32,
-) -> WorldRect {
+) -> Vec2 {
     let width = bounds.width * points_to_world;
     let height = bounds.height * points_to_world;
     let left = bounds.x.mul_add(points_to_world, -anchor_x);
     let top = -(bounds.y.mul_add(points_to_world, -anchor_y));
 
-    WorldRect {
-        center: Vec2::new(width.mul_add(0.5, left), height.mul_add(-0.5, top)),
-    }
+    Vec2::new(width.mul_add(0.5, left), height.mul_add(-0.5, top))
 }
 
 #[cfg(test)]
@@ -757,22 +825,6 @@ mod tests {
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::text::DiegeticTextMeasurer;
-
-    #[test]
-    fn per_level_band_overflows_at_screen_band_capacity() {
-        let capacity = per_level_band_capacity();
-
-        assert!(!per_level_band_overflows(capacity.saturating_sub(1)));
-        assert!(per_level_band_overflows(capacity));
-    }
-
-    #[test]
-    fn oit_total_overflows_at_depth_budget() {
-        let budget = oit_depth_budget();
-
-        assert!(!oit_total_overflows(budget.saturating_sub(1)));
-        assert!(oit_total_overflows(budget));
-    }
 
     /// Minimal measurer for geometry tests that include text commands.
     fn zero_measurer() -> DiegeticTextMeasurer {
@@ -974,20 +1026,25 @@ mod tests {
         app.update();
         app.update();
 
-        let mut quads: Vec<(usize, LegacySdfExtendedMaterial)> = {
+        let mut quads: Vec<(CommandIndex, PanelSdfSurface, LegacySdfExtendedMaterial)> = {
             let world = app.world_mut();
             let mut query =
                 world.query::<(&PanelSdfSurface, &MeshMaterial3d<LegacySdfExtendedMaterial>)>();
-            let pairs: Vec<(usize, Handle<LegacySdfExtendedMaterial>)> = query
+            let pairs: Vec<(
+                CommandIndex,
+                PanelSdfSurface,
+                Handle<LegacySdfExtendedMaterial>,
+            )> = query
                 .iter(world)
-                .map(|(surface, material)| (surface.command_index, material.0.clone()))
+                .map(|(surface, material)| (surface.command_index, *surface, material.0.clone()))
                 .collect();
             let materials = world.resource::<Assets<LegacySdfExtendedMaterial>>();
             pairs
                 .into_iter()
-                .map(|(command_index, handle)| {
+                .map(|(command_index, surface, handle)| {
                     (
                         command_index,
+                        surface,
                         materials
                             .get(&handle)
                             .expect("quad material exists")
@@ -996,21 +1053,24 @@ mod tests {
                 })
                 .collect()
         };
-        quads.sort_by_key(|(command_index, _)| *command_index);
+        quads.sort_by_key(|(command_index, ..)| *command_index);
         assert_eq!(quads.len(), 2, "two overlapping backing quads expected");
 
-        let (below_index, below) = &quads[0];
-        let (above_index, above) = &quads[1];
+        let (below_index, below_surface, below) = &quads[0];
+        let (above_index, above_surface, above) = &quads[1];
         assert!(below_index < above_index);
 
         // Both ordering mechanisms must put the higher command index in
         // front: sorted bias rises and OIT offset rises (reverse-Z, positive =
         // closer).
         assert!(below.base.depth_bias < above.base.depth_bias);
-        assert_eq!(below.base.depth_bias.to_bits(), 0.0_f32.to_bits());
+        assert_eq!(
+            below.base.depth_bias.to_bits(),
+            below_surface.draw_depth.depth_bias().get().to_bits()
+        );
         assert_eq!(
             above.base.depth_bias.to_bits(),
-            constants::LAYER_DEPTH_BIAS.to_bits()
+            above_surface.draw_depth.depth_bias().get().to_bits()
         );
         assert!(
             below.extension.uniforms.oit_depth_offset < above.extension.uniforms.oit_depth_offset

@@ -6,6 +6,7 @@ mod batch_key;
 mod clip;
 mod constants;
 mod draw_order;
+mod draw_order_limits;
 mod material;
 #[cfg(test)]
 mod material_slot_lifetime_probe;
@@ -56,7 +57,10 @@ use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+pub(crate) use draw_order::CommandIndex;
 pub(crate) use draw_order::DrawOrderProjection;
+pub(crate) use draw_order::ElementIndex;
+use draw_order_limits::warn_panel_draw_order_limits;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::resolve_material;
@@ -96,6 +100,14 @@ use crate::cascade::CascadeSet;
 pub(crate) enum PanelChildSystems {
     /// Reconcile and mesh-build of every panel child entity.
     Build,
+}
+
+/// `PostUpdate` phase that reports draw-order capacity limits from
+/// `DrawOrderProjection`.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum DrawOrderLimitSystems {
+    /// Warn about per-level screen lanes and OIT ordinal budget.
+    Warn,
 }
 
 /// Anti-aliasing applied to slug glyph edges, across all text materials.
@@ -362,6 +374,10 @@ impl Plugin for RenderPlugin {
             Update,
             (sync_anti_alias, sync_hairline_fade, sync_hairline_width)
                 .before(CascadeSet::Propagate),
+        )
+        .add_systems(
+            PostUpdate,
+            warn_panel_draw_order_limits.in_set(DrawOrderLimitSystems::Warn),
         )
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)
