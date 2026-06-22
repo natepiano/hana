@@ -71,7 +71,7 @@ Orders below.
 
 ## Phases
 
-### Phase 1 — Ingest & cleanup  · status: todo
+### Phase 1 — Ingest & cleanup  · status: done
 
 #### Work Order
 
@@ -95,7 +95,7 @@ Orders below.
 
 **Acceptance gate:** `crates/bevy_clerestory/` exists; `git log --follow crates/bevy_clerestory/src/lib.rs` resolves full history; inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml`/`.github/`/`.claude/` absent; `LICENSE-APACHE` + `LICENSE-MIT` present. (Workspace does **not** build yet — the crate manifest still names `bevy_window_manager`, colliding with the root registry dep. Green lands at Phase 3.)
 
-### Phase 2 — Rename crate identity in-tree  · status: todo
+### Phase 2 — Rename crate identity in-tree  · status: done
 
 #### Work Order
 
@@ -144,7 +144,7 @@ Orders below.
 
 **Acceptance gate:** `rg -i 'window[_-]?manager' crates/bevy_clerestory --glob '!target'` returns **only** `WindowManagerPlugin` / `WindowManagerPluginCustomPath` symbol lines — no snake_case, no `use` paths, no string literals. (Workspace still not green — host references + manifest deps pending Phase 3.)
 
-### Phase 3 — Manifest plumbing: crate reshape + host repoint  · status: todo
+### Phase 3 — Manifest plumbing: crate reshape + host repoint  · status: done
 
 #### Work Order
 
@@ -199,7 +199,7 @@ Orders below.
 
 **Acceptance gate:** build + examples + `nextest` green; workspace-wide `rg` gate clean; smoke test writes to the isolated `bevy_clerestory` dir; `cargo tree --duplicates` clean.
 
-### Phase 5 — Checkpoint  · status: todo
+### Phase 5 — Checkpoint  · status: done
 
 #### Work Order
 
