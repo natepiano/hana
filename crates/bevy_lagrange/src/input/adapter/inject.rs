@@ -34,6 +34,7 @@ use crate::constants::PINCH_GESTURE_AMPLIFICATION;
 use crate::constants::TOUCH_PINCH_SCALE;
 use crate::input;
 use crate::input::CameraInteractionSources;
+use crate::input::OrbitCamBindingWithSensitivity;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamButtonDragZoomAxis;
 use crate::input::OrbitCamInputContextGated;
@@ -223,6 +224,7 @@ pub(super) enum TrackpadScrollTarget {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TrackpadScrollCandidate {
     target:   TrackpadScrollTarget,
+    index:    usize,
     mod_keys: ModKeys,
 }
 
@@ -237,18 +239,28 @@ fn selected_trackpad_binding(
     let candidates = bindings
         .trackpad_orbit()
         .iter()
-        .map(|binding| trackpad_candidate(TrackpadScrollTarget::Orbit, *binding))
+        .copied()
+        .enumerate()
+        .map(|(index, binding)| trackpad_candidate(TrackpadScrollTarget::Orbit, index, binding))
         .chain(
             bindings
                 .trackpad_pan()
                 .iter()
-                .map(|binding| trackpad_candidate(TrackpadScrollTarget::Pan, *binding)),
+                .copied()
+                .enumerate()
+                .map(|(index, binding)| {
+                    trackpad_candidate(TrackpadScrollTarget::Pan, index, binding)
+                }),
         )
         .chain(
             bindings
                 .trackpad_zoom()
                 .iter()
-                .map(|binding| trackpad_candidate(TrackpadScrollTarget::Zoom, *binding)),
+                .copied()
+                .enumerate()
+                .map(|(index, binding)| {
+                    trackpad_candidate(TrackpadScrollTarget::Zoom, index, binding)
+                }),
         );
 
     candidates
@@ -257,6 +269,7 @@ fn selected_trackpad_binding(
             (
                 mod_key_count(candidate.mod_keys),
                 trackpad_target_priority(candidate.target),
+                candidate.index,
             )
         })
 }
@@ -271,18 +284,22 @@ fn refresh_trackpad_conditions(
             continue;
         }
         condition.active = selection.is_some_and(|selection| {
-            selection.target == condition.target && selection.mod_keys == condition.mod_keys
+            selection.target == condition.target
+                && selection.index == condition.index
+                && selection.mod_keys == condition.mod_keys
         });
     }
 }
 
 const fn trackpad_candidate(
     target: TrackpadScrollTarget,
-    binding: OrbitCamTrackpadScroll,
+    index: usize,
+    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
 ) -> TrackpadScrollCandidate {
     TrackpadScrollCandidate {
         target,
-        mod_keys: binding.mod_keys,
+        index,
+        mod_keys: binding.binding().mod_keys,
     }
 }
 
@@ -361,7 +378,8 @@ fn trackpad_modifier_active(
         .chain(bindings.trackpad_pan())
         .chain(bindings.trackpad_zoom())
         .any(|binding| {
-            !binding.mod_keys.is_empty() && input::mod_keys_pressed(keyboard, binding.mod_keys)
+            !binding.binding().mod_keys.is_empty()
+                && input::mod_keys_pressed(keyboard, binding.binding().mod_keys)
         })
 }
 
@@ -370,11 +388,11 @@ fn apply_touch_contribution(
     touch_gestures: &TouchGestures,
     contributions: &mut AdapterContributions,
 ) {
-    let Some(touch) = bindings.touch() else {
+    let Some(touch) = bindings.touch_config() else {
         return;
     };
 
-    let (orbit, pan, zoom) = match (touch, touch_gestures) {
+    let (orbit, pan, zoom) = match (touch.binding(), touch_gestures) {
         (OrbitCamTouchBinding::OneFingerOrbit, TouchGestures::OneFinger(gesture)) => {
             (gesture.motion, Vec2::ZERO, 0.0)
         },
@@ -427,12 +445,12 @@ fn apply_button_drag_zoom_contribution(
         return;
     };
     if mouse_motion == Vec2::ZERO
-        || mouse_buttons.is_none_or(|buttons| !buttons.pressed(button_drag_zoom.button))
+        || mouse_buttons.is_none_or(|buttons| !buttons.pressed(button_drag_zoom.binding().button))
     {
         return;
     }
 
-    let delta = match button_drag_zoom.axis {
+    let delta = match button_drag_zoom.binding().axis {
         OrbitCamButtonDragZoomAxis::X => mouse_motion.x,
         OrbitCamButtonDragZoomAxis::Y => -mouse_motion.y,
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,

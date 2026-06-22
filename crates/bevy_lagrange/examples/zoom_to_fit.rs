@@ -74,7 +74,7 @@ fn main() {
         .transform(Transform::from_translation(REFERENCE_CUBE_TRANSLATION))
         .face_label(Face::Front, REFERENCE_LABEL)
         .insert(CameraHomeTarget)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_camera_home()
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)

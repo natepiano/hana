@@ -55,9 +55,10 @@ pub enum OrbitCamInputMode {
 ```
 
 It is `Clone + Debug + PartialEq + Reflect`, defaults to
-`Preset(OrbitCamPreset::SimpleMouse)`, and has `From<OrbitCamPreset>` /
-`From<OrbitCamBindings>` conversions. The full binding set is inlined in `Bindings`
-(not boxed) because at most a handful of these components exist at once.
+`OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse())`, and has
+`From<OrbitCamPreset>` / `From<OrbitCamBindings>` conversions. The full binding
+set is inlined in `Bindings` (not boxed) because at most a handful of these
+components exist at once.
 
 `OrbitCam` requires the component (`orbit_cam/mod.rs`):
 

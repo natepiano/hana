@@ -23,6 +23,7 @@ use super::descriptor::InputBindingModifiers;
 use super::descriptor::InputBindingOutputAxis;
 use super::descriptor::InputBindingScale;
 use super::descriptor::InputDeadZone;
+use super::descriptor::InputSensitivity;
 use crate::input::CameraInteractionSources;
 use crate::input::ControlSpeed;
 
@@ -90,6 +91,13 @@ impl OrbitCamHeldBinding {
     #[must_use]
     pub fn with_blocked_gate(mut self, input: impl Into<OrbitCamGateInput>) -> Self {
         self.gates = self.gates.with_blocked(input);
+        self
+    }
+
+    /// Sets the authored sensitivity for the motion binding.
+    #[must_use]
+    pub fn with_sensitivity(mut self, sensitivity: f32) -> Self {
+        self.motion = self.motion.with_sensitivity(sensitivity);
         self
     }
 
@@ -199,11 +207,13 @@ pub enum OrbitCamInputBinding {
     /// A binding with descriptor modifiers applied after composite expansion.
     Modified {
         /// Inner binding being modified.
-        binding:   Box<Self>,
+        binding:     Box<Self>,
         /// Modifiers applied to every expanded entry.
-        modifiers: InputBindingModifiers,
+        modifiers:   InputBindingModifiers,
         /// Optional scale applied with composite-axis awareness.
-        scale:     Option<InputBindingScale>,
+        scale:       Option<InputBindingScale>,
+        /// Authored sensitivity applied after signed scale lowering.
+        sensitivity: InputSensitivity,
     },
 }
 
@@ -249,7 +259,7 @@ impl OrbitCamInputBinding {
     /// Applies a BEI scale modifier after dead-zone processing.
     #[must_use]
     pub fn with_scale(self, scale: impl Into<InputBindingScale>) -> Self {
-        self.with_modifier_update(|_, binding_scale| {
+        self.with_descriptor_update(|_, binding_scale, _| {
             *binding_scale = Some(scale.into());
         })
     }
@@ -257,7 +267,7 @@ impl OrbitCamInputBinding {
     /// Applies an axial BEI dead-zone modifier.
     #[must_use]
     pub fn with_dead_zone(self, dead_zone: InputDeadZone) -> Self {
-        self.with_modifier_update(|modifiers, _| {
+        self.with_descriptor_update(|modifiers, _, _| {
             *modifiers = modifiers.with_dead_zone(dead_zone);
         })
     }
@@ -265,36 +275,52 @@ impl OrbitCamInputBinding {
     /// Scales held input by the current frame delta.
     #[must_use]
     pub fn with_delta_scale(self) -> Self {
-        self.with_modifier_update(|modifiers, _| {
+        self.with_descriptor_update(|modifiers, _, _| {
             *modifiers = modifiers.with_delta_scale();
         })
     }
 
-    fn with_modifier_update(
+    /// Sets the authored sensitivity for this input binding.
+    #[must_use]
+    pub fn with_sensitivity(self, sensitivity: f32) -> Self {
+        self.with_descriptor_update(|_, _, input_sensitivity| {
+            *input_sensitivity = InputSensitivity(sensitivity);
+        })
+    }
+
+    fn with_descriptor_update(
         self,
-        update: impl FnOnce(&mut InputBindingModifiers, &mut Option<InputBindingScale>),
+        update: impl FnOnce(
+            &mut InputBindingModifiers,
+            &mut Option<InputBindingScale>,
+            &mut InputSensitivity,
+        ),
     ) -> Self {
         match self {
             Self::Modified {
                 binding,
                 mut modifiers,
                 mut scale,
+                mut sensitivity,
             } => {
-                update(&mut modifiers, &mut scale);
+                update(&mut modifiers, &mut scale, &mut sensitivity);
                 Self::Modified {
                     binding,
                     modifiers,
                     scale,
+                    sensitivity,
                 }
             },
             binding => {
                 let mut modifiers = InputBindingModifiers::default();
                 let mut scale = None;
-                update(&mut modifiers, &mut scale);
+                let mut sensitivity = InputSensitivity::DEFAULT;
+                update(&mut modifiers, &mut scale, &mut sensitivity);
                 Self::Modified {
                     binding: Box::new(binding),
                     modifiers,
                     scale,
+                    sensitivity,
                 }
             },
         }
@@ -340,9 +366,11 @@ impl OrbitCamInputBinding {
                 binding,
                 modifiers,
                 scale,
+                sensitivity,
             } => binding
                 .descriptor()
-                .with_entry_modifiers(*modifiers, *scale),
+                .with_entry_modifiers(*modifiers, *scale)
+                .with_entry_sensitivity(*sensitivity),
         }
     }
 

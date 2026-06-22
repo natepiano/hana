@@ -49,7 +49,7 @@ fn main() {
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .insert((Cube, CameraHomeTarget))
-        .with_orbit_cam_preset(configure_camera, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(configure_camera, OrbitCamPreset::blender_like())
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

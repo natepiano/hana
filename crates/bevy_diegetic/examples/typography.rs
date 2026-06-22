@@ -285,7 +285,7 @@ fn main() {
         )
         .color(GROUND_COLOR)
         .insert(GroundPlaneToggle)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .unclamped()
         .with_stable_transparency()
         .with_camera_home()

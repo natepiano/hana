@@ -344,7 +344,7 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_PLANE_SIZE)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .unclamped()
         .with_stable_transparency()
         .with_camera_home()

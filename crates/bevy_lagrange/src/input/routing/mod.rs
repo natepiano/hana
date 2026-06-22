@@ -275,7 +275,7 @@ mod tests {
             OrbitCam::default(),
             camera,
             target,
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         )
     }
 
@@ -284,7 +284,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         app.insert_resource(CameraInputRoutingConfig::explicit(camera));
 
@@ -341,7 +341,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         app.world_mut()
             .resource_mut::<OrbitCamSlowModeLatches>()
@@ -380,7 +380,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         app.world_mut()
             .resource_mut::<CameraInputSourceLatches>()
@@ -446,7 +446,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         let overlay = spawn_non_orbit_camera(app.world_mut(), 1);
         app.insert_resource(
@@ -471,7 +471,7 @@ mod tests {
         let mut app = test_app();
         let routed = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         let manual = spawn_camera(app.world_mut(), OrbitCamInputMode::Manual);
         app.insert_resource(CameraInputRoutingConfig::explicit(routed));
@@ -493,7 +493,7 @@ mod tests {
         let camera = spawn_camera(
             app.world_mut(),
             (
-                OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+                OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
                 metrics,
             ),
         );
@@ -515,7 +515,7 @@ mod tests {
         let camera = spawn_camera(
             app.world_mut(),
             (
-                OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+                OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
                 CameraInputDisabled,
             ),
         );

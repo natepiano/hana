@@ -17,6 +17,7 @@ use bevy_enhanced_input::prelude::ModKeys;
 
 use super::action_set::BindingEngagement;
 use super::action_set::BindingRoutePolicy;
+use super::error::OrbitCamBindingsError;
 use super::held_binding::BindingGates;
 use crate::input::CameraInteractionSources;
 use crate::input::ControlSpeed;
@@ -75,6 +76,13 @@ impl InputBindingDescriptor {
         self
     }
 
+    pub(super) fn with_entry_sensitivity(mut self, sensitivity: InputSensitivity) -> Self {
+        for entry in &mut self.entries {
+            entry.sensitivity = sensitivity;
+        }
+        self
+    }
+
     /// Returns `true` when any entry's binding is currently pressed.
     pub fn is_active(
         &self,
@@ -106,6 +114,7 @@ impl InputBindingDescriptor {
 pub struct InputBindingEntry {
     binding:     Binding,
     modifiers:   InputBindingModifiers,
+    sensitivity: InputSensitivity,
     output_axis: InputBindingOutputAxis,
 }
 
@@ -114,6 +123,7 @@ impl InputBindingEntry {
         Self {
             binding,
             modifiers: InputBindingModifiers::new(axis_transform),
+            sensitivity: InputSensitivity::DEFAULT,
             output_axis: InputBindingOutputAxis::X,
         }
     }
@@ -130,6 +140,114 @@ impl InputBindingEntry {
     /// Returns the modifiers installed with this binding entry.
     #[must_use]
     pub const fn modifiers(&self) -> InputBindingModifiers { self.modifiers }
+
+    /// Returns the authored per-entry input sensitivity.
+    #[must_use]
+    pub const fn sensitivity(&self) -> InputSensitivity { self.sensitivity }
+}
+
+/// Per-input multiplier stored separately from signed binding scale.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct InputSensitivity(
+    /// Authored input multiplier.
+    pub f32,
+);
+
+impl InputSensitivity {
+    /// Default enabled sensitivity.
+    pub const DEFAULT: Self = Self(1.0);
+    /// Explicitly disabled sensitivity.
+    pub const DISABLED: Self = Self(0.0);
+
+    /// Returns the stored multiplier.
+    #[must_use]
+    pub const fn value(self) -> f32 { self.0 }
+
+    pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
+        if self.0.is_finite() && self.0 >= Self::DISABLED.0 {
+            Ok(())
+        } else {
+            Err(OrbitCamBindingsError::InvalidScale)
+        }
+    }
+}
+
+impl Default for InputSensitivity {
+    fn default() -> Self { Self::DEFAULT }
+}
+
+/// Per-action orbit-camera sensitivity values.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct OrbitCamSensitivity {
+    orbit: InputSensitivity,
+    pan:   InputSensitivity,
+    zoom:  InputSensitivity,
+}
+
+impl OrbitCamSensitivity {
+    /// Creates a sensitivity set with all actions enabled at the default multiplier.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            orbit: InputSensitivity::DEFAULT,
+            pan:   InputSensitivity::DEFAULT,
+            zoom:  InputSensitivity::DEFAULT,
+        }
+    }
+
+    /// Creates a sensitivity set using the same multiplier for every action.
+    #[must_use]
+    pub const fn uniform(value: f32) -> Self {
+        let sensitivity = InputSensitivity(value);
+        Self {
+            orbit: sensitivity,
+            pan:   sensitivity,
+            zoom:  sensitivity,
+        }
+    }
+
+    /// Sets orbit sensitivity.
+    #[must_use]
+    pub const fn orbit(mut self, value: f32) -> Self {
+        self.orbit = InputSensitivity(value);
+        self
+    }
+
+    /// Sets pan sensitivity.
+    #[must_use]
+    pub const fn pan(mut self, value: f32) -> Self {
+        self.pan = InputSensitivity(value);
+        self
+    }
+
+    /// Sets zoom sensitivity.
+    #[must_use]
+    pub const fn zoom(mut self, value: f32) -> Self {
+        self.zoom = InputSensitivity(value);
+        self
+    }
+
+    /// Returns orbit sensitivity.
+    #[must_use]
+    pub const fn orbit_sensitivity(self) -> InputSensitivity { self.orbit }
+
+    /// Returns pan sensitivity.
+    #[must_use]
+    pub const fn pan_sensitivity(self) -> InputSensitivity { self.pan }
+
+    /// Returns zoom sensitivity.
+    #[must_use]
+    pub const fn zoom_sensitivity(self) -> InputSensitivity { self.zoom }
+
+    pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
+        self.orbit.validate()?;
+        self.pan.validate()?;
+        self.zoom.validate()
+    }
+}
+
+impl Default for OrbitCamSensitivity {
+    fn default() -> Self { Self::new() }
 }
 
 /// Canonical modifier descriptor attached to a flattened binding entry.

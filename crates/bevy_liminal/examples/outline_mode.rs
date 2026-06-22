@@ -177,7 +177,7 @@ fn setup(
             radius: Some(CAMERA_RADIUS),
             ..default()
         },
-        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         OutlineCamera,
     ));
 

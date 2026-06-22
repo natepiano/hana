@@ -21,6 +21,8 @@ use super::action_set::OrbitCamOrbitActionBindings;
 use super::action_set::OrbitCamPanActionBindings;
 use super::action_set::OrbitCamZoomCoarseActionBindings;
 use super::action_set::OrbitCamZoomSmoothActionBindings;
+use super::builder::OrbitCamBindingWithSensitivity;
+use super::builder::OrbitCamTouchBindingConfig;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
 use super::descriptor::InputBindingDescriptor;
@@ -50,6 +52,7 @@ pub fn validate_bindings(
     validate_held_entries(PAN_ACTION_NAME, &descriptor.pan)?;
     validate_held_entries(ZOOM_SMOOTH_ACTION_NAME, &descriptor.zoom_smooth)?;
     validate_impulse_entries(ZOOM_COARSE_ACTION_NAME, &descriptor.zoom_coarse)?;
+    validate_adapter_entries(descriptor)?;
     validate_slow_mode(descriptor.slow_mode.as_ref())?;
 
     Ok(OrbitCamBindings {
@@ -160,6 +163,7 @@ fn validate_descriptor_entries(
 }
 
 fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError> {
+    entry.sensitivity().validate()?;
     let modifiers = entry.modifiers();
     if modifiers.scale().is_some_and(|scale| !scale.is_finite()) {
         return Err(OrbitCamBindingsError::InvalidScale);
@@ -173,6 +177,43 @@ fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError
         return Err(OrbitCamBindingsError::InvalidDeadZone);
     }
     Ok(())
+}
+
+fn validate_adapter_entries(
+    descriptor: &OrbitCamBindingsDescriptor,
+) -> Result<(), OrbitCamBindingsError> {
+    validate_sensitive_entries(&descriptor.trackpad_orbit)?;
+    validate_sensitive_entries(&descriptor.trackpad_pan)?;
+    validate_sensitive_entries(&descriptor.trackpad_zoom)?;
+    validate_sensitive_option(descriptor.mouse_wheel_zoom)?;
+    validate_sensitive_option(descriptor.pinch_zoom)?;
+    validate_sensitive_option(descriptor.button_drag_zoom)?;
+    if let Some(touch) = descriptor.touch {
+        validate_touch_config(touch)?;
+    }
+    Ok(())
+}
+
+fn validate_sensitive_entries<T>(
+    entries: &[OrbitCamBindingWithSensitivity<T>],
+) -> Result<(), OrbitCamBindingsError> {
+    for entry in entries {
+        entry.sensitivity().validate()?;
+    }
+    Ok(())
+}
+
+fn validate_sensitive_option<T>(
+    entry: Option<OrbitCamBindingWithSensitivity<T>>,
+) -> Result<(), OrbitCamBindingsError> {
+    if let Some(entry) = entry {
+        entry.sensitivity().validate()?;
+    }
+    Ok(())
+}
+
+fn validate_touch_config(touch: OrbitCamTouchBindingConfig) -> Result<(), OrbitCamBindingsError> {
+    touch.sensitivity().validate()
 }
 
 fn validate_slow_mode(slow_mode: Option<&OrbitCamSlowMode>) -> Result<(), OrbitCamBindingsError> {

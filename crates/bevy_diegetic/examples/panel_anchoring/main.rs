@@ -91,7 +91,7 @@ fn build_panel_anchoring_app() -> fairy_dust::SprinkleBuilder<fairy_dust::WithOr
                 cam.yaw = Some(CAMERA_YAW);
                 cam.pitch = Some(CAMERA_PITCH);
             },
-            OrbitCamPreset::BlenderLike,
+            OrbitCamPreset::blender_like(),
         )
         .with_stable_transparency()
         .with_camera_home()

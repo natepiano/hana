@@ -42,10 +42,10 @@ impl CameraGuidance {
 
     /// Builds guidance rows for a built-in orbit-camera preset.
     #[must_use]
-    pub fn for_preset(preset: OrbitCamPreset) -> Self {
-        Self::from_summary(describe_orbit_cam_controls(&OrbitCamInputMode::Preset(
-            preset,
-        )))
+    pub fn for_preset(preset: impl Into<OrbitCamPreset>) -> Self {
+        Self::from_summary(describe_orbit_cam_controls(
+            &OrbitCamInputMode::with_preset(preset),
+        ))
     }
 
     /// Builds custom camera guidance rows.

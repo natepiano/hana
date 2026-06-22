@@ -77,7 +77,7 @@ fn main() {
         .with_studio_lighting()
         .key_light_illuminance(KEY_LIGHT_ILLUMINANCE)
         .with_ground_plane()
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

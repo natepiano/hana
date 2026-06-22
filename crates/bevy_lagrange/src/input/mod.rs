@@ -3,8 +3,8 @@
 //! # Quick Start
 //!
 //! `OrbitCam` defaults to
-//! [`OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)`]. Insert
-//! [`OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)`] for editor-style
+//! `OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse())`. Insert
+//! `OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like())` for editor-style
 //! navigation, [`OrbitCamInputMode::Bindings`] when your app owns a keymap or
 //! gamepad mapping, or [`OrbitCamInputMode::Manual`] when your app computes
 //! camera intent itself.
@@ -64,7 +64,9 @@ pub use bindings::InputBindingModifiers;
 pub use bindings::InputBindingScale;
 pub use bindings::InputDeadZone;
 pub use bindings::InputDeltaScale;
+pub use bindings::InputSensitivity;
 pub use bindings::OrbitCamBindingGate;
+pub use bindings::OrbitCamBindingWithSensitivity;
 pub use bindings::OrbitCamBindings;
 pub use bindings::OrbitCamBindingsBuilder;
 pub use bindings::OrbitCamBindingsDescriptor;
@@ -88,11 +90,14 @@ pub use bindings::OrbitCamPanActionBindings;
 pub use bindings::OrbitCamPanBinding;
 pub use bindings::OrbitCamPinchZoom;
 pub use bindings::OrbitCamPreset;
+pub use bindings::OrbitCamPresetKind;
 pub use bindings::OrbitCamScalePolicy;
+pub use bindings::OrbitCamSensitivity;
 pub use bindings::OrbitCamSimpleMouseKeyboardPreset;
 pub use bindings::OrbitCamSimpleMousePreset;
 pub use bindings::OrbitCamSlowMode;
 pub use bindings::OrbitCamTouchBinding;
+pub use bindings::OrbitCamTouchBindingConfig;
 pub use bindings::OrbitCamTrackpadScroll;
 pub use bindings::OrbitCamZoomBinding;
 pub use bindings::OrbitCamZoomCoarseActionBindings;

@@ -78,10 +78,11 @@ fn main() {
 //   2. Spawn the first-pass cube + a point light on `RenderLayers::layer(FIRST_PASS_LAYER_INDEX)`.
 //      The first-pass cube carries `CameraHomeTarget` so Fairy Dust's home logic frames it.
 //   3. Spawn the offscreen OrbitCam with `RenderTarget::Image(image_handle)`, the same
-//      `RenderLayers`, `OrbitCamInputMode::Preset(BlenderLike)`, `FairyDustOrbitCam` (so the camera
-//      control panel finds it), and `CameraInputSurfaceMetrics::camera_view_and_input_surface(view,
-//      surface)` where `view` is the 512x512 texture extent and `surface` is the primary window
-//      size — i.e. mouse deltas arrive in window pixels, the OrbitCam's camera view is the texture.
+//      `RenderLayers`, `OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like())`,
+//      `FairyDustOrbitCam` (so the camera control panel finds it), and
+//      `CameraInputSurfaceMetrics::camera_view_and_input_surface(view, surface)` where `view` is
+//      the 512x512 texture extent and `surface` is the primary window size — i.e. mouse deltas
+//      arrive in window pixels, the OrbitCam's camera view is the texture.
 //   4. Spawn the main-pass (outer) cube with a `StandardMaterial` whose `base_color_texture` is
 //      that same image handle, plus the main-pass window camera looking at it.
 //   5. Insert `CameraInputRoutingConfig::explicit(orbit_cam_id)`. Without this resource, the
@@ -213,7 +214,7 @@ fn setup(
             Transform::from_translation(FIRST_PASS_CAMERA_TRANSLATION)
                 .looking_at(Vec3::ZERO, Vec3::Y),
             OrbitCam::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
             CameraInputSurfaceMetrics::camera_view_and_input_surface(
                 Vec2::new(size.width.to_f32(), size.height.to_f32()),
                 Vec2::new(primary_window.width(), primary_window.height()),

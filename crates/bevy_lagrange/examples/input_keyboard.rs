@@ -1,4 +1,4 @@
-//! Demonstrates keyboard user input through `OrbitCamPreset::Keyboard`.
+//! Demonstrates keyboard user input through `OrbitCamPreset::keyboard()`.
 //!
 //! Controls:
 //!   Arrows — orbit
@@ -64,7 +64,7 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// KEYBOARD PRESET — OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard).
+// KEYBOARD PRESET — OrbitCamInputMode::with_preset(OrbitCamPreset::keyboard()).
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
@@ -90,7 +90,7 @@ fn spawn_camera(mut commands: Commands) {
     apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
         camera,
-        OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::keyboard()),
         FairyDustOrbitCam,
     ));
 }
@@ -158,7 +158,8 @@ fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<KeyboardI
         return;
     };
 
-    let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard));
+    let summary =
+        describe_orbit_cam_controls(&OrbitCamInputMode::with_preset(OrbitCamPreset::keyboard()));
     let idle = |face: KeyboardFaceLabel| {
         action_face_label(face.title(), &idle_label(&summary, face.kind()), None)
     };
@@ -274,7 +275,7 @@ fn action_face_label(action: &str, idle: &str, pressed: Option<&str>) -> String 
 
 const DESCRIPTION_TITLE: &str = "Keyboard Bindings";
 const DESCRIPTION_LINES: [&str; 4] = [
-    "This example uses OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard) with keyboard-only controls.",
+    "This example uses OrbitCamInputMode::with_preset(OrbitCamPreset::keyboard()) with keyboard-only controls.",
     "Use it when the camera should have a keymap and Lagrange should route input.",
     "Unlike Manual mode, your app does not write per-frame input to camera intent (orbit, pan, zoom).",
     "Mapped keys can be held at the same time and will apply in the same frame.",

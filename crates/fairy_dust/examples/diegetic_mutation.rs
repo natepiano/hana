@@ -39,7 +39,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_studio_lighting()
         .with_ground_plane()
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

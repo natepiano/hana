@@ -35,7 +35,7 @@ fn main() {
         .insert(CameraHomeTarget)
         .with_orbit_cam_preset_bundle(
             |_| {},
-            OrbitCamPreset::SimpleMouse,
+            OrbitCamPreset::simple_mouse(),
             Transform::from_translation(CAMERA_TRANSLATION),
         )
         .with_camera_home()

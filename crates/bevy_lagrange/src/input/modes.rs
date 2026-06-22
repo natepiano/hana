@@ -32,10 +32,10 @@ struct ModeReconciliation {
 
 /// Selected input mode for an [`OrbitCam`].
 ///
-/// `OrbitCam` requires this component and defaults to
-/// `OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)`. Use `Preset` for a
-/// built-in keymap, `Bindings` for app-owned validated bindings, or `Manual`
-/// when app code writes camera intent through [`OrbitCamManualInputWriter`].
+/// `OrbitCam` requires this component and defaults to simple mouse preset input.
+/// Use `Preset` for a built-in keymap, `Bindings` for app-owned validated
+/// bindings, or `Manual` when app code writes camera intent through
+/// [`OrbitCamManualInputWriter`].
 ///
 /// [`OrbitCamManualInputWriter`]: super::OrbitCamManualInputWriter
 #[derive(Component, Clone, Debug, PartialEq, Reflect)]
@@ -57,11 +57,17 @@ pub enum OrbitCamInputMode {
 }
 
 impl Default for OrbitCamInputMode {
-    fn default() -> Self { Self::Preset(OrbitCamPreset::default()) }
+    fn default() -> Self { Self::with_preset(OrbitCamPreset::default()) }
+}
+
+impl OrbitCamInputMode {
+    /// Builds preset input mode from a built-in orbit-camera preset.
+    #[must_use]
+    pub fn with_preset(preset: impl Into<OrbitCamPreset>) -> Self { Self::Preset(preset.into()) }
 }
 
 impl From<OrbitCamPreset> for OrbitCamInputMode {
-    fn from(preset: OrbitCamPreset) -> Self { Self::Preset(preset) }
+    fn from(preset: OrbitCamPreset) -> Self { Self::with_preset(preset) }
 }
 
 impl From<OrbitCamBindings> for OrbitCamInputMode {
@@ -446,7 +452,9 @@ mod tests {
 
         assert_eq!(
             app.world().get::<OrbitCamInputMode>(camera),
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse))
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::simple_mouse()
+            ))
         );
         assert!(
             app.world()
@@ -488,7 +496,7 @@ mod tests {
                 OrbitCam::default(),
                 OrbitCamInput::default(),
                 OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputModeDraft::Preset(OrbitCamPreset::BlenderLike),
+                    mode: OrbitCamInputModeDraft::Preset(OrbitCamPreset::blender_like()),
                 },
             ))
             .id();
@@ -497,7 +505,9 @@ mod tests {
 
         assert_eq!(
             app.world().get::<OrbitCamInputMode>(camera),
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::blender_like()
+            ))
         );
         assert_eq!(
             app.world()
@@ -515,7 +525,7 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+                OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
                 OrbitCamInputModeDescriptor {
                     mode: OrbitCamInputModeDraft::Bindings(
                         bindings::invalid_bindings_descriptor_for_tests(),
@@ -531,7 +541,9 @@ mod tests {
 
         assert_eq!(
             app.world().get::<OrbitCamInputMode>(camera),
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::blender_like()
+            ))
         );
         assert_eq!(
             app.world()
@@ -570,7 +582,7 @@ mod tests {
             .spawn((
                 OrbitCam::default(),
                 OrbitCamInput::default(),
-                OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+                OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
             ))
             .id();
         app.insert_resource(ManualWriterTestCamera { manual, preset })

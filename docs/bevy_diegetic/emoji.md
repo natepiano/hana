@@ -403,7 +403,7 @@ Standard canonical builder chain — `fairy_dust::sprinkle_example()` with
 `.with_brp_extras()`, `.with_save_window_position()`, `.with_studio_lighting()`,
 `.with_ground_plane()`, the cube via
 `.with_cube()` carrying `CameraHomeTarget`, `.with_orbit_cam_preset(|_| {},
-OrbitCamPreset::BlenderLike)`, `.with_camera_home().pitch(..).yaw(..)`, a
+OrbitCamPreset::blender_like())`, `.with_camera_home().pitch(..).yaw(..)`, a
 `TitleBar`, and `.with_camera_control_panel()`. The lead `fn main` comment notes
 that `DiegeticUiPlugin` is registered automatically by `sprinkle_example`.
 

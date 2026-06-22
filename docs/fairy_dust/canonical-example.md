@@ -38,7 +38,7 @@ fairy_dust::sprinkle_example()
         .insert(CameraHomeTarget)
     .with_orbit_cam_preset(
         |cam| { /* per-example camera tweaks */ },
-        OrbitCamPreset::BlenderLike,
+        OrbitCamPreset::blender_like(),
     )
     .with_camera_home()
         .pitch(HOME_PITCH)
@@ -142,7 +142,7 @@ without the title affordance (`input_gamepad` uses `.without_key()` plus
 
 ### Camera
 
-Use `.with_orbit_cam_preset(configure, OrbitCamPreset::BlenderLike)` for a
+Use `.with_orbit_cam_preset(configure, OrbitCamPreset::blender_like())` for a
 normal fairy_dust-managed preset camera. Default to `BlenderLike`; use another
 preset only when the example is specifically demonstrating that preset. The
 `configure` closure usually does nothing (`|_| {}`) — the home pose drives the

@@ -16,6 +16,7 @@ use bevy_kana::bind_action_system;
 use bevy_kana::event;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::OrbitCamPresetKind;
 use bevy_lagrange::ResolvedOrbitCamInputRoute;
 
 use super::CameraGuidancePanel;
@@ -35,7 +36,7 @@ pub(crate) enum CameraPresetSwitching {
     Disabled,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum PresetCycleEntry {
     Preset(OrbitCamPreset),
     Off,
@@ -82,16 +83,16 @@ fn cycle_preset(
     let Ok(mut mode) = modes.get_mut(camera) else {
         return;
     };
-    let OrbitCamInputMode::Preset(preset) = *mode else {
+    let OrbitCamInputMode::Preset(preset) = &*mode else {
         return;
     };
     let Ok((panel_entity, mut panel_visibility)) = panels.single_mut() else {
         return;
     };
 
-    match next_cycle_entry(preset, *panel_visibility) {
+    match next_cycle_entry(preset.kind(), *panel_visibility) {
         PresetCycleEntry::Preset(preset) => {
-            *mode = OrbitCamInputMode::Preset(preset);
+            *mode = OrbitCamInputMode::with_preset(preset);
             if matches!(*panel_visibility, Visibility::Hidden) {
                 commands
                     .entity(panel_entity)
@@ -113,16 +114,16 @@ fn cycle_preset(
 }
 
 const fn next_cycle_entry(
-    preset: OrbitCamPreset,
+    preset_kind: OrbitCamPresetKind,
     panel_visibility: Visibility,
 ) -> PresetCycleEntry {
     if matches!(panel_visibility, Visibility::Hidden) {
-        return PresetCycleEntry::Preset(OrbitCamPreset::SimpleMouse);
+        return PresetCycleEntry::Preset(OrbitCamPreset::simple_mouse());
     }
-    match preset {
-        OrbitCamPreset::SimpleMouse => PresetCycleEntry::Preset(OrbitCamPreset::BlenderLike),
-        OrbitCamPreset::BlenderLike => PresetCycleEntry::Off,
-        _ => PresetCycleEntry::Preset(OrbitCamPreset::SimpleMouse),
+    match preset_kind {
+        OrbitCamPresetKind::SimpleMouse => PresetCycleEntry::Preset(OrbitCamPreset::blender_like()),
+        OrbitCamPresetKind::BlenderLike => PresetCycleEntry::Off,
+        _ => PresetCycleEntry::Preset(OrbitCamPreset::simple_mouse()),
     }
 }
 
@@ -133,15 +134,15 @@ mod tests {
     #[test]
     fn visible_panel_cycles_simple_to_blender() {
         assert_eq!(
-            next_cycle_entry(OrbitCamPreset::SimpleMouse, Visibility::Inherited),
-            PresetCycleEntry::Preset(OrbitCamPreset::BlenderLike)
+            next_cycle_entry(OrbitCamPreset::simple_mouse().kind(), Visibility::Inherited),
+            PresetCycleEntry::Preset(OrbitCamPreset::blender_like())
         );
     }
 
     #[test]
     fn visible_panel_cycles_blender_to_off() {
         assert_eq!(
-            next_cycle_entry(OrbitCamPreset::BlenderLike, Visibility::Inherited),
+            next_cycle_entry(OrbitCamPreset::blender_like().kind(), Visibility::Inherited),
             PresetCycleEntry::Off
         );
     }
@@ -149,8 +150,8 @@ mod tests {
     #[test]
     fn hidden_panel_cycles_back_to_simple_mouse() {
         assert_eq!(
-            next_cycle_entry(OrbitCamPreset::BlenderLike, Visibility::Hidden),
-            PresetCycleEntry::Preset(OrbitCamPreset::SimpleMouse)
+            next_cycle_entry(OrbitCamPreset::blender_like().kind(), Visibility::Hidden),
+            PresetCycleEntry::Preset(OrbitCamPreset::simple_mouse())
         );
     }
 }

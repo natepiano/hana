@@ -122,7 +122,7 @@ fn main() {
             )),
         )
         .color(GROUND_COLOR)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_stable_transparency()
         .with_camera_home()
         .pitch(HOME_PITCH)

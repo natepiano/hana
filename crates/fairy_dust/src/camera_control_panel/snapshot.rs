@@ -67,27 +67,15 @@ pub(super) fn resolve_guidance_snapshot(
 fn resolve_mode_labels(mode: Option<&OrbitCamInputMode>) -> (String, String) {
     let Some(mode) = mode else {
         let preset = OrbitCamPreset::default();
-        return ("Preset".to_string(), preset_mode_value(preset).to_string());
+        return ("Preset".to_string(), preset.kind().name().to_string());
     };
     match mode {
         OrbitCamInputMode::Preset(preset) => {
-            ("Preset".to_string(), preset_mode_value(*preset).to_string())
+            ("Preset".to_string(), preset.kind().name().to_string())
         },
         OrbitCamInputMode::Bindings(_) => ("Bindings".to_string(), "Custom".to_string()),
         OrbitCamInputMode::Manual => ("Input".to_string(), "Manual".to_string()),
         _ => ("Input".to_string(), "Custom".to_string()),
-    }
-}
-
-const fn preset_mode_value(preset: OrbitCamPreset) -> &'static str {
-    match preset {
-        OrbitCamPreset::SimpleMouse => "SimpleMouse",
-        OrbitCamPreset::BlenderLike => "BlenderLike",
-        OrbitCamPreset::Keyboard => "Keyboard",
-        OrbitCamPreset::SimpleMouseKeyboard => "SimpleMouseKeyboard",
-        OrbitCamPreset::BlenderLikeKeyboard => "BlenderLikeKeyboard",
-        OrbitCamPreset::Gamepad => "Gamepad",
-        _ => "Custom",
     }
 }
 
@@ -215,7 +203,9 @@ mod tests {
         let snapshot = resolve_guidance_snapshot(
             None,
             None,
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)),
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::blender_like(),
+            )),
         );
 
         assert_eq!(snapshot.slow_mode_binding_label.as_deref(), Some("alt-s"));
@@ -226,7 +216,9 @@ mod tests {
         let snapshot = resolve_guidance_snapshot(
             None,
             None,
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)),
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::simple_mouse(),
+            )),
         );
 
         assert_eq!(snapshot.slow_mode_binding_label, None);

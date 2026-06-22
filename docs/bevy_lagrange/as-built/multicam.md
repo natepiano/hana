@@ -24,15 +24,15 @@ whichever camera the cursor is currently over.
 
 Each camera is spawned as a plain entity carrying `OrbitCam` and an
 `OrbitCamInputMode`. `OrbitCam` requires `OrbitCamInputMode`; the example sets
-it explicitly to `OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike)` on
-all three cameras:
+it explicitly to `OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like())`
+on all three cameras:
 
 ```rust
 commands.spawn((
     Name::new(PRIMARY_CAMERA_NAME),
     Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
     OrbitCam::default(),
-    OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+    OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
     MainCamera,
 ));
 ```
@@ -44,7 +44,7 @@ commands.spawn((
 - `Bindings(OrbitCamBindings)` — app-owned validated bindings.
 - `Manual` — app code writes camera intent.
 
-It defaults to `Preset(OrbitCamPreset::SimpleMouse)`. The
+It defaults to `OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse())`. The
 `OrbitCam::blender_like()` / `OrbitCam::simple_mouse()` / `OrbitCam::manual()`
 helpers (`crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs`) return an
 `impl Bundle` pairing `OrbitCam::default()` with the matching

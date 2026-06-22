@@ -50,7 +50,7 @@ fn main() {
         .with_studio_lighting()
         //   .with_ground_plane()
         // Millimeter-scale strokes need unrestricted inspection.
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .unclamped()
         .with_stable_transparency()
         .with_camera_home()

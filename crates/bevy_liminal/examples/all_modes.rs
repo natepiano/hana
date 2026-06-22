@@ -290,7 +290,7 @@ fn spawn_environment(
     commands.spawn((
         OutlineCamera,
         OrbitCam::default(),
-        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
     ));
 }

@@ -25,7 +25,7 @@ fn main() {
         .with_save_window_position()
         .with_orbit_cam_preset_bundle(
             configure_camera,
-            OrbitCamPreset::BlenderLike,
+            OrbitCamPreset::blender_like(),
             ProgrammaticCamera,
         )
         .with_ground_plane()

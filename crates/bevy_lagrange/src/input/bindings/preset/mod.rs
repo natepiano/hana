@@ -13,6 +13,7 @@ mod simple_mouse_keyboard;
 pub use blender_like::OrbitCamBlenderLikePreset;
 pub use blender_like_keyboard::OrbitCamBlenderLikeKeyboardPreset;
 pub use enum_preset::OrbitCamPreset;
+pub use enum_preset::OrbitCamPresetKind;
 pub use gamepad::OrbitCamGamepadPreset;
 pub use gamepad::OrbitCamGamepadPresetBuilder;
 pub use keyboard::OrbitCamKeyboardPreset;

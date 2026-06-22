@@ -59,8 +59,8 @@ Default mouse controls:
 | Right Mouse | Pan |
 | Scroll Wheel | Zoom |
 
-The default input mode is `OrbitCamPreset::SimpleMouse`. Insert
-`OrbitCamPreset::BlenderLike` for editor navigation, use
+The default input mode is `OrbitCamPreset::simple_mouse()`. Insert
+`OrbitCamPreset::blender_like()` for editor navigation, use
 `OrbitCamBindings` for app-owned keymaps or gamepad mappings, and use
 `OrbitCamManual` with `OrbitCamManualInputWriter` only when your app computes
 orbit, pan, or zoom intent itself.

@@ -174,7 +174,7 @@ fn main() {
                 cam.pitch = Some(HOME_PITCH);
                 cam.zoom_sensitivity = 1.0;
             },
-            OrbitCamPreset::BlenderLike,
+            OrbitCamPreset::blender_like(),
             (
                 Projection::Perspective(PerspectiveProjection {
                     near: 0.001,

@@ -41,7 +41,7 @@ fn main() {
         .insert(CameraHomeTarget)
         .with_orbit_cam_preset_bundle(
             |_| {},
-            OrbitCamPreset::BlenderLike,
+            OrbitCamPreset::blender_like(),
             orthographic_projection(),
         )
         .with_camera_home()

@@ -257,7 +257,7 @@ fn spawn_camera(mut commands: Commands) {
             upside_down_policy: UpsideDownPolicy::Allow,
             ..default()
         },
-        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         FairyDustOrbitCam,
         StableTransparency,
     ));

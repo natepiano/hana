@@ -101,7 +101,7 @@ fn main() {
             CUBE_FACE_TEXT_SIZE,
             CUBE_FACE_TEXT_COLOR,
         )
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)

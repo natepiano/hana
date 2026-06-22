@@ -196,7 +196,7 @@ fn setup(mut commands: Commands) {
             Name::new(PRIMARY_CAMERA_NAME),
             Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
             orbit_cam_default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
             MainCamera,
         ))
         .id();
@@ -211,7 +211,7 @@ fn setup(mut commands: Commands) {
                 ..default()
             },
             orbit_cam_default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
             MinimapCamera,
         ))
         .id();
@@ -235,7 +235,7 @@ fn setup(mut commands: Commands) {
             Camera::default(),
             RenderTarget::Window(WindowRef::Entity(second_window)),
             orbit_cam_default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         ))
         .id();
 

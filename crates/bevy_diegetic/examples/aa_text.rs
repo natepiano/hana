@@ -249,7 +249,7 @@ fn main() {
             )),
         )
         .insert(CameraHomeTarget)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         // OIT keeps the coplanar blended geometry sorted stably as the camera
         // orbits, and forces `Msaa::Off` on the cameras it manages.
         .with_stable_transparency()

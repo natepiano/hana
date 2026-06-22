@@ -158,7 +158,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)

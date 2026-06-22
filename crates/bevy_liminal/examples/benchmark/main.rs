@@ -87,7 +87,7 @@ fn setup_benchmark(
         Camera3d::default(),
         Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_LOOK_AT, Vec3::Y),
         OrbitCam::default(),
-        OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         OutlineCamera,
         AmbientLight {
             brightness: AMBIENT_LIGHT_BRIGHTNESS,

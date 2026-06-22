@@ -9,7 +9,7 @@
 //! fairy_dust::sprinkle_example()
 //!     .with_orbit_cam_preset(
 //!         |orbit_cam| { orbit_cam.radius = Some(5.0); },
-//!         OrbitCamPreset::BlenderLike,
+//!         OrbitCamPreset::blender_like(),
 //!     )
 //!     .with_stable_transparency()       // only callable after with_orbit_cam_*
 //!     .with_save_window_position()

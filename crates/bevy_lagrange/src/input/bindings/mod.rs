@@ -37,6 +37,7 @@ pub use action_set::OrbitCamZoomCoarseActionBindings;
 pub use action_set::OrbitCamZoomSmoothActionBindings;
 use bevy::prelude::*;
 pub use builder::CameraInputGamepadSelectionPolicy;
+pub use builder::OrbitCamBindingWithSensitivity;
 pub use builder::OrbitCamBindingsBuilder;
 pub use builder::OrbitCamBindingsDescriptor;
 pub use builder::OrbitCamButtonDragZoom;
@@ -47,6 +48,7 @@ pub use builder::OrbitCamOrbitBinding;
 pub use builder::OrbitCamPanBinding;
 pub use builder::OrbitCamPinchZoom;
 pub use builder::OrbitCamTouchBinding;
+pub use builder::OrbitCamTouchBindingConfig;
 pub use builder::OrbitCamTrackpadScroll;
 pub use builder::OrbitCamZoomBinding;
 pub use builder::ZoomInversion;
@@ -60,7 +62,9 @@ pub use descriptor::InputBindingModifiers;
 pub use descriptor::InputBindingScale;
 pub use descriptor::InputDeadZone;
 pub use descriptor::InputDeltaScale;
+pub use descriptor::InputSensitivity;
 pub use descriptor::OrbitCamScalePolicy;
+pub use descriptor::OrbitCamSensitivity;
 pub use descriptor::OrbitCamSlowMode;
 pub(crate) use descriptor::mod_keys_pressed;
 pub use error::OrbitCamBindingsError;
@@ -76,6 +80,7 @@ pub use preset::OrbitCamGamepadPreset;
 pub use preset::OrbitCamGamepadPresetBuilder;
 pub use preset::OrbitCamKeyboardPreset;
 pub use preset::OrbitCamPreset;
+pub use preset::OrbitCamPresetKind;
 pub use preset::OrbitCamSimpleMouseKeyboardPreset;
 pub use preset::OrbitCamSimpleMousePreset;
 pub use validate::validate_bindings;
@@ -88,15 +93,15 @@ pub struct OrbitCamBindings {
     pub(super) pan:              OrbitCamPanActionBindings,
     pub(super) zoom_smooth:      OrbitCamZoomSmoothActionBindings,
     pub(super) zoom_coarse:      OrbitCamZoomCoarseActionBindings,
-    pub(super) trackpad_orbit:   Vec<OrbitCamTrackpadScroll>,
-    pub(super) trackpad_pan:     Vec<OrbitCamTrackpadScroll>,
-    pub(super) trackpad_zoom:    Vec<OrbitCamTrackpadScroll>,
-    pub(super) mouse_wheel_zoom: Option<OrbitCamMouseWheelZoom>,
-    pub(super) pinch_zoom:       PinchGestureZoom,
-    pub(super) touch:            Option<OrbitCamTouchBinding>,
+    pub(super) trackpad_orbit:   Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
+    pub(super) trackpad_pan:     Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
+    pub(super) trackpad_zoom:    Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
+    pub(super) mouse_wheel_zoom: Option<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>>,
+    pub(super) pinch_zoom:       Option<OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>>,
+    pub(super) touch:            Option<OrbitCamTouchBindingConfig>,
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
     pub(super) zoom_inversion:   ZoomInversion,
-    pub(super) button_drag_zoom: Option<OrbitCamButtonDragZoom>,
+    pub(super) button_drag_zoom: Option<OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>>,
     pub(super) slow_mode:        Option<OrbitCamSlowMode>,
 }
 
@@ -133,27 +138,59 @@ impl OrbitCamBindings {
 
     /// Returns trackpad orbit bindings.
     #[must_use]
-    pub fn trackpad_orbit(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_orbit }
+    pub fn trackpad_orbit(&self) -> &[OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>] {
+        &self.trackpad_orbit
+    }
 
     /// Returns trackpad pan bindings.
     #[must_use]
-    pub fn trackpad_pan(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_pan }
+    pub fn trackpad_pan(&self) -> &[OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>] {
+        &self.trackpad_pan
+    }
 
     /// Returns trackpad zoom bindings.
     #[must_use]
-    pub fn trackpad_zoom(&self) -> &[OrbitCamTrackpadScroll] { &self.trackpad_zoom }
+    pub fn trackpad_zoom(&self) -> &[OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>] {
+        &self.trackpad_zoom
+    }
 
     /// Returns mouse wheel zoom binding.
     #[must_use]
-    pub const fn mouse_wheel_zoom(&self) -> Option<OrbitCamMouseWheelZoom> { self.mouse_wheel_zoom }
+    pub const fn mouse_wheel_zoom(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>> {
+        self.mouse_wheel_zoom
+    }
 
     /// Returns whether pinch zoom is enabled.
     #[must_use]
-    pub const fn pinch_zoom(&self) -> PinchGestureZoom { self.pinch_zoom }
+    pub const fn pinch_zoom(&self) -> PinchGestureZoom {
+        match self.pinch_zoom {
+            Some(_) => PinchGestureZoom::Enabled,
+            None => PinchGestureZoom::Disabled,
+        }
+    }
+
+    /// Returns pinch zoom binding plus authored sensitivity.
+    #[must_use]
+    pub const fn pinch_zoom_binding(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>> {
+        self.pinch_zoom
+    }
 
     /// Returns touch policy.
     #[must_use]
-    pub const fn touch(&self) -> Option<OrbitCamTouchBinding> { self.touch }
+    pub const fn touch(&self) -> Option<OrbitCamTouchBinding> {
+        match self.touch {
+            Some(touch) => Some(touch.binding()),
+            None => None,
+        }
+    }
+
+    /// Returns touch policy plus authored sensitivity.
+    #[must_use]
+    pub const fn touch_config(&self) -> Option<OrbitCamTouchBindingConfig> { self.touch }
 
     /// Returns gamepad selection policy.
     #[must_use]
@@ -165,7 +202,11 @@ impl OrbitCamBindings {
 
     /// Returns button-drag zoom policy.
     #[must_use]
-    pub const fn button_drag_zoom(&self) -> Option<OrbitCamButtonDragZoom> { self.button_drag_zoom }
+    pub const fn button_drag_zoom(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>> {
+        self.button_drag_zoom
+    }
 
     /// Returns the slow-mode policy.
     #[must_use]
@@ -188,20 +229,32 @@ mod tests {
     use crate::input::constants::PAN_ACTION_NAME;
     use crate::input::constants::ZOOM_COARSE_ACTION_NAME;
 
+    const BUTTON_DRAG_SENSITIVITY: f32 = 0.6;
+    const CUSTOM_DEFAULT_SENSITIVITY: f32 = InputSensitivity::DEFAULT.0;
+    const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
+    const INVALID_NEGATIVE_SENSITIVITY: f32 = -0.01;
+    const MOUSE_DRAG_SENSITIVITY: f32 = 0.2;
+    const PINCH_SENSITIVITY: f32 = 0.5;
+    const TOUCH_ORBIT_SENSITIVITY: f32 = 0.7;
+    const TOUCH_PAN_SENSITIVITY: f32 = 0.8;
+    const TOUCH_ZOOM_SENSITIVITY: f32 = 0.9;
+    const TRACKPAD_SENSITIVITY: f32 = 0.3;
+    const WHEEL_SENSITIVITY: f32 = 0.25;
+
     fn descriptor_with_no_bindings() -> OrbitCamBindingsDescriptor {
         OrbitCamBindingsDescriptor::default()
     }
 
     #[test]
     fn presets_validate_through_shared_path() -> Result<(), OrbitCamBindingsError> {
-        let simple = OrbitCamPreset::SimpleMouse.to_bindings()?;
+        let simple = OrbitCamPreset::simple_mouse().to_bindings()?;
         assert!(simple.mouse_wheel_zoom().is_some());
         assert_eq!(simple.trackpad_zoom().len(), 1);
         assert_eq!(simple.pinch_zoom(), PinchGestureZoom::Enabled);
         assert!(simple.touch().is_none());
         assert!(simple.slow_mode().is_none());
 
-        let blender = OrbitCamPreset::BlenderLike.to_bindings()?;
+        let blender = OrbitCamPreset::blender_like().to_bindings()?;
         assert_eq!(blender.orbit().len(), 1);
         assert_eq!(blender.pan().len(), 1);
         assert_eq!(blender.trackpad_orbit().len(), 1);
@@ -220,7 +273,7 @@ mod tests {
             Some((MouseButton::Middle, ModKeys::SHIFT))
         );
 
-        let keyboard = OrbitCamPreset::Keyboard.to_bindings()?;
+        let keyboard = OrbitCamPreset::keyboard().to_bindings()?;
         assert_eq!(keyboard.orbit().len(), 1);
         assert_eq!(keyboard.pan().len(), 1);
         assert_eq!(keyboard.zoom_smooth().len(), 1);
@@ -229,7 +282,7 @@ mod tests {
         let blender_keyboard = OrbitCamBlenderLikeKeyboardPreset::default().build()?;
         assert!(blender_keyboard.slow_mode().is_some());
 
-        let gamepad = OrbitCamPreset::Gamepad.to_bindings()?;
+        let gamepad = OrbitCamPreset::gamepad().to_bindings()?;
         assert_eq!(gamepad.gamepad(), CameraInputGamepadSelectionPolicy::Active);
         assert_eq!(gamepad.orbit().len(), 2);
         assert_eq!(gamepad.pan().len(), 2);
@@ -280,7 +333,7 @@ mod tests {
     #[test]
     fn preset_enum_delegates_to_blender_like_config() -> Result<(), OrbitCamBindingsError> {
         assert_eq!(
-            OrbitCamPreset::BlenderLike.to_bindings()?,
+            OrbitCamPreset::blender_like().to_bindings()?,
             OrbitCamBlenderLikePreset::default().build()?
         );
         Ok(())
@@ -301,6 +354,154 @@ mod tests {
         assert!(bindings.mouse_wheel_zoom().is_none());
 
         Ok(())
+    }
+
+    #[test]
+    fn invalid_binding_sensitivity_is_rejected() {
+        for sensitivity in [
+            INVALID_NEGATIVE_SENSITIVITY,
+            f32::NAN,
+            f32::INFINITY,
+            f32::NEG_INFINITY,
+        ] {
+            assert_eq!(
+                OrbitCamBindings::builder()
+                    .zoom(OrbitCamMouseWheelZoom.with_sensitivity(sensitivity))
+                    .build(),
+                Err(OrbitCamBindingsError::InvalidScale)
+            );
+        }
+    }
+
+    #[test]
+    fn zero_binding_sensitivity_is_preserved() -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(DISABLED_SENSITIVITY))
+            .build()?;
+
+        let Some(wheel) = bindings.mouse_wheel_zoom() else {
+            assert!(bindings.mouse_wheel_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(wheel.sensitivity(), InputSensitivity::DISABLED);
+
+        Ok(())
+    }
+
+    #[test]
+    fn default_sensitivity_matches_implicit_custom_bindings() -> Result<(), OrbitCamBindingsError> {
+        let implicit = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
+            .zoom(OrbitCamMouseWheelZoom)
+            .build()?;
+        let explicit = OrbitCamBindings::builder()
+            .orbit(
+                OrbitCamMouseDrag::new(MouseButton::Middle)
+                    .with_sensitivity(CUSTOM_DEFAULT_SENSITIVITY),
+            )
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(CUSTOM_DEFAULT_SENSITIVITY))
+            .build()?;
+
+        assert_eq!(implicit, explicit);
+
+        Ok(())
+    }
+
+    #[test]
+    fn adapter_backed_bindings_preserve_authored_sensitivity() -> Result<(), OrbitCamBindingsError>
+    {
+        let touch_sensitivity = OrbitCamSensitivity::new()
+            .orbit(TOUCH_ORBIT_SENSITIVITY)
+            .pan(TOUCH_PAN_SENSITIVITY)
+            .zoom(TOUCH_ZOOM_SENSITIVITY);
+
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamTrackpadScroll::default().with_sensitivity(TRACKPAD_SENSITIVITY))
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(WHEEL_SENSITIVITY))
+            .zoom(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::CONTROL)
+                    .with_sensitivity(TRACKPAD_SENSITIVITY),
+            )
+            .zoom(OrbitCamPinchZoom.with_sensitivity(PINCH_SENSITIVITY))
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Middle)
+                    .with_sensitivity(BUTTON_DRAG_SENSITIVITY),
+            )
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(touch_sensitivity),
+            ))
+            .build()?;
+
+        let [trackpad_orbit] = bindings.trackpad_orbit() else {
+            assert_eq!(bindings.trackpad_orbit().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            trackpad_orbit.sensitivity(),
+            InputSensitivity(TRACKPAD_SENSITIVITY)
+        );
+
+        let Some(wheel) = bindings.mouse_wheel_zoom() else {
+            assert!(bindings.mouse_wheel_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(wheel.sensitivity(), InputSensitivity(WHEEL_SENSITIVITY));
+
+        let [trackpad_zoom] = bindings.trackpad_zoom() else {
+            assert_eq!(bindings.trackpad_zoom().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(trackpad_zoom.binding().mod_keys, ModKeys::CONTROL);
+        assert_eq!(
+            trackpad_zoom.sensitivity(),
+            InputSensitivity(TRACKPAD_SENSITIVITY)
+        );
+
+        let Some(pinch) = bindings.pinch_zoom_binding() else {
+            assert!(bindings.pinch_zoom_binding().is_some());
+            return Ok(());
+        };
+        assert_eq!(pinch.sensitivity(), InputSensitivity(PINCH_SENSITIVITY));
+
+        let Some(button_drag) = bindings.button_drag_zoom() else {
+            assert!(bindings.button_drag_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(button_drag.binding().button, MouseButton::Middle);
+        assert_eq!(
+            button_drag.sensitivity(),
+            InputSensitivity(BUTTON_DRAG_SENSITIVITY)
+        );
+
+        let Some(touch) = bindings.touch_config() else {
+            assert!(bindings.touch_config().is_some());
+            return Ok(());
+        };
+        assert_eq!(touch.binding(), OrbitCamTouchBinding::OneFingerOrbit);
+        assert_eq!(touch.sensitivity(), touch_sensitivity);
+
+        Ok(())
+    }
+
+    #[test]
+    fn sensitivity_and_modifier_setter_order_matches() {
+        assert_eq!(
+            OrbitCamTrackpadScroll::default()
+                .with_sensitivity(TRACKPAD_SENSITIVITY)
+                .with_mod_keys(ModKeys::SHIFT),
+            OrbitCamTrackpadScroll::default()
+                .with_mod_keys(ModKeys::SHIFT)
+                .with_sensitivity(TRACKPAD_SENSITIVITY)
+        );
+        assert_eq!(
+            OrbitCamMouseDrag::new(MouseButton::Middle)
+                .with_sensitivity(MOUSE_DRAG_SENSITIVITY)
+                .with_mod_keys(ModKeys::ALT),
+            OrbitCamMouseDrag::new(MouseButton::Middle)
+                .with_mod_keys(ModKeys::ALT)
+                .with_sensitivity(MOUSE_DRAG_SENSITIVITY)
+        );
     }
 
     #[test]

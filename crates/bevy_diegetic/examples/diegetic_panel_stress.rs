@@ -196,7 +196,7 @@ fn main() {
                 cam.yaw = Some(0.0);
                 cam.pitch = Some(0.35);
             },
-            OrbitCamPreset::BlenderLike,
+            OrbitCamPreset::blender_like(),
         )
         .with_stable_transparency()
         .with_camera_home()

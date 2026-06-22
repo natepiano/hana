@@ -149,7 +149,7 @@ fn main() {
                 GROUND_PLANE_DEPTH_SCALE,
             )),
         )
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)

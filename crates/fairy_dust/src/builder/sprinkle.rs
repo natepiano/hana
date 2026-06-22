@@ -328,8 +328,7 @@ impl SprinkleBuilder<NoOrbitCam> {
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
     /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
     /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
-    /// uses `OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse)` unless another input mode
-    /// is inserted.
+    /// uses `OrbitCamPreset::simple_mouse()` unless another input mode is inserted.
     pub fn with_orbit_cam_configured<F>(mut self, configure: F) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
@@ -361,12 +360,12 @@ impl SprinkleBuilder<NoOrbitCam> {
     pub fn with_orbit_cam_preset<F>(
         self,
         configure: F,
-        preset: OrbitCamPreset,
+        preset: impl Into<OrbitCamPreset>,
     ) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
     {
-        self.with_orbit_cam(configure, OrbitCamInputMode::Preset(preset))
+        self.with_orbit_cam(configure, OrbitCamInputMode::with_preset(preset))
     }
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
@@ -375,14 +374,14 @@ impl SprinkleBuilder<NoOrbitCam> {
     pub fn with_orbit_cam_preset_bundle<F, B>(
         self,
         configure: F,
-        preset: OrbitCamPreset,
+        preset: impl Into<OrbitCamPreset>,
         bundle: B,
     ) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
         B: Bundle + Send + Sync + 'static,
     {
-        self.with_orbit_cam(configure, (OrbitCamInputMode::Preset(preset), bundle))
+        self.with_orbit_cam(configure, (OrbitCamInputMode::with_preset(preset), bundle))
     }
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and

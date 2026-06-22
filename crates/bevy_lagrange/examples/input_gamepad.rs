@@ -1,4 +1,4 @@
-//! Spawns an `OrbitCam` with `OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad)`
+//! Spawns an `OrbitCam` with `OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad())`
 //! and wires `GamepadButton::South` to an `AnimateToFit` home animation. The
 //! `GamepadHomeBegin` / `GamepadHomeEnd` events drive the title-bar chip via
 //! `wire_chip_to_events`, and a `GamepadConnection` resource updates the
@@ -120,11 +120,11 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GAMEPAD CAMERA — OrbitCamPreset::Gamepad + AnimateToFit on GamepadButton::South.
+// GAMEPAD CAMERA — OrbitCamPreset::gamepad() + AnimateToFit on GamepadButton::South.
 //
 // How it works:
-//   1. `spawn_camera` installs `OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad)` so Lagrange
-//      reads the gamepad sticks and triggers for orbit, pan, and zoom.
+//   1. `spawn_camera` installs `OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad())` so
+//      Lagrange reads the gamepad sticks and triggers for orbit, pan, and zoom.
 //   2. `update_gamepad_connection` polls `Query<&Gamepad>` and updates `GamepadConnection`; the
 //      connection chip is updated through `wire_chip_to_activation`.
 //   3. `home_on_gamepad_south` watches `GamepadButton::South`, triggers `AnimateToFit` to fly the
@@ -192,7 +192,7 @@ fn spawn_camera(mut commands: Commands) {
     apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
         camera,
-        OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
         FairyDustOrbitCam,
     ));
 }
@@ -347,7 +347,8 @@ fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<GamepadIn
         return;
     };
 
-    let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad));
+    let summary =
+        describe_orbit_cam_controls(&OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()));
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
             spawn_face_panel(parent, face, GamepadFaceLabel::Orbit, &summary);

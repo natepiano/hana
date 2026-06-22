@@ -1,13 +1,13 @@
-//! Builds an app-owned `OrbitCamBindings` set that mixes mouse, trackpad,
+//! Builds an app-owned `OrbitCamBindings` set that mixes mouse, smooth scroll,
 //! wheel, and pinch inputs, then attaches it through
 //! `OrbitCamInputMode::Bindings(...)`. Press `T` to toggle
 //! `CameraInputDisabled` and see how an app can disable camera controls at
 //! runtime without rebuilding the binding set.
 //!
 //! Controls:
-//!   Orbit — middle mouse drag, trackpad scroll
-//!   Pan   — right mouse drag, Shift + trackpad scroll
-//!   Zoom  — wheel, Ctrl + trackpad scroll, pinch
+//!   Orbit — middle mouse drag, smooth scroll
+//!   Pan   — right mouse drag, Shift + smooth scroll
+//!   Zoom  — wheel, Ctrl + smooth scroll, pinch
 //!   T     — toggle camera input
 
 use std::f32::consts::TAU;
@@ -103,7 +103,7 @@ fn main() {
 //
 // How it works:
 //   1. `custom_bindings` builds one validated `OrbitCamBindings` value with mouse-drag,
-//      trackpad-scroll, wheel, and pinch entries.
+//      smooth-scroll, wheel, and pinch entries.
 //   2. `spawn_camera` clones that binding set into `OrbitCamInputMode::Bindings(...)` on the
 //      `OrbitCam`, while also showing camera-level sensitivity, limit, and upside-down settings.
 //   3. `toggle_camera_controls` adds or removes `CameraInputDisabled`; Lagrange keeps the binding
@@ -117,6 +117,7 @@ const CAMERA_PITCH: f32 = TAU / 8.0;
 const CAMERA_RADIUS: f32 = 5.0;
 const CAMERA_YAW: f32 = TAU / 8.0;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.5;
+const CUSTOM_WHEEL_SENSITIVITY: f32 = 0.75;
 const HOME_MARGIN: f32 = 0.5;
 const INPUT_DISABLED_CONTROL: &str = "T Disabled";
 
@@ -182,7 +183,7 @@ fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .orbit(OrbitCamTrackpadScroll::default())
         .pan(OrbitCamMouseDrag::new(MouseButton::Right))
         .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
-        .zoom(OrbitCamMouseWheelZoom)
+        .zoom(OrbitCamMouseWheelZoom.with_sensitivity(CUSTOM_WHEEL_SENSITIVITY))
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
         .zoom_inversion(ZoomInversion::Inverted)
@@ -457,7 +458,7 @@ fn held_content(
 const DESCRIPTION_TITLE: &str = "Custom Bindings";
 const DESCRIPTION_LINES: [&str; 5] = [
     "This example uses OrbitCamInputMode::Bindings with a multi-device OrbitCamBindings set.",
-    "Bindings can combine mouse drag, trackpad scroll, wheel, and pinch input.",
+    "Bindings can combine mouse drag, smooth scroll, wheel, and pinch input.",
     "Unlike keyboard-only bindings, one camera action can accept several source types.",
     "Unlike Manual mode, Lagrange still reads and routes the input for you.",
     "Press T to toggle CameraInputDisabled on the camera.",

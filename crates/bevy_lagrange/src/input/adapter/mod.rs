@@ -179,6 +179,7 @@ mod tests {
     type TestResult = Result<(), &'static str>;
 
     const SLOW_SCALE: f32 = 0.5;
+    const TRACKPAD_DUPLICATE_SENSITIVITY: f32 = 0.5;
 
     fn camera_input(app: &App, camera: Entity) -> Result<&OrbitCamInput, &'static str> {
         app.world()
@@ -220,7 +221,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
 
@@ -244,7 +245,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
 
@@ -286,11 +287,40 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_smooth_scroll_bindings_install_distinct_conditions() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamTrackpadScroll::default())
+            .zoom(
+                OrbitCamTrackpadScroll::default().with_sensitivity(TRACKPAD_DUPLICATE_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+
+        app.update();
+
+        let mut condition_indexes = modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .filter_map(|entity| {
+                app.world()
+                    .get::<TrackpadBindingCondition>(entity)
+                    .map(|condition| condition.index)
+            })
+            .collect::<Vec<_>>();
+        condition_indexes.sort_unstable();
+
+        assert_eq!(condition_indexes, vec![0, 1]);
+        Ok(())
+    }
+
+    #[test]
     fn mouse_drag_action_resolves_to_orbit_input() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -314,7 +344,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -341,7 +371,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
@@ -363,7 +393,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -392,11 +422,11 @@ mod tests {
         let mut app = test_app();
         let primary = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         let second = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, second);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
@@ -422,7 +452,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -622,7 +652,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
         app.world_mut().write_message(PinchGesture(2.0));
@@ -675,7 +705,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -696,7 +726,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -717,7 +747,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         );
         route_to(&mut app, camera);
         app.world_mut()
@@ -743,7 +773,7 @@ mod tests {
         let routed = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
         spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, routed);
         app.world_mut()
@@ -944,7 +974,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
         );
         let mut gamepad = Gamepad::default();
         gamepad.analog_mut().set(GamepadAxis::RightStickX, 1.0);
@@ -961,7 +991,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
         );
         route_to(&mut app, camera);
 
@@ -1002,7 +1032,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
         );
         route_to(&mut app, camera);
         let gamepad_entity = app.world_mut().spawn(Gamepad::default()).id();
@@ -1117,7 +1147,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
         );
         route_to(&mut app, camera);
         app.update();
@@ -1133,7 +1163,9 @@ mod tests {
 
         app.world_mut()
             .entity_mut(camera)
-            .insert(OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse));
+            .insert(OrbitCamInputMode::with_preset(
+                OrbitCamPreset::simple_mouse(),
+            ));
         app.update();
 
         assert!(
@@ -1168,7 +1200,7 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(
             app.world_mut(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         route_to(&mut app, camera);
         *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {

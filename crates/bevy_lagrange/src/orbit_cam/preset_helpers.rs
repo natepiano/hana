@@ -8,56 +8,36 @@ use crate::input::OrbitCamPreset;
 impl OrbitCam {
     /// Returns an `OrbitCam` bundle using the simple mouse input preset.
     #[must_use]
-    pub fn simple_mouse() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse),
-        )
-    }
+    pub fn simple_mouse() -> impl Bundle { Self::with_preset(OrbitCamPreset::simple_mouse()) }
 
     /// Returns an `OrbitCam` bundle using the Blender-like input preset.
     #[must_use]
-    pub fn blender_like() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
-        )
-    }
+    pub fn blender_like() -> impl Bundle { Self::with_preset(OrbitCamPreset::blender_like()) }
 
     /// Returns an `OrbitCam` bundle using the gamepad input preset.
     #[must_use]
-    pub fn gamepad() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Gamepad),
-        )
-    }
+    pub fn gamepad() -> impl Bundle { Self::with_preset(OrbitCamPreset::gamepad()) }
 
     /// Returns an `OrbitCam` bundle using the keyboard input preset.
     #[must_use]
-    pub fn keyboard() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::Keyboard),
-        )
-    }
+    pub fn keyboard() -> impl Bundle { Self::with_preset(OrbitCamPreset::keyboard()) }
 
     /// Returns an `OrbitCam` bundle using simple mouse and keyboard input presets.
     #[must_use]
     pub fn simple_mouse_keyboard() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouseKeyboard),
-        )
+        Self::with_preset(OrbitCamPreset::simple_mouse_keyboard())
     }
 
     /// Returns an `OrbitCam` bundle using Blender-like and keyboard input presets.
     #[must_use]
     pub fn blender_like_keyboard() -> impl Bundle {
-        (
-            Self::default(),
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLikeKeyboard),
-        )
+        Self::with_preset(OrbitCamPreset::blender_like_keyboard())
+    }
+
+    /// Returns an `OrbitCam` bundle using a built-in input preset.
+    #[must_use]
+    pub fn with_preset(preset: impl Into<OrbitCamPreset>) -> impl Bundle {
+        (Self::default(), OrbitCamInputMode::with_preset(preset))
     }
 
     /// Returns an `OrbitCam` bundle using app-owned validated bindings.
@@ -85,11 +65,15 @@ mod tests {
 
         assert_eq!(
             world.get::<OrbitCamInputMode>(simple_mouse),
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::SimpleMouse))
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::simple_mouse()
+            ))
         );
         assert_eq!(
             world.get::<OrbitCamInputMode>(blender_like),
-            Some(&OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike))
+            Some(&OrbitCamInputMode::with_preset(
+                OrbitCamPreset::blender_like()
+            ))
         );
         assert_eq!(
             world.get::<OrbitCamInputMode>(manual),
@@ -100,7 +84,7 @@ mod tests {
     #[test]
     fn with_bindings_inserts_bindings_input_mode() -> Result<(), OrbitCamBindingsError> {
         let mut world = World::new();
-        let bindings = OrbitCamPreset::SimpleMouse.to_bindings()?;
+        let bindings = OrbitCamPreset::simple_mouse().to_bindings()?;
         let camera = world.spawn(OrbitCam::with_bindings(bindings)).id();
 
         assert!(matches!(

@@ -230,7 +230,7 @@ fn setup(
                 pitch: Some(CAMERA_START_PITCH),
                 ..default()
             },
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
             FairyDustOrbitCam,
         ))
         .id();

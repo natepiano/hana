@@ -65,6 +65,7 @@ use crate::input::InputBindingDescriptor;
 use crate::input::InputBindingModifiers;
 use crate::input::InputDeadZone;
 use crate::input::InputDeltaScale;
+use crate::input::OrbitCamBindingWithSensitivity;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamGateInput;
 use crate::input::OrbitCamGatePolarity;
@@ -131,15 +132,21 @@ pub(super) struct OrbitCamAdapterCustomInputs {
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct TrackpadBindingCondition {
     pub(super) target:   TrackpadScrollTarget,
+    pub(super) index:    usize,
     pub(super) mod_keys: ModKeys,
     pub(super) active:   bool,
 }
 
 impl TrackpadBindingCondition {
-    const fn new(target: TrackpadScrollTarget, binding: OrbitCamTrackpadScroll) -> Self {
+    const fn new(
+        target: TrackpadScrollTarget,
+        index: usize,
+        binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    ) -> Self {
         Self {
             target,
-            mod_keys: binding.mod_keys,
+            index,
+            mod_keys: binding.binding().mod_keys,
             active: false,
         }
     }
@@ -559,33 +566,36 @@ fn spawn_trackpad_custom_bindings(
     entities: &mut Vec<Entity>,
 ) {
     let (orbit, pan, zoom_smooth) = actions;
-    for binding in bindings.trackpad_orbit() {
+    for (index, binding) in bindings.trackpad_orbit().iter().copied().enumerate() {
         entities.push(spawn_trackpad_binding(
             world,
             camera,
             orbit,
             custom_inputs.trackpad,
             TrackpadScrollTarget::Orbit,
-            *binding,
+            index,
+            binding,
         ));
     }
-    for binding in bindings.trackpad_pan() {
+    for (index, binding) in bindings.trackpad_pan().iter().copied().enumerate() {
         entities.push(spawn_trackpad_binding(
             world,
             camera,
             pan,
             custom_inputs.trackpad,
             TrackpadScrollTarget::Pan,
-            *binding,
+            index,
+            binding,
         ));
     }
-    for binding in bindings.trackpad_zoom() {
+    for (index, binding) in bindings.trackpad_zoom().iter().copied().enumerate() {
         entities.push(spawn_trackpad_zoom_binding(
             world,
             camera,
             zoom_smooth,
             custom_inputs.trackpad,
-            *binding,
+            index,
+            binding,
             bindings.zoom_inversion(),
         ));
     }
@@ -599,7 +609,8 @@ fn spawn_trackpad_binding(
     action: Entity,
     input: CustomInput,
     target: TrackpadScrollTarget,
-    binding: OrbitCamTrackpadScroll,
+    index: usize,
+    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
 ) -> Entity {
     let entity = spawn_single_binding(
         world,
@@ -607,7 +618,7 @@ fn spawn_trackpad_binding(
         OrbitCamInputInstallationOf(camera),
         Binding::Custom(input),
     );
-    insert_trackpad_condition(world, entity, target, binding)
+    insert_trackpad_condition(world, entity, target, index, binding)
 }
 
 /// Spawns a trackpad scroll binding that drives zoom: the vertical scroll axis
@@ -618,7 +629,8 @@ fn spawn_trackpad_zoom_binding(
     camera: Entity,
     action: Entity,
     input: CustomInput,
-    binding: OrbitCamTrackpadScroll,
+    index: usize,
+    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
     zoom_inversion: ZoomInversion,
 ) -> Entity {
     let installation = OrbitCamInputInstallationOf(camera);
@@ -629,18 +641,19 @@ fn spawn_trackpad_zoom_binding(
     if matches!(zoom_inversion, ZoomInversion::Inverted) {
         world.entity_mut(entity).insert(Negate::all());
     }
-    insert_trackpad_condition(world, entity, TrackpadScrollTarget::Zoom, binding)
+    insert_trackpad_condition(world, entity, TrackpadScrollTarget::Zoom, index, binding)
 }
 
 fn insert_trackpad_condition(
     world: &mut World,
     entity: Entity,
     target: TrackpadScrollTarget,
-    binding: OrbitCamTrackpadScroll,
+    index: usize,
+    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
 ) -> Entity {
     world
         .entity_mut(entity)
-        .insert(TrackpadBindingCondition::new(target, binding));
+        .insert(TrackpadBindingCondition::new(target, index, binding));
     entity
 }
 

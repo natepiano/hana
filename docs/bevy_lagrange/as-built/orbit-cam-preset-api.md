@@ -32,7 +32,7 @@ and calls `builder.slow_mode(...)` before `.build()`. `OrbitCamScalePolicy` and 
 
 **Single-layer scaling.** Scaling is applied exactly once, in `resolve.rs`: it samples the `slow_mode_toggle` action's `Fired` state to toggle the latch (`ResMut<OrbitCamSlowModeLatches>`), then scales the `adapter_orbit`/`adapter_pan`/`adapter_zoom_coarse`/`adapter_zoom_smooth` blocks. The `AdapterScale<'_>` wrapper (`adapter/mod.rs`, internal `pub(super)`, `Copy`) holds the policy borrow + `slow_active` flag and applies `apply_scale(value, policy, slow_active) = value * if slow_active { policy.slow } else { policy.normal }` uniformly across all seven sources. `inject.rs` stages raw adapter values and applies no scaling. This matches the held-input path, which was already resolve-only.
 
-**Mode-agnostic slow mode.** Both `OrbitCamInputMode::Preset(BlenderLike)` and `OrbitCamInputMode::Bindings(built_from_blender_like)` produce bindings with `slow_mode.is_some()`; the adapter reads `OrbitCamBindings.slow_mode` regardless of mode variant — no branch on `OrbitCamInputMode`.
+**Mode-agnostic slow mode.** Both `OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like())` and `OrbitCamInputMode::Bindings(built_from_blender_like)` produce bindings with `slow_mode.is_some()`; the adapter reads `OrbitCamBindings.slow_mode` regardless of mode variant — no branch on `OrbitCamInputMode`.
 
 **Spawn helpers.** `OrbitCam::simple_mouse()`, `blender_like()`, `gamepad()`, `keyboard()`, `simple_mouse_keyboard()`, `blender_like_keyboard()`, `with_bindings(OrbitCamBindings)`, and `manual()` (`orbit_cam/preset_helpers.rs`) each return `impl Bundle` — a `(OrbitCam::default(), OrbitCamInputMode::…)` tuple, all `#[must_use]`. `mod preset_helpers;` extends `OrbitCam` directly; no `pub use` is needed. When `OrbitCam` fields need configuring the helper cannot compose with overrides, so the explicit tuple is the "I know what I'm doing" path:
 
@@ -40,7 +40,7 @@ and calls `builder.slow_mode(...)` before `.build()`. `OrbitCamScalePolicy` and 
 commands.spawn((
     Transform::from_xyz(0.0, 1.5, 5.0),
     OrbitCam { target_focus: Vec3::Y, target_radius: 8.0, ..default() },
-    OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+    OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
 ));
 ```
 
