@@ -63,6 +63,15 @@ impl InputBindingDescriptor {
     /// Returns the flattened binding entries.
     pub fn entries_slice(&self) -> &[InputBindingEntry] { &self.entries }
 
+    /// Returns binding entries whose sensitivity allows runtime participation.
+    pub fn enabled_entries(&self) -> impl Iterator<Item = &InputBindingEntry> {
+        self.entries.iter().filter(|entry| entry.is_enabled())
+    }
+
+    /// Returns `true` when any entry participates in runtime input.
+    #[must_use]
+    pub fn has_enabled_entries(&self) -> bool { self.enabled_entries().next().is_some() }
+
     pub(super) const fn is_empty(&self) -> bool { self.entries.is_empty() }
 
     pub(super) fn with_entry_modifiers(
@@ -94,6 +103,16 @@ impl InputBindingDescriptor {
             .any(|entry| binding_active(entry.binding, keyboard, mouse_buttons))
     }
 
+    /// Returns `true` when any enabled entry's binding is currently pressed.
+    pub fn enabled_is_active(
+        &self,
+        keyboard: Option<&ButtonInput<KeyCode>>,
+        mouse_buttons: Option<&ButtonInput<MouseButton>>,
+    ) -> bool {
+        self.enabled_entries()
+            .any(|entry| binding_active(entry.binding, keyboard, mouse_buttons))
+    }
+
     /// Returns the first mouse-button binding entry's button and modifier keys.
     pub fn mouse_button_engagement(&self) -> Option<(MouseButton, ModKeys)> {
         self.entries.iter().find_map(|entry| match entry.binding {
@@ -107,6 +126,22 @@ impl InputBindingDescriptor {
             | Binding::Custom(_)
             | Binding::None => None,
         })
+    }
+
+    /// Returns the first enabled mouse-button binding entry's button and modifier keys.
+    pub fn enabled_mouse_button_engagement(&self) -> Option<(MouseButton, ModKeys)> {
+        self.enabled_entries()
+            .find_map(|entry| match entry.binding {
+                Binding::MouseButton { button, mod_keys } => Some((button, mod_keys)),
+                Binding::Keyboard { .. }
+                | Binding::MouseMotion { .. }
+                | Binding::MouseWheel { .. }
+                | Binding::GamepadButton(_)
+                | Binding::GamepadAxis(_)
+                | Binding::AnyKey
+                | Binding::Custom(_)
+                | Binding::None => None,
+            })
     }
 }
 
@@ -141,9 +176,17 @@ impl InputBindingEntry {
     #[must_use]
     pub const fn modifiers(&self) -> InputBindingModifiers { self.modifiers }
 
+    /// Returns modifiers with authored sensitivity composed into the scale.
+    #[must_use]
+    pub fn install_modifiers(&self) -> InputBindingModifiers {
+        self.modifiers.with_sensitivity(self.sensitivity)
+    }
+
     /// Returns the authored per-entry input sensitivity.
     #[must_use]
     pub const fn sensitivity(&self) -> InputSensitivity { self.sensitivity }
+
+    const fn is_enabled(&self) -> bool { self.sensitivity.is_enabled() }
 }
 
 /// Per-input multiplier stored separately from signed binding scale.
@@ -162,6 +205,10 @@ impl InputSensitivity {
     /// Returns the stored multiplier.
     #[must_use]
     pub const fn value(self) -> f32 { self.0 }
+
+    /// Returns whether this sensitivity participates in runtime input.
+    #[must_use]
+    pub const fn is_enabled(self) -> bool { self.0 != Self::DISABLED.0 }
 
     pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
         if self.0.is_finite() && self.0 >= Self::DISABLED.0 {
@@ -293,6 +340,11 @@ impl InputBindingModifiers {
         self
     }
 
+    fn with_sensitivity(mut self, sensitivity: InputSensitivity) -> Self {
+        self.scale = combined_scale(self.scale, sensitivity);
+        self
+    }
+
     /// Returns the axial dead-zone modifier.
     #[must_use]
     pub const fn dead_zone(self) -> Option<InputDeadZone> { self.dead_zone }
@@ -409,6 +461,14 @@ const fn scale_component(
             InputBindingOutputAxis::Y => Some(value.y),
         },
         None => None,
+    }
+}
+
+fn combined_scale(scale: Option<f32>, sensitivity: InputSensitivity) -> Option<f32> {
+    match scale {
+        Some(scale) => Some(scale * sensitivity.value()),
+        None if sensitivity == InputSensitivity::DEFAULT => None,
+        None => Some(sensitivity.value()),
     }
 }
 

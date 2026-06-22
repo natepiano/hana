@@ -502,6 +502,93 @@ mod tests {
                 .with_mod_keys(ModKeys::ALT)
                 .with_sensitivity(MOUSE_DRAG_SENSITIVITY)
         );
+        assert_eq!(
+            OrbitCamInputBinding::from(GamepadAxis::RightStickX)
+                .with_scale(-2.0)
+                .with_sensitivity(MOUSE_DRAG_SENSITIVITY),
+            OrbitCamInputBinding::from(GamepadAxis::RightStickX)
+                .with_sensitivity(MOUSE_DRAG_SENSITIVITY)
+                .with_scale(-2.0)
+        );
+    }
+
+    #[test]
+    fn native_scale_and_sensitivity_compose_for_installation() {
+        let positive = OrbitCamInputBinding::from(GamepadAxis::RightStickX)
+            .with_scale(2.0)
+            .with_sensitivity(WHEEL_SENSITIVITY)
+            .descriptor();
+        let [entry] = positive.entries_slice() else {
+            assert_eq!(positive.entries_slice().len(), 1);
+            return;
+        };
+        assert_eq!(entry.install_modifiers().scale(), Some(0.5));
+
+        let negative = OrbitCamInputBinding::from(GamepadAxis::RightStickX)
+            .with_scale(-2.0)
+            .with_sensitivity(WHEEL_SENSITIVITY)
+            .descriptor();
+        let [entry] = negative.entries_slice() else {
+            assert_eq!(negative.entries_slice().len(), 1);
+            return;
+        };
+        assert_eq!(entry.install_modifiers().scale(), Some(-0.5));
+
+        let sensitivity_only = OrbitCamInputBinding::from(GamepadAxis::RightStickX)
+            .with_sensitivity(WHEEL_SENSITIVITY)
+            .descriptor();
+        let [entry] = sensitivity_only.entries_slice() else {
+            assert_eq!(sensitivity_only.entries_slice().len(), 1);
+            return;
+        };
+        assert_eq!(entry.install_modifiers().scale(), Some(WHEEL_SENSITIVITY));
+
+        let default = OrbitCamInputBinding::from(GamepadAxis::RightStickX).descriptor();
+        let [entry] = default.entries_slice() else {
+            assert_eq!(default.entries_slice().len(), 1);
+            return;
+        };
+        assert_eq!(entry.install_modifiers().scale(), None);
+    }
+
+    #[test]
+    fn per_axis_native_scale_and_sensitivity_compose_for_installation() {
+        let binding = OrbitCamInputBinding::gamepad_axes_2d(
+            GamepadAxis::RightStickX,
+            GamepadAxis::RightStickY,
+        )
+        .with_scale(Vec2::new(-2.0, 4.0))
+        .with_sensitivity(WHEEL_SENSITIVITY)
+        .descriptor();
+        let entries = binding.entries_slice();
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].install_modifiers().scale(), Some(-0.5));
+        assert_eq!(entries[1].install_modifiers().scale(), Some(1.0));
+    }
+
+    #[test]
+    fn zero_sensitive_native_entries_stay_authored_but_leave_enabled_views()
+    -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Left).with_sensitivity(DISABLED_SENSITIVITY))
+            .build()?;
+
+        assert_eq!(bindings.orbit().entries().len(), 1);
+        assert_eq!(bindings.orbit().enabled_entries().count(), 0);
+        let [entry] = bindings.orbit().entries() else {
+            assert_eq!(bindings.orbit().entries().len(), 1);
+            return Ok(());
+        };
+        let [motion] = entry.motion_descriptor().entries_slice() else {
+            assert_eq!(entry.motion_descriptor().entries_slice().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(motion.sensitivity(), InputSensitivity::DISABLED);
+        assert_eq!(entry.enabled_motion_entries().count(), 0);
+        assert_eq!(entry.engagement_descriptor().enabled_entries().count(), 1);
+
+        Ok(())
     }
 
     #[test]

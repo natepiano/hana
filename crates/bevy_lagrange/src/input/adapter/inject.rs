@@ -347,20 +347,20 @@ fn pinch_suppressed(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> bool {
     trackpad_modifier_active(bindings, keyboard)
-        || bindings.orbit().entries().iter().any(|entry| {
+        || bindings.orbit().enabled_entries().any(|entry| {
             entry
                 .engagement_descriptor()
-                .is_active(keyboard, mouse_buttons)
+                .enabled_is_active(keyboard, mouse_buttons)
         })
-        || bindings.pan().entries().iter().any(|entry| {
+        || bindings.pan().enabled_entries().any(|entry| {
             entry
                 .engagement_descriptor()
-                .is_active(keyboard, mouse_buttons)
+                .enabled_is_active(keyboard, mouse_buttons)
         })
-        || bindings.zoom_smooth().entries().iter().any(|entry| {
+        || bindings.zoom_smooth().enabled_entries().any(|entry| {
             entry
                 .engagement_descriptor()
-                .is_active(keyboard, mouse_buttons)
+                .enabled_is_active(keyboard, mouse_buttons)
         })
 }
 

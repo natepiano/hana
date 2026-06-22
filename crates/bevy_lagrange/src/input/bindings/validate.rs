@@ -279,3 +279,39 @@ fn action_descriptor_to_entry<A: ImpulseCameraAction>(
         action:     PhantomData,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+
+    use super::*;
+    use crate::input::InputSensitivity;
+    use crate::input::OrbitCamMouseDrag;
+
+    #[test]
+    fn validation_preserves_authored_disabled_entries_but_enabled_views_filter_them()
+    -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .orbit(
+                OrbitCamMouseDrag::new(MouseButton::Left)
+                    .with_sensitivity(InputSensitivity::DISABLED.0),
+            )
+            .build()?;
+
+        assert_eq!(bindings.orbit().entries().len(), 1);
+        assert_eq!(bindings.orbit().enabled_entries().count(), 0);
+        let [entry] = bindings.orbit().entries() else {
+            assert_eq!(bindings.orbit().entries().len(), 1);
+            return Ok(());
+        };
+        let [motion] = entry.motion_descriptor().entries_slice() else {
+            assert_eq!(entry.motion_descriptor().entries_slice().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(motion.sensitivity(), InputSensitivity::DISABLED);
+        assert_eq!(entry.enabled_motion_entries().count(), 0);
+        assert_eq!(entry.engagement_descriptor().enabled_entries().count(), 1);
+
+        Ok(())
+    }
+}

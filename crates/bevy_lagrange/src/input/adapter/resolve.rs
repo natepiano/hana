@@ -110,21 +110,21 @@ pub(super) fn resolve_actions_into_orbit_cam_input(
         let adapter_scale = AdapterScale::from_bindings(&bindings.0, slow_mode_active);
         let orbit_sources = held_sources_for_state(
             HeldEngagement::from(orbit_engaged),
-            bindings.0.orbit().entries(),
+            bindings.0.orbit().enabled_entries(),
             actions.orbit_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
         );
         let pan_sources = held_sources_for_state(
             HeldEngagement::from(pan_engaged),
-            bindings.0.pan().entries(),
+            bindings.0.pan().enabled_entries(),
             actions.pan_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
         );
         let zoom_smooth_sources = held_sources_for_state(
             HeldEngagement::from(zoom_engaged),
-            bindings.0.zoom_smooth().entries(),
+            bindings.0.zoom_smooth().enabled_entries(),
             actions.zoom_smooth_sources,
             keyboard.as_deref(),
             mouse_buttons.as_deref(),
@@ -227,9 +227,9 @@ impl From<bool> for HeldEngagement {
     fn from(engaged: bool) -> Self { if engaged { Self::Engaged } else { Self::Idle } }
 }
 
-fn held_sources_for_state<A: HeldCameraAction>(
+fn held_sources_for_state<'a, A: HeldCameraAction + 'a>(
     engagement: HeldEngagement,
-    entries: &[HeldActionBindingEntry<A>],
+    entries: impl IntoIterator<Item = &'a HeldActionBindingEntry<A>>,
     fallback: CameraInteractionSources,
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
@@ -239,11 +239,11 @@ fn held_sources_for_state<A: HeldCameraAction>(
     }
 
     let active_sources = entries
-        .iter()
+        .into_iter()
         .filter(|entry| {
             entry
                 .engagement_descriptor()
-                .is_active(keyboard, mouse_buttons)
+                .enabled_is_active(keyboard, mouse_buttons)
         })
         .fold(CameraInteractionSources::NONE, |sources, entry| {
             sources.union(entry.sources())
@@ -260,21 +260,23 @@ fn pan_overrides_orbit(
     keyboard: Option<&ButtonInput<KeyCode>>,
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
 ) -> bool {
-    bindings.pan().entries().iter().any(|pan| {
-        let Some((pan_button, pan_mod_keys)) =
-            pan.engagement_descriptor().mouse_button_engagement()
+    bindings.pan().enabled_entries().any(|pan| {
+        let Some((pan_button, pan_mod_keys)) = pan
+            .engagement_descriptor()
+            .enabled_mouse_button_engagement()
         else {
             return false;
         };
         if !pan
             .engagement_descriptor()
-            .is_active(keyboard, mouse_buttons)
+            .enabled_is_active(keyboard, mouse_buttons)
         {
             return false;
         }
-        bindings.orbit().entries().iter().any(|orbit| {
-            let Some((orbit_button, orbit_mod_keys)) =
-                orbit.engagement_descriptor().mouse_button_engagement()
+        bindings.orbit().enabled_entries().any(|orbit| {
+            let Some((orbit_button, orbit_mod_keys)) = orbit
+                .engagement_descriptor()
+                .enabled_mouse_button_engagement()
             else {
                 return false;
             };
@@ -282,7 +284,7 @@ fn pan_overrides_orbit(
                 && mod_key_count(pan_mod_keys) > mod_key_count(orbit_mod_keys)
                 && orbit
                     .engagement_descriptor()
-                    .is_active(keyboard, mouse_buttons)
+                    .enabled_is_active(keyboard, mouse_buttons)
         })
     })
 }

@@ -174,8 +174,7 @@ fn describe_bindings(
     rows.extend(
         bindings
             .orbit()
-            .entries()
-            .iter()
+            .enabled_entries()
             .map(|entry| describe_held_entry(entry, OrbitCamInteractionKind::Orbit)),
     );
     rows.extend(
@@ -189,8 +188,7 @@ fn describe_bindings(
     rows.extend(
         bindings
             .pan()
-            .entries()
-            .iter()
+            .enabled_entries()
             .map(|entry| describe_held_entry(entry, OrbitCamInteractionKind::Pan)),
     );
     rows.extend(
@@ -207,14 +205,13 @@ fn describe_bindings(
     // native trigger/key bindings derive their direction from their own scale.
     let inversion_sign = zoom_inversion_sign(bindings.zoom_inversion());
 
-    for entry in bindings.zoom_smooth().entries() {
+    for entry in bindings.zoom_smooth().enabled_entries() {
         rows.extend(describe_zoom_held_entry(entry));
     }
     rows.extend(
         bindings
             .zoom_coarse()
-            .entries()
-            .iter()
+            .enabled_entries()
             .map(|entry| describe_action_entry(entry, OrbitCamInteractionKind::Zoom)),
     );
 
@@ -305,10 +302,10 @@ fn describe_trackpad(
 fn describe_zoom_held_entry<A: HeldCameraAction>(
     entry: &HeldActionBindingEntry<A>,
 ) -> Vec<OrbitCamControlRow> {
-    let motion_entries = entry.motion_descriptor().entries_slice();
+    let motion_entries = entry.enabled_motion_entries().collect::<Vec<_>>();
 
     if motion_entries.len() == 1 {
-        let direction = zoom_direction_from_sign(entry_net_sign(&motion_entries[0]));
+        let direction = zoom_direction_from_sign(entry_net_sign(motion_entries[0]));
         return vec![
             control_row(
                 OrbitCamInteractionKind::Zoom,
@@ -322,7 +319,7 @@ fn describe_zoom_held_entry<A: HeldCameraAction>(
 
     let split = motion_entries
         .iter()
-        .map(|motion_entry| {
+        .map(|&motion_entry| {
             zoom_entry_label(motion_entry).map(|stem| {
                 let direction = zoom_direction_from_sign(entry_net_sign(motion_entry));
                 control_row(
@@ -497,7 +494,7 @@ fn mouse_drag_stem(
     engagement: &InputBindingDescriptor,
 ) -> Option<String> {
     let motion_mod_keys = mouse_motion_mod_keys(motion)?;
-    let (button, button_mod_keys) = engagement.mouse_button_engagement()?;
+    let (button, button_mod_keys) = engagement.enabled_mouse_button_engagement()?;
     if motion_mod_keys != button_mod_keys {
         return None;
     }
@@ -510,8 +507,7 @@ fn mouse_drag_stem(
 
 fn mouse_motion_mod_keys(descriptor: &InputBindingDescriptor) -> Option<ModKeys> {
     descriptor
-        .entries_slice()
-        .iter()
+        .enabled_entries()
         .find_map(|entry| match entry.binding() {
             Binding::MouseMotion { mod_keys } => Some(mod_keys),
             Binding::Keyboard { .. }
@@ -529,19 +525,20 @@ fn descriptor_stem(
     descriptor: &InputBindingDescriptor,
     sources: CameraInteractionSources,
 ) -> String {
-    if let Some(label) = keyboard_stem(descriptor.entries_slice()) {
+    let entries = descriptor.enabled_entries().collect::<Vec<_>>();
+    if let Some(label) = keyboard_stem(&entries) {
         return label;
     }
-    if let Some(label) = gamepad_axis_stem(descriptor.entries_slice()) {
+    if let Some(label) = gamepad_axis_stem(&entries) {
         return label;
     }
-    if let Some(label) = gamepad_button_stem(descriptor.entries_slice()) {
+    if let Some(label) = gamepad_button_stem(&entries) {
         return label;
     }
-    if let Some((button, mod_keys)) = descriptor.mouse_button_engagement() {
+    if let Some((button, mod_keys)) = descriptor.enabled_mouse_button_engagement() {
         return with_mod_keys(mod_keys, mouse_button_label(button));
     }
-    if descriptor.entries_slice().iter().any(|entry| {
+    if entries.iter().any(|entry| {
         matches!(
             entry.binding(),
             Binding::MouseWheel { .. } | Binding::MouseMotion { .. }
@@ -549,8 +546,7 @@ fn descriptor_stem(
     }) {
         return MOUSE_DESCRIPTOR_LABEL.to_string();
     }
-    if descriptor
-        .entries_slice()
+    if entries
         .iter()
         .any(|entry| matches!(entry.binding(), Binding::Custom(_)))
     {
@@ -560,7 +556,7 @@ fn descriptor_stem(
     source_stem(sources).to_string()
 }
 
-fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
+fn keyboard_stem(entries: &[&InputBindingEntry]) -> Option<String> {
     let keys = entries
         .iter()
         .map(|entry| match entry.binding() {
@@ -590,7 +586,7 @@ fn keyboard_stem(entries: &[InputBindingEntry]) -> Option<String> {
     }
 }
 
-fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
+fn gamepad_axis_stem(entries: &[&InputBindingEntry]) -> Option<String> {
     let gamepad_axes = entries
         .iter()
         .map(|entry| match entry.binding() {
@@ -617,7 +613,7 @@ fn gamepad_axis_stem(entries: &[InputBindingEntry]) -> Option<String> {
     }
 }
 
-fn gamepad_button_stem(entries: &[InputBindingEntry]) -> Option<String> {
+fn gamepad_button_stem(entries: &[&InputBindingEntry]) -> Option<String> {
     let buttons = entries
         .iter()
         .map(|entry| match entry.binding() {
@@ -779,6 +775,7 @@ fn control_row(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input::InputSensitivity;
     use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamInputBinding;
@@ -864,6 +861,21 @@ mod tests {
         assert_eq!(summary.mode_value, "custom bindings");
         assert!(labels.contains(&"rmb drag"));
         assert!(!labels.contains(&"mmb drag"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_native_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .orbit(
+                OrbitCamMouseDrag::new(MouseButton::Right)
+                    .with_sensitivity(InputSensitivity::DISABLED.0),
+            )
+            .build()?;
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
+
+        assert!(summary.rows.is_empty());
 
         Ok(())
     }

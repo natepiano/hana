@@ -104,6 +104,7 @@ mod tests {
     use bevy_enhanced_input::prelude::BindingOf;
     use bevy_enhanced_input::prelude::DeadZone;
     use bevy_enhanced_input::prelude::DeltaScale;
+    use bevy_enhanced_input::prelude::ModKeys;
     use bevy_enhanced_input::prelude::Scale;
 
     use super::OrbitCamBindings;
@@ -120,12 +121,14 @@ mod tests {
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
     use crate::input::ControlSpeed;
+    use crate::input::InputSensitivity;
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamInputContext;
     use crate::input::OrbitCamInputMode;
+    use crate::input::OrbitCamMouseDrag;
     use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
     use crate::input::OrbitCamTouchBinding;
@@ -178,6 +181,7 @@ mod tests {
 
     type TestResult = Result<(), &'static str>;
 
+    const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
     const SLOW_SCALE: f32 = 0.5;
     const TRACKPAD_DUPLICATE_SENSITIVITY: f32 = 0.5;
 
@@ -189,6 +193,20 @@ mod tests {
 
     fn assert_f32_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= f32::EPSILON);
+    }
+
+    fn installed_scale_for(
+        app: &App,
+        camera: Entity,
+        matches_binding: impl Fn(&Binding) -> bool,
+    ) -> Option<Vec3> {
+        modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .find_map(|entity| {
+                let binding = app.world().get::<Binding>(entity)?;
+                let scale = app.world().get::<Scale>(entity)?;
+                matches_binding(binding).then_some(scale.factor)
+            })
     }
 
     fn spawn_slow_blender_like_camera(app: &mut App) -> Result<Entity, &'static str> {
@@ -312,6 +330,68 @@ mod tests {
         condition_indexes.sort_unstable();
 
         assert_eq!(condition_indexes, vec![0, 1]);
+        Ok(())
+    }
+
+    #[test]
+    fn native_install_uses_composed_scale_and_sensitivity() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamHeldBinding::new(
+                OrbitCamInputBinding::gamepad_axes_2d(
+                    GamepadAxis::RightStickX,
+                    GamepadAxis::RightStickY,
+                )
+                .with_scale(Vec2::new(-2.0, 4.0))
+                .with_sensitivity(0.25),
+                GamepadButton::RightTrigger2,
+            ))
+            .gamepad(CameraInputGamepadSelectionPolicy::Active)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+
+        app.update();
+
+        let x_scale = installed_scale_for(&app, camera, |binding| {
+            matches!(binding, Binding::GamepadAxis(GamepadAxis::RightStickX))
+        })
+        .ok_or("right stick x binding should have a scale")?;
+        let y_scale = installed_scale_for(&app, camera, |binding| {
+            matches!(binding, Binding::GamepadAxis(GamepadAxis::RightStickY))
+        })
+        .ok_or("right stick y binding should have a scale")?;
+
+        assert_eq!(x_scale, Vec3::splat(-0.5));
+        assert_eq!(y_scale, Vec3::splat(1.0));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_native_held_binding_is_not_installed_or_attributed() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Left).with_sensitivity(DISABLED_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+
+        app.update();
+
+        let installed = modes::installed_input_entities(app.world(), camera);
+        assert!(installed.iter().all(|entity| {
+            !matches!(
+                app.world().get::<Binding>(*entity),
+                Some(Binding::MouseMotion { .. } | Binding::MouseButton { .. })
+            )
+        }));
+        let actions = app
+            .world()
+            .get::<OrbitCamInputActionEntities>(camera)
+            .ok_or("input actions should be installed")?;
+        assert!(actions.orbit_sources.is_empty());
         Ok(())
     }
 
@@ -718,6 +798,65 @@ mod tests {
         let input = camera_input(&app, camera)?;
         assert_f32_close(input.zoom_smooth().amount(), 0.0);
         assert!(!input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_pan_binding_does_not_override_orbit() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Left))
+            .pan(
+                OrbitCamMouseDrag::new(MouseButton::Left)
+                    .with_mod_keys(ModKeys::SHIFT)
+                    .with_sensitivity(DISABLED_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(5.0, -2.0);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_eq!(input.orbit(), OrbitDelta::from(Vec2::new(5.0, -2.0)));
+        assert!(!input.has_pan());
+        assert!(input.sources().contains(CameraInteractionSources::MOUSE));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_held_binding_does_not_suppress_pinch() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Left).with_sensitivity(DISABLED_SENSITIVITY))
+            .zoom(OrbitCamPinchZoom)
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut().write_message(PinchGesture(2.0));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            2.0 * PINCH_GESTURE_AMPLIFICATION,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::PINCH));
         Ok(())
     }
 

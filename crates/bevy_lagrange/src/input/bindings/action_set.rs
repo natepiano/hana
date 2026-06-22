@@ -16,6 +16,7 @@ use std::marker::PhantomData;
 use bevy::prelude::*;
 
 use super::descriptor::InputBindingDescriptor;
+use super::descriptor::InputBindingEntry;
 use super::error::OrbitCamBindingsError;
 use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
@@ -65,6 +66,13 @@ impl OrbitCamOrbitActionBindings {
     /// Returns orbit binding entries.
     #[must_use]
     pub fn entries(&self) -> &[HeldActionBindingEntry<OrbitCamOrbitAction>] { self.0.entries() }
+
+    /// Returns orbit binding entries that participate in runtime input.
+    pub fn enabled_entries(
+        &self,
+    ) -> impl Iterator<Item = &HeldActionBindingEntry<OrbitCamOrbitAction>> {
+        self.0.enabled_entries()
+    }
 }
 
 impl OrbitCamPanActionBindings {
@@ -79,6 +87,13 @@ impl OrbitCamPanActionBindings {
     /// Returns pan binding entries.
     #[must_use]
     pub fn entries(&self) -> &[HeldActionBindingEntry<OrbitCamPanAction>] { self.0.entries() }
+
+    /// Returns pan binding entries that participate in runtime input.
+    pub fn enabled_entries(
+        &self,
+    ) -> impl Iterator<Item = &HeldActionBindingEntry<OrbitCamPanAction>> {
+        self.0.enabled_entries()
+    }
 }
 
 impl OrbitCamZoomSmoothActionBindings {
@@ -95,6 +110,13 @@ impl OrbitCamZoomSmoothActionBindings {
     pub fn entries(&self) -> &[HeldActionBindingEntry<OrbitCamZoomSmoothAction>] {
         self.0.entries()
     }
+
+    /// Returns smooth-zoom binding entries that participate in runtime input.
+    pub fn enabled_entries(
+        &self,
+    ) -> impl Iterator<Item = &HeldActionBindingEntry<OrbitCamZoomSmoothAction>> {
+        self.0.enabled_entries()
+    }
 }
 
 impl OrbitCamZoomCoarseActionBindings {
@@ -109,6 +131,13 @@ impl OrbitCamZoomCoarseActionBindings {
     /// Returns coarse-zoom binding entries.
     #[must_use]
     pub fn entries(&self) -> &[ActionBindingEntry<OrbitCamZoomCoarseAction>] { self.0.entries() }
+
+    /// Returns coarse-zoom binding entries that participate in runtime input.
+    pub fn enabled_entries(
+        &self,
+    ) -> impl Iterator<Item = &ActionBindingEntry<OrbitCamZoomCoarseAction>> {
+        self.0.enabled_entries()
+    }
 }
 
 /// Binding set for one semantic action.
@@ -130,6 +159,10 @@ impl<A: CameraSemanticAction> ActionBindingSet<A> {
     /// Returns the binding entries.
     #[must_use]
     pub fn entries(&self) -> &[ActionBindingEntry<A>] { &self.entries }
+
+    pub(super) fn enabled_entries(&self) -> impl Iterator<Item = &ActionBindingEntry<A>> {
+        self.entries.iter().filter(|entry| entry.is_enabled())
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -144,6 +177,10 @@ impl<A: HeldCameraAction, E: CameraSemanticAction> HeldActionBindingSet<A, E> {
     pub(super) const fn is_empty(&self) -> bool { self.entries.is_empty() }
 
     pub(super) fn entries(&self) -> &[HeldActionBindingEntry<A>] { &self.entries }
+
+    pub(super) fn enabled_entries(&self) -> impl Iterator<Item = &HeldActionBindingEntry<A>> {
+        self.entries.iter().filter(|entry| entry.is_enabled())
+    }
 }
 
 /// Binding entry for an impulse camera action.
@@ -172,6 +209,8 @@ impl<A: CameraSemanticAction> ActionBindingEntry<A> {
     /// Returns engagement kind for this binding.
     #[must_use]
     pub const fn engagement(&self) -> BindingEngagement { self.engagement }
+
+    fn is_enabled(&self) -> bool { self.binding.has_enabled_entries() }
 }
 
 /// Paired movement and engagement entry for held camera actions.
@@ -230,6 +269,15 @@ impl<A: HeldCameraAction> HeldActionBindingEntry<A> {
     /// Returns route policy for this binding.
     #[must_use]
     pub const fn route(&self) -> BindingRoutePolicy { self.route }
+
+    fn is_enabled(&self) -> bool {
+        self.motion.has_enabled_entries() && self.engagement.has_enabled_entries()
+    }
+
+    /// Returns motion binding entries that participate in runtime input.
+    pub fn enabled_motion_entries(&self) -> impl Iterator<Item = &InputBindingEntry> {
+        self.motion.enabled_entries()
+    }
 }
 
 /// Route policy attached to a binding entry.
