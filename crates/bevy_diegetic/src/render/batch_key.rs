@@ -65,6 +65,16 @@ impl From<OpaqueRendererMethod> for BatchOpaqueRendererMethod {
     }
 }
 
+impl From<BatchOpaqueRendererMethod> for OpaqueRendererMethod {
+    fn from(method: BatchOpaqueRendererMethod) -> Self {
+        match method {
+            BatchOpaqueRendererMethod::Forward => Self::Forward,
+            BatchOpaqueRendererMethod::Deferred => Self::Deferred,
+            BatchOpaqueRendererMethod::Auto => Self::Auto,
+        }
+    }
+}
+
 /// `UvChannel` re-encoded for hashable resource compatibility.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum BatchUvChannel {
@@ -278,13 +288,6 @@ impl From<&StandardMaterial> for ResourceCompatibility {
 /// the only direction where texture handles move from a material-table batch key
 /// into the `StandardMaterial` half of an extended render material.
 #[must_use]
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Phase 3 and Phase 6 batch material creation route through this helper"
-    )
-)]
 pub(crate) fn apply_resource_compatibility_to_standard_material(
     base: &StandardMaterial,
     compatibility: &ResourceCompatibility,
@@ -453,5 +456,30 @@ mod tests {
 
         assert_eq!(ResourceCompatibility::from(&patched), compatibility);
         assert_eq!(patched.base_color, base.base_color);
+    }
+
+    #[test]
+    fn resource_compatibility_excludes_scalar_values() {
+        let first = StandardMaterial {
+            base_color: Color::srgb(0.1, 0.2, 0.3),
+            emissive: Color::srgb(0.4, 0.5, 0.6).into(),
+            metallic: 0.1,
+            perceptual_roughness: 0.2,
+            reflectance: 0.3,
+            ..Default::default()
+        };
+        let second = StandardMaterial {
+            base_color: Color::srgb(0.8, 0.7, 0.6),
+            emissive: Color::srgb(0.6, 0.5, 0.4).into(),
+            metallic: 0.9,
+            perceptual_roughness: 0.8,
+            reflectance: 0.7,
+            ..Default::default()
+        };
+
+        assert_eq!(
+            ResourceCompatibility::from(&first),
+            ResourceCompatibility::from(&second)
+        );
     }
 }

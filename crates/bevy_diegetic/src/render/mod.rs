@@ -7,6 +7,7 @@ mod clip;
 mod constants;
 mod draw_order;
 mod draw_order_limits;
+mod fill_batch;
 mod material;
 #[cfg(test)]
 mod material_slot_lifetime_probe;
@@ -73,6 +74,9 @@ pub(crate) use draw_order::PrimitiveOrdinal;
 )]
 pub(crate) use draw_order::ShapeOrdinal;
 use draw_order_limits::warn_panel_draw_order_limits;
+use fill_batch::FillBatchPlugin;
+pub(crate) use fill_batch::SdfExtendedMaterial;
+pub(crate) use fill_batch::set_sdf_material_table_buffer;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::resolve_material;
@@ -373,6 +377,7 @@ impl Plugin for RenderPlugin {
         app.add_plugins((
             MaterialTablePlugin,
             AnalyticPathPlugin,
+            FillBatchPlugin,
             TextRenderPlugin,
             PanelGeometryPlugin,
             PanelShapePlugin,

@@ -20,6 +20,7 @@ use super::constants;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderProjection;
+use super::material_table::MaterialTableAppendReady;
 use super::sdf_material;
 use super::sdf_material::LegacySdfExtendedMaterial;
 use super::sdf_material::LegacySdfExtendedMaterialInput;
@@ -96,10 +97,13 @@ impl Plugin for PanelGeometryPlugin {
             "sdf_stroke.wgsl",
             Shader::from_wgsl
         );
-        app.add_plugins(MaterialPlugin::<LegacySdfExtendedMaterial>::default());
+        app.init_resource::<ResolvedSdfSurfaceRegistry>()
+            .add_plugins(MaterialPlugin::<LegacySdfExtendedMaterial>::default());
         app.add_systems(
             PostUpdate,
-            build_panel_geometry.in_set(PanelChildSystems::Build),
+            build_panel_geometry
+                .in_set(PanelChildSystems::Build)
+                .before(MaterialTableAppendReady),
         );
         app.add_systems(Last, update_panel_geometry_perf_stats);
     }
@@ -164,10 +168,12 @@ fn build_panel_geometry(
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
     mut sdf_materials: ResMut<Assets<LegacySdfExtendedMaterial>>,
+    mut resolved_surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
     mut commands: Commands,
 ) {
     for (panel_entity, panel, computed, panel_layers) in &changed_panels {
         let Some(result) = computed.result() else {
+            resolved_surfaces.remove_panel(panel_entity);
             continue;
         };
 
@@ -181,11 +187,29 @@ fn build_panel_geometry(
             surface_shadow: panel.surface_shadow(),
             layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
         };
+        let gathered = gather_surfaces(context.panel, &result.commands, computed.draw_order());
+        let desired = desired_surfaces(gathered);
+        let mut resolved: Vec<ResolvedSdfSurface<'_>> = desired
+            .iter()
+            .map(|surface| resolve_sdf_surface(surface, &context))
+            .collect();
+        resolved.sort_by(|left, right| {
+            left.draw_depth
+                .ordinal_index()
+                .cmp(&right.draw_depth.ordinal_index())
+                .then(left.command_index.cmp(&right.command_index))
+        });
+        resolved_surfaces.upsert_panel(
+            panel_entity,
+            resolved
+                .iter()
+                .map(StoredResolvedSdfSurface::from_resolved)
+                .collect(),
+        );
 
         reconcile_sdf_quads(
             &context,
-            &result.commands,
-            computed.draw_order(),
+            &resolved,
             &old_sdf,
             &mut meshes,
             &mut sdf_materials,
@@ -225,8 +249,7 @@ pub(crate) struct PanelReconcileContext<'a> {
 /// that quad.
 fn reconcile_sdf_quads(
     context: &PanelReconcileContext<'_>,
-    render_commands: &[RenderCommand],
-    draw_order: &DrawOrderProjection,
+    desired: &[ResolvedSdfSurface<'_>],
     old_sdf: &Query<(
         Entity,
         &ChildOf,
@@ -237,9 +260,6 @@ fn reconcile_sdf_quads(
     sdf_materials: &mut Assets<LegacySdfExtendedMaterial>,
     commands: &mut Commands,
 ) {
-    let gathered = gather_surfaces(context.panel, render_commands, draw_order);
-    let desired = desired_surfaces(gathered);
-
     let mut existing: HashMap<
         CommandIndex,
         (Entity, PanelSdfSurface, Handle<LegacySdfExtendedMaterial>),
@@ -254,9 +274,8 @@ fn reconcile_sdf_quads(
         })
         .collect();
 
-    for surface in &desired {
-        let resolved = resolve_sdf_surface(surface, context);
-        let quad = build_sdf_quad_from_resolved(&resolved);
+    for surface in desired {
+        let quad = build_sdf_quad_from_resolved(surface);
         match existing.remove(&quad.signature.command_index) {
             // Identical — leave the quad untouched.
             Some((_, signature, _)) if signature == quad.signature => {},
@@ -440,11 +459,13 @@ fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
 /// Borrowed `StandardMaterial` source plus the layout color override for one
 /// SDF material slot.
 pub(crate) struct ResolvedSdfMaterial<'a> {
+    /// Whether the fill or border role was authored by the layout surface.
+    pub(crate) authored:      bool,
     /// Element or panel material used as the `StandardMaterial` base; `None`
     /// connects this slot to `default_panel_material()`.
     pub(crate) base_material: Option<&'a StandardMaterial>,
     /// Layout color applied to `StandardMaterial::base_color` when the old
-    /// adapter or future frame table builds the owned material.
+    /// adapter or SDF frame table builds the owned material.
     pub(crate) color:         Option<Color>,
 }
 
@@ -464,7 +485,7 @@ impl ResolvedSdfMaterial<'_> {
 }
 
 /// Render-neutral resolved SDF surface shared by the old quad adapter and the
-/// future fill-batch builder.
+/// fill batch builder.
 pub(crate) struct ResolvedSdfSurface<'a> {
     /// Entity of the `DiegeticPanel` that owns this surface.
     pub(crate) panel_entity:    Entity,
@@ -473,10 +494,10 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     /// Full draw-depth projection for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by `sdf_material::sdf_panel_material` and
-    /// the future SDF material table.
+    /// the SDF material table.
     pub(crate) fill_material:   ResolvedSdfMaterial<'a>,
-    /// Border material input consumed by the SDF uniform builder and the
-    /// future SDF material table.
+    /// Border material input consumed by the SDF uniform builder and the SDF
+    /// material table.
     pub(crate) border_material: ResolvedSdfMaterial<'a>,
     /// Panel-local center of the SDF mesh child.
     pub(crate) local_center:    Vec2,
@@ -502,6 +523,149 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) sdf_kind:        u32,
     /// `SdfPanelUniform::sdf_params` payload for this surface.
     pub(crate) sdf_params:      Vec4,
+}
+
+/// Owned current-frame SDF material source retained for the private batch route.
+#[derive(Clone)]
+pub(crate) struct StoredResolvedSdfMaterial {
+    /// Whether this fill or border role was authored by the layout surface.
+    authored:      bool,
+    /// Cloned material source used when appending the frame material table.
+    base_material: Option<StandardMaterial>,
+    /// Layout color applied to `StandardMaterial::base_color`.
+    color:         Option<Color>,
+}
+
+impl StoredResolvedSdfMaterial {
+    fn from_resolved(material: &ResolvedSdfMaterial<'_>) -> Self {
+        Self {
+            authored:      material.authored,
+            base_material: material.base_material.cloned(),
+            color:         material.color,
+        }
+    }
+
+    const fn as_resolved(&self) -> ResolvedSdfMaterial<'_> {
+        ResolvedSdfMaterial {
+            authored:      self.authored,
+            base_material: self.base_material.as_ref(),
+            color:         self.color,
+        }
+    }
+}
+
+/// Owned resolved SDF surface retained while `ComputedDiegeticPanel` is current.
+#[derive(Clone)]
+pub(crate) struct StoredResolvedSdfSurface {
+    /// Entity of the `DiegeticPanel` that owns this surface.
+    panel_entity:    Entity,
+    /// Command identity inside the panel's `LayoutResult::commands` stream.
+    command_index:   CommandIndex,
+    /// Full draw-depth projection for sorted and OIT ordering.
+    draw_depth:      DrawCommandDepth,
+    /// Fill material source for the SDF material table.
+    fill_material:   StoredResolvedSdfMaterial,
+    /// Border material source for the SDF material table.
+    border_material: StoredResolvedSdfMaterial,
+    /// Panel-local center of the SDF mesh.
+    local_center:    Vec2,
+    /// Panel-local transform for this surface.
+    local_transform: Transform,
+    /// Panel-local half size of the SDF form.
+    sdf_half_size:   Vec2,
+    /// Panel-local half size of the quad mesh, including `SDF_AA_PADDING`.
+    mesh_half_size:  Vec2,
+    /// Panel-local per-corner radii [TL, TR, BR, BL].
+    corner_radii:    [f32; 4],
+    /// Panel-local border widths [top, right, bottom, left].
+    border_widths:   [f32; 4],
+    /// Panel-local clip rect [left, bottom, right, top].
+    clip_rect:       Vec4,
+    /// `SdfPanelUniform::sdf_kind` selector for this surface.
+    sdf_kind:        u32,
+    /// `SdfPanelUniform::sdf_params` payload for this surface.
+    sdf_params:      Vec4,
+}
+
+impl StoredResolvedSdfSurface {
+    fn from_resolved(surface: &ResolvedSdfSurface<'_>) -> Self {
+        Self {
+            panel_entity:    surface.panel_entity,
+            command_index:   surface.command_index,
+            draw_depth:      surface.draw_depth,
+            fill_material:   StoredResolvedSdfMaterial::from_resolved(&surface.fill_material),
+            border_material: StoredResolvedSdfMaterial::from_resolved(&surface.border_material),
+            local_center:    surface.local_center,
+            local_transform: surface.local_transform,
+            sdf_half_size:   surface.sdf_half_size,
+            mesh_half_size:  surface.mesh_half_size,
+            corner_radii:    surface.corner_radii,
+            border_widths:   surface.border_widths,
+            clip_rect:       surface.clip_rect,
+            sdf_kind:        surface.sdf_kind,
+            sdf_params:      surface.sdf_params,
+        }
+    }
+
+    /// Returns the owning `DiegeticPanel` entity.
+    pub(crate) const fn panel_entity(&self) -> Entity { self.panel_entity }
+
+    /// Borrows the stored surface with current panel render state.
+    pub(crate) const fn as_resolved(
+        &self,
+        render_layers: RenderLayers,
+        surface_shadow: SurfaceShadow,
+    ) -> ResolvedSdfSurface<'_> {
+        ResolvedSdfSurface {
+            panel_entity: self.panel_entity,
+            command_index: self.command_index,
+            draw_depth: self.draw_depth,
+            fill_material: self.fill_material.as_resolved(),
+            border_material: self.border_material.as_resolved(),
+            local_center: self.local_center,
+            local_transform: self.local_transform,
+            sdf_half_size: self.sdf_half_size,
+            mesh_half_size: self.mesh_half_size,
+            corner_radii: self.corner_radii,
+            border_widths: self.border_widths,
+            clip_rect: self.clip_rect,
+            render_layers,
+            surface_shadow,
+            sdf_kind: self.sdf_kind,
+            sdf_params: self.sdf_params,
+        }
+    }
+}
+
+/// Current resolved SDF surfaces keyed by owning panel for the private batch route.
+#[derive(Default, Resource)]
+pub(crate) struct ResolvedSdfSurfaceRegistry {
+    surfaces_by_panel: HashMap<Entity, Vec<StoredResolvedSdfSurface>>,
+}
+
+impl ResolvedSdfSurfaceRegistry {
+    /// Replaces the retained SDF surfaces for one panel.
+    pub(crate) fn upsert_panel(
+        &mut self,
+        panel_entity: Entity,
+        surfaces: Vec<StoredResolvedSdfSurface>,
+    ) {
+        if surfaces.is_empty() {
+            self.remove_panel(panel_entity);
+        } else {
+            self.surfaces_by_panel.insert(panel_entity, surfaces);
+        }
+    }
+
+    /// Removes retained SDF surfaces for one panel.
+    pub(crate) fn remove_panel(&mut self, panel_entity: Entity) {
+        self.surfaces_by_panel.remove(&panel_entity);
+    }
+
+    /// Iterates retained SDF surfaces in panel-bucket order.
+    pub(crate) fn surfaces(&self) -> impl Iterator<Item = &StoredResolvedSdfSurface> {
+        self.surfaces_by_panel.values().flatten()
+    }
 }
 
 /// An SDF quad ready to spawn or recolor: its material, mesh size, world
@@ -623,10 +787,12 @@ pub(crate) fn resolve_sdf_surface<'a>(
         command_index: surface.command_index,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
+            authored: surface.fill_color.is_some() || element_mat.is_some(),
             base_material,
             color: effective_color,
         },
         border_material: ResolvedSdfMaterial {
+            authored: surface.border_color.is_some(),
             base_material,
             color: surface.border_color,
         },
@@ -844,6 +1010,7 @@ mod tests {
         app.init_asset::<Mesh>();
         app.init_asset::<StandardMaterial>();
         app.init_asset::<LegacySdfExtendedMaterial>();
+        app.init_resource::<ResolvedSdfSurfaceRegistry>();
         app.insert_resource(zero_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
         app.add_systems(PostUpdate, build_panel_geometry);

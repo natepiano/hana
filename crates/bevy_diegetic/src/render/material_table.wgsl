@@ -2,6 +2,8 @@
 //
 // Rust mirror: render/material_table.rs.
 
+#define_import_path bevy_diegetic::material_table
+
 // PathExtension::uniforms uniform buffer.
 const PATH_UNIFORM_BINDING: u32 = 100u;
 // PathExtension::curves storage buffer.

@@ -27,6 +27,7 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::PathExtendedMaterial;
+use super::SdfExtendedMaterial;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
 
@@ -51,6 +52,46 @@ pub(crate) const SDF_MESH_BINDING: u32 = 108;
 
 /// GPU sentinel for an absent SDF fill or border material table read.
 pub(crate) const INVALID_GPU_MATERIAL_SLOT: u32 = u32::MAX;
+
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_ROUTE_RESOLVE: &str = "route/resolve";
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_WORLD_TRANSFORMS: &str = "world-transforms";
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_RECONCILE_SPAWN: &str = "reconcile/spawn";
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_REGISTER: &str = "register";
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_BOUNDS: &str = "bounds";
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_COMMIT: &str = "commit";
+
+#[cfg(test)]
+pub(crate) const SDF_DRIVER_RUN_ORDER: [&str; 6] = [
+    SDF_DRIVER_ROUTE_RESOLVE,
+    SDF_DRIVER_WORLD_TRANSFORMS,
+    SDF_DRIVER_RECONCILE_SPAWN,
+    SDF_DRIVER_REGISTER,
+    SDF_DRIVER_BOUNDS,
+    SDF_DRIVER_COMMIT,
+];
+
+#[cfg(test)]
+#[derive(Default, Resource)]
+pub(crate) struct SdfDriverRunOrder {
+    pub(crate) names:                   Vec<&'static str>,
+    pub(crate) registered_batch_entity: bool,
+}
+
+#[cfg(test)]
+pub(crate) fn record_sdf_driver_run(
+    run_order: &mut Option<ResMut<SdfDriverRunOrder>>,
+    name: &'static str,
+) {
+    if let Some(run_order) = run_order.as_deref_mut() {
+        run_order.names.push(name);
+    }
+}
 
 const DEFAULT_TABLE_CAPACITY: u32 = 1;
 const MATERIAL_TABLE_STRESS_FRAMES: usize = 16;
@@ -118,16 +159,16 @@ pub(crate) enum MaterialSlotIdError {
 }
 
 /// Opaque GPU record row id for SDF fill and border material references.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) struct GpuMaterialSlotId(
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, ShaderType)]
+pub(crate) struct GpuMaterialSlotId {
     /// Raw row index or `INVALID_GPU_MATERIAL_SLOT` sentinel stored in GPU records.
-    u32,
-);
+    raw: u32,
+}
 
 impl GpuMaterialSlotId {
     /// Returns the raw row value written to GPU records.
     #[must_use]
-    pub(crate) const fn as_u32(self) -> u32 { self.0 }
+    pub(crate) const fn as_u32(self) -> u32 { self.raw }
 }
 
 /// CPU-side SDF material presence before a GPU record is built.
@@ -144,8 +185,10 @@ impl SdfPaintMaterial {
     #[must_use]
     pub(crate) const fn to_gpu(self) -> GpuMaterialSlotId {
         match self {
-            Self::Authored(slot) => GpuMaterialSlotId(slot.as_u32()),
-            Self::NotAuthored => GpuMaterialSlotId(INVALID_GPU_MATERIAL_SLOT),
+            Self::Authored(slot) => GpuMaterialSlotId { raw: slot.as_u32() },
+            Self::NotAuthored => GpuMaterialSlotId {
+                raw: INVALID_GPU_MATERIAL_SLOT,
+            },
         }
     }
 
@@ -341,13 +384,6 @@ pub(crate) enum FrameMaterialSlotAppend {
 }
 
 /// Appends one projected material role through the shared table contract.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Phase 3 and Phase 6 route producers through this contract"
-    )
-)]
 pub(crate) fn append_material_slot<T>(
     builder: &mut FrameMaterialTableBuilder,
     input: &T,
@@ -471,6 +507,24 @@ impl FrameMaterialTableBuilder {
         FrameMaterialSlotAppend::Appended(MaterialSlotId(raw))
     }
 
+    /// Returns whether `required_rows` can still fit in this append window.
+    #[must_use]
+    pub(crate) fn has_remaining_rows(&self, required_rows: usize) -> bool {
+        self.rows.len().saturating_add(required_rows).to_u32() <= self.row_limit
+    }
+
+    /// Returns the current row count, used as an atomic append rollback point.
+    #[must_use]
+    pub(crate) const fn row_count(&self) -> usize { self.rows.len() }
+
+    /// Records one producer-level drop without appending a partial row set.
+    pub(crate) const fn record_dropped_limit(&mut self) {
+        self.dropped_records = self.dropped_records.saturating_add(1);
+    }
+
+    /// Rolls back rows appended after `row_count`.
+    pub(crate) fn truncate_rows(&mut self, row_count: usize) { self.rows.truncate(row_count); }
+
     /// Freezes the append window and returns the extracted frame-table payload.
     #[must_use]
     pub(crate) fn freeze(&mut self) -> FrameMaterialTable {
@@ -520,13 +574,6 @@ impl FrameMaterialTableBuild {
     }
 
     /// Returns the single append builder for current-frame producers.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Phase 3 SDF, Phase 6 path, and Phase 9 panel-shape producers append through this owner"
-        )
-    )]
     pub(crate) const fn builder_mut(&mut self) -> &mut FrameMaterialTableBuilder {
         &mut self.builder
     }
@@ -594,12 +641,29 @@ impl RegisteredPathMaterial {
     }
 }
 
+/// One SDF batch material registered for material-table rebinding.
+#[derive(Debug)]
+struct RegisteredSdfMaterial {
+    /// Batch material handle.
+    material:     Handle<SdfExtendedMaterial>,
+    /// Table-buffer handle last written to `SdfExtension::material_table`.
+    bound_handle: Option<Handle<ShaderBuffer>>,
+}
+
+impl RegisteredSdfMaterial {
+    fn needs_rebind(&self, handle: &Handle<ShaderBuffer>) -> bool {
+        self.bound_handle.as_ref() != Some(handle)
+    }
+}
+
 /// Registered batch material handles that need table-buffer rebinding.
 #[derive(Debug, Default, Resource)]
 pub(crate) struct BatchMaterialTableRegistry {
     /// Path batch material handles keyed by their owning batch entity.
     path_materials: HashMap<Entity, RegisteredPathMaterial>,
-    /// At least one registered path material has not seen the current table buffer.
+    /// SDF batch material handles keyed by their owning batch entity.
+    sdf_materials:  HashMap<Entity, RegisteredSdfMaterial>,
+    /// At least one registered material has not seen the current table buffer.
     pending_rebind: bool,
 }
 
@@ -630,6 +694,32 @@ impl BatchMaterialTableRegistry {
         }
     }
 
+    /// Registers or replaces an SDF batch material for table-buffer rebinding.
+    pub(crate) fn register_sdf(
+        &mut self,
+        batch_entity: Entity,
+        material: Handle<SdfExtendedMaterial>,
+    ) {
+        match self.sdf_materials.get_mut(&batch_entity) {
+            Some(registered) if registered.material == material => {},
+            Some(registered) => {
+                registered.material = material;
+                registered.bound_handle = None;
+                self.pending_rebind = true;
+            },
+            None => {
+                self.sdf_materials.insert(
+                    batch_entity,
+                    RegisteredSdfMaterial {
+                        material,
+                        bound_handle: None,
+                    },
+                );
+                self.pending_rebind = true;
+            },
+        }
+    }
+
     /// Explicitly removes a path batch material from table-buffer rebinding.
     #[cfg_attr(
         not(test),
@@ -645,6 +735,7 @@ impl BatchMaterialTableRegistry {
     /// Removes registry entries whose batch entities no longer exist.
     pub(crate) fn purge_dead_with(&mut self, mut is_alive: impl FnMut(Entity) -> bool) {
         self.path_materials.retain(|entity, _| is_alive(*entity));
+        self.sdf_materials.retain(|entity, _| is_alive(*entity));
     }
 
     /// Returns the number of registered batch material handles.
@@ -653,7 +744,7 @@ impl BatchMaterialTableRegistry {
         not(test),
         expect(dead_code, reason = "Phase 2 registry cap tests use this diagnostic")
     )]
-    pub(crate) fn len(&self) -> usize { self.path_materials.len() }
+    pub(crate) fn len(&self) -> usize { self.path_materials.len() + self.sdf_materials.len() }
 
     /// Returns whether no batch material handles are registered.
     #[must_use]
@@ -661,12 +752,18 @@ impl BatchMaterialTableRegistry {
         not(test),
         expect(dead_code, reason = "Phase 2 registry cap tests use this diagnostic")
     )]
-    pub(crate) fn is_empty(&self) -> bool { self.path_materials.is_empty() }
+    pub(crate) fn is_empty(&self) -> bool {
+        self.path_materials.is_empty() && self.sdf_materials.is_empty()
+    }
 
     fn needs_rebind(&self, handle: &Handle<ShaderBuffer>) -> bool {
         self.pending_rebind
             || self
                 .path_materials
+                .values()
+                .any(|registered| registered.needs_rebind(handle))
+            || self
+                .sdf_materials
                 .values()
                 .any(|registered| registered.needs_rebind(handle))
     }
@@ -743,7 +840,9 @@ impl Plugin for MaterialTablePlugin {
     }
 }
 
-fn clear_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) { build.clear(); }
+pub(crate) fn clear_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) {
+    build.clear();
+}
 
 fn freeze_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) { build.freeze(); }
 
@@ -785,6 +884,35 @@ pub(crate) fn register_path_batch_materials<T>(
     }
 }
 
+pub(crate) fn register_sdf_batch_materials<T>(
+    #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
+    mut registry: ResMut<BatchMaterialTableRegistry>,
+    batches: Query<
+        (Entity, &MeshMaterial3d<SdfExtendedMaterial>),
+        (
+            With<T>,
+            Or<(Added<T>, Changed<MeshMaterial3d<SdfExtendedMaterial>>)>,
+        ),
+    >,
+) where
+    T: Component,
+{
+    #[cfg(test)]
+    let mut registered_batch_entity = false;
+    for (entity, material) in &batches {
+        registry.register_sdf(entity, material.0.clone());
+        #[cfg(test)]
+        {
+            registered_batch_entity = true;
+        }
+    }
+    #[cfg(test)]
+    if let Some(run_order) = run_order.as_deref_mut() {
+        run_order.names.push(SDF_DRIVER_REGISTER);
+        run_order.registered_batch_entity |= registered_batch_entity;
+    }
+}
+
 fn purge_stale_registered_material_table_buffers(
     mut registry: ResMut<BatchMaterialTableRegistry>,
     live_entities: Query<Entity>,
@@ -796,6 +924,7 @@ fn rebind_registered_material_table_buffers(
     mut registry: ResMut<BatchMaterialTableRegistry>,
     mut table_buffer: ResMut<MaterialTableBuffer>,
     mut path_materials: ResMut<Assets<PathExtendedMaterial>>,
+    sdf_materials: Option<ResMut<Assets<SdfExtendedMaterial>>>,
 ) {
     let Some(handle) = table_buffer.handle.clone() else {
         return;
@@ -804,6 +933,9 @@ fn rebind_registered_material_table_buffers(
         return;
     }
     rebind_registered_path_materials(&mut registry, &handle, &mut path_materials);
+    if let Some(mut sdf_materials) = sdf_materials {
+        rebind_registered_sdf_materials(&mut registry, &handle, &mut sdf_materials);
+    }
     table_buffer.bound_handle = Some(handle);
 }
 
@@ -827,6 +959,29 @@ fn rebind_registered_path_materials(
         }
     }
     registry.pending_rebind = pending_rebind;
+    rebound
+}
+
+fn rebind_registered_sdf_materials(
+    registry: &mut BatchMaterialTableRegistry,
+    handle: &Handle<ShaderBuffer>,
+    sdf_materials: &mut Assets<SdfExtendedMaterial>,
+) -> usize {
+    let mut rebound = 0;
+    let mut pending_rebind = false;
+    for registered in registry.sdf_materials.values_mut() {
+        if !registered.needs_rebind(handle) {
+            continue;
+        }
+        if let Some(mut material) = sdf_materials.get_mut(&registered.material) {
+            super::set_sdf_material_table_buffer(&mut material, handle.clone());
+            registered.bound_handle = Some(handle.clone());
+            rebound += 1;
+        } else {
+            pending_rebind = true;
+        }
+    }
+    registry.pending_rebind |= pending_rebind;
     rebound
 }
 

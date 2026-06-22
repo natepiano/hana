@@ -323,7 +323,10 @@ pub struct DiegeticUiPlugin;
 
 impl Plugin for DiegeticUiPlugin {
     fn build(&self, app: &mut App) {
+        embedded_asset!(app, "render/material_table.wgsl");
         embedded_asset!(app, "shaders/sdf_panel.wgsl");
+        embedded_asset!(app, "shaders/sdf_material_table.wgsl");
+        embedded_asset!(app, "shaders/sdf_panel_vertex_pull.wgsl");
 
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((

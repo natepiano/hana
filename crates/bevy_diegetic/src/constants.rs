@@ -3,6 +3,8 @@
 // shader assets
 pub(crate) const EMBEDDED_SDF_PANEL_SHADER_PATH: &str =
     "embedded://bevy_diegetic/shaders/sdf_panel.wgsl";
+pub(crate) const EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH: &str =
+    "embedded://bevy_diegetic/shaders/sdf_panel_vertex_pull.wgsl";
 
 // text measurement
 /// Estimated character width as a fraction of font size for monospace approximation.
