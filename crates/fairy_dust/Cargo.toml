@@ -33,8 +33,8 @@ bevy = { workspace = true, features = [
   "zstd_rust",
 ] }
 bevy_brp_extras = { workspace = true }
+bevy_clerestory = { workspace = true }
 bevy_diegetic = { path = "../bevy_diegetic" }
 bevy_enhanced_input = { workspace = true }
 bevy_kana = { workspace = true, features = ["input"] }
 bevy_lagrange = { workspace = true }
-bevy_clerestory = { workspace = true }

@@ -48,8 +48,8 @@ bevy = { version = "0.19.0", features = [
   "scene",
 ] }
 bevy_brp_extras = { workspace = true }
-bevy_lagrange = { workspace = true, features = ["fit_overlay"] }
 bevy_clerestory = { workspace = true }
+bevy_lagrange = { workspace = true, features = ["fit_overlay"] }
 
 [[example]]
 name = "simple"
