@@ -1,0 +1,277 @@
+use bevy::ecs::system::NonSendMarker;
+use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
+use bevy::window::WindowMode;
+use bevy::window::WindowPosition;
+use bevy::winit::WINIT_WINDOWS;
+
+use super::target_position;
+use super::target_position::MonitorResolutionSource;
+use super::target_position::RestoreDiagnostics;
+use super::target_position::TargetPosition;
+use crate::Platform;
+use crate::WindowKey;
+use crate::constants::DEFAULT_SCALE_FACTOR;
+use crate::constants::PRIMARY_MONITOR_INDEX;
+use crate::monitors::CurrentMonitor;
+use crate::monitors::Monitors;
+use crate::persistence;
+#[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
+use crate::persistence::SavedWindowMode;
+use crate::restore_window_config::RestoreWindowConfig;
+
+/// Window decoration dimensions (title bar, borders).
+struct WindowDecoration {
+    physical_width:  u32,
+    physical_height: u32,
+}
+
+/// Information from winit captured at startup.
+#[derive(Resource)]
+pub(crate) struct WinitInfo {
+    starting_monitor_index: usize,
+    window_decoration:      WindowDecoration,
+}
+
+impl WinitInfo {
+    /// Get window decoration dimensions as a `UVec2`.
+    #[must_use]
+    pub(crate) const fn physical_decoration(&self) -> UVec2 {
+        UVec2::new(
+            self.window_decoration.physical_width,
+            self.window_decoration.physical_height,
+        )
+    }
+}
+
+/// Token indicating X11 frame extent compensation is complete (W6 workaround).
+///
+/// This component gates `restore_windows` - the restore system cannot process
+/// a window until this token exists on the entity. On Linux X11 with W6 workaround
+/// enabled, this ensures frame extents are queried and position is compensated
+/// before restore proceeds. On other platforms/configurations, the token is
+/// inserted immediately during `load_target_position` since no compensation is needed.
+#[derive(Component)]
+pub(crate) struct X11FrameCompensated;
+
+/// Populate `WinitInfo` resource from winit (decoration and starting monitor).
+///
+/// # Panics
+///
+/// Panics if no monitors are available (e.g., laptop lid closed at startup).
+/// Window management requires at least one monitor to function.
+pub(crate) fn init_winit_info(
+    mut commands: Commands,
+    window_entity: Single<Entity, With<PrimaryWindow>>,
+    monitors: Res<Monitors>,
+    _: NonSendMarker,
+) {
+    assert!(
+        !monitors.is_empty(),
+        "No monitors available - cannot initialize window manager without a display"
+    );
+
+    WINIT_WINDOWS.with(|winit_windows| {
+        let winit_windows = winit_windows.borrow();
+        if let Some(winit_window) = winit_windows.get_window(*window_entity) {
+            let physical_outer_size = winit_window.outer_size();
+            let physical_inner_size = winit_window.inner_size();
+            let physical_decoration = WindowDecoration {
+                physical_width: physical_outer_size
+                    .width
+                    .saturating_sub(physical_inner_size.width),
+                physical_height: physical_outer_size
+                    .height
+                    .saturating_sub(physical_inner_size.height),
+            };
+
+            let physical_position = winit_window.outer_position().map_or(
+                IVec2::ZERO,
+                |position| IVec2::new(position.x, position.y),
+            );
+
+            debug!(
+                "[init_winit_info] outer_position={physical_position:?} platform={:?}",
+                Platform::detect()
+            );
+
+            let starting_monitor = winit_window
+                .current_monitor()
+                .and_then(|current_monitor| {
+                    let physical_monitor_position = current_monitor.position();
+                    let monitor_info =
+                        monitors.at(physical_monitor_position.x, physical_monitor_position.y);
+                    debug!(
+                        "[init_winit_info] current_monitor() position=({}, {}) -> index={:?}",
+                        physical_monitor_position.x,
+                        physical_monitor_position.y,
+                        monitor_info.map(|monitor| monitor.index)
+                    );
+                    monitor_info.copied()
+                })
+                .unwrap_or_else(|| {
+                    debug!(
+                        "[init_winit_info] current_monitor() unavailable, falling back to closest_to({}, {})",
+                        physical_position.x,
+                        physical_position.y
+                    );
+                    *monitors.closest_to(physical_position.x, physical_position.y)
+                });
+            let starting_monitor_index = starting_monitor.index;
+
+            debug!(
+                "[init_winit_info] decoration={}x{} position=({}, {}) starting_monitor={starting_monitor_index}",
+                physical_decoration.physical_width,
+                physical_decoration.physical_height,
+                physical_position.x,
+                physical_position.y,
+            );
+
+            commands.entity(*window_entity).insert(CurrentMonitor {
+                monitor_info:   starting_monitor,
+                effective_window_mode: WindowMode::Windowed,
+            });
+
+            commands.insert_resource(WinitInfo {
+                starting_monitor_index,
+                window_decoration: physical_decoration,
+            });
+        }
+    });
+}
+
+/// Load saved window state and insert `TargetPosition` on the primary window entity.
+pub(crate) fn load_target_position(
+    mut commands: Commands,
+    window_entity: Single<Entity, With<PrimaryWindow>>,
+    monitors: Res<Monitors>,
+    winit_info: Res<WinitInfo>,
+    mut restore_window_config: ResMut<RestoreWindowConfig>,
+    platform: Res<Platform>,
+) {
+    if let Some(all_states) = persistence::load_all_states(&restore_window_config.path) {
+        restore_window_config.loaded_states = all_states;
+    }
+
+    let Some(window_state) = restore_window_config
+        .loaded_states
+        .get(&WindowKey::Primary)
+        .cloned()
+    else {
+        debug!("[load_target_position] No saved bevy_window_manager state, showing window");
+        commands.queue(|world: &mut World| {
+            let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
+            if let Some(mut window) = query.iter_mut(world).next() {
+                window.visible = true;
+            }
+        });
+        return;
+    };
+
+    debug!(
+        "[load_target_position] Loaded state: position={:?} logical_size={}x{} monitor_scale={} monitor_index={} mode={:?}",
+        window_state.logical_position,
+        window_state.logical_width,
+        window_state.logical_height,
+        window_state.scale,
+        window_state.monitor,
+        window_state.saved_window_mode
+    );
+
+    let starting_monitor_index = winit_info.starting_monitor_index;
+    let starting_scale = monitors
+        .by_index(starting_monitor_index)
+        .map_or(DEFAULT_SCALE_FACTOR, |monitor| monitor.scale);
+
+    let resolved_monitor = target_position::resolve_target_monitor_and_position(
+        window_state.monitor,
+        window_state.logical_position,
+        &monitors,
+    );
+    if matches!(
+        resolved_monitor.monitor_resolution_source,
+        MonitorResolutionSource::FallbackToPrimary
+    ) {
+        warn!(
+            "[load_target_position] Target monitor {} not found, falling back to monitor {PRIMARY_MONITOR_INDEX}",
+            window_state.monitor,
+        );
+    }
+
+    let target_position = target_position::compute_target_position(
+        &window_state,
+        resolved_monitor.monitor_info,
+        resolved_monitor.logical_position,
+        winit_info.physical_decoration(),
+        starting_scale,
+        *platform,
+    );
+
+    debug!(
+        "[load_target_position] Starting monitor={starting_monitor_index} scale={starting_scale}, Target monitor={} scale={}, monitor_scale_strategy={:?}, position={:?}",
+        target_position.monitor_index,
+        target_position.target_scale,
+        target_position.monitor_scale_strategy,
+        target_position.physical_position
+    );
+
+    #[cfg(all(target_os = "windows", feature = "workaround-winit-3124"))]
+    if matches!(
+        window_state.saved_window_mode,
+        SavedWindowMode::Fullscreen { .. }
+    ) {
+        debug!(
+            "[load_target_position] Windows exclusive fullscreen: showing window for surface creation"
+        );
+        commands.queue(|world: &mut World| {
+            let mut query = world.query_filtered::<&mut Window, With<PrimaryWindow>>();
+            if let Some(mut window) = query.iter_mut(world).next() {
+                window.visible = true;
+            }
+        });
+    }
+
+    let entity = *window_entity;
+    let is_fullscreen = window_state.saved_window_mode.is_fullscreen();
+    let restore_diagnostics = RestoreDiagnostics {
+        starting_monitor_index,
+        starting_scale,
+        target_scale: target_position.target_scale,
+        monitor_scale_strategy: target_position.monitor_scale_strategy,
+    };
+    commands
+        .entity(entity)
+        .insert((target_position, restore_diagnostics));
+
+    if is_fullscreen || !platform.needs_frame_compensation() {
+        commands.entity(entity).insert(X11FrameCompensated);
+    }
+}
+
+/// Move the primary window to the target monitor for fullscreen restore on X11.
+///
+/// Body is platform-neutral Bevy code; only the `add_systems` registration in
+/// `lib.rs` is gated to Linux. The early `is_wayland` check makes the system
+/// inert on Wayland; non-Linux platforms never schedule it at all.
+pub(crate) fn move_to_target_monitor(
+    mut window: Single<&mut Window, With<PrimaryWindow>>,
+    targets: Query<&TargetPosition, With<PrimaryWindow>>,
+    platform: Res<Platform>,
+) {
+    if !platform.is_x11() {
+        return;
+    }
+
+    let Ok(target_position) = targets.single() else {
+        return;
+    };
+
+    if !target_position.saved_window_mode.is_fullscreen() {
+        return;
+    }
+
+    if let Some(position) = target_position.physical_position {
+        debug!("[move_to_target_monitor] X11 fullscreen: setting position={position:?}");
+        window.position = WindowPosition::At(position);
+    }
+}

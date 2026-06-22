@@ -1,0 +1,281 @@
+{
+  "platform": "macos",
+  "example_ron_path": "~/Library/Application Support/bevy_window_manager/restore_window.ron",
+  "test_ron_dir": "tests/config/ron/macos",
+
+  "tests": [
+    {
+      "id": "same_monitor_restore_mon0",
+      "description": "Basic position/size persistence on Monitor 0",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "same_monitor_restore_mon0.ron",
+
+      "mutation": {
+        "target_monitor": "launch",
+        "position_offset": [400, 300],
+        "size": [1000, 700]
+      },
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "cross_high_to_low_W1",
+      "description": "Window on low-DPI monitor restores correctly when launched from high-DPI monitor",
+      "automation": "full",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2, "different_scales": true},
+      "workaround_keys": ["W1"],
+
+      "workaround_validation": {
+        "feature_flag": "workaround-winit-4440",
+        "build_without": "--no-default-features",
+        "build_with": "",
+        "without_behavior": "Window restores to wrong position/size on Monitor 1 due to scale factor mismatch",
+        "with_behavior": "Window restores to correct position/size on Monitor 1"
+      },
+
+      "ron_file": "cross_monitor_high_to_low.ron",
+      "expect_mismatch": true,
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"],
+          "position_readback_offset": [0, 30]
+        }
+      }
+    },
+
+    {
+      "id": "cross_high_to_low_midmonitor",
+      "description": "High->low restore with a mid-monitor target (clear of all edges) to isolate whether high->low position needs compensation on 0.19",
+      "automation": "full",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2, "different_scales": true},
+
+      "ron_file": "cross_monitor_high_to_low_midmonitor.ron",
+      "expect_mismatch": true,
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "borderless_programmatic_mon0",
+      "description": "Borderless fullscreen restore - starts in borderless mode via RON",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "fullscreen_borderless_mon0.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "borderless_green_button",
+      "description": "Tests macOS native fullscreen via green button (automated via AppleScript)",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "fullscreen_borderless_green_button.ron",
+
+      "click_fullscreen_button": true,
+      "windows": {
+        "primary": {
+          "validate": ["mode"],
+          "expected_mode": "BorderlessFullscreen"
+        }
+      }
+    },
+
+    {
+      "id": "multi_window_0_0",
+      "description": "Primary on Monitor 0, secondary on Monitor 0",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "multi_window_0_0.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        },
+        "window-1": {
+          "spawn_event": "restore_window::events::SpawnManagedWindow",
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "persistence_remember_all",
+      "description": "RememberAll mode preserves unspawned window entries in RON after shutdown",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "multi_window_0_0.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      },
+
+      "persistence_validation": {
+        "mode": "RememberAll",
+        "expected_ron_keys": ["primary", "window-1"]
+      }
+    },
+
+    {
+      "id": "persistence_active_only",
+      "description": "ActiveOnly mode prunes unspawned window entries from RON after shutdown",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "multi_window_0_0.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      },
+
+      "persistence_validation": {
+        "mode": "ActiveOnly",
+        "expected_ron_keys": ["primary"],
+        "unexpected_ron_keys": ["window-1"]
+      }
+    },
+
+    {
+      "id": "no_position_cross_dpi_restore",
+      "description": "Window with no saved position on different-scale monitor restores visible with correct size on launch monitor",
+      "automation": "full",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2, "different_scales": true},
+      "expect_mismatch": true,
+
+      "ron_file": "no_position_cross_dpi.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["size", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "save_position_on_unmoved_window",
+      "description": "Window that was never moved saves a real position (not None) to the state file",
+      "automation": "full",
+      "launch_monitor": 0,
+
+      "ron_file": "no_position_same_monitor.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["size", "mode"]
+        }
+      },
+
+      "persistence_validation": {
+        "expect_position_saved": ["primary"]
+      }
+    },
+
+    {
+      "id": "multi_window_0_1",
+      "description": "Primary on Monitor 0, secondary on Monitor 1",
+      "automation": "full",
+      "launch_monitor": 0,
+      "requires": {"min_monitors": 2},
+
+      "ron_file": "multi_window_0_1.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        },
+        "window-1": {
+          "spawn_event": "restore_window::events::SpawnManagedWindow",
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "same_monitor_restore_mon1",
+      "description": "Basic position/size persistence on Monitor 1",
+      "automation": "full",
+      "launch_monitor": 1,
+
+      "ron_file": "same_monitor_restore_mon1.ron",
+
+      "mutation": {
+        "target_monitor": "launch",
+        "position_offset": [300, 200],
+        "size": [1100, 600]
+      },
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "multi_window_1_0",
+      "description": "Primary on Monitor 1, secondary on Monitor 0",
+      "automation": "full",
+      "launch_monitor": 1,
+      "requires": {"min_monitors": 2},
+
+      "ron_file": "multi_window_1_0.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        },
+        "window-1": {
+          "spawn_event": "restore_window::events::SpawnManagedWindow",
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    },
+
+    {
+      "id": "multi_window_1_1",
+      "description": "Primary on Monitor 1, secondary on Monitor 1",
+      "automation": "full",
+      "launch_monitor": 1,
+      "requires": {"min_monitors": 2},
+
+      "ron_file": "multi_window_1_1.ron",
+
+      "windows": {
+        "primary": {
+          "validate": ["position", "size", "monitor_index", "mode"]
+        },
+        "window-1": {
+          "spawn_event": "restore_window::events::SpawnManagedWindow",
+          "validate": ["position", "size", "monitor_index", "mode"]
+        }
+      }
+    }
+  ]
+}

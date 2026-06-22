@@ -1,0 +1,562 @@
+//! On-disk persistence format and version handling.
+//!
+//! # Versioning strategy
+//!
+//! Every RON state file carries a `version` field inside [`PersistedState`].
+//! [`decode`] parses the file once, then dispatches to a version-specific
+//! decoder based on that field. All previously shipped versions remain
+//! supported so that users never lose their saved window positions.
+//!
+//! ## Adding a new version
+//!
+//! 1. Bump [`CURRENT_STATE_VERSION`].
+//! 2. If the new version changes `PersistedEntry` or `WindowState` fields, add new structs (e.g.
+//!    `PersistedEntryV2`) and a conversion from the old entry type. If only semantics change, the
+//!    existing structs can be reused.
+//! 3. Add a `decode_v<N>` function that accepts a [`PersistedState`] and returns
+//!    `Option<HashMap<WindowKey, WindowState>>`.
+//! 4. Add an arm to the `match persisted.version` block inside [`decode`].
+//! 5. Update [`encode`] to write the new format (only the latest version is ever written).
+//! 6. Add a test that round-trips through the new version **and** a test that an older version file
+//!    still decodes correctly.
+//!
+//! ## Supported formats (oldest first)
+//!
+//! | Format | Description |
+//! |--------|-------------|
+//! | Legacy single-window | Bare `WindowState` (no version field, pre-multi-window) |
+//! | v1 | `PersistedState { version: 1, entries }` with `width`/`height` (physical) |
+//! | v2 | `PersistedState { version: 2, entries }` with `logical_width`/`logical_height` + `monitor_scale` |
+
+use std::collections::HashMap;
+use std::fmt;
+use std::fmt::Display;
+use std::fmt::Formatter;
+
+use bevy::prelude::*;
+use ron::Error;
+use ron::from_str;
+use ron::ser::PrettyConfig;
+use ron::ser::to_string_pretty;
+use serde::Deserialize;
+use serde::Serialize;
+
+use super::constants::PERSISTED_STATE_VERSION_V1;
+#[cfg(test)]
+use super::window_state::SavedVideoMode;
+use super::window_state::SavedWindowMode;
+use super::window_state::WindowState;
+use crate::constants::CURRENT_STATE_VERSION;
+use crate::constants::DEFAULT_SCALE_FACTOR;
+use crate::constants::PRIMARY_WINDOW_KEY;
+use crate::constants::RON_HEADER;
+
+/// Typed identifier for persisted window state.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Reflect)]
+pub enum WindowKey {
+    Primary,
+    Managed(String),
+}
+
+impl Display for WindowKey {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Primary => write!(f, "{PRIMARY_WINDOW_KEY}"),
+            Self::Managed(name) => write!(f, "{name}"),
+        }
+    }
+}
+
+/// One persisted key/state pair in v1.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct PersistedEntry {
+    #[serde(rename = "key")]
+    window_key:   WindowKey,
+    #[serde(rename = "state")]
+    window_state: WindowState,
+}
+
+/// Versioned persisted state format.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) struct PersistedState {
+    version: u8,
+    entries: Vec<PersistedEntry>,
+}
+
+/// Minimal version probe — just extract the version number from any versioned format.
+#[derive(Deserialize)]
+struct VersionProbe {
+    version: u8,
+}
+
+/// Decode persisted state text into typed runtime state.
+///
+/// Tries versioned formats first (dispatching by the `version` field),
+/// then falls back to legacy unversioned formats. See the module-level
+/// docs for the full list of supported formats.
+pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+    // Probe only `VersionProbe::version` before dispatching to `PersistedStateV1` or
+    // `PersistedState`.
+    if let Ok(probe) = from_str::<VersionProbe>(contents) {
+        match probe.version {
+            PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
+            CURRENT_STATE_VERSION => decode_v2(contents),
+            unsupported => {
+                warn!(
+                    "[decode] Unsupported persisted state version {unsupported} \
+                     (latest supported: {CURRENT_STATE_VERSION})"
+                );
+                None
+            },
+        }
+    } else {
+        // Legacy unversioned format — bare `WindowState` from before multi-window
+        // support. Cannot participate in the version match above because it has no
+        // `version` field.
+        decode_legacy_single_window(contents)
+    }
+}
+
+/// v1 window state layout (used `width`/`height` field names on the wire).
+/// Used only for deserializing v1 and legacy files.
+#[derive(Debug, Clone, Deserialize)]
+struct WindowStateV1 {
+    #[serde(rename = "position")]
+    logical_position:  Option<(i32, i32)>,
+    #[serde(rename = "width")]
+    logical_width:     u32,
+    #[serde(rename = "height")]
+    logical_height:    u32,
+    monitor_index:     usize,
+    #[serde(rename = "mode")]
+    saved_window_mode: SavedWindowMode,
+    #[serde(default)]
+    app_name:          String,
+}
+
+impl WindowStateV1 {
+    /// Convert to current `WindowState`, treating v1 values as logical (assumes scale 1.0).
+    fn into_current(self) -> WindowState {
+        WindowState {
+            logical_position:  self.logical_position,
+            logical_width:     self.logical_width,
+            logical_height:    self.logical_height,
+            scale:             DEFAULT_SCALE_FACTOR,
+            monitor:           self.monitor_index,
+            saved_window_mode: self.saved_window_mode,
+            app_name:          self.app_name,
+        }
+    }
+}
+
+/// v1 persisted entry (uses `WindowStateV1`).
+#[derive(Debug, Clone, Deserialize)]
+struct PersistedEntryV1 {
+    #[serde(rename = "key")]
+    window_key:   WindowKey,
+    #[serde(rename = "state")]
+    window_state: WindowStateV1,
+}
+
+/// v1 persisted state wrapper.
+#[derive(Debug, Clone, Deserialize)]
+struct PersistedStateV1 {
+    version: u8,
+    entries: Vec<PersistedEntryV1>,
+}
+
+fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+    let window_state_v1 = from_str::<WindowStateV1>(contents).ok()?;
+    debug!("[decode] Migrated legacy single-window format to v2");
+    Some(HashMap::from([(
+        WindowKey::Primary,
+        window_state_v1.into_current(),
+    )]))
+}
+
+fn decode_v1(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+    let persisted_state_v1 = from_str::<PersistedStateV1>(contents).ok()?;
+    if persisted_state_v1.version != PERSISTED_STATE_VERSION_V1 {
+        warn!(
+            "[decode] Invalid v1 persisted state version {}",
+            persisted_state_v1.version
+        );
+        return None;
+    }
+
+    let mut states = HashMap::with_capacity(persisted_state_v1.entries.len());
+    for persisted_entry_v1 in persisted_state_v1.entries {
+        if states
+            .insert(
+                persisted_entry_v1.window_key.clone(),
+                persisted_entry_v1.window_state.into_current(),
+            )
+            .is_some()
+        {
+            warn!(
+                "[decode] Invalid persisted state: duplicate key \"{}\"",
+                persisted_entry_v1.window_key
+            );
+            return None;
+        }
+    }
+
+    debug!("[decode] Migrated v1 state to v2");
+    Some(states)
+}
+
+fn decode_v2(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+    let persisted_state = from_str::<PersistedState>(contents).ok()?;
+    let mut states = HashMap::with_capacity(persisted_state.entries.len());
+    for persisted_entry in persisted_state.entries {
+        if states
+            .insert(
+                persisted_entry.window_key.clone(),
+                persisted_entry.window_state,
+            )
+            .is_some()
+        {
+            warn!(
+                "[decode] Invalid persisted state: duplicate key \"{}\"",
+                persisted_entry.window_key
+            );
+            return None;
+        }
+    }
+
+    Some(states)
+}
+
+/// Encode typed runtime state into persisted v1 text.
+pub(super) fn encode(states: &HashMap<WindowKey, WindowState>) -> Result<String, Error> {
+    let mut entries: Vec<PersistedEntry> = states
+        .iter()
+        .map(|(key, window_state)| PersistedEntry {
+            window_key:   key.clone(),
+            window_state: window_state.clone(),
+        })
+        .collect();
+    entries.sort_by(|a, b| a.window_key.cmp(&b.window_key));
+
+    let persisted_state = PersistedState {
+        version: CURRENT_STATE_VERSION,
+        entries,
+    };
+    let ron_body = to_string_pretty(&persisted_state, PrettyConfig::default())?;
+    Ok(format!("{RON_HEADER}{ron_body}"))
+}
+
+#[cfg(test)]
+#[allow(clippy::panic, reason = "tests should panic on unexpected values")]
+mod tests {
+    use std::collections::HashMap;
+
+    use bevy::prelude::*;
+    use ron::from_str;
+    use ron::ser::PrettyConfig;
+    use ron::ser::to_string_pretty;
+
+    use super::CURRENT_STATE_VERSION;
+    use super::DEFAULT_SCALE_FACTOR;
+    use super::PERSISTED_STATE_VERSION_V1;
+    use super::PersistedEntry;
+    use super::PersistedState;
+    use super::SavedVideoMode;
+    use super::SavedWindowMode;
+    use super::WindowKey;
+    use super::WindowState;
+    use crate::persistence::format;
+
+    fn sample_state() -> WindowState {
+        WindowState {
+            logical_position:  Some((10, 20)),
+            logical_width:     800,
+            logical_height:    600,
+            scale:             DEFAULT_SCALE_FACTOR,
+            monitor:           1,
+            saved_window_mode: SavedWindowMode::Windowed,
+            app_name:          "test-app".to_string(),
+        }
+    }
+
+    #[test]
+    fn decode_v2_distinguishes_primary_and_managed_primary() {
+        let persisted_state = PersistedState {
+            version: CURRENT_STATE_VERSION,
+            entries: vec![
+                PersistedEntry {
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
+                },
+                PersistedEntry {
+                    window_key:   WindowKey::Managed("primary".to_string()),
+                    window_state: WindowState {
+                        logical_position: Some((30, 40)),
+                        ..sample_state()
+                    },
+                },
+            ],
+        };
+        let contents = match to_string_pretty(&persisted_state, PrettyConfig::default()) {
+            Ok(contents) => contents,
+            Err(error) => panic!("failed to serialize test state: {error}"),
+        };
+
+        let decoded = format::decode(&contents);
+        assert!(decoded.is_some(), "expected v2 decode to succeed");
+        let decoded = decoded.unwrap_or_default();
+        assert!(decoded.contains_key(&WindowKey::Primary));
+        assert!(decoded.contains_key(&WindowKey::Managed("primary".to_string())));
+        assert_eq!(decoded.len(), 2);
+    }
+
+    #[test]
+    fn decode_legacy_single_window_migrates_to_v2() {
+        // Legacy format uses `width`/`height` field names (pre-multi-window era)
+        let legacy_ron = "\
+(
+    position: Some((10, 20)),
+    width: 800,
+    height: 600,
+    monitor_index: 1,
+    mode: Windowed,
+    app_name: \"test-app\",
+)";
+
+        let decoded = format::decode(legacy_ron);
+        assert!(
+            decoded.is_some(),
+            "expected legacy single-window decode to succeed"
+        );
+        let decoded = decoded.unwrap_or_default();
+        assert!(decoded.contains_key(&WindowKey::Primary));
+        assert_eq!(decoded.len(), 1);
+        let window_state = &decoded[&WindowKey::Primary];
+        assert_eq!(window_state.logical_position, Some((10, 20)));
+        assert_eq!(window_state.logical_width, 800);
+        assert_eq!(window_state.logical_height, 600);
+        assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn decode_v1_migrates_to_v2() {
+        let v1_ron = format!(
+            "\
+(
+    version: {PERSISTED_STATE_VERSION_V1},
+    entries: [
+        (
+            key: Primary,
+            state: (
+                position: Some((10, 20)),
+                width: 800,
+                height: 600,
+                monitor_index: 1,
+                mode: Windowed,
+                app_name: \"test-app\",
+            ),
+        ),
+    ],
+)",
+        );
+
+        let decoded = format::decode(&v1_ron);
+        assert!(decoded.is_some(), "expected v1 decode to succeed");
+        let decoded = decoded.unwrap_or_default();
+        let window_state = &decoded[&WindowKey::Primary];
+        assert_eq!(window_state.logical_width, 800);
+        assert_eq!(window_state.logical_height, 600);
+        assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn decode_v2_rejects_duplicate_keys() {
+        let persisted_state = PersistedState {
+            version: CURRENT_STATE_VERSION,
+            entries: vec![
+                PersistedEntry {
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
+                },
+                PersistedEntry {
+                    window_key:   WindowKey::Primary,
+                    window_state: sample_state(),
+                },
+            ],
+        };
+        let contents = match to_string_pretty(&persisted_state, PrettyConfig::default()) {
+            Ok(contents) => contents,
+            Err(error) => panic!("failed to serialize duplicate-key test state: {error}"),
+        };
+
+        assert!(
+            format::decode(&contents).is_none(),
+            "duplicate keys should fail decode"
+        );
+    }
+
+    /// Golden-file tests using exact RON strings from the pre-multi-window era
+    /// (commit 516f5930, used through v0.18.2). These are byte-for-byte copies of
+    /// files that the published crate wrote via `ron::ser::to_string_pretty` with
+    /// `PrettyConfig::default()`. If a dependency bump or struct change silently
+    /// breaks deserialization, these tests catch it.
+    mod golden_legacy {
+        use super::*;
+
+        /// Bare `WindowState` — windowed mode, from `macos_0/same_monitor_restore.ron`.
+        const WINDOWED: &str = "\
+(
+    position: Some((200, 200)),
+    width: 1600,
+    height: 1200,
+    monitor_index: 0,
+    mode: Windowed,
+    app_name: \"restore_window\",
+)";
+
+        /// Bare `WindowState` — borderless fullscreen, from
+        /// `macos_0/fullscreen_borderless_programmatic.ron`.
+        const BORDERLESS_FULLSCREEN: &str = "\
+(
+    position: Some((0, 0)),
+    width: 3456,
+    height: 2234,
+    monitor_index: 0,
+    mode: BorderlessFullscreen,
+    app_name: \"restore_window\",
+)";
+
+        /// Bare `WindowState` — exclusive fullscreen with explicit video mode,
+        /// from `macos_0/fullscreen_exclusive.ron`.
+        const EXCLUSIVE_FULLSCREEN: &str = "\
+(
+    position: Some((0, 0)),
+    width: 1920,
+    height: 1200,
+    monitor_index: 0,
+    mode: Fullscreen(
+        video_mode: Some((
+            physical_size: (1920, 1200),
+            bit_depth: 32,
+            refresh_rate_millihertz: 60000,
+        )),
+    ),
+    app_name: \"restore_window\",
+)";
+
+        #[test]
+        fn decode_golden_legacy_windowed() {
+            let decoded = format::decode(WINDOWED);
+            assert!(decoded.is_some(), "golden legacy windowed file must decode");
+            let decoded = decoded.unwrap_or_default();
+            assert_eq!(decoded.len(), 1);
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((200, 200)));
+            assert_eq!(window_state.logical_width, 1600);
+            assert_eq!(window_state.logical_height, 1200);
+            assert!((window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+            assert_eq!(window_state.monitor, 0);
+            assert_eq!(window_state.saved_window_mode, SavedWindowMode::Windowed);
+            assert_eq!(window_state.app_name, "restore_window");
+        }
+
+        #[test]
+        fn decode_golden_legacy_borderless_fullscreen() {
+            let decoded = format::decode(BORDERLESS_FULLSCREEN);
+            assert!(
+                decoded.is_some(),
+                "golden legacy borderless fullscreen file must decode"
+            );
+            let decoded = decoded.unwrap_or_default();
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((0, 0)));
+            assert_eq!(window_state.logical_width, 3456);
+            assert_eq!(window_state.logical_height, 2234);
+            assert_eq!(
+                window_state.saved_window_mode,
+                SavedWindowMode::BorderlessFullscreen
+            );
+        }
+
+        #[test]
+        fn decode_golden_legacy_exclusive_fullscreen() {
+            let decoded = format::decode(EXCLUSIVE_FULLSCREEN);
+            assert!(
+                decoded.is_some(),
+                "golden legacy exclusive fullscreen file must decode"
+            );
+            let decoded = decoded.unwrap_or_default();
+            let window_state = &decoded[&WindowKey::Primary];
+            assert_eq!(window_state.logical_position, Some((0, 0)));
+            assert_eq!(window_state.logical_width, 1920);
+            assert_eq!(window_state.logical_height, 1200);
+            assert_eq!(
+                window_state.saved_window_mode,
+                SavedWindowMode::Fullscreen {
+                    video_mode: Some(SavedVideoMode {
+                        physical_size:           UVec2::new(1920, 1200),
+                        bit_depth:               32,
+                        refresh_rate_millihertz: 60000,
+                    }),
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn encode_sets_version_2() {
+        let states = HashMap::from([
+            (WindowKey::Primary, sample_state()),
+            (WindowKey::Managed("inspector".to_string()), sample_state()),
+        ]);
+
+        let encoded = match format::encode(&states) {
+            Ok(encoded) => encoded,
+            Err(error) => panic!("failed to encode state: {error}"),
+        };
+        let decoded = from_str::<PersistedState>(&encoded);
+        assert!(decoded.is_ok(), "encoded text should parse as v2");
+        let decoded = decoded.unwrap_or(PersistedState {
+            version: 0,
+            entries: Vec::new(),
+        });
+        assert_eq!(decoded.version, CURRENT_STATE_VERSION);
+        assert_eq!(decoded.entries.len(), 2);
+    }
+
+    #[test]
+    fn encode_then_decode_roundtrip() {
+        let states = HashMap::from([
+            (WindowKey::Primary, sample_state()),
+            (
+                WindowKey::Managed("inspector".to_string()),
+                WindowState {
+                    logical_position:  Some((100, 200)),
+                    logical_width:     1024,
+                    logical_height:    768,
+                    scale:             2.0,
+                    monitor:           0,
+                    saved_window_mode: SavedWindowMode::Windowed,
+                    app_name:          "test-app".to_string(),
+                },
+            ),
+        ]);
+
+        let encoded = match format::encode(&states) {
+            Ok(encoded) => encoded,
+            Err(error) => panic!("failed to encode state: {error}"),
+        };
+        let decoded = format::decode(&encoded);
+        assert!(decoded.is_some(), "roundtrip decode should succeed");
+        let decoded = decoded.unwrap_or_default();
+        assert_eq!(decoded.len(), 2);
+        let primary = &decoded[&WindowKey::Primary];
+        assert_eq!(primary.logical_width, 800);
+        assert_eq!(primary.logical_height, 600);
+        assert!((primary.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+        let inspector = &decoded[&WindowKey::Managed("inspector".to_string())];
+        assert_eq!(inspector.logical_width, 1024);
+        assert_eq!(inspector.logical_height, 768);
+        assert!((inspector.scale - 2.0).abs() < f64::EPSILON);
+    }
+}

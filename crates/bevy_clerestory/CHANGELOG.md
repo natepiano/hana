@@ -1,0 +1,153 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+## [0.21.0] - 2026-06-20
+
+### Changed
+
+- **Breaking:** Rename window mode API fields for consistency: `WindowRestored.mode` → `window_mode`, `WindowRestoreMismatch.expected_mode`/`actual_mode` → `expected_window_mode`/`actual_window_mode`, and `CurrentMonitor.effective_mode` → `effective_window_mode`.
+
+## [0.21.0-rc.2] - 2026-05-31
+
+### Fixed
+
+- Fix managed (secondary) windows restoring to the wrong monitor and halving in size on each relaunch when their saved monitor has a different scale factor than the primary window's launch monitor. Restore now re-reads each managed window's actual scale factor after creation and recomputes its cross-DPI strategy. Applies to macOS and Linux X11 (previously Windows only); Wayland unaffected.
+
+## [0.21.0-rc.1] - 2026-05-26
+
+### Added
+
+- `logical_position` field on `WindowRestored` event, reporting the pre-scale target position from the saved state.
+- `expected_logical_position` and `actual_logical_position` fields on `WindowRestoreMismatch` event. `actual_logical_position` is derived from the window's physical position divided by its current scale factor.
+- `logical_position` field on `TargetPosition` component (visible via BRP reflection).
+
+### Fixed
+
+- Restore now anchors a window with no saved position on its saved monitor via `WindowPosition::Centered`. Previously the saved `monitor_index` was ignored when `logical_position` was `None`, so the window landed on whichever monitor winit defaulted to. No-op on Wayland (no client-side positioning).
+
+### Changed
+
+- **Breaking:** Updated to Bevy 0.19 (0.19.0-rc.2).
+- **Breaking:** `CurrentMonitor.monitor` field renamed to `monitor_info`.
+- **Breaking:** `WindowRestored` event fields renamed to explicitly qualify pixel units: `position` → `physical_position`, `size` → `physical_size`. `logical_size` unchanged.
+- **Breaking:** `WindowRestoreMismatch` event fields renamed: `expected_position`/`actual_position` → `expected_physical_position`/`actual_physical_position`; `expected_size`/`actual_size` → `expected_physical_size`/`actual_physical_size`. `expected_logical_size`/`actual_logical_size` unchanged.
+- **Breaking:** `TargetPosition` component fields reshaped (visible via BRP reflection): `position` → `physical_position` + new `logical_position`; `width`/`height`/`logical_width`/`logical_height` → `physical_size`/`logical_size` (`UVec2` pairs); `target_monitor_index` → `monitor_index`.
+- **Breaking:** `Monitors` lookup parameters renamed to advertise their unit: `Monitors::at(x, y)` → `Monitors::at(physical_x, physical_y)`; `Monitors::closest_to(x, y)` → `Monitors::closest_to(physical_x, physical_y)`; `Monitors::monitor_for_window(position, width, height)` → `Monitors::monitor_for_window(physical_position, physical_width, physical_height)`. Behavior unchanged.
+- **Breaking:** `WindowRestored` and `WindowRestoreMismatch` event fields renamed: `window_id` → `window_key` to match the `WindowKey` type.
+
+## [0.20.2] - 2026-04-06
+
+### Fixed
+
+- Fix invisible window on launch when saved state has no position on a different-scale monitor (e.g., first launch on an external display). The cross-DPI restore would wait forever for a scale change event that never arrived because the window couldn't move to the target monitor.
+- Fix macOS saving `position: None` for windows that were never explicitly moved. Now queries the actual OS window position via winit instead of relying on Bevy's `Window.position`, which stays `Automatic` after creation.
+
+## [0.20.1] - 2026-04-06
+
+### Added
+
+- `Reflect` derives on internal restore types (`TargetPosition`, `MonitorScaleStrategy`, `SettleState`, etc.) for BRP debugging — enables querying restore state in real time when diagnosing stuck or misbehaving window restores.
+
+## [0.20.0] - 2026-03-30
+
+### Changed
+
+- Group example state files under the crate config directory instead of creating separate top-level directories per example
+
+## [0.19.0] - 2026-03-25
+
+### Added
+
+- `logical_size` field on `WindowRestored` event for the target logical size (content area).
+- `expected_logical_size` and `actual_logical_size` fields on `WindowRestoreMismatch` event.
+- `logical_width`, `logical_height` fields and `logical_size()` method on `TargetPosition` component.
+- `monitor_scale` field on `WindowState` recording the scale factor at save time (informational only).
+
+### Changed
+
+- **Breaking:** State file format bumped to v2: window position and size now stored as logical pixels instead of physical pixels, preserving visual intent across monitors with different scale factors. Automatic migration from v1 and legacy formats.
+- **Breaking:** `WindowState` fields renamed: `position` → `logical_position`, `width` → `logical_width`, `height` → `logical_height`. Deserialization accepts the old `position` name via serde alias.
+
+## [0.18.3] - 2026-03-12
+
+### Added
+
+- Multi-window save/restore via `ManagedWindow` component with `ManagedWindowPersistence` resource to control closed-window behavior.
+- `WindowRestored` entity event triggered when a window's saved state has been fully applied, allowing dependent crates to react to the restored size, position, and mode.
+- `WindowRestoreMismatch` entity event triggered when restore settles but the final window state does not match the target, allowing dependent crates to detect and handle partial or failed restores.
+
+### Changed
+
+- State file format changed from single `WindowState` to versioned `PersistedState { version: 1, entries }` with typed `WindowKey` enum (`Primary` | `Managed("<name>")`) and automatic migration from old format.
+
+### Fixed
+
+- Fix panic when laptop lid is closed (monitor removed event). `save_window_state` and `effective_mode` now handle empty monitor list gracefully instead of panicking in `Monitors::closest_to()`.
+- `effective_mode` now correctly detects when exiting borderless fullscreen via macOS green button. Previously it trusted `window.mode` for `BorderlessFullscreen`, which isn't updated by Bevy/winit when exiting native fullscreen, causing the window to incorrectly save as fullscreen.
+- Window is now automatically hidden during startup and shown after restore to prevent visual flash at default position.
+
+### Removed
+
+- Remove `workaround-winit-4441` (macOS drag-back size fix). The underlying AppKit behavior was fixed in macOS Tahoe 26.3, and the workaround now causes incorrect size doubling when dragging between monitors.
+
+- Remove `WindowExt` trait; unify monitor detection and effective mode in `CurrentMonitor` component via `update_current_monitor` system
+
+## [0.18.0] - 2026-01-15
+
+Stable release for Bevy 0.18.0 - no changes from 0.18.0-rc.1.
+
+## [0.18.0-rc.1] - 2025-12-21
+
+### Removed
+
+- Internal `FullscreenExitGuard` workaround for macOS exclusive fullscreen crash - now fixed upstream in Bevy 0.18 ([bevy #22060](https://github.com/bevyengine/bevy/pull/22060))
+
+## [0.17.2] - 2025-12-20
+
+### Added
+
+- Linux X11 support with position and size restoration
+- Linux Wayland support with size and fullscreen restoration (position not available on Wayland)
+- X11 keyboard snap position fix: workaround for missing `Moved` events when window manager moves window via keyboard shortcuts like Meta+Arrow ([winit #4443](https://github.com/rust-windowing/winit/issues/4443), related [bevy #17576](https://github.com/bevyengine/bevy/issues/17576)). Controlled by `workaround-winit-4443` feature flag.
+
+## [0.17.1] - 2025-12-15
+
+### Added
+
+- Windows platform support with proper multi-monitor window restore
+- Windows DPI drag fix: workaround for window bouncing/resizing bug when dragging between monitors with different scale factors ([winit #4041](https://github.com/rust-windowing/winit/issues/4041), fix in [PR #4341](https://github.com/rust-windowing/winit/pull/4341) not yet released)
+- `app_name` field in `WindowState` to track which application saved the state file
+
+### Fixed
+
+- macOS high→low DPI restore no longer flashes incorrect size on first frame. Window is hidden during two-phase restore and shown after correct size is applied. **Note:** When restoring from high-DPI to low-DPI monitor, the first frame will not be visible.
+- Window state now saves when video mode refresh rate changes (e.g., switching from 75Hz to 60Hz at same resolution)
+- Monitor detection for maximized/snapped windows now uses window center instead of top-left, which could fall outside visible monitor bounds due to Windows invisible border offset ([winit #4296](https://github.com/rust-windowing/winit/issues/4296))
+- Windows position restoration accounts for invisible border offset (workaround for [winit #4107](https://github.com/rust-windowing/winit/issues/4107))
+- Fullscreen windows now correctly restore to the saved target monitor on all platforms
+- Windows exclusive fullscreen restore now waits one frame for surface creation (workaround for [winit #3124](https://github.com/rust-windowing/winit/issues/3124), [bevy #5485](https://github.com/bevyengine/bevy/issues/5485))
+
+## [0.17.0] - 2025-12-08
+
+### Added
+
+- `WindowManagerPlugin` for saving and restoring window position and size across sessions
+- Multi-monitor support with proper scale factor handling
+- Automatic state persistence to platform-specific config directories
+- Fullscreen mode detection and restoration (windowed, borderless, exclusive with video mode)
+- macOS crash fix: workaround for panic when quitting from exclusive fullscreen mode (will be fixed upstream in https://github.com/bevyengine/bevy/pull/22060)
+- `Monitors` resource for querying available monitors by position or index
+- `MonitorInfo` struct exposing monitor scale, position, and size
+- `WindowExt` extension trait for window-to-monitor queries and effective mode detection
+
+[Unreleased]: https://github.com/natepiano/bevy_window_manager/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/natepiano/bevy_window_manager/compare/v0.18.0-rc.1...v0.18.0
+[0.18.0-rc.1]: https://github.com/natepiano/bevy_window_manager/compare/v0.17.2...v0.18.0-rc.1
+[0.17.2]: https://github.com/natepiano/bevy_window_manager/compare/v0.17.1...v0.17.2
+[0.17.1]: https://github.com/natepiano/bevy_window_manager/compare/v0.17.0...v0.17.1
+[0.17.0]: https://github.com/natepiano/bevy_window_manager/releases/tag/v0.17.0

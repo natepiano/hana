@@ -1,0 +1,17 @@
+(
+    version: 2,
+    entries: [
+        (
+            key: Primary,
+            state: (
+                logical_position: Some((0, 0)),
+                logical_width: 1728,
+                logical_height: 1117,
+                monitor_scale: 2.0,
+                monitor_index: 0,
+                mode: BorderlessFullscreen,
+                app_name: "restore_window",
+            )
+        ),
+    ],
+)
