@@ -113,8 +113,10 @@ mod tests {
     use super::install::OrbitCamBindingGateCondition;
     use super::install::OrbitCamInputActionEntities;
     use super::install::TrackpadBindingCondition;
+    use crate::constants::BUTTON_ZOOM_SCALE;
     use crate::constants::PINCH_GESTURE_AMPLIFICATION;
     use crate::constants::PIXEL_SCROLL_SCALE;
+    use crate::constants::TOUCH_PINCH_SCALE;
     use crate::enhanced_input::LagrangeEnhancedInputPlugin;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInputGamepadSelectionPolicy;
@@ -123,14 +125,18 @@ mod tests {
     use crate::input::ControlSpeed;
     use crate::input::InputSensitivity;
     use crate::input::OrbitCamBlenderLikePreset;
+    use crate::input::OrbitCamButtonDragZoom;
+    use crate::input::OrbitCamButtonDragZoomAxis;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamInputContext;
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamMouseDrag;
+    use crate::input::OrbitCamMouseWheelZoom;
     use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamSensitivity;
     use crate::input::OrbitCamTouchBinding;
     use crate::input::OrbitCamTrackpadScroll;
     use crate::input::OrbitDelta;
@@ -142,6 +148,7 @@ mod tests {
     use crate::touch::OneFingerGestures;
     use crate::touch::TouchGestures;
     use crate::touch::TouchTracker;
+    use crate::touch::TwoFingerGestures;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -181,9 +188,25 @@ mod tests {
 
     type TestResult = Result<(), &'static str>;
 
+    const BUTTON_DRAG_MOTION_Y: f32 = -8.0;
+    const BUTTON_DRAG_SENSITIVITY: f32 = 0.25;
     const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
+    const PINCH_DELTA: f32 = 2.0;
+    const PINCH_SENSITIVITY: f32 = 0.5;
+    const PIXEL_SCROLL_DELTA_Y: f32 = 20.0;
     const SLOW_SCALE: f32 = 0.5;
+    const TOUCH_MOTION_X: f32 = 6.0;
+    const TOUCH_MOTION_Y: f32 = 8.0;
+    const TOUCH_ORBIT_SENSITIVITY: f32 = 0.25;
+    const TOUCH_PAN_SENSITIVITY: f32 = 0.5;
+    const TOUCH_PINCH_DELTA: f32 = 4.0;
+    const TOUCH_ZOOM_SENSITIVITY: f32 = 0.75;
     const TRACKPAD_DUPLICATE_SENSITIVITY: f32 = 0.5;
+    const TRACKPAD_ORBIT_PRIORITY_SENSITIVITY: f32 = 3.0;
+    const TRACKPAD_PAN_PRIORITY_SENSITIVITY: f32 = 2.0;
+    const TRACKPAD_ZOOM_SENSITIVITY: f32 = 0.25;
+    const WHEEL_SCROLL_DELTA: f32 = 6.0;
+    const WHEEL_SENSITIVITY: f32 = 0.25;
 
     fn camera_input(app: &App, camera: Entity) -> Result<&OrbitCamInput, &'static str> {
         app.world()
@@ -193,6 +216,13 @@ mod tests {
 
     fn assert_f32_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= f32::EPSILON);
+    }
+
+    fn assert_no_camera_input(app: &App, camera: Entity) -> TestResult {
+        let input = camera_input(app, camera)?;
+        assert!(!input.has_input());
+        assert!(input.sources().is_empty());
+        Ok(())
     }
 
     fn installed_scale_for(
@@ -206,6 +236,16 @@ mod tests {
                 let binding = app.world().get::<Binding>(entity)?;
                 let scale = app.world().get::<Scale>(entity)?;
                 matches_binding(binding).then_some(scale.factor)
+            })
+    }
+
+    fn trackpad_scale_for_index(app: &App, camera: Entity, index: usize) -> Option<Vec3> {
+        modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .find_map(|entity| {
+                let condition = app.world().get::<TrackpadBindingCondition>(entity)?;
+                let scale = app.world().get::<Scale>(entity)?;
+                (condition.index == index).then_some(scale.factor)
             })
     }
 
@@ -469,6 +509,50 @@ mod tests {
     }
 
     #[test]
+    fn tuned_wheel_line_adapter_scales_and_reports_wheel() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(WHEEL_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Line,
+            delta: Vec2::new(0.0, WHEEL_SCROLL_DELTA),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_coarse().amount(),
+            WHEEL_SCROLL_DELTA * WHEEL_SENSITIVITY,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::WHEEL));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_wheel_zoom_is_inactive() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(DISABLED_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Line,
+            delta: Vec2::new(0.0, WHEEL_SCROLL_DELTA),
+        };
+
+        app.update();
+
+        assert_no_camera_input(&app, camera)
+    }
+
+    #[test]
     fn blender_like_trackpad_shift_resolves_to_pan_only() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(
@@ -728,6 +812,173 @@ mod tests {
     }
 
     #[test]
+    fn pixel_scroll_zoom_applies_selected_sensitivity_once() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(TRACKPAD_ZOOM_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(0.0, PIXEL_SCROLL_DELTA_Y),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            PIXEL_SCROLL_DELTA_Y * PIXEL_SCROLL_SCALE * TRACKPAD_ZOOM_SENSITIVITY,
+        );
+        assert!(
+            input
+                .sources()
+                .contains(CameraInteractionSources::SMOOTH_SCROLL)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn duplicate_smooth_scroll_zoom_selects_highest_enabled_index_scale() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(WHEEL_SENSITIVITY))
+            .zoom(
+                OrbitCamTrackpadScroll::default().with_sensitivity(TRACKPAD_DUPLICATE_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(0.0, PIXEL_SCROLL_DELTA_Y),
+        };
+
+        app.update();
+
+        assert_eq!(
+            trackpad_scale_for_index(&app, camera, 1),
+            Some(Vec3::splat(
+                PIXEL_SCROLL_SCALE * TRACKPAD_DUPLICATE_SENSITIVITY
+            ))
+        );
+        assert_f32_close(
+            camera_input(&app, camera)?.zoom_smooth().amount(),
+            PIXEL_SCROLL_DELTA_Y * PIXEL_SCROLL_SCALE * TRACKPAD_DUPLICATE_SENSITIVITY,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_smooth_scroll_is_not_installed_or_active() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(DISABLED_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(0.0, PIXEL_SCROLL_DELTA_Y),
+        };
+
+        app.update();
+
+        let trackpad_conditions = modes::installed_input_entities(app.world(), camera)
+            .into_iter()
+            .filter(|entity| {
+                app.world()
+                    .get::<TrackpadBindingCondition>(*entity)
+                    .is_some()
+            })
+            .count();
+        assert_eq!(trackpad_conditions, 0);
+        assert_no_camera_input(&app, camera)
+    }
+
+    #[test]
+    fn smooth_scroll_target_priority_ignores_sensitivity() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .orbit(
+                OrbitCamTrackpadScroll::default()
+                    .with_sensitivity(TRACKPAD_ORBIT_PRIORITY_SENSITIVITY),
+            )
+            .pan(
+                OrbitCamTrackpadScroll::default()
+                    .with_sensitivity(TRACKPAD_PAN_PRIORITY_SENSITIVITY),
+            )
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(TRACKPAD_ZOOM_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(TOUCH_MOTION_X, PIXEL_SCROLL_DELTA_Y),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert!(!input.has_orbit());
+        assert!(!input.has_pan());
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            PIXEL_SCROLL_DELTA_Y * PIXEL_SCROLL_SCALE * TRACKPAD_ZOOM_SENSITIVITY,
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn smooth_scroll_modifier_count_wins_before_target_priority() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .pan(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::SHIFT | ModKeys::CONTROL)
+                    .with_sensitivity(TRACKPAD_PAN_PRIORITY_SENSITIVITY),
+            )
+            .zoom(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::CONTROL)
+                    .with_sensitivity(TRACKPAD_ZOOM_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        {
+            let mut keyboard = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keyboard.press(KeyCode::ControlLeft);
+            keyboard.press(KeyCode::ShiftLeft);
+        }
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+        };
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_eq!(
+            input.pan().pixels(),
+            Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y) * TRACKPAD_PAN_PRIORITY_SENSITIVITY
+        );
+        assert!(!input.has_zoom());
+        assert!(
+            input
+                .sources()
+                .contains(CameraInteractionSources::SMOOTH_SCROLL)
+        );
+        Ok(())
+    }
+
+    #[test]
     fn pinch_adapter_resolves_to_smooth_zoom() -> TestResult {
         let mut app = test_app();
         let camera = spawn_camera(
@@ -746,6 +997,44 @@ mod tests {
         );
         assert!(input.sources().contains(CameraInteractionSources::PINCH));
         Ok(())
+    }
+
+    #[test]
+    fn tuned_pinch_adapter_scales_and_reports_pinch() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamPinchZoom.with_sensitivity(PINCH_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut().write_message(PinchGesture(PINCH_DELTA));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            PINCH_DELTA * PINCH_GESTURE_AMPLIFICATION * PINCH_SENSITIVITY,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::PINCH));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_pinch_zoom_is_inactive() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamPinchZoom.with_sensitivity(DISABLED_SENSITIVITY))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut().write_message(PinchGesture(PINCH_DELTA));
+
+        app.update();
+
+        assert_no_camera_input(&app, camera)
     }
 
     #[test]
@@ -952,6 +1241,176 @@ mod tests {
         assert_eq!(input.orbit(), OrbitDelta::from(Vec2::new(7.0, 8.0)));
         assert!(input.sources().contains(CameraInteractionSources::TOUCH));
         Ok(())
+    }
+
+    #[test]
+    fn touch_adapter_applies_per_action_sensitivity() -> TestResult {
+        let mut app = test_app();
+        let sensitivity = OrbitCamSensitivity::new()
+            .orbit(TOUCH_ORBIT_SENSITIVITY)
+            .pan(TOUCH_PAN_SENSITIVITY)
+            .zoom(TOUCH_ZOOM_SENSITIVITY);
+        let bindings = OrbitCamBindings::builder()
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(sensitivity),
+            ))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::TwoFinger(
+            TwoFingerGestures {
+                motion:   Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+                pinch:    TOUCH_PINCH_DELTA,
+                rotation: 0.0,
+            },
+        )));
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_eq!(
+            input.pan().pixels(),
+            Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y) * TOUCH_PAN_SENSITIVITY
+        );
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            TOUCH_PINCH_DELTA * TOUCH_PINCH_SCALE * TOUCH_ZOOM_SENSITIVITY,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::TOUCH));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_touch_actions_are_inactive() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit
+                    .with_sensitivity(OrbitCamSensitivity::uniform(DISABLED_SENSITIVITY)),
+            ))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::OneFinger(
+            OneFingerGestures {
+                motion: Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+            },
+        )));
+
+        app.update();
+        assert_no_camera_input(&app, camera)?;
+
+        app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::TwoFinger(
+            TwoFingerGestures {
+                motion:   Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+                pinch:    TOUCH_PINCH_DELTA,
+                rotation: 0.0,
+            },
+        )));
+        app.update();
+
+        assert_no_camera_input(&app, camera)
+    }
+
+    #[test]
+    fn zero_sensitive_touch_action_does_not_disable_other_touch_actions() -> TestResult {
+        let mut app = test_app();
+        let sensitivity = OrbitCamSensitivity::new()
+            .orbit(DISABLED_SENSITIVITY)
+            .pan(TOUCH_PAN_SENSITIVITY)
+            .zoom(DISABLED_SENSITIVITY);
+        let bindings = OrbitCamBindings::builder()
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(sensitivity),
+            ))
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::OneFinger(
+            OneFingerGestures {
+                motion: Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+            },
+        )));
+
+        app.update();
+        assert_no_camera_input(&app, camera)?;
+
+        app.insert_resource(OrbitCamTouchAdapterOverride(TouchGestures::TwoFinger(
+            TwoFingerGestures {
+                motion:   Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y),
+                pinch:    TOUCH_PINCH_DELTA,
+                rotation: 0.0,
+            },
+        )));
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert!(!input.has_orbit());
+        assert_eq!(
+            input.pan().pixels(),
+            Vec2::new(TOUCH_MOTION_X, TOUCH_MOTION_Y) * TOUCH_PAN_SENSITIVITY
+        );
+        assert!(!input.has_zoom());
+        assert!(input.sources().contains(CameraInteractionSources::TOUCH));
+        Ok(())
+    }
+
+    #[test]
+    fn button_drag_zoom_adapter_scales_and_reports_mouse() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Middle)
+                    .with_axis(OrbitCamButtonDragZoomAxis::Y)
+                    .with_sensitivity(BUTTON_DRAG_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(0.0, BUTTON_DRAG_MOTION_Y);
+
+        app.update();
+
+        let input = camera_input(&app, camera)?;
+        assert_f32_close(
+            input.zoom_smooth().amount(),
+            -BUTTON_DRAG_MOTION_Y * BUTTON_ZOOM_SCALE * BUTTON_DRAG_SENSITIVITY,
+        );
+        assert!(input.sources().contains(CameraInteractionSources::MOUSE));
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_button_drag_zoom_is_inactive() -> TestResult {
+        let mut app = test_app();
+        let bindings = OrbitCamBindings::builder()
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Middle)
+                    .with_sensitivity(DISABLED_SENSITIVITY),
+            )
+            .build()
+            .map_err(|_| "bindings should validate")?;
+        let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Bindings(bindings));
+        route_to(&mut app, camera);
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Middle);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = Vec2::new(0.0, BUTTON_DRAG_MOTION_Y);
+
+        app.update();
+
+        assert_no_camera_input(&app, camera)
     }
 
     #[test]

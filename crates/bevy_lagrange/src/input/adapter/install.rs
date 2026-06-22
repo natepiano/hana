@@ -566,7 +566,7 @@ fn spawn_trackpad_custom_bindings(
     entities: &mut Vec<Entity>,
 ) {
     let (orbit, pan, zoom_smooth) = actions;
-    for (index, binding) in bindings.trackpad_orbit().iter().copied().enumerate() {
+    for (index, binding) in bindings.enabled_trackpad_orbit() {
         entities.push(spawn_trackpad_binding(
             world,
             camera,
@@ -577,7 +577,7 @@ fn spawn_trackpad_custom_bindings(
             binding,
         ));
     }
-    for (index, binding) in bindings.trackpad_pan().iter().copied().enumerate() {
+    for (index, binding) in bindings.enabled_trackpad_pan() {
         entities.push(spawn_trackpad_binding(
             world,
             camera,
@@ -588,7 +588,7 @@ fn spawn_trackpad_custom_bindings(
             binding,
         ));
     }
-    for (index, binding) in bindings.trackpad_zoom().iter().copied().enumerate() {
+    for (index, binding) in bindings.enabled_trackpad_zoom() {
         entities.push(spawn_trackpad_zoom_binding(
             world,
             camera,
@@ -618,6 +618,9 @@ fn spawn_trackpad_binding(
         OrbitCamInputInstallationOf(camera),
         Binding::Custom(input),
     );
+    world
+        .entity_mut(entity)
+        .insert(Scale::splat(binding.sensitivity().value()));
     insert_trackpad_condition(world, entity, target, index, binding)
 }
 
@@ -635,9 +638,10 @@ fn spawn_trackpad_zoom_binding(
 ) -> Entity {
     let installation = OrbitCamInputInstallationOf(camera);
     let entity = spawn_single_binding(world, action, installation, Binding::Custom(input));
+    let scale = PIXEL_SCROLL_SCALE * binding.sensitivity().value();
     world
         .entity_mut(entity)
-        .insert((SwizzleAxis::YXZ, Scale::splat(PIXEL_SCROLL_SCALE)));
+        .insert((SwizzleAxis::YXZ, Scale::splat(scale)));
     if matches!(zoom_inversion, ZoomInversion::Inverted) {
         world.entity_mut(entity).insert(Negate::all());
     }

@@ -142,10 +142,36 @@ impl OrbitCamBindings {
         &self.trackpad_orbit
     }
 
+    /// Returns trackpad orbit bindings that participate in runtime input, with
+    /// their authored indexes preserved.
+    pub(crate) fn enabled_trackpad_orbit(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            usize,
+            OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+        ),
+    > + '_ {
+        enabled_sensitive_entries(&self.trackpad_orbit)
+    }
+
     /// Returns trackpad pan bindings.
     #[must_use]
     pub fn trackpad_pan(&self) -> &[OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>] {
         &self.trackpad_pan
+    }
+
+    /// Returns trackpad pan bindings that participate in runtime input, with
+    /// their authored indexes preserved.
+    pub(crate) fn enabled_trackpad_pan(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            usize,
+            OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+        ),
+    > + '_ {
+        enabled_sensitive_entries(&self.trackpad_pan)
     }
 
     /// Returns trackpad zoom bindings.
@@ -154,12 +180,33 @@ impl OrbitCamBindings {
         &self.trackpad_zoom
     }
 
+    /// Returns trackpad zoom bindings that participate in runtime input, with
+    /// their authored indexes preserved.
+    pub(crate) fn enabled_trackpad_zoom(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            usize,
+            OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+        ),
+    > + '_ {
+        enabled_sensitive_entries(&self.trackpad_zoom)
+    }
+
     /// Returns mouse wheel zoom binding.
     #[must_use]
     pub const fn mouse_wheel_zoom(
         &self,
     ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>> {
         self.mouse_wheel_zoom
+    }
+
+    /// Returns mouse wheel zoom binding when it participates in runtime input.
+    #[must_use]
+    pub(crate) const fn enabled_mouse_wheel_zoom(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>> {
+        enabled_sensitive_option(self.mouse_wheel_zoom)
     }
 
     /// Returns whether pinch zoom is enabled.
@@ -179,6 +226,14 @@ impl OrbitCamBindings {
         self.pinch_zoom
     }
 
+    /// Returns pinch zoom binding when it participates in runtime input.
+    #[must_use]
+    pub(crate) const fn enabled_pinch_zoom_binding(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>> {
+        enabled_sensitive_option(self.pinch_zoom)
+    }
+
     /// Returns touch policy.
     #[must_use]
     pub const fn touch(&self) -> Option<OrbitCamTouchBinding> {
@@ -191,6 +246,16 @@ impl OrbitCamBindings {
     /// Returns touch policy plus authored sensitivity.
     #[must_use]
     pub const fn touch_config(&self) -> Option<OrbitCamTouchBindingConfig> { self.touch }
+
+    /// Returns touch policy plus sensitivity when any touch action participates
+    /// in runtime input.
+    #[must_use]
+    pub(crate) const fn enabled_touch_config(&self) -> Option<OrbitCamTouchBindingConfig> {
+        match self.touch {
+            Some(touch) if touch.has_enabled_action() => Some(touch),
+            Some(_) | None => None,
+        }
+    }
 
     /// Returns gamepad selection policy.
     #[must_use]
@@ -208,9 +273,36 @@ impl OrbitCamBindings {
         self.button_drag_zoom
     }
 
+    /// Returns button-drag zoom policy when it participates in runtime input.
+    #[must_use]
+    pub(crate) const fn enabled_button_drag_zoom(
+        &self,
+    ) -> Option<OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>> {
+        enabled_sensitive_option(self.button_drag_zoom)
+    }
+
     /// Returns the slow-mode policy.
     #[must_use]
     pub const fn slow_mode(&self) -> Option<&OrbitCamSlowMode> { self.slow_mode.as_ref() }
+}
+
+fn enabled_sensitive_entries<T: Copy>(
+    entries: &[OrbitCamBindingWithSensitivity<T>],
+) -> impl Iterator<Item = (usize, OrbitCamBindingWithSensitivity<T>)> + '_ {
+    entries
+        .iter()
+        .copied()
+        .enumerate()
+        .filter(|(_, entry)| entry.sensitivity().is_enabled())
+}
+
+const fn enabled_sensitive_option<T: Copy>(
+    entry: Option<OrbitCamBindingWithSensitivity<T>>,
+) -> Option<OrbitCamBindingWithSensitivity<T>> {
+    match entry {
+        Some(entry) if entry.sensitivity().is_enabled() => Some(entry),
+        Some(_) | None => None,
+    }
 }
 
 #[cfg(test)]
@@ -235,6 +327,7 @@ mod tests {
     const INVALID_NEGATIVE_SENSITIVITY: f32 = -0.01;
     const MOUSE_DRAG_SENSITIVITY: f32 = 0.2;
     const PINCH_SENSITIVITY: f32 = 0.5;
+    const REPLACEMENT_SENSITIVITY: f32 = 0.55;
     const TOUCH_ORBIT_SENSITIVITY: f32 = 0.7;
     const TOUCH_PAN_SENSITIVITY: f32 = 0.8;
     const TOUCH_ZOOM_SENSITIVITY: f32 = 0.9;
@@ -480,6 +573,126 @@ mod tests {
         };
         assert_eq!(touch.binding(), OrbitCamTouchBinding::OneFingerOrbit);
         assert_eq!(touch.sensitivity(), touch_sensitivity);
+
+        Ok(())
+    }
+
+    #[test]
+    fn adapter_enabled_views_filter_disabled_entries() -> Result<(), OrbitCamBindingsError> {
+        let touch_sensitivity = OrbitCamSensitivity::new()
+            .orbit(DISABLED_SENSITIVITY)
+            .pan(TOUCH_PAN_SENSITIVITY)
+            .zoom(DISABLED_SENSITIVITY);
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamTrackpadScroll::default().with_sensitivity(DISABLED_SENSITIVITY))
+            .orbit(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::SHIFT)
+                    .with_sensitivity(TRACKPAD_SENSITIVITY),
+            )
+            .pan(OrbitCamTrackpadScroll::default().with_sensitivity(DISABLED_SENSITIVITY))
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(DISABLED_SENSITIVITY))
+            .zoom(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::CONTROL)
+                    .with_sensitivity(TRACKPAD_SENSITIVITY),
+            )
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(DISABLED_SENSITIVITY))
+            .zoom(OrbitCamPinchZoom.with_sensitivity(DISABLED_SENSITIVITY))
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Middle)
+                    .with_sensitivity(DISABLED_SENSITIVITY),
+            )
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(touch_sensitivity),
+            ))
+            .build()?;
+
+        let enabled_orbit = bindings.enabled_trackpad_orbit().collect::<Vec<_>>();
+        let enabled_pan_count = bindings.enabled_trackpad_pan().count();
+        let enabled_zoom = bindings.enabled_trackpad_zoom().collect::<Vec<_>>();
+
+        assert_eq!(bindings.trackpad_orbit().len(), 2);
+        assert_eq!(enabled_orbit.len(), 1);
+        assert_eq!(enabled_orbit[0].0, 1);
+        assert_eq!(enabled_orbit[0].1.binding().mod_keys, ModKeys::SHIFT);
+        assert_eq!(enabled_pan_count, 0);
+        assert_eq!(enabled_zoom.len(), 1);
+        assert_eq!(enabled_zoom[0].0, 1);
+        assert_eq!(enabled_zoom[0].1.binding().mod_keys, ModKeys::CONTROL);
+        assert!(bindings.enabled_mouse_wheel_zoom().is_none());
+        assert!(bindings.enabled_pinch_zoom_binding().is_none());
+        assert!(bindings.enabled_button_drag_zoom().is_none());
+
+        let Some(touch) = bindings.enabled_touch_config() else {
+            assert!(bindings.enabled_touch_config().is_some());
+            return Ok(());
+        };
+        assert_eq!(touch.binding(), OrbitCamTouchBinding::OneFingerOrbit);
+        assert!(!touch.orbit_enabled());
+        assert!(touch.pan_enabled());
+        assert!(!touch.zoom_enabled());
+
+        Ok(())
+    }
+
+    #[test]
+    fn singleton_adapter_builder_calls_use_last_write() -> Result<(), OrbitCamBindingsError> {
+        let replacement_touch_sensitivity = OrbitCamSensitivity::uniform(REPLACEMENT_SENSITIVITY);
+        let bindings = OrbitCamBindings::builder()
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(WHEEL_SENSITIVITY))
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(REPLACEMENT_SENSITIVITY))
+            .zoom(OrbitCamPinchZoom.with_sensitivity(PINCH_SENSITIVITY))
+            .zoom(OrbitCamPinchZoom.with_sensitivity(REPLACEMENT_SENSITIVITY))
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Left)
+                    .with_sensitivity(BUTTON_DRAG_SENSITIVITY),
+            )
+            .zoom(
+                OrbitCamButtonDragZoom::new(MouseButton::Right)
+                    .with_sensitivity(REPLACEMENT_SENSITIVITY),
+            )
+            .touch(Some(OrbitCamTouchBinding::OneFingerOrbit))
+            .touch_config(Some(
+                OrbitCamTouchBinding::TwoFingerOrbit
+                    .with_sensitivity(replacement_touch_sensitivity),
+            ))
+            .build()?;
+
+        let Some(wheel) = bindings.mouse_wheel_zoom() else {
+            assert!(bindings.mouse_wheel_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(
+            wheel.sensitivity(),
+            InputSensitivity(REPLACEMENT_SENSITIVITY)
+        );
+
+        let Some(pinch) = bindings.pinch_zoom_binding() else {
+            assert!(bindings.pinch_zoom_binding().is_some());
+            return Ok(());
+        };
+        assert_eq!(
+            pinch.sensitivity(),
+            InputSensitivity(REPLACEMENT_SENSITIVITY)
+        );
+
+        let Some(button_drag) = bindings.button_drag_zoom() else {
+            assert!(bindings.button_drag_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(button_drag.binding().button, MouseButton::Right);
+        assert_eq!(
+            button_drag.sensitivity(),
+            InputSensitivity(REPLACEMENT_SENSITIVITY)
+        );
+
+        let Some(touch) = bindings.touch_config() else {
+            assert!(bindings.touch_config().is_some());
+            return Ok(());
+        };
+        assert_eq!(touch.binding(), OrbitCamTouchBinding::TwoFingerOrbit);
+        assert_eq!(touch.sensitivity(), replacement_touch_sensitivity);
 
         Ok(())
     }

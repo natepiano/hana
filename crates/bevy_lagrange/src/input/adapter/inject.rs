@@ -34,13 +34,13 @@ use crate::constants::PINCH_GESTURE_AMPLIFICATION;
 use crate::constants::TOUCH_PINCH_SCALE;
 use crate::input;
 use crate::input::CameraInteractionSources;
+use crate::input::InputSensitivity;
 use crate::input::OrbitCamBindingWithSensitivity;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamButtonDragZoomAxis;
 use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamTouchBinding;
 use crate::input::OrbitCamTrackpadScroll;
-use crate::input::PinchGestureZoom;
 use crate::input::ResolvedOrbitCamInputRoute;
 use crate::input::ZoomInversion;
 use crate::input::modes::OrbitCamInputInstallationOf;
@@ -167,14 +167,17 @@ fn apply_mouse_wheel_zoom_contribution(
     scroll: AccumulatedMouseScroll,
     contributions: &mut AdapterContributions,
 ) {
-    if bindings.mouse_wheel_zoom().is_none() {
+    let Some(mouse_wheel_zoom) = bindings.enabled_mouse_wheel_zoom() else {
         return;
-    }
+    };
     if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Line {
         return;
     }
 
-    contributions.zoom_coarse += zoom_signed(scroll.delta.y, bindings);
+    contributions.zoom_coarse += zoom_signed(
+        scroll.delta.y * mouse_wheel_zoom.sensitivity().value(),
+        bindings,
+    );
     contributions.sources.zoom_coarse = contributions
         .sources
         .zoom_coarse
@@ -190,27 +193,31 @@ fn apply_trackpad_scroll_contribution(
         return;
     }
 
+    let Some(selection) = selection else {
+        return;
+    };
+    debug_assert!(selection.sensitivity.is_enabled());
+
     contributions.trackpad = scroll.delta;
-    match selection.map(|selection| selection.target) {
-        Some(TrackpadScrollTarget::Orbit) => {
+    match selection.target {
+        TrackpadScrollTarget::Orbit => {
             contributions.sources.orbit = contributions
                 .sources
                 .orbit
                 .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
-        Some(TrackpadScrollTarget::Pan) => {
+        TrackpadScrollTarget::Pan => {
             contributions.sources.pan = contributions
                 .sources
                 .pan
                 .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
-        Some(TrackpadScrollTarget::Zoom) => {
+        TrackpadScrollTarget::Zoom => {
             contributions.sources.zoom_smooth = contributions
                 .sources
                 .zoom_smooth
                 .union(CameraInteractionSources::SMOOTH_SCROLL);
         },
-        None => {},
     }
 }
 
@@ -221,11 +228,12 @@ pub(super) enum TrackpadScrollTarget {
     Zoom,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct TrackpadScrollCandidate {
-    target:   TrackpadScrollTarget,
-    index:    usize,
-    mod_keys: ModKeys,
+    target:      TrackpadScrollTarget,
+    index:       usize,
+    mod_keys:    ModKeys,
+    sensitivity: InputSensitivity,
 }
 
 fn selected_trackpad_binding(
@@ -236,32 +244,16 @@ fn selected_trackpad_binding(
     if scroll.delta == Vec2::ZERO || scroll.unit != MouseScrollUnit::Pixel {
         return None;
     }
-    let candidates = bindings
-        .trackpad_orbit()
-        .iter()
-        .copied()
-        .enumerate()
-        .map(|(index, binding)| trackpad_candidate(TrackpadScrollTarget::Orbit, index, binding))
-        .chain(
-            bindings
-                .trackpad_pan()
-                .iter()
-                .copied()
-                .enumerate()
-                .map(|(index, binding)| {
-                    trackpad_candidate(TrackpadScrollTarget::Pan, index, binding)
-                }),
-        )
-        .chain(
-            bindings
-                .trackpad_zoom()
-                .iter()
-                .copied()
-                .enumerate()
-                .map(|(index, binding)| {
-                    trackpad_candidate(TrackpadScrollTarget::Zoom, index, binding)
-                }),
-        );
+    let candidates =
+        bindings
+            .enabled_trackpad_orbit()
+            .map(|(index, binding)| trackpad_candidate(TrackpadScrollTarget::Orbit, index, binding))
+            .chain(bindings.enabled_trackpad_pan().map(|(index, binding)| {
+                trackpad_candidate(TrackpadScrollTarget::Pan, index, binding)
+            }))
+            .chain(bindings.enabled_trackpad_zoom().map(|(index, binding)| {
+                trackpad_candidate(TrackpadScrollTarget::Zoom, index, binding)
+            }));
 
     candidates
         .filter(|candidate| trackpad_mod_keys_pressed(keyboard, candidate.mod_keys))
@@ -300,6 +292,7 @@ const fn trackpad_candidate(
         target,
         index,
         mod_keys: binding.binding().mod_keys,
+        sensitivity: binding.sensitivity(),
     }
 }
 
@@ -327,14 +320,17 @@ fn apply_pinch_contribution(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
-    if !matches!(bindings.pinch_zoom(), PinchGestureZoom::Enabled)
-        || pinch == 0.0
-        || pinch_suppressed(bindings, keyboard, mouse_buttons)
-    {
+    let Some(pinch_zoom) = bindings.enabled_pinch_zoom_binding() else {
+        return;
+    };
+    if pinch == 0.0 || pinch_suppressed(bindings, keyboard, mouse_buttons) {
         return;
     }
 
-    contributions.zoom_smooth += zoom_signed(pinch * PINCH_GESTURE_AMPLIFICATION, bindings);
+    contributions.zoom_smooth += zoom_signed(
+        pinch * PINCH_GESTURE_AMPLIFICATION * pinch_zoom.sensitivity().value(),
+        bindings,
+    );
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth
@@ -373,10 +369,10 @@ fn trackpad_modifier_active(
     };
 
     bindings
-        .trackpad_orbit()
-        .iter()
-        .chain(bindings.trackpad_pan())
-        .chain(bindings.trackpad_zoom())
+        .enabled_trackpad_orbit()
+        .map(|(_, binding)| binding)
+        .chain(bindings.enabled_trackpad_pan().map(|(_, binding)| binding))
+        .chain(bindings.enabled_trackpad_zoom().map(|(_, binding)| binding))
         .any(|binding| {
             !binding.binding().mod_keys.is_empty()
                 && input::mod_keys_pressed(keyboard, binding.binding().mod_keys)
@@ -388,7 +384,7 @@ fn apply_touch_contribution(
     touch_gestures: &TouchGestures,
     contributions: &mut AdapterContributions,
 ) {
-    let Some(touch) = bindings.touch_config() else {
+    let Some(touch) = bindings.enabled_touch_config() else {
         return;
     };
 
@@ -412,26 +408,35 @@ fn apply_touch_contribution(
         (_, TouchGestures::None) => (Vec2::ZERO, Vec2::ZERO, 0.0),
     };
 
-    if orbit != Vec2::ZERO {
-        contributions.orbit += orbit;
-        contributions.sources.orbit = contributions
-            .sources
-            .orbit
-            .union(CameraInteractionSources::TOUCH);
+    if touch.orbit_enabled() && orbit != Vec2::ZERO {
+        let orbit = orbit * touch.sensitivity().orbit_sensitivity().value();
+        if orbit != Vec2::ZERO {
+            contributions.orbit += orbit;
+            contributions.sources.orbit = contributions
+                .sources
+                .orbit
+                .union(CameraInteractionSources::TOUCH);
+        }
     }
-    if pan != Vec2::ZERO {
-        contributions.pan += pan;
-        contributions.sources.pan = contributions
-            .sources
-            .pan
-            .union(CameraInteractionSources::TOUCH);
+    if touch.pan_enabled() && pan != Vec2::ZERO {
+        let pan = pan * touch.sensitivity().pan_sensitivity().value();
+        if pan != Vec2::ZERO {
+            contributions.pan += pan;
+            contributions.sources.pan = contributions
+                .sources
+                .pan
+                .union(CameraInteractionSources::TOUCH);
+        }
     }
-    if zoom != 0.0 {
-        contributions.zoom_smooth += zoom_signed(zoom, bindings);
-        contributions.sources.zoom_smooth = contributions
-            .sources
-            .zoom_smooth
-            .union(CameraInteractionSources::TOUCH);
+    if touch.zoom_enabled() && zoom != 0.0 {
+        let zoom = zoom * touch.sensitivity().zoom_sensitivity().value();
+        if zoom != 0.0 {
+            contributions.zoom_smooth += zoom_signed(zoom, bindings);
+            contributions.sources.zoom_smooth = contributions
+                .sources
+                .zoom_smooth
+                .union(CameraInteractionSources::TOUCH);
+        }
     }
 }
 
@@ -441,7 +446,7 @@ fn apply_button_drag_zoom_contribution(
     mouse_buttons: Option<&ButtonInput<MouseButton>>,
     contributions: &mut AdapterContributions,
 ) {
-    let Some(button_drag_zoom) = bindings.button_drag_zoom() else {
+    let Some(button_drag_zoom) = bindings.enabled_button_drag_zoom() else {
         return;
     };
     if mouse_motion == Vec2::ZERO
@@ -456,7 +461,10 @@ fn apply_button_drag_zoom_contribution(
         OrbitCamButtonDragZoomAxis::XY => mouse_motion.x - mouse_motion.y,
     };
 
-    contributions.zoom_smooth += zoom_signed(delta * BUTTON_ZOOM_SCALE, bindings);
+    contributions.zoom_smooth += zoom_signed(
+        delta * BUTTON_ZOOM_SCALE * button_drag_zoom.sensitivity().value(),
+        bindings,
+    );
     contributions.sources.zoom_smooth = contributions
         .sources
         .zoom_smooth

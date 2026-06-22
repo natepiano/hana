@@ -16,8 +16,8 @@ use super::OrbitCamGatePolarity;
 use super::OrbitCamInputMode;
 use super::OrbitCamInteractionKind;
 use super::OrbitCamTouchBinding;
+use super::OrbitCamTouchBindingConfig;
 use super::OrbitCamTrackpadScroll;
-use super::PinchGestureZoom;
 use super::ZoomInversion;
 use super::bindings::BindingGates;
 use super::bindings::InputAxisTransform;
@@ -179,9 +179,8 @@ fn describe_bindings(
     );
     rows.extend(
         bindings
-            .trackpad_orbit()
-            .iter()
-            .copied()
+            .enabled_trackpad_orbit()
+            .map(|(_, trackpad)| trackpad)
             .map(|trackpad| describe_trackpad(trackpad, OrbitCamInteractionKind::Orbit)),
     );
 
@@ -193,9 +192,8 @@ fn describe_bindings(
     );
     rows.extend(
         bindings
-            .trackpad_pan()
-            .iter()
-            .copied()
+            .enabled_trackpad_pan()
+            .map(|(_, trackpad)| trackpad)
             .map(|trackpad| describe_trackpad(trackpad, OrbitCamInteractionKind::Pan)),
     );
 
@@ -215,7 +213,7 @@ fn describe_bindings(
             .map(|entry| describe_action_entry(entry, OrbitCamInteractionKind::Zoom)),
     );
 
-    if bindings.mouse_wheel_zoom().is_some() {
+    if bindings.enabled_mouse_wheel_zoom().is_some() {
         push_zoom_pair(
             &mut rows,
             WHEEL_ZOOM_IN_LABEL,
@@ -225,15 +223,15 @@ fn describe_bindings(
         );
     }
 
-    for trackpad in bindings.trackpad_zoom() {
-        push_trackpad_zoom_pair(&mut rows, *trackpad, inversion_sign);
+    for (_, trackpad) in bindings.enabled_trackpad_zoom() {
+        push_trackpad_zoom_pair(&mut rows, trackpad, inversion_sign);
     }
 
-    if let Some(button_drag) = bindings.button_drag_zoom() {
+    if let Some(button_drag) = bindings.enabled_button_drag_zoom() {
         rows.push(describe_button_drag(button_drag));
     }
 
-    if matches!(bindings.pinch_zoom(), PinchGestureZoom::Enabled) {
+    if bindings.enabled_pinch_zoom_binding().is_some() {
         push_zoom_pair(
             &mut rows,
             PINCH_ZOOM_IN_LABEL,
@@ -243,7 +241,7 @@ fn describe_bindings(
         );
     }
 
-    if let Some(touch) = bindings.touch() {
+    if let Some(touch) = bindings.enabled_touch_config() {
         rows.extend(describe_touch(touch));
     }
 
@@ -435,18 +433,61 @@ fn describe_button_drag(
     )
 }
 
-fn describe_touch(touch: OrbitCamTouchBinding) -> Vec<OrbitCamControlRow> {
-    match touch {
-        OrbitCamTouchBinding::OneFingerOrbit => vec![
-            touch_row(OrbitCamInteractionKind::Orbit, ONE_FINGER_TOUCH_ROW_LABEL),
-            touch_row(OrbitCamInteractionKind::Pan, TWO_FINGER_TOUCH_ROW_LABEL),
-            touch_row(OrbitCamInteractionKind::Zoom, TWO_FINGER_TOUCH_ROW_LABEL),
-        ],
-        OrbitCamTouchBinding::TwoFingerOrbit => vec![
-            touch_row(OrbitCamInteractionKind::Pan, ONE_FINGER_TOUCH_ROW_LABEL),
-            touch_row(OrbitCamInteractionKind::Orbit, TWO_FINGER_TOUCH_ROW_LABEL),
-            touch_row(OrbitCamInteractionKind::Zoom, TWO_FINGER_TOUCH_ROW_LABEL),
-        ],
+fn describe_touch(touch: OrbitCamTouchBindingConfig) -> Vec<OrbitCamControlRow> {
+    let mut rows = Vec::new();
+    match touch.binding() {
+        OrbitCamTouchBinding::OneFingerOrbit => {
+            push_enabled_touch_row(
+                &mut rows,
+                touch.orbit_enabled(),
+                OrbitCamInteractionKind::Orbit,
+                ONE_FINGER_TOUCH_ROW_LABEL,
+            );
+            push_enabled_touch_row(
+                &mut rows,
+                touch.pan_enabled(),
+                OrbitCamInteractionKind::Pan,
+                TWO_FINGER_TOUCH_ROW_LABEL,
+            );
+            push_enabled_touch_row(
+                &mut rows,
+                touch.zoom_enabled(),
+                OrbitCamInteractionKind::Zoom,
+                TWO_FINGER_TOUCH_ROW_LABEL,
+            );
+        },
+        OrbitCamTouchBinding::TwoFingerOrbit => {
+            push_enabled_touch_row(
+                &mut rows,
+                touch.pan_enabled(),
+                OrbitCamInteractionKind::Pan,
+                ONE_FINGER_TOUCH_ROW_LABEL,
+            );
+            push_enabled_touch_row(
+                &mut rows,
+                touch.orbit_enabled(),
+                OrbitCamInteractionKind::Orbit,
+                TWO_FINGER_TOUCH_ROW_LABEL,
+            );
+            push_enabled_touch_row(
+                &mut rows,
+                touch.zoom_enabled(),
+                OrbitCamInteractionKind::Zoom,
+                TWO_FINGER_TOUCH_ROW_LABEL,
+            );
+        },
+    }
+    rows
+}
+
+fn push_enabled_touch_row(
+    rows: &mut Vec<OrbitCamControlRow>,
+    enabled: bool,
+    kind: OrbitCamInteractionKind,
+    label: &'static str,
+) {
+    if enabled {
+        rows.push(touch_row(kind, label));
     }
 }
 
@@ -778,9 +819,15 @@ mod tests {
     use crate::input::InputSensitivity;
     use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamBlenderLikePreset;
+    use crate::input::OrbitCamButtonDragZoom;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamMouseDrag;
+    use crate::input::OrbitCamMouseWheelZoom;
+    use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamSensitivity;
+    use crate::input::OrbitCamTouchBinding;
+    use crate::input::OrbitCamTrackpadScroll;
 
     #[test]
     fn summary_labels_follow_input_mode_variant() -> Result<(), OrbitCamBindingsError> {
@@ -876,6 +923,49 @@ mod tests {
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
 
         assert!(summary.rows.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn disabled_adapter_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
+        let disabled = InputSensitivity::DISABLED.0;
+        let bindings = OrbitCamBindings::builder()
+            .orbit(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
+            .pan(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
+            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
+            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(disabled))
+            .zoom(OrbitCamPinchZoom.with_sensitivity(disabled))
+            .zoom(OrbitCamButtonDragZoom::new(MouseButton::Middle).with_sensitivity(disabled))
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit
+                    .with_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+            ))
+            .build()?;
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
+
+        assert!(summary.rows.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn touch_summary_omits_disabled_actions_only() -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .touch_config(Some(
+                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(
+                    OrbitCamSensitivity::new()
+                        .orbit(InputSensitivity::DISABLED.0)
+                        .zoom(InputSensitivity::DISABLED.0),
+                ),
+            ))
+            .build()?;
+        let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
+        let labels = summary_labels(&summary);
+
+        assert_eq!(summary.rows.len(), 1);
+        assert_eq!(summary.rows[0].kind, OrbitCamInteractionKind::Pan);
+        assert!(labels.contains(&TWO_FINGER_TOUCH_ROW_LABEL));
 
         Ok(())
     }

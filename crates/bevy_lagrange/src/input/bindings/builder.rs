@@ -106,6 +106,10 @@ impl OrbitCamBindingsBuilder {
     }
 
     /// Adds a binding that produces zoom intent.
+    ///
+    /// Held and trackpad bindings are appended. Singleton adapter sources
+    /// (mouse wheel, pinch, and button-drag zoom) use last-write-wins when the
+    /// builder receives repeated calls for the same source.
     #[must_use]
     pub fn zoom(mut self, binding: impl Into<OrbitCamZoomBinding>) -> Self {
         match binding.into() {
@@ -127,6 +131,8 @@ impl OrbitCamBindingsBuilder {
     }
 
     /// Sets the touch policy.
+    ///
+    /// Repeated calls use last-write-wins.
     #[must_use]
     pub const fn touch(mut self, touch: Option<OrbitCamTouchBinding>) -> Self {
         self.descriptor.touch = match touch {
@@ -137,6 +143,8 @@ impl OrbitCamBindingsBuilder {
     }
 
     /// Sets the touch policy with explicit per-action sensitivity.
+    ///
+    /// Repeated calls use last-write-wins.
     #[must_use]
     pub const fn touch_config(mut self, touch: Option<OrbitCamTouchBindingConfig>) -> Self {
         self.descriptor.touch = touch;
@@ -571,6 +579,24 @@ impl OrbitCamTouchBindingConfig {
     /// Returns the authored per-action touch sensitivity.
     #[must_use]
     pub const fn sensitivity(self) -> OrbitCamSensitivity { self.sensitivity }
+
+    /// Returns whether any touch action participates in runtime input.
+    #[must_use]
+    pub const fn has_enabled_action(self) -> bool {
+        self.orbit_enabled() || self.pan_enabled() || self.zoom_enabled()
+    }
+
+    /// Returns whether touch orbit participates in runtime input.
+    #[must_use]
+    pub const fn orbit_enabled(self) -> bool { self.sensitivity.orbit_sensitivity().is_enabled() }
+
+    /// Returns whether touch pan participates in runtime input.
+    #[must_use]
+    pub const fn pan_enabled(self) -> bool { self.sensitivity.pan_sensitivity().is_enabled() }
+
+    /// Returns whether touch zoom participates in runtime input.
+    #[must_use]
+    pub const fn zoom_enabled(self) -> bool { self.sensitivity.zoom_sensitivity().is_enabled() }
 }
 
 impl From<OrbitCamTouchBinding> for OrbitCamTouchBindingConfig {
