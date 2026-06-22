@@ -565,7 +565,7 @@ Under `reflect-input-modes`, register `OrbitCamInputModeDescriptor`, `OrbitCamIn
 - Phase 7 and Phase 8 now require one effective slow-mode predicate or shared helper so Fairy Dust display state and latch cleanup agree.
 - Phase 8 now treats invalid replacement as a Phase 6 regression precondition, focuses new tests on valid zero-sensitive modes, and includes `cargo +nightly fmt --all --check` in final verification.
 
-### Phase 7 — Preserve tuned presets in Fairy Dust panels and examples  · status: todo
+### Phase 7 — Preserve tuned presets in Fairy Dust panels and examples  · status: done
 
 #### Work Order
 
@@ -603,6 +603,30 @@ Re-run the Phase 1 constructor/helper migration as a regression check, then upda
 **Constraints from prior phases:** Phase 1 changed Fairy Dust preset cycling to compare by `preset.kind()` and construct fresh target presets through helpers; do not depend on `OrbitCamPreset: Copy + Eq` for identity. Phase 3 and Phase 4 made control summaries represent effective enabled rows; Fairy Dust should consume that summary path instead of authored arrays for visible controls. Phase 5 introduced payload presets, source setters, gamepad preset payload tuning, and `impl Into<OrbitCamPreset>` bridge coverage for the Fairy Dust builder wrapper chain. Phase 5 also intentionally left built-in preset pinch/touch sensitivity at `1.0`, so zeroing Blender-like mouse and smooth-scroll sensitivity does not disable every slow-scaled contribution. Phase 6 defined reflected descriptor ownership and added a Fairy Dust preset-cycle regression proving stale descriptors do not reapply; Phase 7 should not re-test descriptor ownership unless it changes preset cycling.
 
 **Acceptance gate:** Fairy Dust tests prove a tuned Blender-like preset inserted through builder helpers displays `Preset / BlenderLike`, preserves tuning and the slow-mode hint through hide/show while pinch or any other enabled slow-scaled contribution remains, hides the slow-mode hint for a custom slow-mode binding setup whose effective controls are all disabled, and only resets to a default target preset on explicit cycle. Builder wrapper regression tests or compile checks cover `SprinkleBuilder`, `PrimitiveBuilder`, `StudioLightingBuilder`, `CameraHomeBuilder`, and `TitleBarBuilder` accepting typed preset payloads. `input_preset_blender_like.rs` compile-checks with tuned `OrbitCam::with_preset(preset)`. `input_custom.rs` remains `Bindings / Custom`. `rg` checks over `crates` and `docs` find no stale unit-variant construction outside constructors/tests and no stale tuned-example prose saying `OrbitCam::blender_like`.
+
+#### Retrospective
+
+**What worked:**
+- Fairy Dust snapshots now derive visible rows and slow-mode hints from the effective control summary, so disabled tuned mouse and smooth-scroll controls stay hidden while enabled pinch controls keep the Blender-like slow-mode hint.
+- Preset cycling preserves tuned payloads through hide/show and intentionally constructs default target presets only on explicit cycle.
+- Builder wrapper coverage is compile-only, so it proves typed preset payload acceptance without constructing `App` paths that initialize render assets or shaders.
+
+**What deviated from the plan:**
+- The shared effective slow-mode predicate landed in `bevy_lagrange::input::control_summary` as a crate-internal helper instead of becoming a public Fairy Dust API dependency.
+- `clear_latches_on_mode_replaced` was updated during Phase 7 so latch cleanup and Fairy Dust display state already agree on effective slow mode.
+
+**Surprises:**
+- A builder regression test that calls through `TitleBar` setup enters the screen-panel/rendering plugin path; compile-only function pointer coverage is the right strategy for wrapper APIs.
+- Built-in Blender-like remains a valid slow-mode case after mouse and smooth-scroll are disabled because pinch zoom is still enabled.
+
+**Implications for remaining phases:**
+- Phase 8 can reuse `control_summary::effective_slow_mode` for latch and lifecycle cleanup checks instead of adding a second slow-mode predicate.
+- Phase 8 should still cover lifecycle and animation state after disabled-source mode changes, but it no longer needs to prove Fairy Dust hide/show payload preservation or builder wrapper typed-payload acceptance.
+
+#### Phase 7 Review
+
+- Phase 8 should treat `clear_latches_on_mode_replaced` as already using effective slow-mode semantics and focus new routing tests on behavior, not another implementation rewrite.
+- Phase 8 should keep render/plugin setup out of unit and integration tests for builder wrapper APIs; use compile-time type assertions or focused ECS state tests that do not require shader assets.
 
 ### Phase 8 — Close out lifecycle, animation, and full verification  · status: todo
 

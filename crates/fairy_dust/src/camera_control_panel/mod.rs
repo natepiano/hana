@@ -178,7 +178,8 @@ fn rebind_panel_on_route_change(
     let snapshot = resolve_guidance_snapshot(name, guidance, mode);
     let display = CameraGuidanceDisplay::from_camera_state(
         state.copied().unwrap_or_default(),
-        slow_mode.is_some_and(|state| state.is_active()),
+        snapshot.slow_mode_binding_label.is_some()
+            && slow_mode.is_some_and(|state| state.is_active()),
     );
     *display_state = CameraGuidanceDisplayState::from_display(display);
     commands.entity(panel_entity).insert(snapshot.clone());
@@ -226,16 +227,21 @@ fn refresh_on_sources_changed(
 
 fn track_slow_mode_state(
     cameras: Query<&OrbitCamSlowModeState>,
-    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+    panel: Single<(
+        &CameraGuidancePanel,
+        &CameraGuidanceSnapshot,
+        &mut CameraGuidanceDisplayState,
+    )>,
 ) {
-    let (panel_marker, mut display) = panel.into_inner();
+    let (panel_marker, snapshot, mut display) = panel.into_inner();
     let Some(camera) = panel_marker.bound_camera else {
         return;
     };
     display.set_slow_mode_active(
-        cameras
-            .get(camera)
-            .is_ok_and(|slow_mode| slow_mode.is_active()),
+        snapshot.slow_mode_binding_label.is_some()
+            && cameras
+                .get(camera)
+                .is_ok_and(|slow_mode| slow_mode.is_active()),
     );
 }
 

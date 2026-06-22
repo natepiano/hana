@@ -132,18 +132,38 @@ mod tests {
     use bevy::camera::RenderTarget;
     use bevy::window::WindowRef;
     use bevy_lagrange::CameraInputRoutingConfig;
+    use bevy_lagrange::InputSensitivity;
     use bevy_lagrange::LagrangePlugin;
     use bevy_lagrange::OrbitCam;
+    use bevy_lagrange::OrbitCamBlenderLikePreset;
     use bevy_lagrange::OrbitCamInputModeDescriptor;
     use bevy_lagrange::OrbitCamInputModeDraft;
+    use bevy_lagrange::OrbitCamSensitivity;
+    use bevy_lagrange::OrbitCamSimpleMousePreset;
 
     use super::*;
+
+    const TUNED_SENSITIVITY: f32 = 0.5;
 
     fn camera_preset_kind(app: &App, camera: Entity) -> Option<OrbitCamPresetKind> {
         match app.world().get::<OrbitCamInputMode>(camera)? {
             OrbitCamInputMode::Preset(preset) => Some(preset.kind()),
             _ => None,
         }
+    }
+
+    fn camera_preset(app: &App, camera: Entity) -> Option<OrbitCamPreset> {
+        match app.world().get::<OrbitCamInputMode>(camera)? {
+            OrbitCamInputMode::Preset(preset) => Some(preset.clone()),
+            _ => None,
+        }
+    }
+
+    fn tuned_blender_like_preset() -> OrbitCamBlenderLikePreset {
+        let disabled = InputSensitivity::DISABLED.0;
+        OrbitCamBlenderLikePreset::default()
+            .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
+            .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled))
     }
 
     #[test]
@@ -168,6 +188,64 @@ mod tests {
             next_cycle_entry(OrbitCamPreset::blender_like().kind(), Visibility::Hidden),
             PresetCycleEntry::Preset(OrbitCamPreset::simple_mouse())
         );
+    }
+
+    #[test]
+    fn explicit_cycle_constructs_default_target_preset() {
+        let tuned = OrbitCamSimpleMousePreset::default()
+            .mouse_sensitivity(OrbitCamSensitivity::uniform(TUNED_SENSITIVITY));
+
+        assert_eq!(
+            next_cycle_entry(OrbitCamPreset::from(tuned).kind(), Visibility::Inherited),
+            PresetCycleEntry::Preset(OrbitCamPreset::blender_like())
+        );
+    }
+
+    #[test]
+    fn hiding_and_showing_panel_preserves_tuned_preset_payload() -> Result<(), &'static str> {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, LagrangePlugin));
+        app.finish();
+        let tuned = tuned_blender_like_preset();
+        let expected_preset = OrbitCamPreset::from(tuned);
+        let camera = app
+            .world_mut()
+            .spawn((
+                OrbitCam::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                OrbitCamInputMode::with_preset(tuned),
+            ))
+            .id();
+        let panel = app
+            .world_mut()
+            .spawn((
+                CameraGuidancePanel { bound_camera: None },
+                Visibility::Inherited,
+            ))
+            .id();
+        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+        app.update();
+
+        app.add_systems(Update, cycle_preset);
+        app.update();
+
+        assert_eq!(camera_preset(&app, camera), Some(expected_preset.clone()));
+        assert_eq!(
+            app.world().get::<Visibility>(panel),
+            Some(&Visibility::Hidden)
+        );
+
+        {
+            let mut visibility = app
+                .world_mut()
+                .get_mut::<Visibility>(panel)
+                .ok_or("panel visibility missing")?;
+            *visibility = Visibility::Inherited;
+        }
+
+        assert_eq!(camera_preset(&app, camera), Some(expected_preset));
+        Ok(())
     }
 
     #[test]

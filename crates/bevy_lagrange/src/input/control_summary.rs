@@ -15,6 +15,7 @@ use super::OrbitCamGateInput;
 use super::OrbitCamGatePolarity;
 use super::OrbitCamInputMode;
 use super::OrbitCamInteractionKind;
+use super::OrbitCamSlowMode;
 use super::OrbitCamTouchBinding;
 use super::OrbitCamTouchBindingConfig;
 use super::OrbitCamTrackpadScroll;
@@ -139,6 +140,11 @@ pub fn describe_orbit_cam_controls(mode: &OrbitCamInputMode) -> OrbitCamControlS
     }
 }
 
+pub(crate) fn effective_slow_mode(bindings: &OrbitCamBindings) -> Option<&OrbitCamSlowMode> {
+    let slow_mode = bindings.slow_mode()?;
+    (!effective_control_rows(bindings).is_empty()).then_some(slow_mode)
+}
+
 fn describe_manual_controls() -> OrbitCamControlSummary {
     OrbitCamControlSummary {
         camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
@@ -169,6 +175,15 @@ fn describe_bindings(
     mode_value: &str,
     bindings: &OrbitCamBindings,
 ) -> OrbitCamControlSummary {
+    OrbitCamControlSummary {
+        camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
+        mode_label:   mode_label.to_string(),
+        mode_value:   mode_value.to_string(),
+        rows:         effective_control_rows(bindings),
+    }
+}
+
+fn effective_control_rows(bindings: &OrbitCamBindings) -> Vec<OrbitCamControlRow> {
     let mut rows = Vec::new();
 
     rows.extend(
@@ -258,12 +273,7 @@ fn describe_bindings(
         ));
     }
 
-    OrbitCamControlSummary {
-        camera_label: ORBIT_CAM_CAMERA_LABEL.to_string(),
-        mode_label: mode_label.to_string(),
-        mode_value: mode_value.to_string(),
-        rows,
-    }
+    rows
 }
 
 fn describe_held_entry<A: HeldCameraAction>(
@@ -825,9 +835,13 @@ mod tests {
     use crate::input::OrbitCamMouseWheelZoom;
     use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamScalePolicy;
     use crate::input::OrbitCamSensitivity;
+    use crate::input::OrbitCamSlowMode;
     use crate::input::OrbitCamTouchBinding;
     use crate::input::OrbitCamTrackpadScroll;
+
+    const CUSTOM_SLOW_SCALE: f32 = 0.25;
 
     #[test]
     fn summary_labels_follow_input_mode_variant() -> Result<(), OrbitCamBindingsError> {
@@ -945,6 +959,51 @@ mod tests {
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
 
         assert!(summary.rows.is_empty());
+
+        Ok(())
+    }
+
+    #[test]
+    fn effective_slow_mode_keeps_tuned_blender_like_when_pinch_remains_enabled()
+    -> Result<(), OrbitCamBindingsError> {
+        let disabled = InputSensitivity::DISABLED.0;
+        let preset = OrbitCamPreset::from(
+            OrbitCamBlenderLikePreset::default()
+                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
+                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+        );
+        let bindings = preset.to_bindings()?;
+        let mode = OrbitCamInputMode::with_preset(preset);
+        let summary = describe_orbit_cam_controls(&mode);
+        let labels = summary_labels(&summary);
+
+        assert!(effective_slow_mode(&bindings).is_some());
+        assert!(labels.contains(&"pinch out"));
+        assert!(labels.contains(&"pinch in"));
+        assert!(!labels.contains(&"mmb drag"));
+        assert!(!labels.contains(&"smooth-scroll"));
+        Ok(())
+    }
+
+    #[test]
+    fn effective_slow_mode_omits_custom_slow_mode_without_enabled_controls()
+    -> Result<(), OrbitCamBindingsError> {
+        let disabled = InputSensitivity::DISABLED.0;
+        let bindings = OrbitCamBindings::builder()
+            .slow_mode(OrbitCamSlowMode {
+                toggle_key: KeyCode::KeyS,
+                mod_keys:   ModKeys::ALT,
+                scale:      OrbitCamScalePolicy {
+                    normal: InputSensitivity::DEFAULT.0,
+                    slow:   CUSTOM_SLOW_SCALE,
+                },
+            })
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_sensitivity(disabled))
+            .build()?;
+        assert!(effective_slow_mode(&bindings).is_none());
+        let mode = OrbitCamInputMode::Bindings(bindings);
+
+        assert!(describe_orbit_cam_controls(&mode).rows.is_empty());
 
         Ok(())
     }

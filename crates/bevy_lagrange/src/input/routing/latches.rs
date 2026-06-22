@@ -17,6 +17,7 @@ use bevy::prelude::*;
 use crate::input::CameraInteractionSources;
 use crate::input::OrbitCamInputModeReplaced;
 use crate::input::OrbitCamResolvedBindings;
+use crate::input::control_summary;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct OrbitCamInputOwnerLatch(Entity);
@@ -146,10 +147,10 @@ pub(super) fn clear_latches_on_mode_replaced(
     bindings: Query<&OrbitCamResolvedBindings>,
 ) {
     latches.clear_camera(replaced.camera);
-    let has_slow_mode = bindings
+    let has_effective_slow_mode = bindings
         .get(replaced.camera)
-        .is_ok_and(|bindings| bindings.0.slow_mode().is_some());
-    if !has_slow_mode {
+        .is_ok_and(|bindings| control_summary::effective_slow_mode(&bindings.0).is_some());
+    if !has_effective_slow_mode {
         slow_latches.clear_camera(replaced.camera);
     }
 }

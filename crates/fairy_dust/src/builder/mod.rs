@@ -87,3 +87,69 @@ pub struct StudioLightingBuilder<S> {
 pub struct TitleBarBuilder<S> {
     pub(super) parent: SprinkleBuilder<S>,
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy_lagrange::OrbitCamBlenderLikePreset;
+
+    use super::*;
+
+    #[test]
+    fn builder_wrappers_accept_typed_preset_payloads() {
+        let _: fn(
+            SprinkleBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = sprinkle_builder_with_preset;
+        let _: fn(
+            PrimitiveBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = primitive_builder_with_preset;
+        let _: fn(
+            StudioLightingBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = studio_lighting_builder_with_preset;
+        let _: fn(
+            CameraHomeBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = camera_home_builder_with_preset;
+        let _: fn(
+            TitleBarBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = title_bar_builder_with_preset;
+    }
+
+    fn sprinkle_builder_with_preset(
+        builder: SprinkleBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn primitive_builder_with_preset(
+        builder: PrimitiveBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn studio_lighting_builder_with_preset(
+        builder: StudioLightingBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn camera_home_builder_with_preset(
+        builder: CameraHomeBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn title_bar_builder_with_preset(
+        builder: TitleBarBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+}

@@ -52,7 +52,7 @@ Labels (In = zoom in):
 | Keyboard                 | `+`        | `-`       |
 | Mouse wheel              | `wheel ↑`  | `wheel ↓` |
 | Pinch                    | `pinch out`| `pinch in`|
-| Smooth-scroll (trackpad) | `scroll ↑` | `scroll ↓`|
+| Smooth-scroll             | `scroll ↑` | `scroll ↓`|
 
 Generated in `input/control_summary.rs`:
 

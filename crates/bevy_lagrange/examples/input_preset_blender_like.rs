@@ -1,17 +1,21 @@
-//! Attaches the Blender-like input preset with `OrbitCam::blender_like`.
+//! Attaches a tuned Blender-like input preset with `OrbitCam::with_preset`.
+//! Mouse-backed input uses 0.65 sensitivity; smooth-scroll input uses 0.35.
 //! Alt+S toggles slow orbit, pan, and zoom (5% scale).
 //!
-//! The cube faces display the resulting `OrbitCamInputMode::Preset` rows.
+//! The cube faces display the effective controls while the summary remains
+//! labeled `Preset / BlenderLike`.
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamBlenderLikePreset;
 use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
+use bevy_lagrange::OrbitCamSensitivity;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
@@ -61,24 +65,34 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// BLENDER-LIKE PRESET — OrbitCam::blender_like input mode.
+// BLENDER-LIKE PRESET — tuned OrbitCam::with_preset input mode.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CAMERA_PITCH: f32 = 0.45;
 const CAMERA_YAW: f32 = 0.55;
 const HOME_MARGIN: f32 = 0.5;
+const TUNED_MOUSE_SENSITIVITY: f32 = 0.65;
+const TUNED_SMOOTH_SCROLL_SENSITIVITY: f32 = 0.35;
 
 /// Marks the `OrbitCam` used by the `fairy_dust` face-panel showcase for
 /// `OrbitCamInputMode` and `OrbitCamInteractionState` queries.
 ///
-/// Production code using `OrbitCam::blender_like` does not need this marker.
+/// Production code using `OrbitCam::with_preset` does not need this marker.
 #[derive(Component)]
 struct BlenderLikeCamera;
+
+fn tuned_blender_like_preset() -> OrbitCamBlenderLikePreset {
+    OrbitCamBlenderLikePreset::default()
+        .mouse_sensitivity(OrbitCamSensitivity::uniform(TUNED_MOUSE_SENSITIVITY))
+        .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(
+            TUNED_SMOOTH_SCROLL_SENSITIVITY,
+        ))
+}
 
 fn spawn_camera(mut commands: Commands) {
     commands.spawn((
         Transform::from_xyz(0.0, 1.5, 5.0),
-        OrbitCam::blender_like(),
+        OrbitCam::with_preset(tuned_blender_like_preset()),
         BlenderLikeCamera,
         FairyDustOrbitCam,
     ));

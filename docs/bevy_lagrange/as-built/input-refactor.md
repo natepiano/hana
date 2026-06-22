@@ -75,7 +75,7 @@ pub struct OrbitCam { /* camera behavior fields */ }
 
 A camera spawned with just `OrbitCam::default()` therefore gets the `SimpleMouse`
 preset. `OrbitCam` carries no physical binding fields (mouse buttons, modifiers,
-trackpad/touch policy, zoom direction); those belong to the input mode, bindings, or
+smooth-scroll/touch policy, zoom direction); those belong to the input mode, bindings, or
 adapter policy.
 
 | Variant | Meaning | Library writes `OrbitCamInput` |

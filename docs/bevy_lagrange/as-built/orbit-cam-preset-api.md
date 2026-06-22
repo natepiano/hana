@@ -2,7 +2,7 @@
 
 ## What it is
 
-A unified orbit-camera input system replacing the deleted layer/profile binding model with concrete preset config structs (`OrbitCamBlenderLikePreset`, `OrbitCamGamepadPreset`, etc.), one-liner `OrbitCam::*()` spawn helpers returning `impl Bundle`, and a tunable slow-mode feature toggled by Alt+S (5% scale by default) that applies uniformly to all seven scaled input sources (mouse-drag orbit/pan, trackpad orbit/pan, wheel zoom, trackpad zoom, pinch zoom) with no double-layer application.
+A unified orbit-camera input system replacing the deleted layer/profile binding model with concrete preset config structs (`OrbitCamBlenderLikePreset`, `OrbitCamGamepadPreset`, etc.), one-liner `OrbitCam::*()` spawn helpers returning `impl Bundle`, and a tunable slow-mode feature toggled by Alt+S (5% scale by default) that applies uniformly to all seven scaled input sources (mouse-drag orbit/pan, smooth-scroll orbit/pan, wheel zoom, smooth-scroll zoom, pinch zoom) with no double-layer application.
 
 ## How it works
 
@@ -74,6 +74,6 @@ commands.spawn((
 
 **Helpers return `impl Bundle`, not a named bundle.** A named `OrbitCamPresetBundle` would either need `Copy`/`Clone` (problematic since `OrbitCamBindings` is not `Copy` after slow-mode types gained `Reflect`) or force boxing. `impl Bundle` sidesteps both — callers spawn the tuple directly, and field overrides drop to the explicit tuple path.
 
-**The BlenderLike example spawns `OrbitCam::blender_like()` Preset mode.** An earlier version spawned `OrbitCam::with_bindings(tuned)`, producing `OrbitCamInputMode::Bindings`, which the label system renders as "custom bindings" — misrepresenting a tuned preset as hand-built bindings. Preset mode labels "Preset / BlenderLike" correctly; the custom-bindings story is already owned by `input_custom.rs`.
+**The BlenderLike example spawns `OrbitCam::with_preset(tuned_blender_like_preset())` Preset mode.** An earlier version spawned `OrbitCam::with_bindings(tuned)`, producing `OrbitCamInputMode::Bindings`, which the label system renders as "custom bindings" — misrepresenting a tuned preset as hand-built bindings. Preset mode labels "Preset / BlenderLike" correctly; the custom-bindings story is already owned by `input_custom.rs`.
 
 **Single-layer resolve scaling.** Applying scale in both `inject.rs` and `resolve.rs` double-applied it. Consolidating to resolve-only matches the held-input path (already resolve-only): scaling is intrinsic to action resolution, not adapter injection.

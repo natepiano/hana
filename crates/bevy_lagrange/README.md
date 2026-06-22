@@ -19,7 +19,7 @@ A camera controller for [Bevy](https://bevyengine.org) that combines smooth orbi
 - Event-driven control with full lifecycle events for sequencing
 - Orthographic and perspective projection, multi-viewport, render-to-texture
 - Preset, custom, and manual input modes with source-attributed interaction events
-- Touch, trackpad, keyboard, and gamepad support
+- Touch, smooth-scroll, keyboard, and gamepad support
 - Debug overlay for fit targets (optional `fit_overlay` feature)
 
 ## Quick Start
