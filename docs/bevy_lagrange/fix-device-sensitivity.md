@@ -334,7 +334,7 @@ Apply sensitivity during binding/config lowering, not by changing `CameraInterac
 - Phase 7 now treats effective-summary row filtering as shipped and requires slow-mode hints to hide when no enabled slow-scaled contribution remains.
 - Phase 8 now focuses on valid zero-sensitive tuned presets through lifecycle, latches, panel highlights, animation interruption, and final verification.
 
-### Phase 5 — Add payload-carrying presets and source-level preset setters  · status: todo
+### Phase 5 — Add payload-carrying presets and source-level preset setters  · status: done (uncommitted)
 
 #### Work Order
 
@@ -440,7 +440,36 @@ Reflected preset apply must follow the same validate-before-replace rule in this
 
 **Acceptance gate:** Tests prove default `SimpleMouse`, `BlenderLike`, and `Gamepad` presets generate behaviorally unchanged bindings; tuned `BlenderLike` and `SimpleMouse` presets feed generated mouse and smooth-scroll bindings; `mouse_sensitivity.zoom` affects wheel/button-drag zoom but not pinch/touch; zero source sensitivity creates authored preset payloads that remain round-trippable while generated native and adapter runtime views produce no input; gamepad sensitivity scales normal and gated slow entries without losing `ControlSpeed`; `OrbitCam::with_preset(preset)` and `OrbitCamInputMode::with_preset(preset)` install `Preset(tuned)` and describe as `Preset / <kind>`; runtime insertion and reflected descriptor apply of an invalid typed preset over a working mode leave previous mode, resolved bindings, installation, action children, current-frame input, replacement/success events, and apply status correct; tests cover direct mode insertion and descriptor apply failure paths so invalid replacement cannot clear current-frame input before validation succeeds; Fairy Dust preset cycling still compiles when constructors carry payloads.
 
-### Phase 6 — Add reflected preset drafts, export, validation, and registration  · status: todo
+#### Retrospective
+
+**What worked:**
+- `OrbitCamPreset` now stores typed preset payloads and lowers tuned mouse, smooth-scroll, and gamepad source sensitivity through the existing native and adapter sensitivity paths.
+- Runtime and reflected preset replacement now validate before clearing `OrbitCamInput`, resolved bindings, installations, action children, mode state, or replacement/apply events.
+
+**What deviated from the plan:**
+- The post-implementation review found that gamepad scale/dead-zone tuning still needed a preset-returning path, so `OrbitCamGamepadPreset` gained direct scale/dead-zone setters and `OrbitCamGamepadPresetBuilder::into_preset()`.
+- The post-implementation review found two missed Fairy Dust wrapper overloads, so `camera_home.rs` and `title_bar.rs` now also accept `impl Into<OrbitCamPreset>`.
+- `Default` stays derived for typed presets whose manual implementation would be identical to field defaults because the workspace lints reject redundant manual impls.
+
+**Surprises:**
+- Gamepad base scale knobs are preset payload settings too; without a preset-returning API, tuned gamepad callers would fall back to `Bindings / Custom`.
+- The payload migration exposed builder wrapper paths outside the Phase 5 file list that still needed the Phase 1 `impl Into<OrbitCamPreset>` bridge.
+
+**Implications for remaining phases:**
+- Phase 6 reflected gamepad drafts must include gamepad sensitivity plus scale/dead-zone fields so editor round-trips preserve `Preset / Gamepad` rather than exporting custom bindings.
+- Phase 7 can rely on Fairy Dust preset wrapper chains accepting typed preset payloads, including `CameraHomeBuilder` and `TitleBarBuilder`.
+
+#### Phase 5 Review
+
+- The blind review found missing gamepad preset payload APIs; Phase 5 added direct gamepad scale/dead-zone setters, `OrbitCamGamepadPresetBuilder::into_preset()`, and a preset-payload regression test.
+- The blind review found two Fairy Dust wrapper overloads still taking `OrbitCamPreset` exactly; Phase 5 changed `camera_home.rs` and `title_bar.rs` to accept `impl Into<OrbitCamPreset>`.
+- The derived `Default` finding was kept as-is because behavior is equivalent and `lint clippy` passes with the derived implementations.
+- Phase 6 now fixes reflected export scope to preset/manual runtime-to-draft helpers while keeping custom binding descriptor apply support and registration.
+- Phase 6 now makes descriptor ownership write-only: direct runtime mode changes are authoritative until the descriptor component changes again.
+- Phase 7 now treats Fairy Dust builder files as regression checks and names all builder wrapper paths that must accept typed preset payloads.
+- Phases 7 and 8 now share the same effective slow-mode rule, including the case where slow mode remains configured but all slow-scaled contributions are disabled.
+
+### Phase 6 — Add reflected preset drafts, export, validation, and registration  · status: done (uncommitted)
 
 #### Work Order
 
@@ -485,17 +514,19 @@ pub struct OrbitCamBlenderLikePresetDraft {
 
 Implement `Default` manually for `OrbitCamPresetDraft` and every child draft that needs default construction. Keep `#[reflect(Default)]` only where the manual default exists.
 
-Descriptor application is transactional. The same phase that introduces `OrbitCamPresetDraft` must include draft conversion, validate-before-insert behavior, rejection status/events, and tests that invalid tuned preset drafts leave runtime installation unchanged. Converting a draft preset validates sensitivity and then uses the Phase 5 fallible preset replacement path; reflected apply must not duplicate a second replacement algorithm.
+Descriptor application is transactional. The same phase that introduces `OrbitCamPresetDraft` must include draft conversion, validate-before-insert behavior, rejection status/events, and tests that invalid tuned preset drafts leave runtime installation unchanged. Converting a draft preset validates sensitivity and then inserts the runtime mode only after conversion succeeds, letting Phase 5 reconciliation perform the fallible runtime replacement; reflected apply must not duplicate a second ECS replacement algorithm.
 
-Preset export must preserve tuned preset identity and payload. Do not promise a blanket `From<&OrbitCamInputMode> for OrbitCamInputModeDraft` unless custom binding export is defined. Either add a full `TryFrom<&OrbitCamBindings> for OrbitCamBindingsDescriptor` export contract, or narrow runtime-to-draft export to preset/manual helpers plus tuned-preset round-trip tests. Preset export must not lower tuned presets to `Bindings`.
+Preset export must preserve tuned preset identity and payload. Limit runtime-to-draft export in this phase to preset/manual helpers plus tuned-preset round-trip tests; do not add or promise a blanket `From<&OrbitCamInputMode> for OrbitCamInputModeDraft`. Keep existing `OrbitCamInputModeDraft::Bindings(OrbitCamBindingsDescriptor)` apply support, but do not add a `TryFrom<&OrbitCamBindings> for OrbitCamBindingsDescriptor` custom-binding export contract in this phase. Preset export must not lower tuned presets to `Bindings`.
 
 Runtime-to-draft export uses authored binding and preset payloads, not runtime-only enabled views or control-summary rows. Zero-sensitive entries must remain representable in reflected drafts even though Phase 3 and Phase 4 filter them out of runtime behavior.
 
 Composed reflected drafts mirror composed preset structure. Use nested child drafts, or an intentionally flattened equivalent, for `SimpleMouseKeyboard` and `BlenderLikeKeyboard` so pointer sensitivity, keyboard settings, and Blender-like slow-mode settings survive editor round-trips.
 
-Define descriptor ownership after apply. `OrbitCamInputModeDescriptor` is a mutable draft component; after successful apply it can become stale if Rust code, Fairy Dust preset cycling, or another system changes `OrbitCamInputMode` directly. Treat descriptors as write-only apply requests, or add a sync/export path that updates or removes stale descriptors without reapply loops. Test direct mode changes and preset cycling before export.
+Gamepad reflected drafts mirror the full Phase 5 preset payload, not only `gamepad_sensitivity`. Include `gamepad_sensitivity`, `orbit_scale`, `slow_orbit_scale`, `pan_scale`, `slow_pan_scale`, `zoom_scale`, `slow_zoom_scale`, and `stick_dead_zone`, and convert them into `OrbitCamGamepadPreset` so editor round-trips preserve `Preset / Gamepad`.
 
-Under `reflect-input-modes`, register `OrbitCamInputModeDescriptor`, `OrbitCamInputModeDraft`, `OrbitCamPresetDraft`, all child draft structs, `OrbitCamSensitivityDraft`, `OrbitCamSensitivity`, `InputSensitivity`, and runtime preset/kind types with Bevy's type registry. If custom binding descriptors remain reflected/exportable, also register the concrete Phase 4 payload types used by those descriptors, including `OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>`, `OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>`, `OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>`, `OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>`, and `OrbitCamTouchBindingConfig`; otherwise, explicitly limit this phase's reflected export/registration contract to preset drafts.
+Define descriptor ownership after apply as write-only apply requests. `OrbitCamInputModeDescriptor` is not synchronized back from runtime `OrbitCamInputMode`, and direct Rust code, Fairy Dust preset cycling, or another system may make it stale; that stale descriptor must not reapply unless the descriptor component changes again. Do not add a descriptor sync/export loop in this phase. Test direct mode changes and preset cycling before export.
+
+Under `reflect-input-modes`, register `OrbitCamInputModeDescriptor`, `OrbitCamInputModeDraft`, `OrbitCamPresetDraft`, all child draft structs, `OrbitCamSensitivityDraft`, `OrbitCamSensitivity`, `InputSensitivity`, runtime preset/kind types, and the concrete Phase 4 payload types used by existing custom binding descriptors. The custom descriptor registration set includes `OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>`, `OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>`, `OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>`, `OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>`, and `OrbitCamTouchBindingConfig`. Registration keeps descriptor apply support reflected; runtime export remains preset/manual-only in this phase.
 
 **Files:**
 - `crates/bevy_lagrange/src/input/modes.rs` — reflected draft enum, apply conversion, transactionality, descriptor ownership behavior.
@@ -505,9 +536,34 @@ Under `reflect-input-modes`, register `OrbitCamInputModeDescriptor`, `OrbitCamIn
 - `crates/bevy_lagrange/src/lib.rs` — feature-gated public exports and type registration in plugin setup.
 - `crates/bevy_lagrange/Cargo.toml` — feature coverage if new cfg wiring is needed.
 
-**Constraints from prior phases:** Phase 1 established the bridge API shape: labels come from `preset.kind().name()`, lowering borrows through `preset.to_bindings()`, and new code should use constructor/helper form instead of direct unit variants. Phase 3 and Phase 4 introduced enabled-only runtime views for native and adapter behavior; reflected export must avoid those views and use authored storage. Phase 5 introduced payload presets and validate-before-replace runtime lowering. Reflected draft apply validates to a runtime preset and then calls the same fallible replacement path; do not create a second ECS replacement implementation.
+**Constraints from prior phases:** Phase 1 established the bridge API surface: labels come from `preset.kind().name()`, lowering borrows through `preset.to_bindings()`, and new code should use constructor/helper form instead of direct unit variants. Phase 3 and Phase 4 introduced enabled-only runtime views for native and adapter behavior; reflected export must avoid those views and use authored storage. Phase 5 introduced payload presets, source sensitivity traits, gamepad preset scale/dead-zone payload setters, `OrbitCamGamepadPresetBuilder::into_preset()`, and validate-before-replace runtime lowering. Reflected draft apply validates to a runtime preset and then calls the same fallible replacement path; do not create a second ECS replacement implementation.
 
-**Acceptance gate:** With default features, tests prove reflected input-mode descriptors can apply a tuned Blender-like preset without falling back to `Bindings`, reflected preset drafts can construct tuned presets without Rust fluent setters, invalid reflected preset drafts leave previous mode/resolved bindings/installation/action children unchanged, tuned `BlenderLikeKeyboard` draft apply/export preserves pointer sensitivity and slow-mode fields, registered type lookup finds every new draft/runtime type plus reflected custom-binding payload types if custom descriptor reflection remains in scope, and direct Rust mode changes do not leave stale descriptors that reapply unexpectedly. `cargo check -p bevy_lagrange --all-targets --no-default-features` still passes for runtime preset APIs.
+**Acceptance gate:** With default features, tests prove reflected input-mode descriptors can apply a tuned Blender-like preset without falling back to `Bindings`, reflected preset drafts can construct tuned presets without Rust fluent setters, invalid reflected preset drafts leave previous mode/resolved bindings/installation/action children unchanged, preset/manual runtime-to-draft export preserves tuned `BlenderLikeKeyboard` pointer sensitivity and slow-mode fields, preset/manual runtime-to-draft export preserves tuned `Gamepad` gamepad sensitivity plus fast/slow scale and dead-zone payload fields while reporting `Preset / Gamepad`, registered type lookup finds every new draft/runtime type plus existing reflected custom-binding payload types, custom binding descriptor apply still works, and direct Rust mode changes do not leave stale descriptors that reapply unexpectedly. `cargo check -p bevy_lagrange --all-targets --no-default-features` still passes for runtime preset APIs.
+
+#### Retrospective
+
+**What worked:**
+- Reflected preset drafts now mirror tuned preset payloads and validate into runtime presets before mode insertion.
+- Runtime-to-draft helpers preserve tuned preset identity for manual, Blender-like keyboard, and gamepad paths without adding a blanket custom-binding export contract.
+
+**What deviated from the plan:**
+- The blind review found the initial stale-descriptor coverage only tested direct Rust mode insertion, so `preset_switch.rs` gained a Fairy Dust preset-cycle regression test.
+- `Default` stays derived or unit-like where clippy rejects redundant manual implementations; manual defaults remain only where needed for reflected default behavior.
+
+**Surprises:**
+- `OrbitCamInputModeDescriptor` registry lookup succeeds through its reflected component registration even without an explicit plugin registration line.
+- Fairy Dust preset-cycle tests need `app.finish()` after `LagrangePlugin` setup so enhanced-input context resources exist before camera context observers run.
+
+**Implications for remaining phases:**
+- Phase 7 can rely on reflected descriptor ownership being write-only: Fairy Dust direct preset cycling does not cause stale descriptors to reapply.
+- Phase 8 can rely on invalid reflected and runtime preset replacement preserving previous modes, resolved bindings, installations, action children, current-frame input, and success/replacement events.
+
+#### Phase 6 Review
+
+- Phase 7 now treats stale-descriptor behavior during Fairy Dust preset cycling as already covered by Phase 6 and keeps its cycling work focused on payload preservation and explicit default reset behavior.
+- Phase 7 and Phase 8 now avoid the impossible all-disabled tuned Blender-like slow-mode case; they use a custom slow-mode binding setup for no-enabled-control assertions because built-in Blender-like still emits pinch zoom at `1.0`.
+- Phase 7 and Phase 8 now require one effective slow-mode predicate or shared helper so Fairy Dust display state and latch cleanup agree.
+- Phase 8 now treats invalid replacement as a Phase 6 regression precondition, focuses new tests on valid zero-sensitive modes, and includes `cargo +nightly fmt --all --check` in final verification.
 
 ### Phase 7 — Preserve tuned presets in Fairy Dust panels and examples  · status: todo
 
@@ -516,7 +572,7 @@ Under `reflect-input-modes`, register `OrbitCamInputModeDescriptor`, `OrbitCamIn
 **Goal:** Update Fairy Dust and user-facing examples so tuned presets display as built-in presets and do not reset until an explicit preset change.
 
 **Spec:**
-Fairy Dust builder overloads, snapshot labels, explicit guidance helpers, and preset cycling must preserve payload presets. Phase 1 already changed builder helpers such as `with_orbit_cam_preset` and related bundle overloads to accept `impl Into<OrbitCamPreset>` and insert via `OrbitCamInputMode::with_preset`; keep that bridge behavior and focus this phase on payload preservation, tuned preset display, tests, and public examples/docs.
+Fairy Dust builder overloads, snapshot labels, explicit guidance helpers, and preset cycling must preserve payload presets. Phase 1 and Phase 5 changed builder helpers such as `with_orbit_cam_preset` and related bundle overloads to accept `impl Into<OrbitCamPreset>` and insert via `OrbitCamInputMode::with_preset`, including `SprinkleBuilder`, `PrimitiveBuilder`, `StudioLightingBuilder`, `CameraHomeBuilder`, and `TitleBarBuilder`; treat builder files as regression checks unless a test exposes a missed bridge path, and focus implementation on payload preservation, tuned preset display, tests, and public examples/docs.
 
 Use `preset.kind().name()` only for identity labels, comparisons, and cycle targets. Use `preset.to_bindings()` on the full preset value for rows, slow-mode hints, summaries, and guidance snapshots so tuned payload values are not reset to defaults.
 
@@ -524,17 +580,18 @@ Panels and guidance that display active controls consume the effective summary p
 
 Preset cycling is by preset kind, not by full preset value. Hiding or showing the panel must not reset a tuned preset. An explicit cycle to another preset intentionally constructs the target preset's default settings.
 
-Slow-mode UI should follow effective enabled controls. Define effective slow mode as "slow mode plus at least one enabled contribution it can scale"; hide the slow-mode row and clear active slow-mode display state when all slow-scaled controls are disabled. This includes snapshot/guidance paths that currently derive slow-mode text from authored `slow_mode()` independently of effective rows.
+Slow-mode UI should follow effective enabled controls. Define effective slow mode as "slow mode plus at least one enabled contribution it can scale"; hide the slow-mode row and clear active slow-mode display state when all slow-scaled controls are disabled. This includes snapshot/guidance paths that currently derive slow-mode text from authored `slow_mode()` independently of effective rows. Use the same effective slow-mode rule that Phase 8 uses for routing/latch cleanup, so Fairy Dust display state and input latch state cannot disagree. Phase 5 intentionally left pinch and touch at `1.0` for built-in presets, and `BlenderLike` still emits `OrbitCamPinchZoom`; a tuned Blender-like preset with mouse and smooth-scroll sensitivity set to zero still has an enabled pinch contribution, so do not use that preset as the all-disabled slow-mode case. Use a constructible custom `OrbitCamBindings` setup with `slow_mode()` configured and all effective controls disabled for hide-row assertions until a future preset API owns pinch or touch sensitivity.
 
 Update `input_preset_blender_like.rs` as the primary user-facing example. It should tune Blender-like mouse and smooth-scroll sensitivities while keeping the existing face-panel/control-panel scaffolding. Put named sensitivity constants near `spawn_camera`, make the module doc comment name the tuned mouse and smooth-scroll values, and use only the tuned-preset helper in `spawn_camera`. Update module docs and section header to say the example attaches a tuned Blender-like preset with `OrbitCam::with_preset`; avoid stale prose that says it attaches `OrbitCam::blender_like` or raw `OrbitCamInputMode::Preset` rows. Keep control summaries labeled as `Preset / BlenderLike`.
 
-Leave `input_custom.rs` focused on app-owned bindings. It should include one readable `.with_sensitivity(...)` binding example, but not become a sensitivity reference. User-facing prose there should call Bevy pixel-scroll input "smooth scroll" even if low-level type names still say `OrbitCamTrackpadScroll`.
+Leave `input_custom.rs` focused on app-owned bindings. It already includes a readable `.with_sensitivity(...)` binding example and smooth-scroll wording; regression-check it and edit only if stale prose remains.
 
 Re-run the Phase 1 constructor/helper migration as a regression check, then update examples and docs only where payload-carrying presets change behavior or prose. Search for stale `OrbitCamPreset::BlenderLike`-style unit construction, tuned-example prose that still says `OrbitCam::blender_like`, and user-facing `trackpad` wording where the public concept should be `smooth scroll`.
 
 **Files:**
 - `crates/fairy_dust/src/builder/{sprinkle,primitive,studio_lighting,title_bar,camera_home}.rs` — preserve existing `impl Into<OrbitCamPreset>` bridge behavior through payload-carrying presets.
 - `crates/fairy_dust/src/camera_control_panel/{snapshot,guidance,preset_switch,display}.rs` — payload-preserving labels, slow-mode hints, rows, kind-based cycling, tuned preservation tests.
+- `crates/bevy_lagrange/src/input/control_summary.rs` — shared effective-row or effective-slow-mode predicate if Fairy Dust needs one source of truth for slow-mode visibility.
 - `crates/fairy_dust/src/orbit_cam.rs` — camera marker/installation helper adjustments if builder paths require them.
 - `crates/bevy_lagrange/examples/input_preset_blender_like.rs` — primary tuned preset example.
 - `crates/bevy_lagrange/examples/input_custom.rs` — one custom binding sensitivity example and public wording cleanup.
@@ -543,9 +600,9 @@ Re-run the Phase 1 constructor/helper migration as a regression check, then upda
 - `crates/bevy_lagrange/README.md` and `crates/fairy_dust/README.md` — update only if they contain stale preset construction or public wording affected by payload presets.
 - `docs/bevy_lagrange/as-built/`, `docs/fairy_dust/`, and `docs/bevy_diegetic/` — update only snippets affected by payload presets or stale public wording.
 
-**Constraints from prior phases:** Phase 1 changed Fairy Dust preset cycling to compare by `preset.kind()` and construct fresh target presets through helpers; do not depend on `OrbitCamPreset: Copy + Eq` for identity. Phase 3 and Phase 4 made control summaries represent effective enabled rows; Fairy Dust should consume that summary path instead of authored arrays for visible controls. Phase 5 introduced payload presets and source setters. Phase 6 defined reflected descriptor ownership; Fairy Dust direct mode changes or preset cycling must not cause stale reflected descriptors to reapply unexpectedly.
+**Constraints from prior phases:** Phase 1 changed Fairy Dust preset cycling to compare by `preset.kind()` and construct fresh target presets through helpers; do not depend on `OrbitCamPreset: Copy + Eq` for identity. Phase 3 and Phase 4 made control summaries represent effective enabled rows; Fairy Dust should consume that summary path instead of authored arrays for visible controls. Phase 5 introduced payload presets, source setters, gamepad preset payload tuning, and `impl Into<OrbitCamPreset>` bridge coverage for the Fairy Dust builder wrapper chain. Phase 5 also intentionally left built-in preset pinch/touch sensitivity at `1.0`, so zeroing Blender-like mouse and smooth-scroll sensitivity does not disable every slow-scaled contribution. Phase 6 defined reflected descriptor ownership and added a Fairy Dust preset-cycle regression proving stale descriptors do not reapply; Phase 7 should not re-test descriptor ownership unless it changes preset cycling.
 
-**Acceptance gate:** Fairy Dust tests prove a tuned Blender-like preset inserted through builder helpers displays `Preset / BlenderLike`, preserves tuning and slow-mode hint through hide/show when at least one enabled slow-scaled contribution exists, hides the slow-mode hint when tuned sensitivity disables every slow-scaled contribution, and only resets to a default target preset on explicit cycle. `input_preset_blender_like.rs` compile-checks with tuned `OrbitCam::with_preset(preset)`. `input_custom.rs` remains `Bindings / Custom`. `rg` checks over `crates` and `docs` find no stale unit-variant construction outside constructors/tests and no stale tuned-example prose saying `OrbitCam::blender_like`.
+**Acceptance gate:** Fairy Dust tests prove a tuned Blender-like preset inserted through builder helpers displays `Preset / BlenderLike`, preserves tuning and the slow-mode hint through hide/show while pinch or any other enabled slow-scaled contribution remains, hides the slow-mode hint for a custom slow-mode binding setup whose effective controls are all disabled, and only resets to a default target preset on explicit cycle. Builder wrapper regression tests or compile checks cover `SprinkleBuilder`, `PrimitiveBuilder`, `StudioLightingBuilder`, `CameraHomeBuilder`, and `TitleBarBuilder` accepting typed preset payloads. `input_preset_blender_like.rs` compile-checks with tuned `OrbitCam::with_preset(preset)`. `input_custom.rs` remains `Bindings / Custom`. `rg` checks over `crates` and `docs` find no stale unit-variant construction outside constructors/tests and no stale tuned-example prose saying `OrbitCam::blender_like`.
 
 ### Phase 8 — Close out lifecycle, animation, and full verification  · status: todo
 
@@ -556,7 +613,7 @@ Re-run the Phase 1 constructor/helper migration as a regression check, then upda
 **Spec:**
 Mode changes that disable active sources must flush debounced lifecycle state. When reconciliation removes or disables a source, old `OrbitCamInteractionState` reports, settle deadlines, latches, panel highlights, and animation-interrupt state clear on the next frame rather than waiting for the normal debounce window.
 
-Routing latches are part of the disabled-source closeout. Tests must cover an active mouse/keyboard or slow-mode latch changing to a zero-sensitive mode and clearing on the next frame.
+Routing latches are part of the disabled-source closeout. Tests must cover an active mouse/keyboard or slow-mode latch changing to a zero-sensitive mode and clearing on the next frame. Include a constructible case where `bindings.slow_mode()` still exists but every effective slow-scaled contribution is disabled, such as custom bindings with slow mode configured and all controls disabled. Do not use tuned Blender-like with mouse and smooth-scroll sensitivity set to zero for the all-disabled case, because built-in Blender-like still emits enabled pinch zoom. `clear_latches_on_mode_replaced` must use the same effective slow-mode rule as Fairy Dust display instead of only checking whether `slow_mode()` is present.
 
 Zero-sensitive input must not cancel, complete, or ignore-clear an active animation as user input. The same source with nonzero sensitivity still interrupts according to `CameraInputInterruptBehavior`. Phase 4 already covers raw adapter zero sensitivity at the adapter boundary; this phase emphasizes valid tuned presets that generate zero-sensitive native and adapter bindings.
 
@@ -570,13 +627,14 @@ Run the migration closeout checks at each major boundary if any previous phase l
 - reflected drafts/export/apply/type registration;
 - default-feature and no-default-features validation.
 
-Mode-change cleanup tests depend on Phase 5 and Phase 6 transactionality. Use valid zero-sensitive tuned presets for lifecycle/latch/animation cleanup checks after invalid preset replacement has already been proven non-destructive, so cleanup failures are not conflated with invalid-replacement fallback behavior.
+Mode-change cleanup tests depend on Phase 5 and Phase 6 transactionality. Use valid zero-sensitive tuned presets for lifecycle/latch/animation cleanup checks after invalid preset replacement has already been proven non-destructive, so cleanup failures are not conflated with invalid-replacement fallback behavior. Treat invalid replacement as a regression precondition already covered by Phase 6 unless a final check exposes a regression. Reuse the effective slow-mode predicate from Phase 7 or move it into a shared helper before adding latch assertions.
 
 Final verification checks:
 
 - `cargo nextest run --all-features --workspace --tests`
 - `cargo check --workspace --examples --all-features`
 - `cargo check -p bevy_lagrange --all-targets --no-default-features`
+- `cargo +nightly fmt --all --check`
 - `taplo fmt --check`
 - full `clippy` skill/workflow
 
@@ -593,6 +651,6 @@ The direct `cargo mend --fail-on-warn` failures in Phase 1 and Phase 2 were comm
 - `crates/fairy_dust/src/camera_control_panel/{snapshot,preset_switch}.rs` — final panel highlight/slow-mode/cycling assertions if not already covered.
 - `Cargo.toml`, `crates/bevy_lagrange/Cargo.toml`, `taplo.toml`, `rustfmt.toml` — verification/config inputs only if failures require narrow fixes.
 
-**Constraints from prior phases:** Phase 1 bridge APIs (`OrbitCamPresetKind`, constructor helpers, borrowed `name`/`to_bindings`, `OrbitCamInputMode::with_preset`, `OrbitCam::with_preset`) are the stable public path and public examples/docs should keep constructor/helper form. Phase 3 filters disabled native input before lifecycle receives `OrbitCamInput`, and Phase 4 filters disabled adapter-backed input and source flags before resolver/lifecycle code sees semantic input. Phase 5 and Phase 6 must have proven invalid preset replacement is non-destructive before this phase uses valid zero-sensitive tuned presets for cleanup assertions. All implementation phases must leave default behavior unchanged when sensitivity is `1.0`; zero sensitivity disables runtime participation but authored payload remains round-trippable; custom bindings label as custom; tuned presets label by kind and lower from full payload; reflected and runtime preset replacement validate before destroying working installations.
+**Constraints from prior phases:** Phase 1 bridge APIs (`OrbitCamPresetKind`, constructor helpers, borrowed `name`/`to_bindings`, `OrbitCamInputMode::with_preset`, `OrbitCam::with_preset`) are the stable public path and public examples/docs should keep constructor/helper form. Phase 3 filters disabled native input before lifecycle receives `OrbitCamInput`, and Phase 4 filters disabled adapter-backed input and source flags before resolver/lifecycle code sees semantic input. Phase 5 and Phase 6 proved invalid preset replacement is non-destructive; Phase 8 should focus new work on valid zero-sensitive modes through lifecycle, latches, panels, and animation. Phase 5 left built-in preset pinch/touch sensitivity at `1.0`, so use custom slow-mode bindings for the all-disabled slow-mode case. All implementation phases must leave default behavior unchanged when sensitivity is `1.0`; zero sensitivity disables runtime participation but authored payload remains round-trippable; custom bindings label as custom; tuned presets label by kind and lower from full payload; reflected and runtime preset replacement validate before destroying working installations.
 
-**Acceptance gate:** Added tests cover active source -> apply valid zero-sensitive tuned preset -> next frame has no interaction state, no panel highlight, no mouse/keyboard or slow-mode latch, and no animation interrupt; zero-sensitive payload-generated native and adapter inputs produce no semantic delta, source attribution, active row, lifecycle state, latch, or animation interrupt; nonzero tuned input still interrupts according to `CameraInputInterruptBehavior`; default bindings produce unchanged values; invalid `NaN`, infinite, or negative sensitivity is rejected without destroying the previous working mode; every final verification check listed in the Spec passes, including the full `clippy` skill.
+**Acceptance gate:** Added tests cover active source -> apply valid zero-sensitive tuned preset -> next frame has no interaction state, no panel highlight, no mouse/keyboard or slow-mode latch, and no animation interrupt; zero-sensitive payload-generated native and adapter inputs produce no semantic delta, source attribution, active row, lifecycle state, latch, or animation interrupt; a custom slow-mode binding case clears the slow latch even when `slow_mode()` is still configured but no effective slow-scaled contribution remains; nonzero tuned input still interrupts according to `CameraInputInterruptBehavior`; default bindings produce unchanged values; invalid `NaN`, infinite, or negative sensitivity remains rejected without destroying the previous working mode; every final verification check listed in the Spec passes, including the full `clippy` skill and `cargo +nightly fmt --all --check`.

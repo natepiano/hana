@@ -1,6 +1,9 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
+#[cfg(feature = "reflect-input-modes")]
+use super::enum_preset::OrbitCamSensitivityDraft;
+use super::source_sensitivity::GamepadSensitivity;
 use crate::input::ControlSpeed;
 use crate::input::bindings::CameraInputGamepadSelectionPolicy;
 use crate::input::bindings::InputDeadZone;
@@ -8,11 +11,14 @@ use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamHeldBinding;
 use crate::input::bindings::OrbitCamInputBinding;
+use crate::input::bindings::OrbitCamSensitivity;
 use crate::input::bindings::error::OrbitCamBindingsError;
 
 /// Tunable gamepad preset descriptor.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Default)]
 pub struct OrbitCamGamepadPreset {
+    sensitivity:      OrbitCamSensitivity,
     orbit_scale:      f32,
     slow_orbit_scale: f32,
     pan_scale:        f32,
@@ -51,6 +57,62 @@ impl OrbitCamGamepadPreset {
         <Self as OrbitCamPresetConfig>::build(self)
     }
 
+    /// Sets source sensitivity for generated gamepad bindings.
+    #[must_use]
+    pub const fn gamepad_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
+        self.sensitivity = sensitivity;
+        self
+    }
+
+    /// Sets the fast orbit scale.
+    #[must_use]
+    pub const fn orbit_scale(mut self, orbit_scale: f32) -> Self {
+        self.orbit_scale = orbit_scale;
+        self
+    }
+
+    /// Sets the slow orbit scale.
+    #[must_use]
+    pub const fn slow_orbit_scale(mut self, slow_orbit_scale: f32) -> Self {
+        self.slow_orbit_scale = slow_orbit_scale;
+        self
+    }
+
+    /// Sets the fast pan scale.
+    #[must_use]
+    pub const fn pan_scale(mut self, pan_scale: f32) -> Self {
+        self.pan_scale = pan_scale;
+        self
+    }
+
+    /// Sets the slow pan scale.
+    #[must_use]
+    pub const fn slow_pan_scale(mut self, slow_pan_scale: f32) -> Self {
+        self.slow_pan_scale = slow_pan_scale;
+        self
+    }
+
+    /// Sets the fast zoom scale.
+    #[must_use]
+    pub const fn zoom_scale(mut self, zoom_scale: f32) -> Self {
+        self.zoom_scale = zoom_scale;
+        self
+    }
+
+    /// Sets the slow zoom scale.
+    #[must_use]
+    pub const fn slow_zoom_scale(mut self, slow_zoom_scale: f32) -> Self {
+        self.slow_zoom_scale = slow_zoom_scale;
+        self
+    }
+
+    /// Sets the axial stick dead-zone thresholds.
+    #[must_use]
+    pub const fn stick_dead_zone(mut self, stick_dead_zone: InputDeadZone) -> Self {
+        self.stick_dead_zone = stick_dead_zone;
+        self
+    }
+
     pub(super) fn build_into(
         self,
         builder: OrbitCamBindingsBuilder,
@@ -60,6 +122,7 @@ impl OrbitCamGamepadPreset {
     }
 
     fn validate(&self) -> Result<(), OrbitCamBindingsError> {
+        self.sensitivity.validate()?;
         Self::validate_scale_pair(self.orbit_scale, self.slow_orbit_scale)?;
         Self::validate_scale_pair(self.pan_scale, self.slow_pan_scale)?;
         Self::validate_scale_pair(self.zoom_scale, self.slow_zoom_scale)?;
@@ -93,6 +156,9 @@ impl OrbitCamGamepadPreset {
     }
 
     fn add_to(self, builder: OrbitCamBindingsBuilder) -> OrbitCamBindingsBuilder {
+        let orbit_sensitivity = self.sensitivity.orbit_sensitivity().value();
+        let pan_sensitivity = self.sensitivity.pan_sensitivity().value();
+        let zoom_sensitivity = self.sensitivity.zoom_sensitivity().value();
         let fast_orbit = gamepad_stick(
             GamepadAxis::RightStickX,
             GamepadAxis::RightStickY,
@@ -121,16 +187,23 @@ impl OrbitCamGamepadPreset {
         builder
             .orbit(
                 OrbitCamHeldBinding::same(fast_orbit)
+                    .with_sensitivity(orbit_sensitivity)
                     .with_blocked_gate(GamepadButton::RightTrigger),
             )
             .orbit(
                 OrbitCamHeldBinding::same(slow_orbit)
+                    .with_sensitivity(orbit_sensitivity)
                     .with_required_gate(GamepadButton::RightTrigger)
                     .speed(ControlSpeed::Slow),
             )
-            .pan(OrbitCamHeldBinding::same(fast_pan).with_blocked_gate(GamepadButton::LeftTrigger))
+            .pan(
+                OrbitCamHeldBinding::same(fast_pan)
+                    .with_sensitivity(pan_sensitivity)
+                    .with_blocked_gate(GamepadButton::LeftTrigger),
+            )
             .pan(
                 OrbitCamHeldBinding::same(slow_pan)
+                    .with_sensitivity(pan_sensitivity)
                     .with_required_gate(GamepadButton::LeftTrigger)
                     .speed(ControlSpeed::Slow),
             )
@@ -139,6 +212,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::RightTrigger2,
                     self.zoom_scale,
                 ))
+                .with_sensitivity(zoom_sensitivity)
                 .with_blocked_gate(GamepadButton::RightTrigger),
             )
             .zoom(
@@ -146,6 +220,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::LeftTrigger2,
                     -self.zoom_scale,
                 ))
+                .with_sensitivity(zoom_sensitivity)
                 .with_blocked_gate(GamepadButton::LeftTrigger),
             )
             .zoom(
@@ -153,6 +228,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::RightTrigger2,
                     self.slow_zoom_scale,
                 ))
+                .with_sensitivity(zoom_sensitivity)
                 .with_required_gate(GamepadButton::RightTrigger)
                 .speed(ControlSpeed::Slow),
             )
@@ -161,6 +237,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::LeftTrigger2,
                     -self.slow_zoom_scale,
                 ))
+                .with_sensitivity(zoom_sensitivity)
                 .with_required_gate(GamepadButton::LeftTrigger)
                 .speed(ControlSpeed::Slow),
             )
@@ -171,6 +248,7 @@ impl OrbitCamGamepadPreset {
 impl Default for OrbitCamGamepadPreset {
     fn default() -> Self {
         Self {
+            sensitivity:      OrbitCamSensitivity::default(),
             orbit_scale:      Self::DEFAULT_ORBIT_SCALE,
             slow_orbit_scale: Self::DEFAULT_SLOW_ORBIT_SCALE,
             pan_scale:        Self::DEFAULT_PAN_SCALE,
@@ -182,6 +260,14 @@ impl Default for OrbitCamGamepadPreset {
                 Self::DEFAULT_STICK_DEAD_ZONE_UPPER,
             ),
         }
+    }
+}
+
+impl GamepadSensitivity for OrbitCamGamepadPreset {
+    type Sensitivity = OrbitCamSensitivity;
+
+    fn gamepad_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
+        Self::gamepad_sensitivity(self, sensitivity)
     }
 }
 
@@ -247,6 +333,17 @@ impl OrbitCamGamepadPresetBuilder {
         self
     }
 
+    /// Sets source sensitivity for generated gamepad bindings.
+    #[must_use]
+    pub const fn gamepad_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
+        self.preset.sensitivity = sensitivity;
+        self
+    }
+
+    /// Returns the tuned preset payload.
+    #[must_use]
+    pub const fn into_preset(self) -> OrbitCamGamepadPreset { self.preset }
+
     /// Builds tuned gamepad bindings.
     ///
     /// # Errors
@@ -272,4 +369,69 @@ fn gamepad_stick(
 
 fn gamepad_trigger(button: GamepadButton, scale: f32) -> OrbitCamInputBinding {
     OrbitCamInputBinding::gamepad_button_axis(button, scale).with_delta_scale()
+}
+
+/// Reflected draft for the gamepad preset payload.
+#[cfg(feature = "reflect-input-modes")]
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[reflect(Default)]
+pub struct OrbitCamGamepadPresetDraft {
+    /// Source sensitivity for generated gamepad bindings.
+    pub gamepad_sensitivity: OrbitCamSensitivityDraft,
+    /// Fast orbit scale.
+    pub orbit_scale:         f32,
+    /// Slow orbit scale.
+    pub slow_orbit_scale:    f32,
+    /// Fast pan scale.
+    pub pan_scale:           f32,
+    /// Slow pan scale.
+    pub slow_pan_scale:      f32,
+    /// Fast zoom scale.
+    pub zoom_scale:          f32,
+    /// Slow zoom scale.
+    pub slow_zoom_scale:     f32,
+    /// Axial stick dead-zone thresholds.
+    pub stick_dead_zone:     InputDeadZone,
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl Default for OrbitCamGamepadPresetDraft {
+    fn default() -> Self {
+        let preset = OrbitCamGamepadPreset::default();
+        Self::from(preset)
+    }
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl TryFrom<OrbitCamGamepadPresetDraft> for OrbitCamGamepadPreset {
+    type Error = OrbitCamBindingsError;
+
+    fn try_from(draft: OrbitCamGamepadPresetDraft) -> Result<Self, Self::Error> {
+        Ok(Self {
+            sensitivity:      draft.gamepad_sensitivity.try_into()?,
+            orbit_scale:      draft.orbit_scale,
+            slow_orbit_scale: draft.slow_orbit_scale,
+            pan_scale:        draft.pan_scale,
+            slow_pan_scale:   draft.slow_pan_scale,
+            zoom_scale:       draft.zoom_scale,
+            slow_zoom_scale:  draft.slow_zoom_scale,
+            stick_dead_zone:  draft.stick_dead_zone,
+        })
+    }
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl From<OrbitCamGamepadPreset> for OrbitCamGamepadPresetDraft {
+    fn from(preset: OrbitCamGamepadPreset) -> Self {
+        Self {
+            gamepad_sensitivity: preset.sensitivity.into(),
+            orbit_scale:         preset.orbit_scale,
+            slow_orbit_scale:    preset.slow_orbit_scale,
+            pan_scale:           preset.pan_scale,
+            slow_pan_scale:      preset.slow_pan_scale,
+            zoom_scale:          preset.zoom_scale,
+            slow_zoom_scale:     preset.slow_zoom_scale,
+            stick_dead_zone:     preset.stick_dead_zone,
+        }
+    }
 }

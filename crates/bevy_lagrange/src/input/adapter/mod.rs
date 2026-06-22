@@ -127,11 +127,13 @@ mod tests {
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamButtonDragZoom;
     use crate::input::OrbitCamButtonDragZoomAxis;
+    use crate::input::OrbitCamGamepadPreset;
     use crate::input::OrbitCamHeldBinding;
     use crate::input::OrbitCamInput;
     use crate::input::OrbitCamInputBinding;
     use crate::input::OrbitCamInputContext;
     use crate::input::OrbitCamInputMode;
+    use crate::input::OrbitCamInputModeReplaced;
     use crate::input::OrbitCamMouseDrag;
     use crate::input::OrbitCamMouseWheelZoom;
     use crate::input::OrbitCamPinchZoom;
@@ -188,9 +190,13 @@ mod tests {
 
     type TestResult = Result<(), &'static str>;
 
+    #[derive(Resource, Default)]
+    struct ModeReplacementEvents(usize);
+
     const BUTTON_DRAG_MOTION_Y: f32 = -8.0;
     const BUTTON_DRAG_SENSITIVITY: f32 = 0.25;
     const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
+    const INVALID_SOURCE_SENSITIVITY: f32 = -1.0;
     const PINCH_DELTA: f32 = 2.0;
     const PINCH_SENSITIVITY: f32 = 0.5;
     const PIXEL_SCROLL_DELTA_Y: f32 = 20.0;
@@ -1774,6 +1780,57 @@ mod tests {
                     .get::<OrbitCamBindingGateCondition>(*entity)
                     .is_some())
         );
+    }
+
+    #[test]
+    fn invalid_direct_preset_replacement_preserves_installed_action_entities() -> TestResult {
+        let mut app = test_app();
+        let valid_mode = OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad());
+        let camera = spawn_camera(app.world_mut(), valid_mode.clone());
+        route_to(&mut app, camera);
+        app.update();
+
+        let previous_entities = modes::installed_input_entities(app.world(), camera);
+        let previous_actions = *app
+            .world()
+            .get::<OrbitCamInputActionEntities>(camera)
+            .ok_or("camera should have input action entities")?;
+        app.init_resource::<ModeReplacementEvents>();
+        app.world_mut().entity_mut(camera).observe(
+            |_replaced: On<OrbitCamInputModeReplaced>,
+             mut events: ResMut<ModeReplacementEvents>| {
+                events.0 += 1;
+            },
+        );
+
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(OrbitCamInputMode::with_preset(
+                OrbitCamGamepadPreset::default()
+                    .gamepad_sensitivity(OrbitCamSensitivity::uniform(INVALID_SOURCE_SENSITIVITY)),
+            ));
+        app.update();
+
+        assert_eq!(
+            app.world().get::<OrbitCamInputMode>(camera),
+            Some(&valid_mode)
+        );
+        assert_eq!(
+            modes::installed_input_entities(app.world(), camera),
+            previous_entities
+        );
+        assert_eq!(
+            app.world().get::<OrbitCamInputActionEntities>(camera),
+            Some(&previous_actions)
+        );
+        assert!(previous_entities.iter().any(|entity| {
+            app.world()
+                .get::<OrbitCamBindingGateCondition>(*entity)
+                .is_some()
+        }));
+        assert_eq!(app.world().resource::<ModeReplacementEvents>().0, 0);
+
+        Ok(())
     }
 
     #[test]

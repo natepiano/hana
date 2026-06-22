@@ -2,23 +2,31 @@ use bevy::prelude::*;
 use bevy_enhanced_input::prelude::ModKeys;
 
 use super::config::OrbitCamPresetConfig;
+#[cfg(feature = "reflect-input-modes")]
+use super::enum_preset::OrbitCamSensitivityDraft;
+use super::source_sensitivity::MouseSensitivity;
+use super::source_sensitivity::SmoothScrollSensitivity;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamMouseDrag;
 use crate::input::bindings::OrbitCamMouseWheelZoom;
 use crate::input::bindings::OrbitCamPinchZoom;
 use crate::input::bindings::OrbitCamScalePolicy;
+use crate::input::bindings::OrbitCamSensitivity;
 use crate::input::bindings::OrbitCamSlowMode;
 use crate::input::bindings::OrbitCamTrackpadScroll;
 use crate::input::bindings::error::OrbitCamBindingsError;
 
 /// Configures Blender-style pointer and smooth-scroll camera controls.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Default)]
 pub struct OrbitCamBlenderLikePreset {
-    zoom_mod_keys:        ModKeys,
-    slow_toggle_key:      Option<KeyCode>,
-    slow_toggle_mod_keys: ModKeys,
-    slow_scale:           f32,
+    mouse_sensitivity:         OrbitCamSensitivity,
+    smooth_scroll_sensitivity: OrbitCamSensitivity,
+    zoom_mod_keys:             ModKeys,
+    slow_toggle_key:           Option<KeyCode>,
+    slow_toggle_mod_keys:      ModKeys,
+    slow_scale:                f32,
 }
 
 impl OrbitCamBlenderLikePreset {
@@ -65,6 +73,20 @@ impl OrbitCamBlenderLikePreset {
         self
     }
 
+    /// Sets source sensitivity for mouse-drag and line-wheel input.
+    #[must_use]
+    pub const fn mouse_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
+        self.mouse_sensitivity = sensitivity;
+        self
+    }
+
+    /// Sets source sensitivity for Bevy pixel-scroll input.
+    #[must_use]
+    pub const fn smooth_scroll_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
+        self.smooth_scroll_sensitivity = sensitivity;
+        self
+    }
+
     pub(super) fn build_into(
         self,
         builder: OrbitCamBindingsBuilder,
@@ -74,6 +96,8 @@ impl OrbitCamBlenderLikePreset {
     }
 
     fn validate(&self) -> Result<(), OrbitCamBindingsError> {
+        self.mouse_sensitivity.validate()?;
+        self.smooth_scroll_sensitivity.validate()?;
         if self.slow_toggle_key.is_some()
             && (!self.slow_scale.is_finite()
                 || self.slow_scale <= Self::MIN_SLOW_SCALE
@@ -99,12 +123,33 @@ impl OrbitCamBlenderLikePreset {
         };
 
         builder
-            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
-            .orbit(OrbitCamTrackpadScroll::default())
-            .pan(OrbitCamMouseDrag::new(MouseButton::Middle).with_mod_keys(ModKeys::SHIFT))
-            .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
-            .zoom(OrbitCamMouseWheelZoom)
-            .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(self.zoom_mod_keys))
+            .orbit(
+                OrbitCamMouseDrag::new(MouseButton::Middle)
+                    .with_sensitivity(self.mouse_sensitivity.orbit_sensitivity().value()),
+            )
+            .orbit(
+                OrbitCamTrackpadScroll::default()
+                    .with_sensitivity(self.smooth_scroll_sensitivity.orbit_sensitivity().value()),
+            )
+            .pan(
+                OrbitCamMouseDrag::new(MouseButton::Middle)
+                    .with_mod_keys(ModKeys::SHIFT)
+                    .with_sensitivity(self.mouse_sensitivity.pan_sensitivity().value()),
+            )
+            .pan(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(ModKeys::SHIFT)
+                    .with_sensitivity(self.smooth_scroll_sensitivity.pan_sensitivity().value()),
+            )
+            .zoom(
+                OrbitCamMouseWheelZoom
+                    .with_sensitivity(self.mouse_sensitivity.zoom_sensitivity().value()),
+            )
+            .zoom(
+                OrbitCamTrackpadScroll::default()
+                    .with_mod_keys(self.zoom_mod_keys)
+                    .with_sensitivity(self.smooth_scroll_sensitivity.zoom_sensitivity().value()),
+            )
             .zoom(OrbitCamPinchZoom)
     }
 }
@@ -112,16 +157,91 @@ impl OrbitCamBlenderLikePreset {
 impl Default for OrbitCamBlenderLikePreset {
     fn default() -> Self {
         Self {
-            zoom_mod_keys:        ModKeys::CONTROL,
-            slow_toggle_key:      Some(KeyCode::KeyS),
-            slow_toggle_mod_keys: ModKeys::ALT,
-            slow_scale:           Self::DEFAULT_SLOW_SCALE,
+            mouse_sensitivity:         OrbitCamSensitivity::default(),
+            smooth_scroll_sensitivity: OrbitCamSensitivity::default(),
+            zoom_mod_keys:             ModKeys::CONTROL,
+            slow_toggle_key:           Some(KeyCode::KeyS),
+            slow_toggle_mod_keys:      ModKeys::ALT,
+            slow_scale:                Self::DEFAULT_SLOW_SCALE,
         }
+    }
+}
+
+impl MouseSensitivity for OrbitCamBlenderLikePreset {
+    type Sensitivity = OrbitCamSensitivity;
+
+    fn mouse_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
+        Self::mouse_sensitivity(self, sensitivity)
+    }
+}
+
+impl SmoothScrollSensitivity for OrbitCamBlenderLikePreset {
+    type Sensitivity = OrbitCamSensitivity;
+
+    fn smooth_scroll_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
+        Self::smooth_scroll_sensitivity(self, sensitivity)
     }
 }
 
 impl OrbitCamPresetConfig for OrbitCamBlenderLikePreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         self.build_into(OrbitCamBindings::builder())?.build()
+    }
+}
+
+/// Reflected draft for the Blender-like preset payload.
+#[cfg(feature = "reflect-input-modes")]
+#[derive(Clone, Debug, PartialEq, Reflect)]
+#[reflect(Default)]
+pub struct OrbitCamBlenderLikePresetDraft {
+    /// Source sensitivity for mouse-drag and line-wheel input.
+    pub mouse_sensitivity:         OrbitCamSensitivityDraft,
+    /// Source sensitivity for Bevy pixel-scroll input.
+    pub smooth_scroll_sensitivity: OrbitCamSensitivityDraft,
+    /// Keyboard modifiers required for trackpad zoom.
+    pub zoom_mod_keys:             ModKeys,
+    /// Key that toggles slow mode on or off for this camera.
+    pub slow_toggle_key:           Option<KeyCode>,
+    /// Modifier keys held with the toggle key to fire the slow-mode toggle.
+    pub slow_toggle_mod_keys:      ModKeys,
+    /// Scale applied to all inputs when slow mode is active.
+    pub slow_scale:                f32,
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl Default for OrbitCamBlenderLikePresetDraft {
+    fn default() -> Self {
+        let preset = OrbitCamBlenderLikePreset::default();
+        Self::from(preset)
+    }
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl TryFrom<OrbitCamBlenderLikePresetDraft> for OrbitCamBlenderLikePreset {
+    type Error = OrbitCamBindingsError;
+
+    fn try_from(draft: OrbitCamBlenderLikePresetDraft) -> Result<Self, Self::Error> {
+        Ok(Self {
+            mouse_sensitivity:         draft.mouse_sensitivity.try_into()?,
+            smooth_scroll_sensitivity: draft.smooth_scroll_sensitivity.try_into()?,
+            zoom_mod_keys:             draft.zoom_mod_keys,
+            slow_toggle_key:           draft.slow_toggle_key,
+            slow_toggle_mod_keys:      draft.slow_toggle_mod_keys,
+            slow_scale:                draft.slow_scale,
+        })
+    }
+}
+
+#[cfg(feature = "reflect-input-modes")]
+impl From<OrbitCamBlenderLikePreset> for OrbitCamBlenderLikePresetDraft {
+    fn from(preset: OrbitCamBlenderLikePreset) -> Self {
+        Self {
+            mouse_sensitivity:         preset.mouse_sensitivity.into(),
+            smooth_scroll_sensitivity: preset.smooth_scroll_sensitivity.into(),
+            zoom_mod_keys:             preset.zoom_mod_keys,
+            slow_toggle_key:           preset.slow_toggle_key,
+            slow_toggle_mod_keys:      preset.slow_toggle_mod_keys,
+            slow_scale:                preset.slow_scale,
+        }
     }
 }

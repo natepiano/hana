@@ -220,7 +220,7 @@ impl CameraHomeBuilder<NoOrbitCam> {
     pub fn with_orbit_cam_preset<F>(
         self,
         configure: F,
-        preset: OrbitCamPreset,
+        preset: impl Into<OrbitCamPreset>,
     ) -> SprinkleBuilder<WithOrbitCam>
     where
         F: FnOnce(&mut OrbitCam) + Send + Sync + 'static,
@@ -233,7 +233,7 @@ impl CameraHomeBuilder<NoOrbitCam> {
     pub fn with_orbit_cam_preset_bundle<F, B>(
         self,
         configure: F,
-        preset: OrbitCamPreset,
+        preset: impl Into<OrbitCamPreset>,
         bundle: B,
     ) -> SprinkleBuilder<WithOrbitCam>
     where

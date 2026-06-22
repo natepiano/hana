@@ -113,7 +113,7 @@ fn cycle_preset(
     }
 }
 
-const fn next_cycle_entry(
+fn next_cycle_entry(
     preset_kind: OrbitCamPresetKind,
     panel_visibility: Visibility,
 ) -> PresetCycleEntry {
@@ -129,7 +129,22 @@ const fn next_cycle_entry(
 
 #[cfg(test)]
 mod tests {
+    use bevy::camera::RenderTarget;
+    use bevy::window::WindowRef;
+    use bevy_lagrange::CameraInputRoutingConfig;
+    use bevy_lagrange::LagrangePlugin;
+    use bevy_lagrange::OrbitCam;
+    use bevy_lagrange::OrbitCamInputModeDescriptor;
+    use bevy_lagrange::OrbitCamInputModeDraft;
+
     use super::*;
+
+    fn camera_preset_kind(app: &App, camera: Entity) -> Option<OrbitCamPresetKind> {
+        match app.world().get::<OrbitCamInputMode>(camera)? {
+            OrbitCamInputMode::Preset(preset) => Some(preset.kind()),
+            _ => None,
+        }
+    }
 
     #[test]
     fn visible_panel_cycles_simple_to_blender() {
@@ -152,6 +167,54 @@ mod tests {
         assert_eq!(
             next_cycle_entry(OrbitCamPreset::blender_like().kind(), Visibility::Hidden),
             PresetCycleEntry::Preset(OrbitCamPreset::simple_mouse())
+        );
+    }
+
+    #[test]
+    fn preset_cycle_does_not_reapply_stale_descriptor() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, LagrangePlugin));
+        app.finish();
+        let camera = app
+            .world_mut()
+            .spawn((
+                OrbitCam::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                OrbitCamInputModeDescriptor {
+                    mode: OrbitCamInputModeDraft::from_preset(&OrbitCamPreset::simple_mouse()),
+                },
+            ))
+            .id();
+        app.world_mut().spawn((
+            CameraGuidancePanel { bound_camera: None },
+            Visibility::Inherited,
+        ));
+        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+        app.update();
+
+        assert_eq!(
+            app.world()
+                .resource::<ResolvedOrbitCamInputRoute>()
+                .routed_camera(),
+            Some(camera)
+        );
+        assert_eq!(
+            camera_preset_kind(&app, camera),
+            Some(OrbitCamPresetKind::SimpleMouse)
+        );
+
+        app.add_systems(Update, cycle_preset);
+        app.update();
+        assert_eq!(
+            camera_preset_kind(&app, camera),
+            Some(OrbitCamPresetKind::BlenderLike)
+        );
+
+        app.update();
+        assert_eq!(
+            camera_preset_kind(&app, camera),
+            Some(OrbitCamPresetKind::BlenderLike)
         );
     }
 }

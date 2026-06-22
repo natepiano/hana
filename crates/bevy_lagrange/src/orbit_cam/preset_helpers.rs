@@ -54,7 +54,12 @@ impl OrbitCam {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::input;
     use crate::input::OrbitCamBindingsError;
+    use crate::input::OrbitCamBlenderLikePreset;
+    use crate::input::OrbitCamSensitivity;
+
+    const TUNED_MOUSE_SENSITIVITY: f32 = 0.5;
 
     #[test]
     fn preset_helpers_insert_requested_input_modes() {
@@ -93,5 +98,21 @@ mod tests {
         ));
 
         Ok(())
+    }
+
+    #[test]
+    fn with_preset_accepts_tuned_payloads() {
+        let tuned = OrbitCamBlenderLikePreset::default()
+            .mouse_sensitivity(OrbitCamSensitivity::uniform(TUNED_MOUSE_SENSITIVITY));
+        let expected_preset = OrbitCamPreset::from(tuned);
+        let expected_mode = OrbitCamInputMode::with_preset(expected_preset.clone());
+        let mut world = World::new();
+        let camera = world.spawn(OrbitCam::with_preset(tuned)).id();
+
+        assert_eq!(world.get::<OrbitCamInputMode>(camera), Some(&expected_mode));
+
+        let summary = input::describe_orbit_cam_controls(&expected_mode);
+        assert_eq!(summary.mode_label, "Preset");
+        assert_eq!(summary.mode_value, expected_preset.kind().name());
     }
 }

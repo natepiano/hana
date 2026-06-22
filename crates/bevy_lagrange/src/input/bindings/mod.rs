@@ -74,15 +74,34 @@ pub use held_binding::OrbitCamGateInput;
 pub use held_binding::OrbitCamGatePolarity;
 pub use held_binding::OrbitCamHeldBinding;
 pub use held_binding::OrbitCamInputBinding;
+pub use preset::GamepadSensitivity;
+pub use preset::MouseSensitivity;
 pub use preset::OrbitCamBlenderLikeKeyboardPreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamBlenderLikeKeyboardPresetDraft;
 pub use preset::OrbitCamBlenderLikePreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamBlenderLikePresetDraft;
 pub use preset::OrbitCamGamepadPreset;
 pub use preset::OrbitCamGamepadPresetBuilder;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamGamepadPresetDraft;
 pub use preset::OrbitCamKeyboardPreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamKeyboardPresetDraft;
 pub use preset::OrbitCamPreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamPresetDraft;
 pub use preset::OrbitCamPresetKind;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamSensitivityDraft;
 pub use preset::OrbitCamSimpleMouseKeyboardPreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamSimpleMouseKeyboardPresetDraft;
 pub use preset::OrbitCamSimpleMousePreset;
+#[cfg(feature = "reflect-input-modes")]
+pub use preset::OrbitCamSimpleMousePresetDraft;
+pub use preset::SmoothScrollSensitivity;
 pub use validate::validate_bindings;
 
 /// Validated runtime binding specification for an `OrbitCam`.
@@ -317,6 +336,7 @@ mod tests {
     use super::*;
     use crate::input::CameraInteractionSources;
     use crate::input::ControlSpeed;
+    use crate::input::HeldCameraAction;
     use crate::input::constants::ORBIT_ACTION_NAME;
     use crate::input::constants::PAN_ACTION_NAME;
     use crate::input::constants::ZOOM_COARSE_ACTION_NAME;
@@ -324,10 +344,18 @@ mod tests {
     const BUTTON_DRAG_SENSITIVITY: f32 = 0.6;
     const CUSTOM_DEFAULT_SENSITIVITY: f32 = InputSensitivity::DEFAULT.0;
     const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
+    const GAMEPAD_SOURCE_SENSITIVITY: f32 = 0.5;
+    const GAMEPAD_TUNED_ORBIT_SCALE: f32 = 321.0;
     const INVALID_NEGATIVE_SENSITIVITY: f32 = -0.01;
+    const MOUSE_ORBIT_SENSITIVITY: f32 = 0.2;
+    const MOUSE_PAN_SENSITIVITY: f32 = 0.3;
+    const MOUSE_ZOOM_SENSITIVITY: f32 = 0.4;
     const MOUSE_DRAG_SENSITIVITY: f32 = 0.2;
     const PINCH_SENSITIVITY: f32 = 0.5;
     const REPLACEMENT_SENSITIVITY: f32 = 0.55;
+    const SMOOTH_SCROLL_ORBIT_SENSITIVITY: f32 = 0.6;
+    const SMOOTH_SCROLL_PAN_SENSITIVITY: f32 = 0.7;
+    const SMOOTH_SCROLL_ZOOM_SENSITIVITY: f32 = 0.8;
     const TOUCH_ORBIT_SENSITIVITY: f32 = 0.7;
     const TOUCH_PAN_SENSITIVITY: f32 = 0.8;
     const TOUCH_ZOOM_SENSITIVITY: f32 = 0.9;
@@ -336,6 +364,26 @@ mod tests {
 
     fn descriptor_with_no_bindings() -> OrbitCamBindingsDescriptor {
         OrbitCamBindingsDescriptor::default()
+    }
+
+    fn first_motion_sensitivity<A: HeldCameraAction>(
+        entry: &HeldActionBindingEntry<A>,
+    ) -> Option<InputSensitivity> {
+        entry
+            .motion_descriptor()
+            .entries_slice()
+            .first()
+            .map(InputBindingEntry::sensitivity)
+    }
+
+    fn first_motion_install_scale<A: HeldCameraAction>(
+        entry: &HeldActionBindingEntry<A>,
+    ) -> Option<f32> {
+        entry
+            .motion_descriptor()
+            .entries_slice()
+            .first()
+            .and_then(|entry| entry.install_modifiers().scale())
     }
 
     #[test]
@@ -386,6 +434,23 @@ mod tests {
     }
 
     #[test]
+    fn default_simple_mouse_preset_matches_implicit_bindings() -> Result<(), OrbitCamBindingsError>
+    {
+        let preset = OrbitCamPreset::simple_mouse().to_bindings()?;
+        let expected = OrbitCamBindings::builder()
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Left))
+            .pan(OrbitCamMouseDrag::new(MouseButton::Right))
+            .zoom(OrbitCamMouseWheelZoom)
+            .zoom(OrbitCamTrackpadScroll::default())
+            .zoom(OrbitCamPinchZoom)
+            .build()?;
+
+        assert_eq!(preset, expected);
+
+        Ok(())
+    }
+
+    #[test]
     fn blender_like_default_builds_slow_mode() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBlenderLikePreset::default().build()?;
 
@@ -395,6 +460,144 @@ mod tests {
                 .map(|slow_mode| (slow_mode.toggle_key, slow_mode.mod_keys)),
             Some((KeyCode::KeyS, ModKeys::ALT))
         );
+        Ok(())
+    }
+
+    #[test]
+    fn tuned_simple_mouse_preset_lowers_pointer_source_sensitivity()
+    -> Result<(), OrbitCamBindingsError> {
+        let mouse_sensitivity = OrbitCamSensitivity::new()
+            .orbit(MOUSE_ORBIT_SENSITIVITY)
+            .pan(MOUSE_PAN_SENSITIVITY)
+            .zoom(MOUSE_ZOOM_SENSITIVITY);
+        let smooth_scroll_sensitivity =
+            OrbitCamSensitivity::new().zoom(SMOOTH_SCROLL_ZOOM_SENSITIVITY);
+        let bindings = OrbitCamSimpleMousePreset::default()
+            .mouse_sensitivity(mouse_sensitivity)
+            .smooth_scroll_sensitivity(smooth_scroll_sensitivity)
+            .build()?;
+
+        let [orbit] = bindings.orbit().entries() else {
+            assert_eq!(bindings.orbit().entries().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            first_motion_sensitivity(orbit),
+            Some(InputSensitivity(MOUSE_ORBIT_SENSITIVITY))
+        );
+
+        let [pan] = bindings.pan().entries() else {
+            assert_eq!(bindings.pan().entries().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            first_motion_sensitivity(pan),
+            Some(InputSensitivity(MOUSE_PAN_SENSITIVITY))
+        );
+
+        let Some(wheel) = bindings.mouse_wheel_zoom() else {
+            assert!(bindings.mouse_wheel_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(
+            wheel.sensitivity(),
+            InputSensitivity(MOUSE_ZOOM_SENSITIVITY)
+        );
+
+        let [smooth_scroll_zoom] = bindings.trackpad_zoom() else {
+            assert_eq!(bindings.trackpad_zoom().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            smooth_scroll_zoom.sensitivity(),
+            InputSensitivity(SMOOTH_SCROLL_ZOOM_SENSITIVITY)
+        );
+
+        let Some(pinch) = bindings.pinch_zoom_binding() else {
+            assert!(bindings.pinch_zoom_binding().is_some());
+            return Ok(());
+        };
+        assert_eq!(pinch.sensitivity(), InputSensitivity::DEFAULT);
+
+        Ok(())
+    }
+
+    #[test]
+    fn tuned_blender_like_preset_lowers_mouse_and_smooth_scroll_sensitivity()
+    -> Result<(), OrbitCamBindingsError> {
+        let mouse_sensitivity = OrbitCamSensitivity::new()
+            .orbit(MOUSE_ORBIT_SENSITIVITY)
+            .pan(MOUSE_PAN_SENSITIVITY)
+            .zoom(MOUSE_ZOOM_SENSITIVITY);
+        let smooth_scroll_sensitivity = OrbitCamSensitivity::new()
+            .orbit(SMOOTH_SCROLL_ORBIT_SENSITIVITY)
+            .pan(SMOOTH_SCROLL_PAN_SENSITIVITY)
+            .zoom(SMOOTH_SCROLL_ZOOM_SENSITIVITY);
+        let bindings = OrbitCamBlenderLikePreset::default()
+            .mouse_sensitivity(mouse_sensitivity)
+            .smooth_scroll_sensitivity(smooth_scroll_sensitivity)
+            .build()?;
+
+        let [orbit] = bindings.orbit().entries() else {
+            assert_eq!(bindings.orbit().entries().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            first_motion_sensitivity(orbit),
+            Some(InputSensitivity(MOUSE_ORBIT_SENSITIVITY))
+        );
+
+        let [smooth_scroll_orbit] = bindings.trackpad_orbit() else {
+            assert_eq!(bindings.trackpad_orbit().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            smooth_scroll_orbit.sensitivity(),
+            InputSensitivity(SMOOTH_SCROLL_ORBIT_SENSITIVITY)
+        );
+
+        let [pan] = bindings.pan().entries() else {
+            assert_eq!(bindings.pan().entries().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            first_motion_sensitivity(pan),
+            Some(InputSensitivity(MOUSE_PAN_SENSITIVITY))
+        );
+
+        let [smooth_scroll_pan] = bindings.trackpad_pan() else {
+            assert_eq!(bindings.trackpad_pan().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            smooth_scroll_pan.sensitivity(),
+            InputSensitivity(SMOOTH_SCROLL_PAN_SENSITIVITY)
+        );
+
+        let Some(wheel) = bindings.mouse_wheel_zoom() else {
+            assert!(bindings.mouse_wheel_zoom().is_some());
+            return Ok(());
+        };
+        assert_eq!(
+            wheel.sensitivity(),
+            InputSensitivity(MOUSE_ZOOM_SENSITIVITY)
+        );
+
+        let [smooth_scroll_zoom] = bindings.trackpad_zoom() else {
+            assert_eq!(bindings.trackpad_zoom().len(), 1);
+            return Ok(());
+        };
+        assert_eq!(
+            smooth_scroll_zoom.sensitivity(),
+            InputSensitivity(SMOOTH_SCROLL_ZOOM_SENSITIVITY)
+        );
+
+        let Some(pinch) = bindings.pinch_zoom_binding() else {
+            assert!(bindings.pinch_zoom_binding().is_some());
+            return Ok(());
+        };
+        assert_eq!(pinch.sensitivity(), InputSensitivity::DEFAULT);
+
         Ok(())
     }
 
@@ -421,6 +624,151 @@ mod tests {
                 .build(),
             Err(OrbitCamBindingsError::InvalidScale)
         );
+    }
+
+    #[test]
+    fn gamepad_preset_validates_source_sensitivity() {
+        assert_eq!(
+            OrbitCamGamepadPreset::default()
+                .gamepad_sensitivity(OrbitCamSensitivity::uniform(INVALID_NEGATIVE_SENSITIVITY))
+                .build(),
+            Err(OrbitCamBindingsError::InvalidScale)
+        );
+    }
+
+    #[test]
+    fn zero_gamepad_source_sensitivity_preserves_payload_and_disables_runtime_entries()
+    -> Result<(), OrbitCamBindingsError> {
+        let gamepad_preset = OrbitCamGamepadPreset::default()
+            .gamepad_sensitivity(OrbitCamSensitivity::uniform(DISABLED_SENSITIVITY));
+        let preset = OrbitCamPreset::from(gamepad_preset);
+
+        assert_eq!(preset, OrbitCamPreset::Gamepad(gamepad_preset));
+
+        let bindings = preset.to_bindings()?;
+        assert_eq!(bindings.orbit().enabled_entries().count(), 0);
+        assert_eq!(bindings.pan().enabled_entries().count(), 0);
+        assert_eq!(bindings.zoom_smooth().enabled_entries().count(), 0);
+        assert_eq!(
+            bindings.gamepad(),
+            CameraInputGamepadSelectionPolicy::Active
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn gamepad_scale_tuning_stays_in_preset_payload() -> Result<(), OrbitCamBindingsError> {
+        let gamepad_preset = OrbitCamGamepadPreset::default()
+            .customize()
+            .orbit_scale(GAMEPAD_TUNED_ORBIT_SCALE)
+            .into_preset();
+        let preset = OrbitCamPreset::from(gamepad_preset);
+
+        assert_eq!(preset, OrbitCamPreset::Gamepad(gamepad_preset));
+
+        let bindings = preset.to_bindings()?;
+        let [fast_orbit, _slow_orbit] = bindings.orbit().entries() else {
+            assert_eq!(bindings.orbit().entries().len(), 2);
+            return Ok(());
+        };
+        assert_eq!(
+            first_motion_install_scale(fast_orbit),
+            Some(GAMEPAD_TUNED_ORBIT_SCALE)
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn gamepad_source_sensitivity_scales_normal_and_slow_entries()
+    -> Result<(), OrbitCamBindingsError> {
+        let default = OrbitCamGamepadPreset::default().build()?;
+        let tuned = OrbitCamGamepadPreset::default()
+            .gamepad_sensitivity(OrbitCamSensitivity::uniform(GAMEPAD_SOURCE_SENSITIVITY))
+            .build()?;
+
+        let [default_fast_orbit, default_slow_orbit] = default.orbit().entries() else {
+            assert_eq!(default.orbit().entries().len(), 2);
+            return Ok(());
+        };
+        let [tuned_fast_orbit, tuned_slow_orbit] = tuned.orbit().entries() else {
+            assert_eq!(tuned.orbit().entries().len(), 2);
+            return Ok(());
+        };
+        assert_eq!(tuned_fast_orbit.speed(), ControlSpeed::Normal);
+        assert_eq!(tuned_slow_orbit.speed(), ControlSpeed::Slow);
+        assert_eq!(
+            first_motion_install_scale(tuned_fast_orbit),
+            first_motion_install_scale(default_fast_orbit)
+                .map(|scale| scale * GAMEPAD_SOURCE_SENSITIVITY)
+        );
+        assert_eq!(
+            first_motion_install_scale(tuned_slow_orbit),
+            first_motion_install_scale(default_slow_orbit)
+                .map(|scale| scale * GAMEPAD_SOURCE_SENSITIVITY)
+        );
+
+        let [default_fast_pan, default_slow_pan] = default.pan().entries() else {
+            assert_eq!(default.pan().entries().len(), 2);
+            return Ok(());
+        };
+        let [tuned_fast_pan, tuned_slow_pan] = tuned.pan().entries() else {
+            assert_eq!(tuned.pan().entries().len(), 2);
+            return Ok(());
+        };
+        assert_eq!(tuned_fast_pan.speed(), ControlSpeed::Normal);
+        assert_eq!(tuned_slow_pan.speed(), ControlSpeed::Slow);
+        assert_eq!(
+            first_motion_install_scale(tuned_fast_pan),
+            first_motion_install_scale(default_fast_pan)
+                .map(|scale| scale * GAMEPAD_SOURCE_SENSITIVITY)
+        );
+        assert_eq!(
+            first_motion_install_scale(tuned_slow_pan),
+            first_motion_install_scale(default_slow_pan)
+                .map(|scale| scale * GAMEPAD_SOURCE_SENSITIVITY)
+        );
+
+        let [
+            default_zoom_in,
+            default_zoom_out,
+            default_slow_zoom_in,
+            default_slow_zoom_out,
+        ] = default.zoom_smooth().entries()
+        else {
+            assert_eq!(default.zoom_smooth().entries().len(), 4);
+            return Ok(());
+        };
+        let [
+            tuned_zoom_in,
+            tuned_zoom_out,
+            tuned_slow_zoom_in,
+            tuned_slow_zoom_out,
+        ] = tuned.zoom_smooth().entries()
+        else {
+            assert_eq!(tuned.zoom_smooth().entries().len(), 4);
+            return Ok(());
+        };
+        for entry in [tuned_zoom_in, tuned_zoom_out] {
+            assert_eq!(entry.speed(), ControlSpeed::Normal);
+        }
+        for entry in [tuned_slow_zoom_in, tuned_slow_zoom_out] {
+            assert_eq!(entry.speed(), ControlSpeed::Slow);
+        }
+        for (tuned, default) in [
+            (tuned_zoom_in, default_zoom_in),
+            (tuned_zoom_out, default_zoom_out),
+            (tuned_slow_zoom_in, default_slow_zoom_in),
+            (tuned_slow_zoom_out, default_slow_zoom_out),
+        ] {
+            assert_eq!(
+                first_motion_install_scale(tuned),
+                first_motion_install_scale(default).map(|scale| scale * GAMEPAD_SOURCE_SENSITIVITY)
+            );
+        }
+
+        Ok(())
     }
 
     #[test]
