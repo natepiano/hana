@@ -1,311 +1,255 @@
 # Ingest `bevy_window_manager` into `bevy_hana` as `bevy_clerestory`
 
-A one-off migration plan: move the standalone `bevy_window_manager` crate into
-`crates/bevy_clerestory/` **and rename it** to `bevy_clerestory` in the same
-operation. This is the generic [`ingest.md`](ingest.md) recipe plus a rename
-layer plus a crates.io retirement that differs from a pure relocation. Read
-`ingest.md` for the rationale behind each base step; this doc only restates a
-base step where the rename changes it, and adds the migration-specific work.
+> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Move the standalone
+> `bevy_window_manager` crate into `crates/bevy_clerestory/`, rename it in-tree,
+> repoint the host workspace, then retire the standalone crate/repo.
 
-- Incoming crate: `bevy_window_manager` → `bevy_clerestory`
-- Source repo: `~/rust/bevy_window_manager` (GitHub `natepiano/bevy_window_manager`)
-- Host workspace: `~/rust/bevy_hana` (GitHub `natepiano/hana`)
-- Final crate dir: `crates/bevy_clerestory/`
+Base recipe: [`ingest.md`](ingest.md) (generic relocation rationale). This plan is
+the rename-and-retire variant; the load-bearing facts are baked into the Work
+Orders below.
 
-## Decisions locked (do not relitigate)
+## Delegation Context
+<!-- Shared across all phases. /plan:delegate prepends this to every dispatch. -->
 
-- **Name:** `bevy_clerestory` (architecture: a clerestory is a row of windows set
-  high in a wall — windows arranged across a surface). Bare `clerestory` and
-  `bevy_clerestory` both free on crates.io.
-- **Plugin type names unchanged:** keep `WindowManagerPlugin` and
-  `WindowManagerPluginCustomPath`. Descriptive plugin names that don't match the
-  crate name are the workspace majority (`PanelPlugin`, `TextPlugin`,
-  `DiagnosticsPlugin`, …), so `WindowManagerPlugin` under `bevy_clerestory` is
-  precedented. Only the crate *identity* renames, not the API symbols.
-- **CHANGELOG:** reset to a single "Initial release" entry (see step R3). Old
-  per-version history is preserved in git, not in the file.
-- **crates.io retirement:** publish one final maintenance-note release of
-  `bevy_window_manager`, **left un-yanked** (stays resolvable; reads as
-  maintenance-frozen, not pulled), repo archived. Transfer later via
-  `cargo owner` if anyone wants it. No yank.
-- **Version:** `bevy_clerestory` resets to `0.1.0` — it is a new crate on
-  crates.io, not a continuation of `bevy_window_manager`'s `0.22.x` line.
+- **Project:** `bevy_clerestory` — Bevy plugin for primary-window position
+  restoration + multi-monitor (scale-factor-correct) placement, moving into the
+  `bevy_hana` workspace (Bevy 0.19.0 engine/dev-framework monorepo).
+- **Stack:** Rust edition 2024; Bevy 0.19.0; serde, ron, dirs; platform deps
+  `windows` 0.62.2 / `objc2`+`objc2-app-kit` 0.6.4/0.3.2 / `x11rb` 0.13 /
+  `raw-window-handle` 0.6.
+- **Layout:**
+  - Source `~/rust/bevy_window_manager/`: `Cargo.toml`, `src/` (lib.rs,
+    persistence/load.rs, restore/winit_info.rs, …), `examples/`
+    (restore_window, custom_path, custom_app_name), `tests/`
+    (scripts/, config/), `README.md`, `CHANGELOG.md`, `.claude/`.
+  - Host `~/rust/bevy_hana/`: root `Cargo.toml` (`[workspace.dependencies]`,
+    `members = ["crates/*"]`), `crates/{bevy_clerestory(new), bevy_diegetic,
+    bevy_liminal, fairy_dust, bevy_lagrange, bevy_kana}/Cargo.toml`.
+- **Key files:**
+  - source `~/rust/bevy_window_manager/Cargo.toml` — `name` (7), `[lib].name`
+    (12), `version = "0.22.0-dev"` (9), `bevy` (16–22), `bevy_diagnostic = "0.19.0"`
+    (23), `bevy_kana = "0.1.0"` (24), dev `bevy_brp_extras = "0.20.0"` (32),
+    platform target-deps (35–55).
+  - source `src/persistence/load.rs:35` — `env!("CARGO_PKG_NAME")` default state dir.
+  - source `src/restore/winit_info.rs:161` — debug-log string `"… No saved
+    bevy_window_manager state …"`.
+  - source `tests/scripts/run_test.py:64–69` — fully-qualified component strings
+    `bevy_window_manager::…` (COMP_MANAGED, COMP_CURRENT_MONITOR, COMP_LAUNCH_INFO,
+    COMP_MONITORS, COMP_PERSISTENCE).
+  - source `tests/scripts/macos_detect_zed_monitor.sh` (11,13),
+    `macos_move_zed_to_monitor.sh` (5,81), `windows_detect_zed_monitor.ps1`
+    (5,86,134), `windows_move_zed_to_monitor.ps1` (4,105,186) — window-title
+    match strings `"bevy_window_manager"` (11 total, compiler-invisible).
+  - source `tests/config/{macos,windows,linux}.json:3` — `example_ron_path` dir.
+  - source `README.md`, `CHANGELOG.md` — rebrand / reset targets.
+  - host `~/rust/bevy_hana/Cargo.toml` — `bevy_window_manager = "0.21.0"` (35);
+    `bevy_kana = { path = "crates/bevy_kana" }` (18, lacks `version`).
+  - host `crates/bevy_diegetic/Cargo.toml:47`, `crates/bevy_liminal/Cargo.toml:52`,
+    `crates/fairy_dust/Cargo.toml:40`, `crates/bevy_lagrange/Cargo.toml:45` —
+    `bevy_window_manager = { workspace = true }`.
+  - host `crates/bevy_diegetic/Cargo.toml` — manifest pattern to mirror
+    (`*.workspace = true`, dev `bevy = { version = …, features = ["default_font"] }`).
+- **Build:** `cargo build --workspace`; `cargo build --workspace --examples`;
+  format with `cargo +nightly fmt`.
+- **Test:** `cargo nextest run --workspace` (never `cargo test`).
+- **Lint:** workspace `[workspace.lints]`; per-crate `[lints] workspace = true`.
+- **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_hana` (load before editing Rust).
+- **Invariants:**
+  1. **Rename in-tree only** — the standalone source repo is *never* renamed; it
+     keeps `bevy_window_manager` through its final pointer release and archive.
+  2. **Keep `WindowManagerPlugin` / `WindowManagerPluginCustomPath` symbol names**
+     un-renamed; only crate identity (`bevy_window_manager` → `bevy_clerestory`,
+     `window_manager` → `clerestory`) changes.
+  3. The `env!("CARGO_PKG_NAME")` default-dir shift (`…/bevy_window_manager/` →
+     `…/bevy_clerestory/`) is an accepted one-time per-user reset.
+  4. The rename surface spans the crate **and** 5 host references (root dep entry
+     + 4 consumer dev-deps).
+  5. `bevy_kana` workspace dep must carry `path` **and** `version` to keep members
+     publishable.
+  6. Never commit or run a destructive/outward-facing step (publish, archive,
+     `rm`) without explicit user go-ahead.
 
-## Rename surface (survey, for verification)
+## Phases
 
-Crate-identity occurrences to change (~84 `bevy_window_manager` / `window_manager`
-hits). The `WindowManager*` *symbols* (24 + 6 refs) are **left alone**.
+### Phase 1 — Ingest & cleanup  · status: todo
 
-| Where | What changes |
-|---|---|
-| `Cargo.toml` | `name`, `[lib].name`, `repository`/`homepage` URLs |
-| `src/lib.rs` + doc comments | crate-level docs naming the crate (not the plugin type) |
-| `use bevy_window_manager::…` | every `use` path in `src`, `examples`, `tests` |
-| `tests/scripts/run_test.py` (lines ~64–69) | fully-qualified component strings `bevy_window_manager::managed::ManagedWindow`, etc. — **string literals, compiler won't catch a miss** |
-| `tests/scripts/*.{sh,ps1}` | Zed window-title match string `"bevy_window_manager"` |
-| `tests/config/*.json` | `example_ron_path` dirs (`…/bevy_window_manager/restore_window.ron`) |
-| `README.md` | full rebrand (title, badges, crates.io/docs.rs links, usage) |
-| `.claude/` (plans, commands) | dev tooling pulled in by subtree; rename or drop |
+#### Work Order
 
-After the rename, `rg -i 'window[_-]?manager' --glob '!target'` in the crate
-should return **only** the intentional `WindowManager*` plugin-symbol lines —
-nothing in snake_case, no `use` paths, no string literals.
+**Execution:** manual (orchestrator) — `git subtree` spans two repos; not a codex delegate.
 
-## Behavioral consequence (not cosmetic)
+**Goal:** `crates/bevy_clerestory/` exists with full history and cruft removed; crate is internally still named `bevy_window_manager`.
 
-`src/persistence/load.rs:35` derives the default state directory from
-`env!("CARGO_PKG_NAME")`:
+**Spec:**
+- Pre-flight: `~/rust/bevy_window_manager` clean on `main`, in sync with origin.
+- Re-verify the target name is still unclaimed before going public:
+  `curl -s -o /dev/null -w "%{http_code}" https://index.crates.io/be/vy/bevy_clerestory`
+  must return `404`. Abort if `200`.
+- From `~/rust/bevy_hana`: `git subtree add --prefix=crates/bevy_clerestory ~/rust/bevy_window_manager main` (no `--squash`). Verify `git log --follow crates/bevy_clerestory/src/lib.rs` shows full history. **No `git mv`** — `--prefix` already places files at `crates/bevy_clerestory/`.
+- Delete: `crates/bevy_clerestory/{Cargo.lock, taplo.toml, rustfmt.toml, .github/, .claude/}` (`.claude/` carries name-bearing dev tooling — delete, don't keep).
+- Create LICENSE files (source has none): `cp crates/bevy_kana/LICENSE-APACHE crates/bevy_kana/LICENSE-MIT crates/bevy_clerestory/` (`NOTICE` optional — skip).
 
-```rust
-.join(env!("CARGO_PKG_NAME"))   // was …/bevy_window_manager/, becomes …/bevy_clerestory/
-```
+**Files:**
+- `crates/bevy_clerestory/` — created by subtree; listed deletions; LICENSE files copied in.
 
-Renaming the crate silently moves the default persistence dir. Any user on the
-default config loses saved window positions once (resets to first-launch
-placement). Apps that override via `with_app_name(...)` are unaffected. Accepted
-given `0.22.0-dev` + low downloads — but it is a real one-time reset, so it is a
-conscious choice, not an accident.
+**Constraints from prior phases:** none (Phase 1).
 
----
+**Acceptance gate:** `crates/bevy_clerestory/` exists; `git log --follow crates/bevy_clerestory/src/lib.rs` resolves full history; inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml`/`.github/`/`.claude/` absent; `LICENSE-APACHE` + `LICENSE-MIT` present. (Workspace does **not** build yet — the crate manifest still names `bevy_window_manager`, colliding with the root registry dep. Green lands at Phase 3.)
 
-## Steps
+### Phase 2 — Rename crate identity in-tree  · status: todo
 
-Order: **rename in the source repo first** (one clean commit), then run the base
-ingest. This keeps the archived repo's final state coherent and `git log
---follow` clean through the move.
+#### Work Order
 
-### R1. Rename in the standalone source repo
+**Execution:** the bulk find-replace is performed by the user via the editor's global rename (project convention); the `rg` gate verifies completeness.
 
-`cd ~/rust/bevy_window_manager`, confirm clean tree on `main` in sync with
-origin, then apply the full rename surface above:
+**Goal:** every crate-identity `bevy_window_manager`/`window_manager` occurrence inside `crates/bevy_clerestory/` is `bevy_clerestory`/`clerestory`; `WindowManager*` symbols untouched; CHANGELOG reset; README rebranded.
 
-- All `bevy_window_manager` / `window_manager` crate-identity occurrences →
-  `bevy_clerestory` / `clerestory`. **Leave `WindowManagerPlugin` /
-  `WindowManagerPluginCustomPath` untouched.**
-- `Cargo.toml`: `name = "bevy_clerestory"`, `[lib].name = "bevy_clerestory"`.
-  (URLs get rewritten in step 4; setting them now is fine too.)
-- Verify the rename is complete with the `rg` check above.
-- `cargo build --workspace` + `cargo nextest run` green **in the source repo**
-  before committing (the source repo still builds standalone here).
-- Commit (`rename: bevy_window_manager → bevy_clerestory`) and push. This is the
-  last functional commit to the standalone repo before its final
-  maintenance-note release (step 10).
+**Spec:**
+- Global replace within `crates/bevy_clerestory/`: `bevy_window_manager` → `bevy_clerestory`, `window_manager` → `clerestory`, across `Cargo.toml` (`name`, `[lib].name`), `src/` (crate docs, `use` paths), `examples/`, `tests/`. **Leave `WindowManagerPlugin` and `WindowManagerPluginCustomPath` unchanged (Invariant 2).**
+- Hand-verify these compiler-invisible string literals:
+  - `src/restore/winit_info.rs:161` — debug string `"… No saved bevy_window_manager state …"` → `bevy_clerestory`.
+  - `tests/scripts/run_test.py:64–69` — `COMP_MANAGED`, `COMP_CURRENT_MONITOR`, `COMP_LAUNCH_INFO`, `COMP_MONITORS`, `COMP_PERSISTENCE` strings `bevy_window_manager::…` → `bevy_clerestory::…`.
+  - window-title strings (11): `macos_detect_zed_monitor.sh` (11,13), `macos_move_zed_to_monitor.sh` (5,81), `windows_detect_zed_monitor.ps1` (5,86 `TargetTitle`,134), `windows_move_zed_to_monitor.ps1` (4,105 `TargetTitle`,186) → `bevy_clerestory`.
+  - `tests/config/{macos,windows,linux}.json:3` — `example_ron_path` dir → `bevy_clerestory` (must match the renamed `CARGO_PKG_NAME` default dir).
+- `README.md`: full rebrand — title, crates.io/docs.rs badge URLs, homepage URL, body links; keep `cargo run --example restore_window`.
+- `CHANGELOG.md`: replace with a single initial release (includes `ManagedWindowPersistence` + `Platform`):
 
-### R2. (folded into 10) crates.io retirement is handled at archive time
+  ```markdown
+  # Changelog
 
-No action here — listed so the order is explicit. See step 10.
+  ## 0.1.0 — Initial release
 
-### R3. Reset the CHANGELOG
+  `bevy_clerestory` (formerly published as `bevy_window_manager`).
 
-Replace `CHANGELOG.md` with a single initial-release entry under the new name.
-Do not carry forward the `bevy_window_manager` per-version history (it stays in
-git). List the shipped feature set:
+  - Primary-window position/size persistence across launches.
+  - Multi-monitor support with scale-factor-correct positioning (mixed
+    Retina / non-Retina setups).
+  - Correct placement when dragging across monitors with different scale factors.
+  - Platform workarounds: macOS, Windows, Linux X11 and Wayland.
+  - `Monitors` resource, `MonitorInfo`, `CurrentMonitor`, `ManagedWindow`,
+    `ManagedWindowPersistence`, `WindowKey`, `Platform`,
+    `WindowRestored` / `WindowRestoreMismatch` events.
+  - `WindowManagerPlugin` with `with_app_name` / `with_path` / `with_persistence`
+    builders.
+  ```
 
-```markdown
-# Changelog
+**Files:**
+- `crates/bevy_clerestory/Cargo.toml` — `name`, `[lib].name`.
+- `crates/bevy_clerestory/src/**` — crate docs + `use` paths + `winit_info.rs:161`.
+- `crates/bevy_clerestory/examples/**` — `use` paths, window titles.
+- `crates/bevy_clerestory/tests/scripts/*`, `tests/config/*.json` — string literals.
+- `crates/bevy_clerestory/README.md` — rebrand.
+- `crates/bevy_clerestory/CHANGELOG.md` — reset (block above).
 
-## 0.1.0 — Initial release
+**Constraints from prior phases:** Phase 1 placed the crate at `crates/bevy_clerestory/`, still internally named `bevy_window_manager`, LICENSE files present.
 
-`bevy_clerestory` (formerly published as `bevy_window_manager`).
+**Acceptance gate:** `rg -i 'window[_-]?manager' crates/bevy_clerestory --glob '!target'` returns **only** `WindowManagerPlugin` / `WindowManagerPluginCustomPath` symbol lines — no snake_case, no `use` paths, no string literals. (Workspace still not green — host references + manifest deps pending Phase 3.)
 
-- Primary-window position/size persistence across launches.
-- Multi-monitor support with scale-factor-correct positioning (handles mixed
-  Retina / non-Retina monitor setups).
-- Correct window placement when dragging across monitors with different scale
-  factors.
-- Platform workarounds: macOS, Windows, Linux X11 and Wayland.
-- `Monitors` resource, `MonitorInfo`, `CurrentMonitor`, `ManagedWindow`,
-  `WindowKey`, `WindowRestored` / `WindowRestoreMismatch` events.
-- `WindowManagerPlugin` with `with_app_name` / `with_path` / `with_persistence`
-  builders.
-```
+### Phase 3 — Manifest plumbing: crate reshape + host repoint  · status: todo
 
-### 1. Pre-flight (base `ingest.md` §1)
+#### Work Order
 
-Source repo clean on `main`, in sync with origin — already true after R1's push.
+**Goal:** the workspace resolves and builds the renamed member; `cargo build --workspace` green.
 
-### 2. Ingest with history preserved (base §2)
+**Spec:**
+- `crates/bevy_clerestory/Cargo.toml` → mirror `bevy_diegetic`'s thin manifest:
+  - `edition.workspace = true`, `license.workspace = true`, `authors.workspace = true`, `repository.workspace = true`, `[lints] workspace = true`.
+  - `readme = "README.md"` (per-crate). **Do not** set a per-crate `repository` (inherited; setting it is silently overridden).
+  - `name = "bevy_clerestory"`, `version = "0.1.0"`, per-crate `description`/`keywords`/`categories`.
+  - `homepage = "https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory"`.
+  - `bevy = { workspace = true, features = ["bevy_log", "bevy_window", "bevy_winit", "wayland", "x11"] }`.
+  - `bevy_kana = { workspace = true }`; dev `bevy_brp_extras = { workspace = true }`; `bevy_diagnostic = { workspace = true }`.
+  - dev `bevy = { workspace = true, features = ["default_font"] }` (examples need `default_font`); keep `tempfile` per-crate.
+  - Remove any self dev-dep path reference if present.
+  - Leave platform target-deps per-crate (`windows`, `objc2`, `objc2-app-kit`, `x11rb`, `raw-window-handle`, `dirs`, `ron`).
+- Host root `~/rust/bevy_hana/Cargo.toml`:
+  - line 35: `bevy_window_manager = "0.21.0"` → `bevy_clerestory = { path = "crates/bevy_clerestory", version = "0.1.0" }`.
+  - line 18: `bevy_kana = { path = "crates/bevy_kana" }` → `bevy_kana = { path = "crates/bevy_kana", version = "0.1.0" }` (publishability).
+  - add `bevy_diagnostic = "0.19.0"` to `[workspace.dependencies]`.
+- Host consumer dep lines → `bevy_clerestory = { workspace = true }`:
+  `crates/bevy_diegetic/Cargo.toml:47`, `crates/bevy_liminal/Cargo.toml:52`, `crates/fairy_dust/Cargo.toml:40`, `crates/bevy_lagrange/Cargo.toml:45`.
 
-From `~/rust/bevy_hana`:
+**Files:**
+- `crates/bevy_clerestory/Cargo.toml` — workspace-pattern reshape + dep repoint.
+- `~/rust/bevy_hana/Cargo.toml` — root dep entry rename, `bevy_kana` version, `bevy_diagnostic` entry.
+- `crates/{bevy_diegetic,bevy_liminal,fairy_dust,bevy_lagrange}/Cargo.toml` — consumer dep rename.
 
-```bash
-git subtree add --prefix=crates/bevy_clerestory ~/rust/bevy_window_manager main
-```
+**Constraints from prior phases:** Phase 2 set the crate `name = "bevy_clerestory"` and renamed all internal identity; the crate compiles standalone. The host root + 4 consumers still reference `bevy_window_manager` until this phase.
 
-No `--squash`. `git log --follow crates/bevy_clerestory/src/lib.rs` then shows
-full original history including the R1 rename commit. The source repo dir name
-(`bevy_window_manager`) is irrelevant — the prefix sets the new location.
+**Acceptance gate:** `cargo build --workspace` green; `cargo build --workspace --examples` green.
 
-### 3. Post-subtree cleanup (base §3)
+### Phase 4 — Verify, smoke-test, lock + clean-fix enrollment  · status: todo
 
-Delete from `crates/bevy_clerestory/`: `Cargo.lock`, `taplo.toml`,
-`rustfmt.toml`, `.github/`.
+#### Work Order
 
-**Migration note — LICENSE files (create them):** the source repo has **no**
-`LICENSE-APACHE` / `LICENSE-MIT` / `NOTICE` files (the manifest declares
-`MIT OR Apache-2.0` but the files are absent), so `subtree` brings none. Base §3
-says "keep" them — there is nothing to keep, so **create** them to match every
-other published member. There is no root-level license to inherit; each member
-(`bevy_kana`, `bevy_lagrange`, `bevy_liminal`, `bevy_valence`, `bevy_diegetic`)
-ships its own per-crate `LICENSE-APACHE` + `LICENSE-MIT` as real files. Copy from
-a sibling with the same license:
+**Goal:** full green verification, isolated smoke test, and nightly coverage enrolled.
 
-```bash
-cp crates/bevy_kana/LICENSE-APACHE crates/bevy_kana/LICENSE-MIT crates/bevy_clerestory/
-```
-
-(`NOTICE` is optional — only `bevy_diegetic` has one; the source had none, skip
-unless wanted.) The `license` field still resolves via `workspace.package`
-(step 4); the files are what crates.io requires at publish.
-
-Decide on `crates/bevy_clerestory/.claude/` — either rename its
-name-bearing contents or delete it (dev tooling, not shipped).
-
-### 4. Restructure `Cargo.toml` to the workspace pattern (base §4)
-
-Match `bevy_diegetic`'s thin-manifest pattern:
-
-- `edition.workspace = true`, `license.workspace = true`,
-  `authors.workspace = true`, `repository.workspace = true`,
-  `[lints] workspace = true`.
-- `readme = "README.md"` per-crate.
-- `name = "bevy_clerestory"`, `version = "0.1.0"`, plus per-crate `description`,
-  `keywords`, `categories`.
-- **`homepage`** → `https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory`
-  (the GitHub repo is `natepiano/hana`, not `bevy_hana`).
-
-### 4b. Switch in-tree deps to workspace/path (migration-specific)
-
-The source manifest pins **registry** versions of crates that already live in,
-or are declared by, this workspace. These must be repointed or they resolve to
-published copies instead of the in-tree ones:
-
-- `bevy_kana = "0.1.0"` → `bevy_kana = { workspace = true }`
-  (workspace declares `bevy_kana = { path = "crates/bevy_kana" }` — this is the
-  one that silently pulls the published 0.1.0 if left as-is).
-- `bevy = { version = "0.19.0", default-features = false, features = [...] }` →
-  `bevy = { workspace = true, features = ["bevy_log", "bevy_window",
-  "bevy_winit", "wayland", "x11"] }` (keep the exact feature list).
-- dev-dep `bevy_brp_extras = "0.20.0"` → `{ workspace = true }`
-  (workspace has `0.20.1`).
-- `bevy_diagnostic = "0.19.0"` — not in `[workspace.dependencies]`; either add a
-  workspace entry and reference it, or leave the pin and align the version to
-  `bevy`'s. Prefer adding to `[workspace.dependencies]` for consistency.
-- Leave **platform-specific** target deps per-crate — `windows`, `objc2`,
-  `objc2-app-kit`, `x11rb`, `raw-window-handle`, `dirs`, `ron`, `tempfile` are
-  unique to this crate, not shared workspace deps.
-
-### 5. Minimize the Bevy feature set (base §5)
-
-Source already uses a tight set (`bevy_log`, `bevy_window`, `bevy_winit`,
-`wayland`, `x11`; code touches only `bevy::{window, winit, prelude, ecs}` plus
-`bevy_diagnostic`). Keep it; compare against `bevy_diegetic` / `bevy_lagrange`
-and trim only if something is unused.
-
-### 6. Workspace membership (base §6 — adapted)
-
-`[workspace] members = ["crates/*"]` auto-includes `crates/bevy_clerestory` —
-**no `members` edit needed.** There is currently **no** `bevy_window_manager`
-entry in `[workspace.dependencies]` and **no** in-tree consumer, so base §6's
-"switch registry entry to path dep" is N/A. Add a
-`bevy_clerestory = { path = "crates/bevy_clerestory" }` entry **only if** another
-member starts depending on it later.
-
-### 7. Verify (base §7)
-
-- `cargo build --workspace` green.
-- `cargo build --workspace --examples` green (includes `restore_window`,
-  `custom_path`, `custom_app_name`).
+**Spec:**
 - `cargo nextest run --workspace` green.
-- Run the `restore_window` example end-to-end; confirm it writes to
-  `…/bevy_clerestory/` (the renamed default dir) and restores correctly.
-- Re-run the rename `rg` check inside `crates/bevy_clerestory` — only
-  `WindowManager*` symbols should remain.
-- If the BRP test runner (`tests/scripts/run_test.py`) is exercised, confirm the
-  renamed fully-qualified component strings resolve against the running app.
+- Workspace-wide rename gate: `rg -l 'bevy_window_manager' crates ~/rust/bevy_hana/Cargo.toml` returns nothing.
+- Isolated smoke test (do **not** touch the user's real config): `HOME=$(mktemp -d) cargo run --example restore_window`; confirm it writes the temp `…/bevy_clerestory/restore_window.ron`. The user's real `…/bevy_window_manager/` dir stays untouched and recoverable.
+- `cargo tree -p bevy_clerestory --duplicates` — no unexpected version conflicts for `windows`/`objc2`/`x11rb`/`raw-window-handle`. Confirm `Cargo.lock` carries these platform entries. Regenerate `Cargo.lock`.
+- If the BRP runner (`run_test.py`) is exercised, confirm the renamed component strings resolve against the running app (mandatory, not optional).
+- `~/.claude/scripts/clean-fix/clean-fix.conf`: ensure `bevy_hana` in `[build]`; add `bevy_hana/crates/bevy_clerestory` to `[targets]`. **Do not** remove the standalone `bevy_window_manager` entries yet (live until Phase 7).
 
-Regenerate `Cargo.lock` and commit.
+**Files:**
+- `~/rust/bevy_hana/Cargo.lock` — regenerated.
+- `~/.claude/scripts/clean-fix/clean-fix.conf` — `[build]`/`[targets]` entries (external).
 
-### 8. Update nightly clean-fix config (base §8)
+**Constraints from prior phases:** Phase 3 made the workspace build green; the renamed member is an in-tree path dep carrying `version = "0.1.0"`.
 
-`~/.claude/scripts/clean-fix/clean-fix.conf`:
+**Acceptance gate:** build + examples + `nextest` green; workspace-wide `rg` gate clean; smoke test writes to the isolated `bevy_clerestory` dir; `cargo tree --duplicates` clean.
 
-- `[build]` — ensure `bevy_hana` (workspace root) is present.
-- `[targets]` — add `bevy_hana/crates/bevy_clerestory`.
+### Phase 5 — Checkpoint  · status: todo
 
-Do **not** remove the standalone `[build] bevy_window_manager` entry yet (still a
-live checkout until step 11).
+#### Work Order
 
-### 9. Checkpoint — confirm before retiring the standalone repo (base §9)
+**Execution:** manual gate — stop for explicit user go-ahead; not a codex delegate.
 
-Stop. Everything through step 8 is in-tree and reversible. Summarize what landed
-(crate at `crates/bevy_clerestory/`, history preserved incl. R1 rename, manifest
-on workspace pattern, in-tree deps repointed, build/examples/tests/smoke
-results, clean-fix enrollment) and get explicit go-ahead before steps 10–11
-(outward-facing + destructive).
+**Goal:** confirm readiness before any outward-facing/destructive step.
 
-### 10. Retire the standalone repo + crates.io (base §10, modified)
+**Spec:** Everything through Phase 4 is in-tree and reversible (`git reset`). Summarize what landed (crate at `crates/bevy_clerestory/` with history, manifest on workspace pattern, host repointed, build/examples/tests/smoke green, clean-fix enrolled). Proceed to Phase 6+ only on explicit user go-ahead. Do not commit without being asked.
 
-**crates.io (migration-specific — replaces base §10's pure-pointer-only step):**
+**Constraints from prior phases:** Phases 1–4 are complete and green.
 
-1. On the source repo (still pushable, pre-archive), prepare a **final
-   `bevy_window_manager` release**: bump version (e.g. `0.22.0`), keep the code
-   functional, and set its `README.md` to a maintenance note — not a hard "do
-   not use", since it stays resolvable:
+**Acceptance gate:** user explicitly approves retiring the standalone repo.
 
-   ```markdown
-   # bevy_window_manager
+### Phase 6 — Retire source repo + crates.io  · status: todo
 
-   This crate is no longer actively developed. Development continues as
-   **`bevy_clerestory`** in the hana monorepo:
+#### Work Order
 
-   ➡️ **https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory**
+**Execution:** manual (orchestrator/user) — outward-facing `cargo publish` + `gh archive`; not a codex delegate. `gh` runs unsandboxed.
 
-   This version remains available and functional. Open to transfer — contact via
-   the repository above if you'd like to take it over.
-   ```
+**Goal:** final `bevy_window_manager` pointer release published (un-yanked); GitHub repo archived.
 
-   `cargo publish` this final release. **Do not `cargo yank`.** (Yank wouldn't
-   hide the page anyway and isn't needed for a future `cargo owner` transfer;
-   leaving it resolvable is the friendlier handoff.)
+**Spec:**
+- In `~/rust/bevy_window_manager` (still named `bevy_window_manager` — never renamed): bump `version` to `0.22.0` (latest published `0.21.0`; `0.22.0` is free — confirm with `cargo publish --dry-run`). Keep code functional. Replace `README.md` with a maintenance note pointing to `https://github.com/natepiano/hana/tree/main/crates/bevy_clerestory` (no-longer-developed / open-to-transfer wording). `cargo publish`. **Do not `cargo yank`** (stays resolvable; transferable later via `cargo owner`).
+- Commit + push the README pointer.
+- `gh repo archive natepiano/bevy_window_manager --yes`; confirm `gh repo view natepiano/bevy_window_manager --json isArchived`.
+- Stop pushing to `~/rust/bevy_window_manager`.
+- (Independently, when ready, publish the new crate: `cargo publish -p bevy_clerestory` — members carry no `publish` field, so it is publishable by default.)
 
-**GitHub archive (base §10):**
+**Files:**
+- `~/rust/bevy_window_manager/Cargo.toml` — version bump.
+- `~/rust/bevy_window_manager/README.md` — maintenance/pointer note.
 
-2. Replace the source repo's `README.md` with the same pointer note, commit,
-   push.
-3. `gh repo archive natepiano/bevy_window_manager --yes` (run unsandboxed per the
-   `gh` rule). Confirm with
-   `gh repo view natepiano/bevy_window_manager --json isArchived`.
-4. Stop pushing to `~/rust/bevy_window_manager`.
+**Constraints from prior phases:** the source repo was never renamed (Phase 2 renamed only the in-tree copy); the workspace is green and no longer depends on the published `bevy_window_manager` (Phase 3 repointed it to the path dep).
 
-### 11. Remove the local standalone checkout (base §11)
+**Acceptance gate:** `bevy_window_manager` final release on crates.io, **un-yanked**; `gh … isArchived` is `true`.
 
-Only after: workspace builds/tests green, `git log --follow` resolves full
-history in-tree, final crates.io release published, GitHub repo archived.
+### Phase 7 — Remove local checkout + prune clean-fix.conf  · status: todo
 
-```bash
-rm -rf ~/rust/bevy_window_manager
-```
+#### Work Order
 
-Then prune dead standalone entries from `clean-fix.conf`: remove
-`[build] bevy_window_manager` and any `bevy_window_manager_bevy_update` rows.
-Nightly coverage now comes from the `bevy_hana` root `[build]` entry +
-`bevy_hana/crates/bevy_clerestory` `[targets]` entry.
+**Execution:** manual (orchestrator/user) — destructive (`rm -rf`); not a codex delegate.
 
-## Definition of done
+**Goal:** standalone checkout deleted; nightly config pruned.
 
-- `crates/bevy_clerestory/` exists with full git history (`git log --follow`
-  works; `git blame` resolves through the move and the R1 rename).
-- No crate-identity `window_manager` strings remain — only `WindowManager*`
-  plugin symbols (intentional).
-- CHANGELOG reset to `0.1.0` initial release; `Cargo.toml` on workspace pattern;
-  `bevy_kana` / `bevy` / `bevy_brp_extras` repointed to workspace.
-- Inner `Cargo.lock`/`taplo.toml`/`rustfmt.toml`/`.github/` removed;
-  `LICENSE-APACHE` + `LICENSE-MIT` created (copied from a sibling member).
-- Workspace builds + examples + tests green; `restore_window` writes to the
-  renamed `…/bevy_clerestory/` dir.
-- `clean-fix.conf`: `bevy_hana` in `[build]`, `bevy_hana/crates/bevy_clerestory`
-  in `[targets]`; standalone entries pruned.
-- Final `bevy_window_manager` maintenance-note release published, **un-yanked**;
-  GitHub repo archived with pointer README.
-- Local standalone checkout removed.
+**Spec:** Only after Phase 6 (final release published, repo archived, history confirmed in-tree). `rm -rf ~/rust/bevy_window_manager` (subtree did not transfer the source reflog/tags, so this checkout is their only copy until the repo is archived). Then prune `clean-fix.conf`: remove `[build] bevy_window_manager` and any `bevy_window_manager_bevy_update` rows in `[build]`/`[targets]`. Nightly coverage now comes from the `bevy_hana` root `[build]` entry + `bevy_hana/crates/bevy_clerestory` `[targets]` entry.
+
+**Files:**
+- `~/rust/bevy_window_manager/` — removed.
+- `~/.claude/scripts/clean-fix/clean-fix.conf` — pruned (external).
+
+**Constraints from prior phases:** Phase 6 archived the GitHub repo; until then the local checkout is the only copy of the source reflog/tags.
+
+**Acceptance gate:** `~/rust/bevy_window_manager` gone; `clean-fix.conf` has no `bevy_window_manager` rows.
