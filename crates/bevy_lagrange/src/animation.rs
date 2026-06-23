@@ -624,13 +624,15 @@ mod tests {
     use bevy::input::mouse::AccumulatedMouseScroll;
     use bevy::input::mouse::MouseScrollUnit;
     use bevy::window::WindowRef;
+    use bevy_enhanced_input::prelude::EnhancedInputPlugin;
+    use bevy_enhanced_input::prelude::InputContextAppExt;
 
     use super::*;
-    use crate::enhanced_input::LagrangeEnhancedInputPlugin;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
     use crate::input::InputGain;
     use crate::input::OrbitCamInputAdapterPlugin;
+    use crate::input::OrbitCamInputContext;
     use crate::input::OrbitCamInputGain;
     use crate::input::OrbitCamInputLifecyclePlugin;
     use crate::input::OrbitCamInputMode;
@@ -638,8 +640,8 @@ mod tests {
     use crate::input::OrbitCamPreset;
     use crate::input::OrbitCamRoutingPlugin;
     use crate::input::OrbitCamSimpleMousePreset;
+    use crate::input::TouchTracker;
     use crate::system_sets::LagrangeSystemSetsPlugin;
-    use crate::touch::TouchTracker;
 
     const ANIMATION_FOCUS: Vec3 = Vec3::ZERO;
     const ANIMATION_PITCH: f32 = 0.0;
@@ -673,13 +675,14 @@ mod tests {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            LagrangeEnhancedInputPlugin,
+            EnhancedInputPlugin,
             LagrangeSystemSetsPlugin,
             OrbitCamInputModesPlugin,
             OrbitCamRoutingPlugin,
             OrbitCamInputAdapterPlugin,
             OrbitCamInputLifecyclePlugin,
         ))
+        .add_input_context::<OrbitCamInputContext>()
         .init_resource::<AnimationEventCounts>()
         .init_resource::<ButtonInput<KeyCode>>()
         .init_resource::<ButtonInput<MouseButton>>()

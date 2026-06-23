@@ -4,3 +4,8 @@ use bevy::prelude::*;
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
 #[reflect(Component, Default)]
 pub struct OrbitCamInputContext;
+
+/// Enhanced-input context component installed on cameras controlled by `FlyCam`.
+#[derive(Component, Clone, Copy, Debug, Default, Reflect)]
+#[reflect(Component, Default)]
+pub struct FlyCamInputContext;

@@ -4,32 +4,26 @@
 mod animation;
 mod components;
 mod constants;
-mod enhanced_input;
 mod events;
 mod fit;
 #[cfg(feature = "fit_overlay")]
 mod fit_overlay;
+mod fly_cam;
 mod input;
 mod observers;
 mod orbit_cam;
 mod orbital_math;
 mod projection;
 mod system_sets;
-mod touch;
 
 pub use animation::CameraMove;
 pub use animation::CameraMoveList;
-use bevy::camera::CameraUpdateSystems;
-use bevy::input::gestures::PinchGesture;
-use bevy::input::touch::Touches;
 use bevy::prelude::*;
-use bevy::transform::TransformSystems;
 pub use components::AnimationConflictPolicy;
 pub use components::CameraInputInterruptBehavior;
 pub use components::CurrentFitTarget;
 #[cfg(feature = "fit_overlay")]
 pub use components::FitOverlay;
-use enhanced_input::LagrangeEnhancedInputPlugin;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
 pub use events::AnimationEnd;
@@ -52,6 +46,8 @@ pub use events::ZoomToFit;
 pub use fit_overlay::FitTargetOverlayConfig;
 #[cfg(feature = "fit_overlay")]
 use fit_overlay::ZoomOverlayPlugin;
+pub use fly_cam::FlyCam;
+use fly_cam::FlyCamPlugin;
 pub use input::ActionBindingDescriptor;
 pub use input::ActionBindingEntry;
 pub use input::ActionBindingSet;
@@ -72,6 +68,7 @@ pub use input::CameraSemanticAction;
 pub use input::CoarseZoomDelta;
 pub use input::ControlSpeed;
 pub use input::Damping;
+pub use input::FlyCamInputContext;
 pub use input::GamepadInputGain;
 pub use input::HeldActionBindingEntry;
 pub use input::HeldCameraAction;
@@ -82,6 +79,7 @@ pub use input::InputBindingScale;
 pub use input::InputDeadZone;
 pub use input::InputDeltaScale;
 pub use input::InputGain;
+use input::InputPlugin;
 pub use input::ManualInputSource;
 pub use input::MouseInputGain;
 pub use input::NoPositionFallback;
@@ -103,13 +101,10 @@ pub use input::OrbitCamGateInput;
 pub use input::OrbitCamGatePolarity;
 pub use input::OrbitCamHeldBinding;
 pub use input::OrbitCamInput;
-use input::OrbitCamInputAdapterPlugin;
 pub use input::OrbitCamInputBinding;
 pub use input::OrbitCamInputContext;
 pub use input::OrbitCamInputGain;
-use input::OrbitCamInputLifecyclePlugin;
 pub use input::OrbitCamInputMode;
-use input::OrbitCamInputModesPlugin;
 pub use input::OrbitCamInteractionEnded;
 pub use input::OrbitCamInteractionKind;
 pub use input::OrbitCamInteractionSourcesChanged;
@@ -131,7 +126,6 @@ pub use input::OrbitCamPinchZoom;
 pub use input::OrbitCamPreset;
 pub use input::OrbitCamPresetKind;
 pub use input::OrbitCamReportingDebounce;
-use input::OrbitCamRoutingPlugin;
 pub use input::OrbitCamScalePolicy;
 pub use input::OrbitCamSimpleMouseKeyboardPreset;
 pub use input::OrbitCamSimpleMousePreset;
@@ -160,17 +154,17 @@ use observers::ObserverPlugin;
 pub use orbit_cam::FocusBoundsShape;
 pub use orbit_cam::InitializationState;
 pub use orbit_cam::OrbitCam;
+use orbit_cam::OrbitCamPlugin;
 pub use orbit_cam::OrbitCamSystemSet;
 #[doc(hidden)]
 pub use orbit_cam::OrbitCamUpdateRequest;
 pub use orbit_cam::TimeSource;
 pub use orbit_cam::UpsideDownPolicy;
 use system_sets::LagrangeSystemSetsPlugin;
-use system_sets::OrbitCamInputInternalSet;
 pub use system_sets::OrbitCamInputPhase;
-use touch::TouchTracker;
 
-/// Bevy plugin that contains the systems for controlling `OrbitCam` components.
+/// Bevy plugin for the lagrange cameras. Registers shared camera
+/// infrastructure and both camera kinds, `OrbitCam` and `FlyCam`.
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
@@ -186,36 +180,15 @@ pub struct LagrangePlugin;
 
 impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            LagrangeEnhancedInputPlugin,
-            LagrangeSystemSetsPlugin,
-            OrbitCamInputModesPlugin,
-            OrbitCamRoutingPlugin,
-            OrbitCamInputAdapterPlugin,
-            OrbitCamInputLifecyclePlugin,
-        ));
-
-        app.init_resource::<TouchTracker>()
-            .init_resource::<Touches>()
-            .add_message::<PinchGesture>()
-            .add_systems(
-                PreUpdate,
-                touch::touch_tracker
-                    .in_set(OrbitCamInputPhase::PreInput)
-                    .before(OrbitCamInputInternalSet::AdapterInjection),
-            )
-            .add_systems(
-                PostUpdate,
-                orbit_cam::orbit_cam
-                    .in_set(OrbitCamSystemSet)
-                    .before(TransformSystems::Propagate)
-                    .before(CameraUpdateSystems),
-            );
-
-        app.add_plugins(ObserverPlugin)
-            .add_systems(Update, animation::process_camera_move_list);
+        // Shared camera infrastructure, used across all camera kinds. Each
+        // camera kind registers its own enhanced-input context in its plugin.
+        app.add_plugins((LagrangeSystemSetsPlugin, ObserverPlugin, InputPlugin));
+        app.add_systems(Update, animation::process_camera_move_list);
 
         #[cfg(feature = "fit_overlay")]
         app.add_plugins(ZoomOverlayPlugin);
+
+        // Per-camera-kind plugins.
+        app.add_plugins((OrbitCamPlugin, FlyCamPlugin));
     }
 }

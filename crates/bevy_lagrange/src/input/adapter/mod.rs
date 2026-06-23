@@ -104,6 +104,8 @@ mod tests {
     use bevy_enhanced_input::prelude::BindingOf;
     use bevy_enhanced_input::prelude::DeadZone;
     use bevy_enhanced_input::prelude::DeltaScale;
+    use bevy_enhanced_input::prelude::EnhancedInputPlugin;
+    use bevy_enhanced_input::prelude::InputContextAppExt;
     use bevy_enhanced_input::prelude::ModKeys;
     use bevy_enhanced_input::prelude::Scale;
 
@@ -117,7 +119,6 @@ mod tests {
     use crate::constants::PINCH_GESTURE_AMPLIFICATION;
     use crate::constants::PIXEL_SCROLL_SCALE;
     use crate::constants::TOUCH_PINCH_SCALE;
-    use crate::enhanced_input::LagrangeEnhancedInputPlugin;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInputGamepadSelectionPolicy;
     use crate::input::CameraInputRoutingConfig;
@@ -148,23 +149,24 @@ mod tests {
     use crate::input::modes;
     use crate::input::modes::OrbitCamInputModesPlugin;
     use crate::input::routing::OrbitCamRoutingPlugin;
+    use crate::input::touch::OneFingerGestures;
+    use crate::input::touch::TouchGestures;
+    use crate::input::touch::TouchTracker;
+    use crate::input::touch::TwoFingerGestures;
     use crate::orbit_cam::OrbitCam;
     use crate::system_sets::LagrangeSystemSetsPlugin;
-    use crate::touch::OneFingerGestures;
-    use crate::touch::TouchGestures;
-    use crate::touch::TouchTracker;
-    use crate::touch::TwoFingerGestures;
 
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins((
             MinimalPlugins,
-            LagrangeEnhancedInputPlugin,
+            EnhancedInputPlugin,
             LagrangeSystemSetsPlugin,
             OrbitCamInputModesPlugin,
             OrbitCamRoutingPlugin,
             OrbitCamInputAdapterPlugin,
-        ));
+        ))
+        .add_input_context::<OrbitCamInputContext>();
         app.init_resource::<ButtonInput<KeyCode>>()
             .init_resource::<ButtonInput<MouseButton>>()
             .init_resource::<AccumulatedMouseMotion>()

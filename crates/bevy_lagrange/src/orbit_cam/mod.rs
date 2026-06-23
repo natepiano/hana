@@ -3,8 +3,11 @@
 mod controller;
 mod preset_helpers;
 
+use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
-pub(crate) use controller::orbit_cam;
+use bevy::transform::TransformSystems;
+use bevy_enhanced_input::prelude::InputContextAppExt;
+use controller::orbit_cam;
 
 use super::constants::DEFAULT_INPUT_GAIN;
 use super::constants::DEFAULT_ORBIT_ANGLE;
@@ -17,6 +20,32 @@ use super::input::OrbitCamInput;
 use super::input::OrbitCamInputContext;
 use super::input::OrbitCamInputMode;
 use crate::input::AxisResponse;
+use crate::input::OrbitCamInputAdapterPlugin;
+use crate::input::OrbitCamInputLifecyclePlugin;
+use crate::input::OrbitCamInputModesPlugin;
+use crate::input::OrbitCamRoutingPlugin;
+
+/// Registers the `OrbitCam` controller and its input pipeline.
+pub(super) struct OrbitCamPlugin;
+
+impl Plugin for OrbitCamPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_input_context::<OrbitCamInputContext>()
+            .add_plugins((
+                OrbitCamInputModesPlugin,
+                OrbitCamRoutingPlugin,
+                OrbitCamInputAdapterPlugin,
+                OrbitCamInputLifecyclePlugin,
+            ))
+            .add_systems(
+                PostUpdate,
+                orbit_cam
+                    .in_set(OrbitCamSystemSet)
+                    .before(TransformSystems::Propagate)
+                    .before(CameraUpdateSystems),
+            );
+    }
+}
 
 /// Base system set to allow ordering of `OrbitCam`.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]

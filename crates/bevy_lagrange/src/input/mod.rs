@@ -42,6 +42,7 @@ mod metrics;
 mod modes;
 mod routing;
 mod sources;
+mod touch;
 
 pub use actions::CameraSemanticAction;
 pub use actions::HeldCameraAction;
@@ -54,6 +55,10 @@ pub(super) use adapter::OrbitCamInputAdapterPlugin;
 pub use axis_response::AxisResponse;
 pub use axis_response::Damping;
 pub use axis_response::Sensitivity;
+use bevy::input::gestures::PinchGesture;
+use bevy::input::touch::Touches;
+use bevy::prelude::*;
+use bevy_enhanced_input::prelude::EnhancedInputPlugin;
 pub use bindings::ActionBindingDescriptor;
 pub use bindings::ActionBindingEntry;
 pub use bindings::ActionBindingSet;
@@ -113,6 +118,7 @@ pub use bindings::SmoothScrollInputGain;
 pub use bindings::ZoomInversion;
 pub(super) use bindings::mod_keys_pressed;
 pub use bindings::validate_bindings;
+pub use context::FlyCamInputContext;
 pub use context::OrbitCamInputContext;
 pub use control_summary::ControlSpeed;
 pub use control_summary::OrbitCamControlRow;
@@ -156,3 +162,32 @@ pub use routing::OrbitCamSlowModeState;
 pub use routing::ResolvedOrbitCamInputRoute;
 pub use sources::CameraInteractionSources;
 pub use sources::ManualInputSource;
+pub(crate) use touch::TouchGestures;
+pub(crate) use touch::TouchTracker;
+
+use crate::system_sets::OrbitCamInputInternalSet;
+use crate::system_sets::OrbitCamInputPhase;
+
+/// Registers shared camera input infrastructure used by every camera kind.
+///
+/// Each camera kind registers its own enhanced-input context in its own
+/// plugin; this owns the enhanced-input core, the bevy touch/gesture inputs,
+/// and the touch tracker that feeds the input adapter.
+pub(super) struct InputPlugin;
+
+impl Plugin for InputPlugin {
+    fn build(&self, app: &mut App) {
+        if !app.is_plugin_added::<EnhancedInputPlugin>() {
+            app.add_plugins(EnhancedInputPlugin);
+        }
+        app.init_resource::<TouchTracker>()
+            .init_resource::<Touches>()
+            .add_message::<PinchGesture>()
+            .add_systems(
+                PreUpdate,
+                touch::touch_tracker
+                    .in_set(OrbitCamInputPhase::PreInput)
+                    .before(OrbitCamInputInternalSet::AdapterInjection),
+            );
+    }
+}

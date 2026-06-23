@@ -42,10 +42,10 @@ use crate::input::OrbitCamInputContextGated;
 use crate::input::OrbitCamTouchBinding;
 use crate::input::OrbitCamTrackpadScroll;
 use crate::input::ResolvedOrbitCamInputRoute;
+use crate::input::TouchGestures;
+use crate::input::TouchTracker;
 use crate::input::ZoomInversion;
 use crate::input::modes::OrbitCamInputInstallationOf;
-use crate::touch::TouchGestures;
-use crate::touch::TouchTracker;
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct OrbitCamAdapterFrameSources {
