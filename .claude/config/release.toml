@@ -10,5 +10,5 @@
 # When the dependency gets a newer published release, bump `version` here —
 # the release process needs no other change.
 [[publish_path_pins]]
-dep = "bevy_kana"
+dep     = "bevy_kana"
 version = "0.1.0"
