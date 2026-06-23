@@ -70,7 +70,7 @@ pub(crate) fn setup_camera(mut commands: Commands) {
                 radius: Some(CAMERA_RADIUS),
                 ..default()
             },
-            OrbitCamInputMode::Preset(OrbitCamPreset::BlenderLike),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         ))
         .with_child(SpotLight {
             intensity: SCENE_SPOTLIGHT_INTENSITY,
