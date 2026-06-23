@@ -27,6 +27,7 @@
 
 mod actions;
 mod adapter;
+mod axis_response;
 mod bindings;
 mod constants;
 mod context;
@@ -50,6 +51,9 @@ pub use actions::OrbitCamPanAction;
 pub use actions::OrbitCamZoomCoarseAction;
 pub use actions::OrbitCamZoomSmoothAction;
 pub(super) use adapter::OrbitCamInputAdapterPlugin;
+pub use axis_response::AxisResponse;
+pub use axis_response::Damping;
+pub use axis_response::Sensitivity;
 pub use bindings::ActionBindingDescriptor;
 pub use bindings::ActionBindingEntry;
 pub use bindings::ActionBindingSet;

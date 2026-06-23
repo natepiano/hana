@@ -225,7 +225,6 @@ fn setup(
             radius: Some(3.5),
             yaw: Some(0.0),
             pitch: Some(0.0),
-            zoom_sensitivity: 1.0,
             zoom_lower_limit: 0.000_000_1,
             ..default()
         },

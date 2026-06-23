@@ -254,9 +254,9 @@ fn toggle_manual(
     } else {
         manual.mode = ManualAnimationMode::Active;
         commands.entity(camera).insert(CameraInputDisabled);
-        orbit_cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-        orbit_cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
-        orbit_cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_ACTIVE;
+        orbit_cam.orbit.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
+        orbit_cam.zoom.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
+        orbit_cam.pan.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
         if let (Some(yaw), Some(pitch)) = (orbit_cam.yaw, orbit_cam.pitch) {
             orbit_cam.target_yaw = yaw;
             orbit_cam.target_pitch = pitch;
@@ -355,9 +355,9 @@ fn stop_manual(
     if manual.mode == ManualAnimationMode::Active {
         manual.mode = ManualAnimationMode::Inactive;
         commands.entity(camera).remove::<CameraInputDisabled>();
-        orbit_cam.orbit_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
-        orbit_cam.zoom_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
-        orbit_cam.pan_smoothness = MANUAL_MODE_SMOOTHNESS_INACTIVE;
+        orbit_cam.orbit.set_damping(MANUAL_MODE_SMOOTHNESS_INACTIVE);
+        orbit_cam.zoom.set_damping(MANUAL_MODE_SMOOTHNESS_INACTIVE);
+        orbit_cam.pan.set_damping(MANUAL_MODE_SMOOTHNESS_INACTIVE);
     }
 }
 

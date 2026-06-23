@@ -82,11 +82,11 @@ fn spawn_camera(mut commands: Commands) {
         yaw: Some(CAMERA_YAW),
         pitch: Some(CAMERA_PITCH),
         radius: Some(CAMERA_RADIUS),
-        orbit_sensitivity: CAMERA_ORBIT_SENSITIVITY,
-        pan_sensitivity: CAMERA_PAN_SENSITIVITY,
-        zoom_sensitivity: CAMERA_ZOOM_SENSITIVITY,
         ..default()
     };
+    camera.orbit.set_sensitivity(CAMERA_ORBIT_SENSITIVITY);
+    camera.pan.set_sensitivity(CAMERA_PAN_SENSITIVITY);
+    camera.zoom.set_sensitivity(CAMERA_ZOOM_SENSITIVITY);
     apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
         camera,

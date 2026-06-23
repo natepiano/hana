@@ -114,7 +114,7 @@ impl TitleChipActivation for AnimationPause {
     fn activation(&self) -> ControlActivation { self.control_activation() }
 }
 
-const fn configure_camera(camera: &mut OrbitCam) {
+fn configure_camera(camera: &mut OrbitCam) {
     camera.focus = CUBE_TRANSLATION;
     camera.target_focus = CUBE_TRANSLATION;
     camera.yaw = Some(HOME_YAW);
@@ -122,8 +122,8 @@ const fn configure_camera(camera: &mut OrbitCam) {
     camera.radius = Some(CAMERA_RADIUS);
     // Panning the camera changes the focus, so disable it while this example
     // drives the focus from the moving cube.
-    camera.pan_sensitivity = CAMERA_PAN_SENSITIVITY;
-    camera.pan_smoothness = CAMERA_PAN_SMOOTHNESS;
+    camera.pan.set_sensitivity(CAMERA_PAN_SENSITIVITY);
+    camera.pan.set_damping(CAMERA_PAN_SMOOTHNESS);
 }
 
 fn toggle_pause(mut pause: ResMut<AnimationPause>) { pause.paused = !pause.paused; }

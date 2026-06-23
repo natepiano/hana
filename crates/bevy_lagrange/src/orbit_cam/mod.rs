@@ -16,6 +16,7 @@ use super::constants::DEFAULT_ZOOM_SMOOTHNESS;
 use super::input::OrbitCamInput;
 use super::input::OrbitCamInputContext;
 use super::input::OrbitCamInputMode;
+use crate::input::AxisResponse;
 
 /// Base system set to allow ordering of `OrbitCam`.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
@@ -226,33 +227,13 @@ pub struct OrbitCam {
     /// Should always be >0 otherwise you'll get stuck at 0.
     /// Defaults to `1e-7`.
     pub zoom_lower_limit:    f32,
-    /// The sensitivity of the orbiting motion. A value of `0.0` disables orbiting.
-    /// Defaults to `1.0`.
-    pub orbit_sensitivity:   f32,
-    /// How much smoothing is applied to the orbit motion. A value of `0.0` disables smoothing,
-    /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
-    /// smoothing.
-    /// Defaults to `0.8`.
-    pub orbit_smoothness:    f32,
-    /// The sensitivity of the panning motion. A value of `0.0` disables panning.
-    /// Defaults to `1.0`.
-    pub pan_sensitivity:     f32,
-    /// How much smoothing is applied to the panning motion. A value of `0.0` disables smoothing,
-    /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
-    /// smoothing.
-    /// Defaults to `0.6`.
-    pub pan_smoothness:      f32,
-    /// The sensitivity of moving the camera closer or further way using the scroll wheel.
-    /// A value of `0.0` disables zooming.
-    /// Defaults to `1.0`.
-    pub zoom_sensitivity:    f32,
-    /// How much smoothing is applied to the zoom motion. A value of `0.0` disables smoothing,
-    /// so there's a 1:1 mapping of input to camera position. A value of `1.0` is infinite
-    /// smoothing.
-    /// Defaults to `0.8`.
-    /// Note that this setting does not apply to pixel-based scroll events, as they are typically
-    /// already smooth. It only applies to line-based scroll events.
-    pub zoom_smoothness:     f32,
+    /// Sensitivity and damping of the orbiting motion.
+    pub orbit:               AxisResponse,
+    /// Sensitivity and damping of the panning motion.
+    pub pan:                 AxisResponse,
+    /// Sensitivity and damping of the zoom motion. Damping applies only to
+    /// line-based scroll events; pixel-based scroll is already smooth.
+    pub zoom:                AxisResponse,
     /// Whether to allow the camera to go upside down.
     /// Defaults to `UpsideDownPolicy::Prevent`.
     pub upside_down_policy:  UpsideDownPolicy,
@@ -281,12 +262,18 @@ impl Default for OrbitCam {
             target_focus:        Vec3::ZERO,
             radius:              None,
             upside_down_policy:  UpsideDownPolicy::Prevent,
-            orbit_sensitivity:   DEFAULT_INPUT_SENSITIVITY,
-            orbit_smoothness:    DEFAULT_ORBIT_SMOOTHNESS,
-            pan_sensitivity:     DEFAULT_INPUT_SENSITIVITY,
-            pan_smoothness:      DEFAULT_PAN_SMOOTHNESS,
-            zoom_sensitivity:    DEFAULT_INPUT_SENSITIVITY,
-            zoom_smoothness:     DEFAULT_ZOOM_SMOOTHNESS,
+            orbit:               AxisResponse::new(
+                DEFAULT_INPUT_SENSITIVITY,
+                DEFAULT_ORBIT_SMOOTHNESS,
+            ),
+            pan:                 AxisResponse::new(
+                DEFAULT_INPUT_SENSITIVITY,
+                DEFAULT_PAN_SMOOTHNESS,
+            ),
+            zoom:                AxisResponse::new(
+                DEFAULT_INPUT_SENSITIVITY,
+                DEFAULT_ZOOM_SMOOTHNESS,
+            ),
             yaw:                 None,
             pitch:               None,
             target_yaw:          DEFAULT_ORBIT_ANGLE,

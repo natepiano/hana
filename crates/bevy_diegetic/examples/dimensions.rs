@@ -207,7 +207,6 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_height: f32) {
             radius: Some(0.25),
             yaw: Some(0.0),
             pitch: Some(0.0),
-            zoom_sensitivity: 1.0,
             zoom_lower_limit: 0.000_000_1,
             ..default()
         },

@@ -166,17 +166,18 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let mut orbit_cam = OrbitCam {
+        focus: CAMERA_FOCUS,
+        radius: Some(CAMERA_RADIUS),
+        ..default()
+    };
+    orbit_cam.orbit.set_damping(CAMERA_SMOOTHNESS);
+    orbit_cam.pan.set_damping(CAMERA_SMOOTHNESS);
+    orbit_cam.zoom.set_damping(CAMERA_SMOOTHNESS);
     commands.spawn((
         Camera3d::default(),
         Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
-        OrbitCam {
-            orbit_smoothness: CAMERA_SMOOTHNESS,
-            pan_smoothness: CAMERA_SMOOTHNESS,
-            zoom_smoothness: CAMERA_SMOOTHNESS,
-            focus: CAMERA_FOCUS,
-            radius: Some(CAMERA_RADIUS),
-            ..default()
-        },
+        orbit_cam,
         OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         OutlineCamera,
     ));

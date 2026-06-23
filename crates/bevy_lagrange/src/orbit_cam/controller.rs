@@ -95,14 +95,14 @@ fn collect_camera_input(orbit_cam: &OrbitCam, input: &OrbitCamInput) -> CameraIn
     };
 
     if input.has_orbit() {
-        camera_input.orbit = input.orbit().pixels() * orbit_cam.orbit_sensitivity;
+        camera_input.orbit = input.orbit().pixels() * orbit_cam.orbit.sensitivity();
     }
     if input.has_pan() {
-        camera_input.pan = input.pan().pixels() * orbit_cam.pan_sensitivity;
+        camera_input.pan = input.pan().pixels() * orbit_cam.pan.sensitivity();
     }
     if input.has_zoom() {
-        camera_input.scroll_line = input.zoom_coarse().amount() * orbit_cam.zoom_sensitivity;
-        camera_input.scroll_pixel = input.zoom_smooth().amount() * orbit_cam.zoom_sensitivity;
+        camera_input.scroll_line = input.zoom_coarse().amount() * orbit_cam.zoom.sensitivity();
+        camera_input.scroll_pixel = input.zoom_smooth().amount() * orbit_cam.zoom.sensitivity();
     }
 
     camera_input
@@ -238,25 +238,25 @@ fn smooth_and_update_transform(
     let new_yaw = orbital_math::lerp_and_snap_f32(
         yaw,
         orbit_cam.target_yaw,
-        orbit_cam.orbit_smoothness,
+        orbit_cam.orbit.damping(),
         delta,
     );
     let new_pitch = orbital_math::lerp_and_snap_f32(
         pitch,
         orbit_cam.target_pitch,
-        orbit_cam.orbit_smoothness,
+        orbit_cam.orbit.damping(),
         delta,
     );
     let new_radius = orbital_math::lerp_and_snap_f32(
         radius,
         orbit_cam.target_radius,
-        orbit_cam.zoom_smoothness,
+        orbit_cam.zoom.damping(),
         delta,
     );
     let new_focus = orbital_math::lerp_and_snap_position(
         orbit_cam.focus,
         orbit_cam.target_focus,
-        orbit_cam.pan_smoothness,
+        orbit_cam.pan.damping(),
         delta,
     );
 
@@ -389,12 +389,10 @@ mod tests {
 
     #[test]
     fn collect_camera_input_scales_finalized_intent() {
-        let orbit_cam = OrbitCam {
-            orbit_sensitivity: 2.0,
-            pan_sensitivity: 3.0,
-            zoom_sensitivity: 4.0,
-            ..default()
-        };
+        let mut orbit_cam = OrbitCam::default();
+        orbit_cam.orbit.set_sensitivity(2.0);
+        orbit_cam.pan.set_sensitivity(3.0);
+        orbit_cam.zoom.set_sensitivity(4.0);
         let mut input = OrbitCamInput::default();
         input
             .orbit_pixels_with_sources(Vec2::new(1.0, 2.0), CameraInteractionSources::MOUSE)

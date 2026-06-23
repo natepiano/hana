@@ -44,16 +44,16 @@ fn stash_camera_state(
 ) {
     if existing_stash.is_none() {
         let stash = OrbitCamStash {
-            zoom:  camera.zoom_smoothness,
-            pan:   camera.pan_smoothness,
-            orbit: camera.orbit_smoothness,
+            zoom:  camera.zoom.damping(),
+            pan:   camera.pan.damping(),
+            orbit: camera.orbit.damping(),
         };
         commands.entity(entity).insert(stash);
     }
 
-    camera.zoom_smoothness = INSTANT_SMOOTHNESS;
-    camera.pan_smoothness = INSTANT_SMOOTHNESS;
-    camera.orbit_smoothness = INSTANT_SMOOTHNESS;
+    camera.zoom.set_damping(INSTANT_SMOOTHNESS);
+    camera.pan.set_damping(INSTANT_SMOOTHNESS);
+    camera.orbit.set_damping(INSTANT_SMOOTHNESS);
 }
 
 /// Fires `ZoomBegin` and inserts `ZoomAnimationMarker` when the accepted
@@ -209,9 +209,9 @@ pub(super) fn restore_camera_state(
         return;
     };
 
-    camera.zoom_smoothness = stash.zoom;
-    camera.pan_smoothness = stash.pan;
-    camera.orbit_smoothness = stash.orbit;
+    camera.zoom.set_damping(stash.zoom);
+    camera.pan.set_damping(stash.pan);
+    camera.orbit.set_damping(stash.orbit);
 
     commands.entity(entity).remove::<OrbitCamStash>();
 }

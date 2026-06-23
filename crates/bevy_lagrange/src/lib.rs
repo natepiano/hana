@@ -55,6 +55,7 @@ use fit_overlay::ZoomOverlayPlugin;
 pub use input::ActionBindingDescriptor;
 pub use input::ActionBindingEntry;
 pub use input::ActionBindingSet;
+pub use input::AxisResponse;
 pub use input::BindingEngagement;
 pub use input::BindingGates;
 pub use input::BindingRoutePolicy;
@@ -70,6 +71,7 @@ pub use input::CameraMotion;
 pub use input::CameraSemanticAction;
 pub use input::CoarseZoomDelta;
 pub use input::ControlSpeed;
+pub use input::Damping;
 pub use input::GamepadSensitivity;
 pub use input::HeldActionBindingEntry;
 pub use input::HeldCameraAction;
@@ -147,6 +149,7 @@ pub use input::OrbitDelta;
 pub use input::PanDelta;
 pub use input::PinchGestureZoom;
 pub use input::ResolvedOrbitCamInputRoute;
+pub use input::Sensitivity;
 pub use input::SmoothScrollSensitivity;
 pub use input::SmoothZoomDelta;
 pub use input::ZoomDirection;
@@ -346,14 +349,13 @@ mod tests {
     }
 
     fn spawn_manual_camera(app: &mut App) -> Entity {
+        let mut orbit_cam = OrbitCam::default();
+        orbit_cam.orbit.set_damping(0.0);
         let camera = app
             .world_mut()
             .spawn((
                 ScheduleInvariantCamera,
-                OrbitCam {
-                    orbit_smoothness: 0.0,
-                    ..default()
-                },
+                orbit_cam,
                 OrbitCamInputMode::Manual,
                 Camera::default(),
                 RenderTarget::Window(WindowRef::Primary),

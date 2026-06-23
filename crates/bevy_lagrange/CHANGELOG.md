@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Replace `OrbitCam`'s `{orbit,pan,zoom}_sensitivity` and `{orbit,pan,zoom}_smoothness`
+  fields with three `orbit`/`pan`/`zoom` `AxisResponse` values bundling per-axis
+  `Sensitivity` and `Damping`; read with `.sensitivity()`/`.damping()`, set with
+  `.set_sensitivity()`/`.set_damping()` (breaking).
+
 ### Removed
 
 - `reflect-input-modes` cargo feature and its reflected draft/apply types

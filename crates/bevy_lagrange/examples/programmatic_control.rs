@@ -1,8 +1,8 @@
 //! Drives an `OrbitCam` from app code by mutating `target_focus`, `target_yaw`,
 //! `target_pitch`, and `target_radius` directly. Pressing **H** kicks off a home
-//! animation that temporarily raises the camera's `orbit_smoothness`,
-//! `pan_smoothness`, and `zoom_smoothness` so the lerp reads as a slow fly-to,
-//! then restores the previous smoothness once the camera arrives. The
+//! animation that temporarily raises the camera's per-axis damping so the lerp
+//! reads as a slow fly-to, then restores the previous damping once the camera
+//! arrives. The
 //! `HomeAnimationBegin` / `HomeAnimationEnd` events expose the animation window
 //! for other systems (here, the title-bar control chip) to react to.
 //!
@@ -97,12 +97,12 @@ impl HomeReset {
     fn start(&mut self, camera: &mut OrbitCam) {
         self.previous_smoothness
             .get_or_insert_with(|| CameraSmoothness::from_camera(camera));
-        camera.orbit_smoothness = HOME_SMOOTHNESS;
-        camera.pan_smoothness = HOME_SMOOTHNESS;
-        camera.zoom_smoothness = HOME_SMOOTHNESS;
+        camera.orbit.set_damping(HOME_SMOOTHNESS);
+        camera.pan.set_damping(HOME_SMOOTHNESS);
+        camera.zoom.set_damping(HOME_SMOOTHNESS);
     }
 
-    const fn finish(&mut self, camera: &mut OrbitCam) {
+    fn finish(&mut self, camera: &mut OrbitCam) {
         if let Some(previous) = self.previous_smoothness.take() {
             previous.apply(camera);
         }
@@ -121,16 +121,16 @@ struct CameraSmoothness {
 impl CameraSmoothness {
     const fn from_camera(camera: &OrbitCam) -> Self {
         Self {
-            orbit: camera.orbit_smoothness,
-            pan:   camera.pan_smoothness,
-            zoom:  camera.zoom_smoothness,
+            orbit: camera.orbit.damping(),
+            pan:   camera.pan.damping(),
+            zoom:  camera.zoom.damping(),
         }
     }
 
-    const fn apply(self, camera: &mut OrbitCam) {
-        camera.orbit_smoothness = self.orbit;
-        camera.pan_smoothness = self.pan;
-        camera.zoom_smoothness = self.zoom;
+    fn apply(self, camera: &mut OrbitCam) {
+        camera.orbit.set_damping(self.orbit);
+        camera.pan.set_damping(self.pan);
+        camera.zoom.set_damping(self.zoom);
     }
 }
 

@@ -172,7 +172,7 @@ fn main() {
                 cam.radius = Some(HOME_RADIUS);
                 cam.yaw = Some(HOME_YAW);
                 cam.pitch = Some(HOME_PITCH);
-                cam.zoom_sensitivity = 1.0;
+                cam.zoom.set_sensitivity(1.0);
             },
             OrbitCamPreset::blender_like(),
             (
