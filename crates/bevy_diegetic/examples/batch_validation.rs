@@ -339,6 +339,65 @@ struct BatchValidationSdfPanel {
     image: Handle<Image>,
 }
 
+/// Registered SDF source material handles reused by the animated validation panel.
+#[derive(Clone, Resource)]
+struct SdfSurfaceMaterialHandles {
+    /// Source material for the panel-default card.
+    panel_default: Handle<StandardMaterial>,
+    /// Source material for the metallic animated card.
+    metallic:      Handle<StandardMaterial>,
+    /// Source material for the emissive animated card.
+    emissive:      Handle<StandardMaterial>,
+    /// Source material for the texture-backed card.
+    image:         Handle<StandardMaterial>,
+}
+
+impl SdfSurfaceMaterialHandles {
+    /// Registers the four SDF card materials once and returns their handles.
+    fn new(
+        materials: &mut Assets<StandardMaterial>,
+        image: Handle<Image>,
+        alpha: AlphaMode,
+    ) -> Self {
+        Self {
+            panel_default: materials.add(panel_default_card_material(alpha)),
+            metallic:      materials.add(with_alpha(metallic_glint_material(0.0), alpha)),
+            emissive:      materials.add(with_alpha(emissive_fill_material(0.0), alpha)),
+            image:         materials.add(with_alpha(image_fill_material(image), alpha)),
+        }
+    }
+
+    /// Updates the existing material assets for the current animation frame.
+    fn refresh(
+        &self,
+        materials: &mut Assets<StandardMaterial>,
+        image: Handle<Image>,
+        phase: f32,
+        alpha: AlphaMode,
+    ) {
+        replace_material_asset(
+            materials,
+            &self.panel_default,
+            panel_default_card_material(alpha),
+        );
+        replace_material_asset(
+            materials,
+            &self.metallic,
+            with_alpha(metallic_glint_material(phase), alpha),
+        );
+        replace_material_asset(
+            materials,
+            &self.emissive,
+            with_alpha(emissive_fill_material(phase), alpha),
+        );
+        replace_material_asset(
+            materials,
+            &self.image,
+            with_alpha(image_fill_material(image), alpha),
+        );
+    }
+}
+
 /// Marker for the Text material panel, rebuilt when the alpha selection changes
 /// so its live alpha case re-renders in the chosen mode.
 #[derive(Component)]
@@ -435,21 +494,22 @@ fn spawn_validation_panels(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     selection: Res<AlphaModeSelection>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let sdf_fill_image = asset_server.load("textures/array_texture.png");
     let alpha = selection.mode();
+    let sdf_materials =
+        SdfSurfaceMaterialHandles::new(&mut materials, sdf_fill_image.clone(), alpha);
+    commands.insert_resource(sdf_materials.clone());
     let panels = [
-        (
-            "sdf-surfaces",
-            build_sdf_surface_panel(sdf_fill_image.clone(), 0.0, alpha),
-        ),
+        ("sdf-surfaces", build_sdf_surface_panel(&sdf_materials)),
         ("text-materials", build_text_panel(alpha)),
         ("analytic-shapes", build_shape_panel()),
         ("mixed-stack", build_mixed_panel()),
     ];
     for (index, (name, tree)) in panels.into_iter().enumerate() {
         let (x, y) = panel_grid_position(index);
-        let panel = validation_panel(tree, index);
+        let panel = validation_panel(tree, index, &mut materials);
         match panel {
             Ok(panel) => {
                 let mut entity = commands.spawn((
@@ -514,23 +574,21 @@ fn spawn_validation_panels(
 fn animate_sdf_surface_panel(
     time: Res<Time>,
     selection: Res<AlphaModeSelection>,
-    panels: Query<(Entity, &BatchValidationSdfPanel)>,
-    mut commands: Commands,
+    sdf_materials: Res<SdfSurfaceMaterialHandles>,
+    panels: Query<&BatchValidationSdfPanel>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let phase = time.elapsed_secs() * SDF_ANIMATION_SPEED;
     let alpha = selection.mode();
-    for (entity, panel) in &panels {
-        commands.set_tree(
-            entity,
-            build_sdf_surface_panel(panel.image.clone(), phase, alpha),
-        );
+    for panel in &panels {
+        sdf_materials.refresh(&mut materials, panel.image.clone(), phase, alpha);
     }
 }
 
 // Repaints the center-left selector (highlighting the chosen mode) and rebuilds
 // the Text panel's live alpha case whenever a number key changes the selection.
-// The SDF panel needs no rebuild here — `animate_sdf_surface_panel` already
-// re-trees it every frame and reads the same selection.
+// The SDF panel needs no rebuild here: `animate_sdf_surface_panel` edits the
+// existing material assets, and the fill producer reads those assets each frame.
 fn apply_alpha_selection(
     selection: Res<AlphaModeSelection>,
     selectors: Query<Entity, With<AlphaSelectorPanel>>,
@@ -559,6 +617,7 @@ fn panel_grid_position(index: usize) -> (f32, f32) {
 fn validation_panel(
     tree: LayoutTree,
     index: usize,
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     let mut material = default_panel_material();
     material.base_color = if index.is_multiple_of(2) {
@@ -573,13 +632,14 @@ fn validation_panel(
     if index == 3 {
         builder.with_tree(tree).build()
     } else {
+        let material = materials.add(material);
         builder.material(material).with_tree(tree).build()
     }
 }
 
-fn spawn_stats_panel(mut commands: Commands) {
+fn spawn_stats_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     let sections = validation_stats_sections(None, 0.0, 0.0);
-    match diegetic_stats_sections_panel(&sections) {
+    match diegetic_stats_sections_panel(&sections, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationStatsPanel, panel, Transform::default()));
         },
@@ -587,8 +647,11 @@ fn spawn_stats_panel(mut commands: Commands) {
     }
 }
 
-fn spawn_expected_batches_panel(mut commands: Commands) {
-    match build_expected_batches_panel(None) {
+fn spawn_expected_batches_panel(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    match build_expected_batches_panel(None, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationLedgerPanel, panel, Transform::default()));
         },
@@ -596,8 +659,11 @@ fn spawn_expected_batches_panel(mut commands: Commands) {
     }
 }
 
-fn spawn_alpha_selector_panel(mut commands: Commands) {
-    match build_alpha_selector_panel(ALPHA_DEFAULT_INDEX) {
+fn spawn_alpha_selector_panel(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    match build_alpha_selector_panel(ALPHA_DEFAULT_INDEX, &mut materials) {
         Ok(panel) => {
             commands.spawn((AlphaSelectorPanel, panel, Transform::default()));
         },
@@ -607,8 +673,9 @@ fn spawn_alpha_selector_panel(mut commands: Commands) {
 
 fn build_alpha_selector_panel(
     index: usize,
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
-    let unlit = screen_panel_material();
+    let unlit = materials.add(screen_panel_material());
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::CenterLeft)
@@ -796,8 +863,9 @@ fn stats_key(sections: &[StatsPanelSection]) -> String {
 
 fn build_expected_batches_panel(
     perf: Option<&DiegeticPerfStats>,
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
-    let unlit = screen_panel_material();
+    let unlit = materials.add(screen_panel_material());
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -938,7 +1006,7 @@ fn ledger_cell_style(color: Color) -> TextStyle {
 // share one SDF batch. The image card carries a
 // `base_color_texture`, a batch-compatibility splitter, so it forms its own
 // batch — the SDF column's predicted 2 batches in the expected-batches ledger.
-fn build_sdf_surface_panel(image: Handle<Image>, phase: f32, alpha: AlphaMode) -> LayoutTree {
+fn build_sdf_surface_panel(materials: &SdfSurfaceMaterialHandles) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
@@ -963,14 +1031,14 @@ fn build_sdf_surface_panel(image: Handle<Image>, phase: f32, alpha: AlphaMode) -
                         "panel default",
                         "builder material",
                         ACCENT_BLUE,
-                        alpha,
+                        materials.panel_default.clone(),
                     );
                     sdf_fill_card(
                         builder,
                         "El material",
                         "base color animates",
-                        with_alpha(metallic_glint_material(phase), alpha),
                         ACCENT_GREEN,
+                        materials.metallic.clone(),
                     );
                 },
             );
@@ -984,15 +1052,15 @@ fn build_sdf_surface_panel(image: Handle<Image>, phase: f32, alpha: AlphaMode) -
                         builder,
                         "El material",
                         "emissive value",
-                        with_alpha(emissive_fill_material(phase), alpha),
                         ACCENT_YELLOW,
+                        materials.emissive.clone(),
                     );
                     sdf_fill_card(
                         builder,
                         "image",
                         "texture splits",
-                        with_alpha(image_fill_material(image), alpha),
                         ACCENT_RED,
+                        materials.image.clone(),
                     );
                 },
             );
@@ -1411,8 +1479,8 @@ fn sdf_fill_card(
     builder: &mut LayoutBuilder,
     label: &str,
     caption: &str,
-    material: StandardMaterial,
     accent: Color,
+    material: Handle<StandardMaterial>,
 ) {
     builder.with(
         El::new()
@@ -1444,11 +1512,8 @@ fn sdf_panel_default_card(
     label: &str,
     caption: &str,
     accent: Color,
-    alpha: AlphaMode,
+    material: Handle<StandardMaterial>,
 ) {
-    let mut material = default_panel_material();
-    material.base_color = accent;
-    material.alpha_mode = alpha;
     builder.with(
         El::new()
             .width(Sizing::GROW)
@@ -1472,6 +1537,23 @@ fn sdf_panel_default_card(
             );
         },
     );
+}
+
+fn panel_default_card_material(alpha: AlphaMode) -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = ACCENT_BLUE;
+    material.alpha_mode = alpha;
+    material
+}
+
+fn replace_material_asset(
+    materials: &mut Assets<StandardMaterial>,
+    handle: &Handle<StandardMaterial>,
+    material: StandardMaterial,
+) {
+    if let Some(mut existing) = materials.get_mut(handle) {
+        *existing = material;
+    }
 }
 
 // Matte dielectric SDF fill. Differs from the metallic and emissive cards only

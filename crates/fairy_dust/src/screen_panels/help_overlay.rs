@@ -39,7 +39,6 @@ use super::constants::SCREEN_PANEL_KEYS;
 use super::constants::SCREEN_PANEL_LABEL;
 use super::default_inner_background;
 use super::screen_panel_frame;
-use super::screen_panel_material;
 use crate::camera_control_panel::CameraGuidancePanel;
 use crate::camera_control_panel::CameraPresetSwitching;
 use crate::camera_home::CameraHomeMarker;
@@ -117,6 +116,7 @@ fn show_or_toggle_help(
     camera_panels: Query<Entity, With<CameraGuidancePanel>>,
     preset_switching: Option<Res<CameraPresetSwitching>>,
     mut bars: Query<&mut TitleBarControlState>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     if !overlay.is_empty() {
         for entity in &overlay {
@@ -144,6 +144,7 @@ fn show_or_toggle_help(
             home_marker,
             camera_preset,
         },
+        &mut materials,
     );
     set_help_chip(&mut bars, ControlActivation::Active);
 }
@@ -168,8 +169,12 @@ fn set_help_chip(bars: &mut Query<&mut TitleBarControlState>, activation: Contro
     }
 }
 
-fn spawn_help_overlay(commands: &mut Commands, shortcuts: HelpShortcuts) {
-    let unlit = screen_panel_material();
+fn spawn_help_overlay(
+    commands: &mut Commands,
+    shortcuts: HelpShortcuts,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let unlit = super::screen_panel_material_handle(materials);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::Center)

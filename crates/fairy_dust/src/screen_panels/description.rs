@@ -13,7 +13,6 @@ use super::constants::BODY_COLOR;
 use super::constants::DESCRIPTION_CHILD_GAP;
 use super::constants::DESCRIPTION_WIDTH;
 use super::screen_panel_frame;
-use super::screen_panel_material;
 use crate::constants::LABEL_SIZE;
 use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
@@ -90,8 +89,12 @@ impl DescriptionPanel {
 #[derive(Component)]
 struct DescriptionPanelMarker;
 
-pub(super) fn spawn_description_panel(commands: &mut Commands, panel: &DescriptionPanel) {
-    let unlit = screen_panel_material();
+pub(super) fn spawn_description_panel(
+    commands: &mut Commands,
+    panel: &DescriptionPanel,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let unlit = super::screen_panel_material_handle(materials);
     let built = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(panel.anchor)

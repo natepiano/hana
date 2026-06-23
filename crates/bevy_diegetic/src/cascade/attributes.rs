@@ -1,4 +1,5 @@
 use bevy::ecs::world::EntityWorldMut;
+use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 
 use super::CascadeDefault;
@@ -7,7 +8,10 @@ use super::resolved::CascadeAttr;
 pub use super::resolved::FontUnit;
 use super::resolved::Override;
 use super::resolved::Resolved;
+pub use super::resolved::SdfMaterial;
+pub use super::resolved::ShapeMaterial;
 pub use super::resolved::TextAlpha;
+pub use super::resolved::TextMaterial;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::layout::Unit;
@@ -58,6 +62,24 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored hairline fade policy.
     fn inherit_hairline_fade(&mut self) -> &mut Self;
+
+    /// Author this entity's SDF surface material source handle.
+    fn override_sdf_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
+
+    /// Remove this entity's authored SDF surface material source handle.
+    fn inherit_sdf_material(&mut self) -> &mut Self;
+
+    /// Author this entity's text material source handle.
+    fn override_text_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
+
+    /// Remove this entity's authored text material source handle.
+    fn inherit_text_material(&mut self) -> &mut Self;
+
+    /// Author this entity's panel-shape material source handle.
+    fn override_shape_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self;
+
+    /// Remove this entity's authored panel-shape material source handle.
+    fn inherit_shape_material(&mut self) -> &mut Self;
 }
 
 impl CascadeEntityCommandsExt for EntityCommands<'_> {
@@ -97,6 +119,28 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
 
     fn inherit_hairline_fade(&mut self) -> &mut Self {
         remove_cascade_override::<HairlineFade>(self)
+    }
+
+    fn override_sdf_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self {
+        apply_cascade_override(self, SdfMaterial(material))
+    }
+
+    fn inherit_sdf_material(&mut self) -> &mut Self { remove_cascade_override::<SdfMaterial>(self) }
+
+    fn override_text_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self {
+        apply_cascade_override(self, TextMaterial(material))
+    }
+
+    fn inherit_text_material(&mut self) -> &mut Self {
+        remove_cascade_override::<TextMaterial>(self)
+    }
+
+    fn override_shape_material(&mut self, material: Handle<StandardMaterial>) -> &mut Self {
+        apply_cascade_override(self, ShapeMaterial(material))
+    }
+
+    fn inherit_shape_material(&mut self) -> &mut Self {
+        remove_cascade_override::<ShapeMaterial>(self)
     }
 }
 
@@ -152,6 +196,33 @@ pub fn resolved_anti_alias(world: &World, entity: Entity) -> AntiAlias {
 #[must_use]
 pub fn resolved_hairline_fade(world: &World, entity: Entity) -> HairlineFade {
     resolved_cascade::<HairlineFade>(world, entity)
+}
+
+/// Resolve an entity's current SDF surface material handle.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_sdf_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
+    resolved_cascade::<SdfMaterial>(world, entity).0
+}
+
+/// Resolve an entity's current text material handle.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_text_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
+    resolved_cascade::<TextMaterial>(world, entity).0
+}
+
+/// Resolve an entity's current panel-shape material handle.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_shape_material(world: &World, entity: Entity) -> Handle<StandardMaterial> {
+    resolved_cascade::<ShapeMaterial>(world, entity).0
 }
 
 pub(crate) fn apply_cascade_override<'a, 'w, A>(
@@ -222,7 +293,7 @@ where
     CascadeDefault<A>: Default + Resource,
 {
     if let Some(resolved) = world.get::<Resolved<A>>(entity) {
-        return resolved.0;
+        return resolved.0.clone();
     }
     let default = cascade_default(world);
     resolved::resolve::<A>(world, entity, default)
@@ -235,7 +306,7 @@ where
 {
     world
         .get_resource::<CascadeDefault<A>>()
-        .copied()
+        .cloned()
         .unwrap_or_default()
         .0
 }

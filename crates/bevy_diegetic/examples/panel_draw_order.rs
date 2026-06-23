@@ -184,8 +184,13 @@ fn description_panel() -> DescriptionPanel {
         .lines(DESCRIPTION_LINES)
 }
 
-fn setup(mut commands: Commands, state: Res<DemoState>, sweep: Res<SweepPosition>) {
-    let Ok(panel) = build_panel(*state, sweep.x) else {
+fn setup(
+    mut commands: Commands,
+    state: Res<DemoState>,
+    sweep: Res<SweepPosition>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let Ok(panel) = build_panel(*state, sweep.x, &mut materials) else {
         error!("panel_draw_order: failed to build demo panel");
         return;
     };
@@ -221,8 +226,12 @@ const fn chip_activation(active: bool) -> ControlActivation {
     }
 }
 
-fn build_panel(state: DemoState, sweep_x: f32) -> Result<DiegeticPanel, PanelBuildError> {
-    let material = screen_panel_material();
+fn build_panel(
+    state: DemoState,
+    sweep_x: f32,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let material = materials.add(screen_panel_material());
     let (page_width, page_height) = page_size();
     DiegeticPanel::world()
         .size(page_width, page_height)

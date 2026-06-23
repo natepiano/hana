@@ -30,7 +30,6 @@ use super::constants::STATS_SECTION_GAP;
 use super::constants::STATUS_LABEL_COLOR;
 use super::constants::STATUS_TEXT_COLOR;
 use super::screen_panel_frame;
-use super::screen_panel_material;
 use crate::DEFAULT_PANEL_BACKGROUND;
 
 /// One label/value group in a reusable instrumentation stats panel.
@@ -108,8 +107,14 @@ impl StatsPanelSection {
 ///
 /// Returns [`PanelBuildError`] if the generated screen-space
 /// [`DiegeticPanel`] fails layout validation.
-pub fn diegetic_stats_panel(rows: &[StatsPanelRow]) -> Result<DiegeticPanel, PanelBuildError> {
-    diegetic_stats_sections_panel(&[StatsPanelSection::untitled(rows.iter().cloned())])
+pub fn diegetic_stats_panel(
+    rows: &[StatsPanelRow],
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    diegetic_stats_sections_panel(
+        &[StatsPanelSection::untitled(rows.iter().cloned())],
+        materials,
+    )
 }
 
 /// Creates the standard top-right diegetic stats panel from named sections.
@@ -123,8 +128,9 @@ pub fn diegetic_stats_panel(rows: &[StatsPanelRow]) -> Result<DiegeticPanel, Pan
 /// [`DiegeticPanel`] fails layout validation.
 pub fn diegetic_stats_sections_panel(
     sections: &[StatsPanelSection],
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, PanelBuildError> {
-    let unlit = screen_panel_material();
+    let unlit = super::screen_panel_material_handle(materials);
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopRight)
@@ -143,8 +149,11 @@ pub fn diegetic_stats_sections_panel(
 ///
 /// Returns [`PanelBuildError`] if the generated screen-space
 /// [`DiegeticPanel`] fails layout validation.
-pub fn fps_stats_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildError> {
-    let unlit = screen_panel_material();
+pub fn fps_stats_panel(
+    tree: LayoutTree,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let unlit = super::screen_panel_material_handle(materials);
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopLeft)
@@ -164,8 +173,11 @@ pub fn fps_stats_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildErro
 ///
 /// Returns [`PanelBuildError`] if the generated screen-space
 /// [`DiegeticPanel`] fails layout validation.
-pub fn gpu_meter_panel(tree: LayoutTree) -> Result<DiegeticPanel, PanelBuildError> {
-    let unlit = screen_panel_material();
+pub fn gpu_meter_panel(
+    tree: LayoutTree,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let unlit = super::screen_panel_material_handle(materials);
     DiegeticPanel::screen()
         .size(Percent(GPU_METER_PANEL_WIDTH_FRACTION), Fit)
         .anchor(Anchor::BottomLeft)

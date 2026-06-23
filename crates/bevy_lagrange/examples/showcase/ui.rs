@@ -5,10 +5,10 @@ use super::*;
 #[derive(Component)]
 pub(crate) struct PausedOverlay;
 
-pub(crate) fn spawn_ui(commands: &mut Commands) {
-    policy_panel::spawn_policy_panel(commands);
+pub(crate) fn spawn_ui(commands: &mut Commands, materials: &mut Assets<StandardMaterial>) {
+    policy_panel::spawn_policy_panel(commands, materials);
 
-    event_log::spawn_log_panel(commands);
+    event_log::spawn_log_panel(commands, materials);
 
     // Paused overlay: a screen-space text label centered on the window, hidden
     // until Esc toggles the pause state.

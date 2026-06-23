@@ -98,10 +98,11 @@ pub(super) struct Element {
     pub(super) scroll_anchor_x: ScrollAnchor,
     /// Which vertical edge `scroll_offset.y` measures from.
     pub(super) scroll_anchor_y: ScrollAnchor,
-    /// Optional PBR material override for this element's surface (backgrounds, borders).
-    /// When present, the rendering system uses this instead of the panel-level default.
-    /// `base_color` is overridden by the layout color if both are set.
-    pub(super) material:        Option<Box<StandardMaterial>>,
+    /// Optional PBR source-material handle for this element's surfaces.
+    /// When present, render systems use this as the element-local override over
+    /// the panel material handle and global material cascade defaults.
+    /// `base_color` is overridden by layout or primitive color when both are set.
+    pub(super) material:        Option<Handle<StandardMaterial>>,
     /// Optional editable field contract.
     pub(super) editable:        Option<ImePanelField>,
     /// Optional paint-only draw data.
@@ -368,8 +369,8 @@ impl LayoutTree {
 
     /// Returns the PBR material override for the element at `index`, if any.
     #[must_use]
-    pub fn element_material(&self, index: usize) -> Option<&StandardMaterial> {
-        self.elements.get(index).and_then(|e| e.material.as_deref())
+    pub fn element_material(&self, index: usize) -> Option<&Handle<StandardMaterial>> {
+        self.elements.get(index).and_then(|e| e.material.as_ref())
     }
 
     /// Returns the corner radius for the element at `index`.
@@ -740,8 +741,8 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     change = change.combine(classify_material_change(
-        material.as_deref(),
-        n_material.as_deref(),
+        material.as_ref(),
+        n_material.as_ref(),
     ));
 
     change.combine(classify_content_change(content, n_content))
@@ -849,15 +850,14 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
     }
 }
 
-const fn classify_material_change(
-    material: Option<&StandardMaterial>,
-    next: Option<&StandardMaterial>,
+fn classify_material_change(
+    material: Option<&Handle<StandardMaterial>>,
+    next: Option<&Handle<StandardMaterial>>,
 ) -> LayoutTreeChange {
     match (material, next) {
         (None, None) => LayoutTreeChange::Identical,
-        // StandardMaterial does not provide the tight layout-vs-render
-        // comparator this optimization needs. Stay conservative until it does.
-        (Some(_) | None, Some(_)) | (Some(_), None) => LayoutTreeChange::LayoutAffecting,
+        (Some(material), Some(next)) if material == next => LayoutTreeChange::Identical,
+        (Some(_) | None, Some(_)) | (Some(_), None) => LayoutTreeChange::VisualOnly,
     }
 }
 
@@ -906,9 +906,12 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
 
 #[cfg(test)]
 mod tests {
+    use bevy::asset::Assets;
     use bevy::asset::Handle;
     use bevy::color::Color;
     use bevy::image::Image;
+    use bevy::pbr::StandardMaterial;
+    use bevy::prelude::default;
 
     use super::ElementContent;
     use super::FieldDisplayTextUpdate;
@@ -1390,14 +1393,31 @@ mod tests {
     }
 
     #[test]
-    fn material_change_is_conservatively_layout_affecting() {
-        let tree = root_tree(El::new());
-        let next = root_tree(El::new().material(bevy::pbr::StandardMaterial::default()));
+    fn material_handle_add_remove_and_swap_are_visual_only() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let first = materials.add(StandardMaterial::default());
+        let second = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.0, 0.0),
+            ..default()
+        });
 
-        assert_eq!(
-            tree.classify_change(&next),
-            LayoutTreeChange::LayoutAffecting
-        );
+        let tree = root_tree(El::new());
+        let next = root_tree(El::new().material(first));
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);
+        assert_eq!(next.classify_change(&tree), LayoutTreeChange::VisualOnly);
+
+        let swapped = root_tree(El::new().material(second));
+        assert_eq!(next.classify_change(&swapped), LayoutTreeChange::VisualOnly);
+    }
+
+    #[test]
+    fn identical_material_handle_is_identical() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let material = materials.add(StandardMaterial::default());
+        let tree = root_tree(El::new().material(material.clone()));
+        let next = root_tree(El::new().material(material));
+
+        assert_eq!(tree.classify_change(&next), LayoutTreeChange::Identical);
     }
 
     #[test]

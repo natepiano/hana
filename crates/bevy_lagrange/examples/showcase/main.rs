@@ -235,7 +235,7 @@ fn setup(
         ))
         .id();
 
-    ui::spawn_ui(&mut commands);
+    ui::spawn_ui(&mut commands, &mut materials);
 
     commands.insert_resource(SceneEntities {
         camera,

@@ -63,6 +63,8 @@ use super::material_table::SdfDriverRunOrder;
 use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
+use crate::cascade::CascadeDefault;
+use crate::cascade::SdfMaterial;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
@@ -866,14 +868,35 @@ pub(crate) fn set_sdf_material_record_buffers(
 pub(crate) fn append_sdf_record_materials(
     builder: &mut FrameMaterialTableBuilder,
     surface: &ResolvedSdfSurface<'_>,
+    materials: &Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    default_material: &CascadeDefault<SdfMaterial>,
 ) -> Option<SdfRecordMaterialSlots> {
     let rollback_row_count = builder.row_count();
-    let fill = append_sdf_role(builder, surface, SdfMaterialRole::Fill);
-    let border = append_sdf_role(builder, surface, SdfMaterialRole::Border);
+    let fill = append_sdf_role(
+        builder,
+        surface,
+        SdfMaterialRole::Fill,
+        materials,
+        asset_server,
+        default_material,
+    );
+    let border = append_sdf_role(
+        builder,
+        surface,
+        SdfMaterialRole::Border,
+        materials,
+        asset_server,
+        default_material,
+    );
     match (fill, border) {
         (SdfRoleAppend::DroppedLimit, _) | (_, SdfRoleAppend::DroppedLimit) => {
             builder.truncate_rows(rollback_row_count);
             builder.record_dropped_limit();
+            None
+        },
+        (SdfRoleAppend::Held, _) | (_, SdfRoleAppend::Held) => {
+            builder.truncate_rows(rollback_row_count);
             None
         },
         (SdfRoleAppend::NotAuthored, SdfRoleAppend::NotAuthored) => None,
@@ -887,6 +910,7 @@ pub(crate) fn append_sdf_record_materials(
 enum SdfRoleAppend {
     NotAuthored,
     Appended(MaterialSlotAppended<SdfMaterialSourceKey>),
+    Held,
     DroppedLimit,
 }
 
@@ -894,7 +918,7 @@ impl SdfRoleAppend {
     fn into_appended(self) -> Option<MaterialSlotAppended<SdfMaterialSourceKey>> {
         match self {
             Self::Appended(appended) => Some(appended),
-            Self::NotAuthored | Self::DroppedLimit => None,
+            Self::NotAuthored | Self::Held | Self::DroppedLimit => None,
         }
     }
 }
@@ -938,6 +962,9 @@ fn append_sdf_role(
     builder: &mut FrameMaterialTableBuilder,
     surface: &ResolvedSdfSurface<'_>,
     role: SdfMaterialRole,
+    materials: &Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    default_material: &CascadeDefault<SdfMaterial>,
 ) -> SdfRoleAppend {
     let material = match role {
         SdfMaterialRole::Fill => &surface.fill_material,
@@ -949,12 +976,14 @@ fn append_sdf_role(
     if !builder.has_remaining_rows(1) {
         return SdfRoleAppend::DroppedLimit;
     }
-    let default_material;
-    let base_material = if let Some(base_material) = material.base_material {
-        base_material
-    } else {
-        default_material = sdf_fallback_panel_material();
-        &default_material
+    let handle = material
+        .base_material
+        .cloned()
+        .unwrap_or_else(|| default_material.0.0.clone());
+    let Some(base_material) =
+        material::material_asset_for_frame(materials, asset_server, &handle, &default_material.0.0)
+    else {
+        return SdfRoleAppend::Held;
     };
     let input = SdfMaterialSlotInput {
         key: SdfMaterialSourceKey {
@@ -969,12 +998,6 @@ fn append_sdf_role(
         MaterialSlotAppend::Appended(appended) => SdfRoleAppend::Appended(appended),
         MaterialSlotAppend::DroppedLimit => SdfRoleAppend::DroppedLimit,
     }
-}
-
-fn sdf_fallback_panel_material() -> StandardMaterial {
-    let mut material = material::default_panel_material();
-    material.alpha_mode = AlphaMode::Blend;
-    material
 }
 
 /// Assigns contiguous run ordinals to already-sorted SDF records.
@@ -1086,6 +1109,9 @@ fn route_sdf_batch_records(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
     mut build: ResMut<material_table::FrameMaterialTableBuild>,
     mut surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
+    standard_materials: Res<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
     panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
     mut store: ResMut<SdfBatchStore>,
 ) {
@@ -1116,7 +1142,13 @@ fn route_sdf_batch_records(
             panel:         surface.panel_entity,
             command_index: surface.command_index,
         };
-        if let Some(materials) = append_sdf_record_materials(builder, surface) {
+        if let Some(materials) = append_sdf_record_materials(
+            builder,
+            surface,
+            &standard_materials,
+            &asset_server,
+            &sdf_material_default,
+        ) {
             active_records.insert(record_key);
             appended.push((materials, surface));
         }
@@ -1533,6 +1565,11 @@ mod tests {
             .init_asset::<PathExtendedMaterial>()
             .init_asset::<SdfExtendedMaterial>()
             .add_plugins((MaterialTablePlugin, FillBatchPlugin, PanelGeometryPlugin));
+        let default_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(material::default_panel_material());
+        app.insert_resource(CascadeDefault(SdfMaterial(default_material)));
         app
     }
 
@@ -1543,6 +1580,10 @@ mod tests {
     }
 
     fn spawn_sdf_panel(app: &mut App, tree: LayoutTree, material: StandardMaterial) -> Entity {
+        let material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(material);
         app.world_mut()
             .spawn(
                 DiegeticPanel::world()
@@ -1588,9 +1629,12 @@ mod tests {
     // Drives each fill's base color through the production `.background()` path
     // (the layout color override), while the material supplies the animated
     // scalar PBR fields the background does not touch.
-    fn two_material_surface_tree(first: StandardMaterial, second: StandardMaterial) -> LayoutTree {
-        let first_color = first.base_color;
-        let second_color = second.base_color;
+    fn two_material_surface_tree(
+        first: Handle<StandardMaterial>,
+        first_color: Color,
+        second: Handle<StandardMaterial>,
+        second_color: Color,
+    ) -> LayoutTree {
         let mut builder = LayoutBuilder::new(Mm(100.0), Mm(50.0));
         builder.with(
             El::column().width(Sizing::GROW).height(Sizing::GROW),
@@ -1976,15 +2020,23 @@ mod tests {
     fn first_role_limit_drop_skips_the_whole_record() {
         let mut builder = FrameMaterialTableBuilder::default();
         builder.clear(0);
-        let material = StandardMaterial::default();
+        let (materials, default_material, material) =
+            material_context_for_test(StandardMaterial::default());
         let surface = resolved_surface_for_test(
             0,
             &material,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Authored,
         );
+        let asset_server = asset_server_for_test();
 
-        let append = append_sdf_record_materials(&mut builder, &surface);
+        let append = append_sdf_record_materials(
+            &mut builder,
+            &surface,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
 
         assert!(append.is_none());
         assert_eq!(builder.row_count(), 0);
@@ -1995,15 +2047,23 @@ mod tests {
     fn post_fill_border_limit_drop_rolls_back_the_record() {
         let mut builder = FrameMaterialTableBuilder::default();
         builder.clear(1);
-        let material = StandardMaterial::default();
+        let (materials, default_material, material) =
+            material_context_for_test(StandardMaterial::default());
         let surface = resolved_surface_for_test(
             0,
             &material,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Authored,
         );
+        let asset_server = asset_server_for_test();
 
-        let append = append_sdf_record_materials(&mut builder, &surface);
+        let append = append_sdf_record_materials(
+            &mut builder,
+            &surface,
+            &materials,
+            &asset_server,
+            &default_material,
+        );
 
         assert!(append.is_none());
         assert_eq!(builder.row_count(), 0);
@@ -2013,7 +2073,8 @@ mod tests {
     #[test]
     fn two_role_append_keeps_fill_and_border_when_both_rows_fit() {
         let mut builder = FrameMaterialTableBuilder::default();
-        let material = StandardMaterial::default();
+        let (materials, default_material, material) =
+            material_context_for_test(StandardMaterial::default());
         let surface = resolved_surface_for_test(
             0,
             &material,
@@ -2021,8 +2082,15 @@ mod tests {
             SdfRoleAuthorship::Authored,
         );
         builder.clear(2);
-        let append = append_sdf_record_materials(&mut builder, &surface)
-            .expect("both authored roles fit when two rows remain");
+        let asset_server = asset_server_for_test();
+        let append = append_sdf_record_materials(
+            &mut builder,
+            &surface,
+            &materials,
+            &asset_server,
+            &default_material,
+        )
+        .expect("both authored roles fit when two rows remain");
 
         assert_eq!(builder.row_count(), 2);
         assert!(matches!(append.fill, SdfPaintMaterial::Authored(_)));
@@ -2036,6 +2104,7 @@ mod tests {
             alpha_mode: AlphaMode::Opaque,
             ..Default::default()
         };
+        let (materials, default_material, material) = material_context_for_test(material);
         let mut surface = resolved_surface_for_test(
             0,
             &material,
@@ -2045,9 +2114,16 @@ mod tests {
         surface.fill_material.base_material = None;
         surface.border_material.base_material = None;
         builder.clear(2);
+        let asset_server = asset_server_for_test();
 
-        let append = append_sdf_record_materials(&mut builder, &surface)
-            .expect("color-authored SDF roles should append fallback material rows");
+        let append = append_sdf_record_materials(
+            &mut builder,
+            &surface,
+            &materials,
+            &asset_server,
+            &default_material,
+        )
+        .expect("color-authored SDF roles should append fallback material rows");
 
         assert_eq!(builder.row_count(), 2);
         assert_eq!(append.pipeline_compatibility.alpha, BatchAlphaMode::Blend);
@@ -2193,21 +2269,24 @@ mod tests {
             alpha_mode: AlphaMode::Add,
             ..Default::default()
         };
+        let mut materials = Assets::<StandardMaterial>::default();
+        let handle_a = materials.add(material_a.clone());
+        let handle_b = materials.add(material_b.clone());
         let surface_0 = resolved_surface_for_test(
             0,
-            &material_a,
+            &handle_a,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
         let surface_1 = resolved_surface_for_test(
             1,
-            &material_b,
+            &handle_b,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
         let surface_2 = resolved_surface_for_test(
             2,
-            &material_a,
+            &handle_a,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
@@ -2443,9 +2522,22 @@ mod tests {
         let first_material = animated_scalar_material(0, Color::srgb(0.2, 0.4, 0.8), 0.0);
         let second_material = animated_scalar_material(1, Color::srgb(0.8, 0.3, 0.2), 1.0);
         let initial_colors = [first_material.base_color, second_material.base_color];
+        let first_handle = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(first_material);
+        let second_handle = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(second_material);
         let panel = spawn_sdf_panel(
             &mut app,
-            two_material_surface_tree(first_material, second_material),
+            two_material_surface_tree(
+                first_handle,
+                initial_colors[0],
+                second_handle,
+                initial_colors[1],
+            ),
             StandardMaterial::default(),
         );
         settle_sdf_pipeline(&mut app);
@@ -2467,9 +2559,22 @@ mod tests {
             let second_material =
                 animated_scalar_material(frame + 1, Color::srgb(0.9, 0.4, 0.1), 0.8);
             let expected_colors = [first_material.base_color, second_material.base_color];
+            let first_handle = app
+                .world_mut()
+                .resource_mut::<Assets<StandardMaterial>>()
+                .add(first_material);
+            let second_handle = app
+                .world_mut()
+                .resource_mut::<Assets<StandardMaterial>>()
+                .add(second_material);
             app.world_mut().commands().set_tree(
                 panel,
-                two_material_surface_tree(first_material, second_material),
+                two_material_surface_tree(
+                    first_handle,
+                    expected_colors[0],
+                    second_handle,
+                    expected_colors[1],
+                ),
             );
             settle_sdf_pipeline(&mut app);
 
@@ -2948,7 +3053,7 @@ mod tests {
 
     fn resolved_surface_for_test(
         command_index: usize,
-        material: &StandardMaterial,
+        material: &Handle<StandardMaterial>,
         fill_authorship: SdfRoleAuthorship,
         border_authorship: SdfRoleAuthorship,
     ) -> ResolvedSdfSurface<'_> {
@@ -2988,6 +3093,25 @@ mod tests {
             pipeline_compatibility: PipelineCompatibility::from(material),
             resource_compatibility: ResourceCompatibility::from(material),
         }
+    }
+
+    fn material_context_for_test(
+        material: StandardMaterial,
+    ) -> (
+        Assets<StandardMaterial>,
+        CascadeDefault<SdfMaterial>,
+        Handle<StandardMaterial>,
+    ) {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let default = materials.add(material::default_panel_material());
+        let material = materials.add(material);
+        (materials, CascadeDefault(SdfMaterial(default)), material)
+    }
+
+    fn asset_server_for_test() -> AssetServer {
+        let mut app = App::new();
+        app.add_plugins(AssetPlugin::default());
+        app.world().resource::<AssetServer>().clone()
     }
 
     fn draw_depth_for_test(index: usize) -> DrawCommandDepth {

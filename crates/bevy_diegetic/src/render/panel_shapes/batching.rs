@@ -10,6 +10,7 @@ use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::NoAutoAabb;
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::light::NotShadowCaster;
 use bevy::math::Vec2;
 use bevy::math::Vec3;
@@ -29,6 +30,7 @@ use super::path::PanelShapePathContext;
 use super::primitive::PanelShapeRenderKey;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
+use crate::cascade::ShapeMaterial;
 use crate::layout::BoundingBox;
 use crate::layout::Lighting;
 use crate::layout::PanelShapeSourceKey;
@@ -468,6 +470,13 @@ impl PanelShapeBatchStore {
 struct PanelShapeReconcileContext<'a> {
     panel_entity:        Entity,
     panel:               &'a DiegeticPanel,
+    /// Current `StandardMaterial` assets used to project source handles.
+    standard_materials:  &'a Assets<StandardMaterial>,
+    /// Seeded shape-material cascade default used as the final source handle.
+    shape_default:       &'a CascadeDefault<ShapeMaterial>,
+    /// Panel's cascade-resolved panel-shape material handle.
+    shape_material:      Handle<StandardMaterial>,
+    asset_server:        &'a AssetServer,
     panel_transform:     Mat4,
     path_context:        PanelShapePathContext,
     shadow:              VisualShadow,
@@ -484,6 +493,13 @@ struct PanelShapeReconcileContext<'a> {
     /// The panel entity's cascade-resolved hairline fade policy; elements
     /// without their own override inherit it.
     panel_hairline_fade: HairlineFade,
+}
+
+#[derive(SystemParam)]
+pub(super) struct PanelShapeMaterialAssets<'w> {
+    standard_materials: Res<'w, Assets<StandardMaterial>>,
+    asset_server:       Res<'w, AssetServer>,
+    shape_default:      Res<'w, CascadeDefault<ShapeMaterial>>,
 }
 
 struct ShapePrimitiveSource<'a> {
@@ -513,16 +529,18 @@ struct LineMergeKey {
 
 /// Material facts that require separate `PathRenderRecord` rows before
 /// primitives can be merged into one analytic path.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct PrimitiveMaterialIdentity {
-    /// Current authored primitive color. Future texture/material source fields
-    /// belong here because one `PathRenderRecord` stores one `MaterialSlotId`.
+    /// Shape-local source material handle resolved for this primitive.
+    material:   Option<Handle<StandardMaterial>>,
+    /// Current authored primitive color.
     base_color: [u32; 4],
 }
 
 impl From<&ResolvedPanelShapePrimitive> for PrimitiveMaterialIdentity {
     fn from(primitive: &ResolvedPanelShapePrimitive) -> Self {
         Self {
+            material:   primitive.material().cloned(),
             base_color: color_bits(primitive.color()),
         }
     }
@@ -593,6 +611,7 @@ pub(super) fn reconcile_panel_line_batches(
         Option<&Resolved<Sidedness>>,
         Option<&Resolved<AntiAlias>>,
         Option<&Resolved<HairlineFade>>,
+        Option<&Resolved<ShapeMaterial>>,
     )>,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
@@ -601,6 +620,7 @@ pub(super) fn reconcile_panel_line_batches(
     sidedness_default: Res<CascadeDefault<Sidedness>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
+    material_assets: PanelShapeMaterialAssets,
     mut material_table: ResMut<FrameMaterialTableBuild>,
     mut store: ResMut<PanelShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -623,6 +643,7 @@ pub(super) fn reconcile_panel_line_batches(
         panel_sidedness,
         panel_anti_alias,
         panel_hairline_fade,
+        panel_shape_material,
     ) in &panels
     {
         let Some(result) = computed.result() else {
@@ -638,6 +659,13 @@ pub(super) fn reconcile_panel_line_batches(
         let context = PanelShapeReconcileContext {
             panel_entity,
             panel,
+            standard_materials: &material_assets.standard_materials,
+            shape_default: &material_assets.shape_default,
+            shape_material: panel_shape_material.map_or_else(
+                || material_assets.shape_default.0.0.clone(),
+                |resolved| resolved.0.0.clone(),
+            ),
+            asset_server: &material_assets.asset_server,
             panel_transform: panel_transform.to_matrix(),
             path_context: PanelShapePathContext {
                 points_to_world: panel.points_to_world(),
@@ -736,17 +764,7 @@ fn build_panel_line_group(
         .tree()
         .element_hairline_fade(first.element_index)
         .unwrap_or(context.panel_hairline_fade);
-    let path_members: Vec<PanelShapeMember<'_>> = members
-        .iter()
-        .map(|source| PanelShapeMember {
-            primitive:     source.primitive,
-            fade_exponent: source
-                .line
-                .hairline_fade()
-                .unwrap_or(element_hairline_fade)
-                .fade_exponent(),
-        })
-        .collect();
+    let path_members = panel_shape_path_members(&members, element_hairline_fade);
     let path = path::build_panel_shape_path(
         &path_members,
         first.line.owner_bounds(),
@@ -763,18 +781,24 @@ fn build_panel_line_group(
         .iter()
         .map(|source| primitive_oit_depth_offset(source))
         .fold(f32::INFINITY, f32::min);
-    let base = render::resolve_material(
-        context.panel.tree().element_material(first.element_index),
-        context.panel.material(),
-        None,
-    );
+    let material_handle = first
+        .primitive
+        .material()
+        .or_else(|| context.panel.tree().element_material(first.element_index))
+        .unwrap_or(&context.shape_material);
+    let base = render::material_asset_for_frame(
+        context.standard_materials,
+        context.asset_server,
+        material_handle,
+        &context.shape_default.0.0,
+    )?;
     let key = PanelShapeRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
     };
     let input = PanelShapeMaterialSlotInput {
         key:           PanelShapeMaterialSourceKeyBridge { render_key: key },
-        base_material: &base,
+        base_material: base,
         fill_color:    first.primitive.color(),
         alpha_mode:    AlphaMode::Blend,
         lighting:      context.panel_lighting,
@@ -824,6 +848,23 @@ fn build_panel_line_group(
             run,
         },
     })
+}
+
+fn panel_shape_path_members<'a>(
+    members: &[&ShapePrimitiveSource<'a>],
+    element_hairline_fade: HairlineFade,
+) -> Vec<PanelShapeMember<'a>> {
+    members
+        .iter()
+        .map(|source| PanelShapeMember {
+            primitive:     source.primitive,
+            fade_exponent: source
+                .line
+                .hairline_fade()
+                .unwrap_or(element_hairline_fade)
+                .fade_exponent(),
+        })
+        .collect()
 }
 
 fn primitive_depth_bias(source: &ShapePrimitiveSource<'_>) -> f32 {
@@ -1208,6 +1249,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
+    use crate::cascade::ShapeMaterial;
     use crate::layout::DrawZIndex;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
@@ -1223,6 +1265,7 @@ mod tests {
     use crate::render::QuadraticSegment;
     use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
     use crate::render::constants::LAYER_DEPTH_BIAS;
+    use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::text::DiegeticTextMeasurer;
@@ -1244,6 +1287,7 @@ mod tests {
                 }),
             })
             .add_plugins(HeadlessLayoutPlugin)
+            .add_plugins(CascadePlugin::<ShapeMaterial>::default())
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
             .init_resource::<AntiAlias>()
@@ -1264,6 +1308,7 @@ mod tests {
                 PostUpdate,
                 reconcile_panel_line_batches.after(MaterialTableAppendReady),
             );
+        render::seed_default_material_cascades(&mut app);
         app
     }
 
@@ -1279,9 +1324,22 @@ mod tests {
             .color(color)
     }
 
+    fn horizontal_line_with_material(material: Handle<StandardMaterial>) -> PanelLine {
+        horizontal_line().material(material)
+    }
+
     fn material_base_color(color: Color) -> Vec4 {
         let linear = color.to_linear();
         Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
+    }
+
+    fn material_with_metallic(app: &mut App, metallic: f32) -> Handle<StandardMaterial> {
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic,
+                ..Default::default()
+            })
     }
 
     fn spawn_line_panel(app: &mut App, z_index: DrawZIndex) -> Entity {
@@ -1332,6 +1390,23 @@ mod tests {
             render::path_material_oit_depth_offset(material),
             records,
         )
+    }
+
+    fn first_shape_material_values(app: &App) -> MaterialSlotValues {
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        let records = batch.run_records();
+        let Some(record) = records.first() else {
+            panic!("line batch should have a run record");
+        };
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        table[record.material.as_u32().to_usize()]
     }
 
     /// Per record: the run's AA flags and the packed outline's fade exponent
@@ -1392,6 +1467,87 @@ mod tests {
         assert_eq!(colors.len(), 2);
         assert!(colors.contains(&material_base_color(red)));
         assert!(colors.contains(&material_base_color(blue)));
+    }
+
+    #[test]
+    fn shape_run_inherits_panel_shape_material_through_cascade() {
+        let mut app = line_batch_app();
+        let panel_material = material_with_metallic(&mut app, 0.46);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .shape_material(panel_material)
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .size(40.0, 20.0)
+                        .draw(PanelDraw::lines([horizontal_line()])),
+                    |_| {},
+                );
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        assert_eq!(
+            first_shape_material_values(&app).metallic.to_bits(),
+            0.46_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn shape_cascade_preserves_panel_surface_material_rung() {
+        let mut app = line_batch_app();
+        let panel_material = material_with_metallic(&mut app, 0.57);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .material(panel_material)
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .size(40.0, 20.0)
+                        .draw(PanelDraw::lines([horizontal_line()])),
+                    |_| {},
+                );
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        assert_eq!(
+            first_shape_material_values(&app).metallic.to_bits(),
+            0.57_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn shape_local_material_wins_over_panel_materials() {
+        let mut app = line_batch_app();
+        let panel_material = material_with_metallic(&mut app, 0.21);
+        let panel_shape_material = material_with_metallic(&mut app, 0.35);
+        let local_material = material_with_metallic(&mut app, 0.93);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .material(panel_material)
+            .shape_material(panel_shape_material)
+            .layout(|builder| {
+                builder.with(
+                    El::new().size(40.0, 20.0).draw(PanelDraw::lines([
+                        horizontal_line_with_material(local_material),
+                    ])),
+                    |_| {},
+                );
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        assert_eq!(
+            first_shape_material_values(&app).metallic.to_bits(),
+            0.93_f32.to_bits()
+        );
     }
 
     #[test]
@@ -1663,6 +1819,7 @@ mod tests {
                 width: 2.0,
             },
             color:      Color::WHITE,
+            material:   None,
             bounds:     BoundingBox {
                 x:      0.0,
                 y:      -1.0,
@@ -1685,6 +1842,7 @@ mod tests {
             shaft_end: Vec2::new(50.0, 0.0),
             width: 2.0,
             color: Color::WHITE,
+            material: None,
             hairline_fade: None,
             primitives: vec![primitive],
         };
@@ -1944,6 +2102,7 @@ mod tests {
                 width: 1.0,
             },
             color:      Color::WHITE,
+            material:   None,
             bounds:     BoundingBox {
                 x:      0.0,
                 y:      0.0,
@@ -1970,6 +2129,7 @@ mod tests {
             shaft_end: Vec2::X,
             width: 1.0,
             color: Color::WHITE,
+            material: None,
             hairline_fade: None,
             primitives: vec![primitive],
         }

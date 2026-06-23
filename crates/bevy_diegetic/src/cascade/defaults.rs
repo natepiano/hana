@@ -12,7 +12,7 @@ use crate::layout::Unit;
 /// `Res<CascadeDefault<A>>::is_changed()` precisely tracks only that
 /// attribute's default. Concrete defaults are implemented beside each
 /// `cascade_attr!` declaration.
-#[derive(Resource, Clone, Copy, Debug, Reflect)]
+#[derive(Resource, Clone, Debug, Reflect)]
 #[reflect(Resource)]
 pub struct CascadeDefault<A: CascadeProperty>(pub A);
 

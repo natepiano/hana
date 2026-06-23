@@ -400,15 +400,15 @@ fn main() {
         .run();
 }
 
-fn spawn_panels(mut commands: Commands) {
-    let world_panel = match build_world_panel() {
+fn spawn_panels(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let world_panel = match build_world_panel(&mut materials) {
         Ok(panel) => panel,
         Err(error) => {
             error!("screen_world_panel_conversion: world panel build failed: {error}");
             return;
         },
     };
-    let screen_panel = match build_screen_panel() {
+    let screen_panel = match build_screen_panel(&mut materials) {
         Ok(panel) => panel,
         Err(error) => {
             error!("screen_world_panel_conversion: screen panel build failed: {error}");
@@ -1157,14 +1157,17 @@ fn update_panel_status_trees(
     }
 }
 
-fn build_world_panel() -> Result<DiegeticPanel, PanelBuildError> {
+fn build_world_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let material = materials.add(panel_surface(WORLD_PANEL_COLOR));
     DiegeticPanel::world()
         .size(Mm(WORLD_PANEL_WIDTH_MM), Mm(WORLD_PANEL_HEIGHT_MM))
         .font_unit(Unit::Millimeters)
         .world_height(WORLD_PANEL_HEIGHT)
         .anchor(Anchor::Center)
-        .material(panel_surface(WORLD_PANEL_COLOR))
-        .text_material(panel_surface(WORLD_PANEL_COLOR))
+        .material(material.clone())
+        .text_material(material)
         .with_tree(world_panel_tree(
             PanelSpace::World,
             PanelTreeMetrics::world(Unit::Millimeters, WORLD_PANEL_HEIGHT_MM),
@@ -1177,8 +1180,10 @@ fn build_world_panel() -> Result<DiegeticPanel, PanelBuildError> {
         .build()
 }
 
-fn build_screen_panel() -> Result<DiegeticPanel, PanelBuildError> {
-    let material = screen_panel_material();
+fn build_screen_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let material = materials.add(screen_panel_material());
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .font_unit(Unit::Pixels)

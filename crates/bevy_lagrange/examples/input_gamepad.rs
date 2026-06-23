@@ -342,7 +342,11 @@ struct FaceLabelHold {
     zoom:  ReleaseHold<CubeFacePanelContent>,
 }
 
-fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<GamepadInputCube>>) {
+fn spawn_face_labels(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    cubes: Query<Entity, With<GamepadInputCube>>,
+) {
     let Ok(cube) = cubes.single() else {
         return;
     };
@@ -351,13 +355,31 @@ fn spawn_face_labels(mut commands: Commands, cubes: Query<Entity, With<GamepadIn
         describe_orbit_cam_controls(&OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()));
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
-            spawn_face_panel(parent, face, GamepadFaceLabel::Orbit, &summary);
+            spawn_face_panel(
+                parent,
+                face,
+                GamepadFaceLabel::Orbit,
+                &summary,
+                &mut materials,
+            );
         }
         for face in [Face::Left, Face::Right] {
-            spawn_face_panel(parent, face, GamepadFaceLabel::Pan, &summary);
+            spawn_face_panel(
+                parent,
+                face,
+                GamepadFaceLabel::Pan,
+                &summary,
+                &mut materials,
+            );
         }
         for face in [Face::Top, Face::Bottom] {
-            spawn_face_panel(parent, face, GamepadFaceLabel::Zoom, &summary);
+            spawn_face_panel(
+                parent,
+                face,
+                GamepadFaceLabel::Zoom,
+                &summary,
+                &mut materials,
+            );
         }
     });
     commands.insert_resource(FaceGuidance(summary));
@@ -411,8 +433,13 @@ fn spawn_face_panel(
     face: Face,
     kind: GamepadFaceLabel,
     summary: &OrbitCamControlSummary,
+    materials: &mut Assets<StandardMaterial>,
 ) {
-    match cube_face_panel_with_tree(FACE_PANEL_STYLE.size, idle_grid_tree(kind, summary)) {
+    match cube_face_panel_with_tree(
+        FACE_PANEL_STYLE.size,
+        idle_grid_tree(kind, summary),
+        materials,
+    ) {
         Ok(panel) => {
             parent.spawn((
                 Name::new(GAMEPAD_FACE_PANEL_NAME),

@@ -15,7 +15,7 @@ use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TITLE_COLOR;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
+use fairy_dust::screen_panel_material_handle;
 
 use super::*;
 
@@ -82,8 +82,8 @@ impl fairy_dust::TitleChipActivation for EventLog {
 // PANEL — a 50%-width, full-height diegetic screen panel on the right edge.
 // ═════════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn spawn_log_panel(commands: &mut Commands) {
-    let unlit = screen_panel_material();
+pub(crate) fn spawn_log_panel(commands: &mut Commands, materials: &mut Assets<StandardMaterial>) {
+    let unlit = screen_panel_material_handle(materials);
     let built = DiegeticPanel::screen()
         .size(Px(EVENT_LOG_WIDTH), Percent(0.5))
         .anchor(Anchor::TopRight)

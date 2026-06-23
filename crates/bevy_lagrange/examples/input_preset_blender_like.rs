@@ -151,6 +151,7 @@ struct FaceLabelHold {
 
 fn spawn_face_labels(
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     cubes: Query<Entity, With<BlenderLikeCube>>,
     cameras: Query<&OrbitCamInputMode, With<BlenderLikeCamera>>,
 ) {
@@ -164,13 +165,13 @@ fn spawn_face_labels(
     let summary = describe_orbit_cam_controls(mode);
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
-            spawn_face_panel(parent, face, FaceLabel::Orbit, &summary);
+            spawn_face_panel(parent, face, FaceLabel::Orbit, &summary, &mut materials);
         }
         for face in [Face::Left, Face::Right] {
-            spawn_face_panel(parent, face, FaceLabel::Pan, &summary);
+            spawn_face_panel(parent, face, FaceLabel::Pan, &summary, &mut materials);
         }
         for face in [Face::Top, Face::Bottom] {
-            spawn_face_panel(parent, face, FaceLabel::Zoom, &summary);
+            spawn_face_panel(parent, face, FaceLabel::Zoom, &summary, &mut materials);
         }
     });
     commands.insert_resource(FaceGuidance(summary));
@@ -321,9 +322,10 @@ fn spawn_face_panel(
     face: Face,
     kind: FaceLabel,
     summary: &OrbitCamControlSummary,
+    materials: &mut Assets<StandardMaterial>,
 ) {
     let content = CubeFacePanelContent::idle(kind.title(), idle_labels(summary, kind.kind()));
-    match cube_face_panel(FACE_PANEL_STYLE, content) {
+    match cube_face_panel(FACE_PANEL_STYLE, content, materials) {
         Ok(panel) => {
             parent.spawn((
                 Name::new(FACE_PANEL_NAME),

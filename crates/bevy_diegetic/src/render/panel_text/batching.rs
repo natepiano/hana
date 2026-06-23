@@ -33,6 +33,7 @@ use super::layout::PanelTextZLevel;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
@@ -86,6 +87,7 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
     lightings:          Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
     sidednesses:        Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
     anti_aliases:       Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
+    materials:          Query<'w, 's, &'static Resolved<TextMaterial>, With<TextContent>>,
     alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
     lighting_default:   Res<'w, CascadeDefault<Lighting>>,
     sidedness_default:  Res<'w, CascadeDefault<Sidedness>>,
@@ -102,6 +104,7 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
                 Changed<Resolved<Lighting>>,
                 Changed<Resolved<Sidedness>>,
                 Changed<Resolved<AntiAlias>>,
+                Changed<Resolved<TextMaterial>>,
             )>,
         ),
     >,
@@ -136,6 +139,16 @@ impl PathBatchKeyCascades<'_, '_> {
             .get(label)
             .map_or(self.anti_alias_default.0, |resolved| resolved.0)
     }
+
+    fn material(
+        &self,
+        label: Entity,
+        default: &CascadeDefault<TextMaterial>,
+    ) -> Handle<StandardMaterial> {
+        self.materials
+            .get(label)
+            .map_or_else(|_| default.0.0.clone(), |resolved| resolved.0.0.clone())
+    }
 }
 
 /// The query walks every run but touches only those whose text changed, whose
@@ -164,6 +177,9 @@ pub(super) fn update_panel_text_batches(
     mut backend: ResMut<GlyphCache>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PathExtendedMaterial>>,
+    standard_materials: Res<Assets<StandardMaterial>>,
+    asset_server: Res<AssetServer>,
+    text_material_default: Res<CascadeDefault<TextMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut material_table: ResMut<FrameMaterialTableBuild>,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -173,11 +189,7 @@ pub(super) fn update_panel_text_batches(
 
     // An emptied or despawned run leaves its batch; the rebuild
     // re-derives the survivors' ranges.
-    for label_entity in emptied_runs.read() {
-        backend
-            .batch_store_mut()
-            .remove_run(RunStorageKey::from(label_entity));
-    }
+    remove_emptied_panel_text_runs(&mut emptied_runs, &mut backend);
 
     // Cascade changes are inequality-guarded at the propagation pass, so this
     // set holds only real transitions; membership re-routes the run below.
@@ -199,7 +211,7 @@ pub(super) fn update_panel_text_batches(
     ) in &runs
     {
         let storage_key = RunStorageKey::from(label_entity);
-        let Ok((panel, panel_layers, panel_visibility)) = panels.get(child_of.parent()) else {
+        let Ok((_panel, panel_layers, panel_visibility)) = panels.get(child_of.parent()) else {
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         };
@@ -211,9 +223,21 @@ pub(super) fn update_panel_text_batches(
         let alpha_mode = cascades.alpha(label_entity);
         let lighting = cascades.lighting(label_entity);
         let sidedness = cascades.sidedness(label_entity);
-        let material_candidate =
-            text_material_candidate_for_frame(panel, &prepared, alpha_mode, lighting, sidedness);
-        let key = batch_key_for_run(
+        let material = cascades.material(label_entity, &text_material_default);
+        let Some(material_candidate) = text_material_candidate_for_frame(
+            &material,
+            prepared.fill_color,
+            alpha_mode,
+            lighting,
+            sidedness,
+            &standard_materials,
+            &asset_server,
+            &text_material_default,
+        ) else {
+            backend.batch_store_mut().remove_run(storage_key);
+            continue;
+        };
+        let batch_key = batch_key_for_run(
             panel_layers,
             &prepared,
             *z_level,
@@ -223,52 +247,35 @@ pub(super) fn update_panel_text_batches(
         let key_changed = backend
             .batch_store()
             .key_for_run(storage_key)
-            .is_none_or(|current| current != &key);
-        let record_needs_rebuild = prepared.is_changed()
-            || panel_text_child.is_changed()
-            || z_level.is_changed()
-            || cascade_changed.contains(&label_entity)
-            || key_changed;
-        if !record_needs_rebuild {
-            let Some(material_slot) =
-                append_text_material_row(material_table.builder_mut(), material_candidate)
-            else {
-                backend.batch_store_mut().remove_run(storage_key);
-                continue;
-            };
-            backend
-                .batch_store_mut()
-                .update_run_material(storage_key, material_slot);
-            continue;
-        }
-        // A glyph missing from the atlas means shaping hasn't packed it yet;
-        // the run stays unrouted and self-heals next frame.
-        let Some(glyphs) = build_glyph_records(&backend, &prepared.prepared, prepared.clip_rect)
-        else {
-            continue;
-        };
-        if glyphs.is_empty() {
-            // Clipping removed every quad: drop the run so nothing renders.
-            backend.batch_store_mut().remove_run(storage_key);
-            continue;
-        }
-        let Some(material_slot) =
-            append_text_material_row(material_table.builder_mut(), material_candidate)
-        else {
-            backend.batch_store_mut().remove_run(storage_key);
-            continue;
-        };
-
-        let record = run_record_for(
+            .is_none_or(|current| current != &batch_key);
+        let record_needs_rebuild = panel_text_record_needs_rebuild(
             &prepared,
             &panel_text_child,
-            label_transform,
-            cascades.anti_alias(label_entity),
-            material_slot,
+            &z_level,
+            &cascade_changed,
+            label_entity,
+            key_changed,
         );
-        backend
-            .batch_store_mut()
-            .upsert_run(key, storage_key, glyphs, record);
+        if !record_needs_rebuild {
+            update_existing_text_run_material(
+                material_table.builder_mut(),
+                &mut backend,
+                storage_key,
+                material_candidate,
+            );
+            continue;
+        }
+        upsert_rebuilt_text_run(RebuiltTextRunInput {
+            backend: &mut backend,
+            builder: material_table.builder_mut(),
+            storage_key,
+            batch_key,
+            prepared: &prepared,
+            panel_text_child: &panel_text_child,
+            label_transform,
+            anti_alias: cascades.anti_alias(label_entity),
+            material_candidate,
+        });
     }
 
     reconcile_batch_entities(ReconcileBatchEntities {
@@ -286,28 +293,121 @@ pub(super) fn update_panel_text_batches(
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
 }
 
+fn remove_emptied_panel_text_runs(
+    emptied_runs: &mut RemovedComponents<PreparedPanelText>,
+    backend: &mut GlyphCache,
+) {
+    for label_entity in emptied_runs.read() {
+        backend
+            .batch_store_mut()
+            .remove_run(RunStorageKey::from(label_entity));
+    }
+}
+
+fn panel_text_record_needs_rebuild(
+    prepared: &Ref<'_, PreparedPanelText>,
+    panel_text_child: &Ref<'_, PanelTextLayout>,
+    z_level: &Ref<'_, PanelTextZLevel>,
+    cascade_changed: &EntityHashSet,
+    label_entity: Entity,
+    key_changed: bool,
+) -> bool {
+    prepared.is_changed()
+        || panel_text_child.is_changed()
+        || z_level.is_changed()
+        || cascade_changed.contains(&label_entity)
+        || key_changed
+}
+
+fn update_existing_text_run_material(
+    builder: &mut FrameMaterialTableBuilder,
+    backend: &mut GlyphCache,
+    storage_key: RunStorageKey,
+    material_candidate: MaterialSlotCandidate,
+) {
+    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+        backend.batch_store_mut().remove_run(storage_key);
+        return;
+    };
+    backend
+        .batch_store_mut()
+        .update_run_material(storage_key, material_slot);
+}
+
+struct RebuiltTextRunInput<'a> {
+    backend:            &'a mut GlyphCache,
+    builder:            &'a mut FrameMaterialTableBuilder,
+    storage_key:        RunStorageKey,
+    batch_key:          PathBatchKey,
+    prepared:           &'a PreparedPanelText,
+    panel_text_child:   &'a PanelTextLayout,
+    label_transform:    &'a GlobalTransform,
+    anti_alias:         AntiAlias,
+    material_candidate: MaterialSlotCandidate,
+}
+
+fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
+    let RebuiltTextRunInput {
+        backend,
+        builder,
+        storage_key,
+        batch_key,
+        prepared,
+        panel_text_child,
+        label_transform,
+        anti_alias,
+        material_candidate,
+    } = input;
+    // A glyph missing from the atlas means shaping has not packed it yet; the
+    // run stays unrouted and self-heals next frame.
+    let Some(glyphs) = build_glyph_records(backend, &prepared.prepared, prepared.clip_rect) else {
+        return;
+    };
+    if glyphs.is_empty() {
+        // Clipping removed every quad: drop the run so nothing renders.
+        backend.batch_store_mut().remove_run(storage_key);
+        return;
+    }
+    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+        backend.batch_store_mut().remove_run(storage_key);
+        return;
+    };
+
+    let record = run_record_for(
+        prepared,
+        panel_text_child,
+        label_transform,
+        anti_alias,
+        material_slot,
+    );
+    backend
+        .batch_store_mut()
+        .upsert_run(batch_key, storage_key, glyphs, record);
+}
+
 const fn is_hidden(visibility: Option<&Visibility>) -> bool {
     matches!(visibility, Some(Visibility::Hidden))
 }
 
 fn text_material_candidate_for_frame(
-    panel: &DiegeticPanel,
-    prepared: &PreparedPanelText,
+    handle: &Handle<StandardMaterial>,
+    fill_color: Color,
     alpha_mode: AlphaMode,
     lighting: Lighting,
     sidedness: Sidedness,
-) -> MaterialSlotCandidate {
-    let base = panel
-        .text_material()
-        .cloned()
-        .unwrap_or_else(render::default_panel_material);
-    render::analytic_material_slot_candidate(
-        &base,
-        prepared.fill_color,
-        alpha_mode,
-        lighting,
-        sidedness,
-    )
+    standard_materials: &Assets<StandardMaterial>,
+    asset_server: &AssetServer,
+    text_material_default: &CascadeDefault<TextMaterial>,
+) -> Option<MaterialSlotCandidate> {
+    let base = render::material_asset_for_frame(
+        standard_materials,
+        asset_server,
+        handle,
+        &text_material_default.0.0,
+    )?;
+    Some(render::analytic_material_slot_candidate(
+        base, fill_color, alpha_mode, lighting, sidedness,
+    ))
 }
 
 fn append_text_material_row(
@@ -841,6 +941,8 @@ const fn batch_gpu_alpha_mode(authored: AlphaMode) -> AlphaMode {
     reason = "tests should fail loudly when fixture batches are missing"
 )]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use bevy::asset::AssetPlugin;
@@ -851,6 +953,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
+    use crate::cascade::TextMaterial;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
@@ -863,6 +966,7 @@ mod tests {
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants;
+    use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
     use crate::render::panel_text::alpha;
@@ -907,6 +1011,7 @@ mod tests {
             .insert_resource(monospace_measurer())
             .add_plugins(HeadlessLayoutPlugin)
             .add_plugins(CascadePlugin::<TextAlpha>::default())
+            .add_plugins(CascadePlugin::<TextMaterial>::default())
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
@@ -935,6 +1040,7 @@ mod tests {
                         .after(write_batch_run_transforms),
                 ),
             );
+        render::seed_default_material_cascades(&mut app);
         app
     }
 
@@ -949,6 +1055,21 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text("Alpha", TextStyle::new(10.0));
         builder.build()
+    }
+
+    fn one_text_tree_with_style(style: TextStyle) -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("Alpha", style);
+        builder.build()
+    }
+
+    fn material_with_metallic(app: &mut App, metallic: f32) -> Handle<StandardMaterial> {
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic,
+                ..Default::default()
+            })
     }
 
     fn spawn_panel(app: &mut App, tree: LayoutTree) -> Entity {
@@ -999,6 +1120,27 @@ mod tests {
             .resource::<FrameMaterialTableBuild>()
             .table()
             .row_count()
+    }
+
+    fn first_text_run_material_values(app: &App) -> MaterialSlotValues {
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (_, batch) = store.batches().next().expect("one text batch should exist");
+        let record = batch
+            .run_records()
+            .first()
+            .expect("text batch should have one run record");
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        table[record.material.as_u32().to_usize()]
+    }
+
+    fn layout_hash(style: &TextStyle) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        style.hash_layout(&mut hasher);
+        hasher.finish()
     }
 
     fn absent_text_frame_material_rows() -> usize {
@@ -1227,6 +1369,87 @@ mod tests {
             opaque_runs, 1,
             "exactly the overridden run is keyed under the new key"
         );
+    }
+
+    #[test]
+    fn text_run_inherits_panel_text_material_through_cascade() {
+        let mut app = pipeline_app();
+        let panel_material = material_with_metallic(&mut app, 0.61);
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .text_material(panel_material)
+                .with_tree(one_text_tree())
+                .build()
+                .expect("panel should build"),
+        );
+        settle(&mut app);
+
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.61_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn text_run_material_wins_over_panel_text_material() {
+        let mut app = pipeline_app();
+        let panel_material = material_with_metallic(&mut app, 0.22);
+        let run_material = material_with_metallic(&mut app, 0.77);
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .text_material(panel_material)
+                .with_tree(one_text_tree_with_style(
+                    TextStyle::new(10.0).with_material(run_material),
+                ))
+                .build()
+                .expect("panel should build"),
+        );
+        settle(&mut app);
+
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.77_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn reused_text_run_material_swap_updates_resolved_material_without_layout_cache_change() {
+        let mut app = pipeline_app();
+        let first_material = material_with_metallic(&mut app, 0.31);
+        let second_material = material_with_metallic(&mut app, 0.82);
+        let first_style = TextStyle::new(10.0).with_material(first_material);
+        let second_style = TextStyle::new(10.0).with_material(second_material.clone());
+        let panel = spawn_panel(&mut app, one_text_tree_with_style(first_style.clone()));
+        settle(&mut app);
+        let label_before = label_entities(&mut app)[0];
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.31_f32.to_bits()
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, one_text_tree_with_style(second_style.clone()));
+        settle(&mut app);
+        let label_after = label_entities(&mut app)[0];
+        let resolved = app
+            .world()
+            .get::<Resolved<TextMaterial>>(label_after)
+            .expect("text run should carry Resolved<TextMaterial>");
+
+        assert_eq!(
+            label_after, label_before,
+            "the text run entity should be reused"
+        );
+        assert_eq!(resolved.0.0, second_material);
+        assert_eq!(
+            first_text_run_material_values(&app).metallic.to_bits(),
+            0.82_f32.to_bits()
+        );
+        assert_eq!(first_style.as_measure(), second_style.as_measure());
+        assert_eq!(layout_hash(&first_style), layout_hash(&second_style));
     }
 
     /// Per-batch (`depth_bias`, OIT depth offset) read off the single live

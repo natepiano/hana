@@ -3,7 +3,8 @@
 //! Each element with a background or border produces a `ResolvedSdfSurface`
 //! retained in `ResolvedSdfSurfaceRegistry`; `fill_batch::FillBatchPlugin`
 //! turns those surfaces into visible batched SDF records. Picking still uses
-//! one invisible `PanelInteractionMesh` child per panel.
+//! one invisible `PanelInteractionMesh` child per panel. That interaction mesh
+//! is picking-only and exempt from the `SdfMaterial` cascade.
 
 use std::collections::HashMap;
 
@@ -22,6 +23,9 @@ use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderProjection;
 use super::material_table::MaterialTableAppendReady;
+use crate::cascade::CascadeDefault;
+use crate::cascade::Resolved;
+use crate::cascade::SdfMaterial;
 use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
@@ -32,8 +36,9 @@ use crate::panel::SurfaceShadow;
 
 /// The invisible full-panel interaction quad (Geometry mode only), tagged with
 /// its world size and center so a rebuild can leave it untouched when the panel
-/// has not resized. Both pairs are stored as `f32` bit patterns for exact
-/// equality.
+/// has not resized. Its material is a local picking-only invisible asset, not a
+/// source material resolved from `SdfMaterial`. Both pairs are stored as `f32`
+/// bit patterns for exact equality.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 struct PanelInteractionMesh {
     /// World size (width, height).
@@ -87,11 +92,11 @@ pub(crate) struct ElementSurface {
 
 /// Resolves each panel's SDF surfaces from its render commands.
 ///
-/// `ComputedDiegeticPanel` is marked changed even for a color-only update (the
-/// layout fast path regenerates render commands in place), so this system runs
-/// on more than geometry moves. The system rewrites the
-/// `ResolvedSdfSurfaceRegistry` panel bucket, and `fill_batch::FillBatchPlugin`
-/// handles record reuse, material-table rows, and visible render entities.
+/// Runs when a panel's layout commands change or when its cascade-resolved
+/// `SdfMaterial` changes. The system rewrites the
+/// `ResolvedSdfSurfaceRegistry` panel bucket from the current
+/// `ComputedDiegeticPanel`, and `fill_batch::FillBatchPlugin` handles record
+/// reuse, material-table rows, and visible render entities.
 fn build_panel_geometry(
     changed_panels: Query<
         (
@@ -99,16 +104,21 @@ fn build_panel_geometry(
             &DiegeticPanel,
             &ComputedDiegeticPanel,
             Option<&RenderLayers>,
+            Option<&Resolved<SdfMaterial>>,
         ),
-        Changed<ComputedDiegeticPanel>,
+        Or<(
+            Changed<ComputedDiegeticPanel>,
+            Changed<Resolved<SdfMaterial>>,
+        )>,
     >,
     old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
+    sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
     mut resolved_surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed, panel_layers) in &changed_panels {
+    for (panel_entity, panel, computed, panel_layers, panel_sdf_material) in &changed_panels {
         let Some(result) = computed.result() else {
             resolved_surfaces.remove_panel(panel_entity);
             continue;
@@ -123,6 +133,10 @@ fn build_panel_geometry(
             anchor_y,
             surface_shadow: panel.surface_shadow(),
             layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
+            sdf_material: panel_sdf_material.map_or_else(
+                || sdf_material_default.0.0.clone(),
+                |resolved| resolved.0.0.clone(),
+            ),
         };
         let gathered = gather_surfaces(context.panel, &result.commands, computed.draw_order());
         let desired = desired_surfaces(gathered);
@@ -170,6 +184,8 @@ pub(crate) struct PanelReconcileContext<'a> {
     pub(crate) surface_shadow:  SurfaceShadow,
     /// Render layers copied onto each resolved SDF surface.
     pub(crate) layer:           RenderLayers,
+    /// Panel's cascade-resolved SDF material handle.
+    pub(crate) sdf_material:    Handle<StandardMaterial>,
 }
 
 /// Reconciles the invisible full-panel interaction quad: it is respawned only
@@ -325,14 +341,14 @@ fn desired_surfaces(gathered: GatheredCommands) -> Vec<ElementSurface> {
     desired
 }
 
-/// Borrowed `StandardMaterial` source plus the layout color override for one
-/// SDF material slot.
+/// Borrowed source material handle plus the layout color override for one SDF
+/// material slot.
 pub(crate) struct ResolvedSdfMaterial<'a> {
     /// Authorship state that decides whether this role appends a material row.
     pub(crate) authorship:    SdfRoleAuthorship,
-    /// Element or panel material used as the `StandardMaterial` base; `None`
-    /// connects this slot to `default_panel_material()`.
-    pub(crate) base_material: Option<&'a StandardMaterial>,
+    /// Element or panel material handle used as the `StandardMaterial` source;
+    /// `None` connects this slot to the seeded `SdfMaterial` default.
+    pub(crate) base_material: Option<&'a Handle<StandardMaterial>>,
     /// Layout color applied to `StandardMaterial::base_color` when the SDF
     /// frame material table builds the owned material.
     pub(crate) color:         Option<Color>,
@@ -386,13 +402,13 @@ impl SdfRoleAuthorship {
     pub(crate) const fn is_authored(self) -> bool { matches!(self, Self::Authored) }
 }
 
-/// Owned current-frame SDF material source retained for the batch route.
+/// Owned current-frame SDF source-material handle retained for the batch route.
 #[derive(Clone)]
 pub(crate) struct StoredResolvedSdfMaterial {
     /// Authorship state copied from `ResolvedSdfMaterial::authorship`.
     authorship:    SdfRoleAuthorship,
-    /// Cloned material source used when appending the frame material table.
-    base_material: Option<StandardMaterial>,
+    /// Cloned material source handle used when appending the frame material table.
+    base_material: Option<Handle<StandardMaterial>>,
     /// Layout color applied to `StandardMaterial::base_color`.
     color:         Option<Color>,
 }
@@ -528,10 +544,10 @@ impl ResolvedSdfSurfaceRegistry {
 /// `PostUpdate` schedule.
 pub(crate) fn resolve_sdf_surface<'a>(
     surface: &ElementSurface,
-    context: &PanelReconcileContext<'a>,
+    context: &'a PanelReconcileContext<'a>,
 ) -> ResolvedSdfSurface<'a> {
     let element_mat = context.panel.tree().element_material(surface.index.get());
-    let base_material = element_mat.or_else(|| context.panel.material());
+    let base_material = element_mat.unwrap_or(&context.sdf_material);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
@@ -620,22 +636,22 @@ pub(crate) fn resolve_sdf_surface<'a>(
         command_index: surface.command_index,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
-            authorship: if surface.fill_color.is_some() || element_mat.is_some() {
+            authorship:    if surface.fill_color.is_some() || element_mat.is_some() {
                 SdfRoleAuthorship::Authored
             } else {
                 SdfRoleAuthorship::Unauthored
             },
-            base_material,
-            color: effective_color,
+            base_material: Some(base_material),
+            color:         effective_color,
         },
         border_material: ResolvedSdfMaterial {
-            authorship: if surface.border_color.is_some() {
+            authorship:    if surface.border_color.is_some() {
                 SdfRoleAuthorship::Authored
             } else {
                 SdfRoleAuthorship::Unauthored
             },
-            base_material,
-            color: surface.border_color,
+            base_material: Some(base_material),
+            color:         surface.border_color,
         },
         local_center,
         local_transform: Transform::from_xyz(local_center.x, local_center.y, 0.0),
@@ -716,10 +732,14 @@ fn bounds_to_panel_local_center(
 mod tests {
     use std::sync::Arc;
 
+    use bevy::asset::AssetId;
     use bevy::asset::AssetPlugin;
 
     use super::*;
     use crate::Mm;
+    use crate::cascade::CascadeEntityCommandsExt;
+    use crate::cascade::CascadePlugin;
+    use crate::cascade::SdfMaterial;
     use crate::layout::CornerRadius;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
@@ -731,6 +751,7 @@ mod tests {
     use crate::layout::Unit;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::render;
     use crate::text::DiegeticTextMeasurer;
 
     /// Minimal measurer for geometry tests that include text commands.
@@ -749,10 +770,11 @@ mod tests {
         app.add_plugins(MinimalPlugins);
         app.add_plugins(AssetPlugin::default());
         app.init_asset::<Mesh>();
-        app.init_asset::<StandardMaterial>();
+        render::seed_default_material_cascades(&mut app);
         app.init_resource::<ResolvedSdfSurfaceRegistry>();
         app.insert_resource(zero_measurer());
         app.add_plugins(HeadlessLayoutPlugin);
+        app.add_plugins(CascadePlugin::<SdfMaterial>::default());
         app.add_systems(PostUpdate, build_panel_geometry);
         app
     }
@@ -827,10 +849,14 @@ mod tests {
         fill_authorship:   SdfRoleAuthorship,
         /// Fill color copied from `ResolvedSdfMaterial::color`.
         fill_color:        Option<Color>,
+        /// Fill source handle copied from `ResolvedSdfMaterial::base_material`.
+        fill_material:     Option<AssetId<StandardMaterial>>,
         /// Border role state copied from `ResolvedSdfMaterial::authorship`.
         border_authorship: SdfRoleAuthorship,
         /// Border color copied from `ResolvedSdfMaterial::color`.
         border_color:      Option<Color>,
+        /// Border source handle copied from `ResolvedSdfMaterial::base_material`.
+        border_material:   Option<AssetId<StandardMaterial>>,
     }
 
     fn surface_snapshots(app: &App) -> Vec<SurfaceSnapshot> {
@@ -850,8 +876,10 @@ mod tests {
                     clip_rect:         resolved.clip_rect,
                     fill_authorship:   resolved.fill_material.authorship,
                     fill_color:        resolved.fill_material.color,
+                    fill_material:     resolved.fill_material.base_material.map(Handle::id),
                     border_authorship: resolved.border_material.authorship,
                     border_color:      resolved.border_material.color,
+                    border_material:   resolved.border_material.base_material.map(Handle::id),
                 }
             })
             .collect();
@@ -878,6 +906,26 @@ mod tests {
                 .background(Color::WHITE),
         );
         builder.build()
+    }
+
+    fn background_tree(material: Option<Handle<StandardMaterial>>) -> LayoutTree {
+        let mut element = El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .background(Color::WHITE);
+        if let Some(material) = material {
+            element = element.material(material);
+        }
+        LayoutBuilder::with_root(element).build()
+    }
+
+    fn test_material(app: &mut App, metallic: f32) -> Handle<StandardMaterial> {
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                metallic,
+                ..Default::default()
+            })
     }
 
     #[test]
@@ -995,7 +1043,85 @@ mod tests {
         assert_eq!(below.clip_rect, above.clip_rect);
         assert_eq!(below.fill_authorship, above.fill_authorship);
         assert_eq!(below.fill_color, above.fill_color);
+        assert_eq!(below.fill_material, above.fill_material);
         assert_eq!(below.border_authorship, above.border_authorship);
         assert_eq!(below.border_color, above.border_color);
+        assert_eq!(below.border_material, above.border_material);
+    }
+
+    #[test]
+    fn sdf_surface_uses_panel_resolved_material() {
+        let mut app = geometry_app();
+        let panel_material = test_material(&mut app, 0.42);
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .material(panel_material.clone())
+                .with_tree(background_tree(None))
+                .build()
+                .expect("panel should build"),
+        );
+        app.update();
+        app.update();
+
+        let surface = single_surface_snapshot(&app);
+        assert_eq!(surface.fill_material, Some(panel_material.id()));
+        assert_eq!(surface.border_material, Some(panel_material.id()));
+    }
+
+    #[test]
+    fn sdf_material_override_refreshes_surface_without_layout_change() {
+        let mut app = geometry_app();
+        let first_material = test_material(&mut app, 0.42);
+        let second_material = test_material(&mut app, 0.84);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(50.0))
+                    .material(first_material.clone())
+                    .with_tree(background_tree(None))
+                    .build()
+                    .expect("panel should build"),
+            )
+            .id();
+        app.update();
+        app.update();
+
+        let surface_before = single_surface_snapshot(&app);
+        assert_eq!(surface_before.fill_material, Some(first_material.id()));
+        assert_eq!(surface_before.border_material, Some(first_material.id()));
+
+        app.world_mut()
+            .commands()
+            .entity(panel)
+            .override_sdf_material(second_material.clone());
+        app.update();
+
+        let surface_after = single_surface_snapshot(&app);
+        assert_eq!(surface_after.command_index, surface_before.command_index);
+        assert_eq!(surface_after.fill_material, Some(second_material.id()));
+        assert_eq!(surface_after.border_material, Some(second_material.id()));
+    }
+
+    #[test]
+    fn sdf_element_material_wins_over_panel_material() {
+        let mut app = geometry_app();
+        let panel_material = test_material(&mut app, 0.42);
+        let element_material = test_material(&mut app, 0.84);
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .material(panel_material)
+                .with_tree(background_tree(Some(element_material.clone())))
+                .build()
+                .expect("panel should build"),
+        );
+        app.update();
+        app.update();
+
+        let surface = single_surface_snapshot(&app);
+        assert_eq!(surface.fill_material, Some(element_material.id()));
+        assert_eq!(surface.border_material, Some(element_material.id()));
     }
 }

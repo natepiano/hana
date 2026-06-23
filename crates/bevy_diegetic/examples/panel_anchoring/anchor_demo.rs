@@ -41,9 +41,8 @@ use crate::hinge::advance_hinge;
 use crate::hinge::build_hinge_number_tree;
 use crate::hinge::hinge_accent;
 use crate::hinge::hinge_paused;
-use crate::presentation::panel_material;
+use crate::presentation::AnchorPanelMaterials;
 use crate::presentation::smoothstep;
-use crate::presentation::text_material;
 use crate::scene::ActiveCapability;
 use crate::scene::ModeMorph;
 
@@ -398,6 +397,7 @@ pub(crate) fn spawn_anchor_scene(
     selection: AnchorSelection,
     count: usize,
     show_marker: bool,
+    materials: &AnchorPanelMaterials,
 ) {
     let mut parent = None;
     let link_delta = tile_link_delta(ANCHOR_INDEX, selection);
@@ -413,6 +413,7 @@ pub(crate) fn spawn_anchor_scene(
             selection,
             show_marker,
             false,
+            materials,
         ) else {
             return;
         };
@@ -436,9 +437,10 @@ fn spawn_tile(
     selection: AnchorSelection,
     show_marker: bool,
     animating: bool,
+    materials: &AnchorPanelMaterials,
 ) -> Option<Entity> {
     let tree = build_tile_tree(mode, order, count, selection, show_marker);
-    let panel = match build_anchor_panel(tree) {
+    let panel = match build_anchor_panel(tree, materials) {
         Ok(panel) => panel,
         Err(error) => {
             error!(
@@ -892,6 +894,7 @@ pub(crate) fn reconcile_anchor_chain(
     spin: Res<Spin>,
     transition: Res<AnchorTransition>,
     show: Res<ShowAnchorMarkers>,
+    materials: Res<AnchorPanelMaterials>,
     tiles: Query<(Entity, &AnchorTile)>,
     mut commands: Commands,
 ) {
@@ -921,6 +924,7 @@ pub(crate) fn reconcile_anchor_chain(
             *selection,
             show.0,
             animating,
+            &materials,
         ) else {
             return;
         };
@@ -1201,12 +1205,15 @@ pub(crate) fn anchoring_relation(
     }
 }
 
-fn build_anchor_panel(tree: LayoutTree) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+fn build_anchor_panel(
+    tree: LayoutTree,
+    materials: &AnchorPanelMaterials,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     DiegeticPanel::world()
         .size(Mm(PANEL_WIDTH), Mm(PANEL_HEIGHT))
         .font_unit(Unit::Millimeters)
-        .material(panel_material())
-        .text_material(text_material())
+        .material(materials.panel.clone())
+        .text_material(materials.text.clone())
         .anchor(Anchor::Center)
         .with_tree(tree)
         .build()

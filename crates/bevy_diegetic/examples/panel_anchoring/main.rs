@@ -28,6 +28,7 @@ use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
+use fairy_dust::screen_panel_material;
 
 use crate::anchor_demo::AnchorChain;
 use crate::anchor_demo::AnchorSelection;
@@ -70,6 +71,9 @@ use crate::info_panel::reconcile_info_panel;
 use crate::info_panel::spawn_info_panel;
 use crate::menu::reconcile_menu;
 use crate::menu::spawn_capability_menu;
+use crate::presentation::AnchorPanelMaterials;
+use crate::presentation::panel_material;
+use crate::presentation::text_material;
 use crate::scene::ActiveCapability;
 use crate::scene::ModeMorph;
 use crate::scene::advance_mode_morph;
@@ -228,13 +232,32 @@ fn configure_panel_anchoring_systems(
 
 fn setup(
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     selection: Res<AnchorSelection>,
     chain: Res<AnchorChain>,
     selected: Res<SelectedPanel>,
     active: Res<ActiveCapability>,
     show: Res<ShowAnchorMarkers>,
 ) {
-    spawn_scene(&mut commands, *selection, chain.count(), show.0);
-    spawn_info_panel(&mut commands, *selection, *selected, active.index);
-    spawn_capability_menu(&mut commands, *active);
+    let panel_materials = AnchorPanelMaterials {
+        panel:  materials.add(panel_material()),
+        text:   materials.add(text_material()),
+        screen: materials.add(screen_panel_material()),
+    };
+    commands.insert_resource(panel_materials.clone());
+    spawn_scene(
+        &mut commands,
+        *selection,
+        chain.count(),
+        show.0,
+        &panel_materials,
+    );
+    spawn_info_panel(
+        &mut commands,
+        *selection,
+        *selected,
+        active.index,
+        &panel_materials,
+    );
+    spawn_capability_menu(&mut commands, *active, &panel_materials);
 }

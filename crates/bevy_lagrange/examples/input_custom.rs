@@ -256,6 +256,7 @@ impl FaceLabelHold {
 
 fn spawn_face_labels(
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     bindings: Res<CustomBindings>,
     cubes: Query<Entity, With<CustomInputCube>>,
 ) {
@@ -266,13 +267,25 @@ fn spawn_face_labels(
     let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings.0.clone()));
     commands.entity(cube).with_children(|parent| {
         for face in [Face::Front, Face::Back] {
-            spawn_face_panel(parent, face, CustomFaceLabel::Orbit, &summary);
+            spawn_face_panel(
+                parent,
+                face,
+                CustomFaceLabel::Orbit,
+                &summary,
+                &mut materials,
+            );
         }
         for face in [Face::Left, Face::Right] {
-            spawn_face_panel(parent, face, CustomFaceLabel::Pan, &summary);
+            spawn_face_panel(parent, face, CustomFaceLabel::Pan, &summary, &mut materials);
         }
         for face in [Face::Top, Face::Bottom] {
-            spawn_face_panel(parent, face, CustomFaceLabel::Zoom, &summary);
+            spawn_face_panel(
+                parent,
+                face,
+                CustomFaceLabel::Zoom,
+                &summary,
+                &mut materials,
+            );
         }
     });
     commands.insert_resource(FaceGuidance(summary));
@@ -376,9 +389,10 @@ fn spawn_face_panel(
     face: Face,
     kind: CustomFaceLabel,
     summary: &OrbitCamControlSummary,
+    materials: &mut Assets<StandardMaterial>,
 ) {
     let content = CubeFacePanelContent::idle(kind.title(), idle_labels(summary, kind.kind()));
-    match cube_face_panel(FACE_PANEL_STYLE, content) {
+    match cube_face_panel(FACE_PANEL_STYLE, content, materials) {
         Ok(panel) => {
             parent.spawn((
                 Name::new(FACE_PANEL_NAME),

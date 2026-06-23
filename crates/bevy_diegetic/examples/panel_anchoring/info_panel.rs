@@ -20,7 +20,6 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
 
 use crate::anchor_demo::AnchorDirection;
 use crate::anchor_demo::AnchorSelection;
@@ -33,6 +32,7 @@ use crate::hinge::FoldDirection;
 use crate::hinge::FoldPattern;
 use crate::hinge::FoldTravel;
 use crate::hinge::HingeChain;
+use crate::presentation::AnchorPanelMaterials;
 use crate::scene::ActiveCapability;
 
 #[derive(Component)]
@@ -43,13 +43,13 @@ pub(crate) fn spawn_info_panel(
     selection: AnchorSelection,
     selected: SelectedPanel,
     active_index: usize,
+    materials: &AnchorPanelMaterials,
 ) {
-    let unlit = screen_panel_material();
     let built = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
+        .material(materials.screen.clone())
+        .text_material(materials.screen.clone())
         .with_tree(build_info_panel_tree(
             selection,
             selected,

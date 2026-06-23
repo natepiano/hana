@@ -12,6 +12,7 @@ use crate::PanelFieldId;
 use crate::cascade;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -40,6 +41,7 @@ struct ReusableChild<'a> {
     layout:    &'a PanelTextLayout,
     z_level:   &'a PanelTextZLevel,
     alpha:     Option<&'a Override<TextAlpha>>,
+    material:  Option<&'a Override<TextMaterial>>,
     lighting:  Option<&'a Override<Lighting>>,
     sidedness: Option<&'a Override<Sidedness>>,
 }
@@ -112,13 +114,14 @@ fn collect_existing_text_children<'a>(
         &PanelTextLayout,
         &PanelTextZLevel,
         Option<&Override<TextAlpha>>,
+        Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
     )>,
 ) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
     for &entity in existing_run_entities {
-        let Ok((text, style, layout, z_level, alpha, lighting, sidedness)) =
+        let Ok((text, style, layout, z_level, alpha, material, lighting, sidedness)) =
             existing_runs.get(entity)
         else {
             continue;
@@ -132,6 +135,7 @@ fn collect_existing_text_children<'a>(
                 layout,
                 z_level,
                 alpha,
+                material,
                 lighting,
                 sidedness,
             },
@@ -160,6 +164,7 @@ pub(super) fn reconcile_panel_text_children(
         &PanelTextLayout,
         &PanelTextZLevel,
         Option<&Override<TextAlpha>>,
+        Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
     )>,
@@ -203,10 +208,12 @@ pub(super) fn reconcile_panel_text_children(
         for (element_idx, draw_depth, id, line_index, text, config, bounds, clip) in &text_commands
         {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
-            // `with_lighting` / `with_sidedness`) are captured before
-            // `for_shaping()` clears them, then inserted as `Override<A>` on
-            // the label. `None` means the label inherits the panel value.
+            // `with_material` / `with_lighting` / `with_sidedness`) are
+            // captured before `for_shaping()` clears them, then inserted as
+            // `Override<A>` on the label. `None` means the label inherits the
+            // panel value.
             let label_alpha = config.alpha_mode();
+            let label_material = config.material().cloned();
             let label_lighting = config.lighting();
             let label_sidedness = config.sidedness();
             let style = config.for_shaping(Anchor::TopLeft);
@@ -238,6 +245,7 @@ pub(super) fn reconcile_panel_text_children(
                     layout: panel_text_child,
                     z_level,
                     label_alpha,
+                    label_material,
                     label_lighting,
                     label_sidedness,
                 });
@@ -251,6 +259,7 @@ pub(super) fn reconcile_panel_text_children(
                     layout: panel_text_child,
                     z_level,
                     label_alpha,
+                    label_material,
                     label_lighting,
                     label_sidedness,
                 })
@@ -265,7 +274,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -292,13 +301,14 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     layout:          PanelTextLayout,
     z_level:         PanelTextZLevel,
     label_alpha:     Option<AlphaMode>,
+    label_material:  Option<Handle<StandardMaterial>>,
     label_lighting:  Option<Lighting>,
     label_sidedness: Option<Sidedness>,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
-/// the three captured cascade overrides (alpha, lighting, sidedness) the label
-/// authored. `None` for an override means the label inherits the panel value.
+/// the captured cascade overrides the label authored. `None` for an override
+/// means the label inherits the panel value.
 fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
     let SpawnPanelTextChild {
         commands,
@@ -308,6 +318,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         layout,
         z_level,
         label_alpha,
+        label_material,
         label_lighting,
         label_sidedness,
     } = request;
@@ -327,6 +338,9 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         spawned = child.id();
         if let Some(alpha_mode) = label_alpha {
             cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
+        }
+        if let Some(material) = label_material {
+            cascade::apply_cascade_override(&mut child, TextMaterial(material));
         }
         if let Some(lighting) = label_lighting {
             cascade::apply_cascade_override(&mut child, lighting);
@@ -349,6 +363,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     layout:          PanelTextLayout,
     z_level:         PanelTextZLevel,
     label_alpha:     Option<AlphaMode>,
+    label_material:  Option<Handle<StandardMaterial>>,
     label_lighting:  Option<Lighting>,
     label_sidedness: Option<Sidedness>,
 }
@@ -358,8 +373,8 @@ struct UpdateReusedChild<'a, 'w, 's> {
 /// `shape_panel_text_children` plus the mesh rebuild skip it.
 ///
 /// `gating_eq` excludes render-context fields and compares floats by bits;
-/// the cascade overrides (alpha, lighting, sidedness) are gated on their own
-/// because `gating_eq` ignores them. Writing one unconditionally
+/// the cascade overrides (alpha, material, lighting, sidedness) are gated on
+/// their own because `gating_eq` ignores them. Writing one unconditionally
 /// would re-fire `Changed<Resolved<A>>` on every run and defeat the per-run
 /// short-circuit downstream.
 fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
@@ -371,6 +386,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         layout,
         z_level,
         label_alpha,
+        label_material,
         label_lighting,
         label_sidedness,
     } = request;
@@ -397,6 +413,19 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         None => {
             if reusable.alpha.is_some() {
                 cascade::remove_cascade_override::<TextAlpha>(&mut child);
+            }
+        },
+    }
+    match label_material {
+        Some(material) => {
+            let incoming = TextMaterial(material);
+            if reusable.material.map(|node_override| &node_override.0) != Some(&incoming) {
+                cascade::apply_cascade_override(&mut child, incoming);
+            }
+        },
+        None => {
+            if reusable.material.is_some() {
+                cascade::remove_cascade_override::<TextMaterial>(&mut child);
             }
         },
     }

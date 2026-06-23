@@ -170,7 +170,11 @@ const GAME_UNPAUSED_LABEL: &str = "Game Unpaused";
 #[derive(Component)]
 struct GameStatusPanel;
 
-fn spawn_face_panels(mut commands: Commands, cube_query: Query<Entity, With<Cube>>) {
+fn spawn_face_panels(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    cube_query: Query<Entity, With<Cube>>,
+) {
     let Ok(cube) = cube_query.single() else {
         return;
     };
@@ -178,12 +182,14 @@ fn spawn_face_panels(mut commands: Commands, cube_query: Query<Entity, With<Cube
     let Ok(camera_panel) = cube_face_panel(
         FACE_PANEL_STYLE,
         panel_content(CAMERA_LABEL, CAMERA_TIME_SOURCE_LABEL),
+        &mut materials,
     ) else {
         return;
     };
     let Ok(game_panel) = cube_face_panel(
         FACE_PANEL_STYLE,
         panel_content(game_status_title(false), GAME_TIME_SOURCE_LABEL),
+        &mut materials,
     ) else {
         return;
     };

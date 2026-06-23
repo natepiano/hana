@@ -261,9 +261,9 @@ fn build_panel_or_log(
     }
 }
 
-fn spawn_batch_count_panel(commands: &mut Commands) {
+fn spawn_batch_count_panel(commands: &mut Commands, materials: &mut Assets<StandardMaterial>) {
     let display = BatchCountDisplay::default();
-    let unlit = screen_panel_material();
+    let unlit = materials.add(screen_panel_material());
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -438,8 +438,8 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
-    spawn_batch_count_panel(&mut commands);
+fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    spawn_batch_count_panel(&mut commands, &mut materials);
 
     let a4_width_meters = f32::from(A4_WIDTH);
     let a4_height_meters = f32::from(A4_HEIGHT);

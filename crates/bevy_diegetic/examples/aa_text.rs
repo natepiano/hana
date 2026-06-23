@@ -390,14 +390,23 @@ fn setup(
             Transform::from_xyz(CUBE_X + SCENE_X_OFFSET, HEADLINE_Y, DISPLAY_Z),
         ))
         .id();
+    let cube_panel_material = materials.add(cube_panel_material());
     commands.entity(cube).with_children(|cube| {
-        spawn_cube_status_panels(cube, CubeStatusSnapshot::new(Msaa::Off, oit.0, *post));
-        spawn_cube_compatibility_panels(cube, oit.0, *post);
+        spawn_cube_status_panels(
+            cube,
+            CubeStatusSnapshot::new(Msaa::Off, oit.0, *post),
+            cube_panel_material.clone(),
+        );
+        spawn_cube_compatibility_panels(cube, oit.0, *post, cube_panel_material);
     });
 }
 
-fn spawn_cube_status_panels(cube: &mut ChildSpawnerCommands, snapshot: CubeStatusSnapshot) {
-    let panel = cube_status_panel(snapshot);
+fn spawn_cube_status_panels(
+    cube: &mut ChildSpawnerCommands,
+    snapshot: CubeStatusSnapshot,
+    material: Handle<StandardMaterial>,
+) {
+    let panel = cube_status_panel(snapshot, material);
 
     match panel {
         Ok(panel) => {
@@ -425,14 +434,14 @@ fn spawn_cube_compatibility_panels(
     cube: &mut ChildSpawnerCommands,
     oit_enabled: bool,
     post: PostAa,
+    material: Handle<StandardMaterial>,
 ) {
-    let transparent = cube_panel_material();
     let panel = DiegeticPanel::world()
         .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)
         .font_unit(Unit::Millimeters)
         .anchor(Anchor::Center)
-        .material(transparent.clone())
-        .text_material(transparent)
+        .material(material.clone())
+        .text_material(material)
         .with_tree(build_cube_compatibility_tree(cube_compatibility_message(
             oit_enabled,
             post,
@@ -661,11 +670,17 @@ struct ColumnStyles {
 }
 
 /// Spawns the bottom-left panel with the initial state of both AA settings.
-fn spawn_aa_panel(mut commands: Commands, aa: Res<AntiAlias>, post: Res<PostAa>) {
+fn spawn_aa_panel(
+    mut commands: Commands,
+    aa: Res<AntiAlias>,
+    post: Res<PostAa>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
     };
+    let unlit = materials.add(unlit);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -686,11 +701,17 @@ fn spawn_aa_panel(mut commands: Commands, aa: Res<AntiAlias>, post: Res<PostAa>)
 
 /// Spawns the upper-right instruction panel -- the two demo boxes stacked above
 /// an info box whose copy follows the OIT toggle.
-fn spawn_demo_panel(mut commands: Commands, oit: Res<OitState>, post: Res<PostAa>) {
+fn spawn_demo_panel(
+    mut commands: Commands,
+    oit: Res<OitState>,
+    post: Res<PostAa>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
     };
+    let unlit = materials.add(unlit);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopRight)
@@ -1011,14 +1032,16 @@ const fn post_label(post: PostAa) -> &'static str {
 
 fn cube_panel_material() -> StandardMaterial { cube_face_panel_material() }
 
-fn cube_status_panel(snapshot: CubeStatusSnapshot) -> Result<DiegeticPanel, PanelBuildError> {
-    let transparent = cube_panel_material();
+fn cube_status_panel(
+    snapshot: CubeStatusSnapshot,
+    material: Handle<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     DiegeticPanel::world()
         .size(CUBE_COMPAT_PANEL_SIZE, CUBE_COMPAT_PANEL_SIZE)
         .font_unit(Unit::Millimeters)
         .anchor(Anchor::Center)
-        .material(transparent.clone())
-        .text_material(transparent)
+        .material(material.clone())
+        .text_material(material)
         .with_tree(build_cube_status_tree(snapshot))
         .build()
 }

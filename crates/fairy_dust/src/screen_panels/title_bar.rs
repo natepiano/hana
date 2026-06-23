@@ -24,7 +24,6 @@ use super::constants::TITLE_BAR_CHILD_GAP;
 use super::constants::TITLE_BAR_DEFAULT_TITLE;
 use super::constants::TITLE_BAR_SEGMENT_GAP;
 use super::screen_panel_frame;
-use super::screen_panel_material;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
@@ -306,6 +305,7 @@ struct TitleBarMarker;
 
 pub(super) fn spawn_title_bar_with_home_chip(
     commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
     title_bar: &TitleBar,
     home: Option<&CameraHomeConfig>,
     registry: Option<&TitleBarControlRegistry>,
@@ -332,12 +332,16 @@ pub(super) fn spawn_title_bar_with_home_chip(
             }
         }
     }
-    spawn_title_bar(commands, &title_bar);
+    spawn_title_bar(commands, materials, &title_bar);
 }
 
-fn spawn_title_bar(commands: &mut Commands, title_bar: &TitleBar) {
+fn spawn_title_bar(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+    title_bar: &TitleBar,
+) {
     let state = TitleBarControlState::from_title_bar(title_bar);
-    let unlit = screen_panel_material();
+    let unlit = super::screen_panel_material_handle(materials);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(title_bar.anchor)

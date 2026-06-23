@@ -59,7 +59,7 @@ use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_COLOR;
 use fairy_dust::TitleBar;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
+use fairy_dust::screen_panel_material_handle;
 
 const EXAMPLE_TITLE: &str = "Swapped Axis";
 
@@ -515,8 +515,12 @@ struct ColumnStyles {
     inactive: TextStyle,
 }
 
-fn spawn_engine_panel(mut commands: Commands, engine: Res<Engine>) {
-    let unlit = screen_panel_material();
+fn spawn_engine_panel(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    engine: Res<Engine>,
+) {
+    let unlit = screen_panel_material_handle(&mut materials);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)

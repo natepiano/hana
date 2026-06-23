@@ -117,7 +117,7 @@ struct ScreenPanel;
 #[derive(Resource, Default)]
 struct Tick(u64);
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // Standalone labels: a marker plus the one-element `DiegeticText` bundle.
     commands.spawn((
         WorldLabel,
@@ -137,7 +137,8 @@ fn setup(mut commands: Commands) {
     ));
 
     // Panels: a marker plus a built `DiegeticPanel` whose tree names one run.
-    match world_panel() {
+    let panel_material = materials.add(panel_surface());
+    match world_panel(panel_material.clone()) {
         Ok(panel) => {
             commands.spawn((
                 WorldPanel,
@@ -147,7 +148,7 @@ fn setup(mut commands: Commands) {
         },
         Err(error) => error!("diegetic_mutation: world panel build failed: {error}"),
     }
-    match screen_panel() {
+    match screen_panel(panel_material) {
         Ok(panel) => {
             commands.spawn((ScreenPanel, panel, Transform::default()));
         },
@@ -217,24 +218,28 @@ fn world_panel_label(n: u64) -> String { format!("world panel {n}") }
 fn screen_panel_label(n: u64) -> String { format!("screen panel {n}") }
 
 /// World panel: a `Fit` surface in meters with one named, centered counter run.
-fn world_panel() -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+fn world_panel(
+    material: Handle<StandardMaterial>,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     DiegeticPanel::world()
         .size(Fit, Fit)
         .font_unit(Unit::Meters)
         .anchor(Anchor::Center)
-        .material(panel_surface())
-        .text_material(panel_surface())
+        .material(material.clone())
+        .text_material(material)
         .with_tree(world_panel_tree(0))
         .build()
 }
 
 /// Screen panel: a `Fit` overlay surface, bottom-right, with one named run.
-fn screen_panel() -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+fn screen_panel(
+    material: Handle<StandardMaterial>,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomRight)
-        .material(panel_surface())
-        .text_material(panel_surface())
+        .material(material.clone())
+        .text_material(material)
         .with_tree(screen_panel_tree(0))
         .build()
 }

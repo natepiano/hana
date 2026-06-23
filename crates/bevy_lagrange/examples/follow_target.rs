@@ -220,18 +220,60 @@ const ORBIT_CAM_LINES: &[&str] = &["OrbitCam uses", "the focus point", "to frame
 const TOP_GREETING_LINES: &[&str] = &["Hello!"];
 const BOTTOM_GREETING_LINES: &[&str] = &["Nice to", "see you!"];
 
-fn spawn_story_panels(mut commands: Commands, cubes: Query<Entity, With<Cube>>) {
+fn spawn_story_panels(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    cubes: Query<Entity, With<Cube>>,
+) {
     let Ok(cube) = cubes.single() else {
         return;
     };
 
+    let panel_material = materials.add(transparent_panel_material());
+    let text_material = materials.add(emissive_text_material());
     commands.entity(cube).with_children(|parent| {
-        spawn_story_panel(parent, Face::Front, ANIMATE_CUBE_LINES);
-        spawn_story_panel(parent, Face::Right, CAMERA_FOCUS_LINES);
-        spawn_story_panel(parent, Face::Back, PAN_DISABLED_LINES);
-        spawn_story_panel(parent, Face::Left, ORBIT_CAM_LINES);
-        spawn_story_panel(parent, Face::Top, TOP_GREETING_LINES);
-        spawn_story_panel(parent, Face::Bottom, BOTTOM_GREETING_LINES);
+        spawn_story_panel(
+            parent,
+            Face::Front,
+            ANIMATE_CUBE_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
+        spawn_story_panel(
+            parent,
+            Face::Right,
+            CAMERA_FOCUS_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
+        spawn_story_panel(
+            parent,
+            Face::Back,
+            PAN_DISABLED_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
+        spawn_story_panel(
+            parent,
+            Face::Left,
+            ORBIT_CAM_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
+        spawn_story_panel(
+            parent,
+            Face::Top,
+            TOP_GREETING_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
+        spawn_story_panel(
+            parent,
+            Face::Bottom,
+            BOTTOM_GREETING_LINES,
+            panel_material.clone(),
+            text_material.clone(),
+        );
     });
 }
 
@@ -239,8 +281,10 @@ fn spawn_story_panel(
     parent: &mut ChildSpawnerCommands,
     face: Face,
     lines: &'static [&'static str],
+    panel_material: Handle<StandardMaterial>,
+    text_material: Handle<StandardMaterial>,
 ) {
-    match story_panel(lines) {
+    match story_panel(lines, panel_material, text_material) {
         Ok(panel) => {
             parent.spawn((
                 Name::new(STORY_PANEL_NAME),
@@ -270,14 +314,17 @@ fn face_panel_transform(face: Face) -> Transform {
     }
 }
 
-fn story_panel(lines: &'static [&'static str]) -> Result<DiegeticPanel, PanelBuildError> {
-    let transparent = transparent_panel_material();
+fn story_panel(
+    lines: &'static [&'static str],
+    panel_material: Handle<StandardMaterial>,
+    text_material: Handle<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     DiegeticPanel::world()
         .size(FACE_PANEL_SIZE, FACE_PANEL_SIZE)
         .font_unit(Unit::Millimeters)
         .anchor(PanelAnchor::Center)
-        .material(transparent)
-        .text_material(emissive_text_material())
+        .material(panel_material)
+        .text_material(text_material)
         .with_tree(build_story_panel_tree(lines))
         .build()
 }

@@ -47,7 +47,7 @@ use fairy_dust::TITLE_COLOR;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
+use fairy_dust::screen_panel_material_handle;
 
 fn main() {
     fairy_dust::sprinkle_example()
@@ -286,8 +286,8 @@ const INFO_PANEL_LINES: [&str; 3] = [
 #[derive(Component)]
 struct InfoPanel;
 
-fn spawn_info_panel(mut commands: Commands) {
-    let unlit = screen_panel_material();
+fn spawn_info_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let unlit = screen_panel_material_handle(&mut materials);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopRight)

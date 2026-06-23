@@ -81,7 +81,7 @@ pub(crate) use fill_batch::SdfExtendedMaterial;
 pub(crate) use fill_batch::set_sdf_material_table_buffer;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
-pub(crate) use material::resolve_material;
+pub(crate) use material::material_asset_for_frame;
 use material_table::MaterialTablePlugin;
 use panel_geometry::PanelGeometryPlugin;
 use panel_shapes::PanelShapePlugin;
@@ -103,7 +103,11 @@ pub use world_text::WorldTextReady;
 pub(crate) use world_text::emit_computed_world_text;
 
 use crate::cascade::CascadeDefault;
+use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
+use crate::cascade::SdfMaterial;
+use crate::cascade::ShapeMaterial;
+use crate::cascade::TextMaterial;
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
 /// text runs, images, glyph meshes, and SDF geometry.
 ///
@@ -374,8 +378,27 @@ fn sync_hairline_width(
 /// (slug text, SDF panel geometry).
 pub(crate) struct RenderPlugin;
 
+pub(crate) fn seed_default_material_cascades(app: &mut App) {
+    app.init_asset::<StandardMaterial>();
+    let default_material = app
+        .world_mut()
+        .resource_mut::<Assets<StandardMaterial>>()
+        .add(default_panel_material());
+    app.insert_resource(CascadeDefault(SdfMaterial(default_material.clone())));
+    app.insert_resource(CascadeDefault(TextMaterial(default_material.clone())));
+    app.insert_resource(CascadeDefault(ShapeMaterial(default_material)));
+}
+
 impl Plugin for RenderPlugin {
     fn build(&self, app: &mut App) {
+        seed_default_material_cascades(app);
+
+        app.add_plugins((
+            CascadePlugin::<SdfMaterial>::default(),
+            CascadePlugin::<TextMaterial>::default(),
+            CascadePlugin::<ShapeMaterial>::default(),
+        ));
+
         app.add_plugins((
             MaterialTablePlugin,
             AnalyticPathPlugin,

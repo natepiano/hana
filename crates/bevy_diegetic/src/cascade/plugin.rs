@@ -88,7 +88,7 @@ fn propagate_cascade<A: CascadeAttr>(
         let Ok((_, current)) = resolved.get(entity) else {
             continue;
         };
-        let new = resolved::resolve_walk::<A>(entity, &overrides, &parents, default.0);
+        let new = resolved::resolve_walk::<A>(entity, &overrides, &parents, default.0.clone());
         if current.0 != new {
             commands.entity(entity).insert(Resolved(new));
         }

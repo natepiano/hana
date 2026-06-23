@@ -34,7 +34,10 @@ use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
+use crate::cascade::SdfMaterial;
+use crate::cascade::ShapeMaterial;
 use crate::cascade::TextAlpha;
+use crate::cascade::TextMaterial;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
 use crate::layout::Dimension;
@@ -123,17 +126,22 @@ pub struct DiegeticPanel {
     /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
     /// Text shadow casting is controlled per-element via `GlyphShadowMode`.
     pub(super) surface_shadow:   SurfaceShadow,
-    /// Default PBR material for backgrounds and borders. When `None`, the
-    /// library uses a matte default (roughness 0.95, reflectance 0.02).
-    /// Individual elements can override via `El::material`.
-    /// `base_color` is overridden by the layout color when both are set.
+    /// Default source-material handle for backgrounds and borders. When
+    /// `None`, the renderer falls back through `CascadeDefault<SdfMaterial>`.
+    /// Individual elements can override via `El::material`; `base_color` is
+    /// overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:         Option<StandardMaterial>,
-    /// Default PBR material for text. When `None`, uses the same default as
-    /// `material`. Individual text elements can override.
-    /// `base_color` is overridden by `TextStyle::color` when set.
+    pub(super) material:         Option<Handle<StandardMaterial>>,
+    /// Default source-material handle for text. When `None`, the renderer
+    /// falls back through `CascadeDefault<TextMaterial>`. `base_color` is
+    /// overridden by `TextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:    Option<StandardMaterial>,
+    pub(super) text_material:    Option<Handle<StandardMaterial>>,
+    /// Default source-material handle for panel-shape primitives. When `None`,
+    /// the renderer falls back through `CascadeDefault<ShapeMaterial>`.
+    /// Shape-local colors override `base_color` before projection.
+    #[reflect(ignore)]
+    pub(super) shape_material:   Option<Handle<StandardMaterial>>,
     /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
     /// falls through to the per-style setting and then to
     /// `CascadeDefault<TextAlpha>`.
@@ -167,6 +175,7 @@ impl Default for DiegeticPanel {
             surface_shadow:   SurfaceShadow::Off,
             material:         None,
             text_material:    None,
+            shape_material:   None,
             text_alpha_mode:  None,
             coordinate_space: CoordinateSpace::default(),
             text_index:       HashMap::new(),
@@ -212,18 +221,33 @@ impl DiegeticPanel {
 
     /// The default panel material, if set.
     #[must_use]
-    pub const fn material(&self) -> Option<&StandardMaterial> { self.material.as_ref() }
+    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Mutable access to the default panel material.
-    pub const fn material_mut(&mut self) -> &mut Option<StandardMaterial> { &mut self.material }
+    pub const fn material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
+        &mut self.material
+    }
 
     /// The default text material, if set.
     #[must_use]
-    pub const fn text_material(&self) -> Option<&StandardMaterial> { self.text_material.as_ref() }
+    pub const fn text_material(&self) -> Option<&Handle<StandardMaterial>> {
+        self.text_material.as_ref()
+    }
 
     /// Mutable access to the default text material.
-    pub const fn text_material_mut(&mut self) -> &mut Option<StandardMaterial> {
+    pub const fn text_material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
         &mut self.text_material
+    }
+
+    /// The default panel-shape material, if set.
+    #[must_use]
+    pub const fn shape_material(&self) -> Option<&Handle<StandardMaterial>> {
+        self.shape_material.as_ref()
+    }
+
+    /// Mutable access to the default panel-shape material handle.
+    pub const fn shape_material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
+        &mut self.shape_material
     }
 
     /// The panel-level text [`AlphaMode`] override, if set.
@@ -1036,9 +1060,15 @@ pub(super) fn seed_panel_overrides(
     defaults: Res<CascadeDefaults>,
     anti_alias_overrides: Query<&Override<AntiAlias>>,
     hairline_fade_overrides: Query<&Override<HairlineFade>>,
+    sdf_material_overrides: Query<&Override<SdfMaterial>>,
+    text_material_overrides: Query<&Override<TextMaterial>>,
+    shape_material_overrides: Query<&Override<ShapeMaterial>>,
     parents: Query<&ChildOf>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
+    sdf_material_default: Option<Res<CascadeDefault<SdfMaterial>>>,
+    text_material_default: Option<Res<CascadeDefault<TextMaterial>>>,
+    shape_material_default: Option<Res<CascadeDefault<ShapeMaterial>>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -1048,13 +1078,12 @@ pub(super) fn seed_panel_overrides(
     let font_unit = panel.font_unit().unwrap_or(defaults.panel_font_unit);
     // Per-context glyph defaults: screen panels are unlit, front-facing HUD
     // surfaces; world panels stay lit and double-sided (the global cascade
-    // default). A world panel whose text material is explicitly unlit also seeds
-    // an unlit override so its labels inherit the look its material implied
-    // before lighting moved onto the cascade. Labels still override per-label
-    // via `TextStyle::with_lighting` / `with_sidedness` (captured in
-    // `reconcile_panel_text_children`).
+    // default). Labels still override per-label via
+    // `TextStyle::with_lighting` / `with_sidedness` (captured in
+    // `reconcile_panel_text_children`). Material handles are resolved by
+    // render systems so this headless bridge stays independent of
+    // `Assets<StandardMaterial>`.
     let is_screen = panel.coordinate_space().is_screen();
-    let material_unlit = panel.text_material().is_some_and(|material| material.unlit);
     // The panel renders its elements' analytic line marks, so it carries its
     // own resolved anti-alias mode and hairline fade for the line batcher to
     // read (and to filter on `Changed<Resolved<A>>`). A fresh panel resolves
@@ -1071,21 +1100,120 @@ pub(super) fn seed_panel_overrides(
         &parents,
         hairline_fade_default.0,
     );
+    let sdf_material = panel.material().cloned().map_or_else(
+        || {
+            cascade::resolve_walk::<SdfMaterial>(
+                entity,
+                &sdf_material_overrides,
+                &parents,
+                sdf_material_default
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_default()
+                    .0,
+            )
+        },
+        SdfMaterial,
+    );
+    let text_material = panel.text_material().cloned().map_or_else(
+        || {
+            cascade::resolve_walk::<TextMaterial>(
+                entity,
+                &text_material_overrides,
+                &parents,
+                text_material_default
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_default()
+                    .0,
+            )
+        },
+        TextMaterial,
+    );
+    let shape_material = panel
+        .shape_material()
+        .or_else(|| panel.material())
+        .cloned()
+        .map_or_else(
+            || {
+                cascade::resolve_walk::<ShapeMaterial>(
+                    entity,
+                    &shape_material_overrides,
+                    &parents,
+                    shape_material_default
+                        .as_deref()
+                        .cloned()
+                        .unwrap_or_default()
+                        .0,
+                )
+            },
+            ShapeMaterial,
+        );
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert((
         Resolved(FontUnit(font_unit)),
         Resolved(anti_alias),
         Resolved(hairline_fade),
+        Resolved(sdf_material.clone()),
+        Resolved(text_material.clone()),
+        Resolved(shape_material.clone()),
     ));
     cascade::apply_cascade_override(&mut entity_commands, FontUnit(font_unit));
     if let Some(alpha_mode) = panel.text_alpha_mode() {
         cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
     }
+    if panel.material().is_some() {
+        cascade::apply_cascade_override(&mut entity_commands, sdf_material);
+    }
+    if panel.text_material().is_some() {
+        cascade::apply_cascade_override(&mut entity_commands, text_material);
+    }
+    if panel
+        .shape_material()
+        .or_else(|| panel.material())
+        .is_some()
+    {
+        cascade::apply_cascade_override(&mut entity_commands, shape_material);
+    }
     if is_screen {
         cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
         cascade::apply_cascade_override(&mut entity_commands, Sidedness::FrontOnly);
-    } else if material_unlit {
-        cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
+    }
+}
+
+pub(super) fn sync_panel_material_overrides(
+    panels: Query<(Entity, Ref<DiegeticPanel>), Changed<DiegeticPanel>>,
+    mut commands: Commands,
+) {
+    for (entity, panel) in &panels {
+        if panel.is_added() {
+            continue;
+        }
+        let mut entity_commands = commands.entity(entity);
+        match panel.material().cloned() {
+            Some(material) => {
+                cascade::apply_cascade_override(&mut entity_commands, SdfMaterial(material));
+            },
+            None => {
+                cascade::remove_cascade_override::<SdfMaterial>(&mut entity_commands);
+            },
+        }
+        match panel.text_material().cloned() {
+            Some(material) => {
+                cascade::apply_cascade_override(&mut entity_commands, TextMaterial(material));
+            },
+            None => {
+                cascade::remove_cascade_override::<TextMaterial>(&mut entity_commands);
+            },
+        }
+        match panel.shape_material().or_else(|| panel.material()).cloned() {
+            Some(material) => {
+                cascade::apply_cascade_override(&mut entity_commands, ShapeMaterial(material));
+            },
+            None => {
+                cascade::remove_cascade_override::<ShapeMaterial>(&mut entity_commands);
+            },
+        }
     }
 }
 

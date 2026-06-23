@@ -248,15 +248,15 @@ fn setup(
         })),
     ));
 
-    spawn_status_overlay(&mut commands);
+    spawn_status_overlay(&mut commands, &mut materials);
 }
 
 /// Spawns the diagnostic readout — a bottom-left screen-space overlay built with
 /// the canonical Fairy Dust panel frame. Rebuilt each second by
 /// [`update_status_panel`] (top-left is the title bar, bottom-right the camera
 /// control panel, so the readout sits bottom-left).
-fn spawn_status_overlay(commands: &mut Commands) {
-    let unlit = screen_panel_material();
+fn spawn_status_overlay(commands: &mut Commands, materials: &mut Assets<StandardMaterial>) {
+    let unlit = materials.add(screen_panel_material());
     let built = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -569,6 +569,7 @@ fn update_panels(
     existing: Query<(Entity, &StressPanel)>,
     mut panel_transforms: Query<&mut Transform>,
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut perf: ResMut<StressPerfStats>,
     mut last_panel_count: Local<usize>,
     mut last_row_count: Local<Option<usize>>,
@@ -615,8 +616,8 @@ fn update_panels(
                 let panel = DiegeticPanel::world()
                     .size(MAX_LAYOUT_WIDTH, LAYOUT_HEIGHT)
                     .font_unit(Unit::Millimeters)
-                    .material(transparent_panel_material())
-                    .text_material(default_panel_material())
+                    .material(materials.add(transparent_panel_material()))
+                    .text_material(materials.add(default_panel_material()))
                     .with_tree(tree)
                     .build();
                 let Ok(panel) = panel else {

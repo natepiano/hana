@@ -244,8 +244,8 @@ struct HudSnapshot {
     panel_local_alpha:     Option<AlphaMode>,
 }
 
-fn setup(mut commands: Commands) {
-    let scene_frame = build_scene_frame_panel().map(|panel| {
+fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let scene_frame = build_scene_frame_panel(&mut materials).map(|panel| {
         commands
             .spawn((
                 CameraHomeTarget,
@@ -318,8 +318,8 @@ fn setup(mut commands: Commands) {
         )
         .id();
 
-    let hud =
-        build_hud_panel().map(|panel| commands.spawn((HudPanel, panel, Transform::default())).id());
+    let hud = build_hud_panel(&mut materials)
+        .map(|panel| commands.spawn((HudPanel, panel, Transform::default())).id());
 
     match (scene_frame, hud) {
         (Ok(scene_frame), Ok(hud)) => {
@@ -340,11 +340,14 @@ fn setup(mut commands: Commands) {
     }
 }
 
-fn build_scene_frame_panel() -> Result<DiegeticPanel, PanelBuildError> {
+fn build_scene_frame_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
     };
+    let unlit = materials.add(unlit);
     DiegeticPanel::world()
         .size(SCENE_FRAME_WIDTH, SCENE_FRAME_HEIGHT)
         .anchor(Anchor::Center)
@@ -384,11 +387,14 @@ fn build_scene_frame_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
     builder.build()
 }
 
-fn build_hud_panel() -> Result<DiegeticPanel, PanelBuildError> {
+fn build_hud_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     let unlit = StandardMaterial {
         unlit: true,
         ..default_panel_material()
     };
+    let unlit = materials.add(unlit);
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)

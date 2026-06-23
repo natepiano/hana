@@ -14,7 +14,7 @@ use bevy_diegetic::TextWrap;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TITLE_COLOR;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
+use fairy_dust::screen_panel_material_handle;
 
 use super::*;
 
@@ -133,8 +133,11 @@ fn capped_fit(max: f32) -> Sizing {
 // PANEL — a content-fit diegetic screen panel anchored to the bottom-left corner.
 // ═════════════════════════════════════════════════════════════════════════════
 
-pub(crate) fn spawn_policy_panel(commands: &mut Commands) {
-    let unlit = screen_panel_material();
+pub(crate) fn spawn_policy_panel(
+    commands: &mut Commands,
+    materials: &mut Assets<StandardMaterial>,
+) {
+    let unlit = screen_panel_material_handle(materials);
     let built = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)

@@ -1,11 +1,18 @@
 //! The cascade's value-type traits, matched [`Override<A>`] / [`Resolved<A>`]
 //! component pair, and bounded parent-walk resolvers.
 
+use core::mem::size_of;
+
+use bevy::asset::Handle;
+use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 use bevy::reflect::GetTypeRegistration;
 use bevy::reflect::Typed;
+use private::Sealed;
 
+use super::constants::CASCADE_ATTRIBUTE_BYTES;
 use super::constants::CASCADE_DEPTH_CAP;
+use super::defaults::CascadeDefault;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::layout::Unit;
@@ -19,7 +26,7 @@ mod private {
 macro_rules! cascade_attr {
     // Joins an already-declared value type (one whose own name is the
     // attribute, e.g. `AntiAlias`) to the cascade instead of minting a
-    // wrapper struct. The type must derive `Copy`, `PartialEq`, `Debug`, and
+    // wrapper struct. The type must derive `Clone`, `PartialEq`, `Debug`, and
     // `Reflect`.
     (existing $name:ty, default = $default:expr) => {
         impl $crate::cascade::resolved::private::Sealed for $name {}
@@ -77,6 +84,65 @@ cascade_attr!(
     FontUnit(Unit),
     default = Unit::Meters
 );
+
+/// Source-material handle cascade for SDF backgrounds, borders, and element surfaces.
+///
+/// `SdfMaterial` is authored source-material identity. It is not the batched
+/// `SdfExtendedMaterial` render asset and not the migration-only
+/// `LegacySdfExtendedMaterial` render asset.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+pub struct SdfMaterial(pub Handle<StandardMaterial>);
+
+impl Sealed for SdfMaterial {}
+
+impl CascadeProperty for SdfMaterial {}
+
+impl CascadeAttr for SdfMaterial {}
+
+impl Default for CascadeDefault<SdfMaterial> {
+    fn default() -> Self { Self(SdfMaterial(Handle::default())) }
+}
+
+const _: () = assert!(size_of::<SdfMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
+
+/// Source-material handle cascade for text runs.
+///
+/// `TextMaterial` resolves the authored `StandardMaterial` handle before
+/// analytic text projection. It is not a Bevy render material asset type.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+pub struct TextMaterial(pub Handle<StandardMaterial>);
+
+impl Sealed for TextMaterial {}
+
+impl CascadeProperty for TextMaterial {}
+
+impl CascadeAttr for TextMaterial {}
+
+impl Default for CascadeDefault<TextMaterial> {
+    fn default() -> Self { Self(TextMaterial(Handle::default())) }
+}
+
+const _: () = assert!(size_of::<TextMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
+
+/// Source-material handle cascade for panel-shape primitives.
+///
+/// `ShapeMaterial` resolves the authored `StandardMaterial` handle before
+/// analytic panel-shape projection. It is not a Bevy render material asset type.
+#[derive(Clone, PartialEq, Eq, Debug, Reflect)]
+pub struct ShapeMaterial(pub Handle<StandardMaterial>);
+
+impl Sealed for ShapeMaterial {}
+
+impl CascadeProperty for ShapeMaterial {}
+
+impl CascadeAttr for ShapeMaterial {}
+
+impl Default for CascadeDefault<ShapeMaterial> {
+    fn default() -> Self { Self(ShapeMaterial(Handle::default())) }
+}
+
+const _: () = assert!(size_of::<ShapeMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
+
 // Lighting cascade attribute. Global default is `Lit` (world text); the
 // screen-panel construction bridge overrides it to `Unlit`. Consumed by both
 // glyph runs and panel lines.
@@ -102,7 +168,12 @@ cascade_attr!(TestUnit(Unit), default = Unit::Meters);
 /// This is deliberately smaller than the crate-internal reflection contract
 /// used by the ECS components. Public command/read APIs can name
 /// `CascadeProperty` without leaking Bevy reflection bounds.
-pub trait CascadeProperty: private::Sealed + Copy + PartialEq + Send + Sync + 'static {}
+///
+/// Cascaded values must stay cheap to clone because propagation clones them
+/// when resolving and writing `Resolved<A>`. Small value wrappers and
+/// `Handle<StandardMaterial>` are acceptable; owned `StandardMaterial` values
+/// are not cascade attributes.
+pub trait CascadeProperty: private::Sealed + Clone + PartialEq + Send + Sync + 'static {}
 
 /// A cascading attribute — a pure value type that resolves *my own override,
 /// else my parent's, else a global default*.
@@ -128,7 +199,7 @@ pub(crate) trait CascadeAttr:
 /// This component is `pub(crate)` and cannot be named by external
 /// inspectors/tests. Revisit that boundary only if external tooling needs to
 /// inspect authored cascade state directly.
-#[derive(Component, Reflect, Clone, Copy, Debug)]
+#[derive(Component, Reflect, Clone, Debug)]
 #[reflect(Component)]
 pub(crate) struct Override<A: CascadeAttr>(pub A);
 
@@ -137,12 +208,13 @@ pub(crate) struct Override<A: CascadeAttr>(pub A);
 /// Maintained by [`CascadePlugin`](super::CascadePlugin): seeded at spawn by
 /// the node-kind authoring bridges, kept current by the propagation pass.
 /// Crate-internal; readers query `&Resolved<A>` and filter on
-/// `Changed<Resolved<A>>`.
+/// `Changed<Resolved<A>>`. `Resolved<A>` is a read-only cache maintained by
+/// cascade propagation; author values through `Override<A>`.
 ///
 /// This component is `pub(crate)` and cannot be named by external
 /// inspectors/tests. Revisit that boundary only if external tooling needs to
 /// inspect computed cascade state directly.
-#[derive(Component, Reflect, Clone, Copy, Debug)]
+#[derive(Component, Reflect, Clone, Debug)]
 #[reflect(Component)]
 pub(crate) struct Resolved<A: CascadeAttr>(pub A);
 
@@ -162,7 +234,7 @@ pub(crate) fn resolve<A: CascadeAttr>(world: &World, entity: Entity, default: A)
             return default;
         }
         if let Some(node_override) = world.get::<Override<A>>(current) {
-            return node_override.0;
+            return node_override.0.clone();
         }
         let Some(child_of) = world.get::<ChildOf>(current) else {
             return default;
@@ -198,7 +270,7 @@ pub(crate) fn resolve_walk<A: CascadeAttr>(
             return default;
         }
         if let Ok(node_override) = overrides.get(current) {
-            return node_override.0;
+            return node_override.0.clone();
         }
         let Ok(child_of) = parents.get(current) else {
             return default;

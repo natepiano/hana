@@ -7,6 +7,7 @@ use bevy_kana::ToUsize;
 
 use super::GlyphMetricVisibility;
 use super::pipeline::FontContext;
+use super::pipeline::OverlayAssets;
 use super::pipeline::OverlayContext;
 use super::scaling;
 use crate::callouts::CalloutCap;
@@ -75,22 +76,31 @@ impl GuideSegment {
     }
 }
 
+fn transparent_panel_material(assets: &mut OverlayAssets<'_>) -> Handle<StandardMaterial> {
+    let mut material = default_panel_material();
+    material.base_color = Color::NONE;
+    material.alpha_mode = AlphaMode::Blend;
+    material.unlit = true;
+    assets.materials.add(material)
+}
+
 /// Spawns per-glyph bounding boxes, origin dots, and the advancement arrow.
 pub(super) fn spawn_glyph_metric_guides(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
+    assets: &mut OverlayAssets<'_>,
 ) {
-    spawn_glyph_box_panels(ctx, computed, BBOX_COLOR);
+    spawn_glyph_box_panels(ctx, computed, BBOX_COLOR, assets);
 
     // "Bounding Box" callout from the first glyph's bbox.
     if !computed.glyphs.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        spawn_bounding_box_callout(ctx, font_context, computed, BBOX_COLOR);
+        spawn_bounding_box_callout(ctx, font_context, computed, BBOX_COLOR, assets);
     }
 
     // Origin dots + Advancement arrow below the first glyph.
     if !computed.glyphs.is_empty() && ctx.overlay.labels == GlyphMetricVisibility::Shown {
-        spawn_origin_and_advancement(ctx, font_context, computed);
+        spawn_origin_and_advancement(ctx, font_context, computed, assets);
     }
 }
 
@@ -100,11 +110,9 @@ fn spawn_glyph_box_panels(
     ctx: &mut OverlayContext<'_, '_, '_>,
     computed: &ComputedWorldText,
     bbox_color: Color,
+    assets: &mut OverlayAssets<'_>,
 ) {
-    let mut material = default_panel_material();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
+    let material = transparent_panel_material(assets);
 
     let line_width = scaling::bbox_border_width(ctx.overlay, ctx.font_size, ctx.scale);
 
@@ -161,7 +169,12 @@ fn build_box_outline_tree(width: f32, height: f32, line_width: f32, color: Color
 /// Spawns one transparent world panel sized to the segments' bounding box,
 /// with every segment authored as an element-owned [`PanelLine`]. The element
 /// pins [`HairlineFade::Full`] so debug guides never fade with distance.
-fn spawn_guide_panel(ctx: &mut OverlayContext<'_, '_, '_>, segments: &[GuideSegment], z: f32) {
+fn spawn_guide_panel(
+    ctx: &mut OverlayContext<'_, '_, '_>,
+    segments: &[GuideSegment],
+    z: f32,
+    assets: &mut OverlayAssets<'_>,
+) {
     let Some(first) = segments.first() else {
         return;
     };
@@ -201,10 +214,7 @@ fn spawn_guide_panel(ctx: &mut OverlayContext<'_, '_, '_>, segments: &[GuideSegm
     )
     .build();
 
-    let mut material = default_panel_material();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
+    let material = transparent_panel_material(assets);
 
     let Ok(panel) = DiegeticPanel::world()
         .size(size.x, size.y)
@@ -228,6 +238,7 @@ fn spawn_bounding_box_callout(
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     bbox_color: Color,
+    assets: &mut OverlayAssets<'_>,
 ) {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
     let callout_thickness = scaling::font_scale(ctx.font_size, ctx.scale) * BBOX_MIN_WORLD_RATIO;
@@ -275,6 +286,7 @@ fn spawn_bounding_box_callout(
             ),
         ],
         z,
+        assets,
     );
 
     // Label at the top of the riser, to the left (CenterRight anchor).
@@ -335,6 +347,7 @@ fn spawn_origin_and_advancement(
     ctx: &mut OverlayContext<'_, '_, '_>,
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
+    assets: &mut OverlayAssets<'_>,
 ) {
     let label_size = scaling::font_scale(ctx.font_size, ctx.scale) * LABEL_SIZE_RATIO;
     let z = CALLOUT_Z_OFFSET;
@@ -370,6 +383,7 @@ fn spawn_origin_and_advancement(
             dot_radius,
             Vec3::new(origin_x, origin_y, z),
             Color::WHITE,
+            assets,
         );
     }
 
@@ -397,6 +411,7 @@ fn spawn_origin_and_advancement(
             BASELINE_COLOR,
         )],
         z,
+        assets,
     );
     super::spawn_overlay_label(
         ctx.commands,
@@ -416,6 +431,7 @@ fn spawn_origin_and_advancement(
             dot_radius,
             Vec3::new(advance_end_x, origin_y, z),
             Color::WHITE,
+            assets,
         );
     }
 
@@ -431,12 +447,17 @@ fn spawn_origin_and_advancement(
             spacing,
             z,
         },
+        assets,
     );
 }
 
 /// Spawns the horizontal advancement arrow, its dashed bracket lines, and the
 /// label. The arrow and both dash groups live in one guide panel element.
-fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &ArrowGeometry) {
+fn spawn_advancement_arrow(
+    ctx: &mut OverlayContext<'_, '_, '_>,
+    geometry: &ArrowGeometry,
+    assets: &mut OverlayAssets<'_>,
+) {
     let arrow_y = geometry.descent_world - geometry.spacing;
     let head = scaling::arrowhead_size(ctx.font_size, ctx.scale);
     let gap = scaling::arrow_gap(ctx.font_size, ctx.scale);
@@ -481,7 +502,7 @@ fn spawn_advancement_arrow(ctx: &mut OverlayContext<'_, '_, '_>, geometry: &Arro
         )
     });
 
-    spawn_guide_panel(ctx, &segments, geometry.z);
+    spawn_guide_panel(ctx, &segments, geometry.z, assets);
 
     // "Advancement" label centered below the arrow.
     let advance_mid_x = f32::midpoint(geometry.origin_x, geometry.advance_end_x);
@@ -506,6 +527,7 @@ fn spawn_dot_panel(
     radius: f32,
     position: Vec3,
     color: Color,
+    assets: &mut OverlayAssets<'_>,
 ) {
     let size = radius * 2.0;
     let tree = LayoutBuilder::with_root(
@@ -521,10 +543,7 @@ fn spawn_dot_panel(
     )
     .build();
 
-    let mut material = default_panel_material();
-    material.base_color = Color::NONE;
-    material.alpha_mode = AlphaMode::Blend;
-    material.unlit = true;
+    let material = transparent_panel_material(assets);
 
     let Ok(panel) = DiegeticPanel::world()
         .size(size, size)

@@ -1,7 +1,8 @@
 //! One parent-walking cascade with per-entity `Resolved<A>` caches.
 //!
-//! Some text attributes inherit through the entity tree: text alpha mode and
-//! font unit today. The rule is one sentence, applied by following `ChildOf`:
+//! Some text and material attributes inherit through the entity tree: text
+//! alpha mode, font unit, and source material handles today. The rule is one
+//! sentence, applied by following `ChildOf`:
 //! *my own override, else my parent's, else the global default at the root.*
 //! A standalone text is depth-1 off the root, a panel is depth-1, and a panel
 //! label is depth-2; deeper nesting needs no new type.
@@ -50,6 +51,9 @@
 //! | --- | --- | --- |
 //! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
+//! | [`SdfMaterial`] | `CascadeDefault<SdfMaterial>` | `override_sdf_material`, `inherit_sdf_material`, [`resolved_sdf_material`] |
+//! | [`TextMaterial`] | `CascadeDefault<TextMaterial>` | `override_text_material`, `inherit_text_material`, [`resolved_text_material`] |
+//! | [`ShapeMaterial`] | `CascadeDefault<ShapeMaterial>` | `override_shape_material`, `inherit_shape_material`, [`resolved_shape_material`] |
 //! | [`Lighting`](crate::Lighting) | `CascadeDefault<Lighting>` | `override_lighting`, `inherit_lighting`, [`resolved_lighting`] |
 //! | [`Sidedness`](crate::Sidedness) | `CascadeDefault<Sidedness>` | `override_sidedness`, `inherit_sidedness`, [`resolved_sidedness`] |
 //! | [`AntiAlias`](crate::AntiAlias) | `CascadeDefault<AntiAlias>`, mirrored from the `AntiAlias` resource | `override_anti_alias`, `inherit_anti_alias`, [`resolved_anti_alias`] |
@@ -98,7 +102,9 @@
 //! (`override_name`, `inherit_name`, `resolved_name`), one
 //! `.add_plugins(CascadePlugin::<Name>::default())` line, and a render read site
 //! that uses `Resolved<Name>` or `resolved_name`. The value type only needs to be
-//! `Copy + PartialEq`.
+//! `Clone + PartialEq`, and should stay cheap to clone. A
+//! `Handle<StandardMaterial>` wrapper is acceptable; an owned
+//! `StandardMaterial` is not.
 //!
 //! Promoting an existing plain field is a migration, not just a declaration.
 //! Add the attribute, then inventory every consumer before editing: standalone
@@ -122,15 +128,21 @@ mod resolved;
 
 pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::FontUnit;
+pub use attributes::SdfMaterial;
+pub use attributes::ShapeMaterial;
 pub use attributes::TextAlpha;
+pub use attributes::TextMaterial;
 pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_anti_alias;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_hairline_fade;
 pub use attributes::resolved_lighting;
+pub use attributes::resolved_sdf_material;
+pub use attributes::resolved_shape_material;
 pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
+pub use attributes::resolved_text_material;
 pub use cascade_set::CascadeSet;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;

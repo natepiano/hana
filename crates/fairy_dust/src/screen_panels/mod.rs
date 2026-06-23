@@ -53,9 +53,12 @@ pub(crate) struct FairyDustOverlayPanel;
 
 pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
     ensure_plugin(app, DiegeticUiPlugin);
-    app.add_systems(Startup, move |mut commands: Commands| {
-        description::spawn_description_panel(&mut commands, &panel);
-    });
+    app.add_systems(
+        Startup,
+        move |mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>| {
+            description::spawn_description_panel(&mut commands, &panel, &mut materials);
+        },
+    );
 }
 
 pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
@@ -65,10 +68,12 @@ pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     app.add_systems(
         Startup,
         move |mut commands: Commands,
+              mut materials: ResMut<Assets<StandardMaterial>>,
               home: Option<Res<CameraHomeConfig>>,
               registry: Option<Res<TitleBarControlRegistry>>| {
             title_bar::spawn_title_bar_with_home_chip(
                 &mut commands,
+                &mut materials,
                 &title_bar,
                 home.as_deref(),
                 registry.as_deref(),
@@ -97,6 +102,13 @@ pub fn screen_panel_material() -> StandardMaterial {
         unlit: true,
         ..default_panel_material()
     }
+}
+
+/// Registers and returns the material used by Fairy Dust screen-space panels.
+pub fn screen_panel_material_handle(
+    materials: &mut Assets<StandardMaterial>,
+) -> Handle<StandardMaterial> {
+    materials.add(screen_panel_material())
 }
 
 /// Adds the standard Fairy Dust screen-panel frame, then lets the caller

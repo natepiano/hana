@@ -16,21 +16,24 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::screen_panel_frame;
-use fairy_dust::screen_panel_material;
 
 use crate::constants::*;
+use crate::presentation::AnchorPanelMaterials;
 use crate::scene::ActiveCapability;
 
 #[derive(Component)]
 pub(crate) struct CapabilityMenuPanel;
 
-pub(crate) fn spawn_capability_menu(commands: &mut Commands, active: ActiveCapability) {
-    let unlit = screen_panel_material();
+pub(crate) fn spawn_capability_menu(
+    commands: &mut Commands,
+    active: ActiveCapability,
+    materials: &AnchorPanelMaterials,
+) {
     let built = DiegeticPanel::screen()
         .size(Sizing::FIT, Sizing::FIT)
         .anchor(Anchor::TopRight)
-        .material(unlit.clone())
-        .text_material(unlit)
+        .material(materials.screen.clone())
+        .text_material(materials.screen.clone())
         .with_tree(build_capability_menu_tree(active))
         .build();
     match built {

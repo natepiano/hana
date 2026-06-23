@@ -413,6 +413,8 @@ fn spawn_target(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let face_material = materials.add(transparent_face_material());
+    let face_text_material = materials.add(emissive_text_material());
     commands
         .spawn((
             Mesh3d(meshes.add(Cuboid::from_length(CUBE_SIZE))),
@@ -420,7 +422,14 @@ fn spawn_target(
             Transform::from_translation(TARGET_TRANSLATION),
             CameraHomeTarget,
         ))
-        .with_children(|parent| spawn_face_label_panels(parent, TARGET_LABEL));
+        .with_children(|parent| {
+            spawn_face_label_panels(
+                parent,
+                TARGET_LABEL,
+                face_material.clone(),
+                face_text_material.clone(),
+            );
+        });
 }
 
 /// Spawns the cube that the `A` key's `AnimateToFit` frames — a `FitTarget`-marked
@@ -433,6 +442,8 @@ fn spawn_fit_target(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let face_material = materials.add(transparent_face_material());
+    let face_text_material = materials.add(emissive_text_material());
     commands
         .spawn((
             Mesh3d(meshes.add(Cuboid::from_length(CUBE_SIZE))),
@@ -441,7 +452,14 @@ fn spawn_fit_target(
             FitTarget,
             CameraHomeTarget,
         ))
-        .with_children(|parent| spawn_face_label_panels(parent, FIT_TARGET_LABEL));
+        .with_children(|parent| {
+            spawn_face_label_panels(
+                parent,
+                FIT_TARGET_LABEL,
+                face_material.clone(),
+                face_text_material.clone(),
+            );
+        });
 }
 
 /// Spawns one transparent cube-face [`DiegeticPanel`] per side face, each
@@ -449,9 +467,14 @@ fn spawn_fit_target(
 /// emissive lives in the panel's `text_material` (a `StandardMaterial` whose
 /// `emissive` is the boosted [`FACE_LABEL_COLOR`]), the same example-level
 /// recipe as `focus_bounds`/`follow_target`.
-fn spawn_face_label_panels(parent: &mut ChildSpawnerCommands, label: &'static str) {
+fn spawn_face_label_panels(
+    parent: &mut ChildSpawnerCommands,
+    label: &'static str,
+    face_material: Handle<StandardMaterial>,
+    face_text_material: Handle<StandardMaterial>,
+) {
     for face in [Face::Front, Face::Back, Face::Left, Face::Right] {
-        match face_label_panel(label) {
+        match face_label_panel(label, face_material.clone(), face_text_material.clone()) {
             Ok(panel) => {
                 parent.spawn((panel, cube_face_transform(face, CUBE_SIZE)));
             },
@@ -462,13 +485,17 @@ fn spawn_face_label_panels(parent: &mut ChildSpawnerCommands, label: &'static st
     }
 }
 
-fn face_label_panel(label: &str) -> Result<DiegeticPanel, PanelBuildError> {
+fn face_label_panel(
+    label: &str,
+    face_material: Handle<StandardMaterial>,
+    face_text_material: Handle<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     DiegeticPanel::world()
         .size(FACE_LABEL_PANEL_SIZE, FACE_LABEL_PANEL_SIZE)
         .font_unit(Unit::Millimeters)
         .anchor(Anchor::Center)
-        .material(transparent_face_material())
-        .text_material(emissive_text_material())
+        .material(face_material)
+        .text_material(face_text_material)
         .with_tree(face_label_tree(label))
         .build()
 }
@@ -567,11 +594,11 @@ const EXPLAINERS: [Explainer; 3] = [
 
 /// Spawns the lower-left explainer panel: a transparent, unlit screen panel
 /// stacking one bordered box per [`Explainer`].
-fn spawn_explainer_panel(mut commands: Commands) {
-    let unlit = StandardMaterial {
+fn spawn_explainer_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let unlit = materials.add(StandardMaterial {
         unlit: true,
         ..default_panel_material()
-    };
+    });
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)

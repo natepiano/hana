@@ -230,7 +230,7 @@ macro_rules! text_style_setters {
             /// Replaces the whole [`TextStyle`] at once. Later chained setters
             /// still apply on top of it.
             #[must_use]
-            pub const fn style(mut self, style: TextStyle) -> Self {
+            pub fn style(mut self, style: TextStyle) -> Self {
                 self.style = style;
                 self
             }

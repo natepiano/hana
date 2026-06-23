@@ -120,6 +120,15 @@ impl Default for LightingPreset {
 #[derive(Resource, Default)]
 struct RequestedPreset(Option<u8>);
 
+/// Registered panel source materials used when lighting presets swap handles.
+#[derive(Resource)]
+struct PanelMaterialHandles {
+    /// Lit source material handle for panels that should use scene lighting.
+    lit:   Handle<StandardMaterial>,
+    /// Unlit source material handle for panels that should ignore scene lights.
+    unlit: Handle<StandardMaterial>,
+}
+
 /// Marker for the three world panels under test.
 #[derive(Component)]
 struct RenderPanel;
@@ -244,6 +253,7 @@ fn request_preset_4(mut requested: ResMut<RequestedPreset>) { requested.0 = Some
 fn cycle_lighting_preset(
     mut requested: ResMut<RequestedPreset>,
     mut preset: ResMut<LightingPreset>,
+    material_handles: Res<PanelMaterialHandles>,
     mut panels: Query<&mut DiegeticPanel, With<RenderPanel>>,
     mut lights: Query<(&mut DirectionalLight, &SceneLight)>,
     mut point_lights: Query<(&mut PointLight, &ScenePointLight)>,
@@ -261,16 +271,15 @@ fn cycle_lighting_preset(
 
     let unlit = preset.is_unlit();
     let lights_visible = preset.lights_on();
+    let source_material = if unlit {
+        material_handles.unlit.clone()
+    } else {
+        material_handles.lit.clone()
+    };
 
     for mut panel in &mut panels {
-        let mat = panel
-            .material_mut()
-            .get_or_insert_with(default_panel_material);
-        mat.unlit = unlit;
-        let text_mat = panel
-            .text_material_mut()
-            .get_or_insert_with(default_panel_material);
-        text_mat.unlit = unlit;
+        *panel.material_mut() = Some(source_material.clone());
+        *panel.text_material_mut() = Some(source_material.clone());
     }
 
     // Restore saved illuminance for lights-on, zero for lights-off.
@@ -351,12 +360,26 @@ fn on_panel_clicked(mut click: On<Pointer<Click>>, mut commands: Commands) {
     );
 }
 
-fn setup(mut commands: Commands) {
+fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let lit_panel_material = materials.add(default_panel_material());
+    let unlit_panel_material = materials.add(StandardMaterial {
+        unlit: true,
+        ..default_panel_material()
+    });
+    commands.insert_resource(PanelMaterialHandles {
+        lit:   lit_panel_material,
+        unlit: unlit_panel_material,
+    });
+
+    let opaque_surface_material = materials.add(StandardMaterial {
+        alpha_mode: AlphaMode::Opaque,
+        ..default_panel_material()
+    });
     spawn_panel_card(
         &mut commands,
         "Backgrounds panel",
         -CARD_X_STEP,
-        build_backgrounds_panel(),
+        build_backgrounds_panel(opaque_surface_material),
     );
     spawn_panel_card(&mut commands, "Borders panel", 0.0, build_borders_panel());
     spawn_panel_card(
@@ -412,11 +435,15 @@ fn spawn_panel_card(commands: &mut Commands, name: &'static str, x: f32, tree: L
         .observe(on_panel_clicked);
 }
 
-fn spawn_preset_panel(mut commands: Commands, preset: Res<LightingPreset>) {
-    let unlit = StandardMaterial {
+fn spawn_preset_panel(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    preset: Res<LightingPreset>,
+) {
+    let unlit = materials.add(StandardMaterial {
         unlit: true,
         ..default_panel_material()
-    };
+    });
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -577,12 +604,17 @@ fn panel_divider(builder: &mut LayoutBuilder) {
     );
 }
 
-fn build_backgrounds_panel() -> LayoutTree {
+fn build_backgrounds_panel(opaque_surface_material: Handle<StandardMaterial>) -> LayoutTree {
     let title_style = TextStyle::new(Pt(10.0)).with_color(TEXT_COLOR);
     let body_style = TextStyle::new(Pt(7.0)).with_color(SUBTLE_TEXT);
 
     let mut builder = LayoutBuilder::new(CARD_WIDTH, CARD_HEIGHT);
-    build_card_backgrounds(&mut builder, &title_style, &body_style);
+    build_card_backgrounds(
+        &mut builder,
+        &title_style,
+        &body_style,
+        opaque_surface_material,
+    );
     builder.build()
 }
 
@@ -604,7 +636,12 @@ fn build_combined_panel() -> LayoutTree {
     builder.build()
 }
 
-fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_style: &TextStyle) {
+fn build_card_backgrounds(
+    b: &mut LayoutBuilder,
+    title_style: &TextStyle,
+    body_style: &TextStyle,
+    opaque_surface_material: Handle<StandardMaterial>,
+) {
     b.with(
         El::column()
             .padding(Padding::all(CARD_PAD))
@@ -662,10 +699,7 @@ fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_s
             b.with(
                 El::new()
                     .background(BLUE_BG)
-                    .material(StandardMaterial {
-                        alpha_mode: AlphaMode::Opaque,
-                        ..default_panel_material()
-                    })
+                    .material(opaque_surface_material)
                     .padding(Padding::all(3.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),

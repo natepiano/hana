@@ -130,6 +130,7 @@ pub use screen_panels::fps_stats_panel;
 pub use screen_panels::gpu_meter_panel;
 pub use screen_panels::screen_panel_frame;
 pub use screen_panels::screen_panel_material;
+pub use screen_panels::screen_panel_material_handle;
 
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.

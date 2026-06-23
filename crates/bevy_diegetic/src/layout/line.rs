@@ -5,8 +5,10 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::{self};
 
+use bevy::asset::Handle;
 use bevy::color::Color;
 use bevy::math::Vec2;
+use bevy::pbr::StandardMaterial;
 
 use super::BoundingBox;
 use super::Dimension;
@@ -66,6 +68,11 @@ pub struct PanelCircle {
     center:        PanelPoint,
     radius:        Dimension,
     color:         Color,
+    /// Shape-local source material handle for this filled circle.
+    ///
+    /// This handle resolves before material-table projection. The circle's
+    /// `color` remains a row `base_color` override, not a separate shader path.
+    material:      Option<Handle<StandardMaterial>>,
     hairline_fade: Option<HairlineFade>,
 }
 
@@ -74,6 +81,11 @@ pub struct PanelCircle {
 pub struct LineStyle {
     width:         Dimension,
     color:         Color,
+    /// Shape-local source material handle for lines using this style.
+    ///
+    /// This handle resolves before material-table projection. The line color
+    /// remains a row `base_color` override.
+    material:      Option<Handle<StandardMaterial>>,
     cap_size:      Dimension,
     start_cap:     CalloutCap,
     end_cap:       CalloutCap,
@@ -175,6 +187,8 @@ pub struct ResolvedPanelShape {
     pub(crate) width:                f32,
     /// Resolved base line color.
     pub(crate) color:                Color,
+    /// Resolved source material handle shared by this shape's primitives.
+    pub(crate) material:             Option<Handle<StandardMaterial>>,
     /// Authored hairline fade override; `None` inherits the owning element's
     /// resolution.
     pub(crate) hairline_fade:        Option<HairlineFade>,
@@ -231,6 +245,8 @@ pub struct ResolvedPanelShapePrimitive {
     pub(crate) geometry:   PanelShapePrimitiveGeometry,
     /// Resolved primitive color.
     pub(crate) color:      Color,
+    /// Source material handle resolved for this primitive.
+    pub(crate) material:   Option<Handle<StandardMaterial>>,
     /// Primitive visual bounds.
     pub(crate) bounds:     BoundingBox,
     /// Effective clip for this primitive.
@@ -281,7 +297,7 @@ impl PanelLine {
 
     /// Sets the full line style.
     #[must_use]
-    pub const fn style(mut self, style: LineStyle) -> Self {
+    pub fn style(mut self, style: LineStyle) -> Self {
         self.style = style;
         self
     }
@@ -295,8 +311,15 @@ impl PanelLine {
 
     /// Sets the line color.
     #[must_use]
-    pub const fn color(mut self, color: Color) -> Self {
+    pub fn color(mut self, color: Color) -> Self {
         self.style = self.style.color(color);
+        self
+    }
+
+    /// Sets the source material handle for this line and its caps.
+    #[must_use]
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.style = self.style.material(material);
         self
     }
 
@@ -309,14 +332,14 @@ impl PanelLine {
 
     /// Sets the cap at the start of the line.
     #[must_use]
-    pub const fn start_cap(mut self, cap: CalloutCap) -> Self {
+    pub fn start_cap(mut self, cap: CalloutCap) -> Self {
         self.style = self.style.start_cap(cap);
         self
     }
 
     /// Sets the cap at the end of the line.
     #[must_use]
-    pub const fn end_cap(mut self, cap: CalloutCap) -> Self {
+    pub fn end_cap(mut self, cap: CalloutCap) -> Self {
         self.style = self.style.end_cap(cap);
         self
     }
@@ -329,7 +352,7 @@ impl PanelLine {
     /// exponent — so a never-fading ruler spine and fading minor ticks abut
     /// without an anti-aliasing junction.
     #[must_use]
-    pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
+    pub fn hairline_fade(mut self, fade: HairlineFade) -> Self {
         self.style = self.style.hairline_fade(fade);
         self
     }
@@ -398,6 +421,15 @@ impl PanelShape {
         }
     }
 
+    /// Sets the shape-local source material handle.
+    #[must_use]
+    pub fn material(self, material: Handle<StandardMaterial>) -> Self {
+        match self {
+            Self::Line(line) => Self::Line(line.material(material)),
+            Self::Circle(circle) => Self::Circle(circle.material(material)),
+        }
+    }
+
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         match self {
             Self::Line(line) => Self::Line(line.scaled(default_scale)),
@@ -422,6 +454,7 @@ impl PanelCircle {
             center:        center.into(),
             radius:        radius.into(),
             color:         Color::WHITE,
+            material:      None,
             hairline_fade: None,
         }
     }
@@ -430,6 +463,13 @@ impl PanelCircle {
     #[must_use]
     pub const fn color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Sets the source material handle for this filled circle.
+    #[must_use]
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.material = Some(material);
         self
     }
 
@@ -454,6 +494,12 @@ impl PanelCircle {
     #[must_use]
     pub const fn color_value(&self) -> Color { self.color }
 
+    /// Returns the shape-local source material handle, if set.
+    #[must_use]
+    pub const fn material_handle(&self) -> Option<&Handle<StandardMaterial>> {
+        self.material.as_ref()
+    }
+
     /// Returns the hairline fade override, if any.
     #[must_use]
     pub const fn hairline_fade_value(&self) -> Option<HairlineFade> { self.hairline_fade }
@@ -463,6 +509,7 @@ impl PanelCircle {
             center:        self.center.scaled(default_scale),
             radius:        scaled_dimension(self.radius, default_scale),
             color:         self.color,
+            material:      self.material.clone(),
             hairline_fade: self.hairline_fade,
         }
     }
@@ -546,6 +593,10 @@ impl ResolvedPanelShape {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
+    /// Returns the source material handle resolved for this shape, if any.
+    #[must_use]
+    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
+
     /// Returns the authored hairline fade override, if any.
     #[must_use]
     pub const fn hairline_fade(&self) -> Option<HairlineFade> { self.hairline_fade }
@@ -571,6 +622,10 @@ impl ResolvedPanelShapePrimitive {
     /// Returns the resolved primitive color.
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
+
+    /// Returns the source material handle resolved for this primitive, if any.
+    #[must_use]
+    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Returns this primitive's visual bounds.
     #[must_use]
@@ -623,6 +678,7 @@ pub(crate) fn resolve_panel_line(
     let end = raw_end - direction * end_inset;
 
     let color = line.line_style().color_value();
+    let material = line.line_style().material_handle().cloned();
     let start_cap = line.line_style().start_cap_value().resolved_primitives(
         cap_size,
         color,
@@ -657,6 +713,7 @@ pub(crate) fn resolve_panel_line(
             shaft_end,
             width,
             color,
+            material.clone(),
             clip,
         );
     }
@@ -667,6 +724,7 @@ pub(crate) fn resolve_panel_line(
         direction,
         &start_cap,
         width,
+        material.clone(),
         clip,
     );
     push_cap_primitives(
@@ -676,6 +734,7 @@ pub(crate) fn resolve_panel_line(
         -direction,
         &end_cap,
         width,
+        material.clone(),
         clip,
     );
 
@@ -698,6 +757,7 @@ pub(crate) fn resolve_panel_line(
         shaft_end,
         width,
         color,
+        material,
         hairline_fade: line.line_style().hairline_fade_value(),
         primitives,
     })
@@ -710,6 +770,7 @@ pub(crate) fn resolve_panel_circle(
     let radius = positive_dimension(circle.radius_dimension())?;
     let center = resolve_point(circle.center(), context.owner_bounds)?;
     let color = circle.color_value();
+    let material = circle.material_handle().cloned();
     let clip = match resolve_clip(
         context.owner_bounds,
         context.inherited_clip,
@@ -728,6 +789,7 @@ pub(crate) fn resolve_panel_circle(
         Vec2::X,
         Vec2::splat(radius),
         color,
+        material.clone(),
         clip,
     );
 
@@ -752,6 +814,7 @@ pub(crate) fn resolve_panel_circle(
         shaft_end: center,
         width: radius * 2.0,
         color,
+        material,
         hairline_fade: circle.hairline_fade_value(),
         primitives,
     })
@@ -806,6 +869,7 @@ fn push_segment_primitive(
     end: Vec2,
     width: f32,
     color: Color,
+    material: Option<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     let Some(bounds) = segment_bounds(start, end, width) else {
@@ -817,6 +881,7 @@ fn push_segment_primitive(
         kind: PanelShapePrimitiveKind::Segment,
         geometry: PanelShapePrimitiveGeometry::Segment { start, end, width },
         color,
+        material,
         bounds,
         clip,
         part_order: primitive_ordinal,
@@ -830,6 +895,7 @@ fn push_cap_primitives(
     direction: Vec2,
     cap: &ResolvedCalloutCap,
     width: f32,
+    material: Option<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     for primitive in cap.primitives() {
@@ -840,6 +906,7 @@ fn push_cap_primitives(
             direction,
             *primitive,
             width,
+            material.clone(),
             clip,
         );
     }
@@ -852,6 +919,7 @@ fn push_cap_primitive(
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
     width: f32,
+    material: Option<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     if !primitive.length.is_finite()
@@ -874,6 +942,7 @@ fn push_cap_primitive(
                 end,
                 width,
                 primitive.color,
+                material,
                 clip,
             );
         },
@@ -887,6 +956,7 @@ fn push_cap_primitive(
                 axis,
                 Vec2::new(primitive.length, primitive.width),
                 primitive.color,
+                material,
                 clip,
             );
         },
@@ -898,6 +968,7 @@ fn push_cap_primitive(
                 tip,
                 direction,
                 primitive,
+                material,
                 clip,
             );
         },
@@ -909,6 +980,7 @@ fn push_cap_primitive(
                 tip,
                 direction,
                 primitive,
+                material,
                 clip,
             );
         },
@@ -920,6 +992,7 @@ fn push_cap_primitive(
                 tip,
                 direction,
                 primitive,
+                material,
                 clip,
             );
         },
@@ -933,6 +1006,7 @@ fn push_centered_cap_form(
     tip: Vec2,
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
+    material: Option<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     let half_size = Vec2::new(primitive.length * 0.5, primitive.width * 0.5);
@@ -944,6 +1018,7 @@ fn push_centered_cap_form(
         direction,
         half_size,
         primitive.color,
+        material,
         clip,
     );
 }
@@ -956,6 +1031,7 @@ fn push_form_primitive(
     axis: Vec2,
     half_size: Vec2,
     color: Color,
+    material: Option<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     if !center.is_finite() || !axis.is_finite() || !half_size.is_finite() {
@@ -977,6 +1053,7 @@ fn push_form_primitive(
             half_size,
         },
         color,
+        material,
         bounds,
         clip,
         part_order: primitive_ordinal,
@@ -1077,6 +1154,13 @@ impl LineStyle {
         self
     }
 
+    /// Sets the source material handle for lines using this style.
+    #[must_use]
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.material = Some(material);
+        self
+    }
+
     /// Sets the default cap size used by caps without an explicit override.
     #[must_use]
     pub fn cap_size(mut self, cap_size: impl Into<Dimension>) -> Self {
@@ -1106,6 +1190,12 @@ impl LineStyle {
     #[must_use]
     pub const fn color_value(&self) -> Color { self.color }
 
+    /// Returns the source material handle for this line style, if set.
+    #[must_use]
+    pub const fn material_handle(&self) -> Option<&Handle<StandardMaterial>> {
+        self.material.as_ref()
+    }
+
     /// Returns the default cap size.
     #[must_use]
     pub const fn cap_size_dimension(&self) -> Dimension { self.cap_size }
@@ -1133,6 +1223,7 @@ impl LineStyle {
         Self {
             width:         scaled_dimension(self.width, default_scale),
             color:         self.color,
+            material:      self.material.clone(),
             cap_size:      scaled_dimension(self.cap_size, default_scale),
             start_cap:     self.start_cap.scaled_dimensions(default_scale),
             end_cap:       self.end_cap.scaled_dimensions(default_scale),
@@ -1146,6 +1237,7 @@ impl Default for LineStyle {
         Self {
             width:         DEFAULT_LINE_WIDTH,
             color:         Color::WHITE,
+            material:      None,
             cap_size:      DEFAULT_CAP_SIZE,
             start_cap:     CalloutCap::None,
             end_cap:       CalloutCap::None,

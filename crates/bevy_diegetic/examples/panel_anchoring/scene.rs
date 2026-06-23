@@ -37,6 +37,7 @@ use crate::hinge::FoldDirection;
 use crate::hinge::FoldPattern;
 use crate::hinge::FoldTravel;
 use crate::hinge::HingeChain;
+use crate::presentation::AnchorPanelMaterials;
 
 /// Which capability scene is on screen; its menu entry highlights.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -101,8 +102,9 @@ pub(crate) fn spawn_scene(
     selection: AnchorSelection,
     anchor_count: usize,
     show_marker: bool,
+    materials: &AnchorPanelMaterials,
 ) {
-    spawn_anchor_scene(commands, selection, anchor_count, show_marker);
+    spawn_anchor_scene(commands, selection, anchor_count, show_marker, materials);
 }
 
 /// Number keys switch capabilities. Anchor (`1`) and Spin (`2`) share the

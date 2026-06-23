@@ -2,7 +2,9 @@
 
 use std::hash::Hash;
 
+use bevy::asset::Handle;
 use bevy::color::Color;
+use bevy::pbr::StandardMaterial;
 use bevy::prelude::AlphaMode;
 use bevy::prelude::Component;
 use bevy::prelude::Reflect;
@@ -218,6 +220,14 @@ pub struct TextStyle {
     /// Per-label lighting override. `None` = inherit from the `Lighting`
     /// cascade attribute (world panels default `Lit`, screen `Unlit`).
     lighting:       Option<Lighting>,
+    /// Per-label source material handle for text runs.
+    ///
+    /// This is an authored cascade/source handle. It is not a Bevy render
+    /// material asset and it does not affect text measurement or layout cache
+    /// keys. Create the material once through `Assets<StandardMaterial>` and
+    /// pass the handle here; do not create a fresh asset while rebuilding panel
+    /// data each frame.
+    material:       Option<Handle<StandardMaterial>>,
     font_features:  FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from the resolved
     /// `FontUnit` cascade attribute (panel font unit for panel text, world
@@ -245,6 +255,7 @@ impl PartialEq for TextStyle {
             && self.shadow_mode == other.shadow_mode
             && self.sidedness == other.sidedness
             && self.lighting == other.lighting
+            && self.material == other.material
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.alpha_mode == other.alpha_mode
@@ -283,6 +294,7 @@ impl TextStyle {
             shadow_mode:    GlyphShadowMode::Cast,
             sidedness:      None,
             lighting:       None,
+            material:       None,
             font_features:  FontFeatures::NONE,
             unit:           font_size.unit,
             alpha_mode:     None,
@@ -338,6 +350,10 @@ impl TextStyle {
     /// Returns the per-label lighting override, if set (`None` = inherit).
     #[must_use]
     pub const fn lighting(&self) -> Option<Lighting> { self.lighting }
+
+    /// Returns the text-run source material handle, if set.
+    #[must_use]
+    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Returns the font feature overrides.
     #[must_use]
@@ -480,6 +496,18 @@ impl TextStyle {
         self
     }
 
+    /// Sets the source material handle for this text run.
+    ///
+    /// The handle overrides the `TextMaterial` cascade source for rendering
+    /// only. Measurement and shaping cache keys ignore it; scalar color edits
+    /// still flow through the material-table row, with `with_color` overriding
+    /// that row's `base_color`.
+    #[must_use]
+    pub fn with_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.material = Some(material);
+        self
+    }
+
     /// Sets font feature overrides.
     #[must_use]
     pub const fn with_font_features(mut self, features: FontFeatures) -> Self {
@@ -571,6 +599,11 @@ impl TextStyle {
 
     /// Sets a per-label lighting override (overrides the panel/context default).
     pub const fn set_lighting(&mut self, lighting: Lighting) { self.lighting = Some(lighting); }
+
+    /// Sets the source material handle for this text run.
+    pub fn set_material(&mut self, material: Handle<StandardMaterial>) {
+        self.material = Some(material);
+    }
 
     /// Sets font feature overrides.
     pub const fn set_font_features(&mut self, features: FontFeatures) {
@@ -688,6 +721,7 @@ impl TextStyle {
             shadow_mode: _,
             sidedness: _,
             lighting: _,
+            material: _,
             // Measurement context — not a layout-cache key.
             unit: _,
             // Render-only — affects compositing, not measurement.
@@ -729,6 +763,7 @@ impl TextStyle {
             shadow_mode: _,
             sidedness: _,
             lighting: _,
+            material: _,
             alpha_mode: _,
         } = self;
 
@@ -774,6 +809,7 @@ impl TextStyle {
             shadow_mode,
             sidedness,
             lighting,
+            material: _,
             unit: _,
             alpha_mode: _,
         } = self;
@@ -867,6 +903,13 @@ const _: () = assert!(GlyphRenderMode::PunchOut.discriminant() == 2);
     reason = "tests use expect for clearer failure messages"
 )]
 mod tests {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::Hasher;
+
+    use bevy::asset::Assets;
+    use bevy::pbr::StandardMaterial;
+    use bevy::prelude::default;
+
     use super::*;
     use crate::layout::BoundingBox;
 
@@ -920,6 +963,41 @@ mod tests {
         let recolored = base.clone().with_color(Color::BLACK);
         assert!(base.layout_eq_excluding_visuals(&recolored));
         assert!(!base.gating_eq(&recolored));
+    }
+
+    #[test]
+    fn material_handle_is_render_only_for_layout_and_gating_keys() {
+        let mut materials = Assets::<StandardMaterial>::default();
+        let red = materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.0, 0.0),
+            ..default()
+        });
+        let blue = materials.add(StandardMaterial {
+            base_color: Color::srgb(0.0, 0.0, 1.0),
+            ..default()
+        });
+
+        let red_style = TextStyle::new(24.0).with_material(red);
+        let blue_style = TextStyle::new(24.0).with_material(blue);
+
+        assert_ne!(
+            red_style, blue_style,
+            "full TextStyle equality should include exact source handles"
+        );
+        assert!(
+            red_style.layout_eq_excluding_visuals(&blue_style),
+            "text material handles do not affect measurement layout"
+        );
+        assert!(
+            red_style.gating_eq(&blue_style),
+            "text material handles update frame rows without rebuilding glyph geometry"
+        );
+
+        let mut red_hash = DefaultHasher::new();
+        red_style.hash_layout(&mut red_hash);
+        let mut blue_hash = DefaultHasher::new();
+        blue_style.hash_layout(&mut blue_hash);
+        assert_eq!(red_hash.finish(), blue_hash.finish());
     }
 
     #[test]

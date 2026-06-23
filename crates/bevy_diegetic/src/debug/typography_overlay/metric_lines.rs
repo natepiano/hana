@@ -63,7 +63,7 @@ pub(super) fn spawn_font_metric_guides(
         arrow_spacing: first_glyph.map_or(0.0, |glyph| scaling::arrow_spacing(glyph.advance_x)),
     };
 
-    spawn_metric_guide_panel(ctx, font_context, computed, &extents);
+    spawn_metric_guide_panel(ctx, font_context, computed, &extents, assets);
 
     if ctx.overlay.labels == GlyphMetricVisibility::Shown {
         let metric_lines = metric_line_labels(font_context.font, font_context.line);
@@ -88,6 +88,7 @@ fn spawn_metric_guide_panel(
     font_context: &FontContext<'_>,
     computed: &ComputedWorldText,
     extents: &GlyphExtents,
+    assets: &mut OverlayAssets<'_>,
 ) {
     let line_specs = metric_line_specs(
         font_context.font,
@@ -122,6 +123,7 @@ fn spawn_metric_guide_panel(
     material.base_color = Color::NONE;
     material.alpha_mode = AlphaMode::Blend;
     material.unlit = true;
+    let material = assets.materials.add(material);
 
     let x = LEFT_OUTER_ARROW_SLOT.mul_add(-extents.arrow_spacing, extents.first_left);
     let line_metrics = font_context.line;

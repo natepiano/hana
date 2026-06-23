@@ -395,6 +395,7 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut font_handles: ResMut<FontHandles>,
     font_registry: Res<FontRegistry>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     load_fonts(&asset_server, &mut font_handles);
 
@@ -427,15 +428,20 @@ fn setup(
             .build(),
     ));
 
-    spawn_hud_panels(&mut commands, &font_registry);
+    spawn_hud_panels(&mut commands, &font_registry, &mut materials);
 }
 
-fn spawn_hud_panels(commands: &mut Commands, font_registry: &FontRegistry) {
+fn spawn_hud_panels(
+    commands: &mut Commands,
+    font_registry: &FontRegistry,
+    materials: &mut Assets<StandardMaterial>,
+) {
     let unlit_material = bevy_diegetic::default_panel_material();
     let unlit = StandardMaterial {
         unlit: true,
         ..unlit_material
     };
+    let unlit = materials.add(unlit);
 
     let fonts_panel = DiegeticPanel::screen()
         .size(

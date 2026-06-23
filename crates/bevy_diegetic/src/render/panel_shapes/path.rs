@@ -572,6 +572,7 @@ mod tests {
                 half_size: Vec2::new(2.0, 1.0),
             },
             color:      Color::WHITE,
+            material:   None,
             bounds:     BoundingBox {
                 x:      -2.0,
                 y:      -1.0,
@@ -612,6 +613,7 @@ mod tests {
                 width: 2.0,
             },
             color: Color::WHITE,
+            material: None,
             bounds: BoundingBox {
                 x:      0.0,
                 y:      -1.0,
@@ -771,6 +773,7 @@ mod tests {
                     width: 0.566_929_16,
                 },
                 color:      bevy::color::Color::WHITE,
+                material:   None,
                 bounds:     BoundingBox {
                     x:      22.0,
                     y:      0.0,

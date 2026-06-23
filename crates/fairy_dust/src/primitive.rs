@@ -235,8 +235,9 @@ impl CubeFacePanelStyle {
 pub fn cube_face_panel(
     style: CubeFacePanelStyle,
     content: CubeFacePanelContent,
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, PanelBuildError> {
-    cube_face_panel_with_tree(style.size, cube_face_panel_tree(style, content))
+    cube_face_panel_with_tree(style.size, cube_face_panel_tree(style, content), materials)
 }
 
 /// Builds a transparent cube face panel from a caller-authored layout tree.
@@ -247,8 +248,9 @@ pub fn cube_face_panel(
 pub fn cube_face_panel_with_tree(
     size: f32,
     tree: LayoutTree,
+    materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, PanelBuildError> {
-    let transparent = cube_face_panel_material();
+    let transparent = materials.add(cube_face_panel_material());
     DiegeticPanel::world()
         .size(size, size)
         .font_unit(Unit::Millimeters)

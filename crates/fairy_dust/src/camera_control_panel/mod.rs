@@ -94,10 +94,14 @@ fn ensure_panel_plugins(app: &mut App) {
     ensure_plugin(app, MeshPickingPlugin);
 }
 
-fn spawn_panel(mut commands: Commands, background: Res<CameraControlPanelBackground>) {
+fn spawn_panel(
+    mut commands: Commands,
+    background: Res<CameraControlPanelBackground>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let snapshot = default_snapshot();
     let display = CameraGuidanceDisplay::default();
-    let unlit = screen_panels::screen_panel_material();
+    let unlit = screen_panels::screen_panel_material_handle(&mut materials);
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomRight)

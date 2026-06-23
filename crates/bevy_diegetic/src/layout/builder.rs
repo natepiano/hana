@@ -108,7 +108,7 @@ struct CommonEl {
     scroll_offset:   Vec2,
     scroll_anchor_x: ScrollAnchor,
     scroll_anchor_y: ScrollAnchor,
-    material:        Option<Box<StandardMaterial>>,
+    material:        Option<Handle<StandardMaterial>>,
     editable:        Option<ImePanelField>,
     draw:            Option<PanelDraw>,
     z_index:         DrawZIndex,
@@ -320,13 +320,17 @@ impl<L> El<L> {
         self
     }
 
-    /// Sets a PBR material override for this element.
+    /// Sets a PBR material handle override for this element.
     ///
     /// Controls surface properties (roughness, metallic, reflectance, etc.)
-    /// for backgrounds and borders on this element. If the element also has
-    /// a `.background()` color, that color overrides the material's `base_color`.
-    pub fn material(mut self, material: StandardMaterial) -> Self {
-        self.common.material = Some(Box::new(material));
+    /// for backgrounds, borders, and element-owned panel-shape primitives on
+    /// this element. This is the element-local source above the panel
+    /// `.material(...)` handle and the global `SdfMaterial`/`ShapeMaterial`
+    /// cascade defaults. If the element also has a `.background()` color, that
+    /// color overrides the material's `base_color`. Create the material asset
+    /// once through `Assets<StandardMaterial>`; do not create assets per frame.
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.common.material = Some(material);
         self
     }
 

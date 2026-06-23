@@ -95,8 +95,9 @@ pub(super) struct BuilderData {
     world_width:      Option<f32>,
     world_height:     Option<f32>,
     surface_shadow:   SurfaceShadow,
-    material:         Option<StandardMaterial>,
-    text_material:    Option<StandardMaterial>,
+    material:         Option<Handle<StandardMaterial>>,
+    text_material:    Option<Handle<StandardMaterial>>,
+    shape_material:   Option<Handle<StandardMaterial>>,
     text_alpha_mode:  Option<AlphaMode>,
     tree:             Option<LayoutTree>,
     coordinate_space: CoordinateSpace,
@@ -201,22 +202,35 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
         self
     }
 
-    /// Sets the default PBR material for backgrounds and borders.
+    /// Sets the default PBR material handle for backgrounds and borders.
     ///
-    /// `base_color` is overridden by the layout color when both are set.
-    /// Individual elements can override via `El::material`.
+    /// Create the handle once through `Assets<StandardMaterial>` and pass the
+    /// handle here. `base_color` is overridden by the layout color when both
+    /// are set. Individual elements can override via `El::material`.
     #[must_use]
-    pub fn material(mut self, material: StandardMaterial) -> Self {
+    pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.data.material = Some(material);
         self
     }
 
-    /// Sets the default PBR material for text.
+    /// Sets the default PBR material handle for text.
     ///
-    /// `base_color` is overridden by `TextStyle::color` when set.
+    /// Create the handle once through `Assets<StandardMaterial>` and pass the
+    /// handle here. `base_color` is overridden by `TextStyle::color` when set.
     #[must_use]
-    pub fn text_material(mut self, material: StandardMaterial) -> Self {
+    pub fn text_material(mut self, material: Handle<StandardMaterial>) -> Self {
         self.data.text_material = Some(material);
+        self
+    }
+
+    /// Sets the default PBR material handle for panel-shape primitives.
+    ///
+    /// Create the handle once through `Assets<StandardMaterial>` and pass the
+    /// handle here. Per-shape color values override the resolved material's
+    /// `base_color` before the frame material-table row is projected.
+    #[must_use]
+    pub fn shape_material(mut self, material: Handle<StandardMaterial>) -> Self {
+        self.data.shape_material = Some(material);
         self
     }
 
@@ -778,6 +792,7 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
         surface_shadow:   data.surface_shadow,
         material:         data.material,
         text_material:    data.text_material,
+        shape_material:   data.shape_material,
         text_alpha_mode:  data.text_alpha_mode,
         coordinate_space: data.coordinate_space,
         text_index:       std::collections::HashMap::new(),

@@ -101,6 +101,7 @@ use world_anchoring::WorldAnchorResolveDiagnostics;
 
 use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
+use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::layout::ShapedTextCache;
 use crate::render::AntiAlias;
@@ -183,6 +184,7 @@ impl Plugin for HeadlessLayoutPlugin {
                         .in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
+                    diegetic_panel::sync_panel_material_overrides.before(CascadeSet::Propagate),
                 ),
             )
             .configure_sets(

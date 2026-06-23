@@ -1165,11 +1165,14 @@ struct LastDisplayedBatchStats {
     text: String,
 }
 
-fn spawn_status_overlay(mut commands: Commands) {
-    let built = fps_stats_panel(build_overlay_tree(
-        &INITIAL_METRICS.map(String::from),
-        &INITIAL_METRICS.map(String::from),
-    ));
+fn spawn_status_overlay(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    let built = fps_stats_panel(
+        build_overlay_tree(
+            &INITIAL_METRICS.map(String::from),
+            &INITIAL_METRICS.map(String::from),
+        ),
+        &mut materials,
+    );
     match built {
         Ok(built) => {
             commands.spawn((StatusPanel, built, Transform::default()));
@@ -1178,8 +1181,14 @@ fn spawn_status_overlay(mut commands: Commands) {
     }
 }
 
-fn spawn_batch_stats_overlay(mut commands: Commands) {
-    let built = diegetic_stats_panel(&batch_stats_rows(&BatchStatsValues::default()));
+fn spawn_batch_stats_overlay(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let built = diegetic_stats_panel(
+        &batch_stats_rows(&BatchStatsValues::default()),
+        &mut materials,
+    );
     match built {
         Ok(built) => {
             commands.spawn((BatchStatsPanel, built, Transform::default()));
@@ -2116,8 +2125,14 @@ impl TimelineSegment {
     }
 }
 
-fn spawn_gpu_pipeline_overlay(mut commands: Commands) {
-    let built = gpu_meter_panel(build_gpu_pipeline_tree(&GpuPipelineBars::default()));
+fn spawn_gpu_pipeline_overlay(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let built = gpu_meter_panel(
+        build_gpu_pipeline_tree(&GpuPipelineBars::default()),
+        &mut materials,
+    );
     match built {
         Ok(built) => {
             commands.spawn((GpuPipelinePanel, built, Transform::default()));
