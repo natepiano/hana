@@ -618,15 +618,40 @@ mod tests {
     use std::collections::VecDeque;
     use std::time::Duration;
 
-    use super::*;
-    use crate::input::CameraInteractionSources;
+    use bevy::camera::RenderTarget;
+    use bevy::input::gestures::PinchGesture;
+    use bevy::input::mouse::AccumulatedMouseMotion;
+    use bevy::input::mouse::AccumulatedMouseScroll;
+    use bevy::input::mouse::MouseScrollUnit;
+    use bevy::window::WindowRef;
 
+    use super::*;
+    use crate::enhanced_input::LagrangeEnhancedInputPlugin;
+    use crate::input::CameraInputRoutingConfig;
+    use crate::input::CameraInteractionSources;
+    use crate::input::InputSensitivity;
+    use crate::input::OrbitCamInputAdapterPlugin;
+    use crate::input::OrbitCamInputLifecyclePlugin;
+    use crate::input::OrbitCamInputMode;
+    use crate::input::OrbitCamInputModesPlugin;
+    use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamRoutingPlugin;
+    use crate::input::OrbitCamSensitivity;
+    use crate::input::OrbitCamSimpleMousePreset;
+    use crate::system_sets::LagrangeSystemSetsPlugin;
+    use crate::touch::TouchTracker;
+
+    const ANIMATION_FOCUS: Vec3 = Vec3::ZERO;
+    const ANIMATION_PITCH: f32 = 0.0;
+    const ANIMATION_RADIUS: f32 = 2.0;
+    const ANIMATION_YAW: f32 = 1.0;
     const MOVE_DURATION_MILLIS: u64 = 1_000;
     const INTERRUPT_DELTA: Vec2 = Vec2::X;
     const FINAL_FOCUS: Vec3 = Vec3::new(1.0, 2.0, 3.0);
     const FINAL_YAW: f32 = 0.75;
     const FINAL_PITCH: f32 = 0.25;
     const FINAL_RADIUS: f32 = 5.0;
+    const SMOOTH_SCROLL_DELTA: Vec2 = Vec2::new(0.0, 8.0);
 
     #[derive(Resource, Default)]
     struct AnimationEventCounts {
@@ -641,6 +666,29 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .init_resource::<AnimationEventCounts>()
             .add_systems(Update, process_camera_move_list);
+        app
+    }
+
+    fn input_pipeline_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            LagrangeEnhancedInputPlugin,
+            LagrangeSystemSetsPlugin,
+            OrbitCamInputModesPlugin,
+            OrbitCamRoutingPlugin,
+            OrbitCamInputAdapterPlugin,
+            OrbitCamInputLifecyclePlugin,
+        ))
+        .init_resource::<AnimationEventCounts>()
+        .init_resource::<ButtonInput<KeyCode>>()
+        .init_resource::<ButtonInput<MouseButton>>()
+        .init_resource::<AccumulatedMouseMotion>()
+        .init_resource::<AccumulatedMouseScroll>()
+        .init_resource::<TouchTracker>()
+        .add_message::<PinchGesture>()
+        .add_systems(Update, process_camera_move_list);
+        app.finish();
         app
     }
 
@@ -673,6 +721,32 @@ mod tests {
         camera
     }
 
+    fn spawn_pipeline_animated_camera(
+        app: &mut App,
+        interrupt_behavior: CameraInputInterruptBehavior,
+        mode: OrbitCamInputMode,
+    ) -> Entity {
+        let camera = app
+            .world_mut()
+            .spawn((
+                OrbitCam::default(),
+                OrbitCamInput::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                CameraMoveList::new(VecDeque::from([camera_move(
+                    ANIMATION_FOCUS,
+                    ANIMATION_YAW,
+                    ANIMATION_PITCH,
+                    ANIMATION_RADIUS,
+                )])),
+                interrupt_behavior,
+                mode,
+            ))
+            .id();
+        observe_animation_events(app.world_mut(), camera);
+        camera
+    }
+
     fn observe_animation_events(world: &mut World, camera: Entity) {
         world.entity_mut(camera).observe(
             |event: On<AnimationEnd>, mut counts: ResMut<AnimationEventCounts>| match event.reason {
@@ -692,6 +766,28 @@ mod tests {
 
     fn assert_f32_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= f32::EPSILON);
+    }
+
+    fn add_mouse_drag_and_smooth_scroll_input(app: &mut App) {
+        app.world_mut()
+            .resource_mut::<ButtonInput<MouseButton>>()
+            .press(MouseButton::Left);
+        app.world_mut()
+            .resource_mut::<AccumulatedMouseMotion>()
+            .delta = INTERRUPT_DELTA;
+        *app.world_mut().resource_mut::<AccumulatedMouseScroll>() = AccumulatedMouseScroll {
+            unit:  MouseScrollUnit::Pixel,
+            delta: SMOOTH_SCROLL_DELTA,
+        };
+    }
+
+    fn zero_sensitive_simple_mouse_mode() -> OrbitCamInputMode {
+        let disabled = InputSensitivity::DISABLED.0;
+        OrbitCamInputMode::with_preset(
+            OrbitCamSimpleMousePreset::default()
+                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
+                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+        )
     }
 
     #[test]
@@ -772,6 +868,92 @@ mod tests {
                 .ok_or("camera missing OrbitCamInput")?
                 .has_input()
         );
+        Ok(())
+    }
+
+    #[test]
+    fn zero_sensitive_preset_input_does_not_interrupt_animation() -> TestResult {
+        for interrupt_behavior in [
+            CameraInputInterruptBehavior::Cancel,
+            CameraInputInterruptBehavior::Complete,
+            CameraInputInterruptBehavior::Ignore,
+        ] {
+            let mut app = input_pipeline_app();
+            let camera = spawn_pipeline_animated_camera(
+                &mut app,
+                interrupt_behavior,
+                zero_sensitive_simple_mouse_mode(),
+            );
+            app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+            app.update();
+
+            add_mouse_drag_and_smooth_scroll_input(&mut app);
+            app.update();
+
+            let counts = app.world().resource::<AnimationEventCounts>();
+            assert_eq!(counts.cancelled, 0);
+            assert_eq!(counts.completed, 0);
+            assert!(app.world().get::<CameraMoveList>(camera).is_some());
+            assert!(
+                !app.world()
+                    .get::<OrbitCamInput>(camera)
+                    .ok_or("camera missing OrbitCamInput")?
+                    .has_input()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn nonzero_preset_input_interrupts_animation() -> TestResult {
+        for interrupt_behavior in [
+            CameraInputInterruptBehavior::Cancel,
+            CameraInputInterruptBehavior::Complete,
+            CameraInputInterruptBehavior::Ignore,
+        ] {
+            let mut app = input_pipeline_app();
+            let camera = spawn_pipeline_animated_camera(
+                &mut app,
+                interrupt_behavior,
+                OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
+            );
+            app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+            app.update();
+
+            add_mouse_drag_and_smooth_scroll_input(&mut app);
+            app.update();
+
+            let counts = app.world().resource::<AnimationEventCounts>();
+            match interrupt_behavior {
+                CameraInputInterruptBehavior::Cancel => {
+                    assert_eq!(counts.cancelled, 1);
+                    assert_eq!(counts.completed, 0);
+                    assert!(app.world().get::<CameraMoveList>(camera).is_none());
+                },
+                CameraInputInterruptBehavior::Complete => {
+                    assert_eq!(counts.cancelled, 0);
+                    assert_eq!(counts.completed, 1);
+                    assert!(app.world().get::<CameraMoveList>(camera).is_none());
+                    assert!(
+                        !app.world()
+                            .get::<OrbitCamInput>(camera)
+                            .ok_or("camera missing OrbitCamInput")?
+                            .has_input()
+                    );
+                },
+                CameraInputInterruptBehavior::Ignore => {
+                    assert_eq!(counts.cancelled, 0);
+                    assert_eq!(counts.completed, 0);
+                    assert!(app.world().get::<CameraMoveList>(camera).is_some());
+                    assert!(
+                        !app.world()
+                            .get::<OrbitCamInput>(camera)
+                            .ok_or("camera missing OrbitCamInput")?
+                            .has_input()
+                    );
+                },
+            }
+        }
         Ok(())
     }
 }

@@ -215,16 +215,26 @@ mod tests {
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::WindowRef;
+    use bevy_enhanced_input::prelude::ModKeys;
 
     use super::blockers::OrbitCamInputBlockerBits;
     use super::*;
     use crate::OrbitCam;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInteractionSources;
+    use crate::input::InputSensitivity;
+    use crate::input::OrbitCamBindings;
+    use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamInputModeReplaced;
+    use crate::input::OrbitCamMouseDrag;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamResolvedBindings;
+    use crate::input::OrbitCamScalePolicy;
+    use crate::input::OrbitCamSlowMode;
     use crate::system_sets::LagrangeSystemSetsPlugin;
+
+    const CUSTOM_SLOW_SCALE: f32 = 0.25;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -334,6 +344,47 @@ mod tests {
                 .resource::<OrbitCamSlowModeLatches>()
                 .is_active(camera)
         );
+    }
+
+    #[test]
+    fn mode_replacement_clears_slow_latch_without_effective_slow_controls()
+    -> Result<(), OrbitCamBindingsError> {
+        let bindings = OrbitCamBindings::builder()
+            .slow_mode(OrbitCamSlowMode {
+                toggle_key: KeyCode::KeyS,
+                mod_keys:   ModKeys::ALT,
+                scale:      OrbitCamScalePolicy {
+                    normal: InputSensitivity::DEFAULT.0,
+                    slow:   CUSTOM_SLOW_SCALE,
+                },
+            })
+            .orbit(
+                OrbitCamMouseDrag::new(MouseButton::Middle)
+                    .with_sensitivity(InputSensitivity::DISABLED.0),
+            )
+            .build()?;
+        let mut app = test_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::Bindings(bindings.clone()),
+        );
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(OrbitCamResolvedBindings(bindings));
+        app.world_mut()
+            .resource_mut::<OrbitCamSlowModeLatches>()
+            .toggle(camera);
+
+        app.world_mut()
+            .entity_mut(camera)
+            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+
+        assert!(
+            !app.world()
+                .resource::<OrbitCamSlowModeLatches>()
+                .is_active(camera)
+        );
+        Ok(())
     }
 
     #[test]

@@ -10,6 +10,7 @@ use super::CameraInteractionSources;
 use super::ControlSpeed;
 use super::OrbitCamInput;
 use super::OrbitCamInputBlockers;
+use super::OrbitCamInputModeReplaced;
 use super::OrbitCamInteractionEnded;
 use super::OrbitCamInteractionKind;
 use super::OrbitCamInteractionSourcesChanged;
@@ -136,10 +137,29 @@ pub(crate) struct OrbitCamInputLifecyclePlugin;
 impl Plugin for OrbitCamInputLifecyclePlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<OrbitCamReportingDebounce>()
+            .add_observer(clear_reported_state_on_mode_replaced)
             .add_systems(
                 PreUpdate,
                 finalize_orbit_cam_input.in_set(OrbitCamInputPhase::Finalize),
             );
+    }
+}
+
+fn clear_reported_state_on_mode_replaced(
+    replaced: On<OrbitCamInputModeReplaced>,
+    mut states: Query<(
+        Option<&mut OrbitCamInteractionState>,
+        Option<&mut ReportedInteractionSettle>,
+    )>,
+) {
+    let Ok((state, settle)) = states.get_mut(replaced.camera) else {
+        return;
+    };
+    if let Some(mut state) = state {
+        *state = OrbitCamInteractionState::default();
+    }
+    if let Some(mut settle) = settle {
+        *settle = ReportedInteractionSettle::default();
     }
 }
 
@@ -583,18 +603,28 @@ fn apply_lifecycle_event(world: &mut World, camera: Entity, event: LifecycleEven
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::time::Duration;
 
     use bevy::camera::RenderTarget;
+    use bevy::math::curve::easing::EaseFunction;
     use bevy::prelude::*;
     use bevy::window::WindowRef;
 
     use super::*;
+    use crate::CameraInputInterruptBehavior;
+    use crate::CameraMove;
+    use crate::CameraMoveList;
     use crate::OrbitCam;
+    use crate::animation;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInputRoutingConfig;
+    use crate::input::InputSensitivity;
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamPreset;
+    use crate::input::OrbitCamSensitivity;
+    use crate::input::OrbitCamSimpleMousePreset;
+    use crate::input::modes::OrbitCamInputModesPlugin;
     use crate::input::routing::OrbitCamRoutingPlugin;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
@@ -631,6 +661,21 @@ mod tests {
         app.init_resource::<LifecycleCounts>()
             .init_resource::<CameraInputSourceLatches>();
         app.insert_resource(OrbitCamReportingDebounce(Duration::ZERO));
+        app
+    }
+
+    fn mode_cleanup_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((
+            MinimalPlugins,
+            LagrangeSystemSetsPlugin,
+            OrbitCamInputModesPlugin,
+            OrbitCamRoutingPlugin,
+            OrbitCamInputLifecyclePlugin,
+        ));
+        app.init_resource::<LifecycleCounts>()
+            .add_systems(Update, animation::process_camera_move_list);
+        app.insert_resource(OrbitCamReportingDebounce(Duration::from_secs_f32(WINDOW)));
         app
     }
 
@@ -699,6 +744,36 @@ mod tests {
             .get::<OrbitCamInteractionState>(camera)
             .copied()
             .ok_or("camera missing OrbitCamInteractionState")
+    }
+
+    fn reported_settle(
+        app: &App,
+        camera: Entity,
+    ) -> Result<ReportedInteractionSettle, &'static str> {
+        app.world()
+            .get::<ReportedInteractionSettle>(camera)
+            .copied()
+            .ok_or("camera missing ReportedInteractionSettle")
+    }
+
+    fn zero_sensitive_simple_mouse_mode() -> OrbitCamInputMode {
+        let disabled = InputSensitivity::DISABLED.0;
+        OrbitCamInputMode::with_preset(
+            OrbitCamSimpleMousePreset::default()
+                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
+                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+        )
+    }
+
+    fn cleanup_camera_move() -> CameraMove {
+        CameraMove::ToOrbit {
+            focus:    Vec3::ZERO,
+            yaw:      CLEANUP_YAW,
+            pitch:    CLEANUP_PITCH,
+            radius:   CLEANUP_RADIUS,
+            duration: Duration::from_millis(CLEANUP_MOVE_DURATION_MILLIS),
+            easing:   EaseFunction::Linear,
+        }
     }
 
     #[test]
@@ -825,7 +900,73 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn zero_sensitive_mode_replacement_flushes_debounced_state() -> TestResult {
+        let mut app = mode_cleanup_app();
+        let camera = spawn_camera(
+            app.world_mut(),
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
+        );
+        app.insert_resource(CameraInputRoutingConfig::explicit(camera));
+        app.update();
+
+        update_input(&mut app, camera, |input| {
+            input.orbit_active_with_sources(CameraInteractionSources::MOUSE);
+        })?;
+        app.update();
+        assert_eq!(
+            interaction_state(&app, camera)?.orbit_sources(),
+            CameraInteractionSources::MOUSE
+        );
+
+        update_input(&mut app, camera, |input| {
+            input.clear();
+        })?;
+        app.update();
+        assert_eq!(
+            interaction_state(&app, camera)?.orbit_sources(),
+            CameraInteractionSources::MOUSE
+        );
+        assert!(
+            reported_settle(&app, camera)?
+                .source_deadline(OrbitCamInteractionKind::Orbit)
+                .is_some()
+        );
+        assert_ne!(
+            app.world().resource::<CameraInputSourceLatches>(),
+            &CameraInputSourceLatches::default()
+        );
+
+        app.world_mut().entity_mut(camera).insert((
+            CameraMoveList::new(VecDeque::from([cleanup_camera_move()])),
+            CameraInputInterruptBehavior::Cancel,
+        ));
+        app.world_mut()
+            .entity_mut(camera)
+            .insert(zero_sensitive_simple_mouse_mode());
+        app.update();
+
+        assert!(interaction_state(&app, camera)?.orbit_sources().is_empty());
+        assert!(
+            reported_settle(&app, camera)?
+                .source_deadline(OrbitCamInteractionKind::Orbit)
+                .is_none()
+        );
+        assert_eq!(
+            app.world().resource::<CameraInputSourceLatches>(),
+            &CameraInputSourceLatches::default()
+        );
+        assert!(!input(&app, camera)?.has_input());
+        assert!(app.world().get::<CameraMoveList>(camera).is_some());
+
+        Ok(())
+    }
+
     const WINDOW: f32 = 0.5;
+    const CLEANUP_MOVE_DURATION_MILLIS: u64 = 1_000;
+    const CLEANUP_YAW: f32 = 1.0;
+    const CLEANUP_PITCH: f32 = 0.0;
+    const CLEANUP_RADIUS: f32 = 2.0;
 
     #[test]
     fn fresh_gamepad_normal_stays_pending_until_window_then_settles() {
