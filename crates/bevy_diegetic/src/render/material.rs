@@ -29,6 +29,10 @@ pub(crate) const fn apply_sidedness(base: &mut StandardMaterial, sidedness: Side
 }
 
 /// Returns the library's default matte `StandardMaterial`.
+///
+/// `AlphaMode::Blend` so panel surfaces composite through transparency rather
+/// than writing the depth buffer and occluding coplanar panel text; it also
+/// avoids the visible banding of the opaque SDF route.
 #[must_use]
 pub fn default_panel_material() -> StandardMaterial {
     StandardMaterial {
@@ -37,6 +41,7 @@ pub fn default_panel_material() -> StandardMaterial {
         reflectance: DEFAULT_REFLECTANCE,
         double_sided: true,
         cull_mode: None,
+        alpha_mode: AlphaMode::Blend,
         ..default()
     }
 }

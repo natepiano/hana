@@ -66,6 +66,15 @@ use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 
+/// Extra `depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
+/// from the camera so coplanar panel text, drawn at its true depth, wins the
+/// depth test instead of z-fighting the fill. Only the depth-buffer regime
+/// (`Opaque`/`Mask`) applies it; transparent and OIT fills order through
+/// `ScreenDepthBias`/`OitDepthOffset` and get zero here. Starts far below one
+/// layer-unit; raise by powers of ten until text shows without the fill
+/// visibly floating off the surface.
+const OPAQUE_FILL_DEPTH_PUSH_LAYERS: f32 = 1.0;
+
 /// Render material used by batched SDF fill and border records.
 pub(crate) type SdfExtendedMaterial = ExtendedMaterial<StandardMaterial, SdfExtension>;
 
@@ -373,7 +382,11 @@ impl ResolvedSdfBatchRecord {
             border_material: materials.border,
             paint_mask,
             depth_nudge: surface.draw_depth.depth_bias().get()
-                - draw_order::fill_batch_depth_bias(surface.draw_depth.z_level()).get(),
+                - draw_order::fill_batch_depth_bias(surface.draw_depth.z_level()).get()
+                - opaque_fill_depth_push(
+                    materials.pipeline_compatibility.alpha,
+                    surface.surface_shadow.into(),
+                ),
             oit_depth_offset: surface.draw_depth.oit_depth_offset().get(),
             flags: 0,
         }
@@ -822,6 +835,17 @@ pub(crate) fn sdf_batch_alpha_mode(alpha: BatchAlphaMode, shadow: VisualShadow) 
     match (AlphaMode::from(alpha), shadow) {
         (AlphaMode::Opaque, VisualShadow::Cast) => AlphaMode::Mask(0.0),
         (mode, _) => mode,
+    }
+}
+
+/// Extra `depth_nudge` layer-units to push the SDF fill away from the camera,
+/// non-zero only for the depth-buffer regime (`Opaque`/`Mask`). Transparent and
+/// OIT fills order through their sort/list levers, so they get zero.
+#[must_use]
+fn opaque_fill_depth_push(alpha: BatchAlphaMode, shadow: VisualShadow) -> f32 {
+    match sdf_batch_alpha_mode(alpha, shadow) {
+        AlphaMode::Opaque | AlphaMode::Mask(_) => OPAQUE_FILL_DEPTH_PUSH_LAYERS,
+        _ => 0.0,
     }
 }
 
@@ -2245,6 +2269,33 @@ mod tests {
     }
 
     #[test]
+    fn opaque_sdf_fill_is_pushed_back_relative_to_a_blend_fill() {
+        let fill_depth_nudge = |alpha_mode: AlphaMode| {
+            let mut app = sdf_pipeline_app();
+            spawn_sdf_panel(
+                &mut app,
+                single_surface_tree(Color::WHITE),
+                StandardMaterial {
+                    alpha_mode,
+                    ..default()
+                },
+            );
+            settle_sdf_pipeline(&mut app);
+            let records = sdf_records(&app);
+            assert_eq!(records.len(), 1);
+            records[0].depth_nudge
+        };
+
+        let opaque_nudge = fill_depth_nudge(AlphaMode::Opaque);
+        let blend_nudge = fill_depth_nudge(AlphaMode::Blend);
+
+        assert_eq!(
+            opaque_nudge.to_bits(),
+            (blend_nudge - OPAQUE_FILL_DEPTH_PUSH_LAYERS).to_bits()
+        );
+    }
+
+    #[test]
     fn color_only_sdf_updates_keep_the_batch_entity() {
         let mut app = sdf_pipeline_app();
         let panel = spawn_sdf_panel(
@@ -2385,7 +2436,9 @@ mod tests {
 
         assert!(helper.contains("fn pbr_input_from_material_table"));
         assert_eq!(outside.matches("material_table[").count(), 0);
-        assert_eq!(body.matches("material_table[").count(), 1);
+        // Two mutually exclusive in-helper reads: the depth/shadow prepass reads
+        // base_color only, the main pass reads the full row.
+        assert_eq!(body.matches("material_table[").count(), 2);
         for path in crate_wgsl_files() {
             let source = fs::read_to_string(&path).expect("crate WGSL file should load");
             if path == helper_path {

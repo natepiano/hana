@@ -35,7 +35,7 @@ const OIT_MIN_DEPTH: f32 = 0.000003;
     inflate_subpixel_half_size,
 }
 
-const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.000002;
+const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.0000002;
 const SDF_PAINT_FILL: u32 = 1u;
 const SDF_PAINT_BORDER: u32 = 2u;
 

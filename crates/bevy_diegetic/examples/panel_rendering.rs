@@ -10,8 +10,6 @@ use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::visibility::RenderLayers;
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy::render::camera::MipBias;
-use bevy::render::camera::TemporalJitter;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
 use bevy_diegetic::ChildDivider;
@@ -27,20 +25,16 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToU8;
-use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
-use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleChipActivation;
 
 // ── Colors ──────────────────────────────────────────────────────────
 const DARK_BG: Color = Color::srgba(0.3, 0.3, 0.35, 1.0);
@@ -74,10 +68,9 @@ const SCENE_ILLUMINANCE: f32 = 3137.0;
 
 /// How much illuminance changes per frame while +/- is held.
 const ILLUMINANCE_STEP: f32 = 50.0;
-const TAA_CONTROL: &str = "T TAA";
-const OIT_CONTROL: &str = "O OIT";
 const LIGHT_CONTROL: &str = "+/- Light";
 const RESET_CONTROL: &str = "R Reset";
+const HOME_CONTROL: &str = "H Home";
 const LIGHT_READOUT_LABEL: &str = "Lux";
 const PRESET_PANEL_TITLE: &str = "Panel Material";
 const PRESET_PANEL_PADDING: Px = Px(10.0);
@@ -187,19 +180,16 @@ fn main() {
             ),
         )
         .unclamped()
+        .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)
         .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .with_title_bar(panel_rendering_title_bar(SCENE_ILLUMINANCE))
-        .wire_chip_to_activation::<OitEnabled>(OIT_CONTROL)
-        .wire_chip_to_activation::<TaaEnabled>(TAA_CONTROL)
         .with_camera_control_panel()
         .init_resource::<LightingPreset>()
         .init_resource::<RequestedPreset>()
-        .init_resource::<OitEnabled>()
-        .init_resource::<TaaEnabled>()
         .insert_resource(bevy::light::GlobalAmbientLight {
             color:                      Color::BLACK,
             brightness:                 0.0,
@@ -220,29 +210,22 @@ fn main() {
                 refresh_title_bar_light_readout,
             ),
         )
-        // 1..4 select a lighting preset, O toggles OIT, T toggles TAA — all
-        // through Fairy Dust's shortcut binding, which fires each only when no
-        // modifier is held.
+        // 1..4 select a lighting preset through Fairy Dust's shortcut binding,
+        // which fires each only when no modifier is held.
         .with_shortcut(KeyCode::Digit1, request_preset_1)
         .with_shortcut(KeyCode::Digit2, request_preset_2)
         .with_shortcut(KeyCode::Digit3, request_preset_3)
         .with_shortcut(KeyCode::Digit4, request_preset_4)
-        .with_shortcut(KeyCode::KeyO, toggle_oit)
-        .with_shortcut(KeyCode::KeyT, toggle_taa)
-        .add_systems(PostUpdate, sync_taa_msaa)
         .run();
 }
 
 fn panel_rendering_title_bar(lux: f32) -> TitleBar {
-    TitleBar::new()
-        .with_title("Panel Rendering")
-        .controls([
-            LIGHT_CONTROL.to_string(),
-            light_readout_control(lux),
-            RESET_CONTROL.to_string(),
-        ])
-        .control(OIT_CONTROL)
-        .active_control(TAA_CONTROL)
+    TitleBar::new().with_title("Panel Rendering").controls([
+        HOME_CONTROL.to_string(),
+        LIGHT_CONTROL.to_string(),
+        light_readout_control(lux),
+        RESET_CONTROL.to_string(),
+    ])
 }
 
 fn light_readout_control(lux: f32) -> String { format!("{LIGHT_READOUT_LABEL} {lux:.0}") }
@@ -484,95 +467,6 @@ fn current_light_intensity(lights: &Query<&DirectionalLight, With<SceneLight>>) 
         .fold(0.0, f32::max)
 }
 
-/// Toggles OIT on/off with the `O` key.
-fn toggle_oit(
-    cameras: Query<Entity, With<OrbitCam>>,
-    mut oit_enabled: ResMut<OitEnabled>,
-    mut commands: Commands,
-) {
-    oit_enabled.0 = !oit_enabled.0;
-    for camera in &cameras {
-        if oit_enabled.0 {
-            commands.entity(camera).insert(StableTransparency);
-        } else {
-            commands.entity(camera).remove::<StableTransparency>();
-        }
-    }
-}
-
-/// Toggles TAA on/off with the `T` key.
-fn toggle_taa(
-    cameras: Query<(Entity, Has<TemporalAntiAliasing>), With<OrbitCam>>,
-    mut taa_enabled: ResMut<TaaEnabled>,
-    mut commands: Commands,
-) {
-    for (entity, has_taa) in &cameras {
-        if has_taa {
-            commands
-                .entity(entity)
-                .remove::<TemporalAntiAliasing>()
-                .remove::<TemporalJitter>()
-                .remove::<MipBias>();
-            taa_enabled.0 = false;
-        } else {
-            commands
-                .entity(entity)
-                .insert(TemporalAntiAliasing::default());
-            taa_enabled.0 = true;
-        }
-    }
-}
-
-fn sync_taa_msaa(
-    taa: Res<TaaEnabled>,
-    oit: Res<OitEnabled>,
-    cameras: Query<(Entity, Option<&Msaa>), With<Camera>>,
-    mut commands: Commands,
-) {
-    if oit.0 {
-        return;
-    }
-
-    let desired = if taa.0 { Msaa::Off } else { Msaa::default() };
-    for (camera, msaa) in &cameras {
-        if msaa != Some(&desired) {
-            commands.entity(camera).insert(desired);
-        }
-    }
-}
-
-/// Whether OIT is currently enabled on the scene camera.
-#[derive(Resource, Default)]
-struct OitEnabled(bool);
-
-impl TitleChipActivation for OitEnabled {
-    fn activation(&self) -> ControlActivation {
-        if self.0 {
-            ControlActivation::Active
-        } else {
-            ControlActivation::Inactive
-        }
-    }
-}
-
-/// Whether TAA is currently enabled on the scene camera.
-#[derive(Resource)]
-struct TaaEnabled(bool);
-
-impl Default for TaaEnabled {
-    fn default() -> Self { Self(true) }
-}
-
-impl TitleChipActivation for TaaEnabled {
-    fn activation(&self) -> ControlActivation {
-        if self.0 {
-            ControlActivation::Active
-        } else {
-            ControlActivation::Inactive
-        }
-    }
-}
-
 // ── Panel builders ──────────────────────────────────────────────────
 
 fn build_preset_panel_tree(preset: LightingPreset) -> LayoutTree {
@@ -768,6 +662,10 @@ fn build_card_backgrounds(b: &mut LayoutBuilder, title_style: &TextStyle, body_s
             b.with(
                 El::new()
                     .background(BLUE_BG)
+                    .material(StandardMaterial {
+                        alpha_mode: AlphaMode::Opaque,
+                        ..default_panel_material()
+                    })
                     .padding(Padding::all(3.0))
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),

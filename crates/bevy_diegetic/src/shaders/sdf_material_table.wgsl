@@ -3,7 +3,9 @@
 #import bevy_pbr::pbr_types
 
 #ifndef SDF_STRIPPED_MATERIAL_GROUP
+#ifndef PREPASS_PIPELINE
 #import bevy_pbr::pbr_fragment::pbr_input_from_standard_material
+#endif
 #endif
 
 #ifdef PREPASS_PIPELINE
@@ -25,11 +27,13 @@
 #endif
 
 #ifndef SDF_STRIPPED_MATERIAL_GROUP
+#ifndef PREPASS_PIPELINE
 fn collapsed_table_pbr_input(in: VertexOutput, is_front: bool) -> pbr_types::PbrInput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = vec4<f32>(0.0);
     return pbr_input;
 }
+#endif
 #endif
 
 fn stripped_material_group_pbr_input(in: VertexOutput) -> pbr_types::PbrInput {
@@ -81,6 +85,26 @@ fn pbr_input_from_material_table(
 #ifdef SDF_STRIPPED_MATERIAL_GROUP
     return stripped_material_group_pbr_input(in);
 #else
+#ifdef PREPASS_PIPELINE
+    // The depth/shadow prepass needs only base_color.a for the alpha cutout. A
+    // depth-only VertexOutput carries no world_normal, so read the table row
+    // directly instead of the lit `pbr_input_from_standard_material` path.
+    var pbr_input = pbr_types::pbr_input_new();
+    pbr_input.world_position = in.world_position;
+#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+    pbr_input.world_normal = in.world_normal;
+    pbr_input.N = normalize(in.world_normal);
+#endif
+    let table_has_row = role_present
+        && material_id != INVALID_GPU_MATERIAL_SLOT
+        && material_id < arrayLength(&material_table);
+    if table_has_row {
+        pbr_input.material.base_color = material_table[material_id].base_color;
+    } else {
+        pbr_input.material.base_color = vec4<f32>(0.0);
+    }
+    return pbr_input;
+#else
     if !role_present {
         return collapsed_table_pbr_input(in, is_front);
     }
@@ -100,5 +124,6 @@ fn pbr_input_from_material_table(
     var pbr_input = pbr_input_from_standard_material(sampled_input, is_front);
     apply_material_slot_values(&pbr_input, values);
     return pbr_input;
+#endif
 #endif
 }
