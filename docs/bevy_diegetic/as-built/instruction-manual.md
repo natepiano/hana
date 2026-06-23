@@ -93,6 +93,41 @@ A `min` floor (`grow_min`, `fit_min`) is **only** a guarantee that the element w
 
 A `min` does **not** force a `Fit` *container* to grow past its children's content: a container's `Fit` size comes from its children's *content* sizes, while `min` floors only feed the container's own minimum, which engages only if an ancestor would otherwise squeeze it below that minimum.
 
+### One fixed outer box; `Fit`/`Grow` inside — never `Grow`×`Grow` over stacked content
+
+**Fix size on the outer box only (the panel), then size every interior element with `Fit` or `Grow` — and give each interior element a *single* growing axis.** Pinning an interior box on *both* axes with `Grow` is the most common way to make a panel's borders overflow even when the frame has obvious empty space. Agents reach for `El::column().width(Grow).height(Grow)` reflexively; on a container that stacks real content (a title, a caption, several rows) it is a trap.
+
+Why it breaks (`engine/sizing.rs`):
+
+- The bottom-up `propagate_fit_sizes` pass runs **before** widths/heights are distributed. A `Grow` element has no resolved size yet, so it seeds toward **0** content (the pass even notes this at `sizing.rs:77`). A `Grow`-height container whose children are themselves `Grow`-height therefore computes a **collapsed** natural/content height — far smaller than what it will actually render.
+- The top-down cross-axis pass then floors each child with `MAX(min, MIN(child, max))` (`size_children_cross_axis`, `sizing.rs:579`). Fed the collapsed/foreign reference, the box is resolved to a size that does **not** match the space it occupies, and its border quad — drawn at the element's solved box edges (`render/panel_geometry.rs`), with no clip to the panel — is placed *past the panel edge*. Symptom: the child's top border is clipped and its bottom spills below the frame, while the panel itself still has empty room.
+
+The fix is to give interior boxes **one** growing dimension and let the other be `Fit`:
+
+```rust
+// WRONG — both axes Grow on a container that stacks text/rows.
+El::column().width(Sizing::GROW).height(Sizing::GROW)   // border overflows
+
+// RIGHT — grow across the parent, fit to content along the stack.
+El::column().width(Sizing::GROW).height(Sizing::FIT)    // border stays contained
+```
+
+With `height(FIT)` the bottom-up pass measures the real stacked height, so the box (and its border) is contained and any leftover panel height simply stays empty below it.
+
+`Grow`×`Grow` *is* fine for a leaf-ish box whose content is trivial — e.g. a swatch card holding one centered label — because its content minimum is tiny and can never exceed the parent. The trap is specifically a `Grow`-height **container of stacked children**. When in doubt: fixed outer, one growing axis inside.
+
+**The mirror trap on the width axis: a `Grow`-width row that holds inline text.** `width(GROW).height(FIT)` is the safe pattern for a *stacking* container, but if the box is a `row` whose children are text runs, the same "`Grow` seeds toward 0" rule bites the *width*: in the fit pass the row resolves to ~0 width, so each text run wraps **per word** and the row's `Fit` height is measured as a tall multi-line column. The case/cell then balloons vertically even though every box is already `height(FIT)`. The tell is one sub-tree (the one wrapping its values in a `Grow`-width row) overflowing while a sibling that places text directly in its column stays compact.
+
+```rust
+// WRONG — inline text runs in a Grow-width row: wrap at ~0 width → tall.
+El::row().width(Sizing::GROW).height(Sizing::FIT)   // case height balloons
+
+// RIGHT — measure each run at its intrinsic single-line width, pack left.
+El::row().width(Sizing::FIT).height(Sizing::FIT)    // one line, contained
+```
+
+Use `Fit` width for a row of inline text. Reach for `Grow` width on a text row only if you actually want the runs justified across the full width *and* you accept that long runs will wrap; for captioned value cells, `Fit` is correct.
+
 ---
 
 ## 4. Direction, alignment, gap
@@ -271,6 +306,7 @@ Per word row: `[ word (FIT) ][ feeder cell (grow_min(MIN)) ]` inside a `Fit`-wid
 - **Line drawn off the element.** `PanelDraw` resolves in the element's *local* box; check you attached it to the element whose box you meant, and that `start`/`end`/`percent` are measured from the right edge.
 - **Panel border vanished / geometry shifted after adding an edge marker.** You positioned an overflowing shape with a layout `El` child + (negative) padding, which inflates the box. Use the overflow recipe in §8 instead.
 - **Percent child smaller than expected.** `Percent` is a fraction of the parent's *content* area (after padding and gaps), not its outer size (§7).
+- **A bordered interior box overflows the panel (top border clipped, bottom spills out) even though the frame has empty space.** You gave that box `Grow` on *both* axes while it stacks real content. A `Grow` box seeds toward 0 in the bottom-up pass, so its height is mis-computed and the border is drawn past the panel edge. Fix the size on the *outer* box (the panel) only; give interior stacking boxes a single growing axis — `width(GROW).height(FIT)` (§3, "One fixed outer box").
 
 ---
 

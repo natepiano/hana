@@ -32,6 +32,7 @@ use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
 use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
@@ -88,7 +89,7 @@ const TEXT_PANEL_STATS: PanelStats = PanelStats {
     sdf_borders:      3,
     material_slots:   11,
     readout_reason:   "text alpha/cull split",
-    text_runs:        22,
+    text_runs:        21,
     shape_groups:     0,
     shape_primitives: 0,
 };
@@ -175,7 +176,7 @@ const EXPECTED_BATCHES: [PanelExpected; 8] = [
     },
     PanelExpected {
         label: "Text",
-        text:  5,
+        text:  4,
         shape: 0,
         sdf:   1,
     },
@@ -214,7 +215,7 @@ const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
 const ROW_GAP: f32 = 4.0;
 const TITLE_FONT_SIZE: f32 = 18.75;
-const SUBTITLE_FONT_SIZE: f32 = 17.0;
+const SUBTITLE_FONT_SIZE: f32 = 13.5;
 const BODY_FONT_SIZE: f32 = 15.75;
 const SMALL_FONT_SIZE: f32 = 12.75;
 const MATERIAL_GROUP_TITLE_FONT_SIZE: f32 = 18.0;
@@ -242,12 +243,62 @@ const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
 // Dark cell background shared by the divergent cases that stay legible on dark.
 const DIVERGENT_CASE_BG: Color = Color::srgba(0.02, 0.03, 0.04, 0.38);
-// Light cell for the alpha case: `AlphaMode::Multiply` multiplies its ink into
-// the background and vanishes on dark, so the Opaque/Multiply pair sits on a
+// Light cell for the live alpha case: `AlphaMode::Multiply` multiplies its ink
+// into the background and vanishes on dark, so the selector's run sits on a
 // light swatch where multiply reads as a tint. Caption and ink go dark to match.
 const ALPHA_CELL_BG: Color = Color::srgb(0.82, 0.84, 0.88);
 const ALPHA_CELL_INK: Color = Color::srgb(0.10, 0.12, 0.16);
 const ALPHA_CELL_CAPTION: Color = Color::srgba(0.28, 0.32, 0.40, 0.95);
+
+// The alpha modes the center-left selector cycles through, in number-key order
+// (Digit1..Digit7). The selected mode is applied to the SDF panel's fills and
+// borders and to the Text panel's live alpha case, so both render in the same
+// mode and the per-mode shadow behavior is observable on the ground plane.
+const ALPHA_MODES: [(&str, AlphaMode); 7] = [
+    ("Opaque", AlphaMode::Opaque),
+    ("Blend", AlphaMode::Blend),
+    ("Mask 0.5", AlphaMode::Mask(0.5)),
+    ("Premultiplied", AlphaMode::Premultiplied),
+    ("Add", AlphaMode::Add),
+    ("Multiply", AlphaMode::Multiply),
+    ("AlphaToCoverage", AlphaMode::AlphaToCoverage),
+];
+// Blend is the panel default, so the selector starts there and nothing changes
+// until a number is pressed.
+const ALPHA_DEFAULT_INDEX: usize = 1;
+const ALPHA_KEYS: [KeyCode; 7] = [
+    KeyCode::Digit1,
+    KeyCode::Digit2,
+    KeyCode::Digit3,
+    KeyCode::Digit4,
+    KeyCode::Digit5,
+    KeyCode::Digit6,
+    KeyCode::Digit7,
+];
+const ALPHA_ROW_GAP: f32 = 2.0;
+const ALPHA_ROW_WIDTH: f32 = 120.0;
+const ALPHA_SELECTED_BG: Color = Color::srgba(0.24, 0.62, 0.95, 0.22);
+
+/// The alpha mode the SDF panel fills/borders and the Text panel alpha case
+/// currently render in, chosen from [`ALPHA_MODES`] by the center-left selector.
+#[derive(Resource)]
+struct AlphaModeSelection {
+    index: usize,
+}
+
+impl Default for AlphaModeSelection {
+    fn default() -> Self {
+        Self {
+            index: ALPHA_DEFAULT_INDEX,
+        }
+    }
+}
+
+impl AlphaModeSelection {
+    const fn mode(&self) -> AlphaMode {
+        ALPHA_MODES[self.index].1
+    }
+}
 
 /// Authored draw counts for one panel, split by render family. Drives both the
 /// panel's own upper-right readout and the summed global "authored content"
@@ -289,6 +340,15 @@ struct BatchValidationSdfPanel {
     /// Texture handle reused by the animated SDF material cases.
     image: Handle<Image>,
 }
+
+/// Marker for the Text material panel, rebuilt when the alpha selection changes
+/// so its live alpha case re-renders in the chosen mode.
+#[derive(Component)]
+struct BatchValidationTextPanel;
+
+/// Marker for the center-left alpha-mode selector panel.
+#[derive(Component)]
+struct AlphaSelectorPanel;
 
 #[derive(Component)]
 struct BatchValidationStatsPanel;
@@ -335,28 +395,57 @@ fn main() {
                 .with_anchor(Anchor::TopLeft),
         )
         .with_camera_control_panel()
+        .with_shortcut(ALPHA_KEYS[0], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 0;
+        })
+        .with_shortcut(ALPHA_KEYS[1], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 1;
+        })
+        .with_shortcut(ALPHA_KEYS[2], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 2;
+        })
+        .with_shortcut(ALPHA_KEYS[3], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 3;
+        })
+        .with_shortcut(ALPHA_KEYS[4], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 4;
+        })
+        .with_shortcut(ALPHA_KEYS[5], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 5;
+        })
+        .with_shortcut(ALPHA_KEYS[6], |mut sel: ResMut<AlphaModeSelection>| {
+            sel.index = 6;
+        })
         .init_resource::<LastDisplayedStats>()
+        .init_resource::<AlphaModeSelection>()
         .add_systems(
             Startup,
             (
                 spawn_validation_panels,
                 spawn_stats_panel,
                 spawn_expected_batches_panel,
+                spawn_alpha_selector_panel,
             ),
         )
         .add_systems(Update, update_stats_panel)
         .add_systems(Update, animate_sdf_surface_panel)
+        .add_systems(Update, apply_alpha_selection)
         .run();
 }
 
-fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn spawn_validation_panels(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    selection: Res<AlphaModeSelection>,
+) {
     let sdf_fill_image = asset_server.load("textures/array_texture.png");
+    let alpha = selection.mode();
     let panels = [
         (
             "sdf-surfaces",
-            build_sdf_surface_panel(sdf_fill_image.clone(), 0.0),
+            build_sdf_surface_panel(sdf_fill_image.clone(), 0.0, alpha),
         ),
-        ("text-materials", build_text_panel()),
+        ("text-materials", build_text_panel(alpha)),
         ("analytic-shapes", build_shape_panel()),
         ("mixed-stack", build_mixed_panel()),
     ];
@@ -376,6 +465,9 @@ fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer
                     entity.insert(BatchValidationSdfPanel {
                         image: sdf_fill_image.clone(),
                     });
+                }
+                if index == 1 {
+                    entity.insert(BatchValidationTextPanel);
                 }
             },
             Err(error) => error!("batch_validation: failed to build {name}: {error}"),
@@ -423,12 +515,38 @@ fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer
 
 fn animate_sdf_surface_panel(
     time: Res<Time>,
+    selection: Res<AlphaModeSelection>,
     panels: Query<(Entity, &BatchValidationSdfPanel)>,
     mut commands: Commands,
 ) {
     let phase = time.elapsed_secs() * SDF_ANIMATION_SPEED;
+    let alpha = selection.mode();
     for (entity, panel) in &panels {
-        commands.set_tree(entity, build_sdf_surface_panel(panel.image.clone(), phase));
+        commands.set_tree(
+            entity,
+            build_sdf_surface_panel(panel.image.clone(), phase, alpha),
+        );
+    }
+}
+
+// Repaints the center-left selector (highlighting the chosen mode) and rebuilds
+// the Text panel's live alpha case whenever a number key changes the selection.
+// The SDF panel needs no rebuild here — `animate_sdf_surface_panel` already
+// re-trees it every frame and reads the same selection.
+fn apply_alpha_selection(
+    selection: Res<AlphaModeSelection>,
+    selectors: Query<Entity, With<AlphaSelectorPanel>>,
+    text_panels: Query<Entity, With<BatchValidationTextPanel>>,
+    mut commands: Commands,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    for entity in &selectors {
+        commands.set_tree(entity, alpha_selector_tree(selection.index));
+    }
+    for entity in &text_panels {
+        commands.set_tree(entity, build_text_panel(selection.mode()));
     }
 }
 
@@ -452,7 +570,8 @@ fn validation_panel(
     };
     let builder = DiegeticPanel::world()
         .size(Mm(PANEL_W), Mm(PANEL_H))
-        .anchor(Anchor::Center);
+        .anchor(Anchor::Center)
+        .surface_shadow(SurfaceShadow::On);
     if index == 3 {
         builder.with_tree(tree).build()
     } else {
@@ -477,6 +596,76 @@ fn spawn_expected_batches_panel(mut commands: Commands) {
         },
         Err(error) => error!("batch_validation: failed to build expected-batches panel: {error}"),
     }
+}
+
+fn spawn_alpha_selector_panel(mut commands: Commands) {
+    match build_alpha_selector_panel(ALPHA_DEFAULT_INDEX) {
+        Ok(panel) => {
+            commands.spawn((AlphaSelectorPanel, panel, Transform::default()));
+        },
+        Err(error) => error!("batch_validation: failed to build alpha selector panel: {error}"),
+    }
+}
+
+fn build_alpha_selector_panel(
+    index: usize,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+    let unlit = screen_panel_material();
+    DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::CenterLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(alpha_selector_tree(index))
+        .build()
+}
+
+// Center-left key legend: a title plus one numbered row per alpha mode. The
+// selected row is tinted and sits on a highlight bar so the current choice is
+// obvious; pressing the matching number key (1-7) selects that mode for the SDF
+// panel's fills/borders and the Text panel's live alpha case.
+fn alpha_selector_tree(selected: usize) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(ALPHA_ROW_GAP),
+                |builder| {
+                    builder.text("alpha mode  (1-7)", ledger_title_style());
+                    for (slot, (label, _)) in ALPHA_MODES.iter().enumerate() {
+                        alpha_selector_row(builder, slot, label, slot == selected);
+                    }
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+fn alpha_selector_row(builder: &mut LayoutBuilder, slot: usize, label: &str, selected: bool) {
+    let number = slot + 1;
+    let color = if selected { ACCENT_GREEN } else { TEXT_MUTED };
+    let mut row = El::row()
+        .width(Sizing::fixed(ALPHA_ROW_WIDTH))
+        .height(Sizing::FIT)
+        .gap(LEDGER_CELL_GAP)
+        .padding(Padding::new(3.0, 3.0, 1.0, 1.0))
+        .corner_radius(CornerRadius::all(Mm(0.8)))
+        .alignment(AlignX::Left, AlignY::Center);
+    if selected {
+        row = row.background(ALPHA_SELECTED_BG);
+    }
+    builder.with(row, |builder| {
+        builder.text(format!("{number}"), ledger_cell_style(color));
+        builder.text(label, ledger_cell_style(color));
+    });
 }
 
 fn update_stats_panel(
@@ -751,7 +940,7 @@ fn ledger_cell_style(color: Color) -> TextStyle {
 // share one SDF batch. The image card carries a
 // `base_color_texture`, a batch-compatibility splitter, so it forms its own
 // batch — the SDF column's predicted 2 batches in the expected-batches ledger.
-fn build_sdf_surface_panel(image: Handle<Image>, phase: f32) -> LayoutTree {
+fn build_sdf_surface_panel(image: Handle<Image>, phase: f32, alpha: AlphaMode) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
@@ -776,12 +965,13 @@ fn build_sdf_surface_panel(image: Handle<Image>, phase: f32) -> LayoutTree {
                         "panel default",
                         "builder material",
                         ACCENT_BLUE,
+                        alpha,
                     );
                     sdf_fill_card(
                         builder,
                         "El material",
                         "base color animates",
-                        metallic_glint_material(phase),
+                        with_alpha(metallic_glint_material(phase), alpha),
                         ACCENT_GREEN,
                     );
                 },
@@ -796,14 +986,14 @@ fn build_sdf_surface_panel(image: Handle<Image>, phase: f32) -> LayoutTree {
                         builder,
                         "El material",
                         "emissive value",
-                        emissive_fill_material(phase),
+                        with_alpha(emissive_fill_material(phase), alpha),
                         ACCENT_YELLOW,
                     );
                     sdf_fill_card(
                         builder,
                         "image",
                         "texture splits",
-                        image_fill_material(image),
+                        with_alpha(image_fill_material(image), alpha),
                         ACCENT_RED,
                     );
                 },
@@ -813,7 +1003,14 @@ fn build_sdf_surface_panel(image: Handle<Image>, phase: f32) -> LayoutTree {
     builder.build()
 }
 
-fn build_text_panel() -> LayoutTree {
+// Stamps the selected alpha mode onto a card material so the SDF fill and its
+// border (which inherits the fill material) both render in that mode.
+const fn with_alpha(mut material: StandardMaterial, alpha: AlphaMode) -> StandardMaterial {
+    material.alpha_mode = alpha;
+    material
+}
+
+fn build_text_panel(alpha: AlphaMode) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
@@ -822,6 +1019,9 @@ fn build_text_panel() -> LayoutTree {
         TEXT_PANEL_STATS,
     );
     builder.with(
+        // GROW height: claim the panel's leftover vertical space below the
+        // header so the two group columns (also GROW height) stretch to a
+        // matching height instead of each hugging its own content.
         El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
@@ -838,7 +1038,7 @@ fn build_text_panel() -> LayoutTree {
                 ],
                 ACCENT_GREEN,
             );
-            divergent_group(builder);
+            divergent_group(builder, alpha);
         },
     );
     builder.build()
@@ -987,27 +1187,39 @@ fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
             .gap(0.5)
             .alignment(AlignX::Right, AlignY::Top),
         |builder| {
-            builder.text(
-                format!("sdf {}", stats.sdf_surfaces()),
-                stats_style(ACCENT_BLUE),
+            stats_block_row(
+                builder,
+                &[
+                    (format!("sdf {}", stats.sdf_surfaces()), ACCENT_BLUE),
+                    (format!("text {}", stats.text_runs), ACCENT_GREEN),
+                    (format!("shape {}", stats.shape_groups), ACCENT_YELLOW),
+                ],
             );
-            builder.text(
-                format!("text {}", stats.text_runs),
-                stats_style(ACCENT_GREEN),
-            );
-            builder.text(
-                format!("shapes {}", stats.shape_groups),
-                stats_style(ACCENT_YELLOW),
-            );
-            builder.text(
-                format!("records {}", stats.rendered_records()),
-                stats_style(TEXT_MAIN),
-            );
-            builder.text(
-                format!("mat slots {}", stats.material_slots),
-                stats_style(ACCENT_RED),
+            stats_block_row(
+                builder,
+                &[
+                    (format!("records {}", stats.rendered_records()), TEXT_MAIN),
+                    (format!("slots {}", stats.material_slots), ACCENT_RED),
+                ],
             );
             builder.text(stats.readout_reason, stats_style(TEXT_MUTED));
+        },
+    );
+}
+
+// One right-aligned line of the stats block: several short colored readouts side
+// by side, so the per-panel counts stay legible in three lines instead of six.
+fn stats_block_row(builder: &mut LayoutBuilder, cells: &[(String, Color)]) {
+    builder.with(
+        El::row()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .gap(4.0)
+            .alignment(AlignX::Right, AlignY::Top),
+        |builder| {
+            for (text, color) in cells {
+                builder.text(text.clone(), stats_style(*color));
+            }
         },
     );
 }
@@ -1020,6 +1232,8 @@ fn material_group(
     border: Color,
 ) {
     builder.with(
+        // GROW height so both group columns fill the row and share a height;
+        // the FIT cases inside still hug their content at the top.
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
@@ -1045,7 +1259,7 @@ fn material_case_block(builder: &mut LayoutBuilder, label: &str, value: &str, co
     builder.with(
         El::column()
             .width(Sizing::GROW)
-            .height(Sizing::GROW)
+            .height(Sizing::FIT)
             .gap(1.0)
             .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
             .corner_radius(CornerRadius::all(Mm(1.5)))
@@ -1060,11 +1274,14 @@ fn material_case_block(builder: &mut LayoutBuilder, label: &str, value: &str, co
 
 // The Divergent group authors text runs that actually carry the batch splitters,
 // so each one forms its own text batch (observable in `batch.batches` / the
-// ledger's `actual` text count). The default-style captions and the BothSides
-// cull run share the panel's one shared text batch; the four divergent runs
-// (Opaque, Multiply, FrontOnly, BackOnly) add four more — the ledger's Text=5.
-fn divergent_group(builder: &mut LayoutBuilder) {
+// ledger's `actual` text count). The default-style captions, the BothSides cull
+// run, and the live alpha run while the selector holds the panel-default Blend
+// share the panel's one shared text batch; the two cull splitters (FrontOnly,
+// BackOnly) always add two more, and the alpha run adds a fourth whenever the
+// selector picks a non-Blend mode — the ledger's Text=4.
+fn divergent_group(builder: &mut LayoutBuilder, alpha: AlphaMode) {
     builder.with(
+        // GROW height to match the Shared group; see `material_group`.
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
@@ -1076,33 +1293,38 @@ fn divergent_group(builder: &mut LayoutBuilder) {
         |builder| {
             builder.text("Divergent group", material_group_title_style());
             builder.text("splits compatibility", small_style(TEXT_MUTED));
-            divergent_alpha_case(builder);
+            divergent_alpha_case(builder, alpha);
             divergent_texture_case(builder);
             divergent_cull_case(builder);
         },
     );
 }
 
-// Alpha-mode split: two runs that both diverge from the panel default
-// `AlphaMode::Blend`. `Opaque` routes through Mask(0.0) (hard-edged silhouette);
-// `Multiply` tints its ink into the light cell. Each is its own text batch.
-fn divergent_alpha_case(builder: &mut LayoutBuilder) {
+// Live alpha-mode case: one run rendered in the mode the center-left selector
+// currently holds, so the text material's alpha tracks the same selection that
+// drives the SDF panel. Sits on a light cell so `Multiply` reads as a tint
+// rather than vanishing into the dark panel.
+fn divergent_alpha_case(builder: &mut LayoutBuilder, alpha: AlphaMode) {
     divergent_case_shell(
         builder,
-        "alpha mode",
+        "alpha mode (selector)",
         ALPHA_CELL_BG,
         ALPHA_CELL_CAPTION,
         |builder| {
             builder.text(
-                "Opaque",
-                body_style(ALPHA_CELL_INK).with_alpha_mode(AlphaMode::Opaque),
-            );
-            builder.text(
-                "Multiply",
-                body_style(ALPHA_CELL_INK).with_alpha_mode(AlphaMode::Multiply),
+                alpha_mode_label(alpha),
+                body_style(ALPHA_CELL_INK).with_alpha_mode(alpha),
             );
         },
     );
+}
+
+// Short display name for an alpha mode, matching the selector's row labels.
+fn alpha_mode_label(alpha: AlphaMode) -> &'static str {
+    ALPHA_MODES
+        .iter()
+        .find(|(_, mode)| *mode == alpha)
+        .map_or("custom", |(label, _)| *label)
 }
 
 // Texture split for text is deferred — text glyphs cannot carry a
@@ -1161,7 +1383,7 @@ fn divergent_case_shell(
     builder.with(
         El::column()
             .width(Sizing::GROW)
-            .height(Sizing::GROW)
+            .height(Sizing::FIT)
             .gap(1.0)
             .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
             .corner_radius(CornerRadius::all(Mm(1.5)))
@@ -1169,9 +1391,13 @@ fn divergent_case_shell(
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(caption, small_style(caption_color));
+            // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
+            // bottom-up fit pass, forcing its text runs to wrap per word and
+            // measure tall, which balloons the case height. FIT measures each
+            // run at its intrinsic single-line width and packs them left.
             builder.with(
                 El::row()
-                    .width(Sizing::GROW)
+                    .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .gap(ROW_GAP),
                 values,
@@ -1215,13 +1441,22 @@ fn sdf_fill_card(
     );
 }
 
-fn sdf_panel_default_card(builder: &mut LayoutBuilder, label: &str, caption: &str, accent: Color) {
+fn sdf_panel_default_card(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    caption: &str,
+    accent: Color,
+    alpha: AlphaMode,
+) {
+    let mut material = default_panel_material();
+    material.base_color = accent;
+    material.alpha_mode = alpha;
     builder.with(
         El::new()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .padding(Padding::all(2.0))
-            .background(accent)
+            .material(material)
             .border(Border::all(Mm(0.3), accent))
             .corner_radius(CornerRadius::all(Mm(1.4)))
             .alignment(AlignX::Center, AlignY::Center),
