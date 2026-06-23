@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-use super::source_sensitivity::GamepadSensitivity;
+use super::source_input_gain::GamepadInputGain;
 use crate::input::ControlSpeed;
 use crate::input::bindings::CameraInputGamepadSelectionPolicy;
 use crate::input::bindings::InputDeadZone;
@@ -9,14 +9,14 @@ use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
 use crate::input::bindings::OrbitCamHeldBinding;
 use crate::input::bindings::OrbitCamInputBinding;
-use crate::input::bindings::OrbitCamSensitivity;
+use crate::input::bindings::OrbitCamInputGain;
 use crate::input::bindings::error::OrbitCamBindingsError;
 
 /// Tunable gamepad preset descriptor.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 #[reflect(Default)]
 pub struct OrbitCamGamepadPreset {
-    sensitivity:      OrbitCamSensitivity,
+    input_gain:       OrbitCamInputGain,
     orbit_scale:      f32,
     slow_orbit_scale: f32,
     pan_scale:        f32,
@@ -55,10 +55,10 @@ impl OrbitCamGamepadPreset {
         <Self as OrbitCamPresetConfig>::build(self)
     }
 
-    /// Sets source sensitivity for generated gamepad bindings.
+    /// Sets source input gain for generated gamepad bindings.
     #[must_use]
-    pub const fn gamepad_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
-        self.sensitivity = sensitivity;
+    pub const fn gamepad_input_gain(mut self, input_gain: OrbitCamInputGain) -> Self {
+        self.input_gain = input_gain;
         self
     }
 
@@ -120,7 +120,7 @@ impl OrbitCamGamepadPreset {
     }
 
     fn validate(&self) -> Result<(), OrbitCamBindingsError> {
-        self.sensitivity.validate()?;
+        self.input_gain.validate()?;
         Self::validate_scale_pair(self.orbit_scale, self.slow_orbit_scale)?;
         Self::validate_scale_pair(self.pan_scale, self.slow_pan_scale)?;
         Self::validate_scale_pair(self.zoom_scale, self.slow_zoom_scale)?;
@@ -154,9 +154,9 @@ impl OrbitCamGamepadPreset {
     }
 
     fn add_to(self, builder: OrbitCamBindingsBuilder) -> OrbitCamBindingsBuilder {
-        let orbit_sensitivity = self.sensitivity.orbit_sensitivity().value();
-        let pan_sensitivity = self.sensitivity.pan_sensitivity().value();
-        let zoom_sensitivity = self.sensitivity.zoom_sensitivity().value();
+        let orbit_input_gain = self.input_gain.orbit_input_gain().value();
+        let pan_input_gain = self.input_gain.pan_input_gain().value();
+        let zoom_input_gain = self.input_gain.zoom_input_gain().value();
         let fast_orbit = gamepad_stick(
             GamepadAxis::RightStickX,
             GamepadAxis::RightStickY,
@@ -185,23 +185,23 @@ impl OrbitCamGamepadPreset {
         builder
             .orbit(
                 OrbitCamHeldBinding::same(fast_orbit)
-                    .with_sensitivity(orbit_sensitivity)
+                    .with_input_gain(orbit_input_gain)
                     .with_blocked_gate(GamepadButton::RightTrigger),
             )
             .orbit(
                 OrbitCamHeldBinding::same(slow_orbit)
-                    .with_sensitivity(orbit_sensitivity)
+                    .with_input_gain(orbit_input_gain)
                     .with_required_gate(GamepadButton::RightTrigger)
                     .speed(ControlSpeed::Slow),
             )
             .pan(
                 OrbitCamHeldBinding::same(fast_pan)
-                    .with_sensitivity(pan_sensitivity)
+                    .with_input_gain(pan_input_gain)
                     .with_blocked_gate(GamepadButton::LeftTrigger),
             )
             .pan(
                 OrbitCamHeldBinding::same(slow_pan)
-                    .with_sensitivity(pan_sensitivity)
+                    .with_input_gain(pan_input_gain)
                     .with_required_gate(GamepadButton::LeftTrigger)
                     .speed(ControlSpeed::Slow),
             )
@@ -210,7 +210,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::RightTrigger2,
                     self.zoom_scale,
                 ))
-                .with_sensitivity(zoom_sensitivity)
+                .with_input_gain(zoom_input_gain)
                 .with_blocked_gate(GamepadButton::RightTrigger),
             )
             .zoom(
@@ -218,7 +218,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::LeftTrigger2,
                     -self.zoom_scale,
                 ))
-                .with_sensitivity(zoom_sensitivity)
+                .with_input_gain(zoom_input_gain)
                 .with_blocked_gate(GamepadButton::LeftTrigger),
             )
             .zoom(
@@ -226,7 +226,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::RightTrigger2,
                     self.slow_zoom_scale,
                 ))
-                .with_sensitivity(zoom_sensitivity)
+                .with_input_gain(zoom_input_gain)
                 .with_required_gate(GamepadButton::RightTrigger)
                 .speed(ControlSpeed::Slow),
             )
@@ -235,7 +235,7 @@ impl OrbitCamGamepadPreset {
                     GamepadButton::LeftTrigger2,
                     -self.slow_zoom_scale,
                 ))
-                .with_sensitivity(zoom_sensitivity)
+                .with_input_gain(zoom_input_gain)
                 .with_required_gate(GamepadButton::LeftTrigger)
                 .speed(ControlSpeed::Slow),
             )
@@ -246,7 +246,7 @@ impl OrbitCamGamepadPreset {
 impl Default for OrbitCamGamepadPreset {
     fn default() -> Self {
         Self {
-            sensitivity:      OrbitCamSensitivity::default(),
+            input_gain:       OrbitCamInputGain::default(),
             orbit_scale:      Self::DEFAULT_ORBIT_SCALE,
             slow_orbit_scale: Self::DEFAULT_SLOW_ORBIT_SCALE,
             pan_scale:        Self::DEFAULT_PAN_SCALE,
@@ -261,11 +261,11 @@ impl Default for OrbitCamGamepadPreset {
     }
 }
 
-impl GamepadSensitivity for OrbitCamGamepadPreset {
-    type Sensitivity = OrbitCamSensitivity;
+impl GamepadInputGain for OrbitCamGamepadPreset {
+    type Gain = OrbitCamInputGain;
 
-    fn gamepad_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
-        Self::gamepad_sensitivity(self, sensitivity)
+    fn gamepad_input_gain(self, input_gain: Self::Gain) -> Self {
+        Self::gamepad_input_gain(self, input_gain)
     }
 }
 
@@ -331,10 +331,10 @@ impl OrbitCamGamepadPresetBuilder {
         self
     }
 
-    /// Sets source sensitivity for generated gamepad bindings.
+    /// Sets source input gain for generated gamepad bindings.
     #[must_use]
-    pub const fn gamepad_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
-        self.preset.sensitivity = sensitivity;
+    pub const fn gamepad_input_gain(mut self, input_gain: OrbitCamInputGain) -> Self {
+        self.preset.input_gain = input_gain;
         self
     }
 

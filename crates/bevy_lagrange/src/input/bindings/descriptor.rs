@@ -63,7 +63,7 @@ impl InputBindingDescriptor {
     /// Returns the flattened binding entries.
     pub fn entries_slice(&self) -> &[InputBindingEntry] { &self.entries }
 
-    /// Returns binding entries whose sensitivity allows runtime participation.
+    /// Returns binding entries whose input gain allows runtime participation.
     pub fn enabled_entries(&self) -> impl Iterator<Item = &InputBindingEntry> {
         self.entries.iter().filter(|entry| entry.is_enabled())
     }
@@ -85,9 +85,9 @@ impl InputBindingDescriptor {
         self
     }
 
-    pub(super) fn with_entry_sensitivity(mut self, sensitivity: InputGain) -> Self {
+    pub(super) fn with_entry_input_gain(mut self, input_gain: InputGain) -> Self {
         for entry in &mut self.entries {
-            entry.sensitivity = sensitivity;
+            entry.input_gain = input_gain;
         }
         self
     }
@@ -149,7 +149,7 @@ impl InputBindingDescriptor {
 pub struct InputBindingEntry {
     binding:     Binding,
     modifiers:   InputBindingModifiers,
-    sensitivity: InputGain,
+    input_gain:  InputGain,
     output_axis: InputBindingOutputAxis,
 }
 
@@ -158,7 +158,7 @@ impl InputBindingEntry {
         Self {
             binding,
             modifiers: InputBindingModifiers::new(axis_transform),
-            sensitivity: InputGain::DEFAULT,
+            input_gain: InputGain::DEFAULT,
             output_axis: InputBindingOutputAxis::X,
         }
     }
@@ -176,20 +176,28 @@ impl InputBindingEntry {
     #[must_use]
     pub const fn modifiers(&self) -> InputBindingModifiers { self.modifiers }
 
-    /// Returns modifiers with authored sensitivity composed into the scale.
+    /// Returns modifiers with authored input gain composed into the scale.
     #[must_use]
     pub fn install_modifiers(&self) -> InputBindingModifiers {
-        self.modifiers.with_sensitivity(self.sensitivity)
+        self.modifiers.with_input_gain(self.input_gain)
     }
 
-    /// Returns the authored per-entry input sensitivity.
+    /// Returns the authored per-entry input gain.
     #[must_use]
-    pub const fn sensitivity(&self) -> InputGain { self.sensitivity }
+    pub const fn input_gain(&self) -> InputGain { self.input_gain }
 
-    const fn is_enabled(&self) -> bool { self.sensitivity.is_enabled() }
+    const fn is_enabled(&self) -> bool { self.input_gain.is_enabled() }
 }
 
-/// Per-input multiplier stored separately from signed binding scale.
+/// Authored multiplier on a binding's raw device input.
+///
+/// Composed into the binding modifier scale at capture before the input
+/// becomes a semantic camera action.
+/// Stored separately from the signed binding scale.
+///
+/// Distinct from [`Sensitivity`](crate::Sensitivity): input gain scales the
+/// signal at the input binding; sensitivity scales a camera axis's response
+/// during the orbit/pan/zoom operation, downstream of input gain.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct InputGain(
     /// Authored input multiplier.
@@ -197,16 +205,16 @@ pub struct InputGain(
 );
 
 impl InputGain {
-    /// Default enabled sensitivity.
+    /// Default enabled gain.
     pub const DEFAULT: Self = Self(1.0);
-    /// Explicitly disabled sensitivity.
+    /// Explicitly disabled gain.
     pub const DISABLED: Self = Self(0.0);
 
     /// Returns the stored multiplier.
     #[must_use]
     pub const fn value(self) -> f32 { self.0 }
 
-    /// Returns whether this sensitivity participates in runtime input.
+    /// Returns whether this input gain participates in runtime input.
     #[must_use]
     pub const fn is_enabled(self) -> bool { self.0 != Self::DISABLED.0 }
 
@@ -223,16 +231,16 @@ impl Default for InputGain {
     fn default() -> Self { Self::DEFAULT }
 }
 
-/// Per-action orbit-camera sensitivity values.
+/// Per-action orbit-camera `InputGain` values.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct OrbitCamSensitivity {
+pub struct OrbitCamInputGain {
     orbit: InputGain,
     pan:   InputGain,
     zoom:  InputGain,
 }
 
-impl OrbitCamSensitivity {
-    /// Creates a sensitivity set with all actions enabled at the default multiplier.
+impl OrbitCamInputGain {
+    /// Creates an input gain set with all actions enabled at the default multiplier.
     #[must_use]
     pub const fn new() -> Self {
         Self {
@@ -242,49 +250,49 @@ impl OrbitCamSensitivity {
         }
     }
 
-    /// Creates a sensitivity set using the same multiplier for every action.
+    /// Creates an input gain set using the same multiplier for every action.
     #[must_use]
     pub const fn uniform(value: f32) -> Self {
-        let sensitivity = InputGain(value);
+        let input_gain = InputGain(value);
         Self {
-            orbit: sensitivity,
-            pan:   sensitivity,
-            zoom:  sensitivity,
+            orbit: input_gain,
+            pan:   input_gain,
+            zoom:  input_gain,
         }
     }
 
-    /// Sets orbit sensitivity.
+    /// Sets orbit input gain.
     #[must_use]
     pub const fn orbit(mut self, value: f32) -> Self {
         self.orbit = InputGain(value);
         self
     }
 
-    /// Sets pan sensitivity.
+    /// Sets pan input gain.
     #[must_use]
     pub const fn pan(mut self, value: f32) -> Self {
         self.pan = InputGain(value);
         self
     }
 
-    /// Sets zoom sensitivity.
+    /// Sets zoom input gain.
     #[must_use]
     pub const fn zoom(mut self, value: f32) -> Self {
         self.zoom = InputGain(value);
         self
     }
 
-    /// Returns orbit sensitivity.
+    /// Returns orbit input gain.
     #[must_use]
-    pub const fn orbit_sensitivity(self) -> InputGain { self.orbit }
+    pub const fn orbit_input_gain(self) -> InputGain { self.orbit }
 
-    /// Returns pan sensitivity.
+    /// Returns pan input gain.
     #[must_use]
-    pub const fn pan_sensitivity(self) -> InputGain { self.pan }
+    pub const fn pan_input_gain(self) -> InputGain { self.pan }
 
-    /// Returns zoom sensitivity.
+    /// Returns zoom input gain.
     #[must_use]
-    pub const fn zoom_sensitivity(self) -> InputGain { self.zoom }
+    pub const fn zoom_input_gain(self) -> InputGain { self.zoom }
 
     pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
         self.orbit.validate()?;
@@ -293,7 +301,7 @@ impl OrbitCamSensitivity {
     }
 }
 
-impl Default for OrbitCamSensitivity {
+impl Default for OrbitCamInputGain {
     fn default() -> Self { Self::new() }
 }
 
@@ -340,8 +348,8 @@ impl InputBindingModifiers {
         self
     }
 
-    fn with_sensitivity(mut self, sensitivity: InputGain) -> Self {
-        self.scale = combined_scale(self.scale, sensitivity);
+    fn with_input_gain(mut self, input_gain: InputGain) -> Self {
+        self.scale = combined_scale(self.scale, input_gain);
         self
     }
 
@@ -464,11 +472,11 @@ const fn scale_component(
     }
 }
 
-fn combined_scale(scale: Option<f32>, sensitivity: InputGain) -> Option<f32> {
+fn combined_scale(scale: Option<f32>, input_gain: InputGain) -> Option<f32> {
     match scale {
-        Some(scale) => Some(scale * sensitivity.value()),
-        None if sensitivity == InputGain::DEFAULT => None,
-        None => Some(sensitivity.value()),
+        Some(scale) => Some(scale * input_gain.value()),
+        None if input_gain == InputGain::DEFAULT => None,
+        None => Some(input_gain.value()),
     }
 }
 

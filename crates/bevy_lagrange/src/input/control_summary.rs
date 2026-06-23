@@ -831,12 +831,12 @@ mod tests {
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamButtonDragZoom;
     use crate::input::OrbitCamInputBinding;
+    use crate::input::OrbitCamInputGain;
     use crate::input::OrbitCamMouseDrag;
     use crate::input::OrbitCamMouseWheelZoom;
     use crate::input::OrbitCamPinchZoom;
     use crate::input::OrbitCamPreset;
     use crate::input::OrbitCamScalePolicy;
-    use crate::input::OrbitCamSensitivity;
     use crate::input::OrbitCamSlowMode;
     use crate::input::OrbitCamTouchBinding;
     use crate::input::OrbitCamTrackpadScroll;
@@ -929,7 +929,7 @@ mod tests {
     fn disabled_native_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .orbit(
-                OrbitCamMouseDrag::new(MouseButton::Right).with_sensitivity(InputGain::DISABLED.0),
+                OrbitCamMouseDrag::new(MouseButton::Right).with_input_gain(InputGain::DISABLED.0),
             )
             .build()?;
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
@@ -943,15 +943,15 @@ mod tests {
     fn disabled_adapter_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
         let disabled = InputGain::DISABLED.0;
         let bindings = OrbitCamBindings::builder()
-            .orbit(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
-            .pan(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
-            .zoom(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
-            .zoom(OrbitCamMouseWheelZoom.with_sensitivity(disabled))
-            .zoom(OrbitCamPinchZoom.with_sensitivity(disabled))
-            .zoom(OrbitCamButtonDragZoom::new(MouseButton::Middle).with_sensitivity(disabled))
+            .orbit(OrbitCamTrackpadScroll::default().with_input_gain(disabled))
+            .pan(OrbitCamTrackpadScroll::default().with_input_gain(disabled))
+            .zoom(OrbitCamTrackpadScroll::default().with_input_gain(disabled))
+            .zoom(OrbitCamMouseWheelZoom.with_input_gain(disabled))
+            .zoom(OrbitCamPinchZoom.with_input_gain(disabled))
+            .zoom(OrbitCamButtonDragZoom::new(MouseButton::Middle).with_input_gain(disabled))
             .touch_config(Some(
                 OrbitCamTouchBinding::OneFingerOrbit
-                    .with_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+                    .with_input_gain(OrbitCamInputGain::uniform(disabled)),
             ))
             .build()?;
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
@@ -967,8 +967,8 @@ mod tests {
         let disabled = InputGain::DISABLED.0;
         let preset = OrbitCamPreset::from(
             OrbitCamBlenderLikePreset::default()
-                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
-                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+                .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
+                .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled)),
         );
         let bindings = preset.to_bindings()?;
         let mode = OrbitCamInputMode::with_preset(preset);
@@ -996,7 +996,7 @@ mod tests {
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })
-            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_sensitivity(disabled))
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_input_gain(disabled))
             .build()?;
         assert!(effective_slow_mode(&bindings).is_none());
         let mode = OrbitCamInputMode::Bindings(bindings);
@@ -1010,8 +1010,8 @@ mod tests {
     fn touch_summary_omits_disabled_actions_only() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .touch_config(Some(
-                OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(
-                    OrbitCamSensitivity::new()
+                OrbitCamTouchBinding::OneFingerOrbit.with_input_gain(
+                    OrbitCamInputGain::new()
                         .orbit(InputGain::DISABLED.0)
                         .zoom(InputGain::DISABLED.0),
                 ),

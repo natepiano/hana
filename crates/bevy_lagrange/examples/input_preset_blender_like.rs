@@ -11,11 +11,11 @@ use bevy_lagrange::CameraInteractionSources;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBlenderLikePreset;
 use bevy_lagrange::OrbitCamControlSummary;
+use bevy_lagrange::OrbitCamInputGain;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::OrbitCamSensitivity;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
@@ -71,8 +71,8 @@ fn main() {
 const CAMERA_PITCH: f32 = 0.45;
 const CAMERA_YAW: f32 = 0.55;
 const HOME_MARGIN: f32 = 0.5;
-const TUNED_MOUSE_SENSITIVITY: f32 = 0.65;
-const TUNED_SMOOTH_SCROLL_SENSITIVITY: f32 = 0.35;
+const TUNED_MOUSE_INPUT_GAIN: f32 = 0.65;
+const TUNED_SMOOTH_SCROLL_INPUT_GAIN: f32 = 0.35;
 
 /// Marks the `OrbitCam` used by the `fairy_dust` face-panel showcase for
 /// `OrbitCamInputMode` and `OrbitCamInteractionState` queries.
@@ -83,10 +83,8 @@ struct BlenderLikeCamera;
 
 fn tuned_blender_like_preset() -> OrbitCamBlenderLikePreset {
     OrbitCamBlenderLikePreset::default()
-        .mouse_sensitivity(OrbitCamSensitivity::uniform(TUNED_MOUSE_SENSITIVITY))
-        .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(
-            TUNED_SMOOTH_SCROLL_SENSITIVITY,
-        ))
+        .mouse_input_gain(OrbitCamInputGain::uniform(TUNED_MOUSE_INPUT_GAIN))
+        .smooth_scroll_input_gain(OrbitCamInputGain::uniform(TUNED_SMOOTH_SCROLL_INPUT_GAIN))
 }
 
 fn spawn_camera(mut commands: Commands) {

@@ -620,7 +620,7 @@ fn spawn_trackpad_binding(
     );
     world
         .entity_mut(entity)
-        .insert(Scale::splat(binding.sensitivity().value()));
+        .insert(Scale::splat(binding.input_gain().value()));
     insert_trackpad_condition(world, entity, target, index, binding)
 }
 
@@ -638,7 +638,7 @@ fn spawn_trackpad_zoom_binding(
 ) -> Entity {
     let installation = OrbitCamInputInstallationOf(camera);
     let entity = spawn_single_binding(world, action, installation, Binding::Custom(input));
-    let scale = PIXEL_SCROLL_SCALE * binding.sensitivity().value();
+    let scale = PIXEL_SCROLL_SCALE * binding.input_gain().value();
     world
         .entity_mut(entity)
         .insert((SwizzleAxis::YXZ, Scale::splat(scale)));

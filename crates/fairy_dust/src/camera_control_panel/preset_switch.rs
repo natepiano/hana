@@ -136,7 +136,7 @@ mod tests {
     use bevy_lagrange::LagrangePlugin;
     use bevy_lagrange::OrbitCam;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
-    use bevy_lagrange::OrbitCamSensitivity;
+    use bevy_lagrange::OrbitCamInputGain;
     use bevy_lagrange::OrbitCamSimpleMousePreset;
 
     use super::*;
@@ -160,8 +160,8 @@ mod tests {
     fn tuned_blender_like_preset() -> OrbitCamBlenderLikePreset {
         let disabled = InputGain::DISABLED.0;
         OrbitCamBlenderLikePreset::default()
-            .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
-            .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled))
+            .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
+            .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled))
     }
 
     #[test]
@@ -191,7 +191,7 @@ mod tests {
     #[test]
     fn explicit_cycle_constructs_default_target_preset() {
         let tuned = OrbitCamSimpleMousePreset::default()
-            .mouse_sensitivity(OrbitCamSensitivity::uniform(TUNED_SENSITIVITY));
+            .mouse_input_gain(OrbitCamInputGain::uniform(TUNED_SENSITIVITY));
 
         assert_eq!(
             next_cycle_entry(OrbitCamPreset::from(tuned).kind(), Visibility::Inherited),

@@ -52,10 +52,10 @@ pub(super) const SMOOTH_SCROLL_ZOOM_OUT_LABEL: &str = "scroll ↓";
 #[cfg(test)]
 pub(super) const CUSTOM_SLOW_SCALE: f32 = 0.25;
 #[cfg(test)]
-pub(super) const DISABLED_SENSITIVITY: f32 = super::InputGain::DISABLED.0;
+pub(super) const DISABLED_INPUT_GAIN: f32 = super::InputGain::DISABLED.0;
 #[cfg(test)]
-pub(super) const INVALID_SOURCE_SENSITIVITY: f32 = -1.0;
+pub(super) const INVALID_SOURCE_INPUT_GAIN: f32 = -1.0;
 #[cfg(test)]
-pub(super) const PINCH_SENSITIVITY: f32 = 0.5;
+pub(super) const PINCH_INPUT_GAIN: f32 = 0.5;
 #[cfg(test)]
-pub(super) const WHEEL_SENSITIVITY: f32 = 0.25;
+pub(super) const WHEEL_INPUT_GAIN: f32 = 0.25;

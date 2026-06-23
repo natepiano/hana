@@ -175,7 +175,7 @@ fn apply_mouse_wheel_zoom_contribution(
     }
 
     contributions.zoom_coarse += zoom_signed(
-        scroll.delta.y * mouse_wheel_zoom.sensitivity().value(),
+        scroll.delta.y * mouse_wheel_zoom.input_gain().value(),
         bindings,
     );
     contributions.sources.zoom_coarse = contributions
@@ -196,7 +196,7 @@ fn apply_trackpad_scroll_contribution(
     let Some(selection) = selection else {
         return;
     };
-    debug_assert!(selection.sensitivity.is_enabled());
+    debug_assert!(selection.input_gain.is_enabled());
 
     contributions.trackpad = scroll.delta;
     match selection.target {
@@ -230,10 +230,10 @@ pub(super) enum TrackpadScrollTarget {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct TrackpadScrollCandidate {
-    target:      TrackpadScrollTarget,
-    index:       usize,
-    mod_keys:    ModKeys,
-    sensitivity: InputGain,
+    target:     TrackpadScrollTarget,
+    index:      usize,
+    mod_keys:   ModKeys,
+    input_gain: InputGain,
 }
 
 fn selected_trackpad_binding(
@@ -292,7 +292,7 @@ const fn trackpad_candidate(
         target,
         index,
         mod_keys: binding.binding().mod_keys,
-        sensitivity: binding.sensitivity(),
+        input_gain: binding.input_gain(),
     }
 }
 
@@ -328,7 +328,7 @@ fn apply_pinch_contribution(
     }
 
     contributions.zoom_smooth += zoom_signed(
-        pinch * PINCH_GESTURE_AMPLIFICATION * pinch_zoom.sensitivity().value(),
+        pinch * PINCH_GESTURE_AMPLIFICATION * pinch_zoom.input_gain().value(),
         bindings,
     );
     contributions.sources.zoom_smooth = contributions
@@ -409,7 +409,7 @@ fn apply_touch_contribution(
     };
 
     if touch.orbit_enabled() && orbit != Vec2::ZERO {
-        let orbit = orbit * touch.sensitivity().orbit_sensitivity().value();
+        let orbit = orbit * touch.input_gain().orbit_input_gain().value();
         if orbit != Vec2::ZERO {
             contributions.orbit += orbit;
             contributions.sources.orbit = contributions
@@ -419,7 +419,7 @@ fn apply_touch_contribution(
         }
     }
     if touch.pan_enabled() && pan != Vec2::ZERO {
-        let pan = pan * touch.sensitivity().pan_sensitivity().value();
+        let pan = pan * touch.input_gain().pan_input_gain().value();
         if pan != Vec2::ZERO {
             contributions.pan += pan;
             contributions.sources.pan = contributions
@@ -429,7 +429,7 @@ fn apply_touch_contribution(
         }
     }
     if touch.zoom_enabled() && zoom != 0.0 {
-        let zoom = zoom * touch.sensitivity().zoom_sensitivity().value();
+        let zoom = zoom * touch.input_gain().zoom_input_gain().value();
         if zoom != 0.0 {
             contributions.zoom_smooth += zoom_signed(zoom, bindings);
             contributions.sources.zoom_smooth = contributions
@@ -462,7 +462,7 @@ fn apply_button_drag_zoom_contribution(
     };
 
     contributions.zoom_smooth += zoom_signed(
-        delta * BUTTON_ZOOM_SCALE * button_drag_zoom.sensitivity().value(),
+        delta * BUTTON_ZOOM_SCALE * button_drag_zoom.input_gain().value(),
         bindings,
     );
     contributions.sources.zoom_smooth = contributions

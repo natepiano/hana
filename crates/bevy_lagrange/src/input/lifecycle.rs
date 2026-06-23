@@ -620,9 +620,9 @@ mod tests {
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::InputGain;
+    use crate::input::OrbitCamInputGain;
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamPreset;
-    use crate::input::OrbitCamSensitivity;
     use crate::input::OrbitCamSimpleMousePreset;
     use crate::input::modes::OrbitCamInputModesPlugin;
     use crate::input::routing::OrbitCamRoutingPlugin;
@@ -760,8 +760,8 @@ mod tests {
         let disabled = InputGain::DISABLED.0;
         OrbitCamInputMode::with_preset(
             OrbitCamSimpleMousePreset::default()
-                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
-                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+                .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
+                .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled)),
         )
     }
 

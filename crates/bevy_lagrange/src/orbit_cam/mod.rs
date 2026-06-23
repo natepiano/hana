@@ -6,7 +6,7 @@ mod preset_helpers;
 use bevy::prelude::*;
 pub(crate) use controller::orbit_cam;
 
-use super::constants::DEFAULT_INPUT_SENSITIVITY;
+use super::constants::DEFAULT_INPUT_GAIN;
 use super::constants::DEFAULT_ORBIT_ANGLE;
 use super::constants::DEFAULT_ORBIT_SMOOTHNESS;
 use super::constants::DEFAULT_PAN_SMOOTHNESS;
@@ -262,18 +262,9 @@ impl Default for OrbitCam {
             target_focus:        Vec3::ZERO,
             radius:              None,
             upside_down_policy:  UpsideDownPolicy::Prevent,
-            orbit:               AxisResponse::new(
-                DEFAULT_INPUT_SENSITIVITY,
-                DEFAULT_ORBIT_SMOOTHNESS,
-            ),
-            pan:                 AxisResponse::new(
-                DEFAULT_INPUT_SENSITIVITY,
-                DEFAULT_PAN_SMOOTHNESS,
-            ),
-            zoom:                AxisResponse::new(
-                DEFAULT_INPUT_SENSITIVITY,
-                DEFAULT_ZOOM_SMOOTHNESS,
-            ),
+            orbit:               AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_ORBIT_SMOOTHNESS),
+            pan:                 AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_PAN_SMOOTHNESS),
+            zoom:                AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_ZOOM_SMOOTHNESS),
             yaw:                 None,
             pitch:               None,
             target_yaw:          DEFAULT_ORBIT_ANGLE,

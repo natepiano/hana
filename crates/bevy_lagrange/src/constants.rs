@@ -39,8 +39,8 @@ pub(crate) const VERTICAL_DIMENSION_LABEL: &str = "vertical";
 // input constants
 /// Conversion factor from mouse drag delta to scroll-equivalent zoom input.
 pub(crate) const BUTTON_ZOOM_SCALE: f32 = 0.03;
-/// Neutral sensitivity multiplier for user-controlled camera input.
-pub(crate) const DEFAULT_INPUT_SENSITIVITY: f32 = 1.0;
+/// Neutral input gain multiplier for user-controlled camera input.
+pub(crate) const DEFAULT_INPUT_GAIN: f32 = 1.0;
 /// Amplification factor for trackpad pinch gesture input.
 pub(crate) const PINCH_GESTURE_AMPLIFICATION: f32 = 10.0;
 /// Scale factor for converting pixel-based scroll events to zoom input.

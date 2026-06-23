@@ -631,12 +631,12 @@ mod tests {
     use crate::input::CameraInteractionSources;
     use crate::input::InputGain;
     use crate::input::OrbitCamInputAdapterPlugin;
+    use crate::input::OrbitCamInputGain;
     use crate::input::OrbitCamInputLifecyclePlugin;
     use crate::input::OrbitCamInputMode;
     use crate::input::OrbitCamInputModesPlugin;
     use crate::input::OrbitCamPreset;
     use crate::input::OrbitCamRoutingPlugin;
-    use crate::input::OrbitCamSensitivity;
     use crate::input::OrbitCamSimpleMousePreset;
     use crate::system_sets::LagrangeSystemSetsPlugin;
     use crate::touch::TouchTracker;
@@ -785,8 +785,8 @@ mod tests {
         let disabled = InputGain::DISABLED.0;
         OrbitCamInputMode::with_preset(
             OrbitCamSimpleMousePreset::default()
-                .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
-                .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled)),
+                .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
+                .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled)),
         )
     }
 

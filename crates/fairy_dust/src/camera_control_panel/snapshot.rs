@@ -152,9 +152,9 @@ mod tests {
     use bevy_lagrange::OrbitCamBindings;
     use bevy_lagrange::OrbitCamBindingsError;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
+    use bevy_lagrange::OrbitCamInputGain;
     use bevy_lagrange::OrbitCamMouseDrag;
     use bevy_lagrange::OrbitCamScalePolicy;
-    use bevy_lagrange::OrbitCamSensitivity;
 
     use super::*;
 
@@ -237,8 +237,8 @@ mod tests {
     fn tuned_blender_like_snapshot_keeps_preset_label_and_slow_mode_hint() {
         let disabled = InputGain::DISABLED.0;
         let preset = OrbitCamBlenderLikePreset::default()
-            .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
-            .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled));
+            .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
+            .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled));
         let snapshot =
             resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::with_preset(preset)));
         let labels = row_labels(&snapshot);
@@ -265,7 +265,7 @@ mod tests {
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })
-            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_sensitivity(disabled))
+            .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_input_gain(disabled))
             .build()?;
         let snapshot =
             resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::Bindings(bindings)));

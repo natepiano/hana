@@ -117,7 +117,7 @@ const CAMERA_PITCH: f32 = TAU / 8.0;
 const CAMERA_RADIUS: f32 = 5.0;
 const CAMERA_YAW: f32 = TAU / 8.0;
 const CAMERA_ZOOM_SENSITIVITY: f32 = 0.5;
-const CUSTOM_WHEEL_SENSITIVITY: f32 = 0.75;
+const CUSTOM_WHEEL_INPUT_GAIN: f32 = 0.75;
 const HOME_MARGIN: f32 = 0.5;
 const INPUT_DISABLED_CONTROL: &str = "T Disabled";
 
@@ -183,7 +183,7 @@ fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .orbit(OrbitCamTrackpadScroll::default())
         .pan(OrbitCamMouseDrag::new(MouseButton::Right))
         .pan(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::SHIFT))
-        .zoom(OrbitCamMouseWheelZoom.with_sensitivity(CUSTOM_WHEEL_SENSITIVITY))
+        .zoom(OrbitCamMouseWheelZoom.with_input_gain(CUSTOM_WHEEL_INPUT_GAIN))
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
         .zoom_inversion(ZoomInversion::Inverted)

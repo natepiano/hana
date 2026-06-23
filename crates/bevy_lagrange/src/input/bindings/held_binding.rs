@@ -94,10 +94,10 @@ impl OrbitCamHeldBinding {
         self
     }
 
-    /// Sets the authored sensitivity for the motion binding.
+    /// Sets the authored input gain for the motion binding.
     #[must_use]
-    pub fn with_sensitivity(mut self, sensitivity: f32) -> Self {
-        self.motion = self.motion.with_sensitivity(sensitivity);
+    pub fn with_input_gain(mut self, input_gain: f32) -> Self {
+        self.motion = self.motion.with_input_gain(input_gain);
         self
     }
 
@@ -207,13 +207,13 @@ pub enum OrbitCamInputBinding {
     /// A binding with descriptor modifiers applied after composite expansion.
     Modified {
         /// Inner binding being modified.
-        binding:     Box<Self>,
+        binding:    Box<Self>,
         /// Modifiers applied to every expanded entry.
-        modifiers:   InputBindingModifiers,
+        modifiers:  InputBindingModifiers,
         /// Optional scale applied with composite-axis awareness.
-        scale:       Option<InputBindingScale>,
-        /// Authored sensitivity applied after signed scale lowering.
-        sensitivity: InputGain,
+        scale:      Option<InputBindingScale>,
+        /// Authored input gain applied after signed scale lowering.
+        input_gain: InputGain,
     },
 }
 
@@ -280,11 +280,11 @@ impl OrbitCamInputBinding {
         })
     }
 
-    /// Sets the authored sensitivity for this input binding.
+    /// Sets the authored input gain for this input binding.
     #[must_use]
-    pub fn with_sensitivity(self, sensitivity: f32) -> Self {
-        self.with_descriptor_update(|_, _, input_sensitivity| {
-            *input_sensitivity = InputGain(sensitivity);
+    pub fn with_input_gain(self, input_gain_value: f32) -> Self {
+        self.with_descriptor_update(|_, _, input_gain| {
+            *input_gain = InputGain(input_gain_value);
         })
     }
 
@@ -297,26 +297,26 @@ impl OrbitCamInputBinding {
                 binding,
                 mut modifiers,
                 mut scale,
-                mut sensitivity,
+                mut input_gain,
             } => {
-                update(&mut modifiers, &mut scale, &mut sensitivity);
+                update(&mut modifiers, &mut scale, &mut input_gain);
                 Self::Modified {
                     binding,
                     modifiers,
                     scale,
-                    sensitivity,
+                    input_gain,
                 }
             },
             binding => {
                 let mut modifiers = InputBindingModifiers::default();
                 let mut scale = None;
-                let mut sensitivity = InputGain::DEFAULT;
-                update(&mut modifiers, &mut scale, &mut sensitivity);
+                let mut input_gain = InputGain::DEFAULT;
+                update(&mut modifiers, &mut scale, &mut input_gain);
                 Self::Modified {
                     binding: Box::new(binding),
                     modifiers,
                     scale,
-                    sensitivity,
+                    input_gain,
                 }
             },
         }
@@ -362,11 +362,11 @@ impl OrbitCamInputBinding {
                 binding,
                 modifiers,
                 scale,
-                sensitivity,
+                input_gain,
             } => binding
                 .descriptor()
                 .with_entry_modifiers(*modifiers, *scale)
-                .with_entry_sensitivity(*sensitivity),
+                .with_entry_input_gain(*input_gain),
         }
     }
 

@@ -336,9 +336,9 @@ mod tests {
     use super::*;
     use crate::input::CameraInteractionSources;
     use crate::input::OrbitCamBlenderLikePreset;
+    use crate::input::OrbitCamInputGain;
     use crate::input::OrbitCamManualInputWriter;
-    use crate::input::OrbitCamSensitivity;
-    use crate::input::constants::INVALID_SOURCE_SENSITIVITY;
+    use crate::input::constants::INVALID_SOURCE_INPUT_GAIN;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     #[derive(Resource)]
@@ -370,7 +370,7 @@ mod tests {
 
     fn invalid_blender_like_preset() -> OrbitCamPreset {
         OrbitCamBlenderLikePreset::default()
-            .mouse_sensitivity(OrbitCamSensitivity::uniform(INVALID_SOURCE_SENSITIVITY))
+            .mouse_input_gain(OrbitCamInputGain::uniform(INVALID_SOURCE_INPUT_GAIN))
             .into()
     }
 
@@ -615,7 +615,7 @@ mod tests {
         assert!(type_is_registered::<OrbitCamPreset>(&app));
         assert!(type_is_registered::<OrbitCamPresetKind>(&app));
         assert!(type_is_registered::<OrbitCamScalePolicy>(&app));
-        assert!(type_is_registered::<OrbitCamSensitivity>(&app));
+        assert!(type_is_registered::<OrbitCamInputGain>(&app));
         assert!(type_is_registered::<OrbitCamSimpleMouseKeyboardPreset>(
             &app
         ));

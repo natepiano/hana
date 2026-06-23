@@ -24,7 +24,7 @@ use super::action_set::BindingRoutePolicy;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
 use super::descriptor::InputGain;
-use super::descriptor::OrbitCamSensitivity;
+use super::descriptor::OrbitCamInputGain;
 use super::descriptor::OrbitCamSlowMode;
 use super::error::OrbitCamBindingsError;
 use super::held_binding::OrbitCamHeldBinding;
@@ -123,7 +123,7 @@ impl OrbitCamBindingsBuilder {
         self
     }
 
-    /// Sets the touch policy with explicit per-action sensitivity.
+    /// Sets the touch policy with explicit per-action input gain.
     ///
     /// Repeated calls use last-write-wins.
     #[must_use]
@@ -164,7 +164,7 @@ impl OrbitCamBindingsBuilder {
     }
 }
 
-/// A binding value plus its authored input sensitivity.
+/// A binding value plus its authored input gain.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct OrbitCamBindingWithInputGain<T> {
     binding:    T,
@@ -172,12 +172,12 @@ pub struct OrbitCamBindingWithInputGain<T> {
 }
 
 impl<T> OrbitCamBindingWithInputGain<T> {
-    /// Creates a binding wrapper with explicit sensitivity.
+    /// Creates a binding wrapper with explicit input gain.
     #[must_use]
-    pub const fn new(binding: T, sensitivity: f32) -> Self {
+    pub const fn new(binding: T, input_gain: f32) -> Self {
         Self {
             binding,
-            input_gain: InputGain(sensitivity),
+            input_gain: InputGain(input_gain),
         }
     }
 
@@ -185,14 +185,14 @@ impl<T> OrbitCamBindingWithInputGain<T> {
     #[must_use]
     pub const fn binding(&self) -> &T { &self.binding }
 
-    /// Returns the authored sensitivity.
+    /// Returns the authored input gain.
     #[must_use]
-    pub const fn sensitivity(&self) -> InputGain { self.input_gain }
+    pub const fn input_gain(&self) -> InputGain { self.input_gain }
 
-    /// Replaces the authored sensitivity.
+    /// Replaces the authored input gain.
     #[must_use]
-    pub const fn with_sensitivity(mut self, sensitivity: f32) -> Self {
-        self.input_gain = InputGain(sensitivity);
+    pub const fn with_input_gain(mut self, input_gain: f32) -> Self {
+        self.input_gain = InputGain(input_gain);
         self
     }
 }
@@ -403,10 +403,10 @@ impl OrbitCamMouseDrag {
         self
     }
 
-    /// Sets the authored sensitivity for this mouse-drag binding.
+    /// Sets the authored input gain for this mouse-drag binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
-        OrbitCamBindingWithInputGain::new(self, sensitivity)
+    pub const fn with_input_gain(self, input_gain: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, input_gain)
     }
 }
 
@@ -428,7 +428,7 @@ impl From<OrbitCamMouseDrag> for OrbitCamHeldBinding {
 
 impl From<OrbitCamBindingWithInputGain<OrbitCamMouseDrag>> for OrbitCamHeldBinding {
     fn from(value: OrbitCamBindingWithInputGain<OrbitCamMouseDrag>) -> Self {
-        Self::from(*value.binding()).with_sensitivity(value.sensitivity().value())
+        Self::from(*value.binding()).with_input_gain(value.input_gain().value())
     }
 }
 
@@ -447,10 +447,10 @@ impl OrbitCamTrackpadScroll {
         self
     }
 
-    /// Sets the authored sensitivity for this smooth-scroll binding.
+    /// Sets the authored input gain for this smooth-scroll binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
-        OrbitCamBindingWithInputGain::new(self, sensitivity)
+    pub const fn with_input_gain(self, input_gain: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, input_gain)
     }
 }
 
@@ -460,10 +460,10 @@ impl OrbitCamTrackpadScroll {
 pub struct OrbitCamMouseWheelZoom;
 
 impl OrbitCamMouseWheelZoom {
-    /// Sets the authored sensitivity for this mouse-wheel zoom binding.
+    /// Sets the authored input gain for this mouse-wheel zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
-        OrbitCamBindingWithInputGain::new(self, sensitivity)
+    pub const fn with_input_gain(self, input_gain: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, input_gain)
     }
 }
 
@@ -472,10 +472,10 @@ impl OrbitCamMouseWheelZoom {
 pub struct OrbitCamPinchZoom;
 
 impl OrbitCamPinchZoom {
-    /// Sets the authored sensitivity for this pinch zoom binding.
+    /// Sets the authored input gain for this pinch zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
-        OrbitCamBindingWithInputGain::new(self, sensitivity)
+    pub const fn with_input_gain(self, input_gain: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, input_gain)
     }
 }
 
@@ -505,10 +505,10 @@ impl OrbitCamButtonDragZoom {
         self
     }
 
-    /// Sets the authored sensitivity for this button-drag zoom binding.
+    /// Sets the authored input gain for this button-drag zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
-        OrbitCamBindingWithInputGain::new(self, sensitivity)
+    pub const fn with_input_gain(self, input_gain: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, input_gain)
     }
 }
 
@@ -523,33 +523,33 @@ pub enum OrbitCamTouchBinding {
 }
 
 impl OrbitCamTouchBinding {
-    /// Sets per-action authored sensitivity for this touch policy.
+    /// Sets per-action authored input gain for this touch policy.
     #[must_use]
-    pub const fn with_sensitivity(
+    pub const fn with_input_gain(
         self,
-        sensitivity: OrbitCamSensitivity,
+        input_gain: OrbitCamInputGain,
     ) -> OrbitCamTouchBindingConfig {
         OrbitCamTouchBindingConfig {
             binding: self,
-            sensitivity,
+            input_gain,
         }
     }
 }
 
-/// Touch gesture policy plus per-action authored sensitivity.
+/// Touch gesture policy plus per-action authored input gain.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct OrbitCamTouchBindingConfig {
-    binding:     OrbitCamTouchBinding,
-    sensitivity: OrbitCamSensitivity,
+    binding:    OrbitCamTouchBinding,
+    input_gain: OrbitCamInputGain,
 }
 
 impl OrbitCamTouchBindingConfig {
-    /// Creates a touch policy using default sensitivity for every action.
+    /// Creates a touch policy using default input gain for every action.
     #[must_use]
     pub const fn new(binding: OrbitCamTouchBinding) -> Self {
         Self {
             binding,
-            sensitivity: OrbitCamSensitivity::new(),
+            input_gain: OrbitCamInputGain::new(),
         }
     }
 
@@ -557,9 +557,9 @@ impl OrbitCamTouchBindingConfig {
     #[must_use]
     pub const fn binding(self) -> OrbitCamTouchBinding { self.binding }
 
-    /// Returns the authored per-action touch sensitivity.
+    /// Returns the authored per-action touch input gain.
     #[must_use]
-    pub const fn sensitivity(self) -> OrbitCamSensitivity { self.sensitivity }
+    pub const fn input_gain(self) -> OrbitCamInputGain { self.input_gain }
 
     /// Returns whether any touch action participates in runtime input.
     #[must_use]
@@ -569,15 +569,15 @@ impl OrbitCamTouchBindingConfig {
 
     /// Returns whether touch orbit participates in runtime input.
     #[must_use]
-    pub const fn orbit_enabled(self) -> bool { self.sensitivity.orbit_sensitivity().is_enabled() }
+    pub const fn orbit_enabled(self) -> bool { self.input_gain.orbit_input_gain().is_enabled() }
 
     /// Returns whether touch pan participates in runtime input.
     #[must_use]
-    pub const fn pan_enabled(self) -> bool { self.sensitivity.pan_sensitivity().is_enabled() }
+    pub const fn pan_enabled(self) -> bool { self.input_gain.pan_input_gain().is_enabled() }
 
     /// Returns whether touch zoom participates in runtime input.
     #[must_use]
-    pub const fn zoom_enabled(self) -> bool { self.sensitivity.zoom_sensitivity().is_enabled() }
+    pub const fn zoom_enabled(self) -> bool { self.input_gain.zoom_input_gain().is_enabled() }
 }
 
 impl From<OrbitCamTouchBinding> for OrbitCamTouchBindingConfig {

@@ -358,7 +358,7 @@ mod tests {
                 },
             })
             .orbit(
-                OrbitCamMouseDrag::new(MouseButton::Middle).with_sensitivity(InputGain::DISABLED.0),
+                OrbitCamMouseDrag::new(MouseButton::Middle).with_input_gain(InputGain::DISABLED.0),
             )
             .build()?;
         let mut app = test_app();

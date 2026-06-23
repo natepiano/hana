@@ -2,8 +2,12 @@
 
 use bevy::prelude::*;
 
-/// Multiplier applied to an axis's raw input before it drives the camera.
-/// A value of `0.0` disables the axis.
+/// Multiplier applied to an axis's semantic input as it drives a camera
+/// operation (orbit, pan, zoom). A value of `0.0` disables the axis.
+///
+/// Distinct from [`InputGain`](crate::InputGain): sensitivity acts on the
+/// camera operation, downstream of input gain, which scales raw device input
+/// at the binding.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct Sensitivity(pub f32);
 

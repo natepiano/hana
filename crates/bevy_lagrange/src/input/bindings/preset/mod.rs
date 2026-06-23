@@ -9,7 +9,7 @@ mod gamepad;
 mod keyboard;
 mod simple_mouse;
 mod simple_mouse_keyboard;
-mod source_sensitivity;
+mod source_input_gain;
 
 pub use blender_like::OrbitCamBlenderLikePreset;
 pub use blender_like_keyboard::OrbitCamBlenderLikeKeyboardPreset;
@@ -20,6 +20,6 @@ pub use gamepad::OrbitCamGamepadPresetBuilder;
 pub use keyboard::OrbitCamKeyboardPreset;
 pub use simple_mouse::OrbitCamSimpleMousePreset;
 pub use simple_mouse_keyboard::OrbitCamSimpleMouseKeyboardPreset;
-pub use source_sensitivity::GamepadSensitivity;
-pub use source_sensitivity::MouseSensitivity;
-pub use source_sensitivity::SmoothScrollSensitivity;
+pub use source_input_gain::GamepadInputGain;
+pub use source_input_gain::MouseInputGain;
+pub use source_input_gain::SmoothScrollInputGain;

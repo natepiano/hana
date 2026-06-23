@@ -35,7 +35,7 @@ pub enum OrbitCamBindingsError {
         /// Semantic action name.
         action: &'static str,
     },
-    /// A scale modifier or sensitivity value was invalid.
+    /// A scale modifier or input gain value was invalid.
     InvalidScale,
     /// A dead-zone modifier used unsupported thresholds.
     InvalidDeadZone,
@@ -84,7 +84,7 @@ impl Display for OrbitCamBindingsError {
                 )
             },
             Self::InvalidScale => {
-                formatter.write_str("binding scale modifier or sensitivity value is invalid")
+                formatter.write_str("binding scale modifier or input gain value is invalid")
             },
             Self::InvalidDeadZone => {
                 formatter.write_str("binding dead-zone thresholds are invalid")

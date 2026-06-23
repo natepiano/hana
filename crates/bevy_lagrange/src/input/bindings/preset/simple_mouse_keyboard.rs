@@ -3,11 +3,11 @@ use bevy::prelude::*;
 use super::config::OrbitCamPresetConfig;
 use super::keyboard::OrbitCamKeyboardPreset;
 use super::simple_mouse::OrbitCamSimpleMousePreset;
-use super::source_sensitivity::MouseSensitivity;
-use super::source_sensitivity::SmoothScrollSensitivity;
+use super::source_input_gain::MouseInputGain;
+use super::source_input_gain::SmoothScrollInputGain;
 use crate::input::bindings::OrbitCamBindings;
 use crate::input::bindings::OrbitCamBindingsBuilder;
-use crate::input::bindings::OrbitCamSensitivity;
+use crate::input::bindings::OrbitCamInputGain;
 use crate::input::bindings::error::OrbitCamBindingsError;
 
 /// Configures simple mouse controls plus keyboard camera controls.
@@ -43,17 +43,17 @@ impl OrbitCamSimpleMouseKeyboardPreset {
         self
     }
 
-    /// Sets source sensitivity for mouse-drag and line-wheel input.
+    /// Sets source input gain for mouse-drag and line-wheel input.
     #[must_use]
-    pub const fn mouse_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
-        self.pointer = self.pointer.mouse_sensitivity(sensitivity);
+    pub const fn mouse_input_gain(mut self, input_gain: OrbitCamInputGain) -> Self {
+        self.pointer = self.pointer.mouse_input_gain(input_gain);
         self
     }
 
-    /// Sets source sensitivity for Bevy pixel-scroll input.
+    /// Sets source input gain for Bevy pixel-scroll input.
     #[must_use]
-    pub const fn smooth_scroll_sensitivity(mut self, sensitivity: OrbitCamSensitivity) -> Self {
-        self.pointer = self.pointer.smooth_scroll_sensitivity(sensitivity);
+    pub const fn smooth_scroll_input_gain(mut self, input_gain: OrbitCamInputGain) -> Self {
+        self.pointer = self.pointer.smooth_scroll_input_gain(input_gain);
         self
     }
 
@@ -66,19 +66,19 @@ impl OrbitCamSimpleMouseKeyboardPreset {
     }
 }
 
-impl MouseSensitivity for OrbitCamSimpleMouseKeyboardPreset {
-    type Sensitivity = OrbitCamSensitivity;
+impl MouseInputGain for OrbitCamSimpleMouseKeyboardPreset {
+    type Gain = OrbitCamInputGain;
 
-    fn mouse_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
-        Self::mouse_sensitivity(self, sensitivity)
+    fn mouse_input_gain(self, input_gain: Self::Gain) -> Self {
+        Self::mouse_input_gain(self, input_gain)
     }
 }
 
-impl SmoothScrollSensitivity for OrbitCamSimpleMouseKeyboardPreset {
-    type Sensitivity = OrbitCamSensitivity;
+impl SmoothScrollInputGain for OrbitCamSimpleMouseKeyboardPreset {
+    type Gain = OrbitCamInputGain;
 
-    fn smooth_scroll_sensitivity(self, sensitivity: Self::Sensitivity) -> Self {
-        Self::smooth_scroll_sensitivity(self, sensitivity)
+    fn smooth_scroll_input_gain(self, input_gain: Self::Gain) -> Self {
+        Self::smooth_scroll_input_gain(self, input_gain)
     }
 }
 
