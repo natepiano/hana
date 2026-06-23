@@ -1,0 +1,14 @@
+# Release configuration for the hana workspace.
+
+# Workspace path-dependencies that must be pinned to a published crates.io
+# version during publish. cargo publish rejects path-only deps (no version
+# requirement), so before publishing on the release branch each entry's
+# `^<dep> = ...` line in root Cargo.toml is rewritten to `<dep> = "<version>"`
+# (path key dropped) and committed. The pin lives only on the fire-and-forget
+# release branch; main keeps the path dependency.
+#
+# When the dependency gets a newer published release, bump `version` here —
+# the release process needs no other change.
+[[publish_path_pins]]
+dep = "bevy_kana"
+version = "0.1.0"
