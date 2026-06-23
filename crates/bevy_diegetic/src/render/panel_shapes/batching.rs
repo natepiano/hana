@@ -46,6 +46,7 @@ use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
 use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
+use crate::render::Dirty;
 use crate::render::HairlineFade;
 use crate::render::PathAtlas;
 use crate::render::PathExtendedMaterial;
@@ -124,8 +125,8 @@ struct ShapeBatchRecord {
 struct ShapeBatch {
     entity:        Option<Entity>,
     gpu:           Option<ShapeBatchGpu>,
-    records_dirty: bool,
-    bounds_dirty:  bool,
+    records_dirty: Dirty,
+    bounds_dirty:  Dirty,
     records:       Vec<ShapeBatchRecord>,
 }
 
@@ -153,15 +154,15 @@ impl ShapeBatch {
 
     fn push_record(&mut self, record: ShapeBatchRecord) {
         self.records.push(record);
-        self.records_dirty = true;
-        self.bounds_dirty = true;
+        self.records_dirty.mark();
+        self.bounds_dirty.mark();
     }
 
     fn remove_record(&mut self, key: PanelShapeRenderKey) {
         if let Some(index) = self.records.iter().position(|record| record.key == key) {
             self.records.remove(index);
-            self.records_dirty = true;
-            self.bounds_dirty = true;
+            self.records_dirty.mark();
+            self.bounds_dirty.mark();
         }
     }
 
@@ -193,7 +194,7 @@ pub(super) struct PanelShapeBatchStore {
     panel_index: HashMap<Entity, Vec<(ShapeBatchKey, PanelShapeRenderKey)>>,
     interner:    VisualMaterialInterner,
     atlas:       PathAtlas<PanelShapeRenderKey>,
-    atlas_dirty: bool,
+    atlas_dirty: Dirty,
 }
 
 impl PanelShapeBatchStore {
@@ -208,7 +209,7 @@ impl PanelShapeBatchStore {
     fn upsert_panel(&mut self, panel: Entity, records: Vec<(ShapeBatchKey, ShapeBatchRecord)>) {
         self.remove_panel(panel);
         if !records.is_empty() {
-            self.atlas_dirty = true;
+            self.atlas_dirty.mark();
         }
         for (key, record) in records {
             let record_key = record.key;
@@ -227,7 +228,7 @@ impl PanelShapeBatchStore {
         let Some(records) = self.panel_index.remove(&panel) else {
             return;
         };
-        self.atlas_dirty = true;
+        self.atlas_dirty.mark();
         for (key, record_key) in records {
             if let Some(batch) = self.batches.get_mut(&key) {
                 batch.remove_record(record_key);
@@ -236,7 +237,7 @@ impl PanelShapeBatchStore {
     }
 
     fn rebuild_path_atlas_if_dirty(&mut self) {
-        if !self.atlas_dirty {
+        if !self.atlas_dirty.is_set() {
             return;
         }
         let paths: Vec<(PanelShapeRenderKey, PathOutline)> = self
@@ -257,10 +258,10 @@ impl PanelShapeBatchStore {
                     record.instance.atlas_index = atlas_index;
                 }
             }
-            batch.records_dirty = true;
-            batch.bounds_dirty = true;
+            batch.records_dirty.mark();
+            batch.bounds_dirty.mark();
         }
-        self.atlas_dirty = false;
+        self.atlas_dirty.clear();
     }
 
     fn commit_path_atlas(
@@ -795,7 +796,7 @@ fn spawn_batch_entity(
             capacity,
             run_capacity,
         });
-        batch.records_dirty = false;
+        batch.records_dirty.clear();
     }
 }
 
@@ -856,7 +857,7 @@ fn grow_batch_assets(
     gpu.mesh = mesh;
     gpu.capacity = capacity;
     gpu.run_capacity = run_capacity;
-    batch.records_dirty = false;
+    batch.records_dirty.clear();
 }
 
 pub(super) fn update_panel_line_batch_bounds(
@@ -867,7 +868,7 @@ pub(super) fn update_panel_line_batch_bounds(
     >,
 ) {
     for (_, batch) in store.batches_mut() {
-        if !batch.bounds_dirty {
+        if !batch.bounds_dirty.is_set() {
             continue;
         }
         let Some(entity) = batch.entity else {
@@ -886,7 +887,7 @@ pub(super) fn update_panel_line_batch_bounds(
             center:       Vec3A::ZERO,
             half_extents: Vec3A::from((max - min) * 0.5),
         };
-        batch.bounds_dirty = false;
+        batch.bounds_dirty.clear();
     }
 }
 
@@ -901,14 +902,14 @@ pub(super) fn commit_panel_line_batch_buffers(
     for (_, batch) in store.batches_mut() {
         batches += 1;
         records += batch.record_count().to_usize();
-        if batch.gpu.is_none() || !batch.records_dirty {
+        if batch.gpu.is_none() || !batch.records_dirty.is_set() {
             continue;
         }
         let capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.capacity);
         let run_capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.run_capacity);
         let instances = padded_line_instances(&batch.instances(), capacity);
         let run_records = padded_line_runs(&batch.run_records(), run_capacity);
-        batch.records_dirty = false;
+        batch.records_dirty.clear();
         let Some(gpu) = &batch.gpu else {
             continue;
         };

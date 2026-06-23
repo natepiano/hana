@@ -34,6 +34,12 @@ pub(super) const DIAG_LAYOUT_COMPUTE_PANELS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/layout/compute_panels");
 pub(super) const DIAG_PANEL_RECONCILE_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel/reconcile_ms");
+pub(super) const DIAG_MATERIAL_TABLE_CAPACITY: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/material_table/capacity");
+pub(super) const DIAG_MATERIAL_TABLE_ROWS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/material_table/rows");
+pub(super) const DIAG_MATERIAL_TABLE_UPLOAD_BYTES: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/material_table/upload_bytes");
 pub(super) const DIAG_PANEL_SDF_BATCHES: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel/sdf_batches");
 pub(super) const DIAG_PANEL_SDF_RECORDS: DiagnosticPath =

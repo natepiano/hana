@@ -30,6 +30,7 @@ use super::PathExtendedMaterial;
 use super::SdfExtendedMaterial;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
+use crate::panel::DiegeticPerfStats;
 
 /// Path material uniform binding used by `PathExtension::uniforms`.
 pub(crate) const PATH_UNIFORM_BINDING: u32 = 100;
@@ -436,10 +437,6 @@ impl FrameMaterialTable {
 
     /// Returns the number of bytes uploaded for the live rows.
     #[must_use]
-    #[expect(
-        dead_code,
-        reason = "Phase 2 measurement reporting keeps this stat for emitted harness rows"
-    )]
     pub(crate) fn upload_bytes(&self) -> usize {
         self.row_count()
             .saturating_mul(MaterialSlotValues::shader_size_bytes())
@@ -801,6 +798,7 @@ impl Plugin for MaterialTablePlugin {
         app.init_resource::<FrameMaterialTableBuild>()
             .init_resource::<MaterialTableBuffer>()
             .init_resource::<BatchMaterialTableRegistry>()
+            .init_resource::<DiegeticPerfStats>()
             .configure_sets(
                 PostUpdate,
                 (
@@ -824,6 +822,7 @@ impl Plugin for MaterialTablePlugin {
                     ensure_material_table_buffer_handle,
                     rebind_registered_material_table_buffers,
                     update_material_table_buffer_data,
+                    update_material_table_perf_stats,
                     warn_material_table_drops,
                 )
                     .chain()
@@ -1007,6 +1006,16 @@ fn update_material_table_buffer_data(
     if let Some(mut buffer) = storage_buffers.get_mut(handle) {
         buffer.set_data(build.table().padded_rows(capacity));
     }
+}
+
+fn update_material_table_perf_stats(
+    build: Res<FrameMaterialTableBuild>,
+    table_buffer: Res<MaterialTableBuffer>,
+    mut perf: ResMut<DiegeticPerfStats>,
+) {
+    perf.material_table.rows = build.table().row_count();
+    perf.material_table.upload_bytes = build.table().upload_bytes();
+    perf.material_table.capacity = table_buffer.capacity.to_usize();
 }
 
 fn warn_material_table_drops(build: Res<FrameMaterialTableBuild>) {

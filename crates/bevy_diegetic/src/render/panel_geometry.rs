@@ -568,7 +568,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
     // The clip rect coming in from `clip::effective_clip` is bound to the
     // panel viewport (or a tighter scissor), which sits *at* the SDF form
     // boundary — i.e. exactly where the AA ramp needs to fade. Without the
-    // padding here, the shader's `discard` (in `sdf_panel_vertex_pull.wgsl`) throws away
+    // padding here, the shader's `discard` (in `sdf_panel.wgsl`) throws away
     // every fragment in the AA region at panel/viewport edges, and the
     // visible boundary collapses to the underlying polygon edge — a hard
     // staircase with no MSAA to smooth it.

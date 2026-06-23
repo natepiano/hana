@@ -43,7 +43,7 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 ///
 /// Panels much farther than the camera focus shrink `position.z` below
 /// the 64-step budget (z = near/d crosses `6.4e-5` at ~15.6× the orbit
-/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel_vertex_pull.wgsl` and
+/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl` and
 /// `analytic_path.wgsl` keeps those fragments
 /// storable; past the bound their coplanar ordering collapses to OIT-list
 /// insertion order instead of going invisible.

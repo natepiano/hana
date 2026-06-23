@@ -35,6 +35,7 @@ use crate::layout::Sidedness;
 use crate::render::BaseMaterialId;
 use crate::render::BatchAlphaMode;
 use crate::render::BatchRenderLayers;
+use crate::render::Dirty;
 use crate::render::VisualMaterialInterner;
 use crate::text::RunStorageKey;
 
@@ -113,12 +114,12 @@ pub struct PathBatch {
     /// GPU handles; `None` until the routing system creates them.
     pub gpu:             Option<PathBatchResources>,
     /// Path records changed — the instance buffer needs an upload.
-    pub instances_dirty: bool,
+    pub instances_dirty: Dirty,
     /// Run records changed — the run table needs an upload.
-    pub run_table_dirty: bool,
+    pub run_table_dirty: Dirty,
     /// Membership, geometry, or a transform changed — the Aabb-union system
     /// recomputes this batch's bounds.
-    pub bounds_dirty:    bool,
+    pub bounds_dirty:    Dirty,
     runs:                Vec<BatchRun>,
     path_records:        Vec<PathInstanceRecord>,
     run_records:         Vec<RunRecord>,
@@ -188,9 +189,9 @@ impl PathBatch {
             run.range = start..self.path_records.len().to_u32();
             self.run_records.push(run.record);
         }
-        self.instances_dirty = true;
-        self.run_table_dirty = true;
-        self.bounds_dirty = true;
+        self.instances_dirty.mark();
+        self.run_table_dirty.mark();
+        self.bounds_dirty.mark();
     }
 
     fn push_run(
@@ -238,12 +239,12 @@ impl PathBatch {
             }
             if self.run_records[position] != record {
                 self.run_records[position] = record;
-                self.run_table_dirty = true;
+                self.run_table_dirty.mark();
             }
             self.runs[position].path_records = path_records;
             self.runs[position].record = record;
-            self.instances_dirty = true;
-            self.bounds_dirty = true;
+            self.instances_dirty.mark();
+            self.bounds_dirty.mark();
         } else {
             self.runs[position].path_records = path_records;
             self.runs[position].record = record;
@@ -262,8 +263,8 @@ impl PathBatch {
         }
         self.runs[position].record.transform = transform;
         self.run_records[position].transform = transform;
-        self.run_table_dirty = true;
-        self.bounds_dirty = true;
+        self.run_table_dirty.mark();
+        self.bounds_dirty.mark();
     }
 }
 
@@ -464,9 +465,9 @@ mod tests {
             .map(|record| record.run_index)
             .collect();
         assert_eq!(stamped, vec![0, 0, 1]);
-        assert!(batch.instances_dirty);
-        assert!(batch.run_table_dirty);
-        assert!(batch.bounds_dirty);
+        assert!(batch.instances_dirty.is_set());
+        assert!(batch.run_table_dirty.is_set());
+        assert!(batch.bounds_dirty.is_set());
     }
 
     #[test]
@@ -513,8 +514,8 @@ mod tests {
         );
         {
             let batch = store.get_mut(&batch_key).expect("batch should exist");
-            batch.instances_dirty = false;
-            batch.run_table_dirty = false;
+            batch.instances_dirty.clear();
+            batch.run_table_dirty.clear();
         }
 
         // Same record count, different atlas indices — the stress-test edit
@@ -527,9 +528,9 @@ mod tests {
         );
 
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert!(batch.instances_dirty, "path records changed");
+        assert!(batch.instances_dirty.is_set(), "path records changed");
         assert!(
-            !batch.run_table_dirty,
+            !batch.run_table_dirty.is_set(),
             "an unchanged run record must not dirty the run table"
         );
         let atlas: Vec<u32> = batch
@@ -561,7 +562,10 @@ mod tests {
 
         let batch = store.get(&batch_key).expect("batch should exist");
         assert_eq!(batch.path_record_count(), 2);
-        assert!(batch.run_table_dirty, "a rebuild re-uploads both buffers");
+        assert!(
+            batch.run_table_dirty.is_set(),
+            "a rebuild re-uploads both buffers"
+        );
     }
 
     #[test]
@@ -640,22 +644,22 @@ mod tests {
         );
         {
             let batch = store.get_mut(&batch_key).expect("batch should exist");
-            batch.run_table_dirty = false;
-            batch.bounds_dirty = false;
+            batch.run_table_dirty.clear();
+            batch.bounds_dirty.clear();
         }
 
         store.update_run_transform(run, Mat4::IDENTITY);
         let batch = store.get(&batch_key).expect("batch should exist");
         assert!(
-            !batch.run_table_dirty,
+            !batch.run_table_dirty.is_set(),
             "an identical matrix must not dirty the run table"
         );
 
         let moved = Mat4::from_translation(Vec3::X);
         store.update_run_transform(run, moved);
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert!(batch.run_table_dirty);
-        assert!(batch.bounds_dirty);
+        assert!(batch.run_table_dirty.is_set());
+        assert!(batch.bounds_dirty.is_set());
         assert_eq!(batch.run_records()[0].transform, moved);
     }
 

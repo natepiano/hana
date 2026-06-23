@@ -410,7 +410,7 @@ pub(super) fn update_batch_bounds(
     >,
 ) {
     for (_, batch) in backend.batch_store_mut().batches_mut() {
-        if !batch.bounds_dirty {
+        if !batch.bounds_dirty.is_set() {
             continue;
         }
         let Some(entity) = batch.entity else {
@@ -432,7 +432,7 @@ pub(super) fn update_batch_bounds(
             center:       Vec3A::ZERO,
             half_extents: Vec3A::from((max - min) * 0.5),
         };
-        batch.bounds_dirty = false;
+        batch.bounds_dirty.clear();
     }
 }
 
@@ -463,16 +463,16 @@ pub(super) fn commit_batch_buffers(
         if batch.gpu.is_none() {
             continue;
         }
-        let instances_payload = batch.instances_dirty.then(|| {
+        let instances_payload = batch.instances_dirty.is_set().then(|| {
             let capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.capacity);
             padded_glyph_records(batch.path_records(), capacity)
         });
-        let run_table_payload = batch.run_table_dirty.then(|| {
+        let run_table_payload = batch.run_table_dirty.is_set().then(|| {
             let run_capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.run_capacity);
             padded_run_records(batch.run_records(), run_capacity)
         });
-        batch.instances_dirty = false;
-        batch.run_table_dirty = false;
+        batch.instances_dirty.clear();
+        batch.run_table_dirty.clear();
         let Some(gpu) = &batch.gpu else {
             continue;
         };
@@ -668,8 +668,8 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
         // writes (e.g. this frame's post-propagation transform pass) need an
         // upload. bounds_dirty stays set so the union system places the
         // entity this frame.
-        batch.instances_dirty = false;
-        batch.run_table_dirty = false;
+        batch.instances_dirty.clear();
+        batch.run_table_dirty.clear();
     }
 }
 
@@ -737,8 +737,8 @@ fn grow_batch_assets(
     gpu.capacity = capacity;
     gpu.run_capacity = run_capacity;
     // The new buffers were created from the current records.
-    batch.instances_dirty = false;
-    batch.run_table_dirty = false;
+    batch.instances_dirty.clear();
+    batch.run_table_dirty.clear();
 }
 
 /// Inputs for [`batch_material`].

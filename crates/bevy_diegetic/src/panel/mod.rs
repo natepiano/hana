@@ -79,6 +79,7 @@ pub use gizmos::ShowTextGizmos;
 pub use perf::BatchPerfStats;
 use perf::DiagnosticsPlugin;
 pub use perf::DiegeticPerfStats;
+pub use perf::MaterialTablePerfStats;
 pub use perf::PanelGeometryPerfStats;
 pub use perf::PanelShapeBatchPerfStats;
 pub use perf::PanelTextPerfStats;

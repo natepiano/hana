@@ -224,6 +224,7 @@ pub use panel::GrowMax;
 pub use panel::GrowRange;
 pub use panel::HeadlessLayoutPlugin;
 pub use panel::Inches;
+pub use panel::MaterialTablePerfStats;
 pub use panel::Millimeters;
 pub use panel::PanelAnchorEdge;
 pub use panel::PanelAnchorEdgeEndpoints;
@@ -335,7 +336,7 @@ impl Plugin for DiegeticUiPlugin {
             "shaders/sdf_material_table.wgsl",
             bevy::shader::Shader::from_wgsl
         );
-        embedded_asset!(app, "shaders/sdf_panel_vertex_pull.wgsl");
+        embedded_asset!(app, "shaders/sdf_panel.wgsl");
 
         app.init_resource::<CascadeDefaults>();
         app.add_plugins((

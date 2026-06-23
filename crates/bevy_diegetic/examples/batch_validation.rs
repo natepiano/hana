@@ -1,8 +1,8 @@
 //! Batching validation scene for SDF surfaces, text, and analytic shapes.
 //!
 //! This example is intentionally kept in sync with the material-table batching
-//! plan. It starts from today's counters and leaves explicit pending rows for
-//! draw/material-table counts that land in later phases.
+//! plan. It starts from today's counters and keeps placeholder rows only for
+//! draw counts that land in later phases.
 
 use bevy::camera::primitives::Aabb;
 use bevy::diagnostic::Diagnostic;
@@ -77,6 +77,8 @@ const AUTHORED_PANELS: usize = 4;
 const SDF_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        4,
     sdf_borders:      5,
+    material_slots:   9,
+    readout_reason:   "value share / texture split",
     text_runs:        10,
     shape_groups:     0,
     shape_primitives: 0,
@@ -84,6 +86,8 @@ const SDF_PANEL_STATS: PanelStats = PanelStats {
 const TEXT_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        8,
     sdf_borders:      3,
+    material_slots:   11,
+    readout_reason:   "text alpha/cull split",
     text_runs:        22,
     shape_groups:     0,
     shape_primitives: 0,
@@ -91,6 +95,8 @@ const TEXT_PANEL_STATS: PanelStats = PanelStats {
 const SHAPE_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        3,
     sdf_borders:      4,
+    material_slots:   7,
+    readout_reason:   "path records share",
     text_runs:        8,
     shape_groups:     3,
     shape_primitives: 7,
@@ -98,6 +104,8 @@ const SHAPE_PANEL_STATS: PanelStats = PanelStats {
 const MIXED_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        5,
     sdf_borders:      2,
+    material_slots:   7,
+    readout_reason:   "families split",
     text_runs:        15,
     shape_groups:     1,
     shape_primitives: 3,
@@ -124,16 +132,15 @@ const AUTHORED_SHAPE_PRIMITIVES: usize = SDF_PANEL_STATS.shape_primitives
     + SHAPE_PANEL_STATS.shape_primitives
     + MIXED_PANEL_STATS.shape_primitives;
 
+const SDF_ANIMATION_GREEN_OFFSET: f32 = 2.1;
+const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
+const SDF_ANIMATION_SPEED: f32 = 0.9;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
-// Placeholder value for the `material table` stats rows until the batching phases
-// land. Plan Phase 5 replaces each with its observed counter.
-const MATERIAL_TABLE_PENDING: &str = "pending";
 
 // Author's prediction of how many draw batches each on-screen panel collapses
-// into, per render family. Batches merge globally by compatibility key, and SDF
-// surfaces are not batched yet (the material-table plan's Phase 5 adds that), so
-// these are intent values the live `actual` row is reconciled against. Columns
-// are text, shape, sdf — the order the ledger renders.
+// into, per render family. Batches merge globally by compatibility key, so these
+// are intent values the live `actual` row is reconciled against. Columns are
+// text, shape, sdf — the order the ledger renders.
 struct PanelExpected {
     label: &'static str,
     text:  usize,
@@ -251,6 +258,10 @@ struct PanelStats {
     sdf_fills:        usize,
     /// Element borders, each one authored SDF border surface.
     sdf_borders:      usize,
+    /// Authored SDF fill/border material-table rows for this panel.
+    material_slots:   usize,
+    /// Short share/split text drawn by `panel_stats_block`.
+    readout_reason:   &'static str,
     /// `builder.text` runs.
     text_runs:        usize,
     /// `PanelDraw::shapes` layers, each one analytic shape group.
@@ -262,10 +273,22 @@ struct PanelStats {
 impl PanelStats {
     /// Fills plus borders: the panel's total authored SDF surfaces.
     const fn sdf_surfaces(self) -> usize { self.sdf_fills + self.sdf_borders }
+
+    /// SDF surfaces, text runs, and analytic path groups rendered by this panel.
+    const fn rendered_records(self) -> usize {
+        self.sdf_surfaces() + self.text_runs + self.shape_groups
+    }
 }
 
 #[derive(Component)]
 struct BatchValidationPanel;
+
+/// Marker for the SDF material-value animation panel.
+#[derive(Component)]
+struct BatchValidationSdfPanel {
+    /// Texture handle reused by the animated SDF material cases.
+    image: Handle<Image>,
+}
 
 #[derive(Component)]
 struct BatchValidationStatsPanel;
@@ -322,13 +345,17 @@ fn main() {
             ),
         )
         .add_systems(Update, update_stats_panel)
+        .add_systems(Update, animate_sdf_surface_panel)
         .run();
 }
 
 fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer>) {
     let sdf_fill_image = asset_server.load("textures/array_texture.png");
     let panels = [
-        ("sdf-surfaces", build_sdf_surface_panel(sdf_fill_image)),
+        (
+            "sdf-surfaces",
+            build_sdf_surface_panel(sdf_fill_image.clone(), 0.0),
+        ),
         ("text-materials", build_text_panel()),
         ("analytic-shapes", build_shape_panel()),
         ("mixed-stack", build_mixed_panel()),
@@ -338,13 +365,18 @@ fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer
         let panel = validation_panel(tree, index);
         match panel {
             Ok(panel) => {
-                commands.spawn((
+                let mut entity = commands.spawn((
                     Name::new(format!("batch validation {name}")),
                     BatchValidationPanel,
                     CameraHomeTarget,
                     panel,
                     Transform::from_xyz(x, y, 0.0),
                 ));
+                if index == 0 {
+                    entity.insert(BatchValidationSdfPanel {
+                        image: sdf_fill_image.clone(),
+                    });
+                }
             },
             Err(error) => error!("batch_validation: failed to build {name}: {error}"),
         }
@@ -389,6 +421,17 @@ fn spawn_validation_panels(mut commands: Commands, asset_server: Res<AssetServer
     ));
 }
 
+fn animate_sdf_surface_panel(
+    time: Res<Time>,
+    panels: Query<(Entity, &BatchValidationSdfPanel)>,
+    mut commands: Commands,
+) {
+    let phase = time.elapsed_secs() * SDF_ANIMATION_SPEED;
+    for (entity, panel) in &panels {
+        commands.set_tree(entity, build_sdf_surface_panel(panel.image.clone(), phase));
+    }
+}
+
 fn panel_grid_position(index: usize) -> (f32, f32) {
     let column = (index % 2).to_f32();
     let row = (index / 2).to_f32();
@@ -407,12 +450,14 @@ fn validation_panel(
     } else {
         CARD_BG_ALT
     };
-    DiegeticPanel::world()
+    let builder = DiegeticPanel::world()
         .size(Mm(PANEL_W), Mm(PANEL_H))
-        .anchor(Anchor::Center)
-        .material(material)
-        .with_tree(tree)
-        .build()
+        .anchor(Anchor::Center);
+    if index == 3 {
+        builder.with_tree(tree).build()
+    } else {
+        builder.material(material).with_tree(tree).build()
+    }
 }
 
 fn spawn_stats_panel(mut commands: Commands) {
@@ -478,6 +523,7 @@ fn validation_stats_sections(
     let batch = &perf.batch;
     let shape_batch = perf.line_batch;
     let sdf = perf.panel_geometry;
+    let material_table = perf.material_table;
     let current_draws = sdf.sdf_batches + batch.batches + shape_batch.batches;
     vec![
         StatsPanelSection::new(
@@ -529,11 +575,14 @@ fn validation_stats_sections(
         StatsPanelSection::new(
             "material table",
             [
+                StatsPanelRow::new("sdf batches", sdf.sdf_batches.to_string())
+                    .detail("scalar/vector materials share; texture resource splits"),
+                StatsPanelRow::new("sdf records", sdf.sdf_records.to_string()),
                 StatsPanelRow::new("sdf uploads", sdf.sdf_uploads.to_string()),
-                StatsPanelRow::new("table rows", MATERIAL_TABLE_PENDING),
-                StatsPanelRow::new("table bytes", MATERIAL_TABLE_PENDING),
-                StatsPanelRow::new("table capacity", MATERIAL_TABLE_PENDING)
-                    .detail("table rows and capacity wire in at plan Phase 5"),
+                StatsPanelRow::new("table rows", material_table.rows.to_string()),
+                StatsPanelRow::new("table bytes", material_table.upload_bytes.to_string()),
+                StatsPanelRow::new("table capacity", material_table.capacity.to_string())
+                    .detail("row capacity stays steady during SDF material animation"),
             ],
         ),
     ]
@@ -697,12 +746,12 @@ fn ledger_cell_style(color: Color) -> TextStyle {
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
-// Four SDF fills laid out 2x2. The colored / metallic / emissive cards differ
-// only in StandardMaterial table values (base_color, metallic, emissive), so
-// post-material-table they share one SDF batch. The image card carries a
+// Four SDF fills laid out 2x2. The panel-default / metallic / emissive cards
+// differ only in StandardMaterial table values, so post-material-table they
+// share one SDF batch. The image card carries a
 // `base_color_texture`, a batch-compatibility splitter, so it forms its own
 // batch — the SDF column's predicted 2 batches in the expected-batches ledger.
-fn build_sdf_surface_panel(image: Handle<Image>) -> LayoutTree {
+fn build_sdf_surface_panel(image: Handle<Image>, phase: f32) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
@@ -722,18 +771,17 @@ fn build_sdf_surface_panel(image: Handle<Image>) -> LayoutTree {
                     .height(Sizing::GROW)
                     .gap(ROW_GAP),
                 |builder| {
-                    sdf_fill_card(
+                    sdf_panel_default_card(
                         builder,
-                        "base color",
-                        "table value",
-                        colored_fill_material(),
+                        "panel default",
+                        "builder material",
                         ACCENT_BLUE,
                     );
                     sdf_fill_card(
                         builder,
-                        "metallic",
-                        "table value",
-                        metallic_glint_material(),
+                        "El material",
+                        "base color animates",
+                        metallic_glint_material(phase),
                         ACCENT_GREEN,
                     );
                 },
@@ -746,9 +794,9 @@ fn build_sdf_surface_panel(image: Handle<Image>) -> LayoutTree {
                 |builder| {
                     sdf_fill_card(
                         builder,
-                        "emissive",
-                        "table value",
-                        emissive_fill_material(),
+                        "El material",
+                        "emissive value",
+                        emissive_fill_material(phase),
                         ACCENT_YELLOW,
                     );
                     sdf_fill_card(
@@ -847,7 +895,7 @@ fn build_mixed_panel() -> LayoutTree {
             mixed_row(
                 builder,
                 "SDF surface",
-                "fill + border",
+                "global default",
                 "2 records",
                 ACCENT_BLUE,
                 Border::all(Mm(0.4), ACCENT_BLUE),
@@ -928,6 +976,9 @@ fn panel_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str, stats:
 }
 
 // The panel's own authored counts, drawn small in the upper-right corner.
+// `panel_stats_block` omits per-panel batch and upload counts: `DiegeticPerfStats`
+// reports observed batch/upload totals globally because batches span panels and
+// uploads happen per batch buffer.
 fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
     builder.with(
         El::column()
@@ -948,6 +999,15 @@ fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
                 format!("shapes {}", stats.shape_groups),
                 stats_style(ACCENT_YELLOW),
             );
+            builder.text(
+                format!("records {}", stats.rendered_records()),
+                stats_style(TEXT_MAIN),
+            );
+            builder.text(
+                format!("mat slots {}", stats.material_slots),
+                stats_style(ACCENT_RED),
+            );
+            builder.text(stats.readout_reason, stats_style(TEXT_MUTED));
         },
     );
 }
@@ -1155,33 +1215,62 @@ fn sdf_fill_card(
     );
 }
 
-// Matte dielectric SDF fill. Differs from the metallic and emissive cards only
-// in StandardMaterial table values, so the three share a batch.
-fn colored_fill_material() -> StandardMaterial {
-    let mut material = default_panel_material();
-    material.base_color = Color::srgb(0.12, 0.26, 0.42);
-    material
+fn sdf_panel_default_card(builder: &mut LayoutBuilder, label: &str, caption: &str, accent: Color) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(2.0))
+            .background(accent)
+            .border(Border::all(Mm(0.3), accent))
+            .corner_radius(CornerRadius::all(Mm(1.4)))
+            .alignment(AlignX::Center, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(1.0)
+                    .alignment(AlignX::Center, AlignY::Center),
+                |builder| {
+                    builder.text(label, swatch_style(accent));
+                    builder.text(caption, small_style(TEXT_MUTED));
+                },
+            );
+        },
+    );
 }
 
-// Brushed-metal SDF fill: full metallic with a moderate roughness that spreads
-// and dims the reflected environment map, with a near-white base color tinting
-// it. Keeps `default_panel_material`'s double-sided / no-cull setup so the
-// diegetic panel still renders from both faces.
-fn metallic_glint_material() -> StandardMaterial {
+// Matte dielectric SDF fill. Differs from the metallic and emissive cards only
+// in StandardMaterial table values, so the three share a batch.
+fn animated_unit(phase: f32, offset: f32) -> f32 { (phase + offset).sin().mul_add(0.5, 0.5) }
+
+// Brushed-metal SDF fill whose base color also sweeps each frame, so the fill
+// visibly cycles while staying batch-compatible with the panel-default and
+// emissive cards: base color, metallic, roughness, and reflectance are all
+// material-table values, never batch splitters. Keeps `default_panel_material`'s
+// double-sided / no-cull setup so the diegetic panel renders from both faces.
+fn metallic_glint_material(phase: f32) -> StandardMaterial {
     let mut material = default_panel_material();
-    material.base_color = Color::srgb(0.22, 0.38, 0.72);
+    material.base_color = Color::srgb(
+        animated_unit(phase, SDF_ANIMATION_RED_OFFSET).mul_add(0.25, 0.18),
+        animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(0.30, 0.28),
+        animated_unit(phase, 0.0).mul_add(0.30, 0.50),
+    );
     material.metallic = 1.0;
-    material.perceptual_roughness = 0.55;
-    material.reflectance = 0.9;
+    material.perceptual_roughness =
+        animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(0.35, 0.35);
+    material.reflectance = animated_unit(phase, SDF_ANIMATION_RED_OFFSET).mul_add(0.2, 0.7);
     material
 }
 
 // Emissive SDF fill: a warm self-lit readout color. `emissive` is a table value,
 // so this stays batch-compatible with the colored and metallic cards.
-fn emissive_fill_material() -> StandardMaterial {
+fn emissive_fill_material(phase: f32) -> StandardMaterial {
     let mut material = default_panel_material();
     material.base_color = Color::srgb(0.06, 0.05, 0.03);
-    material.emissive = EMISSIVE_WARM.into();
+    let intensity = animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(0.8, 0.6);
+    material.emissive = EMISSIVE_WARM.to_linear() * intensity;
     material
 }
 
@@ -1191,7 +1280,9 @@ fn emissive_fill_material() -> StandardMaterial {
 fn image_fill_material(image: Handle<Image>) -> StandardMaterial {
     let mut material = default_panel_material();
     material.base_color = Color::WHITE;
-    material.base_color_texture = Some(image);
+    material.base_color_texture = Some(image.clone());
+    material.emissive_texture = Some(image);
+    material.emissive = LinearRgba::WHITE;
     material
 }
 

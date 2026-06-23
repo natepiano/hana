@@ -6,7 +6,7 @@ use bevy::shader::Shader;
 
 // shader assets
 pub(crate) const EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH: &str =
-    "embedded://bevy_diegetic/shaders/sdf_panel_vertex_pull.wgsl";
+    "embedded://bevy_diegetic/shaders/sdf_panel.wgsl";
 
 /// Stable handle to `material_table.wgsl`, registered as a synchronous shader
 /// library so the `bevy_diegetic::material_table` import composes deterministically

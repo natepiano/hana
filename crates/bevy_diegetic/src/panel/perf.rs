@@ -8,6 +8,9 @@ use bevy_kana::ToF64;
 
 use super::constants::DIAG_LAYOUT_COMPUTE_MS;
 use super::constants::DIAG_LAYOUT_COMPUTE_PANELS;
+use super::constants::DIAG_MATERIAL_TABLE_CAPACITY;
+use super::constants::DIAG_MATERIAL_TABLE_ROWS;
+use super::constants::DIAG_MATERIAL_TABLE_UPLOAD_BYTES;
 use super::constants::DIAG_PANEL_RECONCILE_MS;
 use super::constants::DIAG_PANEL_SDF_BATCHES;
 use super::constants::DIAG_PANEL_SDF_RECORDS;
@@ -54,6 +57,8 @@ pub struct DiegeticPerfStats {
     pub line_batch:     PanelShapeBatchPerfStats,
     /// SDF panel surface batch counters, written by `commit_sdf_batch_buffers`.
     pub panel_geometry: PanelGeometryPerfStats,
+    /// Frame material-table counters, written after the shared table buffer is current.
+    pub material_table: MaterialTablePerfStats,
 }
 
 /// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
@@ -96,6 +101,17 @@ pub struct PanelGeometryPerfStats {
     pub sdf_records: usize,
     /// SDF record-buffer uploads this frame.
     pub sdf_uploads: usize,
+}
+
+/// Per-frame shared material-table counters.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
+pub struct MaterialTablePerfStats {
+    /// Current-frame `MaterialSlotValues` rows appended by render producers.
+    pub rows:         usize,
+    /// Bytes represented by the current-frame live material rows.
+    pub upload_bytes: usize,
+    /// Row capacity of the shared material-table storage buffer.
+    pub capacity:     usize,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
@@ -158,6 +174,9 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_LAYOUT_COMPUTE_PANELS),
             Diagnostic::new(DIAG_PANEL_RECONCILE_MS).with_suffix(" ms"),
+            Diagnostic::new(DIAG_MATERIAL_TABLE_ROWS),
+            Diagnostic::new(DIAG_MATERIAL_TABLE_UPLOAD_BYTES).with_suffix(" bytes"),
+            Diagnostic::new(DIAG_MATERIAL_TABLE_CAPACITY),
             Diagnostic::new(DIAG_PANEL_SDF_BATCHES),
             Diagnostic::new(DIAG_PANEL_SDF_RECORDS),
             Diagnostic::new(DIAG_PANEL_SDF_UPLOADS),
@@ -183,6 +202,15 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_MS, || f64::from(perf.compute_ms));
     diagnostics.add_measurement(&DIAG_LAYOUT_COMPUTE_PANELS, || perf.compute_panels.to_f64());
     diagnostics.add_measurement(&DIAG_PANEL_RECONCILE_MS, || f64::from(perf.reconcile_ms));
+    diagnostics.add_measurement(&DIAG_MATERIAL_TABLE_ROWS, || {
+        perf.material_table.rows.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_MATERIAL_TABLE_UPLOAD_BYTES, || {
+        perf.material_table.upload_bytes.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_MATERIAL_TABLE_CAPACITY, || {
+        perf.material_table.capacity.to_f64()
+    });
     diagnostics.add_measurement(&DIAG_PANEL_SDF_BATCHES, || {
         perf.panel_geometry.sdf_batches.to_f64()
     });
