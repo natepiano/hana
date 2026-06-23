@@ -1,10 +1,10 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
+use super::FitOverlay;
 use super::context::FitOverlayEmptyReason;
 use super::fit_target_bounds::FitMarginPercents;
 use super::visual::FitOverlayVisual;
-use crate::components::FitOverlay;
 
 #[derive(Clone, Copy)]
 pub(super) struct RetainedVisualEntity {
@@ -102,7 +102,7 @@ mod tests {
     use bevy::camera::visibility::RenderLayers;
 
     use super::*;
-    use crate::fit_overlay::visual::FitOverlayVisualKind;
+    use crate::fit::overlay::visual::FitOverlayVisualKind;
 
     #[test]
     fn deduplicate_fit_overlay_visuals_keeps_one_visual_per_camera_kind() {

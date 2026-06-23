@@ -60,23 +60,23 @@ impl From<f32> for LightTravelPhase {
     }
 }
 
+/// `Esc` — toggle the tube light animation between running and paused.
+pub(crate) fn toggle_light_animation(time: Res<Time>, mut animation: ResMut<LightAnimation>) {
+    *animation = match *animation {
+        LightAnimation::Running => LightAnimation::Paused {
+            frozen_at: time.elapsed_secs(),
+        },
+        LightAnimation::Paused { .. } => LightAnimation::Running,
+    };
+}
+
 /// Oscillates a point light along a tube's center axis.
-/// 2s travel each direction, 0.5s pause at each end. Esc toggles pause.
+/// 2s travel each direction, 0.5s pause at each end.
 pub(crate) fn animate_tube_light(
     time: Res<Time>,
-    keyboard: Res<ButtonInput<KeyCode>>,
-    mut animation: ResMut<LightAnimation>,
+    animation: Res<LightAnimation>,
     mut lights: Query<(&TubeLight, &mut Transform)>,
 ) {
-    if keyboard.just_pressed(KeyCode::Escape) {
-        *animation = match *animation {
-            LightAnimation::Running => LightAnimation::Paused {
-                frozen_at: time.elapsed_secs(),
-            },
-            LightAnimation::Paused { .. } => LightAnimation::Running,
-        };
-    }
-
     let elapsed = match *animation {
         LightAnimation::Paused { frozen_at } => frozen_at,
         LightAnimation::Running => time.elapsed_secs(),

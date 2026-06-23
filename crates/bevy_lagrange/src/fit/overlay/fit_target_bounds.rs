@@ -5,6 +5,7 @@ use bevy::prelude::*;
 use bevy::ui::UiTargetCamera;
 use bevy::window::PrimaryWindow;
 
+use super::FitOverlay;
 use super::constants::DEFAULT_OVERLAY_LINE_WIDTH;
 use super::constants::OVERLAY_BALANCED_COLOR;
 use super::constants::OVERLAY_RECTANGLE_COLOR;
@@ -31,12 +32,11 @@ use super::screen_space;
 use super::screen_space::MarginBalance;
 use super::visual::FitOverlayVisual;
 use super::visual::FitOverlayVisualKind;
-use crate::components::CurrentFitTarget;
-use crate::components::FitOverlay;
+use crate::CurrentFitTarget;
 use crate::constants::TOLERANCE;
 use crate::fit::Edge;
-use crate::projection;
-use crate::projection::ScreenSpaceBounds;
+use crate::fit::projection;
+use crate::fit::projection::ScreenSpaceBounds;
 
 /// Configuration for fit target overlay colors and line appearance.
 ///

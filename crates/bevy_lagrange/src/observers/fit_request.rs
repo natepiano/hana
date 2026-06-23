@@ -3,7 +3,6 @@ use bevy::prelude::*;
 use crate::events::FitAnchor;
 use crate::fit;
 use crate::fit::FitSolution;
-use crate::projection;
 
 /// Parameters for a fit calculation request.
 pub(super) struct FitRequest<'a> {
@@ -30,7 +29,7 @@ pub(super) fn prepare_fit_for_target(
 ) -> Option<FitSolution> {
     let context = request.context;
     let target = request.target;
-    let Some((vertices, geometric_center)) = projection::extract_mesh_vertices(
+    let Some((vertices, geometric_center)) = fit::extract_mesh_vertices(
         target,
         children_query,
         mesh_query,

@@ -1,8 +1,8 @@
 use bevy::prelude::*;
 
-use crate::projection;
-use crate::projection::CameraBasis;
-use crate::projection::ProjectionMode;
+use crate::fit::projection;
+use crate::fit::projection::CameraBasis;
+use crate::fit::projection::ProjectionMode;
 
 /// 2D cross product for three points (for convex hull turn detection).
 fn cross_2d(o: (f32, f32), a: (f32, f32), b: (f32, f32)) -> f32 {

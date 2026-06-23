@@ -11,11 +11,12 @@ use super::OrbitCamUpdateRequest;
 use super::OrbitDragState;
 use super::TimeSource;
 use super::UpsideDownPolicy;
+use super::orbital_math;
 use crate::constants::SCROLL_ZOOM_FACTOR;
 use crate::input::CameraInputSurfaceMetrics;
 use crate::input::OrbitCamInput;
 use crate::input::ResolvedOrbitCamInputRoute;
-use crate::orbital_math;
+use crate::interpolation;
 
 /// Aggregated camera input for a single frame.
 struct CameraInput {
@@ -235,25 +236,25 @@ fn smooth_and_update_transform(
         return;
     };
 
-    let new_yaw = orbital_math::lerp_and_snap_f32(
+    let new_yaw = interpolation::lerp_and_snap_f32(
         yaw,
         orbit_cam.target_yaw,
         orbit_cam.orbit.damping(),
         delta,
     );
-    let new_pitch = orbital_math::lerp_and_snap_f32(
+    let new_pitch = interpolation::lerp_and_snap_f32(
         pitch,
         orbit_cam.target_pitch,
         orbit_cam.orbit.damping(),
         delta,
     );
-    let new_radius = orbital_math::lerp_and_snap_f32(
+    let new_radius = interpolation::lerp_and_snap_f32(
         radius,
         orbit_cam.target_radius,
         orbit_cam.zoom.damping(),
         delta,
     );
-    let new_focus = orbital_math::lerp_and_snap_position(
+    let new_focus = interpolation::lerp_and_snap_position(
         orbit_cam.focus,
         orbit_cam.target_focus,
         orbit_cam.pan.damping(),

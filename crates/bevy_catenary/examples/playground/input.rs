@@ -1,6 +1,5 @@
-//! `DragState`, `SlackAdjustment`, `handle_drag`, `handle_keyboard`, and the
-//! `on_drag_start`, `on_despawnable_clicked`, and `on_cable_mesh_child_added`
-//! pointer observers.
+//! `DragState`, `handle_drag`, shortcut systems, slack title-bar pulse systems,
+//! and pointer observers.
 
 use std::time::Duration;
 
@@ -12,27 +11,26 @@ use bevy_catenary::CurveKind;
 use bevy_catenary::DebugGizmos;
 use bevy_catenary::Solver;
 use bevy_lagrange::ZoomToFit;
+use fairy_dust::FairyDustOrbitCam;
 
 use super::constants::MIN_TAUT_CABLE_SLACK;
 use super::constants::NAVIGATION_DURATION_MS;
 use super::constants::RAY_EPSILON;
 use super::constants::SLACK_ADJUSTMENT_STEP;
+use super::constants::SLACK_PULSE_SECONDS;
 use super::constants::ZOOM_DURATION_MS;
 use super::constants::ZOOM_MARGIN_GROUND;
 use super::constants::ZOOM_MARGIN_MESH;
-use super::constants::ZOOM_MARGIN_NAVIGATION;
 use super::detach_demo;
 use super::detach_demo::DetachDemoEntity;
 use super::entities;
 use super::entities::Despawnable;
 use super::entities::Draggable;
+use super::entities::FullSceneTarget;
 use super::entities::NodeCube;
 use super::entities::Selected;
 use super::entities::SlackLocked;
-use super::scene::SceneEntities;
 use super::scene::SharedCableMaterial;
-use super::sections::CurrentSection;
-use super::sections::SectionBounds;
 
 #[derive(Resource, Default)]
 pub(crate) struct DragState {
@@ -40,36 +38,6 @@ pub(crate) struct DragState {
     y_height:    f32,
     /// Offset from the cursor hit point to the entity center (XZ only).
     grab_offset: Vec2,
-}
-
-#[derive(Clone, Copy)]
-enum SlackAdjustment {
-    Increase,
-    Decrease,
-    None,
-}
-
-impl SlackAdjustment {
-    const fn delta(self) -> f32 {
-        match self {
-            Self::Increase => SLACK_ADJUSTMENT_STEP,
-            Self::Decrease => -SLACK_ADJUSTMENT_STEP,
-            Self::None => 0.0,
-        }
-    }
-}
-
-impl From<&ButtonInput<KeyCode>> for SlackAdjustment {
-    fn from(keyboard: &ButtonInput<KeyCode>) -> Self {
-        match (
-            keyboard.pressed(KeyCode::Equal),
-            keyboard.pressed(KeyCode::Minus),
-        ) {
-            (true, false) => Self::Increase,
-            (false, true) => Self::Decrease,
-            _ => Self::None,
-        }
-    }
 }
 
 fn cursor_ray_y_plane(
@@ -177,12 +145,31 @@ pub(crate) fn on_cable_mesh_child_added(
     commands.entity(cable_mesh_child.0).observe(on_mesh_clicked);
 }
 
-pub(crate) fn handle_keyboard(
-    keyboard: Res<ButtonInput<KeyCode>>,
+/// `D` — toggle catenary debug gizmos.
+pub(crate) fn toggle_debug_gizmos(mut debug_gizmos: ResMut<DebugGizmos>) {
+    *debug_gizmos = match *debug_gizmos {
+        DebugGizmos::Enabled => DebugGizmos::Disabled,
+        DebugGizmos::Disabled => DebugGizmos::Enabled,
+    };
+}
+
+/// `F` — frame the whole scene by fitting the ground plane.
+pub(crate) fn frame_full_scene(
     mut commands: Commands,
-    mut debug_gizmos: ResMut<DebugGizmos>,
-    scene_entities: Res<SceneEntities>,
-    mut cables: Query<&mut Cable, Without<SlackLocked>>,
+    camera: Single<Entity, With<FairyDustOrbitCam>>,
+    ground: Single<Entity, With<FullSceneTarget>>,
+) {
+    commands.trigger(
+        ZoomToFit::new(*camera, *ground)
+            .margin(ZOOM_MARGIN_GROUND)
+            .duration(Duration::from_millis(NAVIGATION_DURATION_MS))
+            .easing(EaseFunction::CubicOut),
+    );
+}
+
+/// `R` — despawn and respawn the Detach Policy section.
+pub(crate) fn reset_detach_demo(
+    mut commands: Commands,
     shared_cable_material: Res<SharedCableMaterial>,
     detach_entities: Query<Entity, With<DetachDemoEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -193,56 +180,110 @@ pub(crate) fn handle_keyboard(
         (With<NodeCube>, Without<Draggable>, Without<Despawnable>),
     >,
 ) {
-    if keyboard.just_pressed(KeyCode::KeyD) {
-        *debug_gizmos = match *debug_gizmos {
-            DebugGizmos::Enabled => DebugGizmos::Disabled,
-            DebugGizmos::Disabled => DebugGizmos::Enabled,
-        };
+    let node_mesh = node_mesh_query.iter().next().map(|m| m.0.clone());
+    let node_material = node_material_query.iter().next().map(|m| m.0.clone());
+
+    for entity in &detach_entities {
+        commands.entity(entity).despawn();
     }
 
-    if keyboard.just_pressed(KeyCode::KeyF) {
-        commands.trigger(
-            ZoomToFit::new(scene_entities.camera, scene_entities.ground)
-                .margin(ZOOM_MARGIN_GROUND)
-                .duration(Duration::from_millis(NAVIGATION_DURATION_MS))
-                .easing(EaseFunction::CubicOut),
+    if let (Some(node_mesh), Some(node_material)) = (node_mesh, node_material) {
+        detach_demo::spawn_detach_demo(
+            &mut commands,
+            &mut meshes,
+            &mut materials,
+            &node_mesh,
+            &node_material,
+            &shared_cable_material.0,
         );
     }
+}
 
-    let slack_delta = SlackAdjustment::from(keyboard.as_ref()).delta();
-    if slack_delta != 0.0 {
-        for mut cable in &mut cables {
-            match &mut cable.solver {
-                Solver::Catenary(catenary)
-                | Solver::Routed {
-                    curve_kind: CurveKind::Catenary(catenary),
-                    ..
-                } => {
-                    catenary.slack = (catenary.slack + slack_delta).max(MIN_TAUT_CABLE_SLACK);
-                },
-                _ => {},
-            }
+fn adjust_cable_slack(delta: f32, cables: &mut Query<&mut Cable, Without<SlackLocked>>) {
+    for mut cable in cables.iter_mut() {
+        match &mut cable.solver {
+            Solver::Catenary(catenary)
+            | Solver::Routed {
+                curve_kind: CurveKind::Catenary(catenary),
+                ..
+            } => {
+                catenary.slack = (catenary.slack + delta).max(MIN_TAUT_CABLE_SLACK);
+            },
+            _ => {},
         }
     }
+}
 
-    if keyboard.just_pressed(KeyCode::KeyR) {
-        let node_mesh = node_mesh_query.iter().next().map(|m| m.0.clone());
-        let node_material = node_material_query.iter().next().map(|m| m.0.clone());
+/// `=` held — increase catenary slack each frame.
+pub(crate) fn increase_slack(mut cables: Query<&mut Cable, Without<SlackLocked>>) {
+    adjust_cable_slack(SLACK_ADJUSTMENT_STEP, &mut cables);
+}
 
-        for entity in &detach_entities {
-            commands.entity(entity).despawn();
-        }
+/// `-` held — decrease catenary slack each frame.
+pub(crate) fn decrease_slack(mut cables: Query<&mut Cable, Without<SlackLocked>>) {
+    adjust_cable_slack(-SLACK_ADJUSTMENT_STEP, &mut cables);
+}
 
-        if let (Some(node_mesh), Some(node_material)) = (node_mesh, node_material) {
-            detach_demo::spawn_detach_demo(
-                &mut commands,
-                &mut meshes,
-                &mut materials,
-                &node_mesh,
-                &node_material,
-                &shared_cable_material.0,
-            );
-        }
+/// Lights the `+` slack segment in the title bar.
+#[derive(Event)]
+pub(crate) struct SlackPlusPulseBegin;
+
+/// Clears the `+` slack segment highlight.
+#[derive(Event)]
+pub(crate) struct SlackPlusPulseEnd;
+
+/// Lights the `-` slack segment in the title bar.
+#[derive(Event)]
+pub(crate) struct SlackMinusPulseBegin;
+
+/// Clears the `-` slack segment highlight.
+#[derive(Event)]
+pub(crate) struct SlackMinusPulseEnd;
+
+/// Deadlines (in elapsed seconds) at which each slack segment highlight clears.
+#[derive(Resource, Default)]
+pub(crate) struct SlackPulse {
+    plus_end_secs:  Option<f32>,
+    minus_end_secs: Option<f32>,
+}
+
+/// Flashes the `+` slack segment for [`SLACK_PULSE_SECONDS`].
+pub(crate) fn begin_plus_slack_pulse(
+    time: Res<Time>,
+    mut pulse: ResMut<SlackPulse>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs();
+    commands.trigger(SlackPlusPulseBegin);
+    pulse.plus_end_secs = Some(now + SLACK_PULSE_SECONDS);
+}
+
+/// Flashes the `-` slack segment for [`SLACK_PULSE_SECONDS`].
+pub(crate) fn begin_minus_slack_pulse(
+    time: Res<Time>,
+    mut pulse: ResMut<SlackPulse>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs();
+    commands.trigger(SlackMinusPulseBegin);
+    pulse.minus_end_secs = Some(now + SLACK_PULSE_SECONDS);
+}
+
+/// Clears slack title-bar highlights once their deadlines pass.
+pub(crate) fn clear_slack_pulses(
+    time: Res<Time>,
+    mut pulse: ResMut<SlackPulse>,
+    mut commands: Commands,
+) {
+    let now = time.elapsed_secs();
+    if pulse.plus_end_secs.is_some_and(|end| now >= end) {
+        commands.trigger(SlackPlusPulseEnd);
+        pulse.plus_end_secs = None;
+    }
+
+    if pulse.minus_end_secs.is_some_and(|end| now >= end) {
+        commands.trigger(SlackMinusPulseEnd);
+        pulse.minus_end_secs = None;
     }
 }
 
@@ -264,24 +305,6 @@ pub(crate) fn on_mesh_clicked(
     commands.trigger(
         ZoomToFit::new(camera, clicked)
             .margin(ZOOM_MARGIN_MESH)
-            .duration(Duration::from_millis(ZOOM_DURATION_MS))
-            .easing(EaseFunction::CubicOut),
-    );
-}
-
-pub(crate) fn on_ground_clicked(
-    _click: On<Pointer<Click>>,
-    mut commands: Commands,
-    selected: Query<Entity, With<Selected>>,
-    scene_entities: Res<SceneEntities>,
-    section_bounds: Res<SectionBounds>,
-    current_section: Res<CurrentSection>,
-) {
-    entities::deselect_all(&mut commands, &selected);
-
-    commands.trigger(
-        ZoomToFit::new(scene_entities.camera, section_bounds.0[current_section.0])
-            .margin(ZOOM_MARGIN_NAVIGATION)
             .duration(Duration::from_millis(ZOOM_DURATION_MS))
             .easing(EaseFunction::CubicOut),
     );

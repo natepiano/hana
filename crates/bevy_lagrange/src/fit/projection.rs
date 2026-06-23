@@ -4,7 +4,7 @@ use bevy::mesh::VertexAttributeValues;
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-use super::constants::MIN_VISIBLE_DEPTH;
+use crate::constants::MIN_VISIBLE_DEPTH;
 
 // ============================================================================
 // Camera basis

@@ -10,7 +10,6 @@ use super::fit_request::FitRequest;
 use super::snap_orbit;
 use super::snap_orbit::SnapOrbit;
 use crate::animation::CameraMove;
-use crate::components::CurrentFitTarget;
 use crate::constants::MILLIS_PER_SECOND;
 use crate::events::AnimateToFit;
 use crate::events::AnimationBegin;
@@ -25,6 +24,16 @@ use crate::events::ZoomEnd;
 use crate::events::ZoomReason;
 use crate::events::ZoomToFit;
 use crate::orbit_cam::OrbitCam;
+
+/// Marks the entity that the camera is currently fitted to.
+///
+/// Persists after fit completes to enable persistent debug overlay.
+#[derive(Component, Reflect, Debug)]
+#[reflect(Component)]
+pub struct CurrentFitTarget(
+    /// The entity being fitted.
+    pub Entity,
+);
 
 /// Observer for `ZoomToFit` event - frames a target entity in the camera view.
 /// When duration is `Duration::ZERO`, snaps instantly.

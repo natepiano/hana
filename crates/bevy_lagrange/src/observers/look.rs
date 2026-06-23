@@ -205,10 +205,10 @@ pub(super) fn on_look_at_and_zoom_to_fit(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::CurrentFitTarget;
     use crate::animation::AnimationSourceMarker;
     use crate::animation::CameraMoveList;
     use crate::animation::ZoomAnimationMarker;
-    use crate::components::CurrentFitTarget;
     use crate::events::ZoomBegin;
     use crate::events::ZoomEnd;
     use crate::observers::ObserverPlugin;

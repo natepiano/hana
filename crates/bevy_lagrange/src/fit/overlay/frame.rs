@@ -3,10 +3,10 @@ use bevy_kana::ToF32;
 
 use super::context::FitOverlayCameraContext;
 use super::context::FitOverlayEmptyReason;
-use crate::projection;
-use crate::projection::CameraBasis;
-use crate::projection::ProjectionMode;
-use crate::projection::ScreenSpaceBounds;
+use crate::fit::projection;
+use crate::fit::projection::CameraBasis;
+use crate::fit::projection::ProjectionMode;
+use crate::fit::projection::ScreenSpaceBounds;
 
 /// Desired overlay frame for one source camera.
 pub(super) enum FitOverlayFrame {

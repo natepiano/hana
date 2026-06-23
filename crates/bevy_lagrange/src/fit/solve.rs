@@ -11,21 +11,21 @@ use core::fmt::Formatter;
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-use super::constants::CENTERING_MAX_ITERATIONS;
-use super::constants::CENTERING_TOLERANCE;
-use super::constants::DEGENERATE_EXTENT_THRESHOLD;
-use super::constants::HORIZONTAL_DIMENSION_LABEL;
-use super::constants::INITIAL_RADIUS_MULTIPLIER;
-use super::constants::MAX_ITERATIONS;
-use super::constants::MAX_MARGIN;
-use super::constants::MAX_RADIUS_MULTIPLIER;
-use super::constants::MIN_MARGIN;
-use super::constants::MIN_RADIUS_MULTIPLIER;
-use super::constants::TOLERANCE;
-use super::constants::VERTICAL_DIMENSION_LABEL;
 use super::projection;
 use super::projection::ProjectionMode;
 use super::projection::ScreenSpaceBounds;
+use crate::constants::CENTERING_MAX_ITERATIONS;
+use crate::constants::CENTERING_TOLERANCE;
+use crate::constants::DEGENERATE_EXTENT_THRESHOLD;
+use crate::constants::HORIZONTAL_DIMENSION_LABEL;
+use crate::constants::INITIAL_RADIUS_MULTIPLIER;
+use crate::constants::MAX_ITERATIONS;
+use crate::constants::MAX_MARGIN;
+use crate::constants::MAX_RADIUS_MULTIPLIER;
+use crate::constants::MIN_MARGIN;
+use crate::constants::MIN_RADIUS_MULTIPLIER;
+use crate::constants::TOLERANCE;
+use crate::constants::VERTICAL_DIMENSION_LABEL;
 use crate::events::FitAnchor;
 
 /// Returns the zoom margin multiplier (1.0 / (1.0 - margin)).

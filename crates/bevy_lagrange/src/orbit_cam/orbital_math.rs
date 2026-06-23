@@ -1,15 +1,13 @@
-//! Orbit camera math and interpolation helpers.
+//! `OrbitCam` spherical-coordinate transform math.
 
 use bevy::prelude::*;
 use bevy_kana::Position;
 
-use super::constants::EPSILON;
-use super::constants::MIN_ORBIT_RADIUS;
-use super::constants::PERSPECTIVE_NEAR_MIN;
-use super::constants::PERSPECTIVE_NEAR_RADIUS_FACTOR;
-use super::constants::SMOOTHNESS_EXPONENT;
+use crate::constants::MIN_ORBIT_RADIUS;
+use crate::constants::PERSPECTIVE_NEAR_MIN;
+use crate::constants::PERSPECTIVE_NEAR_RADIUS_FACTOR;
 
-pub(crate) fn calculate_from_translation_and_focus(
+pub(super) fn calculate_from_translation_and_focus(
     translation: impl Into<Position>,
     focus: impl Into<Position>,
     axis: [Vec3; 3],
@@ -29,7 +27,7 @@ pub(crate) fn calculate_from_translation_and_focus(
 }
 
 /// Update `transform` based on yaw, pitch, and the camera's focus and radius
-pub(crate) fn update_orbit_transform(
+pub(super) fn update_orbit_transform(
     yaw: f32,
     pitch: f32,
     mut radius: f32,
@@ -74,33 +72,6 @@ fn sync_perspective_near_clip(projection: &mut PerspectiveProjection, radius: f3
         .min(projection.far);
     projection.near = new_near;
     projection.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -new_near);
-}
-
-pub(crate) const fn approx_equal(a: f32, b: f32) -> bool { (a - b).abs() < EPSILON }
-
-pub(crate) fn lerp_and_snap_f32(from: f32, to: f32, smoothness: f32, delta_secs: f32) -> f32 {
-    let t = smoothness.powi(SMOOTHNESS_EXPONENT);
-    let mut new_value = from.lerp(to, 1.0 - t.powf(delta_secs));
-    if smoothness < 1.0 && approx_equal(new_value, to) {
-        new_value = to;
-    }
-    new_value
-}
-
-pub(crate) fn lerp_and_snap_position(
-    from: impl Into<Position>,
-    to: impl Into<Position>,
-    smoothness: f32,
-    delta_secs: f32,
-) -> Position {
-    let from = from.into();
-    let to = to.into();
-    let t = smoothness.powi(SMOOTHNESS_EXPONENT);
-    let mut new_value = (*from).lerp(*to, 1.0 - t.powf(delta_secs));
-    if smoothness < 1.0 && approx_equal((new_value - *to).length(), 0.0) {
-        new_value.x = to.x;
-    }
-    Position(new_value)
 }
 
 #[cfg(test)]
@@ -214,31 +185,6 @@ mod calculate_from_translation_and_focus_tests {
 
 #[cfg(test)]
 #[allow(
-    clippy::unreadable_literal,
-    clippy::float_cmp,
-    reason = "test assertions verify deterministic bitwise-exact float results"
-)]
-mod approx_equal_tests {
-    use super::*;
-
-    #[test]
-    fn same_value_is_approx_equal() {
-        assert!(approx_equal(1.0, 1.0));
-    }
-
-    #[test]
-    fn value_within_threshold_is_approx_equal() {
-        assert!(approx_equal(1.0, EPSILON.mul_add(0.1, 1.0)));
-    }
-
-    #[test]
-    fn value_outside_threshold_is_not_approx_equal() {
-        assert!(!approx_equal(1.0, EPSILON.mul_add(10.0, 1.0)));
-    }
-}
-
-#[cfg(test)]
-#[allow(
     clippy::float_cmp,
     reason = "tests verify exact near-plane sync behavior"
 )]
@@ -277,73 +223,5 @@ mod sync_perspective_near_clip_tests {
         sync_perspective_near_clip(&mut projection, 20.0);
         assert_eq!(projection.near, 0.01);
         assert_eq!(projection.near_clip_plane, Vec4::new(0.0, 0.0, -1.0, -0.01));
-    }
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::unreadable_literal,
-    clippy::float_cmp,
-    reason = "test assertions verify deterministic bitwise-exact float results"
-)]
-mod lerp_and_snap_f32_tests {
-    use super::*;
-
-    #[test]
-    fn lerps_when_output_outside_snap_threshold() {
-        let out = lerp_and_snap_f32(1.0, 2.0, 0.5, 1.0);
-        // Due to the frame rate independence, this value is not easily predictable
-        assert_eq!(out, 1.9921875);
-    }
-
-    #[test]
-    fn snaps_to_target_when_inside_threshold() {
-        let out = lerp_and_snap_f32(1.9991, 2.0, 0.5, 1.0);
-        assert_eq!(out, 2.0);
-        let out = lerp_and_snap_f32(1.9991, 2.0, 0.1, 1.0);
-        assert_eq!(out, 2.0);
-        let out = lerp_and_snap_f32(1.9991, 2.0, 0.9, 1.0);
-        assert_eq!(out, 2.0);
-    }
-
-    #[test]
-    fn does_not_snap_if_smoothness_is_one() {
-        // Smoothness of one results in the value not changing, so it doesn't make sense to snap
-        let out = lerp_and_snap_f32(1.9991, 2.0, 1.0, 1.0);
-        assert_eq!(out, 1.9991);
-    }
-}
-
-#[cfg(test)]
-#[allow(
-    clippy::unreadable_literal,
-    clippy::float_cmp,
-    reason = "test assertions verify deterministic bitwise-exact float results"
-)]
-mod lerp_and_snap_position_tests {
-    use super::*;
-
-    #[test]
-    fn lerps_when_output_outside_snap_threshold() {
-        let out = lerp_and_snap_position(Position::default(), Position(Vec3::X), 0.5, 1.0);
-        // Due to the frame rate independence, this value is not easily predictable
-        assert_eq!(out, Position::new(0.9921875, 0.0, 0.0));
-    }
-
-    #[test]
-    fn snaps_to_target_when_inside_threshold() {
-        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.5, 1.0);
-        assert_eq!(out, Position(Vec3::X));
-        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.1, 1.0);
-        assert_eq!(out, Position(Vec3::X));
-        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 0.9, 1.0);
-        assert_eq!(out, Position(Vec3::X));
-    }
-
-    #[test]
-    fn does_not_snap_if_smoothness_is_one() {
-        // Smoothness of one results in the value not changing, so it doesn't make sense to snap
-        let out = lerp_and_snap_position(Position(Vec3::X * 0.9991), Position(Vec3::X), 1.0, 1.0);
-        assert_eq!(out, Position(Vec3::X * 0.9991));
     }
 }

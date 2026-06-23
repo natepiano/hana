@@ -9,6 +9,9 @@ mod fit_request;
 mod look;
 mod snap_orbit;
 
+pub use animation::AnimationConflictPolicy;
+pub use fit::CurrentFitTarget;
+
 /// Registers every observer in the `observers` domain.
 pub(crate) struct ObserverPlugin;
 

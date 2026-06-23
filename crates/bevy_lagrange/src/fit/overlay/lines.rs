@@ -385,11 +385,11 @@ mod tests {
     use bevy_kana::Position;
 
     use super::*;
-    use crate::fit_overlay::context::FitOverlayCameraContext;
-    use crate::fit_overlay::frame::FitOverlayLayout;
-    use crate::projection::CameraBasis;
-    use crate::projection::ProjectionMode;
-    use crate::projection::ScreenSpaceBounds;
+    use crate::fit::overlay::context::FitOverlayCameraContext;
+    use crate::fit::overlay::frame::FitOverlayLayout;
+    use crate::fit::projection::CameraBasis;
+    use crate::fit::projection::ProjectionMode;
+    use crate::fit::projection::ScreenSpaceBounds;
 
     #[derive(Resource)]
     struct TestLineCamera(Entity);

@@ -2,28 +2,20 @@
 #![doc = include_str!("../README.md")]
 
 mod animation;
-mod components;
 mod constants;
 mod events;
 mod fit;
-#[cfg(feature = "fit_overlay")]
-mod fit_overlay;
 mod fly_cam;
 mod input;
+mod interpolation;
 mod observers;
 mod orbit_cam;
-mod orbital_math;
-mod projection;
 mod system_sets;
 
+pub use animation::CameraInputInterruptBehavior;
 pub use animation::CameraMove;
 pub use animation::CameraMoveList;
 use bevy::prelude::*;
-pub use components::AnimationConflictPolicy;
-pub use components::CameraInputInterruptBehavior;
-pub use components::CurrentFitTarget;
-#[cfg(feature = "fit_overlay")]
-pub use components::FitOverlay;
 pub use events::AnimateToFit;
 pub use events::AnimationBegin;
 pub use events::AnimationEnd;
@@ -43,9 +35,10 @@ pub use events::ZoomEnd;
 pub use events::ZoomReason;
 pub use events::ZoomToFit;
 #[cfg(feature = "fit_overlay")]
-pub use fit_overlay::FitTargetOverlayConfig;
+pub use fit::FitOverlay;
+use fit::FitPlugin;
 #[cfg(feature = "fit_overlay")]
-use fit_overlay::ZoomOverlayPlugin;
+pub use fit::FitTargetOverlayConfig;
 pub use fly_cam::FlyCam;
 use fly_cam::FlyCamPlugin;
 pub use input::ActionBindingDescriptor;
@@ -150,6 +143,8 @@ pub use input::ZoomDirection;
 pub use input::ZoomInversion;
 pub use input::describe_orbit_cam_controls;
 pub use input::validate_bindings;
+pub use observers::AnimationConflictPolicy;
+pub use observers::CurrentFitTarget;
 use observers::ObserverPlugin;
 pub use orbit_cam::FocusBoundsShape;
 pub use orbit_cam::InitializationState;
@@ -182,11 +177,13 @@ impl Plugin for LagrangePlugin {
     fn build(&self, app: &mut App) {
         // Shared camera infrastructure, used across all camera kinds. Each
         // camera kind registers its own enhanced-input context in its plugin.
-        app.add_plugins((LagrangeSystemSetsPlugin, ObserverPlugin, InputPlugin));
+        app.add_plugins((
+            LagrangeSystemSetsPlugin,
+            ObserverPlugin,
+            InputPlugin,
+            FitPlugin,
+        ));
         app.add_systems(Update, animation::process_camera_move_list);
-
-        #[cfg(feature = "fit_overlay")]
-        app.add_plugins(ZoomOverlayPlugin);
 
         // Per-camera-kind plugins.
         app.add_plugins((OrbitCamPlugin, FlyCamPlugin));

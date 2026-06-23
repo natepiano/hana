@@ -23,16 +23,28 @@ pub use fit_target_bounds::FitTargetOverlayConfig;
 use lines::FitOverlayLineMaterial;
 use lines::FitOverlayLineMaterials;
 
-use super::components::FitOverlay;
+/// Enables the fit target debug overlay on a camera entity.
+///
+/// Insert this component to enable the overlay; remove it to disable the
+/// overlay. The presence or absence of `FitOverlay` is the toggle.
+///
+/// Generated overlay visuals are owned by this camera. Retained line visuals
+/// copy this camera's effective `RenderLayers`, render through normal Bevy
+/// layer-intersection visibility, and do not add another render visibility
+/// filter. Labels are plain Bevy UI nodes targeted through `UiTargetCamera`.
+/// `Camera::order` keeps its normal pass-order meaning.
+#[derive(Component, Reflect, Default)]
+#[reflect(Component, Default)]
+pub struct FitOverlay;
 
 /// System set for resolving and reconciling fit-overlay visuals.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub(crate) struct FitOverlaySystemSet;
 
 /// Plugin that enables fit target debug visualization.
-pub(crate) struct ZoomOverlayPlugin;
+pub(crate) struct FitOverlayPlugin;
 
-impl Plugin for ZoomOverlayPlugin {
+impl Plugin for FitOverlayPlugin {
     fn build(&self, app: &mut App) {
         if app.world().contains_resource::<AssetServer>() {
             app.add_plugins(MaterialPlugin::<lines::FitOverlayLineMaterial>::default());

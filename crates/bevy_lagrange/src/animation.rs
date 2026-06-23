@@ -15,7 +15,6 @@ use bevy_kana::Displacement;
 use bevy_kana::Position;
 
 use super::OrbitCam;
-use super::components::CameraInputInterruptBehavior;
 use super::constants::EXTERNAL_INPUT_TOLERANCE;
 use super::constants::MILLIS_PER_SECOND;
 use super::events::AnimationEnd;
@@ -213,6 +212,39 @@ impl MoveState {
             Self::Ready => false,
         }
     }
+}
+
+/// Controls what happens when user input occurs during an in-flight animation.
+///
+/// Specifically, this governs **user input to the camera** (orbit, pan, zoom) while an
+/// animation is playing.
+///
+/// This is a required component on [`CameraMoveList`] — if not explicitly inserted, it
+/// defaults to [`Ignore`](CameraInputInterruptBehavior::Ignore).
+///
+/// This component is orthogonal to [`AnimationConflictPolicy`](crate::AnimationConflictPolicy) —
+/// `CameraInputInterruptBehavior` handles physical camera input during an animation, while
+/// `AnimationConflictPolicy` handles programmatic animation requests that arrive while one is
+/// already playing.
+///
+/// - [`Ignore`](CameraInputInterruptBehavior::Ignore) — disable camera input while animating and
+///   keep animating uninterrupted. No interrupt lifecycle events are emitted.
+/// - [`Cancel`](CameraInputInterruptBehavior::Cancel) — stop the camera where it is and fire
+///   `*Cancelled` events
+/// - [`Complete`](CameraInputInterruptBehavior::Complete) — jump to the final position of the
+///   entire queue and fire normal `*End` events
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component, Default)]
+pub enum CameraInputInterruptBehavior {
+    /// Disable camera input and keep animating uninterrupted.
+    #[default]
+    Ignore,
+    /// Stop the camera at its current position. Fires `AnimationEnd` /
+    /// `ZoomEnd` with `reason: Cancelled`.
+    Cancel,
+    /// Jump to the final queued position. Fires `AnimationEnd` / `ZoomEnd`
+    /// with `reason: Completed`.
+    Complete,
 }
 
 /// Component that queues multiple camera movements to execute sequentially.

@@ -7,7 +7,6 @@ use crate::animation::AnimationSourceMarker;
 use crate::animation::CameraMove;
 use crate::animation::CameraMoveList;
 use crate::animation::ZoomAnimationMarker;
-use crate::components::AnimationConflictPolicy;
 use crate::constants::DEFAULT_ORBIT_ANGLE;
 use crate::constants::DEFAULT_TARGET_RADIUS;
 use crate::constants::INSTANT_SMOOTHNESS;
@@ -22,6 +21,32 @@ use crate::events::ZoomContext;
 use crate::events::ZoomEnd;
 use crate::events::ZoomReason;
 use crate::orbit_cam::OrbitCam;
+
+/// Controls what happens when a new animation request conflicts with an active one.
+///
+/// Insert this component on a camera entity to configure conflict resolution. If not
+/// present, defaults to [`LastWins`](AnimationConflictPolicy::LastWins).
+///
+/// This component is orthogonal to
+/// [`CameraInputInterruptBehavior`](crate::CameraInputInterruptBehavior) —
+/// `AnimationConflictPolicy` handles programmatic animation requests (e.g.
+/// [`ZoomToFit`](crate::ZoomToFit), [`PlayAnimation`](crate::PlayAnimation)) that conflict with an
+/// active animation, while `CameraInputInterruptBehavior` handles physical user input interrupting
+/// an animation.
+///
+/// - [`LastWins`](AnimationConflictPolicy::LastWins) — cancel the current animation and start the
+///   new one. Fires appropriate `*Cancelled` events for the interrupted operation.
+/// - [`FirstWins`](AnimationConflictPolicy::FirstWins) — reject the incoming request. Fires
+///   [`AnimationRejected`](crate::AnimationRejected).
+#[derive(Component, Reflect, Default, Clone, Copy, Debug, PartialEq, Eq)]
+#[reflect(Component, Default)]
+pub enum AnimationConflictPolicy {
+    /// Cancel the current animation and start the new one.
+    #[default]
+    LastWins,
+    /// Reject the incoming request and keep the current animation.
+    FirstWins,
+}
 
 /// Component that stores camera runtime state values during animations.
 ///

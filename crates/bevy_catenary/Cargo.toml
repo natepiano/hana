@@ -29,6 +29,7 @@ name = "playground"
 path = "examples/playground/main.rs"
 
 [dev-dependencies]
-bevy            = { workspace = true, features = ["default"] }
-bevy_brp_extras = { workspace = true }
-bevy_lagrange   = { workspace = true, features = ["fit_overlay"] }
+bevy          = { workspace = true, features = ["default"] }
+bevy_diegetic = { workspace = true }
+bevy_lagrange = { workspace = true, features = ["fit_overlay"] }
+fairy_dust    = { workspace = true }

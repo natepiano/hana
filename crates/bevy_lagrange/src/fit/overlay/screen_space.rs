@@ -3,9 +3,9 @@ use bevy_kana::ScreenPosition;
 
 use super::constants::PERCENT_MULTIPLIER;
 use crate::fit::Edge;
-use crate::projection::CameraBasis;
-use crate::projection::ProjectionMode;
-use crate::projection::ScreenSpaceBounds;
+use crate::fit::projection::CameraBasis;
+use crate::fit::projection::ProjectionMode;
+use crate::fit::projection::ScreenSpaceBounds;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum MarginBalance {

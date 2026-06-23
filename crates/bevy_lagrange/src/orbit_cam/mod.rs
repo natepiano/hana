@@ -1,6 +1,7 @@
 //! `OrbitCam` component, systems, and helpers.
 
 mod controller;
+mod orbital_math;
 mod preset_helpers;
 
 use bevy::camera::CameraUpdateSystems;

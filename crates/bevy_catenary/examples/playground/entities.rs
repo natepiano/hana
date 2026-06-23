@@ -1,5 +1,6 @@
-//! `Selected`, `NodeCube`, `Draggable`, `Despawnable`, `SlackLocked`, and the
-//! `spawn_cable`, `spawn_node_pair`, and `spawn_node_cube` helpers.
+//! `Selected`, `NodeCube`, `Draggable`, `Despawnable`, `SlackLocked`,
+//! `FullSceneTarget`, and the `spawn_cable`, `spawn_node_pair`, and
+//! `spawn_node_cube` helpers.
 
 use bevy::ecs::system::EntityCommands;
 use bevy::prelude::*;
@@ -28,6 +29,10 @@ pub(crate) struct Despawnable;
 /// Marker to exclude a cable from global +/- slack adjustment.
 #[derive(Component)]
 pub(crate) struct SlackLocked;
+
+/// Marks the ground plane, the `F`-key full-scene overview framing target.
+#[derive(Component)]
+pub(crate) struct FullSceneTarget;
 
 pub(crate) fn spawn_cable(
     commands: &mut Commands,

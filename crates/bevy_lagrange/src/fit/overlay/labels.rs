@@ -11,7 +11,7 @@ use super::screen_space;
 use super::visual::FitOverlayVisual;
 use super::visual::FitOverlayVisualKind;
 use crate::fit::Edge;
-use crate::projection::ScreenSpaceBounds;
+use crate::fit::projection::ScreenSpaceBounds;
 
 /// Component marking a margin percentage label.
 #[derive(Component, Reflect)]
