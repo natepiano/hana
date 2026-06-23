@@ -169,6 +169,7 @@ For `egui` integration — preventing camera input while egui has focus — see 
 
 | `bevy_lagrange` | Bevy |
 |---------------|------|
+| 0.1.0         | 0.19 |
 | 0.0.4         | 0.19 |
 | 0.0.3         | 0.18 |
 
