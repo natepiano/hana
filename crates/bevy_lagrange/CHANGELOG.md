@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fields with three `orbit`/`pan`/`zoom` `AxisResponse` values bundling per-axis
   `Sensitivity` and `Damping`; read with `.sensitivity()`/`.damping()`, set with
   `.set_sensitivity()`/`.set_damping()` (breaking).
+- Rename the input-sensitivity API to input gain (breaking). The per-axis
+  `Sensitivity` type on `AxisResponse` is unrelated and unchanged.
+  - Types:
+    - `InputSensitivity` → `InputGain`
+    - `OrbitCamSensitivity` → `OrbitCamInputGain`
+    - `MouseSensitivity` → `MouseInputGain`
+    - `GamepadSensitivity` → `GamepadInputGain`
+    - `SmoothScrollSensitivity` → `SmoothScrollInputGain`
+    - `OrbitCamBindingWithSensitivity<T>` → `OrbitCamBindingWithInputGain<T>`
+  - Builder methods:
+    - `with_sensitivity` → `with_input_gain`
+    - `mouse_sensitivity` → `mouse_input_gain`
+    - `smooth_scroll_sensitivity` → `smooth_scroll_input_gain`
+    - `gamepad_sensitivity` → `gamepad_input_gain`
 
 ### Removed
 
