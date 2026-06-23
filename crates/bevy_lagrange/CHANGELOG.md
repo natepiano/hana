@@ -9,10 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 > [bevy_panorbit_camera](https://github.com/Plonq/bevy_panorbit_camera). Thank you
 > for graciously allowing this project to build on your foundation.
 
-## [Unreleased]
+## [0.1.0] - 2026-06-22
+
+### Added
+- Source-level input sensitivity on preset APIs — presets can carry mouse, gamepad, and smooth-scroll tuning through construction and conversion, preserved across `impl Into<OrbitCamPreset>` builder bridges.
+- Binding-level sensitivity in the device adapter pipeline — mouse wheel, trackpad orbit/pan/zoom, pinch, touch, and button-drag inputs are scaled by their active binding sensitivity.
 
 ### Changed
 - Change `OrbitCamPreset` variants to carry preset payloads; use helper constructors such as `OrbitCamPreset::blender_like()` or `OrbitCamInputMode::with_preset(...)` instead of unit variants like `OrbitCamPreset::BlenderLike` (breaking).
+- A disabled input binding no longer affects camera motion or shows up as an active input source.
+- Zero or negative input sensitivities are rejected consistently; a zero-sensitive source is disabled rather than applied.
+
+### Fixed
+- Clear cached orbit interaction and reported settle state when an input mode is replaced, so mode swaps no longer retain stale source or debounce data (including slow-mode latch reset).
 
 ## [0.0.4] - 2026-06-20
 
