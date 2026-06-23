@@ -9,9 +9,9 @@ use bevy_kana::ToU32;
 
 use super::BandRecord;
 use super::CurveRecord;
+use super::PackedPathRecord;
 use super::PathAtlasHandles;
 use super::PathOutline;
-use super::PathRecord;
 use super::packing;
 use super::packing::BandLayout;
 
@@ -21,7 +21,7 @@ pub(crate) struct PathAtlas<K> {
     indices:           HashMap<K, u32>,
     curves:            Vec<CurveRecord>,
     bands:             Vec<BandRecord>,
-    path_records:      Vec<PathRecord>,
+    path_records:      Vec<PackedPathRecord>,
     revision:          u32,
     uploaded_revision: u32,
     handles:           Option<PathAtlasHandles>,
@@ -95,7 +95,7 @@ where
                     start: band.start + curve_start,
                     ..*band
                 }));
-            self.path_records.push(PathRecord::new(
+            self.path_records.push(PackedPathRecord::new(
                 packed.bounds(),
                 band_start,
                 packed.horizontal_band_count(),

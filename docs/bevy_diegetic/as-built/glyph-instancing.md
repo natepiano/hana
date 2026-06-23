@@ -95,28 +95,28 @@ shadow passes.
 Two GPU tables plus a per-batch entity:
 
 ```text
-PathInstanceRecord (one per glyph, 40 B)         RunRecord (one per run, 96 B stride)
+PathQuadRecord (one per glyph, 40 B)         PathRenderRecord (one per run, 96 B stride)
   rect_min:  vec2<f32>   // layout space, clipped   transform:   mat4x4<f32> // label world matrix
   rect_size: vec2<f32>                              fill_color:  vec4<f32>
   uv_min:    vec2<f32>   // padded quad UVs         render_mode: u32         // Text / PunchOut
   uv_size:   vec2<f32>                              depth_nudge: f32
-  atlas_index: u32       // PathRecord index
-  run_index:   u32       // RunRecord index
+  packed_path_index: u32       // PackedPathRecord index
+  render_index:   u32       // PathRenderRecord index
 ```
 
-PathInstanceRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
-40, already stride-aligned). RunRecord: 64 + 16 + 4 + 4 = 88, rounded to a
+PathQuadRecord is 40 B under std430 (vec2 alignment is 8; 4×8 + 2×4 =
+40, already stride-aligned). PathRenderRecord: 64 + 16 + 4 + 4 = 88, rounded to a
 96 array stride by encase (struct alignment 16) — **no explicit pad field**;
 encase owns the padding, same as the existing `CurveRecord` / `BandRecord` /
-`PathRecord` declarations. Transform encoding: `Mat4` — glam has no
+`PackedPathRecord` declarations. Transform encoding: `Mat4` — glam has no
 `Mat3x4` and the existing record structs only use `Vec4` / `UVec4` through
 `ShaderType`, so `Mat4` is the no-surprises choice; pack to 3×`Vec4` only if
 measurement justifies it. Both structs live in
 `src/render/analytic_paths/packing.rs` next to `CurveRecord` / `BandRecord` /
-`PathRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
+`PackedPathRecord`, deriving `ShaderType` the same way. Step 1 adds compile-time
 layout assertions against the **GPU layout, not the Rust layout** —
 `size_of` measures the wrong thing; assert via `ShaderSize::SHADER_SIZE`
-(`PathInstanceRecord` 40, RunRecord 96 — encase rounds struct size to its
+(`PathQuadRecord` 40, PathRenderRecord 96 — encase rounds struct size to its
 16-byte alignment per WGSL rules; confirmed against encase 0.12's
 `METADATA.min_size()`), plus a write-and-readback round-trip check.
 
@@ -190,14 +190,14 @@ Frame flow in steady state (stress test), with schedule anchors:
 1. shaping → `PreparedPanelText` per label (unchanged)
 2. geometry write — `update_panel_text_geometry` (PostUpdate,
    `.before(TransformSystems::Propagate)`, unchanged slot) writes the run's
-   glyph records into its batch range + the non-transform `RunRecord`
+   glyph records into its batch range + the non-transform `PathRenderRecord`
    fields; atlas commit stays inside it (records only index the atlas);
    capacity growth is detected here — the replacement mesh/buffers are
    created, written, and swapped onto the batch entity in the same frame
    (D4: a same-frame-created asset is prepared before queue)
 3. transform write — new system, PostUpdate
    `.after(TransformSystems::Propagate)`, copies each label's
-   `GlobalTransform` into its `RunRecord` slot, gated on
+   `GlobalTransform` into its `PathRenderRecord` slot, gated on
    `Ref::is_changed` (decision 5)
 4. Aabb union — new system `.after(transform write)`,
    `.after(VisibilitySystems::CalculateBounds)`,
@@ -209,7 +209,7 @@ Frame flow in steady state (stress test), with schedule anchors:
    `DiegeticPerfStats` batch counters
 6. render → per batch: one entity extracted, one draw per pass
 
-Text edit = a range write. Label move = one `RunRecord` write. Neither
+Text edit = a range write. Label move = one `PathRenderRecord` write. Neither
 touches a mesh asset.
 
 ## Buffer-write granularity (sets expectations for the property below)
@@ -329,7 +329,7 @@ occluders).
 prepass vertex shader.** The depth prepass writes depth from the prepass
 vertex stage; if only the main pass nudges, main-pass fragment depth diverges
 from prepass depth and depth-equal testing rejects the fragments. Both
-stages read the same `RunRecord.depth_nudge` through the shared WGSL
+stages read the same `PathRenderRecord.depth_nudge` through the shared WGSL
 function in `slug_text_vertex_pull.wgsl` (decision 1), so this is one code
 path, not duplicated logic. Step 3b verifies Geometry-mode layering against
 the `panel_rendering` example before the old path is removed.
@@ -348,7 +348,7 @@ fragments under depth-equal testing.
 The nudge *value* is computed exactly as today's bias:
 `depth_nudge = command_index as f32 × LAYER_DEPTH_BIAS` for the non-OIT
 path, `0.0` under OIT. Naming kept straight: `depth_nudge` (per-run,
-`RunRecord`, vertex-applied) is a different field from `oit_depth_offset`
+`PathRenderRecord`, vertex-applied) is a different field from `oit_depth_offset`
 (global policy in the binding-100 uniform, always 0.0, read by the OIT
 fragment branch) — the two never merge. Punch-out is also unaffected in
 the prepass: the prepass fragment discards on coverage only and never
@@ -364,12 +364,12 @@ implementer's):
 ```rust
 struct PathBatchStore {
     batches:   HashMap<PathBatchKey, PathBatch>,
-    run_index: HashMap<RunStorageKey, PathBatchKey>,  // which batch a run is in
+    render_index: HashMap<RunStorageKey, PathBatchKey>,  // which batch a run is in
 }
 struct PathBatch {
     entity:        Option<Entity>,               // the batch render entity
-    glyph_records: Vec<PathInstanceRecord>,
-    run_records:   Vec<RunRecord>,
+    glyph_records: Vec<PathQuadRecord>,
+    run_records:   Vec<PathRenderRecord>,
     runs:          Vec<(RunStorageKey, Range<u32>)>, // written ONLY by rebuild()
     instances:     Handle<ShaderBuffer>,
     run_table:     Handle<ShaderBuffer>,
@@ -411,7 +411,7 @@ First cut — rebuild, don't allocate:
   doubling so the cost is a known number; Step 2's label-add stress watches
   hitch frequency.
 - Membership has a single mutation point: `insert_run` / `move_run` /
-  `remove_run` update `run_index` and the batch's run set together, then
+  `remove_run` update `render_index` and the batch's run set together, then
   trigger the rebuild — a despawn plus a batch-move in one frame is
   order-independent because every operation leaves both structures
   consistent.
@@ -425,14 +425,14 @@ First cut — rebuild, don't allocate:
   `Assets<TextMaterial>` generically, so batch materials pick up
   `AntiAlias` changes with no new code (one-frame latency — it runs in
   Update).
-- Storage keys are never held by the batch path: `run_index` keys are
+- Storage keys are never held by the batch path: `render_index` keys are
   routing entries, not `run_storage` allocations, so a toggle flip cannot
   double-free — the decision-4 debug assertion plus the Step-2
   flip-both-directions gate item verify it.
 - Ranges have a single writer: `rebuild()` recomputes `runs` as it rebuilds
   the record vectors — no other code path writes ranges, so they cannot go
   stale relative to the buffers they index.
-- Records are always fully stamped: `PathInstanceRecord` / `RunRecord`
+- Records are always fully stamped: `PathQuadRecord` / `PathRenderRecord`
   deliberately derive no `Default`, and `RenderMode` discriminants start
   at 1 (`Text = 1`, `PunchOut = 2`), so a forgotten `render_mode` stamp
   (0) would render as neither mode — `rebuild()` stamps every field from
@@ -456,7 +456,7 @@ Glyph records stay in layout space; world placement is the per-run `Mat4`.
 (`panel_text/mod.rs:94-96`), so it cannot read this frame's
 `GlobalTransform` — the **transform-write system** (frame-flow step 3) runs
 `.after(TransformSystems::Propagate)` in PostUpdate, copies each routed
-label's `GlobalTransform` into its `RunRecord` slot, and marks the batch's
+label's `GlobalTransform` into its `PathRenderRecord` slot, and marks the batch's
 `run_table_dirty` only when the matrix actually changed (`Ref::is_changed`
 gating).
 The buffer commit (frame-flow step 5) runs after both writers, still in
@@ -565,7 +565,7 @@ gate examples. Flipping at runtime tears down the inactive path's products
 The batch direction is a system, not an observer: when the toggle leaves
 `BatchedRecords`, the batch-path gating system despawns all
 `DiegeticTextBatch` entities and clears `PathBatchStore` (batches +
-`run_index`; the interner may persist — it is keying state only).
+`render_index`; the interner may persist — it is keying state only).
 Batch entities carry a marker component (`DiegeticTextBatch`) so BRP
 inspection can tell the two paths apart (Reflect-registered as of the
 Step-2 review — a bare `Component` cannot be used as a BRP query filter).
@@ -608,7 +608,7 @@ toggle flipped in the gate examples.
   recovered glyph index;
   GPU-layout assertions (40 / 96 via `ShaderSize::SHADER_SIZE`, not
   `size_of` — encase rounds struct size to alignment per WGSL rules, so 96
-  is what it returns for RunRecord; verified against encase 0.12 source) +
+  is what it returns for PathRenderRecord; verified against encase 0.12 source) +
   a CPU-side encase encode/decode round-trip; one
   capacity-doubling reallocation measured (the hitch number) **and** the
   no-blink requirement verified by frame-stepped screenshots at N / N+1 /
@@ -1311,7 +1311,7 @@ toggle flipped in the gate examples.
        writes kernel-panicked the machine twice. Mitigation:
        `render/oit_guard.rs` patches `oit_draw.wgsl`/`oit_resolve.wgsl`
        in process with `arrayLength` guards, our vertex-pull shader
-       gained a `run_index` clamp, and `StableTransparency` activation
+       gained a `render_index` clamp, and `StableTransparency` activation
        is gated on both patches being confirmed (guard failure = sorted
        fallback, never unguarded OIT).
     2. *Gate deadlock* — bevy only loads `oit_resolve.wgsl` when an OIT
@@ -1403,7 +1403,7 @@ toggle flipped in the gate examples.
   batch entities carry a real hand-written `Aabb` + `NoAutoAabb` from
   Step 2.) `RunStorage` (the struct) is deleted;
   `RunStorageKey` stays — it is the run identifier in
-  `PathBatchStore.run_index`. Deleting the per-run path also deletes the
+  `PathBatchStore.render_index`. Deleting the per-run path also deletes the
   per-change material rewrites that masked the buffer rebind hazard — the
   capacity-padding / growth-handle-rewrite mechanism (Step 2, `PathBatchResources`
   doc contract) must survive untouched, and the contract gains a headless
@@ -1639,7 +1639,7 @@ compatibility, GPU-preprocessing compatibility).
 whole-asset-upload claim, the `text_material`-by-value claim, the toggle
 teardown safety (`On<Remove>` fires synchronously before flush), and every
 cited line ref including the bevy `extended_material.rs` ones. Corrections
-and refinements incorporated: PathInstanceRecord size corrected 48 → 40 B
+and refinements incorporated: PathQuadRecord size corrected 48 → 40 B
 (std430; the ~28 KB figures → 24 KB); frame flow gained explicit schedule
 anchors (geometry write before Propagate, transform write after, Aabb union
 between `CalculateBounds` and `CheckVisibility`, buffer commit after both
@@ -1670,7 +1670,7 @@ storage bindings (decision 1); `PathBatchKey` dedicated struct — `AlphaMode` n
 interner concretized (`InternedMaterialKey`, map + vec, never freed)
 (decision 2); prepass-parity scope made precise — blend/OIT text skips the
 depth prepass; the overridden prepass vertex stage serves the shadow pass;
-parity protects future mask/opaque text (decision 3); RunRecord explicit
+parity protects future mask/opaque text (decision 3); PathRenderRecord explicit
 `_pad` dropped — encase owns padding; layout assertions via `ShaderType`
 metadata, not `size_of` (Target model + Step 1); split dirty flags
 (instances vs run table) + single-writer rule for ranges + `RunStorageKey`
@@ -1711,7 +1711,7 @@ one-frame visual gap (new mesh not yet prepared at queue time) — measured
 at Step 1, mitigation surfaced as D3; batched→per-run toggle teardown named
 (gating system despawns `DiegeticTextBatch` entities, clears the store);
 membership single-mutation-point rule (insert/move/remove update
-`run_index` + run set together); `SHADER_SIZE` named as the assertion API
+`render_index` + run set together); `SHADER_SIZE` named as the assertion API
 with write-readback as the stride backstop; split-dirty-flag wording
 propagated through frame-flow step 5, buffer-write granularity, decisions
 4/5, and the Step-2 gate; "Until Step 3" → "Until Step 3a"; Step-2 gate
@@ -1777,7 +1777,7 @@ frame later. Gates operationalized: Step 1 (screenshot criteria, shared
 nudge function by construction + shadow-pass render check, Metal-capture
 or debug-color first_vertex verification, CPU-side encase encode/decode
 round-trip named, N/N+1/N+2 frame-stepped no-blink capture, hand-written
-RunRecord transforms); Step 2 (ImageMagick `compare` for the diff,
+PathRenderRecord transforms); Step 2 (ImageMagick `compare` for the diff,
 constant-velocity overlay for transform lag, slab-watch grep recipe);
 Step 3a (store-level unit tests via cargo nextest with the three named
 cases); dynamic-edits acceptance row wired to the split-dirty-flag

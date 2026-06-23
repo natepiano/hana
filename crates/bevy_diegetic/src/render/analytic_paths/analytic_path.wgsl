@@ -13,12 +13,12 @@
 //             a +x ray from a point in the slab can cross) and along-X
 //             bands (x-slabs), so winding and nearest-distance scans touch
 //             a handful of curves, not the whole path.
-//   path_records  — PathRecord per packed path: design-space bounds, band table
+//   path_records  — PackedPathRecord per packed path: design-space bounds, band table
 //             ranges, narrowest dilating stroke.
 //   uv_a    — fractional position inside the path bounds quad.
 //   uv_b    — (path index, run index) as floats, constant per quad.
-//   per-run — fill color / render mode / OIT offset / AA flags from the
-//             RunRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS, else from the
+//   per-run — material slot / render mode / OIT offset / AA flags from the
+//             PathRenderRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS, else from the
 //             material's PathUniform.
 //
 // Evaluation: non-zero winding (inside/outside) + distance to the nearest
@@ -39,6 +39,8 @@
     pbr_functions::alpha_discard,
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 }
+#import bevy_diegetic::material_table::INVALID_GPU_MATERIAL_SLOT
+#import bevy_diegetic::sdf_material_table::pbr_input_from_material_table
 
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::prepass_io::VertexOutput
@@ -99,7 +101,7 @@ const LINE_DEBUG_SCALE: f32 = 8.0;
 const RENDER_MODE_TEXT: u32 = 1u;
 const RENDER_MODE_PUNCH_OUT: u32 = 2u;
 // Mirrors AA_FLAG_SUPERSAMPLE / AA_FLAG_BAND in render/mod.rs — the
-// RunRecord.aa_flags bit encoding written by AntiAlias::aa_flags().
+// PathRenderRecord.aa_flags bit encoding written by AntiAlias::aa_flags().
 const AA_FLAG_SUPERSAMPLE: u32 = 1u;
 const AA_FLAG_BAND: u32 = 2u;
 
@@ -164,7 +166,7 @@ struct BandRecord {
 }
 
 // One packed path (font path or merged panel-line group).
-struct PathRecord {
+struct PackedPathRecord {
     // Design-space bounds: min in .xy, size in .zw. uv_a maps onto this
     // rectangle (see design_position).
     bounds_min_size: vec4<f32>,
@@ -288,54 +290,54 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> uniforms: PathUniform;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var<storage, read> curves: array<CurveRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<storage, read> bands: array<BandRecord>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PathRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PackedPathRecord>;
 
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-// Mirrors `RunRecord` in `path/packing.rs` (std430, 96 B stride). Under the
+// Mirrors `PathRenderRecord` in `path/packing.rs` (std430, 96 B stride). Under the
 // vertex-pulling route a batch holds many runs, so the per-run values move
 // out of the material uniform into this table, indexed by the run index the
 // vertex stage forwards in `uv_b.y`.
-struct RunRecord {
+struct PathRenderRecord {
     transform: mat4x4<f32>,
-    fill_color: vec4<f32>,
+    material: u32,
     render_mode: u32,
     depth_nudge: f32,
     oit_depth_offset: f32,
     aa_flags: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<PathRenderRecord>;
 
 // The index arrives in an interpolated varying that is constant across the
 // quad, but perspective-corrected interpolation can land a hair below the
 // integer (478.9999 for 479.0) on long sliver quads, so recovery must round —
 // a floor() here reads the previous record and the quad renders another
 // path's coverage.
-fn run_index(path_uv: vec2<f32>) -> u32 {
+fn render_index(path_uv: vec2<f32>) -> u32 {
     return u32(path_uv.y + 0.5);
 }
 #endif
 
 // uv_b.x carries the path table index; same rounding recovery as
-// run_index above.
+// render_index above.
 fn path_index(path_uv: vec2<f32>) -> u32 {
     return u32(path_uv.x + 0.5);
 }
 
-// Per-run fill color: the run table under vertex pulling, the material
-// uniform on the per-run path.
-fn run_fill_color(path_uv: vec2<f32>) -> vec4<f32> {
+// Per-run material-table slot: the run table under vertex pulling, invalid on
+// the per-run path.
+fn run_material_id(path_uv: vec2<f32>) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[run_index(path_uv)].fill_color;
+    return run_records[render_index(path_uv)].material;
 #else
-    return uniforms.fill_color;
+    return INVALID_GPU_MATERIAL_SLOT;
 #endif
 }
 
-// Per-run render mode (Text / PunchOut), sourced like `run_fill_color`.
+// Per-run render mode (Text / PunchOut), sourced like `run_material_id`.
 fn run_render_mode(path_uv: vec2<f32>) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[run_index(path_uv)].render_mode;
+    return run_records[render_index(path_uv)].render_mode;
 #else
     return uniforms.render_mode;
 #endif
@@ -345,17 +347,17 @@ fn run_render_mode(path_uv: vec2<f32>) -> u32 {
 // uniform on the per-run path.
 fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[run_index(path_uv)].oit_depth_offset;
+    return run_records[render_index(path_uv)].oit_depth_offset;
 #else
     return uniforms.oit_depth_offset;
 #endif
 }
 
 // Per-run anti-alias mode bits (AA_FLAG_SUPERSAMPLE | AA_FLAG_BAND), sourced
-// like `run_fill_color`.
+// like `run_material_id`.
 fn run_aa_flags(path_uv: vec2<f32>) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[run_index(path_uv)].aa_flags;
+    return run_records[render_index(path_uv)].aa_flags;
 #else
     var flags = 0u;
     if uniforms.supersample != 0u {
@@ -368,17 +370,17 @@ fn run_aa_flags(path_uv: vec2<f32>) -> u32 {
 #endif
 }
 
-fn path_bounds_min(path: PathRecord) -> vec2<f32> {
+fn path_bounds_min(path: PackedPathRecord) -> vec2<f32> {
     return path.bounds_min_size.xy;
 }
 
-fn path_bounds_size(path: PathRecord) -> vec2<f32> {
+fn path_bounds_size(path: PackedPathRecord) -> vec2<f32> {
     return path.bounds_min_size.zw;
 }
 
 // uv_a → design-space point inside the path bounds. v flips: uv origin is
 // top-left, design space is y-up.
-fn design_position(uv: vec2<f32>, path: PathRecord) -> vec2<f32> {
+fn design_position(uv: vec2<f32>, path: PackedPathRecord) -> vec2<f32> {
     let bounds_min = path_bounds_min(path);
     let bounds_size = path_bounds_size(path);
     return bounds_min + vec2<f32>(
@@ -387,7 +389,7 @@ fn design_position(uv: vec2<f32>, path: PathRecord) -> vec2<f32> {
     );
 }
 
-fn along_y_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+fn along_y_band_index(point: vec2<f32>, path: PackedPathRecord) -> u32 {
     let bounds_min = path_bounds_min(path);
     let bounds_size = path_bounds_size(path);
     let band_count = path.band_range.y;
@@ -399,7 +401,7 @@ fn along_y_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
     return min(u32(normalized_y * f32(band_count)), band_count - 1u);
 }
 
-fn along_x_band_index(point: vec2<f32>, path: PathRecord) -> u32 {
+fn along_x_band_index(point: vec2<f32>, path: PackedPathRecord) -> u32 {
     let bounds_min = path_bounds_min(path);
     let bounds_size = path_bounds_size(path);
     let band_count = path.band_range.w;
@@ -567,7 +569,7 @@ fn curve_winding(curve: CurveRecord, point: vec2<f32>) -> i32 {
         winding_for_t(curve, point, (-b + root) / (2.0 * a));
 }
 
-fn outside_path_bounds(point: vec2<f32>, path: PathRecord) -> bool {
+fn outside_path_bounds(point: vec2<f32>, path: PackedPathRecord) -> bool {
     // Line paths (min_feature > 0) render with the vertex-stage quad expansion
     // (analytic_path_vertex_pull.wgsl LINE_AA_MARGIN_PX) so the grazing AA ramp
     // clears the quad edge. The packed bounds are NOT expanded, so clipping
@@ -691,7 +693,7 @@ fn along_y_coverage_terms(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> CoverageTerms {
     let include_winding = !outside_path_bounds(point, path);
     let along_y_band = bands[path.band_range.x + along_y_band_index(point, path)];
@@ -745,7 +747,7 @@ fn nearest_along_x_curve(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
     initial: CoverageTerms,
 ) -> CoverageTerms {
     let along_x_band = bands[path.band_range.z + along_x_band_index(point, path)];
@@ -762,7 +764,7 @@ fn nearest_along_x_curve(
 // Non-zero winding number at `point` over ALL curves (both lanes), using the
 // point's along-Y band. Returns 0 outside the path bounds. The prepass
 // silhouette test wants the union fill, not a per-lane one.
-fn winding_at(point: vec2<f32>, path: PathRecord) -> i32 {
+fn winding_at(point: vec2<f32>, path: PackedPathRecord) -> i32 {
     if outside_path_bounds(point, path) {
         return 0;
     }
@@ -801,7 +803,7 @@ fn winding_at(point: vec2<f32>, path: PathRecord) -> i32 {
 
 // Per-lane winding number at `point` (x = exempt lane, y = faded lane);
 // zero outside the path bounds.
-fn lane_winding_at(point: vec2<f32>, path: PathRecord) -> vec2<i32> {
+fn lane_winding_at(point: vec2<f32>, path: PackedPathRecord) -> vec2<i32> {
     if outside_path_bounds(point, path) {
         return vec2<i32>(0, 0);
     }
@@ -825,7 +827,7 @@ fn lane_winding_at(point: vec2<f32>, path: PathRecord) -> vec2<i32> {
 // neighbor; an interior edge of a self-intersecting / overlapping path
 // (e.g. the EB Garamond `g` neck) is filled on both sides, so all neighbors
 // stay inside.
-fn lanes_any_outside_neighbor(point: vec2<f32>, edge_width: f32, path: PathRecord) -> vec2<bool> {
+fn lanes_any_outside_neighbor(point: vec2<f32>, edge_width: f32, path: PackedPathRecord) -> vec2<bool> {
     let right = lane_winding_at(point + vec2<f32>(edge_width, 0.0), path);
     let left = lane_winding_at(point - vec2<f32>(edge_width, 0.0), path);
     let up = lane_winding_at(point + vec2<f32>(0.0, edge_width), path);
@@ -875,7 +877,7 @@ fn lanes_no_outside_neighbor(
     union_terms: LaneTerms,
     point: vec2<f32>,
     edge_width: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> vec2<bool> {
     if lane_needs_neighbor_test(terms.exempt, edge_width)
         || lane_needs_neighbor_test(union_terms, edge_width) {
@@ -890,7 +892,7 @@ fn distance_coverage(
     pixel: vec2<f32>,
     dilation_max: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> f32 {
     let edge_width = max(max(pixel.x, pixel.y) * EDGE_FILTER_WIDTH, ROOT_EPSILON);
     // The distance scan must reach the most-dilated silhouette plus the AA ramp.
@@ -957,7 +959,7 @@ fn signed_distance_sample(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> SdSample {
     let scan_width = sqrt(scan_width_sq);
     var terms = along_y_coverage_terms(point, scan_width_sq, hairline_target, path);
@@ -990,7 +992,7 @@ fn signed_distance(
     point: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> vec2<f32> {
     return signed_distance_sample(point, scan_width_sq, hairline_target, path).sd;
 }
@@ -1032,7 +1034,7 @@ fn aniso_band_coverage(
     dy: vec2<f32>,
     scan_width_sq: f32,
     hairline_target: f32,
-    path: PathRecord,
+    path: PackedPathRecord,
 ) -> f32 {
     let sd_center = signed_distance(point, scan_width_sq, hairline_target, path);
     let len_dx = length(dx);
@@ -1162,7 +1164,7 @@ fn line_floor(
 // Polygon-mode sentinel: a line path (min_feature > 0) packed with no along-X
 // band is a set of convex half-plane polygons (packing::build_packed_polygons),
 // not a banded curve scan.
-fn is_polygon_mode(path: PathRecord) -> bool {
+fn is_polygon_mode(path: PackedPathRecord) -> bool {
     return path.min_feature > 0.0 && path.band_range.w == 0u;
 }
 
@@ -1182,7 +1184,7 @@ fn is_polygon_mode(path: PathRecord) -> bool {
 // polygon's nearest, i.e. cross-stroke, edge), matching the curve path's fade
 // cascade; an all-Full path has fade_exponent 0 everywhere, so fade is 1 and the
 // result is the plain union.
-fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PathRecord) -> f32 {
+fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PackedPathRecord) -> f32 {
     let poly_start = path.band_range.x;
     let poly_count = path.band_range.y;
     var exempt_cov = 0.0;
@@ -1265,7 +1267,7 @@ fn analytic_polygon_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, pat
 // against the second edge at a corner, so a foreshortened straight edge stays a
 // continuous sub-pixel hairline while the convex cap stays bounded to
 // ~hairline_min_px. Head-on the footprint is isotropic and N collapses to one.
-fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PathRecord) -> f32 {
+fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: PackedPathRecord) -> f32 {
     let footprint_max = max(length(dx), length(dy));
     let scan_width = footprint_max * (EDGE_FILTER_WIDTH + uniforms.hairline_min_px) + ROOT_EPSILON;
     let scan_width_sq = scan_width * scan_width;
@@ -1339,7 +1341,7 @@ fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: 
 
 fn render_coverage(
     uv: vec2<f32>,
-    path: PathRecord,
+    path: PackedPathRecord,
     render_mode: u32,
     aa_flags: u32,
 ) -> f32 {
@@ -1490,25 +1492,39 @@ fn fragment(
             return dbg_out;
         }
     }
-    let fill_color = run_fill_color(in.uv_b);
     let coverage = render_coverage(
         in.uv,
         path,
         run_render_mode(in.uv_b),
         run_aa_flags(in.uv_b),
     );
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    var pbr_input = pbr_input_from_material_table(
+        in,
+        is_front,
+        true,
+        run_material_id(in.uv_b),
+    );
+    let final_alpha = coverage * pbr_input.material.base_color.a;
+#else
+    let fill_color = uniforms.fill_color;
     let final_alpha = coverage * fill_color.a;
+#endif
     // This discard precedes oit_draw below, so faded near-zero fragments never
     // occupy OIT fragment-pool slots.
     if final_alpha < DISCARD_ALPHA {
         discard;
     }
 
+#ifndef FRAGMENT_DATA_FROM_BATCHED_PATHS
     var pbr_input = pbr_input_from_standard_material(in, is_front);
     pbr_input.material.base_color = vec4<f32>(
         fill_color.rgb,
         final_alpha,
     );
+#else
+    pbr_input.material.base_color.a = final_alpha;
+#endif
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material,
         pbr_input.material.base_color,

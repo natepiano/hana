@@ -295,9 +295,7 @@ impl Default for AlphaModeSelection {
 }
 
 impl AlphaModeSelection {
-    const fn mode(&self) -> AlphaMode {
-        ALPHA_MODES[self.index].1
-    }
+    const fn mode(&self) -> AlphaMode { ALPHA_MODES[self.index].1 }
 }
 
 /// Authored draw counts for one panel, split by render family. Drives both the

@@ -66,7 +66,7 @@ struct PathUniform {
     /// which fixes the convex-corner flare at grazing angles.
     aa_band:          u32,
     /// Minimum on-screen stroke width in device pixels for hairline-dilated
-    /// paths (`PathRecord::min_feature > 0`). Mirrored from
+    /// paths (`PackedPathRecord::min_feature > 0`). Mirrored from
     /// [`HairlineWidth`](crate::HairlineWidth) by `sync_hairline_width`.
     hairline_min_px:  f32,
 }
@@ -88,13 +88,13 @@ pub struct PathExtension {
     /// Shared path along-Y/along-X band records.
     #[storage(102, read_only)]
     bands:          Handle<ShaderBuffer>,
-    /// Shared path records, indexed by each atlas record's `atlas_index`.
+    /// Shared path records, indexed by each atlas record's `packed_path_index`.
     #[storage(103, read_only)]
     path_records:   Handle<ShaderBuffer>,
     /// Per-path instance records read by the vertex-pulling stage.
     #[storage(104, read_only, visibility(vertex))]
     instances:      Handle<ShaderBuffer>,
-    /// Per-run records (world transform, fill color, render mode, depth
+    /// Per-run records (world transform, material slot, render mode, depth
     /// nudge) read by the vertex-pulling stages.
     #[storage(105, read_only, visibility(vertex, fragment))]
     run_records:    Handle<ShaderBuffer>,
@@ -151,24 +151,40 @@ impl MaterialExtension for PathExtension {
         _layout: &MeshVertexBufferLayoutRef,
         key: MaterialExtensionKey<Self>,
     ) -> Result<(), SpecializedMeshPipelineError> {
-        if key.bind_group_data.vertex_pull && !material_group_is_stripped(descriptor) {
-            // One WGSL file serves the main, prepass, and shadow pipelines;
-            // its `#ifdef PREPASS_PIPELINE` gate picks the entry point. The
-            // swap happens here rather than in `vertex_shader()` /
-            // `prepass_vertex_shader()` because those are material-type-wide,
-            // and stripped-group pipelines must keep the standard vertex
-            // stage (see `material_group_is_stripped`).
-            descriptor.vertex.shader = ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
-            // The fragment sources `fill_color` / `render_mode` from the run
-            // table (binding 105) instead of the material uniform, so a batch
-            // renders every run with its own color and mode.
-            if let Some(fragment) = descriptor.fragment.as_mut() {
-                fragment
-                    .shader_defs
-                    .push("FRAGMENT_DATA_FROM_BATCHED_PATHS".into());
-            }
-        }
+        specialize_path_extension_descriptor(descriptor, key.bind_group_data.vertex_pull);
         Ok(())
+    }
+}
+
+fn specialize_path_extension_descriptor(
+    descriptor: &mut RenderPipelineDescriptor,
+    vertex_pull: bool,
+) {
+    if vertex_pull && !material_group_is_stripped(descriptor) {
+        // One WGSL file serves the main, prepass, and shadow pipelines;
+        // its `#ifdef PREPASS_PIPELINE` gate picks the entry point. The
+        // swap happens here rather than in `vertex_shader()` /
+        // `prepass_vertex_shader()` because those are material-type-wide,
+        // and stripped-group pipelines must keep the standard vertex
+        // stage (see `material_group_is_stripped`).
+        descriptor.vertex.shader = ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
+        // The fragment sources material slot / render mode from the run
+        // table (binding 105) instead of the material uniform, so a batch
+        // renders every run with its own material-table row and mode.
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment
+                .shader_defs
+                .push("FRAGMENT_DATA_FROM_BATCHED_PATHS".into());
+        }
+    } else if vertex_pull && material_group_is_stripped(descriptor) {
+        // Deliberately share the SDF helper's stripped-material-group branch:
+        // the standard vertex stage avoids vertex-pull bindings 104/105, and
+        // the helper avoids material-table binding 106.
+        if let Some(fragment) = descriptor.fragment.as_mut() {
+            fragment
+                .shader_defs
+                .push("SDF_STRIPPED_MATERIAL_GROUP".into());
+        }
     }
 }
 
@@ -191,8 +207,7 @@ fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
 pub(crate) struct BatchPathMaterialInput {
     /// Base material settings.
     pub base:             StandardMaterial,
-    /// Placeholder fill color; vertex-pulling fragments read per-run color from
-    /// `run_records`.
+    /// Placeholder fill color for non-batched path fragments.
     pub fill_color:       Vec4,
     /// Placeholder render mode; vertex-pulling fragments read per-run mode from
     /// `run_records`.
@@ -205,7 +220,7 @@ pub(crate) struct BatchPathMaterialInput {
     pub curves:           Handle<ShaderBuffer>,
     /// Shared path along-Y/along-X band records.
     pub bands:            Handle<ShaderBuffer>,
-    /// Shared path records, indexed by each atlas record's `atlas_index`.
+    /// Shared path records, indexed by each atlas record's `packed_path_index`.
     pub path_records:     Handle<ShaderBuffer>,
     /// Per-path instance records read by the vertex-pulling stage.
     pub instances:        Handle<ShaderBuffer>,
@@ -299,4 +314,49 @@ pub(crate) fn set_path_material_anti_alias(
 ) {
     material.extension.uniforms.supersample = u32::from(anti_alias.supersamples());
     material.extension.uniforms.aa_band = u32::from(anti_alias.anisotropic());
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::render::render_resource::FragmentState;
+    use bevy::shader::ShaderDefVal;
+
+    use super::*;
+    use crate::render::material_table::MATERIAL_TABLE_BINDING;
+    use crate::render::material_table::PATH_INSTANCES_BINDING;
+    use crate::render::material_table::PATH_RUN_RECORDS_BINDING;
+
+    #[test]
+    fn stripped_analytic_pipeline_guards_vertex_pull_and_material_table_bindings() {
+        let mut descriptor = RenderPipelineDescriptor {
+            fragment: Some(FragmentState::default()),
+            ..Default::default()
+        };
+
+        specialize_path_extension_descriptor(&mut descriptor, true);
+
+        assert!(descriptor.fragment.is_some(), "fragment state should exist");
+        let Some(fragment) = descriptor.fragment.as_ref() else {
+            return;
+        };
+        assert!(
+            fragment
+                .shader_defs
+                .contains(&ShaderDefVal::from("SDF_STRIPPED_MATERIAL_GROUP"))
+        );
+        assert!(
+            !fragment
+                .shader_defs
+                .contains(&ShaderDefVal::from("FRAGMENT_DATA_FROM_BATCHED_PATHS"))
+        );
+        let vertex_pull = include_str!("analytic_path_vertex_pull.wgsl");
+        let fragment_shader = include_str!("analytic_path.wgsl");
+        let helper = include_str!("../../shaders/sdf_material_table.wgsl");
+        assert!(vertex_pull.contains(&format!("@binding({PATH_INSTANCES_BINDING})")));
+        assert!(vertex_pull.contains(&format!("@binding({PATH_RUN_RECORDS_BINDING})")));
+        assert!(fragment_shader.contains(&format!("@binding({PATH_RUN_RECORDS_BINDING})")));
+        assert!(helper.contains(&format!("@binding({MATERIAL_TABLE_BINDING})")));
+        assert!(helper.contains("#ifndef SDF_STRIPPED_MATERIAL_GROUP"));
+        assert!(helper.contains("#ifdef SDF_STRIPPED_MATERIAL_GROUP"));
+    }
 }

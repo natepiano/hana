@@ -310,8 +310,8 @@ Acceptance:
 
 **What deviated from the plan:**
 
-- The renderer still exposes glyph-compatible aliases such as `PathRecord` and
-  `PathInstanceRecord` while Phase B begins consuming the path names.
+- The renderer still exposes glyph-compatible aliases such as `PackedPathRecord` and
+  `PathQuadRecord` while Phase B begins consuming the path names.
 - The existing text batch key remains text-oriented, while the already-shared
   `VisualBatchKey` remains the generic render compatibility key for future path
   producers.
@@ -404,12 +404,12 @@ Acceptance:
   forms into closed `PathOutline` contours, including midpoint-control
   quadratics for straight edges and quadratic arc segments for circles.
 - `PanelLineBatchStore` kept panel-owned source cleanup while routing payloads
-  through `PathAtlas<PanelLineRenderKey>`, `PathInstanceRecord`, `RunRecord`,
+  through `PathAtlas<PanelLineRenderKey>`, `PathQuadRecord`, `PathRenderRecord`,
   and `TextMaterial`.
 
 **What deviated from the plan:**
 
-- Phase B added `RunRecord::oit_depth_offset` so panel-line analytic paths keep
+- Phase B added `PathRenderRecord::oit_depth_offset` so panel-line analytic paths keep
   per-primitive OIT ordering through the shared run table.
 - The old `render/panel_lines/material.rs` and `panel_line_batch.wgsl` were
   left unregistered instead of deleted so Phase F can remove or archive them
@@ -496,9 +496,9 @@ Deliverables:
   the existing `cascade_attr!` infrastructure (`TextAlpha` is the template):
   `Override<A>` / `Resolved<A>` components, cascade plugin registration, and
   attribute verbs. The global resources stay as the cascade root defaults.
-- Carry the resolved AA mode and fade policy in `RunRecord` instead of
+- Carry the resolved AA mode and fade policy in `PathRenderRecord` instead of
   material uniforms so overrides do not split batches or materials. Update
-  the `RunRecord` size assertion and the WGSL mirror struct. Add a single
+  the `PathRenderRecord` size assertion and the WGSL mirror struct. Add a single
   enum→bits conversion site (an `AaBits`-style helper plus a fade-bits
   helper) so the GPU encoding cannot drift from the authored enums.
 - Shader constraint: read the per-run flags and compute `fwidth`/`dpdx`/
@@ -557,7 +557,7 @@ Acceptance:
   cascade without minting a wrapper struct, so the attributes are literally
   `AntiAlias` and `HairlineFade` (`Override<AntiAlias>`,
   `resolved_anti_alias`).
-- `RunRecord` grew `aa_flags: u32` + `fade_exponent: f32` (96 → 112 B stride);
+- `PathRenderRecord` grew `aa_flags: u32` + `fade_exponent: f32` (96 → 112 B stride);
   the encase assertion, both WGSL mirrors, and the padded-payload tests all
   moved together. `AntiAlias::aa_flags()` and
   `HairlineFade::fade_exponent()` are the single conversion/validation sites.
@@ -631,7 +631,7 @@ Acceptance:
 - Phase F's SDF deliverable is split into removable (quarantined panel-line
   files) vs retained (`LegacySdfExtendedMaterial` for backgrounds and the non-coplanar
   callout fallback), plus the stale `sdf_material.rs` discriminant doc.
-- Phase F's rename audit now covers the Phase C mirror surfaces (`RunRecord`
+- Phase F's rename audit now covers the Phase C mirror surfaces (`PathRenderRecord`
   WGSL mirrors, `AA_FLAG_*` pair, coverage-probe tripwire) and re-counts the
   reference-site figure at phase start.
 - Phase F's cross-panel OIT regression check gains a heterogeneous per-run
@@ -641,7 +641,7 @@ Acceptance:
 
 Follow-up implemented after Phase C closed, fixing the tick/spine abutment
 artifact the element-level fade exemption produced in `units.rs`. Supersedes
-the Phase C retrospective statements that `RunRecord` carries `fade_exponent`
+the Phase C retrospective statements that `PathRenderRecord` carries `fade_exponent`
 and that the fade factor derives from a single winning curve. User-verified
 in `units` 2026-06-11: junction line gone at zoom-in, fade-out joins
 correctly, spine/majors stay solid.
@@ -665,7 +665,7 @@ As built:
   — mixed fade policies share one group, one record, one batch.
 - **Fade is per-curve data**: `PathContour` and `CurveRecord` gained
   `fade_exponent` (curve stride 64 → 80 B, new encase assertion);
-  `RunRecord.fade_exponent` and `PathUniform.hairline_fade_exponent` were
+  `PathRenderRecord.fade_exponent` and `PathUniform.hairline_fade_exponent` were
   deleted (run stride 112 → 96 B; both WGSL mirrors, padded-payload tests,
   and every constructor updated). `aa_flags` stays per-record.
 - **Two-lane coverage evaluation** in `analytic_path.wgsl`: curves split into
@@ -720,7 +720,7 @@ As built:
   the added work is the band pack plus a tens-of-KB upload per step).
 - Phase D's fade-policy pin can now be authored per line as well as per
   element; the Phase F rename audit covers `CurveRecord::fade_exponent` (not
-  `RunRecord`) and the heterogeneous-fade OIT regression case exercises
+  `PathRenderRecord`) and the heterogeneous-fade OIT regression case exercises
   per-curve fade after a global flip.
 
 ### Phase D - Typography Overlay Migration (complete)
@@ -829,7 +829,7 @@ Acceptance:
   decision and partially answers the Non-Line Panel Marks question.
 - The whole renderer module and identity layer were renamed
   `panel_lines` → `panel_shapes`, Line → Shape (`PanelShapeSourceKey`,
-  `PanelShapeBatchStore`, `ShapeBatchKey`, `ResolvedPanelShape`,
+  `PanelShapeBatchStore`, `PathBatchKey`, `ResolvedPanelShape`,
   `build_panel_shape_path`, `PanelShapeMember`). At Phase D close-out this
   document and its title were renamed to "Panel Shape API" /
   `panel-shape-api.md` and the live module-tree references updated to
@@ -934,7 +934,7 @@ Deliverables:
   `panel_shapes/primitive.rs` calls `PanelShapeRenderKey` a "panel-line"
   identity), and keep the as-built module summary current.
 - Rename text/glyph-compatible internal analytic-path names such as
-  `TextMaterial`, `PathRecord`, and `PathInstanceRecord` to path-neutral
+  `TextMaterial`, `PackedPathRecord`, and `PathQuadRecord` to path-neutral
   names, or explicitly defer with a per-type rationale recorded in code. The
   rename touches reference sites across render and text modules (re-count at
   phase start; the `panel_lines`→`panel_shapes` module rename is already done
@@ -942,14 +942,14 @@ Deliverables:
   and `panel_text/batching.rs`); this deliverable also folds in the residual
   Line→Shape doc-comment cleanup the Phase D rename left partial — e.g.
   `panel_shapes/primitive.rs` still calls `PanelShapeRenderKey` a "panel-line"
-  identity. Stage it through the existing `PathRecord` /
-  `PathInstanceRecord` aliases — first switch crate-internal uses to the
+  identity. Stage it through the existing `PackedPathRecord` /
+  `PathQuadRecord` aliases — first switch crate-internal uses to the
   aliases, then rename the definitions — so there is a compiling
   intermediate state. The rename audit also covers the Phase C surfaces: the
-  `RunRecord` mirror structs and `aa_flags` comments in
+  `PathRenderRecord` mirror structs and `aa_flags` comments in
   `analytic_path.wgsl` and `analytic_path_vertex_pull.wgsl`, the
   `CurveRecord::fade_exponent` mirrors (Phase C addendum moved fade from
-  `RunRecord` to per-curve data), the `AA_FLAG_SUPERSAMPLE` /
+  `PathRenderRecord` to per-curve data), the `AA_FLAG_SUPERSAMPLE` /
   `AA_FLAG_BAND` constant pair mirrored between `render/mod.rs` and
   `analytic_path.wgsl`, and the shader-hash tripwire + CPU mirror in
   `text/slug/glyph/coverage_probe.rs`.

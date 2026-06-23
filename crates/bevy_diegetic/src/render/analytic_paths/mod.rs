@@ -13,9 +13,13 @@ mod material;
 mod packing;
 
 pub(crate) use atlas::PathAtlas;
+pub(crate) use batching::GeometryDirty;
+pub(crate) use batching::MaterialDirty;
 pub(crate) use batching::PathBatchKey;
 pub(crate) use batching::PathBatchResources;
 pub(crate) use batching::PathBatchStore;
+pub(crate) use batching::PlacementDirty;
+pub(crate) use batching::analytic_material_slot_candidate;
 use bevy::asset::embedded_asset;
 use bevy::asset::load_internal_asset;
 use bevy::pbr::MaterialPlugin;
@@ -40,9 +44,9 @@ pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
 pub(crate) use packing::DEFAULT_BAND_COUNT;
 pub(crate) use packing::PackedPath;
-pub(crate) use packing::PathInstanceRecord;
-pub(crate) use packing::PathRecord;
-pub(crate) use packing::RunRecord;
+pub(crate) use packing::PackedPathRecord;
+pub(crate) use packing::PathQuadRecord;
+pub(crate) use packing::PathRenderRecord;
 pub(crate) use packing::build_packed_path;
 
 use self::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
@@ -55,7 +59,7 @@ pub(crate) struct PathAtlasHandles {
     pub curves:       Handle<ShaderBuffer>,
     /// Shared along-Y/along-X band records.
     pub bands:        Handle<ShaderBuffer>,
-    /// Shared path records, indexed by each instance record's `atlas_index`.
+    /// Shared packed-path records, indexed by each quad record's `packed_path_index`.
     pub path_records: Handle<ShaderBuffer>,
 }
 

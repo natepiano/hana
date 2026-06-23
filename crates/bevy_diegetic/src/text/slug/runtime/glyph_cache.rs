@@ -201,7 +201,9 @@ impl GlyphCache {
 
     /// Shared-atlas record index for `key`, if the glyph has been packed.
     #[must_use]
-    pub fn atlas_index(&self, key: GlyphKey) -> Option<u32> { self.outline_cache.global_index(key) }
+    pub fn packed_path_index(&self, key: GlyphKey) -> Option<u32> {
+        self.outline_cache.global_index(key)
+    }
 
     /// The glyph batch store (records, batch keys, GPU handles per batch).
     #[must_use]

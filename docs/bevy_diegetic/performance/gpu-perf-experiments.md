@@ -133,7 +133,7 @@ bench + xctrace = verdict).
   (punch-out runs invert it), replacing the full `render_coverage`
   evaluation binarized at 0.5. Unconditional — no per-label choice. A
   per-label `GlyphShadowQuality` (`Expensive`/`Cheap` through
-  `TextStyle` + `RunRecord` + a per-run shader branch) was built first
+  `TextStyle` + `PathRenderRecord` + a per-run shader branch) was built first
   for the A/B, then deleted once the user picked cheap-always: the
   choice bought only code complexity. Net engine diff: the prepass
   fragment body plus the mirror-test hash.

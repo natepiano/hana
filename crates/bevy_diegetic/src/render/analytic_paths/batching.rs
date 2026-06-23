@@ -13,12 +13,14 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
+use bevy::color::Color;
 use bevy::math::Mat4;
 use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy::math::Vec4;
 use bevy::math::Vec4Swizzles;
 use bevy::pbr::StandardMaterial;
+use bevy::prelude::AlphaMode;
 use bevy::prelude::Entity;
 use bevy::prelude::Handle;
 use bevy::prelude::Mesh;
@@ -27,40 +29,136 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
 use super::material::PathExtendedMaterial;
-use super::packing::PathInstanceRecord;
-use super::packing::RunRecord;
-use crate::layout::GlyphShadowMode;
+use super::packing::PathQuadRecord;
+use super::packing::PathRenderRecord;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
-use crate::render::BaseMaterialId;
-use crate::render::BatchAlphaMode;
+use crate::render;
 use crate::render::BatchRenderLayers;
 use crate::render::Dirty;
-use crate::render::VisualMaterialInterner;
+use crate::render::VisualShadow;
+use crate::render::batch_key::PipelineCompatibility;
+use crate::render::batch_key::ResourceCompatibility;
+use crate::render::material_table::GpuMaterialSlotId;
+use crate::render::material_table::MaterialSlotCandidate;
+use crate::render::material_table::MaterialSlotId;
 use crate::text::RunStorageKey;
 
-/// What splits text draws: every pipeline/material/entity-level property. A
-/// run differing on several fields at once still maps to exactly one batch.
-/// `fill_color`, `render_mode`, and the depth nudge are stored per run in
-/// [`RunRecord`]s, so they do not split.
+/// Map key for one `PathBatchResources` entry in an analytic-path batch store.
+///
+/// Scalar/vector PBR values are deliberately absent: a `PathRenderRecord`
+/// carries the current frame's material table row, while this key carries only
+/// sort, pass, pipeline, and resource facts that must agree inside one draw.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PathBatchKey {
-    /// Interned authored base material (`DiegeticPanel::text_material` or the
-    /// library default).
-    pub base_material: BaseMaterialId,
-    /// Resolved `TextAlpha` cascade value.
-    pub alpha:         BatchAlphaMode,
-    /// Resolved `Lighting` cascade value.
-    pub lighting:      Lighting,
-    /// Resolved `Sidedness` cascade value.
-    pub sidedness:     Sidedness,
     /// Panel command z-level for the batch's shared screen sort lane.
-    pub z_level:       i8,
-    /// The run's `GlyphShadowMode` (`Cast` batches cast, `None` batches carry
-    /// `NotShadowCaster`).
-    pub shadow:        GlyphShadowMode,
-    /// The owning panel's render layers.
-    pub layers:        BatchRenderLayers,
+    pub z_level:                i8,
+    /// Shadow participation for this analytic path draw.
+    pub shadow:                 VisualShadow,
+    /// Render layers copied from the owning panel or text run scope.
+    pub layers:                 BatchRenderLayers,
+    /// Material-derived pipeline facts that must agree inside this path draw.
+    pub pipeline_compatibility: PipelineCompatibility,
+    /// Texture and bind-group facts copied into the path render material.
+    pub resource_compatibility: ResourceCompatibility,
+}
+
+/// Projects an analytic producer's effective source material into table values
+/// and resource/pipeline compatibility.
+pub(crate) fn analytic_material_slot_candidate(
+    base_material: &StandardMaterial,
+    base_color: Color,
+    alpha_mode: AlphaMode,
+    lighting: Lighting,
+    sidedness: Sidedness,
+) -> MaterialSlotCandidate {
+    let mut material = base_material.clone();
+    material.base_color = base_color;
+    material.alpha_mode = alpha_mode;
+    material.unlit = matches!(lighting, Lighting::Unlit);
+    render::apply_sidedness(&mut material, sidedness);
+    MaterialSlotCandidate::from(&material)
+}
+
+/// Dirty state for material-table row id changes in `PathRenderRecord`.
+#[derive(Debug, Default)]
+pub(crate) struct MaterialDirty {
+    /// Whether the path render-record buffer needs a material-id upload.
+    render_records: Dirty,
+}
+
+impl MaterialDirty {
+    /// Marks `PathRenderRecord::material` data dirty.
+    pub const fn mark(&mut self) { self.render_records.mark(); }
+
+    /// Clears material-only render-record dirtiness after upload.
+    pub const fn clear(&mut self) { self.render_records.clear(); }
+
+    /// Whether material slot ids need a render-record upload.
+    #[must_use]
+    pub const fn is_set(&self) -> bool { self.render_records.is_set() }
+}
+
+/// Dirty state for placement, AA, render mode, and depth values.
+#[derive(Debug, Default)]
+pub(crate) struct PlacementDirty {
+    /// Whether non-material `PathRenderRecord` data needs upload.
+    render_records: Dirty,
+    /// Whether batch bounds must be recomputed from placement changes.
+    bounds:         Dirty,
+}
+
+impl PlacementDirty {
+    /// Marks placement-sensitive render-record and bounds data dirty.
+    pub const fn mark(&mut self) {
+        self.render_records.mark();
+        self.bounds.mark();
+    }
+
+    /// Clears placement render-record dirtiness after upload.
+    pub const fn clear_render_records(&mut self) { self.render_records.clear(); }
+
+    /// Clears placement bounds dirtiness after bounds recomputation.
+    pub const fn clear_bounds(&mut self) { self.bounds.clear(); }
+
+    /// Whether placement data needs a render-record upload.
+    #[must_use]
+    pub const fn render_records_are_dirty(&self) -> bool { self.render_records.is_set() }
+
+    /// Whether placement data requires a bounds recomputation.
+    #[must_use]
+    pub const fn bounds_are_dirty(&self) -> bool { self.bounds.is_set() }
+}
+
+/// Dirty state for path quad records and packed-path atlas changes.
+#[derive(Debug, Default)]
+pub(crate) struct GeometryDirty {
+    /// Whether the path quad buffer needs upload.
+    path_quads: Dirty,
+    /// Whether batch bounds must be recomputed from quad geometry changes.
+    bounds:     Dirty,
+}
+
+impl GeometryDirty {
+    /// Marks `PathQuadRecord` and bounds data dirty.
+    pub const fn mark(&mut self) {
+        self.path_quads.mark();
+        self.bounds.mark();
+    }
+
+    /// Clears path-quad dirtiness after upload.
+    pub const fn clear_path_quads(&mut self) { self.path_quads.clear(); }
+
+    /// Clears geometry bounds dirtiness after bounds recomputation.
+    pub const fn clear_bounds(&mut self) { self.bounds.clear(); }
+
+    /// Whether path quad records need upload.
+    #[must_use]
+    pub const fn path_quads_are_dirty(&self) -> bool { self.path_quads.is_set() }
+
+    /// Whether geometry data requires a bounds recomputation.
+    #[must_use]
+    pub const fn bounds_are_dirty(&self) -> bool { self.bounds.is_set() }
 }
 
 /// GPU-side handles for one batch, created by the routing system on the
@@ -77,9 +175,9 @@ pub(crate) struct PathBatchKey {
 /// reliably (a missing render asset retries next frame).
 #[derive(Debug)]
 pub(crate) struct PathBatchResources {
-    /// `PathInstanceRecord` storage buffer (binding 104), `capacity` records.
+    /// `PathQuadRecord` storage buffer (binding 104), `capacity` records.
     pub instances:    Handle<ShaderBuffer>,
-    /// `RunRecord` storage buffer (binding 105), `run_capacity` records.
+    /// `PathRenderRecord` storage buffer (binding 105), `run_capacity` records.
     pub run_table:    Handle<ShaderBuffer>,
     /// Inert capacity-sized mesh; re-created and swapped on capacity growth.
     pub mesh:         Handle<Mesh>,
@@ -96,9 +194,9 @@ pub(crate) struct PathBatchResources {
 #[derive(Debug)]
 struct BatchRun {
     key:          RunStorageKey,
-    /// Path records in run order; `run_index` is stamped by `rebuild`.
-    path_records: Vec<PathInstanceRecord>,
-    record:       RunRecord,
+    /// Path records in run order; `render_index` is stamped by `rebuild`.
+    path_records: Vec<PathQuadRecord>,
+    record:       PathRenderRecord,
     /// This run's slots in the concatenated path records — derived state,
     /// written only by `rebuild`.
     range:        Range<u32>,
@@ -113,27 +211,26 @@ pub struct PathBatch {
     pub entity:          Option<Entity>,
     /// GPU handles; `None` until the routing system creates them.
     pub gpu:             Option<PathBatchResources>,
-    /// Path records changed — the instance buffer needs an upload.
-    pub instances_dirty: Dirty,
-    /// Run records changed — the run table needs an upload.
-    pub run_table_dirty: Dirty,
-    /// Membership, geometry, or a transform changed — the Aabb-union system
-    /// recomputes this batch's bounds.
-    pub bounds_dirty:    Dirty,
+    /// Material-slot row ids changed in `PathRenderRecord::material`.
+    pub material_dirty:  MaterialDirty,
+    /// Placement, render mode, AA, or depth changed in path render records.
+    pub placement_dirty: PlacementDirty,
+    /// Path quad membership or geometry changed.
+    pub geometry_dirty:  GeometryDirty,
     runs:                Vec<BatchRun>,
-    path_records:        Vec<PathInstanceRecord>,
-    run_records:         Vec<RunRecord>,
+    path_records:        Vec<PathQuadRecord>,
+    run_records:         Vec<PathRenderRecord>,
 }
 
 impl PathBatch {
-    /// Concatenated path records, `run_index` stamped — the instance-buffer
+    /// Concatenated path records, `render_index` stamped — the instance-buffer
     /// upload payload.
     #[must_use]
-    pub fn path_records(&self) -> &[PathInstanceRecord] { &self.path_records }
+    pub fn path_records(&self) -> &[PathQuadRecord] { &self.path_records }
 
     /// One record per member run — the run-table upload payload.
     #[must_use]
-    pub fn run_records(&self) -> &[RunRecord] { &self.run_records }
+    pub fn run_records(&self) -> &[PathRenderRecord] { &self.run_records }
 
     /// Number of member runs.
     #[must_use]
@@ -155,7 +252,7 @@ impl PathBatch {
         let mut max = Vec3::MIN;
         let mut any = false;
         for record in &self.path_records {
-            let run = &self.run_records[record.run_index.to_usize()];
+            let run = &self.run_records[record.render_index.to_usize()];
             for (corner_x, corner_y) in [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)] {
                 let local = record.rect_min + Vec2::new(corner_x, corner_y) * record.rect_size;
                 let world = run.transform * Vec4::new(local.x, local.y, 0.0, 1.0);
@@ -180,25 +277,25 @@ impl PathBatch {
         self.run_records.clear();
         for (index, run) in self.runs.iter_mut().enumerate() {
             let start = self.path_records.len().to_u32();
-            let run_index = index.to_u32();
+            let render_index = index.to_u32();
             self.path_records
-                .extend(run.path_records.iter().map(|record| PathInstanceRecord {
-                    run_index,
+                .extend(run.path_records.iter().map(|record| PathQuadRecord {
+                    render_index,
                     ..*record
                 }));
             run.range = start..self.path_records.len().to_u32();
             self.run_records.push(run.record);
         }
-        self.instances_dirty.mark();
-        self.run_table_dirty.mark();
-        self.bounds_dirty.mark();
+        self.geometry_dirty.mark();
+        self.material_dirty.mark();
+        self.placement_dirty.mark();
     }
 
     fn push_run(
         &mut self,
         key: RunStorageKey,
-        path_records: Vec<PathInstanceRecord>,
-        record: RunRecord,
+        path_records: Vec<PathQuadRecord>,
+        record: PathRenderRecord,
     ) {
         self.runs.push(BatchRun {
             key,
@@ -222,29 +319,37 @@ impl PathBatch {
     fn update_run(
         &mut self,
         key: RunStorageKey,
-        path_records: Vec<PathInstanceRecord>,
-        record: RunRecord,
+        path_records: Vec<PathQuadRecord>,
+        record: PathRenderRecord,
     ) {
         let Some(position) = self.position_of(key) else {
             return;
         };
         if self.runs[position].path_records.len() == path_records.len() {
-            let run_index = position.to_u32();
+            let render_index = position.to_u32();
             let range = self.runs[position].range.clone();
+            let mut path_records_changed = false;
             for (slot, source) in range.zip(path_records.iter()) {
-                self.path_records[slot.to_usize()] = PathInstanceRecord {
-                    run_index,
+                let index = slot.to_usize();
+                let stamped = PathQuadRecord {
+                    render_index,
                     ..*source
                 };
+                if self.path_records[index] != stamped {
+                    self.path_records[index] = stamped;
+                    path_records_changed = true;
+                }
             }
             if self.run_records[position] != record {
                 self.run_records[position] = record;
-                self.run_table_dirty.mark();
+                self.material_dirty.mark();
+                self.placement_dirty.mark();
             }
             self.runs[position].path_records = path_records;
             self.runs[position].record = record;
-            self.instances_dirty.mark();
-            self.bounds_dirty.mark();
+            if path_records_changed {
+                self.geometry_dirty.mark();
+            }
         } else {
             self.runs[position].path_records = path_records;
             self.runs[position].record = record;
@@ -252,7 +357,7 @@ impl PathBatch {
         }
     }
 
-    /// Writes one member run's transform into its `RunRecord` slot, dirtying
+    /// Writes one member run's transform into its `PathRenderRecord` slot, dirtying
     /// the run table only when the matrix actually changed.
     fn update_run_transform(&mut self, key: RunStorageKey, transform: Mat4) {
         let Some(position) = self.position_of(key) else {
@@ -263,35 +368,77 @@ impl PathBatch {
         }
         self.runs[position].record.transform = transform;
         self.run_records[position].transform = transform;
-        self.run_table_dirty.mark();
-        self.bounds_dirty.mark();
+        self.placement_dirty.mark();
+    }
+
+    /// Writes one member run's frame-local material slot into its
+    /// `PathRenderRecord` without dirtying quads, atlas data, or bounds.
+    fn update_run_material(&mut self, key: RunStorageKey, material: GpuMaterialSlotId) {
+        let Some(position) = self.position_of(key) else {
+            return;
+        };
+        if self.runs[position].record.material == material {
+            return;
+        }
+        self.runs[position].record.material = material;
+        self.run_records[position].material = material;
+        self.material_dirty.mark();
+    }
+
+    /// Whether either material or placement fields require a render-record upload.
+    #[must_use]
+    pub const fn render_records_are_dirty(&self) -> bool {
+        self.material_dirty.is_set() || self.placement_dirty.render_records_are_dirty()
+    }
+
+    /// Whether path quads require upload.
+    #[must_use]
+    pub const fn path_quads_are_dirty(&self) -> bool { self.geometry_dirty.path_quads_are_dirty() }
+
+    /// Whether the batch Aabb must be recomputed.
+    #[must_use]
+    pub const fn bounds_are_dirty(&self) -> bool {
+        self.geometry_dirty.bounds_are_dirty() || self.placement_dirty.bounds_are_dirty()
+    }
+
+    /// Clears render-record dirty state after upload.
+    pub const fn clear_render_record_dirty(&mut self) {
+        self.material_dirty.clear();
+        self.placement_dirty.clear_render_records();
+    }
+
+    /// Clears path-quad dirty state after upload.
+    pub const fn clear_path_quad_dirty(&mut self) { self.geometry_dirty.clear_path_quads(); }
+
+    /// Clears bounds dirty state after recomputation.
+    pub const fn clear_bounds_dirty(&mut self) {
+        self.geometry_dirty.clear_bounds();
+        self.placement_dirty.clear_bounds();
     }
 }
 
-/// Routes every panel-text run to its batch: one [`PathBatch`] per
-/// [`PathBatchKey`], a run→batch index, and the base-material interner.
+/// Routes every text or panel-shape run to its analytic path batch.
 #[derive(Debug, Default)]
 pub(crate) struct PathBatchStore {
-    batches:   HashMap<PathBatchKey, PathBatch>,
-    run_index: HashMap<RunStorageKey, PathBatchKey>,
-    interner:  VisualMaterialInterner,
+    batches:      HashMap<PathBatchKey, PathBatch>,
+    /// Current batch key for each routed run.
+    render_index: HashMap<RunStorageKey, PathBatchKey>,
 }
 
 impl PathBatchStore {
-    /// Id for an authored base material, minting one on first sight.
-    pub fn intern_base_material(&mut self, material: &StandardMaterial) -> BaseMaterialId {
-        self.interner.intern_base_material(material)
-    }
-
-    /// The authored material behind an interned id.
-    #[must_use]
-    pub fn base_material(&self, id: BaseMaterialId) -> &StandardMaterial {
-        self.interner.base_material(id)
-    }
-
     /// Whether a run is currently routed to any batch.
     #[must_use]
-    pub fn is_routed(&self, run: RunStorageKey) -> bool { self.run_index.contains_key(&run) }
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "batch-store tests exercise route membership")
+    )]
+    pub fn is_routed(&self, run: RunStorageKey) -> bool { self.render_index.contains_key(&run) }
+
+    /// Current batch key for a routed run.
+    #[must_use]
+    pub fn key_for_run(&self, run: RunStorageKey) -> Option<&PathBatchKey> {
+        self.render_index.get(&run)
+    }
 
     /// Inserts a run into its key's batch, moves it when its key changed, or
     /// updates it in place — the single membership mutation point, together
@@ -300,10 +447,10 @@ impl PathBatchStore {
         &mut self,
         key: PathBatchKey,
         run: RunStorageKey,
-        path_records: Vec<PathInstanceRecord>,
-        record: RunRecord,
+        path_records: Vec<PathQuadRecord>,
+        record: PathRenderRecord,
     ) {
-        if let Some(current) = self.run_index.get(&run) {
+        if let Some(current) = self.render_index.get(&run) {
             if *current == key {
                 if let Some(batch) = self.batches.get_mut(&key) {
                     batch.update_run(run, path_records, record);
@@ -314,19 +461,19 @@ impl PathBatchStore {
             if let Some(batch) = self.batches.get_mut(&previous) {
                 batch.remove_run(run);
             }
-            self.run_index.remove(&run);
+            self.render_index.remove(&run);
         }
         self.batches
             .entry(key.clone())
             .or_default()
             .push_run(run, path_records, record);
-        self.run_index.insert(run, key);
+        self.render_index.insert(run, key);
     }
 
     /// Removes a run from its batch. The emptied batch keeps its store entry
     /// until the routing system reconciles it via [`Self::take_empty_batches`].
     pub fn remove_run(&mut self, run: RunStorageKey) {
-        let Some(key) = self.run_index.remove(&run) else {
+        let Some(key) = self.render_index.remove(&run) else {
             return;
         };
         if let Some(batch) = self.batches.get_mut(&key) {
@@ -334,14 +481,25 @@ impl PathBatchStore {
         }
     }
 
-    /// Writes a routed run's world transform into its `RunRecord` slot. A
+    /// Writes a routed run's world transform into its `PathRenderRecord` slot. A
     /// no-op for unrouted runs (e.g. a fully clipped label).
     pub fn update_run_transform(&mut self, run: RunStorageKey, transform: Mat4) {
-        let Some(key) = self.run_index.get(&run) else {
+        let Some(key) = self.render_index.get(&run) else {
             return;
         };
         if let Some(batch) = self.batches.get_mut(key) {
             batch.update_run_transform(run, transform);
+        }
+    }
+
+    /// Writes a routed run's frame-local material-table row id. A no-op for
+    /// unrouted runs and for unchanged row ids.
+    pub fn update_run_material(&mut self, run: RunStorageKey, material: MaterialSlotId) {
+        let Some(key) = self.render_index.get(&run) else {
+            return;
+        };
+        if let Some(batch) = self.batches.get_mut(key) {
+            batch.update_run_material(run, GpuMaterialSlotId::from(material));
         }
     }
 
@@ -396,22 +554,25 @@ mod tests {
     use bevy::prelude::AlphaMode;
 
     use super::*;
+    use crate::render::material_table::MaterialSlotId;
 
-    fn path_record(rect_min: Vec2, atlas_index: u32) -> PathInstanceRecord {
-        PathInstanceRecord {
+    fn path_record(rect_min: Vec2, packed_path_index: u32) -> PathQuadRecord {
+        PathQuadRecord {
             rect_min,
             rect_size: Vec2::ONE,
             uv_min: Vec2::ZERO,
             uv_size: Vec2::ONE,
-            atlas_index,
-            run_index: 0,
+            packed_path_index,
+            render_index: 0,
         }
     }
 
-    fn record(transform: Mat4) -> RunRecord {
-        RunRecord {
+    fn record(transform: Mat4) -> PathRenderRecord {
+        PathRenderRecord {
             transform,
-            fill_color: Vec4::ONE,
+            material: GpuMaterialSlotId::from(
+                MaterialSlotId::try_from(0).expect("slot 0 is valid"),
+            ),
             render_mode: 1,
             depth_nudge: 0.0,
             oit_depth_offset: 0.0,
@@ -419,16 +580,17 @@ mod tests {
         }
     }
 
-    fn key(store: &mut PathBatchStore, alpha: AlphaMode) -> PathBatchKey {
-        let id = store.intern_base_material(&StandardMaterial::default());
+    fn key(alpha: AlphaMode) -> PathBatchKey {
+        let material = StandardMaterial {
+            alpha_mode: alpha,
+            ..Default::default()
+        };
         PathBatchKey {
-            base_material: id,
-            alpha:         alpha.into(),
-            lighting:      Lighting::Lit,
-            sidedness:     Sidedness::BothSides,
-            z_level:       0,
-            shadow:        GlyphShadowMode::Cast,
-            layers:        BatchRenderLayers(RenderLayers::layer(0)),
+            z_level:                0,
+            shadow:                 VisualShadow::Cast,
+            layers:                 BatchRenderLayers(RenderLayers::layer(0)),
+            pipeline_compatibility: PipelineCompatibility::from(&material),
+            resource_compatibility: ResourceCompatibility::from(&material),
         }
     }
 
@@ -437,7 +599,7 @@ mod tests {
     #[test]
     fn two_runs_one_key_share_a_batch_with_contiguous_ranges() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
 
@@ -462,18 +624,47 @@ mod tests {
         let stamped: Vec<u32> = batch
             .path_records()
             .iter()
-            .map(|record| record.run_index)
+            .map(|record| record.render_index)
             .collect();
         assert_eq!(stamped, vec![0, 0, 1]);
-        assert!(batch.instances_dirty.is_set());
-        assert!(batch.run_table_dirty.is_set());
-        assert!(batch.bounds_dirty.is_set());
+        assert!(batch.path_quads_are_dirty());
+        assert!(batch.render_records_are_dirty());
+        assert!(batch.bounds_are_dirty());
+    }
+
+    #[test]
+    fn runs_differing_only_by_render_layers_route_to_separate_batches() {
+        let mut store = PathBatchStore::default();
+        let layer0 = key(AlphaMode::Blend);
+        let layer1 = PathBatchKey {
+            layers: BatchRenderLayers(RenderLayers::layer(1)),
+            ..key(AlphaMode::Blend)
+        };
+        // Identical compatibility/order; the render layer is the only difference.
+        assert_ne!(layer0, layer1);
+
+        store.upsert_run(
+            layer0.clone(),
+            run_key(1),
+            vec![path_record(Vec2::ZERO, 0)],
+            record(Mat4::IDENTITY),
+        );
+        store.upsert_run(
+            layer1.clone(),
+            run_key(2),
+            vec![path_record(Vec2::ZERO, 0)],
+            record(Mat4::IDENTITY),
+        );
+
+        assert_eq!(store.batches().count(), 2);
+        assert_eq!(store.get(&layer0).expect("layer 0 batch").run_count(), 1);
+        assert_eq!(store.get(&layer1).expect("layer 1 batch").run_count(), 1);
     }
 
     #[test]
     fn removing_a_run_rebuilds_the_survivors_ranges() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
         store.upsert_run(
@@ -496,14 +687,14 @@ mod tests {
         assert_eq!(batch.run_count(), 1);
         assert_eq!(batch.path_record_count(), 1);
         // The surviving run shifted to index 0 and its records re-stamped.
-        assert_eq!(batch.path_records()[0].run_index, 0);
-        assert_eq!(batch.path_records()[0].atlas_index, 2);
+        assert_eq!(batch.path_records()[0].render_index, 0);
+        assert_eq!(batch.path_records()[0].packed_path_index, 2);
     }
 
     #[test]
     fn same_count_edit_writes_in_place_without_touching_the_run_table() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         let stamped = record(Mat4::IDENTITY);
         store.upsert_run(
@@ -514,8 +705,8 @@ mod tests {
         );
         {
             let batch = store.get_mut(&batch_key).expect("batch should exist");
-            batch.instances_dirty.clear();
-            batch.run_table_dirty.clear();
+            batch.clear_path_quad_dirty();
+            batch.clear_render_record_dirty();
         }
 
         // Same record count, different atlas indices — the stress-test edit
@@ -528,23 +719,73 @@ mod tests {
         );
 
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert!(batch.instances_dirty.is_set(), "path records changed");
+        assert!(batch.path_quads_are_dirty(), "path records changed");
         assert!(
-            !batch.run_table_dirty.is_set(),
+            batch.geometry_dirty.bounds_are_dirty(),
+            "path record changes must recompute bounds"
+        );
+        assert!(
+            !batch.render_records_are_dirty(),
             "an unchanged run record must not dirty the run table"
         );
         let atlas: Vec<u32> = batch
             .path_records()
             .iter()
-            .map(|record| record.atlas_index)
+            .map(|record| record.packed_path_index)
             .collect();
         assert_eq!(atlas, vec![5, 6]);
     }
 
     #[test]
+    fn identical_same_count_quads_do_not_dirty_geometry() {
+        let mut store = PathBatchStore::default();
+        let batch_key = key(AlphaMode::Blend);
+        let run = run_key(1);
+        let path_records = vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)];
+        store.upsert_run(
+            batch_key.clone(),
+            run,
+            path_records.clone(),
+            record(Mat4::IDENTITY),
+        );
+        {
+            let batch = store.get_mut(&batch_key).expect("batch should exist");
+            batch.clear_path_quad_dirty();
+            batch.clear_render_record_dirty();
+            batch.clear_bounds_dirty();
+        }
+
+        let mut updated = record(Mat4::from_translation(Vec3::X));
+        updated.material =
+            GpuMaterialSlotId::from(MaterialSlotId::try_from(7).expect("slot 7 is valid"));
+        store.upsert_run(batch_key.clone(), run, path_records, updated);
+
+        let batch = store.get(&batch_key).expect("batch should exist");
+        assert!(batch.material_dirty.is_set());
+        assert!(batch.placement_dirty.render_records_are_dirty());
+        assert!(
+            batch.render_records_are_dirty(),
+            "material and placement edits update the run table"
+        );
+        assert!(
+            !batch.path_quads_are_dirty(),
+            "identical path records must not upload the quad table"
+        );
+        assert!(
+            !batch.geometry_dirty.bounds_are_dirty(),
+            "identical path records must not mark geometry bounds dirty"
+        );
+        assert!(
+            batch.placement_dirty.bounds_are_dirty(),
+            "placement changes still recompute bounds"
+        );
+        assert_eq!(batch.run_records()[0], updated);
+    }
+
+    #[test]
     fn count_change_takes_the_rebuild_path() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         store.upsert_run(
             batch_key.clone(),
@@ -563,7 +804,7 @@ mod tests {
         let batch = store.get(&batch_key).expect("batch should exist");
         assert_eq!(batch.path_record_count(), 2);
         assert!(
-            batch.run_table_dirty.is_set(),
+            batch.render_records_are_dirty(),
             "a rebuild re-uploads both buffers"
         );
     }
@@ -571,8 +812,8 @@ mod tests {
     #[test]
     fn key_change_moves_the_run_between_batches() {
         let mut store = PathBatchStore::default();
-        let blend = key(&mut store, AlphaMode::Blend);
-        let add = key(&mut store, AlphaMode::Add);
+        let blend = key(AlphaMode::Blend);
+        let add = key(AlphaMode::Add);
         let run = run_key(1);
         store.upsert_run(
             blend.clone(),
@@ -600,8 +841,8 @@ mod tests {
     #[test]
     fn move_then_remove_in_one_pass_leaves_both_maps_consistent() {
         let mut store = PathBatchStore::default();
-        let blend = key(&mut store, AlphaMode::Blend);
-        let add = key(&mut store, AlphaMode::Add);
+        let blend = key(AlphaMode::Blend);
+        let add = key(AlphaMode::Add);
         let run = run_key(1);
         store.upsert_run(
             blend,
@@ -634,7 +875,7 @@ mod tests {
     #[test]
     fn transform_update_dirties_the_run_table_only_on_change() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         store.upsert_run(
             batch_key.clone(),
@@ -644,48 +885,54 @@ mod tests {
         );
         {
             let batch = store.get_mut(&batch_key).expect("batch should exist");
-            batch.run_table_dirty.clear();
-            batch.bounds_dirty.clear();
+            batch.clear_render_record_dirty();
+            batch.clear_bounds_dirty();
         }
 
         store.update_run_transform(run, Mat4::IDENTITY);
         let batch = store.get(&batch_key).expect("batch should exist");
         assert!(
-            !batch.run_table_dirty.is_set(),
+            !batch.render_records_are_dirty(),
             "an identical matrix must not dirty the run table"
         );
 
         let moved = Mat4::from_translation(Vec3::X);
         store.update_run_transform(run, moved);
         let batch = store.get(&batch_key).expect("batch should exist");
-        assert!(batch.run_table_dirty.is_set());
-        assert!(batch.bounds_dirty.is_set());
+        assert!(batch.render_records_are_dirty());
+        assert!(batch.bounds_are_dirty());
         assert_eq!(batch.run_records()[0].transform, moved);
     }
 
     #[test]
-    fn interner_assigns_one_id_per_distinct_material() {
-        let mut store = PathBatchStore::default();
-        let default_id = store.intern_base_material(&StandardMaterial::default());
-        let same_id = store.intern_base_material(&StandardMaterial::default());
-        let tinted = StandardMaterial {
+    fn scalar_material_values_do_not_enter_path_batch_key() {
+        let first = StandardMaterial {
             base_color: Color::srgb(0.5, 0.2, 0.2),
+            metallic: 0.25,
+            perceptual_roughness: 0.3,
             ..Default::default()
         };
-        let tinted_id = store.intern_base_material(&tinted);
+        let second = StandardMaterial {
+            base_color: Color::srgb(0.1, 0.7, 0.4),
+            metallic: 0.9,
+            perceptual_roughness: 0.8,
+            ..Default::default()
+        };
 
-        assert_eq!(default_id, same_id);
-        assert_ne!(default_id, tinted_id);
         assert_eq!(
-            store.base_material(tinted_id).base_color,
-            Color::srgb(0.5, 0.2, 0.2)
+            PipelineCompatibility::from(&first),
+            PipelineCompatibility::from(&second)
+        );
+        assert_eq!(
+            ResourceCompatibility::from(&first),
+            ResourceCompatibility::from(&second)
         );
     }
 
     #[test]
     fn world_bounds_unions_rects_across_run_transforms() {
         let mut store = PathBatchStore::default();
-        let batch_key = key(&mut store, AlphaMode::Blend);
+        let batch_key = key(AlphaMode::Blend);
         store.upsert_run(
             batch_key.clone(),
             run_key(1),
@@ -708,5 +955,33 @@ mod tests {
         // Unit rects at the origin and at (4, 0, -2).
         assert_eq!(min, Vec3::new(0.0, 0.0, -2.0));
         assert_eq!(max, Vec3::new(5.0, 1.0, 0.0));
+    }
+
+    #[test]
+    fn material_slot_refresh_dirties_only_render_records() {
+        let mut store = PathBatchStore::default();
+        let batch_key = key(AlphaMode::Blend);
+        let run = run_key(1);
+        store.upsert_run(
+            batch_key.clone(),
+            run,
+            vec![path_record(Vec2::ZERO, 0)],
+            record(Mat4::IDENTITY),
+        );
+        {
+            let batch = store.get_mut(&batch_key).expect("batch should exist");
+            batch.clear_path_quad_dirty();
+            batch.clear_render_record_dirty();
+            batch.clear_bounds_dirty();
+        }
+
+        store.update_run_material(run, MaterialSlotId::try_from(7).expect("slot 7 is valid"));
+
+        let batch = store.get(&batch_key).expect("batch should exist");
+        assert!(batch.material_dirty.is_set());
+        assert!(batch.render_records_are_dirty());
+        assert!(!batch.path_quads_are_dirty());
+        assert!(!batch.bounds_are_dirty());
+        assert_eq!(batch.run_records()[0].material.as_u32(), 7);
     }
 }

@@ -49,8 +49,8 @@ implements. No new font dependency.
 > **Update (glyph_instancing Step 4b, 2026-06-06):** the per-run mesh path
 > described below was deleted — `RunRenderData` / `RunStorage` /
 > `build_run_render_data` / `commit_run_storage` no longer exist, and text
-> renders only through the batched-records path (`PathInstanceRecord` /
-> `RunRecord` GPU tables expanded by `slug_text_vertex_pull.wgsl`). A color
+> renders only through the batched-records path (`PathQuadRecord` /
+> `PathRenderRecord` GPU tables expanded by `slug_text_vertex_pull.wgsl`). A color
 > glyph therefore lands as **N glyph records with a brush field** (one per
 > COLR layer) in its batch's instance table, not N layer-quads in a run
 > mesh; everything below about outlines, packing, coverage, and brushes is
@@ -62,7 +62,7 @@ Today's monochrome path (all under `crates/bevy_diegetic/src/text/slug/`):
   conversion, producing a quadratic-only `Glyph` (`Contour` / `QuadraticSegment`
   / `Bounds`).
 - `glyph/packing.rs` — packs a glyph's quadratics into `CurveRecord` + a
-  horizontal/vertical `BandRecord` acceleration structure, plus a `PathRecord`
+  horizontal/vertical `BandRecord` acceleration structure, plus a `PackedPathRecord`
   (`bounds_min_size`, `band_range`).
 - `render/run_data.rs` — `RunRenderData { mesh, curves, bands, glyphs }`: one
   quad per glyph instance, combined curve/band/glyph buffers for the run.
@@ -139,7 +139,7 @@ These are the types and the GPU layout the phases below build toward.
   `glyphs` buffer (a clip outline packs exactly like a glyph outline); a no-clip
   sentinel marks an unclipped layer, and a clipped layer costs one extra
   indirection (`glyphs[quad_records[i].clip_outline_index]`) plus a second
-  coverage evaluation. `PathRecord` stays monochrome-only — per-layer data lives
+  coverage evaluation. `PackedPathRecord` stays monochrome-only — per-layer data lives
   in `QuadRecord`, not a widened glyph record.
 - **`BrushRecord` / `StopRecord`** — `Brush` → `BrushRecord` via an explicit
   `impl From<&Brush>` with `#[repr(u32)]` tags (`BrushTag`, `ExtendMode`,

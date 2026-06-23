@@ -32,6 +32,7 @@ use self::shaping::shape_panel_text_children;
 use super::PanelChildSystems;
 use super::material_table;
 use super::material_table::BatchResourcesReady;
+use super::material_table::MaterialTableAppendReady;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
@@ -102,6 +103,7 @@ impl Plugin for TextRenderPlugin {
             (
                 update_panel_text_batches
                     .after(shape_panel_text_children)
+                    .after(MaterialTableAppendReady)
                     .before(TransformSystems::Propagate)
                     .before(BatchResourcesReady),
                 material_table::register_path_batch_materials::<DiegeticTextBatch>

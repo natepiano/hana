@@ -59,7 +59,7 @@ once, so default text lands at OIT offset `0.0`.
 (`render/panel_text/batching.rs`) are vertex-pulled batches. Each splits its
 batches by z-level (`z_level` on the batch key), so default-level content stays one
 shared batch across panels while a raised/lowered run spawns its own batch in the
-matching band. Per-record OIT offsets (`RunRecord` fields `depth_nudge` /
+matching band. Per-record OIT offsets (`PathRenderRecord` fields `depth_nudge` /
 `oit_depth_offset`) disambiguate within a batch on the OIT axis. Fills/borders/images
 are individual draws, each stamped with its command's full `DrawCommandDepth`.
 
@@ -119,7 +119,7 @@ text on/off — invalidates reuse instead of leaving a stale `oit_depth_offset`.
 - **Two-axis split is the precedent.** Lines and text are the two worked examples of
   "one batch per `(z_level, …)`, CPU-fixed screen lane (`line_batch_depth_bias` /
   `text_batch_depth_bias`) + per-record OIT offset." Any future batched-geometry path
-  replicates this `RunRecord` structure rather than re-deriving it.
+  replicates this `PathRenderRecord` structure rather than re-deriving it.
 
 ## Why
 

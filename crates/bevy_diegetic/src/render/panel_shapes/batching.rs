@@ -42,26 +42,33 @@ use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
 use crate::render::AntiAlias;
-use crate::render::BaseMaterialId;
-use crate::render::BatchAlphaMode;
 use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
 use crate::render::Dirty;
+use crate::render::GeometryDirty;
 use crate::render::HairlineFade;
+use crate::render::MaterialDirty;
 use crate::render::PathAtlas;
+use crate::render::PathBatchKey;
 use crate::render::PathExtendedMaterial;
-use crate::render::PathInstanceRecord;
 use crate::render::PathOutline;
+use crate::render::PathQuadRecord;
+use crate::render::PathRenderRecord;
+use crate::render::PlacementDirty;
 use crate::render::RenderMode;
-use crate::render::RunRecord;
-use crate::render::VisualBatchKey;
-use crate::render::VisualMaterialInterner;
 use crate::render::VisualShadow;
 use crate::render::analytic_paths::PathAtlasHandles;
+use crate::render::batch_key;
 use crate::render::draw_order;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrderProjection;
-use crate::render::draw_order::ScreenDepthBias;
+use crate::render::material_table;
+use crate::render::material_table::FrameMaterialTableBuild;
+use crate::render::material_table::FrameMaterialTableBuilder;
+use crate::render::material_table::MaterialSlotAppend;
+use crate::render::material_table::MaterialSlotCandidate;
+use crate::render::material_table::MaterialSlotInput;
+use crate::render::material_table::SdfPaintMaterial;
 
 /// Target design-unit extent for one panel-line band (≈ 5.8mm at the
 /// reference design scale). Bands shrink the per-fragment curve loop — a
@@ -83,21 +90,57 @@ const PANEL_LINE_PART_OIT_DEPTH_STEP: f32 = 0.000_000_001;
 #[reflect(Component)]
 pub(super) struct DiegeticPanelShapeBatch;
 
-/// Cross-panel compatibility key for analytic panel-line path instances.
-///
-/// Per-primitive color, render mode, transform, sorted depth nudge, and OIT
-/// offset live in `RunRecord`s. `ShapeBatchKey::z_level` selects the shared
-/// panel-line lane for that authored level.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct ShapeBatchKey {
-    visual:  VisualBatchKey,
-    z_level: i8,
+/// Temporary panel-line material source identity before source entities exist.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "Phase 6 bridge replaced by PanelShapeMaterialSourceKey in Phase 9"
+    )
+)]
+#[cfg_attr(
+    not(test),
+    allow(
+        unfulfilled_lint_expectations,
+        reason = "Phase 6 keeps the requested bridge gate even while production uses it"
+    )
+)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct PanelShapeMaterialSourceKeyBridge {
+    /// Current panel-line render identity used to find the authored source.
+    render_key: PanelShapeRenderKey,
 }
 
-impl ShapeBatchKey {
-    const fn new(visual: VisualBatchKey, z_level: i8) -> Self { Self { visual, z_level } }
+/// Append-time material input for one panel-line render record.
+struct PanelShapeMaterialSlotInput<'a> {
+    /// Source identity returned with the appended frame-local slot.
+    key:           PanelShapeMaterialSourceKeyBridge,
+    /// Resolved element/panel/default source material before color override.
+    base_material: &'a StandardMaterial,
+    /// Resolved primitive color used as the row's effective `base_color`.
+    fill_color:    Color,
+    /// Current panel-line alpha pipeline mode.
+    alpha_mode:    AlphaMode,
+    /// Resolved panel-line lighting policy.
+    lighting:      Lighting,
+    /// Resolved panel-line sidedness policy.
+    sidedness:     Sidedness,
+}
 
-    fn depth_bias(&self) -> ScreenDepthBias { draw_order::line_batch_depth_bias(self.z_level) }
+impl MaterialSlotInput for PanelShapeMaterialSlotInput<'_> {
+    type Key = PanelShapeMaterialSourceKeyBridge;
+
+    fn key(&self) -> Self::Key { self.key }
+
+    fn material_slot_candidate(&self) -> MaterialSlotCandidate {
+        render::analytic_material_slot_candidate(
+            self.base_material,
+            self.fill_color,
+            self.alpha_mode,
+            self.lighting,
+            self.sidedness,
+        )
+    }
 }
 
 /// GPU-side handles for one line path batch.
@@ -112,22 +155,23 @@ struct ShapeBatchGpu {
 }
 
 /// One member primitive in a batch.
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 struct ShapeBatchRecord {
     key:      PanelShapeRenderKey,
     outline:  PathOutline,
-    instance: PathInstanceRecord,
-    run:      RunRecord,
+    instance: PathQuadRecord,
+    run:      PathRenderRecord,
 }
 
-/// One render entity + material + mesh per [`ShapeBatchKey`].
+/// One render entity + material + mesh per [`PathBatchKey`].
 #[derive(Debug, Default)]
 struct ShapeBatch {
-    entity:        Option<Entity>,
-    gpu:           Option<ShapeBatchGpu>,
-    records_dirty: Dirty,
-    bounds_dirty:  Dirty,
-    records:       Vec<ShapeBatchRecord>,
+    entity:          Option<Entity>,
+    gpu:             Option<ShapeBatchGpu>,
+    material_dirty:  MaterialDirty,
+    placement_dirty: PlacementDirty,
+    geometry_dirty:  GeometryDirty,
+    records:         Vec<ShapeBatchRecord>,
 }
 
 impl ShapeBatch {
@@ -137,33 +181,94 @@ impl ShapeBatch {
 
     fn run_count(&self) -> u32 { self.records.len().to_u32() }
 
-    fn instances(&self) -> Vec<PathInstanceRecord> {
+    fn instances(&self) -> Vec<PathQuadRecord> {
         self.records
             .iter()
             .enumerate()
-            .map(|(index, record)| PathInstanceRecord {
-                run_index: index.to_u32(),
+            .map(|(index, record)| PathQuadRecord {
+                render_index: index.to_u32(),
                 ..record.instance
             })
             .collect()
     }
 
-    fn run_records(&self) -> Vec<RunRecord> {
+    fn run_records(&self) -> Vec<PathRenderRecord> {
         self.records.iter().map(|record| record.run).collect()
     }
 
     fn push_record(&mut self, record: ShapeBatchRecord) {
         self.records.push(record);
-        self.records_dirty.mark();
-        self.bounds_dirty.mark();
+        self.material_dirty.mark();
+        self.placement_dirty.mark();
+        self.geometry_dirty.mark();
     }
 
     fn remove_record(&mut self, key: PanelShapeRenderKey) {
         if let Some(index) = self.records.iter().position(|record| record.key == key) {
             self.records.remove(index);
-            self.records_dirty.mark();
-            self.bounds_dirty.mark();
+            self.material_dirty.mark();
+            self.placement_dirty.mark();
+            self.geometry_dirty.mark();
         }
+    }
+
+    fn position_of(&self, key: PanelShapeRenderKey) -> Option<usize> {
+        self.records.iter().position(|record| record.key == key)
+    }
+
+    fn refresh_record(&mut self, incoming: ShapeBatchRecord) {
+        let Some(index) = self.position_of(incoming.key) else {
+            self.push_record(incoming);
+            return;
+        };
+        let record = &mut self.records[index];
+        if record.outline != incoming.outline
+            || !path_quad_geometry_eq(&record.instance, &incoming.instance)
+        {
+            record.outline = incoming.outline;
+            let packed_path_index = record.instance.packed_path_index;
+            record.instance = PathQuadRecord {
+                packed_path_index,
+                ..incoming.instance
+            };
+            record.run = incoming.run;
+            self.material_dirty.mark();
+            self.placement_dirty.mark();
+            self.geometry_dirty.mark();
+            return;
+        }
+        if path_render_record_placement_eq(&record.run, &incoming.run) {
+            if record.run.material != incoming.run.material {
+                record.run.material = incoming.run.material;
+                self.material_dirty.mark();
+            }
+        } else {
+            record.run = incoming.run;
+            self.material_dirty.mark();
+            self.placement_dirty.mark();
+        }
+    }
+
+    const fn render_records_are_dirty(&self) -> bool {
+        self.material_dirty.is_set() || self.placement_dirty.render_records_are_dirty()
+    }
+
+    const fn path_quads_are_dirty(&self) -> bool { self.geometry_dirty.path_quads_are_dirty() }
+
+    const fn bounds_are_dirty(&self) -> bool {
+        self.geometry_dirty.bounds_are_dirty() || self.placement_dirty.bounds_are_dirty()
+    }
+
+    const fn clear_render_record_dirty(&mut self) {
+        self.material_dirty.clear();
+        self.placement_dirty.clear_render_records();
+    }
+
+    const fn clear_path_quad_dirty(&mut self) { self.geometry_dirty.clear_path_quads(); }
+
+    const fn clear_bounds_dirty(&mut self) {
+        self.geometry_dirty.clear_bounds();
+        self.placement_dirty.clear_bounds();
     }
 
     fn world_bounds(&self) -> Option<(Vec3, Vec3)> {
@@ -187,26 +292,35 @@ impl ShapeBatch {
     }
 }
 
+fn path_quad_geometry_eq(left: &PathQuadRecord, right: &PathQuadRecord) -> bool {
+    left.rect_min == right.rect_min
+        && left.rect_size == right.rect_size
+        && left.uv_min == right.uv_min
+        && left.uv_size == right.uv_size
+}
+
+fn path_render_record_placement_eq(left: &PathRenderRecord, right: &PathRenderRecord) -> bool {
+    left.transform == right.transform
+        && left.render_mode == right.render_mode
+        && left.depth_nudge.to_bits() == right.depth_nudge.to_bits()
+        && left.oit_depth_offset.to_bits() == right.oit_depth_offset.to_bits()
+        && left.aa_flags == right.aa_flags
+}
+
 /// Routes panel-line primitives into compatible cross-panel batches.
 #[derive(Debug, Default, Resource)]
 pub(super) struct PanelShapeBatchStore {
-    batches:     HashMap<ShapeBatchKey, ShapeBatch>,
-    panel_index: HashMap<Entity, Vec<(ShapeBatchKey, PanelShapeRenderKey)>>,
-    interner:    VisualMaterialInterner,
+    batches:     HashMap<PathBatchKey, ShapeBatch>,
+    panel_index: HashMap<Entity, Vec<(PathBatchKey, PanelShapeRenderKey)>>,
     atlas:       PathAtlas<PanelShapeRenderKey>,
     atlas_dirty: Dirty,
 }
 
 impl PanelShapeBatchStore {
-    fn intern_base_material(&mut self, material: &StandardMaterial) -> BaseMaterialId {
-        self.interner.intern_base_material(material)
-    }
-
-    fn base_material(&self, id: BaseMaterialId) -> &StandardMaterial {
-        self.interner.base_material(id)
-    }
-
-    fn upsert_panel(&mut self, panel: Entity, records: Vec<(ShapeBatchKey, ShapeBatchRecord)>) {
+    fn upsert_panel(&mut self, panel: Entity, records: Vec<(PathBatchKey, ShapeBatchRecord)>) {
+        if self.try_refresh_panel(panel, &records) {
+            return;
+        }
         self.remove_panel(panel);
         if !records.is_empty() {
             self.atlas_dirty.mark();
@@ -222,6 +336,39 @@ impl PanelShapeBatchStore {
                 .or_default()
                 .push((key, record_key));
         }
+    }
+
+    fn try_refresh_panel(
+        &mut self,
+        panel: Entity,
+        records: &[(PathBatchKey, ShapeBatchRecord)],
+    ) -> bool {
+        let Some(existing) = self.panel_index.get(&panel) else {
+            return false;
+        };
+        if existing.len() != records.len() {
+            return false;
+        }
+        if existing
+            .iter()
+            .zip(records)
+            .any(|((old_key, old_record_key), (new_key, new_record))| {
+                old_key != new_key || *old_record_key != new_record.key
+            })
+        {
+            return false;
+        }
+        for (key, record) in records.iter().cloned() {
+            let Some(batch) = self.batches.get_mut(&key) else {
+                return false;
+            };
+            let was_geometry_dirty = batch.path_quads_are_dirty();
+            batch.refresh_record(record);
+            if batch.path_quads_are_dirty() && !was_geometry_dirty {
+                self.atlas_dirty.mark();
+            }
+        }
+        true
     }
 
     fn remove_panel(&mut self, panel: Entity) {
@@ -254,12 +401,11 @@ impl PanelShapeBatchStore {
             .rebuild(paths, PANEL_LINE_BAND_TARGET_DESIGN_UNITS);
         for batch in self.batches.values_mut() {
             for record in &mut batch.records {
-                if let Some(atlas_index) = self.atlas.index(&record.key) {
-                    record.instance.atlas_index = atlas_index;
+                if let Some(packed_path_index) = self.atlas.index(&record.key) {
+                    record.instance.packed_path_index = packed_path_index;
                 }
             }
-            batch.records_dirty.mark();
-            batch.bounds_dirty.mark();
+            batch.geometry_dirty.mark();
         }
         self.atlas_dirty.clear();
     }
@@ -289,7 +435,7 @@ impl PanelShapeBatchStore {
     }
 
     fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<ShapeBatchKey> = self
+        let empty: Vec<PathBatchKey> = self
             .batches
             .iter()
             .filter(|(_, batch)| batch.is_empty())
@@ -306,15 +452,15 @@ impl PanelShapeBatchStore {
         entities
     }
 
-    fn batches(&self) -> impl Iterator<Item = (&ShapeBatchKey, &ShapeBatch)> { self.batches.iter() }
+    fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &ShapeBatch)> { self.batches.iter() }
 
-    fn batches_mut(&mut self) -> impl Iterator<Item = (&ShapeBatchKey, &mut ShapeBatch)> {
+    fn batches_mut(&mut self) -> impl Iterator<Item = (&PathBatchKey, &mut ShapeBatch)> {
         self.batches.iter_mut()
     }
 
-    fn get(&self, key: &ShapeBatchKey) -> Option<&ShapeBatch> { self.batches.get(key) }
+    fn get(&self, key: &PathBatchKey) -> Option<&ShapeBatch> { self.batches.get(key) }
 
-    fn get_mut(&mut self, key: &ShapeBatchKey) -> Option<&mut ShapeBatch> {
+    fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut ShapeBatch> {
         self.batches.get_mut(key)
     }
 }
@@ -348,7 +494,7 @@ struct ShapePrimitiveSource<'a> {
 }
 
 struct BuiltPanelShapePrimitive {
-    batch_key: ShapeBatchKey,
+    batch_key: PathBatchKey,
     record:    ShapeBatchRecord,
 }
 
@@ -358,32 +504,53 @@ struct BuiltPanelShapePrimitive {
 /// spine) share one winding field and one anti-aliasing ramp.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 struct LineMergeKey {
-    element_index: usize,
-    color:         [u32; 4],
-    clip:          Option<[u32; 4]>,
-    owner_bounds:  [u32; 4],
-    layering:      [u32; 2],
+    element_index:     usize,
+    clip:              Option<[u32; 4]>,
+    owner_bounds:      [u32; 4],
+    layering:          [u32; 2],
+    material_identity: PrimitiveMaterialIdentity,
+}
+
+/// Material facts that require separate `PathRenderRecord` rows before
+/// primitives can be merged into one analytic path.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct PrimitiveMaterialIdentity {
+    /// Current authored primitive color. Future texture/material source fields
+    /// belong here because one `PathRenderRecord` stores one `MaterialSlotId`.
+    base_color: [u32; 4],
+}
+
+impl From<&ResolvedPanelShapePrimitive> for PrimitiveMaterialIdentity {
+    fn from(primitive: &ResolvedPanelShapePrimitive) -> Self {
+        Self {
+            base_color: color_bits(primitive.color()),
+        }
+    }
 }
 
 impl From<&ShapePrimitiveSource<'_>> for LineMergeKey {
     fn from(source: &ShapePrimitiveSource<'_>) -> Self {
-        let linear = source.primitive.color().to_linear();
         Self {
-            element_index: source.element_index,
-            color:         [
-                linear.red.to_bits(),
-                linear.green.to_bits(),
-                linear.blue.to_bits(),
-                linear.alpha.to_bits(),
-            ],
-            clip:          source.primitive.clip().map(bounding_box_bits),
-            owner_bounds:  bounding_box_bits(source.line.owner_bounds()),
-            layering:      [
+            element_index:     source.element_index,
+            clip:              source.primitive.clip().map(bounding_box_bits),
+            owner_bounds:      bounding_box_bits(source.line.owner_bounds()),
+            layering:          [
                 source.draw_depth.depth_bias().get().to_bits(),
                 source.draw_depth.oit_depth_offset().get().to_bits(),
             ],
+            material_identity: PrimitiveMaterialIdentity::from(source.primitive),
         }
     }
+}
+
+fn color_bits(color: Color) -> [u32; 4] {
+    let linear = color.to_linear();
+    [
+        linear.red.to_bits(),
+        linear.green.to_bits(),
+        linear.blue.to_bits(),
+        linear.alpha.to_bits(),
+    ]
 }
 
 const fn bounding_box_bits(bounds: BoundingBox) -> [u32; 4] {
@@ -415,31 +582,18 @@ fn group_line_primitives<'a>(
 }
 
 pub(super) fn reconcile_panel_line_batches(
-    changed_panels: Query<
-        (
-            Entity,
-            &DiegeticPanel,
-            &ComputedDiegeticPanel,
-            &GlobalTransform,
-            Option<&RenderLayers>,
-            Option<&Visibility>,
-            Option<&Resolved<Lighting>>,
-            Option<&Resolved<Sidedness>>,
-            Option<&Resolved<AntiAlias>>,
-            Option<&Resolved<HairlineFade>>,
-        ),
-        Or<(
-            Changed<ComputedDiegeticPanel>,
-            Changed<DiegeticPanel>,
-            Changed<GlobalTransform>,
-            Changed<RenderLayers>,
-            Changed<Visibility>,
-            Changed<Resolved<Lighting>>,
-            Changed<Resolved<Sidedness>>,
-            Changed<Resolved<AntiAlias>>,
-            Changed<Resolved<HairlineFade>>,
-        )>,
-    >,
+    panels: Query<(
+        Entity,
+        &DiegeticPanel,
+        &ComputedDiegeticPanel,
+        &GlobalTransform,
+        Option<&RenderLayers>,
+        Option<&Visibility>,
+        Option<&Resolved<Lighting>>,
+        Option<&Resolved<Sidedness>>,
+        Option<&Resolved<AntiAlias>>,
+        Option<&Resolved<HairlineFade>>,
+    )>,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
     anti_alias: Res<AntiAlias>,
@@ -447,6 +601,7 @@ pub(super) fn reconcile_panel_line_batches(
     sidedness_default: Res<CascadeDefault<Sidedness>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
+    mut material_table: ResMut<FrameMaterialTableBuild>,
     mut store: ResMut<PanelShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PathExtendedMaterial>>,
@@ -468,7 +623,7 @@ pub(super) fn reconcile_panel_line_batches(
         panel_sidedness,
         panel_anti_alias,
         panel_hairline_fade,
-    ) in &changed_panels
+    ) in &panels
     {
         let Some(result) = computed.result() else {
             store.remove_panel(panel_entity);
@@ -501,7 +656,7 @@ pub(super) fn reconcile_panel_line_batches(
             &context,
             &result.commands,
             computed.draw_order(),
-            &mut store,
+            material_table.builder_mut(),
         );
         store.upsert_panel(panel_entity, records);
     }
@@ -527,11 +682,11 @@ fn collect_panel_records(
     context: &PanelShapeReconcileContext<'_>,
     render_commands: &[RenderCommand],
     draw_order: &DrawOrderProjection,
-    store: &mut PanelShapeBatchStore,
-) -> Vec<(ShapeBatchKey, ShapeBatchRecord)> {
+    material_table: &mut FrameMaterialTableBuilder,
+) -> Vec<(PathBatchKey, ShapeBatchRecord)> {
     group_line_primitives(collect_line_primitives(render_commands, draw_order))
         .into_iter()
-        .filter_map(|group| build_panel_line_group(context, group, store))
+        .filter_map(|group| build_panel_line_group(context, group, material_table))
         .map(|built| (built.batch_key, built.record))
         .collect()
 }
@@ -565,7 +720,7 @@ fn collect_line_primitives<'a>(
 fn build_panel_line_group(
     context: &PanelShapeReconcileContext<'_>,
     group: Vec<ShapePrimitiveSource<'_>>,
-    store: &mut PanelShapeBatchStore,
+    material_table: &mut FrameMaterialTableBuilder,
 ) -> Option<BuiltPanelShapePrimitive> {
     let members: Vec<&ShapePrimitiveSource<'_>> = group
         .iter()
@@ -613,19 +768,29 @@ fn build_panel_line_group(
         context.panel.material(),
         None,
     );
-    let base_material = store.intern_base_material(&base);
-    let visual = VisualBatchKey {
-        base_material,
-        alpha: BatchAlphaMode::Blend,
-        lighting: context.panel_lighting,
-        sidedness: context.panel_sidedness,
-        shadow: context.shadow,
-        layers: context.layers.clone(),
-    };
-    let batch_key = ShapeBatchKey::new(visual, first.draw_depth.z_level());
     let key = PanelShapeRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
+    };
+    let input = PanelShapeMaterialSlotInput {
+        key:           PanelShapeMaterialSourceKeyBridge { render_key: key },
+        base_material: &base,
+        fill_color:    first.primitive.color(),
+        alpha_mode:    AlphaMode::Blend,
+        lighting:      context.panel_lighting,
+        sidedness:     context.panel_sidedness,
+    };
+    let MaterialSlotAppend::Appended(appended) =
+        material_table::append_material_slot(material_table, &input)
+    else {
+        return None;
+    };
+    let batch_key = PathBatchKey {
+        z_level:                first.draw_depth.z_level(),
+        shadow:                 context.shadow,
+        layers:                 context.layers.clone(),
+        pipeline_compatibility: appended.pipeline_compatibility,
+        resource_compatibility: appended.resource_compatibility,
     };
     // Element override else the panel's cascade-resolved value. The merge key
     // groups per element, so every member of this group shares one resolution.
@@ -634,22 +799,21 @@ fn build_panel_line_group(
         .tree()
         .element_anti_alias(first.element_index)
         .unwrap_or(context.panel_anti_alias);
-    let linear = first.primitive.color().to_linear();
-    let run = RunRecord {
+    let run = PathRenderRecord {
         transform: context.panel_transform,
-        fill_color: Vec4::new(linear.red, linear.green, linear.blue, linear.alpha),
+        material: appended.slot.into(),
         render_mode: u32::from(RenderMode::Text),
         depth_nudge: depth_bias,
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
     };
-    let instance = PathInstanceRecord {
-        rect_min:    path.rect_min,
-        rect_size:   path.rect_size,
-        uv_min:      path.uv_min,
-        uv_size:     path.uv_size,
-        atlas_index: 0,
-        run_index:   0,
+    let instance = PathQuadRecord {
+        rect_min:          path.rect_min,
+        rect_size:         path.rect_size,
+        uv_min:            path.uv_min,
+        uv_size:           path.uv_size,
+        packed_path_index: 0,
+        render_index:      0,
     };
     Some(BuiltPanelShapePrimitive {
         batch_key,
@@ -742,7 +906,7 @@ fn reconcile_batch_entities(
 }
 
 fn spawn_batch_entity(
-    key: &ShapeBatchKey,
+    key: &PathBatchKey,
     atlas: &PathAtlasHandles,
     anti_alias: AntiAlias,
     store: &mut PanelShapeBatchStore,
@@ -766,7 +930,6 @@ fn spawn_batch_entity(
     )));
     let mesh = meshes.add(inert_line_batch_mesh(capacity));
     let material = materials.add(line_batch_material(ShapeBatchMaterialInput {
-        base: store.base_material(key.visual.base_material).clone(),
         key,
         atlas,
         instances: instances.clone(),
@@ -779,9 +942,9 @@ fn spawn_batch_entity(
         MeshMaterial3d(material.clone()),
         NoAutoAabb,
         Aabb::default(),
-        key.visual.layers.0.clone(),
+        key.layers.0.clone(),
     ));
-    if key.visual.shadow == VisualShadow::None {
+    if key.shadow == VisualShadow::None {
         batch_entity.insert(NotShadowCaster);
     }
     let entity = batch_entity.id();
@@ -796,12 +959,13 @@ fn spawn_batch_entity(
             capacity,
             run_capacity,
         });
-        batch.records_dirty.clear();
+        batch.clear_render_record_dirty();
+        batch.clear_path_quad_dirty();
     }
 }
 
 fn grow_batch_assets(
-    key: &ShapeBatchKey,
+    key: &PathBatchKey,
     store: &mut PanelShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PathExtendedMaterial>,
@@ -857,7 +1021,8 @@ fn grow_batch_assets(
     gpu.mesh = mesh;
     gpu.capacity = capacity;
     gpu.run_capacity = run_capacity;
-    batch.records_dirty.clear();
+    batch.clear_render_record_dirty();
+    batch.clear_path_quad_dirty();
 }
 
 pub(super) fn update_panel_line_batch_bounds(
@@ -868,7 +1033,7 @@ pub(super) fn update_panel_line_batch_bounds(
     >,
 ) {
     for (_, batch) in store.batches_mut() {
-        if !batch.bounds_dirty.is_set() {
+        if !batch.bounds_are_dirty() {
             continue;
         }
         let Some(entity) = batch.entity else {
@@ -887,7 +1052,7 @@ pub(super) fn update_panel_line_batch_bounds(
             center:       Vec3A::ZERO,
             half_extents: Vec3A::from((max - min) * 0.5),
         };
-        batch.bounds_dirty.clear();
+        batch.clear_bounds_dirty();
     }
 }
 
@@ -902,22 +1067,33 @@ pub(super) fn commit_panel_line_batch_buffers(
     for (_, batch) in store.batches_mut() {
         batches += 1;
         records += batch.record_count().to_usize();
-        if batch.gpu.is_none() || !batch.records_dirty.is_set() {
+        if batch.gpu.is_none()
+            || (!batch.path_quads_are_dirty() && !batch.render_records_are_dirty())
+        {
             continue;
         }
         let capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.capacity);
         let run_capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.run_capacity);
-        let instances = padded_line_instances(&batch.instances(), capacity);
-        let run_records = padded_line_runs(&batch.run_records(), run_capacity);
-        batch.records_dirty.clear();
+        let instances = batch
+            .path_quads_are_dirty()
+            .then(|| padded_line_instances(&batch.instances(), capacity));
+        let run_records = batch
+            .render_records_are_dirty()
+            .then(|| padded_line_runs(&batch.run_records(), run_capacity));
+        batch.clear_path_quad_dirty();
+        batch.clear_render_record_dirty();
         let Some(gpu) = &batch.gpu else {
             continue;
         };
-        if let Some(mut buffer) = storage_buffers.get_mut(&gpu.instances) {
+        if let Some(instances) = instances
+            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.instances)
+        {
             buffer.set_data(instances);
             uploads += 1;
         }
-        if let Some(mut buffer) = storage_buffers.get_mut(&gpu.run_table) {
+        if let Some(run_records) = run_records
+            && let Some(mut buffer) = storage_buffers.get_mut(&gpu.run_table)
+        {
             buffer.set_data(run_records);
             uploads += 1;
         }
@@ -927,31 +1103,31 @@ pub(super) fn commit_panel_line_batch_buffers(
     perf.line_batch.uploads = uploads;
 }
 
-fn padded_line_instances(records: &[PathInstanceRecord], capacity: u32) -> Vec<PathInstanceRecord> {
+fn padded_line_instances(records: &[PathQuadRecord], capacity: u32) -> Vec<PathQuadRecord> {
     let mut padded = Vec::with_capacity(capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         capacity.to_usize().max(records.len()),
-        PathInstanceRecord {
-            rect_min:    Vec2::ZERO,
-            rect_size:   Vec2::ZERO,
-            uv_min:      Vec2::ZERO,
-            uv_size:     Vec2::ZERO,
-            atlas_index: 0,
-            run_index:   0,
+        PathQuadRecord {
+            rect_min:          Vec2::ZERO,
+            rect_size:         Vec2::ZERO,
+            uv_min:            Vec2::ZERO,
+            uv_size:           Vec2::ZERO,
+            packed_path_index: 0,
+            render_index:      0,
         },
     );
     padded
 }
 
-fn padded_line_runs(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord> {
+fn padded_line_runs(records: &[PathRenderRecord], run_capacity: u32) -> Vec<PathRenderRecord> {
     let mut padded = Vec::with_capacity(run_capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         run_capacity.to_usize().max(records.len()),
-        RunRecord {
+        PathRenderRecord {
             transform:        Mat4::ZERO,
-            fill_color:       Vec4::ZERO,
+            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:      0,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
@@ -980,8 +1156,7 @@ fn inert_line_batch_mesh(capacity: u32) -> Mesh {
 }
 
 struct ShapeBatchMaterialInput<'a> {
-    base:       StandardMaterial,
-    key:        &'a ShapeBatchKey,
+    key:        &'a PathBatchKey,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
@@ -990,17 +1165,22 @@ struct ShapeBatchMaterialInput<'a> {
 
 fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMaterial {
     let ShapeBatchMaterialInput {
-        mut base,
         key,
         atlas,
         instances,
         run_table,
         anti_alias,
     } = input;
-    base.alpha_mode = key.visual.alpha.into();
-    base.unlit = matches!(key.visual.lighting, Lighting::Unlit);
-    render::apply_sidedness(&mut base, key.visual.sidedness);
-    base.depth_bias = key.depth_bias().get();
+    let base = StandardMaterial::default();
+    let mut base = batch_key::apply_resource_compatibility_to_standard_material(
+        &base,
+        &key.resource_compatibility,
+    );
+    batch_key::apply_pipeline_compatibility_to_standard_material(
+        &mut base,
+        key.pipeline_compatibility,
+    );
+    base.depth_bias = draw_order::line_batch_depth_bias(key.z_level).get();
     render::batch_path_material(BatchPathMaterialInput {
         base,
         fill_color: Vec4::ONE,
@@ -1043,6 +1223,8 @@ mod tests {
     use crate::render::QuadraticSegment;
     use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
     use crate::render::constants::LAYER_DEPTH_BIAS;
+    use crate::render::material_table::MaterialTableAppendReady;
+    use crate::render::material_table::MaterialTablePlugin;
     use crate::text::DiegeticTextMeasurer;
 
     /// Headless app wired with panel layout, the AA/fade cascade plugins
@@ -1053,6 +1235,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(AssetPlugin::default())
+            .add_plugins(MaterialTablePlugin)
             .insert_resource(DiegeticTextMeasurer {
                 measure_fn: Arc::new(|_text: &str, measure: &TextMeasure| TextDimensions {
                     width:       measure.size,
@@ -1077,7 +1260,10 @@ mod tests {
                 )
                     .before(CascadeSet::Propagate),
             )
-            .add_systems(PostUpdate, reconcile_panel_line_batches);
+            .add_systems(
+                PostUpdate,
+                reconcile_panel_line_batches.after(MaterialTableAppendReady),
+            );
         app
     }
 
@@ -1085,6 +1271,17 @@ mod tests {
         PanelLine::new((0.0, 5.0), (20.0, 5.0))
             .width(0.4)
             .color(Color::WHITE)
+    }
+
+    fn horizontal_line_with_color(color: Color) -> PanelLine {
+        PanelLine::new((0.0, 5.0), (20.0, 5.0))
+            .width(0.4)
+            .color(color)
+    }
+
+    fn material_base_color(color: Color) -> Vec4 {
+        let linear = color.to_linear();
+        Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
     }
 
     fn spawn_line_panel(app: &mut App, z_index: DrawZIndex) -> Entity {
@@ -1153,6 +1350,48 @@ mod tests {
             .collect();
         fields.sort_unstable();
         fields
+    }
+
+    #[test]
+    fn same_silhouette_different_colors_keep_distinct_records() {
+        let mut app = line_batch_app();
+        let red = Color::srgb(1.0, 0.0, 0.0);
+        let blue = Color::srgb(0.0, 0.0, 1.0);
+        let line_element = El::new().size(40.0, 20.0).draw(PanelDraw::lines([
+            horizontal_line_with_color(red),
+            horizontal_line_with_color(blue),
+        ]));
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .layout(|builder| {
+                builder.with(line_element, |_| {});
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        assert_eq!(store.batches().count(), 1);
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 2);
+
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        assert_eq!(table.len(), 2);
+        let colors: Vec<Vec4> = batch
+            .run_records()
+            .iter()
+            .map(|record| table[record.material.as_u32().to_usize()].base_color)
+            .collect();
+        assert_eq!(colors.len(), 2);
+        assert!(colors.contains(&material_base_color(red)));
+        assert!(colors.contains(&material_base_color(blue)));
     }
 
     #[test]
@@ -1466,7 +1705,7 @@ mod tests {
     #[test]
     fn two_panels_with_same_key_share_one_line_batch() {
         let mut store = PanelShapeBatchStore::default();
-        let key = test_batch_key(&mut store);
+        let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
 
@@ -1486,7 +1725,7 @@ mod tests {
     #[test]
     fn removing_a_panel_removes_only_its_line_records() {
         let mut store = PanelShapeBatchStore::default();
-        let key = test_batch_key(&mut store);
+        let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
 
@@ -1507,7 +1746,7 @@ mod tests {
     #[test]
     fn atlas_rebuild_compacts_surviving_panel_line_paths() {
         let mut store = PanelShapeBatchStore::default();
-        let key = test_batch_key(&mut store);
+        let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
         store.upsert_panel(
@@ -1525,7 +1764,7 @@ mod tests {
         let first_indices: Vec<u32> = batch
             .instances()
             .iter()
-            .map(|record| record.atlas_index)
+            .map(|record| record.packed_path_index)
             .collect();
         assert_eq!(first_indices, vec![0, 1]);
 
@@ -1538,7 +1777,7 @@ mod tests {
         let second_indices: Vec<u32> = batch
             .instances()
             .iter()
-            .map(|record| record.atlas_index)
+            .map(|record| record.packed_path_index)
             .collect();
         assert_eq!(second_indices, vec![0]);
     }
@@ -1560,20 +1799,74 @@ mod tests {
         );
     }
 
-    fn test_batch_key(store: &mut PanelShapeBatchStore) -> ShapeBatchKey {
-        let base = StandardMaterial::default();
-        let base_material = store.intern_base_material(&base);
-        ShapeBatchKey::new(
-            VisualBatchKey {
-                base_material,
-                alpha: BatchAlphaMode::Blend,
-                lighting: Lighting::Lit,
-                sidedness: Sidedness::BothSides,
-                shadow: VisualShadow::Cast,
-                layers: BatchRenderLayers(RenderLayers::layer(0)),
-            },
-            0,
-        )
+    #[test]
+    fn material_slot_refresh_dirties_only_line_run_records() {
+        let mut batch = ShapeBatch::default();
+        let original = test_batch_record(Entity::from_bits(1), 0);
+        let mut refreshed = test_batch_record(Entity::from_bits(1), 0);
+        let Ok(slot) = crate::render::material_table::MaterialSlotId::try_from(7) else {
+            panic!("test slot is not the sentinel");
+        };
+        refreshed.run.material = slot.into();
+        batch.push_record(original);
+        batch.clear_render_record_dirty();
+        batch.clear_path_quad_dirty();
+        batch.clear_bounds_dirty();
+
+        batch.refresh_record(refreshed);
+
+        assert!(batch.render_records_are_dirty());
+        assert!(!batch.path_quads_are_dirty());
+        assert!(!batch.bounds_are_dirty());
+    }
+
+    #[test]
+    fn panel_material_input_projects_color_and_scalar_values() {
+        let mut base = StandardMaterial {
+            metallic: 0.42,
+            perceptual_roughness: 0.23,
+            reflectance: 0.61,
+            ..Default::default()
+        };
+        render::apply_sidedness(&mut base, Sidedness::BothSides);
+        let key = PanelShapeRenderKey {
+            panel:  Entity::from_bits(1),
+            source: PanelShapePrimitiveKey::new(PanelShapeSourceKey::element(0, 0, 0), 0),
+        };
+        let color = Color::srgb(0.2, 0.4, 0.6);
+        let input = PanelShapeMaterialSlotInput {
+            key:           PanelShapeMaterialSourceKeyBridge { render_key: key },
+            base_material: &base,
+            fill_color:    color,
+            alpha_mode:    AlphaMode::Blend,
+            lighting:      Lighting::Lit,
+            sidedness:     Sidedness::BothSides,
+        };
+        let mut expected_material = base.clone();
+        expected_material.base_color = color;
+        expected_material.alpha_mode = AlphaMode::Blend;
+        render::apply_sidedness(&mut expected_material, Sidedness::BothSides);
+        let expected_values =
+            crate::render::material_table::MaterialSlotValues::from(&expected_material);
+
+        let candidate = input.material_slot_candidate();
+
+        assert_eq!(candidate.values, expected_values);
+    }
+
+    fn test_batch_key() -> PathBatchKey {
+        let mut material = StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..Default::default()
+        };
+        render::apply_sidedness(&mut material, Sidedness::BothSides);
+        PathBatchKey {
+            z_level:                0,
+            shadow:                 VisualShadow::Cast,
+            layers:                 BatchRenderLayers(RenderLayers::layer(0)),
+            pipeline_compatibility: batch_key::PipelineCompatibility::from(&material),
+            resource_compatibility: batch_key::ResourceCompatibility::from(&material),
+        }
     }
 
     fn test_batch_record(panel: Entity, primitive_ordinal: usize) -> ShapeBatchRecord {
@@ -1586,17 +1879,17 @@ mod tests {
                 ),
             },
             outline:  test_outline(),
-            instance: PathInstanceRecord {
-                rect_min:    Vec2::ZERO,
-                rect_size:   Vec2::ONE,
-                uv_min:      Vec2::ZERO,
-                uv_size:     Vec2::ONE,
-                atlas_index: 0,
-                run_index:   0,
+            instance: PathQuadRecord {
+                rect_min:          Vec2::ZERO,
+                rect_size:         Vec2::ONE,
+                uv_min:            Vec2::ZERO,
+                uv_size:           Vec2::ONE,
+                packed_path_index: 0,
+                render_index:      0,
             },
-            run:      RunRecord {
+            run:      PathRenderRecord {
                 transform:        Mat4::IDENTITY,
-                fill_color:       Vec4::ONE,
+                material:         SdfPaintMaterial::NotAuthored.to_gpu(),
                 render_mode:      u32::from(RenderMode::Text),
                 depth_nudge:      0.0,
                 oit_depth_offset: 0.0,

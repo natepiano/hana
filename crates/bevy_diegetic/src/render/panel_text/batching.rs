@@ -34,24 +34,32 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::constants::MILLISECONDS_PER_SECOND;
-use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
 use crate::render::AntiAlias;
-use crate::render::BaseMaterialId;
 use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
 use crate::render::PathBatchKey;
 use crate::render::PathBatchResources;
 use crate::render::PathExtendedMaterial;
-use crate::render::PathInstanceRecord;
+use crate::render::PathQuadRecord;
+use crate::render::PathRenderRecord;
 use crate::render::RenderMode;
-use crate::render::RunRecord;
+use crate::render::VisualShadow;
 use crate::render::analytic_paths::PathAtlasHandles;
+use crate::render::batch_key;
+use crate::render::batch_key::PipelineCompatibility;
+use crate::render::batch_key::ResourceCompatibility;
 use crate::render::draw_order;
+use crate::render::material_table::FrameMaterialSlotAppend;
+use crate::render::material_table::FrameMaterialTableBuild;
+use crate::render::material_table::FrameMaterialTableBuilder;
+use crate::render::material_table::MaterialSlotCandidate;
+use crate::render::material_table::MaterialSlotId;
+use crate::render::material_table::SdfPaintMaterial;
 use crate::render::world_text::TextContent;
 use crate::text;
 use crate::text::GlyphCache;
@@ -157,6 +165,7 @@ pub(super) fn update_panel_text_batches(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PathExtendedMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
+    mut material_table: ResMut<FrameMaterialTableBuild>,
     mut perf: ResMut<DiegeticPerfStats>,
     mut commands: Commands,
 ) {
@@ -174,24 +183,10 @@ pub(super) fn update_panel_text_batches(
     // set holds only real transitions; membership re-routes the run below.
     let cascade_changed = cascades.changed_set();
 
-    // Upload the shared glyph atlas once before the run loop — records only
-    // index the atlas.
-    let any_work = !cascade_changed.is_empty()
-        || runs
-            .iter()
-            .any(|(label_entity, prepared, panel_text_child, z_level, ..)| {
-                prepared.is_changed()
-                    || panel_text_child.is_changed()
-                    || z_level.is_changed()
-                    || !backend
-                        .batch_store()
-                        .is_routed(RunStorageKey::from(label_entity))
-            });
-    let atlas = if any_work {
-        backend.commit_glyph_atlas(&mut storage_buffers, &mut materials)
-    } else {
-        None
-    };
+    // Upload the shared glyph atlas once before the run loop. A frame with no
+    // glyph changes reuses existing handles, while live runs still append
+    // current-frame material rows below.
+    let atlas = backend.commit_glyph_atlas(&mut storage_buffers, &mut materials);
 
     for (
         label_entity,
@@ -212,15 +207,40 @@ pub(super) fn update_panel_text_batches(
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         }
-        if !prepared.is_changed()
-            && !panel_text_child.is_changed()
-            && !z_level.is_changed()
-            && !cascade_changed.contains(&label_entity)
-            && backend.batch_store().is_routed(storage_key)
-        {
+
+        let alpha_mode = cascades.alpha(label_entity);
+        let lighting = cascades.lighting(label_entity);
+        let sidedness = cascades.sidedness(label_entity);
+        let material_candidate =
+            text_material_candidate_for_frame(panel, &prepared, alpha_mode, lighting, sidedness);
+        let key = batch_key_for_run(
+            panel_layers,
+            &prepared,
+            *z_level,
+            material_candidate.pipeline_compatibility,
+            material_candidate.resource_compatibility.clone(),
+        );
+        let key_changed = backend
+            .batch_store()
+            .key_for_run(storage_key)
+            .is_none_or(|current| current != &key);
+        let record_needs_rebuild = prepared.is_changed()
+            || panel_text_child.is_changed()
+            || z_level.is_changed()
+            || cascade_changed.contains(&label_entity)
+            || key_changed;
+        if !record_needs_rebuild {
+            let Some(material_slot) =
+                append_text_material_row(material_table.builder_mut(), material_candidate)
+            else {
+                backend.batch_store_mut().remove_run(storage_key);
+                continue;
+            };
+            backend
+                .batch_store_mut()
+                .update_run_material(storage_key, material_slot);
             continue;
         }
-
         // A glyph missing from the atlas means shaping hasn't packed it yet;
         // the run stays unrouted and self-heals next frame.
         let Some(glyphs) = build_glyph_records(&backend, &prepared.prepared, prepared.clip_rect)
@@ -232,26 +252,19 @@ pub(super) fn update_panel_text_batches(
             backend.batch_store_mut().remove_run(storage_key);
             continue;
         }
-
-        let base = panel
-            .text_material()
-            .cloned()
-            .unwrap_or_else(render::default_panel_material);
-        let base_material = backend.batch_store_mut().intern_base_material(&base);
-        let key = batch_key_for_run(
-            base_material,
-            label_entity,
-            panel_layers,
-            &prepared,
-            &cascades,
-            *z_level,
-        );
+        let Some(material_slot) =
+            append_text_material_row(material_table.builder_mut(), material_candidate)
+        else {
+            backend.batch_store_mut().remove_run(storage_key);
+            continue;
+        };
 
         let record = run_record_for(
             &prepared,
             &panel_text_child,
             label_transform,
             cascades.anti_alias(label_entity),
+            material_slot,
         );
         backend
             .batch_store_mut()
@@ -277,22 +290,49 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
     matches!(visibility, Some(Visibility::Hidden))
 }
 
+fn text_material_candidate_for_frame(
+    panel: &DiegeticPanel,
+    prepared: &PreparedPanelText,
+    alpha_mode: AlphaMode,
+    lighting: Lighting,
+    sidedness: Sidedness,
+) -> MaterialSlotCandidate {
+    let base = panel
+        .text_material()
+        .cloned()
+        .unwrap_or_else(render::default_panel_material);
+    render::analytic_material_slot_candidate(
+        &base,
+        prepared.fill_color,
+        alpha_mode,
+        lighting,
+        sidedness,
+    )
+}
+
+fn append_text_material_row(
+    builder: &mut FrameMaterialTableBuilder,
+    candidate: MaterialSlotCandidate,
+) -> Option<MaterialSlotId> {
+    match builder.append_values(candidate.values) {
+        FrameMaterialSlotAppend::Appended(slot) => Some(slot),
+        FrameMaterialSlotAppend::DroppedLimit => None,
+    }
+}
+
 fn batch_key_for_run(
-    base_material: BaseMaterialId,
-    label_entity: Entity,
     panel_layers: Option<&RenderLayers>,
     prepared: &PreparedPanelText,
-    cascades: &PathBatchKeyCascades<'_, '_>,
     z_level: PanelTextZLevel,
+    pipeline_compatibility: PipelineCompatibility,
+    resource_compatibility: ResourceCompatibility,
 ) -> PathBatchKey {
     PathBatchKey {
-        base_material,
-        alpha: cascades.alpha(label_entity).into(),
-        lighting: cascades.lighting(label_entity),
-        sidedness: cascades.sidedness(label_entity),
         z_level: z_level.0,
-        shadow: prepared.shadow_mode,
+        shadow: prepared.shadow_mode.into(),
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
+        pipeline_compatibility,
+        resource_compatibility,
     }
 }
 
@@ -301,18 +341,13 @@ fn run_record_for(
     panel_text_child: &PanelTextLayout,
     label_transform: &GlobalTransform,
     anti_alias: AntiAlias,
-) -> RunRecord {
-    let fill_color = LinearRgba::from(prepared.fill_color);
-    RunRecord {
+    material: MaterialSlotId,
+) -> PathRenderRecord {
+    PathRenderRecord {
         // Pre-propagation snapshot; write_batch_run_transforms corrects it
         // after TransformSystems::Propagate the same frame.
         transform:        label_transform.to_matrix(),
-        fill_color:       Vec4::new(
-            fill_color.red,
-            fill_color.green,
-            fill_color.blue,
-            fill_color.alpha,
-        ),
+        material:         material.into(),
         render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
         depth_nudge:      panel_text_child.depth_bias,
         oit_depth_offset: panel_text_child.oit_depth_offset,
@@ -381,7 +416,7 @@ fn reconcile_batch_entities(input: ReconcileBatchEntities<'_, '_, '_>) {
 }
 
 /// Copies each routed label's propagated `GlobalTransform` into its
-/// `RunRecord` slot. The store dirties the run table only when the matrix
+/// `PathRenderRecord` slot. The store dirties the run table only when the matrix
 /// actually changed, so a static frame uploads nothing.
 pub(super) fn write_batch_run_transforms(
     labels: Query<(Entity, Ref<GlobalTransform>), (With<TextContent>, With<PreparedPanelText>)>,
@@ -410,7 +445,7 @@ pub(super) fn update_batch_bounds(
     >,
 ) {
     for (_, batch) in backend.batch_store_mut().batches_mut() {
-        if !batch.bounds_dirty.is_set() {
+        if !batch.bounds_are_dirty() {
             continue;
         }
         let Some(entity) = batch.entity else {
@@ -432,7 +467,7 @@ pub(super) fn update_batch_bounds(
             center:       Vec3A::ZERO,
             half_extents: Vec3A::from((max - min) * 0.5),
         };
-        batch.bounds_dirty.clear();
+        batch.clear_bounds_dirty();
     }
 }
 
@@ -463,16 +498,16 @@ pub(super) fn commit_batch_buffers(
         if batch.gpu.is_none() {
             continue;
         }
-        let instances_payload = batch.instances_dirty.is_set().then(|| {
+        let instances_payload = batch.path_quads_are_dirty().then(|| {
             let capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.capacity);
             padded_glyph_records(batch.path_records(), capacity)
         });
-        let run_table_payload = batch.run_table_dirty.is_set().then(|| {
+        let run_table_payload = batch.render_records_are_dirty().then(|| {
             let run_capacity = batch.gpu.as_ref().map_or(0, |gpu| gpu.run_capacity);
             padded_run_records(batch.run_records(), run_capacity)
         });
-        batch.instances_dirty.clear();
-        batch.run_table_dirty.clear();
+        batch.clear_path_quad_dirty();
+        batch.clear_render_record_dirty();
         let Some(gpu) = &batch.gpu else {
             continue;
         };
@@ -499,18 +534,18 @@ pub(super) fn commit_batch_buffers(
 /// Glyph records padded to `capacity` with zero-size quads: every corner of a
 /// padding quad coincides, so it rasterizes nothing, and the buffer's byte
 /// length stays constant between growths.
-fn padded_glyph_records(records: &[PathInstanceRecord], capacity: u32) -> Vec<PathInstanceRecord> {
+fn padded_glyph_records(records: &[PathQuadRecord], capacity: u32) -> Vec<PathQuadRecord> {
     let mut padded = Vec::with_capacity(capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         capacity.to_usize().max(records.len()),
-        PathInstanceRecord {
-            rect_min:    Vec2::ZERO,
-            rect_size:   Vec2::ZERO,
-            uv_min:      Vec2::ZERO,
-            uv_size:     Vec2::ZERO,
-            atlas_index: 0,
-            run_index:   0,
+        PathQuadRecord {
+            rect_min:          Vec2::ZERO,
+            rect_size:         Vec2::ZERO,
+            uv_min:            Vec2::ZERO,
+            uv_size:           Vec2::ZERO,
+            packed_path_index: 0,
+            render_index:      0,
         },
     );
     padded
@@ -520,14 +555,14 @@ fn padded_glyph_records(records: &[PathInstanceRecord], capacity: u32) -> Vec<Pa
 /// no live glyph record carries their index, and zero-size padding quads
 /// produce no fragments — so every field can be zero (`render_mode` 0 is
 /// deliberately neither `Text` nor `PunchOut`).
-fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord> {
+fn padded_run_records(records: &[PathRenderRecord], run_capacity: u32) -> Vec<PathRenderRecord> {
     let mut padded = Vec::with_capacity(run_capacity.to_usize());
     padded.extend_from_slice(records);
     padded.resize(
         run_capacity.to_usize().max(records.len()),
-        RunRecord {
+        PathRenderRecord {
             transform:        Mat4::ZERO,
-            fill_color:       Vec4::ZERO,
+            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:      0,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,
@@ -539,20 +574,20 @@ fn padded_run_records(records: &[RunRecord], run_capacity: u32) -> Vec<RunRecord
 
 /// Builds one run's glyph instance records against the shared atlas, with
 /// each quad's padded rect and UVs clipped by `glyph_quad_extents`.
-/// `run_index` is `0` on every record — the batch store stamps it at rebuild.
+/// `render_index` is `0` on every record — the batch store stamps it at rebuild.
 /// Returns `None` when a glyph is not yet packed.
 fn build_glyph_records(
     cache: &GlyphCache,
     prepared: &PreparedTextRun,
     clip_rect: Option<[f32; 4]>,
-) -> Option<Vec<PathInstanceRecord>> {
+) -> Option<Vec<PathQuadRecord>> {
     let mut records = Vec::with_capacity(prepared.glyph_count());
     for glyph in prepared.glyphs() {
-        let atlas_index = cache.atlas_index(glyph.key())?;
+        let packed_path_index = cache.packed_path_index(glyph.key())?;
         let Some(extents) = text::glyph_quad_extents(*glyph, 1.0, clip_rect) else {
             continue;
         };
-        records.push(PathInstanceRecord {
+        records.push(PathQuadRecord {
             rect_min: Vec2::new(extents.left, extents.bottom),
             rect_size: Vec2::new(extents.right - extents.left, extents.top - extents.bottom),
             uv_min: Vec2::new(extents.uv_left, extents.uv_top),
@@ -560,8 +595,8 @@ fn build_glyph_records(
                 extents.uv_right - extents.uv_left,
                 extents.uv_bottom - extents.uv_top,
             ),
-            atlas_index,
-            run_index: 0,
+            packed_path_index,
+            render_index: 0,
         });
     }
     Some(records)
@@ -622,16 +657,11 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
     let run_capacity = batch.run_count().to_u32().next_power_of_two();
     let glyph_records = padded_glyph_records(batch.path_records(), capacity);
     let run_records = padded_run_records(batch.run_records(), run_capacity);
-    let base = backend
-        .batch_store()
-        .base_material(key.base_material)
-        .clone();
 
     let instances = storage_buffers.add(ShaderBuffer::from(glyph_records));
     let run_table = storage_buffers.add(ShaderBuffer::from(run_records));
     let mesh = meshes.add(inert_batch_mesh(capacity));
     let material = materials.add(batch_material(BatchMaterialInput {
-        base,
         key,
         atlas,
         instances: instances.clone(),
@@ -649,7 +679,7 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
         Aabb::default(),
         key.layers.0.clone(),
     ));
-    if key.shadow == GlyphShadowMode::None {
+    if key.shadow == VisualShadow::None {
         batch_entity.insert(NotShadowCaster);
     }
     let entity = batch_entity.id();
@@ -666,10 +696,10 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
         });
         // The buffers were created from the current records; only later
         // writes (e.g. this frame's post-propagation transform pass) need an
-        // upload. bounds_dirty stays set so the union system places the
+        // upload. Bounds dirtiness stays set so the union system places the
         // entity this frame.
-        batch.instances_dirty.clear();
-        batch.run_table_dirty.clear();
+        batch.clear_path_quad_dirty();
+        batch.clear_render_record_dirty();
     }
 }
 
@@ -737,13 +767,12 @@ fn grow_batch_assets(
     gpu.capacity = capacity;
     gpu.run_capacity = run_capacity;
     // The new buffers were created from the current records.
-    batch.instances_dirty.clear();
-    batch.run_table_dirty.clear();
+    batch.clear_path_quad_dirty();
+    batch.clear_render_record_dirty();
 }
 
 /// Inputs for [`batch_material`].
 struct BatchMaterialInput<'a> {
-    base:       StandardMaterial,
     key:        &'a PathBatchKey,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
@@ -751,23 +780,27 @@ struct BatchMaterialInput<'a> {
     anti_alias: AntiAlias,
 }
 
-/// Builds one batch's material: the interned base with the key's cascade
-/// values applied, the shared atlas buffers, the batch's record buffers, and
-/// the vertex-pulling route switched on. `fill_color` / `render_mode` in the
-/// uniform are placeholders — the fragment reads them per run from the run
-/// table under `FRAGMENT_DATA_FROM_BATCHED_PATHS`.
+/// Builds one batch's material from resource/pipeline compatibility and atlas
+/// buffers. Scalar PBR values are read per `PathRenderRecord::material` from
+/// the frame material table.
 fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
     let BatchMaterialInput {
-        mut base,
         key,
         atlas,
         instances,
         run_table,
         anti_alias,
     } = input;
-    base.alpha_mode = batch_gpu_alpha_mode(key.alpha.into());
-    base.unlit = matches!(key.lighting, Lighting::Unlit);
-    render::apply_sidedness(&mut base, key.sidedness);
+    let base = render::default_panel_material();
+    let mut base = batch_key::apply_resource_compatibility_to_standard_material(
+        &base,
+        &key.resource_compatibility,
+    );
+    batch_key::apply_pipeline_compatibility_to_standard_material(
+        &mut base,
+        key.pipeline_compatibility,
+    );
+    base.alpha_mode = batch_gpu_alpha_mode(key.pipeline_compatibility.alpha.into());
     base.depth_bias = draw_order::text_batch_depth_bias(key.z_level).get();
     render::batch_path_material(BatchPathMaterialInput {
         base,
@@ -784,8 +817,9 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
 }
 
 /// Maps a batch's authored alpha mode to the one written on the GPU material.
-/// Invariant: [`PathBatchKey::alpha`] always keeps the user's authored mode — only
-/// the material differs, and only where bevy's pipeline routing requires it.
+/// Invariant: [`PathBatchKey::pipeline_compatibility`] always keeps the user's
+/// authored alpha mode — only the material differs, and only where bevy's
+/// pipeline routing requires it.
 ///
 /// `Opaque` becomes `Mask(0.0)`: opaque casters take bevy's depth-only shadow
 /// pipelines, which strip the material bind group from the pipeline layout —
@@ -820,6 +854,7 @@ mod tests {
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::DrawZIndex;
     use crate::layout::El;
+    use crate::layout::GlyphShadowMode;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
     use crate::layout::TextDimensions;
@@ -828,6 +863,8 @@ mod tests {
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::constants;
+    use crate::render::material_table::MaterialTableAppendReady;
+    use crate::render::material_table::MaterialTablePlugin;
     use crate::render::panel_text::alpha;
     use crate::render::panel_text::glyph_cascade;
     use crate::render::panel_text::reconcile;
@@ -837,6 +874,7 @@ mod tests {
     use crate::text::FontRegistry;
 
     const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
+    const NON_INTERSECTING_CLIP_RECT: [f32; 4] = [f32::MAX; 4];
     const RAISED_LEVEL: DrawZIndex = DrawZIndex(1);
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
@@ -864,6 +902,7 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .add_plugins(AssetPlugin::default())
+            .add_plugins(MaterialTablePlugin)
             .add_plugins(TransformPlugin)
             .insert_resource(monospace_measurer())
             .add_plugins(HeadlessLayoutPlugin)
@@ -887,6 +926,7 @@ mod tests {
                         .after(reconcile::reconcile_panel_text_children),
                     update_panel_text_batches
                         .after(shaping::shape_panel_text_children)
+                        .after(MaterialTableAppendReady)
                         .before(TransformSystems::Propagate),
                     write_batch_run_transforms.after(TransformSystems::Propagate),
                     update_batch_bounds.after(write_batch_run_transforms),
@@ -902,6 +942,12 @@ mod tests {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text("Alpha", TextStyle::new(10.0));
         builder.text("Beta", TextStyle::new(10.0));
+        builder.build()
+    }
+
+    fn one_text_tree() -> LayoutTree {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("Alpha", TextStyle::new(10.0));
         builder.build()
     }
 
@@ -946,6 +992,60 @@ mod tests {
             .map(|(_, batch)| batch.path_record_count().to_usize())
             .sum();
         (batches, runs, glyphs)
+    }
+
+    fn frame_material_row_count(app: &App) -> usize {
+        app.world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .row_count()
+    }
+
+    fn absent_text_frame_material_rows() -> usize {
+        let mut app = pipeline_app();
+        settle(&mut app);
+        frame_material_row_count(&app)
+    }
+
+    fn drop_cached_glyph_paths(mut backend: ResMut<GlyphCache>) {
+        *backend = GlyphCache::default();
+    }
+
+    fn clip_prepared_runs_outside_glyphs(mut prepared_runs: Query<&mut PreparedPanelText>) {
+        for mut prepared in &mut prepared_runs {
+            prepared.clip_rect = Some(NON_INTERSECTING_CLIP_RECT);
+        }
+    }
+
+    #[test]
+    fn unroutable_runs_append_no_material_rows() {
+        let absent_rows = absent_text_frame_material_rows();
+
+        let mut missing_glyphs = pipeline_app();
+        missing_glyphs.add_systems(
+            PostUpdate,
+            drop_cached_glyph_paths
+                .after(shaping::shape_panel_text_children)
+                .before(update_panel_text_batches),
+        );
+        spawn_panel(&mut missing_glyphs, one_text_tree());
+        settle(&mut missing_glyphs);
+
+        assert_eq!(store_stats(&missing_glyphs), (0, 0, 0));
+        assert_eq!(frame_material_row_count(&missing_glyphs), absent_rows);
+
+        let mut fully_clipped = pipeline_app();
+        fully_clipped.add_systems(
+            PostUpdate,
+            clip_prepared_runs_outside_glyphs
+                .after(shaping::shape_panel_text_children)
+                .before(update_panel_text_batches),
+        );
+        spawn_panel(&mut fully_clipped, one_text_tree());
+        settle(&mut fully_clipped);
+
+        assert_eq!(store_stats(&fully_clipped), (0, 0, 0));
+        assert_eq!(frame_material_row_count(&fully_clipped), absent_rows);
     }
 
     #[test]
@@ -1120,7 +1220,7 @@ mod tests {
         let store = app.world().resource::<GlyphCache>().batch_store();
         let opaque_runs: usize = store
             .batches()
-            .filter(|(key, _)| key.alpha == AlphaMode::Opaque.into())
+            .filter(|(key, _)| key.pipeline_compatibility.alpha == AlphaMode::Opaque.into())
             .map(|(_, batch)| batch.run_count())
             .sum();
         assert_eq!(
@@ -1345,7 +1445,10 @@ mod tests {
         assert_eq!(runs, 2, "the respawned panel's runs are routed");
         assert_eq!(glyphs, 9);
         let store = app.world().resource::<GlyphCache>().batch_store();
-        let keys: Vec<AlphaMode> = store.batches().map(|(key, _)| key.alpha.into()).collect();
+        let keys: Vec<AlphaMode> = store
+            .batches()
+            .map(|(key, _)| key.pipeline_compatibility.alpha.into())
+            .collect();
         assert_eq!(
             (batches, keys.as_slice()),
             (1, &[AlphaMode::Blend][..]),
@@ -1354,13 +1457,13 @@ mod tests {
     }
 
     #[test]
-    fn fill_color_edit_stays_in_batch_as_a_record_write() {
+    fn fill_color_edit_stays_in_batch_as_a_material_row_write() {
         let mut app = pipeline_app();
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         let entity_before = batch_entities(&mut app)[0];
 
-        // Same text, new color: a value-only run-record write, not a re-key.
+        // Same text, new color: a material-table row write, not a re-key.
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(
             "Alpha",
@@ -1382,12 +1485,24 @@ mod tests {
         );
         let store = app.world().resource::<GlyphCache>().batch_store();
         let (_, batch) = store.batches().next().expect("one batch should exist");
+        let material_slots: Vec<u32> = batch
+            .run_records()
+            .iter()
+            .map(|record| record.material.as_u32())
+            .collect();
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        let red = Color::srgb(1.0, 0.0, 0.0).to_linear();
         assert!(
-            batch
-                .run_records()
-                .iter()
-                .any(|record| record.fill_color == Vec4::new(1.0, 0.0, 0.0, 1.0)),
-            "the recolored run's record carries the new fill color"
+            material_slots.iter().any(|slot| {
+                table.get(slot.to_usize()).is_some_and(|row| {
+                    row.base_color == Vec4::new(red.red, red.green, red.blue, red.alpha)
+                })
+            }),
+            "the recolored run's current material table row carries the new fill color"
         );
     }
 
@@ -1457,17 +1572,17 @@ mod tests {
     /// the padding fails here instead of at a parity screenshot.
     #[test]
     fn commit_payloads_keep_a_constant_length_between_growths() {
-        let glyph = PathInstanceRecord {
-            rect_min:    Vec2::ZERO,
-            rect_size:   Vec2::ONE,
-            uv_min:      Vec2::ZERO,
-            uv_size:     Vec2::ONE,
-            atlas_index: 0,
-            run_index:   0,
+        let glyph = PathQuadRecord {
+            rect_min:          Vec2::ZERO,
+            rect_size:         Vec2::ONE,
+            uv_min:            Vec2::ZERO,
+            uv_size:           Vec2::ONE,
+            packed_path_index: 0,
+            render_index:      0,
         };
-        let record = RunRecord {
+        let record = PathRenderRecord {
             transform:        Mat4::IDENTITY,
-            fill_color:       Vec4::ONE,
+            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:      1,
             depth_nudge:      0.0,
             oit_depth_offset: 0.0,

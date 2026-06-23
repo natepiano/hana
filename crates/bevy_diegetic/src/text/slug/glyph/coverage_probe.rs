@@ -50,7 +50,7 @@ use crate::render::Bounds;
 use crate::render::CurveRecord;
 use crate::render::DEFAULT_BAND_COUNT;
 use crate::render::PackedPath;
-use crate::render::PathRecord;
+use crate::render::PackedPathRecord;
 use crate::render::QuadraticSegment;
 
 const ROOT_EPSILON: f32 = 0.000_01;
@@ -86,7 +86,7 @@ const CORNER_WING_MAX_REACH: f32 = 1.5;
 // ---- shader-math debugging model -------------------------------------------
 
 struct Probe {
-    record: PathRecord,
+    record: PackedPathRecord,
     curves: Vec<CurveRecord>,
     bands:  Vec<BandRecord>,
 }
@@ -731,7 +731,7 @@ fn build() -> (Probe, GroundTruth) {
     let packed = super::build_packed_glyph(glyph, DEFAULT_BAND_COUNT);
     let band_count = (packed.bands().len() / 2) as u32;
     let probe = Probe {
-        record: PathRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
+        record: PackedPathRecord::new(packed.bounds(), 0, band_count, band_count, band_count, 0.0),
         curves: packed.curves().to_vec(),
         bands:  packed.bands().to_vec(),
     };
@@ -1014,7 +1014,7 @@ fn rectangle_probe_with_fade(
     let packed = super::build_packed_glyph(glyph, band_count);
     let band_count = (packed.bands().len() / 2) as u32;
     Probe {
-        record: PathRecord::new(
+        record: PackedPathRecord::new(
             packed.bounds(),
             0,
             band_count,
@@ -1218,7 +1218,7 @@ fn atlas_packed_tall_spine_covers_full_length() {
             start: band.start + curve_start,
             ..*band
         }));
-        records.push(PathRecord::new(
+        records.push(PackedPathRecord::new(
             packed.bounds(),
             band_start,
             axis_band_count,
@@ -1537,7 +1537,7 @@ fn merged_mixed_fade_path_has_no_junction_dip() {
         let packed = super::build_packed_glyph(glyph, 1);
         let band_count = (packed.bands().len() / 2) as u32;
         Probe {
-            record: PathRecord::new(
+            record: PackedPathRecord::new(
                 packed.bounds(),
                 0,
                 band_count,

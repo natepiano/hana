@@ -12,6 +12,7 @@ use super::Bounds;
 use super::PathContour;
 use super::PathOutline;
 use super::QuadraticSegment;
+use crate::render::material_table::GpuMaterialSlotId;
 
 /// Default number of horizontal bands packed per path.
 pub(crate) const DEFAULT_BAND_COUNT: usize = 96;
@@ -119,9 +120,9 @@ pub(crate) struct BandRecord {
     pub range_max: f32,
 }
 
-/// GPU path record for one unique path in a packed text run.
+/// GPU path record for one packed analytic path's bounds and curve-band ranges.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub(crate) struct PathRecord {
+pub(crate) struct PackedPathRecord {
     /// Bounds minimum in `.xy`, bounds size in `.zw`, in font design-space units.
     pub bounds_min_size: Vec4,
     /// Horizontal band start/count in `.xy`, vertical band start/count in `.zw`.
@@ -132,8 +133,8 @@ pub(crate) struct PathRecord {
     pub min_feature:     f32,
 }
 
-impl PathRecord {
-    /// Creates a path record that points into the combined run band buffer.
+impl PackedPathRecord {
+    /// Creates a packed path record that points into the combined band buffer.
     #[must_use]
     pub fn new(
         bounds: Bounds,
@@ -159,31 +160,30 @@ impl PathRecord {
 /// GPU record for one batched path quad. The vertex-pulling shader expands
 /// each record into four corners: positions from `rect_min`/`rect_size` in run
 /// layout space, padded path UVs from `uv_min`/`uv_size`, the shared-atlas
-/// slot through `atlas_index`, and the owning run through `run_index`.
+/// slot through `packed_path_index`, and the owning run through `render_index`.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub(crate) struct PathInstanceRecord {
+pub(crate) struct PathQuadRecord {
     /// Quad minimum corner (left, bottom) in run layout space, clipped.
-    pub rect_min:    Vec2,
+    pub rect_min:          Vec2,
     /// Quad size (width, height) in run layout space.
-    pub rect_size:   Vec2,
+    pub rect_size:         Vec2,
     /// Padded path UV at the quad's (left, top) corner.
-    pub uv_min:      Vec2,
+    pub uv_min:            Vec2,
     /// Padded path UV extent from `uv_min` toward (right, bottom).
-    pub uv_size:     Vec2,
-    /// Shared-atlas [`PathRecord`] index.
-    pub atlas_index: u32,
-    /// [`RunRecord`] index within the same batch.
-    pub run_index:   u32,
+    pub uv_size:           Vec2,
+    /// Shared-atlas [`PackedPathRecord`] index.
+    pub packed_path_index: u32,
+    /// [`PathRenderRecord`] index within the same batch.
+    pub render_index:      u32,
 }
 
-/// GPU record for one path run inside a batch: world placement plus the
-/// per-run values that batching moves out of the material uniform.
+/// GPU record for one text run or panel-shape primitive inside a path batch.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
-pub(crate) struct RunRecord {
+pub(crate) struct PathRenderRecord {
     /// Label world matrix (run layout space → world).
     pub transform:        Mat4,
-    /// Linear fill color.
-    pub fill_color:       Vec4,
+    /// Frame-local material-table row selected by this rendered path record.
+    pub material:         GpuMaterialSlotId,
     /// Visible render mode (`RenderMode` as `u32`).
     pub render_mode:      u32,
     /// Clip-space depth nudge in layer units for non-OIT views.
@@ -200,9 +200,9 @@ pub(crate) struct RunRecord {
 // WGSL mirror structs in `analytic_path_vertex_pull.wgsl` assume these strides.
 // `ShaderSize` measures the encase layout, not the Rust layout.
 const _: () = assert!(CurveRecord::SHADER_SIZE.get() == 80);
-const _: () = assert!(PathRecord::SHADER_SIZE.get() == 48);
-const _: () = assert!(PathInstanceRecord::SHADER_SIZE.get() == 40);
-const _: () = assert!(RunRecord::SHADER_SIZE.get() == 96);
+const _: () = assert!(PackedPathRecord::SHADER_SIZE.get() == 48);
+const _: () = assert!(PathQuadRecord::SHADER_SIZE.get() == 40);
+const _: () = assert!(PathRenderRecord::SHADER_SIZE.get() == 96);
 
 /// One analytic path's packed curve and band data for the shader.
 #[derive(Clone, Debug, PartialEq)]
@@ -610,26 +610,29 @@ mod tests {
     use bevy::render::render_resource::encase::StorageBuffer;
 
     use super::*;
+    use crate::render::material_table::MaterialSlotId;
 
-    fn glyph_record(seed: f32, atlas_index: u32, run_index: u32) -> PathInstanceRecord {
-        PathInstanceRecord {
+    fn glyph_record(seed: f32, packed_path_index: u32, render_index: u32) -> PathQuadRecord {
+        PathQuadRecord {
             rect_min: Vec2::new(seed, seed + 0.5),
             rect_size: Vec2::new(seed + 1.0, seed + 1.5),
             uv_min: Vec2::new(-0.0625, -0.0625),
             uv_size: Vec2::new(1.125, 1.125),
-            atlas_index,
-            run_index,
+            packed_path_index,
+            render_index,
         }
     }
 
-    fn run_record(seed: f32) -> RunRecord {
-        RunRecord {
+    fn run_record(seed: f32) -> PathRenderRecord {
+        PathRenderRecord {
             transform:        Mat4::from_translation(bevy::math::Vec3::new(
                 seed,
                 -seed,
                 seed * 2.0,
             )),
-            fill_color:       Vec4::new(0.25, 0.5, 0.75, 1.0),
+            material:         GpuMaterialSlotId::from(
+                MaterialSlotId::try_from(seed.to_bits()).expect("seed bits are valid slot ids"),
+            ),
             render_mode:      1,
             depth_nudge:      seed,
             oit_depth_offset: -seed,
@@ -648,7 +651,7 @@ mod tests {
             "two records at a 40-byte stride"
         );
 
-        let mut decoded: Vec<PathInstanceRecord> = Vec::new();
+        let mut decoded: Vec<PathQuadRecord> = Vec::new();
         StorageBuffer::new(encoded.as_ref().clone())
             .read(&mut decoded)
             .expect("records should decode");
@@ -666,7 +669,7 @@ mod tests {
             "two records at a 96-byte stride"
         );
 
-        let mut decoded: Vec<RunRecord> = Vec::new();
+        let mut decoded: Vec<PathRenderRecord> = Vec::new();
         StorageBuffer::new(encoded.as_ref().clone())
             .read(&mut decoded)
             .expect("records should decode");

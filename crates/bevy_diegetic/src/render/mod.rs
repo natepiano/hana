@@ -29,7 +29,10 @@ pub(crate) use analytic_paths::BatchPathMaterialInput;
 pub(crate) use analytic_paths::Bounds;
 pub(crate) use analytic_paths::CurveRecord;
 pub(crate) use analytic_paths::DEFAULT_BAND_COUNT;
+pub(crate) use analytic_paths::GeometryDirty;
+pub(crate) use analytic_paths::MaterialDirty;
 pub(crate) use analytic_paths::PackedPath;
+pub(crate) use analytic_paths::PackedPathRecord;
 pub(crate) use analytic_paths::PathAtlas;
 pub(crate) use analytic_paths::PathAtlasHandles;
 pub(crate) use analytic_paths::PathBatchKey;
@@ -37,12 +40,13 @@ pub(crate) use analytic_paths::PathBatchResources;
 pub(crate) use analytic_paths::PathBatchStore;
 pub(crate) use analytic_paths::PathContour;
 pub(crate) use analytic_paths::PathExtendedMaterial;
-pub(crate) use analytic_paths::PathInstanceRecord;
 pub(crate) use analytic_paths::PathOutline;
-pub(crate) use analytic_paths::PathRecord;
+pub(crate) use analytic_paths::PathQuadRecord;
+pub(crate) use analytic_paths::PathRenderRecord;
+pub(crate) use analytic_paths::PlacementDirty;
 pub(crate) use analytic_paths::QuadraticSegment;
 pub(crate) use analytic_paths::RenderMode;
-pub(crate) use analytic_paths::RunRecord;
+pub(crate) use analytic_paths::analytic_material_slot_candidate;
 pub(crate) use analytic_paths::batch_path_material;
 pub(crate) use analytic_paths::build_packed_path;
 #[cfg(test)]
@@ -50,11 +54,8 @@ pub(crate) use analytic_paths::path_material_oit_depth_offset;
 pub(crate) use analytic_paths::set_batch_path_material_buffers;
 pub(crate) use analytic_paths::set_path_material_atlas;
 pub(crate) use analytic_paths::set_path_material_table_buffer;
-pub(crate) use batch_key::BaseMaterialId;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
-pub(crate) use batch_key::VisualBatchKey;
-pub(crate) use batch_key::VisualMaterialInterner;
 pub(crate) use batch_key::VisualShadow;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
@@ -177,11 +178,11 @@ pub enum AntiAlias {
     Both,
 }
 
-/// `RunRecord::aa_flags` bit for footprint supersampling. Mirrored by
+/// `PathRenderRecord::aa_flags` bit for footprint supersampling. Mirrored by
 /// `AA_FLAG_SUPERSAMPLE` in `analytic_path.wgsl`.
 pub(crate) const AA_FLAG_SUPERSAMPLE: u32 = 1;
 
-/// `RunRecord::aa_flags` bit for the screen-space anisotropic edge band.
+/// `PathRenderRecord::aa_flags` bit for the screen-space anisotropic edge band.
 /// Mirrored by `AA_FLAG_BAND` in `analytic_path.wgsl`.
 pub(crate) const AA_FLAG_BAND: u32 = 1 << 1;
 
@@ -194,7 +195,7 @@ impl AntiAlias {
     #[must_use]
     pub const fn anisotropic(self) -> bool { matches!(self, Self::Anisotropic | Self::Both) }
 
-    /// The `RunRecord::aa_flags` encoding of this mode — the one enum→bits
+    /// The `PathRenderRecord::aa_flags` encoding of this mode — the one enum→bits
     /// conversion site, so the GPU encoding cannot drift from the variants.
     #[must_use]
     pub(crate) const fn aa_flags(self) -> u32 {

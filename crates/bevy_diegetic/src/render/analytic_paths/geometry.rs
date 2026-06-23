@@ -62,7 +62,7 @@ pub(crate) struct PathOutline {
 
 impl PathOutline {
     /// Narrowest dilating stroke across all contours, forwarded to
-    /// `PathRecord::min_feature` so the shader sizes its distance scan for
+    /// `PackedPathRecord::min_feature` so the shader sizes its distance scan for
     /// the largest dilation in the path. `0.0` when no contour dilates.
     #[must_use]
     pub fn min_feature(&self) -> f32 {

@@ -172,6 +172,10 @@ impl GpuMaterialSlotId {
     pub(crate) const fn as_u32(self) -> u32 { self.raw }
 }
 
+impl From<MaterialSlotId> for GpuMaterialSlotId {
+    fn from(slot: MaterialSlotId) -> Self { Self { raw: slot.as_u32() } }
+}
+
 /// CPU-side SDF material presence before a GPU record is built.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum SdfPaintMaterial {
@@ -728,13 +732,6 @@ impl BatchMaterialTableRegistry {
     }
 
     /// Explicitly removes a path batch material from table-buffer rebinding.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Phase 6 path batch cleanup unregisters through this API"
-        )
-    )]
     pub(crate) fn unregister_path(&mut self, batch_entity: Entity) {
         self.path_materials.remove(&batch_entity);
     }

@@ -2,8 +2,8 @@
 //
 // The batch mesh is inert: capacity-sized zeroed vertices whose only job is
 // switching the VERTEX_UVS_A / VERTEX_UVS_B pipeline defs on. Every visible
-// value is pulled from two storage tables — one PathInstanceRecord per path
-// quad, one RunRecord per text run — indexed from the vertex index. One file
+// value is pulled from two storage tables — one PathQuadRecord per path
+// quad, one PathRenderRecord per text run — indexed from the vertex index. One file
 // serves the main, prepass, and shadow pipelines: `#ifdef PREPASS_PIPELINE`
 // picks the entry point, and both call the same `pull_vertex` helper so the
 // expansion and the depth nudge cannot drift between passes.
@@ -21,39 +21,39 @@
 #import bevy_pbr::forward_io::VertexOutput
 #endif
 
-// Mirrors `PathInstanceRecord` in `path/packing.rs` (std430, 40 B stride).
-struct PathInstanceRecord {
+// Mirrors `PathQuadRecord` in `path/packing.rs` (std430, 40 B stride).
+struct PathQuadRecord {
     rect_min: vec2<f32>,
     rect_size: vec2<f32>,
     uv_min: vec2<f32>,
     uv_size: vec2<f32>,
-    atlas_index: u32,
-    run_index: u32,
+    packed_path_index: u32,
+    render_index: u32,
 }
 
-// Mirrors `RunRecord` in `path/packing.rs` (std430, 96 B stride).
-struct RunRecord {
+// Mirrors `PathRenderRecord` in `path/packing.rs` (std430, 96 B stride).
+struct PathRenderRecord {
     transform: mat4x4<f32>,
-    fill_color: vec4<f32>,
+    material: u32,
     render_mode: u32,
     depth_nudge: f32,
     oit_depth_offset: f32,
     aa_flags: u32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathInstanceRecord>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<RunRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathQuadRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<PathRenderRecord>;
 
-// Mirrors the leading fields of `PathRecord` in packing.rs. Only `min_feature`
+// Mirrors the leading fields of `PackedPathRecord` in packing.rs. Only `min_feature`
 // is read here, to tell a panel-line quad (min_feature > 0, screen-space
 // hairline coverage) from a text path quad (min_feature 0).
-struct PathRecord {
+struct PackedPathRecord {
     bounds_min_size: vec4<f32>,
     band_range: vec4<u32>,
     min_feature: f32,
 }
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PathRecord>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PackedPathRecord>;
 
 // Clip-space depth shift per depth_nudge layer unit, applied post-projection
 // so coplanar runs resolve to distinct depths.
@@ -121,14 +121,14 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
 
     let record = instances[path];
 
-    // Bevy compiles shaders without bounds checks, so a run_index outside the
+    // Bevy compiles shaders without bounds checks, so a render_index outside the
     // run table would read arbitrary memory and emit a quad anywhere on
     // screen. Collapse such a record to a degenerate quad.
-    if record.run_index >= arrayLength(&run_records) {
+    if record.render_index >= arrayLength(&run_records) {
         out.clip_position = vec4<f32>(0.0, 0.0, 0.0, 1.0);
         return out;
     }
-    let run = run_records[record.run_index];
+    let run = run_records[record.render_index];
 
     // Corner order matches RunMeshBuilder::push_path:
     // 0 = (left, top), 1 = (right, top), 2 = (right, bottom), 3 = (left, bottom).
@@ -144,7 +144,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // (see LINE_AA_MARGIN_PX). The margin is per panel-local axis, so the
     // foreshortened axis expands more; uv shifts by the same affine
     // rect->uv ratio, keeping the coverage field exact. Text is untouched.
-    if path_records[record.atlas_index].min_feature > 0.0 {
+    if path_records[record.packed_path_index].min_feature > 0.0 {
         let base_clip = position_world_to_clip((run.transform * vec4<f32>(local, 0.0, 1.0)).xyz);
         let axis_x = (run.transform * vec4<f32>(1.0, 0.0, 0.0, 0.0)).xyz;
         let axis_y = (run.transform * vec4<f32>(0.0, 1.0, 0.0, 0.0)).xyz;
@@ -177,7 +177,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // uv_b.x = atlas record index, uv_b.y = run index, both recovered in the
     // fragment with u32(floor(..)).
     out.uv = uv;
-    out.uv_b = vec2<f32>(f32(record.atlas_index), f32(record.run_index));
+    out.uv_b = vec2<f32>(f32(record.packed_path_index), f32(record.render_index));
     return out;
 }
 
