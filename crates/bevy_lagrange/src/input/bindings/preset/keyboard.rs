@@ -54,30 +54,3 @@ impl OrbitCamPresetConfig for OrbitCamKeyboardPreset {
         self.build_into(OrbitCamBindings::builder()).build()
     }
 }
-
-/// Reflected draft for the keyboard-only preset payload.
-#[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Reflect)]
-#[reflect(Default)]
-pub struct OrbitCamKeyboardPresetDraft;
-
-#[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamKeyboardPresetDraft {
-    fn default() -> Self { Self::from(OrbitCamKeyboardPreset) }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamKeyboardPresetDraft> for OrbitCamKeyboardPreset {
-    fn from(draft: OrbitCamKeyboardPresetDraft) -> Self {
-        let OrbitCamKeyboardPresetDraft = draft;
-        Self
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamKeyboardPreset> for OrbitCamKeyboardPresetDraft {
-    fn from(preset: OrbitCamKeyboardPreset) -> Self {
-        let OrbitCamKeyboardPreset = preset;
-        Self
-    }
-}

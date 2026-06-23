@@ -1,12 +1,8 @@
 use bevy::prelude::*;
 
 use super::blender_like::OrbitCamBlenderLikePreset;
-#[cfg(feature = "reflect-input-modes")]
-use super::blender_like::OrbitCamBlenderLikePresetDraft;
 use super::config::OrbitCamPresetConfig;
 use super::keyboard::OrbitCamKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-use super::keyboard::OrbitCamKeyboardPresetDraft;
 use super::source_sensitivity::MouseSensitivity;
 use super::source_sensitivity::SmoothScrollSensitivity;
 use crate::input::bindings::OrbitCamBindings;
@@ -89,43 +85,5 @@ impl SmoothScrollSensitivity for OrbitCamBlenderLikeKeyboardPreset {
 impl OrbitCamPresetConfig for OrbitCamBlenderLikeKeyboardPreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         self.build_into(OrbitCamBindings::builder())?.build()
-    }
-}
-
-/// Reflected draft for the Blender-like plus keyboard preset payload.
-#[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Debug, PartialEq, Reflect)]
-#[reflect(Default)]
-pub struct OrbitCamBlenderLikeKeyboardPresetDraft {
-    /// Blender-like child preset draft.
-    pub pointer:  OrbitCamBlenderLikePresetDraft,
-    /// Keyboard child preset draft.
-    pub keyboard: OrbitCamKeyboardPresetDraft,
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamBlenderLikeKeyboardPresetDraft {
-    fn default() -> Self { Self::from(OrbitCamBlenderLikeKeyboardPreset::default()) }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl TryFrom<OrbitCamBlenderLikeKeyboardPresetDraft> for OrbitCamBlenderLikeKeyboardPreset {
-    type Error = OrbitCamBindingsError;
-
-    fn try_from(draft: OrbitCamBlenderLikeKeyboardPresetDraft) -> Result<Self, Self::Error> {
-        Ok(Self {
-            pointer:  draft.pointer.try_into()?,
-            keyboard: draft.keyboard.into(),
-        })
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamBlenderLikeKeyboardPreset> for OrbitCamBlenderLikeKeyboardPresetDraft {
-    fn from(preset: OrbitCamBlenderLikeKeyboardPreset) -> Self {
-        Self {
-            pointer:  preset.pointer.into(),
-            keyboard: preset.keyboard.into(),
-        }
     }
 }

@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-#[cfg(feature = "reflect-input-modes")]
-use super::enum_preset::OrbitCamSensitivityDraft;
 use super::source_sensitivity::MouseSensitivity;
 use super::source_sensitivity::SmoothScrollSensitivity;
 use crate::input::bindings::OrbitCamBindings;
@@ -101,43 +99,5 @@ impl SmoothScrollSensitivity for OrbitCamSimpleMousePreset {
 impl OrbitCamPresetConfig for OrbitCamSimpleMousePreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         self.build_into(OrbitCamBindings::builder())?.build()
-    }
-}
-
-/// Reflected draft for the simple mouse preset payload.
-#[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Debug, PartialEq, Reflect)]
-#[reflect(Default)]
-pub struct OrbitCamSimpleMousePresetDraft {
-    /// Source sensitivity for mouse-drag and line-wheel input.
-    pub mouse_sensitivity:         OrbitCamSensitivityDraft,
-    /// Source sensitivity for Bevy pixel-scroll input.
-    pub smooth_scroll_sensitivity: OrbitCamSensitivityDraft,
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamSimpleMousePresetDraft {
-    fn default() -> Self { Self::from(OrbitCamSimpleMousePreset::default()) }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl TryFrom<OrbitCamSimpleMousePresetDraft> for OrbitCamSimpleMousePreset {
-    type Error = OrbitCamBindingsError;
-
-    fn try_from(draft: OrbitCamSimpleMousePresetDraft) -> Result<Self, Self::Error> {
-        Ok(Self {
-            mouse_sensitivity:         draft.mouse_sensitivity.try_into()?,
-            smooth_scroll_sensitivity: draft.smooth_scroll_sensitivity.try_into()?,
-        })
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamSimpleMousePreset> for OrbitCamSimpleMousePresetDraft {
-    fn from(preset: OrbitCamSimpleMousePreset) -> Self {
-        Self {
-            mouse_sensitivity:         preset.mouse_sensitivity.into(),
-            smooth_scroll_sensitivity: preset.smooth_scroll_sensitivity.into(),
-        }
     }
 }

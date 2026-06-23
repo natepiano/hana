@@ -90,19 +90,13 @@ pub use input::OrbitCamBindingsBuilder;
 pub use input::OrbitCamBindingsDescriptor;
 pub use input::OrbitCamBindingsError;
 pub use input::OrbitCamBlenderLikeKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamBlenderLikeKeyboardPresetDraft;
 pub use input::OrbitCamBlenderLikePreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamBlenderLikePresetDraft;
 pub use input::OrbitCamButtonDragZoom;
 pub use input::OrbitCamButtonDragZoomAxis;
 pub use input::OrbitCamControlRow;
 pub use input::OrbitCamControlSummary;
 pub use input::OrbitCamGamepadPreset;
 pub use input::OrbitCamGamepadPresetBuilder;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamGamepadPresetDraft;
 pub use input::OrbitCamGateInput;
 pub use input::OrbitCamGatePolarity;
 pub use input::OrbitCamHeldBinding;
@@ -112,18 +106,6 @@ pub use input::OrbitCamInputBinding;
 pub use input::OrbitCamInputContext;
 use input::OrbitCamInputLifecyclePlugin;
 pub use input::OrbitCamInputMode;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeApplied;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeApplyState;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeApplyStatus;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeDescriptor;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeDraft;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamInputModeRejected;
 use input::OrbitCamInputModesPlugin;
 pub use input::OrbitCamInteractionEnded;
 pub use input::OrbitCamInteractionKind;
@@ -132,8 +114,6 @@ pub use input::OrbitCamInteractionSpeedChanged;
 pub use input::OrbitCamInteractionStarted;
 pub use input::OrbitCamInteractionState;
 pub use input::OrbitCamKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamKeyboardPresetDraft;
 pub use input::OrbitCamManualInput;
 pub use input::OrbitCamManualInputWriter;
 pub use input::OrbitCamMouseDrag;
@@ -146,21 +126,13 @@ pub use input::OrbitCamPanActionBindings;
 pub use input::OrbitCamPanBinding;
 pub use input::OrbitCamPinchZoom;
 pub use input::OrbitCamPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamPresetDraft;
 pub use input::OrbitCamPresetKind;
 pub use input::OrbitCamReportingDebounce;
 use input::OrbitCamRoutingPlugin;
 pub use input::OrbitCamScalePolicy;
 pub use input::OrbitCamSensitivity;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamSensitivityDraft;
 pub use input::OrbitCamSimpleMouseKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamSimpleMouseKeyboardPresetDraft;
 pub use input::OrbitCamSimpleMousePreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use input::OrbitCamSimpleMousePresetDraft;
 pub use input::OrbitCamSlowMode;
 pub use input::OrbitCamSlowModeState;
 pub use input::OrbitCamTouchBinding;
@@ -220,7 +192,6 @@ impl Plugin for LagrangePlugin {
             OrbitCamInputLifecyclePlugin,
         ));
 
-        #[cfg(feature = "reflect-input-modes")]
         app.register_type::<ActionBindingDescriptor>()
             .register_type::<BindingEngagement>()
             .register_type::<BindingGates>()
@@ -242,35 +213,26 @@ impl Plugin for LagrangePlugin {
             .register_type::<OrbitCamBindings>()
             .register_type::<OrbitCamBindingsDescriptor>()
             .register_type::<OrbitCamBlenderLikeKeyboardPreset>()
-            .register_type::<OrbitCamBlenderLikeKeyboardPresetDraft>()
             .register_type::<OrbitCamBlenderLikePreset>()
-            .register_type::<OrbitCamBlenderLikePresetDraft>()
             .register_type::<OrbitCamButtonDragZoom>()
             .register_type::<OrbitCamButtonDragZoomAxis>()
             .register_type::<OrbitCamGamepadPreset>()
-            .register_type::<OrbitCamGamepadPresetDraft>()
             .register_type::<OrbitCamGateInput>()
             .register_type::<OrbitCamGatePolarity>()
             .register_type::<OrbitCamHeldBinding>()
             .register_type::<OrbitCamInputBinding>()
-            .register_type::<OrbitCamInputModeDraft>()
             .register_type::<OrbitCamKeyboardPreset>()
-            .register_type::<OrbitCamKeyboardPresetDraft>()
             .register_type::<OrbitCamMouseDrag>()
             .register_type::<OrbitCamMouseWheelZoom>()
             .register_type::<OrbitCamOrbitBinding>()
             .register_type::<OrbitCamPanBinding>()
             .register_type::<OrbitCamPinchZoom>()
             .register_type::<OrbitCamPreset>()
-            .register_type::<OrbitCamPresetDraft>()
             .register_type::<OrbitCamPresetKind>()
             .register_type::<OrbitCamScalePolicy>()
             .register_type::<OrbitCamSensitivity>()
-            .register_type::<OrbitCamSensitivityDraft>()
             .register_type::<OrbitCamSimpleMouseKeyboardPreset>()
-            .register_type::<OrbitCamSimpleMouseKeyboardPresetDraft>()
             .register_type::<OrbitCamSimpleMousePreset>()
-            .register_type::<OrbitCamSimpleMousePresetDraft>()
             .register_type::<OrbitCamSlowMode>()
             .register_type::<OrbitCamTouchBinding>()
             .register_type::<OrbitCamTouchBindingConfig>()
@@ -305,7 +267,6 @@ impl Plugin for LagrangePlugin {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "reflect-input-modes")]
     use std::any::TypeId;
     use std::collections::VecDeque;
     use std::time::Duration;
@@ -409,13 +370,11 @@ mod tests {
         camera
     }
 
-    #[cfg(feature = "reflect-input-modes")]
     fn type_is_registered<T: 'static>(app: &App) -> bool {
         let registry = app.world().resource::<AppTypeRegistry>().read();
         registry.get(TypeId::of::<T>()).is_some()
     }
 
-    #[cfg(feature = "reflect-input-modes")]
     #[test]
     fn reflect_input_mode_types_are_registered() {
         let mut app = App::new();
@@ -454,39 +413,29 @@ mod tests {
         assert!(type_is_registered::<OrbitCamBlenderLikeKeyboardPreset>(
             &app
         ));
-        assert!(type_is_registered::<OrbitCamBlenderLikeKeyboardPresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamBlenderLikePreset>(&app));
-        assert!(type_is_registered::<OrbitCamBlenderLikePresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamButtonDragZoom>(&app));
         assert!(type_is_registered::<OrbitCamButtonDragZoomAxis>(&app));
         assert!(type_is_registered::<OrbitCamGamepadPreset>(&app));
-        assert!(type_is_registered::<OrbitCamGamepadPresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamGateInput>(&app));
         assert!(type_is_registered::<OrbitCamGatePolarity>(&app));
         assert!(type_is_registered::<OrbitCamHeldBinding>(&app));
         assert!(type_is_registered::<OrbitCamInputBinding>(&app));
         assert!(type_is_registered::<OrbitCamInputMode>(&app));
-        assert!(type_is_registered::<OrbitCamInputModeDescriptor>(&app));
-        assert!(type_is_registered::<OrbitCamInputModeDraft>(&app));
         assert!(type_is_registered::<OrbitCamKeyboardPreset>(&app));
-        assert!(type_is_registered::<OrbitCamKeyboardPresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamMouseDrag>(&app));
         assert!(type_is_registered::<OrbitCamMouseWheelZoom>(&app));
         assert!(type_is_registered::<OrbitCamOrbitBinding>(&app));
         assert!(type_is_registered::<OrbitCamPanBinding>(&app));
         assert!(type_is_registered::<OrbitCamPinchZoom>(&app));
         assert!(type_is_registered::<OrbitCamPreset>(&app));
-        assert!(type_is_registered::<OrbitCamPresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamPresetKind>(&app));
         assert!(type_is_registered::<OrbitCamScalePolicy>(&app));
         assert!(type_is_registered::<OrbitCamSensitivity>(&app));
-        assert!(type_is_registered::<OrbitCamSensitivityDraft>(&app));
         assert!(type_is_registered::<OrbitCamSimpleMouseKeyboardPreset>(
             &app
         ));
-        assert!(type_is_registered::<OrbitCamSimpleMouseKeyboardPresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamSimpleMousePreset>(&app));
-        assert!(type_is_registered::<OrbitCamSimpleMousePresetDraft>(&app));
         assert!(type_is_registered::<OrbitCamSlowMode>(&app));
         assert!(type_is_registered::<OrbitCamTouchBinding>(&app));
         assert!(type_is_registered::<OrbitCamTouchBindingConfig>(&app));

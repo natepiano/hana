@@ -136,8 +136,6 @@ mod tests {
     use bevy_lagrange::LagrangePlugin;
     use bevy_lagrange::OrbitCam;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
-    use bevy_lagrange::OrbitCamInputModeDescriptor;
-    use bevy_lagrange::OrbitCamInputModeDraft;
     use bevy_lagrange::OrbitCamSensitivity;
     use bevy_lagrange::OrbitCamSimpleMousePreset;
 
@@ -249,7 +247,7 @@ mod tests {
     }
 
     #[test]
-    fn preset_cycle_does_not_reapply_stale_descriptor() {
+    fn preset_cycle_advances_from_simple_mouse() {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, LagrangePlugin));
         app.finish();
@@ -259,9 +257,7 @@ mod tests {
                 OrbitCam::default(),
                 Camera::default(),
                 RenderTarget::Window(WindowRef::Primary),
-                OrbitCamInputModeDescriptor {
-                    mode: OrbitCamInputModeDraft::from_preset(&OrbitCamPreset::simple_mouse()),
-                },
+                OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
             ))
             .id();
         app.world_mut().spawn((

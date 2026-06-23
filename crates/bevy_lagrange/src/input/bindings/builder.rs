@@ -27,14 +27,10 @@ use super::descriptor::InputSensitivity;
 use super::descriptor::OrbitCamSensitivity;
 use super::descriptor::OrbitCamSlowMode;
 use super::error::OrbitCamBindingsError;
-#[cfg(test)]
-use super::held_binding::BindingGates;
 use super::held_binding::OrbitCamHeldBinding;
 use super::held_binding::OrbitCamInputBinding;
 use super::validate;
 use crate::input::CameraInteractionSources;
-#[cfg(test)]
-use crate::input::ControlSpeed;
 
 /// Reflectable draft binding specification for editor and keymap tooling.
 #[derive(Clone, Debug, Default, PartialEq, Reflect)]
@@ -61,21 +57,6 @@ impl TryFrom<OrbitCamBindingsDescriptor> for OrbitCamBindings {
     fn try_from(descriptor: OrbitCamBindingsDescriptor) -> Result<Self, Self::Error> {
         validate::validate_bindings(&descriptor)
     }
-}
-
-#[cfg(test)]
-pub(crate) fn invalid_bindings_descriptor_for_tests() -> OrbitCamBindingsDescriptor {
-    let mut descriptor = OrbitCamBindingsDescriptor::default();
-    descriptor.orbit.push(HeldBindingDescriptor {
-        motion:             OrbitCamInputBinding::from(Binding::mouse_motion()).descriptor(),
-        engagement:         None,
-        gates:              BindingGates::default(),
-        sources:            CameraInteractionSources::MOUSE,
-        engagement_sources: CameraInteractionSources::MOUSE,
-        route:              BindingRoutePolicy::CursorPosition,
-        speed:              ControlSpeed::Normal,
-    });
-    descriptor
 }
 
 /// Builder for `OrbitCamBindings`.

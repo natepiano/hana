@@ -15,7 +15,7 @@ version              = "0.2.0-dev"
 workspace = true
 
 [features]
-default = ["reflect-input-modes"]
+default = []
 fit_overlay = [
   "bevy/bevy_asset",
   "bevy/bevy_mesh",
@@ -25,7 +25,6 @@ fit_overlay = [
   "bevy/bevy_ui",
   "bevy/bevy_ui_render",
 ]
-reflect-input-modes = []
 
 [dependencies]
 bevy = { workspace = true, features = [

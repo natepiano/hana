@@ -52,8 +52,6 @@ pub use builder::OrbitCamTouchBindingConfig;
 pub use builder::OrbitCamTrackpadScroll;
 pub use builder::OrbitCamZoomBinding;
 pub use builder::ZoomInversion;
-#[cfg(test)]
-pub(crate) use builder::invalid_bindings_descriptor_for_tests;
 pub use descriptor::ActionBindingDescriptor;
 pub use descriptor::InputAxisTransform;
 pub use descriptor::InputBindingDescriptor;
@@ -77,30 +75,14 @@ pub use held_binding::OrbitCamInputBinding;
 pub use preset::GamepadSensitivity;
 pub use preset::MouseSensitivity;
 pub use preset::OrbitCamBlenderLikeKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamBlenderLikeKeyboardPresetDraft;
 pub use preset::OrbitCamBlenderLikePreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamBlenderLikePresetDraft;
 pub use preset::OrbitCamGamepadPreset;
 pub use preset::OrbitCamGamepadPresetBuilder;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamGamepadPresetDraft;
 pub use preset::OrbitCamKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamKeyboardPresetDraft;
 pub use preset::OrbitCamPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamPresetDraft;
 pub use preset::OrbitCamPresetKind;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamSensitivityDraft;
 pub use preset::OrbitCamSimpleMouseKeyboardPreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamSimpleMouseKeyboardPresetDraft;
 pub use preset::OrbitCamSimpleMousePreset;
-#[cfg(feature = "reflect-input-modes")]
-pub use preset::OrbitCamSimpleMousePresetDraft;
 pub use preset::SmoothScrollSensitivity;
 pub use validate::validate_bindings;
 

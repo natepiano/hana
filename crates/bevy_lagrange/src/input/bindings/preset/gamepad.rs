@@ -1,8 +1,6 @@
 use bevy::prelude::*;
 
 use super::config::OrbitCamPresetConfig;
-#[cfg(feature = "reflect-input-modes")]
-use super::enum_preset::OrbitCamSensitivityDraft;
 use super::source_sensitivity::GamepadSensitivity;
 use crate::input::ControlSpeed;
 use crate::input::bindings::CameraInputGamepadSelectionPolicy;
@@ -369,69 +367,4 @@ fn gamepad_stick(
 
 fn gamepad_trigger(button: GamepadButton, scale: f32) -> OrbitCamInputBinding {
     OrbitCamInputBinding::gamepad_button_axis(button, scale).with_delta_scale()
-}
-
-/// Reflected draft for the gamepad preset payload.
-#[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Debug, PartialEq, Reflect)]
-#[reflect(Default)]
-pub struct OrbitCamGamepadPresetDraft {
-    /// Source sensitivity for generated gamepad bindings.
-    pub gamepad_sensitivity: OrbitCamSensitivityDraft,
-    /// Fast orbit scale.
-    pub orbit_scale:         f32,
-    /// Slow orbit scale.
-    pub slow_orbit_scale:    f32,
-    /// Fast pan scale.
-    pub pan_scale:           f32,
-    /// Slow pan scale.
-    pub slow_pan_scale:      f32,
-    /// Fast zoom scale.
-    pub zoom_scale:          f32,
-    /// Slow zoom scale.
-    pub slow_zoom_scale:     f32,
-    /// Axial stick dead-zone thresholds.
-    pub stick_dead_zone:     InputDeadZone,
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamGamepadPresetDraft {
-    fn default() -> Self {
-        let preset = OrbitCamGamepadPreset::default();
-        Self::from(preset)
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl TryFrom<OrbitCamGamepadPresetDraft> for OrbitCamGamepadPreset {
-    type Error = OrbitCamBindingsError;
-
-    fn try_from(draft: OrbitCamGamepadPresetDraft) -> Result<Self, Self::Error> {
-        Ok(Self {
-            sensitivity:      draft.gamepad_sensitivity.try_into()?,
-            orbit_scale:      draft.orbit_scale,
-            slow_orbit_scale: draft.slow_orbit_scale,
-            pan_scale:        draft.pan_scale,
-            slow_pan_scale:   draft.slow_pan_scale,
-            zoom_scale:       draft.zoom_scale,
-            slow_zoom_scale:  draft.slow_zoom_scale,
-            stick_dead_zone:  draft.stick_dead_zone,
-        })
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamGamepadPreset> for OrbitCamGamepadPresetDraft {
-    fn from(preset: OrbitCamGamepadPreset) -> Self {
-        Self {
-            gamepad_sensitivity: preset.sensitivity.into(),
-            orbit_scale:         preset.orbit_scale,
-            slow_orbit_scale:    preset.slow_orbit_scale,
-            pan_scale:           preset.pan_scale,
-            slow_pan_scale:      preset.slow_pan_scale,
-            zoom_scale:          preset.zoom_scale,
-            slow_zoom_scale:     preset.slow_zoom_scale,
-            stick_dead_zone:     preset.stick_dead_zone,
-        }
-    }
 }

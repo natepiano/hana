@@ -2,8 +2,6 @@ use bevy::prelude::*;
 use bevy_enhanced_input::prelude::ModKeys;
 
 use super::config::OrbitCamPresetConfig;
-#[cfg(feature = "reflect-input-modes")]
-use super::enum_preset::OrbitCamSensitivityDraft;
 use super::source_sensitivity::MouseSensitivity;
 use super::source_sensitivity::SmoothScrollSensitivity;
 use crate::input::bindings::OrbitCamBindings;
@@ -186,62 +184,5 @@ impl SmoothScrollSensitivity for OrbitCamBlenderLikePreset {
 impl OrbitCamPresetConfig for OrbitCamBlenderLikePreset {
     fn build(self) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         self.build_into(OrbitCamBindings::builder())?.build()
-    }
-}
-
-/// Reflected draft for the Blender-like preset payload.
-#[cfg(feature = "reflect-input-modes")]
-#[derive(Clone, Debug, PartialEq, Reflect)]
-#[reflect(Default)]
-pub struct OrbitCamBlenderLikePresetDraft {
-    /// Source sensitivity for mouse-drag and line-wheel input.
-    pub mouse_sensitivity:         OrbitCamSensitivityDraft,
-    /// Source sensitivity for Bevy pixel-scroll input.
-    pub smooth_scroll_sensitivity: OrbitCamSensitivityDraft,
-    /// Keyboard modifiers required for trackpad zoom.
-    pub zoom_mod_keys:             ModKeys,
-    /// Key that toggles slow mode on or off for this camera.
-    pub slow_toggle_key:           Option<KeyCode>,
-    /// Modifier keys held with the toggle key to fire the slow-mode toggle.
-    pub slow_toggle_mod_keys:      ModKeys,
-    /// Scale applied to all inputs when slow mode is active.
-    pub slow_scale:                f32,
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl Default for OrbitCamBlenderLikePresetDraft {
-    fn default() -> Self {
-        let preset = OrbitCamBlenderLikePreset::default();
-        Self::from(preset)
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl TryFrom<OrbitCamBlenderLikePresetDraft> for OrbitCamBlenderLikePreset {
-    type Error = OrbitCamBindingsError;
-
-    fn try_from(draft: OrbitCamBlenderLikePresetDraft) -> Result<Self, Self::Error> {
-        Ok(Self {
-            mouse_sensitivity:         draft.mouse_sensitivity.try_into()?,
-            smooth_scroll_sensitivity: draft.smooth_scroll_sensitivity.try_into()?,
-            zoom_mod_keys:             draft.zoom_mod_keys,
-            slow_toggle_key:           draft.slow_toggle_key,
-            slow_toggle_mod_keys:      draft.slow_toggle_mod_keys,
-            slow_scale:                draft.slow_scale,
-        })
-    }
-}
-
-#[cfg(feature = "reflect-input-modes")]
-impl From<OrbitCamBlenderLikePreset> for OrbitCamBlenderLikePresetDraft {
-    fn from(preset: OrbitCamBlenderLikePreset) -> Self {
-        Self {
-            mouse_sensitivity:         preset.mouse_sensitivity.into(),
-            smooth_scroll_sensitivity: preset.smooth_scroll_sensitivity.into(),
-            zoom_mod_keys:             preset.zoom_mod_keys,
-            slow_toggle_key:           preset.slow_toggle_key,
-            slow_toggle_mod_keys:      preset.slow_toggle_mod_keys,
-            slow_scale:                preset.slow_scale,
-        }
     }
 }

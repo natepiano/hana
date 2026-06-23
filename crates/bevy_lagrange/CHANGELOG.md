@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+
+- `reflect-input-modes` cargo feature and its reflected draft/apply types
+  (`OrbitCamInputModeDescriptor`, `OrbitCamInputModeDraft`, the `*PresetDraft`
+  mirrors, `OrbitCamInputModeApplyStatus`/`OrbitCamInputModeApplied`/`OrbitCamInputModeRejected`).
+  Author input modes directly with `OrbitCamInputMode` (`with_preset`, `Bindings`,
+  `Manual`); the runtime preset/binding types and their `Reflect` registration are
+  unchanged.
+
 ## [0.1.0] - 2026-06-22
 
 ### Added
