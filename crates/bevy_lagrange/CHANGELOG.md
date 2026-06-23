@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Change `OrbitCamPreset` variants to carry preset payloads; use helper constructors such as `OrbitCamPreset::blender_like()` or `OrbitCamInputMode::with_preset(...)` instead of unit variants like `OrbitCamPreset::BlenderLike` (breaking).
+
 ## [0.0.4] - 2026-06-20
 
 ### Added
