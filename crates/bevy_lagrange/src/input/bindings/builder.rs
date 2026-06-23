@@ -23,7 +23,7 @@ use super::OrbitCamBindings;
 use super::action_set::BindingRoutePolicy;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
-use super::descriptor::InputSensitivity;
+use super::descriptor::InputGain;
 use super::descriptor::OrbitCamSensitivity;
 use super::descriptor::OrbitCamSlowMode;
 use super::error::OrbitCamBindingsError;
@@ -39,15 +39,15 @@ pub struct OrbitCamBindingsDescriptor {
     pub(super) pan:              Vec<HeldBindingDescriptor>,
     pub(super) zoom_smooth:      Vec<HeldBindingDescriptor>,
     pub(super) zoom_coarse:      Vec<ActionBindingDescriptor>,
-    pub(super) trackpad_orbit:   Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
-    pub(super) trackpad_pan:     Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
-    pub(super) trackpad_zoom:    Vec<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>>,
-    pub(super) mouse_wheel_zoom: Option<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>>,
-    pub(super) pinch_zoom:       Option<OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>>,
+    pub(super) trackpad_orbit:   Vec<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>>,
+    pub(super) trackpad_pan:     Vec<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>>,
+    pub(super) trackpad_zoom:    Vec<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>>,
+    pub(super) mouse_wheel_zoom: Option<OrbitCamBindingWithInputGain<OrbitCamMouseWheelZoom>>,
+    pub(super) pinch_zoom:       Option<OrbitCamBindingWithInputGain<OrbitCamPinchZoom>>,
     pub(super) touch:            Option<OrbitCamTouchBindingConfig>,
     pub(super) gamepad:          CameraInputGamepadSelectionPolicy,
     pub(super) zoom_inversion:   ZoomInversion,
-    pub(super) button_drag_zoom: Option<OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>>,
+    pub(super) button_drag_zoom: Option<OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom>>,
     pub(super) slow_mode:        Option<OrbitCamSlowMode>,
 }
 
@@ -166,18 +166,18 @@ impl OrbitCamBindingsBuilder {
 
 /// A binding value plus its authored input sensitivity.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct OrbitCamBindingWithSensitivity<T> {
-    binding:     T,
-    sensitivity: InputSensitivity,
+pub struct OrbitCamBindingWithInputGain<T> {
+    binding:    T,
+    input_gain: InputGain,
 }
 
-impl<T> OrbitCamBindingWithSensitivity<T> {
+impl<T> OrbitCamBindingWithInputGain<T> {
     /// Creates a binding wrapper with explicit sensitivity.
     #[must_use]
     pub const fn new(binding: T, sensitivity: f32) -> Self {
         Self {
             binding,
-            sensitivity: InputSensitivity(sensitivity),
+            input_gain: InputGain(sensitivity),
         }
     }
 
@@ -187,32 +187,32 @@ impl<T> OrbitCamBindingWithSensitivity<T> {
 
     /// Returns the authored sensitivity.
     #[must_use]
-    pub const fn sensitivity(&self) -> InputSensitivity { self.sensitivity }
+    pub const fn sensitivity(&self) -> InputGain { self.input_gain }
 
     /// Replaces the authored sensitivity.
     #[must_use]
     pub const fn with_sensitivity(mut self, sensitivity: f32) -> Self {
-        self.sensitivity = InputSensitivity(sensitivity);
+        self.input_gain = InputGain(sensitivity);
         self
     }
 }
 
-impl<T> Deref for OrbitCamBindingWithSensitivity<T> {
+impl<T> Deref for OrbitCamBindingWithInputGain<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target { self.binding() }
 }
 
-impl<T> From<T> for OrbitCamBindingWithSensitivity<T> {
+impl<T> From<T> for OrbitCamBindingWithInputGain<T> {
     fn from(binding: T) -> Self {
         Self {
             binding,
-            sensitivity: InputSensitivity::DEFAULT,
+            input_gain: InputGain::DEFAULT,
         }
     }
 }
 
-impl OrbitCamBindingWithSensitivity<OrbitCamMouseDrag> {
+impl OrbitCamBindingWithInputGain<OrbitCamMouseDrag> {
     /// Requires keyboard modifiers on both mouse motion and button engagement.
     #[must_use]
     pub const fn with_mod_keys(mut self, mod_keys: ModKeys) -> Self {
@@ -221,7 +221,7 @@ impl OrbitCamBindingWithSensitivity<OrbitCamMouseDrag> {
     }
 }
 
-impl OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll> {
+impl OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll> {
     /// Requires keyboard modifiers on smooth-scroll input.
     #[must_use]
     pub const fn with_mod_keys(mut self, mod_keys: ModKeys) -> Self {
@@ -230,7 +230,7 @@ impl OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll> {
     }
 }
 
-impl OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom> {
+impl OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom> {
     /// Sets the axis used for button-drag zoom.
     #[must_use]
     pub const fn with_axis(mut self, axis: OrbitCamButtonDragZoomAxis) -> Self {
@@ -246,7 +246,7 @@ pub enum OrbitCamOrbitBinding {
     /// Held enhanced-input binding.
     Held(OrbitCamHeldBinding),
     /// Trackpad smooth-scroll binding.
-    Trackpad(OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>),
+    Trackpad(OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>),
 }
 
 impl From<OrbitCamHeldBinding> for OrbitCamOrbitBinding {
@@ -257,8 +257,8 @@ impl From<OrbitCamMouseDrag> for OrbitCamOrbitBinding {
     fn from(value: OrbitCamMouseDrag) -> Self { Self::Held(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>> for OrbitCamOrbitBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamMouseDrag>> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamMouseDrag>) -> Self {
         Self::Held(value.into())
     }
 }
@@ -271,8 +271,8 @@ impl From<OrbitCamTrackpadScroll> for OrbitCamOrbitBinding {
     fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>> for OrbitCamOrbitBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>> for OrbitCamOrbitBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>) -> Self {
         Self::Trackpad(value)
     }
 }
@@ -284,7 +284,7 @@ pub enum OrbitCamPanBinding {
     /// Held enhanced-input binding.
     Held(OrbitCamHeldBinding),
     /// Trackpad smooth-scroll binding.
-    Trackpad(OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>),
+    Trackpad(OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>),
 }
 
 impl From<OrbitCamHeldBinding> for OrbitCamPanBinding {
@@ -295,8 +295,8 @@ impl From<OrbitCamMouseDrag> for OrbitCamPanBinding {
     fn from(value: OrbitCamMouseDrag) -> Self { Self::Held(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>> for OrbitCamPanBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamMouseDrag>> for OrbitCamPanBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamMouseDrag>) -> Self {
         Self::Held(value.into())
     }
 }
@@ -309,8 +309,8 @@ impl From<OrbitCamTrackpadScroll> for OrbitCamPanBinding {
     fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>> for OrbitCamPanBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>> for OrbitCamPanBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>) -> Self {
         Self::Trackpad(value)
     }
 }
@@ -322,13 +322,13 @@ pub enum OrbitCamZoomBinding {
     /// Held enhanced-input binding.
     Held(OrbitCamHeldBinding),
     /// Trackpad smooth-scroll binding.
-    Trackpad(OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>),
+    Trackpad(OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>),
     /// Mouse wheel zoom binding.
-    MouseWheel(OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>),
+    MouseWheel(OrbitCamBindingWithInputGain<OrbitCamMouseWheelZoom>),
     /// Pinch gesture zoom binding.
-    Pinch(OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>),
+    Pinch(OrbitCamBindingWithInputGain<OrbitCamPinchZoom>),
     /// Button-drag zoom binding.
-    ButtonDrag(OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>),
+    ButtonDrag(OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom>),
 }
 
 impl From<OrbitCamHeldBinding> for OrbitCamZoomBinding {
@@ -343,8 +343,8 @@ impl From<OrbitCamTrackpadScroll> for OrbitCamZoomBinding {
     fn from(value: OrbitCamTrackpadScroll) -> Self { Self::Trackpad(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>> for OrbitCamZoomBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>) -> Self {
         Self::Trackpad(value)
     }
 }
@@ -353,8 +353,8 @@ impl From<OrbitCamMouseWheelZoom> for OrbitCamZoomBinding {
     fn from(value: OrbitCamMouseWheelZoom) -> Self { Self::MouseWheel(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>> for OrbitCamZoomBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamMouseWheelZoom>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamMouseWheelZoom>> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamMouseWheelZoom>) -> Self {
         Self::MouseWheel(value)
     }
 }
@@ -363,16 +363,16 @@ impl From<OrbitCamPinchZoom> for OrbitCamZoomBinding {
     fn from(value: OrbitCamPinchZoom) -> Self { Self::Pinch(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>> for OrbitCamZoomBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamPinchZoom>) -> Self { Self::Pinch(value) }
+impl From<OrbitCamBindingWithInputGain<OrbitCamPinchZoom>> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamPinchZoom>) -> Self { Self::Pinch(value) }
 }
 
 impl From<OrbitCamButtonDragZoom> for OrbitCamZoomBinding {
     fn from(value: OrbitCamButtonDragZoom) -> Self { Self::ButtonDrag(value.into()) }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>> for OrbitCamZoomBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom>> for OrbitCamZoomBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom>) -> Self {
         Self::ButtonDrag(value)
     }
 }
@@ -405,8 +405,8 @@ impl OrbitCamMouseDrag {
 
     /// Sets the authored sensitivity for this mouse-drag binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithSensitivity<Self> {
-        OrbitCamBindingWithSensitivity::new(self, sensitivity)
+    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, sensitivity)
     }
 }
 
@@ -426,8 +426,8 @@ impl From<OrbitCamMouseDrag> for OrbitCamHeldBinding {
     }
 }
 
-impl From<OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>> for OrbitCamHeldBinding {
-    fn from(value: OrbitCamBindingWithSensitivity<OrbitCamMouseDrag>) -> Self {
+impl From<OrbitCamBindingWithInputGain<OrbitCamMouseDrag>> for OrbitCamHeldBinding {
+    fn from(value: OrbitCamBindingWithInputGain<OrbitCamMouseDrag>) -> Self {
         Self::from(*value.binding()).with_sensitivity(value.sensitivity().value())
     }
 }
@@ -449,8 +449,8 @@ impl OrbitCamTrackpadScroll {
 
     /// Sets the authored sensitivity for this smooth-scroll binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithSensitivity<Self> {
-        OrbitCamBindingWithSensitivity::new(self, sensitivity)
+    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, sensitivity)
     }
 }
 
@@ -462,8 +462,8 @@ pub struct OrbitCamMouseWheelZoom;
 impl OrbitCamMouseWheelZoom {
     /// Sets the authored sensitivity for this mouse-wheel zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithSensitivity<Self> {
-        OrbitCamBindingWithSensitivity::new(self, sensitivity)
+    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, sensitivity)
     }
 }
 
@@ -474,8 +474,8 @@ pub struct OrbitCamPinchZoom;
 impl OrbitCamPinchZoom {
     /// Sets the authored sensitivity for this pinch zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithSensitivity<Self> {
-        OrbitCamBindingWithSensitivity::new(self, sensitivity)
+    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, sensitivity)
     }
 }
 
@@ -507,8 +507,8 @@ impl OrbitCamButtonDragZoom {
 
     /// Sets the authored sensitivity for this button-drag zoom binding.
     #[must_use]
-    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithSensitivity<Self> {
-        OrbitCamBindingWithSensitivity::new(self, sensitivity)
+    pub const fn with_sensitivity(self, sensitivity: f32) -> OrbitCamBindingWithInputGain<Self> {
+        OrbitCamBindingWithInputGain::new(self, sensitivity)
     }
 }
 

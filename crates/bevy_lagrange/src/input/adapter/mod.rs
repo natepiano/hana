@@ -123,7 +123,6 @@ mod tests {
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
     use crate::input::ControlSpeed;
-    use crate::input::InputSensitivity;
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamButtonDragZoom;
     use crate::input::OrbitCamButtonDragZoomAxis;
@@ -142,6 +141,10 @@ mod tests {
     use crate::input::OrbitCamTouchBinding;
     use crate::input::OrbitCamTrackpadScroll;
     use crate::input::OrbitDelta;
+    use crate::input::constants::DISABLED_SENSITIVITY;
+    use crate::input::constants::INVALID_SOURCE_SENSITIVITY;
+    use crate::input::constants::PINCH_SENSITIVITY;
+    use crate::input::constants::WHEEL_SENSITIVITY;
     use crate::input::modes;
     use crate::input::modes::OrbitCamInputModesPlugin;
     use crate::input::routing::OrbitCamRoutingPlugin;
@@ -195,10 +198,7 @@ mod tests {
 
     const BUTTON_DRAG_MOTION_Y: f32 = -8.0;
     const BUTTON_DRAG_SENSITIVITY: f32 = 0.25;
-    const DISABLED_SENSITIVITY: f32 = InputSensitivity::DISABLED.0;
-    const INVALID_SOURCE_SENSITIVITY: f32 = -1.0;
     const PINCH_DELTA: f32 = 2.0;
-    const PINCH_SENSITIVITY: f32 = 0.5;
     const PIXEL_SCROLL_DELTA_Y: f32 = 20.0;
     const SLOW_SCALE: f32 = 0.5;
     const TOUCH_MOTION_X: f32 = 6.0;
@@ -212,7 +212,6 @@ mod tests {
     const TRACKPAD_PAN_PRIORITY_SENSITIVITY: f32 = 2.0;
     const TRACKPAD_ZOOM_SENSITIVITY: f32 = 0.25;
     const WHEEL_SCROLL_DELTA: f32 = 6.0;
-    const WHEEL_SENSITIVITY: f32 = 0.25;
 
     fn camera_input(app: &App, camera: Entity) -> Result<&OrbitCamInput, &'static str> {
         app.world()

@@ -629,7 +629,7 @@ mod tests {
     use crate::enhanced_input::LagrangeEnhancedInputPlugin;
     use crate::input::CameraInputRoutingConfig;
     use crate::input::CameraInteractionSources;
-    use crate::input::InputSensitivity;
+    use crate::input::InputGain;
     use crate::input::OrbitCamInputAdapterPlugin;
     use crate::input::OrbitCamInputLifecyclePlugin;
     use crate::input::OrbitCamInputMode;
@@ -782,7 +782,7 @@ mod tests {
     }
 
     fn zero_sensitive_simple_mouse_mode() -> OrbitCamInputMode {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         OrbitCamInputMode::with_preset(
             OrbitCamSimpleMousePreset::default()
                 .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))

@@ -148,7 +148,7 @@ pub(super) const fn speed_label(speed: ControlSpeed) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use bevy_lagrange::InputSensitivity;
+    use bevy_lagrange::InputGain;
     use bevy_lagrange::OrbitCamBindings;
     use bevy_lagrange::OrbitCamBindingsError;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
@@ -235,7 +235,7 @@ mod tests {
 
     #[test]
     fn tuned_blender_like_snapshot_keeps_preset_label_and_slow_mode_hint() {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         let preset = OrbitCamBlenderLikePreset::default()
             .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
             .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled));
@@ -255,13 +255,13 @@ mod tests {
     #[test]
     fn custom_slow_mode_snapshot_omits_hint_when_all_controls_are_disabled()
     -> Result<(), OrbitCamBindingsError> {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         let bindings = OrbitCamBindings::builder()
             .slow_mode(OrbitCamSlowMode {
                 toggle_key: KeyCode::KeyS,
                 mod_keys:   ModKeys::ALT,
                 scale:      OrbitCamScalePolicy {
-                    normal: InputSensitivity::DEFAULT.0,
+                    normal: InputGain::DEFAULT.0,
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })

@@ -222,7 +222,7 @@ mod tests {
     use crate::OrbitCam;
     use crate::input::CameraInputDisabled;
     use crate::input::CameraInteractionSources;
-    use crate::input::InputSensitivity;
+    use crate::input::InputGain;
     use crate::input::OrbitCamBindings;
     use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamInputMode;
@@ -232,9 +232,8 @@ mod tests {
     use crate::input::OrbitCamResolvedBindings;
     use crate::input::OrbitCamScalePolicy;
     use crate::input::OrbitCamSlowMode;
+    use crate::input::constants::CUSTOM_SLOW_SCALE;
     use crate::system_sets::LagrangeSystemSetsPlugin;
-
-    const CUSTOM_SLOW_SCALE: f32 = 0.25;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -354,13 +353,12 @@ mod tests {
                 toggle_key: KeyCode::KeyS,
                 mod_keys:   ModKeys::ALT,
                 scale:      OrbitCamScalePolicy {
-                    normal: InputSensitivity::DEFAULT.0,
+                    normal: InputGain::DEFAULT.0,
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })
             .orbit(
-                OrbitCamMouseDrag::new(MouseButton::Middle)
-                    .with_sensitivity(InputSensitivity::DISABLED.0),
+                OrbitCamMouseDrag::new(MouseButton::Middle).with_sensitivity(InputGain::DISABLED.0),
             )
             .build()?;
         let mut app = test_app();

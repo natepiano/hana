@@ -132,7 +132,7 @@ mod tests {
     use bevy::camera::RenderTarget;
     use bevy::window::WindowRef;
     use bevy_lagrange::CameraInputRoutingConfig;
-    use bevy_lagrange::InputSensitivity;
+    use bevy_lagrange::InputGain;
     use bevy_lagrange::LagrangePlugin;
     use bevy_lagrange::OrbitCam;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
@@ -158,7 +158,7 @@ mod tests {
     }
 
     fn tuned_blender_like_preset() -> OrbitCamBlenderLikePreset {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         OrbitCamBlenderLikePreset::default()
             .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
             .smooth_scroll_sensitivity(OrbitCamSensitivity::uniform(disabled))

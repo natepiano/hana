@@ -8,7 +8,7 @@ use super::CameraInteractionSources;
 use super::CameraSemanticAction;
 use super::HeldActionBindingEntry;
 use super::HeldCameraAction;
-use super::OrbitCamBindingWithSensitivity;
+use super::OrbitCamBindingWithInputGain;
 use super::OrbitCamBindings;
 use super::OrbitCamButtonDragZoom;
 use super::OrbitCamGateInput;
@@ -293,7 +293,7 @@ fn describe_action_entry<A: CameraSemanticAction>(
 }
 
 fn describe_trackpad(
-    trackpad: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    trackpad: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
     kind: OrbitCamInteractionKind,
 ) -> OrbitCamControlRow {
     control_row(
@@ -370,7 +370,7 @@ fn push_zoom_pair(
 /// label with any required modifier keys (matching `trackpad_stem`).
 fn push_trackpad_zoom_pair(
     rows: &mut Vec<OrbitCamControlRow>,
-    trackpad: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    trackpad: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
     inversion_sign: f32,
 ) {
     let zoom_in = with_mod_keys(
@@ -434,7 +434,7 @@ fn zoom_entry_label(entry: &InputBindingEntry) -> Option<String> {
 }
 
 fn describe_button_drag(
-    button_drag: OrbitCamBindingWithSensitivity<OrbitCamButtonDragZoom>,
+    button_drag: OrbitCamBindingWithInputGain<OrbitCamButtonDragZoom>,
 ) -> OrbitCamControlRow {
     control_row(
         OrbitCamInteractionKind::Zoom,
@@ -826,7 +826,7 @@ fn control_row(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::input::InputSensitivity;
+    use crate::input::InputGain;
     use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamBlenderLikePreset;
     use crate::input::OrbitCamButtonDragZoom;
@@ -840,8 +840,7 @@ mod tests {
     use crate::input::OrbitCamSlowMode;
     use crate::input::OrbitCamTouchBinding;
     use crate::input::OrbitCamTrackpadScroll;
-
-    const CUSTOM_SLOW_SCALE: f32 = 0.25;
+    use crate::input::constants::CUSTOM_SLOW_SCALE;
 
     #[test]
     fn summary_labels_follow_input_mode_variant() -> Result<(), OrbitCamBindingsError> {
@@ -930,8 +929,7 @@ mod tests {
     fn disabled_native_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .orbit(
-                OrbitCamMouseDrag::new(MouseButton::Right)
-                    .with_sensitivity(InputSensitivity::DISABLED.0),
+                OrbitCamMouseDrag::new(MouseButton::Right).with_sensitivity(InputGain::DISABLED.0),
             )
             .build()?;
         let summary = describe_orbit_cam_controls(&OrbitCamInputMode::Bindings(bindings));
@@ -943,7 +941,7 @@ mod tests {
 
     #[test]
     fn disabled_adapter_bindings_are_omitted_from_summary() -> Result<(), OrbitCamBindingsError> {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         let bindings = OrbitCamBindings::builder()
             .orbit(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
             .pan(OrbitCamTrackpadScroll::default().with_sensitivity(disabled))
@@ -966,7 +964,7 @@ mod tests {
     #[test]
     fn effective_slow_mode_keeps_tuned_blender_like_when_pinch_remains_enabled()
     -> Result<(), OrbitCamBindingsError> {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         let preset = OrbitCamPreset::from(
             OrbitCamBlenderLikePreset::default()
                 .mouse_sensitivity(OrbitCamSensitivity::uniform(disabled))
@@ -988,13 +986,13 @@ mod tests {
     #[test]
     fn effective_slow_mode_omits_custom_slow_mode_without_enabled_controls()
     -> Result<(), OrbitCamBindingsError> {
-        let disabled = InputSensitivity::DISABLED.0;
+        let disabled = InputGain::DISABLED.0;
         let bindings = OrbitCamBindings::builder()
             .slow_mode(OrbitCamSlowMode {
                 toggle_key: KeyCode::KeyS,
                 mod_keys:   ModKeys::ALT,
                 scale:      OrbitCamScalePolicy {
-                    normal: InputSensitivity::DEFAULT.0,
+                    normal: InputGain::DEFAULT.0,
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })
@@ -1014,8 +1012,8 @@ mod tests {
             .touch_config(Some(
                 OrbitCamTouchBinding::OneFingerOrbit.with_sensitivity(
                     OrbitCamSensitivity::new()
-                        .orbit(InputSensitivity::DISABLED.0)
-                        .zoom(InputSensitivity::DISABLED.0),
+                        .orbit(InputGain::DISABLED.0)
+                        .zoom(InputGain::DISABLED.0),
                 ),
             ))
             .build()?;

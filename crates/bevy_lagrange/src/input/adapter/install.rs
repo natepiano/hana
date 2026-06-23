@@ -64,7 +64,7 @@ use crate::input::InputAxisTransform;
 use crate::input::InputBindingDescriptor;
 use crate::input::InputDeadZone;
 use crate::input::InputDeltaScale;
-use crate::input::OrbitCamBindingWithSensitivity;
+use crate::input::OrbitCamBindingWithInputGain;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamGateInput;
 use crate::input::OrbitCamGatePolarity;
@@ -141,7 +141,7 @@ impl TrackpadBindingCondition {
     const fn new(
         target: TrackpadScrollTarget,
         index: usize,
-        binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+        binding: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
     ) -> Self {
         Self {
             target,
@@ -610,7 +610,7 @@ fn spawn_trackpad_binding(
     input: CustomInput,
     target: TrackpadScrollTarget,
     index: usize,
-    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    binding: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
 ) -> Entity {
     let entity = spawn_single_binding(
         world,
@@ -633,7 +633,7 @@ fn spawn_trackpad_zoom_binding(
     action: Entity,
     input: CustomInput,
     index: usize,
-    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    binding: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
     zoom_inversion: ZoomInversion,
 ) -> Entity {
     let installation = OrbitCamInputInstallationOf(camera);
@@ -653,7 +653,7 @@ fn insert_trackpad_condition(
     entity: Entity,
     target: TrackpadScrollTarget,
     index: usize,
-    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    binding: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
 ) -> Entity {
     world
         .entity_mut(entity)

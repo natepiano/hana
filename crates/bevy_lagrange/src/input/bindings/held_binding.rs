@@ -23,7 +23,7 @@ use super::descriptor::InputBindingModifiers;
 use super::descriptor::InputBindingOutputAxis;
 use super::descriptor::InputBindingScale;
 use super::descriptor::InputDeadZone;
-use super::descriptor::InputSensitivity;
+use super::descriptor::InputGain;
 use crate::input::CameraInteractionSources;
 use crate::input::ControlSpeed;
 
@@ -213,7 +213,7 @@ pub enum OrbitCamInputBinding {
         /// Optional scale applied with composite-axis awareness.
         scale:       Option<InputBindingScale>,
         /// Authored sensitivity applied after signed scale lowering.
-        sensitivity: InputSensitivity,
+        sensitivity: InputGain,
     },
 }
 
@@ -284,17 +284,13 @@ impl OrbitCamInputBinding {
     #[must_use]
     pub fn with_sensitivity(self, sensitivity: f32) -> Self {
         self.with_descriptor_update(|_, _, input_sensitivity| {
-            *input_sensitivity = InputSensitivity(sensitivity);
+            *input_sensitivity = InputGain(sensitivity);
         })
     }
 
     fn with_descriptor_update(
         self,
-        update: impl FnOnce(
-            &mut InputBindingModifiers,
-            &mut Option<InputBindingScale>,
-            &mut InputSensitivity,
-        ),
+        update: impl FnOnce(&mut InputBindingModifiers, &mut Option<InputBindingScale>, &mut InputGain),
     ) -> Self {
         match self {
             Self::Modified {
@@ -314,7 +310,7 @@ impl OrbitCamInputBinding {
             binding => {
                 let mut modifiers = InputBindingModifiers::default();
                 let mut scale = None;
-                let mut sensitivity = InputSensitivity::DEFAULT;
+                let mut sensitivity = InputGain::DEFAULT;
                 update(&mut modifiers, &mut scale, &mut sensitivity);
                 Self::Modified {
                     binding: Box::new(binding),

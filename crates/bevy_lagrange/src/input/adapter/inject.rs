@@ -34,8 +34,8 @@ use crate::constants::PINCH_GESTURE_AMPLIFICATION;
 use crate::constants::TOUCH_PINCH_SCALE;
 use crate::input;
 use crate::input::CameraInteractionSources;
-use crate::input::InputSensitivity;
-use crate::input::OrbitCamBindingWithSensitivity;
+use crate::input::InputGain;
+use crate::input::OrbitCamBindingWithInputGain;
 use crate::input::OrbitCamBindings;
 use crate::input::OrbitCamButtonDragZoomAxis;
 use crate::input::OrbitCamInputContextGated;
@@ -233,7 +233,7 @@ pub(super) struct TrackpadScrollCandidate {
     target:      TrackpadScrollTarget,
     index:       usize,
     mod_keys:    ModKeys,
-    sensitivity: InputSensitivity,
+    sensitivity: InputGain,
 }
 
 fn selected_trackpad_binding(
@@ -286,7 +286,7 @@ fn refresh_trackpad_conditions(
 const fn trackpad_candidate(
     target: TrackpadScrollTarget,
     index: usize,
-    binding: OrbitCamBindingWithSensitivity<OrbitCamTrackpadScroll>,
+    binding: OrbitCamBindingWithInputGain<OrbitCamTrackpadScroll>,
 ) -> TrackpadScrollCandidate {
     TrackpadScrollCandidate {
         target,

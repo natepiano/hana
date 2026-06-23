@@ -21,7 +21,7 @@ use super::action_set::OrbitCamOrbitActionBindings;
 use super::action_set::OrbitCamPanActionBindings;
 use super::action_set::OrbitCamZoomCoarseActionBindings;
 use super::action_set::OrbitCamZoomSmoothActionBindings;
-use super::builder::OrbitCamBindingWithSensitivity;
+use super::builder::OrbitCamBindingWithInputGain;
 use super::builder::OrbitCamTouchBindingConfig;
 use super::descriptor::ActionBindingDescriptor;
 use super::descriptor::HeldBindingDescriptor;
@@ -195,7 +195,7 @@ fn validate_adapter_entries(
 }
 
 fn validate_sensitive_entries<T>(
-    entries: &[OrbitCamBindingWithSensitivity<T>],
+    entries: &[OrbitCamBindingWithInputGain<T>],
 ) -> Result<(), OrbitCamBindingsError> {
     for entry in entries {
         entry.sensitivity().validate()?;
@@ -204,7 +204,7 @@ fn validate_sensitive_entries<T>(
 }
 
 fn validate_sensitive_option<T>(
-    entry: Option<OrbitCamBindingWithSensitivity<T>>,
+    entry: Option<OrbitCamBindingWithInputGain<T>>,
 ) -> Result<(), OrbitCamBindingsError> {
     if let Some(entry) = entry {
         entry.sensitivity().validate()?;
@@ -285,7 +285,7 @@ mod tests {
     use bevy::prelude::*;
 
     use super::*;
-    use crate::input::InputSensitivity;
+    use crate::input::InputGain;
     use crate::input::OrbitCamMouseDrag;
 
     #[test]
@@ -293,8 +293,7 @@ mod tests {
     -> Result<(), OrbitCamBindingsError> {
         let bindings = OrbitCamBindings::builder()
             .orbit(
-                OrbitCamMouseDrag::new(MouseButton::Left)
-                    .with_sensitivity(InputSensitivity::DISABLED.0),
+                OrbitCamMouseDrag::new(MouseButton::Left).with_sensitivity(InputGain::DISABLED.0),
             )
             .build()?;
 
@@ -308,7 +307,7 @@ mod tests {
             assert_eq!(entry.motion_descriptor().entries_slice().len(), 1);
             return Ok(());
         };
-        assert_eq!(motion.sensitivity(), InputSensitivity::DISABLED);
+        assert_eq!(motion.sensitivity(), InputGain::DISABLED);
         assert_eq!(entry.enabled_motion_entries().count(), 0);
         assert_eq!(entry.engagement_descriptor().enabled_entries().count(), 1);
 
