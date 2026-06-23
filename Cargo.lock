@@ -613,6 +613,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_catenary"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_kana 0.2.0-dev",
+ "bevy_lagrange",
+]
+
+[[package]]
 name = "bevy_clerestory"
 version = "0.1.0"
 dependencies = [

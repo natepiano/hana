@@ -12,6 +12,7 @@ version    = "0.0.1"
 
 [workspace.dependencies]
 bevy = { version = "0.19.0", default-features = false }
+bevy_catenary = { path = "crates/bevy_catenary" }
 bevy_diagnostic = "0.19.0"
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
