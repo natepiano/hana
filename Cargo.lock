@@ -618,7 +618,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_brp_extras",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "bevy_lagrange",
 ]
 
@@ -629,7 +629,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_diagnostic",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "dirs",
  "objc2 0.6.4",
  "objc2-app-kit 0.3.2",
@@ -774,7 +774,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "bevy_lagrange",
  "bitflags 2.13.0",
  "clay-layout",
@@ -1154,6 +1154,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "680eefefe1fc6ab5cd19f873fb2760684de503ab7a582e5bf07bb2b1a3fadb61"
 dependencies = [
  "bevy",
+ "bevy_enhanced_input",
 ]
 
 [[package]]
@@ -1173,7 +1174,7 @@ dependencies = [
  "bevy_clerestory",
  "bevy_diegetic",
  "bevy_enhanced_input",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
@@ -1212,7 +1213,7 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "bevy_lagrange",
  "bevy_render",
  "bytemuck",
@@ -2818,7 +2819,7 @@ dependencies = [
  "bevy_clerestory",
  "bevy_diegetic",
  "bevy_enhanced_input",
- "bevy_kana 0.2.0-dev",
+ "bevy_kana 0.1.0",
  "bevy_lagrange",
 ]
 
