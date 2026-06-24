@@ -64,10 +64,14 @@ use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
 use crate::cascade::CascadeDefault;
+use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
+use crate::layout::Lighting;
+use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::render;
 
 /// Extra `depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
 /// from the camera so coplanar panel text, drawn at its true depth, wins the
@@ -139,6 +143,10 @@ pub(crate) struct SdfMaterialSlotInput<'a> {
     pub base_material:  &'a StandardMaterial,
     /// Layout color override for `StandardMaterial::base_color`.
     pub color_override: Option<Color>,
+    /// Panel cascade-resolved lighting policy applied over the source material.
+    pub lighting:       Lighting,
+    /// Panel cascade-resolved sidedness applied over the source material.
+    pub sidedness:      Sidedness,
 }
 
 impl MaterialSlotInput for SdfMaterialSlotInput<'_> {
@@ -151,6 +159,8 @@ impl MaterialSlotInput for SdfMaterialSlotInput<'_> {
         if let Some(color) = self.color_override {
             material.base_color = color;
         }
+        render::apply_sidedness(&mut material, self.sidedness);
+        material.unlit = matches!(self.lighting, Lighting::Unlit);
         MaterialSlotCandidate {
             values:                 (&material).into(),
             pipeline_compatibility: (&material).into(),
@@ -868,6 +878,8 @@ pub(crate) fn set_sdf_material_record_buffers(
 pub(crate) fn append_sdf_record_materials(
     builder: &mut FrameMaterialTableBuilder,
     surface: &ResolvedSdfSurface<'_>,
+    panel_lighting: Lighting,
+    panel_sidedness: Sidedness,
     materials: &Assets<StandardMaterial>,
     asset_server: &AssetServer,
     default_material: &CascadeDefault<SdfMaterial>,
@@ -877,6 +889,8 @@ pub(crate) fn append_sdf_record_materials(
         builder,
         surface,
         SdfMaterialRole::Fill,
+        panel_lighting,
+        panel_sidedness,
         materials,
         asset_server,
         default_material,
@@ -885,6 +899,8 @@ pub(crate) fn append_sdf_record_materials(
         builder,
         surface,
         SdfMaterialRole::Border,
+        panel_lighting,
+        panel_sidedness,
         materials,
         asset_server,
         default_material,
@@ -962,6 +978,8 @@ fn append_sdf_role(
     builder: &mut FrameMaterialTableBuilder,
     surface: &ResolvedSdfSurface<'_>,
     role: SdfMaterialRole,
+    panel_lighting: Lighting,
+    panel_sidedness: Sidedness,
     materials: &Assets<StandardMaterial>,
     asset_server: &AssetServer,
     default_material: &CascadeDefault<SdfMaterial>,
@@ -993,6 +1011,8 @@ fn append_sdf_role(
         },
         base_material,
         color_override: material.color,
+        lighting: panel_lighting,
+        sidedness: panel_sidedness,
     };
     match material_table::append_material_slot(builder, &input) {
         MaterialSlotAppend::Appended(appended) => SdfRoleAppend::Appended(appended),
@@ -1112,7 +1132,15 @@ fn route_sdf_batch_records(
     standard_materials: Res<Assets<StandardMaterial>>,
     asset_server: Res<AssetServer>,
     sdf_material_default: Res<CascadeDefault<SdfMaterial>>,
-    panels: Query<(&DiegeticPanel, Option<&RenderLayers>, Option<&Visibility>)>,
+    lighting_default: Res<CascadeDefault<Lighting>>,
+    sidedness_default: Res<CascadeDefault<Sidedness>>,
+    panels: Query<(
+        &DiegeticPanel,
+        Option<&RenderLayers>,
+        Option<&Visibility>,
+        Option<&Resolved<Lighting>>,
+        Option<&Resolved<Sidedness>>,
+    )>,
     mut store: ResMut<SdfBatchStore>,
 ) {
     #[cfg(test)]
@@ -1122,7 +1150,8 @@ fn route_sdf_batch_records(
     let mut active_records = HashSet::new();
     let mut stale_panels = HashSet::new();
     for stored_surface in surfaces.surfaces() {
-        let Ok((panel, panel_layers, panel_visibility)) = panels.get(stored_surface.panel_entity())
+        let Ok((panel, panel_layers, panel_visibility, resolved_lighting, resolved_sidedness)) =
+            panels.get(stored_surface.panel_entity())
         else {
             stale_panels.insert(stored_surface.panel_entity());
             continue;
@@ -1130,14 +1159,20 @@ fn route_sdf_batch_records(
         if matches!(panel_visibility, Some(Visibility::Hidden)) {
             continue;
         }
-        resolved_surfaces.push(stored_surface.as_resolved(
-            panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
-            panel.surface_shadow(),
+        let panel_lighting = resolved_lighting.map_or(lighting_default.0, |resolved| resolved.0);
+        let panel_sidedness = resolved_sidedness.map_or(sidedness_default.0, |resolved| resolved.0);
+        resolved_surfaces.push((
+            stored_surface.as_resolved(
+                panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
+                panel.surface_shadow(),
+            ),
+            panel_lighting,
+            panel_sidedness,
         ));
     }
     let mut appended = Vec::new();
     let builder = build.builder_mut();
-    for surface in &resolved_surfaces {
+    for (surface, panel_lighting, panel_sidedness) in &resolved_surfaces {
         let record_key = SdfRecordKey {
             panel:         surface.panel_entity,
             command_index: surface.command_index,
@@ -1145,6 +1180,8 @@ fn route_sdf_batch_records(
         if let Some(materials) = append_sdf_record_materials(
             builder,
             surface,
+            *panel_lighting,
+            *panel_sidedness,
             &standard_materials,
             &asset_server,
             &sdf_material_default,
@@ -1570,6 +1607,8 @@ mod tests {
             .resource_mut::<Assets<StandardMaterial>>()
             .add(material::default_panel_material());
         app.insert_resource(CascadeDefault(SdfMaterial(default_material)));
+        app.insert_resource(CascadeDefault(Lighting::Lit));
+        app.insert_resource(CascadeDefault(Sidedness::BothSides));
         app
     }
 
@@ -1974,6 +2013,8 @@ mod tests {
             },
             base_material:  material,
             color_override: color,
+            lighting:       Lighting::Lit,
+            sidedness:      Sidedness::BothSides,
         }
     }
 
@@ -1991,12 +2032,49 @@ mod tests {
             candidate.values.base_color,
             Vec4::new(expected.red, expected.green, expected.blue, expected.alpha)
         );
-        assert_eq!(
-            candidate.pipeline_compatibility,
-            PipelineCompatibility::from(&StandardMaterial {
+        assert_eq!(candidate.pipeline_compatibility, {
+            let mut expected_material = StandardMaterial {
                 base_color: Color::srgba(0.8, 0.7, 0.6, 0.5),
                 ..material
-            })
+            };
+            render::apply_sidedness(&mut expected_material, Sidedness::BothSides);
+            PipelineCompatibility::from(&expected_material)
+        });
+    }
+
+    #[test]
+    fn sdf_material_slot_input_uses_cascade_lighting_and_sidedness() {
+        let mut base_material = StandardMaterial {
+            unlit: true,
+            ..Default::default()
+        };
+        render::apply_sidedness(&mut base_material, Sidedness::BackOnly);
+        let input = SdfMaterialSlotInput {
+            key:            SdfMaterialSourceKey {
+                panel:         Entity::from_bits(1),
+                command_index: CommandIndex::from(0),
+                role:          SdfMaterialRole::Fill,
+            },
+            base_material:  &base_material,
+            color_override: None,
+            lighting:       Lighting::Lit,
+            sidedness:      Sidedness::BothSides,
+        };
+        let mut expected_material = base_material.clone();
+        render::apply_sidedness(&mut expected_material, Sidedness::BothSides);
+        expected_material.unlit = false;
+        let expected_candidate = MaterialSlotCandidate::from(&expected_material);
+
+        let candidate = input.material_slot_candidate();
+
+        assert_eq!(candidate.values, expected_candidate.values);
+        assert_eq!(
+            candidate.pipeline_compatibility,
+            expected_candidate.pipeline_compatibility
+        );
+        assert_ne!(
+            candidate.pipeline_compatibility,
+            PipelineCompatibility::from(&base_material)
         );
     }
 
@@ -2033,6 +2111,8 @@ mod tests {
         let append = append_sdf_record_materials(
             &mut builder,
             &surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
             &materials,
             &asset_server,
             &default_material,
@@ -2060,6 +2140,8 @@ mod tests {
         let append = append_sdf_record_materials(
             &mut builder,
             &surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
             &materials,
             &asset_server,
             &default_material,
@@ -2086,6 +2168,8 @@ mod tests {
         let append = append_sdf_record_materials(
             &mut builder,
             &surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
             &materials,
             &asset_server,
             &default_material,
@@ -2119,6 +2203,8 @@ mod tests {
         let append = append_sdf_record_materials(
             &mut builder,
             &surface,
+            Lighting::Lit,
+            Sidedness::BothSides,
             &materials,
             &asset_server,
             &default_material,
