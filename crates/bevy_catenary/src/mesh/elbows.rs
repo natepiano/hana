@@ -13,36 +13,6 @@ use super::path;
 use crate::routing::CableGeometry;
 use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
-/// Resolve elbow arm lengths from per-elbow overrides or the global multiplier.
-fn resolve_elbow_arms(
-    cable_mesh_config: &CableMeshConfig,
-    elbow_idx: usize,
-    fillet_start: Vec3,
-    fillet_end: Vec3,
-    max_arm: f32,
-) -> (f32, f32) {
-    cable_mesh_config
-        .elbow_config
-        .arm_overrides
-        .as_ref()
-        .and_then(|overrides| overrides.get(elbow_idx))
-        .map_or_else(
-            || {
-                let arm = (fillet_start.distance(fillet_end)
-                    * DEFAULT_ELBOW_ARM_FRACTION
-                    * cable_mesh_config.elbow_config.arm_multiplier)
-                    .min(max_arm);
-                (arm, arm)
-            },
-            |&(first_arm_length, second_arm_length)| {
-                (
-                    first_arm_length.clamp(0.0, max_arm),
-                    second_arm_length.clamp(0.0, max_arm),
-                )
-            },
-        )
-}
-
 /// Metadata about a single elbow fillet, for visualization and interactive editing.
 #[derive(Clone, Debug)]
 pub struct ElbowMetadata {
@@ -135,6 +105,36 @@ fn compute_elbow_at_corner(
         control2_arm,
         fillet_reach,
     })
+}
+
+/// Resolve elbow arm lengths from per-elbow overrides or the global multiplier.
+fn resolve_elbow_arms(
+    cable_mesh_config: &CableMeshConfig,
+    elbow_idx: usize,
+    fillet_start: Vec3,
+    fillet_end: Vec3,
+    max_arm: f32,
+) -> (f32, f32) {
+    cable_mesh_config
+        .elbow_config
+        .arm_overrides
+        .as_ref()
+        .and_then(|overrides| overrides.get(elbow_idx))
+        .map_or_else(
+            || {
+                let arm = (fillet_start.distance(fillet_end)
+                    * DEFAULT_ELBOW_ARM_FRACTION
+                    * cable_mesh_config.elbow_config.arm_multiplier)
+                    .min(max_arm);
+                (arm, arm)
+            },
+            |&(first_arm_length, second_arm_length)| {
+                (
+                    first_arm_length.clamp(0.0, max_arm),
+                    second_arm_length.clamp(0.0, max_arm),
+                )
+            },
+        )
 }
 
 /// Smooth sharp bends in the path using cubic Bezier fillets.
