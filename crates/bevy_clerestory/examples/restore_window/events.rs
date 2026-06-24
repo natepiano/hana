@@ -47,26 +47,26 @@ pub(crate) struct WindowModeDifference {
 
 #[derive(Debug, Clone, Reflect)]
 pub(crate) struct PhysicalPositionMismatch {
-    pub(crate) expected_physical_position: Option<IVec2>,
-    pub(crate) actual_physical_position:   Option<IVec2>,
+    pub(crate) expected: Option<IVec2>,
+    pub(crate) actual:   Option<IVec2>,
 }
 
 #[derive(Debug, Clone, Reflect)]
 pub(crate) struct LogicalPositionMismatch {
-    pub(crate) expected_logical_position: Option<IVec2>,
-    pub(crate) actual_logical_position:   Option<IVec2>,
+    pub(crate) expected: Option<IVec2>,
+    pub(crate) actual:   Option<IVec2>,
 }
 
 #[derive(Debug, Clone, Reflect)]
 pub(crate) struct PhysicalSizeMismatch {
-    pub(crate) expected_physical_size: UVec2,
-    pub(crate) actual_physical_size:   UVec2,
+    pub(crate) expected: UVec2,
+    pub(crate) actual:   UVec2,
 }
 
 #[derive(Debug, Clone, Reflect)]
 pub(crate) struct LogicalSizeMismatch {
-    pub(crate) expected_logical_size: UVec2,
-    pub(crate) actual_logical_size:   UVec2,
+    pub(crate) expected: UVec2,
+    pub(crate) actual:   UVec2,
 }
 
 #[derive(Debug, Clone, Reflect)]
@@ -208,20 +208,20 @@ pub(crate) fn on_window_restore_mismatch(
         event.entity,
         CachedMismatchState {
             physical_position_mismatch: PhysicalPositionMismatch {
-                expected_physical_position: event.expected_physical_position,
-                actual_physical_position:   event.actual_physical_position,
+                expected: event.expected_physical_position,
+                actual:   event.actual_physical_position,
             },
             logical_position_mismatch:  LogicalPositionMismatch {
-                expected_logical_position: event.expected_logical_position,
-                actual_logical_position:   event.actual_logical_position,
+                expected: event.expected_logical_position,
+                actual:   event.actual_logical_position,
             },
             physical_size_mismatch:     PhysicalSizeMismatch {
-                expected_physical_size: event.expected_physical_size,
-                actual_physical_size:   event.actual_physical_size,
+                expected: event.expected_physical_size,
+                actual:   event.actual_physical_size,
             },
             logical_size_mismatch:      LogicalSizeMismatch {
-                expected_logical_size: event.expected_logical_size,
-                actual_logical_size:   event.actual_logical_size,
+                expected: event.expected_logical_size,
+                actual:   event.actual_logical_size,
             },
             window_mode_difference:     WindowModeDifference {
                 expected: event.expected_window_mode,
@@ -244,8 +244,8 @@ pub(crate) fn on_window_restore_mismatch(
             actual:   event.actual_monitor,
         },
         physical_size_mismatch: PhysicalSizeMismatch {
-            expected_physical_size: event.expected_physical_size,
-            actual_physical_size:   event.actual_physical_size,
+            expected: event.expected_physical_size,
+            actual:   event.actual_physical_size,
         },
         window_mode_difference: WindowModeDifference {
             expected: event.expected_window_mode,

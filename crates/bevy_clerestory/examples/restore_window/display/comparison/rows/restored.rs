@@ -144,14 +144,14 @@ fn add_position_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: cached_mismatch_state
                     .physical_position_mismatch
-                    .expected_physical_position
+                    .expected
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
                     ),
                 actual:   cached_mismatch_state
                     .physical_position_mismatch
-                    .actual_physical_position
+                    .actual
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
@@ -170,14 +170,14 @@ fn add_position_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: cached_mismatch_state
                     .logical_position_mismatch
-                    .expected_logical_position
+                    .expected
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
                     ),
                 actual:   cached_mismatch_state
                     .logical_position_mismatch
-                    .actual_logical_position
+                    .actual
                     .map_or_else(
                         || NONE_TEXT.to_string(),
                         |position| format!("({}, {})", position.x, position.y),
@@ -208,22 +208,22 @@ fn add_size_rows(
                     "{}x{}",
                     cached_mismatch_state
                         .physical_size_mismatch
-                        .expected_physical_size
+                        .expected
                         .x,
                     cached_mismatch_state
                         .physical_size_mismatch
-                        .expected_physical_size
+                        .expected
                         .y
                 ),
                 actual:   format!(
                     "{}x{}",
                     cached_mismatch_state
                         .physical_size_mismatch
-                        .actual_physical_size
+                        .actual
                         .x,
                     cached_mismatch_state
                         .physical_size_mismatch
-                        .actual_physical_size
+                        .actual
                         .y
                 ),
             }),
@@ -242,22 +242,22 @@ fn add_size_rows(
                     "{}x{}",
                     cached_mismatch_state
                         .logical_size_mismatch
-                        .expected_logical_size
+                        .expected
                         .x,
                     cached_mismatch_state
                         .logical_size_mismatch
-                        .expected_logical_size
+                        .expected
                         .y
                 ),
                 actual:   format!(
                     "{}x{}",
                     cached_mismatch_state
                         .logical_size_mismatch
-                        .actual_logical_size
+                        .actual
                         .x,
                     cached_mismatch_state
                         .logical_size_mismatch
-                        .actual_logical_size
+                        .actual
                         .y
                 ),
             }),
