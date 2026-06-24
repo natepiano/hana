@@ -17,7 +17,6 @@
 //! - Orbit: Middle-mouse drag (or two-finger trackpad)
 //! - Pan: Shift + middle-mouse
 //! - Zoom: Scroll wheel (or pinch)
-//! - D: Toggle debug gizmos
 //! - +/-: Adjust catenary slack
 //! - R: Reset detach demo (Detach Policy section)
 //! - Esc: Pause tube light animation
@@ -38,10 +37,8 @@ mod ui;
 use animation::LightAnimation;
 use bevy::prelude::*;
 use bevy_catenary::CatenaryPlugin;
-use bevy_catenary::DebugGizmos;
 use bevy_lagrange::OrbitCamPreset;
 use constants::CATENARY_SECTION_INDEX;
-use constants::DEBUG_CONTROL;
 use constants::EXAMPLE_TITLE;
 use constants::GROUND_DEPTH;
 use constants::GROUND_WIDTH;
@@ -56,7 +53,6 @@ use constants::SLACK_PLUS_SEGMENT_ID;
 use constants::ZOOM_MARGIN_NAVIGATION;
 use entities::FullSceneTarget;
 use fairy_dust::Anchor;
-use fairy_dust::ControlActivation;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -72,6 +68,7 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
+        .with_hdr()
         .with_studio_lighting()
         .with_ground_plane()
         .size(1.0)
@@ -83,6 +80,7 @@ fn main() {
         .insert(FullSceneTarget)
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .unclamped()
+        .with_bloom()
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
@@ -92,7 +90,6 @@ fn main() {
                 .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
                 .control(OVERVIEW_CONTROL)
-                .control(DEBUG_CONTROL)
                 .control(TitleBarControl::segmented(
                     SLACK_HINT,
                     [
@@ -102,16 +99,13 @@ fn main() {
                 )),
         )
         .wire_chip_to_fit_target::<FullSceneTarget>(OVERVIEW_CONTROL)
-        .wire_chip_to_state::<DebugGizmos, _>(DEBUG_CONTROL, |gizmos| match gizmos {
-            DebugGizmos::Enabled => ControlActivation::Active,
-            DebugGizmos::Disabled => ControlActivation::Inactive,
-        })
         .wire_chip_to_events::<SlackPlusPulseBegin, SlackPlusPulseEnd>(SLACK_PLUS_SEGMENT_ID)
         .wire_chip_to_events::<SlackMinusPulseBegin, SlackMinusPulseEnd>(SLACK_MINUS_SEGMENT_ID)
         .with_camera_control_panel()
         .add_plugins(CatenaryPlugin)
         .init_resource::<input::DragState>()
         .init_resource::<input::SlackPulse>()
+        .init_resource::<labels::RResetFlash>()
         .init_resource::<LightAnimation>()
         .init_resource::<NavSelection>()
         .init_resource::<RequestedNavigation>()
@@ -122,6 +116,8 @@ fn main() {
                 (scene::setup_sections, ui::setup_ui).chain(),
                 nav_panel::spawn_nav_panel,
                 labels::spawn_section_labels,
+                labels::spawn_cap_styles_labels,
+                labels::spawn_connector_labels,
             ),
         )
         .add_systems(
@@ -132,7 +128,10 @@ fn main() {
                 nav_panel::apply_navigation_request,
                 nav_panel::refresh_nav_panel,
                 input::clear_slack_pulses,
+                labels::update_esc_pause_label,
+                labels::update_r_reset_label,
                 (input::handle_drag, scene::sync_movable_obstacles).chain(),
+                labels::billboard_camera_facing_labels,
                 animation::animate_tube_light,
             ),
         )
@@ -157,7 +156,6 @@ fn main() {
         .with_shortcut(KeyCode::Digit7, nav_panel::request_detach_demo_section)
         .with_shortcut(KeyCode::Digit8, nav_panel::request_inside_view_section)
         .with_shortcut(KeyCode::Digit9, nav_panel::request_connector_section)
-        .with_shortcut(KeyCode::KeyD, input::toggle_debug_gizmos)
         .with_shortcut(KeyCode::KeyF, input::frame_full_scene)
         .with_shortcut(KeyCode::KeyR, input::reset_detach_demo)
         .with_shortcut(KeyCode::Escape, animation::toggle_light_animation)

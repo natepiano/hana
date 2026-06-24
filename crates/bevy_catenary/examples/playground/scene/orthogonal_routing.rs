@@ -10,12 +10,16 @@ use bevy_catenary::Obstacle;
 use bevy_catenary::PathStrategy;
 use bevy_catenary::Solver;
 
+use super::constants::NODE_CUBE_DIMENSION;
 use super::constants::ORTHOGONAL_ROUTING_END_Z;
 use super::constants::ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS;
 use super::constants::ORTHOGONAL_ROUTING_OBSTACLE_OFFSETS;
 use super::constants::ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER;
 use super::constants::ORTHOGONAL_ROUTING_START_Z;
+use crate::constants::BOX_LABEL_EMISSIVE_COLOR;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
+use crate::constants::DRAG_FACE_LABEL_TEXT;
+use crate::constants::FACE_LABEL_SIZE_RATIO;
 use crate::constants::NODE_Y;
 use crate::constants::OBSTACLE_COLOR;
 use crate::constants::ORTHOGONAL_ROUTING_SECTION_INDEX;
@@ -59,14 +63,27 @@ pub(super) fn setup_section_orthogonal_routing(
         .map(|position| Obstacle::new(ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS, position))
         .collect();
 
-    let start_node = entities::spawn_node_cube(commands, node_mesh, node_material, start)
-        .insert(Draggable)
-        .observe(input::on_drag_start)
-        .id();
-    let end_node = entities::spawn_node_cube(commands, node_mesh, node_material, end)
-        .insert(Draggable)
-        .observe(input::on_drag_start)
-        .id();
+    let mut start_ec = entities::spawn_node_cube(commands, node_mesh, node_material, start);
+    start_ec.insert(Draggable).observe(input::on_drag_start);
+    entities::add_cube_face_labels(
+        &mut start_ec,
+        DRAG_FACE_LABEL_TEXT,
+        NODE_CUBE_DIMENSION,
+        NODE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
+        BOX_LABEL_EMISSIVE_COLOR,
+    );
+    let start_node = start_ec.id();
+
+    let mut end_ec = entities::spawn_node_cube(commands, node_mesh, node_material, end);
+    end_ec.insert(Draggable).observe(input::on_drag_start);
+    entities::add_cube_face_labels(
+        &mut end_ec,
+        DRAG_FACE_LABEL_TEXT,
+        NODE_CUBE_DIMENSION,
+        NODE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
+        BOX_LABEL_EMISSIVE_COLOR,
+    );
+    let end_node = end_ec.id();
 
     let cable = commands
         .spawn((
@@ -97,31 +114,39 @@ pub(super) fn setup_section_orthogonal_routing(
         ));
     });
 
+    let obstacle_size =
+        ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.x * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER;
     for obstacle_position in obstacle_positions {
-        commands
-            .spawn((
-                Mesh3d(meshes.add(Cuboid::new(
-                    ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.x
-                        * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER,
-                    ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.y
-                        * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER,
-                    ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.z
-                        * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER,
-                ))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: OBSTACLE_COLOR,
-                    ..default()
-                })),
-                Transform::from_translation(obstacle_position),
-                NotShadowCaster,
-                Draggable,
-                MovableRoutingObstacle {
-                    cable,
-                    half_extents: ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS,
-                },
-            ))
+        let mut obstacle = commands.spawn((
+            Mesh3d(meshes.add(Cuboid::new(
+                obstacle_size,
+                ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.y
+                    * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER,
+                ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.z
+                    * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER,
+            ))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: OBSTACLE_COLOR,
+                ..default()
+            })),
+            Transform::from_translation(obstacle_position),
+            NotShadowCaster,
+            Draggable,
+            MovableRoutingObstacle {
+                cable,
+                half_extents: ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS,
+            },
+        ));
+        obstacle
             .observe(input::on_drag_start)
             .observe(input::on_mesh_clicked);
+        entities::add_cube_face_labels(
+            &mut obstacle,
+            DRAG_FACE_LABEL_TEXT,
+            obstacle_size,
+            obstacle_size * FACE_LABEL_SIZE_RATIO,
+            BOX_LABEL_EMISSIVE_COLOR,
+        );
     }
 }
 

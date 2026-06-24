@@ -1,5 +1,6 @@
 //! Section 6: detach demo — cables respond to endpoint detach events.
 
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_catenary::AttachedTo;
 use bevy_catenary::Cable;
@@ -9,12 +10,19 @@ use bevy_catenary::CableMeshConfig;
 use bevy_catenary::CatenarySolver;
 use bevy_catenary::DetachPolicy;
 use bevy_catenary::Solver;
+use bevy_diegetic::Anchor;
+use bevy_diegetic::DiegeticText;
 
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::DESPAWN_GREEN;
 use super::constants::DESPAWN_RED;
 use super::constants::DETACH_BUMP_BLUE;
 use super::constants::DETACH_DEMO_ENDPOINT_X_OFFSET;
+use super::constants::DETACH_DEMO_LABEL_COLORS;
+use super::constants::DETACH_DEMO_LABEL_SIDE_GAP;
+use super::constants::DETACH_DEMO_LABEL_SIZE;
+use super::constants::DETACH_DEMO_LABEL_WRAP_WIDTH;
+use super::constants::DETACH_DEMO_LABELS;
 use super::constants::DETACH_DEMO_ROW_DESPAWN_INDEX;
 use super::constants::DETACH_DEMO_ROW_FREEZE_INDEX;
 use super::constants::DETACH_DEMO_ROW_SLACK_BUMP_INDEX;
@@ -30,6 +38,7 @@ use super::constants::SLACK_NORMAL;
 use super::entities;
 use super::entities::Despawnable;
 use super::input;
+use super::labels::CameraFacingLabel;
 
 /// Marker for entities belonging to the detach demo section (for reset).
 #[derive(Component)]
@@ -47,6 +56,8 @@ struct DetachDemoRow {
     sphere_color:    Color,
     catenary_solver: CatenarySolver,
     detach_policy:   DetachPolicy,
+    label:           &'static str,
+    label_color:     Color,
 }
 
 pub(crate) fn spawn_detach_demo(
@@ -75,6 +86,8 @@ pub(crate) fn spawn_detach_demo(
             sphere_color:    DESPAWN_GREEN,
             catenary_solver: CatenarySolver::new().with_slack(SLACK_NORMAL),
             detach_policy:   DetachPolicy::Remain,
+            label:           DETACH_DEMO_LABELS[DETACH_DEMO_ROW_FREEZE_INDEX],
+            label_color:     DETACH_DEMO_LABEL_COLORS[DETACH_DEMO_ROW_FREEZE_INDEX],
         },
         DetachDemoRow {
             z:               DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
@@ -83,12 +96,16 @@ pub(crate) fn spawn_detach_demo(
                 .with_slack(SLACK_NORMAL)
                 .with_detach_slack_bump(DETACH_DEMO_SLACK_BUMP),
             detach_policy:   DetachPolicy::Remain,
+            label:           DETACH_DEMO_LABELS[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
+            label_color:     DETACH_DEMO_LABEL_COLORS[DETACH_DEMO_ROW_SLACK_BUMP_INDEX],
         },
         DetachDemoRow {
             z:               DETACH_DEMO_ROW_Z[DETACH_DEMO_ROW_DESPAWN_INDEX],
             sphere_color:    DESPAWN_RED,
             catenary_solver: CatenarySolver::new().with_slack(SLACK_NORMAL),
             detach_policy:   DetachPolicy::Despawn,
+            label:           DETACH_DEMO_LABELS[DETACH_DEMO_ROW_DESPAWN_INDEX],
+            label_color:     DETACH_DEMO_LABEL_COLORS[DETACH_DEMO_ROW_DESPAWN_INDEX],
         },
     ];
 
@@ -114,20 +131,41 @@ fn spawn_detach_demo_row(
         base_color: row.sphere_color,
         ..default()
     });
+    let sphere_position = Vec3::new(
+        section_center_x - DETACH_DEMO_ENDPOINT_X_OFFSET,
+        NODE_Y,
+        row.z,
+    );
     let sphere = commands
         .spawn((
             Mesh3d(detach_demo_assets.sphere_mesh.clone()),
             MeshMaterial3d(sphere_material),
-            Transform::from_translation(Vec3::new(
-                section_center_x - DETACH_DEMO_ENDPOINT_X_OFFSET,
-                NODE_Y,
-                row.z,
-            )),
+            Transform::from_translation(sphere_position),
             Despawnable,
             DetachDemoEntity,
         ))
         .observe(input::on_despawnable_clicked)
         .id();
+
+    // Emissive caption to the left of the sphere, wrapped onto two lines and
+    // billboarded to the camera. Anchored at its right edge so it grows away
+    // from the sphere. Independent of the sphere so it survives a
+    // despawn-on-click; `R` clears it via the shared `DetachDemoEntity` marker.
+    commands.spawn((
+        CameraFacingLabel,
+        Pickable::IGNORE,
+        DetachDemoEntity,
+        DiegeticText::world(row.label)
+            .size(DETACH_DEMO_LABEL_SIZE)
+            .width(DETACH_DEMO_LABEL_WRAP_WIDTH)
+            .anchor(Anchor::CenterRight)
+            .color(row.label_color)
+            .unlit()
+            .transform(Transform::from_translation(
+                sphere_position - Vec3::X * DETACH_DEMO_LABEL_SIDE_GAP,
+            ))
+            .build(),
+    ));
 
     let anchor_position = Vec3::new(
         section_center_x + DETACH_DEMO_ENDPOINT_X_OFFSET,

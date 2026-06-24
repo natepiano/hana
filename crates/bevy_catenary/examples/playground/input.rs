@@ -8,11 +8,11 @@ use bevy::prelude::*;
 use bevy_catenary::Cable;
 use bevy_catenary::CableMeshChild;
 use bevy_catenary::CurveKind;
-use bevy_catenary::DebugGizmos;
 use bevy_catenary::Solver;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::FairyDustOrbitCam;
 
+use super::constants::DETACH_R_RESET_FLASH_SECONDS;
 use super::constants::MIN_TAUT_CABLE_SLACK;
 use super::constants::NAVIGATION_DURATION_MS;
 use super::constants::RAY_EPSILON;
@@ -30,6 +30,7 @@ use super::entities::FullSceneTarget;
 use super::entities::NodeCube;
 use super::entities::Selected;
 use super::entities::SlackLocked;
+use super::labels::RResetFlash;
 use super::scene::SharedCableMaterial;
 
 #[derive(Resource, Default)]
@@ -62,7 +63,7 @@ fn cursor_ray_y_plane(
 pub(crate) fn handle_drag(
     mut drag_state: ResMut<DragState>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<FairyDustOrbitCam>>,
     windows: Query<&Window>,
     mut draggables: Query<&mut Transform, With<Draggable>>,
 ) {
@@ -100,7 +101,7 @@ pub(crate) fn on_drag_start(
     click: On<Pointer<Press>>,
     mut drag_state: ResMut<DragState>,
     transforms: Query<&Transform, With<Draggable>>,
-    cameras: Query<(&Camera, &GlobalTransform)>,
+    cameras: Query<(&Camera, &GlobalTransform), With<FairyDustOrbitCam>>,
     windows: Query<&Window>,
 ) {
     if click.button != PointerButton::Primary {
@@ -145,14 +146,6 @@ pub(crate) fn on_cable_mesh_child_added(
     commands.entity(cable_mesh_child.0).observe(on_mesh_clicked);
 }
 
-/// `D` — toggle catenary debug gizmos.
-pub(crate) fn toggle_debug_gizmos(mut debug_gizmos: ResMut<DebugGizmos>) {
-    *debug_gizmos = match *debug_gizmos {
-        DebugGizmos::Enabled => DebugGizmos::Disabled,
-        DebugGizmos::Disabled => DebugGizmos::Enabled,
-    };
-}
-
 /// `F` — frame the whole scene by fitting the ground plane.
 pub(crate) fn frame_full_scene(
     mut commands: Commands,
@@ -167,9 +160,12 @@ pub(crate) fn frame_full_scene(
     );
 }
 
-/// `R` — despawn and respawn the Detach Policy section.
+/// `R` — despawn and respawn the Detach Policy section, and flash the
+/// "R - Reset" ground line yellow.
 pub(crate) fn reset_detach_demo(
     mut commands: Commands,
+    time: Res<Time>,
+    mut r_reset_flash: ResMut<RResetFlash>,
     shared_cable_material: Res<SharedCableMaterial>,
     detach_entities: Query<Entity, With<DetachDemoEntity>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -180,6 +176,8 @@ pub(crate) fn reset_detach_demo(
         (With<NodeCube>, Without<Draggable>, Without<Despawnable>),
     >,
 ) {
+    r_reset_flash.flash_until_secs = Some(time.elapsed_secs() + DETACH_R_RESET_FLASH_SECONDS);
+
     let node_mesh = node_mesh_query.iter().next().map(|m| m.0.clone());
     let node_material = node_material_query.iter().next().map(|m| m.0.clone());
 

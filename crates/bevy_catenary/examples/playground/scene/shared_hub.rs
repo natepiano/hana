@@ -1,3 +1,4 @@
+use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_catenary::AttachedTo;
 use bevy_catenary::Cable;
@@ -7,6 +8,7 @@ use bevy_catenary::CableMeshConfig;
 use bevy_catenary::CatenarySolver;
 use bevy_catenary::DEFAULT_SLACK;
 use bevy_catenary::Solver;
+use bevy_diegetic::DiegeticText;
 
 use super::constants::SHARED_HUB_POSITION_Z;
 use super::constants::SHARED_HUB_SPHERE_RINGS;
@@ -19,6 +21,10 @@ use super::constants::SHARED_HUB_SPOKE_Y_OFFSET;
 use super::constants::SHARED_HUB_SPOKE_Z;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
 use crate::constants::DRAGGABLE_COLOR;
+use crate::constants::HUB_LABEL_COLOR;
+use crate::constants::HUB_LABEL_HOVER_Y;
+use crate::constants::HUB_LABEL_SIZE;
+use crate::constants::HUB_LABEL_TEXT;
 use crate::constants::HUB_SPHERE_RADIUS;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
@@ -27,6 +33,7 @@ use crate::entities;
 use crate::entities::Draggable;
 use crate::entities::NodeCube;
 use crate::input;
+use crate::labels::CameraFacingLabel;
 
 /// Section 4: Three cables from a central draggable hub.
 pub(super) fn setup_section_shared_hub(
@@ -48,16 +55,26 @@ pub(super) fn setup_section_shared_hub(
         ..default()
     });
 
-    let hub = commands
-        .spawn((
-            Mesh3d(drag_mesh),
-            MeshMaterial3d(drag_material),
-            Transform::from_translation(Vec3::new(section_center_x, NODE_Y, SHARED_HUB_POSITION_Z)),
-            Draggable,
-            NodeCube,
-        ))
-        .observe(input::on_drag_start)
-        .id();
+    let mut hub_ec = commands.spawn((
+        Mesh3d(drag_mesh),
+        MeshMaterial3d(drag_material),
+        Transform::from_translation(Vec3::new(section_center_x, NODE_Y, SHARED_HUB_POSITION_Z)),
+        Draggable,
+        NodeCube,
+    ));
+    hub_ec.observe(input::on_drag_start);
+    hub_ec.with_children(|parent| {
+        parent.spawn((
+            CameraFacingLabel,
+            Pickable::IGNORE,
+            DiegeticText::world(HUB_LABEL_TEXT)
+                .size(HUB_LABEL_SIZE)
+                .color(HUB_LABEL_COLOR)
+                .transform(Transform::from_xyz(0.0, HUB_LABEL_HOVER_Y, 0.0))
+                .build(),
+        ));
+    });
+    let hub = hub_ec.id();
 
     let spokes = [
         Vec3::new(

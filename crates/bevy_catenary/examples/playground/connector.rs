@@ -1,5 +1,7 @@
 //! Section 8: Connector model — GLTF power plug at one cable end.
 
+use std::f32::consts::FRAC_PI_2;
+
 use bevy::prelude::*;
 use bevy_catenary::AttachedTo;
 use bevy_catenary::Cable;
@@ -47,6 +49,16 @@ pub(crate) fn setup_section_connector(
     let section_center_x = SECTION_X[CONNECTOR_SECTION_INDEX];
     let plug_scene: Handle<WorldAsset> = asset_server.load(CONNECTOR_MODEL_PATH);
 
+    // The straight-in orientation the `Fixed` aligner computes for this
+    // horizontal cable (tangent +X → cable-exit direction -X). Baked into the
+    // `AsSpawned` plug's spawn transform so it plugs in straight and stays that
+    // way as it is dragged. `Fixed`/`Rotating` get overwritten by the aligner,
+    // so their spawn rotation is irrelevant.
+    let straight_in = Transform::IDENTITY
+        .looking_to(Vec3::NEG_X, Vec3::Y)
+        .rotation
+        * Quat::from_rotation_x(-FRAC_PI_2);
+
     let configs = [
         (
             Vec3::new(
@@ -60,6 +72,7 @@ pub(crate) fn setup_section_connector(
                 CONNECTOR_LANE_Z[CONNECTOR_LANE_FIXED_INDEX],
             ),
             EndpointAlignment::Fixed,
+            Quat::IDENTITY,
         ),
         (
             Vec3::new(
@@ -73,6 +86,7 @@ pub(crate) fn setup_section_connector(
                 CONNECTOR_LANE_Z[CONNECTOR_LANE_AS_SPAWNED_INDEX],
             ),
             EndpointAlignment::AsSpawned,
+            straight_in,
         ),
         (
             Vec3::new(
@@ -86,10 +100,11 @@ pub(crate) fn setup_section_connector(
                 CONNECTOR_LANE_Z[CONNECTOR_LANE_ROTATING_INDEX],
             ),
             EndpointAlignment::Rotating,
+            Quat::IDENTITY,
         ),
     ];
 
-    for (start, end, alignment) in configs {
+    for (start, end, alignment, spawn_rotation) in configs {
         let cable = commands
             .spawn((
                 Cable {
@@ -107,7 +122,9 @@ pub(crate) fn setup_section_connector(
         let plug = commands
             .spawn((
                 WorldAssetRoot(plug_scene.clone()),
-                Transform::from_translation(end).with_scale(Vec3::splat(CONNECTOR_MODEL_SCALE)),
+                Transform::from_translation(end)
+                    .with_rotation(spawn_rotation)
+                    .with_scale(Vec3::splat(CONNECTOR_MODEL_SCALE)),
                 Draggable,
             ))
             .observe(input::on_drag_start)

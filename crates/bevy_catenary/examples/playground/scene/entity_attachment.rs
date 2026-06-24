@@ -9,13 +9,17 @@ use bevy_catenary::Solver;
 
 use super::constants::DRAGGABLE_CUBE_DIMENSION;
 use super::constants::ENTITY_ATTACHMENT_Z;
+use crate::constants::BOX_LABEL_EMISSIVE_COLOR;
 use crate::constants::DEFAULT_CABLE_RESOLUTION;
+use crate::constants::DRAG_FACE_LABEL_TEXT;
 use crate::constants::DRAGGABLE_COLOR;
 use crate::constants::ENTITY_ATTACHMENT_SECTION_INDEX;
+use crate::constants::FACE_LABEL_SIZE_RATIO;
 use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
 use crate::constants::SPAN_HALF_X;
+use crate::entities;
 use crate::entities::Draggable;
 use crate::entities::NodeCube;
 use crate::input;
@@ -38,35 +42,47 @@ pub(super) fn setup_section_entity_attachment(
         ..default()
     });
 
-    let left_cube = commands
-        .spawn((
-            Mesh3d(drag_mesh.clone()),
-            MeshMaterial3d(drag_material.clone()),
-            Transform::from_translation(Vec3::new(
-                section_center_x - SPAN_HALF_X,
-                NODE_Y,
-                ENTITY_ATTACHMENT_Z,
-            )),
-            Draggable,
-            NodeCube,
-        ))
-        .observe(input::on_drag_start)
-        .id();
+    let mut left = commands.spawn((
+        Mesh3d(drag_mesh.clone()),
+        MeshMaterial3d(drag_material.clone()),
+        Transform::from_translation(Vec3::new(
+            section_center_x - SPAN_HALF_X,
+            NODE_Y,
+            ENTITY_ATTACHMENT_Z,
+        )),
+        Draggable,
+        NodeCube,
+    ));
+    left.observe(input::on_drag_start);
+    entities::add_cube_face_labels(
+        &mut left,
+        DRAG_FACE_LABEL_TEXT,
+        DRAGGABLE_CUBE_DIMENSION,
+        DRAGGABLE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
+        BOX_LABEL_EMISSIVE_COLOR,
+    );
+    let left_cube = left.id();
 
-    let right_cube = commands
-        .spawn((
-            Mesh3d(drag_mesh),
-            MeshMaterial3d(drag_material),
-            Transform::from_translation(Vec3::new(
-                section_center_x + SPAN_HALF_X,
-                NODE_Y,
-                ENTITY_ATTACHMENT_Z,
-            )),
-            Draggable,
-            NodeCube,
-        ))
-        .observe(input::on_drag_start)
-        .id();
+    let mut right = commands.spawn((
+        Mesh3d(drag_mesh),
+        MeshMaterial3d(drag_material),
+        Transform::from_translation(Vec3::new(
+            section_center_x + SPAN_HALF_X,
+            NODE_Y,
+            ENTITY_ATTACHMENT_Z,
+        )),
+        Draggable,
+        NodeCube,
+    ));
+    right.observe(input::on_drag_start);
+    entities::add_cube_face_labels(
+        &mut right,
+        DRAG_FACE_LABEL_TEXT,
+        DRAGGABLE_CUBE_DIMENSION,
+        DRAGGABLE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
+        BOX_LABEL_EMISSIVE_COLOR,
+    );
+    let right_cube = right.id();
 
     commands
         .spawn((
