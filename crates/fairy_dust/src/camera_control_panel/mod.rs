@@ -34,6 +34,7 @@ use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
+use display::SlowMode;
 pub use guidance::CameraGuidance;
 pub use guidance::CameraGuidanceRow;
 use layout::build_guidance_tree;
@@ -176,11 +177,15 @@ fn rebind_panel_on_route_change(
     };
 
     let snapshot = resolve_guidance_snapshot(name, guidance, mode);
-    let display = CameraGuidanceDisplay::from_camera_state(
-        state.copied().unwrap_or_default(),
-        snapshot.slow_mode_binding_label.is_some()
-            && slow_mode.is_some_and(|state| state.is_active()),
-    );
+    let slow_mode = if snapshot.slow_mode_binding_label.is_some()
+        && slow_mode.is_some_and(|state| state.is_active())
+    {
+        SlowMode::Active
+    } else {
+        SlowMode::Inactive
+    };
+    let display =
+        CameraGuidanceDisplay::from_camera_state(state.copied().unwrap_or_default(), slow_mode);
     *display_state = CameraGuidanceDisplayState::from_display(display);
     commands.entity(panel_entity).insert(snapshot.clone());
     commands.set_tree(
@@ -237,12 +242,16 @@ fn track_slow_mode_state(
     let Some(camera) = panel_marker.bound_camera else {
         return;
     };
-    display.set_slow_mode_active(
-        snapshot.slow_mode_binding_label.is_some()
-            && cameras
-                .get(camera)
-                .is_ok_and(|slow_mode| slow_mode.is_active()),
-    );
+    let slow_mode = if snapshot.slow_mode_binding_label.is_some()
+        && cameras
+            .get(camera)
+            .is_ok_and(|slow_mode| slow_mode.is_active())
+    {
+        SlowMode::Active
+    } else {
+        SlowMode::Inactive
+    };
+    display.set_slow_mode(slow_mode);
 }
 
 /// Mirrors the bound camera's reported zoom direction onto the panel display

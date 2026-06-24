@@ -36,6 +36,7 @@ use super::constants::TABLE_ROW_GAP;
 use super::constants::TABLE_SECTION_DIVIDER_GAP;
 use super::constants::TRUNK_END_GAP;
 use super::display::CameraGuidanceDisplay;
+use super::display::SlowMode;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
 use crate::connector;
@@ -142,13 +143,7 @@ fn build_guidance_table(
                 );
             }
             if let Some(binding_label) = snapshot.slow_mode_binding_label.as_deref() {
-                build_slow_mode_row(
-                    builder,
-                    binding_label,
-                    display.slow_mode_active(),
-                    label,
-                    active,
-                );
+                build_slow_mode_row(builder, binding_label, display.slow_mode(), label, active);
             }
         },
     );
@@ -157,10 +152,11 @@ fn build_guidance_table(
 fn build_slow_mode_row(
     builder: &mut LayoutBuilder,
     binding_label: &str,
-    slow_mode_active: bool,
+    slow_mode: SlowMode,
     label: &TextStyle,
     active: &TextStyle,
 ) {
+    let slow_mode_active = slow_mode.is_active();
     let style = if slow_mode_active { active } else { label };
     let connector_color = if slow_mode_active {
         ACTIVE_COLOR
@@ -222,7 +218,7 @@ fn build_slow_mode_row(
                     .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text("Slow", style.clone());
+                    builder.text(snapshot::speed_label(ControlSpeed::Slow), style.clone());
                 },
             );
         },

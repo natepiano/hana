@@ -30,7 +30,13 @@ use bevy_diegetic::default_panel_material;
 use crate::constants::CUBE_DEFAULT_COLOR;
 use crate::constants::CUBE_DEFAULT_SIZE;
 use crate::constants::CUBE_FACE_LABEL_SIZE;
+use crate::constants::CUBE_FACE_PANEL_ACTIVE_BODY_SIZE;
 use crate::constants::CUBE_FACE_PANEL_BLUE;
+use crate::constants::CUBE_FACE_PANEL_BODY_SIZE;
+use crate::constants::CUBE_FACE_PANEL_PADDING_FRACTION;
+use crate::constants::CUBE_FACE_PANEL_ROW_GAP_FRACTION;
+use crate::constants::CUBE_FACE_PANEL_SIZE_FRACTION;
+use crate::constants::CUBE_FACE_PANEL_TITLE_SIZE;
 use crate::constants::FACE_TEXT_Z_OFFSET;
 use crate::constants::GROUND_PLANE_ALPHA;
 use crate::constants::GROUND_PLANE_DEFAULT_COLOR;
@@ -210,12 +216,12 @@ impl CubeFacePanelStyle {
     #[must_use]
     pub const fn for_cube(cube_size: f32) -> Self {
         Self {
-            size:             cube_size * 0.88,
-            padding:          cube_size * 0.06,
-            row_gap:          cube_size * 0.02,
-            title_size:       72.0,
-            body_size:        44.0,
-            active_body_size: 52.0,
+            size:             cube_size * CUBE_FACE_PANEL_SIZE_FRACTION,
+            padding:          cube_size * CUBE_FACE_PANEL_PADDING_FRACTION,
+            row_gap:          cube_size * CUBE_FACE_PANEL_ROW_GAP_FRACTION,
+            title_size:       CUBE_FACE_PANEL_TITLE_SIZE,
+            body_size:        CUBE_FACE_PANEL_BODY_SIZE,
+            active_body_size: CUBE_FACE_PANEL_ACTIVE_BODY_SIZE,
             color:            CUBE_FACE_PANEL_BLUE,
         }
     }

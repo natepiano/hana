@@ -88,9 +88,19 @@ fn spawn_help_context(mut commands: Commands) {
 pub(super) struct KeyboardShortcutHelp;
 
 #[derive(Clone, Copy)]
+enum ShortcutPresence {
+    Present,
+    Absent,
+}
+
+impl ShortcutPresence {
+    const fn is_present(self) -> bool { matches!(self, Self::Present) }
+}
+
+#[derive(Clone, Copy)]
 struct HelpShortcuts {
-    home_marker:   bool,
-    camera_preset: bool,
+    home_marker:   ShortcutPresence,
+    camera_preset: ShortcutPresence,
 }
 
 struct HelpRow {
@@ -118,11 +128,21 @@ fn show_or_toggle_help(
 
     let preset_switching_enabled =
         preset_switching.is_none_or(|switching| *switching == CameraPresetSwitching::Enabled);
+    let home_marker = if home_markers.is_empty() {
+        ShortcutPresence::Absent
+    } else {
+        ShortcutPresence::Present
+    };
+    let camera_preset = if !camera_panels.is_empty() && preset_switching_enabled {
+        ShortcutPresence::Present
+    } else {
+        ShortcutPresence::Absent
+    };
     spawn_help_overlay(
         &mut commands,
         HelpShortcuts {
-            home_marker:   !home_markers.is_empty(),
-            camera_preset: !camera_panels.is_empty() && preset_switching_enabled,
+            home_marker,
+            camera_preset,
         },
     );
     set_help_chip(&mut bars, ControlActivation::Active);
@@ -299,7 +319,7 @@ fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextSty
 
 fn shortcut_rows(shortcuts: HelpShortcuts) -> Vec<HelpRow> {
     let mut rows = Vec::new();
-    if shortcuts.home_marker {
+    if shortcuts.home_marker.is_present() {
         rows.push(HelpRow {
             keys:  HOME_AABB_KEYS,
             label: HOME_AABB_LABEL,
@@ -309,7 +329,7 @@ fn shortcut_rows(shortcuts: HelpShortcuts) -> Vec<HelpRow> {
         keys:  SCREEN_PANEL_KEYS,
         label: SCREEN_PANEL_LABEL,
     });
-    if shortcuts.camera_preset {
+    if shortcuts.camera_preset.is_present() {
         rows.push(HelpRow {
             keys:  CAMERA_PRESET_KEYS,
             label: CAMERA_PRESET_LABEL,

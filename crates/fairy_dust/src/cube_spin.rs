@@ -5,6 +5,9 @@ use std::marker::PhantomData;
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::*;
 
+use crate::constants::CUBE_SPIN_PAUSE_CONTROL_ID;
+use crate::constants::CUBE_SPIN_PAUSE_CONTROL_LABEL;
+use crate::constants::DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND;
 use crate::ensure_plugin;
 use crate::screen_panels;
 use crate::screen_panels::ControlActivation;
@@ -82,7 +85,7 @@ pub enum CubeSpinMotion {
 }
 
 impl Default for CubeSpinMotion {
-    fn default() -> Self { Self::Yaw(0.2) }
+    fn default() -> Self { Self::Yaw(DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND) }
 }
 
 /// Time source used by cube spin.
@@ -117,10 +120,13 @@ impl CubeSpinConfig {
     #[must_use]
     pub const fn new() -> Self {
         Self {
-            chip:          Some(TitleChip::new("cube_spin_pause", "P Pause")),
+            chip:          Some(TitleChip::new(
+                CUBE_SPIN_PAUSE_CONTROL_ID,
+                CUBE_SPIN_PAUSE_CONTROL_LABEL,
+            )),
             key:           Some(KeyCode::KeyP),
             active_mode:   CubeSpinMode::Paused,
-            motion:        CubeSpinMotion::Yaw(0.2),
+            motion:        CubeSpinMotion::Yaw(DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND),
             time_source:   CubeSpinTimeSource::Virtual,
             initial_state: CubeSpinMode::Spinning,
         }

@@ -38,6 +38,17 @@ impl ReleaseCountdowns {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum SlowMode {
+    Active,
+    #[default]
+    Inactive,
+}
+
+impl SlowMode {
+    pub(super) const fn is_active(self) -> bool { matches!(self, Self::Active) }
+}
+
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub(super) struct CameraGuidanceDisplayState {
     orbit:                   CameraInteractionSources,
@@ -47,7 +58,7 @@ pub(super) struct CameraGuidanceDisplayState {
     pan_speed:               Option<ControlSpeed>,
     zoom_speed:              Option<ControlSpeed>,
     zoom_direction:          Option<ZoomDirection>,
-    slow_mode_active:        bool,
+    slow_mode:               SlowMode,
     releases:                ReleaseCountdowns,
     pub(super) render_state: RenderState,
 }
@@ -59,29 +70,29 @@ impl Default for CameraGuidanceDisplayState {
 impl CameraGuidanceDisplayState {
     pub(super) const fn from_display(display: CameraGuidanceDisplay) -> Self {
         Self {
-            orbit:            display.orbit,
-            pan:              display.pan,
-            zoom:             display.zoom,
-            orbit_speed:      display.orbit_speed,
-            pan_speed:        display.pan_speed,
-            zoom_speed:       display.zoom_speed,
-            zoom_direction:   display.zoom_direction,
-            slow_mode_active: display.slow_mode_active,
-            releases:         ReleaseCountdowns::empty(),
-            render_state:     RenderState::Idle,
+            orbit:          display.orbit,
+            pan:            display.pan,
+            zoom:           display.zoom,
+            orbit_speed:    display.orbit_speed,
+            pan_speed:      display.pan_speed,
+            zoom_speed:     display.zoom_speed,
+            zoom_direction: display.zoom_direction,
+            slow_mode:      display.slow_mode,
+            releases:       ReleaseCountdowns::empty(),
+            render_state:   RenderState::Idle,
         }
     }
 
     pub(super) const fn display(self) -> CameraGuidanceDisplay {
         CameraGuidanceDisplay {
-            orbit:            self.orbit,
-            pan:              self.pan,
-            zoom:             self.zoom,
-            orbit_speed:      self.orbit_speed,
-            pan_speed:        self.pan_speed,
-            zoom_speed:       self.zoom_speed,
-            zoom_direction:   self.zoom_direction,
-            slow_mode_active: self.slow_mode_active,
+            orbit:          self.orbit,
+            pan:            self.pan,
+            zoom:           self.zoom,
+            orbit_speed:    self.orbit_speed,
+            pan_speed:      self.pan_speed,
+            zoom_speed:     self.zoom_speed,
+            zoom_direction: self.zoom_direction,
+            slow_mode:      self.slow_mode,
         }
     }
 
@@ -151,9 +162,9 @@ impl CameraGuidanceDisplayState {
         }
     }
 
-    pub(super) const fn set_slow_mode_active(&mut self, active: bool) {
-        if self.slow_mode_active != active {
-            self.slow_mode_active = active;
+    pub(super) fn set_slow_mode(&mut self, slow_mode: SlowMode) {
+        if self.slow_mode != slow_mode {
+            self.slow_mode = slow_mode;
             self.render_state = RenderState::Pending;
         }
     }
@@ -180,20 +191,20 @@ fn tick_release_countdown(
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(super) struct CameraGuidanceDisplay {
-    pub(super) orbit:            CameraInteractionSources,
-    pub(super) pan:              CameraInteractionSources,
-    pub(super) zoom:             CameraInteractionSources,
-    pub(super) orbit_speed:      Option<ControlSpeed>,
-    pub(super) pan_speed:        Option<ControlSpeed>,
-    pub(super) zoom_speed:       Option<ControlSpeed>,
-    pub(super) zoom_direction:   Option<ZoomDirection>,
-    pub(super) slow_mode_active: bool,
+    pub(super) orbit:          CameraInteractionSources,
+    pub(super) pan:            CameraInteractionSources,
+    pub(super) zoom:           CameraInteractionSources,
+    pub(super) orbit_speed:    Option<ControlSpeed>,
+    pub(super) pan_speed:      Option<ControlSpeed>,
+    pub(super) zoom_speed:     Option<ControlSpeed>,
+    pub(super) zoom_direction: Option<ZoomDirection>,
+    pub(super) slow_mode:      SlowMode,
 }
 
 impl CameraGuidanceDisplay {
     pub(super) const fn from_camera_state(
         state: OrbitCamInteractionState,
-        slow_mode_active: bool,
+        slow_mode: SlowMode,
     ) -> Self {
         Self {
             orbit: state.orbit_sources(),
@@ -203,7 +214,7 @@ impl CameraGuidanceDisplay {
             pan_speed: state.speed(OrbitCamInteractionKind::Pan),
             zoom_speed: state.speed(OrbitCamInteractionKind::Zoom),
             zoom_direction: state.zoom_direction(),
-            slow_mode_active,
+            slow_mode,
         }
     }
 
@@ -218,7 +229,7 @@ impl CameraGuidanceDisplay {
 
     pub(super) const fn zoom_direction(self) -> Option<ZoomDirection> { self.zoom_direction }
 
-    pub(super) const fn slow_mode_active(self) -> bool { self.slow_mode_active }
+    pub(super) const fn slow_mode(self) -> SlowMode { self.slow_mode }
 
     pub(super) const fn speed(self, kind: OrbitCamInteractionKind) -> Option<ControlSpeed> {
         match kind {
@@ -328,19 +339,19 @@ mod tests {
     }
 
     #[test]
-    fn slow_mode_active_marks_pending_only_on_change() {
+    fn slow_mode_marks_pending_only_on_change() {
         let mut display = CameraGuidanceDisplayState::default();
 
-        display.set_slow_mode_active(false);
-        assert!(!display.display().slow_mode_active);
+        display.set_slow_mode(SlowMode::Inactive);
+        assert_eq!(display.display().slow_mode, SlowMode::Inactive);
         assert_eq!(display.render_state, RenderState::Idle);
 
-        display.set_slow_mode_active(true);
-        assert!(display.display().slow_mode_active);
+        display.set_slow_mode(SlowMode::Active);
+        assert_eq!(display.display().slow_mode, SlowMode::Active);
         assert_eq!(display.render_state, RenderState::Pending);
 
         display.render_state = RenderState::Idle;
-        display.set_slow_mode_active(true);
+        display.set_slow_mode(SlowMode::Active);
         assert_eq!(display.render_state, RenderState::Idle);
     }
 }

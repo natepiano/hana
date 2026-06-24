@@ -114,6 +114,19 @@ pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
     Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
 }
 
+// cube face panel
+pub(crate) const CUBE_FACE_PANEL_ACTIVE_BODY_SIZE: f32 = 52.0;
+pub(crate) const CUBE_FACE_PANEL_BODY_SIZE: f32 = 44.0;
+pub(crate) const CUBE_FACE_PANEL_PADDING_FRACTION: f32 = 0.06;
+pub(crate) const CUBE_FACE_PANEL_ROW_GAP_FRACTION: f32 = 0.02;
+pub(crate) const CUBE_FACE_PANEL_SIZE_FRACTION: f32 = 0.88;
+pub(crate) const CUBE_FACE_PANEL_TITLE_SIZE: f32 = 72.0;
+
+// cube spin
+pub(crate) const CUBE_SPIN_PAUSE_CONTROL_ID: &str = "cube_spin_pause";
+pub(crate) const CUBE_SPIN_PAUSE_CONTROL_LABEL: &str = "P Pause";
+pub(crate) const DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND: f32 = 0.2;
+
 // environment map
 pub(crate) const DIFFUSE_MAP: &str =
     "embedded://fairy_dust/environment_maps/pisa_diffuse_rgb9e5_zstd.ktx2";
