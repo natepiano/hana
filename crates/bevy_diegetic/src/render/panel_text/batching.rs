@@ -64,6 +64,7 @@ use crate::render::material_table::SdfPaintMaterial;
 use crate::render::world_text::TextContent;
 use crate::text;
 use crate::text::GlyphCache;
+use crate::text::GlyphQuadExtents;
 use crate::text::PreparedTextRun;
 use crate::text::RunStorageKey;
 
@@ -92,7 +93,7 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
     lighting_default:   Res<'w, CascadeDefault<Lighting>>,
     sidedness_default:  Res<'w, CascadeDefault<Sidedness>>,
     anti_alias_default: Res<'w, CascadeDefault<AntiAlias>>,
-    changed: Query<
+    placement_changed: Query<
         'w,
         's,
         Entity,
@@ -104,17 +105,19 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
                 Changed<Resolved<Lighting>>,
                 Changed<Resolved<Sidedness>>,
                 Changed<Resolved<AntiAlias>>,
-                Changed<Resolved<TextMaterial>>,
             )>,
         ),
     >,
 }
 
 impl PathBatchKeyCascades<'_, '_> {
-    /// Runs whose resolved cascade value transitioned this frame. The
-    /// propagation pass is inequality-guarded, so membership means a real
-    /// transition.
-    fn changed_set(&self) -> EntityHashSet { self.changed.iter().collect() }
+    /// Runs whose resolved placement or pipeline cascade value transitioned
+    /// this frame. `Resolved<TextMaterial>` is excluded because
+    /// `text_material_candidate_for_frame` recomputes table rows and
+    /// compatibility every frame; scalar-only material changes are material
+    /// row updates, while texture/pipeline changes are detected through
+    /// `PathBatchKey` comparison.
+    fn placement_changed_set(&self) -> EntityHashSet { self.placement_changed.iter().collect() }
 
     fn alpha(&self, label: Entity) -> AlphaMode {
         self.alphas
@@ -193,7 +196,7 @@ pub(super) fn update_panel_text_batches(
 
     // Cascade changes are inequality-guarded at the propagation pass, so this
     // set holds only real transitions; membership re-routes the run below.
-    let cascade_changed = cascades.changed_set();
+    let cascade_changed = cascades.placement_changed_set();
 
     // Upload the shared glyph atlas once before the run loop. A frame with no
     // glyph changes reuses existing handles, while live runs still append
@@ -248,7 +251,7 @@ pub(super) fn update_panel_text_batches(
             .batch_store()
             .key_for_run(storage_key)
             .is_none_or(|current| current != &batch_key);
-        let record_needs_rebuild = panel_text_record_needs_rebuild(
+        let geometry_changed = panel_text_geometry_changed(
             &prepared,
             &panel_text_child,
             &z_level,
@@ -256,26 +259,21 @@ pub(super) fn update_panel_text_batches(
             label_entity,
             key_changed,
         );
-        if !record_needs_rebuild {
-            update_existing_text_run_material(
-                material_table.builder_mut(),
-                &mut backend,
+        apply_text_run_update(
+            RebuiltTextRunInput {
+                backend: &mut backend,
+                builder: material_table.builder_mut(),
                 storage_key,
+                batch_key,
+                prepared: &prepared,
+                panel_text_child: &panel_text_child,
+                label_transform,
+                anti_alias: cascades.anti_alias(label_entity),
                 material_candidate,
-            );
-            continue;
-        }
-        upsert_rebuilt_text_run(RebuiltTextRunInput {
-            backend: &mut backend,
-            builder: material_table.builder_mut(),
-            storage_key,
-            batch_key,
-            prepared: &prepared,
-            panel_text_child: &panel_text_child,
-            label_transform,
-            anti_alias: cascades.anti_alias(label_entity),
-            material_candidate,
-        });
+            },
+            geometry_changed,
+            prepared.is_changed(),
+        );
     }
 
     reconcile_batch_entities(ReconcileBatchEntities {
@@ -304,7 +302,7 @@ fn remove_emptied_panel_text_runs(
     }
 }
 
-fn panel_text_record_needs_rebuild(
+fn panel_text_geometry_changed(
     prepared: &Ref<'_, PreparedPanelText>,
     panel_text_child: &Ref<'_, PanelTextLayout>,
     z_level: &Ref<'_, PanelTextZLevel>,
@@ -312,7 +310,9 @@ fn panel_text_record_needs_rebuild(
     label_entity: Entity,
     key_changed: bool,
 ) -> bool {
-    prepared.is_changed()
+    // A render-only prepared change leaves glyph geometry intact; every other
+    // signal here re-derives the quads.
+    (prepared.is_changed() && !prepared.render_only)
         || panel_text_child.is_changed()
         || z_level.is_changed()
         || cascade_changed.contains(&label_entity)
@@ -346,6 +346,38 @@ struct RebuiltTextRunInput<'a> {
     material_candidate: MaterialSlotCandidate,
 }
 
+/// Routes one run by what changed: a full glyph rebuild, a render-only record
+/// refresh that reuses the existing quads, or a material-row write.
+fn apply_text_run_update(
+    input: RebuiltTextRunInput<'_>,
+    geometry_changed: bool,
+    render_only_changed: bool,
+) {
+    if geometry_changed {
+        upsert_rebuilt_text_run(input);
+    } else if render_only_changed {
+        // Color or render-mode edit: glyph quads are unchanged, so refresh the
+        // run record and material row instead of re-deriving identical geometry.
+        refresh_text_run_record(RenderOnlyTextRunInput {
+            backend:            input.backend,
+            builder:            input.builder,
+            storage_key:        input.storage_key,
+            prepared:           input.prepared,
+            panel_text_child:   input.panel_text_child,
+            label_transform:    input.label_transform,
+            anti_alias:         input.anti_alias,
+            material_candidate: input.material_candidate,
+        });
+    } else {
+        update_existing_text_run_material(
+            input.builder,
+            input.backend,
+            input.storage_key,
+            input.material_candidate,
+        );
+    }
+}
+
 fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
     let RebuiltTextRunInput {
         backend,
@@ -358,9 +390,19 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         anti_alias,
         material_candidate,
     } = input;
-    // A glyph missing from the atlas means shaping has not packed it yet; the
-    // run stays unrouted and self-heals next frame.
-    let Some(glyphs) = build_glyph_records(backend, &prepared.prepared, prepared.clip_rect) else {
+    // A glyph missing from the atlas means shaping has not packed it yet. An
+    // unrouted run stays out and self-heals next frame; a run that was already
+    // live must drop its now-stale records rather than keep rendering the prior
+    // frame's glyphs.
+    let Some(glyphs) = build_glyph_records(
+        backend,
+        &prepared.prepared,
+        prepared.clip_rect,
+        panel_text_child,
+    ) else {
+        if backend.batch_store().is_routed(storage_key) {
+            backend.batch_store_mut().remove_run(storage_key);
+        }
         return;
     };
     if glyphs.is_empty() {
@@ -385,6 +427,46 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         .upsert_run(batch_key, storage_key, glyphs, record);
 }
 
+struct RenderOnlyTextRunInput<'a> {
+    backend:            &'a mut GlyphCache,
+    builder:            &'a mut FrameMaterialTableBuilder,
+    storage_key:        RunStorageKey,
+    prepared:           &'a PreparedPanelText,
+    panel_text_child:   &'a PanelTextLayout,
+    label_transform:    &'a GlobalTransform,
+    anti_alias:         AntiAlias,
+    material_candidate: MaterialSlotCandidate,
+}
+
+/// Rewrites a routed run's `PathRenderRecord` and material-table row when only
+/// render fields changed, reusing the glyph quads already in the batch.
+fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
+    let RenderOnlyTextRunInput {
+        backend,
+        builder,
+        storage_key,
+        prepared,
+        panel_text_child,
+        label_transform,
+        anti_alias,
+        material_candidate,
+    } = input;
+    let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
+        backend.batch_store_mut().remove_run(storage_key);
+        return;
+    };
+    let record = run_record_for(
+        prepared,
+        panel_text_child,
+        label_transform,
+        anti_alias,
+        material_slot,
+    );
+    backend
+        .batch_store_mut()
+        .update_run_record(storage_key, record);
+}
+
 const fn is_hidden(visibility: Option<&Visibility>) -> bool {
     matches!(visibility, Some(Visibility::Hidden))
 }
@@ -405,9 +487,21 @@ fn text_material_candidate_for_frame(
         handle,
         &text_material_default.0.0,
     )?;
+    let base = strip_tangent_dependent_maps(base);
     Some(render::analytic_material_slot_candidate(
-        base, fill_color, alpha_mode, lighting, sidedness,
+        &base, fill_color, alpha_mode, lighting, sidedness,
     ))
+}
+
+/// Glyph quads carry position and UVs but no tangents, so normal and parallax
+/// (depth) maps would sample against an undefined tangent basis and skew the
+/// lighting. Drop them here so a text material that sets either still lights
+/// correctly from its remaining channels instead of rendering wrong.
+fn strip_tangent_dependent_maps(base: &StandardMaterial) -> StandardMaterial {
+    let mut material = base.clone();
+    material.normal_map_texture = None;
+    material.depth_map = None;
+    material
 }
 
 fn append_text_material_row(
@@ -644,8 +738,11 @@ fn padded_glyph_records(records: &[PathQuadRecord], capacity: u32) -> Vec<PathQu
             rect_size:         Vec2::ZERO,
             uv_min:            Vec2::ZERO,
             uv_size:           Vec2::ZERO,
+            box_uv_min:        Vec2::ZERO,
+            box_uv_size:       Vec2::ZERO,
             packed_path_index: 0,
             render_index:      0,
+            box_uv_flip_x:     0,
         },
     );
     padded
@@ -680,13 +777,16 @@ fn build_glyph_records(
     cache: &GlyphCache,
     prepared: &PreparedTextRun,
     clip_rect: Option<[f32; 4]>,
+    panel_text_child: &PanelTextLayout,
 ) -> Option<Vec<PathQuadRecord>> {
     let mut records = Vec::with_capacity(prepared.glyph_count());
+    let (box_min, box_size) = text_box_min_size(panel_text_child);
     for glyph in prepared.glyphs() {
         let packed_path_index = cache.packed_path_index(glyph.key())?;
         let Some(extents) = text::glyph_quad_extents(*glyph, 1.0, clip_rect) else {
             continue;
         };
+        let (box_uv_min, box_uv_size) = glyph_box_uv(&extents, box_min, box_size);
         records.push(PathQuadRecord {
             rect_min: Vec2::new(extents.left, extents.bottom),
             rect_size: Vec2::new(extents.right - extents.left, extents.top - extents.bottom),
@@ -695,11 +795,42 @@ fn build_glyph_records(
                 extents.uv_right - extents.uv_left,
                 extents.uv_bottom - extents.uv_top,
             ),
+            box_uv_min,
+            box_uv_size,
             packed_path_index,
             render_index: 0,
+            box_uv_flip_x: 0,
         });
     }
     Some(records)
+}
+
+fn text_box_min_size(panel_text_child: &PanelTextLayout) -> (Vec2, Vec2) {
+    let bounds = panel_text_child.bounds;
+    let size = Vec2::new(
+        bounds.width * panel_text_child.scale_x,
+        bounds.height * panel_text_child.scale_y,
+    );
+    let min = Vec2::new(
+        bounds
+            .x
+            .mul_add(panel_text_child.scale_x, -panel_text_child.anchor_x),
+        (bounds.y + bounds.height).mul_add(-panel_text_child.scale_y, panel_text_child.anchor_y),
+    );
+    (min, size)
+}
+
+fn glyph_box_uv(extents: &GlyphQuadExtents, box_min: Vec2, box_size: Vec2) -> (Vec2, Vec2) {
+    let inv_size = Vec2::new(
+        box_size.x.max(f32::EPSILON).recip(),
+        box_size.y.max(f32::EPSILON).recip(),
+    );
+    let box_top = box_min.y + box_size.y;
+    let left = ((extents.left - box_min.x) * inv_size.x).clamp(0.0, 1.0);
+    let right = ((extents.right - box_min.x) * inv_size.x).clamp(0.0, 1.0);
+    let top = ((box_top - extents.top) * inv_size.y).clamp(0.0, 1.0);
+    let bottom = ((box_top - extents.bottom) * inv_size.y).clamp(0.0, 1.0);
+    (Vec2::new(left, top), Vec2::new(right - left, bottom - top))
 }
 
 /// Inert capacity-sized batch mesh: zeroed `POSITION` / `UV_0` / `UV_1`
@@ -946,6 +1077,7 @@ mod tests {
     use std::sync::Arc;
 
     use bevy::asset::AssetPlugin;
+    use bevy::image::Image;
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
@@ -1068,6 +1200,16 @@ mod tests {
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial {
                 metallic,
+                ..Default::default()
+            })
+    }
+
+    fn material_with_texture(app: &mut App, texture: Handle<Image>) -> Handle<StandardMaterial> {
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial {
+                base_color_texture: Some(texture),
+                alpha_mode: AlphaMode::Blend,
                 ..Default::default()
             })
     }
@@ -1415,6 +1557,110 @@ mod tests {
     }
 
     #[test]
+    fn scalar_distinct_text_materials_share_one_batch_with_distinct_rows() {
+        let mut app = pipeline_app();
+        let first_material = material_with_metallic(&mut app, 0.21);
+        let second_material = material_with_metallic(&mut app, 0.84);
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("Alpha", TextStyle::new(10.0).with_material(first_material));
+        builder.text("Beta", TextStyle::new(10.0).with_material(second_material));
+        spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        let (batches, runs, glyphs) = store_stats(&app);
+        assert_eq!(batches, 1, "scalar/vector-only differences stay batched");
+        assert_eq!(runs, 2);
+        assert_eq!(glyphs, 9);
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (_, batch) = store.batches().next().expect("one text batch should exist");
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        let metallic_values: Vec<u32> = batch
+            .run_records()
+            .iter()
+            .map(|record| {
+                table[record.material.as_u32().to_usize()]
+                    .metallic
+                    .to_bits()
+            })
+            .collect();
+        assert_eq!(
+            metallic_values,
+            vec![0.21_f32.to_bits(), 0.84_f32.to_bits()],
+            "each run keeps its own frame material row"
+        );
+    }
+
+    #[test]
+    fn same_texture_text_materials_share_texture_batch_and_write_box_uvs() {
+        let mut app = pipeline_app();
+        let texture = Handle::<Image>::default();
+        let material = material_with_texture(&mut app, texture);
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text("AB", TextStyle::new(10.0).with_material(material.clone()));
+        builder.text("CD", TextStyle::new(10.0).with_material(material));
+        let panel = spawn_panel(&mut app, builder.build());
+        settle(&mut app);
+
+        let (batches, runs, glyphs) = store_stats(&app);
+        assert_eq!(
+            batches, 1,
+            "same texture resource stays in one texture batch"
+        );
+        assert_eq!(runs, 2);
+        assert_eq!(glyphs, 4);
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (key, batch) = store
+            .batches()
+            .next()
+            .expect("one texture batch should exist");
+        assert!(
+            key.resource_compatibility.base_color_texture.is_some(),
+            "the texture resource remains a batch-key splitter"
+        );
+        let before: Vec<(Vec2, Vec2)> = batch
+            .path_records()
+            .iter()
+            .map(|record| (record.box_uv_min, record.box_uv_size))
+            .collect();
+        assert!(
+            before
+                .windows(2)
+                .any(|pair| pair[0].0.x.to_bits() != pair[1].0.x.to_bits()),
+            "glyph records sample distinct horizontal regions of the run box"
+        );
+        assert!(
+            before.iter().all(|(uv_min, uv_size)| {
+                uv_min.x >= 0.0
+                    && uv_min.y >= 0.0
+                    && uv_min.x + uv_size.x <= 1.0 + f32::EPSILON
+                    && uv_min.y + uv_size.y <= 1.0 + f32::EPSILON
+                    && uv_size.x > 0.0
+                    && uv_size.y > 0.0
+            }),
+            "box UVs stay inside the run-local 0..1 box"
+        );
+
+        app.world_mut().entity_mut(panel).insert(Visibility::Hidden);
+        settle(&mut app);
+        app.world_mut()
+            .entity_mut(panel)
+            .insert(Visibility::Inherited);
+        settle(&mut app);
+        let store = app.world().resource::<GlyphCache>().batch_store();
+        let (_, batch) = store.batches().next().expect("texture batch should return");
+        let after: Vec<(Vec2, Vec2)> = batch
+            .path_records()
+            .iter()
+            .map(|record| (record.box_uv_min, record.box_uv_size))
+            .collect();
+        assert_eq!(after, before, "box UVs are stable across hide/reroute");
+    }
+
+    #[test]
     fn reused_text_run_material_swap_updates_resolved_material_without_layout_cache_change() {
         let mut app = pipeline_app();
         let first_material = material_with_metallic(&mut app, 0.31);
@@ -1685,6 +1931,11 @@ mod tests {
         let panel = spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
         let entity_before = batch_entities(&mut app)[0];
+        let path_records_before: Vec<PathQuadRecord> = {
+            let store = app.world().resource::<GlyphCache>().batch_store();
+            let (_, batch) = store.batches().next().expect("one batch should exist");
+            batch.path_records().to_vec()
+        };
 
         // Same text, new color: a material-table row write, not a re-key.
         let mut builder = LayoutBuilder::new(100.0, 50.0);
@@ -1708,6 +1959,11 @@ mod tests {
         );
         let store = app.world().resource::<GlyphCache>().batch_store();
         let (_, batch) = store.batches().next().expect("one batch should exist");
+        assert_eq!(
+            batch.path_records(),
+            path_records_before.as_slice(),
+            "recoloring must not rewrite path-quad records"
+        );
         let material_slots: Vec<u32> = batch
             .run_records()
             .iter()
@@ -1726,6 +1982,27 @@ mod tests {
                 })
             }),
             "the recolored run's current material table row carries the new fill color"
+        );
+    }
+
+    #[test]
+    fn text_drops_normal_and_depth_maps_it_cannot_sample() {
+        // Glyph quads have UVs but no tangents, so normal and parallax (depth)
+        // maps would sample an undefined basis; UV-sampled maps survive.
+        let authored = StandardMaterial {
+            base_color_texture: Some(Handle::default()),
+            normal_map_texture: Some(Handle::default()),
+            depth_map: Some(Handle::default()),
+            ..Default::default()
+        };
+
+        let resolved = strip_tangent_dependent_maps(&authored);
+
+        assert!(resolved.normal_map_texture.is_none());
+        assert!(resolved.depth_map.is_none());
+        assert!(
+            resolved.base_color_texture.is_some(),
+            "uv-sampled textures survive the strip"
         );
     }
 
@@ -1800,8 +2077,11 @@ mod tests {
             rect_size:         Vec2::ONE,
             uv_min:            Vec2::ZERO,
             uv_size:           Vec2::ONE,
+            box_uv_min:        Vec2::ZERO,
+            box_uv_size:       Vec2::ONE,
             packed_path_index: 0,
             render_index:      0,
+            box_uv_flip_x:     0,
         };
         let record = PathRenderRecord {
             transform:        Mat4::IDENTITY,

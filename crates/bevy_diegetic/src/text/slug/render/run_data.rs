@@ -4,7 +4,7 @@ const GLYPH_PADDING_DESIGN_UNITS: f32 = 16.0;
 
 /// Padded, optionally clipped quad rect and UVs for one glyph instance — the
 /// extents `build_glyph_records` packs into `PathQuadRecord`s.
-pub struct GlyphQuadExtents {
+pub(crate) struct GlyphQuadExtents {
     pub(crate) left:      f32,
     pub(crate) right:     f32,
     pub(crate) bottom:    f32,

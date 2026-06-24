@@ -91,8 +91,8 @@ pub struct PathExtension {
     /// Shared path records, indexed by each atlas record's `packed_path_index`.
     #[storage(103, read_only)]
     path_records:   Handle<ShaderBuffer>,
-    /// Per-path instance records read by the vertex-pulling stage.
-    #[storage(104, read_only, visibility(vertex))]
+    /// Per-path instance records read by the vertex-pulling and fragment stages.
+    #[storage(104, read_only, visibility(vertex, fragment))]
     instances:      Handle<ShaderBuffer>,
     /// Per-run records (world transform, material slot, render mode, depth
     /// nudge) read by the vertex-pulling stages.

@@ -42,6 +42,7 @@ use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::ShapedTextCache;
 use crate::layout::Sidedness;
+use crate::layout::TextStyle;
 use crate::panel::DiegeticPerfStats;
 use crate::text::PreparedTextRun;
 
@@ -54,6 +55,9 @@ use crate::text::PreparedTextRun;
 pub(super) struct PreparedPanelText {
     /// Prepared text run.
     pub prepared:    PreparedTextRun,
+    /// Text-style snapshot used by `shape_panel_text_children` to decide
+    /// whether a `Changed<TextStyle>` event affects glyph geometry.
+    pub style_gate:  TextStyle,
     /// Glyph render mode for this text element.
     pub render_mode: GlyphRenderMode,
     /// Glyph shadow mode for this text element.
@@ -62,6 +66,11 @@ pub(super) struct PreparedPanelText {
     pub fill_color:  Color,
     /// Optional panel-local clipping rect.
     pub clip_rect:   Option<[f32; 4]>,
+    /// Set when the change that marked this component dirty touched only render
+    /// fields (color, render mode, shadow mode) and left glyph geometry intact.
+    /// The batching pass reads it to update the run record in place instead of
+    /// re-deriving identical glyph quads. `false` on every full reshape.
+    pub render_only: bool,
 }
 
 /// Plugin that adds text rendering for diegetic panels.

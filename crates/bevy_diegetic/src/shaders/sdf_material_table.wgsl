@@ -57,13 +57,35 @@ fn apply_material_slot_values(
     pbr_input: ptr<function, pbr_types::PbrInput>,
     values: MaterialSlotValues,
 ) {
+    let flags = (*pbr_input).material.flags;
+    let sampled_base_color = (*pbr_input).material.base_color;
+    let sampled_emissive = (*pbr_input).material.emissive;
+    let sampled_metallic = (*pbr_input).material.metallic;
+    let sampled_roughness = (*pbr_input).material.perceptual_roughness;
+
     (*pbr_input).material.base_color = values.base_color;
+    if (flags & pbr_types::STANDARD_MATERIAL_FLAGS_BASE_COLOR_TEXTURE_BIT) != 0u {
+        (*pbr_input).material.base_color *= sampled_base_color;
+    }
+
     (*pbr_input).material.emissive = values.emissive;
+    if (flags & pbr_types::STANDARD_MATERIAL_FLAGS_EMISSIVE_TEXTURE_BIT) != 0u {
+        (*pbr_input).material.emissive = vec4<f32>(
+            values.emissive.rgb * sampled_emissive.rgb,
+            values.emissive.a,
+        );
+    }
+
     (*pbr_input).material.attenuation_color = values.attenuation_color;
     (*pbr_input).material.uv_transform = values.uv_transform;
     (*pbr_input).material.reflectance = values.reflectance;
     (*pbr_input).material.perceptual_roughness = values.roughness;
     (*pbr_input).material.metallic = values.metallic;
+    if (flags & pbr_types::STANDARD_MATERIAL_FLAGS_METALLIC_ROUGHNESS_TEXTURE_BIT) != 0u {
+        (*pbr_input).material.perceptual_roughness = values.roughness * sampled_roughness;
+        (*pbr_input).material.metallic = values.metallic * sampled_metallic;
+    }
+
     (*pbr_input).material.diffuse_transmission = values.diffuse_transmission;
     (*pbr_input).material.specular_transmission = values.specular_transmission;
     (*pbr_input).material.thickness = values.thickness;

@@ -299,6 +299,9 @@ fn path_quad_geometry_eq(left: &PathQuadRecord, right: &PathQuadRecord) -> bool 
         && left.rect_size == right.rect_size
         && left.uv_min == right.uv_min
         && left.uv_size == right.uv_size
+        && left.box_uv_min == right.box_uv_min
+        && left.box_uv_size == right.box_uv_size
+        && left.box_uv_flip_x == right.box_uv_flip_x
 }
 
 fn path_render_record_placement_eq(left: &PathRenderRecord, right: &PathRenderRecord) -> bool {
@@ -836,8 +839,11 @@ fn build_panel_line_group(
         rect_size:         path.rect_size,
         uv_min:            path.uv_min,
         uv_size:           path.uv_size,
+        box_uv_min:        path.uv_min,
+        box_uv_size:       path.uv_size,
         packed_path_index: 0,
         render_index:      0,
+        box_uv_flip_x:     0,
     };
     Some(BuiltPanelShapePrimitive {
         batch_key,
@@ -1154,8 +1160,11 @@ fn padded_line_instances(records: &[PathQuadRecord], capacity: u32) -> Vec<PathQ
             rect_size:         Vec2::ZERO,
             uv_min:            Vec2::ZERO,
             uv_size:           Vec2::ZERO,
+            box_uv_min:        Vec2::ZERO,
+            box_uv_size:       Vec2::ZERO,
             packed_path_index: 0,
             render_index:      0,
+            box_uv_flip_x:     0,
         },
     );
     padded
@@ -2042,8 +2051,11 @@ mod tests {
                 rect_size:         Vec2::ONE,
                 uv_min:            Vec2::ZERO,
                 uv_size:           Vec2::ONE,
+                box_uv_min:        Vec2::ZERO,
+                box_uv_size:       Vec2::ONE,
                 packed_path_index: 0,
                 render_index:      0,
+                box_uv_flip_x:     0,
             },
             run:      PathRenderRecord {
                 transform:        Mat4::IDENTITY,

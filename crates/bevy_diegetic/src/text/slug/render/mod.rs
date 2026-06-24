@@ -1,5 +1,6 @@
 mod run_data;
 
+pub(crate) use run_data::GlyphQuadExtents;
 pub(crate) use run_data::glyph_quad_extents;
 
 #[cfg(test)]

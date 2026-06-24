@@ -3,6 +3,7 @@
 mod batching;
 mod path;
 mod primitive;
+mod relationship;
 
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;

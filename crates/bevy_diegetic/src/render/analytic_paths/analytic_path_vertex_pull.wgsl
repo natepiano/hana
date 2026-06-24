@@ -21,14 +21,17 @@
 #import bevy_pbr::forward_io::VertexOutput
 #endif
 
-// Mirrors `PathQuadRecord` in `path/packing.rs` (std430, 40 B stride).
+// Mirrors `PathQuadRecord` in `path/packing.rs` (std430, 64 B stride).
 struct PathQuadRecord {
     rect_min: vec2<f32>,
     rect_size: vec2<f32>,
     uv_min: vec2<f32>,
     uv_size: vec2<f32>,
+    box_uv_min: vec2<f32>,
+    box_uv_size: vec2<f32>,
     packed_path_index: u32,
     render_index: u32,
+    box_uv_flip_x: u32,
 }
 
 // Mirrors `PathRenderRecord` in `path/packing.rs` (std430, 96 B stride).
@@ -78,8 +81,8 @@ struct PulledVertex {
     clip_position: vec4<f32>,
     world_position: vec4<f32>,
     world_normal: vec3<f32>,
-    uv: vec2<f32>,
-    uv_b: vec2<f32>,
+    material_uv: vec2<f32>,
+    coverage_uv: vec2<f32>,
 }
 
 #ifndef PREPASS_PIPELINE
@@ -135,8 +138,11 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     let corner_x = f32(corner == 1u || corner == 2u);
     let corner_top = f32(corner <= 1u);
     var local = record.rect_min + vec2<f32>(corner_x, corner_top) * record.rect_size;
-    // uv = padded path quad UVs (uv_min sits at the top-left corner).
-    var uv = record.uv_min + vec2<f32>(corner_x, 1.0 - corner_top) * record.uv_size;
+    // coverage_uv = padded path quad UVs (uv_min sits at the top-left corner).
+    var coverage_uv = record.uv_min + vec2<f32>(corner_x, 1.0 - corner_top) * record.uv_size;
+    let box_corner_x = select(corner_x, 1.0 - corner_x, record.box_uv_flip_x != 0u);
+    let material_uv =
+        record.box_uv_min + vec2<f32>(box_corner_x, 1.0 - corner_top) * record.box_uv_size;
 
 #ifndef PREPASS_PIPELINE
     // Panel lines (min_feature > 0) only: grow the quad in the panel plane so
@@ -155,7 +161,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
         let sign_y = corner_top * 2.0 - 1.0;
         local += vec2<f32>(sign_x * margin_x, sign_y * margin_y);
         let inv_rect = vec2<f32>(1.0, 1.0) / max(record.rect_size, vec2<f32>(LINE_AA_EPSILON));
-        uv += vec2<f32>(
+        coverage_uv += vec2<f32>(
             sign_x * margin_x * record.uv_size.x * inv_rect.x,
             -sign_y * margin_y * record.uv_size.y * inv_rect.y,
         );
@@ -163,6 +169,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
 #endif
 
     var world = run.transform * vec4<f32>(local, 0.0, 1.0);
+    world.w = f32(path);
     out.world_position = world;
 
     var clip = position_world_to_clip(world.xyz);
@@ -174,10 +181,10 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
     // Records carry no normal: rotate layout-space +z by the run transform.
     out.world_normal = normalize((run.transform * vec4<f32>(0.0, 0.0, 1.0, 0.0)).xyz);
 
-    // uv_b.x = atlas record index, uv_b.y = run index, both recovered in the
-    // fragment with u32(floor(..)).
-    out.uv = uv;
-    out.uv_b = vec2<f32>(f32(record.packed_path_index), f32(record.render_index));
+    // `uv` is the material box UV consumed by Bevy PBR texture sampling.
+    // `uv_b` is the analytic path coverage UV consumed by `analytic_path.wgsl`.
+    out.material_uv = material_uv;
+    out.coverage_uv = coverage_uv;
     return out;
 }
 
@@ -195,10 +202,10 @@ fn vertex(
     out.position.z = min(out.position.z, 1.0);
 #endif
 #ifdef VERTEX_UVS_A
-    out.uv = pulled.uv;
+    out.uv = pulled.material_uv;
 #endif
 #ifdef VERTEX_UVS_B
-    out.uv_b = pulled.uv_b;
+    out.uv_b = pulled.coverage_uv;
 #endif
 #ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
     out.world_normal = pulled.world_normal;
@@ -221,10 +228,10 @@ fn vertex(
     out.world_position = pulled.world_position;
     out.world_normal = pulled.world_normal;
 #ifdef VERTEX_UVS_A
-    out.uv = pulled.uv;
+    out.uv = pulled.material_uv;
 #endif
 #ifdef VERTEX_UVS_B
-    out.uv_b = pulled.uv_b;
+    out.uv_b = pulled.coverage_uv;
 #endif
 #ifdef VERTEX_OUTPUT_INSTANCE_INDEX
     out.instance_index = instance_index;

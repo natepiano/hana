@@ -781,14 +781,17 @@ impl TextStyle {
             && *unit == other.unit
     }
 
-    /// Bit-equality over the fields a panel-text glyph mesh and material depend
-    /// on, used to gate per-run rebuilds.
+    /// Bit-equality over the fields panel-text glyph geometry depends on, used
+    /// to gate per-run glyph and path-quad rebuilds.
     ///
     /// Compares the measurement fields (`font_id`, `size`, `weight`, `slant`,
     /// `line_height`, letter/word spacing, `wrap`, `align`, `anchor`,
-    /// `font_features`) via `to_bits`, plus the render fields baked into the
-    /// mesh and material (`color`, `render_mode`, `shadow_mode`, `sidedness`,
-    /// `lighting`).
+    /// `font_features`) via `to_bits`.
+    ///
+    /// Excludes render/material fields (`color`, `render_mode`, `shadow_mode`,
+    /// `sidedness`, `lighting`, `material`, `alpha_mode`) because
+    /// `PreparedPanelText`, cascade overrides, `PathRenderRecord`, and the
+    /// frame material table own those updates without changing glyph geometry.
     /// Excludes `unit` (measurement context, not a mesh input) and
     /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
@@ -804,11 +807,11 @@ impl TextStyle {
             align,
             anchor,
             font_features,
-            color,
-            render_mode,
-            shadow_mode,
-            sidedness,
-            lighting,
+            color: _,
+            render_mode: _,
+            shadow_mode: _,
+            sidedness: _,
+            lighting: _,
             material: _,
             unit: _,
             alpha_mode: _,
@@ -825,11 +828,6 @@ impl TextStyle {
             && *align == other.align
             && *anchor == other.anchor
             && *font_features == other.font_features
-            && *color == other.color
-            && *render_mode == other.render_mode
-            && *shadow_mode == other.shadow_mode
-            && *sidedness == other.sidedness
-            && *lighting == other.lighting
     }
 }
 
@@ -956,13 +954,14 @@ mod tests {
     }
 
     #[test]
-    fn gating_eq_detects_color_change() {
-        // color is render-only for measurement, so layout_eq_excluding_visuals
-        // ignores it — but the mesh material bakes it in, so gating_eq must not.
+    fn gating_eq_ignores_color_change() {
         let base = TextStyle::new(24.0).with_color(Color::WHITE);
         let recolored = base.clone().with_color(Color::BLACK);
         assert!(base.layout_eq_excluding_visuals(&recolored));
-        assert!(!base.gating_eq(&recolored));
+        assert!(
+            base.gating_eq(&recolored),
+            "text color updates material-table rows without rebuilding glyph geometry"
+        );
     }
 
     #[test]

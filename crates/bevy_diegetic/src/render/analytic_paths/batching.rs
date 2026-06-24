@@ -385,6 +385,31 @@ impl PathBatch {
         self.material_dirty.mark();
     }
 
+    /// Rewrites one member run's record without touching its glyph quads. Dirties
+    /// the material buffer when the table row changed and the placement buffer
+    /// when any other record field changed.
+    fn update_run_record(&mut self, key: RunStorageKey, record: PathRenderRecord) {
+        let Some(position) = self.position_of(key) else {
+            return;
+        };
+        let current = self.run_records[position];
+        if current == record {
+            return;
+        }
+        if current.material != record.material {
+            self.material_dirty.mark();
+        }
+        // Whole-record compares avoid per-field float equality: equalize the
+        // material slot, and any remaining difference is a placement field.
+        let mut placement_probe = record;
+        placement_probe.material = current.material;
+        if placement_probe != current {
+            self.placement_dirty.mark();
+        }
+        self.runs[position].record = record;
+        self.run_records[position] = record;
+    }
+
     /// Whether either material or placement fields require a render-record upload.
     #[must_use]
     pub const fn render_records_are_dirty(&self) -> bool {
@@ -428,10 +453,6 @@ pub(crate) struct PathBatchStore {
 impl PathBatchStore {
     /// Whether a run is currently routed to any batch.
     #[must_use]
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "batch-store tests exercise route membership")
-    )]
     pub fn is_routed(&self, run: RunStorageKey) -> bool { self.render_index.contains_key(&run) }
 
     /// Current batch key for a routed run.
@@ -503,6 +524,17 @@ impl PathBatchStore {
         }
     }
 
+    /// Rewrites a routed run's full render record without rebuilding its glyph
+    /// quads. A no-op for unrouted runs.
+    pub fn update_run_record(&mut self, run: RunStorageKey, record: PathRenderRecord) {
+        let Some(key) = self.render_index.get(&run) else {
+            return;
+        };
+        if let Some(batch) = self.batches.get_mut(key) {
+            batch.update_run_record(run, record);
+        }
+    }
+
     /// All batches.
     pub fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &PathBatch)> {
         self.batches.iter()
@@ -562,8 +594,11 @@ mod tests {
             rect_size: Vec2::ONE,
             uv_min: Vec2::ZERO,
             uv_size: Vec2::ONE,
+            box_uv_min: Vec2::ZERO,
+            box_uv_size: Vec2::ONE,
             packed_path_index,
             render_index: 0,
+            box_uv_flip_x: 0,
         }
     }
 
@@ -983,5 +1018,53 @@ mod tests {
         assert!(!batch.path_quads_are_dirty());
         assert!(!batch.bounds_are_dirty());
         assert_eq!(batch.run_records()[0].material.as_u32(), 7);
+    }
+
+    #[test]
+    fn record_refresh_rewrites_the_run_table_without_touching_glyph_quads() {
+        let mut store = PathBatchStore::default();
+        let batch_key = key(AlphaMode::Blend);
+        let run = run_key(1);
+        store.upsert_run(
+            batch_key.clone(),
+            run,
+            vec![path_record(Vec2::ZERO, 0)],
+            record(Mat4::IDENTITY),
+        );
+        let quads_before = store
+            .get(&batch_key)
+            .expect("batch should exist")
+            .path_records()
+            .to_vec();
+        {
+            let batch = store.get_mut(&batch_key).expect("batch should exist");
+            batch.clear_path_quad_dirty();
+            batch.clear_render_record_dirty();
+            batch.clear_bounds_dirty();
+        }
+
+        // A render-only edit: new material row and render mode, identical quads.
+        let mut refreshed = record(Mat4::IDENTITY);
+        refreshed.material =
+            GpuMaterialSlotId::from(MaterialSlotId::try_from(5).expect("slot 5 is valid"));
+        refreshed.render_mode = 2;
+        store.update_run_record(run, refreshed);
+
+        let batch = store.get(&batch_key).expect("batch should exist");
+        assert!(
+            batch.material_dirty.is_set(),
+            "a changed material row dirties the material buffer"
+        );
+        assert!(
+            batch.placement_dirty.render_records_are_dirty(),
+            "a changed render mode dirties the placement records"
+        );
+        assert!(
+            !batch.path_quads_are_dirty(),
+            "a render-only edit must not re-upload glyph quads"
+        );
+        assert_eq!(batch.path_records(), quads_before.as_slice());
+        assert_eq!(batch.run_records()[0].material.as_u32(), 5);
+        assert_eq!(batch.run_records()[0].render_mode, 2);
     }
 }

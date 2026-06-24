@@ -87,9 +87,9 @@ const SDF_PANEL_STATS: PanelStats = PanelStats {
 const TEXT_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        8,
     sdf_borders:      3,
-    material_slots:   11,
-    readout_reason:   "text alpha/cull split",
-    text_runs:        21,
+    material_slots:   12,
+    readout_reason:   "value share / texture split",
+    text_runs:        23,
     shape_groups:     0,
     shape_primitives: 0,
 };
@@ -398,6 +398,31 @@ impl SdfSurfaceMaterialHandles {
     }
 }
 
+/// Registered text source material handles reused by the text validation panel.
+#[derive(Clone, Resource)]
+struct TextPanelMaterialHandles {
+    /// Panel-level default text material.
+    panel_default: Handle<StandardMaterial>,
+    /// Source material for the emissive scalar/vector row.
+    emissive:      Handle<StandardMaterial>,
+    /// Source material for the metallic scalar/vector row.
+    metallic:      Handle<StandardMaterial>,
+    /// Source material carrying a base-color texture for the texture split row.
+    texture:       Handle<StandardMaterial>,
+}
+
+impl TextPanelMaterialHandles {
+    /// Registers the text validation source materials once and returns handles.
+    fn new(materials: &mut Assets<StandardMaterial>, image: Handle<Image>) -> Self {
+        Self {
+            panel_default: materials.add(text_panel_default_material()),
+            emissive:      materials.add(text_emissive_material()),
+            metallic:      materials.add(text_metallic_material()),
+            texture:       materials.add(text_texture_material(image)),
+        }
+    }
+}
+
 /// Marker for the Text material panel, rebuilt when the alpha selection changes
 /// so its live alpha case re-renders in the chosen mode.
 #[derive(Component)]
@@ -500,16 +525,26 @@ fn spawn_validation_panels(
     let alpha = selection.mode();
     let sdf_materials =
         SdfSurfaceMaterialHandles::new(&mut materials, sdf_fill_image.clone(), alpha);
+    let text_materials = TextPanelMaterialHandles::new(&mut materials, sdf_fill_image.clone());
     commands.insert_resource(sdf_materials.clone());
+    commands.insert_resource(text_materials.clone());
     let panels = [
-        ("sdf-surfaces", build_sdf_surface_panel(&sdf_materials)),
-        ("text-materials", build_text_panel(alpha)),
-        ("analytic-shapes", build_shape_panel()),
-        ("mixed-stack", build_mixed_panel()),
+        (
+            "sdf-surfaces",
+            build_sdf_surface_panel(&sdf_materials),
+            None,
+        ),
+        (
+            "text-materials",
+            build_text_panel(&text_materials, alpha),
+            Some(text_materials.panel_default.clone()),
+        ),
+        ("analytic-shapes", build_shape_panel(), None),
+        ("mixed-stack", build_mixed_panel(), None),
     ];
-    for (index, (name, tree)) in panels.into_iter().enumerate() {
+    for (index, (name, tree, text_material)) in panels.into_iter().enumerate() {
         let (x, y) = panel_grid_position(index);
-        let panel = validation_panel(tree, index, &mut materials);
+        let panel = validation_panel(tree, index, text_material, &mut materials);
         match panel {
             Ok(panel) => {
                 let mut entity = commands.spawn((
@@ -591,6 +626,7 @@ fn animate_sdf_surface_panel(
 // existing material assets, and the fill producer reads those assets each frame.
 fn apply_alpha_selection(
     selection: Res<AlphaModeSelection>,
+    text_materials: Res<TextPanelMaterialHandles>,
     selectors: Query<Entity, With<AlphaSelectorPanel>>,
     text_panels: Query<Entity, With<BatchValidationTextPanel>>,
     mut commands: Commands,
@@ -602,7 +638,7 @@ fn apply_alpha_selection(
         commands.set_tree(entity, alpha_selector_tree(selection.index));
     }
     for entity in &text_panels {
-        commands.set_tree(entity, build_text_panel(selection.mode()));
+        commands.set_tree(entity, build_text_panel(&text_materials, selection.mode()));
     }
 }
 
@@ -617,6 +653,7 @@ fn panel_grid_position(index: usize) -> (f32, f32) {
 fn validation_panel(
     tree: LayoutTree,
     index: usize,
+    text_material: Option<Handle<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     let mut material = default_panel_material();
@@ -629,6 +666,10 @@ fn validation_panel(
         .size(Mm(PANEL_W), Mm(PANEL_H))
         .anchor(Anchor::Center)
         .surface_shadow(SurfaceShadow::On);
+    let builder = match text_material {
+        Some(material) => builder.text_material(material),
+        None => builder,
+    };
     if index == 3 {
         builder.with_tree(tree).build()
     } else {
@@ -1076,7 +1117,40 @@ const fn with_alpha(mut material: StandardMaterial, alpha: AlphaMode) -> Standar
     material
 }
 
-fn build_text_panel(alpha: AlphaMode) -> LayoutTree {
+fn text_panel_default_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = TEXT_MAIN;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn text_emissive_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.08, 0.06, 0.02);
+    material.emissive = EMISSIVE_WARM.to_linear() * 1.4;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn text_metallic_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = GLINT;
+    material.metallic = 1.0;
+    material.perceptual_roughness = 0.26;
+    material.reflectance = 0.8;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn text_texture_material(image: Handle<Image>) -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::WHITE;
+    material.base_color_texture = Some(image);
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn build_text_panel(materials: &TextPanelMaterialHandles, alpha: AlphaMode) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
@@ -1093,18 +1167,8 @@ fn build_text_panel(alpha: AlphaMode) -> LayoutTree {
             .height(Sizing::GROW)
             .gap(ROW_GAP),
         |builder| {
-            material_group(
-                builder,
-                "Shared group",
-                "varies table values",
-                &[
-                    ("base color", "cool blue", ACCENT_BLUE),
-                    ("emissive", "warm readout", EMISSIVE_WARM),
-                    ("metallic", "sharp glint", GLINT),
-                ],
-                ACCENT_GREEN,
-            );
-            divergent_group(builder, alpha);
+            shared_text_material_group(builder, materials);
+            divergent_group(builder, materials, alpha);
         },
     );
     builder.build()
@@ -1290,13 +1354,7 @@ fn stats_block_row(builder: &mut LayoutBuilder, cells: &[(String, Color)]) {
     );
 }
 
-fn material_group(
-    builder: &mut LayoutBuilder,
-    title: &str,
-    subtitle: &str,
-    rows: &[(&str, &str, Color)],
-    border: Color,
-) {
+fn shared_text_material_group(builder: &mut LayoutBuilder, materials: &TextPanelMaterialHandles) {
     builder.with(
         // GROW height so both group columns fill the row and share a height;
         // the FIT cases inside still hug their content at the top.
@@ -1306,14 +1364,35 @@ fn material_group(
             .gap(ROW_GAP)
             .padding(Padding::all(Mm(2.0)))
             .background(Color::srgba(0.02, 0.03, 0.04, 0.30))
-            .border(Border::all(Mm(0.3), border))
+            .border(Border::all(Mm(0.3), ACCENT_GREEN))
             .corner_radius(CornerRadius::all(Mm(1.3))),
         |builder| {
-            builder.text(title, material_group_title_style());
-            builder.text(subtitle, small_style(TEXT_MUTED));
-            for (label, value, color) in rows {
-                material_case_block(builder, label, value, *color);
-            }
+            builder.text("Shared group", material_group_title_style());
+            builder.text("varies table values", small_style(TEXT_MUTED));
+            material_case_block_with_style(
+                builder,
+                "panel text material",
+                "inherited base",
+                body_style(TEXT_MAIN),
+            );
+            material_case_block_with_style(
+                builder,
+                "style color",
+                "cool blue",
+                body_style(ACCENT_BLUE).with_color(ACCENT_BLUE),
+            );
+            material_case_block_with_style(
+                builder,
+                "local material",
+                "emissive value",
+                body_style(EMISSIVE_WARM).with_material(materials.emissive.clone()),
+            );
+            material_case_block_with_style(
+                builder,
+                "local material",
+                "metallic glint",
+                body_style(GLINT).with_material(materials.metallic.clone()),
+            );
         },
     );
 }
@@ -1321,7 +1400,12 @@ fn material_group(
 // Each case stacks a muted caption above its value. The value owns the full
 // group width and wraps, so the long divergent-group strings cannot clip at the
 // card edge the way a fixed-label-width row did.
-fn material_case_block(builder: &mut LayoutBuilder, label: &str, value: &str, color: Color) {
+fn material_case_block_with_style(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    value: &str,
+    style: TextStyle,
+) {
     builder.with(
         El::column()
             .width(Sizing::GROW)
@@ -1333,21 +1417,23 @@ fn material_case_block(builder: &mut LayoutBuilder, label: &str, value: &str, co
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.text(label, small_style(TEXT_MUTED));
-            builder.text(value, body_style(color));
+            builder.text(value, style);
         },
     );
 }
 
 // The Divergent group authors text runs that actually carry the batch splitters,
 // so each one forms its own text batch (observable in `batch.batches` / the
-// ledger's `actual` text count). The default-style captions, the BothSides cull
-// run, and the live alpha run while the selector holds the panel-default Blend
-// share the panel's one shared text batch; the two cull splitters (FrontOnly,
-// BackOnly) always add two more, and the alpha run adds a fourth whenever the
-// selector picks a non-Blend mode — the ledger's Text=4.
-fn divergent_group(builder: &mut LayoutBuilder, alpha: AlphaMode) {
+// ledger's `actual` text count). The texture row splits by resource; the
+// cull-mode rows split by sidedness; the live alpha row splits only when the
+// selector leaves the panel-default Blend mode.
+fn divergent_group(
+    builder: &mut LayoutBuilder,
+    materials: &TextPanelMaterialHandles,
+    alpha: AlphaMode,
+) {
     builder.with(
-        // GROW height to match the Shared group; see `material_group`.
+        // GROW height to match the Shared group; see `shared_text_material_group`.
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
@@ -1360,7 +1446,7 @@ fn divergent_group(builder: &mut LayoutBuilder, alpha: AlphaMode) {
             builder.text("Divergent group", material_group_title_style());
             builder.text("splits compatibility", small_style(TEXT_MUTED));
             divergent_alpha_case(builder, alpha);
-            divergent_texture_case(builder);
+            divergent_texture_case(builder, materials);
             divergent_cull_case(builder);
         },
     );
@@ -1393,17 +1479,19 @@ fn alpha_mode_label(alpha: AlphaMode) -> &'static str {
         .map_or("custom", |(label, _)| *label)
 }
 
-// Texture split for text is deferred — text glyphs cannot carry a
-// `base_color_texture` until the texture feature lands (plan Phase 8). The SDF
-// panel demonstrates the texture splitter today; this stays a placeholder.
-fn divergent_texture_case(builder: &mut LayoutBuilder) {
+// Texture-backed text samples the material image across the run-local box UV,
+// and the texture resource forms its own compatibility batch.
+fn divergent_texture_case(builder: &mut LayoutBuilder, materials: &TextPanelMaterialHandles) {
     divergent_case_shell(
         builder,
         "texture",
         DIVERGENT_CASE_BG,
         TEXT_MUTED,
         |builder| {
-            builder.text("text texture: plan Phase 8", body_style(TEXT_MUTED));
+            builder.text(
+                "image glyphs",
+                body_style(TEXT_MAIN).with_material(materials.texture.clone()),
+            );
         },
     );
 }

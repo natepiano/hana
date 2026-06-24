@@ -15,8 +15,11 @@
 //             a handful of curves, not the whole path.
 //   path_records  — PackedPathRecord per packed path: design-space bounds, band table
 //             ranges, narrowest dilating stroke.
-//   uv_a    — fractional position inside the path bounds quad.
-//   uv_b    — (path index, run index) as floats, constant per quad.
+//   uv_a    — material box UV under vertex pulling, else fractional position
+//             inside the path bounds quad.
+//   uv_b    — path-coverage UV under vertex pulling, else (path index, run
+//             index) as floats, constant per quad.
+//   world.w — PathQuadRecord index under vertex pulling.
 //   per-run — material slot / render mode / OIT offset / AA flags from the
 //             PathRenderRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS, else from the
 //             material's PathUniform.
@@ -293,10 +296,24 @@ fn union_lane(terms: CoverageTerms) -> LaneTerms {
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PackedPathRecord>;
 
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+// Mirrors `PathQuadRecord` in `path/packing.rs` (std430, 64 B stride). The
+// fragment stage reads it so coverage UV and material box UV can diverge.
+struct PathQuadRecord {
+    rect_min: vec2<f32>,
+    rect_size: vec2<f32>,
+    uv_min: vec2<f32>,
+    uv_size: vec2<f32>,
+    box_uv_min: vec2<f32>,
+    box_uv_size: vec2<f32>,
+    packed_path_index: u32,
+    render_index: u32,
+    box_uv_flip_x: u32,
+}
+
 // Mirrors `PathRenderRecord` in `path/packing.rs` (std430, 96 B stride). Under the
 // vertex-pulling route a batch holds many runs, so the per-run values move
 // out of the material uniform into this table, indexed by the run index the
-// vertex stage forwards in `uv_b.y`.
+// vertex stage reaches through `PathQuadRecord::render_index`.
 struct PathRenderRecord {
     transform: mat4x4<f32>,
     material: u32,
@@ -306,6 +323,7 @@ struct PathRenderRecord {
     aa_flags: u32,
 }
 
+@group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathQuadRecord>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var<storage, read> run_records: array<PathRenderRecord>;
 
 // The index arrives in an interpolated varying that is constant across the
@@ -313,31 +331,48 @@ struct PathRenderRecord {
 // integer (478.9999 for 479.0) on long sliver quads, so recovery must round —
 // a floor() here reads the previous record and the quad renders another
 // path's coverage.
-fn render_index(path_uv: vec2<f32>) -> u32 {
-    return u32(path_uv.y + 0.5);
+fn instance_index(in: VertexOutput) -> u32 {
+    return u32(in.world_position.w + 0.5);
+}
+
+fn render_index(in: VertexOutput) -> u32 {
+    return instances[instance_index(in)].render_index;
 }
 #endif
 
-// uv_b.x carries the path table index; same rounding recovery as
-// render_index above.
-fn path_index(path_uv: vec2<f32>) -> u32 {
-    return u32(path_uv.x + 0.5);
+// Coverage UVs are separate from material sampling UVs under vertex pulling.
+fn coverage_uv(in: VertexOutput) -> vec2<f32> {
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    return in.uv_b;
+#else
+    return in.uv;
+#endif
+}
+
+fn path_index(in: VertexOutput) -> u32 {
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    return instances[instance_index(in)].packed_path_index;
+#else
+    // uv_b.x carries the path table index; same rounding recovery as
+    // render_index above.
+    return u32(in.uv_b.x + 0.5);
+#endif
 }
 
 // Per-run material-table slot: the run table under vertex pulling, invalid on
 // the per-run path.
-fn run_material_id(path_uv: vec2<f32>) -> u32 {
+fn run_material_id(in: VertexOutput) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[render_index(path_uv)].material;
+    return run_records[render_index(in)].material;
 #else
     return INVALID_GPU_MATERIAL_SLOT;
 #endif
 }
 
 // Per-run render mode (Text / PunchOut), sourced like `run_material_id`.
-fn run_render_mode(path_uv: vec2<f32>) -> u32 {
+fn run_render_mode(in: VertexOutput) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[render_index(path_uv)].render_mode;
+    return run_records[render_index(in)].render_mode;
 #else
     return uniforms.render_mode;
 #endif
@@ -345,9 +380,9 @@ fn run_render_mode(path_uv: vec2<f32>) -> u32 {
 
 // Per-run OIT z offset: the run table under vertex pulling, the material
 // uniform on the per-run path.
-fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
+fn run_oit_depth_offset(in: VertexOutput) -> f32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[render_index(path_uv)].oit_depth_offset;
+    return run_records[render_index(in)].oit_depth_offset;
 #else
     return uniforms.oit_depth_offset;
 #endif
@@ -355,9 +390,9 @@ fn run_oit_depth_offset(path_uv: vec2<f32>) -> f32 {
 
 // Per-run anti-alias mode bits (AA_FLAG_SUPERSAMPLE | AA_FLAG_BAND), sourced
 // like `run_material_id`.
-fn run_aa_flags(path_uv: vec2<f32>) -> u32 {
+fn run_aa_flags(in: VertexOutput) -> u32 {
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    return run_records[render_index(path_uv)].aa_flags;
+    return run_records[render_index(in)].aa_flags;
 #else
     var flags = 0u;
     if uniforms.supersample != 0u {
@@ -1434,10 +1469,10 @@ fn fragment(in: VertexOutput) {
 #ifdef VERTEX_UVS_B
     // The shadow map stores a binary silhouette, so one winding test answers
     // it: keep fragments inside the outline (punch-out runs invert the test).
-    let path = path_records[path_index(in.uv_b)];
-    let point = design_position(in.uv, path);
+    let path = path_records[path_index(in)];
+    let point = design_position(coverage_uv(in), path);
     let inside = winding_at(point, path) != 0;
-    if inside == (run_render_mode(in.uv_b) == RENDER_MODE_PUNCH_OUT) {
+    if inside == (run_render_mode(in) == RENDER_MODE_PUNCH_OUT) {
         discard;
     }
 #else
@@ -1460,12 +1495,13 @@ fn fragment(
     discard;
 #endif
 
-    let path = path_records[path_index(in.uv_b)];
+    let path = path_records[path_index(in)];
+    let path_uv = coverage_uv(in);
     // Diagnostic: paint line fragments with an upstream coverage input. The
     // derivatives are taken under the const-only gate (uniform control flow)
     // before the per-fragment min_feature branch.
     if LINE_DEBUG_MODE != 0 {
-        let dbg_point = design_position(in.uv, path);
+        let dbg_point = design_position(path_uv, path);
         let dbg_dx = dpdx(dbg_point);
         let dbg_dy = dpdy(dbg_point);
         if path.min_feature > 0.0 {
@@ -1485,7 +1521,7 @@ fn fragment(
             dbg_out.color = vec4<f32>(dbg_rgb, 1.0);
 #ifdef OIT_ENABLED
             var dbg_pos = in.position;
-            dbg_pos.z = max(dbg_pos.z + run_oit_depth_offset(in.uv_b), OIT_MIN_DEPTH);
+            dbg_pos.z = max(dbg_pos.z + run_oit_depth_offset(in), OIT_MIN_DEPTH);
             oit_draw(dbg_pos, dbg_out.color);
             discard;
 #endif
@@ -1493,18 +1529,23 @@ fn fragment(
         }
     }
     let coverage = render_coverage(
-        in.uv,
+        path_uv,
         path,
-        run_render_mode(in.uv_b),
-        run_aa_flags(in.uv_b),
+        run_render_mode(in),
+        run_aa_flags(in),
     );
 #ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     var pbr_input = pbr_input_from_material_table(
         in,
         is_front,
         true,
-        run_material_id(in.uv_b),
+        run_material_id(in),
     );
+    // The vertex stage parks this quad's record index in `world_position.w`;
+    // restore the homogeneous 1.0 so shadow sampling (which multiplies the full
+    // vec4 by the light's `clip_from_world`) lands at the fragment's world
+    // position instead of a per-record-displaced point.
+    pbr_input.world_position.w = 1.0;
     let final_alpha = coverage * pbr_input.material.base_color.a;
 #else
     let fill_color = uniforms.fill_color;
@@ -1544,7 +1585,7 @@ fn fragment(
         // Offset position.z so coplanar layers get distinct depths in the OIT
         // linked list; pipeline depth_bias does not affect in.position.z.
         var oit_pos = in.position;
-        oit_pos.z = max(oit_pos.z + run_oit_depth_offset(in.uv_b), OIT_MIN_DEPTH);
+        oit_pos.z = max(oit_pos.z + run_oit_depth_offset(in), OIT_MIN_DEPTH);
         oit_draw(oit_pos, out.color);
         discard;
     }

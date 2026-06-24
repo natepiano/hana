@@ -12,6 +12,7 @@ mod runtime;
 mod support;
 
 use bevy::prelude::*;
+pub(crate) use render::GlyphQuadExtents;
 pub(crate) use render::glyph_quad_extents;
 pub(crate) use runtime::GlyphCache;
 pub(crate) use runtime::PositionedGlyph;

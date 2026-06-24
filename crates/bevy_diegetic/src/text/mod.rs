@@ -33,6 +33,7 @@ pub use font::GlyphTypographyMetrics;
 pub use font::create_parley_measurer;
 pub(crate) use font::glyph_ink_extents;
 pub(crate) use slug::GlyphCache;
+pub(crate) use slug::GlyphQuadExtents;
 pub(crate) use slug::PositionedGlyph;
 pub(crate) use slug::PreparedTextRun;
 pub(crate) use slug::RunStorageKey;

@@ -16,6 +16,7 @@ use bevy::material::OpaqueRendererMethod;
 use bevy::mesh::UvChannel;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::AlphaMode;
+use bevy::prelude::Color;
 use bevy::prelude::Handle;
 use bevy::render::render_resource::Face;
 
@@ -364,24 +365,34 @@ pub(crate) fn apply_resource_compatibility_to_standard_material(
     material
         .base_color_texture
         .clone_from(&compatibility.base_color_texture);
-    material.base_color_channel = compatibility.base_color_channel.into();
+    material.base_color_channel = UvChannel::Uv0;
+    if compatibility.base_color_texture.is_some() {
+        material.base_color = Color::WHITE;
+    }
     material
         .emissive_texture
         .clone_from(&compatibility.emissive_texture);
-    material.emissive_channel = compatibility.emissive_channel.into();
+    material.emissive_channel = UvChannel::Uv0;
+    if compatibility.emissive_texture.is_some() {
+        material.emissive = Color::WHITE.into();
+    }
     material
         .metallic_roughness_texture
         .clone_from(&compatibility.metallic_roughness_texture);
-    material.metallic_roughness_channel = compatibility.metallic_roughness_channel.into();
+    material.metallic_roughness_channel = UvChannel::Uv0;
+    if compatibility.metallic_roughness_texture.is_some() {
+        material.metallic = 1.0;
+        material.perceptual_roughness = 1.0;
+    }
     material
         .normal_map_texture
         .clone_from(&compatibility.normal_map_texture);
-    material.normal_map_channel = compatibility.normal_map_channel.into();
+    material.normal_map_channel = UvChannel::Uv0;
     material.flip_normal_map_y = compatibility.flip_normal_map_y;
     material
         .occlusion_texture
         .clone_from(&compatibility.occlusion_texture);
-    material.occlusion_channel = compatibility.occlusion_channel.into();
+    material.occlusion_channel = UvChannel::Uv0;
     material.depth_map.clone_from(&compatibility.depth_map);
     material
 }
@@ -433,9 +444,12 @@ mod tests {
     }
 
     #[test]
-    fn apply_resource_compatibility_copies_texture_handles_and_channels() {
+    fn apply_resource_compatibility_copies_textures_and_routes_box_uv() {
         let base = StandardMaterial {
             base_color: Color::srgb(0.1, 0.2, 0.3),
+            emissive: Color::srgb(0.4, 0.5, 0.6).into(),
+            metallic: 0.25,
+            perceptual_roughness: 0.5,
             ..Default::default()
         };
         let source = StandardMaterial {
@@ -457,8 +471,25 @@ mod tests {
 
         let patched = apply_resource_compatibility_to_standard_material(&base, &compatibility);
 
-        assert_eq!(ResourceCompatibility::from(&patched), compatibility);
-        assert_eq!(patched.base_color, base.base_color);
+        assert_eq!(patched.base_color_texture, compatibility.base_color_texture);
+        assert_eq!(patched.emissive_texture, compatibility.emissive_texture);
+        assert_eq!(
+            patched.metallic_roughness_texture,
+            compatibility.metallic_roughness_texture
+        );
+        assert_eq!(patched.normal_map_texture, compatibility.normal_map_texture);
+        assert_eq!(patched.occlusion_texture, compatibility.occlusion_texture);
+        assert_eq!(patched.depth_map, compatibility.depth_map);
+
+        assert_eq!(patched.base_color_channel, UvChannel::Uv0);
+        assert_eq!(patched.emissive_channel, UvChannel::Uv0);
+        assert_eq!(patched.metallic_roughness_channel, UvChannel::Uv0);
+        assert_eq!(patched.normal_map_channel, UvChannel::Uv0);
+        assert_eq!(patched.occlusion_channel, UvChannel::Uv0);
+        assert_eq!(patched.base_color, Color::WHITE);
+        assert_eq!(patched.emissive, Color::WHITE.into());
+        assert_eq!(patched.metallic.to_bits(), 1.0_f32.to_bits());
+        assert_eq!(patched.perceptual_roughness.to_bits(), 1.0_f32.to_bits());
     }
 
     #[test]

@@ -159,8 +159,9 @@ impl PackedPathRecord {
 
 /// GPU record for one batched path quad. The vertex-pulling shader expands
 /// each record into four corners: positions from `rect_min`/`rect_size` in run
-/// layout space, padded path UVs from `uv_min`/`uv_size`, the shared-atlas
-/// slot through `packed_path_index`, and the owning run through `render_index`.
+/// layout space, padded path UVs from `uv_min`/`uv_size`, material-sampling UVs
+/// from `box_uv_min`/`box_uv_size`, the shared-atlas slot through
+/// `packed_path_index`, and the owning run through `render_index`.
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct PathQuadRecord {
     /// Quad minimum corner (left, bottom) in run layout space, clipped.
@@ -171,10 +172,16 @@ pub(crate) struct PathQuadRecord {
     pub uv_min:            Vec2,
     /// Padded path UV extent from `uv_min` toward (right, bottom).
     pub uv_size:           Vec2,
+    /// Material box UV at the quad's top-left corner.
+    pub box_uv_min:        Vec2,
+    /// Material box UV extent from `box_uv_min` toward (right, bottom).
+    pub box_uv_size:       Vec2,
     /// Shared-atlas [`PackedPathRecord`] index.
     pub packed_path_index: u32,
     /// [`PathRenderRecord`] index within the same batch.
     pub render_index:      u32,
+    /// Non-zero flips material box UVs horizontally for this quad.
+    pub box_uv_flip_x:     u32,
 }
 
 /// GPU record for one text run or panel-shape primitive inside a path batch.
@@ -201,7 +208,7 @@ pub(crate) struct PathRenderRecord {
 // `ShaderSize` measures the encase layout, not the Rust layout.
 const _: () = assert!(CurveRecord::SHADER_SIZE.get() == 80);
 const _: () = assert!(PackedPathRecord::SHADER_SIZE.get() == 48);
-const _: () = assert!(PathQuadRecord::SHADER_SIZE.get() == 40);
+const _: () = assert!(PathQuadRecord::SHADER_SIZE.get() == 64);
 const _: () = assert!(PathRenderRecord::SHADER_SIZE.get() == 96);
 
 /// One analytic path's packed curve and band data for the shader.
@@ -618,8 +625,11 @@ mod tests {
             rect_size: Vec2::new(seed + 1.0, seed + 1.5),
             uv_min: Vec2::new(-0.0625, -0.0625),
             uv_size: Vec2::new(1.125, 1.125),
+            box_uv_min: Vec2::ZERO,
+            box_uv_size: Vec2::ONE,
             packed_path_index,
             render_index,
+            box_uv_flip_x: 0,
         }
     }
 
@@ -641,14 +651,14 @@ mod tests {
     }
 
     #[test]
-    fn glyph_instance_records_round_trip_through_encase_at_40_byte_stride() {
+    fn glyph_instance_records_round_trip_through_encase_at_64_byte_stride() {
         let records = vec![glyph_record(1.0, 7, 0), glyph_record(-2.0, 11, 1)];
         let mut encoded = StorageBuffer::new(Vec::<u8>::new());
         encoded.write(&records).expect("records should encode");
         assert_eq!(
             encoded.as_ref().len(),
-            80,
-            "two records at a 40-byte stride"
+            128,
+            "two records at a 64-byte stride"
         );
 
         let mut decoded: Vec<PathQuadRecord> = Vec::new();

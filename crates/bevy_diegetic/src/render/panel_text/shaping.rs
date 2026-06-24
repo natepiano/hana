@@ -36,7 +36,13 @@ pub(super) fn shape_panel_text_children(
             )>,
         ),
     >,
-    texts: Query<(&TextContent, &TextStyle, &PanelTextLayout, &ChildOf)>,
+    mut texts: Query<(
+        Ref<TextContent>,
+        Ref<TextStyle>,
+        Ref<PanelTextLayout>,
+        &ChildOf,
+        Option<&mut PreparedPanelText>,
+    )>,
     font_registry: Res<FontRegistry>,
     shaping_cx: Res<TextShapingContext>,
     cache: Res<ShapedTextCache>,
@@ -59,7 +65,8 @@ pub(super) fn shape_panel_text_children(
     }
 
     for entity in to_process {
-        let Ok((world_text, style, panel_text_child, child_of)) = texts.get(entity) else {
+        let Ok((world_text, style, panel_text_child, child_of, prepared)) = texts.get_mut(entity)
+        else {
             continue;
         };
 
@@ -69,6 +76,17 @@ pub(super) fn shape_panel_text_children(
         }
 
         let config = style.for_shaping(Anchor::Center);
+        if let Some(mut prepared) = prepared
+            && text_render_only_refresh(
+                &world_text,
+                &style,
+                &panel_text_child,
+                &config,
+                &mut prepared,
+            )
+        {
+            continue;
+        }
         let placement = QuadPlacement {
             bounds:    panel_text_child.bounds,
             scale:     Vec2::new(panel_text_child.scale_x, panel_text_child.scale_y),
@@ -95,6 +113,36 @@ pub(super) fn shape_panel_text_children(
     perf.panel_text.parley_ms = aggregate.shape_ms;
     perf.panel_text.shaped_panels = shaped_panels.len();
     perf.panel_text.total_ms = perf.panel_text.shape_ms + perf.panel_text.mesh_build_ms;
+}
+
+fn text_render_only_refresh(
+    world_text: &Ref<'_, TextContent>,
+    style: &Ref<'_, TextStyle>,
+    panel_text_child: &Ref<'_, PanelTextLayout>,
+    config: &TextStyle,
+    prepared: &mut PreparedPanelText,
+) -> bool {
+    if world_text.is_changed() || panel_text_child.is_changed() {
+        return false;
+    }
+    if !style.is_changed() || !prepared.style_gate.gating_eq(config) {
+        return false;
+    }
+
+    let render_mode = config.render_mode();
+    let shadow_mode = config.shadow_mode();
+    let fill_color = config.color();
+    let render_fields_changed = prepared.render_mode != render_mode
+        || prepared.shadow_mode != shadow_mode
+        || prepared.fill_color != fill_color;
+    if render_fields_changed {
+        prepared.style_gate = config.clone();
+        prepared.render_mode = render_mode;
+        prepared.shadow_mode = shadow_mode;
+        prepared.fill_color = fill_color;
+        prepared.render_only = true;
+    }
+    true
 }
 
 /// Placement parameters that position glyphs into panel-local space.
@@ -173,10 +221,12 @@ fn build_panel_text(
     (
         Some(PreparedPanelText {
             prepared,
+            style_gate: config.clone(),
             render_mode: config.render_mode(),
             shadow_mode: config.shadow_mode(),
             fill_color: config.color(),
             clip_rect,
+            render_only: false,
         }),
         stats,
     )

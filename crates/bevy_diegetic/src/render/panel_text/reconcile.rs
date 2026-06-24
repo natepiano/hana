@@ -368,15 +368,15 @@ struct UpdateReusedChild<'a, 'w, 's> {
     label_sidedness: Option<Sidedness>,
 }
 
-/// Writes each gated component of a reused panel-text child only when it
-/// differs, so an unchanged run stays un-`Changed` and
-/// `shape_panel_text_children` plus the mesh rebuild skip it.
+/// Writes each component of a reused panel-text child only when it differs, so
+/// an unchanged run stays un-`Changed`.
 ///
-/// `gating_eq` excludes render-context fields and compares floats by bits;
-/// the cascade overrides (alpha, material, lighting, sidedness) are gated on
-/// their own because `gating_eq` ignores them. Writing one unconditionally
-/// would re-fire `Changed<Resolved<A>>` on every run and defeat the per-run
-/// short-circuit downstream.
+/// `shape_panel_text_children` classifies `Changed<TextStyle>` with
+/// `TextStyle::gating_eq`: geometry fields rebuild glyphs, while render-only
+/// fields refresh `PreparedPanelText` and material-table rows. Cascade
+/// overrides (alpha, material, lighting, sidedness) are gated on their own
+/// because writing one unconditionally would re-fire `Changed<Resolved<A>>` on
+/// every run and defeat the per-run short-circuit downstream.
 fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     let UpdateReusedChild {
         commands,
@@ -394,7 +394,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     if reusable.text.text() != text {
         child.insert(TextContent::new(text.to_owned()));
     }
-    if !reusable.style.gating_eq(&style) {
+    if reusable.style != &style {
         child.insert(style);
     }
     if !reusable.layout.gating_eq(&layout) {

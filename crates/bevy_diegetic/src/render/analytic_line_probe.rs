@@ -253,8 +253,11 @@ fn build_line(
             1.0 + 2.0 * PADDING_DESIGN_UNITS / design.x,
             1.0 + 2.0 * PADDING_DESIGN_UNITS / design.y,
         ),
+        box_uv_min:        Vec2::ZERO,
+        box_uv_size:       Vec2::ONE,
         packed_path_index: 0,
         render_index:      0,
+        box_uv_flip_x:     0,
     };
 
     let run_transform = place
