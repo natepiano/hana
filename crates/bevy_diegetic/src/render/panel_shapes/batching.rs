@@ -19,7 +19,6 @@ use bevy::math::Vec3A;
 use bevy::math::Vec4;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
-use bevy::render::render_resource::Face;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToF32;
@@ -531,8 +530,8 @@ struct PanelShapeMaterialIdentity {
 enum PanelShapeBaseColorIdentity {
     /// The source uses the default white shape color.
     Default,
-    /// The source authored a non-default color on this source entity.
-    Source(Entity, PanelShapeColorDiscriminator),
+    /// The source authored a non-default color.
+    Source(PanelShapeColorDiscriminator),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -549,20 +548,17 @@ impl PanelShapeMaterialIdentity {
     ) -> Self {
         Self {
             source_material: source_material.id(),
-            base_color:      PanelShapeBaseColorIdentity::from_color(
-                source.source_entity,
-                source.primitive.color(),
-            ),
+            base_color:      PanelShapeBaseColorIdentity::from_color(source.primitive.color()),
         }
     }
 }
 
 impl PanelShapeBaseColorIdentity {
-    fn from_color(source_entity: Entity, color: Color) -> Self {
+    fn from_color(color: Color) -> Self {
         if default_shape_color(color) {
             Self::Default
         } else {
-            Self::Source(source_entity, color.into())
+            Self::Source(color.into())
         }
     }
 }
@@ -927,8 +923,8 @@ fn build_panel_line_group(
         source: first.primitive.source_key(),
     };
     let alpha_mode = base.alpha_mode;
-    let lighting = shape_lighting(&base, context.panel_lighting);
-    let sidedness = shape_sidedness(&base, context.panel_sidedness);
+    let lighting = context.panel_lighting;
+    let sidedness = context.panel_sidedness;
     let input = PanelShapeMaterialSlotInput {
         key: PanelShapeMaterialSourceKey {
             shape: first.source_entity,
@@ -1007,22 +1003,6 @@ where
         .material()
         .or_else(|| context.panel.tree().element_material(source.element_index))
         .unwrap_or(&context.shape_material)
-}
-
-const fn shape_lighting(material: &StandardMaterial, fallback: Lighting) -> Lighting {
-    if material.unlit {
-        Lighting::Unlit
-    } else {
-        fallback
-    }
-}
-
-const fn shape_sidedness(material: &StandardMaterial, fallback: Sidedness) -> Sidedness {
-    match (material.double_sided, material.cull_mode) {
-        (true, None) => Sidedness::BothSides,
-        (false, Some(Face::Front)) => Sidedness::BackOnly,
-        _ => fallback,
-    }
 }
 
 fn panel_shape_path_members<'a>(
@@ -2544,6 +2524,13 @@ mod tests {
             line: &red_again,
             primitive: &red_again.primitives()[0],
         };
+        let red_different_source = ShapePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            source_entity: Entity::from_bits(11),
+            line: &red_again,
+            primitive: &red_again.primitives()[0],
+        };
         let blue_same_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
@@ -2562,6 +2549,10 @@ mod tests {
         assert_eq!(
             PanelShapeMergeKey::from_source(&red_source, &material),
             PanelShapeMergeKey::from_source(&red_same_source, &material),
+        );
+        assert_eq!(
+            PanelShapeMergeKey::from_source(&red_source, &material),
+            PanelShapeMergeKey::from_source(&red_different_source, &material),
         );
         assert_ne!(
             PanelShapeMergeKey::from_source(&red_source, &material),
@@ -2606,16 +2597,41 @@ mod tests {
     }
 
     #[test]
-    fn default_material_sidedness_uses_panel_sidedness() {
-        let material = StandardMaterial::default();
+    fn material_slot_input_uses_cascade_lighting_and_sidedness() {
+        let mut base = StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            unlit: true,
+            ..Default::default()
+        };
+        render::apply_sidedness(&mut base, Sidedness::BackOnly);
+        let color = Color::srgb(0.2, 0.4, 0.6);
+        let input = PanelShapeMaterialSlotInput {
+            key:           PanelShapeMaterialSourceKey {
+                shape: Entity::from_bits(10),
+            },
+            base_material: &base,
+            fill_color:    color,
+            alpha_mode:    base.alpha_mode,
+            lighting:      Lighting::Lit,
+            sidedness:     Sidedness::BothSides,
+        };
+        let mut expected_material = base.clone();
+        expected_material.base_color = color;
+        expected_material.unlit = false;
+        render::apply_sidedness(&mut expected_material, Sidedness::BothSides);
+        let source_candidate = MaterialSlotCandidate::from(&base);
+        let expected_candidate = MaterialSlotCandidate::from(&expected_material);
 
+        let candidate = input.material_slot_candidate();
+
+        assert_eq!(candidate.values, expected_candidate.values);
         assert_eq!(
-            shape_sidedness(&material, Sidedness::BothSides),
-            Sidedness::BothSides
+            candidate.pipeline_compatibility,
+            expected_candidate.pipeline_compatibility,
         );
-        assert_eq!(
-            shape_sidedness(&material, Sidedness::BackOnly),
-            Sidedness::BackOnly
+        assert_ne!(
+            candidate.pipeline_compatibility,
+            source_candidate.pipeline_compatibility,
         );
     }
 
