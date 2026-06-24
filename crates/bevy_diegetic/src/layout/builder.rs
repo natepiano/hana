@@ -324,9 +324,11 @@ impl<L> El<L> {
     ///
     /// Controls surface properties (roughness, metallic, reflectance, etc.)
     /// for backgrounds, borders, and element-owned panel-shape primitives on
-    /// this element. This is the element-local source above the panel
-    /// `.material(...)` handle and the global `SdfMaterial`/`ShapeMaterial`
-    /// cascade defaults. If the element also has a `.background()` color, that
+    /// this element. For panel-shape primitives, this is the element-local
+    /// source above the panel `.shape_material(...)` handle and the global
+    /// `ShapeMaterial` cascade default. For backgrounds and borders, it is
+    /// above the panel `.material(...)` handle and the global `SdfMaterial`
+    /// cascade default. If the element also has a `.background()` color, that
     /// color overrides the material's `base_color`. Create the material asset
     /// once through `Assets<StandardMaterial>`; do not create assets per frame.
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {

@@ -1130,25 +1130,21 @@ pub(super) fn seed_panel_overrides(
         },
         TextMaterial,
     );
-    let shape_material = panel
-        .shape_material()
-        .or_else(|| panel.material())
-        .cloned()
-        .map_or_else(
-            || {
-                cascade::resolve_walk::<ShapeMaterial>(
-                    entity,
-                    &shape_material_overrides,
-                    &parents,
-                    shape_material_default
-                        .as_deref()
-                        .cloned()
-                        .unwrap_or_default()
-                        .0,
-                )
-            },
-            ShapeMaterial,
-        );
+    let shape_material = panel.shape_material().cloned().map_or_else(
+        || {
+            cascade::resolve_walk::<ShapeMaterial>(
+                entity,
+                &shape_material_overrides,
+                &parents,
+                shape_material_default
+                    .as_deref()
+                    .cloned()
+                    .unwrap_or_default()
+                    .0,
+            )
+        },
+        ShapeMaterial,
+    );
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert((
         Resolved(FontUnit(font_unit)),
@@ -1168,11 +1164,7 @@ pub(super) fn seed_panel_overrides(
     if panel.text_material().is_some() {
         cascade::apply_cascade_override(&mut entity_commands, text_material);
     }
-    if panel
-        .shape_material()
-        .or_else(|| panel.material())
-        .is_some()
-    {
+    if panel.shape_material().is_some() {
         cascade::apply_cascade_override(&mut entity_commands, shape_material);
     }
     if is_screen {
@@ -1206,7 +1198,7 @@ pub(super) fn sync_panel_material_overrides(
                 cascade::remove_cascade_override::<TextMaterial>(&mut entity_commands);
             },
         }
-        match panel.shape_material().or_else(|| panel.material()).cloned() {
+        match panel.shape_material().cloned() {
             Some(material) => {
                 cascade::apply_cascade_override(&mut entity_commands, ShapeMaterial(material));
             },

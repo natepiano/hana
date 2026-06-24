@@ -23,6 +23,7 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
+use bevy_diegetic::LineStyle;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelCircle;
@@ -74,14 +75,14 @@ const AUTHORED_PANELS: usize = 4;
 // own copy in the upper-right corner; the global "authored content" totals are
 // the sum of these four, so per-panel and aggregate readouts stay consistent.
 // One El background = one sdf fill, one El border = one sdf border, one
-// `builder.text` = one text run, one `PanelDraw::shapes` = one shape group.
+// `builder.text` = one text run, one panel-shape render record = one path row.
 const SDF_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        4,
     sdf_borders:      5,
     material_slots:   9,
     readout_reason:   "value share / texture split",
     text_runs:        10,
-    shape_groups:     0,
+    shape_records:    0,
     shape_primitives: 0,
 };
 const TEXT_PANEL_STATS: PanelStats = PanelStats {
@@ -90,17 +91,17 @@ const TEXT_PANEL_STATS: PanelStats = PanelStats {
     material_slots:   12,
     readout_reason:   "value share / texture split",
     text_runs:        23,
-    shape_groups:     0,
+    shape_records:    0,
     shape_primitives: 0,
 };
 const SHAPE_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        3,
     sdf_borders:      4,
-    material_slots:   7,
-    readout_reason:   "path records share",
+    material_slots:   6,
+    readout_reason:   "shape rows share; texture splits",
     text_runs:        8,
-    shape_groups:     3,
-    shape_primitives: 7,
+    shape_records:    6,
+    shape_primitives: 11,
 };
 const MIXED_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        5,
@@ -108,7 +109,7 @@ const MIXED_PANEL_STATS: PanelStats = PanelStats {
     material_slots:   7,
     readout_reason:   "families split",
     text_runs:        15,
-    shape_groups:     1,
+    shape_records:    1,
     shape_primitives: 3,
 };
 
@@ -124,10 +125,10 @@ const AUTHORED_TEXT_RUNS: usize = SDF_PANEL_STATS.text_runs
     + TEXT_PANEL_STATS.text_runs
     + SHAPE_PANEL_STATS.text_runs
     + MIXED_PANEL_STATS.text_runs;
-const AUTHORED_SHAPE_GROUPS: usize = SDF_PANEL_STATS.shape_groups
-    + TEXT_PANEL_STATS.shape_groups
-    + SHAPE_PANEL_STATS.shape_groups
-    + MIXED_PANEL_STATS.shape_groups;
+const AUTHORED_SHAPE_RECORDS: usize = SDF_PANEL_STATS.shape_records
+    + TEXT_PANEL_STATS.shape_records
+    + SHAPE_PANEL_STATS.shape_records
+    + MIXED_PANEL_STATS.shape_records;
 const AUTHORED_SHAPE_PRIMITIVES: usize = SDF_PANEL_STATS.shape_primitives
     + TEXT_PANEL_STATS.shape_primitives
     + SHAPE_PANEL_STATS.shape_primitives
@@ -183,7 +184,7 @@ const EXPECTED_BATCHES: [PanelExpected; 8] = [
     PanelExpected {
         label: "Shapes",
         text:  1,
-        shape: 1,
+        shape: 3,
         sdf:   1,
     },
     PanelExpected {
@@ -313,8 +314,8 @@ struct PanelStats {
     readout_reason:   &'static str,
     /// `builder.text` runs.
     text_runs:        usize,
-    /// `PanelDraw::shapes` layers, each one analytic shape group.
-    shape_groups:     usize,
+    /// Panel-shape `PathRenderRecord` rows predicted for this panel.
+    shape_records:    usize,
     /// Total stroked/filled marks across all shape groups.
     shape_primitives: usize,
 }
@@ -325,7 +326,7 @@ impl PanelStats {
 
     /// SDF surfaces, text runs, and analytic path groups rendered by this panel.
     const fn rendered_records(self) -> usize {
-        self.sdf_surfaces() + self.text_runs + self.shape_groups
+        self.sdf_surfaces() + self.text_runs + self.shape_records
     }
 }
 
@@ -419,6 +420,37 @@ impl TextPanelMaterialHandles {
             emissive:      materials.add(text_emissive_material()),
             metallic:      materials.add(text_metallic_material()),
             texture:       materials.add(text_texture_material(image)),
+        }
+    }
+}
+
+/// Registered panel-shape source material handles used by the shape validation panel.
+#[derive(Clone)]
+struct ShapePanelMaterialHandles {
+    /// Panel-level shape material default.
+    panel_default: Handle<StandardMaterial>,
+    /// Shape-local emissive material used through `PanelLine::material`.
+    local_line:    Handle<StandardMaterial>,
+    /// Scalar material used through `LineStyle::material`.
+    style_line:    Handle<StandardMaterial>,
+    /// Scalar material used through `PanelCircle::material`.
+    circle:        Handle<StandardMaterial>,
+    /// Source material whose alpha mode splits the shape batch.
+    alpha_split:   Handle<StandardMaterial>,
+    /// Source material whose texture resource splits the shape batch.
+    texture:       Handle<StandardMaterial>,
+}
+
+impl ShapePanelMaterialHandles {
+    /// Registers the panel-shape validation source materials once.
+    fn new(materials: &mut Assets<StandardMaterial>, image: Handle<Image>) -> Self {
+        Self {
+            panel_default: materials.add(shape_panel_default_material()),
+            local_line:    materials.add(shape_local_line_material()),
+            style_line:    materials.add(shape_style_line_material()),
+            circle:        materials.add(shape_circle_material()),
+            alpha_split:   materials.add(shape_alpha_split_material()),
+            texture:       materials.add(shape_texture_material(image)),
         }
     }
 }
@@ -526,6 +558,7 @@ fn spawn_validation_panels(
     let sdf_materials =
         SdfSurfaceMaterialHandles::new(&mut materials, sdf_fill_image.clone(), alpha);
     let text_materials = TextPanelMaterialHandles::new(&mut materials, sdf_fill_image.clone());
+    let shape_materials = ShapePanelMaterialHandles::new(&mut materials, sdf_fill_image.clone());
     commands.insert_resource(sdf_materials.clone());
     commands.insert_resource(text_materials.clone());
     let panels = [
@@ -533,18 +566,25 @@ fn spawn_validation_panels(
             "sdf-surfaces",
             build_sdf_surface_panel(&sdf_materials),
             None,
+            None,
         ),
         (
             "text-materials",
             build_text_panel(&text_materials, alpha),
             Some(text_materials.panel_default.clone()),
+            None,
         ),
-        ("analytic-shapes", build_shape_panel(), None),
-        ("mixed-stack", build_mixed_panel(), None),
+        (
+            "analytic-shapes",
+            build_shape_panel(&shape_materials),
+            None,
+            Some(shape_materials.panel_default.clone()),
+        ),
+        ("mixed-stack", build_mixed_panel(), None, None),
     ];
-    for (index, (name, tree, text_material)) in panels.into_iter().enumerate() {
+    for (index, (name, tree, text_material, shape_material)) in panels.into_iter().enumerate() {
         let (x, y) = panel_grid_position(index);
-        let panel = validation_panel(tree, index, text_material, &mut materials);
+        let panel = validation_panel(tree, index, text_material, shape_material, &mut materials);
         match panel {
             Ok(panel) => {
                 let mut entity = commands.spawn((
@@ -654,6 +694,7 @@ fn validation_panel(
     tree: LayoutTree,
     index: usize,
     text_material: Option<Handle<StandardMaterial>>,
+    shape_material: Option<Handle<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     let mut material = default_panel_material();
@@ -668,6 +709,10 @@ fn validation_panel(
         .surface_shadow(SurfaceShadow::On);
     let builder = match text_material {
         Some(material) => builder.text_material(material),
+        None => builder,
+    };
+    let builder = match shape_material {
+        Some(material) => builder.shape_material(material),
         None => builder,
     };
     if index == 3 {
@@ -845,7 +890,7 @@ fn validation_stats_sections(
                 StatsPanelRow::new("sdf borders", AUTHORED_SDF_BORDERS.to_string())
                     .detail("fills and borders should become SDF batch records"),
                 StatsPanelRow::new("text runs", AUTHORED_TEXT_RUNS.to_string()),
-                StatsPanelRow::new("shape groups", AUTHORED_SHAPE_GROUPS.to_string()),
+                StatsPanelRow::new("shape records", AUTHORED_SHAPE_RECORDS.to_string()),
                 StatsPanelRow::new("shape primitives", AUTHORED_SHAPE_PRIMITIVES.to_string())
                     .detail("lines, arrows, circles, dividers"),
             ],
@@ -1150,6 +1195,57 @@ fn text_texture_material(image: Handle<Image>) -> StandardMaterial {
     material
 }
 
+fn shape_panel_default_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.08, 0.10, 0.13);
+    material.metallic = 0.0;
+    material.perceptual_roughness = 0.42;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn shape_local_line_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.05, 0.06, 0.02);
+    material.emissive = EMISSIVE_WARM.to_linear();
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn shape_style_line_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = GLINT;
+    material.metallic = 1.0;
+    material.perceptual_roughness = 0.24;
+    material.reflectance = 0.8;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn shape_circle_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::srgb(0.12, 0.08, 0.18);
+    material.perceptual_roughness = 0.72;
+    material.reflectance = 0.28;
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
+fn shape_alpha_split_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = ACCENT_RED;
+    material.alpha_mode = AlphaMode::Add;
+    material
+}
+
+fn shape_texture_material(image: Handle<Image>) -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = Color::WHITE;
+    material.base_color_texture = Some(image);
+    material.alpha_mode = AlphaMode::Blend;
+    material
+}
+
 fn build_text_panel(materials: &TextPanelMaterialHandles, alpha: AlphaMode) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
@@ -1174,34 +1270,76 @@ fn build_text_panel(materials: &TextPanelMaterialHandles, alpha: AlphaMode) -> L
     builder.build()
 }
 
-fn build_shape_panel() -> LayoutTree {
+fn build_shape_panel(materials: &ShapePanelMaterialHandles) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
         "Analytic shapes",
-        "groups own primitives",
+        "source materials share or split",
         SHAPE_PANEL_STATS,
     );
     builder.with(
-        El::column()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
             .gap(ROW_GAP),
         |builder| {
-            shape_group_card(builder, 0, "Arrow shape", "line + arrow cap", ACCENT_BLUE);
-            shape_group_card(
-                builder,
-                1,
-                "Marker shape",
-                "circle + guide line",
-                ACCENT_GREEN,
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
+                |builder| {
+                    shape_group_card(
+                        builder,
+                        materials,
+                        0,
+                        "panel default",
+                        "shape_material",
+                        ACCENT_BLUE,
+                    );
+                    shape_group_card(
+                        builder,
+                        materials,
+                        1,
+                        "line local",
+                        "PanelLine::material",
+                        ACCENT_GREEN,
+                    );
+                    shape_group_card(
+                        builder,
+                        materials,
+                        2,
+                        "line style",
+                        "LineStyle::material",
+                        ACCENT_YELLOW,
+                    );
+                },
             );
-            shape_group_card(
-                builder,
-                2,
-                "Callout shape",
-                "line + two end caps",
-                ACCENT_YELLOW,
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
+                |builder| {
+                    shape_group_card(
+                        builder,
+                        materials,
+                        3,
+                        "circle local",
+                        "PanelCircle::material",
+                        ACCENT_BLUE,
+                    );
+                    shape_group_card(builder, materials, 4, "alpha split", "Add mode", ACCENT_RED);
+                    shape_group_card(
+                        builder,
+                        materials,
+                        5,
+                        "texture split",
+                        "texture resource splits",
+                        ACCENT_GREEN,
+                    );
+                },
             );
         },
     );
@@ -1248,8 +1386,8 @@ fn build_mixed_panel() -> LayoutTree {
             );
             mixed_shape_row(
                 builder,
-                "Shape group",
-                "line + caps",
+                "Shape default",
+                "global/default",
                 "3 primitives",
                 ACCENT_RED,
             );
@@ -1322,7 +1460,7 @@ fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
                 &[
                     (format!("sdf {}", stats.sdf_surfaces()), ACCENT_BLUE),
                     (format!("text {}", stats.text_runs), ACCENT_GREEN),
-                    (format!("shape {}", stats.shape_groups), ACCENT_YELLOW),
+                    (format!("shape {}", stats.shape_records), ACCENT_YELLOW),
                 ],
             );
             stats_block_row(
@@ -1693,7 +1831,11 @@ fn image_fill_material(image: Handle<Image>) -> StandardMaterial {
 // strip element to the right of the label, so they resolve against that
 // element's local space: every row spans `start(3)` to `end(6)`, vertically
 // centered, which makes all three lines the same length regardless of width.
-fn shape_strip(index: usize, color: Color) -> Vec<bevy_diegetic::PanelShape> {
+fn shape_strip(
+    materials: &ShapePanelMaterialHandles,
+    index: usize,
+    color: Color,
+) -> Vec<bevy_diegetic::PanelShape> {
     // A fresh line spanning the strip width, built per row because `PanelLine`
     // and `PanelPoint` move on each builder call. The end inset varies: a
     // centered end cap (circle/diamond) extends half its size past its end
@@ -1707,26 +1849,60 @@ fn shape_strip(index: usize, color: Color) -> Vec<bevy_diegetic::PanelShape> {
         .color(color)
     };
     match index {
-        // Arrow shape: one stroked line with an arrow end cap.
+        // Panel-level shape material default: no local source handle.
         0 => vec![
             span(3.6)
                 .width(Mm(0.5))
                 .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2))
                 .into(),
         ],
-        // Marker shape: a guide line ending in a filled circle marker.
+        // Shape-local material through `PanelLine::material`.
         1 => vec![
             span(6.0)
                 .width(Mm(0.45))
+                .material(materials.local_line.clone())
                 .end_cap(CalloutCap::circle().radius(2.4))
                 .into(),
         ],
-        // Callout shape: one line bracketed by a start cap and an end cap.
+        // Shape-local material through `LineStyle::material`.
+        2 => vec![
+            PanelLine::new(
+                PanelPoint::new(PanelCoord::start(Mm(3.0)), PanelCoord::percent(0.5)),
+                PanelPoint::new(PanelCoord::end(Mm(6.0)), PanelCoord::percent(0.5)),
+            )
+            .style(
+                LineStyle::default()
+                    .width(Mm(0.4))
+                    .color(color)
+                    .material(materials.style_line.clone())
+                    .start_cap(CalloutCap::circle().radius(1.8))
+                    .end_cap(CalloutCap::diamond().width(3.0).height(3.0)),
+            )
+            .into(),
+        ],
+        // Shape-local material through `PanelCircle::material`.
+        3 => vec![
+            PanelCircle::new(
+                PanelPoint::new(PanelCoord::percent(0.5), PanelCoord::percent(0.5)),
+                Mm(4.0),
+            )
+            .color(color)
+            .material(materials.circle.clone())
+            .into(),
+        ],
+        // Material alpha mode is a pipeline splitter.
+        4 => vec![
+            span(5.0)
+                .width(Mm(0.62))
+                .material(materials.alpha_split.clone())
+                .into(),
+        ],
+        // Base-color texture samples across the shape-local 0..1 box UV.
         _ => vec![
-            span(6.0)
-                .width(Mm(0.4))
-                .start_cap(CalloutCap::circle().radius(1.8))
-                .end_cap(CalloutCap::diamond().width(3.0).height(3.0))
+            span(5.0)
+                .width(Mm(1.0))
+                .material(materials.texture.clone())
+                .end_cap(CalloutCap::square().width(3.0).height(3.0))
                 .into(),
         ],
     }
@@ -1734,6 +1910,7 @@ fn shape_strip(index: usize, color: Color) -> Vec<bevy_diegetic::PanelShape> {
 
 fn shape_group_card(
     builder: &mut LayoutBuilder,
+    materials: &ShapePanelMaterialHandles,
     index: usize,
     label: &str,
     detail: &str,
@@ -1752,7 +1929,7 @@ fn shape_group_card(
         |builder| {
             builder.with(
                 El::column()
-                    .width(Sizing::fixed(70.0))
+                    .width(Sizing::fixed(58.0))
                     .height(Sizing::FIT)
                     .gap(1.0),
                 |builder| {
@@ -1764,7 +1941,7 @@ fn shape_group_card(
                 El::new()
                     .width(Sizing::GROW)
                     .height(Sizing::GROW)
-                    .draw(PanelDraw::shapes(shape_strip(index, color))),
+                    .draw(PanelDraw::shapes(shape_strip(materials, index, color))),
                 |_builder| {},
             );
         },

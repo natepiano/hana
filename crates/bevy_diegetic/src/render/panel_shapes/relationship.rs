@@ -1,13 +1,16 @@
-//! The panel↔primitive relationship types for the panel-shape path.
+//! The panel↔source relationship types for the panel-shape path.
 //!
-//! These components define the typed traversal index. The panel-shape producer
-//! does not consume them yet — it routes through its current batch input path.
+//! These components define the typed traversal index for authored panel-shape
+//! sources. A source entity may expand to several analytic path primitives; the
+//! primitives remain renderer data, not Bevy entities.
 
 use std::ops::Deref;
 
 use bevy::prelude::*;
 
-/// Marker on a panel-shape primitive entity owned by a diegetic panel.
+use crate::layout::PanelShapeSourceKey;
+
+/// Marker on a panel-shape source entity owned by a diegetic panel.
 ///
 /// The marker identifies entities that participate in the
 /// [`PanelShapeOf`] / [`PanelShapes`] traversal index. It does not carry batch
@@ -16,31 +19,29 @@ use bevy::prelude::*;
 #[reflect(Component, PartialEq, Debug, FromWorld, Default, Clone)]
 pub(super) struct PanelShape;
 
-/// Relationship source on each panel-shape primitive, pointing at its panel.
+/// Resolved source identity stored on a [`PanelShape`] entity.
+#[derive(Component, Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PanelShapeSource {
+    /// Stable source key from the resolved panel command stream.
+    pub(super) key:           PanelShapeSourceKey,
+    /// Source command index from [`ResolvedPanelShape`](crate::ResolvedPanelShape).
+    pub(super) command_index: usize,
+}
+
+/// Relationship source on each panel-shape source, pointing at its panel.
 ///
-/// Mirrors [`ChildOf`]: a public entity field plus a [`panel`](Self::panel)
-/// accessor. Bevy maintains the matching [`PanelShapes`] set on the panel as
-/// primitives carrying this component spawn and despawn.
+/// Mirrors [`ChildOf`]: Bevy maintains the matching [`PanelShapes`] set on the
+/// panel as sources carrying this component spawn and despawn.
 #[derive(Component, Clone, Copy, Debug, Eq, PartialEq, Reflect)]
 #[reflect(Component, PartialEq, Debug, FromWorld, Clone)]
 #[relationship(relationship_target = PanelShapes)]
 pub(super) struct PanelShapeOf(#[entities] pub(super) Entity);
 
-impl PanelShapeOf {
-    /// The panel entity this primitive belongs to.
-    #[must_use]
-    #[expect(
-        dead_code,
-        reason = "the panel-shape producer does not consume this relationship accessor yet"
-    )]
-    pub(super) const fn panel(self) -> Entity { self.0 }
-}
-
 impl FromWorld for PanelShapeOf {
     fn from_world(_world: &mut World) -> Self { Self(Entity::PLACEHOLDER) }
 }
 
-/// Relationship target on a panel: the set of its panel-shape primitives.
+/// Relationship target on a panel: the set of its panel-shape source entities.
 ///
 /// Bevy maintains this set from [`PanelShapeOf`] components. The target is a
 /// traversal index only; the normal hierarchy remains responsible for
@@ -56,14 +57,9 @@ impl Deref for PanelShapes {
     fn deref(&self) -> &Self::Target { &self.0 }
 }
 
-/// Material-source identity for a panel-shape primitive, keyed by the source
-/// entity rather than a render key.
+/// Material-source identity for a panel-shape source entity.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-#[expect(
-    dead_code,
-    reason = "the panel-shape producer does not consume this material source key yet"
-)]
 pub(super) struct PanelShapeMaterialSourceKey {
-    /// Panel-shape primitive whose material source is being projected.
+    /// Panel-shape source whose material is projected into a frame table row.
     pub(super) shape: Entity,
 }

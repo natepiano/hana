@@ -44,11 +44,13 @@ pub(super) struct PanelShapePathContext {
 
 /// Renderer-owned path data and the clipped instance quad for one primitive.
 pub(super) struct PanelShapePath {
-    pub outline:   PathOutline,
-    pub rect_min:  Vec2,
-    pub rect_size: Vec2,
-    pub uv_min:    Vec2,
-    pub uv_size:   Vec2,
+    pub outline:     PathOutline,
+    pub rect_min:    Vec2,
+    pub rect_size:   Vec2,
+    pub uv_min:      Vec2,
+    pub uv_size:     Vec2,
+    pub box_uv_min:  Vec2,
+    pub box_uv_size: Vec2,
 }
 
 /// One merge-group member: a resolved primitive plus its resolved hairline
@@ -87,15 +89,17 @@ pub(super) fn build_panel_shape_path(
         .collect();
     let source_bounds = segment_bounds(contours.iter().flat_map(|contour| &contour.segments))?;
     let translation = PathTranslation::new(source_bounds);
-    let (rect_min, rect_size, uv_min, uv_size) =
+    let (rect_min, rect_size, source_uv_min, source_uv_size) =
         clipped_instance(translation, clip, owner_bounds, context)?;
     let outline = local_design_outline(contours, translation);
     Some(PanelShapePath {
         outline,
         rect_min,
         rect_size,
-        uv_min,
-        uv_size,
+        uv_min: source_uv_min,
+        uv_size: source_uv_size,
+        box_uv_min: source_uv_min,
+        box_uv_size: source_uv_size,
     })
 }
 

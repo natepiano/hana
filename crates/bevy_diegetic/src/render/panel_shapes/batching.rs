@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 
+use bevy::asset::AssetId;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::primitives::Aabb;
 use bevy::camera::visibility::NoAutoAabb;
@@ -18,6 +19,7 @@ use bevy::math::Vec3A;
 use bevy::math::Vec4;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 use bevy_kana::ToF32;
@@ -28,6 +30,11 @@ use super::path;
 use super::path::PanelShapeMember;
 use super::path::PanelShapePathContext;
 use super::primitive::PanelShapeRenderKey;
+use super::relationship::PanelShape;
+use super::relationship::PanelShapeMaterialSourceKey;
+use super::relationship::PanelShapeOf;
+use super::relationship::PanelShapeSource;
+use super::relationship::PanelShapes;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::ShapeMaterial;
@@ -92,32 +99,11 @@ const PANEL_LINE_PART_OIT_DEPTH_STEP: f32 = 0.000_000_001;
 #[reflect(Component)]
 pub(super) struct DiegeticPanelShapeBatch;
 
-/// Temporary panel-line material source identity before source entities exist.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Phase 6 bridge replaced by PanelShapeMaterialSourceKey in Phase 9"
-    )
-)]
-#[cfg_attr(
-    not(test),
-    allow(
-        unfulfilled_lint_expectations,
-        reason = "Phase 6 keeps the requested bridge gate even while production uses it"
-    )
-)]
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct PanelShapeMaterialSourceKeyBridge {
-    /// Current panel-line render identity used to find the authored source.
-    render_key: PanelShapeRenderKey,
-}
-
 /// Append-time material input for one panel-line render record.
 struct PanelShapeMaterialSlotInput<'a> {
     /// Source identity returned with the appended frame-local slot.
-    key:           PanelShapeMaterialSourceKeyBridge,
-    /// Resolved element/panel/default source material before color override.
+    key:           PanelShapeMaterialSourceKey,
+    /// Resolved primitive/element/panel/default material before color override.
     base_material: &'a StandardMaterial,
     /// Resolved primitive color used as the row's effective `base_color`.
     fill_color:    Color,
@@ -130,7 +116,7 @@ struct PanelShapeMaterialSlotInput<'a> {
 }
 
 impl MaterialSlotInput for PanelShapeMaterialSlotInput<'_> {
-    type Key = PanelShapeMaterialSourceKeyBridge;
+    type Key = PanelShapeMaterialSourceKey;
 
     fn key(&self) -> Self::Key { self.key }
 
@@ -508,6 +494,7 @@ pub(super) struct PanelShapeMaterialAssets<'w> {
 struct ShapePrimitiveSource<'a> {
     element_index: usize,
     draw_depth:    DrawCommandDepth,
+    source_entity: Entity,
     line:          &'a ResolvedPanelShape,
     primitive:     &'a ResolvedPanelShapePrimitive,
 }
@@ -522,35 +509,69 @@ struct BuiltPanelShapePrimitive {
 /// render as a single multi-contour path, so abutting strokes (tick meets
 /// spine) share one winding field and one anti-aliasing ramp.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct LineMergeKey {
+struct PanelShapeMergeKey {
     element_index:     usize,
     clip:              Option<[u32; 4]>,
     owner_bounds:      [u32; 4],
     layering:          [u32; 2],
-    material_identity: PrimitiveMaterialIdentity,
+    material_identity: PanelShapeMaterialIdentity,
 }
 
-/// Material facts that require separate `PathRenderRecord` rows before
-/// primitives can be merged into one analytic path.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct PrimitiveMaterialIdentity {
-    /// Shape-local source material handle resolved for this primitive.
-    material:   Option<Handle<StandardMaterial>>,
-    /// Current authored primitive color.
-    base_color: [u32; 4],
+/// Opaque material-source facts that require separate `PathRenderRecord` rows.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct PanelShapeMaterialIdentity {
+    /// Resolved `StandardMaterial` asset id used before table-row projection.
+    source_material: AssetId<StandardMaterial>,
+    /// Authored base-color source identity when the color is not the default.
+    base_color:      PanelShapeBaseColorIdentity,
 }
 
-impl From<&ResolvedPanelShapePrimitive> for PrimitiveMaterialIdentity {
-    fn from(primitive: &ResolvedPanelShapePrimitive) -> Self {
+/// Stable source for a panel-shape `base_color` override.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+enum PanelShapeBaseColorIdentity {
+    /// The source uses the default white shape color.
+    Default,
+    /// The source authored a non-default color on this source entity.
+    Source(Entity, PanelShapeColorDiscriminator),
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct PanelShapeColorDiscriminator([u32; 4]);
+
+impl From<Color> for PanelShapeColorDiscriminator {
+    fn from(color: Color) -> Self { Self(color_bits(color)) }
+}
+
+impl PanelShapeMaterialIdentity {
+    fn from_source(
+        source: &ShapePrimitiveSource<'_>,
+        source_material: &Handle<StandardMaterial>,
+    ) -> Self {
         Self {
-            material:   primitive.material().cloned(),
-            base_color: color_bits(primitive.color()),
+            source_material: source_material.id(),
+            base_color:      PanelShapeBaseColorIdentity::from_color(
+                source.source_entity,
+                source.primitive.color(),
+            ),
         }
     }
 }
 
-impl From<&ShapePrimitiveSource<'_>> for LineMergeKey {
-    fn from(source: &ShapePrimitiveSource<'_>) -> Self {
+impl PanelShapeBaseColorIdentity {
+    fn from_color(source_entity: Entity, color: Color) -> Self {
+        if default_shape_color(color) {
+            Self::Default
+        } else {
+            Self::Source(source_entity, color.into())
+        }
+    }
+}
+
+impl PanelShapeMergeKey {
+    fn from_source(
+        source: &ShapePrimitiveSource<'_>,
+        source_material: &Handle<StandardMaterial>,
+    ) -> Self {
         Self {
             element_index:     source.element_index,
             clip:              source.primitive.clip().map(bounding_box_bits),
@@ -559,7 +580,7 @@ impl From<&ShapePrimitiveSource<'_>> for LineMergeKey {
                 source.draw_depth.depth_bias().get().to_bits(),
                 source.draw_depth.oit_depth_offset().get().to_bits(),
             ],
-            material_identity: PrimitiveMaterialIdentity::from(source.primitive),
+            material_identity: PanelShapeMaterialIdentity::from_source(source, source_material),
         }
     }
 }
@@ -574,6 +595,8 @@ fn color_bits(color: Color) -> [u32; 4] {
     ]
 }
 
+fn default_shape_color(color: Color) -> bool { color_bits(color) == color_bits(Color::WHITE) }
+
 const fn bounding_box_bits(bounds: BoundingBox) -> [u32; 4] {
     [
         bounds.x.to_bits(),
@@ -587,11 +610,13 @@ const fn bounding_box_bits(bounds: BoundingBox) -> [u32; 4] {
 /// order so group identities stay stable across reconciles.
 fn group_line_primitives<'a>(
     sources: Vec<ShapePrimitiveSource<'a>>,
+    context: &PanelShapeReconcileContext<'_>,
 ) -> Vec<Vec<ShapePrimitiveSource<'a>>> {
     let mut groups: Vec<Vec<ShapePrimitiveSource<'a>>> = Vec::new();
-    let mut group_indices: HashMap<LineMergeKey, usize> = HashMap::new();
+    let mut group_indices: HashMap<PanelShapeMergeKey, usize> = HashMap::new();
     for source in sources {
-        let key = LineMergeKey::from(&source);
+        let material = resolved_source_material(&source, context);
+        let key = PanelShapeMergeKey::from_source(&source, material);
         if let Some(&index) = group_indices.get(&key) {
             groups[index].push(source);
         } else {
@@ -615,7 +640,9 @@ pub(super) fn reconcile_panel_line_batches(
         Option<&Resolved<AntiAlias>>,
         Option<&Resolved<HairlineFade>>,
         Option<&Resolved<ShapeMaterial>>,
+        Option<&PanelShapes>,
     )>,
+    shape_sources: Query<&PanelShapeSource>,
     mut removed_computed: RemovedComponents<ComputedDiegeticPanel>,
     mut removed_panels: RemovedComponents<DiegeticPanel>,
     anti_alias: Res<AntiAlias>,
@@ -633,6 +660,9 @@ pub(super) fn reconcile_panel_line_batches(
 ) {
     for panel in removed_computed.read().chain(removed_panels.read()) {
         store.remove_panel(panel);
+        if let Ok(mut panel_commands) = commands.get_entity(panel) {
+            panel_commands.despawn_related::<PanelShapes>();
+        }
     }
 
     for (
@@ -647,6 +677,7 @@ pub(super) fn reconcile_panel_line_batches(
         panel_anti_alias,
         panel_hairline_fade,
         panel_shape_material,
+        panel_shapes,
     ) in &panels
     {
         let Some(result) = computed.result() else {
@@ -688,6 +719,13 @@ pub(super) fn reconcile_panel_line_batches(
             &result.commands,
             computed.draw_order(),
             material_table.builder_mut(),
+            &reconcile_panel_shape_sources(
+                &mut commands,
+                panel_entity,
+                panel_shapes,
+                &shape_sources,
+                &result.commands,
+            ),
         );
         store.upsert_panel(panel_entity, records);
     }
@@ -714,17 +752,22 @@ fn collect_panel_records(
     render_commands: &[RenderCommand],
     draw_order: &DrawOrderProjection,
     material_table: &mut FrameMaterialTableBuilder,
+    source_entities: &HashMap<PanelShapeSourceKey, Entity>,
 ) -> Vec<(PathBatchKey, ShapeBatchRecord)> {
-    group_line_primitives(collect_line_primitives(render_commands, draw_order))
-        .into_iter()
-        .filter_map(|group| build_panel_line_group(context, group, material_table))
-        .map(|built| (built.batch_key, built.record))
-        .collect()
+    group_line_primitives(
+        collect_line_primitives(render_commands, draw_order, source_entities),
+        context,
+    )
+    .into_iter()
+    .filter_map(|group| build_panel_line_group(context, group, material_table))
+    .map(|built| (built.batch_key, built.record))
+    .collect()
 }
 
 fn collect_line_primitives<'a>(
     render_commands: &'a [RenderCommand],
     draw_order: &DrawOrderProjection,
+    source_entities: &HashMap<PanelShapeSourceKey, Entity>,
 ) -> Vec<ShapePrimitiveSource<'a>> {
     let mut primitives = Vec::new();
     for (command_index, command) in render_commands.iter().enumerate() {
@@ -735,10 +778,14 @@ fn collect_line_primitives<'a>(
             continue;
         };
         for line in shapes {
+            let Some(&source_entity) = source_entities.get(&line.source_key()) else {
+                continue;
+            };
             for primitive in line.primitives() {
                 primitives.push(ShapePrimitiveSource {
                     element_index: command.element_idx,
                     draw_depth,
+                    source_entity,
                     line,
                     primitive,
                 });
@@ -746,6 +793,89 @@ fn collect_line_primitives<'a>(
         }
     }
     primitives
+}
+
+fn reconcile_panel_shape_sources(
+    commands: &mut Commands,
+    panel_entity: Entity,
+    panel_shapes: Option<&PanelShapes>,
+    shape_sources: &Query<&PanelShapeSource>,
+    render_commands: &[RenderCommand],
+) -> HashMap<PanelShapeSourceKey, Entity> {
+    let existing = collect_existing_shape_sources(panel_shapes, shape_sources);
+    let mut live = HashMap::new();
+    for line in resolved_panel_shapes(render_commands) {
+        let key = line.source_key();
+        if live.contains_key(&key) {
+            continue;
+        }
+        let source = PanelShapeSource {
+            key,
+            command_index: line.source_command_index(),
+        };
+        let entity = if let Some(&entity) = existing.get(&key) {
+            if shape_sources
+                .get(entity)
+                .is_ok_and(|current| *current != source)
+                && let Ok(mut entity_commands) = commands.get_entity(entity)
+            {
+                entity_commands.insert(source);
+            }
+            entity
+        } else {
+            spawn_panel_shape_source(commands, panel_entity, source)
+        };
+        live.insert(key, entity);
+    }
+    for (key, entity) in existing {
+        if !live.contains_key(&key)
+            && let Ok(mut entity_commands) = commands.get_entity(entity)
+        {
+            entity_commands.despawn();
+        }
+    }
+    live
+}
+
+fn collect_existing_shape_sources(
+    panel_shapes: Option<&PanelShapes>,
+    shape_sources: &Query<&PanelShapeSource>,
+) -> HashMap<PanelShapeSourceKey, Entity> {
+    let mut by_key = HashMap::new();
+    let Some(panel_shapes) = panel_shapes else {
+        return by_key;
+    };
+    for &entity in &**panel_shapes {
+        if let Ok(source) = shape_sources.get(entity) {
+            by_key.insert(source.key, entity);
+        }
+    }
+    by_key
+}
+
+fn resolved_panel_shapes(
+    render_commands: &[RenderCommand],
+) -> impl Iterator<Item = &ResolvedPanelShape> {
+    render_commands
+        .iter()
+        .flat_map(|command| match &command.kind {
+            RenderCommandKind::Shapes { shapes } => shapes.as_slice(),
+            _ => &[],
+        })
+}
+
+fn spawn_panel_shape_source(
+    commands: &mut Commands,
+    panel_entity: Entity,
+    source: PanelShapeSource,
+) -> Entity {
+    let mut spawned = Entity::PLACEHOLDER;
+    commands.entity(panel_entity).with_children(|children| {
+        spawned = children
+            .spawn((PanelShape, source, PanelShapeOf(panel_entity)))
+            .id();
+    });
+    spawned
 }
 
 fn build_panel_line_group(
@@ -784,28 +914,30 @@ fn build_panel_line_group(
         .iter()
         .map(|source| primitive_oit_depth_offset(source))
         .fold(f32::INFINITY, f32::min);
-    let material_handle = first
-        .primitive
-        .material()
-        .or_else(|| context.panel.tree().element_material(first.element_index))
-        .unwrap_or(&context.shape_material);
+    let material_handle = resolved_source_material(first, context);
     let base = render::material_asset_for_frame(
         context.standard_materials,
         context.asset_server,
         material_handle,
         &context.shape_default.0.0,
     )?;
+    let base = strip_tangent_dependent_maps(base);
     let key = PanelShapeRenderKey {
         panel:  context.panel_entity,
         source: first.primitive.source_key(),
     };
+    let alpha_mode = base.alpha_mode;
+    let lighting = shape_lighting(&base, context.panel_lighting);
+    let sidedness = shape_sidedness(&base, context.panel_sidedness);
     let input = PanelShapeMaterialSlotInput {
-        key:           PanelShapeMaterialSourceKeyBridge { render_key: key },
-        base_material: base,
-        fill_color:    first.primitive.color(),
-        alpha_mode:    AlphaMode::Blend,
-        lighting:      context.panel_lighting,
-        sidedness:     context.panel_sidedness,
+        key: PanelShapeMaterialSourceKey {
+            shape: first.source_entity,
+        },
+        base_material: &base,
+        fill_color: first.primitive.color(),
+        alpha_mode,
+        lighting,
+        sidedness,
     };
     let MaterialSlotAppend::Appended(appended) =
         material_table::append_material_slot(material_table, &input)
@@ -839,8 +971,8 @@ fn build_panel_line_group(
         rect_size:         path.rect_size,
         uv_min:            path.uv_min,
         uv_size:           path.uv_size,
-        box_uv_min:        path.uv_min,
-        box_uv_size:       path.uv_size,
+        box_uv_min:        path.box_uv_min,
+        box_uv_size:       path.box_uv_size,
         packed_path_index: 0,
         render_index:      0,
         box_uv_flip_x:     0,
@@ -854,6 +986,43 @@ fn build_panel_line_group(
             run,
         },
     })
+}
+
+fn strip_tangent_dependent_maps(material: &StandardMaterial) -> StandardMaterial {
+    let mut material = material.clone();
+    material.normal_map_texture = None;
+    material.depth_map = None;
+    material
+}
+
+fn resolved_source_material<'a, 'source>(
+    source: &'a ShapePrimitiveSource<'source>,
+    context: &'a PanelShapeReconcileContext<'_>,
+) -> &'a Handle<StandardMaterial>
+where
+    'source: 'a,
+{
+    source
+        .primitive
+        .material()
+        .or_else(|| context.panel.tree().element_material(source.element_index))
+        .unwrap_or(&context.shape_material)
+}
+
+const fn shape_lighting(material: &StandardMaterial, fallback: Lighting) -> Lighting {
+    if material.unlit {
+        Lighting::Unlit
+    } else {
+        fallback
+    }
+}
+
+const fn shape_sidedness(material: &StandardMaterial, fallback: Sidedness) -> Sidedness {
+    match (material.double_sided, material.cull_mode) {
+        (true, None) => Sidedness::BothSides,
+        (false, Some(Face::Front)) => Sidedness::BackOnly,
+        _ => fallback,
+    }
 }
 
 fn panel_shape_path_members<'a>(
@@ -1254,12 +1423,15 @@ mod tests {
     use bevy::color::Color;
 
     use super::*;
+    use crate::CalloutCap;
     use crate::El;
     use crate::Mm;
     use crate::cascade::CascadePlugin;
     use crate::cascade::CascadeSet;
     use crate::cascade::ShapeMaterial;
     use crate::layout::DrawZIndex;
+    use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutTree;
     use crate::layout::PanelDraw;
     use crate::layout::PanelLine;
     use crate::layout::PanelShapePrimitiveGeometry;
@@ -1267,6 +1439,7 @@ mod tests {
     use crate::layout::PanelShapePrimitiveKind;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
+    use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::Bounds;
     use crate::render::HairlineWidth;
@@ -1337,6 +1510,19 @@ mod tests {
         horizontal_line().material(material)
     }
 
+    fn one_line_tree(line: PanelLine) -> LayoutTree {
+        LayoutBuilder::with_root(El::new().size(40.0, 20.0).draw(PanelDraw::lines([line]))).build()
+    }
+
+    fn two_line_tree(first: PanelLine, second: PanelLine) -> LayoutTree {
+        LayoutBuilder::with_root(
+            El::new()
+                .size(40.0, 20.0)
+                .draw(PanelDraw::lines([first, second])),
+        )
+        .build()
+    }
+
     fn material_base_color(color: Color) -> Vec4 {
         let linear = color.to_linear();
         Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
@@ -1349,6 +1535,12 @@ mod tests {
                 metallic,
                 ..Default::default()
             })
+    }
+
+    fn material_asset(app: &mut App, material: StandardMaterial) -> Handle<StandardMaterial> {
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(material)
     }
 
     fn spawn_line_panel(app: &mut App, z_index: DrawZIndex) -> Entity {
@@ -1418,6 +1610,30 @@ mod tests {
         table[record.material.as_u32().to_usize()]
     }
 
+    fn first_line_batch_material_values(app: &App) -> Vec<MaterialSlotValues> {
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        batch
+            .run_records()
+            .iter()
+            .map(|record| table[record.material.as_u32().to_usize()])
+            .collect()
+    }
+
+    fn panel_shape_sources(app: &App, panel: Entity) -> Vec<Entity> {
+        app.world()
+            .get::<PanelShapes>(panel)
+            .map(|sources| sources.iter().collect())
+            .unwrap_or_default()
+    }
+
     /// Per record: the run's AA flags and the packed outline's fade exponent
     /// (fade is per-curve data carried by the record's contours, not a run
     /// field).
@@ -1479,6 +1695,129 @@ mod tests {
     }
 
     #[test]
+    fn same_colored_end_cap_shares_material_row() {
+        let mut app = line_batch_app();
+        let color = Color::srgb(0.9, 0.1, 0.1);
+        let line = horizontal_line_with_color(color).end_cap(CalloutCap::circle().color(color));
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .with_tree(one_line_tree(line))
+                .build()
+                .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+        );
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        assert_eq!(store.batches().count(), 1);
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 1);
+        let rows = first_line_batch_material_values(&app);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].base_color, material_base_color(color));
+    }
+
+    #[test]
+    fn differently_colored_end_cap_gets_distinct_material_row() {
+        let mut app = line_batch_app();
+        let line_color = Color::srgb(0.9, 0.1, 0.1);
+        let cap_color = Color::srgb(0.1, 0.1, 0.9);
+        let line =
+            horizontal_line_with_color(line_color).end_cap(CalloutCap::circle().color(cap_color));
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .with_tree(one_line_tree(line))
+                .build()
+                .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+        );
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        assert_eq!(store.batches().count(), 1);
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 2);
+        let colors: Vec<Vec4> = first_line_batch_material_values(&app)
+            .iter()
+            .map(|values| values.base_color)
+            .collect();
+        assert_eq!(colors.len(), 2);
+        assert!(colors.contains(&material_base_color(line_color)));
+        assert!(colors.contains(&material_base_color(cap_color)));
+    }
+
+    #[test]
+    fn shape_source_entities_reuse_across_material_only_edits() {
+        let mut app = line_batch_app();
+        let red = Color::srgb(1.0, 0.0, 0.0);
+        let blue = Color::srgb(0.0, 0.0, 1.0);
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(60.0))
+                    .with_tree(one_line_tree(horizontal_line_with_color(red)))
+                    .build()
+                    .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+            )
+            .id();
+        settle(&mut app);
+        let before = panel_shape_sources(&app, panel);
+        assert_eq!(before.len(), 1);
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(red)
+        );
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, one_line_tree(horizontal_line_with_color(blue)));
+        settle(&mut app);
+
+        assert_eq!(panel_shape_sources(&app, panel), before);
+        assert_eq!(
+            first_shape_material_values(&app).base_color,
+            material_base_color(blue)
+        );
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 1);
+        assert!(!batch.path_quads_are_dirty());
+    }
+
+    #[test]
+    fn removed_panel_shape_source_despawns_relationship_entity() {
+        let mut app = line_batch_app();
+        let panel = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(100.0), Mm(60.0))
+                    .with_tree(one_line_tree(horizontal_line()))
+                    .build()
+                    .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+            )
+            .id();
+        settle(&mut app);
+        let before = panel_shape_sources(&app, panel);
+        assert_eq!(before.len(), 1);
+
+        app.world_mut()
+            .commands()
+            .set_tree(panel, LayoutBuilder::new(100.0, 50.0).build());
+        settle(&mut app);
+
+        assert!(panel_shape_sources(&app, panel).is_empty());
+        assert!(app.world().get_entity(before[0]).is_err());
+    }
+
+    #[test]
     fn shape_run_inherits_panel_shape_material_through_cascade() {
         let mut app = line_batch_app();
         let panel_material = material_with_metallic(&mut app, 0.46);
@@ -1505,7 +1844,35 @@ mod tests {
     }
 
     #[test]
-    fn shape_cascade_preserves_panel_surface_material_rung() {
+    fn element_material_overrides_panel_shape_material_for_shape_primitives() {
+        let mut app = line_batch_app();
+        let panel_shape_material = material_with_metallic(&mut app, 0.35);
+        let element_material = material_with_metallic(&mut app, 0.64);
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .shape_material(panel_shape_material)
+            .layout(|builder| {
+                builder.with(
+                    El::new()
+                        .size(40.0, 20.0)
+                        .material(element_material)
+                        .draw(PanelDraw::lines([horizontal_line()])),
+                    |_| {},
+                );
+            })
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        assert_eq!(
+            first_shape_material_values(&app).metallic.to_bits(),
+            0.64_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn panel_surface_material_does_not_feed_shape_materials() {
         let mut app = line_batch_app();
         let panel_material = material_with_metallic(&mut app, 0.57);
         let panel = DiegeticPanel::world()
@@ -1526,7 +1893,7 @@ mod tests {
 
         assert_eq!(
             first_shape_material_values(&app).metallic.to_bits(),
-            0.57_f32.to_bits()
+            render::default_panel_material().metallic.to_bits()
         );
     }
 
@@ -1556,6 +1923,133 @@ mod tests {
         assert_eq!(
             first_shape_material_values(&app).metallic.to_bits(),
             0.93_f32.to_bits()
+        );
+    }
+
+    #[test]
+    fn scalar_distinct_shape_material_sources_share_one_batch_with_distinct_rows() {
+        let mut app = line_batch_app();
+        let first_material = material_asset(
+            &mut app,
+            StandardMaterial {
+                metallic: 0.18,
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        let second_material = material_asset(
+            &mut app,
+            StandardMaterial {
+                metallic: 0.82,
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        let panel = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(60.0))
+            .with_tree(two_line_tree(
+                horizontal_line_with_material(first_material),
+                horizontal_line_with_material(second_material),
+            ))
+            .build()
+            .unwrap_or_else(|error| panic!("line panel should build: {error:?}"));
+        app.world_mut().spawn(panel);
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        assert_eq!(store.batches().count(), 1);
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        assert_eq!(batch.record_count(), 2);
+        let table = app
+            .world()
+            .resource::<FrameMaterialTableBuild>()
+            .table()
+            .rows();
+        let metallic: Vec<u32> = batch
+            .run_records()
+            .iter()
+            .map(|record| {
+                table[record.material.as_u32().to_usize()]
+                    .metallic
+                    .to_bits()
+            })
+            .collect();
+        assert!(metallic.contains(&0.18_f32.to_bits()));
+        assert!(metallic.contains(&0.82_f32.to_bits()));
+    }
+
+    #[test]
+    fn alpha_or_texture_shape_material_splitters_create_separate_batches() {
+        let mut alpha_app = line_batch_app();
+        let blend = material_asset(
+            &mut alpha_app,
+            StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        let add = material_asset(
+            &mut alpha_app,
+            StandardMaterial {
+                alpha_mode: AlphaMode::Add,
+                ..Default::default()
+            },
+        );
+        alpha_app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .with_tree(two_line_tree(
+                    horizontal_line_with_material(blend),
+                    horizontal_line_with_material(add),
+                ))
+                .build()
+                .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+        );
+        settle(&mut alpha_app);
+        assert_eq!(
+            alpha_app
+                .world()
+                .resource::<PanelShapeBatchStore>()
+                .batches()
+                .count(),
+            2
+        );
+
+        let mut texture_app = line_batch_app();
+        let untextured = material_asset(
+            &mut texture_app,
+            StandardMaterial {
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        let textured = material_asset(
+            &mut texture_app,
+            StandardMaterial {
+                base_color_texture: Some(Handle::default()),
+                alpha_mode: AlphaMode::Blend,
+                ..Default::default()
+            },
+        );
+        texture_app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .with_tree(two_line_tree(
+                    horizontal_line_with_material(untextured),
+                    horizontal_line_with_material(textured),
+                ))
+                .build()
+                .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+        );
+        settle(&mut texture_app);
+        let store = texture_app.world().resource::<PanelShapeBatchStore>();
+        assert_eq!(store.batches().count(), 2);
+        assert!(
+            store
+                .batches()
+                .any(|(key, _)| key.resource_compatibility.base_color_texture.is_some())
         );
     }
 
@@ -1788,12 +2282,14 @@ mod tests {
         let first_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
+            source_entity: Entity::from_bits(10),
             line: &first,
             primitive: &first.primitives()[0],
         };
         let second_source = ShapePrimitiveSource {
             element_index: 0,
             draw_depth,
+            source_entity: Entity::from_bits(11),
             line: &second,
             primitive: &second.primitives()[0],
         };
@@ -1863,7 +2359,9 @@ mod tests {
         }];
 
         let projection = DrawOrderProjection::from_commands(&commands);
-        let collected = collect_line_primitives(&commands, &projection);
+        let mut source_entities = HashMap::new();
+        source_entities.insert(source_key, Entity::from_bits(10));
+        let collected = collect_line_primitives(&commands, &projection, &source_entities);
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].primitive.clip(), Some(inherited_clip));
@@ -1988,6 +2486,94 @@ mod tests {
     }
 
     #[test]
+    fn line_record_uses_shape_local_box_uv_not_atlas_uv() {
+        let mut app = line_batch_app();
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(60.0))
+                .with_tree(one_line_tree(horizontal_line()))
+                .build()
+                .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
+        );
+        settle(&mut app);
+
+        let store = app.world().resource::<PanelShapeBatchStore>();
+        let Some((_, batch)) = store.batches().next() else {
+            panic!("one line batch should exist");
+        };
+        let Some(record) = batch.records.first() else {
+            panic!("line batch should have a record");
+        };
+        assert_ne!(record.instance.uv_min, Vec2::ZERO);
+        assert_ne!(record.instance.uv_size, Vec2::ONE);
+        assert_eq!(record.instance.box_uv_min, record.instance.uv_min);
+        assert_eq!(record.instance.box_uv_size, record.instance.uv_size);
+    }
+
+    #[test]
+    fn panel_shape_merge_key_keeps_material_source_without_scalar_color_values() {
+        let red_color = Color::srgb(1.0, 0.0, 0.0);
+        let blue_color = Color::srgb(0.0, 0.0, 1.0);
+        let mut red = test_line(0);
+        red.primitives[0].color = red_color;
+        let mut red_again = test_line(0);
+        red_again.primitives[0].color = red_color;
+        let mut blue = test_line(0);
+        blue.primitives[0].color = blue_color;
+        let commands = vec![RenderCommand {
+            bounds:      red.visual_bounds(),
+            element_idx: 0,
+            kind:        RenderCommandKind::Shapes {
+                shapes: vec![red.clone()],
+            },
+            z_index:     DrawZIndex::default(),
+        }];
+        let draw_depth = draw_depth_for_command(&commands, 0);
+        let material = Handle::<StandardMaterial>::default();
+        let red_source = ShapePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            source_entity: Entity::from_bits(10),
+            line: &red,
+            primitive: &red.primitives()[0],
+        };
+        let red_same_source = ShapePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            source_entity: Entity::from_bits(10),
+            line: &red_again,
+            primitive: &red_again.primitives()[0],
+        };
+        let blue_same_source = ShapePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            source_entity: Entity::from_bits(10),
+            line: &blue,
+            primitive: &blue.primitives()[0],
+        };
+        let blue_different_source = ShapePrimitiveSource {
+            element_index: 0,
+            draw_depth,
+            source_entity: Entity::from_bits(11),
+            line: &blue,
+            primitive: &blue.primitives()[0],
+        };
+
+        assert_eq!(
+            PanelShapeMergeKey::from_source(&red_source, &material),
+            PanelShapeMergeKey::from_source(&red_same_source, &material),
+        );
+        assert_ne!(
+            PanelShapeMergeKey::from_source(&red_source, &material),
+            PanelShapeMergeKey::from_source(&blue_same_source, &material),
+        );
+        assert_ne!(
+            PanelShapeMergeKey::from_source(&red_source, &material),
+            PanelShapeMergeKey::from_source(&blue_different_source, &material),
+        );
+    }
+
+    #[test]
     fn panel_material_input_projects_color_and_scalar_values() {
         let mut base = StandardMaterial {
             metallic: 0.42,
@@ -1996,13 +2582,11 @@ mod tests {
             ..Default::default()
         };
         render::apply_sidedness(&mut base, Sidedness::BothSides);
-        let key = PanelShapeRenderKey {
-            panel:  Entity::from_bits(1),
-            source: PanelShapePrimitiveKey::new(PanelShapeSourceKey::element(0, 0, 0), 0),
-        };
         let color = Color::srgb(0.2, 0.4, 0.6);
         let input = PanelShapeMaterialSlotInput {
-            key:           PanelShapeMaterialSourceKeyBridge { render_key: key },
+            key:           PanelShapeMaterialSourceKey {
+                shape: Entity::from_bits(10),
+            },
             base_material: &base,
             fill_color:    color,
             alpha_mode:    AlphaMode::Blend,
@@ -2019,6 +2603,20 @@ mod tests {
         let candidate = input.material_slot_candidate();
 
         assert_eq!(candidate.values, expected_values);
+    }
+
+    #[test]
+    fn default_material_sidedness_uses_panel_sidedness() {
+        let material = StandardMaterial::default();
+
+        assert_eq!(
+            shape_sidedness(&material, Sidedness::BothSides),
+            Sidedness::BothSides
+        );
+        assert_eq!(
+            shape_sidedness(&material, Sidedness::BackOnly),
+            Sidedness::BackOnly
+        );
     }
 
     fn test_batch_key() -> PathBatchKey {
