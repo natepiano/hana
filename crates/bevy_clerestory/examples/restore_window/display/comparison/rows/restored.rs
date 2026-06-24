@@ -206,25 +206,13 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state
-                        .physical_size_mismatch
-                        .expected
-                        .x,
-                    cached_mismatch_state
-                        .physical_size_mismatch
-                        .expected
-                        .y
+                    cached_mismatch_state.physical_size_mismatch.expected.x,
+                    cached_mismatch_state.physical_size_mismatch.expected.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state
-                        .physical_size_mismatch
-                        .actual
-                        .x,
-                    cached_mismatch_state
-                        .physical_size_mismatch
-                        .actual
-                        .y
+                    cached_mismatch_state.physical_size_mismatch.actual.x,
+                    cached_mismatch_state.physical_size_mismatch.actual.y
                 ),
             }),
         },
@@ -240,25 +228,13 @@ fn add_size_rows(
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {
                 expected: format!(
                     "{}x{}",
-                    cached_mismatch_state
-                        .logical_size_mismatch
-                        .expected
-                        .x,
-                    cached_mismatch_state
-                        .logical_size_mismatch
-                        .expected
-                        .y
+                    cached_mismatch_state.logical_size_mismatch.expected.x,
+                    cached_mismatch_state.logical_size_mismatch.expected.y
                 ),
                 actual:   format!(
                     "{}x{}",
-                    cached_mismatch_state
-                        .logical_size_mismatch
-                        .actual
-                        .x,
-                    cached_mismatch_state
-                        .logical_size_mismatch
-                        .actual
-                        .y
+                    cached_mismatch_state.logical_size_mismatch.actual.x,
+                    cached_mismatch_state.logical_size_mismatch.actual.y
                 ),
             }),
         },
