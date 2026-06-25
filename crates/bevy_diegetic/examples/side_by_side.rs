@@ -469,10 +469,10 @@ fn build_controls_panel() -> LayoutTree {
             .background(Color::srgba(0.1, 0.1, 0.12, 0.85))
             .border(Border::all(0.0005, border_color)),
         |b| {
-            b.text(
+            b.text((
                 "controls",
                 title_style.with_color(Color::srgb(0.4, 0.5, 0.9)),
-            );
+            ));
             b.with(
                 El::new()
                     .width(Sizing::GROW)
@@ -486,28 +486,28 @@ fn build_controls_panel() -> LayoutTree {
                     // Key column
                     b.with(El::column().align_x(AlignX::Center), |b| {
                         b.with(El::new().height(row_height), |b| {
-                            b.text("d", control_text_style.clone());
+                            b.text(("d", control_text_style.clone()));
                         });
                         b.with(El::new().height(row_height), |b| {
-                            b.text("s", control_text_style.clone());
+                            b.text(("s", control_text_style.clone()));
                         });
                     });
                     // Arrow column
                     b.with(El::column().align_x(AlignX::Center), |b| {
                         b.with(El::new().height(row_height), |b| {
-                            b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
+                            b.text(("\u{2192}", arrow_style.clone().with_color(dim_color)));
                         });
                         b.with(El::new().height(row_height), |b| {
-                            b.text("\u{2192}", arrow_style.clone().with_color(dim_color));
+                            b.text(("\u{2192}", arrow_style.clone().with_color(dim_color)));
                         });
                     });
                     // Description column
                     b.with(El::column().align_x(AlignX::Left), |b| {
                         b.with(El::new().height(row_height), |b| {
-                            b.text("toggle debug", control_text_style.clone());
+                            b.text(("toggle debug", control_text_style.clone()));
                         });
                         b.with(El::new().height(row_height), |b| {
-                            b.text("cycle size", control_text_style.clone());
+                            b.text(("cycle size", control_text_style.clone()));
                         });
                     });
                 },
@@ -682,7 +682,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
             b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
                 // Title slot.
                 b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                    b.text("STATUS", TextStyle::new(FONT_SIZE));
+                    b.text(("STATUS", TextStyle::new(FONT_SIZE)));
                 });
                 // Grow spacer.
                 b.with(
@@ -696,7 +696,7 @@ fn build_diegetic_header(b: &mut LayoutBuilder, s: f32) {
                         .height(Sizing::GROW)
                         .align_x(AlignX::Right),
                     |b| {
-                        b.text("DIEGETIC LAYOUT", TextStyle::new(SUBTITLE_FONT_SIZE));
+                        b.text(("DIEGETIC LAYOUT", TextStyle::new(SUBTITLE_FONT_SIZE)));
                     },
                 );
             });
@@ -731,12 +731,12 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32)
                 |b| {
                     for (label, value) in rows {
                         b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
-                            b.text(label, TextStyle::new(FONT_SIZE));
+                            b.text((label, TextStyle::new(FONT_SIZE)));
                             b.with(
                                 El::new().width(Sizing::GROW).height(Sizing::fixed(1.0 * s)),
                                 |_| {},
                             );
-                            b.text(value, TextStyle::new(FONT_SIZE));
+                            b.text((value, TextStyle::new(FONT_SIZE)));
                         });
                     }
 
@@ -747,7 +747,7 @@ fn build_diegetic_body(b: &mut LayoutBuilder, rows: &[(String, String)], s: f32)
                     );
 
                     // Word-wrap cell.
-                    b.text(WRAP_TEXT, TextStyle::new(FONT_SIZE));
+                    b.text((WRAP_TEXT, TextStyle::new(FONT_SIZE)));
                 },
             );
         },

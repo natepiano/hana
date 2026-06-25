@@ -143,10 +143,10 @@ fn spawn_hud(commands: &mut Commands) {
                             .border(Border::all(1.0, Color::srgba(0.2, 0.3, 0.6, 0.4))),
                         |b| {
                             // Title.
-                            b.text(
+                            b.text((
                                 "Mission Control",
                                 TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR),
-                            );
+                            ));
                             divider(b);
 
                             // Two-column layout.
@@ -233,17 +233,17 @@ fn column(b: &mut LayoutBuilder, title: &str, rows: &[(&str, &str, Color)]) {
             .height(Sizing::FIT)
             .gap(4.0),
         |b| {
-            b.text(title, TextStyle::new(HEADER_SIZE).with_color(HEADER_COLOR));
+            b.text((title, TextStyle::new(HEADER_SIZE).with_color(HEADER_COLOR)));
             for &(label, value, color) in rows {
                 b.with(
                     El::row().width(Sizing::GROW).height(Sizing::FIT).gap(4.0),
                     |b| {
-                        b.text(label, TextStyle::new(BODY_SIZE).with_color(BODY_COLOR));
+                        b.text((label, TextStyle::new(BODY_SIZE).with_color(BODY_COLOR)));
                         b.with(
                             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                             |_| {},
                         );
-                        b.text(value, TextStyle::new(BODY_SIZE).with_color(color));
+                        b.text((value, TextStyle::new(BODY_SIZE).with_color(color)));
                     },
                 );
             }

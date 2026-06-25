@@ -299,7 +299,7 @@ fn label_cell(builder: &mut LayoutBuilder, text: &str) {
             .height(Sizing::FIT)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(text, status_label_style());
+            builder.text((text, status_label_style()));
         },
     );
 }
@@ -325,7 +325,7 @@ fn value_cell(builder: &mut LayoutBuilder, text: &str, emphasis: CellEmphasis) {
             .height(Sizing::FIT)
             .alignment(AlignX::Right, AlignY::Center),
         |builder| {
-            builder.text(text, style);
+            builder.text((text, style));
         },
     );
 }
@@ -749,10 +749,10 @@ fn build_panel_tree(
                         .border(Border::all(0.01, BORDER_COLOR)),
                     |b| {
                         if is_first {
-                            b.text(
+                            b.text((
                                 "'+' add  '-' remove",
                                 TextStyle::new(FONT_SIZE).with_shadow_mode(GlyphShadowMode::None),
-                            );
+                            ));
                             b.with(
                                 El::new()
                                     .width(Sizing::GROW)
@@ -780,12 +780,12 @@ fn build_panel_tree(
                                     .height(Sizing::FIT)
                                     .gap(ROW_SPACING),
                                 |b| {
-                                    b.text(&label, config.clone());
+                                    b.text((&label, config.clone()));
                                     b.with(
                                         El::new().width(Sizing::GROW).height(Sizing::fixed(0.01)),
                                         |_| {},
                                     );
-                                    b.text(value, config);
+                                    b.text((value, config));
                                 },
                             );
                         }

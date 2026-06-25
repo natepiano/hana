@@ -23,21 +23,21 @@ use super::constants::DEFAULT_FONT_SIZE;
 /// to determine break points.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum TextWrap {
+    /// Never wrap. The full text is measured as a single run and may
+    /// overflow the element's bounds.
+    #[default]
+    None,
     /// Break at word boundaries when text exceeds the element's width.
     ///
     /// Words are split on ASCII whitespace. The engine measures each word
     /// individually, accumulates widths on a line, and breaks when the
     /// next word would exceed the available width.
-    #[default]
     Words,
     /// Break only at explicit `\n` characters.
     ///
     /// Each line between newlines is measured as a single run. The element's
     /// width is the widest line; height is the sum of all line heights.
     Newlines,
-    /// Never wrap. The full text is measured as a single run and may
-    /// overflow the element's bounds.
-    None,
 }
 
 // ── Font property types ──────────────────────────────────────────────────────
@@ -182,7 +182,7 @@ pub struct DrawZIndex(pub i8);
 
 /// Unified text styling for both layout (panel) text and standalone world text.
 ///
-/// One struct carries every typography, wrap-mode, and render field. Layout and
+/// One struct carries every typography and render field. Layout and
 /// standalone contexts share the data; context-specific defaults (lighting,
 /// sidedness, font unit) are supplied by the cascade and per-context builders
 /// rather than by separate types.
@@ -190,7 +190,7 @@ pub struct DrawZIndex(pub i8);
 /// All fields are private and authored through builder methods.
 ///
 /// ```ignore
-/// // Panel text: word-wraps against its containing element.
+/// // Panel text style:
 /// TextStyle::new(14.0)
 ///     .with_font(FontId::MONOSPACE.0)
 ///     .bold()
@@ -208,7 +208,6 @@ pub struct TextStyle {
     line_height:    f32,
     letter_spacing: f32,
     word_spacing:   f32,
-    wrap:           TextWrap,
     color:          Color,
     align:          TextAlign,
     anchor:         Anchor,
@@ -247,7 +246,6 @@ impl PartialEq for TextStyle {
             && self.line_height == other.line_height
             && self.letter_spacing == other.letter_spacing
             && self.word_spacing == other.word_spacing
-            && self.wrap == other.wrap
             && self.color == other.color
             && self.align == other.align
             && self.anchor == other.anchor
@@ -274,7 +272,7 @@ impl TextStyle {
     /// `f32` records no unit and resolves from the contextual `FontUnit`
     /// cascade attribute (panel font unit, world units, or pixels).
     ///
-    /// Defaults to word wrapping, centered anchor, normal weight, white color.
+    /// Defaults to centered anchor, normal weight, white color.
     #[must_use]
     pub fn new(size: impl Into<Dimension>) -> Self {
         let font_size = size.into();
@@ -286,7 +284,6 @@ impl TextStyle {
             line_height:    0.0,
             letter_spacing: 0.0,
             word_spacing:   0.0,
-            wrap:           TextWrap::Words,
             color:          Color::WHITE,
             align:          TextAlign::Left,
             anchor:         Anchor::Center,
@@ -362,10 +359,6 @@ impl TextStyle {
     /// Returns the per-label unit override, if set.
     #[must_use]
     pub const fn unit(&self) -> Option<Unit> { self.unit }
-
-    /// Returns the text wrapping mode.
-    #[must_use]
-    pub const fn wrap_mode(&self) -> TextWrap { self.wrap }
 
     /// Returns the text alignment.
     #[must_use]
@@ -529,20 +522,6 @@ impl TextStyle {
         self
     }
 
-    /// Sets the text wrapping mode.
-    #[must_use]
-    pub const fn wrap(mut self, mode: TextWrap) -> Self {
-        self.wrap = mode;
-        self
-    }
-
-    /// Disables text wrapping (text may overflow the element).
-    #[must_use]
-    pub const fn no_wrap(mut self) -> Self {
-        self.wrap = TextWrap::None;
-        self
-    }
-
     /// Sets the per-label text [`AlphaMode`] override.
     ///
     /// The panel-text reconciler captures this value before converting via
@@ -622,9 +601,6 @@ impl TextStyle {
         self.unit = dimension.unit;
     }
 
-    /// Sets the text wrapping mode.
-    pub const fn set_wrap(&mut self, wrap: TextWrap) { self.wrap = wrap; }
-
     /// Sets the per-label [`AlphaMode`] override.
     pub const fn set_alpha_mode(&mut self, alpha_mode: AlphaMode) {
         self.alpha_mode = Some(alpha_mode);
@@ -635,8 +611,8 @@ impl TextStyle {
     /// Returns a copy with font-related dimensions multiplied by `factor`.
     ///
     /// Used by the layout engine to convert font sizes from font units to
-    /// layout units in render commands. Non-dimensional fields (color, wrap
-    /// mode, font features, etc.) are preserved unchanged.
+    /// layout units in render commands. Non-dimensional fields (color, font
+    /// features, etc.) are preserved unchanged.
     #[must_use]
     pub fn scaled(&self, factor: f32) -> Self {
         let mut copy = self.clone();
@@ -660,15 +636,14 @@ impl TextStyle {
 
     /// Returns a copy prepared for text shaping at the given anchor.
     ///
-    /// Forces [`TextWrap::None`] and [`TextAlign::Left`] and clears the unit /
-    /// alpha-mode authoring fields (those route through the cascade). The two
+    /// Forces [`TextAlign::Left`] and clears the unit / alpha-mode authoring
+    /// fields (those route through the cascade). The two
     /// contexts differ only in anchor: world text uses [`Anchor::TopLeft`] (the
     /// command origin), layout-engine text uses [`Anchor::Center`].
     /// Crate-internal helper.
     #[must_use]
     pub fn for_shaping(&self, anchor: Anchor) -> Self {
         Self {
-            wrap: TextWrap::None,
             align: TextAlign::Left,
             anchor,
             unit: None,
@@ -711,7 +686,6 @@ impl TextStyle {
             line_height,
             letter_spacing,
             word_spacing,
-            wrap,
             align,
             anchor,
             font_features,
@@ -735,7 +709,6 @@ impl TextStyle {
         line_height.to_bits().hash(hasher);
         letter_spacing.to_bits().hash(hasher);
         word_spacing.to_bits().hash(hasher);
-        (*wrap as u8).hash(hasher);
         (*align as u8).hash(hasher);
         (*anchor as u8).hash(hasher);
         font_features.hash(hasher);
@@ -752,7 +725,6 @@ impl TextStyle {
             line_height,
             letter_spacing,
             word_spacing,
-            wrap,
             align,
             anchor,
             font_features,
@@ -774,7 +746,6 @@ impl TextStyle {
             && line_height.to_bits() == other.line_height.to_bits()
             && letter_spacing.to_bits() == other.letter_spacing.to_bits()
             && word_spacing.to_bits() == other.word_spacing.to_bits()
-            && *wrap == other.wrap
             && *align == other.align
             && *anchor == other.anchor
             && *font_features == other.font_features
@@ -785,8 +756,8 @@ impl TextStyle {
     /// to gate per-run glyph and path-quad rebuilds.
     ///
     /// Compares the measurement fields (`font_id`, `size`, `weight`, `slant`,
-    /// `line_height`, letter/word spacing, `wrap`, `align`, `anchor`,
-    /// `font_features`) via `to_bits`.
+    /// `line_height`, letter/word spacing, `align`, `anchor`, `font_features`)
+    /// via `to_bits`.
     ///
     /// Excludes render/material fields (`color`, `render_mode`, `shadow_mode`,
     /// `sidedness`, `lighting`, `material`, `alpha_mode`) because
@@ -803,7 +774,6 @@ impl TextStyle {
             line_height,
             letter_spacing,
             word_spacing,
-            wrap,
             align,
             anchor,
             font_features,
@@ -824,7 +794,6 @@ impl TextStyle {
             && line_height.to_bits() == other.line_height.to_bits()
             && letter_spacing.to_bits() == other.letter_spacing.to_bits()
             && word_spacing.to_bits() == other.word_spacing.to_bits()
-            && *wrap == other.wrap
             && *align == other.align
             && *anchor == other.anchor
             && *font_features == other.font_features

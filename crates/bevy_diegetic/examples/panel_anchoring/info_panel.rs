@@ -17,6 +17,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::screen_panel_frame;
@@ -206,7 +207,7 @@ fn hinge_mode_section(builder: &mut LayoutBuilder, hinge: HingeChain) {
             .height(Sizing::FIT)
             .gap(NAV_TITLE_GAP),
         |builder| {
-            builder.text("Modes", nav_text_style(INFO_TITLE_SIZE, false));
+            builder.text(("Modes", nav_text_style(INFO_TITLE_SIZE, false)));
             hinge_option_columns(
                 builder,
                 ("A", "Accordion", pattern == FoldPattern::Accordion),
@@ -235,7 +236,7 @@ fn hinge_action_section(builder: &mut LayoutBuilder, action: FoldAction) {
             .height(Sizing::FIT)
             .gap(NAV_TITLE_GAP),
         |builder| {
-            builder.text("Actions", nav_text_style(INFO_TITLE_SIZE, false));
+            builder.text(("Actions", nav_text_style(INFO_TITLE_SIZE, false)));
             hinge_option_columns(
                 builder,
                 ("U", "Up", action == FoldAction::Up),
@@ -285,8 +286,8 @@ fn hinge_option_cell(builder: &mut LayoutBuilder, option: (&str, &str, bool)) {
             .gap(NAV_HINT_WORD_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(key, nav_text_style(NAV_HINT_SIZE, lit));
-            builder.text(label, nav_text_style(NAV_HINT_SIZE, lit));
+            builder.text((key, nav_text_style(NAV_HINT_SIZE, lit)));
+            builder.text((label, nav_text_style(NAV_HINT_SIZE, lit)));
         },
     );
 }
@@ -300,8 +301,8 @@ fn hinge_option(builder: &mut LayoutBuilder, key: &str, label: &str, lit: bool) 
             .gap(NAV_HINT_WORD_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(key, nav_text_style(NAV_HINT_SIZE, lit));
-            builder.text(label, nav_text_style(NAV_HINT_SIZE, lit));
+            builder.text((key, nav_text_style(NAV_HINT_SIZE, lit)));
+            builder.text((label, nav_text_style(NAV_HINT_SIZE, lit)));
         },
     );
 }
@@ -336,7 +337,7 @@ fn info_direction_legend(builder: &mut LayoutBuilder, glow: LegendGlow) {
             .height(Sizing::FIT)
             .gap(NAV_TITLE_GAP),
         |builder| {
-            builder.text("Navigation", nav_text_style(INFO_TITLE_SIZE, false));
+            builder.text(("Navigation", nav_text_style(INFO_TITLE_SIZE, false)));
             builder.with(
                 El::column()
                     .width(Sizing::GROW)
@@ -364,15 +365,19 @@ fn nav_tab_hint(builder: &mut LayoutBuilder) {
             .height(Sizing::FIT)
             .gap(NAV_HINT_LINE_GAP),
         |builder| {
-            builder.text_element(
-                El::new().width(Sizing::GROW).height(Sizing::FIT),
-                "Tab to change which panel's anchor point you are adjusting",
-                nav_text_style(NAV_HINT_SIZE, false),
+            builder.text(
+                Text::new(
+                    "Tab to change which panel's anchor point you are adjusting",
+                    nav_text_style(NAV_HINT_SIZE, false),
+                )
+                .layout(El::new().width(Sizing::GROW).height(Sizing::FIT)),
             );
-            builder.text_element(
-                El::new().width(Sizing::GROW).height(Sizing::FIT),
-                "Use arrow keys to change the anchor point",
-                nav_text_style(NAV_HINT_SIZE, false),
+            builder.text(
+                Text::new(
+                    "Use arrow keys to change the anchor point",
+                    nav_text_style(NAV_HINT_SIZE, false),
+                )
+                .layout(El::new().width(Sizing::GROW).height(Sizing::FIT)),
             );
         },
     );
@@ -380,10 +385,10 @@ fn nav_tab_hint(builder: &mut LayoutBuilder) {
 
 /// A single arrow glyph, glowing yellow while it is the lit direction.
 fn nav_arrow(builder: &mut LayoutBuilder, direction: AnchorDirection, glow: LegendGlow) {
-    builder.text(
+    builder.text((
         direction.glyph(),
         nav_text_style(NAV_GLYPH_SIZE, glow.direction == Some(direction)),
-    );
+    ));
 }
 
 /// The middle row of the cross: `←`, a centered `R Reset`, and `→`. The arrows
@@ -398,13 +403,13 @@ fn nav_middle_row(builder: &mut LayoutBuilder, glow: LegendGlow) {
             .alignment(AlignX::Center, AlignY::Center),
         |builder| {
             nav_arrow(builder, AnchorDirection::Left, glow);
-            builder.text(
+            builder.text((
                 AnchorDirection::Reset.glyph(),
                 nav_text_style(
                     NAV_CENTER_SIZE,
                     glow.direction == Some(AnchorDirection::Reset),
                 ),
-            );
+            ));
             nav_arrow(builder, AnchorDirection::Right, glow);
         },
     );
@@ -435,10 +440,10 @@ fn info_section(
             .height(Sizing::FIT)
             .gap(INFO_ROW_GAP),
         |builder| {
-            builder.text(
+            builder.text((
                 role.title(),
                 info_title_style(PanelRole::accent_color(), selected),
-            );
+            ));
             info_anchor_row(
                 builder,
                 label,
@@ -478,8 +483,8 @@ fn info_anchor_text(builder: &mut LayoutBuilder, label: &str, value: &str, accen
             .gap(1.0)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(label, info_label_style());
-            builder.text(value, info_value_style(accent));
+            builder.text((label, info_label_style()));
+            builder.text((value, info_value_style(accent)));
         },
     );
 }

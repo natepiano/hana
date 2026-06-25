@@ -73,7 +73,7 @@ fn build_capability_menu_tree(active: ActiveCapability) -> LayoutTree {
                     .height(Sizing::FIT)
                     .gap(MENU_SECTION_GAP),
                 |builder| {
-                    builder.text("Animations", menu_header_style());
+                    builder.text(("Animations", menu_header_style()));
                     builder.with(
                         El::column()
                             .width(Sizing::GROW)
@@ -108,8 +108,8 @@ fn capability_menu_row(builder: &mut LayoutBuilder, index: usize, name: &str, ac
             .background(background)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text((index + 1).to_string(), menu_number_style(active));
-            builder.text(name, menu_name_style(active));
+            builder.text(((index + 1).to_string(), menu_number_style(active)));
+            builder.text((name, menu_name_style(active)));
         },
     );
 }

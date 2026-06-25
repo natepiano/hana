@@ -9,6 +9,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -236,24 +237,14 @@ struct PolicyTextStyles {
 impl PolicyTextStyles {
     fn new() -> Self {
         Self {
-            header:      TextStyle::new(POLICY_PANEL_HEADER_SIZE)
-                .with_color(TITLE_COLOR)
-                .no_wrap(),
-            key:         TextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
-                .with_color(HINT_TEXT_COLOR)
-                .no_wrap(),
+            header:      TextStyle::new(POLICY_PANEL_HEADER_SIZE).with_color(TITLE_COLOR),
+            key:         TextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE).with_color(HINT_TEXT_COLOR),
             key_active:  TextStyle::new(POLICY_PANEL_KEY_TEXT_SIZE)
-                .with_color(POLICY_PANEL_ACTIVE_COLOR)
-                .no_wrap(),
-            name:        TextStyle::new(POLICY_PANEL_TEXT_SIZE)
-                .with_color(HINT_TEXT_COLOR)
-                .no_wrap(),
+                .with_color(POLICY_PANEL_ACTIVE_COLOR),
+            name:        TextStyle::new(POLICY_PANEL_TEXT_SIZE).with_color(HINT_TEXT_COLOR),
             active:      TextStyle::new(POLICY_PANEL_TEXT_SIZE)
-                .with_color(POLICY_PANEL_ACTIVE_COLOR)
-                .no_wrap(),
-            description: TextStyle::new(POLICY_PANEL_TEXT_SIZE)
-                .with_color(HINT_TEXT_COLOR)
-                .wrap(TextWrap::Words),
+                .with_color(POLICY_PANEL_ACTIVE_COLOR),
+            description: TextStyle::new(POLICY_PANEL_TEXT_SIZE).with_color(HINT_TEXT_COLOR),
         }
     }
 }
@@ -357,7 +348,7 @@ fn build_group(
             .height(Sizing::FIT)
             .gap(Px(POLICY_PANEL_HEADER_GAP)),
         |builder| {
-            builder.text(header, styles.header.clone());
+            builder.text((header, styles.header.clone()));
             builder.with(
                 El::row()
                     .width(Sizing::GROW)
@@ -386,7 +377,7 @@ fn build_key_cell(builder: &mut LayoutBuilder, key: &str, key_style: &TextStyle)
             .height(Sizing::FIT)
             .alignment(AlignX::Center, AlignY::Center),
         |builder| {
-            builder.text(format!("{key} {POLICY_PANEL_ARROW}"), key_style.clone());
+            builder.text((format!("{key} {POLICY_PANEL_ARROW}"), key_style.clone()));
         },
     );
 }
@@ -417,13 +408,15 @@ fn build_variant_row(
                     .width(Sizing::fixed(Px(POLICY_PANEL_NAME_COLUMN_WIDTH)))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(label, name_style.clone());
+                    builder.text((label, name_style.clone()));
                 },
             );
             builder.with(
                 El::new().width(Sizing::GROW).height(Sizing::FIT),
                 |builder| {
-                    builder.text(description, styles.description.clone());
+                    builder.text(
+                        Text::new(description, styles.description.clone()).wrap(TextWrap::Words),
+                    );
                 },
             );
         },

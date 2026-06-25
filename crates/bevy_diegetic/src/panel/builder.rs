@@ -809,6 +809,7 @@ mod tests {
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
     use crate::PanelFieldId;
+    use crate::Text;
     use crate::TextStyle;
 
     fn style() -> TextStyle { TextStyle::new(Mm(6.0)) }
@@ -822,8 +823,8 @@ mod tests {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.text_id("title", "A", style());
-                builder.text_id("title", "B", style());
+                builder.text(Text::new("A", style()).id("title"));
+                builder.text(Text::new("B", style()).id("title"));
             })
             .build();
 
@@ -838,8 +839,8 @@ mod tests {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.text_id("a", "A", style());
-                builder.text_id("b", "B", style());
+                builder.text(Text::new("A", style()).id("a"));
+                builder.text(Text::new("B", style()).id("b"));
             })
             .build();
 
@@ -854,7 +855,7 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 for _ in 0..8 {
-                    builder.text("x", style());
+                    builder.text(("x", style()));
                 }
             })
             .build();
@@ -870,9 +871,9 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
                 builder.with(El::new().editable_field("name", field_spec()), |builder| {
-                    builder.text("v", style());
+                    builder.text(("v", style()));
                 });
-                builder.text_id("name", "dup", style());
+                builder.text(Text::new("dup", style()).id("name"));
             })
             .build();
 

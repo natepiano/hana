@@ -352,11 +352,11 @@ fn build_controls(b: &mut LayoutBuilder) {
                     .background(HUD_BACKGROUND)
                     .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                 |b| {
-                    b.text("CONTROLS", title);
+                    b.text(("CONTROLS", title));
                     hud_divider(b);
-                    b.text("H home", hud_text_style(false));
+                    b.text(("H home", hud_text_style(false)));
                     hud_divider(b);
-                    b.text("1-7 alpha mode", hud_text_style(false));
+                    b.text(("1-7 alpha mode", hud_text_style(false)));
                 },
             );
         },
@@ -397,7 +397,7 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
                 |b| {
                     // Title.
                     b.with(El::new().width(Sizing::GROW), |b| {
-                        b.text("ALPHA MODES", title);
+                        b.text(("ALPHA MODES", title));
                     });
                     // Vertical list of modes 1..7; active is highlighted.
                     b.with(El::column().width(Sizing::GROW).gap(Px(2.0)), |b| {
@@ -406,7 +406,7 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
                                 std::mem::discriminant(mode) == std::mem::discriminant(&active);
                             let chip_style = hud_text_style(is_active);
                             b.with(El::new().width(Sizing::GROW), |b| {
-                                b.text(format!("{} {}", idx + 1, label), chip_style);
+                                b.text((format!("{} {}", idx + 1, label), chip_style));
                             });
                         }
                     });
@@ -420,11 +420,11 @@ fn build_info_panel(b: &mut LayoutBuilder, active: AlphaMode) {
                     );
                     // Active mode name.
                     b.with(El::new().width(Sizing::GROW), |b| {
-                        b.text(alpha_mode_label(active), active_header);
+                        b.text((alpha_mode_label(active), active_header));
                     });
                     // Description paragraph.
                     b.with(El::new().width(Sizing::GROW), |b| {
-                        b.text(alpha_mode_description(active), body);
+                        b.text((alpha_mode_description(active), body));
                     });
                 },
             );

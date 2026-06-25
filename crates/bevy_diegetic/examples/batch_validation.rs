@@ -3,10 +3,14 @@
 //! The scene displays authored record counts, material-table rows, and expected
 //! batch counts alongside live renderer counters.
 
+use bevy::camera::Hdr;
 use bevy::camera::primitives::Aabb;
 use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
+use bevy::post_process::bloom::Bloom;
+use bevy::post_process::bloom::BloomCompositeMode;
+use bevy::post_process::bloom::BloomPrefilter;
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
@@ -37,13 +41,16 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::StatsPanelRow;
 use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
@@ -84,7 +91,6 @@ const SDF_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        4,
     sdf_borders:      5,
     material_slots:   9,
-    readout_reason:   "value share / texture split",
     text_runs:        10,
     shape_records:    0,
     shape_primitives: 0,
@@ -93,7 +99,6 @@ const TEXT_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        8,
     sdf_borders:      3,
     material_slots:   12,
-    readout_reason:   "value share / texture split",
     text_runs:        23,
     shape_records:    0,
     shape_primitives: 0,
@@ -102,7 +107,6 @@ const SHAPE_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        3,
     sdf_borders:      4,
     material_slots:   6,
-    readout_reason:   "shape rows share; texture splits",
     text_runs:        8,
     shape_records:    6,
     shape_primitives: 11,
@@ -111,7 +115,6 @@ const MIXED_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:        5,
     sdf_borders:      2,
     material_slots:   7,
-    readout_reason:   "families split",
     text_runs:        15,
     shape_records:    1,
     shape_primitives: 3,
@@ -142,6 +145,8 @@ const SDF_ANIMATION_GREEN_OFFSET: f32 = 2.1;
 const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
 const SDF_ANIMATION_SPEED: f32 = 0.9;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
+const HDR_CONTROL: &str = "R HDR";
+const BLOOM_CONTROL: &str = "B Bloom";
 
 // One render family's live batch decomposition, paired for the breakdown table.
 struct FamilyBreakdown<'a> {
@@ -249,10 +254,8 @@ const LEDGER_FONT_SIZE: f32 = 10.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
 const LEDGER_ROW_GAP: f32 = 2.0;
 const LEDGER_CELL_GAP: f32 = 4.0;
-// Fixed table width so each row's GROW spacer can push the number columns to a
-// shared right edge inside the panel padding. Wide enough for the longest
-// breakdown label plus the three right-aligned number columns.
-const LEDGER_TABLE_WIDTH: f32 = 236.0;
+const LEDGER_BATCH_REASON_MEASURE: &str = "L31 untextured shadow alphatocoverage";
+const LEDGER_MATERIAL_LABEL_MEASURE: &str = "upload us";
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
@@ -292,12 +295,15 @@ const EMISSIVE_WARM: Color = Color::linear_rgb(3.6, 2.3, 0.2);
 const GLINT: Color = Color::linear_rgb(0.95, 0.97, 1.0);
 const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
-// Light cell for the live alpha case: `AlphaMode::Multiply` multiplies its ink
-// into the background and vanishes on dark, so the selector's run sits on a
-// light swatch where multiply reads as a tint. Caption and ink go dark to match.
-const ALPHA_CELL_BG: Color = Color::srgb(0.82, 0.84, 0.88);
-const ALPHA_CELL_INK: Color = Color::srgb(0.10, 0.12, 0.16);
-const ALPHA_CELL_CAPTION: Color = Color::srgba(0.28, 0.32, 0.40, 0.95);
+const BATCH_BLOOM_INTENSITY: f32 = 0.25;
+const BATCH_BLOOM_THRESHOLD: f32 = 4.0;
+const BATCH_BLOOM_THRESHOLD_SOFTNESS: f32 = 0.0;
+const TEXT_EMISSIVE_GAIN: f32 = 1.8;
+// Match the A4 text sample's black-on-white treatment so the live alpha case is
+// judged against the same contrast baseline as `units.rs`.
+const ALPHA_CELL_BG: Color = Color::WHITE;
+const ALPHA_CELL_INK: Color = Color::BLACK;
+const ALPHA_CELL_CAPTION: Color = Color::BLACK;
 
 // The alpha modes the center-left selector cycles through, in number-key order
 // (Digit1..Digit7). The selected mode is applied to the SDF panel's fills and
@@ -326,7 +332,6 @@ const ALPHA_KEYS: [KeyCode; 7] = [
 ];
 const ALPHA_ROW_GAP: f32 = 2.0;
 const ALPHA_ROW_WIDTH: f32 = 120.0;
-const ALPHA_SELECTED_BG: Color = Color::srgba(0.24, 0.62, 0.95, 0.22);
 
 /// The alpha mode the SDF panel fills/borders and the Text panel alpha case
 /// currently render in, chosen from [`ALPHA_MODES`] by the center-left selector.
@@ -358,8 +363,6 @@ struct PanelStats {
     sdf_borders:      usize,
     /// Authored SDF fill/border material-table rows for this panel.
     material_slots:   usize,
-    /// Short share/split text drawn by `panel_stats_block`.
-    readout_reason:   &'static str,
     /// `builder.text` runs.
     text_runs:        usize,
     /// Panel-shape `PathRenderRecord` rows predicted for this panel.
@@ -535,6 +538,54 @@ struct ValidationStatus {
     last_alpha:    usize,
 }
 
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+enum RenderFeature {
+    #[default]
+    On,
+    Off,
+}
+
+impl RenderFeature {
+    const fn activation(self) -> ControlActivation {
+        match self {
+            Self::On => ControlActivation::Active,
+            Self::Off => ControlActivation::Inactive,
+        }
+    }
+}
+
+#[derive(Resource, Clone, Copy, Default, PartialEq, Eq)]
+struct RenderFeatures {
+    hdr:   RenderFeature,
+    bloom: RenderFeature,
+}
+
+impl RenderFeatures {
+    const fn toggle_hdr(&mut self) {
+        match self.hdr {
+            RenderFeature::On => {
+                self.hdr = RenderFeature::Off;
+                self.bloom = RenderFeature::Off;
+            },
+            RenderFeature::Off => {
+                self.hdr = RenderFeature::On;
+            },
+        }
+    }
+
+    const fn toggle_bloom(&mut self) {
+        match self.bloom {
+            RenderFeature::On => {
+                self.bloom = RenderFeature::Off;
+            },
+            RenderFeature::Off => {
+                self.hdr = RenderFeature::On;
+                self.bloom = RenderFeature::On;
+            },
+        }
+    }
+}
+
 #[derive(Default, PartialEq, Eq)]
 enum ValidationState {
     #[default]
@@ -552,7 +603,6 @@ fn main() {
     // `fairy_dust::sprinkle_example`.
     fairy_dust::sprinkle_example()
         .with_brp_extras()
-        .with_hdr()
         .with_perf_mode()
         .with_save_window_position()
         .with_studio_lighting()
@@ -568,7 +618,7 @@ fn main() {
             OrbitCamPreset::blender_like(),
         )
         .with_stable_transparency()
-        .with_bloom()
+        .add_systems(Update, tune_batch_validation_bloom)
         .with_environment_map()
         .with_camera_home()
         .yaw(0.0)
@@ -577,8 +627,14 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_title("Batch Validation")
-                .with_anchor(Anchor::TopLeft),
+                .with_anchor(Anchor::TopLeft)
+                .active_control(HDR_CONTROL)
+                .active_control(BLOOM_CONTROL),
         )
+        .wire_chip_to_state::<RenderFeatures, _>(HDR_CONTROL, |features| features.hdr.activation())
+        .wire_chip_to_state::<RenderFeatures, _>(BLOOM_CONTROL, |features| {
+            features.bloom.activation()
+        })
         .with_camera_control_panel()
         .with_shortcut(ALPHA_KEYS[0], |mut sel: ResMut<AlphaModeSelection>| {
             sel.index = 0;
@@ -601,9 +657,12 @@ fn main() {
         .with_shortcut(ALPHA_KEYS[6], |mut sel: ResMut<AlphaModeSelection>| {
             sel.index = 6;
         })
+        .with_shortcut(KeyCode::KeyR, toggle_hdr)
+        .with_shortcut(KeyCode::KeyB, toggle_bloom)
         .init_resource::<LastDisplayedStats>()
         .init_resource::<AlphaModeSelection>()
         .init_resource::<ValidationStatus>()
+        .init_resource::<RenderFeatures>()
         .add_systems(
             Startup,
             (
@@ -615,10 +674,13 @@ fn main() {
         )
         .add_observer(anchor_alpha_selector_when_added)
         .add_observer(anchor_alpha_selector_when_title_added)
+        .add_observer(apply_render_features_to_added_camera)
+        .add_observer(apply_render_features_to_added_orbit_camera)
         .add_systems(Update, validate_batch_counts.before(update_stats_panel))
         .add_systems(Update, update_stats_panel)
         .add_systems(Update, animate_sdf_surface_panel)
         .add_systems(Update, apply_alpha_selection)
+        .add_systems(PostUpdate, sync_render_feature_components)
         .run();
 }
 
@@ -732,6 +794,106 @@ fn animate_sdf_surface_panel(
     let alpha = selection.mode();
     for panel in &panels {
         sdf_materials.refresh(&mut materials, panel.image.clone(), phase, alpha);
+    }
+}
+
+fn tune_batch_validation_bloom(mut blooms: Query<&mut Bloom>) {
+    for mut bloom in &mut blooms {
+        configure_batch_validation_bloom(&mut bloom);
+    }
+}
+
+const fn batch_validation_bloom() -> Bloom {
+    Bloom {
+        intensity: BATCH_BLOOM_INTENSITY,
+        prefilter: BloomPrefilter {
+            threshold:          BATCH_BLOOM_THRESHOLD,
+            threshold_softness: BATCH_BLOOM_THRESHOLD_SOFTNESS,
+        },
+        composite_mode: BloomCompositeMode::Additive,
+        ..Bloom::OLD_SCHOOL
+    }
+}
+
+const fn configure_batch_validation_bloom(bloom: &mut Bloom) { *bloom = batch_validation_bloom(); }
+
+fn toggle_hdr(mut features: ResMut<RenderFeatures>) { features.toggle_hdr(); }
+
+fn toggle_bloom(mut features: ResMut<RenderFeatures>) { features.toggle_bloom(); }
+
+fn apply_render_features_to_added_camera(
+    trigger: On<Add, Camera>,
+    features: Res<RenderFeatures>,
+    cameras: Query<Option<&Hdr>, With<Camera>>,
+    mut commands: Commands,
+) {
+    let Ok(hdr) = cameras.get(trigger.entity) else {
+        return;
+    };
+    set_hdr_component(trigger.entity, hdr, features.hdr, &mut commands);
+}
+
+fn apply_render_features_to_added_orbit_camera(
+    trigger: On<Add, FairyDustOrbitCam>,
+    features: Res<RenderFeatures>,
+    cameras: Query<(Option<&Hdr>, Option<&Bloom>), With<FairyDustOrbitCam>>,
+    mut commands: Commands,
+) {
+    let Ok((hdr, bloom)) = cameras.get(trigger.entity) else {
+        return;
+    };
+    set_bloom_component(trigger.entity, bloom, features.bloom, &mut commands);
+    set_hdr_component(trigger.entity, hdr, features.hdr, &mut commands);
+}
+
+fn sync_render_feature_components(
+    features: Res<RenderFeatures>,
+    cameras: Query<(Entity, Option<&Hdr>), With<Camera>>,
+    bloom_cameras: Query<(Entity, Option<&Bloom>), With<FairyDustOrbitCam>>,
+    mut commands: Commands,
+) {
+    if !features.is_changed() {
+        return;
+    }
+    for (entity, bloom) in &bloom_cameras {
+        set_bloom_component(entity, bloom, features.bloom, &mut commands);
+    }
+    for (entity, hdr) in &cameras {
+        set_hdr_component(entity, hdr, features.hdr, &mut commands);
+    }
+}
+
+fn set_hdr_component(
+    camera: Entity,
+    hdr: Option<&Hdr>,
+    feature: RenderFeature,
+    commands: &mut Commands,
+) {
+    match (feature, hdr) {
+        (RenderFeature::On, None) => {
+            commands.entity(camera).insert(Hdr);
+        },
+        (RenderFeature::Off, Some(_)) => {
+            commands.entity(camera).remove::<Hdr>();
+        },
+        (RenderFeature::On, Some(_)) | (RenderFeature::Off, None) => {},
+    }
+}
+
+fn set_bloom_component(
+    camera: Entity,
+    bloom: Option<&Bloom>,
+    feature: RenderFeature,
+    commands: &mut Commands,
+) {
+    match (feature, bloom) {
+        (RenderFeature::On, None) => {
+            commands.entity(camera).insert(batch_validation_bloom());
+        },
+        (RenderFeature::Off, Some(_)) => {
+            commands.entity(camera).remove::<Bloom>();
+        },
+        (RenderFeature::On, Some(_)) | (RenderFeature::Off, None) => {},
     }
 }
 
@@ -898,7 +1060,7 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
                     .height(Sizing::FIT)
                     .gap(ALPHA_ROW_GAP),
                 |builder| {
-                    builder.text("alpha mode  (1-7)", ledger_title_style());
+                    builder.text(("alpha mode  (1-7)", ledger_title_style()));
                     for (slot, (label, _)) in ALPHA_MODES.iter().enumerate() {
                         alpha_selector_row(builder, slot, label, slot == selected);
                     }
@@ -911,20 +1073,17 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
 
 fn alpha_selector_row(builder: &mut LayoutBuilder, slot: usize, label: &str, selected: bool) {
     let number = slot + 1;
-    let color = if selected { ACCENT_GREEN } else { TEXT_MUTED };
-    let mut row = El::row()
+    let color = if selected { ACCENT_YELLOW } else { TEXT_MUTED };
+    let row = El::row()
         .width(Sizing::fixed(ALPHA_ROW_WIDTH))
         .height(Sizing::FIT)
         .gap(LEDGER_CELL_GAP)
         .padding(Padding::new(3.0, 3.0, 1.0, 1.0))
         .corner_radius(CornerRadius::all(Mm(0.8)))
         .alignment(AlignX::Left, AlignY::Center);
-    if selected {
-        row = row.background(ALPHA_SELECTED_BG);
-    }
     builder.with(row, |builder| {
-        builder.text(format!("{number}"), ledger_cell_style(color));
-        builder.text(label, ledger_cell_style(color));
+        builder.text((format!("{number}"), ledger_cell_style(color)));
+        builder.text((label, ledger_cell_style(color)));
     });
 }
 
@@ -1163,80 +1322,18 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationSt
         |builder| {
             builder.with(
                 El::column()
-                    .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
+                    .width(Sizing::GROW)
                     .height(Sizing::FIT)
                     .gap(LEDGER_ROW_GAP),
                 |builder| {
-                    builder.text("batch validation", ledger_title_style());
-                    ledger_row(
-                        builder,
-                        "",
-                        TEXT_MUTED,
-                        ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
-                    );
-                    ledger_row(
-                        builder,
-                        "draws",
-                        TEXT_MAIN,
-                        families.each_ref().map(|f| f.batch_count.to_string()),
-                    );
-                    ledger_row(
-                        builder,
-                        "records",
-                        TEXT_MAIN,
-                        families.each_ref().map(|f| f.record_total.to_string()),
-                    );
-                    ledger_row(
-                        builder,
-                        "records/draw",
-                        TEXT_MUTED,
-                        families.each_ref().map(records_per_draw),
-                    );
-
-                    for family in &families {
-                        ledger_separator(builder);
-                        builder.text(
-                            format!("{} draws", family.label),
-                            ledger_cell_style(family.color),
-                        );
-                        for batch in family.batches {
-                            ledger_kv_row(
-                                builder,
-                                &batch_reason(batch),
-                                family.color,
-                                batch.record_count.to_string(),
-                            );
-                        }
-                    }
+                    ledger_batch_section(builder, &families);
 
                     // Per-frame cost of rebuilding and re-uploading the whole
                     // material table. freeze/upload us are paid every frame even
                     // when no material changed — the work a durable slot table
                     // would skip on a no-change frame.
-                    let table = perf.material_table;
                     ledger_separator(builder);
-                    builder.text("material table", ledger_cell_style(TEXT_MAIN));
-                    ledger_kv_row(builder, "rows", TEXT_MUTED, table.rows.to_string());
-                    ledger_kv_row(builder, "capacity", TEXT_MUTED, table.capacity.to_string());
-                    ledger_kv_row(builder, "bytes", TEXT_MUTED, table.upload_bytes.to_string());
-                    ledger_kv_row(
-                        builder,
-                        "freeze us",
-                        TEXT_MUTED,
-                        table.freeze_us.to_string(),
-                    );
-                    ledger_kv_row(
-                        builder,
-                        "upload us",
-                        TEXT_MUTED,
-                        table.upload_us.to_string(),
-                    );
-                    ledger_kv_row(
-                        builder,
-                        "reallocs",
-                        TEXT_MUTED,
-                        table.allocations.to_string(),
-                    );
+                    ledger_material_section(builder, &perf);
 
                     ledger_separator(builder);
                     // Every state stays a single short line so the FIT-height
@@ -1249,12 +1346,102 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationSt
                             (format!("mismatch: {} fault(s)", failures.len()), ACCENT_RED)
                         },
                     };
-                    builder.text(status_text, ledger_cell_style(status_color));
+                    builder.text((status_text, ledger_cell_style(status_color)));
                 },
             );
         },
     );
     builder.build()
+}
+
+fn ledger_batch_section(builder: &mut LayoutBuilder, families: &[FamilyBreakdown<'_>; 3]) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(LEDGER_ROW_GAP),
+        |builder| {
+            builder.text(("batch validation", ledger_title_style()));
+            ledger_row(
+                builder,
+                "",
+                TEXT_MUTED,
+                ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
+            );
+            ledger_row(
+                builder,
+                "draws",
+                TEXT_MAIN,
+                families
+                    .each_ref()
+                    .map(|family| family.batch_count.to_string()),
+            );
+            ledger_row(
+                builder,
+                "records",
+                TEXT_MAIN,
+                families
+                    .each_ref()
+                    .map(|family| family.record_total.to_string()),
+            );
+            ledger_row(
+                builder,
+                "records/draw",
+                TEXT_MAIN,
+                families.each_ref().map(records_per_draw),
+            );
+
+            for family in families {
+                ledger_separator(builder);
+                // Header row: each row below is one draw, labeled by its
+                // split reason; the right column is that draw's record
+                // count, so the column sums to the family record total.
+                ledger_breakdown_header(builder, &format!("{} draws", family.label), family.color);
+                for batch in family.batches {
+                    ledger_kv_row(
+                        builder,
+                        &batch_reason(batch),
+                        family.color,
+                        batch.record_count.to_string(),
+                    );
+                }
+            }
+        },
+    );
+}
+
+fn ledger_material_section(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats) {
+    let table = perf.material_table;
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(LEDGER_ROW_GAP),
+        |builder| {
+            builder.text(("material table", ledger_cell_style(TEXT_MAIN)));
+            ledger_plain_kv_row(builder, "rows", TEXT_MUTED, table.rows.to_string());
+            ledger_plain_kv_row(builder, "capacity", TEXT_MUTED, table.capacity.to_string());
+            ledger_plain_kv_row(builder, "bytes", TEXT_MUTED, table.upload_bytes.to_string());
+            ledger_plain_kv_row(
+                builder,
+                "freeze us",
+                TEXT_MUTED,
+                table.freeze_us.to_string(),
+            );
+            ledger_plain_kv_row(
+                builder,
+                "upload us",
+                TEXT_MUTED,
+                table.upload_us.to_string(),
+            );
+            ledger_plain_kv_row(
+                builder,
+                "reallocs",
+                TEXT_MUTED,
+                table.allocations.to_string(),
+            );
+        },
+    );
 }
 
 // One table row: a fixed-width left label cell plus three right-aligned numeric
@@ -1276,7 +1463,7 @@ fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
             .height(Sizing::FIT)
             .alignment(AlignX::Right, AlignY::Center),
         |builder| {
-            builder.text(value, ledger_cell_style(color));
+            builder.text((value, ledger_cell_style(color)));
         },
     );
 }
@@ -1297,13 +1484,47 @@ fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cell
                     .height(Sizing::FIT)
                     .alignment(AlignX::Left, AlignY::Center),
                 |builder| {
-                    builder.text(label, ledger_cell_style(label_color));
+                    builder.text((label, ledger_cell_style(label_color)));
                 },
             );
             ledger_spacer(builder);
             for (cell, color) in cells.into_iter().zip(LEDGER_FAMILY_COLORS) {
                 ledger_num_cell(builder, cell, color);
             }
+        },
+    );
+}
+
+// Breakdown section header: the family label keeps its natural width, then a
+// grow spacer pushes "records" to the right. Follow-on rows reserve the longest
+// possible batch-reason label separately.
+fn ledger_breakdown_header(builder: &mut LayoutBuilder, label: &str, color: Color) {
+    builder.with(
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(LEDGER_CELL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text((label, ledger_cell_style(color)));
+                },
+            );
+            ledger_spacer(builder);
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Right, AlignY::Center),
+                |builder| {
+                    builder.text(("records", ledger_cell_style(color)));
+                },
+            );
         },
     );
 }
@@ -1324,7 +1545,36 @@ fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: 
                     .height(Sizing::FIT)
                     .alignment(AlignX::Left, AlignY::Center),
                 |builder| {
-                    builder.text(label, ledger_cell_style(color));
+                    builder.text(
+                        Text::new(label, ledger_cell_style(color))
+                            .measure_as(LEDGER_BATCH_REASON_MEASURE),
+                    );
+                },
+            );
+            ledger_spacer(builder);
+            ledger_num_cell(builder, value, color);
+        },
+    );
+}
+
+fn ledger_plain_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
+    builder.with(
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(LEDGER_CELL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text(
+                        Text::new(label, ledger_cell_style(color))
+                            .measure_as(LEDGER_MATERIAL_LABEL_MEASURE),
+                    );
                 },
             );
             ledger_spacer(builder);
@@ -1454,7 +1704,7 @@ fn text_panel_default_material() -> StandardMaterial {
 fn text_emissive_material() -> StandardMaterial {
     let mut material = default_panel_material();
     material.base_color = Color::srgb(0.08, 0.06, 0.02);
-    material.emissive = EMISSIVE_WARM.to_linear() * 1.4;
+    material.emissive = EMISSIVE_WARM.to_linear() * TEXT_EMISSIVE_GAIN;
     material.alpha_mode = AlphaMode::Blend;
     material
 }
@@ -1681,7 +1931,7 @@ fn build_mixed_panel() -> LayoutTree {
                     .background(MIXED_ROW_BG)
                     .alignment(AlignX::Left, AlignY::Center),
                 |builder| {
-                    builder.text("Expected: SDF + text + path batches", body_style(TEXT_MAIN));
+                    builder.text(("Expected: SDF + text + path batches", body_style(TEXT_MAIN)));
                 },
             );
         },
@@ -1716,8 +1966,8 @@ fn panel_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str, stats:
                     .height(Sizing::FIT)
                     .gap(1.0),
                 |builder| {
-                    builder.text(title, title_style());
-                    builder.text(subtitle, subtitle_style(TEXT_MUTED));
+                    builder.text((title, title_style()));
+                    builder.text((subtitle, subtitle_style(TEXT_MUTED)));
                 },
             );
             panel_stats_block(builder, stats);
@@ -1752,7 +2002,6 @@ fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
                     (format!("slots {}", stats.material_slots), ACCENT_RED),
                 ],
             );
-            builder.text(stats.readout_reason, stats_style(TEXT_MUTED));
         },
     );
 }
@@ -1768,7 +2017,7 @@ fn stats_block_row(builder: &mut LayoutBuilder, cells: &[(String, Color)]) {
             .alignment(AlignX::Right, AlignY::Top),
         |builder| {
             for (text, color) in cells {
-                builder.text(text.clone(), stats_style(*color));
+                builder.text((text.clone(), stats_style(*color)));
             }
         },
     );
@@ -1820,8 +2069,8 @@ fn material_group_header(builder: &mut LayoutBuilder, title: &str, subtitle: &st
             .height(Sizing::FIT)
             .gap(MATERIAL_CASE_GAP),
         |builder| {
-            builder.text(title, material_group_title_style());
-            builder.text(subtitle, material_caption_style(TEXT_MUTED));
+            builder.text((title, material_group_title_style()));
+            builder.text((subtitle, material_caption_style(TEXT_MUTED)));
         },
     );
 }
@@ -1852,8 +2101,8 @@ fn material_case_block_with_style(
             .background(MATERIAL_CASE_BG)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(label, material_caption_style(TEXT_MUTED));
-            builder.text(value, style);
+            builder.text((label, material_caption_style(TEXT_MUTED)));
+            builder.text((value, style));
         },
     );
 }
@@ -1901,10 +2150,10 @@ fn divergent_alpha_case(builder: &mut LayoutBuilder, alpha: AlphaMode) {
         ALPHA_CELL_BG,
         ALPHA_CELL_CAPTION,
         |builder| {
-            builder.text(
+            builder.text((
                 alpha_mode_label(alpha),
                 material_value_style(ALPHA_CELL_INK).with_alpha_mode(alpha),
-            );
+            ));
         },
     );
 }
@@ -1926,10 +2175,10 @@ fn divergent_texture_case(builder: &mut LayoutBuilder, materials: &TextPanelMate
         MATERIAL_CASE_BG,
         TEXT_MUTED,
         |builder| {
-            builder.text(
+            builder.text((
                 "image glyphs",
                 material_value_style(TEXT_MAIN).with_material(materials.texture.clone()),
-            );
+            ));
         },
     );
 }
@@ -1945,18 +2194,18 @@ fn divergent_cull_case(builder: &mut LayoutBuilder) {
         MATERIAL_CASE_BG,
         TEXT_MUTED,
         |builder| {
-            builder.text(
+            builder.text((
                 "FrontOnly",
                 material_value_style(ACCENT_RED).with_sidedness(Sidedness::FrontOnly),
-            );
-            builder.text(
+            ));
+            builder.text((
                 "BackOnly",
                 material_value_style(ACCENT_RED).with_sidedness(Sidedness::BackOnly),
-            );
-            builder.text(
+            ));
+            builder.text((
                 "BothSides",
                 material_value_style(ACCENT_RED).with_sidedness(Sidedness::BothSides),
-            );
+            ));
         },
     );
 }
@@ -1981,7 +2230,7 @@ fn divergent_case_shell(
             .background(cell_bg)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(caption, material_caption_style(caption_color));
+            builder.text((caption, material_caption_style(caption_color)));
             // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
             // bottom-up fit pass, forcing its text runs to wrap per word and
             // measure tall, which balloons the case height. FIT measures each
@@ -2024,8 +2273,8 @@ fn sdf_fill_card(
                     .gap(1.0)
                     .alignment(AlignX::Center, AlignY::Center),
                 |builder| {
-                    builder.text(label, swatch_style(accent));
-                    builder.text(caption, small_style(TEXT_MUTED));
+                    builder.text((label, swatch_style(accent)));
+                    builder.text((caption, small_style(TEXT_MUTED)));
                 },
             );
         },
@@ -2056,8 +2305,8 @@ fn sdf_panel_default_card(
                     .gap(1.0)
                     .alignment(AlignX::Center, AlignY::Center),
                 |builder| {
-                    builder.text(label, swatch_style(accent));
-                    builder.text(caption, small_style(TEXT_MUTED));
+                    builder.text((label, swatch_style(accent)));
+                    builder.text((caption, small_style(TEXT_MUTED)));
                 },
             );
         },
@@ -2232,8 +2481,8 @@ fn shape_group_card(
                     .height(Sizing::FIT)
                     .gap(1.0),
                 |builder| {
-                    builder.text(label, body_style(color));
-                    builder.text(detail, small_style(TEXT_MUTED));
+                    builder.text((label, body_style(color)));
+                    builder.text((detail, small_style(TEXT_MUTED)));
                 },
             );
             builder.with(
@@ -2277,16 +2526,16 @@ fn mixed_row_body(
             .width(Sizing::fixed(MIXED_LABEL_WIDTH))
             .height(Sizing::FIT),
         |builder| {
-            builder.text(label, body_style(color));
+            builder.text((label, body_style(color)));
         },
     );
     builder.with(
         El::new().width(Sizing::GROW).height(Sizing::FIT),
         |builder| {
-            builder.text(value, body_style(TEXT_MAIN));
+            builder.text((value, body_style(TEXT_MAIN)));
         },
     );
-    builder.text(count, body_style(TEXT_MUTED));
+    builder.text((count, body_style(TEXT_MUTED)));
 }
 
 fn mixed_row(

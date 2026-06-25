@@ -319,10 +319,10 @@ fn build_panel_content(b: &mut LayoutBuilder, serif_font_id: Option<u16>) {
             .background(bg)
             .border(Border::all(1.0, border_color)),
         |b| {
-            b.text(
+            b.text((
                 "Font Features",
                 TextStyle::new(SECTION_SIZE + 4.0).with_color(section_color),
-            );
+            ));
 
             let serif_font = serif_font_id.unwrap_or(0);
             let serif_name = if serif_font_id.is_some() {
@@ -492,17 +492,17 @@ fn build_feature_column(
                     .gap(8.0)
                     .align_y(AlignY::Top),
                 |b| {
-                    b.text(
+                    b.text((
                         title,
                         TextStyle::new(SECTION_SIZE).with_color(section_color),
-                    );
+                    ));
                     b.with(
                         El::new()
                             .width(Sizing::GROW)
                             .height(Sizing::FIT)
                             .align_x(AlignX::Right),
                         |b| {
-                            b.text(font_name, font_name_config.clone());
+                            b.text((font_name, font_name_config.clone()));
                         },
                     );
                 },
@@ -541,7 +541,7 @@ fn build_sample_rows(
                             .height(Sizing::FIT)
                             .alignment(AlignX::Center, AlignY::Top),
                         |b| {
-                            b.text("Off", label_config.clone());
+                            b.text(("Off", label_config.clone()));
                         },
                     );
                     b.with(
@@ -550,7 +550,7 @@ fn build_sample_rows(
                             .height(Sizing::FIT)
                             .alignment(AlignX::Center, AlignY::Top),
                         |b| {
-                            b.text("On", label_config.clone());
+                            b.text(("On", label_config.clone()));
                         },
                     );
                 },
@@ -570,7 +570,7 @@ fn build_sample_rows(
                                 .height(Sizing::GROW)
                                 .alignment(AlignX::Center, AlignY::Center),
                             |b| {
-                                b.text(sample, off_config.clone());
+                                b.text((sample, off_config.clone()));
                             },
                         );
                         b.with(
@@ -579,7 +579,7 @@ fn build_sample_rows(
                                 .height(Sizing::GROW)
                                 .alignment(AlignX::Center, AlignY::Center),
                             |b| {
-                                b.text(sample, on_config.clone());
+                                b.text((sample, on_config.clone()));
                             },
                         );
                     },

@@ -820,7 +820,7 @@ mod tests {
                 .background(Color::WHITE),
             |builder| {
                 if matches!(text_content_state, TextContentState::Present) {
-                    builder.text("Alpha", TextStyle::new(10.0));
+                    builder.text(("Alpha", TextStyle::new(10.0)));
                 }
             },
         );

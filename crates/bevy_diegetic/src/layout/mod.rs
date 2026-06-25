@@ -58,6 +58,8 @@ pub use builder::El;
 pub use builder::LayoutBuilder;
 pub use builder::Overlay;
 pub use builder::Row;
+pub use builder::Text;
+pub use builder::TextSizing;
 pub use draw::DrawOverflow;
 pub use draw::PanelDraw;
 pub(crate) use element::FieldDisplayTextUpdate;

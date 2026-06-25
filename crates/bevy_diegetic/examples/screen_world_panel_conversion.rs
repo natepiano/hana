@@ -1220,10 +1220,10 @@ fn screen_panel_tree(
                     .height(Sizing::FIT)
                     .gap(Px(SCREEN_GAP_PX)),
                 |builder| {
-                    builder.text(
+                    builder.text((
                         "Screen Authored Panel",
                         TextStyle::new(metrics.title_size).with_color(TEXT_COLOR),
-                    );
+                    ));
                     status_badge(builder, space, metrics);
                     panel_option_row(
                         builder,
@@ -1275,12 +1275,10 @@ fn world_panel_tree(
             .corner_radius(CornerRadius::all(metrics.dim(metrics.radius)))
             .background(PANEL_FILL_BACKGROUND),
     );
-    builder.text(
+    builder.text((
         "World Authored Panel",
-        TextStyle::new(metrics.title_size)
-            .with_color(TEXT_COLOR)
-            .no_wrap(),
-    );
+        TextStyle::new(metrics.title_size).with_color(TEXT_COLOR),
+    ));
     status_badge(&mut builder, space, metrics);
     panel_option_row(
         &mut builder,
@@ -1340,16 +1338,14 @@ fn panel_option_row(
         row = row.background(ACTION_HIGHLIGHT);
     }
     builder.with(row, |builder| {
-        builder.text(
+        builder.text((
             operation.label(),
-            TextStyle::new(metrics.detail_size)
-                .with_color(if is_highlighted {
-                    TEXT_COLOR
-                } else {
-                    enabled_text_color(is_enabled)
-                })
-                .no_wrap(),
-        );
+            TextStyle::new(metrics.detail_size).with_color(if is_highlighted {
+                TEXT_COLOR
+            } else {
+                enabled_text_color(is_enabled)
+            }),
+        ));
     });
 }
 
@@ -1369,12 +1365,10 @@ fn status_badge(builder: &mut LayoutBuilder, space: PanelSpace, metrics: PanelTr
             .corner_radius(CornerRadius::all(metrics.dim(metrics.radius * 0.45)))
             .background(space.highlight()),
         |builder| {
-            builder.text(
+            builder.text((
                 space.label(),
-                TextStyle::new(metrics.status_size)
-                    .with_color(TEXT_COLOR)
-                    .no_wrap(),
-            );
+                TextStyle::new(metrics.status_size).with_color(TEXT_COLOR),
+            ));
         },
     );
 }

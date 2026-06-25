@@ -101,7 +101,7 @@ mod tests {
     fn collects_authored_field_record_text_and_bounds() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(El::new().editable_field("name", field_spec()), |builder| {
-            builder.text("Gain", TextStyle::new(10.0));
+            builder.text(("Gain", TextStyle::new(10.0)));
         });
         let tree = builder.build();
         let engine = LayoutEngine::new(Arc::new(measure));

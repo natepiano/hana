@@ -280,7 +280,7 @@ mod tests {
             .world_height(0.5)
             .anchor(crate::Anchor::Center)
             .layout(|builder| {
-                builder.text("saved", TextStyle::new(6.0));
+                builder.text(("saved", TextStyle::new(6.0)));
             })
             .build()
             .map_err(|error| error.to_string())

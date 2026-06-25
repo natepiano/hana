@@ -307,7 +307,7 @@ fn spawn_info_panel(mut commands: Commands, mut materials: ResMut<Assets<Standar
 }
 
 fn build_info_panel_layout(builder: &mut LayoutBuilder) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
     let body = TextStyle::new(LABEL_SIZE).with_color(INFO_TEXT_COLOR);
 
     screen_panel_frame(
@@ -319,9 +319,9 @@ fn build_info_panel_layout(builder: &mut LayoutBuilder) {
             builder.with(
                 El::column().width(Sizing::GROW).gap(INFO_PANEL_GAP),
                 |builder| {
-                    builder.text(INFO_PANEL_HEADING, title);
+                    builder.text((INFO_PANEL_HEADING, title));
                     for line in INFO_PANEL_LINES {
-                        builder.text(line, body.clone());
+                        builder.text((line, body.clone()));
                     }
                 },
             );

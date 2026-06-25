@@ -7,6 +7,7 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Percent;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
 use bevy_kana::ToF32;
@@ -144,7 +145,7 @@ fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
                     .height(Sizing::GROW)
                     .gap(EVENT_LOG_CHILD_GAP),
                 |builder| {
-                    builder.text(EVENT_LOG_TITLE, title);
+                    builder.text((EVENT_LOG_TITLE, title));
                     title_divider(builder);
                     // Scroll viewport: fills the remaining height, clips overflow,
                     // and follows the tail (scrollback 0) until the user scrolls up.
@@ -157,10 +158,11 @@ fn build_log_layout(builder: &mut LayoutBuilder, log: &EventLog) {
                         |builder| {
                             for entry in &log.entries {
                                 builder.text(
-                                    &entry.text,
-                                    TextStyle::new(EVENT_LOG_TEXT_SIZE)
-                                        .with_color(entry.color)
-                                        .wrap(TextWrap::Words),
+                                    Text::new(
+                                        &entry.text,
+                                        TextStyle::new(EVENT_LOG_TEXT_SIZE).with_color(entry.color),
+                                    )
+                                    .wrap(TextWrap::Words),
                                 );
                             }
                         },
@@ -191,7 +193,7 @@ fn footer_hints(builder: &mut LayoutBuilder, hint: &TextStyle) {
             .gap(EVENT_LOG_CHILD_GAP)
             .align_y(AlignY::Center),
         |builder| {
-            builder.text(LOG_SCROLL_HINT_TEXT, hint.clone());
+            builder.text((LOG_SCROLL_HINT_TEXT, hint.clone()));
             builder.with(
                 El::new()
                     .width(Sizing::fixed(EVENT_LOG_DIVIDER_THICKNESS))
@@ -199,7 +201,7 @@ fn footer_hints(builder: &mut LayoutBuilder, hint: &TextStyle) {
                     .background(EVENT_LOG_DIVIDER_COLOR),
                 |_| {},
             );
-            builder.text(LOG_CLEAR_HINT_TEXT, hint.clone());
+            builder.text((LOG_CLEAR_HINT_TEXT, hint.clone()));
         },
     );
 }

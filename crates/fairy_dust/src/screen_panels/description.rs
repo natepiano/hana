@@ -124,9 +124,9 @@ fn build_description_layout(builder: &mut LayoutBuilder, panel: &DescriptionPane
         builder.with(
             El::column().width(Sizing::GROW).gap(DESCRIPTION_CHILD_GAP),
             |builder| {
-                builder.text(&panel.title, title);
+                builder.text((&panel.title, title));
                 for line in &panel.lines {
-                    builder.text(line, body.clone());
+                    builder.text((line, body.clone()));
                 }
             },
         );

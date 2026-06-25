@@ -405,21 +405,13 @@ fn build_hud_panel(
 }
 
 fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: Option<&HudSnapshot>) {
-    let title = TextStyle::new(PANEL_TITLE_SIZE)
-        .with_color(HUD_HEADER_COLOR)
-        .no_wrap();
-    let inherited = TextStyle::new(PANEL_TEXT_SIZE)
-        .with_color(INHERITED_COLOR)
-        .no_wrap();
-    let mut own = TextStyle::new(PANEL_TEXT_SIZE)
-        .with_color(OVERRIDE_COLOR)
-        .no_wrap();
+    let title = TextStyle::new(PANEL_TITLE_SIZE).with_color(HUD_HEADER_COLOR);
+    let inherited = TextStyle::new(PANEL_TEXT_SIZE).with_color(INHERITED_COLOR);
+    let mut own = TextStyle::new(PANEL_TEXT_SIZE).with_color(OVERRIDE_COLOR);
     if snapshot.is_none_or(|snapshot| snapshot.state.label_alpha.is_override()) {
         own = own.with_alpha_mode(LABEL_ALPHA);
     }
-    let unit = TextStyle::new(PANEL_TEXT_SIZE)
-        .with_color(DEFAULT_COLOR)
-        .no_wrap();
+    let unit = TextStyle::new(PANEL_TEXT_SIZE).with_color(DEFAULT_COLOR);
     let inherited_text = snapshot.map_or_else(
         || alpha_line(PANEL_INHERITED_PREFIX, PANEL_ALPHA, "panel"),
         panel_inherited_text,
@@ -450,10 +442,10 @@ fn build_panel_layout(builder: &mut LayoutBuilder, snapshot: Option<&HudSnapshot
                     .background(DEFAULT_PANEL_BACKGROUND)
                     .border(Border::all(PANEL_INNER_BORDER_WIDTH, PANEL_BORDER_DIM)),
                 |builder| {
-                    builder.text("Panel Text", title);
-                    builder.text(inherited_text, inherited);
-                    builder.text(local_text, own);
-                    builder.text(unit_text, unit);
+                    builder.text(("Panel Text", title));
+                    builder.text((inherited_text, inherited));
+                    builder.text((local_text, own));
+                    builder.text((unit_text, unit));
                 },
             );
         },
@@ -638,15 +630,9 @@ struct HudPanel;
 
 fn build_hud_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    let header = TextStyle::new(LABEL_SIZE)
-        .with_color(HUD_HEADER_COLOR)
-        .no_wrap();
-    let control_key = TextStyle::new(LABEL_SIZE)
-        .with_color(HUD_KEY_COLOR)
-        .no_wrap();
-    let control_text = TextStyle::new(LABEL_SIZE)
-        .with_color(HUD_CONTROL_COLOR)
-        .no_wrap();
+    let header = TextStyle::new(LABEL_SIZE).with_color(HUD_HEADER_COLOR);
+    let control_key = TextStyle::new(LABEL_SIZE).with_color(HUD_KEY_COLOR);
+    let control_text = TextStyle::new(LABEL_SIZE).with_color(HUD_CONTROL_COLOR);
 
     builder.with(
         El::row().width(Sizing::FIT).height(Sizing::FIT),
@@ -658,7 +644,7 @@ fn build_hud_tree(snapshot: Option<&HudSnapshot>) -> LayoutTree {
             },
             None => {
                 build_hud_card(builder, |builder| {
-                    builder.text("Cascade controls", header);
+                    builder.text(("Cascade controls", header));
                 });
             },
         },
@@ -693,7 +679,7 @@ fn build_controls_table(
             .height(Sizing::FIT)
             .gap(HUD_ROW_GAP),
         |builder| {
-            builder.text("Cascade controls", header.clone());
+            builder.text(("Cascade controls", header.clone()));
             controls_row(
                 builder,
                 "G",
@@ -765,7 +751,7 @@ fn controls_row(
                     .width(Sizing::fixed(HUD_CONTROL_KEY_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(key, key_style.clone());
+                    builder.text((key, key_style.clone()));
                 },
             );
             builder.with(
@@ -773,7 +759,7 @@ fn controls_row(
                     .width(Sizing::fixed(HUD_CONTROL_LABEL_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(label, text_style.clone());
+                    builder.text((label, text_style.clone()));
                 },
             );
             builder.with(
@@ -781,7 +767,7 @@ fn controls_row(
                     .width(Sizing::fixed(HUD_CONTROL_VALUE_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(value, text_style.clone());
+                    builder.text((value, text_style.clone()));
                 },
             );
         },

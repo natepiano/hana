@@ -263,7 +263,7 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
             .height(Sizing::grow_min(0.0)),
         |b| {
             // Padding labels — sit in the padding space.
-            b.text("top: Pt(14.17)", pad_label.clone());
+            b.text(("top: Pt(14.17)", pad_label.clone()));
 
             // Content area with visible background.
             b.with(
@@ -276,20 +276,20 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
                     .height(Sizing::grow_min(0.0)),
                 |b| {
                     // Padding description.
-                    b.text(
+                    b.text((
                         "Padding: Mm(5) left/right, Pt(14) top, In(0.2) bottom",
                         code.clone(),
-                    );
-                    b.text("visible gap between border and this box", label.clone());
+                    ));
+                    b.text(("visible gap between border and this box", label.clone()));
 
                     // Border description.
-                    b.text("Border::all(Mm(1.0), color)", code.clone());
+                    b.text(("Border::all(Mm(1.0), color)", code.clone()));
 
                     // Gap description.
-                    b.text("gap(Mm(2.0)) — space between rows", code.clone());
+                    b.text(("gap(Mm(2.0)) — space between rows", code.clone()));
 
                     // Fixed-size boxes.
-                    b.text("Sizing::fixed(Mm(8.0)):", code.clone());
+                    b.text(("Sizing::fixed(Mm(8.0)):", code.clone()));
                     b.with(
                         El::row()
                             .gap(Mm(2.0))
@@ -303,7 +303,7 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
                                         .height(Sizing::fixed(Mm(8.0)))
                                         .background(BOX_COLOR),
                                     |b| {
-                                        b.text(*label_text, text.clone());
+                                        b.text((*label_text, text.clone()));
                                     },
                                 );
                             }
@@ -313,7 +313,7 @@ fn build_demo() -> bevy_diegetic::LayoutTree {
             );
 
             // Bottom padding label.
-            b.text("bottom: In(0.197)", pad_label);
+            b.text(("bottom: In(0.197)", pad_label));
         },
     );
     builder.build()
@@ -333,34 +333,34 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            b.text(
+            b.text((
                 "The Dimension type — used by Pt (Points), \
                  Mm (Millimeters), In (Inches), and bare f32 — \
                  is accepted by every spatial property in the \
                  layout system.",
                 note.clone(),
-            );
-            b.text(
+            ));
+            b.text((
                 "Padding, Border width, gap, Sizing, \
                  and font size all take impl Into<Dimension>. \
                  This means you can mix units freely within \
                  a single element.",
                 note.clone(),
-            );
-            b.text(
+            ));
+            b.text((
                 "Bare f32 uses the panel's layout_unit \
                  (Millimeters in this example). Newtypes \
                  carry their unit explicitly.",
                 note.clone(),
-            );
-            b.text(
+            ));
+            b.text((
                 "The demo panel on the left uses Mm for \
                  padding sides, Pt for top padding, In for \
                  bottom padding, Mm for borders and gaps, \
                  and Mm for fixed box sizing — all in one \
                  layout tree.",
                 note,
-            );
+            ));
         },
     );
     builder.build()

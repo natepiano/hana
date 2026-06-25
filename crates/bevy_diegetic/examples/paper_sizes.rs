@@ -294,7 +294,7 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                         .height(Sizing::grow_min(0.0)),
                     |b| {
                         // Column title.
-                        b.text(*group_name, col_header.clone());
+                        b.text((*group_name, col_header.clone()));
 
                         // 4 paper sizes — each row takes 25% of remaining height.
                         for (size, name) in *sizes {
@@ -333,29 +333,29 @@ fn build_panel() -> bevy_diegetic::LayoutTree {
                     .width(Sizing::fixed(column_content_width))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("PaperSize", col_header);
-                    b.text(
+                    b.text(("PaperSize", col_header));
+                    b.text((
                         "28 standard paper, card, photo, and poster \
                          sizes with dimensions in millimeters.",
                         note_style.clone(),
-                    );
-                    b.text(
+                    ));
+                    b.text((
                         "Use .portrait() or .landscape() for explicit orientation:",
                         note_style.clone(),
-                    );
-                    b.text(".size(PaperSize::A4)", code_style.clone());
-                    b.text(".size(PaperSize::A4.landscape())", code_style.clone());
-                    b.text(".size(PaperSize::BusinessCard.portrait())", code_style);
-                    b.text(
+                    ));
+                    b.text((".size(PaperSize::A4)", code_style.clone()));
+                    b.text((".size(PaperSize::A4.landscape())", code_style.clone()));
+                    b.text((".size(PaperSize::BusinessCard.portrait())", code_style));
+                    b.text((
                         "Default is natural — portrait for paper, \
                          landscape for cards.",
                         note_style.clone(),
-                    );
-                    b.text(
+                    ));
+                    b.text((
                         "Rectangles show true relative proportions \
                          within each group.",
                         note_style,
-                    );
+                    ));
                 },
             );
         },
@@ -398,7 +398,7 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
             .width(Sizing::grow_min(0.0))
             .height(Sizing::fit_min(0.0)),
         |b| {
-            b.text(label, params.name_style.clone());
+            b.text((label, params.name_style.clone()));
 
             b.with(
                 El::row()
@@ -420,7 +420,7 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
                                     .border(Border::all(Pt(0.5), BORDER_COLOR)),
                                 |_| {},
                             );
-                            b.text("portrait", params.dim_style.clone());
+                            b.text(("portrait", params.dim_style.clone()));
                         },
                     );
                     b.with(
@@ -436,7 +436,7 @@ fn build_paper_row(b: &mut LayoutBuilder, size: PaperSize, name: &str, params: &
                                     .border(Border::all(Pt(0.5), BORDER_COLOR)),
                                 |_| {},
                             );
-                            b.text("landscape", params.dim_style.clone());
+                            b.text(("landscape", params.dim_style.clone()));
                         },
                     );
                 },

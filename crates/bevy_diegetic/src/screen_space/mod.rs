@@ -715,7 +715,7 @@ mod tests {
         let panel = DiegeticPanel::screen()
             .size(Fit, Fit)
             .layout(|builder| {
-                builder.text("test", TextStyle::new(10.0));
+                builder.text(("test", TextStyle::new(10.0)));
             })
             .build()
             .expect("screen fit panel builds");
@@ -789,7 +789,7 @@ mod tests {
             .size(Fit, Fit)
             .anchor(Anchor::TopLeft)
             .layout(|builder| {
-                builder.text("test", TextStyle::new(10.0));
+                builder.text(("test", TextStyle::new(10.0)));
             })
             .build()
             .expect("source panel builds");

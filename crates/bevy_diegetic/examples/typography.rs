@@ -602,10 +602,10 @@ fn build_fonts_panel(
                             .background(HUD_BACKGROUND)
                             .border(Border::all(Px(1.0), HUD_BORDER_DIM)),
                         |b| {
-                            b.text(
+                            b.text((
                                 "FONTS",
                                 TextStyle::new(fairy_dust::TITLE_SIZE).with_color(HUD_TITLE_COLOR),
-                            );
+                            ));
                             b.with(
                                 El::row()
                                     .width(Sizing::FIT)
@@ -627,7 +627,7 @@ fn build_fonts_panel(
                                                         .align_x(AlignX::Center)
                                                         .align_y(AlignY::Center),
                                                     |b| {
-                                                        b.text(*text, config.clone());
+                                                        b.text((*text, config.clone()));
                                                     },
                                                 );
                                             }
@@ -666,7 +666,7 @@ fn column(b: &mut LayoutBuilder, align: AlignX, row_height: Sizing, cells: &[Col
                         .height(row_height)
                         .align_y(AlignY::Center),
                     |b| {
-                        b.text(*text, config.clone());
+                        b.text((*text, config.clone()));
                     },
                 );
             }

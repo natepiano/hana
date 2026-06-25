@@ -16,7 +16,7 @@
 //!     .with(El::column().width(Sizing::GROW).height(Sizing::GROW).padding(Padding::all(8.0))
 //!           .background(Color::srgb_u8(180, 96, 122)),
 //!         |b| {
-//!             b.text("STATUS", TextConfig::new(7));
+//!             b.text(("STATUS", TextStyle::new(7.0)));
 //!             b.with(El::new().width(Sizing::GROW).height(Sizing::fixed(4.0))
 //!                    .background(Color::srgb_u8(74, 196, 172)),
 //!                 |_| {},
@@ -43,6 +43,7 @@ use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
 use super::TextStyle;
+use super::TextWrap;
 use super::child_layout::ChildLayout;
 use super::element::ChildOverflow;
 use super::element::Element;
@@ -65,6 +66,166 @@ use crate::render::HairlineFade;
 pub struct El<L = Row> {
     common:       CommonEl,
     child_layout: L,
+}
+
+/// Text sizing and wrapping policy for a layout text leaf.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TextSizing {
+    /// Measure the visible text naturally, optionally wrapping it.
+    Natural {
+        /// Wrapping policy for the visible text.
+        wrap: TextWrap,
+    },
+    /// Measure this surrogate string while rendering the visible text as one line.
+    MeasureAs {
+        /// Surrogate string used for measurement.
+        text: String,
+    },
+    /// Reserve the measured width of this surrogate string, then wrap visible text to it.
+    WrapAtMeasure {
+        /// Surrogate string whose measured width becomes the wrap width.
+        text: String,
+    },
+}
+
+impl Default for TextSizing {
+    fn default() -> Self {
+        Self::Natural {
+            wrap: TextWrap::None,
+        }
+    }
+}
+
+impl TextSizing {
+    /// Creates natural text sizing with the requested wrapping mode.
+    #[must_use]
+    pub const fn wrap(wrap: TextWrap) -> Self { Self::Natural { wrap } }
+
+    /// Creates sizing that measures a surrogate string instead of the visible text.
+    #[must_use]
+    pub fn measure_as(text: impl Into<String>) -> Self { Self::MeasureAs { text: text.into() } }
+
+    /// Creates sizing that wraps visible text at the surrogate string's measured width.
+    #[must_use]
+    pub fn wrap_at_measure(text: impl Into<String>) -> Self {
+        Self::WrapAtMeasure { text: text.into() }
+    }
+
+    pub(crate) fn measure_text<'a>(&'a self, visible_text: &'a str) -> &'a str {
+        match self {
+            Self::Natural { .. } => visible_text,
+            Self::MeasureAs { text } | Self::WrapAtMeasure { text } => text,
+        }
+    }
+
+    pub(crate) const fn visible_text_affects_layout(&self) -> bool {
+        match self {
+            Self::Natural { .. } | Self::WrapAtMeasure { .. } => true,
+            Self::MeasureAs { .. } => false,
+        }
+    }
+}
+
+/// Text leaf declaration for [`LayoutBuilder::text`].
+#[must_use]
+#[derive(Clone, Debug)]
+pub struct Text {
+    id:      Option<PanelFieldId>,
+    layout:  CommonEl,
+    content: String,
+    style:   TextStyle,
+    sizing:  TextSizing,
+}
+
+impl Text {
+    /// Creates a text declaration with visible text and style.
+    pub fn new(text: impl Into<String>, style: TextStyle) -> Self {
+        Self {
+            id: None,
+            layout: CommonEl::default(),
+            content: text.into(),
+            style,
+            sizing: TextSizing::default(),
+        }
+    }
+
+    /// Assigns a panel-local id so this run can be addressed at runtime.
+    pub fn id(mut self, id: impl Into<PanelFieldId>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// Sets the element layout declaration for this text leaf.
+    pub fn layout<L>(mut self, layout: El<L>) -> Self
+    where
+        L: ChildLayoutState,
+    {
+        let El { common, .. } = layout;
+        self.layout = common;
+        self
+    }
+
+    /// Sets the complete sizing policy for this text leaf.
+    pub fn sizing(mut self, sizing: TextSizing) -> Self {
+        self.sizing = sizing;
+        self
+    }
+
+    /// Measures the visible text naturally with the requested wrapping mode.
+    pub fn wrap(mut self, wrap: TextWrap) -> Self {
+        self.sizing = TextSizing::wrap(wrap);
+        self
+    }
+
+    /// Measures this text leaf as though it contained the surrogate string.
+    pub fn measure_as(mut self, text: impl Into<String>) -> Self {
+        self.sizing = TextSizing::measure_as(text);
+        self
+    }
+
+    /// Reserves the surrogate string's width and wraps visible text to that width.
+    pub fn wrap_at_measure(mut self, text: impl Into<String>) -> Self {
+        self.sizing = TextSizing::wrap_at_measure(text);
+        self
+    }
+
+    fn into_element(self, id: PanelFieldId) -> Element {
+        let Self {
+            id: _,
+            layout,
+            content,
+            style,
+            sizing,
+        } = self;
+        text_leaf_element(
+            layout,
+            ElementContent::Text {
+                id,
+                text: content,
+                config: style,
+                sizing,
+            },
+        )
+    }
+}
+
+impl From<&str> for Text {
+    fn from(text: &str) -> Self { Self::new(text, TextStyle::default()) }
+}
+
+impl From<&String> for Text {
+    fn from(text: &String) -> Self { Self::new(text, TextStyle::default()) }
+}
+
+impl From<String> for Text {
+    fn from(text: String) -> Self { Self::new(text, TextStyle::default()) }
+}
+
+impl<T> From<(T, TextStyle)> for Text
+where
+    T: Into<String>,
+{
+    fn from((text, style): (T, TextStyle)) -> Self { Self::new(text, style) }
 }
 
 /// Public row child-layout state for [`El`].
@@ -138,6 +299,29 @@ impl Default for CommonEl {
             anti_alias:      None,
             hairline_fade:   None,
         }
+    }
+}
+
+fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
+    Element {
+        width: common.width,
+        height: common.height,
+        padding: common.padding,
+        child_layout: ChildLayout::default(),
+        background: common.background,
+        border: common.border,
+        corner_radius: common.corner_radius,
+        overflow: common.overflow,
+        scroll_offset: common.scroll_offset,
+        scroll_anchor_x: common.scroll_anchor_x,
+        scroll_anchor_y: common.scroll_anchor_y,
+        material: common.material,
+        editable: common.editable,
+        draw: common.draw,
+        z_index: common.z_index,
+        anti_alias: common.anti_alias,
+        hairline_fade: common.hairline_fade,
+        content,
     }
 }
 
@@ -617,91 +801,13 @@ impl LayoutBuilder {
     /// of their own. Use [`Self::with`] when you want to create another nested
     /// container instead of a text leaf.
     ///
-    /// The run is given a builder-minted [`PanelFieldId::Auto`] id, so it renders
-    /// but is not addressable at runtime. Use [`Self::text_id`] when a run needs
-    /// to be looked up or retexted later.
-    pub fn text(&mut self, text: impl Into<String>, config: TextStyle) -> &mut Self {
-        let id = self.take_auto_id();
-        self.add_text(id, El::new(), text, config)
-    }
-
-    /// Adds a text leaf with an [`El`] declaration.
-    ///
-    /// Use this when the text leaf itself needs element fields such as
-    /// [`El::z_index`]. The run is given a builder-minted
-    /// [`PanelFieldId::Auto`] id; use [`Self::text_id_element`] when the run
-    /// also needs an author-assigned id.
-    pub fn text_element<L>(
-        &mut self,
-        el: El<L>,
-        text: impl Into<String>,
-        config: TextStyle,
-    ) -> &mut Self
-    where
-        L: ChildLayoutState,
-    {
-        let id = self.take_auto_id();
-        self.add_text(id, el, text, config)
-    }
-
-    /// Adds a text leaf with an author-assigned id, so it can be addressed at
-    /// runtime via [`text_child`](crate::DiegeticPanel::text_child).
-    ///
-    /// The id is passed by value (mirroring
-    /// [`editable_field`](El::editable_field)), so a caller binds it once and
-    /// reuses the same value at the lookup site:
-    ///
-    /// ```ignore
-    /// let id = PanelFieldId::named("title");
-    /// builder.text_id(id.clone(), "Hello", TextStyle::new(16.0));
-    /// // …later…
-    /// let entity = panel.text_child(&id);
-    /// ```
-    ///
-    /// Text-run ids share one panel-local namespace with editable-field ids; a
-    /// duplicate author-assigned id is rejected by `DiegeticPanelBuilder::build`.
-    pub fn text_id(
-        &mut self,
-        id: impl Into<PanelFieldId>,
-        text: impl Into<String>,
-        config: TextStyle,
-    ) -> &mut Self {
-        self.add_text(id.into(), El::new(), text, config)
-    }
-
-    /// Adds a text leaf with an [`El`] declaration and an author-assigned id.
-    pub fn text_id_element<L>(
-        &mut self,
-        id: impl Into<PanelFieldId>,
-        el: El<L>,
-        text: impl Into<String>,
-        config: TextStyle,
-    ) -> &mut Self
-    where
-        L: ChildLayoutState,
-    {
-        self.add_text(id.into(), el, text, config)
-    }
-
-    fn add_text<L>(
-        &mut self,
-        id: PanelFieldId,
-        el: El<L>,
-        text: impl Into<String>,
-        config: TextStyle,
-    ) -> &mut Self
-    where
-        L: ChildLayoutState,
-    {
+    /// The run is given a builder-minted [`PanelFieldId::Auto`] id unless the
+    /// declaration supplies [`Text::id`].
+    pub fn text(&mut self, text: impl Into<Text>) -> &mut Self {
         let parent = self.current_parent();
-        self.tree.add_child(
-            parent,
-            el.into_element(ElementContent::Text {
-                id,
-                text: text.into(),
-                config,
-            }),
-        );
+        let text = text.into();
+        let id = text.id.clone().unwrap_or_else(|| self.take_auto_id());
+        self.tree.add_child(parent, text.into_element(id));
         self
     }
 

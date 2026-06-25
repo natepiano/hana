@@ -27,6 +27,7 @@ use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
 use super::Sizing;
+use super::TextSizing;
 use super::TextStyle;
 use super::Unit;
 use super::child_layout::ChildLayout;
@@ -136,6 +137,8 @@ pub(super) enum ElementContent {
         text:   String,
         /// Text configuration.
         config: TextStyle,
+        /// Sizing and wrapping policy.
+        sizing: TextSizing,
     },
     /// Image leaf — rendered as a textured quad.
     Image {
@@ -871,16 +874,25 @@ fn classify_content_change(content: &ElementContent, next: &ElementContent) -> L
             }
         },
         (
-            ElementContent::Text { text, config, .. },
+            ElementContent::Text {
+                text,
+                config,
+                sizing,
+                ..
+            },
             ElementContent::Text {
                 text: next_text,
                 config: next_config,
+                sizing: next_sizing,
                 ..
             },
         ) => {
-            if text != next_text || !config.layout_eq_excluding_visuals(next_config) {
+            if sizing != next_sizing
+                || (!config.layout_eq_excluding_visuals(next_config))
+                || (sizing.visible_text_affects_layout() && text != next_text)
+            {
                 LayoutTreeChange::LayoutAffecting
-            } else if config != next_config {
+            } else if text != next_text || config != next_config {
                 LayoutTreeChange::VisualOnly
             } else {
                 LayoutTreeChange::Identical
@@ -938,8 +950,8 @@ mod tests {
     use crate::layout::PanelLine;
     use crate::layout::PanelShape;
     use crate::layout::Sizing;
+    use crate::layout::Text;
     use crate::layout::TextStyle;
-    use crate::layout::TextWrap;
     use crate::layout::Unit;
     use crate::layout::child_layout::ChildLayout;
 
@@ -949,7 +961,7 @@ mod tests {
 
     fn text_tree(text: &str, style: TextStyle) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, style);
+        builder.text((text, style));
         builder.build()
     }
 
@@ -957,7 +969,7 @@ mod tests {
     fn contains_text_id_discriminates_named_typo_from_present() {
         let present = PanelFieldId::named("title");
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_id(present.clone(), "Hi", TextStyle::new(10.0));
+        builder.text(Text::new("Hi", TextStyle::new(10.0)).id(present.clone()));
         let tree = builder.build();
 
         // A present named id is found; a typo is not — this is the discriminator a
@@ -974,7 +986,7 @@ mod tests {
 
     fn root_tree<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
-        builder.text("child", TextStyle::new(10.0));
+        builder.text(("child", TextStyle::new(10.0)));
         builder.build()
     }
 
@@ -986,7 +998,7 @@ mod tests {
                 .height(Sizing::fixed(Mm(10.0)))
                 .padding(Padding::all(Mm(2.0))),
         );
-        builder.text("child", TextStyle::new(3.0));
+        builder.text(("child", TextStyle::new(3.0)));
         let tree = builder.build();
 
         let millimeters_to_points = Unit::Millimeters.to_points();
@@ -1043,13 +1055,13 @@ mod tests {
     #[test]
     fn text_leaf_normalizes_authored_child_layout() {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_element(
-            El::column()
-                .gap(4.0)
-                .alignment(AlignX::Right, AlignY::Bottom)
-                .child_divider(ChildDivider::new(1.0, Color::WHITE)),
-            "child",
-            TextStyle::new(10.0),
+        builder.text(
+            Text::new("child", TextStyle::new(10.0)).layout(
+                El::column()
+                    .gap(4.0)
+                    .alignment(AlignX::Right, AlignY::Bottom)
+                    .child_divider(ChildDivider::new(1.0, Color::WHITE)),
+            ),
         );
         let tree = builder.build();
 
@@ -1075,10 +1087,9 @@ mod tests {
     #[test]
     fn text_leaf_normalizes_authored_overlay_child_layout() {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_element(
-            El::overlay().alignment(AlignX::Right, AlignY::Bottom),
-            "child",
-            TextStyle::new(10.0),
+        builder.text(
+            Text::new("child", TextStyle::new(10.0))
+                .layout(El::overlay().alignment(AlignX::Right, AlignY::Bottom)),
         );
         let tree = builder.build();
 
@@ -1422,8 +1433,8 @@ mod tests {
 
     #[test]
     fn layout_text_ignores_standalone_only_world_scale() {
-        let tree = text_tree("same", TextStyle::new(10.0).wrap(TextWrap::Words));
-        let next = text_tree("same", TextStyle::new(10.0).wrap(TextWrap::Words));
+        let tree = text_tree("same", TextStyle::new(10.0));
+        let next = text_tree("same", TextStyle::new(10.0));
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::Identical);
     }
@@ -1432,7 +1443,7 @@ mod tests {
     fn updates_field_display_text_descendant() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("10", TextStyle::new(10.0));
+            builder.text(("10", TextStyle::new(10.0)));
         });
         let mut tree = builder.build();
 
@@ -1446,10 +1457,10 @@ mod tests {
     fn rejects_duplicate_field_display_update() {
         let mut builder = LayoutBuilder::new(100.0, 40.0);
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("10", TextStyle::new(10.0));
+            builder.text(("10", TextStyle::new(10.0)));
         });
         builder.with(El::new().editable_field("gain", field_spec()), |builder| {
-            builder.text("12", TextStyle::new(10.0));
+            builder.text(("12", TextStyle::new(10.0)));
         });
         let mut tree = builder.build();
 

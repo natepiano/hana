@@ -70,7 +70,7 @@ use crate::render::HairlineFade;
 ///         .size(Mm(210.0), Mm(297.0))
 ///         .world_height(0.5)
 ///         .layout(|b| {
-///             b.text("Hello", TextStyle::new(48.0));
+///             b.text(("Hello", TextStyle::new(48.0)));
 ///         })
 ///         .build()?,
 ///     Transform::from_xyz(0.0, 0.0, 0.0),
@@ -1497,7 +1497,7 @@ mod tests {
 
     fn test_tree(text: &str) -> crate::LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, TextStyle::new(10.0));
+        builder.text((text, TextStyle::new(10.0)));
         builder.build()
     }
 

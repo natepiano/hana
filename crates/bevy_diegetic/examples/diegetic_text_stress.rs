@@ -1296,7 +1296,7 @@ fn label_cell_with_accent(
             .padding(Padding::new(indent.left_padding(), 0.0, 0.0, 0.0))
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(text, style);
+            builder.text((text, style));
         },
     );
 }
@@ -1319,7 +1319,7 @@ fn value_cell_with_accent(
             .height(Sizing::FIT)
             .alignment(AlignX::Right, AlignY::Center),
         |builder| {
-            builder.text(text, style);
+            builder.text((text, style));
         },
     );
 }
@@ -1385,7 +1385,7 @@ fn table_section_title(builder: &mut LayoutBuilder, title: &str) {
             .height(Sizing::FIT)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(title, stats_header_label_style());
+            builder.text((title, stats_header_label_style()));
         },
     );
 }
@@ -2218,7 +2218,7 @@ fn lane_label_with_color(builder: &mut LayoutBuilder, label: &str, color: Color)
             .height(Sizing::fixed(GPU_PIPELINE_LANE_ROW_HEIGHT))
             .alignment(AlignX::Right, AlignY::Center),
         |builder| {
-            builder.text(label, gpu_pipeline_lane_label_style(color));
+            builder.text((label, gpu_pipeline_lane_label_style(color)));
         },
     );
 }
@@ -2333,7 +2333,7 @@ fn gpu_pipeline_label_row(builder: &mut LayoutBuilder, axis: f32, segment: Timel
                     .padding(segment.alignment.padding())
                     .alignment(segment.alignment.align_x(), AlignY::Center),
                 |builder| {
-                    builder.text(segment.label, gpu_pipeline_segment_label_style(segment));
+                    builder.text((segment.label, gpu_pipeline_segment_label_style(segment)));
                 },
             );
         },
@@ -2358,7 +2358,6 @@ fn gpu_pipeline_segment_label_style(segment: TimelineSegment) -> TextStyle {
         .with_color(gpu_pipeline_segment_label_color(segment))
         .with_align(segment.alignment.text_align())
         .with_shadow_mode(GlyphShadowMode::None)
-        .no_wrap()
 }
 
 fn gpu_pipeline_segment_label_color(segment: TimelineSegment) -> Color {

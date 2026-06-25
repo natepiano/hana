@@ -325,11 +325,11 @@ fn build_batch_count_panel_tree(display: BatchCountDisplay) -> LayoutTree {
             builder.with(
                 El::column().width(Sizing::FIT).height(Sizing::FIT).gap(2.0),
                 |builder| {
-                    builder.text("Line Batches", title);
-                    builder.text(format!("{}", stats.batches), value);
-                    builder.text(format!("records {}", stats.records), label.clone());
-                    builder.text(format!("uploads {}", stats.uploads), label.clone());
-                    builder.text(fade_line(display.fade), label);
+                    builder.text(("Line Batches", title));
+                    builder.text((format!("{}", stats.batches), value));
+                    builder.text((format!("records {}", stats.records), label.clone()));
+                    builder.text((format!("uploads {}", stats.uploads), label.clone()));
+                    builder.text((fade_line(display.fade), label));
                 },
             );
         },
@@ -1211,7 +1211,7 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
                             .align_x(AlignX::Right)
                             .align_y(AlignY::Center),
                         |b| {
-                            b.text(format!("{centimeter}"), label_style.clone());
+                            b.text((format!("{centimeter}"), label_style.clone()));
                         },
                     );
                 }
@@ -1305,7 +1305,7 @@ fn build_imperial_panel_ruler(
                                 .align_x(AlignX::Left)
                                 .align_y(AlignY::Center),
                             |b| {
-                                b.text(format!("{inch}"), label_style.clone());
+                                b.text((format!("{inch}"), label_style.clone()));
                             },
                         );
                     }
@@ -1386,7 +1386,7 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
                                     .height(Sizing::GROW)
                                     .align_x(AlignX::Center),
                                 |b| {
-                                    b.text(format!("{centimeter}"), label_style.clone());
+                                    b.text((format!("{centimeter}"), label_style.clone()));
                                 },
                             );
                         },
@@ -1451,7 +1451,7 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
                                     .height(Sizing::GROW)
                                     .align_x(AlignX::Center),
                                 |b| {
-                                    b.text(format!("{inch}"), label_style.clone());
+                                    b.text((format!("{inch}"), label_style.clone()));
                                 },
                             );
                         },
@@ -1487,7 +1487,7 @@ fn debug_border(debug: bool, width: impl Into<bevy_diegetic::Dimension>) -> Bord
 
 fn debug_text(b: &mut bevy_diegetic::LayoutBuilder, text: &str, style: TextStyle, db: Border) {
     b.with(El::new().width(Sizing::GROW).border(db), |b| {
-        b.text(text, style);
+        b.text((text, style));
     });
 }
 
@@ -1542,10 +1542,10 @@ fn build_a4_content(builder: &mut LayoutBuilder, debug: bool) {
                     .border(db),
                 |b| {
                     b.with(El::new().border(db), |b| {
-                        b.text(
+                        b.text((
                             "PaperSize::A4  |  layout: Millimeters  |  font: Points",
                             TextStyle::new(Pt(14.0)).with_color(A4_DIM_COLOR),
-                        );
+                        ));
                     });
                 },
             );
@@ -1841,10 +1841,10 @@ fn build_index_content(builder: &mut LayoutBuilder, debug: bool) {
                     .border(db),
                 |b| {
                     b.with(El::new().border(db), |b| {
-                        b.text(
+                        b.text((
                             "PaperSize::Photo5x7  |  layout: Inches  |  font: Points",
                             footer,
-                        );
+                        ));
                     });
                 },
             );
@@ -1865,10 +1865,10 @@ fn index_row(
         El::row().width(Sizing::GROW).gap(In(0.12)).border(db),
         |b| {
             b.with(El::column().width(Sizing::fixed(In(1.0))).border(db), |b| {
-                b.text(label_text, label.clone());
+                b.text((label_text, label.clone()));
             });
             b.with(El::column().width(Sizing::GROW).border(db), |b| {
-                b.text(code_text, code.clone());
+                b.text((code_text, code.clone()));
             });
         },
     );

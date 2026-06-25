@@ -172,10 +172,9 @@ impl FontRegistry {
     /// Returns the [`FontId`] assigned to the new font, or `None` if the
     /// font data cannot be parsed.
     ///
-    /// The font is immediately available for use in `TextConfig` and
-    /// `TextStyle` via `.with_font(id.0)`. Glyph outlines are built on
-    /// demand by the slug renderer when text using this font is first
-    /// rendered.
+    /// The font is immediately available for use in [`TextStyle`](crate::TextStyle)
+    /// via `.with_font(id.0)`. Glyph outlines are built on demand by the slug
+    /// renderer when text using this font is first rendered.
     ///
     /// # Example
     ///
@@ -185,7 +184,7 @@ impl FontRegistry {
     /// fn setup(mut registry: ResMut<FontRegistry>) {
     ///     let id = registry.register_font("Noto Sans", NOTO_SANS)
     ///         .expect("font should parse");
-    ///     // Use `id.0` with `TextConfig::new(size).with_font(id.0)`.
+    ///     // Use `id.0` with `TextStyle::new(size).with_font(id.0)`.
     /// }
     /// ```
     pub fn register_font(&mut self, name: &str, data: &[u8]) -> Option<FontId> {

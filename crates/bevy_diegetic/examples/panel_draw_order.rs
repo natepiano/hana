@@ -24,6 +24,7 @@ use bevy_diegetic::PanelBuildError;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
@@ -257,13 +258,15 @@ fn draw_order_tree(state: DemoState, sweep_x: f32) -> LayoutTree {
             .height(Sizing::GROW)
             .padding(Padding::all(In(PAGE_PADDING_IN))),
         |builder| {
-            builder.text_element(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .z_index(TEXT_Z),
-                STORY_TEXT,
-                story_style(),
+            builder.text(
+                Text::new(STORY_TEXT, story_style())
+                    .layout(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::FIT)
+                            .z_index(TEXT_Z),
+                    )
+                    .wrap(TextWrap::Words),
             );
         },
     );
@@ -323,7 +326,6 @@ fn story_style() -> TextStyle {
         .with_color(TEXT_COLOR)
         .with_align(TextAlign::Left)
         .with_shadow_mode(GlyphShadowMode::None)
-        .wrap(TextWrap::Words)
 }
 
 fn page_border() -> Border { Border::all(In(PAGE_BORDER_IN), PAGE_BORDER_COLOR) }

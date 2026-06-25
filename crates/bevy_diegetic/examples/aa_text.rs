@@ -40,6 +40,7 @@ use bevy_diegetic::PanelText;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
@@ -768,15 +769,9 @@ fn build_aa_tree(aa: AntiAlias, post: PostAa) -> LayoutTree {
 
 fn build_aa_layout(builder: &mut LayoutBuilder, aa: AntiAlias, post: PostAa) {
     let styles = ColumnStyles {
-        header:   TextStyle::new(TITLE_SIZE)
-            .with_color(HEADER_COLOR)
-            .no_wrap(),
-        active:   TextStyle::new(LABEL_SIZE)
-            .with_color(ACTIVE_COLOR)
-            .no_wrap(),
-        inactive: TextStyle::new(LABEL_SIZE)
-            .with_color(INACTIVE_COLOR)
-            .no_wrap(),
+        header:   TextStyle::new(TITLE_SIZE).with_color(HEADER_COLOR),
+        active:   TextStyle::new(LABEL_SIZE).with_color(ACTIVE_COLOR),
+        inactive: TextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR),
     };
     builder.with(
         El::row()
@@ -823,7 +818,7 @@ fn build_column<'a>(
             .height(Sizing::FIT)
             .gap(ROW_GAP),
         |builder| {
-            builder.text(header, styles.header.clone());
+            builder.text((header, styles.header.clone()));
             panel_divider(builder);
             for (label, active) in rows {
                 let style = if active {
@@ -831,7 +826,7 @@ fn build_column<'a>(
                 } else {
                     &styles.inactive
                 };
-                builder.text(label, style.clone());
+                builder.text((label, style.clone()));
             }
         },
     );
@@ -846,15 +841,9 @@ fn build_demo_panel_tree(oit_enabled: bool, post: PostAa) -> LayoutTree {
 }
 
 fn build_demo_panel_layout(builder: &mut LayoutBuilder, oit_enabled: bool, post: PostAa) {
-    let title = TextStyle::new(TITLE_SIZE)
-        .with_color(HEADER_COLOR)
-        .no_wrap();
-    let key = TextStyle::new(LABEL_SIZE)
-        .with_color(ACTIVE_COLOR)
-        .no_wrap();
-    let body = TextStyle::new(LABEL_SIZE)
-        .with_color(INACTIVE_COLOR)
-        .no_wrap();
+    let title = TextStyle::new(TITLE_SIZE).with_color(HEADER_COLOR);
+    let key = TextStyle::new(LABEL_SIZE).with_color(ACTIVE_COLOR);
+    let body = TextStyle::new(LABEL_SIZE).with_color(INACTIVE_COLOR);
     // Fixed-width container plus GROW boxes line the three boxes up on both
     // edges and give the info box's paragraphs a stable wrap width.
     builder.with(
@@ -890,7 +879,7 @@ fn build_demo_box(
             .background(DEFAULT_PANEL_BACKGROUND)
             .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
         |builder| {
-            builder.text(demo.title, title.clone());
+            builder.text((demo.title, title.clone()));
             panel_divider(builder);
             for &(keycap, description) in demo.rows {
                 builder.with(
@@ -899,8 +888,8 @@ fn build_demo_box(
                         .height(Sizing::FIT)
                         .gap(KEY_GAP),
                     |builder| {
-                        builder.text(keycap, key.clone());
-                        builder.text(description, body.clone());
+                        builder.text((keycap, key.clone()));
+                        builder.text((description, body.clone()));
                     },
                 );
             }
@@ -924,10 +913,10 @@ fn build_info_box(builder: &mut LayoutBuilder, title: &TextStyle, oit_enabled: b
             .background(DEFAULT_PANEL_BACKGROUND)
             .border(Border::all(PANEL_BORDER_WIDTH, PANEL_BORDER_COLOR)),
         |builder| {
-            builder.text(info_title, title.clone());
+            builder.text((info_title, title.clone()));
             panel_divider(builder);
             for paragraph in paragraphs {
-                builder.text(*paragraph, body.clone());
+                builder.text((*paragraph, body.clone()));
             }
         },
     );
@@ -1073,7 +1062,7 @@ fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
         (STATUS_FIELD_OIT, oit_label(snapshot.oit_enabled)),
         (STATUS_FIELD_POST, post_label(snapshot.post)),
     ] {
-        builder.text_id(PanelFieldId::named(field), label, style.clone());
+        builder.text(Text::new(label, style.clone()).id(PanelFieldId::named(field)));
     }
     builder.build()
 }
@@ -1088,13 +1077,13 @@ fn build_cube_compatibility_tree(message: Option<&str>) -> LayoutTree {
             .clip(),
     );
     if let Some(message) = message {
-        builder.text(
+        builder.text((
             message,
             TextStyle::new(CUBE_COMPAT_PANEL_FONT_SIZE)
                 .with_color(Color::WHITE)
                 .with_align(TextAlign::Center)
                 .with_shadow_mode(GlyphShadowMode::None),
-        );
+        ));
     }
     builder.build()
 }

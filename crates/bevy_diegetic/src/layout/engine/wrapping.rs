@@ -4,6 +4,7 @@ use bevy_kana::ToF32;
 use super::layout_engine::ComputedLayout;
 use super::layout_engine::MeasureTextFn;
 use super::sizing;
+use crate::layout::TextSizing;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
 use crate::layout::element::ElementContent;
@@ -193,11 +194,13 @@ fn rewrap_subtree(
     if let ElementContent::Text {
         ref text,
         ref config,
+        ref sizing,
         ..
     } = element.content
         && let Some(result) = wrapped_text_result(
             text,
             config,
+            sizing,
             computed[index].natural_text_width,
             parent_content_width,
             measure,
@@ -235,39 +238,49 @@ fn rewrap_subtree(
 fn wrapped_text_result(
     text: &str,
     config: &TextStyle,
+    sizing: &TextSizing,
     natural_width: f32,
     parent_content_width: f32,
     measure: &MeasureTextFn,
     font_scale: f32,
 ) -> Option<WrappedText> {
-    match config.wrap_mode() {
-        TextWrap::Words => {
-            // Fast path: compare the cached natural text width (measured
-            // once in `initialize_leaf_sizes`) against the parent's
-            // content area. If the text fits and has no explicit
-            // newlines, wrapping would produce one identical line — skip.
-            // Uses the cached width to avoid re-calling the measure fn.
-            if !text.contains('\n') && natural_width <= parent_content_width {
-                None
-            } else {
-                Some(wrap_text_words(
-                    text,
-                    config,
-                    parent_content_width,
-                    measure,
-                    font_scale,
-                ))
-            }
+    match sizing {
+        TextSizing::Natural { wrap } => match wrap {
+            TextWrap::None => None,
+            TextWrap::Words => {
+                // Fast path: compare the cached natural text width (measured
+                // once in `initialize_leaf_sizes`) against the parent's
+                // content area. If the text fits and has no explicit
+                // newlines, wrapping would produce one identical line — skip.
+                // Uses the cached width to avoid re-calling the measure fn.
+                if !text.contains('\n') && natural_width <= parent_content_width {
+                    None
+                } else {
+                    Some(wrap_text_words(
+                        text,
+                        config,
+                        parent_content_width,
+                        measure,
+                        font_scale,
+                    ))
+                }
+            },
+            TextWrap::Newlines => {
+                // Fast path: no explicit newlines means a single line.
+                if text.contains('\n') {
+                    Some(wrap_text_newlines(text, config, measure, font_scale))
+                } else {
+                    None
+                }
+            },
         },
-        TextWrap::Newlines => {
-            // Fast path: no explicit newlines means a single line.
-            if text.contains('\n') {
-                Some(wrap_text_newlines(text, config, measure, font_scale))
-            } else {
-                None
-            }
+        TextSizing::MeasureAs { .. } => None,
+        TextSizing::WrapAtMeasure { .. } => {
+            let wrap_width = natural_width.min(parent_content_width);
+            Some(wrap_text_words(
+                text, config, wrap_width, measure, font_scale,
+            ))
         },
-        TextWrap::None => None,
     }
 }
 
@@ -284,7 +297,15 @@ fn apply_wrapped_text(
     let old_height = computed[index].height;
 
     let max_line_width = result.lines.iter().map(|l| l.width).fold(0.0_f32, f32::max);
-    if element.width.is_fit() {
+    if element.width.is_fit()
+        && !matches!(
+            element.content,
+            ElementContent::Text {
+                sizing: TextSizing::WrapAtMeasure { .. },
+                ..
+            }
+        )
+    {
         computed[index].width =
             max_line_width.clamp(element.width.min_size(), element.width.max_size());
     }

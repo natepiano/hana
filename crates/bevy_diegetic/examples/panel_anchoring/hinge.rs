@@ -345,7 +345,7 @@ pub(crate) fn build_hinge_number_tree(order: usize, count: usize) -> LayoutTree 
             .border(Border::all(HINGE_BORDER_WIDTH, accent))
             .alignment(AlignX::Center, AlignY::Center),
         |builder| {
-            builder.text((order + 1).to_string(), hinge_label_style(accent));
+            builder.text(((order + 1).to_string(), hinge_label_style(accent)));
         },
     );
     builder.build()

@@ -369,7 +369,7 @@ fn build_story_panel_tree(lines: &'static [&'static str]) -> LayoutTree {
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
     for line in lines {
-        builder.text(*line, text.clone());
+        builder.text((*line, text.clone()));
     }
 
     builder.build()

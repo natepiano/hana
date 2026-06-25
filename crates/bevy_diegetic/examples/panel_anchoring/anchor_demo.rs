@@ -1288,7 +1288,7 @@ fn depth_label_overlay(builder: &mut LayoutBuilder, accent: Color, depth_mm: f32
             .alignment(AlignX::Center, AlignY::Bottom)
             .padding(Padding::new(0.0, 0.0, 0.0, DEPTH_LABEL_BOTTOM_PAD)),
         |builder| {
-            builder.text(depth_label(depth_mm), depth_label_style(accent, depth_mm));
+            builder.text((depth_label(depth_mm), depth_label_style(accent, depth_mm)));
         },
     );
 }

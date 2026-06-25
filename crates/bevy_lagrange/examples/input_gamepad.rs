@@ -617,7 +617,7 @@ fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> L
             .padding(Padding::all(style.padding))
             .clip(),
     );
-    builder.text(kind.title(), title_style);
+    builder.text((kind.title(), title_style));
     for (speed_label, controls) in idle_speed_groups(summary, kind.kind()) {
         builder.with(
             El::row()
@@ -630,7 +630,7 @@ fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> L
                         .width(Sizing::percent(SPEED_COLUMN_FRACTION))
                         .alignment(AlignX::Left, AlignY::Center),
                     |cell| {
-                        cell.text(speed_label, label_style.clone());
+                        cell.text((speed_label, label_style.clone()));
                     },
                 );
                 group.with(
@@ -640,7 +640,7 @@ fn idle_grid_tree(kind: GamepadFaceLabel, summary: &OrbitCamControlSummary) -> L
                         .gap(style.row_gap),
                     |column| {
                         for control in &controls {
-                            column.text(control.clone(), label_style.clone());
+                            column.text((control.clone(), label_style.clone()));
                         }
                     },
                 );

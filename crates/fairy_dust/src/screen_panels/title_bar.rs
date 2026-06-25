@@ -447,7 +447,7 @@ fn build_title_bar_contents<L: ChildLayoutState>(
     inactive_control: &TextStyle,
 ) {
     builder.with(container, |builder| {
-        builder.text(&title_bar.title, title.clone());
+        builder.text((&title_bar.title, title.clone()));
         for control in &title_bar.controls {
             title_separator(builder, orientation);
             if control.segments.is_empty() {
@@ -456,7 +456,7 @@ fn build_title_bar_contents<L: ChildLayoutState>(
                 } else {
                     inactive_control.clone()
                 };
-                builder.text(&control.label, style);
+                builder.text((&control.label, style));
             } else {
                 segmented_control_cell(builder, control, state, active_control, inactive_control);
             }
@@ -467,7 +467,7 @@ fn build_title_bar_contents<L: ChildLayoutState>(
         } else {
             inactive_control.clone()
         };
-        builder.text(HELP_CONTROL, help_style);
+        builder.text((HELP_CONTROL, help_style));
     });
 }
 
@@ -482,14 +482,14 @@ fn segmented_control_cell(
 ) {
     let row = El::row().gap(TITLE_BAR_SEGMENT_GAP).align_y(AlignY::Center);
     builder.with(row, |builder| {
-        builder.text(&control.label, inactive.clone());
+        builder.text((&control.label, inactive.clone()));
         for segment in &control.segments {
             let style = if state.is_active(&segment.id) {
                 active.clone()
             } else {
                 inactive.clone()
             };
-            builder.text(&segment.label, style);
+            builder.text((&segment.label, style));
         }
     });
 }

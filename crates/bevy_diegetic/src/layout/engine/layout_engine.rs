@@ -154,10 +154,13 @@ impl LayoutEngine {
             if let ElementContent::Text {
                 ref text,
                 ref config,
+                ref sizing,
                 ..
             } = element.content
             {
-                let dims = (self.measure_text)(text, &config.as_measure().scaled(font_scale));
+                let measurement_text = sizing.measure_text(text);
+                let dims =
+                    (self.measure_text)(measurement_text, &config.as_measure().scaled(font_scale));
                 computed[index].natural_text_width = dims.width;
                 if element.width.is_fit() {
                     computed[index].width = dims
@@ -264,7 +267,13 @@ impl LayoutResult {
         }
 
         tree.elements.iter().enumerate().all(|(index, element)| {
-            let ElementContent::Text { text, config, .. } = &element.content else {
+            let ElementContent::Text {
+                text,
+                config,
+                sizing,
+                ..
+            } = &element.content
+            else {
                 return true;
             };
             // A wrapped leaf's cached line-break offsets index into the old string;
@@ -277,7 +286,10 @@ impl LayoutResult {
             // Bit-exact: the same cache-backed measure over the same text and
             // measure inputs returns the same value the prior solve stored, so an
             // unchanged box compares equal without an epsilon.
-            let dims = measure(text, &config.as_measure().scaled(font_scale));
+            let dims = measure(
+                sizing.measure_text(text),
+                &config.as_measure().scaled(font_scale),
+            );
             dims.width.to_bits() == self.computed[index].natural_text_width.to_bits()
         })
     }

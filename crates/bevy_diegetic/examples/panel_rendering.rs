@@ -503,24 +503,12 @@ fn build_preset_panel_tree(preset: LightingPreset) -> LayoutTree {
 }
 
 fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset) {
-    let title = TextStyle::new(TITLE_SIZE)
-        .with_color(PRESET_TITLE_COLOR)
-        .no_wrap();
-    let header = TextStyle::new(LABEL_SIZE)
-        .with_color(PRESET_HEADER_COLOR)
-        .no_wrap();
-    let key_active = TextStyle::new(LABEL_SIZE)
-        .with_color(PRESET_ACTIVE_COLOR)
-        .no_wrap();
-    let key_inactive = TextStyle::new(LABEL_SIZE)
-        .with_color(PRESET_INACTIVE_COLOR)
-        .no_wrap();
-    let body_active = TextStyle::new(LABEL_SIZE)
-        .with_color(PRESET_ACTIVE_COLOR)
-        .no_wrap();
-    let body_inactive = TextStyle::new(LABEL_SIZE)
-        .with_color(PRESET_INACTIVE_COLOR)
-        .no_wrap();
+    let title = TextStyle::new(TITLE_SIZE).with_color(PRESET_TITLE_COLOR);
+    let header = TextStyle::new(LABEL_SIZE).with_color(PRESET_HEADER_COLOR);
+    let key_active = TextStyle::new(LABEL_SIZE).with_color(PRESET_ACTIVE_COLOR);
+    let key_inactive = TextStyle::new(LABEL_SIZE).with_color(PRESET_INACTIVE_COLOR);
+    let body_active = TextStyle::new(LABEL_SIZE).with_color(PRESET_ACTIVE_COLOR);
+    let body_inactive = TextStyle::new(LABEL_SIZE).with_color(PRESET_INACTIVE_COLOR);
 
     builder.with(
         El::column()
@@ -535,7 +523,7 @@ fn build_preset_panel_layout(builder: &mut LayoutBuilder, preset: LightingPreset
                 PRESET_PANEL_BORDER_COLOR,
             )),
         |builder| {
-            builder.text(PRESET_PANEL_TITLE, title);
+            builder.text((PRESET_PANEL_TITLE, title));
             panel_divider(builder);
             build_preset_row(builder, "", "Material", "Lights", &header, &header, &header);
             panel_divider(builder);
@@ -571,7 +559,7 @@ fn build_preset_row(
                     .width(Sizing::fixed(PRESET_KEY_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(key, key_style.clone());
+                    builder.text((key, key_style.clone()));
                 },
             );
             builder.with(
@@ -579,7 +567,7 @@ fn build_preset_row(
                     .width(Sizing::fixed(PRESET_MATERIAL_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(material, material_style.clone());
+                    builder.text((material, material_style.clone()));
                 },
             );
             builder.with(
@@ -587,7 +575,7 @@ fn build_preset_row(
                     .width(Sizing::fixed(PRESET_LIGHTS_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(lights, lights_style.clone());
+                    builder.text((lights, lights_style.clone()));
                 },
             );
         },
@@ -651,8 +639,8 @@ fn build_card_backgrounds(
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            b.text("Backgrounds", title_style.clone());
-            b.text("Nested elements with fills", body_style.clone());
+            b.text(("Backgrounds", title_style.clone()));
+            b.text(("Nested elements with fills", body_style.clone()));
 
             b.with(
                 El::row()
@@ -668,7 +656,7 @@ fn build_card_backgrounds(
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::grow_min(0.0)),
                         |b| {
-                            b.text("Red", body_style.clone());
+                            b.text(("Red", body_style.clone()));
                         },
                     );
                     b.with(
@@ -679,7 +667,7 @@ fn build_card_backgrounds(
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::grow_min(0.0)),
                         |b| {
-                            b.text("Blue", body_style.clone());
+                            b.text(("Blue", body_style.clone()));
                         },
                     );
                     b.with(
@@ -690,7 +678,7 @@ fn build_card_backgrounds(
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::grow_min(0.0)),
                         |b| {
-                            b.text("Green", body_style.clone());
+                            b.text(("Green", body_style.clone()));
                         },
                     );
                 },
@@ -704,7 +692,7 @@ fn build_card_backgrounds(
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("Nested background", body_style.clone());
+                    b.text(("Nested background", body_style.clone()));
                 },
             );
         },
@@ -720,7 +708,7 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            b.text("Borders", title_style.clone());
+            b.text(("Borders", title_style.clone()));
 
             b.with(
                 El::new()
@@ -729,7 +717,7 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::fit_min(0.0)),
                 |b| {
-                    b.text("Thin blue border", body_style.clone());
+                    b.text(("Thin blue border", body_style.clone()));
                 },
             );
 
@@ -740,7 +728,7 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::fit_min(0.0)),
                 |b| {
-                    b.text("Thick red border", body_style.clone());
+                    b.text(("Thick red border", body_style.clone()));
                 },
             );
 
@@ -753,9 +741,9 @@ fn build_card_borders(b: &mut LayoutBuilder, title_style: &TextStyle, body_style
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("Row A", body_style.clone());
-                    b.text("Row B", body_style.clone());
-                    b.text("Row C", body_style.clone());
+                    b.text(("Row A", body_style.clone()));
+                    b.text(("Row B", body_style.clone()));
+                    b.text(("Row C", body_style.clone()));
                 },
             );
         },
@@ -773,7 +761,7 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            b.text("Combined", title_style.clone());
+            b.text(("Combined", title_style.clone()));
 
             b.with(
                 El::new()
@@ -783,7 +771,7 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::fit_min(0.0)),
                 |b| {
-                    b.text("Card with bg + border", body_style.clone());
+                    b.text(("Card with bg + border", body_style.clone()));
                 },
             );
 
@@ -803,8 +791,8 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::fixed(8.0)),
                         |b| {
-                            b.text("No clip", body_style.clone());
-                            b.text("Spills out", body_style.clone());
+                            b.text(("No clip", body_style.clone()));
+                            b.text(("Spills out", body_style.clone()));
                         },
                     );
                     // Overflow clipped — second line hidden at the boundary.
@@ -818,8 +806,8 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                             .width(Sizing::grow_min(0.0))
                             .height(Sizing::fixed(8.0)),
                         |b| {
-                            b.text("Clipped", body_style.clone());
-                            b.text("Hidden", body_style.clone());
+                            b.text(("Clipped", body_style.clone()));
+                            b.text(("Hidden", body_style.clone()));
                         },
                     );
                 },
@@ -835,9 +823,9 @@ fn build_card_combined(b: &mut LayoutBuilder, title_style: &TextStyle, body_styl
                     .width(Sizing::grow_min(0.0))
                     .height(Sizing::grow_min(0.0)),
                 |b| {
-                    b.text("Item 1", body_style.clone());
-                    b.text("Item 2", body_style.clone());
-                    b.text("Item 3", body_style.clone());
+                    b.text(("Item 1", body_style.clone()));
+                    b.text(("Item 2", body_style.clone()));
+                    b.text(("Item 3", body_style.clone()));
                 },
             );
         },

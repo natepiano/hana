@@ -26,6 +26,7 @@ use bevy_diegetic::PanelFieldId;
 use bevy_diegetic::PanelText;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
@@ -253,12 +254,12 @@ fn world_panel_tree(n: u64) -> LayoutTree {
             .corner_radius(CornerRadius::all(WORLD_PANEL_RADIUS_M))
             .background(DEFAULT_PANEL_BACKGROUND),
     );
-    builder.text_id(
-        PanelFieldId::named(COUNTER_FIELD),
-        world_panel_label(n),
-        TextStyle::new(WORLD_PANEL_TEXT_M)
-            .with_color(TEXT_COLOR)
-            .no_wrap(),
+    builder.text(
+        Text::new(
+            world_panel_label(n),
+            TextStyle::new(WORLD_PANEL_TEXT_M).with_color(TEXT_COLOR),
+        )
+        .id(PanelFieldId::named(COUNTER_FIELD)),
     );
     builder.build()
 }
@@ -272,12 +273,12 @@ fn screen_panel_tree(n: u64) -> LayoutTree {
             .corner_radius(CornerRadius::all(SCREEN_PANEL_RADIUS_PX))
             .background(DEFAULT_PANEL_BACKGROUND),
     );
-    builder.text_id(
-        PanelFieldId::named(COUNTER_FIELD),
-        screen_panel_label(n),
-        TextStyle::new(SCREEN_PANEL_TEXT_PX)
-            .with_color(TEXT_COLOR)
-            .no_wrap(),
+    builder.text(
+        Text::new(
+            screen_panel_label(n),
+            TextStyle::new(SCREEN_PANEL_TEXT_PX).with_color(TEXT_COLOR),
+        )
+        .id(PanelFieldId::named(COUNTER_FIELD)),
     );
     builder.build()
 }

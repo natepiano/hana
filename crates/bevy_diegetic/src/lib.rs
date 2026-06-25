@@ -200,6 +200,7 @@ pub use layout::ResolvedPanelShapePrimitive;
 pub use layout::Row;
 pub use layout::Sidedness;
 pub use layout::Sizing;
+pub use layout::Text;
 pub use layout::TextAlign;
 /// Measured width and height of a text string, returned by [`MeasureTextFn`].
 pub use layout::TextDimensions;
@@ -208,6 +209,7 @@ pub use layout::TextDimensions;
 /// for a real-world custom measurer that bridges clay-layout to our
 /// parley-backed measurement via this type.
 pub use layout::TextMeasure;
+pub use layout::TextSizing;
 pub use layout::TextStyle;
 pub use layout::TextWrap;
 pub use layout::Unit;

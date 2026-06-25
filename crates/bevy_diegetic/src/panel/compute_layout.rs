@@ -348,7 +348,7 @@ mod tests {
 
     fn colored_text_tree(text: &str, color: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, TextStyle::new(10.0).with_color(color));
+        builder.text((text, TextStyle::new(10.0).with_color(color)));
         builder.build()
     }
 
@@ -580,7 +580,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Fit, Fit)
             .layout(|b| {
-                b.text("Hello", TextStyle::new(Mm(6.0)));
+                b.text(("Hello", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("Fit world panel should build even at zero initial size");
@@ -627,7 +627,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Fit, FitMax(Mm(1000.0).into()))
             .layout(|b| {
-                b.text("Hello", TextStyle::new(Mm(6.0)));
+                b.text(("Hello", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("Fit/FitMax world panel should build");
@@ -662,7 +662,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(FitMax(Mm(20.0).into()), Fit)
             .layout(|b| {
-                b.text("HelloHello", TextStyle::new(Mm(6.0)));
+                b.text(("HelloHello", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("FitMax world panel should build");
@@ -704,7 +704,7 @@ mod tests {
                         .height(crate::Sizing::GROW)
                         .padding(crate::Padding::all(8.0)),
                     |b| {
-                        b.text("Hello", TextStyle::new(16.0));
+                        b.text(("Hello", TextStyle::new(16.0)));
                     },
                 );
             })
@@ -820,7 +820,7 @@ mod tests {
             .size(Px(600.0), Px(44.0))
             .anchor(Anchor::BottomRight)
             .layout(|b| {
-                b.text("fixed", TextStyle::new(16.0));
+                b.text(("fixed", TextStyle::new(16.0)));
             })
             .build()
             .expect("fixed screen panel");
@@ -828,7 +828,7 @@ mod tests {
             .size(Percent(0.25), Px(200.0))
             .anchor(Anchor::TopRight)
             .layout(|b| {
-                b.text("percent", TextStyle::new(16.0));
+                b.text(("percent", TextStyle::new(16.0)));
             })
             .build()
             .expect("percent screen panel");
@@ -836,7 +836,7 @@ mod tests {
             .size(Fit, Fit)
             .anchor(Anchor::BottomRight)
             .layout(|b| {
-                b.text("fit", TextStyle::new(16.0));
+                b.text(("fit", TextStyle::new(16.0)));
             })
             .build()
             .expect("fit screen panel");
@@ -895,7 +895,7 @@ mod tests {
         let panel = DiegeticPanel::screen()
             .size(Percent(0.25), Percent(0.20))
             .layout(|b| {
-                b.text("Resize", TextStyle::new(16.0));
+                b.text(("Resize", TextStyle::new(16.0)));
             })
             .build()
             .expect("percent screen panel should build");
@@ -956,7 +956,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|b| {
-                b.text("Hi", TextStyle::new(Mm(6.0)));
+                b.text(("Hi", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("fixed-size world panel should build");
@@ -981,7 +981,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|b| {
-                b.text("Hi", TextStyle::new(Mm(6.0)));
+                b.text(("Hi", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("headless panel should build");

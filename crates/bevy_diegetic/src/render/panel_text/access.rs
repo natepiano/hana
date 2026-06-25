@@ -475,6 +475,7 @@ mod tests {
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
+    use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
@@ -544,13 +545,13 @@ mod tests {
 
     fn auto_tree(text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, TextStyle::new(10.0));
+        builder.text((text, TextStyle::new(10.0)));
         builder.build()
     }
 
     fn named_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_id(id.clone(), text, TextStyle::new(10.0));
+        builder.text(Text::new(text, TextStyle::new(10.0)).id(id.clone()));
         builder.build()
     }
 
@@ -558,8 +559,8 @@ mod tests {
     /// the lone-run path is ambiguous.
     fn two_text_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0));
-        builder.text("Beta", TextStyle::new(10.0));
+        builder.text(("Alpha", TextStyle::new(10.0)));
+        builder.text(("Beta", TextStyle::new(10.0)));
         builder.build()
     }
 
@@ -571,7 +572,7 @@ mod tests {
     /// 0..n).
     fn wrapped_tree(text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, TextStyle::new(10.0).wrap(TextWrap::Newlines));
+        builder.text(Text::new(text, TextStyle::new(10.0)).wrap(TextWrap::Newlines));
         builder.build()
     }
 
@@ -1043,10 +1044,10 @@ mod tests {
     /// entity per line while staying id-addressable.
     fn named_wrapped_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_id(
-            id.clone(),
-            text,
-            TextStyle::new(10.0).wrap(TextWrap::Newlines),
+        builder.text(
+            Text::new(text, TextStyle::new(10.0))
+                .id(id.clone())
+                .wrap(TextWrap::Newlines),
         );
         builder.build()
     }

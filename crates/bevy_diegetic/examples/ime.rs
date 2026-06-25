@@ -227,16 +227,16 @@ fn editable_text_tree(builder: &mut LayoutBuilder, state: &EditableTextState) {
 
     builder.with(frame, |builder| {
         if state.mode == EditMode::Idle {
-            builder.text(
+            builder.text((
                 state.text.as_str(),
-                TextStyle::new(TEXT_SIZE).with_color(TEXT_COLOR).no_wrap(),
-            );
+                TextStyle::new(TEXT_SIZE).with_color(TEXT_COLOR),
+            ));
         }
         if let Some(error) = &state.error {
-            builder.text(
+            builder.text((
                 error.as_str(),
                 TextStyle::new(WARNING_SIZE).with_color(WARNING),
-            );
+            ));
         }
     });
 }

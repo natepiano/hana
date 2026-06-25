@@ -55,6 +55,7 @@ use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::layout::ResolvedPanelShape;
 use crate::layout::Sizing;
+use crate::layout::Text;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
 use crate::layout::TextStyle;
@@ -241,17 +242,17 @@ fn add_aligned_table_row(
                     .gap(2.0),
                 |builder| {
                     for binding in bindings {
-                        builder.text(*binding, style.clone());
+                        builder.text((*binding, style.clone()));
                     }
                 },
             );
-            builder.text("->", style.clone());
+            builder.text(("->", style.clone()));
             builder.with(
                 El::new()
                     .width(Sizing::fit_min(action_min))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(action, style.clone());
+                    builder.text((action, style.clone()));
                 },
             );
         },
@@ -361,7 +362,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
             .width(Sizing::fixed(100.0))
             .height(Sizing::fixed(40.0)),
         |builder| {
-            builder.text("label", text_style.clone());
+            builder.text(("label", text_style.clone()));
         },
     );
     let base_tree = base_builder.build();
@@ -376,7 +377,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
                 (100.0, 20.0),
             )])),
         |builder| {
-            builder.text("label", text_style);
+            builder.text(("label", text_style));
         },
     );
     let draw_tree = draw_builder.build();
@@ -621,7 +622,7 @@ fn fused_fit_propagation_matches_separate_axis_passes() {
     builder.with(
         El::row().width(Sizing::FIT).height(Sizing::FIT).gap(4.0),
         |builder| {
-            builder.text("Alpha", TextStyle::new(10.0));
+            builder.text(("Alpha", TextStyle::new(10.0)));
             builder.with(
                 El::new()
                     .width(Sizing::fixed(15.0))
@@ -636,7 +637,7 @@ fn fused_fit_propagation_matches_separate_axis_passes() {
             .height(Sizing::fixed(12.0))
             .clip(),
         |builder| {
-            builder.text("Beta", TextStyle::new(8.0));
+            builder.text(("Beta", TextStyle::new(8.0)));
         },
     );
     let tree = builder.build();
@@ -730,7 +731,7 @@ fn fit_wraps_text_content() {
     let font_size = 16.0;
     let text = "Hello";
     // Expected text bounds come from the same monospace metrics as production.
-    b.text(text, TextStyle::new(font_size));
+    b.text((text, TextStyle::new(font_size)));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -752,7 +753,7 @@ fn fit_root_with_direct_text_child_resolves_width() {
     let font_size = 16.0;
     let text = "Hello";
     let mut b = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    b.text(text, TextStyle::new(font_size));
+    b.text((text, TextStyle::new(font_size)));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -794,7 +795,7 @@ fn fit_with_min_respects_minimum() {
             .height(Sizing::fixed(20.0)),
         |b| {
             // Content is only 48px wide but min is 100.
-            b.text("Hello", TextStyle::new(16.0));
+            b.text(("Hello", TextStyle::new(16.0)));
         },
     );
     let tree = b.build();
@@ -821,10 +822,10 @@ fn fit_root_clamps_grow_children_content_under_max() {
             .height(Sizing::FIT),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(text, TextStyle::new(font_size));
+        b.text((text, TextStyle::new(font_size)));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(text, TextStyle::new(font_size));
+        b.text((text, TextStyle::new(font_size)));
     });
     let tree = b.build();
 
@@ -850,10 +851,10 @@ fn fit_root_caps_grow_children_content_at_max() {
             .height(Sizing::FIT),
     );
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, TextStyle::new(font_size));
+        b.text((wide, TextStyle::new(font_size)));
     });
     b.with(El::new().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text(wide, TextStyle::new(font_size));
+        b.text((wide, TextStyle::new(font_size)));
     });
     let tree = b.build();
 
@@ -1163,7 +1164,7 @@ fn bordered_overlay_text_wraps_inside_content_box() {
             .height(Sizing::fixed(100.0))
             .border(Border::all(10.0, Color::WHITE)),
     );
-    b.text("Hello World", TextStyle::new(font_size));
+    b.text(Text::new("Hello World", TextStyle::new(font_size)).wrap(TextWrap::Words));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1799,7 +1800,7 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
             builder.with(
                 El::column().width(Sizing::GROW).height(Sizing::GROW),
                 |builder| {
-                    builder.text("29", TextStyle::new(8.0).with_color(Color::WHITE));
+                    builder.text(("29", TextStyle::new(8.0).with_color(Color::WHITE)));
                 },
             );
             builder.with(
@@ -1858,7 +1859,7 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
 #[test]
 fn render_commands_include_text() {
     let mut b = LayoutBuilder::new(200.0, 200.0);
-    b.text("Hello", TextStyle::new(16.0));
+    b.text(("Hello", TextStyle::new(16.0)));
     let tree = b.build();
 
     let engine = LayoutEngine::new(monospace_measure());
@@ -1923,7 +1924,7 @@ fn nested_layout_header_body() {
                     .height(Sizing::fixed(20.0))
                     .background(Color::srgb_u8(52, 98, 90)),
                 |b| {
-                    b.text("STATUS", TextStyle::new(7.0));
+                    b.text(("STATUS", TextStyle::new(7.0)));
                 },
             );
             // Divider.
@@ -2034,8 +2035,8 @@ fn text_positioned_correctly() {
             .height(Sizing::GROW)
             .padding(Padding::all(10.0)),
         |b| {
-            b.text("Hello", TextStyle::new(16.0));
-            b.text("World", TextStyle::new(16.0));
+            b.text(("Hello", TextStyle::new(16.0)));
+            b.text(("World", TextStyle::new(16.0)));
         },
     );
     let tree = b.build();
@@ -2065,12 +2066,12 @@ fn key_value_row_layout() {
     let spacer_width = VIEWPORT - label_width - value_width;
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(El::row().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text(label_text, TextStyle::new(font_size));
+        b.text((label_text, TextStyle::new(font_size)));
         b.with(
             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
             |_| {},
         );
-        b.text(value_text, TextStyle::new(font_size));
+        b.text((value_text, TextStyle::new(font_size)));
     });
     let tree = b.build();
 
@@ -2088,7 +2089,7 @@ fn key_value_row_layout() {
 #[test]
 fn fit_table_with_grow_rows_aligns_middle_column() {
     let font_size = 10.0;
-    let style = TextStyle::new(font_size).no_wrap();
+    let style = TextStyle::new(font_size);
     let action_min = text_width("Orbit", font_size);
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(
@@ -2333,7 +2334,7 @@ fn text_wraps_at_word_boundaries() {
     assert!(test_width < 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text("Hello World Test", TextStyle::new(font_size));
+        b.text(Text::new("Hello World Test", TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2360,7 +2361,7 @@ fn text_no_wrap_overflows() {
     // "Hello World" in a narrow container with TextWrap::None.
     let mut b = LayoutBuilder::new(40.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text("Hello World", TextStyle::new(16.0).no_wrap());
+        b.text(("Hello World", TextStyle::new(16.0)));
     });
     let tree = b.build();
 
@@ -2380,14 +2381,70 @@ fn text_no_wrap_overflows() {
 }
 
 #[test]
+fn text_measure_as_reserves_surrogate_size() {
+    let font_size = 16.0;
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.text(Text::new("OK", TextStyle::new(font_size)).measure_as("Disconnected"));
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
+
+    assert!(approx_eq(
+        result.computed[1].width,
+        text_width("Disconnected", font_size)
+    ));
+    assert!(approx_eq(result.computed[1].height, line_height(font_size)));
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter_map(|cmd| match &cmd.kind {
+            RenderCommandKind::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_commands, vec!["OK"]);
+}
+
+#[test]
+fn text_wrap_at_measure_reserves_surrogate_width() {
+    let font_size = 16.0;
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.text(Text::new("Alpha Beta Gamma", TextStyle::new(font_size)).wrap_at_measure("Alpha Beta"));
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
+
+    assert!(approx_eq(
+        result.computed[1].width,
+        text_width("Alpha Beta", font_size)
+    ));
+    assert!(approx_eq(
+        result.computed[1].height,
+        text_height(2, font_size)
+    ));
+
+    let text_commands: Vec<_> = result
+        .commands
+        .iter()
+        .filter_map(|cmd| match &cmd.kind {
+            RenderCommandKind::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(text_commands, vec!["Alpha Beta", "Gamma"]);
+}
+
+#[test]
 fn text_wraps_at_newlines_only() {
     // "Line1\nLine2\nLine3" with TextWrap::Newlines in a wide container.
     let font_size = 16.0;
     let mut b = LayoutBuilder::new(500.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
         b.text(
-            "Line1\nLine2\nLine3",
-            TextStyle::new(font_size).wrap(TextWrap::Newlines),
+            Text::new("Line1\nLine2\nLine3", TextStyle::new(font_size)).wrap(TextWrap::Newlines),
         );
     });
     let tree = b.build();
@@ -2417,7 +2474,7 @@ fn word_wrap_long_word_does_not_break() {
     assert!(word_width > 80.0);
     let mut b = LayoutBuilder::new(80.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text(word, TextStyle::new(font_size));
+        b.text(Text::new(word, TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2446,7 +2503,7 @@ fn word_wrap_preserves_explicit_newlines() {
     assert!(second_paragraph_width < 50.0);
     let mut b = LayoutBuilder::new(50.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text("AA BB\nCC DD", TextStyle::new(font_size));
+        b.text(Text::new("AA BB\nCC DD", TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2472,7 +2529,7 @@ fn word_wrap_empty_string() {
     let font_size = 16.0;
     let mut b = LayoutBuilder::new(200.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text("", TextStyle::new(font_size));
+        b.text(Text::new("", TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2490,7 +2547,7 @@ fn word_wrap_updates_parent_fit_height() {
     // Parent height should grow to accommodate.
     let mut b = LayoutBuilder::new(80.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::FIT), |b| {
-        b.text("Hello World Test", TextStyle::new(font_size));
+        b.text(Text::new("Hello World Test", TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2517,7 +2574,7 @@ fn word_wrap_render_commands_per_line() {
         // one measured line height lower.
         assert!(first_line_width < 50.0);
         assert!(second_line_width < 50.0);
-        b.text("AA BB CC", TextStyle::new(font_size));
+        b.text(Text::new("AA BB CC", TextStyle::new(font_size)).wrap(TextWrap::Words));
     });
     let tree = b.build();
 
@@ -2569,14 +2626,14 @@ fn fit_parent_sees_grow_children_content_height() {
         |b| {
             b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
                 b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                    b.text("STATUS", TextStyle::new(title_font_size));
+                    b.text(("STATUS", TextStyle::new(title_font_size)));
                 });
                 b.with(
                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                     |_| {},
                 );
                 b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                    b.text("SUB", TextStyle::new(subtitle_font_size));
+                    b.text(("SUB", TextStyle::new(subtitle_font_size)));
                 });
             });
         },
@@ -2769,7 +2826,7 @@ fn grow_body_compression_20_rows() {
         |b| {
             b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
                 b.with(El::new().width(Sizing::FIT).height(Sizing::GROW), |b| {
-                    b.text("STATUS", TextStyle::new(10.0));
+                    b.text(("STATUS", TextStyle::new(10.0)));
                 });
                 b.with(
                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
@@ -2781,7 +2838,7 @@ fn grow_body_compression_20_rows() {
                         .height(Sizing::GROW)
                         .align_x(AlignX::Right),
                     |b| {
-                        b.text("BENCH", TextStyle::new(10.0));
+                        b.text(("BENCH", TextStyle::new(10.0)));
                     },
                 );
             });
@@ -2802,12 +2859,12 @@ fn grow_body_compression_20_rows() {
             |b| {
                 for (label, value) in &rows {
                     b.with(El::row().width(Sizing::GROW).height(Sizing::FIT), |b| {
-                        b.text(*label, TextStyle::new(10.0));
+                        b.text((*label, TextStyle::new(10.0)));
                         b.with(
                             El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                             |_| {},
                         );
-                        b.text(*value, TextStyle::new(10.0));
+                        b.text((*value, TextStyle::new(10.0)));
                     });
                 }
             },
@@ -2844,7 +2901,13 @@ fn grow_body_compression_20_rows() {
 /// a standalone label becomes at runtime, the geometry-stable skip's main subject.
 fn fit_text_tree(text: &str) -> LayoutTree {
     let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
-    builder.text(text, TextStyle::new(10.0));
+    builder.text((text, TextStyle::new(10.0)));
+    builder.build()
+}
+
+fn fit_measure_as_tree(text: &str, measurement_text: &str) -> LayoutTree {
+    let mut builder = LayoutBuilder::new(VIEWPORT, VIEWPORT);
+    builder.text(Text::new(text, TextStyle::new(10.0)).measure_as(measurement_text));
     builder.build()
 }
 
@@ -2881,6 +2944,39 @@ fn can_reuse_geometry_holds_for_a_same_width_text_swap_only() {
 }
 
 #[test]
+fn can_reuse_geometry_holds_for_measure_as_text_swap() {
+    let measure = monospace_measure();
+    let engine = LayoutEngine::new(Arc::clone(&measure));
+    let result = engine.compute(
+        &fit_measure_as_tree("OK", "Disconnected"),
+        VIEWPORT,
+        VIEWPORT,
+        1.0,
+    );
+
+    assert!(
+        result.can_reuse_geometry(
+            &fit_measure_as_tree("Ready", "Disconnected"),
+            &measure,
+            VIEWPORT,
+            VIEWPORT,
+            1.0
+        ),
+        "a measure_as retext should reuse geometry when the surrogate is unchanged",
+    );
+    assert!(
+        !result.can_reuse_geometry(
+            &fit_measure_as_tree("Ready", "Connected"),
+            &measure,
+            VIEWPORT,
+            VIEWPORT,
+            1.0
+        ),
+        "a different surrogate measurement must relayout",
+    );
+}
+
+#[test]
 fn can_reuse_geometry_rejects_a_newline_even_at_the_same_natural_width() {
     let measure = monospace_measure();
     let engine = LayoutEngine::new(Arc::clone(&measure));
@@ -2906,8 +3002,7 @@ fn can_reuse_geometry_rejects_a_wrapped_leaf() {
         El::new().width(Sizing::fixed(40.0)).height(Sizing::FIT),
         |builder| {
             builder.text(
-                "alpha beta gamma delta",
-                TextStyle::new(10.0).wrap(TextWrap::Words),
+                Text::new("alpha beta gamma delta", TextStyle::new(10.0)).wrap(TextWrap::Words),
             );
         },
     );
@@ -2930,7 +3025,7 @@ fn perf_element_sizes() {
         "ElementContent: {} bytes",
         std::mem::size_of::<ElementContent>()
     );
-    println!("TextConfig: {} bytes", std::mem::size_of::<TextStyle>());
+    println!("TextStyle: {} bytes", std::mem::size_of::<TextStyle>());
     println!("Border: {} bytes", std::mem::size_of::<Border>());
     println!("Sizing: {} bytes", std::mem::size_of::<Sizing>());
     println!("Padding: {} bytes", std::mem::size_of::<Padding>());

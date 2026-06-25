@@ -174,7 +174,7 @@ mod tests {
             .anchor(anchor)
             .screen_position(screen_position.x, screen_position.y)
             .layout(|builder| {
-                builder.text("fit", TextStyle::new(10.0));
+                builder.text(("fit", TextStyle::new(10.0)));
             })
             .build()
             .expect("fit screen panel builds")

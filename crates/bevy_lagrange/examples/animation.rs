@@ -535,13 +535,13 @@ fn face_label_tree(label: &str) -> LayoutTree {
             .padding(Padding::all(FACE_LABEL_PADDING))
             .clip(),
     );
-    builder.text(
+    builder.text((
         label,
         TextStyle::new(FACE_LABEL_TEXT_SIZE)
             .with_color(FACE_LABEL_COLOR)
             .with_align(TextAlign::Center)
             .with_shadow_mode(GlyphShadowMode::None),
-    );
+    ));
     builder.build()
 }
 
@@ -619,9 +619,7 @@ fn spawn_explainer_panel(mut commands: Commands, mut materials: ResMut<Assets<St
 
 fn build_explainer_tree() -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    let title = TextStyle::new(TITLE_SIZE)
-        .with_color(EXPLAINER_HEADER_COLOR)
-        .no_wrap();
+    let title = TextStyle::new(TITLE_SIZE).with_color(EXPLAINER_HEADER_COLOR);
     // Wrapped body text flows to the fixed box width.
     let body = TextStyle::new(LABEL_SIZE).with_color(EXPLAINER_BODY_COLOR);
     builder.with(
@@ -654,10 +652,10 @@ fn build_explainer_box(
             .background(DEFAULT_PANEL_BACKGROUND)
             .border(Border::all(EXPLAINER_BORDER_WIDTH, EXPLAINER_BORDER_COLOR)),
         |builder| {
-            builder.text(explainer.title, title.clone());
+            builder.text((explainer.title, title.clone()));
             explainer_divider(builder);
             for line in explainer.lines {
-                builder.text(*line, body.clone());
+                builder.text((*line, body.clone()));
             }
         },
     );

@@ -374,7 +374,7 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
                                 .width(Sizing::fixed(LABEL_COL))
                                 .height(Sizing::fit_min(0.0)),
                             |b| {
-                                b.text(*label, label_style.clone());
+                                b.text((*label, label_style.clone()));
                             },
                         );
                         b.with(
@@ -382,7 +382,7 @@ fn build_demo_panel() -> bevy_diegetic::LayoutTree {
                                 .width(Sizing::grow_min(0.0))
                                 .height(Sizing::fit_min(0.0)),
                             |b| {
-                                b.text("Hello", sample_style.clone());
+                                b.text(("Hello", sample_style.clone()));
                             },
                         );
                     },
@@ -407,27 +407,27 @@ fn build_commentary() -> bevy_diegetic::LayoutTree {
             .width(Sizing::grow_min(0.0))
             .height(Sizing::grow_min(0.0)),
         |b| {
-            b.text(
+            b.text((
                 "Pt (Points), Mm (Millimeters), and In (Inches) are \
                  newtypes that carry the unit. Pt(18), Mm(6.35), and \
                  In(0.25) all describe the same physical size — the \
                  constructor knows how to convert.",
                 note_style.clone(),
-            );
-            b.text(
+            ));
+            b.text((
                 "Bare 18.0 uses the contextual default: panel text \
                  inherits font_unit from the panel (Points by default). \
                  WorldText resolves font_unit from CascadeDefault<FontUnit> \
                  (Meters by default).",
                 note_style.clone(),
-            );
-            b.text(
+            ));
+            b.text((
                 "Both the DiegeticPanel and the individual WorldText \
                  instances render \"Hello\" at the same height, \
                  showing that Pt, Mm, In, and bare f32 all convert \
                  consistently.",
                 note_style,
-            );
+            ));
         },
     );
     builder.build()

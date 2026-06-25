@@ -281,10 +281,10 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
                     builder.with(
                         El::new().width(Sizing::FIT).height(Sizing::GROW),
                         |builder| {
-                            builder.text(
+                            builder.text((
                                 "STATUS",
                                 TextStyle::new(FONT_SIZE).with_color(style.text_color),
-                            );
+                            ));
                         },
                     );
                     builder.with(
@@ -297,10 +297,10 @@ fn build_diegetic_header(builder: &mut LayoutBuilder, style: DiegeticStatusTreeS
                             .height(Sizing::GROW)
                             .align_x(AlignX::Right),
                         |builder| {
-                            builder.text(
+                            builder.text((
                                 "BENCH",
                                 TextStyle::new(FONT_SIZE).with_color(style.text_color),
-                            );
+                            ));
                         },
                     );
                 },
@@ -330,18 +330,18 @@ fn build_diegetic_body(
                         builder.with(
                             El::row().width(Sizing::GROW).height(Sizing::FIT),
                             |builder| {
-                                builder.text(
+                                builder.text((
                                     *label,
                                     TextStyle::new(FONT_SIZE).with_color(style.text_color),
-                                );
+                                ));
                                 builder.with(
                                     El::new().width(Sizing::GROW).height(Sizing::fixed(1.0)),
                                     |_| {},
                                 );
-                                builder.text(
+                                builder.text((
                                     *value,
                                     TextStyle::new(FONT_SIZE).with_color(style.text_color),
-                                );
+                                ));
                             },
                         );
                     }

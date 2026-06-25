@@ -189,12 +189,12 @@ fn build_status_panel(text: &str) -> LayoutTree {
             .background(PANEL_BG)
             .border(Border::all(0.0005, PANEL_BORDER_COLOR)),
         |b| {
-            b.text(
+            b.text((
                 text,
                 TextStyle::new(STATUS_FONT_SIZE)
                     .with_color(Color::srgba(1.0, 1.0, 1.0, 0.9))
                     .with_shadow_mode(GlyphShadowMode::None),
-            );
+            ));
         },
     );
     builder.build()

@@ -48,6 +48,7 @@ use crate::layout::Lighting;
 use crate::layout::Px;
 use crate::layout::Sidedness;
 use crate::layout::Sizing;
+use crate::layout::Text;
 use crate::layout::TextAlign;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
@@ -435,15 +436,8 @@ impl DiegeticTextBuilder {
     pub fn spawn(self, commands: &mut Commands) -> Entity { commands.spawn(self.build()).id() }
 }
 
-/// Builds the single-element layout tree for a [`DiegeticText`] panel. Applies
-/// [`TextWrap::Words`] when a wrap width is set and [`TextWrap::None`] otherwise.
+/// Builds the single-element layout tree for a [`DiegeticText`] panel.
 fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>) -> LayoutTree {
-    let mut style = style.clone();
-    style.set_wrap(if wrap_width.is_some() {
-        TextWrap::Words
-    } else {
-        TextWrap::None
-    });
     // The root must carry the sizing the panel resolves to: `Fit` width
     // (shrink-wrap to the text) when there is no wrap width, or a fixed wrap
     // width; height is always `Fit`. This root sizing must match what
@@ -452,7 +446,13 @@ fn build_one_element_tree(text: &str, style: &TextStyle, wrap_width: Option<f32>
     // collapses the measured width to zero.
     let width = wrap_width.map_or(Sizing::FIT, Sizing::fixed);
     let mut builder = LayoutBuilder::with_root(El::new().width(width).height(Sizing::FIT));
-    builder.text(text.to_string(), style);
+    let text = Text::new(text, style.clone());
+    let text = if wrap_width.is_some() {
+        text.wrap(TextWrap::Words)
+    } else {
+        text
+    };
+    builder.text(text);
     builder.build()
 }
 

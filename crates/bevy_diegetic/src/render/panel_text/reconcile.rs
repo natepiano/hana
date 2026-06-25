@@ -731,6 +731,7 @@ mod tests {
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
+    use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
@@ -823,19 +824,19 @@ mod tests {
 
     fn two_text_tree(first: Color, second: Color) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_color(first));
-        builder.text("Beta", TextStyle::new(10.0).with_color(second));
+        builder.text(("Alpha", TextStyle::new(10.0).with_color(first)));
+        builder.text(("Beta", TextStyle::new(10.0).with_color(second)));
         builder.build()
     }
 
     fn single_alpha_text_tree(color: Color, alpha: AlphaMode) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
+        builder.text((
             "Glow",
             TextStyle::new(10.0)
                 .with_color(color)
                 .with_alpha_mode(alpha),
-        );
+        ));
         builder.build()
     }
 
@@ -966,7 +967,7 @@ mod tests {
 
     fn one_text_tree(text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(text, TextStyle::new(10.0));
+        builder.text((text, TextStyle::new(10.0)));
         builder.build()
     }
 
@@ -1089,8 +1090,8 @@ mod tests {
 
     fn two_named_tree(first: &str, second: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_id(PanelFieldId::named("a"), first, TextStyle::new(10.0));
-        builder.text_id(PanelFieldId::named("b"), second, TextStyle::new(10.0));
+        builder.text(Text::new(first, TextStyle::new(10.0)).id(PanelFieldId::named("a")));
+        builder.text(Text::new(second, TextStyle::new(10.0)).id(PanelFieldId::named("b")));
         builder.build()
     }
 
@@ -1205,15 +1206,15 @@ mod tests {
     }
 
     /// A run of auto text elements followed by one named run. Auto ids come from
-    /// a per-build counter over `text()` calls in build order (`text_id` does not
-    /// consume it), so an auto run's id is its position among the autos; the named
-    /// run's id is fixed.
+    /// a per-build counter over unnamed `text()` declarations in build order, so
+    /// an auto run's id is its position among the autos; the named run's id is
+    /// fixed.
     fn autos_then_named_tree(autos: &[&str], named: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         for text in autos {
-            builder.text(*text, TextStyle::new(10.0));
+            builder.text((*text, TextStyle::new(10.0)));
         }
-        builder.text_id(PanelFieldId::named("keep"), named, TextStyle::new(10.0));
+        builder.text(Text::new(named, TextStyle::new(10.0)).id(PanelFieldId::named("keep")));
         builder.build()
     }
 

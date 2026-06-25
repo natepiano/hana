@@ -66,19 +66,15 @@ fn build_guidance_layout(
 ) {
     let title = TextStyle::new(TITLE_SIZE)
         .with_color(TITLE_COLOR)
-        .no_wrap()
         .with_shadow_mode(GlyphShadowMode::None);
     let header = TextStyle::new(LABEL_SIZE)
         .with_color(HEADER_COLOR)
-        .no_wrap()
         .with_shadow_mode(GlyphShadowMode::None);
     let label = TextStyle::new(LABEL_SIZE)
         .with_color(LABEL_COLOR)
-        .no_wrap()
         .with_shadow_mode(GlyphShadowMode::None);
     let active = TextStyle::new(LABEL_SIZE)
         .with_color(ACTIVE_COLOR)
-        .no_wrap()
         .with_shadow_mode(GlyphShadowMode::None);
 
     screen_panels::screen_panel_frame(builder, Sizing::FIT, Sizing::FIT, background, |builder| {
@@ -88,11 +84,11 @@ fn build_guidance_layout(
                 .height(Sizing::FIT)
                 .gap(GUIDANCE_CHILD_GAP),
             |builder| {
-                builder.text(format!("CAMERA: {}", snapshot.camera_label), title.clone());
-                builder.text(
+                builder.text((format!("CAMERA: {}", snapshot.camera_label), title.clone()));
+                builder.text((
                     format!("{}: {}", snapshot.mode_label, snapshot.mode_value),
                     header.clone(),
-                );
+                ));
                 build_guidance_table(builder, snapshot, display, &label, &active);
             },
         );
@@ -192,7 +188,7 @@ fn build_slow_mode_row(
                     .height(Sizing::fixed(LABEL_LINE_HEIGHT))
                     .align_y(AlignY::Center),
                 |builder| {
-                    builder.text(binding_label, style.clone());
+                    builder.text((binding_label, style.clone()));
                     builder.with(
                         El::new()
                             .width(Sizing::grow_min(FEEDER_CELL_MIN))
@@ -218,7 +214,7 @@ fn build_slow_mode_row(
                     .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(snapshot::speed_label(ControlSpeed::Slow), style.clone());
+                    builder.text((snapshot::speed_label(ControlSpeed::Slow), style.clone()));
                 },
             );
         },
@@ -257,7 +253,7 @@ fn build_speed_block(
                         .width(Sizing::fit_min(SPEED_LABEL_COLUMN_WIDTH))
                         .height(Sizing::FIT),
                     |builder| {
-                        builder.text(snapshot::speed_label(speed), speed_style.clone());
+                        builder.text((snapshot::speed_label(speed), speed_style.clone()));
                     },
                 );
             }
@@ -374,7 +370,7 @@ fn build_action_row(
                                 .height(Sizing::fixed(LABEL_LINE_HEIGHT))
                                 .align_y(AlignY::Center),
                             |builder| {
-                                builder.text(row.label(), binding_style.clone());
+                                builder.text((row.label(), binding_style.clone()));
                                 builder.with(
                                     El::new()
                                         .width(Sizing::grow_min(FEEDER_CELL_MIN))
@@ -403,10 +399,10 @@ fn build_action_row(
                     .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(
+                    builder.text((
                         snapshot::action_label(kind, direction),
                         action_style.clone(),
-                    );
+                    ));
                 },
             );
         },

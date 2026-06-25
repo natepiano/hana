@@ -131,7 +131,7 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .text_alpha_mode(AlphaMode::Add)
             .layout(|b| {
-                b.text("Hi", TextStyle::new(Mm(6.0)));
+                b.text(("Hi", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("test panel should build");
@@ -170,7 +170,7 @@ mod tests {
         let panel = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|b| {
-                b.text("Hi", TextStyle::new(Mm(6.0)));
+                b.text(("Hi", TextStyle::new(Mm(6.0))));
             })
             .build()
             .expect("test panel should build");
@@ -213,10 +213,10 @@ mod tests {
             .size(Mm(50.0), Mm(30.0))
             .text_alpha_mode(AlphaMode::Add)
             .layout(|b| {
-                b.text(
+                b.text((
                     "Hi",
                     TextStyle::new(Mm(6.0)).with_alpha_mode(AlphaMode::Multiply),
-                );
+                ));
             })
             .build()
             .expect("test panel should build");
@@ -237,7 +237,7 @@ mod tests {
                 style = style.with_alpha_mode(mode);
             }
             let mut builder = LayoutBuilder::new(100.0, 50.0);
-            builder.text("Hi", style);
+            builder.text(("Hi", style));
             builder.build()
         }
 

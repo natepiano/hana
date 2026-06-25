@@ -560,13 +560,9 @@ fn build_engine_tree(selected: Engine) -> LayoutTree {
 
 fn build_engine_layout(builder: &mut LayoutBuilder, selected: Engine) {
     let styles = ColumnStyles {
-        header:   TextStyle::new(LABEL_SIZE).with_color(TITLE_COLOR).no_wrap(),
-        active:   TextStyle::new(LABEL_SIZE)
-            .with_color(PANEL_ACTIVE_COLOR)
-            .no_wrap(),
-        inactive: TextStyle::new(LABEL_SIZE)
-            .with_color(PANEL_INACTIVE_COLOR)
-            .no_wrap(),
+        header:   TextStyle::new(LABEL_SIZE).with_color(TITLE_COLOR),
+        active:   TextStyle::new(LABEL_SIZE).with_color(PANEL_ACTIVE_COLOR),
+        inactive: TextStyle::new(LABEL_SIZE).with_color(PANEL_INACTIVE_COLOR),
     };
     screen_panel_frame(
         builder,
@@ -632,14 +628,14 @@ fn build_column<'a>(
             .height(Sizing::FIT)
             .gap(PANEL_ROW_GAP),
         |builder| {
-            builder.text(header, styles.header.clone());
+            builder.text((header, styles.header.clone()));
             for (label, active) in rows {
                 let style = if active {
                     &styles.active
                 } else {
                     &styles.inactive
                 };
-                builder.text(label, style.clone());
+                builder.text((label, style.clone()));
             }
         },
     );

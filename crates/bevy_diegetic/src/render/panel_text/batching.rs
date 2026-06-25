@@ -1104,6 +1104,7 @@ mod tests {
     use crate::layout::GlyphShadowMode;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
+    use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
@@ -1190,20 +1191,20 @@ mod tests {
 
     fn two_text_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0));
-        builder.text("Beta", TextStyle::new(10.0));
+        builder.text(("Alpha", TextStyle::new(10.0)));
+        builder.text(("Beta", TextStyle::new(10.0)));
         builder.build()
     }
 
     fn one_text_tree() -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0));
+        builder.text(("Alpha", TextStyle::new(10.0)));
         builder.build()
     }
 
     fn one_text_tree_with_style(style: TextStyle) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", style);
+        builder.text(("Alpha", style));
         builder.build()
     }
 
@@ -1475,8 +1476,8 @@ mod tests {
         let (_, _, glyphs_before) = store_stats(&app);
 
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alphas", TextStyle::new(10.0));
-        builder.text("Beta", TextStyle::new(10.0));
+        builder.text(("Alphas", TextStyle::new(10.0)));
+        builder.text(("Beta", TextStyle::new(10.0)));
         app.world_mut().commands().set_tree(panel, builder.build());
         settle(&mut app);
 
@@ -1574,8 +1575,8 @@ mod tests {
         let first_material = material_with_metallic(&mut app, 0.21);
         let second_material = material_with_metallic(&mut app, 0.84);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("Alpha", TextStyle::new(10.0).with_material(first_material));
-        builder.text("Beta", TextStyle::new(10.0).with_material(second_material));
+        builder.text(("Alpha", TextStyle::new(10.0).with_material(first_material)));
+        builder.text(("Beta", TextStyle::new(10.0).with_material(second_material)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
@@ -1612,8 +1613,8 @@ mod tests {
         let texture = Handle::<Image>::default();
         let material = material_with_texture(&mut app, texture);
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text("AB", TextStyle::new(10.0).with_material(material.clone()));
-        builder.text("CD", TextStyle::new(10.0).with_material(material));
+        builder.text(("AB", TextStyle::new(10.0).with_material(material.clone())));
+        builder.text(("CD", TextStyle::new(10.0).with_material(material)));
         let panel = spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
@@ -1796,16 +1797,11 @@ mod tests {
     fn text_element_z_index_authors_z_level_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text_element(
-            El::new().z_index(LOWERED_LEVEL),
-            "Lower",
-            TextStyle::new(10.0),
+        builder.text(
+            Text::new("Lower", TextStyle::new(10.0)).layout(El::new().z_index(LOWERED_LEVEL)),
         );
-        builder.text_element(
-            El::new().z_index(RAISED_LEVEL),
-            "Raise",
-            TextStyle::new(10.0),
-        );
+        builder
+            .text(Text::new("Raise", TextStyle::new(10.0)).layout(El::new().z_index(RAISED_LEVEL)));
         spawn_panel(&mut app, builder.build());
         settle(&mut app);
 
@@ -1951,11 +1947,11 @@ mod tests {
 
         // Same text, new color: a material-table row write, not a re-key.
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
+        builder.text((
             "Alpha",
             TextStyle::new(10.0).with_color(Color::srgb(1.0, 0.0, 0.0)),
-        );
-        builder.text("Beta", TextStyle::new(10.0));
+        ));
+        builder.text(("Beta", TextStyle::new(10.0)));
         app.world_mut().commands().set_tree(panel, builder.build());
         settle(&mut app);
 
@@ -2026,11 +2022,11 @@ mod tests {
         assert_eq!(store_stats(&app).0, 1);
 
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(
+        builder.text((
             "Alpha",
             TextStyle::new(10.0).with_shadow_mode(GlyphShadowMode::None),
-        );
-        builder.text("Beta", TextStyle::new(10.0));
+        ));
+        builder.text(("Beta", TextStyle::new(10.0)));
         app.world_mut().commands().set_tree(panel, builder.build());
         settle(&mut app);
 

@@ -683,7 +683,7 @@ fn caret_prefix_text(snapshot: &ImeBufferSnapshot) -> Cow<'_, str> {
 
 fn editor_text_measure() -> TextMeasure { editor_text_style().as_measure() }
 
-fn editor_text_style() -> TextStyle { TextStyle::new(EDITOR_FONT_SIZE).no_wrap() }
+fn editor_text_style() -> TextStyle { TextStyle::new(EDITOR_FONT_SIZE) }
 
 fn editor_tree(snapshot: &ImeBufferSnapshot, validation: Option<&str>) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(
@@ -764,7 +764,7 @@ fn add_text(builder: &mut LayoutBuilder, text: &str, color: Color) {
     if text.is_empty() {
         return;
     }
-    builder.text(text, editor_text_style().with_color(color));
+    builder.text((text, editor_text_style().with_color(color)));
 }
 
 fn add_selected_text(builder: &mut LayoutBuilder, text: &str) {

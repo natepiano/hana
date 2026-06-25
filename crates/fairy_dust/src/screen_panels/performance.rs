@@ -260,7 +260,7 @@ fn stats_section(builder: &mut LayoutBuilder, section: &StatsPanelSection, last:
                         .height(Sizing::FIT)
                         .alignment(AlignX::Left, AlignY::Center),
                     |builder| {
-                        builder.text(&section.title, stats_section_label_style());
+                        builder.text((&section.title, stats_section_label_style()));
                     },
                 );
             }
@@ -293,7 +293,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                             .height(Sizing::FIT)
                             .alignment(AlignX::Left, AlignY::Center),
                         |builder| {
-                            builder.text(&row.label, stats_header_label_style());
+                            builder.text((&row.label, stats_header_label_style()));
                         },
                     );
                     builder.with(
@@ -302,7 +302,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                             .height(Sizing::FIT)
                             .alignment(AlignX::Right, AlignY::Center),
                         |builder| {
-                            builder.text(&row.value, stats_header_value_style());
+                            builder.text((&row.value, stats_header_value_style()));
                         },
                     );
                 },
@@ -320,7 +320,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                         ))
                         .alignment(AlignX::Left, AlignY::Top),
                     |builder| {
-                        builder.text(detail, stats_desc_style());
+                        builder.text((detail, stats_desc_style()));
                     },
                 );
             }

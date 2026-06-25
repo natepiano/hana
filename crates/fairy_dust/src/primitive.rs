@@ -281,7 +281,7 @@ pub fn cube_face_panel_tree(
         .with_color(style.color)
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
-    builder.text(content.title, title);
+    builder.text((content.title, title));
 
     let body_size = match content.activity {
         CubeFacePanelActivity::Active => style.active_body_size,
@@ -292,7 +292,7 @@ pub fn cube_face_panel_tree(
         .with_align(TextAlign::Center)
         .with_shadow_mode(GlyphShadowMode::None);
     for row in content.rows {
-        builder.text(row, body.clone());
+        builder.text((row, body.clone()));
     }
 
     builder.build()

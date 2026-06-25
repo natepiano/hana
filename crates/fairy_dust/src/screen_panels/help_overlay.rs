@@ -218,11 +218,9 @@ fn build_help_tree(shortcuts: HelpShortcuts) -> LayoutTree {
 }
 
 fn build_help_layout(builder: &mut LayoutBuilder, shortcuts: HelpShortcuts) {
-    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR).no_wrap();
-    let hint = TextStyle::new(HELP_CLOSE_HINT_SIZE)
-        .with_color(BODY_COLOR)
-        .no_wrap();
-    let label = TextStyle::new(LABEL_SIZE).with_color(BODY_COLOR).no_wrap();
+    let title = TextStyle::new(TITLE_SIZE).with_color(TITLE_COLOR);
+    let hint = TextStyle::new(HELP_CLOSE_HINT_SIZE).with_color(BODY_COLOR);
+    let label = TextStyle::new(LABEL_SIZE).with_color(BODY_COLOR);
 
     screen_panel_frame(
         builder,
@@ -256,7 +254,7 @@ fn build_title_row(builder: &mut LayoutBuilder, title: &TextStyle, hint: &TextSt
             builder.with(
                 El::new().width(Sizing::GROW).height(Sizing::FIT),
                 |builder| {
-                    builder.text(HELP_TITLE, title.clone());
+                    builder.text((HELP_TITLE, title.clone()));
                 },
             );
             builder.with(
@@ -265,7 +263,7 @@ fn build_title_row(builder: &mut LayoutBuilder, title: &TextStyle, hint: &TextSt
                     .height(Sizing::FIT)
                     .align_x(AlignX::Right),
                 |builder| {
-                    builder.text(CLOSE_HINT, hint.clone());
+                    builder.text((CLOSE_HINT, hint.clone()));
                 },
             );
         },
@@ -309,13 +307,13 @@ fn build_shortcut_row(builder: &mut LayoutBuilder, row: HelpRow, label: &TextSty
                     .width(Sizing::fixed(HELP_KEY_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(row.keys, label.clone());
+                    builder.text((row.keys, label.clone()));
                 },
             );
             builder.with(
                 El::new().width(Sizing::FIT).height(Sizing::FIT),
                 |builder| {
-                    builder.text(row.label, label.clone());
+                    builder.text((row.label, label.clone()));
                 },
             );
         },
