@@ -979,6 +979,31 @@ fn center_dilation_bounds_corner_wing() {
     }
 }
 
+/// Tripwire: hashes `analytic_path.wgsl` and fails when it changes. The [`Probe`]
+/// above mirrors the shader's coverage math by hand; this flags that the shader
+/// changed so the mirror gets re-checked. It cannot tell whether the change was
+/// correct — the shader runs on the GPU. On failure, re-verify [`Probe`], then
+/// set `EXPECTED_SHADER_FNV1A` to the printed value.
+#[test]
+fn shader_mirror_matches_wgsl() {
+    const SHADER: &str = include_str!("../../../render/analytic_paths/analytic_path.wgsl");
+    const EXPECTED_SHADER_FNV1A: u64 = 0x391e_01e4_1065_7a1c;
+    let actual = fnv1a_64(SHADER.as_bytes());
+    assert_eq!(
+        actual, EXPECTED_SHADER_FNV1A,
+        "shader has changed, make sure to update this test to match the new logic (new hash {actual:#018x})",
+    );
+}
+
+fn fnv1a_64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for &byte in bytes {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
 // ---- panel-line tick scale probe -------------------------------------------
 
 /// Builds a probe for an axis-aligned rectangle outline with the given design

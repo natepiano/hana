@@ -1254,8 +1254,8 @@ mod tests {
     use super::*;
     use crate::render;
     use crate::render::AntiAlias;
-    use crate::render::BatchPathMaterialInput;
     use crate::render::PathAtlasHandles;
+    use crate::render::PathMaterialBuffers;
     use crate::render::RenderMode;
     use crate::render::batch_key::BatchAlphaMode;
     use crate::render::fill_batch::FillBatchPlugin;
@@ -1339,18 +1339,21 @@ mod tests {
             bands:        Handle::default(),
             path_records: Handle::default(),
         };
-        render::batch_path_material(BatchPathMaterialInput {
-            base:             StandardMaterial::default(),
-            fill_color:       Vec4::ONE,
-            render_mode:      RenderMode::Text,
-            oit_depth_offset: 0.0,
-            anti_alias:       AntiAlias::default(),
-            curves:           atlas.curves,
-            bands:            atlas.bands,
-            path_records:     atlas.path_records,
-            instances:        Handle::default(),
-            run_records:      Handle::default(),
-        })
+        PathExtendedMaterial {
+            base:      StandardMaterial::default(),
+            extension: render::analytic_paths::vertex_pull(
+                RenderMode::Text,
+                0.0,
+                AntiAlias::default(),
+                PathMaterialBuffers {
+                    curves:       atlas.curves,
+                    bands:        atlas.bands,
+                    path_records: atlas.path_records,
+                    instances:    Handle::default(),
+                    run_records:  Handle::default(),
+                },
+            ),
+        }
     }
 
     fn assert_same_f32(actual: f32, expected: f32) {

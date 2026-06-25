@@ -15,6 +15,9 @@ use super::constants::DIAG_PANEL_RECONCILE_MS;
 use super::constants::DIAG_PANEL_SDF_BATCHES;
 use super::constants::DIAG_PANEL_SDF_RECORDS;
 use super::constants::DIAG_PANEL_SDF_UPLOADS;
+use super::constants::DIAG_PANEL_SHAPE_BATCHES;
+use super::constants::DIAG_PANEL_SHAPE_RECORDS;
+use super::constants::DIAG_PANEL_SHAPE_UPLOADS;
 use super::constants::DIAG_PANEL_TEXT_MESH_BUILD_MS;
 use super::constants::DIAG_PANEL_TEXT_PARLEY_MS;
 use super::constants::DIAG_PANEL_TEXT_SHAPE_MS;
@@ -180,6 +183,9 @@ impl Plugin for DiagnosticsPlugin {
             Diagnostic::new(DIAG_PANEL_SDF_BATCHES),
             Diagnostic::new(DIAG_PANEL_SDF_RECORDS),
             Diagnostic::new(DIAG_PANEL_SDF_UPLOADS),
+            Diagnostic::new(DIAG_PANEL_SHAPE_BATCHES),
+            Diagnostic::new(DIAG_PANEL_SHAPE_RECORDS),
+            Diagnostic::new(DIAG_PANEL_SHAPE_UPLOADS),
             Diagnostic::new(DIAG_PANEL_TEXT_TOTAL_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_SHAPE_MS).with_suffix(" ms"),
             Diagnostic::new(DIAG_PANEL_TEXT_PARLEY_MS).with_suffix(" ms"),
@@ -219,6 +225,15 @@ fn publish_perf_diagnostics(perf: Res<DiegeticPerfStats>, mut diagnostics: Diagn
     });
     diagnostics.add_measurement(&DIAG_PANEL_SDF_UPLOADS, || {
         perf.panel_geometry.sdf_uploads.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_SHAPE_BATCHES, || {
+        perf.line_batch.batches.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_SHAPE_RECORDS, || {
+        perf.line_batch.records.to_f64()
+    });
+    diagnostics.add_measurement(&DIAG_PANEL_SHAPE_UPLOADS, || {
+        perf.line_batch.uploads.to_f64()
     });
     diagnostics.add_measurement(&DIAG_PANEL_TEXT_TOTAL_MS, || {
         f64::from(perf.panel_text.total_ms)

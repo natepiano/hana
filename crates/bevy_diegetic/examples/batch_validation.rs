@@ -1,8 +1,7 @@
 //! Batching validation scene for SDF surfaces, text, and analytic shapes.
 //!
-//! This example is intentionally kept in sync with the material-table batching
-//! plan. It starts from today's counters and keeps placeholder rows only for
-//! draw counts that land in later phases.
+//! The scene displays authored record counts, material-table rows, and expected
+//! batch counts alongside live renderer counters.
 
 use bevy::camera::primitives::Aabb;
 use bevy::diagnostic::Diagnostic;
@@ -144,60 +143,94 @@ const FPS_UPDATE_INTERVAL: f32 = 1.0;
 // are intent values the live `actual` row is reconciled against. Columns are
 // text, shape, sdf — the order the ledger renders.
 struct PanelExpected {
-    label: &'static str,
-    text:  usize,
-    shape: usize,
-    sdf:   usize,
+    label:       &'static str,
+    text:        usize,
+    shape:       usize,
+    sdf:         usize,
+    // True for the panel whose live alpha-mode run forms its own text batch when
+    // the selector leaves Blend, adding one to the predicted text total.
+    alpha_split: bool,
+}
+
+// Predicted text batches for one panel under the active alpha mode: the baseline
+// count plus the live alpha-mode split when the selector is off Blend.
+const fn panel_text_for_mode(panel: &PanelExpected, alpha_index: usize) -> usize {
+    if panel.alpha_split && alpha_index != ALPHA_DEFAULT_INDEX {
+        panel.text + 1
+    } else {
+        panel.text
+    }
+}
+
+// Predicted global batch totals [text, shape, sdf] for the active alpha mode.
+// Shape and sdf totals are alpha-invariant; only text gains the live alpha-mode
+// split.
+fn expected_totals(alpha_index: usize) -> [usize; 3] {
+    let mut totals = [0_usize; 3];
+    for panel in &EXPECTED_BATCHES {
+        totals[0] += panel_text_for_mode(panel, alpha_index);
+        totals[1] += panel.shape;
+        totals[2] += panel.sdf;
+    }
+    totals
 }
 
 const EXPECTED_BATCHES: [PanelExpected; 8] = [
     PanelExpected {
-        label: "Title",
-        text:  1,
-        shape: 0,
-        sdf:   1,
+        label:       "Title",
+        text:        1,
+        shape:       0,
+        sdf:         1,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "Info",
-        text:  1,
-        shape: 0,
-        sdf:   1,
+        label:       "Info",
+        text:        1,
+        shape:       0,
+        sdf:         1,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "Camera",
-        text:  1,
-        shape: 0,
-        sdf:   1,
+        label:       "Camera",
+        text:        1,
+        shape:       0,
+        sdf:         1,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "SDF",
-        text:  1,
-        shape: 0,
-        sdf:   2,
+        label:       "SDF",
+        text:        1,
+        shape:       0,
+        sdf:         2,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "Text",
-        text:  4,
-        shape: 0,
-        sdf:   1,
+        label:       "Text",
+        text:        4,
+        shape:       0,
+        sdf:         1,
+        alpha_split: true,
     },
     PanelExpected {
-        label: "Shapes",
-        text:  1,
-        shape: 3,
-        sdf:   1,
+        label:       "Shapes",
+        text:        1,
+        shape:       3,
+        sdf:         1,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "Mixed",
-        text:  1,
-        shape: 1,
-        sdf:   1,
+        label:       "Mixed",
+        text:        1,
+        shape:       1,
+        sdf:         1,
+        alpha_split: false,
     },
     PanelExpected {
-        label: "Expected",
-        text:  1,
-        shape: 0,
-        sdf:   1,
+        label:       "Expected",
+        text:        1,
+        shape:       0,
+        sdf:         1,
+        alpha_split: false,
     },
 ];
 
@@ -219,11 +252,19 @@ const TITLE_FONT_SIZE: f32 = 18.75;
 const SUBTITLE_FONT_SIZE: f32 = 13.5;
 const BODY_FONT_SIZE: f32 = 15.75;
 const SMALL_FONT_SIZE: f32 = 12.75;
-const MATERIAL_GROUP_TITLE_FONT_SIZE: f32 = 18.0;
+const MATERIAL_GROUP_TITLE_FONT_SIZE: f32 = 16.0;
+const MATERIAL_CASE_FONT_SIZE: f32 = 15.0;
+const MATERIAL_CASE_CAPTION_FONT_SIZE: f32 = 11.75;
+const MATERIAL_GROUP_GAP: f32 = 2.0;
+const MATERIAL_CASE_GAP: f32 = 0.5;
+const MATERIAL_CASE_PAD_X: f32 = 2.0;
+const MATERIAL_CASE_PAD_Y: f32 = 1.0;
+const MATERIAL_VALUE_GAP: f32 = 2.0;
 const STATS_FONT_SIZE: f32 = 12.0;
 const SWATCH_FONT_SIZE: f32 = 31.5;
 const MIXED_LABEL_WIDTH: f32 = 58.0;
 const MIXED_ROW_BG: Color = Color::srgba(0.14, 0.16, 0.20, 0.92);
+const MATERIAL_CASE_BG: Color = Color::srgba(0.10, 0.11, 0.13, 0.72);
 const CARD_BG: Color = Color::srgba(0.055, 0.065, 0.075, 0.94);
 const CARD_BG_ALT: Color = Color::srgba(0.075, 0.055, 0.075, 0.94);
 const CARD_BORDER: Color = Color::srgba(0.34, 0.56, 0.72, 0.75);
@@ -242,8 +283,6 @@ const EMISSIVE_WARM: Color = Color::linear_rgb(3.6, 2.3, 0.2);
 const GLINT: Color = Color::linear_rgb(0.95, 0.97, 1.0);
 const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
-// Dark cell background shared by the divergent cases that stay legible on dark.
-const DIVERGENT_CASE_BG: Color = Color::srgba(0.02, 0.03, 0.04, 0.38);
 // Light cell for the live alpha case: `AlphaMode::Multiply` multiplies its ink
 // into the background and vanishes on dark, so the selector's run sits on a
 // light swatch where multiply reads as a tint. Caption and ink go dark to match.
@@ -475,6 +514,31 @@ struct LastDisplayedStats {
     key: String,
 }
 
+// Outcome of checking the predicted batch totals against the live renderer
+// counts. `Stabilizing` holds until the observed batch totals stay unchanged for
+// `VALIDATION_STABLE_FRAMES` consecutive frames; the latch re-arms whenever the
+// alpha selection changes.
+#[derive(Resource, Default)]
+struct ValidationStatus {
+    state:         ValidationState,
+    last_observed: Option<[usize; 3]>,
+    stable_frames: u32,
+    last_alpha:    usize,
+}
+
+#[derive(Default, PartialEq, Eq)]
+enum ValidationState {
+    #[default]
+    Stabilizing,
+    Match,
+    Mismatch {
+        expected: [usize; 3],
+        observed: [usize; 3],
+    },
+}
+
+const VALIDATION_STABLE_FRAMES: u32 = 30;
+
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
@@ -532,6 +596,7 @@ fn main() {
         })
         .init_resource::<LastDisplayedStats>()
         .init_resource::<AlphaModeSelection>()
+        .init_resource::<ValidationStatus>()
         .add_systems(
             Startup,
             (
@@ -541,6 +606,7 @@ fn main() {
                 spawn_alpha_selector_panel,
             ),
         )
+        .add_systems(Update, validate_batch_counts.before(update_stats_panel))
         .add_systems(Update, update_stats_panel)
         .add_systems(Update, animate_sdf_surface_panel)
         .add_systems(Update, apply_alpha_selection)
@@ -737,7 +803,12 @@ fn spawn_expected_batches_panel(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    match build_expected_batches_panel(None, &mut materials) {
+    match build_expected_batches_panel(
+        None,
+        ALPHA_DEFAULT_INDEX,
+        &ValidationState::Stabilizing,
+        &mut materials,
+    ) {
         Ok(panel) => {
             commands.spawn((BatchValidationLedgerPanel, panel, Transform::default()));
         },
@@ -819,10 +890,59 @@ fn alpha_selector_row(builder: &mut LayoutBuilder, slot: usize, label: &str, sel
     });
 }
 
+// Latches the live batch totals: once `[text, shape, sdf]` batch counts hold
+// steady for `VALIDATION_STABLE_FRAMES` frames, compares them against the
+// predicted totals for the active alpha mode and records match/mismatch. SDF
+// material animation changes table values, not batch counts, so it never
+// disturbs the latch. Re-arms when the alpha selection changes.
+fn validate_batch_counts(
+    perf: Res<DiegeticPerfStats>,
+    selection: Res<AlphaModeSelection>,
+    mut status: ResMut<ValidationStatus>,
+) {
+    let observed = [
+        perf.batch.batches,
+        perf.line_batch.batches,
+        perf.panel_geometry.sdf_batches,
+    ];
+    if selection.index != status.last_alpha {
+        status.last_alpha = selection.index;
+        status.state = ValidationState::Stabilizing;
+        status.last_observed = None;
+        status.stable_frames = 0;
+    }
+    // A zero in any family means the renderer has not populated that count yet;
+    // hold in `Stabilizing` rather than latch onto a partial frame.
+    if observed.contains(&0) {
+        status.state = ValidationState::Stabilizing;
+        status.last_observed = None;
+        status.stable_frames = 0;
+        return;
+    }
+    if status.last_observed == Some(observed) {
+        status.stable_frames += 1;
+    } else {
+        status.last_observed = Some(observed);
+        status.stable_frames = 0;
+        status.state = ValidationState::Stabilizing;
+    }
+    if status.stable_frames < VALIDATION_STABLE_FRAMES {
+        return;
+    }
+    let expected = expected_totals(selection.index);
+    status.state = if observed == expected {
+        ValidationState::Match
+    } else {
+        ValidationState::Mismatch { expected, observed }
+    };
+}
+
 fn update_stats_panel(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
     diegetic_perf: Res<DiegeticPerfStats>,
+    selection: Res<AlphaModeSelection>,
+    validation: Res<ValidationStatus>,
     panels: Query<Entity, With<BatchValidationStatsPanel>>,
     ledger_panels: Query<Entity, With<BatchValidationLedgerPanel>>,
     mut last: ResMut<LastDisplayedStats>,
@@ -841,7 +961,12 @@ fn update_stats_panel(
         .and_then(Diagnostic::smoothed);
     let sections =
         validation_stats_sections(Some(&diegetic_perf), fps.unwrap_or(0.0), time.delta_secs());
-    let key = stats_key(&sections);
+    let key = format!(
+        "{}|alpha={}|val={}",
+        stats_key(&sections),
+        selection.index,
+        validation_key(&validation.state)
+    );
     if key == last.key {
         return;
     }
@@ -850,7 +975,22 @@ fn update_stats_panel(
         commands.set_tree(panel, diegetic_stats_sections_tree(&sections));
     }
     for panel in &ledger_panels {
-        commands.set_tree(panel, expected_batches_tree(Some(&diegetic_perf)));
+        commands.set_tree(
+            panel,
+            expected_batches_tree(Some(&diegetic_perf), selection.index, &validation.state),
+        );
+    }
+}
+
+// Short discriminant for the dedup key so the ledger rebuilds when the
+// validation outcome changes even after the live counts stop moving.
+fn validation_key(state: &ValidationState) -> String {
+    match state {
+        ValidationState::Stabilizing => "stabilizing".to_owned(),
+        ValidationState::Match => "match".to_owned(),
+        ValidationState::Mismatch { expected, observed } => {
+            format!("mismatch:{expected:?}:{observed:?}")
+        },
     }
 }
 
@@ -904,8 +1044,17 @@ fn validation_stats_sections(
                 StatsPanelRow::new("text runs", batch.runs.to_string()),
                 StatsPanelRow::new("text glyphs", batch.glyph_records.to_string())
                     .detail("live glyph instance records"),
+                StatsPanelRow::new(
+                    "text uploads",
+                    (batch.instance_uploads + batch.run_table_uploads).to_string(),
+                )
+                .detail(format!(
+                    "instance {} + run-table {}",
+                    batch.instance_uploads, batch.run_table_uploads
+                )),
                 StatsPanelRow::new("shape batches", shape_batch.batches.to_string()),
                 StatsPanelRow::new("path records", shape_batch.records.to_string()),
+                StatsPanelRow::new("shape uploads", shape_batch.uploads.to_string()),
                 StatsPanelRow::new("draws today", current_draws.to_string()).detail(format!(
                     "sdf {} + text {} + shapes {}",
                     sdf.sdf_batches, batch.batches, shape_batch.batches
@@ -949,6 +1098,8 @@ fn stats_key(sections: &[StatsPanelSection]) -> String {
 
 fn build_expected_batches_panel(
     perf: Option<&DiegeticPerfStats>,
+    alpha_index: usize,
+    status: &ValidationState,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
     let unlit = materials.add(screen_panel_material());
@@ -957,14 +1108,19 @@ fn build_expected_batches_panel(
         .anchor(Anchor::BottomLeft)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(expected_batches_tree(perf))
+        .with_tree(expected_batches_tree(perf, alpha_index, status))
         .build()
 }
 
 // The bottom-left ledger: a title, a header row, one row per panel with its
-// predicted text/shape/sdf batch counts, then a `predicted` totals row (the
-// column sums) and a live `actual` row pulled from the renderer counters.
-fn expected_batches_tree(perf: Option<&DiegeticPerfStats>) -> LayoutTree {
+// predicted text/shape/sdf batch counts for the active alpha mode, then a
+// `predicted` totals row, a live `actual` row from the renderer counters, and a
+// validation status line latched by `validate_batch_counts`.
+fn expected_batches_tree(
+    perf: Option<&DiegeticPerfStats>,
+    alpha_index: usize,
+    status: &ValidationState,
+) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -985,22 +1141,19 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>) -> LayoutTree {
                         TEXT_MUTED,
                         ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
                     );
-                    let mut totals = [0_usize; 3];
                     for panel in &EXPECTED_BATCHES {
                         ledger_row(
                             builder,
                             panel.label,
                             TEXT_MUTED,
                             [
-                                panel.text.to_string(),
+                                panel_text_for_mode(panel, alpha_index).to_string(),
                                 panel.shape.to_string(),
                                 panel.sdf.to_string(),
                             ],
                         );
-                        totals[0] += panel.text;
-                        totals[1] += panel.shape;
-                        totals[2] += panel.sdf;
                     }
+                    let totals = expected_totals(alpha_index);
                     ledger_separator(builder);
                     ledger_row(
                         builder,
@@ -1023,6 +1176,16 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>) -> LayoutTree {
                             perf.panel_geometry.sdf_batches.to_string(),
                         ],
                     );
+                    ledger_separator(builder);
+                    let (status_text, status_color) = match status {
+                        ValidationState::Stabilizing => ("stabilizing…".to_owned(), TEXT_MUTED),
+                        ValidationState::Match => ("validation: match".to_owned(), ACCENT_GREEN),
+                        ValidationState::Mismatch { expected, observed } => (
+                            format!("mismatch predicted {expected:?} actual {observed:?}"),
+                            ACCENT_RED,
+                        ),
+                    };
+                    builder.text(status_text, ledger_cell_style(status_color));
                 },
             );
         },
@@ -1358,7 +1521,7 @@ fn build_mixed_panel() -> LayoutTree {
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .gap(ROW_GAP),
+            .gap(2.0),
         |builder| {
             mixed_row(
                 builder,
@@ -1494,44 +1657,60 @@ fn stats_block_row(builder: &mut LayoutBuilder, cells: &[(String, Color)]) {
 
 fn shared_text_material_group(builder: &mut LayoutBuilder, materials: &TextPanelMaterialHandles) {
     builder.with(
-        // GROW height so both group columns fill the row and share a height;
-        // the FIT cases inside still hug their content at the top.
+        // GROW height so both group columns fill the row and share a height; the
+        // FIT cases inside keep their content from inflating the panel.
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .gap(ROW_GAP)
-            .padding(Padding::all(Mm(2.0)))
+            .gap(MATERIAL_GROUP_GAP)
+            .padding(Padding::all(Mm(1.5)))
             .background(Color::srgba(0.02, 0.03, 0.04, 0.30))
             .border(Border::all(Mm(0.3), ACCENT_GREEN))
             .corner_radius(CornerRadius::all(Mm(1.3))),
         |builder| {
-            builder.text("Shared group", material_group_title_style());
-            builder.text("varies table values", small_style(TEXT_MUTED));
-            material_case_block_with_style(
-                builder,
-                "panel text material",
-                "inherited base",
-                body_style(TEXT_MAIN),
-            );
+            material_group_header(builder, "Shared group", "varies table values");
+            material_group_spacer(builder);
             material_case_block_with_style(
                 builder,
                 "style color",
                 "cool blue",
-                body_style(ACCENT_BLUE).with_color(ACCENT_BLUE),
+                material_value_style(ACCENT_BLUE),
             );
+            material_group_spacer(builder);
             material_case_block_with_style(
                 builder,
                 "local material",
                 "emissive value",
-                body_style(EMISSIVE_WARM).with_material(materials.emissive.clone()),
+                material_value_style(EMISSIVE_WARM).with_material(materials.emissive.clone()),
             );
+            material_group_spacer(builder);
             material_case_block_with_style(
                 builder,
                 "local material",
                 "metallic glint",
-                body_style(GLINT).with_material(materials.metallic.clone()),
+                material_value_style(GLINT).with_material(materials.metallic.clone()),
             );
         },
+    );
+}
+
+fn material_group_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(MATERIAL_CASE_GAP),
+        |builder| {
+            builder.text(title, material_group_title_style());
+            builder.text(subtitle, material_caption_style(TEXT_MUTED));
+        },
+    );
+}
+
+fn material_group_spacer(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new().width(Sizing::GROW).height(Sizing::GROW),
+        |_builder| {},
     );
 }
 
@@ -1548,13 +1727,13 @@ fn material_case_block_with_style(
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .gap(1.0)
-            .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
+            .gap(MATERIAL_CASE_GAP)
+            .padding(Padding::xy(MATERIAL_CASE_PAD_X, MATERIAL_CASE_PAD_Y))
             .corner_radius(CornerRadius::all(Mm(1.5)))
-            .background(Color::srgba(0.02, 0.03, 0.04, 0.38))
+            .background(MATERIAL_CASE_BG)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(label, small_style(TEXT_MUTED));
+            builder.text(label, material_caption_style(TEXT_MUTED));
             builder.text(value, style);
         },
     );
@@ -1575,16 +1754,18 @@ fn divergent_group(
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .gap(ROW_GAP)
-            .padding(Padding::all(Mm(2.0)))
+            .gap(MATERIAL_GROUP_GAP)
+            .padding(Padding::all(Mm(1.5)))
             .background(Color::srgba(0.02, 0.03, 0.04, 0.30))
             .border(Border::all(Mm(0.3), ACCENT_RED))
             .corner_radius(CornerRadius::all(Mm(1.3))),
         |builder| {
-            builder.text("Divergent group", material_group_title_style());
-            builder.text("splits compatibility", small_style(TEXT_MUTED));
+            material_group_header(builder, "Divergent group", "splits compatibility");
+            material_group_spacer(builder);
             divergent_alpha_case(builder, alpha);
+            material_group_spacer(builder);
             divergent_texture_case(builder, materials);
+            material_group_spacer(builder);
             divergent_cull_case(builder);
         },
     );
@@ -1603,7 +1784,7 @@ fn divergent_alpha_case(builder: &mut LayoutBuilder, alpha: AlphaMode) {
         |builder| {
             builder.text(
                 alpha_mode_label(alpha),
-                body_style(ALPHA_CELL_INK).with_alpha_mode(alpha),
+                material_value_style(ALPHA_CELL_INK).with_alpha_mode(alpha),
             );
         },
     );
@@ -1623,12 +1804,12 @@ fn divergent_texture_case(builder: &mut LayoutBuilder, materials: &TextPanelMate
     divergent_case_shell(
         builder,
         "texture",
-        DIVERGENT_CASE_BG,
+        MATERIAL_CASE_BG,
         TEXT_MUTED,
         |builder| {
             builder.text(
                 "image glyphs",
-                body_style(TEXT_MAIN).with_material(materials.texture.clone()),
+                material_value_style(TEXT_MAIN).with_material(materials.texture.clone()),
             );
         },
     );
@@ -1642,24 +1823,23 @@ fn divergent_cull_case(builder: &mut LayoutBuilder) {
     divergent_case_shell(
         builder,
         "cull mode",
-        DIVERGENT_CASE_BG,
+        MATERIAL_CASE_BG,
         TEXT_MUTED,
         |builder| {
             builder.text(
                 "FrontOnly",
-                body_style(ACCENT_RED).with_sidedness(Sidedness::FrontOnly),
+                material_value_style(ACCENT_RED).with_sidedness(Sidedness::FrontOnly),
             );
             builder.text(
                 "BackOnly",
-                body_style(ACCENT_RED).with_sidedness(Sidedness::BackOnly),
+                material_value_style(ACCENT_RED).with_sidedness(Sidedness::BackOnly),
             );
             builder.text(
                 "BothSides",
-                body_style(ACCENT_RED).with_sidedness(Sidedness::BothSides),
+                material_value_style(ACCENT_RED).with_sidedness(Sidedness::BothSides),
             );
         },
     );
-    builder.text("back hidden from front", small_style(TEXT_MUTED));
 }
 
 // A divergent case: a captioned cell whose value runs wrap in a row, so each
@@ -1676,13 +1856,13 @@ fn divergent_case_shell(
         El::column()
             .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .gap(1.0)
-            .padding(Padding::new(3.0, 3.0, 2.0, 2.0))
+            .gap(MATERIAL_CASE_GAP)
+            .padding(Padding::xy(MATERIAL_CASE_PAD_X, MATERIAL_CASE_PAD_Y))
             .corner_radius(CornerRadius::all(Mm(1.5)))
             .background(cell_bg)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(caption, small_style(caption_color));
+            builder.text(caption, material_caption_style(caption_color));
             // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
             // bottom-up fit pass, forcing its text runs to wrap per word and
             // measure tall, which balloons the case height. FIT measures each
@@ -1691,7 +1871,7 @@ fn divergent_case_shell(
                 El::row()
                     .width(Sizing::FIT)
                     .height(Sizing::FIT)
-                    .gap(ROW_GAP),
+                    .gap(MATERIAL_VALUE_GAP),
                 values,
             );
         },
@@ -2054,6 +2234,18 @@ fn material_group_title_style() -> TextStyle {
     TextStyle::new(MATERIAL_GROUP_TITLE_FONT_SIZE)
         .bold()
         .with_color(TEXT_MAIN)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn material_caption_style(color: Color) -> TextStyle {
+    TextStyle::new(MATERIAL_CASE_CAPTION_FONT_SIZE)
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
+}
+
+fn material_value_style(color: Color) -> TextStyle {
+    TextStyle::new(MATERIAL_CASE_FONT_SIZE)
+        .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 

@@ -46,6 +46,12 @@ pub(super) const DIAG_PANEL_SDF_RECORDS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel/sdf_records");
 pub(super) const DIAG_PANEL_SDF_UPLOADS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel/sdf_uploads");
+pub(super) const DIAG_PANEL_SHAPE_BATCHES: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_shape/batches");
+pub(super) const DIAG_PANEL_SHAPE_RECORDS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_shape/path_records");
+pub(super) const DIAG_PANEL_SHAPE_UPLOADS: DiagnosticPath =
+    DiagnosticPath::const_new("bevy_diegetic/panel_shape/uploads");
 pub(super) const DIAG_PANEL_TEXT_MESH_BUILD_MS: DiagnosticPath =
     DiagnosticPath::const_new("bevy_diegetic/panel_text/mesh_build_ms");
 pub(super) const DIAG_PANEL_TEXT_PARLEY_MS: DiagnosticPath =

@@ -21,8 +21,9 @@
 //             index) as floats, constant per quad.
 //   world.w — PathQuadRecord index under vertex pulling.
 //   per-run — material slot / render mode / OIT offset / AA flags from the
-//             PathRenderRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS, else from the
-//             material's PathUniform.
+//             PathRenderRecord table under FRAGMENT_DATA_FROM_BATCHED_PATHS.
+//             Non-vertex-pulled fallback fragments carry no material row and
+//             resolve to transparent output.
 //
 // Evaluation: non-zero winding (inside/outside) + distance to the nearest
 // curve (the AA ramp), both banded. Strokes thinner than
@@ -38,7 +39,6 @@
 // keep that probe in lockstep.
 
 #import bevy_pbr::{
-    pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
     pbr_types::STANDARD_MATERIAL_FLAGS_UNLIT_BIT,
 }
@@ -109,7 +109,6 @@ const AA_FLAG_SUPERSAMPLE: u32 = 1u;
 const AA_FLAG_BAND: u32 = 2u;
 
 struct PathUniform {
-    fill_color: vec4<f32>,
     render_mode: u32,
     oit_depth_offset: f32,
     supersample: u32,
@@ -1534,38 +1533,28 @@ fn fragment(
         run_render_mode(in),
         run_aa_flags(in),
     );
-#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    let material_id = run_material_id(in);
     var pbr_input = pbr_input_from_material_table(
         in,
         is_front,
-        true,
-        run_material_id(in),
+        material_id != INVALID_GPU_MATERIAL_SLOT,
+        material_id,
     );
     // The vertex stage parks this quad's record index in `world_position.w`;
     // restore the homogeneous 1.0 so shadow sampling (which multiplies the full
     // vec4 by the light's `clip_from_world`) lands at the fragment's world
     // position instead of a per-record-displaced point.
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
     pbr_input.world_position.w = 1.0;
-    let final_alpha = coverage * pbr_input.material.base_color.a;
-#else
-    let fill_color = uniforms.fill_color;
-    let final_alpha = coverage * fill_color.a;
 #endif
+    let final_alpha = coverage * pbr_input.material.base_color.a;
     // This discard precedes oit_draw below, so faded near-zero fragments never
     // occupy OIT fragment-pool slots.
     if final_alpha < DISCARD_ALPHA {
         discard;
     }
 
-#ifndef FRAGMENT_DATA_FROM_BATCHED_PATHS
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
-    pbr_input.material.base_color = vec4<f32>(
-        fill_color.rgb,
-        final_alpha,
-    );
-#else
     pbr_input.material.base_color.a = final_alpha;
-#endif
     pbr_input.material.base_color = alpha_discard(
         pbr_input.material,
         pbr_input.material.base_color,

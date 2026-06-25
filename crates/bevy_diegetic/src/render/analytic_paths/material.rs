@@ -1,5 +1,4 @@
 use bevy::asset::Asset;
-use bevy::math::Vec4;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::ExtendedMaterial;
 use bevy::pbr::MATERIAL_BIND_GROUP_INDEX;
@@ -48,11 +47,24 @@ impl From<GlyphRenderMode> for RenderMode {
 /// Material used by the path renderer.
 pub(crate) type PathExtendedMaterial = ExtendedMaterial<StandardMaterial, PathExtension>;
 
+/// GPU buffer handles bound by `PathExtension` for one vertex-pulled path
+/// batch.
+pub(crate) struct PathMaterialBuffers {
+    /// Shared path record band-packed quadratic curve records.
+    pub curves:       Handle<ShaderBuffer>,
+    /// Shared path along-Y/along-X band records.
+    pub bands:        Handle<ShaderBuffer>,
+    /// Shared path records, indexed by each atlas record's `packed_path_index`.
+    pub path_records: Handle<ShaderBuffer>,
+    /// Per-path instance records read by the vertex-pulling and fragment stages.
+    pub instances:    Handle<ShaderBuffer>,
+    /// Per-run records read by the vertex-pulling and fragment stages.
+    pub run_records:  Handle<ShaderBuffer>,
+}
+
 /// Uniforms consumed by the path shader.
 #[derive(Clone, Debug, ShaderType)]
 struct PathUniform {
-    /// Linear fill color.
-    fill_color:       Vec4,
     /// Visible render mode for this pass.
     render_mode:      u32,
     /// Per-layer depth offset applied to the OIT fragment position for coplanar
@@ -78,7 +90,7 @@ const HAIRLINE_DEFAULT_DEVICE_PX: f32 = 2.0;
 /// Text material extension over `StandardMaterial`.
 #[derive(Asset, AsBindGroup, Clone, Debug, TypePath)]
 #[bind_group_data(PathExtensionKey)]
-pub struct PathExtension {
+pub(crate) struct PathExtension {
     /// Shader uniforms.
     #[uniform(100)]
     uniforms:       PathUniform,
@@ -104,6 +116,34 @@ pub struct PathExtension {
     /// Routes this material's vertex stages (main, prepass, shadow) through
     /// `analytic_path_vertex_pull.wgsl` instead of the standard mesh vertex stage.
     vertex_pull:    bool,
+}
+
+impl PathExtension {
+    /// Builds the extension payload for one vertex-pulled analytic-path batch.
+    #[must_use]
+    pub(super) fn vertex_pull(
+        render_mode: RenderMode,
+        oit_depth_offset: f32,
+        anti_alias: AntiAlias,
+        buffers: PathMaterialBuffers,
+    ) -> Self {
+        Self {
+            uniforms:       PathUniform {
+                render_mode: u32::from(render_mode),
+                oit_depth_offset,
+                supersample: u32::from(anti_alias.supersamples()),
+                aa_band: u32::from(anti_alias.anisotropic()),
+                hairline_min_px: HAIRLINE_DEFAULT_DEVICE_PX,
+            },
+            curves:         buffers.curves,
+            bands:          buffers.bands,
+            path_records:   buffers.path_records,
+            instances:      buffers.instances,
+            run_records:    buffers.run_records,
+            material_table: Handle::default(),
+            vertex_pull:    true,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -203,71 +243,9 @@ fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
         .is_none_or(|material_layout| material_layout.entries.is_empty())
 }
 
-/// Inputs for one vertex-pulling batch material.
-pub(crate) struct BatchPathMaterialInput {
-    /// Base material settings.
-    pub base:             StandardMaterial,
-    /// Placeholder fill color for non-batched path fragments.
-    pub fill_color:       Vec4,
-    /// Placeholder render mode; vertex-pulling fragments read per-run mode from
-    /// `run_records`.
-    pub render_mode:      RenderMode,
-    /// Per-layer depth offset for coplanar OIT layer ordering.
-    pub oit_depth_offset: f32,
-    /// Anti-aliasing mode packed into the path shader uniforms.
-    pub anti_alias:       AntiAlias,
-    /// Shared path record band-packed quadratic curve records.
-    pub curves:           Handle<ShaderBuffer>,
-    /// Shared path along-Y/along-X band records.
-    pub bands:            Handle<ShaderBuffer>,
-    /// Shared path records, indexed by each atlas record's `packed_path_index`.
-    pub path_records:     Handle<ShaderBuffer>,
-    /// Per-path instance records read by the vertex-pulling stage.
-    pub instances:        Handle<ShaderBuffer>,
-    /// Per-run records read by the vertex-pulling stage.
-    pub run_records:      Handle<ShaderBuffer>,
-}
-
-/// Creates a vertex-pulling `PathExtendedMaterial` for one batch.
-#[must_use]
-pub(crate) fn batch_path_material(input: BatchPathMaterialInput) -> PathExtendedMaterial {
-    let BatchPathMaterialInput {
-        base,
-        fill_color,
-        render_mode,
-        oit_depth_offset,
-        anti_alias,
-        curves,
-        bands,
-        path_records,
-        instances,
-        run_records,
-    } = input;
-    ExtendedMaterial {
-        base,
-        extension: PathExtension {
-            uniforms: PathUniform {
-                fill_color,
-                render_mode: u32::from(render_mode),
-                oit_depth_offset,
-                supersample: u32::from(anti_alias.supersamples()),
-                aa_band: u32::from(anti_alias.anisotropic()),
-                hairline_min_px: HAIRLINE_DEFAULT_DEVICE_PX,
-            },
-            curves,
-            bands,
-            path_records,
-            instances,
-            run_records,
-            material_table: Handle::default(),
-            vertex_pull: true,
-        },
-    }
-}
-
 /// Repoints a batch material at replacement record buffers after capacity
 /// growth.
-pub(crate) fn set_batch_path_material_buffers(
+pub(crate) fn set_path_material_record_buffers(
     material: &mut PathExtendedMaterial,
     instances: Handle<ShaderBuffer>,
     run_records: Handle<ShaderBuffer>,

@@ -16,7 +16,6 @@ use bevy::light::NotShadowCaster;
 use bevy::math::Vec2;
 use bevy::math::Vec3;
 use bevy::math::Vec3A;
-use bevy::math::Vec4;
 use bevy::mesh::Indices;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
@@ -50,7 +49,6 @@ use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
 use crate::render::AntiAlias;
-use crate::render::BatchPathMaterialInput;
 use crate::render::BatchRenderLayers;
 use crate::render::Dirty;
 use crate::render::GeometryDirty;
@@ -59,6 +57,7 @@ use crate::render::MaterialDirty;
 use crate::render::PathAtlas;
 use crate::render::PathBatchKey;
 use crate::render::PathExtendedMaterial;
+use crate::render::PathMaterialBuffers;
 use crate::render::PathOutline;
 use crate::render::PathQuadRecord;
 use crate::render::PathRenderRecord;
@@ -1206,7 +1205,7 @@ fn grow_batch_assets(
         return;
     };
     if let Some(mut material) = materials.get_mut(&gpu.material) {
-        render::set_batch_path_material_buffers(
+        render::set_path_material_record_buffers(
             &mut material,
             instances.clone(),
             run_table.clone(),
@@ -1380,18 +1379,21 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMateri
         key.pipeline_compatibility,
     );
     base.depth_bias = draw_order::line_batch_depth_bias(key.z_level).get();
-    render::batch_path_material(BatchPathMaterialInput {
+    PathExtendedMaterial {
         base,
-        fill_color: Vec4::ONE,
-        render_mode: RenderMode::Text,
-        oit_depth_offset: 0.0,
-        anti_alias,
-        curves: atlas.curves.clone(),
-        bands: atlas.bands.clone(),
-        path_records: atlas.path_records.clone(),
-        instances,
-        run_records: run_table,
-    })
+        extension: render::analytic_paths::vertex_pull(
+            RenderMode::Text,
+            0.0,
+            anti_alias,
+            PathMaterialBuffers {
+                curves: atlas.curves.clone(),
+                bands: atlas.bands.clone(),
+                path_records: atlas.path_records.clone(),
+                instances,
+                run_records: run_table,
+            },
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -1401,6 +1403,7 @@ mod tests {
 
     use bevy::asset::AssetPlugin;
     use bevy::color::Color;
+    use bevy::math::Vec4;
 
     use super::*;
     use crate::CalloutCap;

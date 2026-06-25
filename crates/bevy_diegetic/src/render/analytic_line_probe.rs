@@ -16,11 +16,12 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 
 use super::AntiAlias;
-use super::BatchPathMaterialInput;
+use super::analytic_paths;
 use super::Bounds;
 use super::PackedPathRecord;
 use super::PathContour;
 use super::PathExtendedMaterial;
+use super::PathMaterialBuffers;
 use super::PathOutline;
 use super::PathQuadRecord;
 use super::PathRenderRecord;
@@ -276,14 +277,21 @@ fn build_line(
     let instances = storage_buffers.add(ShaderBuffer::from(vec![instance]));
     let run_records = storage_buffers.add(ShaderBuffer::from(vec![run]));
     let mesh = meshes.add(inert_quad_mesh());
-    let material = materials.add(line_material(LineMaterialBuffers {
-        base_material,
-        curves,
-        bands,
-        path_records,
-        instances,
-        run_records,
-    }));
+    let material = materials.add(PathExtendedMaterial {
+        base:      base_material,
+        extension: analytic_paths::vertex_pull(
+            RenderMode::Text,
+            0.0,
+            AntiAlias::Both,
+            PathMaterialBuffers {
+                curves,
+                bands,
+                path_records,
+                instances,
+                run_records,
+            },
+        ),
+    });
     Some(BuiltLine { mesh, material })
 }
 
@@ -327,30 +335,6 @@ fn inert_quad_mesh() -> Mesh {
     mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, vec![[0.0_f32; 2]; 4]);
     mesh.insert_indices(Indices::U32(vec![0, 3, 2, 0, 2, 1]));
     mesh
-}
-
-struct LineMaterialBuffers {
-    base_material: StandardMaterial,
-    curves:        Handle<ShaderBuffer>,
-    bands:         Handle<ShaderBuffer>,
-    path_records:  Handle<ShaderBuffer>,
-    instances:     Handle<ShaderBuffer>,
-    run_records:   Handle<ShaderBuffer>,
-}
-
-fn line_material(buffers: LineMaterialBuffers) -> PathExtendedMaterial {
-    super::batch_path_material(BatchPathMaterialInput {
-        base:             buffers.base_material,
-        fill_color:       Vec4::ONE,
-        render_mode:      RenderMode::Text,
-        oit_depth_offset: 0.0,
-        anti_alias:       AntiAlias::Both,
-        curves:           buffers.curves,
-        bands:            buffers.bands,
-        path_records:     buffers.path_records,
-        instances:        buffers.instances,
-        run_records:      buffers.run_records,
-    })
 }
 
 fn line_base_material() -> StandardMaterial {

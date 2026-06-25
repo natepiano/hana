@@ -25,20 +25,21 @@ use bevy::asset::load_internal_asset;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
+use super::AntiAlias;
 pub(crate) use geometry::Bounds;
 pub(crate) use geometry::PathContour;
 pub(crate) use geometry::PathOutline;
 pub(crate) use geometry::QuadraticSegment;
-pub(crate) use material::BatchPathMaterialInput;
 pub(crate) use material::PathExtendedMaterial;
+pub(crate) use material::PathExtension;
+pub(crate) use material::PathMaterialBuffers;
 pub(crate) use material::RenderMode;
-pub(crate) use material::batch_path_material;
 #[cfg(test)]
 pub(crate) use material::path_material_oit_depth_offset;
-pub(crate) use material::set_batch_path_material_buffers;
 pub(crate) use material::set_path_material_anti_alias;
 pub(crate) use material::set_path_material_atlas;
 pub(crate) use material::set_path_material_hairline;
+pub(crate) use material::set_path_material_record_buffers;
 pub(crate) use material::set_path_material_table_buffer;
 pub(crate) use packing::BandRecord;
 pub(crate) use packing::CurveRecord;
@@ -48,6 +49,21 @@ pub(crate) use packing::PackedPathRecord;
 pub(crate) use packing::PathQuadRecord;
 pub(crate) use packing::PathRenderRecord;
 pub(crate) use packing::build_packed_path;
+
+#[inline]
+pub(super) fn vertex_pull(
+    render_mode: RenderMode,
+    oit_depth_offset: f32,
+    anti_alias: AntiAlias,
+    buffers: PathMaterialBuffers,
+) -> PathExtension {
+    material::PathExtension::vertex_pull(
+        render_mode,
+        oit_depth_offset,
+        anti_alias,
+        buffers,
+    )
+}
 
 use self::constants::ANALYTIC_PATH_VERTEX_PULL_SHADER_HANDLE;
 

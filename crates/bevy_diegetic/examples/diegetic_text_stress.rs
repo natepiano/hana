@@ -1623,6 +1623,9 @@ struct BatchStatsValues {
     sdf_batches:       usize,
     sdf_records:       usize,
     sdf_uploads:       usize,
+    material_rows:     usize,
+    material_bytes:    usize,
+    material_capacity: usize,
     shadow_items:      u32,
     /// Caster draws per shadow view (largest first).
     shadow_per_view:   Vec<u32>,
@@ -1660,6 +1663,12 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<StatsPanelRow> {
         ]),
         StatsPanelRow::new("sdf records", values.sdf_records.to_string())
             .detail("panel chrome records across all SDF batches"),
+        StatsPanelRow::new("material rows", values.material_rows.to_string()).details([
+            "MaterialSlotValues rows for SDF, text, and panel lines".to_string(),
+            format!("live row bytes: {}", values.material_bytes),
+        ]),
+        StatsPanelRow::new("material capacity", values.material_capacity.to_string())
+            .detail("shared material-table row capacity"),
         StatsPanelRow::new("text batches", values.text_batches.to_string()).details([
             "PathBatchStore: compatible text/shapes share draws".to_string(),
             "labels and panel text route together by key".to_string(),
@@ -1735,6 +1744,7 @@ fn update_batch_stats_panel(
     let batch = &diegetic_perf.batch;
     let line_batch = diegetic_perf.line_batch;
     let sdf = diegetic_perf.panel_geometry;
+    let material_table = diegetic_perf.material_table;
     let values = BatchStatsValues {
         text_batches:      batch.batches,
         text_runs:         batch.runs,
@@ -1747,6 +1757,9 @@ fn update_batch_stats_panel(
         sdf_batches:       sdf.sdf_batches,
         sdf_records:       sdf.sdf_records,
         sdf_uploads:       sdf.sdf_uploads,
+        material_rows:     material_table.rows,
+        material_bytes:    material_table.upload_bytes,
+        material_capacity: material_table.capacity,
         shadow_items:      draw_counts.shadow_items(),
         shadow_per_view:   draw_counts.shadow_per_view(),
     };

@@ -176,9 +176,9 @@ pub const LOG_FILTER: &str = "info,wgpu=error,naga=error,bevy_winit=warn,bevy_re
 /// Canonical pitch limit for examples that manually spawn an `OrbitCam`.
 pub(crate) const EXAMPLE_ORBIT_CAM_PITCH_LIMIT: f32 = std::f32::consts::TAU / 3.0;
 /// Canonical lower zoom/radius limit for examples that manually spawn an `OrbitCam`.
-pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT: f32 = 0.1;
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_LOWER_LIMIT: f32 = 0.01;
 /// Canonical upper zoom/radius limit for examples that manually spawn an `OrbitCam`.
-pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_UPPER_LIMIT: f32 = 20.0;
+pub(crate) const EXAMPLE_ORBIT_CAM_ZOOM_UPPER_LIMIT: f32 = 40.0;
 
 // point light
 pub(crate) const POINT_LIGHT_COLOR: Color = Color::srgb(0.45, 0.68, 1.0);

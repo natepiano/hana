@@ -107,10 +107,31 @@ pub(crate) struct SdfRecordSnapshot {
     pub flags:           u32,
 }
 
+/// BRP-inspectable summary of one live `SdfBatchKey` entry.
+#[derive(Debug, Default, Reflect)]
+pub(crate) struct SdfBatchSummary {
+    /// `SdfBatchKey::z_level` widened for BRP.
+    pub z_level:                i32,
+    /// Active `RenderLayers` indices copied from `SdfBatchKey::layers`.
+    pub render_layers:          Vec<u32>,
+    /// Debug label for `SdfBatchKey::shadow`.
+    pub shadow:                 String,
+    /// `ContiguousDrawnRun::value` for this batch.
+    pub contiguous_run:         u32,
+    /// Live `SdfBatch::records` length.
+    pub record_count:           u32,
+    /// Debug label for `SdfBatchKey::pipeline_compatibility`.
+    pub pipeline_compatibility: String,
+    /// Debug label for `SdfBatchKey::resource_compatibility`.
+    pub resource_compatibility: String,
+}
+
 /// Per-frame diagnostic snapshot of built SDF GPU records, BRP-inspectable.
 #[derive(Debug, Default, Reflect, Resource)]
 #[reflect(Resource)]
 pub(crate) struct SdfRecordDiagnostics {
+    /// Per-batch decomposition of the live SDF batch set.
+    pub batches: Vec<SdfBatchSummary>,
     /// Live (non-padding) record snapshots committed this frame.
     pub records: Vec<SdfRecordSnapshot>,
 }
@@ -265,10 +286,6 @@ pub(crate) struct ContiguousDrawnRun {
 /// Key for one SDF fill batch and one `SdfBatchResources` entry.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfBatchKey {
-    /// Panel entity; batching is panel-scoped, so the union-centroid sort
-    /// center stays valid (dropping this field requires a sorted-vs-OIT parity
-    /// revisit, per `SdfBatchKey` docs).
-    pub panel_entity:           Entity,
     /// Authored z-level for the shared SDF fill sort lane.
     pub z_level:                i8,
     /// Render layers copied from the panel.
@@ -356,7 +373,6 @@ impl ResolvedSdfBatchRecord {
             role:          SdfMaterialRole::Border,
         };
         let batch_key = SdfBatchKey {
-            panel_entity: surface.panel_entity,
             z_level: surface.draw_depth.z_level(),
             layers: BatchRenderLayers(surface.render_layers.clone()),
             shadow: surface.surface_shadow.into(),
@@ -1020,40 +1036,49 @@ fn append_sdf_role(
     }
 }
 
-/// Assigns contiguous run ordinals to already-sorted SDF records.
+/// Assigns contiguous run ordinals independently for each `BatchRenderLayers`.
 pub(crate) fn assign_contiguous_runs(
     records: Vec<(SdfRecordMaterialSlots, &ResolvedSdfSurface<'_>)>,
 ) -> Vec<ResolvedSdfBatchRecord> {
-    let mut sorted = records;
-    sorted.sort_by(|(_, left), (_, right)| {
-        left.draw_depth
-            .ordinal_index()
-            .cmp(&right.draw_depth.ordinal_index())
-            .then(left.command_index.cmp(&right.command_index))
-    });
+    let record_count = records.len();
+    let mut by_layers: HashMap<BatchRenderLayers, Vec<_>> = HashMap::new();
+    for (materials, surface) in records {
+        by_layers
+            .entry(BatchRenderLayers(surface.render_layers.clone()))
+            .or_default()
+            .push((materials, surface));
+    }
 
-    let mut output = Vec::with_capacity(sorted.len());
-    let mut previous = None;
-    let mut run = ContiguousDrawnRun::default();
-    for (materials, surface) in sorted {
-        let compatibility = SdfRunCompatibility::from_surface(surface, &materials);
-        if previous
-            .as_ref()
-            .is_some_and(|previous| previous != &compatibility)
-        {
-            run.value = run.value.saturating_add(1);
+    let mut output = Vec::with_capacity(record_count);
+    for (_, mut partition) in by_layers {
+        partition.sort_by(|(_, left), (_, right)| {
+            left.draw_depth
+                .ordinal_index()
+                .cmp(&right.draw_depth.ordinal_index())
+                .then(left.command_index.cmp(&right.command_index))
+        });
+
+        let mut previous = None;
+        let mut run = ContiguousDrawnRun::default();
+        for (materials, surface) in partition {
+            let compatibility = SdfRunCompatibility::from_surface(surface, &materials);
+            if previous
+                .as_ref()
+                .is_some_and(|previous| previous != &compatibility)
+            {
+                run.value = run.value.saturating_add(1);
+            }
+            previous = Some(compatibility);
+            output.push(ResolvedSdfBatchRecord::from_resolved(
+                surface, materials, run,
+            ));
         }
-        previous = Some(compatibility);
-        output.push(ResolvedSdfBatchRecord::from_resolved(
-            surface, materials, run,
-        ));
     }
     output
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SdfRunCompatibility {
-    panel_entity:           Entity,
     z_level:                i8,
     layers:                 BatchRenderLayers,
     shadow:                 VisualShadow,
@@ -1064,7 +1089,6 @@ struct SdfRunCompatibility {
 impl SdfRunCompatibility {
     fn from_surface(surface: &ResolvedSdfSurface<'_>, materials: &SdfRecordMaterialSlots) -> Self {
         Self {
-            panel_entity:           surface.panel_entity,
             z_level:                surface.draw_depth.z_level(),
             layers:                 BatchRenderLayers(surface.render_layers.clone()),
             shadow:                 surface.surface_shadow.into(),
@@ -1480,8 +1504,18 @@ pub(crate) fn commit_sdf_batch_buffers(
     let mut batches = 0_usize;
     let mut records = 0_usize;
     diagnostics.records.clear();
-    for (_, batch) in store.batches_mut() {
+    diagnostics.batches.clear();
+    for (key, batch) in store.batches_mut() {
         batches += 1;
+        diagnostics.batches.push(SdfBatchSummary {
+            z_level:                i32::from(key.z_level),
+            render_layers:          key.layers.0.iter().map(usize::to_u32).collect(),
+            shadow:                 format!("{:?}", key.shadow),
+            contiguous_run:         key.contiguous_drawn_run.value,
+            record_count:           batch.record_count(),
+            pipeline_compatibility: format!("{:?}", key.pipeline_compatibility),
+            resource_compatibility: format!("{:?}", key.resource_compatibility),
+        });
         records += batch.records().len();
         for resolved in batch.records() {
             let record = SdfRenderRecord::from_resolved(resolved);
@@ -2289,7 +2323,6 @@ mod tests {
                 });
                 pipeline_compatibility.double_sided = cull_mode.is_none();
                 let key = SdfBatchKey {
-                    panel_entity: Entity::from_bits(1),
                     z_level: 0,
                     layers: BatchRenderLayers(RenderLayers::layer(0)),
                     shadow,
@@ -2364,22 +2397,30 @@ mod tests {
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
-        let surface_1 = resolved_surface_for_test(
+        let mut surface_1 = resolved_surface_for_test(
             1,
+            &handle_a,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        surface_1.panel_entity = Entity::from_bits(2);
+        let surface_2 = resolved_surface_for_test(
+            2,
             &handle_b,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
-        let surface_2 = resolved_surface_for_test(
-            2,
+        let surface_3 = resolved_surface_for_test(
+            3,
             &handle_a,
             SdfRoleAuthorship::Authored,
             SdfRoleAuthorship::Unauthored,
         );
         let records = assign_contiguous_runs(vec![
             (slots_for_test(0, &material_a), &surface_0),
-            (slots_for_test(1, &material_b), &surface_1),
-            (slots_for_test(2, &material_a), &surface_2),
+            (slots_for_test(1, &material_a), &surface_1),
+            (slots_for_test(2, &material_b), &surface_2),
+            (slots_for_test(3, &material_a), &surface_3),
         ]);
 
         let runs: Vec<u32> = records
@@ -2387,7 +2428,96 @@ mod tests {
             .map(|record| record.batch_key.contiguous_drawn_run.value)
             .collect();
 
-        assert_eq!(runs, vec![0, 1, 2]);
+        assert_eq!(runs, vec![0, 0, 1, 2]);
+        assert_eq!(records[0].batch_key, records[1].batch_key);
+        assert_ne!(records[1].batch_key, records[2].batch_key);
+        assert_ne!(records[2].batch_key, records[3].batch_key);
+    }
+
+    #[test]
+    fn interleaved_render_layers_assign_draw_runs_independently() {
+        let material = StandardMaterial {
+            alpha_mode: AlphaMode::Blend,
+            ..Default::default()
+        };
+        let mut materials = Assets::<StandardMaterial>::default();
+        let handle = materials.add(material.clone());
+        let mut surface_0 = resolved_surface_for_test(
+            0,
+            &handle,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        surface_0.render_layers = RenderLayers::layer(0);
+        let mut surface_1 = resolved_surface_for_test(
+            1,
+            &handle,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        surface_1.render_layers = RenderLayers::layer(1);
+        let mut surface_2 = resolved_surface_for_test(
+            2,
+            &handle,
+            SdfRoleAuthorship::Authored,
+            SdfRoleAuthorship::Unauthored,
+        );
+        surface_2.panel_entity = Entity::from_bits(2);
+        surface_2.render_layers = RenderLayers::layer(0);
+
+        let records = assign_contiguous_runs(vec![
+            (slots_for_test(0, &material), &surface_0),
+            (slots_for_test(1, &material), &surface_1),
+            (slots_for_test(2, &material), &surface_2),
+        ]);
+
+        let layer_zero = BatchRenderLayers(RenderLayers::layer(0));
+        let layer_zero_records: Vec<&ResolvedSdfBatchRecord> = records
+            .iter()
+            .filter(|record| record.batch_key.layers == layer_zero)
+            .collect();
+        let batch_keys: HashSet<&SdfBatchKey> =
+            records.iter().map(|record| &record.batch_key).collect();
+
+        assert_eq!(records.len(), 3);
+        assert_eq!(batch_keys.len(), 2);
+        assert_eq!(layer_zero_records.len(), 2);
+        assert_eq!(
+            layer_zero_records[0].batch_key.contiguous_drawn_run,
+            layer_zero_records[1].batch_key.contiguous_drawn_run
+        );
+        assert_eq!(
+            layer_zero_records[0].batch_key,
+            layer_zero_records[1].batch_key
+        );
+    }
+
+    #[test]
+    fn compatible_sdf_surfaces_from_separate_panels_share_one_batch() {
+        let mut app = sdf_pipeline_app();
+        let first_panel = spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::srgb(0.1, 0.2, 0.3)),
+            StandardMaterial::default(),
+        );
+        let second_panel = spawn_sdf_panel(
+            &mut app,
+            single_surface_tree(Color::srgb(0.6, 0.5, 0.4)),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let records = single_sdf_batch_records(&app);
+        let panels: HashSet<Entity> = records
+            .iter()
+            .map(|record| record.record_key.panel)
+            .collect();
+
+        assert_eq!(live_sdf_batch_count(&mut app), 1);
+        assert_eq!(records.len(), 2);
+        assert_eq!(panels.len(), 2);
+        assert!(panels.contains(&first_panel));
+        assert!(panels.contains(&second_panel));
     }
 
     #[test]
@@ -3127,7 +3257,6 @@ mod tests {
 
     fn test_batch_key() -> SdfBatchKey {
         SdfBatchKey {
-            panel_entity:           Entity::from_bits(1),
             z_level:                0,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             shadow:                 VisualShadow::Cast,
