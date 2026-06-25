@@ -1259,9 +1259,18 @@ pub(super) fn commit_panel_line_batch_buffers(
     let mut batches = 0_usize;
     let mut records = 0_usize;
     let mut uploads = 0_usize;
-    for (_, batch) in store.batches_mut() {
+    perf.shape_breakdown.clear();
+    for (key, batch) in store.batches_mut() {
         batches += 1;
         records += batch.record_count().to_usize();
+        perf.shape_breakdown.push(render::batch_summary(
+            key.z_level,
+            &key.layers,
+            key.shadow,
+            &key.pipeline_compatibility,
+            &key.resource_compatibility,
+            batch.record_count(),
+        ));
         if batch.gpu.is_none()
             || (!batch.path_quads_are_dirty() && !batch.render_records_are_dirty())
         {

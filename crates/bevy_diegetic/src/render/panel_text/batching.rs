@@ -685,10 +685,19 @@ pub(super) fn commit_batch_buffers(
     let mut glyph_records = 0_usize;
     let mut instance_uploads = 0_usize;
     let mut run_table_uploads = 0_usize;
-    for (_, batch) in backend.batch_store_mut().batches_mut() {
+    perf.text_breakdown.clear();
+    for (key, batch) in backend.batch_store_mut().batches_mut() {
         batches += 1;
         runs += batch.run_count();
         glyph_records += batch.path_record_count().to_usize();
+        perf.text_breakdown.push(render::batch_summary(
+            key.z_level,
+            &key.layers,
+            key.shadow,
+            &key.pipeline_compatibility,
+            &key.resource_compatibility,
+            batch.path_record_count(),
+        ));
         if batch.gpu.is_none() {
             continue;
         }

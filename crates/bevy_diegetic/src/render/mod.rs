@@ -58,6 +58,7 @@ pub(crate) use analytic_paths::set_path_material_table_buffer;
 pub(crate) use batch_key::BatchAlphaMode;
 pub(crate) use batch_key::BatchRenderLayers;
 pub(crate) use batch_key::VisualShadow;
+pub(crate) use batch_key::batch_summary;
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::warn_once;
 use bevy::prelude::*;

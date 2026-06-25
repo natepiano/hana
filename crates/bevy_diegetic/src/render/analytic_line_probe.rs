@@ -16,7 +16,6 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::render::storage::ShaderBuffer;
 
 use super::AntiAlias;
-use super::analytic_paths;
 use super::Bounds;
 use super::PackedPathRecord;
 use super::PathContour;
@@ -28,6 +27,7 @@ use super::PathRenderRecord;
 use super::QuadraticSegment;
 use super::RenderMode;
 use super::analytic_material_slot_candidate;
+use super::analytic_paths;
 use super::material_table;
 use super::material_table::BatchMaterialTableRegistry;
 use super::material_table::FrameMaterialTableBuild;

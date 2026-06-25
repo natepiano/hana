@@ -19,8 +19,10 @@ use bevy::prelude::AlphaMode;
 use bevy::prelude::Color;
 use bevy::prelude::Handle;
 use bevy::render::render_resource::Face;
+use bevy_kana::ToU32;
 
 use crate::layout::GlyphShadowMode;
+use crate::panel::BatchSummary;
 use crate::panel::SurfaceShadow;
 
 /// `AlphaMode` re-encoded so it can sit in a hash-map key: `AlphaMode` has a
@@ -348,6 +350,32 @@ impl From<&StandardMaterial> for ResourceCompatibility {
             occlusion_channel:          BatchUvChannel::from(occlusion_channel),
             depth_map:                  depth_map.clone(),
         }
+    }
+}
+
+/// Builds the public per-batch summary shown by the batch-validation diagnostic.
+///
+/// Decodes the batch-key discriminants a viewer needs to see why a family split
+/// into more than one draw — render layer, lit/unlit path, alpha mode, and
+/// base-color texture binding — into [`BatchSummary`]. Every visual batch store
+/// (text, panel-line, SDF) shares this so the breakdowns stay uniform.
+#[must_use]
+pub(crate) fn batch_summary(
+    z_level: i8,
+    layers: &BatchRenderLayers,
+    shadow: VisualShadow,
+    pipeline: &PipelineCompatibility,
+    resource: &ResourceCompatibility,
+    record_count: u32,
+) -> BatchSummary {
+    BatchSummary {
+        z_level: i32::from(z_level),
+        render_layers: layers.0.iter().map(usize::to_u32).collect(),
+        casts_shadow: matches!(shadow, VisualShadow::Cast),
+        unlit: pipeline.unlit,
+        alpha_mode: format!("{:?}", pipeline.alpha),
+        textured: resource.base_color_texture.is_some(),
+        record_count,
     }
 }
 

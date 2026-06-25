@@ -11,6 +11,8 @@ use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::AnchoredToPanel;
+use bevy_diegetic::BatchSummary;
 use bevy_diegetic::Border;
 use bevy_diegetic::CalloutCap;
 use bevy_diegetic::CornerRadius;
@@ -25,17 +27,20 @@ use bevy_diegetic::LayoutTree;
 use bevy_diegetic::LineStyle;
 use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
+use bevy_diegetic::PanelAnchorOffset;
 use bevy_diegetic::PanelCircle;
 use bevy_diegetic::PanelCoord;
 use bevy_diegetic::PanelDraw;
 use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
+use bevy_diegetic::Px;
 use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
+use bevy_kana::ToUsize;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
@@ -62,7 +67,7 @@ const GROUND_SIZE: f32 = 1.45;
 const HOME_FOCUS: Vec3 = Vec3::new(0.0, PANEL_GRID_CENTER_Y, 0.0);
 const HOME_RADIUS: f32 = 0.50;
 const HOME_PITCH: f32 = 0.0;
-const HOME_MARGIN: f32 = 0.15;
+const HOME_MARGIN: f32 = 0.33;
 // Point light placed in front of and up-left of the metallic center card
 // (world center ~(-0.091, 0.242, 0), front face +Z) to land a specular glint.
 const GLINT_LIGHT_POS: Vec3 = Vec3::new(-0.13, 0.30, 0.16);
@@ -138,112 +143,116 @@ const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
 const SDF_ANIMATION_SPEED: f32 = 0.9;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 
-// Author's prediction of how many draw batches each on-screen panel collapses
-// into, per render family. Batches merge globally by compatibility key, so these
-// are intent values the live `actual` row is reconciled against. Columns are
-// text, shape, sdf — the order the ledger renders.
-struct PanelExpected {
-    label:       &'static str,
-    text:        usize,
-    shape:       usize,
-    sdf:         usize,
-    // True for the panel whose live alpha-mode run forms its own text batch when
-    // the selector leaves Blend, adding one to the predicted text total.
-    alpha_split: bool,
+// One render family's live batch decomposition, paired for the breakdown table.
+struct FamilyBreakdown<'a> {
+    label:        &'static str,
+    color:        Color,
+    batch_count:  usize,
+    record_total: usize,
+    batches:      &'a [BatchSummary],
 }
 
-// Predicted text batches for one panel under the active alpha mode: the baseline
-// count plus the live alpha-mode split when the selector is off Blend.
-const fn panel_text_for_mode(panel: &PanelExpected, alpha_index: usize) -> usize {
-    if panel.alpha_split && alpha_index != ALPHA_DEFAULT_INDEX {
-        panel.text + 1
+// The three families in the order the diagnostic renders: text, shape, sdf.
+fn family_breakdowns(perf: &DiegeticPerfStats) -> [FamilyBreakdown<'_>; 3] {
+    [
+        FamilyBreakdown {
+            label:        "text",
+            color:        ACCENT_GREEN,
+            batch_count:  perf.batch.batches,
+            record_total: perf.batch.glyph_records,
+            batches:      &perf.text_breakdown,
+        },
+        FamilyBreakdown {
+            label:        "shape",
+            color:        ACCENT_YELLOW,
+            batch_count:  perf.line_batch.batches,
+            record_total: perf.line_batch.records,
+            batches:      &perf.shape_breakdown,
+        },
+        FamilyBreakdown {
+            label:        "sdf",
+            color:        ACCENT_BLUE,
+            batch_count:  perf.panel_geometry.sdf_batches,
+            record_total: perf.panel_geometry.sdf_records,
+            batches:      &perf.sdf_breakdown,
+        },
+    ]
+}
+
+// Derived batching invariants, checked per family against the live breakdown.
+// No authored target: a green latch means the renderer's own decomposition is
+// self-consistent, which holds across any panel set.
+//
+//   1. one breakdown row per counted draw,
+//   2. every record routed into exactly one batch (per-batch counts sum to the family total),
+//   3. no empty batch lingering.
+fn batch_invariant_failures(perf: &DiegeticPerfStats) -> Vec<String> {
+    let mut failures = Vec::new();
+    for family in family_breakdowns(perf) {
+        if family.batches.len() != family.batch_count {
+            failures.push(format!(
+                "{}: {} draws, {} rows",
+                family.label,
+                family.batch_count,
+                family.batches.len()
+            ));
+        }
+        let routed: usize = family
+            .batches
+            .iter()
+            .map(|batch| batch.record_count.to_usize())
+            .sum();
+        if routed != family.record_total {
+            failures.push(format!(
+                "{}: {routed}/{} records routed",
+                family.label, family.record_total
+            ));
+        }
+        if family.batches.iter().any(|batch| batch.record_count == 0) {
+            failures.push(format!("{}: empty batch", family.label));
+        }
+    }
+    failures
+}
+
+// Compact label for why a batch is its own draw: render layer, then the
+// discriminants that vary across the scene's batches — texture binding and the
+// unlit screen-layer path. Alpha mode is appended when it leaves Blend.
+fn batch_reason(batch: &BatchSummary) -> String {
+    let layer = batch
+        .render_layers
+        .first()
+        .map_or_else(|| "L?".to_owned(), |index| format!("L{index}"));
+    let mut tags = Vec::new();
+    tags.push(if batch.textured {
+        "textured".to_owned()
     } else {
-        panel.text
+        "untextured".to_owned()
+    });
+    if batch.unlit {
+        tags.push("unlit".to_owned());
     }
-}
-
-// Predicted global batch totals [text, shape, sdf] for the active alpha mode.
-// Shape and sdf totals are alpha-invariant; only text gains the live alpha-mode
-// split.
-fn expected_totals(alpha_index: usize) -> [usize; 3] {
-    let mut totals = [0_usize; 3];
-    for panel in &EXPECTED_BATCHES {
-        totals[0] += panel_text_for_mode(panel, alpha_index);
-        totals[1] += panel.shape;
-        totals[2] += panel.sdf;
+    if batch.casts_shadow {
+        tags.push("shadow".to_owned());
     }
-    totals
+    if batch.alpha_mode != "Blend" {
+        tags.push(batch.alpha_mode.to_lowercase());
+    }
+    format!("{layer} {}", tags.join(" "))
 }
-
-const EXPECTED_BATCHES: [PanelExpected; 8] = [
-    PanelExpected {
-        label:       "Title",
-        text:        1,
-        shape:       0,
-        sdf:         1,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "Info",
-        text:        1,
-        shape:       0,
-        sdf:         1,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "Camera",
-        text:        1,
-        shape:       0,
-        sdf:         1,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "SDF",
-        text:        1,
-        shape:       0,
-        sdf:         2,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "Text",
-        text:        4,
-        shape:       0,
-        sdf:         1,
-        alpha_split: true,
-    },
-    PanelExpected {
-        label:       "Shapes",
-        text:        1,
-        shape:       3,
-        sdf:         1,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "Mixed",
-        text:        1,
-        shape:       1,
-        sdf:         1,
-        alpha_split: false,
-    },
-    PanelExpected {
-        label:       "Expected",
-        text:        1,
-        shape:       0,
-        sdf:         1,
-        alpha_split: false,
-    },
-];
 
 // Per-family column colors, matching `panel_stats_block`: text green, shape
 // yellow, sdf blue.
 const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BLUE];
 const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
 const LEDGER_FONT_SIZE: f32 = 10.0;
-const LEDGER_LABEL_WIDTH: f32 = 74.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
 const LEDGER_ROW_GAP: f32 = 2.0;
 const LEDGER_CELL_GAP: f32 = 4.0;
-const LEDGER_TABLE_WIDTH: f32 = LEDGER_LABEL_WIDTH + 3.0 * (LEDGER_NUM_WIDTH + LEDGER_CELL_GAP);
+// Fixed table width so each row's GROW spacer can push the number columns to a
+// shared right edge inside the panel padding. Wide enough for the longest
+// breakdown label plus the three right-aligned number columns.
+const LEDGER_TABLE_WIDTH: f32 = 236.0;
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
@@ -514,10 +523,10 @@ struct LastDisplayedStats {
     key: String,
 }
 
-// Outcome of checking the predicted batch totals against the live renderer
-// counts. `Stabilizing` holds until the observed batch totals stay unchanged for
-// `VALIDATION_STABLE_FRAMES` consecutive frames; the latch re-arms whenever the
-// alpha selection changes.
+// Outcome of checking the renderer's live batch decomposition against the
+// derived batching invariants. `Stabilizing` holds until the observed batch
+// totals stay unchanged for `VALIDATION_STABLE_FRAMES` consecutive frames; the
+// latch re-arms whenever the alpha selection changes.
 #[derive(Resource, Default)]
 struct ValidationStatus {
     state:         ValidationState,
@@ -532,8 +541,7 @@ enum ValidationState {
     Stabilizing,
     Match,
     Mismatch {
-        expected: [usize; 3],
-        observed: [usize; 3],
+        failures: Vec<String>,
     },
 }
 
@@ -566,7 +574,6 @@ fn main() {
         .yaw(0.0)
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)
-        .anchor(Anchor::CenterLeft)
         .with_title_bar(
             TitleBar::new()
                 .with_title("Batch Validation")
@@ -606,6 +613,8 @@ fn main() {
                 spawn_alpha_selector_panel,
             ),
         )
+        .add_observer(anchor_alpha_selector_when_added)
+        .add_observer(anchor_alpha_selector_when_title_added)
         .add_systems(Update, validate_batch_counts.before(update_stats_panel))
         .add_systems(Update, update_stats_panel)
         .add_systems(Update, animate_sdf_surface_panel)
@@ -803,12 +812,7 @@ fn spawn_expected_batches_panel(
     mut commands: Commands,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    match build_expected_batches_panel(
-        None,
-        ALPHA_DEFAULT_INDEX,
-        &ValidationState::Stabilizing,
-        &mut materials,
-    ) {
+    match build_expected_batches_panel(None, &ValidationState::Stabilizing, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationLedgerPanel, panel, Transform::default()));
         },
@@ -835,11 +839,45 @@ fn build_alpha_selector_panel(
     let unlit = materials.add(screen_panel_material());
     DiegeticPanel::screen()
         .size(Fit, Fit)
-        .anchor(Anchor::CenterLeft)
+        .anchor(Anchor::TopLeft)
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(alpha_selector_tree(index))
         .build()
+}
+
+// Pins the alpha selector's top-left corner just under the title bar's
+// bottom-left, so it tracks the title across window resizes. Two observers cover
+// either spawn order: whichever of the selector or title appears second wires the
+// relationship.
+fn alpha_selector_title_anchor(title: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(title, Anchor::TopLeft, Anchor::BottomLeft)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
+}
+
+fn anchor_alpha_selector_when_added(
+    trigger: On<Add, AlphaSelectorPanel>,
+    titles: Query<Entity, With<TitleBar>>,
+    mut commands: Commands,
+) {
+    let Ok(title) = titles.single() else {
+        return;
+    };
+    commands
+        .entity(trigger.entity)
+        .insert(alpha_selector_title_anchor(title));
+}
+
+fn anchor_alpha_selector_when_title_added(
+    trigger: On<Add, TitleBar>,
+    selectors: Query<Entity, With<AlphaSelectorPanel>>,
+    mut commands: Commands,
+) {
+    for selector in &selectors {
+        commands
+            .entity(selector)
+            .insert(alpha_selector_title_anchor(trigger.entity));
+    }
 }
 
 // Center-left key legend: a title plus one numbered row per alpha mode. The
@@ -929,11 +967,11 @@ fn validate_batch_counts(
     if status.stable_frames < VALIDATION_STABLE_FRAMES {
         return;
     }
-    let expected = expected_totals(selection.index);
-    status.state = if observed == expected {
+    let failures = batch_invariant_failures(&perf);
+    status.state = if failures.is_empty() {
         ValidationState::Match
     } else {
-        ValidationState::Mismatch { expected, observed }
+        ValidationState::Mismatch { failures }
     };
 }
 
@@ -977,7 +1015,7 @@ fn update_stats_panel(
     for panel in &ledger_panels {
         commands.set_tree(
             panel,
-            expected_batches_tree(Some(&diegetic_perf), selection.index, &validation.state),
+            expected_batches_tree(Some(&diegetic_perf), &validation.state),
         );
     }
 }
@@ -988,9 +1026,7 @@ fn validation_key(state: &ValidationState) -> String {
     match state {
         ValidationState::Stabilizing => "stabilizing".to_owned(),
         ValidationState::Match => "match".to_owned(),
-        ValidationState::Mismatch { expected, observed } => {
-            format!("mismatch:{expected:?}:{observed:?}")
-        },
+        ValidationState::Mismatch { failures } => format!("mismatch:{failures:?}"),
     }
 }
 
@@ -1098,7 +1134,6 @@ fn stats_key(sections: &[StatsPanelSection]) -> String {
 
 fn build_expected_batches_panel(
     perf: Option<&DiegeticPerfStats>,
-    alpha_index: usize,
     status: &ValidationState,
     materials: &mut Assets<StandardMaterial>,
 ) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
@@ -1108,19 +1143,17 @@ fn build_expected_batches_panel(
         .anchor(Anchor::BottomLeft)
         .material(unlit.clone())
         .text_material(unlit)
-        .with_tree(expected_batches_tree(perf, alpha_index, status))
+        .with_tree(expected_batches_tree(perf, status))
         .build()
 }
 
-// The bottom-left ledger: a title, a header row, one row per panel with its
-// predicted text/shape/sdf batch counts for the active alpha mode, then a
-// `predicted` totals row, a live `actual` row from the renderer counters, and a
-// validation status line latched by `validate_batch_counts`.
-fn expected_batches_tree(
-    perf: Option<&DiegeticPerfStats>,
-    alpha_index: usize,
-    status: &ValidationState,
-) -> LayoutTree {
+// The bottom-left batch diagnostic, entirely live: a family-totals table
+// (draws / records / records-per-draw for text, shape, sdf), then a per-batch
+// breakdown listing why each family split, and a validation line latched by
+// `validate_batch_counts` against the renderer's own decomposition.
+fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationState) -> LayoutTree {
+    let perf = perf.cloned().unwrap_or_default();
+    let families = family_breakdowns(&perf);
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
         &mut builder,
@@ -1130,60 +1163,91 @@ fn expected_batches_tree(
         |builder| {
             builder.with(
                 El::column()
-                    .width(Sizing::FIT)
+                    .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
                     .height(Sizing::FIT)
                     .gap(LEDGER_ROW_GAP),
                 |builder| {
-                    builder.text("expected batches", ledger_title_style());
+                    builder.text("batch validation", ledger_title_style());
                     ledger_row(
                         builder,
                         "",
                         TEXT_MUTED,
                         ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
                     );
-                    for panel in &EXPECTED_BATCHES {
-                        ledger_row(
-                            builder,
-                            panel.label,
-                            TEXT_MUTED,
-                            [
-                                panel_text_for_mode(panel, alpha_index).to_string(),
-                                panel.shape.to_string(),
-                                panel.sdf.to_string(),
-                            ],
+                    ledger_row(
+                        builder,
+                        "draws",
+                        TEXT_MAIN,
+                        families.each_ref().map(|f| f.batch_count.to_string()),
+                    );
+                    ledger_row(
+                        builder,
+                        "records",
+                        TEXT_MAIN,
+                        families.each_ref().map(|f| f.record_total.to_string()),
+                    );
+                    ledger_row(
+                        builder,
+                        "records/draw",
+                        TEXT_MUTED,
+                        families.each_ref().map(records_per_draw),
+                    );
+
+                    for family in &families {
+                        ledger_separator(builder);
+                        builder.text(
+                            format!("{} draws", family.label),
+                            ledger_cell_style(family.color),
                         );
+                        for batch in family.batches {
+                            ledger_kv_row(
+                                builder,
+                                &batch_reason(batch),
+                                family.color,
+                                batch.record_count.to_string(),
+                            );
+                        }
                     }
-                    let totals = expected_totals(alpha_index);
+
+                    // Per-frame cost of rebuilding and re-uploading the whole
+                    // material table. freeze/upload us are paid every frame even
+                    // when no material changed — the work a durable slot table
+                    // would skip on a no-change frame.
+                    let table = perf.material_table;
                     ledger_separator(builder);
-                    ledger_row(
+                    builder.text("material table", ledger_cell_style(TEXT_MAIN));
+                    ledger_kv_row(builder, "rows", TEXT_MUTED, table.rows.to_string());
+                    ledger_kv_row(builder, "capacity", TEXT_MUTED, table.capacity.to_string());
+                    ledger_kv_row(builder, "bytes", TEXT_MUTED, table.upload_bytes.to_string());
+                    ledger_kv_row(
                         builder,
-                        "predicted",
-                        TEXT_MAIN,
-                        [
-                            totals[0].to_string(),
-                            totals[1].to_string(),
-                            totals[2].to_string(),
-                        ],
+                        "freeze us",
+                        TEXT_MUTED,
+                        table.freeze_us.to_string(),
                     );
-                    let perf = perf.cloned().unwrap_or_default();
-                    ledger_row(
+                    ledger_kv_row(
                         builder,
-                        "actual",
-                        TEXT_MAIN,
-                        [
-                            perf.batch.batches.to_string(),
-                            perf.line_batch.batches.to_string(),
-                            perf.panel_geometry.sdf_batches.to_string(),
-                        ],
+                        "upload us",
+                        TEXT_MUTED,
+                        table.upload_us.to_string(),
                     );
+                    ledger_kv_row(
+                        builder,
+                        "reallocs",
+                        TEXT_MUTED,
+                        table.allocations.to_string(),
+                    );
+
                     ledger_separator(builder);
+                    // Every state stays a single short line so the FIT-height
+                    // panel keeps a constant height as the latch flips — a longer
+                    // message would wrap and bump the bottom-anchored panel.
                     let (status_text, status_color) = match status {
                         ValidationState::Stabilizing => ("stabilizing…".to_owned(), TEXT_MUTED),
-                        ValidationState::Match => ("validation: match".to_owned(), ACCENT_GREEN),
-                        ValidationState::Mismatch { expected, observed } => (
-                            format!("mismatch predicted {expected:?} actual {observed:?}"),
-                            ACCENT_RED,
-                        ),
+                        ValidationState::Match => ("records routed: ok".to_owned(), ACCENT_GREEN),
+                        ValidationState::Mismatch { failures } => {
+                            (format!("mismatch: {} fault(s)", failures.len()), ACCENT_RED)
+                        },
                     };
                     builder.text(status_text, ledger_cell_style(status_color));
                 },
@@ -1195,42 +1259,97 @@ fn expected_batches_tree(
 
 // One table row: a fixed-width left label cell plus three right-aligned numeric
 // cells colored by family (text/shape/sdf).
+// A GROW spacer between the left label and the right-aligned number columns:
+// the label hugs its content on the left, the spacer eats the slack, and the
+// fixed-width number cells share a right edge across every row.
+fn ledger_spacer(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::new().width(Sizing::GROW).height(Sizing::FIT),
+        |_builder| {},
+    );
+}
+
+fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(LEDGER_NUM_WIDTH))
+            .height(Sizing::FIT)
+            .alignment(AlignX::Right, AlignY::Center),
+        |builder| {
+            builder.text(value, ledger_cell_style(color));
+        },
+    );
+}
+
+// The three-column family row: a left label, a GROW spacer, then text / shape /
+// sdf numbers right-aligned at the panel's padding edge.
 fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cells: [String; 3]) {
     builder.with(
         El::row()
-            .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
+            .width(Sizing::GROW)
             .height(Sizing::FIT)
             .gap(LEDGER_CELL_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.with(
                 El::new()
-                    .width(Sizing::fixed(LEDGER_LABEL_WIDTH))
+                    .width(Sizing::FIT)
                     .height(Sizing::FIT)
                     .alignment(AlignX::Left, AlignY::Center),
                 |builder| {
                     builder.text(label, ledger_cell_style(label_color));
                 },
             );
+            ledger_spacer(builder);
             for (cell, color) in cells.into_iter().zip(LEDGER_FAMILY_COLORS) {
-                builder.with(
-                    El::new()
-                        .width(Sizing::fixed(LEDGER_NUM_WIDTH))
-                        .height(Sizing::FIT)
-                        .alignment(AlignX::Right, AlignY::Center),
-                    |builder| {
-                        builder.text(cell, ledger_cell_style(color));
-                    },
-                );
+                ledger_num_cell(builder, cell, color);
             }
         },
     );
 }
 
+// One breakdown row: a left label (the batch's split reason), a GROW spacer, and
+// a single record count right-aligned under the rightmost family column.
+fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
+    builder.with(
+        El::row()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(LEDGER_CELL_GAP)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text(label, ledger_cell_style(color));
+                },
+            );
+            ledger_spacer(builder);
+            ledger_num_cell(builder, value, color);
+        },
+    );
+}
+
+// Records-per-draw compression ratio for one family, the headline number for
+// "batching is working". Dashed when no draws have landed yet.
+fn records_per_draw(family: &FamilyBreakdown) -> String {
+    if family.batch_count == 0 {
+        "—".to_owned()
+    } else {
+        format!(
+            "{:.1}",
+            family.record_total.to_f32() / family.batch_count.to_f32()
+        )
+    }
+}
+
 fn ledger_separator(builder: &mut LayoutBuilder) {
     builder.with(
         El::new()
-            .width(Sizing::fixed(LEDGER_TABLE_WIDTH))
+            .width(Sizing::GROW)
             .height(Sizing::fixed(1.0))
             .background(LEDGER_SEPARATOR_COLOR),
         |_builder| {},

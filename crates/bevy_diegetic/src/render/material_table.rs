@@ -5,6 +5,7 @@
 //! extracted together, and no retained allocator or owner snapshot exists.
 
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::hash::Hash;
 use std::time::Duration;
 use std::time::Instant;
@@ -95,6 +96,10 @@ pub(crate) fn record_sdf_driver_run(
 }
 
 const DEFAULT_TABLE_CAPACITY: u32 = 1;
+/// Frames a lower row demand must persist before the table is allowed to shrink.
+/// Growth is immediate; shrink waits this long so a transient drop in live rows
+/// does not reallocate the buffer down only to reallocate it back up.
+const CAPACITY_SHRINK_DWELL_FRAMES: usize = 120;
 const MATERIAL_TABLE_STRESS_FRAMES: usize = 16;
 const MATERIAL_TABLE_WARMUP_FRAMES: usize = 4;
 const MEDIUM_MEASUREMENT_ENTRIES: usize = 5_000;
@@ -550,19 +555,25 @@ impl FrameMaterialTableBuilder {
 #[reflect(Resource)]
 pub(crate) struct FrameMaterialTableBuild {
     /// Single builder shared by SDF, text, and panel-shape producers.
-    builder:   FrameMaterialTableBuilder,
+    builder:     FrameMaterialTableBuilder,
     /// Frozen rows extracted with the frame's GPU records.
-    table:     FrameMaterialTable,
+    table:       FrameMaterialTable,
     /// Storage-buffer-derived row cap for this frame.
-    row_limit: u32,
+    row_limit:   u32,
+    /// Wall time of the most recent `freeze` clone.
+    last_freeze: Duration,
+    /// Wall time of the most recent capacity-pad plus storage-buffer write.
+    last_upload: Duration,
 }
 
 impl Default for FrameMaterialTableBuild {
     fn default() -> Self {
         Self {
-            builder:   FrameMaterialTableBuilder::default(),
-            table:     FrameMaterialTable::default(),
-            row_limit: INVALID_GPU_MATERIAL_SLOT - 1,
+            builder:     FrameMaterialTableBuilder::default(),
+            table:       FrameMaterialTable::default(),
+            row_limit:   INVALID_GPU_MATERIAL_SLOT - 1,
+            last_freeze: Duration::ZERO,
+            last_upload: Duration::ZERO,
         }
     }
 }
@@ -593,6 +604,36 @@ impl FrameMaterialTableBuild {
     pub(crate) const fn dropped_record_count(&self) -> u32 { self.builder.dropped_record_count() }
 }
 
+/// Rolling window of recent live row counts that decides table capacity.
+///
+/// Each frame pushes the current live row count and reports the capacity the
+/// buffer should hold: `next_power_of_two` of the largest row count across the
+/// last [`CAPACITY_SHRINK_DWELL_FRAMES`] frames. The target rises the instant
+/// demand rises and falls only once the last high-water sample ages out of the
+/// window, so a transient spike keeps capacity high for the full dwell.
+#[derive(Clone, Debug, Default)]
+pub(crate) struct CapacityWindow {
+    recent: VecDeque<u32>,
+}
+
+impl CapacityWindow {
+    /// Records this frame's live row count and returns the target capacity.
+    fn observe(&mut self, live_rows: u32) -> u32 {
+        self.recent.push_back(live_rows);
+        while self.recent.len() > CAPACITY_SHRINK_DWELL_FRAMES {
+            self.recent.pop_front();
+        }
+        let peak = self
+            .recent
+            .iter()
+            .copied()
+            .max()
+            .unwrap_or(0)
+            .max(DEFAULT_TABLE_CAPACITY);
+        peak.next_power_of_two()
+    }
+}
+
 /// Main-world material-table storage-buffer handle and capacity.
 #[derive(Clone, Debug, Default, Reflect, Resource)]
 #[reflect(Resource)]
@@ -602,11 +643,14 @@ pub(crate) struct MaterialTableBuffer {
     pub handle:      Option<Handle<ShaderBuffer>>,
     /// Row capacity represented by `handle`.
     pub capacity:    u32,
-    /// Number of buffer assets allocated for table capacity growth.
+    /// Number of buffer assets allocated for table capacity grow/shrink events.
     pub allocations: u32,
     /// Table-buffer handle last rebound into all registered path materials.
     #[reflect(ignore)]
     bound_handle:    Option<Handle<ShaderBuffer>>,
+    /// Rolling row-demand window driving capacity grow/shrink decisions.
+    #[reflect(ignore)]
+    window:          CapacityWindow,
 }
 
 /// Render-world copy of the frame table and current buffer handle.
@@ -850,23 +894,23 @@ pub(crate) fn clear_frame_material_table(mut build: ResMut<FrameMaterialTableBui
     build.clear();
 }
 
-fn freeze_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) { build.freeze(); }
+fn freeze_frame_material_table(mut build: ResMut<FrameMaterialTableBuild>) {
+    let start = Instant::now();
+    build.freeze();
+    build.last_freeze = start.elapsed();
+}
 
 fn ensure_material_table_buffer_handle(
     build: Res<FrameMaterialTableBuild>,
     mut table_buffer: ResMut<MaterialTableBuffer>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
-    let required_capacity = build
-        .table()
-        .row_count()
-        .to_u32()
-        .max(DEFAULT_TABLE_CAPACITY);
-    if table_buffer.handle.is_some() && table_buffer.capacity >= required_capacity {
+    let live_rows = build.table().row_count().to_u32();
+    let capacity = table_buffer.window.observe(live_rows);
+    if table_buffer.handle.is_some() && table_buffer.capacity == capacity {
         return;
     }
 
-    let capacity = required_capacity.next_power_of_two();
     let shader_buffer = ShaderBuffer::from(build.table().padded_rows(capacity));
     table_buffer.handle = Some(storage_buffers.add(shader_buffer));
     table_buffer.capacity = capacity;
@@ -992,16 +1036,20 @@ fn rebind_registered_sdf_materials(
 }
 
 fn update_material_table_buffer_data(
-    build: Res<FrameMaterialTableBuild>,
+    mut build: ResMut<FrameMaterialTableBuild>,
     table_buffer: Res<MaterialTableBuffer>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    build.last_upload = Duration::ZERO;
     let Some(handle) = table_buffer.handle.as_ref() else {
         return;
     };
     let capacity = table_buffer.capacity.max(DEFAULT_TABLE_CAPACITY);
     if let Some(mut buffer) = storage_buffers.get_mut(handle) {
-        buffer.set_data(build.table().padded_rows(capacity));
+        let start = Instant::now();
+        let rows = build.table().padded_rows(capacity);
+        buffer.set_data(rows);
+        build.last_upload = start.elapsed();
     }
 }
 
@@ -1013,6 +1061,11 @@ fn update_material_table_perf_stats(
     perf.material_table.rows = build.table().row_count();
     perf.material_table.upload_bytes = build.table().upload_bytes();
     perf.material_table.capacity = table_buffer.capacity.to_usize();
+    perf.material_table.freeze_us =
+        u64::try_from(build.last_freeze.as_micros()).unwrap_or(u64::MAX);
+    perf.material_table.upload_us =
+        u64::try_from(build.last_upload.as_micros()).unwrap_or(u64::MAX);
+    perf.material_table.allocations = table_buffer.allocations;
 }
 
 fn warn_material_table_drops(build: Res<FrameMaterialTableBuild>) {
@@ -1449,6 +1502,66 @@ mod tests {
         let table = builder.freeze();
         assert_eq!(table.row_count(), 3);
         assert_eq!(table.rows(), &[values, values, values]);
+    }
+
+    #[test]
+    fn capacity_grows_immediately_on_demand() {
+        let mut window = CapacityWindow::default();
+        assert_eq!(window.observe(343), 512);
+        // A spike raises the target the same frame, no dwell.
+        assert_eq!(window.observe(600), 1024);
+    }
+
+    #[test]
+    fn capacity_holds_for_the_full_dwell_then_shrinks() {
+        let mut window = CapacityWindow::default();
+        assert_eq!(window.observe(600), 1024);
+        // The spike sample stays in the window for the dwell length, so the
+        // target stays high while low demand frames accumulate behind it.
+        for _ in 0..(CAPACITY_SHRINK_DWELL_FRAMES - 1) {
+            assert_eq!(window.observe(100), 1024);
+        }
+        // The frame that ages the spike out drops the target.
+        assert_eq!(window.observe(100), 128);
+    }
+
+    #[test]
+    fn a_spike_inside_the_window_resets_the_shrink_dwell() {
+        let mut window = CapacityWindow::default();
+        assert_eq!(window.observe(600), 1024);
+        for _ in 0..(CAPACITY_SHRINK_DWELL_FRAMES - 2) {
+            let _ = window.observe(100);
+        }
+        // A fresh spike before the dwell elapses keeps capacity pinned high.
+        assert_eq!(window.observe(600), 1024);
+        for _ in 0..(CAPACITY_SHRINK_DWELL_FRAMES - 1) {
+            assert_eq!(window.observe(100), 1024);
+        }
+    }
+
+    #[test]
+    fn oscillation_across_a_power_of_two_boundary_does_not_thrash() {
+        let mut window = CapacityWindow::default();
+        assert_eq!(window.observe(600), 1024);
+        // Alternating demand that crosses the 512 boundary keeps a high sample
+        // inside the window every frame, so the target never drops back.
+        for frame in 0..(CAPACITY_SHRINK_DWELL_FRAMES * 2) {
+            let rows = if frame % 2 == 0 { 500 } else { 600 };
+            assert_eq!(window.observe(rows), 1024);
+        }
+    }
+
+    #[test]
+    fn capacity_never_falls_below_the_window_peak_power_of_two() {
+        let mut window = CapacityWindow::default();
+        let _ = window.observe(900);
+        for _ in 0..CAPACITY_SHRINK_DWELL_FRAMES {
+            let capacity = window.observe(513);
+            assert!(
+                capacity >= 1024,
+                "capacity {capacity} dropped below 513 rows"
+            );
+        }
     }
 
     #[test]

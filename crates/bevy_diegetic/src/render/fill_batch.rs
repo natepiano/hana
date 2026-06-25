@@ -1505,8 +1505,17 @@ pub(crate) fn commit_sdf_batch_buffers(
     let mut records = 0_usize;
     diagnostics.records.clear();
     diagnostics.batches.clear();
+    perf.sdf_breakdown.clear();
     for (key, batch) in store.batches_mut() {
         batches += 1;
+        perf.sdf_breakdown.push(super::batch_summary(
+            key.z_level,
+            &key.layers,
+            key.shadow,
+            &key.pipeline_compatibility,
+            &key.resource_compatibility,
+            batch.record_count(),
+        ));
         diagnostics.batches.push(SdfBatchSummary {
             z_level:                i32::from(key.z_level),
             render_layers:          key.layers.0.iter().map(usize::to_u32).collect(),

@@ -44,24 +44,59 @@ use super::constants::DIAG_TEXT_BATCHES;
 pub struct DiegeticPerfStats {
     /// Stage 1 — `compute_panel_layouts` wall time in milliseconds.
     /// Layout math: element positions and sizes for every dirty panel.
-    pub compute_ms:     f32,
+    pub compute_ms:      f32,
     /// Stage 1 — panels processed by the most recent layout run.
-    pub compute_panels: usize,
+    pub compute_panels:  usize,
     /// Between stages 1 and 2 — `reconcile_panel_text_children` plus
     /// `reconcile_panel_image_children` wall time in milliseconds: re-deriving
     /// text / image child entities from each changed panel's render commands.
-    pub reconcile_ms:   f32,
+    pub reconcile_ms:    f32,
     /// Stages 2 & 3 — panel-text shaping + record-build timings and counts.
-    pub panel_text:     PanelTextPerfStats,
+    pub panel_text:      PanelTextPerfStats,
     /// Glyph-batch counters, written by `commit_batch_buffers`.
-    pub batch:          BatchPerfStats,
+    pub batch:           BatchPerfStats,
     /// Panel-line analytic path batch counters, written by
     /// `commit_panel_shape_batch_buffers`.
-    pub line_batch:     PanelShapeBatchPerfStats,
+    pub line_batch:      PanelShapeBatchPerfStats,
     /// SDF panel surface batch counters, written by `commit_sdf_batch_buffers`.
-    pub panel_geometry: PanelGeometryPerfStats,
+    pub panel_geometry:  PanelGeometryPerfStats,
     /// Frame material-table counters, written after the shared table buffer is current.
-    pub material_table: MaterialTablePerfStats,
+    pub material_table:  MaterialTablePerfStats,
+    /// Per-batch decomposition of the live glyph batches, one entry per text
+    /// draw. Rebuilt each frame by `commit_batch_buffers`.
+    pub text_breakdown:  Vec<BatchSummary>,
+    /// Per-batch decomposition of the live panel-line (analytic path) batches,
+    /// rebuilt each frame by `commit_panel_line_batch_buffers`.
+    pub shape_breakdown: Vec<BatchSummary>,
+    /// Per-batch decomposition of the live SDF surface batches, rebuilt each
+    /// frame by `commit_sdf_batch_buffers`.
+    pub sdf_breakdown:   Vec<BatchSummary>,
+}
+
+/// One live batch's identity, for the per-family batch decomposition in
+/// [`DiegeticPerfStats`].
+///
+/// Carries the batch-key discriminants a viewer needs to see why a family split
+/// into more than one draw: render layer, lit/unlit shader path, alpha mode, and
+/// whether a base-color texture is bound. Each entry is one draw; `record_count`
+/// is how many records routed into it.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Reflect)]
+pub struct BatchSummary {
+    /// Authored z-level / sort lane for the batch.
+    pub z_level:       i32,
+    /// Active render-layer indices copied from the batch key.
+    pub render_layers: Vec<u32>,
+    /// Batch casts a shadow, a batch-key discriminant that splits otherwise
+    /// identical draws.
+    pub casts_shadow:  bool,
+    /// Unlit shader path, from the batch's pipeline compatibility.
+    pub unlit:         bool,
+    /// Short alpha-mode label, from the batch's pipeline compatibility.
+    pub alpha_mode:    String,
+    /// A base-color texture is bound, splitting this batch from untextured ones.
+    pub textured:      bool,
+    /// Records routed into this batch.
+    pub record_count:  u32,
 }
 
 /// Per-frame glyph-batch counters, written by `commit_batch_buffers`.
@@ -115,6 +150,14 @@ pub struct MaterialTablePerfStats {
     pub upload_bytes: usize,
     /// Row capacity of the shared material-table storage buffer.
     pub capacity:     usize,
+    /// Microseconds spent cloning the row Vec into the frozen frame table.
+    pub freeze_us:    u64,
+    /// Microseconds spent padding the rows to capacity and writing them into
+    /// the storage buffer. Paid every frame regardless of whether any material
+    /// changed; a durable slot table would skip this on a no-change frame.
+    pub upload_us:    u64,
+    /// Cumulative buffer reallocations from capacity grow and shrink events.
+    pub allocations:  u32,
 }
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:

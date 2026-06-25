@@ -214,6 +214,7 @@ pub use layout::Unit;
 pub use panel::AnchoredToPanel;
 pub use panel::AnyUnit;
 pub use panel::BatchPerfStats;
+pub use panel::BatchSummary;
 pub use panel::CompatibleUnits;
 pub use panel::ComputedDiegeticPanel;
 pub use panel::CoordinateSpace;
