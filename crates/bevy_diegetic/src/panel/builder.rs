@@ -87,20 +87,21 @@ pub struct Ready;
 
 #[derive(Default)]
 pub(super) struct BuilderData {
-    width:            f32,
-    height:           f32,
-    layout_unit:      Unit,
-    font_unit:        Option<Unit>,
-    anchor:           Option<Anchor>,
-    world_width:      Option<f32>,
-    world_height:     Option<f32>,
-    surface_shadow:   SurfaceShadow,
-    material:         Option<Handle<StandardMaterial>>,
-    text_material:    Option<Handle<StandardMaterial>>,
-    shape_material:   Option<Handle<StandardMaterial>>,
-    text_alpha_mode:  Option<AlphaMode>,
-    tree:             Option<LayoutTree>,
-    coordinate_space: CoordinateSpace,
+    width:                  f32,
+    height:                 f32,
+    layout_unit:            Unit,
+    font_unit:              Option<Unit>,
+    anchor:                 Option<Anchor>,
+    world_width:            Option<f32>,
+    world_height:           Option<f32>,
+    surface_shadow:         SurfaceShadow,
+    material:               Option<Handle<StandardMaterial>>,
+    text_material:          Option<Handle<StandardMaterial>>,
+    shape_material:         Option<Handle<StandardMaterial>>,
+    text_alpha_mode:        Option<AlphaMode>,
+    hdr_text_coverage_bias: Option<f32>,
+    tree:                   Option<LayoutTree>,
+    coordinate_space:       CoordinateSpace,
 }
 
 /// Builder for [`DiegeticPanel`].
@@ -244,6 +245,20 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     #[must_use]
     pub const fn text_alpha_mode(mut self, mode: AlphaMode) -> Self {
         self.data.text_alpha_mode = Some(mode);
+        self
+    }
+
+    /// Sets a panel-wide HDR text coverage bias inherited by text runs in this
+    /// panel.
+    ///
+    /// The default is `0.0`, which leaves analytic glyph coverage unchanged.
+    /// Positive values make fractional glyph edges more opaque, which can help
+    /// dark text on light backgrounds under HDR. Per-label
+    /// [`TextStyle::with_hdr_text_coverage_bias`](crate::TextStyle::with_hdr_text_coverage_bias)
+    /// still wins.
+    #[must_use]
+    pub const fn hdr_text_coverage_bias(mut self, bias: f32) -> Self {
+        self.data.hdr_text_coverage_bias = Some(bias);
         self
     }
 
@@ -780,22 +795,23 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
 
 fn build_panel(data: BuilderData) -> DiegeticPanel {
     DiegeticPanel {
-        tree:             data.tree.unwrap_or_default(),
-        tree_revision:    0,
-        width:            data.width,
-        height:           data.height,
-        layout_unit:      data.layout_unit,
-        font_unit:        data.font_unit,
-        anchor:           data.anchor.unwrap_or(Anchor::TopLeft),
-        world_width:      data.world_width,
-        world_height:     data.world_height,
-        surface_shadow:   data.surface_shadow,
-        material:         data.material,
-        text_material:    data.text_material,
-        shape_material:   data.shape_material,
-        text_alpha_mode:  data.text_alpha_mode,
-        coordinate_space: data.coordinate_space,
-        text_index:       std::collections::HashMap::new(),
+        tree:                   data.tree.unwrap_or_default(),
+        tree_revision:          0,
+        width:                  data.width,
+        height:                 data.height,
+        layout_unit:            data.layout_unit,
+        font_unit:              data.font_unit,
+        anchor:                 data.anchor.unwrap_or(Anchor::TopLeft),
+        world_width:            data.world_width,
+        world_height:           data.world_height,
+        surface_shadow:         data.surface_shadow,
+        material:               data.material,
+        text_material:          data.text_material,
+        shape_material:         data.shape_material,
+        text_alpha_mode:        data.text_alpha_mode,
+        hdr_text_coverage_bias: data.hdr_text_coverage_bias,
+        coordinate_space:       data.coordinate_space,
+        text_index:             std::collections::HashMap::new(),
     }
 }
 

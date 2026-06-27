@@ -2,6 +2,7 @@ use bevy::prelude::*;
 
 use crate::cascade;
 use crate::cascade::CascadeDefault;
+use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
 use crate::cascade::Resolved;
 use crate::cascade::TextMaterial;
@@ -14,15 +15,17 @@ use crate::render::world_text::TextContent;
 ///
 /// Fires when a label first gains [`TextContent`] and seeds its
 /// `Resolved<TextMaterial>` / `Resolved<Lighting>` / `Resolved<Sidedness>` /
-/// `Resolved<AntiAlias>` via [`resolve_walk`](cascade::resolve_walk). The walk
+/// `Resolved<AntiAlias>` / `Resolved<HdrTextCoverageBias>` via
+/// [`resolve_walk`](cascade::resolve_walk). The walk
 /// honors the label's own override first — `reconcile_panel_text_children`
 /// inserts one when the label authored `TextStyle::with_material` /
-/// `with_lighting` / `with_sidedness`, and `override_anti_alias` authors
-/// anti-alias state — then climbs `ChildOf` to the panel's override (seeded by
-/// `seed_panel_overrides` for screen panels and panel material fields), else
-/// the global default. `update_panel_text_batches` reads the material handle,
-/// lighting, and sidedness as material-table inputs and anti-alias mode as a
-/// per-run record field.
+/// `with_lighting` / `with_sidedness` /
+/// `with_hdr_text_coverage_bias`, and `override_anti_alias` authors anti-alias
+/// state — then climbs `ChildOf` to the panel's override (seeded by
+/// `seed_panel_overrides` for screen panels and panel fields), else the global
+/// default. `update_panel_text_batches` reads the material handle, lighting,
+/// and sidedness as material-table inputs and anti-alias mode plus HDR coverage
+/// bias as per-run record fields.
 /// Later changes flow through the propagation pass, not this observer. The
 /// glyph-render twin of `seed_panel_child_alpha`.
 pub(super) fn seed_panel_text_child_glyph(
@@ -31,11 +34,13 @@ pub(super) fn seed_panel_text_child_glyph(
     lighting_overrides: Query<&Override<Lighting>>,
     sidedness_overrides: Query<&Override<Sidedness>>,
     anti_alias_overrides: Query<&Override<AntiAlias>>,
+    hdr_text_coverage_bias_overrides: Query<&Override<HdrTextCoverageBias>>,
     parents: Query<&ChildOf>,
     material_default: Res<CascadeDefault<TextMaterial>>,
     lighting_default: Res<CascadeDefault<Lighting>>,
     sidedness_default: Res<CascadeDefault<Sidedness>>,
     anti_alias_default: Res<CascadeDefault<AntiAlias>>,
+    hdr_text_coverage_bias_default: Res<CascadeDefault<HdrTextCoverageBias>>,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
@@ -63,10 +68,17 @@ pub(super) fn seed_panel_text_child_glyph(
         &parents,
         anti_alias_default.0,
     );
+    let hdr_text_coverage_bias = cascade::resolve_walk::<HdrTextCoverageBias>(
+        entity,
+        &hdr_text_coverage_bias_overrides,
+        &parents,
+        hdr_text_coverage_bias_default.0,
+    );
     commands.entity(entity).insert((
         Resolved(material),
         Resolved(lighting),
         Resolved(sidedness),
         Resolved(anti_alias),
+        Resolved(hdr_text_coverage_bias),
     ));
 }

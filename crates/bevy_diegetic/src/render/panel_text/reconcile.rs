@@ -10,6 +10,7 @@ use super::TextRunOf;
 use super::layout::PanelTextZLevel;
 use crate::PanelFieldId;
 use crate::cascade;
+use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
@@ -35,15 +36,16 @@ use crate::render::world_text::TextContent;
 /// `existing_children` query for one reconcile pass.
 #[derive(Clone, Copy)]
 struct ReusableChild<'a> {
-    entity:    Entity,
-    text:      &'a TextContent,
-    style:     &'a TextStyle,
-    layout:    &'a PanelTextLayout,
-    z_level:   &'a PanelTextZLevel,
-    alpha:     Option<&'a Override<TextAlpha>>,
-    material:  Option<&'a Override<TextMaterial>>,
-    lighting:  Option<&'a Override<Lighting>>,
-    sidedness: Option<&'a Override<Sidedness>>,
+    entity:                 Entity,
+    text:                   &'a TextContent,
+    style:                  &'a TextStyle,
+    layout:                 &'a PanelTextLayout,
+    z_level:                &'a PanelTextZLevel,
+    alpha:                  Option<&'a Override<TextAlpha>>,
+    material:               Option<&'a Override<TextMaterial>>,
+    lighting:               Option<&'a Override<Lighting>>,
+    sidedness:              Option<&'a Override<Sidedness>>,
+    hdr_text_coverage_bias: Option<&'a Override<HdrTextCoverageBias>>,
 }
 
 /// One text render command resolved to its reconcile inputs: source element,
@@ -117,12 +119,22 @@ fn collect_existing_text_children<'a>(
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
+        Option<&Override<HdrTextCoverageBias>>,
     )>,
 ) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
     for &entity in existing_run_entities {
-        let Ok((text, style, layout, z_level, alpha, material, lighting, sidedness)) =
-            existing_runs.get(entity)
+        let Ok((
+            text,
+            style,
+            layout,
+            z_level,
+            alpha,
+            material,
+            lighting,
+            sidedness,
+            hdr_text_coverage_bias,
+        )) = existing_runs.get(entity)
         else {
             continue;
         };
@@ -138,6 +150,7 @@ fn collect_existing_text_children<'a>(
                 material,
                 lighting,
                 sidedness,
+                hdr_text_coverage_bias,
             },
         );
     }
@@ -167,6 +180,7 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
+        Option<&Override<HdrTextCoverageBias>>,
     )>,
     mut commands: Commands,
     mut perf: ResMut<DiegeticPerfStats>,
@@ -216,6 +230,7 @@ pub(super) fn reconcile_panel_text_children(
             let label_material = config.material().cloned();
             let label_lighting = config.lighting();
             let label_sidedness = config.sidedness();
+            let label_hdr_text_coverage_bias = config.hdr_text_coverage_bias();
             let style = config.for_shaping(Anchor::TopLeft);
             let z_level = PanelTextZLevel(draw_depth.z_level());
             let panel_text_child = PanelTextLayout {
@@ -248,6 +263,7 @@ pub(super) fn reconcile_panel_text_children(
                     label_material,
                     label_lighting,
                     label_sidedness,
+                    label_hdr_text_coverage_bias,
                 });
                 reusable.entity
             } else {
@@ -262,6 +278,7 @@ pub(super) fn reconcile_panel_text_children(
                     label_material,
                     label_lighting,
                     label_sidedness,
+                    label_hdr_text_coverage_bias,
                 })
             };
 
@@ -274,7 +291,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -291,19 +308,20 @@ pub(super) fn reconcile_panel_text_children(
 }
 
 /// Inputs to [`spawn_panel_text_child`]. Grouped into a struct because reconcile
-/// threads text, style, layout, and three captured cascade overrides through to
-/// a freshly spawned child.
+/// threads text, style, layout, and captured cascade overrides through to a
+/// freshly spawned child.
 struct SpawnPanelTextChild<'a, 'w, 's> {
-    commands:        &'a mut Commands<'w, 's>,
-    panel_entity:    Entity,
-    text:            &'a str,
-    style:           TextStyle,
-    layout:          PanelTextLayout,
-    z_level:         PanelTextZLevel,
-    label_alpha:     Option<AlphaMode>,
-    label_material:  Option<Handle<StandardMaterial>>,
-    label_lighting:  Option<Lighting>,
-    label_sidedness: Option<Sidedness>,
+    commands:                     &'a mut Commands<'w, 's>,
+    panel_entity:                 Entity,
+    text:                         &'a str,
+    style:                        TextStyle,
+    layout:                       PanelTextLayout,
+    z_level:                      PanelTextZLevel,
+    label_alpha:                  Option<AlphaMode>,
+    label_material:               Option<Handle<StandardMaterial>>,
+    label_lighting:               Option<Lighting>,
+    label_sidedness:              Option<Sidedness>,
+    label_hdr_text_coverage_bias: Option<f32>,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
@@ -321,6 +339,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         label_material,
         label_lighting,
         label_sidedness,
+        label_hdr_text_coverage_bias,
     } = request;
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
@@ -348,24 +367,28 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         if let Some(sidedness) = label_sidedness {
             cascade::apply_cascade_override(&mut child, sidedness);
         }
+        if let Some(bias) = label_hdr_text_coverage_bias {
+            cascade::apply_cascade_override(&mut child, HdrTextCoverageBias(bias));
+        }
     });
     spawned
 }
 
 /// Inputs to [`update_reused_panel_text_child`]. Grouped into a struct because
-/// reconcile threads text, style, layout, and three captured cascade overrides
-/// through to a reused child.
+/// reconcile threads text, style, layout, and captured cascade overrides through
+/// to a reused child.
 struct UpdateReusedChild<'a, 'w, 's> {
-    commands:        &'a mut Commands<'w, 's>,
-    reusable:        ReusableChild<'a>,
-    text:            &'a str,
-    style:           TextStyle,
-    layout:          PanelTextLayout,
-    z_level:         PanelTextZLevel,
-    label_alpha:     Option<AlphaMode>,
-    label_material:  Option<Handle<StandardMaterial>>,
-    label_lighting:  Option<Lighting>,
-    label_sidedness: Option<Sidedness>,
+    commands:                     &'a mut Commands<'w, 's>,
+    reusable:                     ReusableChild<'a>,
+    text:                         &'a str,
+    style:                        TextStyle,
+    layout:                       PanelTextLayout,
+    z_level:                      PanelTextZLevel,
+    label_alpha:                  Option<AlphaMode>,
+    label_material:               Option<Handle<StandardMaterial>>,
+    label_lighting:               Option<Lighting>,
+    label_sidedness:              Option<Sidedness>,
+    label_hdr_text_coverage_bias: Option<f32>,
 }
 
 /// Writes each component of a reused panel-text child only when it differs, so
@@ -374,9 +397,10 @@ struct UpdateReusedChild<'a, 'w, 's> {
 /// `shape_panel_text_children` classifies `Changed<TextStyle>` with
 /// `TextStyle::gating_eq`: geometry fields rebuild glyphs, while render-only
 /// fields refresh `PreparedPanelText` and material-table rows. Cascade
-/// overrides (alpha, material, lighting, sidedness) are gated on their own
-/// because writing one unconditionally would re-fire `Changed<Resolved<A>>` on
-/// every run and defeat the per-run short-circuit downstream.
+/// overrides (alpha, material, lighting, sidedness, HDR text coverage bias) are
+/// gated on their own because writing one unconditionally would re-fire
+/// `Changed<Resolved<A>>` on every run and defeat the per-run short-circuit
+/// downstream.
 fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     let UpdateReusedChild {
         commands,
@@ -389,6 +413,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         label_material,
         label_lighting,
         label_sidedness,
+        label_hdr_text_coverage_bias,
     } = request;
     let mut child = commands.entity(reusable.entity);
     if reusable.text.text() != text {
@@ -450,6 +475,23 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         None => {
             if reusable.sidedness.is_some() {
                 cascade::remove_cascade_override::<Sidedness>(&mut child);
+            }
+        },
+    }
+    match label_hdr_text_coverage_bias {
+        Some(bias) => {
+            let incoming = HdrTextCoverageBias(bias);
+            if reusable
+                .hdr_text_coverage_bias
+                .map(|node_override| node_override.0)
+                != Some(incoming)
+            {
+                cascade::apply_cascade_override(&mut child, incoming);
+            }
+        },
+        None => {
+            if reusable.hdr_text_coverage_bias.is_some() {
+                cascade::remove_cascade_override::<HdrTextCoverageBias>(&mut child);
             }
         },
     }

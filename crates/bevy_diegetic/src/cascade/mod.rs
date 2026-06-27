@@ -1,8 +1,8 @@
 //! One parent-walking cascade with per-entity `Resolved<A>` caches.
 //!
 //! Some text and material attributes inherit through the entity tree: text
-//! alpha mode, font unit, and source material handles today. The rule is one
-//! sentence, applied by following `ChildOf`:
+//! alpha mode, HDR coverage bias, font unit, and source material handles today.
+//! The rule is one sentence, applied by following `ChildOf`:
 //! *my own override, else my parent's, else the global default at the root.*
 //! A standalone text is depth-1 off the root, a panel is depth-1, and a panel
 //! label is depth-2; deeper nesting needs no new type.
@@ -51,6 +51,7 @@
 //! | --- | --- | --- |
 //! | [`TextAlpha`] | `CascadeDefault<TextAlpha>` | `override_text_alpha`, `inherit_text_alpha`, [`resolved_text_alpha`] |
 //! | [`FontUnit`] | `CascadeDefault<FontUnit>` | `override_font_unit`, `inherit_font_unit`, [`resolved_font_unit`] |
+//! | [`HdrTextCoverageBias`] | `CascadeDefault<HdrTextCoverageBias>` | `override_hdr_text_coverage_bias`, `inherit_hdr_text_coverage_bias`, [`resolved_hdr_text_coverage_bias`] |
 //! | [`SdfMaterial`] | `CascadeDefault<SdfMaterial>` | `override_sdf_material`, `inherit_sdf_material`, [`resolved_sdf_material`] |
 //! | [`TextMaterial`] | `CascadeDefault<TextMaterial>` | `override_text_material`, `inherit_text_material`, [`resolved_text_material`] |
 //! | [`ShapeMaterial`] | `CascadeDefault<ShapeMaterial>` | `override_shape_material`, `inherit_shape_material`, [`resolved_shape_material`] |
@@ -82,9 +83,10 @@
 //!
 //! - **Spawn.** The node-kind authoring bridges seed each participant's initial `Resolved<A>`
 //!   during command flush. Standalone text and panels seed their own participating attributes;
-//!   panel labels seed text alpha. Bridges that author a per-node override use the same helper as
-//!   the public verbs; standalone text only seeds global defaults and relies on explicit
-//!   `override_*` commands for non-default entity values.
+//!   panel labels seed glyph-facing attributes such as text alpha and HDR coverage bias. Bridges
+//!   that author a per-node override use the same helper as the public verbs; standalone text only
+//!   seeds global defaults and relies on explicit `override_*` commands for non-default entity
+//!   values.
 //! - **Change.** [`CascadePlugin`]'s propagation system, in [`CascadeSet::Propagate`], re-resolves
 //!   a node when its own `Override<A>` changes or is removed, its `ChildOf` changes, or
 //!   `CascadeDefault<A>` changes — fanning ancestor changes down through `Children`. It runs every
@@ -128,6 +130,7 @@ mod resolved;
 
 pub use attributes::CascadeEntityCommandsExt;
 pub use attributes::FontUnit;
+pub use attributes::HdrTextCoverageBias;
 pub use attributes::SdfMaterial;
 pub use attributes::ShapeMaterial;
 pub use attributes::TextAlpha;
@@ -137,6 +140,7 @@ pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_anti_alias;
 pub use attributes::resolved_font_unit;
 pub use attributes::resolved_hairline_fade;
+pub use attributes::resolved_hdr_text_coverage_bias;
 pub use attributes::resolved_lighting;
 pub use attributes::resolved_sdf_material;
 pub use attributes::resolved_shape_material;

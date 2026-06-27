@@ -31,6 +31,7 @@ use super::PanelTextLayout;
 use super::PreparedPanelText;
 use super::layout::PanelTextZLevel;
 use crate::cascade::CascadeDefault;
+use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
@@ -84,15 +85,18 @@ pub struct DiegeticTextBatch;
 /// re-routing.
 #[derive(SystemParam)]
 pub(super) struct PathBatchKeyCascades<'w, 's> {
-    alphas:             Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
-    lightings:          Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
-    sidednesses:        Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
-    anti_aliases:       Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
-    materials:          Query<'w, 's, &'static Resolved<TextMaterial>, With<TextContent>>,
-    alpha_default:      Res<'w, CascadeDefault<TextAlpha>>,
-    lighting_default:   Res<'w, CascadeDefault<Lighting>>,
-    sidedness_default:  Res<'w, CascadeDefault<Sidedness>>,
-    anti_alias_default: Res<'w, CascadeDefault<AntiAlias>>,
+    alphas:                         Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
+    lightings:                      Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
+    sidednesses:                    Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
+    anti_aliases:                   Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
+    materials: Query<'w, 's, &'static Resolved<TextMaterial>, With<TextContent>>,
+    hdr_text_coverage_biases:
+        Query<'w, 's, &'static Resolved<HdrTextCoverageBias>, With<TextContent>>,
+    alpha_default:                  Res<'w, CascadeDefault<TextAlpha>>,
+    lighting_default:               Res<'w, CascadeDefault<Lighting>>,
+    sidedness_default:              Res<'w, CascadeDefault<Sidedness>>,
+    anti_alias_default:             Res<'w, CascadeDefault<AntiAlias>>,
+    hdr_text_coverage_bias_default: Res<'w, CascadeDefault<HdrTextCoverageBias>>,
     placement_changed: Query<
         'w,
         's,
@@ -108,6 +112,16 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
             )>,
         ),
     >,
+    record_changed: Query<
+        'w,
+        's,
+        Entity,
+        (
+            With<TextContent>,
+            With<PreparedPanelText>,
+            Changed<Resolved<HdrTextCoverageBias>>,
+        ),
+    >,
 }
 
 impl PathBatchKeyCascades<'_, '_> {
@@ -118,6 +132,10 @@ impl PathBatchKeyCascades<'_, '_> {
     /// row updates, while texture/pipeline changes are detected through
     /// `PathBatchKey` comparison.
     fn placement_changed_set(&self) -> EntityHashSet { self.placement_changed.iter().collect() }
+
+    /// Runs whose per-record cascade value changed without changing glyph
+    /// geometry or batch routing.
+    fn record_changed_set(&self) -> EntityHashSet { self.record_changed.iter().collect() }
 
     fn alpha(&self, label: Entity) -> AlphaMode {
         self.alphas
@@ -141,6 +159,12 @@ impl PathBatchKeyCascades<'_, '_> {
         self.anti_aliases
             .get(label)
             .map_or(self.anti_alias_default.0, |resolved| resolved.0)
+    }
+
+    fn hdr_text_coverage_bias(&self, label: Entity) -> HdrTextCoverageBias {
+        self.hdr_text_coverage_biases
+            .get(label)
+            .map_or(self.hdr_text_coverage_bias_default.0, |resolved| resolved.0)
     }
 
     fn material(
@@ -197,6 +221,7 @@ pub(super) fn update_panel_text_batches(
     // Cascade changes are inequality-guarded at the propagation pass, so this
     // set holds only real transitions; membership re-routes the run below.
     let cascade_changed = cascades.placement_changed_set();
+    let record_changed = cascades.record_changed_set();
 
     // Upload the shared glyph atlas once before the run loop. A frame with no
     // glyph changes reuses existing handles, while live runs still append
@@ -259,6 +284,7 @@ pub(super) fn update_panel_text_batches(
             label_entity,
             key_changed,
         );
+        let render_record_changed = record_changed.contains(&label_entity);
         apply_text_run_update(
             RebuiltTextRunInput {
                 backend: &mut backend,
@@ -269,10 +295,11 @@ pub(super) fn update_panel_text_batches(
                 panel_text_child: &panel_text_child,
                 label_transform,
                 anti_alias: cascades.anti_alias(label_entity),
+                hdr_text_coverage_bias: cascades.hdr_text_coverage_bias(label_entity),
                 material_candidate,
             },
             geometry_changed,
-            prepared.is_changed(),
+            prepared.is_changed() || render_record_changed,
         );
     }
 
@@ -335,15 +362,16 @@ fn update_existing_text_run_material(
 }
 
 struct RebuiltTextRunInput<'a> {
-    backend:            &'a mut GlyphCache,
-    builder:            &'a mut FrameMaterialTableBuilder,
-    storage_key:        RunStorageKey,
-    batch_key:          PathBatchKey,
-    prepared:           &'a PreparedPanelText,
-    panel_text_child:   &'a PanelTextLayout,
-    label_transform:    &'a GlobalTransform,
-    anti_alias:         AntiAlias,
-    material_candidate: MaterialSlotCandidate,
+    backend:                &'a mut GlyphCache,
+    builder:                &'a mut FrameMaterialTableBuilder,
+    storage_key:            RunStorageKey,
+    batch_key:              PathBatchKey,
+    prepared:               &'a PreparedPanelText,
+    panel_text_child:       &'a PanelTextLayout,
+    label_transform:        &'a GlobalTransform,
+    anti_alias:             AntiAlias,
+    hdr_text_coverage_bias: HdrTextCoverageBias,
+    material_candidate:     MaterialSlotCandidate,
 }
 
 /// Routes one run by what changed: a full glyph rebuild, a render-only record
@@ -359,14 +387,15 @@ fn apply_text_run_update(
         // Color or render-mode edit: glyph quads are unchanged, so refresh the
         // run record and material row instead of re-deriving identical geometry.
         refresh_text_run_record(RenderOnlyTextRunInput {
-            backend:            input.backend,
-            builder:            input.builder,
-            storage_key:        input.storage_key,
-            prepared:           input.prepared,
-            panel_text_child:   input.panel_text_child,
-            label_transform:    input.label_transform,
-            anti_alias:         input.anti_alias,
-            material_candidate: input.material_candidate,
+            backend:                input.backend,
+            builder:                input.builder,
+            storage_key:            input.storage_key,
+            prepared:               input.prepared,
+            panel_text_child:       input.panel_text_child,
+            label_transform:        input.label_transform,
+            anti_alias:             input.anti_alias,
+            hdr_text_coverage_bias: input.hdr_text_coverage_bias,
+            material_candidate:     input.material_candidate,
         });
     } else {
         update_existing_text_run_material(
@@ -388,6 +417,7 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         panel_text_child,
         label_transform,
         anti_alias,
+        hdr_text_coverage_bias,
         material_candidate,
     } = input;
     // A glyph missing from the atlas means shaping has not packed it yet. An
@@ -420,6 +450,7 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         panel_text_child,
         label_transform,
         anti_alias,
+        hdr_text_coverage_bias,
         material_slot,
     );
     backend
@@ -428,14 +459,15 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
 }
 
 struct RenderOnlyTextRunInput<'a> {
-    backend:            &'a mut GlyphCache,
-    builder:            &'a mut FrameMaterialTableBuilder,
-    storage_key:        RunStorageKey,
-    prepared:           &'a PreparedPanelText,
-    panel_text_child:   &'a PanelTextLayout,
-    label_transform:    &'a GlobalTransform,
-    anti_alias:         AntiAlias,
-    material_candidate: MaterialSlotCandidate,
+    backend:                &'a mut GlyphCache,
+    builder:                &'a mut FrameMaterialTableBuilder,
+    storage_key:            RunStorageKey,
+    prepared:               &'a PreparedPanelText,
+    panel_text_child:       &'a PanelTextLayout,
+    label_transform:        &'a GlobalTransform,
+    anti_alias:             AntiAlias,
+    hdr_text_coverage_bias: HdrTextCoverageBias,
+    material_candidate:     MaterialSlotCandidate,
 }
 
 /// Rewrites a routed run's `PathRenderRecord` and material-table row when only
@@ -449,6 +481,7 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
         panel_text_child,
         label_transform,
         anti_alias,
+        hdr_text_coverage_bias,
         material_candidate,
     } = input;
     let Some(material_slot) = append_text_material_row(builder, material_candidate) else {
@@ -460,6 +493,7 @@ fn refresh_text_run_record(input: RenderOnlyTextRunInput<'_>) {
         panel_text_child,
         label_transform,
         anti_alias,
+        hdr_text_coverage_bias,
         material_slot,
     );
     backend
@@ -535,17 +569,19 @@ fn run_record_for(
     panel_text_child: &PanelTextLayout,
     label_transform: &GlobalTransform,
     anti_alias: AntiAlias,
+    hdr_text_coverage_bias: HdrTextCoverageBias,
     material: MaterialSlotId,
 ) -> PathRenderRecord {
     PathRenderRecord {
         // Pre-propagation snapshot; write_batch_run_transforms corrects it
         // after TransformSystems::Propagate the same frame.
-        transform:        label_transform.to_matrix(),
-        material:         material.into(),
-        render_mode:      u32::from(RenderMode::from(prepared.render_mode)),
-        depth_nudge:      panel_text_child.depth_bias,
-        oit_depth_offset: panel_text_child.oit_depth_offset,
-        aa_flags:         anti_alias.aa_flags(),
+        transform:          label_transform.to_matrix(),
+        material:           material.into(),
+        render_mode:        u32::from(RenderMode::from(prepared.render_mode)),
+        depth_nudge:        panel_text_child.depth_bias,
+        oit_depth_offset:   panel_text_child.oit_depth_offset,
+        aa_flags:           anti_alias.aa_flags(),
+        text_coverage_bias: hdr_text_coverage_bias.shader_value(),
     }
 }
 
@@ -767,12 +803,13 @@ fn padded_run_records(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Pa
     padded.resize(
         run_capacity.to_usize().max(records.len()),
         PathRenderRecord {
-            transform:        Mat4::ZERO,
-            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
-            render_mode:      0,
-            depth_nudge:      0.0,
-            oit_depth_offset: 0.0,
-            aa_flags:         0,
+            transform:          Mat4::ZERO,
+            material:           SdfPaintMaterial::NotAuthored.to_gpu(),
+            render_mode:        0,
+            depth_nudge:        0.0,
+            oit_depth_offset:   0.0,
+            aa_flags:           0,
+            text_coverage_bias: 0.0,
         },
     );
     padded
@@ -1097,6 +1134,7 @@ mod tests {
     use crate::Mm;
     use crate::cascade::CascadeEntityCommandsExt;
     use crate::cascade::CascadePlugin;
+    use crate::cascade::HdrTextCoverageBias;
     use crate::cascade::TextMaterial;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::DrawZIndex;
@@ -1290,6 +1328,16 @@ mod tests {
             .table()
             .rows();
         table[record.material.as_u32().to_usize()]
+    }
+
+    fn text_run_coverage_biases(app: &App) -> Vec<f32> {
+        app.world()
+            .resource::<GlyphCache>()
+            .batch_store()
+            .batches()
+            .flat_map(|(_, batch)| batch.run_records().iter())
+            .map(|record| record.text_coverage_bias)
+            .collect()
     }
 
     fn layout_hash(style: &TextStyle) -> u64 {
@@ -1567,6 +1615,59 @@ mod tests {
             first_text_run_material_values(&app).metallic.to_bits(),
             0.77_f32.to_bits()
         );
+    }
+
+    #[test]
+    fn text_run_inherits_panel_hdr_text_coverage_bias_through_cascade() {
+        let mut app = pipeline_app();
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .hdr_text_coverage_bias(2.0)
+                .with_tree(one_text_tree())
+                .build()
+                .expect("panel should build"),
+        );
+        settle(&mut app);
+
+        assert_eq!(text_run_coverage_biases(&app), vec![2.0]);
+    }
+
+    #[test]
+    fn text_run_hdr_text_coverage_bias_wins_over_panel_default() {
+        let mut app = pipeline_app();
+        app.world_mut().spawn(
+            DiegeticPanel::world()
+                .size(Mm(100.0), Mm(50.0))
+                .hdr_text_coverage_bias(2.0)
+                .with_tree(one_text_tree_with_style(
+                    TextStyle::new(10.0).with_hdr_text_coverage_bias(-1.25),
+                ))
+                .build()
+                .expect("panel should build"),
+        );
+        settle(&mut app);
+
+        assert_eq!(text_run_coverage_biases(&app), vec![-1.25]);
+    }
+
+    #[test]
+    fn global_hdr_text_coverage_bias_refreshes_run_records_without_splitting_batch() {
+        let mut app = pipeline_app();
+        spawn_panel(&mut app, two_text_tree());
+        settle(&mut app);
+        let entity_before = batch_entities(&mut app)[0];
+        assert_eq!(store_stats(&app), (1, 2, 9));
+        assert_eq!(text_run_coverage_biases(&app), vec![0.0, 0.0]);
+
+        app.world_mut()
+            .resource_mut::<CascadeDefault<HdrTextCoverageBias>>()
+            .0 = HdrTextCoverageBias(2.0);
+        settle(&mut app);
+
+        assert_eq!(store_stats(&app), (1, 2, 9));
+        assert_eq!(batch_entities(&mut app), vec![entity_before]);
+        assert_eq!(text_run_coverage_biases(&app), vec![2.0, 2.0]);
     }
 
     #[test]
@@ -2092,12 +2193,13 @@ mod tests {
             box_uv_flip_x:     0,
         };
         let record = PathRenderRecord {
-            transform:        Mat4::IDENTITY,
-            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
-            render_mode:      1,
-            depth_nudge:      0.0,
-            oit_depth_offset: 0.0,
-            aa_flags:         AntiAlias::Both.aa_flags(),
+            transform:          Mat4::IDENTITY,
+            material:           SdfPaintMaterial::NotAuthored.to_gpu(),
+            render_mode:        1,
+            depth_nudge:        0.0,
+            oit_depth_offset:   0.0,
+            aa_flags:           AntiAlias::Both.aa_flags(),
+            text_coverage_bias: 0.0,
         };
 
         for count in 0..=8_usize {

@@ -201,24 +201,24 @@ pub struct DrawZIndex(pub i8);
 /// ```
 #[derive(Component, Clone, Debug, Reflect)]
 pub struct TextStyle {
-    font_id:        u16,
-    size:           f32,
-    weight:         FontWeight,
-    slant:          FontSlant,
-    line_height:    f32,
-    letter_spacing: f32,
-    word_spacing:   f32,
-    color:          Color,
-    align:          TextAlign,
-    anchor:         Anchor,
-    render_mode:    GlyphRenderMode,
-    shadow_mode:    GlyphShadowMode,
+    font_id:                u16,
+    size:                   f32,
+    weight:                 FontWeight,
+    slant:                  FontSlant,
+    line_height:            f32,
+    letter_spacing:         f32,
+    word_spacing:           f32,
+    color:                  Color,
+    align:                  TextAlign,
+    anchor:                 Anchor,
+    render_mode:            GlyphRenderMode,
+    shadow_mode:            GlyphShadowMode,
     /// Per-label sidedness override. `None` = inherit from the `Sidedness`
     /// cascade attribute (world panels default `BothSides`, screen `FrontOnly`).
-    sidedness:      Option<Sidedness>,
+    sidedness:              Option<Sidedness>,
     /// Per-label lighting override. `None` = inherit from the `Lighting`
     /// cascade attribute (world panels default `Lit`, screen `Unlit`).
-    lighting:       Option<Lighting>,
+    lighting:               Option<Lighting>,
     /// Per-label source material handle for text runs.
     ///
     /// This is an authored cascade/source handle. It is not a Bevy render
@@ -226,15 +226,18 @@ pub struct TextStyle {
     /// keys. Create the material once through `Assets<StandardMaterial>` and
     /// pass the handle here; do not create a fresh asset while rebuilding panel
     /// data each frame.
-    material:       Option<Handle<StandardMaterial>>,
-    font_features:  FontFeatures,
+    material:               Option<Handle<StandardMaterial>>,
+    font_features:          FontFeatures,
     /// What unit `size` is expressed in. `None` = inherit from the resolved
     /// `FontUnit` cascade attribute (panel font unit for panel text, world
     /// units for standalone, pixels for screen text).
-    unit:           Option<Unit>,
+    unit:                   Option<Unit>,
     /// Per-label alpha-mode override. `None` = inherit from the `TextAlpha`
     /// cascade attribute.
-    alpha_mode:     Option<AlphaMode>,
+    alpha_mode:             Option<AlphaMode>,
+    /// Per-label HDR text coverage-bias override. `None` = inherit from the
+    /// `HdrTextCoverageBias` cascade attribute.
+    hdr_text_coverage_bias: Option<f32>,
 }
 
 impl PartialEq for TextStyle {
@@ -257,6 +260,7 @@ impl PartialEq for TextStyle {
             && self.font_features == other.font_features
             && self.unit == other.unit
             && self.alpha_mode == other.alpha_mode
+            && self.hdr_text_coverage_bias == other.hdr_text_coverage_bias
     }
 }
 
@@ -277,24 +281,25 @@ impl TextStyle {
     pub fn new(size: impl Into<Dimension>) -> Self {
         let font_size = size.into();
         Self {
-            font_id:        0,
-            size:           font_size.value,
-            weight:         FontWeight::NORMAL,
-            slant:          FontSlant::Normal,
-            line_height:    0.0,
-            letter_spacing: 0.0,
-            word_spacing:   0.0,
-            color:          Color::WHITE,
-            align:          TextAlign::Left,
-            anchor:         Anchor::Center,
-            render_mode:    GlyphRenderMode::Text,
-            shadow_mode:    GlyphShadowMode::Cast,
-            sidedness:      None,
-            lighting:       None,
-            material:       None,
-            font_features:  FontFeatures::NONE,
-            unit:           font_size.unit,
-            alpha_mode:     None,
+            font_id:                0,
+            size:                   font_size.value,
+            weight:                 FontWeight::NORMAL,
+            slant:                  FontSlant::Normal,
+            line_height:            0.0,
+            letter_spacing:         0.0,
+            word_spacing:           0.0,
+            color:                  Color::WHITE,
+            align:                  TextAlign::Left,
+            anchor:                 Anchor::Center,
+            render_mode:            GlyphRenderMode::Text,
+            shadow_mode:            GlyphShadowMode::Cast,
+            sidedness:              None,
+            lighting:               None,
+            material:               None,
+            font_features:          FontFeatures::NONE,
+            unit:                   font_size.unit,
+            alpha_mode:             None,
+            hdr_text_coverage_bias: None,
         }
     }
 
@@ -374,6 +379,13 @@ impl TextStyle {
     /// `CascadeDefault<TextAlpha>`.
     #[must_use]
     pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
+
+    /// Returns the per-label HDR text coverage-bias override, if any.
+    ///
+    /// `None` means the label inherits the panel-level override, then
+    /// `CascadeDefault<HdrTextCoverageBias>`.
+    #[must_use]
+    pub const fn hdr_text_coverage_bias(&self) -> Option<f32> { self.hdr_text_coverage_bias }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -533,6 +545,19 @@ impl TextStyle {
         self
     }
 
+    /// Sets the per-label HDR text coverage-bias override.
+    ///
+    /// `0.0` leaves analytic glyph coverage unchanged. Positive values make
+    /// fractional glyph edges more opaque, which can compensate for dark text
+    /// that looks too thin under HDR, especially on light backgrounds. Tune
+    /// this per scene, panel, or label; it can make light text on dark
+    /// backgrounds look heavier.
+    #[must_use]
+    pub const fn with_hdr_text_coverage_bias(mut self, bias: f32) -> Self {
+        self.hdr_text_coverage_bias = Some(bias);
+        self
+    }
+
     // ── In-place (set_*) setters ──────────────────────────────────────────
 
     /// Sets the font identifier.
@@ -606,6 +631,11 @@ impl TextStyle {
         self.alpha_mode = Some(alpha_mode);
     }
 
+    /// Sets the per-label HDR text coverage-bias override.
+    pub const fn set_hdr_text_coverage_bias(&mut self, bias: f32) {
+        self.hdr_text_coverage_bias = Some(bias);
+    }
+
     // ── Conversions and derived views ─────────────────────────────────────
 
     /// Returns a copy with font-related dimensions multiplied by `factor`.
@@ -648,6 +678,7 @@ impl TextStyle {
             anchor,
             unit: None,
             alpha_mode: None,
+            hdr_text_coverage_bias: None,
             ..self.clone()
         }
     }
@@ -700,6 +731,8 @@ impl TextStyle {
             unit: _,
             // Render-only — affects compositing, not measurement.
             alpha_mode: _,
+            // Render-only — coverage transfer, not measurement.
+            hdr_text_coverage_bias: _,
         } = self;
 
         font_id.hash(hasher);
@@ -737,6 +770,7 @@ impl TextStyle {
             lighting: _,
             material: _,
             alpha_mode: _,
+            hdr_text_coverage_bias: _,
         } = self;
 
         *font_id == other.font_id
@@ -760,9 +794,10 @@ impl TextStyle {
     /// via `to_bits`.
     ///
     /// Excludes render/material fields (`color`, `render_mode`, `shadow_mode`,
-    /// `sidedness`, `lighting`, `material`, `alpha_mode`) because
-    /// `PreparedPanelText`, cascade overrides, `PathRenderRecord`, and the
-    /// frame material table own those updates without changing glyph geometry.
+    /// `sidedness`, `lighting`, `material`, `alpha_mode`,
+    /// `hdr_text_coverage_bias`) because `PreparedPanelText`, cascade
+    /// overrides, `PathRenderRecord`, and the frame material table own those
+    /// updates without changing glyph geometry.
     /// Excludes `unit` (measurement context, not a mesh input) and
     /// `alpha_mode` (gated separately through `Override<TextAlpha>`).
     pub(crate) fn gating_eq(&self, other: &Self) -> bool {
@@ -785,6 +820,7 @@ impl TextStyle {
             material: _,
             unit: _,
             alpha_mode: _,
+            hdr_text_coverage_bias: _,
         } = self;
 
         *font_id == other.font_id
@@ -969,9 +1005,10 @@ mod tests {
     }
 
     #[test]
-    fn for_shaping_drops_layout_unit_and_alpha_authoring() {
+    fn for_shaping_drops_render_cascade_authoring() {
         let prepared = TextStyle::new(crate::Pt(24.0))
             .with_alpha_mode(AlphaMode::Add)
+            .with_hdr_text_coverage_bias(2.0)
             .for_shaping(Anchor::TopLeft);
 
         assert_eq!(
@@ -981,6 +1018,10 @@ mod tests {
         assert_eq!(
             prepared.alpha_mode, None,
             "alpha authoring routes through TextAlpha, not the per-run view"
+        );
+        assert_eq!(
+            prepared.hdr_text_coverage_bias, None,
+            "HDR coverage authoring routes through HdrTextCoverageBias, not the per-run view"
         );
     }
 

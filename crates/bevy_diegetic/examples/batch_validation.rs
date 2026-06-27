@@ -1,10 +1,14 @@
 //! Batching validation scene for SDF surfaces, text, and analytic shapes.
 //!
 //! The scene displays authored record counts, material-table rows, and expected
-//! batch counts alongside live renderer counters.
+//! batch counts alongside live renderer counters. `R` toggles HDR and `[` / `]`
+//! tune `HdrTextCoverageBias`, the cascading text coverage compensation used
+//! when analytic text looks too thin under HDR, especially dark text on light
+//! backgrounds.
 
 use bevy::camera::Hdr;
 use bevy::camera::primitives::Aabb;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::diagnostic::Diagnostic;
 use bevy::diagnostic::DiagnosticsStore;
 use bevy::diagnostic::FrameTimeDiagnosticsPlugin;
@@ -19,6 +23,7 @@ use bevy_diegetic::AnchoredToPanel;
 use bevy_diegetic::BatchSummary;
 use bevy_diegetic::Border;
 use bevy_diegetic::CalloutCap;
+use bevy_diegetic::CascadeDefault;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
 use bevy_diegetic::DiegeticPanelCommands;
@@ -26,6 +31,7 @@ use bevy_diegetic::DiegeticPerfStats;
 use bevy_diegetic::El;
 use bevy_diegetic::Fit;
 use bevy_diegetic::GlyphShadowMode;
+use bevy_diegetic::HdrTextCoverageBias;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::LineStyle;
@@ -147,6 +153,8 @@ const SDF_ANIMATION_SPEED: f32 = 0.9;
 const FPS_UPDATE_INTERVAL: f32 = 1.0;
 const HDR_CONTROL: &str = "R HDR";
 const BLOOM_CONTROL: &str = "B Bloom";
+const TONEMAPPING_CONTROL: &str = "T Tonemapping";
+const TEXT_COVERAGE_CONTROL: &str = "[] Text coverage";
 
 // One render family's live batch decomposition, paired for the breakdown table.
 struct FamilyBreakdown<'a> {
@@ -304,6 +312,7 @@ const TEXT_EMISSIVE_GAIN: f32 = 1.8;
 const ALPHA_CELL_BG: Color = Color::WHITE;
 const ALPHA_CELL_INK: Color = Color::BLACK;
 const ALPHA_CELL_CAPTION: Color = Color::BLACK;
+const ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS: f32 = 2.0;
 
 // The alpha modes the center-left selector cycles through, in number-key order
 // (Digit1..Digit7). The selected mode is applied to the SDF panel's fills and
@@ -333,6 +342,27 @@ const ALPHA_KEYS: [KeyCode; 7] = [
 const ALPHA_ROW_GAP: f32 = 2.0;
 const ALPHA_ROW_WIDTH: f32 = 120.0;
 
+const TONEMAPPING_MODES: [(&str, Tonemapping); 9] = [
+    ("None", Tonemapping::None),
+    ("Reinhard", Tonemapping::Reinhard),
+    ("ReinhardLum", Tonemapping::ReinhardLuminance),
+    ("ACES", Tonemapping::AcesFitted),
+    ("AgX", Tonemapping::AgX),
+    ("BoringDisplay", Tonemapping::SomewhatBoringDisplayTransform),
+    ("TonyMcMapface", Tonemapping::TonyMcMapface),
+    ("BlenderFilmic", Tonemapping::BlenderFilmic),
+    ("KhronosPbr", Tonemapping::KhronosPbrNeutral),
+];
+const TONEMAPPING_DEFAULT_INDEX: usize = 6;
+const TONEMAPPING_ROW_GAP: f32 = 2.0;
+const TONEMAPPING_ROW_WIDTH: f32 = 150.0;
+const TEXT_COVERAGE_BIAS_STEP: f32 = 0.1;
+const TEXT_COVERAGE_BIAS_RATE: f32 = 0.8;
+const TEXT_COVERAGE_BIAS_MIN: f32 = -4.0;
+const TEXT_COVERAGE_BIAS_MAX: f32 = 4.0;
+const TEXT_COVERAGE_ROW_GAP: f32 = 2.0;
+const TEXT_COVERAGE_ROW_WIDTH: f32 = 150.0;
+
 /// The alpha mode the SDF panel fills/borders and the Text panel alpha case
 /// currently render in, chosen from [`ALPHA_MODES`] by the center-left selector.
 #[derive(Resource)]
@@ -350,6 +380,41 @@ impl Default for AlphaModeSelection {
 
 impl AlphaModeSelection {
     const fn mode(&self) -> AlphaMode { ALPHA_MODES[self.index].1 }
+}
+
+/// The tonemapper applied to every batch-validation camera, cycled by `T`.
+#[derive(Resource)]
+struct TonemappingSelection {
+    index: usize,
+}
+
+impl Default for TonemappingSelection {
+    fn default() -> Self {
+        Self {
+            index: TONEMAPPING_DEFAULT_INDEX,
+        }
+    }
+}
+
+impl TonemappingSelection {
+    const fn mode(&self) -> Tonemapping { TONEMAPPING_MODES[self.index].1 }
+
+    const fn cycle(&mut self) { self.index = (self.index + 1) % TONEMAPPING_MODES.len(); }
+}
+
+/// HDR-only coverage target, adjusted by `[` and `]`.
+#[derive(Resource, Clone, Copy, Default)]
+struct HdrTextCoverageSelection {
+    selected: f32,
+}
+
+impl HdrTextCoverageSelection {
+    const fn active_for(self, features: RenderFeatures) -> f32 {
+        match features.hdr {
+            RenderFeature::On => self.selected,
+            RenderFeature::Off => 0.0,
+        }
+    }
 }
 
 /// Authored draw counts for one panel, split by render family. Drives both the
@@ -516,6 +581,12 @@ struct BatchValidationTextPanel;
 struct AlphaSelectorPanel;
 
 #[derive(Component)]
+struct TonemappingSelectorPanel;
+
+#[derive(Component)]
+struct TextCoverageSelectorPanel;
+
+#[derive(Component)]
 struct BatchValidationStatsPanel;
 
 #[derive(Component)]
@@ -629,38 +700,29 @@ fn main() {
                 .with_title("Batch Validation")
                 .with_anchor(Anchor::TopLeft)
                 .active_control(HDR_CONTROL)
-                .active_control(BLOOM_CONTROL),
+                .active_control(BLOOM_CONTROL)
+                .active_control(TONEMAPPING_CONTROL)
+                .active_control(TEXT_COVERAGE_CONTROL),
         )
         .wire_chip_to_state::<RenderFeatures, _>(HDR_CONTROL, |features| features.hdr.activation())
         .wire_chip_to_state::<RenderFeatures, _>(BLOOM_CONTROL, |features| {
             features.bloom.activation()
         })
         .with_camera_control_panel()
-        .with_shortcut(ALPHA_KEYS[0], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 0;
-        })
-        .with_shortcut(ALPHA_KEYS[1], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 1;
-        })
-        .with_shortcut(ALPHA_KEYS[2], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 2;
-        })
-        .with_shortcut(ALPHA_KEYS[3], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 3;
-        })
-        .with_shortcut(ALPHA_KEYS[4], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 4;
-        })
-        .with_shortcut(ALPHA_KEYS[5], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 5;
-        })
-        .with_shortcut(ALPHA_KEYS[6], |mut sel: ResMut<AlphaModeSelection>| {
-            sel.index = 6;
-        })
+        .with_shortcut(ALPHA_KEYS[0], select_alpha::<0>)
+        .with_shortcut(ALPHA_KEYS[1], select_alpha::<1>)
+        .with_shortcut(ALPHA_KEYS[2], select_alpha::<2>)
+        .with_shortcut(ALPHA_KEYS[3], select_alpha::<3>)
+        .with_shortcut(ALPHA_KEYS[4], select_alpha::<4>)
+        .with_shortcut(ALPHA_KEYS[5], select_alpha::<5>)
+        .with_shortcut(ALPHA_KEYS[6], select_alpha::<6>)
         .with_shortcut(KeyCode::KeyR, toggle_hdr)
         .with_shortcut(KeyCode::KeyB, toggle_bloom)
+        .with_shortcut(KeyCode::KeyT, cycle_tonemapping)
         .init_resource::<LastDisplayedStats>()
         .init_resource::<AlphaModeSelection>()
+        .init_resource::<TonemappingSelection>()
+        .init_resource::<HdrTextCoverageSelection>()
         .init_resource::<ValidationStatus>()
         .init_resource::<RenderFeatures>()
         .add_systems(
@@ -670,16 +732,33 @@ fn main() {
                 spawn_stats_panel,
                 spawn_expected_batches_panel,
                 spawn_alpha_selector_panel,
+                spawn_tonemapping_selector_panel,
+                spawn_text_coverage_selector_panel,
             ),
         )
         .add_observer(anchor_alpha_selector_when_added)
         .add_observer(anchor_alpha_selector_when_title_added)
+        .add_observer(anchor_tonemapping_selector_when_added)
+        .add_observer(anchor_tonemapping_selector_when_alpha_added)
+        .add_observer(anchor_text_coverage_selector_when_added)
+        .add_observer(anchor_text_coverage_selector_when_tonemapping_added)
         .add_observer(apply_render_features_to_added_camera)
+        .add_observer(apply_tonemapping_to_added_camera)
         .add_observer(apply_render_features_to_added_orbit_camera)
         .add_systems(Update, validate_batch_counts.before(update_stats_panel))
         .add_systems(Update, update_stats_panel)
         .add_systems(Update, animate_sdf_surface_panel)
         .add_systems(Update, apply_alpha_selection)
+        .add_systems(Update, apply_tonemapping_selection)
+        .add_systems(
+            Update,
+            (
+                adjust_text_coverage_bias,
+                apply_text_coverage_bias_default,
+                update_text_coverage_selector_panel,
+            )
+                .chain(),
+        )
         .add_systems(PostUpdate, sync_render_feature_components)
         .run();
 }
@@ -821,6 +900,52 @@ fn toggle_hdr(mut features: ResMut<RenderFeatures>) { features.toggle_hdr(); }
 
 fn toggle_bloom(mut features: ResMut<RenderFeatures>) { features.toggle_bloom(); }
 
+fn cycle_tonemapping(mut selection: ResMut<TonemappingSelection>) { selection.cycle(); }
+
+fn select_alpha<const INDEX: usize>(mut selection: ResMut<AlphaModeSelection>) {
+    selection.index = INDEX;
+}
+
+fn adjust_text_coverage_bias(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut selection: ResMut<HdrTextCoverageSelection>,
+) {
+    let left = keyboard.pressed(KeyCode::BracketLeft);
+    let right = keyboard.pressed(KeyCode::BracketRight);
+    let direction = match (left, right) {
+        (true, false) => -1.0,
+        (false, true) => 1.0,
+        (true, true) | (false, false) => return,
+    };
+    let key = if direction < 0.0 {
+        KeyCode::BracketLeft
+    } else {
+        KeyCode::BracketRight
+    };
+    let amount = if keyboard.just_pressed(key) {
+        TEXT_COVERAGE_BIAS_STEP
+    } else {
+        TEXT_COVERAGE_BIAS_RATE * time.delta_secs()
+    };
+    let next = (selection.selected + direction * amount)
+        .clamp(TEXT_COVERAGE_BIAS_MIN, TEXT_COVERAGE_BIAS_MAX);
+    if (selection.selected - next).abs() > f32::EPSILON {
+        selection.selected = next;
+    }
+}
+
+fn apply_text_coverage_bias_default(
+    selection: Res<HdrTextCoverageSelection>,
+    features: Res<RenderFeatures>,
+    mut cascade_default: ResMut<CascadeDefault<HdrTextCoverageBias>>,
+) {
+    let bias = selection.active_for(*features);
+    if (cascade_default.0.0 - bias).abs() > f32::EPSILON {
+        cascade_default.0 = HdrTextCoverageBias(bias);
+    }
+}
+
 fn apply_render_features_to_added_camera(
     trigger: On<Add, Camera>,
     features: Res<RenderFeatures>,
@@ -831,6 +956,18 @@ fn apply_render_features_to_added_camera(
         return;
     };
     set_hdr_component(trigger.entity, hdr, features.hdr, &mut commands);
+}
+
+fn apply_tonemapping_to_added_camera(
+    trigger: On<Add, Camera>,
+    selection: Res<TonemappingSelection>,
+    cameras: Query<Option<&Tonemapping>, With<Camera>>,
+    mut commands: Commands,
+) {
+    let Ok(tonemapping) = cameras.get(trigger.entity) else {
+        return;
+    };
+    set_tonemapping_component(trigger.entity, tonemapping, selection.mode(), &mut commands);
 }
 
 fn apply_render_features_to_added_orbit_camera(
@@ -863,6 +1000,41 @@ fn sync_render_feature_components(
     }
 }
 
+fn apply_tonemapping_selection(
+    selection: Res<TonemappingSelection>,
+    selectors: Query<Entity, With<TonemappingSelectorPanel>>,
+    cameras: Query<(Entity, Option<&Tonemapping>), With<Camera>>,
+    mut commands: Commands,
+) {
+    if !selection.is_changed() {
+        return;
+    }
+    for entity in &selectors {
+        commands.set_tree(entity, tonemapping_selector_tree(selection.index));
+    }
+    for (entity, tonemapping) in &cameras {
+        set_tonemapping_component(entity, tonemapping, selection.mode(), &mut commands);
+    }
+}
+
+fn update_text_coverage_selector_panel(
+    selection: Res<HdrTextCoverageSelection>,
+    features: Res<RenderFeatures>,
+    cascade_default: Res<CascadeDefault<HdrTextCoverageBias>>,
+    selectors: Query<Entity, With<TextCoverageSelectorPanel>>,
+    mut commands: Commands,
+) {
+    if !selection.is_changed() && !features.is_changed() && !cascade_default.is_changed() {
+        return;
+    }
+    for entity in &selectors {
+        commands.set_tree(
+            entity,
+            text_coverage_selector_tree(selection.selected, cascade_default.0.0, features.hdr),
+        );
+    }
+}
+
 fn set_hdr_component(
     camera: Entity,
     hdr: Option<&Hdr>,
@@ -877,6 +1049,17 @@ fn set_hdr_component(
             commands.entity(camera).remove::<Hdr>();
         },
         (RenderFeature::On, Some(_)) | (RenderFeature::Off, None) => {},
+    }
+}
+
+fn set_tonemapping_component(
+    camera: Entity,
+    current: Option<&Tonemapping>,
+    selected: Tonemapping,
+    commands: &mut Commands,
+) {
+    if current != Some(&selected) {
+        commands.entity(camera).insert(selected);
     }
 }
 
@@ -994,6 +1177,43 @@ fn spawn_alpha_selector_panel(
     }
 }
 
+fn spawn_tonemapping_selector_panel(
+    mut commands: Commands,
+    selection: Res<TonemappingSelection>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    match build_tonemapping_selector_panel(selection.index, &mut materials) {
+        Ok(panel) => {
+            commands.spawn((TonemappingSelectorPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("batch_validation: failed to build tonemapping selector panel: {error}");
+        },
+    }
+}
+
+fn spawn_text_coverage_selector_panel(
+    mut commands: Commands,
+    selection: Res<HdrTextCoverageSelection>,
+    features: Res<RenderFeatures>,
+    cascade_default: Res<CascadeDefault<HdrTextCoverageBias>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    match build_text_coverage_selector_panel(
+        selection.selected,
+        cascade_default.0.0,
+        features.hdr,
+        &mut materials,
+    ) {
+        Ok(panel) => {
+            commands.spawn((TextCoverageSelectorPanel, panel, Transform::default()));
+        },
+        Err(error) => {
+            error!("batch_validation: failed to build text coverage selector panel: {error}");
+        },
+    }
+}
+
 fn build_alpha_selector_panel(
     index: usize,
     materials: &mut Assets<StandardMaterial>,
@@ -1005,6 +1225,36 @@ fn build_alpha_selector_panel(
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(alpha_selector_tree(index))
+        .build()
+}
+
+fn build_text_coverage_selector_panel(
+    selected_bias: f32,
+    active_bias: f32,
+    hdr: RenderFeature,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+    let unlit = materials.add(screen_panel_material());
+    DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(text_coverage_selector_tree(selected_bias, active_bias, hdr))
+        .build()
+}
+
+fn build_tonemapping_selector_panel(
+    index: usize,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+    let unlit = materials.add(screen_panel_material());
+    DiegeticPanel::screen()
+        .size(Fit, Fit)
+        .anchor(Anchor::TopLeft)
+        .material(unlit.clone())
+        .text_material(unlit)
+        .with_tree(tonemapping_selector_tree(index))
         .build()
 }
 
@@ -1042,6 +1292,72 @@ fn anchor_alpha_selector_when_title_added(
     }
 }
 
+// Pins the tonemapping selector's top-left corner just under the alpha
+// selector's bottom-left, so both diagnostic controls move as one stack.
+fn tonemapping_selector_alpha_anchor(alpha_selector: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(alpha_selector, Anchor::TopLeft, Anchor::BottomLeft)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
+}
+
+fn anchor_tonemapping_selector_when_added(
+    trigger: On<Add, TonemappingSelectorPanel>,
+    alpha_selectors: Query<Entity, With<AlphaSelectorPanel>>,
+    mut commands: Commands,
+) {
+    let Ok(alpha_selector) = alpha_selectors.single() else {
+        return;
+    };
+    commands
+        .entity(trigger.entity)
+        .insert(tonemapping_selector_alpha_anchor(alpha_selector));
+}
+
+fn anchor_tonemapping_selector_when_alpha_added(
+    trigger: On<Add, AlphaSelectorPanel>,
+    tonemapping_selectors: Query<Entity, With<TonemappingSelectorPanel>>,
+    mut commands: Commands,
+) {
+    for selector in &tonemapping_selectors {
+        commands
+            .entity(selector)
+            .insert(tonemapping_selector_alpha_anchor(trigger.entity));
+    }
+}
+
+// Pins the text coverage selector under the tonemapping selector so HDR,
+// tonemapping, and coverage controls stay together.
+fn text_coverage_selector_tonemapping_anchor(tonemapping_selector: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(tonemapping_selector, Anchor::TopLeft, Anchor::BottomLeft)
+        .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
+}
+
+fn anchor_text_coverage_selector_when_added(
+    trigger: On<Add, TextCoverageSelectorPanel>,
+    tonemapping_selectors: Query<Entity, With<TonemappingSelectorPanel>>,
+    mut commands: Commands,
+) {
+    let Ok(tonemapping_selector) = tonemapping_selectors.single() else {
+        return;
+    };
+    commands
+        .entity(trigger.entity)
+        .insert(text_coverage_selector_tonemapping_anchor(
+            tonemapping_selector,
+        ));
+}
+
+fn anchor_text_coverage_selector_when_tonemapping_added(
+    trigger: On<Add, TonemappingSelectorPanel>,
+    coverage_selectors: Query<Entity, With<TextCoverageSelectorPanel>>,
+    mut commands: Commands,
+) {
+    for selector in &coverage_selectors {
+        commands
+            .entity(selector)
+            .insert(text_coverage_selector_tonemapping_anchor(trigger.entity));
+    }
+}
+
 // Center-left key legend: a title plus one numbered row per alpha mode. The
 // selected row is tinted and sits on a highlight bar so the current choice is
 // obvious; pressing the matching number key (1-7) selects that mode for the SDF
@@ -1062,7 +1378,7 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
                 |builder| {
                     builder.text(("alpha mode  (1-7)", ledger_title_style()));
                     for (slot, (label, _)) in ALPHA_MODES.iter().enumerate() {
-                        alpha_selector_row(builder, slot, label, slot == selected);
+                        selector_row(builder, slot + 1, label, slot == selected, ALPHA_ROW_WIDTH);
                     }
                 },
             );
@@ -1071,11 +1387,101 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
     builder.build()
 }
 
-fn alpha_selector_row(builder: &mut LayoutBuilder, slot: usize, label: &str, selected: bool) {
-    let number = slot + 1;
+// Tonemapping is a camera component, so this selector makes HDR text comparisons
+// possible without restarting the example. Press `T` to cycle the active row.
+fn tonemapping_selector_tree(selected: usize) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(TONEMAPPING_ROW_GAP),
+                |builder| {
+                    builder.text(("tonemapping  (T)", ledger_title_style()));
+                    for (slot, (label, _)) in TONEMAPPING_MODES.iter().enumerate() {
+                        selector_row(
+                            builder,
+                            slot + 1,
+                            label,
+                            slot == selected,
+                            TONEMAPPING_ROW_WIDTH,
+                        );
+                    }
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+// Text coverage bias is a cascading analytic-text value. The panel is
+// deliberately small because the useful test is a visual sweep under HDR: `[`
+// makes text thinner, `]` makes fractional edge pixels more opaque. HDR-off
+// rendering keeps the active cascade value at zero so it remains the comparison
+// baseline.
+fn text_coverage_selector_tree(
+    selected_bias: f32,
+    active_bias: f32,
+    hdr: RenderFeature,
+) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
+    let hdr_label = match hdr {
+        RenderFeature::On => "HDR on",
+        RenderFeature::Off => "HDR off",
+    };
+    let title = format!("text coverage {hdr_label}  ([ ])");
+    screen_panel_frame(
+        &mut builder,
+        Sizing::FIT,
+        Sizing::FIT,
+        DEFAULT_PANEL_BACKGROUND,
+        |builder| {
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(TEXT_COVERAGE_ROW_GAP),
+                |builder| {
+                    builder.text((title, ledger_title_style()));
+                    coverage_value_row(builder, "target", &format!("{selected_bias:+.2}"));
+                    coverage_value_row(builder, "active", &format!("{active_bias:+.2}"));
+                },
+            );
+        },
+    );
+    builder.build()
+}
+
+fn coverage_value_row(builder: &mut LayoutBuilder, label: &str, value: &str) {
+    let row = El::row()
+        .width(Sizing::fixed(TEXT_COVERAGE_ROW_WIDTH))
+        .height(Sizing::FIT)
+        .gap(LEDGER_CELL_GAP)
+        .padding(Padding::new(3.0, 3.0, 1.0, 1.0))
+        .corner_radius(CornerRadius::all(Mm(0.8)))
+        .alignment(AlignX::Left, AlignY::Center);
+    builder.with(row, |builder| {
+        builder.text((label, ledger_cell_style(TEXT_MUTED)));
+        builder.text((value, ledger_cell_style(ACCENT_YELLOW)));
+    });
+}
+
+fn selector_row(
+    builder: &mut LayoutBuilder,
+    number: usize,
+    label: &str,
+    selected: bool,
+    width: f32,
+) {
     let color = if selected { ACCENT_YELLOW } else { TEXT_MUTED };
     let row = El::row()
-        .width(Sizing::fixed(ALPHA_ROW_WIDTH))
+        .width(Sizing::fixed(width))
         .height(Sizing::FIT)
         .gap(LEDGER_CELL_GAP)
         .padding(Padding::new(3.0, 3.0, 1.0, 1.0))
@@ -2148,11 +2554,14 @@ fn divergent_alpha_case(builder: &mut LayoutBuilder, alpha: AlphaMode) {
         builder,
         "alpha mode (selector)",
         ALPHA_CELL_BG,
-        ALPHA_CELL_CAPTION,
+        material_caption_style(ALPHA_CELL_CAPTION)
+            .with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS),
         |builder| {
             builder.text((
                 alpha_mode_label(alpha),
-                material_value_style(ALPHA_CELL_INK).with_alpha_mode(alpha),
+                material_value_style(ALPHA_CELL_INK)
+                    .with_alpha_mode(alpha)
+                    .with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS),
             ));
         },
     );
@@ -2173,7 +2582,7 @@ fn divergent_texture_case(builder: &mut LayoutBuilder, materials: &TextPanelMate
         builder,
         "texture",
         MATERIAL_CASE_BG,
-        TEXT_MUTED,
+        material_caption_style(TEXT_MUTED),
         |builder| {
             builder.text((
                 "image glyphs",
@@ -2192,7 +2601,7 @@ fn divergent_cull_case(builder: &mut LayoutBuilder) {
         builder,
         "cull mode",
         MATERIAL_CASE_BG,
-        TEXT_MUTED,
+        material_caption_style(TEXT_MUTED),
         |builder| {
             builder.text((
                 "FrontOnly",
@@ -2217,7 +2626,7 @@ fn divergent_case_shell(
     builder: &mut LayoutBuilder,
     caption: &str,
     cell_bg: Color,
-    caption_color: Color,
+    caption_style: TextStyle,
     values: impl FnOnce(&mut LayoutBuilder),
 ) {
     builder.with(
@@ -2230,7 +2639,7 @@ fn divergent_case_shell(
             .background(cell_bg)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text((caption, material_caption_style(caption_color)));
+            builder.text((caption, caption_style));
             // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
             // bottom-up fit pass, forcing its text runs to wrap per word and
             // measure tall, which balloons the case height. FIT measures each

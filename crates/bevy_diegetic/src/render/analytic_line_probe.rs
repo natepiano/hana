@@ -265,13 +265,14 @@ fn build_line(
         * Mat4::from_translation(midpoint.extend(0.0))
         * Mat4::from_rotation_z(direction.to_angle());
     let run = PathRenderRecord {
-        transform:        run_transform,
-        material:         material_slot.into(),
-        render_mode:      u32::from(RenderMode::Text),
-        depth_nudge:      0.0,
-        oit_depth_offset: 0.0,
+        transform:          run_transform,
+        material:           material_slot.into(),
+        render_mode:        u32::from(RenderMode::Text),
+        depth_nudge:        0.0,
+        oit_depth_offset:   0.0,
         // Matches the probe material's supersample + aa_band settings.
-        aa_flags:         AntiAlias::Both.aa_flags(),
+        aa_flags:           AntiAlias::Both.aa_flags(),
+        text_coverage_bias: 0.0,
     };
 
     let instances = storage_buffers.add(ShaderBuffer::from(vec![instance]));

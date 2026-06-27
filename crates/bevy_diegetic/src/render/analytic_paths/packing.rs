@@ -188,19 +188,23 @@ pub(crate) struct PathQuadRecord {
 #[derive(Clone, Copy, Debug, PartialEq, ShaderType)]
 pub(crate) struct PathRenderRecord {
     /// Label world matrix (run layout space → world).
-    pub transform:        Mat4,
+    pub transform:          Mat4,
     /// Frame-local material-table row selected by this rendered path record.
-    pub material:         GpuMaterialSlotId,
+    pub material:           GpuMaterialSlotId,
     /// Visible render mode (`RenderMode` as `u32`).
-    pub render_mode:      u32,
+    pub render_mode:        u32,
     /// Clip-space depth nudge in layer units for non-OIT views.
-    pub depth_nudge:      f32,
+    pub depth_nudge:        f32,
     /// Per-run OIT position-z offset for coplanar ordering.
-    pub oit_depth_offset: f32,
+    pub oit_depth_offset:   f32,
     /// Resolved anti-alias mode bits (`AntiAlias::aa_flags`:
     /// `AA_FLAG_SUPERSAMPLE` | `AA_FLAG_BAND`). Per-record so an element-level
     /// AA override never splits a batch or material.
-    pub aa_flags:         u32,
+    pub aa_flags:           u32,
+    /// Signed coverage transfer for text paths. `0.0` leaves coverage
+    /// unchanged; positive values make fractional edge pixels more opaque, and
+    /// negative values make them thinner. Ignored by line and panel-shape paths.
+    pub text_coverage_bias: f32,
 }
 
 // GPU-layout assertions against the std430 sizes the shaders index by — the
@@ -635,18 +639,19 @@ mod tests {
 
     fn run_record(seed: f32) -> PathRenderRecord {
         PathRenderRecord {
-            transform:        Mat4::from_translation(bevy::math::Vec3::new(
+            transform:          Mat4::from_translation(bevy::math::Vec3::new(
                 seed,
                 -seed,
                 seed * 2.0,
             )),
-            material:         GpuMaterialSlotId::from(
+            material:           GpuMaterialSlotId::from(
                 MaterialSlotId::try_from(seed.to_bits()).expect("seed bits are valid slot ids"),
             ),
-            render_mode:      1,
-            depth_nudge:      seed,
-            oit_depth_offset: -seed,
-            aa_flags:         3,
+            render_mode:        1,
+            depth_nudge:        seed,
+            oit_depth_offset:   -seed,
+            aa_flags:           3,
+            text_coverage_bias: seed * 0.25,
         }
     }
 

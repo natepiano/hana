@@ -6,6 +6,7 @@ use super::CascadeDefault;
 use super::resolved;
 use super::resolved::CascadeAttr;
 pub use super::resolved::FontUnit;
+pub use super::resolved::HdrTextCoverageBias;
 use super::resolved::Override;
 use super::resolved::Resolved;
 pub use super::resolved::SdfMaterial;
@@ -38,6 +39,16 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored font unit.
     fn inherit_font_unit(&mut self) -> &mut Self;
+
+    /// Author this entity's HDR text coverage bias.
+    ///
+    /// `0.0` leaves analytic text coverage unchanged. Positive values make
+    /// fractional glyph edges more opaque and are useful for dark text that
+    /// looks too thin under HDR. Negative values make edges thinner.
+    fn override_hdr_text_coverage_bias(&mut self, bias: f32) -> &mut Self;
+
+    /// Remove this entity's authored HDR text coverage bias.
+    fn inherit_hdr_text_coverage_bias(&mut self) -> &mut Self;
 
     /// Author this entity's lighting mode.
     fn override_lighting(&mut self, lighting: Lighting) -> &mut Self;
@@ -94,6 +105,14 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
     }
 
     fn inherit_font_unit(&mut self) -> &mut Self { remove_cascade_override::<FontUnit>(self) }
+
+    fn override_hdr_text_coverage_bias(&mut self, bias: f32) -> &mut Self {
+        apply_cascade_override(self, HdrTextCoverageBias(bias))
+    }
+
+    fn inherit_hdr_text_coverage_bias(&mut self) -> &mut Self {
+        remove_cascade_override::<HdrTextCoverageBias>(self)
+    }
 
     fn override_lighting(&mut self, lighting: Lighting) -> &mut Self {
         apply_cascade_override(self, lighting)
@@ -160,6 +179,15 @@ pub fn resolved_text_alpha(world: &World, entity: Entity) -> AlphaMode {
 #[must_use]
 pub fn resolved_font_unit(world: &World, entity: Entity) -> Unit {
     resolved_cascade::<FontUnit>(world, entity).0
+}
+
+/// Resolve an entity's current HDR text coverage bias.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_hdr_text_coverage_bias(world: &World, entity: Entity) -> f32 {
+    resolved_cascade::<HdrTextCoverageBias>(world, entity).0
 }
 
 /// Resolve an entity's current lighting mode.

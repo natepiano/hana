@@ -612,6 +612,7 @@ mod tests {
             depth_nudge: 0.0,
             oit_depth_offset: 0.0,
             aa_flags: 3,
+            text_coverage_bias: 0.0,
         }
     }
 

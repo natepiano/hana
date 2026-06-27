@@ -104,6 +104,7 @@ use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
+use crate::cascade::HdrTextCoverageBias;
 use crate::layout::ShapedTextCache;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
@@ -154,11 +155,12 @@ impl Plugin for HeadlessLayoutPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(DiagnosticsPlugin)
             .add_plugins(CascadePlugin::<FontUnit>::default())
-            // Anti-alias and hairline fade live here, not in `RenderPlugin`,
-            // because `seed_panel_overrides` reads their `CascadeDefault<A>`
-            // resources — headless layout apps must have them.
+            // These live here, not in `RenderPlugin`, because
+            // `seed_panel_overrides` reads their `CascadeDefault<A>` resources
+            // — headless layout apps must have them.
             .add_plugins(CascadePlugin::<AntiAlias>::default())
             .add_plugins(CascadePlugin::<HairlineFade>::default())
+            .add_plugins(CascadePlugin::<HdrTextCoverageBias>::default())
             .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
@@ -185,7 +187,7 @@ impl Plugin for HeadlessLayoutPlugin {
                         .in_set(PanelSystems::ApplyConversions),
                     compute_layout::compute_panel_layouts.in_set(PanelSystems::ComputeLayout),
                     compute_layout::resolve_world_panel_fit.in_set(PanelSystems::ResolveWorldFit),
-                    diegetic_panel::sync_panel_material_overrides.before(CascadeSet::Propagate),
+                    diegetic_panel::sync_panel_cascade_overrides.before(CascadeSet::Propagate),
                 ),
             )
             .configure_sets(

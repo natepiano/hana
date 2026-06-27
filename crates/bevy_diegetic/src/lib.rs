@@ -39,6 +39,9 @@
 //!         ..default()
 //!     })
 //!     .insert_resource(CascadeDefault(TextAlpha(AlphaMode::Add)))
+//!     // Optional: compensate analytic glyph coverage when HDR makes dark text
+//!     // look too thin on light backgrounds. The default is no compensation.
+//!     .insert_resource(CascadeDefault(HdrTextCoverageBias(2.0)))
 //!     .add_plugins(DiegeticUiPlugin);
 //! ```
 
@@ -78,6 +81,7 @@ pub use cascade::CascadeEntityCommandsExt;
 pub use cascade::CascadeProperty;
 pub use cascade::CascadeSet;
 pub use cascade::FontUnit;
+pub use cascade::HdrTextCoverageBias;
 pub use cascade::SdfMaterial;
 pub use cascade::ShapeMaterial;
 pub use cascade::TextAlpha;
@@ -85,6 +89,7 @@ pub use cascade::TextMaterial;
 pub use cascade::resolved_anti_alias;
 pub use cascade::resolved_font_unit;
 pub use cascade::resolved_hairline_fade;
+pub use cascade::resolved_hdr_text_coverage_bias;
 pub use cascade::resolved_lighting;
 pub use cascade::resolved_sdf_material;
 pub use cascade::resolved_shape_material;

@@ -320,6 +320,7 @@ struct PathRenderRecord {
     depth_nudge: f32,
     oit_depth_offset: f32,
     aa_flags: u32,
+    text_coverage_bias: f32,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var<storage, read> instances: array<PathQuadRecord>;
@@ -401,6 +402,16 @@ fn run_aa_flags(in: VertexOutput) -> u32 {
         flags |= AA_FLAG_BAND;
     }
     return flags;
+#endif
+}
+
+// Per-run signed text coverage transfer. Only text paths consume this; line
+// and panel-shape paths ignore it structurally because `path.min_feature > 0`.
+fn run_text_coverage_bias(in: VertexOutput) -> f32 {
+#ifdef FRAGMENT_DATA_FROM_BATCHED_PATHS
+    return run_records[render_index(in)].text_coverage_bias;
+#else
+    return 0.0;
 #endif
 }
 
@@ -1373,11 +1384,23 @@ fn analytic_line_coverage(point: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, path: 
     return coverage;
 }
 
+fn apply_text_coverage_bias(coverage: f32, bias: f32) -> f32 {
+    let clamped = clamp(coverage, 0.0, 1.0);
+    if bias > 0.0 {
+        return 1.0 - pow(1.0 - clamped, 1.0 + bias);
+    }
+    if bias < 0.0 {
+        return pow(clamped, 1.0 - bias);
+    }
+    return clamped;
+}
+
 fn render_coverage(
     uv: vec2<f32>,
     path: PackedPathRecord,
     render_mode: u32,
     aa_flags: u32,
+    text_coverage_bias: f32,
 ) -> f32 {
     // Derivatives stay at the top, BEFORE any branch: aa_flags is per-run data
     // recovered from an interpolated varying, so the branches below are
@@ -1453,6 +1476,10 @@ fn render_coverage(
         coverage = sum * 0.25;
     } else {
         coverage = distance_coverage(point, pixel, dilation_max, hairline_target, path);
+    }
+
+    if path.min_feature == 0.0 {
+        coverage = apply_text_coverage_bias(coverage, text_coverage_bias);
     }
 
     if render_mode == RENDER_MODE_PUNCH_OUT {
@@ -1532,6 +1559,7 @@ fn fragment(
         path,
         run_render_mode(in),
         run_aa_flags(in),
+        run_text_coverage_bias(in),
     );
     let material_id = run_material_id(in);
     var pbr_input = pbr_input_from_material_table(

@@ -960,6 +960,7 @@ fn build_panel_line_group(
         depth_nudge: depth_bias,
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
+        text_coverage_bias: 0.0,
     };
     let instance = PathQuadRecord {
         rect_min:          path.rect_min,
@@ -1333,12 +1334,13 @@ fn padded_line_runs(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Path
     padded.resize(
         run_capacity.to_usize().max(records.len()),
         PathRenderRecord {
-            transform:        Mat4::ZERO,
-            material:         SdfPaintMaterial::NotAuthored.to_gpu(),
-            render_mode:      0,
-            depth_nudge:      0.0,
-            oit_depth_offset: 0.0,
-            aa_flags:         0,
+            transform:          Mat4::ZERO,
+            material:           SdfPaintMaterial::NotAuthored.to_gpu(),
+            render_mode:        0,
+            depth_nudge:        0.0,
+            oit_depth_offset:   0.0,
+            aa_flags:           0,
+            text_coverage_bias: 0.0,
         },
     );
     padded
@@ -2684,12 +2686,13 @@ mod tests {
                 box_uv_flip_x:     0,
             },
             run:      PathRenderRecord {
-                transform:        Mat4::IDENTITY,
-                material:         SdfPaintMaterial::NotAuthored.to_gpu(),
-                render_mode:      u32::from(RenderMode::Text),
-                depth_nudge:      0.0,
-                oit_depth_offset: 0.0,
-                aa_flags:         AntiAlias::Both.aa_flags(),
+                transform:          Mat4::IDENTITY,
+                material:           SdfPaintMaterial::NotAuthored.to_gpu(),
+                render_mode:        u32::from(RenderMode::Text),
+                depth_nudge:        0.0,
+                oit_depth_offset:   0.0,
+                aa_flags:           AntiAlias::Both.aa_flags(),
+                text_coverage_bias: 0.0,
             },
         }
     }

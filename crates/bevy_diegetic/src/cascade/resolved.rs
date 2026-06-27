@@ -4,6 +4,7 @@
 use core::mem::size_of;
 
 use bevy::asset::Handle;
+use bevy::log::warn_once;
 use bevy::pbr::StandardMaterial;
 use bevy::prelude::*;
 use bevy::reflect::GetTypeRegistration;
@@ -84,6 +85,44 @@ cascade_attr!(
     FontUnit(Unit),
     default = Unit::Meters
 );
+cascade_attr!(
+    /// HDR text coverage-bias cascade attribute.
+    ///
+    /// `0.0` leaves analytic glyph coverage unchanged. Positive values make
+    /// fractional glyph-edge pixels more opaque, which can compensate for dark
+    /// text looking too thin when an HDR camera renders into a float target.
+    /// Negative values make fractional edges thinner. Use this for text that
+    /// degrades under HDR, especially dark text on light backgrounds; avoid
+    /// applying it broadly to light text on dark backgrounds unless that scene
+    /// has been tuned, because the same compensation can make those glyphs look
+    /// heavier.
+    HdrTextCoverageBias(f32),
+    default = 0.0
+);
+
+const HDR_TEXT_COVERAGE_BIAS_MIN: f32 = -4.0;
+const HDR_TEXT_COVERAGE_BIAS_MAX: f32 = 4.0;
+
+impl HdrTextCoverageBias {
+    /// Value sent to `PathRenderRecord::text_coverage_bias`.
+    ///
+    /// The public authored value is intentionally plain `f32` so it can be
+    /// tuned live, including through reflection. The shader path clamps it to a
+    /// bounded signed transfer and treats non-finite input as no compensation.
+    #[must_use]
+    pub(crate) fn shader_value(self) -> f32 {
+        if self.0.is_finite() {
+            self.0
+                .clamp(HDR_TEXT_COVERAGE_BIAS_MIN, HDR_TEXT_COVERAGE_BIAS_MAX)
+        } else {
+            warn_once!(
+                "HdrTextCoverageBias value {} is not finite; rendering text without HDR coverage compensation",
+                self.0
+            );
+            0.0
+        }
+    }
+}
 
 /// Source-material handle cascade for SDF backgrounds, borders, and element surfaces.
 ///
