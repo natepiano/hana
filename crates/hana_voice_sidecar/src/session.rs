@@ -4,37 +4,46 @@ use std::collections::VecDeque;
 
 use bevy_kana::ToF32;
 
-const NOISE_FLOOR_ALPHA: f32 = 0.05;
-const NOISE_FLOOR_START_MULTIPLIER: f32 = 2.6;
-const NOISE_FLOOR_RELEASE_MULTIPLIER: f32 = 1.7;
-const RELEASE_THRESHOLD_RATIO: f32 = 0.55;
+use crate::vad::VadEngine;
 
 /// Voice session configuration.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SessionConfig {
-    /// Absolute RMS floor required before a chunk can begin speech.
-    pub speech_rms_threshold: f32,
+    /// VAD probability required before a frame can begin speech.
+    pub speech_probability_threshold:         f32,
+    /// VAD probability required to keep speech active after it begins.
+    pub speech_release_probability_threshold: f32,
     /// Sustained speech required before leaving the armed phase.
-    pub speech_start_ms:      u64,
+    pub speech_start_ms:                      u64,
+    /// Time low-confidence release frames may hold active speech open.
+    pub speech_hangover_ms:                   u64,
     /// Audio retained before detected speech starts.
-    pub pre_roll_ms:          u64,
+    pub pre_roll_ms:                          u64,
     /// Silence required before the utterance is committed.
-    pub silence_commit_ms:    u64,
+    pub silence_commit_ms:                    u64,
+    /// Active audio window age that triggers an STT probe even without silence.
+    pub candidate_probe_ms:                   u64,
+    /// Additional active audio required before another STT probe.
+    pub candidate_probe_interval_ms:          u64,
     /// Hard cap for one utterance.
-    pub max_utterance_ms:     u64,
+    pub max_utterance_ms:                     u64,
     /// Minimum speech duration before committing.
-    pub min_speech_ms:        u64,
+    pub min_speech_ms:                        u64,
 }
 
 impl Default for SessionConfig {
     fn default() -> Self {
         Self {
-            speech_rms_threshold: 0.015,
-            speech_start_ms:      120,
-            pre_roll_ms:          400,
-            silence_commit_ms:    900,
-            max_utterance_ms:     30_000,
-            min_speech_ms:        120,
+            speech_probability_threshold:         0.36,
+            speech_release_probability_threshold: 0.24,
+            speech_start_ms:                      64,
+            speech_hangover_ms:                   160,
+            pre_roll_ms:                          650,
+            silence_commit_ms:                    850,
+            candidate_probe_ms:                   1_800,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     30_000,
+            min_speech_ms:                        64,
         }
     }
 }
@@ -96,6 +105,8 @@ pub enum SessionEvent {
     },
     /// Candidate audio window is complete and can be written/transcribed.
     AudioCommitted(CommittedUtterance),
+    /// A provisional audio window is ready for STT while capture continues.
+    CandidateReady(CommittedUtterance),
     /// Speech ended before the minimum duration.
     SpeechTooShort {
         /// Session id.
@@ -124,25 +135,49 @@ pub struct CommittedUtterance {
 #[derive(Clone, Debug, PartialEq)]
 pub struct VoiceSessionSnapshot {
     /// Current session phase.
-    pub phase:       SessionPhase,
+    pub phase:                SessionPhase,
     /// Active session id, if any.
-    pub session_id:  Option<String>,
+    pub session_id:           Option<String>,
     /// Last RMS level observed.
-    pub rms:         f32,
+    pub rms:                  f32,
     /// Current silence window in milliseconds.
-    pub silence_ms:  u64,
+    pub silence_ms:           u64,
     /// Speech duration in milliseconds.
-    pub speech_ms:   u64,
+    pub speech_ms:            u64,
     /// Full recording duration in milliseconds.
-    pub recorded_ms: u64,
-    /// Estimated ambient noise floor.
-    pub noise_rms:   f32,
-    /// Current speech-start gate.
-    pub gate_rms:    f32,
+    pub recorded_ms:          u64,
+    /// Last VAD voice probability.
+    pub vad_probability:      f32,
+    /// Current VAD speech-start probability.
+    pub vad_gate_probability: f32,
     /// Last committed transcript or status text.
-    pub transcript:  Option<String>,
+    pub transcript:           Option<String>,
     /// Last error message.
-    pub error:       Option<String>,
+    pub error:                Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct VadDecision {
+    start_samples:   usize,
+    release_samples: usize,
+    start:           VadSignal,
+    release:         VadSignal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum VadSignal {
+    Inactive,
+    Active,
+}
+
+impl VadSignal {
+    const fn from_samples(samples: usize) -> Self {
+        if samples > 0 {
+            Self::Active
+        } else {
+            Self::Inactive
+        }
+    }
 }
 
 /// Stateful VAD session.
@@ -157,9 +192,11 @@ pub struct VoiceSession {
     silence_samples:      usize,
     speech_samples:       usize,
     speech_start_samples: usize,
-    recorded_samples:     usize,
+    next_probe_samples:   usize,
+    candidate_count:      u32,
     last_rms:             f32,
-    noise_floor_rms:      f32,
+    last_vad_probability: f32,
+    vad:                  VadEngine,
     transcript:           Option<String>,
     error:                Option<String>,
 }
@@ -167,7 +204,7 @@ pub struct VoiceSession {
 impl VoiceSession {
     /// Creates a new idle session state machine.
     #[must_use]
-    pub const fn new(config: SessionConfig, sample_rate: u32) -> Self {
+    pub fn new(config: SessionConfig, sample_rate: u32) -> Self {
         Self {
             config,
             sample_rate,
@@ -178,9 +215,11 @@ impl VoiceSession {
             silence_samples: 0,
             speech_samples: 0,
             speech_start_samples: 0,
-            recorded_samples: 0,
+            next_probe_samples: 0,
+            candidate_count: 0,
             last_rms: 0.0,
-            noise_floor_rms: 0.0,
+            last_vad_probability: 0.0,
+            vad: VadEngine::new(sample_rate),
             transcript: None,
             error: None,
         }
@@ -207,6 +246,7 @@ impl VoiceSession {
         self.phase = SessionPhase::Idle;
         self.session_id = None;
         self.clear_audio_window();
+        self.vad.reset();
     }
 
     fn clear_audio_window(&mut self) {
@@ -215,8 +255,10 @@ impl VoiceSession {
         self.silence_samples = 0;
         self.speech_samples = 0;
         self.speech_start_samples = 0;
-        self.recorded_samples = 0;
+        self.next_probe_samples = 0;
+        self.candidate_count = 0;
         self.last_rms = 0.0;
+        self.last_vad_probability = 0.0;
     }
 
     /// Processes new mono samples and returns any resulting state events.
@@ -234,20 +276,70 @@ impl VoiceSession {
         }
 
         let mut events = Vec::new();
-        self.recorded_samples = self.recorded_samples.saturating_add(samples.len());
-        let start_gate = self.speech_start_gate();
-        let release_gate = self.speech_release_gate();
-        let starts_speech = self.last_rms >= start_gate;
-        let continues_speech = self.last_rms >= release_gate;
+        let Some(decision) = self.vad_decision(samples) else {
+            self.record_without_vad_frames(samples);
+            return events;
+        };
+        self.apply_vad_decision(samples, decision, &mut events);
+        self.commit_ready_audio(&mut events);
+        events
+    }
 
-        match (self.phase, starts_speech, continues_speech) {
-            (SessionPhase::Armed, false, _) => {
+    fn vad_decision(&mut self, samples: &[f32]) -> Option<VadDecision> {
+        let frames = self.vad.process(samples);
+        if frames.is_empty() {
+            return None;
+        }
+        if let Some(probability) = frames
+            .iter()
+            .map(|frame| frame.probability)
+            .max_by(f32::total_cmp)
+        {
+            self.last_vad_probability = probability;
+        }
+        let start_samples = frames
+            .iter()
+            .filter(|frame| frame.probability >= self.config.speech_probability_threshold)
+            .map(|frame| frame.source_samples)
+            .sum();
+        let release_samples = frames
+            .iter()
+            .filter(|frame| frame.probability >= self.config.speech_release_probability_threshold)
+            .map(|frame| frame.source_samples)
+            .sum();
+        Some(VadDecision {
+            start_samples,
+            release_samples,
+            start: VadSignal::from_samples(start_samples),
+            release: VadSignal::from_samples(release_samples),
+        })
+    }
+
+    fn record_without_vad_frames(&mut self, samples: &[f32]) {
+        match self.phase {
+            SessionPhase::Armed => self.push_pre_roll(samples),
+            SessionPhase::Listening | SessionPhase::Settling => {
+                self.samples.extend_from_slice(samples);
+            },
+            _ => {},
+        }
+    }
+
+    fn apply_vad_decision(
+        &mut self,
+        samples: &[f32],
+        decision: VadDecision,
+        events: &mut Vec<SessionEvent>,
+    ) {
+        match (self.phase, decision.start, decision.release) {
+            (SessionPhase::Armed, VadSignal::Inactive, _) => {
                 self.speech_start_samples = 0;
                 self.push_pre_roll(samples);
-                self.update_noise_floor();
             },
-            (SessionPhase::Armed, true, _) => {
-                self.speech_start_samples = self.speech_start_samples.saturating_add(samples.len());
+            (SessionPhase::Armed, VadSignal::Active, _) => {
+                self.speech_start_samples = self
+                    .speech_start_samples
+                    .saturating_add(decision.start_samples);
                 self.push_pre_roll(samples);
                 if self.speech_start_ms() >= self.config.speech_start_ms {
                     self.phase = SessionPhase::Listening;
@@ -259,47 +351,87 @@ impl VoiceSession {
                     }
                 }
             },
-            (SessionPhase::Listening, _, true) => {
+            (SessionPhase::Listening, VadSignal::Active, _) => {
                 self.samples.extend_from_slice(samples);
-                self.speech_samples = self.speech_samples.saturating_add(samples.len());
+                self.speech_samples = self.speech_samples.saturating_add(decision.release_samples);
                 self.silence_samples = 0;
             },
-            (SessionPhase::Listening, _, false) => {
-                self.phase = SessionPhase::Settling;
+            (SessionPhase::Listening, VadSignal::Inactive, _) => {
                 self.samples.extend_from_slice(samples);
+                self.speech_samples = self.speech_samples.saturating_add(decision.release_samples);
                 self.silence_samples = self.silence_samples.saturating_add(samples.len());
-                self.update_noise_floor();
-                if let Some(session_id) = self.session_id.clone() {
-                    events.push(SessionEvent::SpeechSettling { session_id });
+                if self.silence_ms() >= self.config.speech_hangover_ms {
+                    self.phase = SessionPhase::Settling;
+                    if let Some(session_id) = self.session_id.clone() {
+                        events.push(SessionEvent::SpeechSettling { session_id });
+                    }
                 }
             },
-            (SessionPhase::Settling, _, true) => {
+            (SessionPhase::Settling, VadSignal::Active, _) => {
                 self.phase = SessionPhase::Listening;
                 self.samples.extend_from_slice(samples);
-                self.speech_samples = self.speech_samples.saturating_add(samples.len());
+                self.speech_samples = self.speech_samples.saturating_add(decision.release_samples);
                 self.silence_samples = 0;
+                if let Some(session_id) = self.session_id.clone() {
+                    events.push(SessionEvent::SpeechStarted { session_id });
+                }
             },
-            (SessionPhase::Settling, false, _) => {
+            (SessionPhase::Settling, VadSignal::Inactive, _) => {
                 self.samples.extend_from_slice(samples);
+                self.speech_samples = self.speech_samples.saturating_add(decision.release_samples);
                 self.silence_samples = self.silence_samples.saturating_add(samples.len());
-                self.update_noise_floor();
             },
             _ => {},
         }
+    }
 
-        if matches!(self.phase, SessionPhase::Listening | SessionPhase::Settling)
-            && self.recorded_ms() >= self.config.max_utterance_ms
-        {
-            self.silence_samples = self.ms_to_samples(self.config.silence_commit_ms);
-        }
-
+    fn commit_ready_audio(&mut self, events: &mut Vec<SessionEvent>) {
         if self.phase == SessionPhase::Settling
             && self.silence_ms() >= self.config.silence_commit_ms
         {
             events.push(self.commit());
+            return;
         }
 
-        events
+        if matches!(self.phase, SessionPhase::Listening | SessionPhase::Settling)
+            && self.config.candidate_probe_ms > 0
+            && self.audio_window_ms() >= self.config.candidate_probe_ms
+        {
+            self.push_candidate_probe(events);
+        }
+
+        if matches!(self.phase, SessionPhase::Listening | SessionPhase::Settling)
+            && self.audio_window_ms() >= self.config.max_utterance_ms
+        {
+            self.phase = SessionPhase::Settling;
+            self.silence_samples = self.ms_to_samples(self.config.silence_commit_ms);
+            events.push(self.commit());
+        }
+    }
+
+    fn push_candidate_probe(&mut self, events: &mut Vec<SessionEvent>) {
+        if self.next_probe_samples == 0 {
+            self.next_probe_samples = self.ms_to_samples(self.config.candidate_probe_ms);
+        }
+        if self.samples.len() < self.next_probe_samples {
+            return;
+        }
+        let Some(session_id) = self.session_id.clone() else {
+            return;
+        };
+        self.candidate_count = self.candidate_count.saturating_add(1);
+        let interval_ms = self.config.candidate_probe_interval_ms.max(1);
+        self.next_probe_samples = self
+            .next_probe_samples
+            .saturating_add(self.ms_to_samples(interval_ms));
+        events.push(SessionEvent::CandidateReady(CommittedUtterance {
+            session_id:           format!("{session_id}-probe-{}", self.candidate_count),
+            samples:              self.samples.clone(),
+            sample_rate:          self.sample_rate,
+            speech_duration_ms:   self.speech_ms(),
+            silence_ms:           self.silence_ms(),
+            recorded_duration_ms: self.audio_window_ms(),
+        }));
     }
 
     /// Marks the session as waiting on transcription.
@@ -321,16 +453,16 @@ impl VoiceSession {
     #[must_use]
     pub fn snapshot(&self) -> VoiceSessionSnapshot {
         VoiceSessionSnapshot {
-            phase:       self.phase,
-            session_id:  self.session_id.clone(),
-            rms:         self.last_rms,
-            silence_ms:  self.silence_ms(),
-            speech_ms:   self.speech_ms(),
-            recorded_ms: self.recorded_ms(),
-            noise_rms:   self.noise_floor_rms,
-            gate_rms:    self.speech_start_gate(),
-            transcript:  self.transcript.clone(),
-            error:       self.error.clone(),
+            phase:                self.phase,
+            session_id:           self.session_id.clone(),
+            rms:                  self.last_rms,
+            silence_ms:           self.silence_ms(),
+            speech_ms:            self.speech_ms(),
+            recorded_ms:          self.audio_window_ms(),
+            vad_probability:      self.last_vad_probability,
+            vad_gate_probability: self.config.speech_probability_threshold,
+            transcript:           self.transcript.clone(),
+            error:                self.error.clone(),
         }
     }
 
@@ -360,7 +492,7 @@ impl VoiceSession {
             sample_rate: self.sample_rate,
             speech_duration_ms: self.speech_ms(),
             silence_ms: self.silence_ms(),
-            recorded_duration_ms: self.recorded_ms(),
+            recorded_duration_ms: self.audio_window_ms(),
         })
     }
 
@@ -372,33 +504,7 @@ impl VoiceSession {
     fn silence_ms(&self) -> u64 { samples_to_ms(self.silence_samples, self.sample_rate) }
     fn speech_ms(&self) -> u64 { samples_to_ms(self.speech_samples, self.sample_rate) }
     fn speech_start_ms(&self) -> u64 { samples_to_ms(self.speech_start_samples, self.sample_rate) }
-    fn recorded_ms(&self) -> u64 { samples_to_ms(self.recorded_samples, self.sample_rate) }
-
-    const fn speech_start_gate(&self) -> f32 {
-        self.config.speech_rms_threshold.max(
-            self.noise_floor_rms
-                .mul_add(NOISE_FLOOR_START_MULTIPLIER, 0.0),
-        )
-    }
-
-    fn speech_release_gate(&self) -> f32 {
-        let absolute = self.config.speech_rms_threshold * RELEASE_THRESHOLD_RATIO;
-        let adaptive = self.noise_floor_rms * NOISE_FLOOR_RELEASE_MULTIPLIER;
-        absolute.max(adaptive)
-    }
-
-    fn update_noise_floor(&mut self) {
-        if self.last_rms <= 0.0 {
-            return;
-        }
-        if self.noise_floor_rms <= 0.0 {
-            self.noise_floor_rms = self.last_rms;
-        } else {
-            self.noise_floor_rms = self
-                .noise_floor_rms
-                .mul_add(1.0 - NOISE_FLOOR_ALPHA, self.last_rms * NOISE_FLOOR_ALPHA);
-        }
-    }
+    fn audio_window_ms(&self) -> u64 { samples_to_ms(self.samples.len(), self.sample_rate) }
 }
 
 fn samples_to_ms(samples: usize, sample_rate: u32) -> u64 {
@@ -421,12 +527,16 @@ mod tests {
     #[test]
     fn commits_after_speech_and_silence() {
         let config = SessionConfig {
-            speech_rms_threshold: 0.1,
-            speech_start_ms:      50,
-            pre_roll_ms:          100,
-            silence_commit_ms:    100,
-            max_utterance_ms:     5_000,
-            min_speech_ms:        50,
+            speech_probability_threshold:         0.1,
+            speech_release_probability_threshold: 0.05,
+            speech_start_ms:                      50,
+            speech_hangover_ms:                   20,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        50,
         };
         let mut session = VoiceSession::new(config, 1_000);
         let _event = session.arm("session-1");
@@ -449,12 +559,16 @@ mod tests {
     #[test]
     fn returns_to_listening_when_speech_resumes_before_commit() {
         let config = SessionConfig {
-            speech_rms_threshold: 0.1,
-            speech_start_ms:      50,
-            pre_roll_ms:          100,
-            silence_commit_ms:    200,
-            max_utterance_ms:     5_000,
-            min_speech_ms:        50,
+            speech_probability_threshold:         0.1,
+            speech_release_probability_threshold: 0.05,
+            speech_start_ms:                      50,
+            speech_hangover_ms:                   50,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    200,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        50,
         };
         let mut session = VoiceSession::new(config, 1_000);
         let _event = session.arm("session-2");
@@ -467,37 +581,44 @@ mod tests {
     }
 
     #[test]
-    fn ignores_background_noise_near_the_old_gate() {
+    fn ignores_background_noise_below_vad_gate() {
         let config = SessionConfig {
-            speech_rms_threshold: 0.020,
-            speech_start_ms:      220,
-            pre_roll_ms:          400,
-            silence_commit_ms:    900,
-            max_utterance_ms:     5_000,
-            min_speech_ms:        350,
+            speech_probability_threshold:         0.45,
+            speech_release_probability_threshold: 0.25,
+            speech_start_ms:                      64,
+            speech_hangover_ms:                   160,
+            pre_roll_ms:                          400,
+            silence_commit_ms:                    900,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        64,
         };
         let mut session = VoiceSession::new(config, 1_000);
         let _event = session.arm("session-noise");
 
         for _step in 0..50 {
-            assert!(session.process_samples(&[0.012; 20]).is_empty());
+            assert!(session.process_samples(&[0.12; 20]).is_empty());
         }
 
         let snapshot = session.snapshot();
         assert_eq!(session.phase(), SessionPhase::Armed);
-        assert!(snapshot.noise_rms >= 0.011);
-        assert!(snapshot.gate_rms >= 0.030);
+        assert!(snapshot.vad_probability < snapshot.vad_gate_probability);
     }
 
     #[test]
     fn requires_sustained_audio_before_speech_starts() {
         let config = SessionConfig {
-            speech_rms_threshold: 0.1,
-            speech_start_ms:      200,
-            pre_roll_ms:          200,
-            silence_commit_ms:    100,
-            max_utterance_ms:     5_000,
-            min_speech_ms:        50,
+            speech_probability_threshold:         0.1,
+            speech_release_probability_threshold: 0.05,
+            speech_start_ms:                      200,
+            speech_hangover_ms:                   20,
+            pre_roll_ms:                          200,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        50,
         };
         let mut session = VoiceSession::new(config, 1_000);
         let _event = session.arm("session-start");
@@ -514,14 +635,18 @@ mod tests {
     }
 
     #[test]
-    fn captures_short_command_after_noise_floor_calibration() {
+    fn captures_short_command() {
         let config = SessionConfig {
-            speech_rms_threshold: 0.015,
-            speech_start_ms:      120,
-            pre_roll_ms:          400,
-            silence_commit_ms:    100,
-            max_utterance_ms:     5_000,
-            min_speech_ms:        120,
+            speech_probability_threshold:         0.02,
+            speech_release_probability_threshold: 0.01,
+            speech_start_ms:                      120,
+            speech_hangover_ms:                   20,
+            pre_roll_ms:                          400,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        120,
         };
         let mut session = VoiceSession::new(config, 1_000);
         let _event = session.arm("session-short");
@@ -540,6 +665,135 @@ mod tests {
         assert!(matches!(
             events.last(),
             Some(SessionEvent::AudioCommitted(committed)) if committed.speech_duration_ms == 120
+        ));
+    }
+
+    #[test]
+    fn max_utterance_commits_even_if_release_gate_stays_active() {
+        let config = SessionConfig {
+            speech_probability_threshold:         0.1,
+            speech_release_probability_threshold: 0.01,
+            speech_start_ms:                      50,
+            speech_hangover_ms:                   100,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     300,
+            min_speech_ms:                        50,
+        };
+        let mut session = VoiceSession::new(config, 1_000);
+        let _event = session.arm("session-cap");
+
+        assert!(
+            session
+                .process_samples(&[0.5; 80])
+                .iter()
+                .any(|event| { matches!(event, SessionEvent::SpeechStarted { .. }) })
+        );
+        let events = session.process_samples(&[0.02; 300]);
+
+        assert_eq!(session.phase(), SessionPhase::Complete);
+        assert!(matches!(
+            events.last(),
+            Some(SessionEvent::AudioCommitted(committed)) if committed.recorded_duration_ms >= 300
+        ));
+    }
+
+    #[test]
+    fn one_vad_frame_keeps_active_speech_alive() {
+        let config = SessionConfig {
+            speech_probability_threshold:         0.1,
+            speech_release_probability_threshold: 0.05,
+            speech_start_ms:                      16,
+            speech_hangover_ms:                   100,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        16,
+        };
+        let mut session = VoiceSession::new(config, 1_000);
+        let _event = session.arm("session-frame");
+
+        assert!(
+            session
+                .process_samples(&[0.5; 16])
+                .iter()
+                .any(|event| { matches!(event, SessionEvent::SpeechStarted { .. }) })
+        );
+        assert!(session.process_samples(&[0.5; 16]).is_empty());
+
+        assert_eq!(session.phase(), SessionPhase::Listening);
+    }
+
+    #[test]
+    fn release_gate_alone_cannot_hold_listening_forever() {
+        let config = SessionConfig {
+            speech_probability_threshold:         0.5,
+            speech_release_probability_threshold: 0.1,
+            speech_start_ms:                      50,
+            speech_hangover_ms:                   50,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   5_000,
+            candidate_probe_interval_ms:          1_000,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        50,
+        };
+        let mut session = VoiceSession::new(config, 1_000);
+        let _event = session.arm("session-release");
+
+        assert!(
+            session
+                .process_samples(&[0.6; 60])
+                .iter()
+                .any(|event| { matches!(event, SessionEvent::SpeechStarted { .. }) })
+        );
+        assert!(session.process_samples(&[0.2; 40]).is_empty());
+        let events = session.process_samples(&[0.2; 10]);
+
+        assert_eq!(session.phase(), SessionPhase::Settling);
+        assert!(
+            events
+                .iter()
+                .any(|event| { matches!(event, SessionEvent::SpeechSettling { .. }) })
+        );
+
+        let events = session.process_samples(&[0.2; 50]);
+
+        assert!(matches!(
+            events.last(),
+            Some(SessionEvent::AudioCommitted(committed)) if committed.recorded_duration_ms >= 160
+        ));
+    }
+
+    #[test]
+    fn emits_candidate_probe_while_background_keeps_listening_active() {
+        let config = SessionConfig {
+            speech_probability_threshold:         0.5,
+            speech_release_probability_threshold: 0.1,
+            speech_start_ms:                      50,
+            speech_hangover_ms:                   100,
+            pre_roll_ms:                          100,
+            silence_commit_ms:                    100,
+            candidate_probe_ms:                   150,
+            candidate_probe_interval_ms:          100,
+            max_utterance_ms:                     5_000,
+            min_speech_ms:                        50,
+        };
+        let mut session = VoiceSession::new(config, 1_000);
+        let _event = session.arm("session-probe");
+
+        let _events = session.process_samples(&[0.6; 80]);
+        let events = session.process_samples(&[0.6; 100]);
+
+        assert_eq!(session.phase(), SessionPhase::Listening);
+        assert!(matches!(
+            events.last(),
+            Some(SessionEvent::CandidateReady(committed))
+                if committed.session_id == "session-probe-probe-1"
         ));
     }
 }

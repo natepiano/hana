@@ -1,12 +1,14 @@
 //! Bevy feedback UI for the Hana voice sidecar POC.
 //!
 //! Press space to toggle continuous transcription. While enabled, the sidecar
-//! proposes candidate windows after pauses, lets Apple Speech validate them, and
-//! appends committed transcript JSONL for the agent.
+//! probes active audio windows, lets Apple Speech validate them, and commits the
+//! best stable transcript JSONL for the agent.
 
+use std::collections::VecDeque;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::path::PathBuf;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -39,6 +41,7 @@ use fairy_dust::cube_face_transform;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 use hana_voice_sidecar::AudioInput;
+use hana_voice_sidecar::CommittedUtterance;
 use hana_voice_sidecar::PendingTranscription;
 use hana_voice_sidecar::RuntimeEvent;
 use hana_voice_sidecar::RuntimeLog;
@@ -66,6 +69,9 @@ const STATUS_PANEL_GAP: f32 = 8.0;
 const STATUS_ROW_GAP: f32 = 10.0;
 const STATUS_LABEL_WIDTH: f32 = 116.0;
 const STATUS_DIVIDER_HEIGHT: f32 = 1.5;
+const MAX_QUEUED_TRANSCRIPTIONS: usize = 3;
+const TENTATIVE_STABILITY_MS: u64 = 1_600;
+const COMPLETED_ROOTS_MAX: usize = 16;
 
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.94, 0.98);
 const MUTED_COLOR: Color = Color::srgb(0.68, 0.72, 0.78);
@@ -117,7 +123,13 @@ fn main() {
         .add_systems(PostStartup, spawn_cube_prompt_faces)
         .add_systems(
             Update,
-            (drain_audio, poll_transcription, refresh_feedback).chain(),
+            (
+                drain_audio,
+                poll_transcription,
+                promote_tentative_transcript,
+                refresh_feedback,
+            )
+                .chain(),
         )
         .with_shortcut(KeyCode::Space, toggle_listening_loop)
         .run();
@@ -125,14 +137,44 @@ fn main() {
 
 #[derive(Resource)]
 struct SidecarRuntime {
-    audio:       Result<AudioInput, String>,
-    log:         Result<RuntimeLog, String>,
-    session:     VoiceSession,
-    pending:     Vec<PendingTranscription>,
-    loop_state:  ListeningLoop,
-    last_event:  String,
-    last_text:   Option<String>,
-    last_status: String,
+    audio:           Result<AudioInput, String>,
+    log:             Result<RuntimeLog, String>,
+    session:         VoiceSession,
+    pending:         Vec<PendingTranscriptionJob>,
+    queued:          VecDeque<QueuedTranscription>,
+    tentative:       Option<TentativeTranscript>,
+    completed_roots: VecDeque<String>,
+    loop_state:      ListeningLoop,
+    last_event:      String,
+    last_text:       Option<String>,
+    last_status:     String,
+}
+
+struct QueuedTranscription {
+    session_id:      String,
+    root_session_id: String,
+    audio_path:      PathBuf,
+    purpose:         TranscriptionPurpose,
+}
+
+struct PendingTranscriptionJob {
+    transcription:   PendingTranscription,
+    root_session_id: String,
+    purpose:         TranscriptionPurpose,
+}
+
+struct TentativeTranscript {
+    root_session_id: String,
+    text:            String,
+    backend:         String,
+    audio_path:      String,
+    deadline_ms:     u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TranscriptionPurpose {
+    Probe,
+    Final,
 }
 
 impl SidecarRuntime {
@@ -151,6 +193,9 @@ impl SidecarRuntime {
             log,
             session: VoiceSession::new(SessionConfig::default(), sample_rate),
             pending: Vec::new(),
+            queued: VecDeque::new(),
+            tentative: None,
+            completed_roots: VecDeque::new(),
             loop_state: ListeningLoop::Off,
             last_event: String::from("Press space to start"),
             last_text: None,
@@ -175,6 +220,42 @@ impl SidecarRuntime {
     }
 
     fn paths(&self) -> Option<&RuntimePaths> { self.log.as_ref().ok().map(RuntimeLog::paths) }
+
+    fn transcription_work_count(&self) -> usize { self.pending.len() + self.queued.len() }
+
+    fn has_transcription_work(&self) -> bool { self.transcription_work_count() > 0 }
+
+    fn is_completed_root(&self, root_session_id: &str) -> bool {
+        self.completed_roots
+            .iter()
+            .any(|completed| completed == root_session_id)
+    }
+
+    fn mark_root_completed(&mut self, root_session_id: String) {
+        if self.is_completed_root(&root_session_id) {
+            return;
+        }
+        self.completed_roots.push_back(root_session_id);
+        while self.completed_roots.len() > COMPLETED_ROOTS_MAX {
+            let _old = self.completed_roots.pop_front();
+        }
+    }
+
+    fn clear_error_text(&mut self) {
+        if self
+            .last_text
+            .as_deref()
+            .is_some_and(|text| text.starts_with("Error:"))
+        {
+            self.last_text = None;
+        }
+    }
+
+    fn clear_transcription_status(&mut self) {
+        if self.last_status.starts_with("Transcription failed:") {
+            self.last_status = String::from(MIC_READY);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -195,6 +276,18 @@ impl ListeningLoop {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum InboxAppend {
     Written,
+    Skipped,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CandidateAudioWrite {
+    Written,
+    Failed,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TentativePromotion {
+    Applied,
     Skipped,
 }
 
@@ -258,10 +351,13 @@ fn toggle_listening_loop(mut runtime: ResMut<SidecarRuntime>) {
     if runtime.loop_state == ListeningLoop::On {
         runtime.loop_state = ListeningLoop::Off;
         runtime.session.stop();
-        runtime.last_event = if runtime.pending.is_empty() {
-            String::from("Stopped")
+        runtime.last_event = if runtime.has_transcription_work() {
+            format!(
+                "Stopped; finishing {} transcript(s)",
+                runtime.transcription_work_count()
+            )
         } else {
-            format!("Stopped; finishing {} transcript(s)", runtime.pending.len())
+            String::from("Stopped")
         };
         return;
     }
@@ -276,6 +372,7 @@ fn arm_next_session(runtime: &mut SidecarRuntime, source: &'static str) {
     let SessionEvent::ListenArmed { session_id } = runtime.session.arm(session_id) else {
         return;
     };
+    runtime.clear_error_text();
     runtime.last_event = match source {
         "keyboard_space" => String::from("Listening. Speak anytime."),
         _ => String::from("Listening for the next utterance"),
@@ -304,6 +401,8 @@ fn handle_session_event(runtime: &mut SidecarRuntime, event: SessionEvent) {
     match event {
         SessionEvent::ListenArmed { .. } => {},
         SessionEvent::SpeechStarted { session_id } => {
+            runtime.clear_error_text();
+            runtime.clear_transcription_status();
             runtime.last_event = String::from("Listening");
             debug!(session_id = %session_id, "speech started");
         },
@@ -316,40 +415,19 @@ fn handle_session_event(runtime: &mut SidecarRuntime, event: SessionEvent) {
             );
         },
         SessionEvent::AudioCommitted(committed) => {
-            let Some(paths) = runtime.paths() else {
-                runtime
-                    .session
-                    .mark_error("runtime log is unavailable; audio was not written");
-                return;
-            };
-            let audio_path = paths.audio_path(&committed.session_id);
-            match write_wav(&audio_path, committed.sample_rate, &committed.samples) {
-                Ok(()) => {
-                    runtime.last_event = String::from("Candidate window");
-                    debug!(
-                        session_id = %committed.session_id,
-                        audio_path = %audio_path.display(),
-                        speech_duration_ms = committed.speech_duration_ms,
-                        silence_ms = committed.silence_ms,
-                        recorded_duration_ms = committed.recorded_duration_ms,
-                        "candidate audio committed"
-                    );
-                    runtime
-                        .pending
-                        .push(spawn_transcription(committed.session_id, audio_path));
-                    if runtime.loop_state == ListeningLoop::On {
-                        arm_next_session(runtime, "continuous");
-                    } else {
-                        runtime.session.mark_transcribing();
-                    }
+            match write_candidate_audio(runtime, committed, TranscriptionPurpose::Final) {
+                CandidateAudioWrite::Written if runtime.loop_state == ListeningLoop::On => {
+                    arm_next_session(runtime, "continuous");
                 },
-                Err(error) => {
-                    warn!(error = %error, "WAV write failed");
-                    runtime
-                        .session
-                        .mark_error(format!("WAV write failed: {error}"));
+                CandidateAudioWrite::Written => {
+                    runtime.session.mark_transcribing();
                 },
+                CandidateAudioWrite::Failed => {},
             }
+        },
+        SessionEvent::CandidateReady(committed) => {
+            let _write_status =
+                write_candidate_audio(runtime, committed, TranscriptionPurpose::Probe);
         },
         SessionEvent::SpeechTooShort { session_id } => {
             runtime.last_event = format!("Too quiet or too brief: {session_id}");
@@ -361,24 +439,78 @@ fn handle_session_event(runtime: &mut SidecarRuntime, event: SessionEvent) {
     }
 }
 
+fn write_candidate_audio(
+    runtime: &mut SidecarRuntime,
+    committed: CommittedUtterance,
+    purpose: TranscriptionPurpose,
+) -> CandidateAudioWrite {
+    let Some(paths) = runtime.paths() else {
+        runtime
+            .session
+            .mark_error("runtime log is unavailable; audio was not written");
+        return CandidateAudioWrite::Failed;
+    };
+    let audio_path = paths.audio_path(&committed.session_id);
+    match write_wav(&audio_path, committed.sample_rate, &committed.samples) {
+        Ok(()) => {
+            let root_session_id = root_session_id(&committed.session_id);
+            runtime.last_event = match purpose {
+                TranscriptionPurpose::Probe => String::from("Trying candidate"),
+                TranscriptionPurpose::Final => String::from("Candidate window"),
+            };
+            debug!(
+                session_id = %committed.session_id,
+                root_session_id = %root_session_id,
+                audio_path = %audio_path.display(),
+                speech_duration_ms = committed.speech_duration_ms,
+                silence_ms = committed.silence_ms,
+                recorded_duration_ms = committed.recorded_duration_ms,
+                purpose = ?purpose,
+                "candidate audio committed"
+            );
+            queue_transcription(
+                runtime,
+                committed.session_id,
+                root_session_id,
+                audio_path,
+                purpose,
+            );
+            CandidateAudioWrite::Written
+        },
+        Err(error) => {
+            warn!(error = %error, "WAV write failed");
+            runtime
+                .session
+                .mark_error(format!("WAV write failed: {error}"));
+            CandidateAudioWrite::Failed
+        },
+    }
+}
+
 fn poll_transcription(mut runtime: ResMut<SidecarRuntime>) {
     let mut outcomes = Vec::new();
     let mut index = 0;
     while index < runtime.pending.len() {
-        if let Some(outcome) = runtime.pending[index].try_recv() {
-            outcomes.push(outcome);
-            let _finished = runtime.pending.swap_remove(index);
+        if let Some(outcome) = runtime.pending[index].transcription.try_recv() {
+            let job = runtime.pending.swap_remove(index);
+            outcomes.push((job.root_session_id, job.purpose, outcome));
         } else {
             index += 1;
         }
     }
 
-    for outcome in outcomes {
-        handle_transcription_outcome(&mut runtime, outcome);
+    for (root_session_id, purpose, outcome) in outcomes {
+        handle_transcription_outcome(&mut runtime, &root_session_id, purpose, outcome);
     }
+    start_next_transcription(&mut runtime);
 }
 
-fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: TranscriptionOutcome) {
+fn handle_transcription_outcome(
+    runtime: &mut SidecarRuntime,
+    root_session_id: &str,
+    purpose: TranscriptionPurpose,
+    outcome: TranscriptionOutcome,
+) {
     match outcome {
         TranscriptionOutcome::Transcribed {
             session_id,
@@ -386,21 +518,17 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
             text,
             backend,
         } => {
-            runtime.last_event = String::from("Transcript committed");
-            runtime.last_text = Some(text.clone());
-            if runtime.loop_state == ListeningLoop::Off && runtime.pending.is_empty() {
-                runtime.session.mark_complete(text.clone());
-            }
-            let event = RuntimeEvent::TranscriptCommitted {
-                session_id,
-                seq: runtime.next_seq(),
-                created_at_unix_ms: now_unix_millis(),
-                text,
-                audio_path: audio_path.to_string_lossy().into_owned(),
-                backend,
-            };
-            if runtime.append_inbox(event) == InboxAppend::Written {
-                remove_transcribed_audio(runtime, &audio_path);
+            if purpose == TranscriptionPurpose::Probe {
+                handle_probe_transcript(
+                    runtime,
+                    root_session_id,
+                    session_id,
+                    audio_path,
+                    text,
+                    backend,
+                );
+            } else {
+                commit_transcript(runtime, session_id, audio_path, text, backend);
             }
         },
         TranscriptionOutcome::Failed {
@@ -408,10 +536,26 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
             audio_path,
             error,
         } => {
-            runtime.last_event = String::from("Transcription failed");
-            runtime.last_text = Some(format!("Error: {error}"));
-            if runtime.loop_state == ListeningLoop::Off && runtime.pending.is_empty() {
-                runtime.session.mark_error(error.clone());
+            if purpose == TranscriptionPurpose::Probe {
+                runtime.clear_error_text();
+                runtime.last_status = format!("Candidate failed: {error}");
+                remove_candidate_audio(runtime, &audio_path);
+            } else {
+                match promote_tentative_for_root(runtime, root_session_id, "candidate fallback") {
+                    TentativePromotion::Applied => {},
+                    TentativePromotion::Skipped => {
+                        if runtime.loop_state == ListeningLoop::Off
+                            && !runtime.has_transcription_work()
+                        {
+                            runtime.last_text = Some(format!("Error: {error}"));
+                            runtime.session.mark_error(error.clone());
+                        } else {
+                            runtime.clear_error_text();
+                            runtime.last_status = format!("Transcription failed: {error}");
+                        }
+                        runtime.last_event = String::from("Transcription failed");
+                    },
+                }
             }
             warn!(
                 session_id = %session_id,
@@ -425,9 +569,23 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
             audio_path,
             reason,
         } => {
-            runtime.last_event = String::from("Candidate ignored; listening");
-            if runtime.loop_state == ListeningLoop::Off && runtime.pending.is_empty() {
-                runtime.session.mark_complete(reason.clone());
+            if purpose == TranscriptionPurpose::Probe {
+                runtime.last_event = String::from("Candidate ignored; listening");
+                runtime.clear_error_text();
+                remove_candidate_audio(runtime, &audio_path);
+            } else {
+                match promote_tentative_for_root(runtime, root_session_id, "candidate fallback") {
+                    TentativePromotion::Applied => {},
+                    TentativePromotion::Skipped => {
+                        runtime.last_event = String::from("Candidate ignored; listening");
+                        runtime.clear_error_text();
+                        if runtime.loop_state == ListeningLoop::Off
+                            && !runtime.has_transcription_work()
+                        {
+                            runtime.session.mark_complete(reason.clone());
+                        }
+                    },
+                }
             }
             debug!(
                 session_id = %session_id,
@@ -435,9 +593,281 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
                 reason = %reason,
                 "candidate transcription rejected"
             );
-            remove_candidate_audio(runtime, &audio_path);
+            if purpose == TranscriptionPurpose::Final {
+                remove_candidate_audio(runtime, &audio_path);
+            }
         },
     }
+}
+
+fn handle_probe_transcript(
+    runtime: &mut SidecarRuntime,
+    root_session_id: &str,
+    session_id: String,
+    audio_path: PathBuf,
+    text: String,
+    backend: String,
+) {
+    if runtime.is_completed_root(root_session_id) {
+        remove_candidate_audio(runtime, &audio_path);
+        return;
+    }
+    runtime.clear_transcription_status();
+    let deadline_ms = now_unix_millis().saturating_add(TENTATIVE_STABILITY_MS);
+    let should_replace = runtime
+        .tentative
+        .as_ref()
+        .filter(|tentative| tentative.root_session_id == root_session_id)
+        .is_none_or(|tentative| is_better_transcript(&text, &tentative.text));
+    if should_replace {
+        runtime.tentative = Some(TentativeTranscript {
+            root_session_id: root_session_id.to_owned(),
+            text: text.clone(),
+            backend,
+            audio_path: audio_path.to_string_lossy().into_owned(),
+            deadline_ms,
+        });
+        runtime.last_text = Some(format!("Tentative: {text}"));
+        runtime.last_event = String::from("Candidate understood; listening");
+    } else {
+        runtime.last_event = String::from("Candidate unchanged; waiting");
+    }
+    debug!(
+        session_id = %session_id,
+        root_session_id = %root_session_id,
+        text = %text,
+        "candidate transcript accepted"
+    );
+    remove_candidate_audio(runtime, &audio_path);
+}
+
+fn commit_transcript(
+    runtime: &mut SidecarRuntime,
+    session_id: String,
+    audio_path: PathBuf,
+    text: String,
+    backend: String,
+) {
+    let root = root_session_id(&session_id);
+    runtime.tentative = runtime
+        .tentative
+        .take()
+        .filter(|tentative| tentative.root_session_id != root);
+    runtime.mark_root_completed(root);
+    runtime.clear_transcription_status();
+    runtime.last_event = String::from("Transcript committed");
+    runtime.last_text = Some(text.clone());
+    if runtime.loop_state == ListeningLoop::Off && !runtime.has_transcription_work() {
+        runtime.session.mark_complete(text.clone());
+    }
+    let event = RuntimeEvent::TranscriptCommitted {
+        session_id,
+        seq: runtime.next_seq(),
+        created_at_unix_ms: now_unix_millis(),
+        text,
+        audio_path: audio_path.to_string_lossy().into_owned(),
+        backend,
+    };
+    if runtime.append_inbox(event) == InboxAppend::Written {
+        remove_transcribed_audio(runtime, &audio_path);
+    }
+}
+
+fn promote_tentative_transcript(mut runtime: ResMut<SidecarRuntime>) {
+    let Some(tentative) = &runtime.tentative else {
+        return;
+    };
+    if now_unix_millis() < tentative.deadline_ms {
+        return;
+    }
+    let root_session_id = tentative.root_session_id.clone();
+    let _promotion = promote_tentative_for_root(&mut runtime, &root_session_id, "candidate stable");
+}
+
+fn promote_tentative_for_root(
+    runtime: &mut SidecarRuntime,
+    root_session_id: &str,
+    reason: &'static str,
+) -> TentativePromotion {
+    let Some(tentative) = runtime.tentative.take() else {
+        return TentativePromotion::Skipped;
+    };
+    if tentative.root_session_id != root_session_id {
+        runtime.tentative = Some(tentative);
+        return TentativePromotion::Skipped;
+    }
+    runtime.mark_root_completed(root_session_id.to_owned());
+    runtime.clear_transcription_status();
+    runtime.last_event = format!("Transcript committed from {reason}");
+    runtime.last_text = Some(tentative.text.clone());
+    let event = RuntimeEvent::TranscriptCommitted {
+        session_id:         root_session_id.to_owned(),
+        seq:                runtime.next_seq(),
+        created_at_unix_ms: now_unix_millis(),
+        text:               tentative.text.clone(),
+        audio_path:         tentative.audio_path,
+        backend:            tentative.backend,
+    };
+    let _append = runtime.append_inbox(event);
+    if current_session_root(runtime).as_deref() == Some(root_session_id) {
+        if runtime.loop_state == ListeningLoop::On {
+            runtime.session.stop();
+            arm_next_session(runtime, "continuous");
+        } else {
+            runtime.session.mark_complete(tentative.text);
+        }
+    }
+    TentativePromotion::Applied
+}
+
+fn root_session_id(session_id: &str) -> String {
+    session_id
+        .split_once("-probe-")
+        .map_or(session_id, |(root, _suffix)| root)
+        .to_owned()
+}
+
+fn current_session_root(runtime: &SidecarRuntime) -> Option<String> {
+    runtime
+        .session
+        .snapshot()
+        .session_id
+        .as_deref()
+        .map(root_session_id)
+}
+
+fn is_better_transcript(candidate: &str, current: &str) -> bool {
+    transcript_score(candidate) > transcript_score(current)
+}
+
+fn transcript_score(text: &str) -> (usize, usize) {
+    let normalized = normalized_transcript(text);
+    let words = normalized.split_whitespace().count();
+    let characters = normalized
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .count();
+    (words, characters)
+}
+
+fn normalized_transcript(text: &str) -> String {
+    text.split_whitespace()
+        .map(|word| {
+            let normalized: String = word
+                .chars()
+                .filter(|character| character.is_alphanumeric())
+                .flat_map(char::to_lowercase)
+                .collect();
+            if normalized == "okay" {
+                String::from("ok")
+            } else {
+                normalized
+            }
+        })
+        .filter(|word| !word.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn queue_transcription(
+    runtime: &mut SidecarRuntime,
+    session_id: String,
+    root_session_id: String,
+    audio_path: PathBuf,
+    purpose: TranscriptionPurpose,
+) {
+    if purpose == TranscriptionPurpose::Probe && runtime.is_completed_root(&root_session_id) {
+        remove_candidate_audio(runtime, &audio_path);
+        return;
+    }
+    let job = QueuedTranscription {
+        session_id,
+        root_session_id,
+        audio_path,
+        purpose,
+    };
+    if runtime.pending.is_empty() {
+        runtime.last_event = match purpose {
+            TranscriptionPurpose::Probe => String::from("Trying candidate"),
+            TranscriptionPurpose::Final => String::from("Candidate window"),
+        };
+        spawn_transcription_job(runtime, job);
+        return;
+    }
+    if runtime.queued.len() < MAX_QUEUED_TRANSCRIPTIONS {
+        runtime.last_event = format!("Candidate queued ({})", runtime.queued.len() + 1);
+        debug!(
+            session_id = %job.session_id,
+            root_session_id = %job.root_session_id,
+            audio_path = %job.audio_path.display(),
+            queued = runtime.queued.len() + 1,
+            purpose = ?job.purpose,
+            "candidate queued behind active transcription"
+        );
+        runtime.queued.push_back(job);
+        return;
+    }
+    if purpose == TranscriptionPurpose::Final
+        && let Some(evicted) = evict_queued_probe(runtime)
+    {
+        remove_candidate_audio(runtime, &evicted.audio_path);
+        runtime.last_event = String::from("Final candidate queued");
+        runtime.queued.push_back(job);
+        return;
+    }
+    warn!(
+        session_id = %job.session_id,
+        root_session_id = %job.root_session_id,
+        audio_path = %job.audio_path.display(),
+        queued = runtime.queued.len(),
+        purpose = ?job.purpose,
+        "dropping candidate because transcription queue is full"
+    );
+    runtime.last_event = String::from("Candidate dropped; STT busy");
+    remove_candidate_audio(runtime, &job.audio_path);
+}
+
+fn evict_queued_probe(runtime: &mut SidecarRuntime) -> Option<QueuedTranscription> {
+    let position = runtime
+        .queued
+        .iter()
+        .position(|job| job.purpose == TranscriptionPurpose::Probe)?;
+    runtime.queued.remove(position)
+}
+
+fn start_next_transcription(runtime: &mut SidecarRuntime) {
+    if !runtime.pending.is_empty() {
+        return;
+    }
+    let Some(job) = next_queued_job(runtime) else {
+        return;
+    };
+    runtime.last_event = format!(
+        "Transcribing queued candidate; {} queued",
+        runtime.queued.len()
+    );
+    spawn_transcription_job(runtime, job);
+}
+
+fn next_queued_job(runtime: &mut SidecarRuntime) -> Option<QueuedTranscription> {
+    while let Some(job) = runtime.queued.pop_front() {
+        if job.purpose == TranscriptionPurpose::Probe
+            && runtime.is_completed_root(&job.root_session_id)
+        {
+            remove_candidate_audio(runtime, &job.audio_path);
+            continue;
+        }
+        return Some(job);
+    }
+    None
+}
+
+fn spawn_transcription_job(runtime: &mut SidecarRuntime, job: QueuedTranscription) {
+    runtime.pending.push(PendingTranscriptionJob {
+        transcription:   spawn_transcription(job.session_id, job.audio_path),
+        root_session_id: job.root_session_id,
+        purpose:         job.purpose,
+    });
 }
 
 fn remove_transcribed_audio(runtime: &mut SidecarRuntime, audio_path: &Path) {
@@ -486,7 +916,7 @@ fn refresh_feedback(
         runtime.last_event,
         snapshot.speech_ms,
         snapshot.silence_ms,
-        runtime.pending.len()
+        runtime.transcription_work_count()
     );
     if runtime.last_status != MIC_READY {
         event = format!("{event} | {}", runtime.last_status);
@@ -499,8 +929,8 @@ fn refresh_feedback(
         .unwrap_or_else(|| String::from("none yet"));
     let level = format!("{:.3}", snapshot.rms);
     let gate = format!(
-        "noise {:.3} / start {:.3}",
-        snapshot.noise_rms, snapshot.gate_rms
+        "voice {:.2} / start {:.2}",
+        snapshot.vad_probability, snapshot.vad_gate_probability
     );
     set_status_field(&mut panel_text, *panel, FIELD_LOOP, mode);
     set_status_field(
@@ -595,7 +1025,7 @@ fn status_panel_tree() -> LayoutTree {
                     status_row(builder, "Event", FIELD_EVENT, "Press space to start");
                     status_row(builder, "Transcript", FIELD_TRANSCRIPT, "none yet");
                     status_row(builder, "Mic level", FIELD_MIC, "0.000");
-                    status_row(builder, "Gate", FIELD_GATE, "noise 0.000 / start 0.020");
+                    status_row(builder, "Gate", FIELD_GATE, "voice 0.00 / start 0.36");
                 },
             );
         },

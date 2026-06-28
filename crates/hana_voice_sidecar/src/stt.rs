@@ -213,7 +213,7 @@ impl AppleSpeechTranscriber {
             .with_contextual_strings(APPLE_CONTEXTUAL_STRINGS.iter().copied())
             .with_should_report_partial_results(false)
             .with_adds_punctuation(true);
-        if on_device {
+        if self.recognition_mode == RecognitionMode::OnDeviceRequired {
             options.set_requires_on_device_recognition(true);
         }
 
@@ -225,7 +225,11 @@ impl AppleSpeechTranscriber {
                 "candidate window did not contain a usable transcript",
             )));
         }
-        let mode = if on_device { "on-device" } else { "system" };
+        let mode = match (self.recognition_mode, on_device) {
+            (RecognitionMode::OnDeviceRequired, _) => "on-device",
+            (RecognitionMode::SystemAllowed, true) => "system-allowed",
+            (RecognitionMode::SystemAllowed, false) => "system",
+        };
         Ok(Transcript {
             text,
             backend: format!("apple-speech:{locale}:{mode}"),
@@ -293,7 +297,17 @@ impl Error for TranscriptionError {}
 
 #[cfg(target_os = "macos")]
 impl From<SpeechError> for TranscriptionError {
-    fn from(error: SpeechError) -> Self { Self::AppleSpeech(error.to_string()) }
+    fn from(error: SpeechError) -> Self { classify_speech_error(error.to_string()) }
+}
+
+#[cfg(target_os = "macos")]
+fn classify_speech_error(message: String) -> TranscriptionError {
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("no speech detected") || normalized.contains("no speech") {
+        TranscriptionError::NoSpeech(message)
+    } else {
+        TranscriptionError::AppleSpeech(message)
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -312,6 +326,10 @@ fn recognition_mode_from_env() -> RecognitionMode {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "macos")]
+    use super::TranscriptionError;
+    #[cfg(target_os = "macos")]
+    use super::classify_speech_error;
     use super::is_valid_transcript;
 
     #[test]
@@ -325,5 +343,13 @@ mod tests {
         assert!(!is_valid_transcript(""));
         assert!(!is_valid_transcript("?"));
         assert!(!is_valid_transcript("..."));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn apple_no_speech_errors_are_rejected_candidates() {
+        let error = classify_speech_error(String::from("recognition failed: No speech detected"));
+
+        assert!(matches!(error, TranscriptionError::NoSpeech(_)));
     }
 }

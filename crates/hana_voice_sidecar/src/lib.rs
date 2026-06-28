@@ -8,6 +8,7 @@ mod audio;
 mod event_log;
 mod session;
 mod stt;
+mod vad;
 
 pub use audio::AudioInput;
 pub use audio::AudioInputError;
