@@ -1,5 +1,5 @@
 [workspace]
-exclude  = ["vendor/clay-layout", "crates/hana"]
+exclude  = ["crates/hana", "vendor/clay-layout"]
 members  = ["crates/*"]
 resolver = "3"
 
