@@ -1,5 +1,6 @@
 //! Build support for the Hana voice sidecar example.
 
+#[cfg(target_os = "macos")]
 use std::process::Command;
 
 fn main() {

@@ -14,8 +14,11 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::TryRecvError;
 use std::thread;
 
+#[cfg(target_os = "macos")]
 use speech::AuthorizationStatus;
+#[cfg(target_os = "macos")]
 use speech::SpeechError;
+#[cfg(target_os = "macos")]
 use speech::SpeechRecognizer;
 
 #[cfg(target_os = "macos")]
