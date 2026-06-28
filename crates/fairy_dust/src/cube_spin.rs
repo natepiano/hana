@@ -7,6 +7,7 @@ use bevy_enhanced_input::prelude::*;
 
 use crate::constants::CUBE_SPIN_PAUSE_CONTROL_ID;
 use crate::constants::CUBE_SPIN_PAUSE_CONTROL_LABEL;
+use crate::constants::CUBE_SPIN_RESERVE_LABEL;
 use crate::constants::DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND;
 use crate::ensure_plugin;
 use crate::screen_panels;
@@ -240,7 +241,7 @@ impl<M: 'static> TitleChipActivation for CubeSpinControl<M> {
 
 pub(crate) fn install<M: Component>(app: &mut App, config: CubeSpinConfig) {
     if let Some(key) = config.key {
-        shortcuts::reserve_key(app, key, "cube spin");
+        shortcuts::reserve_key(app, key, CUBE_SPIN_RESERVE_LABEL);
     }
     if let Some(chip) = config.chip {
         screen_panels::register_title_control(app, chip);

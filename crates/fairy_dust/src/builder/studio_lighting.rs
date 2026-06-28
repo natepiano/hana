@@ -9,10 +9,23 @@ use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
-use super::StudioLightingBuilder;
 use super::WithOrbitCam;
 use crate::lighting;
+use crate::lighting::StudioLightingConfig;
 use crate::primitive::PrimitiveConfig;
+
+/// Builder returned by [`SprinkleBuilder::with_studio_lighting`] for tweaking
+/// the studio rig before it spawns.
+///
+/// Lighting tweak methods are only reachable through this type, so calling
+/// [`Self::aim_at`] or [`Self::key_light_pos`] is a compile error when no
+/// studio lighting has been installed. Calling a non-lighting builder method
+/// finalizes the configuration and returns to the normal [`SprinkleBuilder`]
+/// (or [`PrimitiveBuilder`]) chain.
+pub struct StudioLightingBuilder<S> {
+    pub(super) parent: SprinkleBuilder<S>,
+    pub(super) config: StudioLightingConfig,
+}
 
 impl<S> StudioLightingBuilder<S> {
     /// Sets the world-space target the key and fill lights aim at.

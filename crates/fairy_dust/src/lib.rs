@@ -56,8 +56,6 @@ mod shortcuts;
 mod transparency;
 mod unclamp;
 
-use std::marker::PhantomData;
-
 use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
@@ -168,10 +166,7 @@ fn sprinkle_builder(mut app: App) -> SprinkleBuilder<NoOrbitCam> {
     screen_panels::install_overlay_picking(&mut app);
     restart::install(&mut app);
     screen_space_lights::install(&mut app);
-    SprinkleBuilder {
-        app,
-        state_marker: PhantomData,
-    }
+    SprinkleBuilder::new(app)
 }
 
 /// Add `plugin` to `app` if no plugin of the same type is already registered.

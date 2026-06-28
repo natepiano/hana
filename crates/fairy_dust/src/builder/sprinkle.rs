@@ -2,6 +2,7 @@
 
 use std::marker::PhantomData;
 
+use bevy::app::App;
 use bevy::app::Plugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -16,12 +17,9 @@ use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
-use super::NoOrbitCam;
 use super::PrimitiveBuilder;
-use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
-use super::WithOrbitCam;
 use crate::Anchor;
 use crate::bloom;
 use crate::brp_extras;
@@ -46,6 +44,27 @@ use crate::screen_panels::TitleBar;
 use crate::shortcuts;
 use crate::transparency;
 use crate::unclamp;
+
+/// Typestate marker: the builder has not yet spawned an `OrbitCam`.
+///
+/// Camera-attached capabilities are not defined for `SprinkleBuilder<NoOrbitCam>`,
+/// so calling them is a compile error.
+pub struct NoOrbitCam;
+
+/// Typestate marker: the builder has spawned an `OrbitCam`.
+///
+/// Reached via [`SprinkleBuilder::with_orbit_cam_configured`]. Camera-attached
+/// capabilities like [`SprinkleBuilder::with_stable_transparency`]
+/// become callable in this state.
+pub struct WithOrbitCam;
+
+/// Builder returned by [`sprinkle_example`](crate::sprinkle_example). State-agnostic capability
+/// methods are defined for any `S`; camera-attached methods are gated by
+/// the typestate.
+pub struct SprinkleBuilder<S> {
+    pub(super) app:          App,
+    pub(super) state_marker: PhantomData<S>,
+}
 
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
@@ -325,6 +344,13 @@ impl<S> SprinkleBuilder<S> {
 
 // State transition: `NoOrbitCam` → `WithOrbitCam`.
 impl SprinkleBuilder<NoOrbitCam> {
+    pub(crate) const fn new(app: App) -> Self {
+        Self {
+            app,
+            state_marker: PhantomData,
+        }
+    }
+
     /// Add `bevy_lagrange::LagrangePlugin` and spawn an `OrbitCam` entity.
     /// The caller's `configure` closure can set `focus`, `radius`, `yaw`,
     /// `pitch`, sensitivity, limits, or other camera behavior fields. Input
@@ -498,5 +524,77 @@ impl SprinkleBuilder<WithOrbitCam> {
     pub fn unclamped(mut self) -> Self {
         unclamp::install(&mut self.app);
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy_lagrange::OrbitCamBlenderLikePreset;
+
+    use super::NoOrbitCam;
+    use super::SprinkleBuilder;
+    use super::WithOrbitCam;
+    use crate::builder::CameraHomeBuilder;
+    use crate::builder::PrimitiveBuilder;
+    use crate::builder::StudioLightingBuilder;
+    use crate::builder::TitleBarBuilder;
+
+    #[test]
+    fn builder_wrappers_accept_typed_preset_payloads() {
+        let _: fn(
+            SprinkleBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = sprinkle_builder_with_preset;
+        let _: fn(
+            PrimitiveBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = primitive_builder_with_preset;
+        let _: fn(
+            StudioLightingBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = studio_lighting_builder_with_preset;
+        let _: fn(
+            CameraHomeBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = camera_home_builder_with_preset;
+        let _: fn(
+            TitleBarBuilder<NoOrbitCam>,
+            OrbitCamBlenderLikePreset,
+        ) -> SprinkleBuilder<WithOrbitCam> = title_bar_builder_with_preset;
+    }
+
+    fn sprinkle_builder_with_preset(
+        builder: SprinkleBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn primitive_builder_with_preset(
+        builder: PrimitiveBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn studio_lighting_builder_with_preset(
+        builder: StudioLightingBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn camera_home_builder_with_preset(
+        builder: CameraHomeBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
+    }
+
+    fn title_bar_builder_with_preset(
+        builder: TitleBarBuilder<NoOrbitCam>,
+        preset: OrbitCamBlenderLikePreset,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        builder.with_orbit_cam_preset(|_| {}, preset)
     }
 }

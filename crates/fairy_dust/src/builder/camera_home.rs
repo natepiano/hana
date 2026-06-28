@@ -11,7 +11,6 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
 use bevy_lagrange::OrbitCamPreset;
 
-use super::CameraHomeBuilder;
 use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
@@ -20,6 +19,7 @@ use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::Anchor;
 use crate::camera_home;
+use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
 use crate::constants::HOME_CONTROL;
 use crate::cube_spin::CubeSpinConfig;
@@ -27,6 +27,15 @@ use crate::restart_camera;
 use crate::screen_panels;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
+
+/// Builder returned while configuring a camera "home" pose.
+///
+/// Calling a non-home builder method finalizes the home registration and
+/// returns to the normal [`SprinkleBuilder`] chain.
+pub struct CameraHomeBuilder<S> {
+    pub(super) parent: SprinkleBuilder<S>,
+    pub(super) config: CameraHomeConfig,
+}
 
 impl<S> CameraHomeBuilder<S> {
     /// Sets the home pose yaw in radians.

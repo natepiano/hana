@@ -125,6 +125,7 @@ pub(crate) const CUBE_FACE_PANEL_TITLE_SIZE: f32 = 72.0;
 // cube spin
 pub(crate) const CUBE_SPIN_PAUSE_CONTROL_ID: &str = "cube_spin_pause";
 pub(crate) const CUBE_SPIN_PAUSE_CONTROL_LABEL: &str = "P Pause";
+pub(crate) const CUBE_SPIN_RESERVE_LABEL: &str = "cube spin";
 pub(crate) const DEFAULT_CUBE_SPIN_RADIANS_PER_SECOND: f32 = 0.2;
 
 // environment map

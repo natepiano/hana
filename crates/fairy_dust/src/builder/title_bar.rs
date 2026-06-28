@@ -16,7 +16,6 @@ use super::NoOrbitCam;
 use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
-use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::cube_spin::CubeSpinConfig;
 use crate::screen_panels::ControlActivation;
@@ -24,6 +23,19 @@ use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
 use crate::screen_panels::TitleBarControlState;
 use crate::screen_panels::TitleChipActivation;
+
+/// Builder returned by [`SprinkleBuilder::with_title_bar`] for wiring chip
+/// highlights to event lifecycles.
+///
+/// Chip-wiring methods are only reachable through this type, so calling
+/// [`Self::wire_chip_to_events`] is a compile error when no title bar has
+/// been installed.
+///
+/// Calling a non-wiring builder method finalizes the title bar configuration
+/// and returns to the normal [`SprinkleBuilder`] chain.
+pub struct TitleBarBuilder<S> {
+    pub(super) parent: SprinkleBuilder<S>,
+}
 
 impl<S> TitleBarBuilder<S> {
     /// Toggles `chip` active on `Begin` and inactive on `End` for any event

@@ -3,6 +3,7 @@
 use bevy::app::Plugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
+use bevy::ecs::system::EntityCommands;
 use bevy::ecs::system::ScheduleSystem;
 use bevy::prelude::*;
 use bevy_lagrange::OrbitCam;
@@ -11,7 +12,6 @@ use bevy_lagrange::OrbitCamPreset;
 
 use super::CameraHomeBuilder;
 use super::NoOrbitCam;
-use super::PrimitiveBuilder;
 use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
@@ -22,8 +22,22 @@ use crate::cube_spin::FairyDustCubeSpinTarget;
 use crate::primitive;
 use crate::primitive::Face;
 use crate::primitive::FaceTextSpec;
+use crate::primitive::PrimitiveConfig;
 use crate::screen_panels::DescriptionPanel;
 use crate::screen_panels::TitleBar;
+
+/// Boxed deferred-insert closure applied to a primitive entity at spawn time.
+pub(super) type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
+
+/// Builder returned while configuring a simple scene primitive.
+///
+/// Calling a non-primitive builder method finalizes the primitive and returns
+/// to the normal [`SprinkleBuilder`] chain.
+pub struct PrimitiveBuilder<S> {
+    pub(super) parent:  SprinkleBuilder<S>,
+    pub(super) config:  PrimitiveConfig,
+    pub(super) inserts: Vec<PrimitiveInsert>,
+}
 
 impl<S> PrimitiveBuilder<S> {
     /// Sets the primitive size.
