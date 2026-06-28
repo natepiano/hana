@@ -11,6 +11,7 @@ use bevy::camera::ClearColorConfig;
 use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::visibility::RenderLayers;
+use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
@@ -414,6 +415,7 @@ fn setup_screen_space_view_for_panel(
                 clear_color: ClearColorConfig::None,
                 ..default()
             },
+            Tonemapping::AcesFitted,
             RenderTarget::Window(WindowRef::Entity(window_entity)),
             Projection::Orthographic(OrthographicProjection {
                 scaling_mode: ScalingMode::WindowSize,

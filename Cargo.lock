@@ -2688,6 +2688,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "doom-fish-utils"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f"
+dependencies = [
+ "crossbeam-queue",
+ "futures-util",
+]
+
+[[package]]
 name = "downcast-rs"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3234,6 +3244,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "hana_voice_sidecar"
+version = "0.0.1"
+dependencies = [
+ "bevy",
+ "bevy_diegetic",
+ "bevy_kana 0.2.0-dev",
+ "bevy_lagrange",
+ "cpal",
+ "fairy_dust",
+ "hound",
+ "serde",
+ "serde_json",
+ "speech",
+]
+
+[[package]]
 name = "harfrust"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3325,6 +3351,12 @@ name = "hexf-parse"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
+
+[[package]]
+name = "hound"
+version = "3.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
 
 [[package]]
 name = "http"
@@ -5341,6 +5373,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dd538fb6910ac1099850255cf94a94df6551fbdd602454387d0adb2d1ca6dead"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "speech"
+version = "0.8.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91c3e0a5b3f2f469e392dbfc8e0e07f315e48517e485e3c647f40476664b2f1a"
+dependencies = [
+ "doom-fish-utils",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
