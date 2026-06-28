@@ -15,8 +15,8 @@ use std::thread;
 use std::time::Duration;
 
 use bevy_kana::ToI32;
-use cpal::BuildStreamError;
 use cpal::Device;
+use cpal::Error as CpalError;
 use cpal::SampleFormat;
 use cpal::Stream;
 use cpal::StreamConfig;
@@ -218,12 +218,12 @@ fn build_stream(
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
 ) -> Result<Stream, AudioInputError> {
-    let config = StreamConfig::from(supported.clone());
+    let config = StreamConfig::from(*supported);
     let channels = usize::from(config.channels);
     let stream = match supported.sample_format() {
-        SampleFormat::F32 => build_f32_stream(device, &config, channels, sample_tx, error_tx),
-        SampleFormat::I16 => build_i16_stream(device, &config, channels, sample_tx, error_tx),
-        SampleFormat::U16 => build_u16_stream(device, &config, channels, sample_tx, error_tx),
+        SampleFormat::F32 => build_f32_stream(device, config, channels, sample_tx, error_tx),
+        SampleFormat::I16 => build_i16_stream(device, config, channels, sample_tx, error_tx),
+        SampleFormat::U16 => build_u16_stream(device, config, channels, sample_tx, error_tx),
         format => return Err(AudioInputError::UnsupportedFormat(format)),
     };
     stream.map_err(|error| AudioInputError::Stream(error.to_string()))
@@ -231,11 +231,11 @@ fn build_stream(
 
 fn build_f32_stream(
     device: &Device,
-    config: &StreamConfig,
+    config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
-) -> Result<Stream, BuildStreamError> {
+) -> Result<Stream, CpalError> {
     device.build_input_stream(
         config,
         move |data: &[f32], _| {
@@ -250,11 +250,11 @@ fn build_f32_stream(
 
 fn build_i16_stream(
     device: &Device,
-    config: &StreamConfig,
+    config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
-) -> Result<Stream, BuildStreamError> {
+) -> Result<Stream, CpalError> {
     device.build_input_stream(
         config,
         move |data: &[i16], _| {
@@ -269,11 +269,11 @@ fn build_i16_stream(
 
 fn build_u16_stream(
     device: &Device,
-    config: &StreamConfig,
+    config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
-) -> Result<Stream, BuildStreamError> {
+) -> Result<Stream, CpalError> {
     device.build_input_stream(
         config,
         move |data: &[u16], _| {
@@ -337,7 +337,7 @@ mod tests {
     #[test]
     fn write_wav_recreates_missing_parent_directory() {
         let root = std::env::temp_dir()
-            .join("hana_voice_sidecar_write_wav_test")
+            .join("hana_prosody_write_wav_test")
             .join(std::process::id().to_string());
         let path = root.join("audio").join("voice.wav");
         let _cleanup = fs::remove_dir_all(&root);

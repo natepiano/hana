@@ -193,7 +193,7 @@ impl AppleSpeechTranscriber {
         let recognizer = self
             .recognizer()?
             .with_default_task_hint(TaskHint::Dictation)
-            .with_callback_queue(CallbackQueue::named("hana-voice-sidecar-stt"));
+            .with_callback_queue(CallbackQueue::named("hana-prosody-stt"));
         if !recognizer.is_available() {
             return Err(TranscriptionError::AppleSpeech(String::from(
                 "Apple Speech recognizer is unavailable",

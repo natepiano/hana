@@ -227,7 +227,7 @@ mod tests {
 
     #[test]
     fn resolves_sibling_hana_runtime_from_workspace_subdir() {
-        let current = Path::new("/Users/example/rust/bevy_hana/crates/hana_voice_sidecar");
+        let current = Path::new("/Users/example/rust/bevy_hana/crates/hana_prosody");
 
         assert_eq!(
             default_runtime_dir_from(current),
@@ -262,7 +262,7 @@ mod tests {
     fn temp_test_dir() -> PathBuf {
         let counter = TEST_DIR_COUNTER.fetch_add(1, Ordering::Relaxed);
         std::env::temp_dir().join(format!(
-            "hana_voice_sidecar_event_log_test_{}_{}",
+            "hana_prosody_event_log_test_{}_{}",
             std::process::id(),
             counter
         ))

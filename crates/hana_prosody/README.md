@@ -1,11 +1,11 @@
-# Hana Voice Sidecar
+# Hana Prosody
 
 Prototype sidecar for the Hana voice-art loop.
 
 Run the feedback UI from the workspace root:
 
 ```sh
-cargo run -p hana_voice_sidecar --example voice_sidecar
+cargo run -p hana_prosody --example voice_sidecar
 ```
 
 Press space to toggle continuous transcription. While the loop is on, the app
@@ -25,33 +25,13 @@ On macOS, Apple Speech is the STT backend. Set `HANA_STT_LOCALE` to choose a
 recognizer locale, and set `HANA_STT_REQUIRE_ON_DEVICE=1` when the loop must
 fail instead of using a network-backed system recognizer.
 
-Generate macOS `say` fixtures for offline VAD checks:
+The generated-speech diagnostics live in ignored integration tests because they
+depend on macOS `say`, `afconvert`, and Apple Speech authorization:
 
 ```sh
-cargo run -p hana_voice_sidecar --example voice_say_fixtures -- \
-  --out-dir /tmp/hana_voice_sidecar_speech_fixtures \
-  test testing reset okay rest
+cargo nextest run -p hana_prosody --run-ignored ignored-only
 ```
 
-Replay those WAVs through the same session state machine used by the sidecar:
-
-```sh
-cargo run -p hana_voice_sidecar --example voice_vad_replay -- \
-  /tmp/hana_voice_sidecar_speech_fixtures/test.wav \
-  /tmp/hana_voice_sidecar_speech_fixtures/testing.wav
-```
-
-With no paths, `voice_vad_replay` scans `HANA_ART_RUN_DIR/audio` or the default
-`../hana/run/art/audio` directory. It appends synthetic tail silence by default
-so short generated clips can still exercise the settle-and-commit path.
-
-Run Apple Speech directly over named fixture files:
-
-```sh
-cargo run -p hana_voice_sidecar --example voice_stt_files -- \
-  /tmp/hana_voice_sidecar_speech_fixtures/test.wav \
-  /tmp/hana_voice_sidecar_speech_fixtures/testing.wav
-```
-
-The expected phrase is derived from the filename, with underscores treated as
-spaces.
+Those tests generate short `say` fixtures, replay the WAVs through the same
+session state machine used by the sidecar, and run Apple Speech over the named
+fixtures with the expected phrase derived from the filename.
