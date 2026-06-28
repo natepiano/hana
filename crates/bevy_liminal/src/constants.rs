@@ -98,6 +98,7 @@ pub(super) const MERGED_OVERLAP_SHADER_FACTOR: f32 = 0.0;
 pub(super) const MSAA_DISABLED_SAMPLE_COUNT: u32 = 1;
 pub(super) const NO_FLOOD_PASS_COUNT: u32 = 0;
 pub(super) const NO_FLOOD_WIDTH_THRESHOLD: f32 = 0.0;
+pub(super) const NO_RENDER_PIPELINE_IMMEDIATE_DATA_SIZE: u32 = 0;
 pub(super) const NON_SCREEN_HULL_SHELL_MODE_SHADER_FACTOR: f32 = 0.0;
 
 /// Reverse-Z far-plane sentinel used when clearing the outline depth texture.

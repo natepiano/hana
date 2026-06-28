@@ -45,6 +45,7 @@ use super::constants::JUMP_FLOOD_FINAL_COMPOSE_PASS_COUNT;
 use super::constants::JUMP_FLOOD_RADIUS_DIVISOR;
 use super::constants::NO_FLOOD_PASS_COUNT;
 use super::constants::NO_FLOOD_WIDTH_THRESHOLD;
+use super::constants::NO_RENDER_PIPELINE_IMMEDIATE_DATA_SIZE;
 use super::constants::OUTLINE_JUMP_FLOOD_PASS_LABEL;
 use super::constants::OUTLINE_JUMP_FLOOD_PIPELINE_LABEL;
 use super::constants::TRIANGLE_VERTEX_COUNT;
@@ -62,11 +63,11 @@ pub(crate) struct FloodSettings {
 
 #[derive(Resource)]
 pub(crate) struct JumpFloodPipeline {
-    pub(crate) layout:         BindGroupLayoutDescriptor,
-    pub(crate) sampler:        Sampler,
-    pub(crate) id:             CachedRenderPipelineId,
-    pub(crate) lookup_buffer:  DynamicUniformBuffer<JumpFloodUniform>,
-    pub(crate) lookup_offsets: Vec<u32>,
+    pub(crate) layout:                    BindGroupLayoutDescriptor,
+    pub(crate) sampler:                   Sampler,
+    pub(crate) cached_render_pipeline_id: CachedRenderPipelineId,
+    pub(crate) lookup_buffer:             DynamicUniformBuffer<JumpFloodUniform>,
+    pub(crate) lookup_offsets:            Vec<u32>,
 }
 
 impl FromWorld for JumpFloodPipeline {
@@ -94,31 +95,28 @@ impl FromWorld for JumpFloodPipeline {
 
         let fullscreen_shader = world.resource::<FullscreenShader>().clone();
 
-        let id =
-            world
-                .resource_mut::<PipelineCache>()
-                .queue_render_pipeline(RenderPipelineDescriptor {
-                    label:                            Some(
-                        OUTLINE_JUMP_FLOOD_PIPELINE_LABEL.into(),
-                    ),
-                    layout:                           vec![layout.clone()],
-                    vertex:                           fullscreen_shader.to_vertex_state(),
-                    fragment:                         Some(FragmentState {
-                        shader:      FLOOD_SHADER_HANDLE,
-                        shader_defs: vec![],
-                        entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
-                        targets:     vec![Some(ColorTargetState {
-                            format:     TextureFormat::Rgba32Float,
-                            blend:      None,
-                            write_mask: ColorWrites::ALL,
-                        })],
-                    }),
-                    primitive:                        PrimitiveState::default(),
-                    depth_stencil:                    None,
-                    multisample:                      MultisampleState::default(),
-                    immediate_size:                   0,
-                    zero_initialize_workgroup_memory: false,
-                });
+        let cached_render_pipeline_id = world
+            .resource_mut::<PipelineCache>()
+            .queue_render_pipeline(RenderPipelineDescriptor {
+                label:                            Some(OUTLINE_JUMP_FLOOD_PIPELINE_LABEL.into()),
+                layout:                           vec![layout.clone()],
+                vertex:                           fullscreen_shader.to_vertex_state(),
+                fragment:                         Some(FragmentState {
+                    shader:      FLOOD_SHADER_HANDLE,
+                    shader_defs: vec![],
+                    entry_point: Some(FRAGMENT_SHADER_ENTRY_POINT.into()),
+                    targets:     vec![Some(ColorTargetState {
+                        format:     TextureFormat::Rgba32Float,
+                        blend:      None,
+                        write_mask: ColorWrites::ALL,
+                    })],
+                }),
+                primitive:                        PrimitiveState::default(),
+                depth_stencil:                    None,
+                multisample:                      MultisampleState::default(),
+                immediate_size:                   NO_RENDER_PIPELINE_IMMEDIATE_DATA_SIZE,
+                zero_initialize_workgroup_memory: false,
+            });
 
         let render_queue = world.resource::<RenderQueue>();
         let mut uniform_buffer = DynamicUniformBuffer::new_with_alignment(u64::from(
@@ -135,7 +133,7 @@ impl FromWorld for JumpFloodPipeline {
         Self {
             layout,
             sampler,
-            id,
+            cached_render_pipeline_id,
             lookup_buffer: uniform_buffer,
             lookup_offsets: offsets,
         }
@@ -160,7 +158,8 @@ impl<'w> JumpFloodPass<'w> {
     pub(crate) fn new(world: &'w World) -> Option<Self> {
         let pipeline = world.resource::<JumpFloodPipeline>();
         let pipeline_cache = world.resource::<PipelineCache>();
-        let render_pipeline = pipeline_cache.get_render_pipeline(pipeline.id)?;
+        let render_pipeline =
+            pipeline_cache.get_render_pipeline(pipeline.cached_render_pipeline_id)?;
 
         Some(Self {
             pipeline,

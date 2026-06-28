@@ -14,9 +14,9 @@ use bevy_render::sync_world::MainEntity;
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct OutlineBatchSetKey {
-    pub(crate) pipeline:      CachedRenderPipelineId,
-    pub(crate) draw_function: DrawFunctionId,
-    pub(crate) mesh_slabs:    MeshSlabs,
+    pub(crate) cached_render_pipeline_id: CachedRenderPipelineId,
+    pub(crate) draw_function_id:          DrawFunctionId,
+    pub(crate) mesh_slabs:                MeshSlabs,
 }
 
 impl PhaseItemBatchSetKey for OutlineBatchSetKey {
@@ -48,7 +48,7 @@ impl PhaseItem for JumpFloodOutlinePhase {
 
     fn main_entity(&self) -> MainEntity { self.main_entity }
 
-    fn draw_function(&self) -> DrawFunctionId { self.batch_set_key.draw_function }
+    fn draw_function(&self) -> DrawFunctionId { self.batch_set_key.draw_function_id }
 
     fn batch_range(&self) -> &Range<u32> { &self.batch_range }
 
@@ -84,7 +84,9 @@ impl BinnedPhaseItem for JumpFloodOutlinePhase {
 
 impl CachedRenderPipelinePhaseItem for JumpFloodOutlinePhase {
     #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId { self.batch_set_key.pipeline }
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.batch_set_key.cached_render_pipeline_id
+    }
 }
 
 pub(crate) struct HullOutlinePhase {
@@ -101,7 +103,7 @@ impl PhaseItem for HullOutlinePhase {
 
     fn main_entity(&self) -> MainEntity { self.main_entity }
 
-    fn draw_function(&self) -> DrawFunctionId { self.batch_set_key.draw_function }
+    fn draw_function(&self) -> DrawFunctionId { self.batch_set_key.draw_function_id }
 
     fn batch_range(&self) -> &Range<u32> { &self.batch_range }
 
@@ -137,5 +139,7 @@ impl BinnedPhaseItem for HullOutlinePhase {
 
 impl CachedRenderPipelinePhaseItem for HullOutlinePhase {
     #[inline]
-    fn cached_pipeline(&self) -> CachedRenderPipelineId { self.batch_set_key.pipeline }
+    fn cached_pipeline(&self) -> CachedRenderPipelineId {
+        self.batch_set_key.cached_render_pipeline_id
+    }
 }

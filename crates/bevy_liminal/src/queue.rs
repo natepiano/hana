@@ -67,7 +67,7 @@ pub(crate) fn queue_outline(
     >,
     mut queued_entities: Local<HashMap<RetainedViewEntity, Vec<MainEntity>>>,
 ) {
-    let draw_function = draw_functions.read().id::<DrawOutline>();
+    let draw_function_id = draw_functions.read().id::<DrawOutline>();
 
     for (_, view, camera, visible_entities, msaa, has_normal_prepass, has_motion_vector_prepass) in
         views.iter()
@@ -158,8 +158,8 @@ pub(crate) fn queue_outline(
 
             outline_phase.add(
                 OutlineBatchSetKey {
-                    pipeline: pipeline_id,
-                    draw_function,
+                    cached_render_pipeline_id: pipeline_id,
+                    draw_function_id,
                     mesh_slabs: mesh_allocator
                         .mesh_slabs(&mesh_instance.mesh_asset_id())
                         .unwrap_or_default(),
@@ -229,7 +229,7 @@ pub(crate) fn queue_hull_outline(
         return;
     }
 
-    let draw_function = draw_functions.read().id::<DrawHull>();
+    let draw_function_id = draw_functions.read().id::<DrawHull>();
 
     for (_, view, camera, visible_entities, msaa, has_normal_prepass) in views.iter() {
         let Some(outline_phase) = outline_phases.get_mut(&view.retained_view_entity) else {
@@ -311,8 +311,8 @@ pub(crate) fn queue_hull_outline(
 
             outline_phase.add(
                 OutlineBatchSetKey {
-                    pipeline: pipeline_id,
-                    draw_function,
+                    cached_render_pipeline_id: pipeline_id,
+                    draw_function_id,
                     mesh_slabs: mesh_allocator
                         .mesh_slabs(&mesh_instance.mesh_asset_id())
                         .unwrap_or_default(),

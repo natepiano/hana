@@ -21,6 +21,7 @@ use super::constants::COMPOSE_SHADER_HANDLE;
 use super::constants::FRAGMENT_SHADER_ENTRY_POINT;
 use super::constants::MSAA_DISABLED_SAMPLE_COUNT;
 use super::constants::MULTISAMPLED_SHADER_DEF;
+use super::constants::NO_RENDER_PIPELINE_IMMEDIATE_DATA_SIZE;
 use super::constants::OUTLINE_COMPOSE_OUTPUT_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::OUTLINE_COMPOSE_OUTPUT_MSAA_BIND_GROUP_LAYOUT_LABEL;
 use super::constants::OUTLINE_COMPOSE_OUTPUT_MSAA_PIPELINE_LABEL;
@@ -167,7 +168,7 @@ impl FromWorld for ComposeOutputPipeline {
             primitive:                        PrimitiveState::default(),
             depth_stencil:                    None,
             multisample:                      MultisampleState::default(),
-            immediate_size:                   0,
+            immediate_size:                   NO_RENDER_PIPELINE_IMMEDIATE_DATA_SIZE,
             zero_initialize_workgroup_memory: false,
         };
 
