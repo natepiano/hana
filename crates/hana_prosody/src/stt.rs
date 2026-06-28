@@ -137,6 +137,7 @@ fn transcribe(session_id: String, audio_path: PathBuf) -> TranscriptionOutcome {
             text,
             backend,
         },
+        #[cfg(target_os = "macos")]
         Err(TranscriptionError::NoSpeech(reason)) => TranscriptionOutcome::Rejected {
             session_id,
             audio_path,
@@ -161,7 +162,9 @@ fn transcribe_with_apple_speech(audio_path: &Path) -> Result<Transcript, Transcr
 }
 
 #[cfg(not(target_os = "macos"))]
-fn transcribe_with_apple_speech(_audio_path: &Path) -> Result<Transcript, TranscriptionError> {
+const fn transcribe_with_apple_speech(
+    _audio_path: &Path,
+) -> Result<Transcript, TranscriptionError> {
     Err(TranscriptionError::UnsupportedPlatform)
 }
 
@@ -269,6 +272,7 @@ enum RecognitionMode {
 
 #[derive(Debug)]
 enum TranscriptionError {
+    #[cfg(target_os = "macos")]
     NoSpeech(String),
     #[cfg(target_os = "macos")]
     AppleSpeech(String),
@@ -279,6 +283,7 @@ enum TranscriptionError {
 impl Display for TranscriptionError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            #[cfg(target_os = "macos")]
             Self::NoSpeech(reason) => formatter.write_str(reason),
             #[cfg(target_os = "macos")]
             Self::AppleSpeech(error) => write!(formatter, "Apple Speech failed: {error}"),
@@ -288,6 +293,7 @@ impl Display for TranscriptionError {
     }
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn is_valid_transcript(text: &str) -> bool {
     let alphanumeric = text
         .chars()
