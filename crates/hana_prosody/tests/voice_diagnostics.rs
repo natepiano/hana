@@ -1,30 +1,53 @@
 //! Diagnostic tests for generated speech fixtures and the voice session loop.
 
+#[cfg(target_os = "macos")]
 use std::error::Error;
+#[cfg(target_os = "macos")]
 use std::fs;
+#[cfg(target_os = "macos")]
 use std::io;
 use std::path::Path;
+#[cfg(target_os = "macos")]
 use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
+#[cfg(target_os = "macos")]
 use std::thread;
+#[cfg(target_os = "macos")]
 use std::time::Duration;
+#[cfg(target_os = "macos")]
 use std::time::Instant;
 
+#[cfg(target_os = "macos")]
 use bevy_kana::ToF32;
+#[cfg(target_os = "macos")]
 use hana_prosody::PendingTranscription;
+#[cfg(target_os = "macos")]
 use hana_prosody::SessionConfig;
+#[cfg(target_os = "macos")]
 use hana_prosody::SessionEvent;
+#[cfg(target_os = "macos")]
 use hana_prosody::TranscriptionOutcome;
+#[cfg(target_os = "macos")]
 use hana_prosody::VoiceSession;
+#[cfg(target_os = "macos")]
 use hana_prosody::spawn_transcription;
 
+#[cfg(target_os = "macos")]
 const DEFAULT_CHUNK_MS: u64 = 16;
+#[cfg(target_os = "macos")]
 const DEFAULT_TAIL_MS: u64 = 1_500;
+#[cfg(target_os = "macos")]
 const FIXTURE_DIR_PREFIX: &str = "hana_prosody_voice_diagnostics";
+#[cfg(target_os = "macos")]
 const FIXTURE_PHRASES: &[&str] = &["test", "testing", "reset", "okay", "rest"];
+#[cfg(target_os = "macos")]
 const I24_MAX: f32 = 8_388_607.0;
+#[cfg(target_os = "macos")]
 const I32_MAX: f32 = 2_147_483_647.0;
+#[cfg(target_os = "macos")]
 const POLL_INTERVAL: Duration = Duration::from_millis(50);
+#[cfg(target_os = "macos")]
 const STT_TIMEOUT: Duration = Duration::from_secs(20);
 
 #[test]
@@ -77,6 +100,7 @@ fn generated_say_fixtures_transcribe_with_apple_speech() -> Result<(), Box<dyn E
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 #[derive(Debug)]
 struct FixtureRoot {
     path: PathBuf,
@@ -88,6 +112,7 @@ enum SlugBoundary {
     Word,
 }
 
+#[cfg(target_os = "macos")]
 impl FixtureRoot {
     fn new(label: &str) -> Result<Self, Box<dyn Error>> {
         let path = std::env::temp_dir().join(format!(
@@ -102,6 +127,7 @@ impl FixtureRoot {
     fn path(&self) -> &Path { &self.path }
 }
 
+#[cfg(target_os = "macos")]
 impl Drop for FixtureRoot {
     fn drop(&mut self) { let _cleanup_result = fs::remove_dir_all(&self.path); }
 }
