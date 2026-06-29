@@ -403,7 +403,9 @@ are complete.
 
 ### Separate Diagnostics From Fixed Command-count Capacity
 
-Delete or downgrade the warning that fires on raw
+Status: done.
+
+Deleted the warning that fires on raw
 `COMMAND_SORT_OFFSET_CAPACITY`.
 
 A high command count in one `DrawZIndex` is not itself a renderer failure.
