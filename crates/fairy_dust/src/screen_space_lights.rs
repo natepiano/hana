@@ -13,12 +13,24 @@ use bevy_kana::event;
 
 use crate::ensure_plugin;
 
-#[derive(Resource)]
-struct ScreenSpacePanelsEnabled(bool);
-
-impl Default for ScreenSpacePanelsEnabled {
-    fn default() -> Self { Self(true) }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ScreenSpacePanelsVisibility {
+    #[default]
+    Shown,
+    Hidden,
 }
+
+impl ScreenSpacePanelsVisibility {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Shown => Self::Hidden,
+            Self::Hidden => Self::Shown,
+        }
+    }
+}
+
+#[derive(Resource, Default)]
+struct ScreenSpacePanelsEnabled(ScreenSpacePanelsVisibility);
 
 #[derive(Component)]
 struct ScreenSpacePanelsContext;
@@ -26,9 +38,31 @@ struct ScreenSpacePanelsContext;
 action!(ToggleScreenSpacePanels);
 event!(ToggleScreenSpacePanelsEvent);
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScreenSpaceCameraState {
+    Active,
+    Inactive,
+}
+
+impl From<bool> for ScreenSpaceCameraState {
+    fn from(is_active: bool) -> Self {
+        if is_active {
+            Self::Active
+        } else {
+            Self::Inactive
+        }
+    }
+}
+
+impl From<ScreenSpaceCameraState> for bool {
+    fn from(state: ScreenSpaceCameraState) -> Self {
+        matches!(state, ScreenSpaceCameraState::Active)
+    }
+}
+
 #[derive(Component)]
 struct ScreenSpaceCameraRestore {
-    is_active: bool,
+    state: ScreenSpaceCameraState,
 }
 
 #[derive(Component)]
@@ -63,7 +97,7 @@ fn spawn_toggle_action(mut commands: Commands) {
 }
 
 fn toggle_screen_space_panels(mut enabled: ResMut<ScreenSpacePanelsEnabled>) {
-    enabled.0 = !enabled.0;
+    enabled.0 = enabled.0.toggled();
 }
 
 fn apply_screen_space_panels(
@@ -83,15 +117,15 @@ fn apply_screen_space_panels(
     >,
 ) {
     for (entity, mut camera, restore) in &mut cameras {
-        if enabled.0 {
+        if enabled.0 == ScreenSpacePanelsVisibility::Shown {
             if let Some(restore) = restore {
-                camera.is_active = restore.is_active;
+                camera.is_active = restore.state.into();
                 commands.entity(entity).remove::<ScreenSpaceCameraRestore>();
             }
         } else {
             if restore.is_none() {
                 commands.entity(entity).insert(ScreenSpaceCameraRestore {
-                    is_active: camera.is_active,
+                    state: camera.is_active.into(),
                 });
             }
             camera.is_active = false;
@@ -99,7 +133,7 @@ fn apply_screen_space_panels(
     }
 
     for (entity, mut light, restore) in &mut lights {
-        if enabled.0 {
+        if enabled.0 == ScreenSpacePanelsVisibility::Shown {
             if let Some(restore) = restore {
                 light.illuminance = restore.illuminance;
                 commands.entity(entity).remove::<ScreenSpaceLightRestore>();

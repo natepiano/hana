@@ -110,17 +110,35 @@ enum AtHome {
     No,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum HomeAabbGizmoDisplay {
+    Shown,
+    #[default]
+    Hidden,
+}
+
+impl HomeAabbGizmoDisplay {
+    const fn toggled(self) -> Self {
+        match self {
+            Self::Shown => Self::Hidden,
+            Self::Hidden => Self::Shown,
+        }
+    }
+}
+
 /// Tracks whether [`draw_home_aabb_gizmo`] is currently drawing a wireframe
 /// of the home cube. Toggled by **Ctrl+Shift+A** — undocumented debug
 /// affordance available in every `fairy_dust`-built example, no setup needed.
 /// Defaults to off.
 #[derive(Resource, Default)]
-struct HomeAabbGizmoVisible(bool);
+struct HomeAabbGizmoVisible(HomeAabbGizmoDisplay);
 
 /// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. The gizmo combo is a chord,
 /// not a single key, so it doesn't collide with bare-`A` bindings the caller
 /// may have.
-fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) { visible.0 = !visible.0; }
+fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) {
+    visible.0 = visible.0.toggled();
+}
 
 /// Draws a wireframe of the home cube — sized to the union of every
 /// [`CameraHomeTarget`] entity — while [`HomeAabbGizmoVisible`] is on. Lets
@@ -131,7 +149,7 @@ fn draw_home_aabb_gizmo(
     cube: Query<&Transform, With<CameraHomeMarker>>,
     mut gizmos: Gizmos,
 ) {
-    if !visible.0 {
+    if visible.0 == HomeAabbGizmoDisplay::Hidden {
         return;
     }
     let Some(home) = home else {

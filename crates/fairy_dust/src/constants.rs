@@ -53,25 +53,32 @@ pub(crate) const RESTART_CAMERA_RESTORE_DURATION: Duration = Duration::from_secs
 
 // cargo restart
 pub(crate) const CARGO_BIN: &str = "cargo";
-pub(crate) const CARGO_EXAMPLE_FLAG: &str = "--example";
 pub(crate) const CARGO_EXAMPLES_DIR: &str = "examples";
+pub(crate) const CARGO_EXAMPLE_FLAG: &str = "--example";
 pub(crate) const CARGO_MANIFEST_PATH_FLAG: &str = "--manifest-path";
-pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
 pub(crate) const CARGO_RELEASE_FLAG: &str = "--release";
+pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
 
 // cascade shadow
+// An orthographic `OrbitCam` parks at a fixed `(near + far) / 2` distance that a
+// small scene's radius-based fit can't reach, so the cascade also extends to
+// cover the camera. This headroom keeps the scene's far edge inside the last
+// cascade rather than exactly on its boundary; it must stay small enough that
+// larger scenes (where the radius term already dominates) are left untouched.
+pub(crate) const CASCADE_CAMERA_HEADROOM: f32 = 1.2;
 // Matches Bevy's non-webgl default. The auto-fit only narrows the cascade
 // distances; the count must stay constant after spawn, because changing the
 // number of cascades on a live light desyncs `bevy_light`'s per-cascade
 // visibility queues and panics.
 pub(crate) const CASCADE_COUNT: usize = 4;
-pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
 // `CascadeShadowConfigBuilder` requires `first_cascade_far_bound` to be
 // strictly greater than `minimum_distance`; this margin keeps tiny fitted scenes
 // from landing exactly on the minimum.
 pub(crate) const CASCADE_FIRST_BOUND_HEADROOM: f32 = 0.001;
-pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;
-pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;
+// Far bound of the first (high-resolution) cascade as a fraction of the fitted
+// `maximum_distance`. 0.2 matches the proven 12/60 split.
+pub(crate) const CASCADE_FIRST_BOUND_RATIO: f32 = 0.2;
+pub(crate) const CASCADE_FIRST_FAR_BOUND: f32 = 6.0;
 // Auto-fit cascade: once the scene's geometry exists, the key light's cascade
 // `maximum_distance` is set to (scene bounding-sphere radius * this multiple),
 // measured only over the meshes the key light actually shadows (those sharing
@@ -79,15 +86,8 @@ pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;
 // bakes in the studio camera's framing standoff; 5.0 gives ~18 for the
 // canonical ~5-unit grounds and scales up for larger scenes.
 pub(crate) const CASCADE_FIT_RADIUS_MULTIPLE: f32 = 5.0;
-// Far bound of the first (high-resolution) cascade as a fraction of the fitted
-// `maximum_distance`. 0.2 matches the proven 12/60 split.
-pub(crate) const CASCADE_FIRST_BOUND_RATIO: f32 = 0.2;
-// An orthographic `OrbitCam` parks at a fixed `(near + far) / 2` distance that a
-// small scene's radius-based fit can't reach, so the cascade also extends to
-// cover the camera. This headroom keeps the scene's far edge inside the last
-// cascade rather than exactly on its boundary; it must stay small enough that
-// larger scenes (where the radius term already dominates) are left untouched.
-pub(crate) const CASCADE_CAMERA_HEADROOM: f32 = 1.2;
+pub(crate) const CASCADE_MAX_DISTANCE: f32 = 18.0;
+pub(crate) const CASCADE_MIN_DISTANCE: f32 = 0.1;
 // The auto-fit re-runs each frame so the cascade re-adjusts when the projection
 // toggles; it rewrites the config only when `maximum_distance` moves by more
 // than this, so a steady camera costs nothing.
@@ -138,14 +138,14 @@ pub(crate) const SPECULAR_MAP: &str =
     "embedded://fairy_dust/environment_maps/pisa_specular_rgb9e5_zstd.ktx2";
 
 // face text
-/// Outward offset for a face label so it does not z-fight the cube surface.
-pub(crate) const FACE_TEXT_Z_OFFSET: f32 = 0.001;
+/// Default face-label size for simple cube-mounted `WorldText` labels.
+pub const CUBE_FACE_LABEL_SIZE: f32 = 0.095;
 /// Canonical blue for cube-mounted labels and panels.
 pub const CUBE_FACE_PANEL_BLUE: Color = Color::srgb(0.1, 0.35, 1.0);
 /// Default time that cube face input labels remain visible after release.
 pub const CUBE_FACE_PANEL_RELEASE_HOLD: Duration = Duration::from_millis(300);
-/// Default face-label size for simple cube-mounted `WorldText` labels.
-pub const CUBE_FACE_LABEL_SIZE: f32 = 0.095;
+/// Outward offset for a face label so it does not z-fight the cube surface.
+pub(crate) const FACE_TEXT_Z_OFFSET: f32 = 0.001;
 
 // fill light
 pub(crate) const FILL_LIGHT_ILLUMINANCE: f32 = 1_400.0;
@@ -233,12 +233,13 @@ const INSET: Px = Px(FRAME_PAD.0 + BORDER.0);
 pub(crate) const INNER_RADIUS: Px = Px(RADIUS.0 - INSET.0);
 pub(crate) const RADIUS: Px = Px(12.0);
 
-/// Canonical HUD title size. Used by `fairy_dust` panels and re-exported
-/// for ad-hoc panels that want to match the built-in look.
-pub const TITLE_SIZE: Pt = Pt(14.0);
+// typography
 /// Canonical HUD body / label size. Used by `fairy_dust` panels and re-exported
 /// for ad-hoc panels that want to match the built-in look.
 pub const LABEL_SIZE: Pt = Pt(11.0);
+/// Canonical HUD title size. Used by `fairy_dust` panels and re-exported
+/// for ad-hoc panels that want to match the built-in look.
+pub const TITLE_SIZE: Pt = Pt(14.0);
 
 // unclamp
 /// Zoom floor left in place after unclamping. `zoom_lower_limit` is not
