@@ -39,21 +39,21 @@ pub enum RectangleSource {
     ChildDivider,
 }
 
-/// Fixed draw step derived from a [`RenderCommandKind`].
+/// Fixed coarse sort tier derived from a [`RenderCommandKind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DrawSortTier {
     /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`],
     /// [`RenderCommandKind::Image`], and [`RenderCommandKind::PrecomposeLdr`]
     /// commands.
     Surface,
-    /// [`RenderCommandKind::Shapes`] commands.
+    /// [`RenderCommandKind::PanelShapes`] commands.
     PanelShape,
     /// [`RenderCommandKind::Text`] commands.
     Text,
 }
 
 impl DrawSortTier {
-    /// Returns the stable ordinal for `DrawStep` sort keys.
+    /// Returns the stable ordinal for `DrawSortTier` sort keys.
     #[must_use]
     pub const fn sort_order(self) -> u8 {
         match self {
@@ -62,6 +62,17 @@ impl DrawSortTier {
             Self::Text => 2,
         }
     }
+}
+
+/// GPU batch family derived from a [`RenderCommandKind`].
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum DrawBatchFamily {
+    /// SDF surface batches for rectangle and border commands.
+    SdfSurface,
+    /// Analytic path batches for panel-shape commands.
+    PanelShape,
+    /// Analytic path batches for panel-text commands.
+    Text,
 }
 
 /// The specific visual to render.
@@ -108,7 +119,7 @@ pub enum RenderCommandKind {
 }
 
 impl RenderCommandKind {
-    /// Returns the fixed [`DrawStep`] for commands that draw pixels.
+    /// Returns the fixed [`DrawSortTier`] for commands that draw pixels.
     #[must_use]
     pub(crate) const fn draw_sort_tier(&self) -> Option<DrawSortTier> {
         match self {
@@ -119,6 +130,19 @@ impl RenderCommandKind {
             Self::PanelShapes { .. } => Some(DrawSortTier::PanelShape),
             Self::Text { .. } => Some(DrawSortTier::Text),
             Self::ScissorStart | Self::ScissorEnd => None,
+        }
+    }
+
+    /// Returns the GPU batch family for commands routed through a shared batch.
+    #[must_use]
+    pub(crate) const fn draw_batch_family(&self) -> Option<DrawBatchFamily> {
+        match self {
+            Self::Rectangle { .. } | Self::Border { .. } => Some(DrawBatchFamily::SdfSurface),
+            Self::PanelShapes { .. } => Some(DrawBatchFamily::PanelShape),
+            Self::Text { .. } => Some(DrawBatchFamily::Text),
+            Self::Image { .. } | Self::PrecomposeLdr | Self::ScissorStart | Self::ScissorEnd => {
+                None
+            },
         }
     }
 }
@@ -182,6 +206,50 @@ mod tests {
 
         for (kind, expected) in cases {
             assert_eq!(kind.draw_sort_tier(), expected);
+        }
+    }
+
+    #[test]
+    fn render_command_kinds_map_to_batch_families() {
+        let cases = [
+            (
+                RenderCommandKind::Rectangle {
+                    color:  Color::WHITE,
+                    source: RectangleSource::Background,
+                },
+                Some(DrawBatchFamily::SdfSurface),
+            ),
+            (
+                RenderCommandKind::Border {
+                    border: Border::default(),
+                },
+                Some(DrawBatchFamily::SdfSurface),
+            ),
+            (
+                RenderCommandKind::PanelShapes { shapes: Vec::new() },
+                Some(DrawBatchFamily::PanelShape),
+            ),
+            (
+                RenderCommandKind::Text {
+                    text:   String::new(),
+                    config: TextStyle::default(),
+                },
+                Some(DrawBatchFamily::Text),
+            ),
+            (
+                RenderCommandKind::Image {
+                    handle: Handle::<Image>::default(),
+                    tint:   Color::WHITE,
+                },
+                None,
+            ),
+            (RenderCommandKind::PrecomposeLdr, None),
+            (RenderCommandKind::ScissorStart, None),
+            (RenderCommandKind::ScissorEnd, None),
+        ];
+
+        for (kind, expected) in cases {
+            assert_eq!(kind.draw_batch_family(), expected);
         }
     }
 }

@@ -37,6 +37,7 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::ShapeMaterial;
 use crate::layout::BoundingBox;
+use crate::layout::DrawBatchFamily;
 use crate::layout::Lighting;
 use crate::layout::PanelShapeSourceKey;
 use crate::layout::RenderCommand;
@@ -766,6 +767,9 @@ fn collect_line_primitives<'a>(
 ) -> Vec<ShapePrimitiveSource<'a>> {
     let mut primitives = Vec::new();
     for (command_index, command) in render_commands.iter().enumerate() {
+        if command.kind.draw_batch_family() != Some(DrawBatchFamily::PanelShape) {
+            continue;
+        }
         let RenderCommandKind::PanelShapes { shapes } = &command.kind else {
             continue;
         };
@@ -941,6 +945,7 @@ fn build_panel_line_group(
     };
     let batch_key = PathBatchKey {
         z_index:                first.draw_depth.z_index(),
+        batch_family:           DrawBatchFamily::PanelShape,
         shadow:                 context.shadow,
         layers:                 context.layers.clone(),
         pipeline_compatibility: appended.pipeline_compatibility,
@@ -2666,6 +2671,7 @@ mod tests {
         render::apply_sidedness(&mut material, Sidedness::BothSides);
         PathBatchKey {
             z_index:                DrawZIndex::default(),
+            batch_family:           DrawBatchFamily::PanelShape,
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             pipeline_compatibility: batch_key::PipelineCompatibility::from(&material),

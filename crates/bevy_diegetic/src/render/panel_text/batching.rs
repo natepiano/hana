@@ -36,6 +36,7 @@ use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::DrawBatchFamily;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
@@ -557,6 +558,7 @@ fn batch_key_for_run(
 ) -> PathBatchKey {
     PathBatchKey {
         z_index: z_index.0,
+        batch_family: DrawBatchFamily::Text,
         shadow: prepared.shadow_mode.into(),
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
         pipeline_compatibility,

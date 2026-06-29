@@ -125,14 +125,18 @@ mod tests {
     #[test]
     fn per_z_index_warning_detects_line_command_only_panel() {
         assert_per_z_index_warning_for_commands(repeated_commands(
-            panel_shapes(),
+            RenderCommandKind::PanelShapes { shapes: Vec::new() },
             per_z_index_band_capacity(),
         ));
     }
 
     #[test]
     fn per_z_index_warning_detects_mixed_panel() {
-        let kinds = [rectangle(), text(), panel_shapes()];
+        let kinds = [
+            rectangle(),
+            text(),
+            RenderCommandKind::PanelShapes { shapes: Vec::new() },
+        ];
         let commands = (0..per_z_index_band_capacity())
             .map(|index| command(kinds[index % kinds.len()].clone(), index))
             .collect();
@@ -183,8 +187,6 @@ mod tests {
             source: RectangleSource::Background,
         }
     }
-
-    fn panel_shapes() -> RenderCommandKind { RenderCommandKind::PanelShapes { shapes: Vec::new() } }
 
     fn text() -> RenderCommandKind {
         RenderCommandKind::Text {

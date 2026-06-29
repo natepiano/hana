@@ -9,13 +9,8 @@ use super::PanelShape;
 /// phases resolve its coordinates against the owning element's computed box.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelDraw {
-    kind:     PanelDrawKind,
+    shapes:   Vec<PanelShape>,
     overflow: DrawOverflow,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(super) enum PanelDrawKind {
-    Shapes(Vec<PanelShape>),
 }
 
 /// Whether a `PanelDraw` is clipped to the owning element.
@@ -31,15 +26,13 @@ pub enum DrawOverflow {
 impl PanelDraw {
     /// Creates a draw layer from lines.
     #[must_use]
-    pub fn lines(lines: impl IntoIterator<Item = PanelLine>) -> Self {
-        Self::shapes(lines.into_iter().map(PanelShape::Line))
-    }
+    pub fn lines(lines: impl IntoIterator<Item = PanelLine>) -> Self { Self::shapes(lines) }
 
     /// Creates a draw layer from shapes (lines and filled forms).
     #[must_use]
-    pub fn shapes(shapes: impl IntoIterator<Item = PanelShape>) -> Self {
+    pub fn shapes(shapes: impl IntoIterator<Item = impl Into<PanelShape>>) -> Self {
         Self {
-            kind:     PanelDrawKind::Shapes(shapes.into_iter().collect()),
+            shapes:   shapes.into_iter().map(Into::into).collect(),
             overflow: DrawOverflow::Clipped,
         }
     }
@@ -57,15 +50,15 @@ impl PanelDraw {
 
     /// Returns the shapes stored by this draw layer.
     #[must_use]
-    pub fn shapes_ref(&self) -> &[PanelShape] {
-        match &self.kind {
-            PanelDrawKind::Shapes(shapes) => shapes,
-        }
-    }
+    pub fn shapes_ref(&self) -> &[PanelShape] { &self.shapes }
 
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {
-            kind:     self.kind.scaled(default_scale),
+            shapes:   self
+                .shapes
+                .iter()
+                .map(|shape| shape.scaled(default_scale))
+                .collect(),
             overflow: self.overflow,
         }
     }
@@ -73,19 +66,6 @@ impl PanelDraw {
 
 impl Default for PanelDraw {
     fn default() -> Self { Self::lines([]) }
-}
-
-impl PanelDrawKind {
-    fn scaled(&self, default_scale: f32) -> Self {
-        match self {
-            Self::Shapes(shapes) => Self::Shapes(
-                shapes
-                    .iter()
-                    .map(|shape| shape.scaled(default_scale))
-                    .collect(),
-            ),
-        }
-    }
 }
 
 #[cfg(test)]

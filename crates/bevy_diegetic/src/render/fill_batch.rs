@@ -68,6 +68,7 @@ use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
+use crate::layout::DrawBatchFamily;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
@@ -289,6 +290,8 @@ pub(crate) struct ContiguousDrawnRun {
 pub(crate) struct SdfBatchKey {
     /// Authored z-index for the shared SDF fill sort lane.
     pub z_index:                DrawZIndex,
+    /// Renderer family that owns this SDF batch.
+    pub batch_family:           DrawBatchFamily,
     /// Render layers copied from the panel.
     pub layers:                 BatchRenderLayers,
     /// Shadow participation for this batch.
@@ -375,6 +378,7 @@ impl ResolvedSdfBatchRecord {
         };
         let batch_key = SdfBatchKey {
             z_index: surface.draw_depth.z_index(),
+            batch_family: DrawBatchFamily::SdfSurface,
             layers: BatchRenderLayers(surface.render_layers.clone()),
             shadow: surface.surface_shadow.into(),
             contiguous_drawn_run,
@@ -2334,6 +2338,7 @@ mod tests {
                 pipeline_compatibility.double_sided = cull_mode.is_none();
                 let key = SdfBatchKey {
                     z_index: 0.into(),
+                    batch_family: DrawBatchFamily::SdfSurface,
                     layers: BatchRenderLayers(RenderLayers::layer(0)),
                     shadow,
                     contiguous_drawn_run: ContiguousDrawnRun::default(),
@@ -3271,6 +3276,7 @@ mod tests {
     fn test_batch_key() -> SdfBatchKey {
         SdfBatchKey {
             z_index:                0.into(),
+            batch_family:           DrawBatchFamily::SdfSurface,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             shadow:                 VisualShadow::Cast,
             contiguous_drawn_run:   ContiguousDrawnRun::default(),

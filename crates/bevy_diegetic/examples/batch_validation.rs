@@ -43,6 +43,7 @@ use bevy_diegetic::PanelCoord;
 use bevy_diegetic::PanelDraw;
 use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
+use bevy_diegetic::PanelShape;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
@@ -86,66 +87,38 @@ const HOME_MARGIN: f32 = 0.33;
 const GLINT_LIGHT_POS: Vec3 = Vec3::new(-0.13, 0.30, 0.16);
 const GLINT_LIGHT_LUMENS: f32 = 2000.0;
 
-const AUTHORED_PANELS: usize = 4;
-
 // Authored content each panel draws, counted by family. Each panel renders its
-// own copy in the upper-right corner; the global "authored content" totals are
-// the sum of these four, so per-panel and aggregate readouts stay consistent.
+// own copy in the upper-right corner, so per-panel readouts stay consistent.
 // One El background = one sdf fill, one El border = one sdf border, one
 // `builder.text` = one text run, one panel-shape render record = one path row.
 const SDF_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:        4,
-    sdf_borders:      5,
-    material_slots:   9,
-    text_runs:        10,
-    shape_records:    0,
-    shape_primitives: 0,
+    sdf_fills:      4,
+    sdf_borders:    5,
+    material_slots: 9,
+    text_runs:      10,
+    shape_records:  0,
 };
 const TEXT_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:        8,
-    sdf_borders:      3,
-    material_slots:   12,
-    text_runs:        23,
-    shape_records:    0,
-    shape_primitives: 0,
+    sdf_fills:      8,
+    sdf_borders:    3,
+    material_slots: 12,
+    text_runs:      23,
+    shape_records:  0,
 };
 const SHAPE_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:        3,
-    sdf_borders:      4,
-    material_slots:   6,
-    text_runs:        8,
-    shape_records:    6,
-    shape_primitives: 11,
+    sdf_fills:      3,
+    sdf_borders:    4,
+    material_slots: 6,
+    text_runs:      8,
+    shape_records:  6,
 };
 const MIXED_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:        5,
-    sdf_borders:      2,
-    material_slots:   7,
-    text_runs:        15,
-    shape_records:    1,
-    shape_primitives: 3,
+    sdf_fills:      5,
+    sdf_borders:    2,
+    material_slots: 7,
+    text_runs:      15,
+    shape_records:  1,
 };
-
-const AUTHORED_SDF_FILLS: usize = SDF_PANEL_STATS.sdf_fills
-    + TEXT_PANEL_STATS.sdf_fills
-    + SHAPE_PANEL_STATS.sdf_fills
-    + MIXED_PANEL_STATS.sdf_fills;
-const AUTHORED_SDF_BORDERS: usize = SDF_PANEL_STATS.sdf_borders
-    + TEXT_PANEL_STATS.sdf_borders
-    + SHAPE_PANEL_STATS.sdf_borders
-    + MIXED_PANEL_STATS.sdf_borders;
-const AUTHORED_TEXT_RUNS: usize = SDF_PANEL_STATS.text_runs
-    + TEXT_PANEL_STATS.text_runs
-    + SHAPE_PANEL_STATS.text_runs
-    + MIXED_PANEL_STATS.text_runs;
-const AUTHORED_SHAPE_RECORDS: usize = SDF_PANEL_STATS.shape_records
-    + TEXT_PANEL_STATS.shape_records
-    + SHAPE_PANEL_STATS.shape_records
-    + MIXED_PANEL_STATS.shape_records;
-const AUTHORED_SHAPE_PRIMITIVES: usize = SDF_PANEL_STATS.shape_primitives
-    + TEXT_PANEL_STATS.shape_primitives
-    + SHAPE_PANEL_STATS.shape_primitives
-    + MIXED_PANEL_STATS.shape_primitives;
 
 const SDF_ANIMATION_GREEN_OFFSET: f32 = 2.1;
 const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
@@ -418,23 +391,20 @@ impl HdrTextCoverageSelection {
     }
 }
 
-/// Authored draw counts for one panel, split by render family. Drives both the
-/// panel's own upper-right readout and the summed global "authored content"
-/// totals.
+/// Authored draw counts for one panel, split by render family. Drives the
+/// panel's own upper-right readout.
 #[derive(Clone, Copy)]
 struct PanelStats {
     /// Element backgrounds, each one authored SDF fill surface.
-    sdf_fills:        usize,
+    sdf_fills:      usize,
     /// Element borders, each one authored SDF border surface.
-    sdf_borders:      usize,
+    sdf_borders:    usize,
     /// Authored SDF fill/border material-table rows for this panel.
-    material_slots:   usize,
+    material_slots: usize,
     /// `builder.text` runs.
-    text_runs:        usize,
+    text_runs:      usize,
     /// Panel-shape `PathRenderRecord` rows predicted for this panel.
-    shape_records:    usize,
-    /// Total stroked/filled marks across all shape groups.
-    shape_primitives: usize,
+    shape_records:  usize,
 }
 
 impl PanelStats {
@@ -1607,36 +1577,19 @@ fn validation_stats_sections(
     let sdf = perf.panel_geometry;
     let material_table = perf.material_table;
     let current_draws = sdf.sdf_batches + batch.batches + shape_batch.batches;
+    let frame_ms = frame_secs * 1000.0;
     vec![
-        StatsPanelSection::new(
-            "frame",
-            [
-                StatsPanelRow::new(
-                    "profile",
-                    if cfg!(debug_assertions) {
-                        "debug"
-                    } else {
-                        "release"
-                    },
-                ),
-                StatsPanelRow::new("fps", format!("{fps:.0}"))
-                    .detail(format!("frame: {:.2} ms", frame_secs * 1000.0)),
-            ],
-        ),
-        StatsPanelSection::new(
-            "authored content",
-            [
-                StatsPanelRow::new("panels", AUTHORED_PANELS.to_string())
-                    .detail("four world panels, each a different batching case"),
-                StatsPanelRow::new("sdf fills", AUTHORED_SDF_FILLS.to_string()),
-                StatsPanelRow::new("sdf borders", AUTHORED_SDF_BORDERS.to_string())
-                    .detail("fills and borders should become SDF batch records"),
-                StatsPanelRow::new("text runs", AUTHORED_TEXT_RUNS.to_string()),
-                StatsPanelRow::new("shape records", AUTHORED_SHAPE_RECORDS.to_string()),
-                StatsPanelRow::new("shape primitives", AUTHORED_SHAPE_PRIMITIVES.to_string())
-                    .detail("lines, arrows, circles, dividers"),
-            ],
-        ),
+        StatsPanelSection::untitled([
+            StatsPanelRow::new(
+                "profile",
+                if cfg!(debug_assertions) {
+                    "debug"
+                } else {
+                    "release"
+                },
+            ),
+            StatsPanelRow::new("fps", format!("{fps:.0} / {frame_ms:.2} ms")),
+        ]),
         StatsPanelSection::new(
             "observed renderer",
             [
@@ -2939,14 +2892,13 @@ fn shape_group_card(
 // sits on the line's first point so it touches the stroke.
 fn mixed_shape_group(color: Color) -> PanelDraw {
     PanelDraw::shapes([
-        PanelLine::new(PanelPoint::new(6.0, 4.0), PanelPoint::new(146.0, 4.0))
-            .width(Mm(0.5))
-            .color(color)
-            .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2))
-            .into(),
-        PanelCircle::new(PanelPoint::new(6.0, 4.0), Mm(2.0))
-            .color(color)
-            .into(),
+        PanelShape::from(
+            PanelLine::new(PanelPoint::new(6.0, 4.0), PanelPoint::new(146.0, 4.0))
+                .width(Mm(0.5))
+                .color(color)
+                .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2)),
+        ),
+        PanelShape::from(PanelCircle::new(PanelPoint::new(6.0, 4.0), Mm(2.0)).color(color)),
     ])
 }
 

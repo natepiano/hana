@@ -32,6 +32,7 @@ use super::material::PathExtendedMaterial;
 use super::packing::PathQuadRecord;
 use super::packing::PathRenderRecord;
 use crate::DrawZIndex;
+use crate::layout::DrawBatchFamily;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::render;
@@ -52,8 +53,10 @@ use crate::text::RunStorageKey;
 /// sort, pass, pipeline, and resource facts that must agree inside one draw.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PathBatchKey {
-    /// Panel command z-level for the batch's shared screen sort lane.
+    /// Authored z-index for the batch's shared screen sort anchor.
     pub z_index:                DrawZIndex,
+    /// Renderer family that owns this analytic path batch.
+    pub batch_family:           DrawBatchFamily,
     /// Shadow participation for this analytic path draw.
     pub shadow:                 VisualShadow,
     /// Render layers copied from the owning panel or text run scope.
@@ -624,6 +627,7 @@ mod tests {
         };
         PathBatchKey {
             z_index:                0.into(),
+            batch_family:           DrawBatchFamily::Text,
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             pipeline_compatibility: PipelineCompatibility::from(&material),
