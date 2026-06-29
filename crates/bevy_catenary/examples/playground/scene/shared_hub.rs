@@ -55,15 +55,15 @@ pub(super) fn setup_section_shared_hub(
         ..default()
     });
 
-    let mut hub_ec = commands.spawn((
+    let mut hub_entity_commands = commands.spawn((
         Mesh3d(drag_mesh),
         MeshMaterial3d(drag_material),
         Transform::from_translation(Vec3::new(section_center_x, NODE_Y, SHARED_HUB_POSITION_Z)),
         Draggable,
         NodeCube,
     ));
-    hub_ec.observe(input::on_drag_start);
-    hub_ec.with_children(|parent| {
+    hub_entity_commands.observe(input::on_drag_start);
+    hub_entity_commands.with_children(|parent| {
         parent.spawn((
             CameraFacingLabel,
             Pickable::IGNORE,
@@ -74,7 +74,7 @@ pub(super) fn setup_section_shared_hub(
                 .build(),
         ));
     });
-    let hub = hub_ec.id();
+    let hub = hub_entity_commands.id();
 
     let spokes = [
         Vec3::new(

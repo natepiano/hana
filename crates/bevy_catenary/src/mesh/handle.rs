@@ -80,11 +80,12 @@ pub(super) fn on_geometry_computed(
         // `Assets<Mesh>::add` creates the `Handle<Mesh>` for the spawned `Mesh3d` child.
         // `CableMeshChild` and `CableMeshHandle` are inserted on the cable entity.
         let handle = meshes.add(new_mesh);
-        let mut child_commands = commands.spawn((Mesh3d(handle.clone()), ChildOf(cable_entity)));
-        if let Some(ref mat) = cable_mesh_config.material {
-            child_commands.insert(MeshMaterial3d(mat.clone()));
+        let mut child_entity_commands =
+            commands.spawn((Mesh3d(handle.clone()), ChildOf(cable_entity)));
+        if let Some(ref material) = cable_mesh_config.material {
+            child_entity_commands.insert(MeshMaterial3d(material.clone()));
         }
-        let child = child_commands.id();
+        let child = child_entity_commands.id();
         commands
             .entity(cable_entity)
             .insert((CableMeshHandle(handle), CableMeshChild(child)));

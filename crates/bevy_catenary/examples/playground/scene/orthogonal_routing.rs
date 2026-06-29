@@ -63,27 +63,33 @@ pub(super) fn setup_section_orthogonal_routing(
         .map(|position| Obstacle::new(ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS, position))
         .collect();
 
-    let mut start_ec = entities::spawn_node_cube(commands, node_mesh, node_material, start);
-    start_ec.insert(Draggable).observe(input::on_drag_start);
+    let mut start_entity_commands =
+        entities::spawn_node_cube(commands, node_mesh, node_material, start);
+    start_entity_commands
+        .insert(Draggable)
+        .observe(input::on_drag_start);
     entities::add_cube_face_labels(
-        &mut start_ec,
+        &mut start_entity_commands,
         DRAG_FACE_LABEL_TEXT,
         NODE_CUBE_DIMENSION,
         NODE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
         BOX_LABEL_EMISSIVE_COLOR,
     );
-    let start_node = start_ec.id();
+    let start_node = start_entity_commands.id();
 
-    let mut end_ec = entities::spawn_node_cube(commands, node_mesh, node_material, end);
-    end_ec.insert(Draggable).observe(input::on_drag_start);
+    let mut end_entity_commands =
+        entities::spawn_node_cube(commands, node_mesh, node_material, end);
+    end_entity_commands
+        .insert(Draggable)
+        .observe(input::on_drag_start);
     entities::add_cube_face_labels(
-        &mut end_ec,
+        &mut end_entity_commands,
         DRAG_FACE_LABEL_TEXT,
         NODE_CUBE_DIMENSION,
         NODE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
         BOX_LABEL_EMISSIVE_COLOR,
     );
-    let end_node = end_ec.id();
+    let end_node = end_entity_commands.id();
 
     let cable = commands
         .spawn((
@@ -114,10 +120,20 @@ pub(super) fn setup_section_orthogonal_routing(
         ));
     });
 
+    spawn_routing_obstacles(commands, meshes, materials, cable, obstacle_positions);
+}
+
+fn spawn_routing_obstacles(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    cable: Entity,
+    obstacle_positions: impl IntoIterator<Item = Vec3>,
+) {
     let obstacle_size =
         ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.x * ORTHOGONAL_ROUTING_OBSTACLE_SIZE_MULTIPLIER;
     for obstacle_position in obstacle_positions {
-        let mut obstacle = commands.spawn((
+        let mut obstacle_entity_commands = commands.spawn((
             Mesh3d(meshes.add(Cuboid::new(
                 obstacle_size,
                 ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS.y
@@ -137,11 +153,11 @@ pub(super) fn setup_section_orthogonal_routing(
                 half_extents: ORTHOGONAL_ROUTING_OBSTACLE_HALF_EXTENTS,
             },
         ));
-        obstacle
+        obstacle_entity_commands
             .observe(input::on_drag_start)
             .observe(input::on_mesh_clicked);
         entities::add_cube_face_labels(
-            &mut obstacle,
+            &mut obstacle_entity_commands,
             DRAG_FACE_LABEL_TEXT,
             obstacle_size,
             obstacle_size * FACE_LABEL_SIZE_RATIO,

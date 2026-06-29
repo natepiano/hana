@@ -42,7 +42,7 @@ pub(super) fn setup_section_entity_attachment(
         ..default()
     });
 
-    let mut left = commands.spawn((
+    let mut left_entity_commands = commands.spawn((
         Mesh3d(drag_mesh.clone()),
         MeshMaterial3d(drag_material.clone()),
         Transform::from_translation(Vec3::new(
@@ -53,17 +53,17 @@ pub(super) fn setup_section_entity_attachment(
         Draggable,
         NodeCube,
     ));
-    left.observe(input::on_drag_start);
+    left_entity_commands.observe(input::on_drag_start);
     entities::add_cube_face_labels(
-        &mut left,
+        &mut left_entity_commands,
         DRAG_FACE_LABEL_TEXT,
         DRAGGABLE_CUBE_DIMENSION,
         DRAGGABLE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
         BOX_LABEL_EMISSIVE_COLOR,
     );
-    let left_cube = left.id();
+    let left_cube = left_entity_commands.id();
 
-    let mut right = commands.spawn((
+    let mut right_entity_commands = commands.spawn((
         Mesh3d(drag_mesh),
         MeshMaterial3d(drag_material),
         Transform::from_translation(Vec3::new(
@@ -74,15 +74,15 @@ pub(super) fn setup_section_entity_attachment(
         Draggable,
         NodeCube,
     ));
-    right.observe(input::on_drag_start);
+    right_entity_commands.observe(input::on_drag_start);
     entities::add_cube_face_labels(
-        &mut right,
+        &mut right_entity_commands,
         DRAG_FACE_LABEL_TEXT,
         DRAGGABLE_CUBE_DIMENSION,
         DRAGGABLE_CUBE_DIMENSION * FACE_LABEL_SIZE_RATIO,
         BOX_LABEL_EMISSIVE_COLOR,
     );
-    let right_cube = right.id();
+    let right_cube = right_entity_commands.id();
 
     commands
         .spawn((

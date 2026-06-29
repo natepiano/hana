@@ -120,9 +120,10 @@ fn spawn_labeled_node_pair(
     word: &str,
 ) {
     for position in [start, end] {
-        let mut node = entities::spawn_node_cube(commands, node_mesh, node_material, position);
+        let mut node_entity_commands =
+            entities::spawn_node_cube(commands, node_mesh, node_material, position);
         entities::add_cube_face_labels(
-            &mut node,
+            &mut node_entity_commands,
             word,
             NODE_CUBE_DIMENSION,
             SOLVER_FACE_LABEL_SIZE,
