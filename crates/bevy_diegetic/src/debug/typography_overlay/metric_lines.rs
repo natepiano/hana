@@ -26,7 +26,6 @@ use crate::debug::constants::METRIC_LINE_Z_OFFSET;
 use crate::default_panel_material;
 use crate::layout::Anchor;
 use crate::layout::DrawOverflow;
-use crate::layout::DrawZIndex;
 use crate::layout::El;
 use crate::layout::LayoutBuilder;
 use crate::layout::LayoutTree;
@@ -372,7 +371,7 @@ fn build_metric_guide_tree(
             El::new()
                 .size(width, height)
                 .hairline_fade(HairlineFade::Full)
-                .z_index(DrawZIndex(1))
+                .z_index(1)
                 .draw(PanelDraw::shapes(dot_shapes).overflow(DrawOverflow::Visible)),
             |_| {},
         );

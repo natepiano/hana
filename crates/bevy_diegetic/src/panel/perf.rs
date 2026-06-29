@@ -28,6 +28,7 @@ use super::constants::DIAG_TEXT_BATCH_INSTANCE_UPLOADS;
 use super::constants::DIAG_TEXT_BATCH_RUN_TABLE_UPLOADS;
 use super::constants::DIAG_TEXT_BATCH_RUNS;
 use super::constants::DIAG_TEXT_BATCHES;
+use crate::DrawZIndex;
 
 /// Lightweight timing data for diegetic UI systems.
 ///
@@ -82,8 +83,8 @@ pub struct DiegeticPerfStats {
 /// is how many records routed into it.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Reflect)]
 pub struct BatchSummary {
-    /// Authored z-level / sort lane for the batch.
-    pub z_level:       i32,
+    /// Authored z-index / sort lane for the batch.
+    pub z_index:       DrawZIndex,
     /// Active render-layer indices copied from the batch key.
     pub render_layers: Vec<u32>,
     /// Batch casts a shadow, a batch-key discriminant that splits otherwise

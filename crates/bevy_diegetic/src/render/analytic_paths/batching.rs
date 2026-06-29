@@ -31,6 +31,7 @@ use bevy_kana::ToUsize;
 use super::material::PathExtendedMaterial;
 use super::packing::PathQuadRecord;
 use super::packing::PathRenderRecord;
+use crate::DrawZIndex;
 use crate::layout::Lighting;
 use crate::layout::Sidedness;
 use crate::render;
@@ -52,7 +53,7 @@ use crate::text::RunStorageKey;
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct PathBatchKey {
     /// Panel command z-level for the batch's shared screen sort lane.
-    pub z_level:                i8,
+    pub z_index:                DrawZIndex,
     /// Shadow participation for this analytic path draw.
     pub shadow:                 VisualShadow,
     /// Render layers copied from the owning panel or text run scope.
@@ -609,7 +610,7 @@ mod tests {
                 MaterialSlotId::try_from(0).expect("slot 0 is valid"),
             ),
             render_mode: 1,
-            depth_nudge: 0.0,
+            clip_depth_nudge: 0.0,
             oit_depth_offset: 0.0,
             aa_flags: 3,
             text_coverage_bias: 0.0,
@@ -622,7 +623,7 @@ mod tests {
             ..Default::default()
         };
         PathBatchKey {
-            z_level:                0,
+            z_index:                0.into(),
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             pipeline_compatibility: PipelineCompatibility::from(&material),

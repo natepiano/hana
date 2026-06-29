@@ -146,8 +146,8 @@ fn build_panel_geometry(
             .collect();
         resolved.sort_by(|left, right| {
             left.draw_depth
-                .ordinal_index()
-                .cmp(&right.draw_depth.ordinal_index())
+                .panel_draw_command_rank_index()
+                .cmp(&right.draw_depth.panel_draw_command_rank_index())
                 .then(left.command_index.cmp(&right.command_index))
         });
         resolved_surfaces.upsert_panel(

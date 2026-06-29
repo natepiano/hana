@@ -39,7 +39,7 @@ struct PathRenderRecord {
     transform: mat4x4<f32>,
     material: u32,
     render_mode: u32,
-    depth_nudge: f32,
+    clip_depth_nudge: f32,
     oit_depth_offset: f32,
     aa_flags: u32,
     text_coverage_bias: f32,
@@ -59,9 +59,9 @@ struct PackedPathRecord {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> path_records: array<PackedPathRecord>;
 
-// Clip-space depth shift per depth_nudge layer unit, applied post-projection
+// Clip-space depth shift per clip_depth_nudge layer unit, applied post-projection
 // so coplanar runs resolve to distinct depths.
-const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.000002;
+const CLIP_DEPTH_NUDGE_PER_LAYER: f32 = 0.000002;
 
 // Screen-space room, in device pixels, added around a panel-line quad for its
 // coverage ramp. That ramp is screen-space (~1px) plus any hairline dilation;
@@ -175,7 +175,7 @@ fn pull_vertex(vertex_index: u32, instance_index: u32) -> PulledVertex {
 
     var clip = position_world_to_clip(world.xyz);
 #ifndef OIT_ENABLED
-    clip.z += run.depth_nudge * DEPTH_NUDGE_CLIP_PER_LAYER * clip.w;
+    clip.z += run.clip_depth_nudge * CLIP_DEPTH_NUDGE_PER_LAYER * clip.w;
 #endif
     out.clip_position = clip;
 

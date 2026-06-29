@@ -7,7 +7,7 @@ use bevy::prelude::*;
 use super::PanelTextLayout;
 use super::PanelTextRuns;
 use super::TextRunOf;
-use super::layout::PanelTextZLevel;
+use super::layout::PanelTextDrawZIndex;
 use crate::PanelElementId;
 use crate::cascade;
 use crate::cascade::HdrTextCoverageBias;
@@ -41,7 +41,7 @@ struct ReusableChild<'a> {
     text:                   &'a TextContent,
     style:                  &'a TextStyle,
     layout:                 &'a PanelTextLayout,
-    z_level:                &'a PanelTextZLevel,
+    z_index:                &'a PanelTextDrawZIndex,
     alpha:                  Option<&'a Override<TextAlpha>>,
     material:               Option<&'a Override<TextMaterial>>,
     lighting:               Option<&'a Override<Lighting>>,
@@ -115,7 +115,7 @@ fn collect_existing_text_children<'a>(
         &TextContent,
         &TextStyle,
         &PanelTextLayout,
-        &PanelTextZLevel,
+        &PanelTextDrawZIndex,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
@@ -129,7 +129,7 @@ fn collect_existing_text_children<'a>(
             text,
             style,
             layout,
-            z_level,
+            z_index,
             alpha,
             material,
             lighting,
@@ -146,7 +146,7 @@ fn collect_existing_text_children<'a>(
                 text,
                 style,
                 layout,
-                z_level,
+                z_index,
                 alpha,
                 material,
                 lighting,
@@ -176,7 +176,7 @@ pub(super) fn reconcile_panel_text_children(
         &TextContent,
         &TextStyle,
         &PanelTextLayout,
-        &PanelTextZLevel,
+        &PanelTextDrawZIndex,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
@@ -233,12 +233,12 @@ pub(super) fn reconcile_panel_text_children(
             let label_sidedness = config.sidedness();
             let label_hdr_text_coverage_bias = config.hdr_text_coverage_bias();
             let style = config.for_shaping(Anchor::TopLeft);
-            let z_level = PanelTextZLevel(draw_depth.z_level());
+            let z_index = PanelTextDrawZIndex(draw_depth.z_index());
             let panel_text_child = PanelTextLayout {
                 id: id.clone(),
                 line_index: *line_index,
                 element_idx: *element_idx,
-                draw_ordinal: draw_depth.ordinal_index(),
+                draw_ordinal: draw_depth.panel_draw_command_rank_index(),
                 depth_bias: draw_depth.depth_bias().get(),
                 oit_depth_offset: draw_depth.oit_depth_offset().get(),
                 bounds: *bounds,
@@ -259,7 +259,7 @@ pub(super) fn reconcile_panel_text_children(
                     text,
                     style,
                     layout: panel_text_child,
-                    z_level,
+                    z_index,
                     label_alpha,
                     label_material,
                     label_lighting,
@@ -274,7 +274,7 @@ pub(super) fn reconcile_panel_text_children(
                     text,
                     style,
                     layout: panel_text_child,
-                    z_level,
+                    z_index,
                     label_alpha,
                     label_material,
                     label_lighting,
@@ -317,7 +317,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     text:                         &'a str,
     style:                        TextStyle,
     layout:                       PanelTextLayout,
-    z_level:                      PanelTextZLevel,
+    z_index:                      PanelTextDrawZIndex,
     label_alpha:                  Option<AlphaMode>,
     label_material:               Option<Handle<StandardMaterial>>,
     label_lighting:               Option<Lighting>,
@@ -335,7 +335,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         text,
         style,
         layout,
-        z_level,
+        z_index,
         label_alpha,
         label_material,
         label_lighting,
@@ -352,7 +352,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             TextContent::new(text.to_owned()),
             style,
             layout,
-            z_level,
+            z_index,
             TextRunOf(panel_entity),
         ));
         spawned = child.id();
@@ -384,7 +384,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     text:                         &'a str,
     style:                        TextStyle,
     layout:                       PanelTextLayout,
-    z_level:                      PanelTextZLevel,
+    z_index:                      PanelTextDrawZIndex,
     label_alpha:                  Option<AlphaMode>,
     label_material:               Option<Handle<StandardMaterial>>,
     label_lighting:               Option<Lighting>,
@@ -409,7 +409,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         text,
         style,
         layout,
-        z_level,
+        z_index,
         label_alpha,
         label_material,
         label_lighting,
@@ -426,8 +426,8 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     if !reusable.layout.gating_eq(&layout) {
         child.insert(layout);
     }
-    if *reusable.z_level != z_level {
-        child.insert(z_level);
+    if *reusable.z_index != z_index {
+        child.insert(z_index);
     }
     match label_alpha {
         Some(alpha_mode) => {
@@ -799,7 +799,7 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
-    use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
+    use crate::render::constants::FIRST_COMMAND_SORT_OFFSET;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
@@ -1574,7 +1574,7 @@ mod tests {
         app.update();
 
         let (_, material_before) = single_image_child(&mut app);
-        let first_command_depth = DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * LAYER_DEPTH_BIAS;
+        let first_command_depth = FIRST_COMMAND_SORT_OFFSET.to_f32() * LAYER_DEPTH_BIAS;
         assert_eq!(
             material_depth_bias(&app, &material_before).to_bits(),
             first_command_depth.to_bits(),

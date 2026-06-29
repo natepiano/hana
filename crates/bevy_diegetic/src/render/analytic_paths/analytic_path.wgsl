@@ -317,7 +317,7 @@ struct PathRenderRecord {
     transform: mat4x4<f32>,
     material: u32,
     render_mode: u32,
-    depth_nudge: f32,
+    clip_depth_nudge: f32,
     oit_depth_offset: f32,
     aa_flags: u32,
     text_coverage_bias: f32,

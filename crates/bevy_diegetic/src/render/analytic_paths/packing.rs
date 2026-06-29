@@ -194,7 +194,7 @@ pub(crate) struct PathRenderRecord {
     /// Visible render mode (`RenderMode` as `u32`).
     pub render_mode:        u32,
     /// Clip-space depth nudge in layer units for non-OIT views.
-    pub depth_nudge:        f32,
+    pub clip_depth_nudge:   f32,
     /// Per-run OIT position-z offset for coplanar ordering.
     pub oit_depth_offset:   f32,
     /// Resolved anti-alias mode bits (`AntiAlias::aa_flags`:
@@ -648,7 +648,7 @@ mod tests {
                 MaterialSlotId::try_from(seed.to_bits()).expect("seed bits are valid slot ids"),
             ),
             render_mode:        1,
-            depth_nudge:        seed,
+            clip_depth_nudge:   seed,
             oit_depth_offset:   -seed,
             aa_flags:           3,
             text_coverage_bias: seed * 0.25,

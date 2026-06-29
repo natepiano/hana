@@ -2,6 +2,7 @@ use bevy::prelude::Component;
 
 use crate::PanelElementId;
 use crate::layout::BoundingBox;
+use crate::layout::DrawZIndex;
 
 /// Layout payload for a panel-text run (a
 /// [`TextContent`](crate::TextContent) entity).
@@ -42,7 +43,7 @@ pub struct PanelTextLayout {
 
 /// Private batch-routing depth level for a panel-text run.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct PanelTextZLevel(pub(super) i8);
+pub(super) struct PanelTextDrawZIndex(pub(super) DrawZIndex);
 
 impl PanelTextLayout {
     /// Bit-equality over the layout fields a panel-text glyph mesh depends on,

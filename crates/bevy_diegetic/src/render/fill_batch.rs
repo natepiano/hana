@@ -63,6 +63,7 @@ use super::material_table::SdfDriverRunOrder;
 use super::material_table::SdfPaintMaterial;
 use super::panel_geometry::ResolvedSdfSurface;
 use super::panel_geometry::ResolvedSdfSurfaceRegistry;
+use crate::DrawZIndex;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
 use crate::cascade::SdfMaterial;
@@ -73,7 +74,7 @@ use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
 use crate::render;
 
-/// Extra `depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
+/// Extra `clip_depth_nudge` layer-units pushing an opaque/alpha-mask SDF fill away
 /// from the camera so coplanar panel text, drawn at its true depth, wins the
 /// depth test instead of z-fighting the fill. Only the depth-buffer regime
 /// (`Opaque`/`Mask`) applies it; transparent and OIT fills order through
@@ -110,8 +111,8 @@ pub(crate) struct SdfRecordSnapshot {
 /// BRP-inspectable summary of one live `SdfBatchKey` entry.
 #[derive(Debug, Default, Reflect)]
 pub(crate) struct SdfBatchSummary {
-    /// `SdfBatchKey::z_level` widened for BRP.
-    pub z_level:                i32,
+    /// `SdfBatchKey::z_index` widened for BRP.
+    pub z_index:                DrawZIndex,
     /// Active `RenderLayers` indices copied from `SdfBatchKey::layers`.
     pub render_layers:          Vec<u32>,
     /// Debug label for `SdfBatchKey::shadow`.
@@ -286,8 +287,8 @@ pub(crate) struct ContiguousDrawnRun {
 /// Key for one SDF fill batch and one `SdfBatchResources` entry.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfBatchKey {
-    /// Authored z-level for the shared SDF fill sort lane.
-    pub z_level:                i8,
+    /// Authored z-index for the shared SDF fill sort lane.
+    pub z_index:                DrawZIndex,
     /// Render layers copied from the panel.
     pub layers:                 BatchRenderLayers,
     /// Shadow participation for this batch.
@@ -347,7 +348,7 @@ pub(crate) struct ResolvedSdfBatchRecord {
     /// Role-present bits derived from `fill_material` and `border_material`.
     pub paint_mask:       SdfPaintMask,
     /// Clip-space depth nudge in layer units for non-OIT views.
-    pub depth_nudge:      f32,
+    pub clip_depth_nudge: f32,
     /// Per-record OIT position-z offset for coplanar ordering.
     pub oit_depth_offset: f32,
     /// Extra shader flags for the SDF fragment path.
@@ -373,7 +374,7 @@ impl ResolvedSdfBatchRecord {
             role:          SdfMaterialRole::Border,
         };
         let batch_key = SdfBatchKey {
-            z_level: surface.draw_depth.z_level(),
+            z_index: surface.draw_depth.z_index(),
             layers: BatchRenderLayers(surface.render_layers.clone()),
             shadow: surface.surface_shadow.into(),
             contiguous_drawn_run,
@@ -410,8 +411,8 @@ impl ResolvedSdfBatchRecord {
             fill_material: materials.fill,
             border_material: materials.border,
             paint_mask,
-            depth_nudge: surface.draw_depth.depth_bias().get()
-                - draw_order::fill_batch_depth_bias(surface.draw_depth.z_level()).get()
+            clip_depth_nudge: surface.draw_depth.depth_bias().get()
+                - draw_order::sdf_surface_batch_depth_bias(surface.draw_depth.z_index()).get()
                 - opaque_fill_depth_push(
                     materials.pipeline_compatibility.alpha,
                     surface.surface_shadow.into(),
@@ -451,7 +452,7 @@ pub(crate) struct SdfRenderRecord {
     /// Extra shader flags for SDF rendering.
     pub flags:            u32,
     /// Clip-space depth nudge in layer units for non-OIT views.
-    pub depth_nudge:      f32,
+    pub clip_depth_nudge: f32,
     /// Per-record OIT position-z offset for coplanar ordering.
     pub oit_depth_offset: f32,
 }
@@ -471,7 +472,7 @@ impl SdfRenderRecord {
             border_material:  record.border_material.to_gpu(),
             paint_mask:       record.paint_mask,
             flags:            record.flags,
-            depth_nudge:      record.depth_nudge,
+            clip_depth_nudge: record.clip_depth_nudge,
             oit_depth_offset: record.oit_depth_offset,
         }
     }
@@ -490,7 +491,7 @@ impl SdfRenderRecord {
             border_material:  SdfPaintMaterial::NotAuthored.to_gpu(),
             paint_mask:       SdfPaintMask::empty(),
             flags:            0,
-            depth_nudge:      0.0,
+            clip_depth_nudge: 0.0,
             oit_depth_offset: 0.0,
         }
     }
@@ -557,8 +558,8 @@ impl SdfBatch {
     fn sort_records(&mut self) {
         self.records.sort_by(|left, right| {
             left.draw_depth
-                .ordinal_index()
-                .cmp(&right.draw_depth.ordinal_index())
+                .panel_draw_command_rank_index()
+                .cmp(&right.draw_depth.panel_draw_command_rank_index())
                 .then(
                     left.record_key
                         .command_index
@@ -829,7 +830,7 @@ pub(crate) fn sdf_batch_material(input: SdfBatchMaterialInput) -> SdfExtendedMat
     base.fog_enabled = key.pipeline_compatibility.fog_enabled;
     base.opaque_render_method = key.pipeline_compatibility.opaque_render_method.into();
     base.deferred_lighting_pass_id = key.pipeline_compatibility.deferred_lighting_pass_id;
-    base.depth_bias = draw_order::fill_batch_depth_bias(key.z_level).get();
+    base.depth_bias = draw_order::sdf_surface_batch_depth_bias(key.z_index).get();
     ExtendedMaterial {
         base,
         extension: SdfExtension {
@@ -861,7 +862,7 @@ pub(crate) fn sdf_batch_alpha_mode(alpha: BatchAlphaMode, shadow: VisualShadow) 
     }
 }
 
-/// Extra `depth_nudge` layer-units to push the SDF fill away from the camera,
+/// Extra `clip_depth_nudge` layer-units to push the SDF fill away from the camera,
 /// non-zero only for the depth-buffer regime (`Opaque`/`Mask`). Transparent and
 /// OIT fills order through their sort/list levers, so they get zero.
 #[must_use]
@@ -1053,8 +1054,8 @@ pub(crate) fn assign_contiguous_runs(
     for (_, mut partition) in by_layers {
         partition.sort_by(|(_, left), (_, right)| {
             left.draw_depth
-                .ordinal_index()
-                .cmp(&right.draw_depth.ordinal_index())
+                .panel_draw_command_rank_index()
+                .cmp(&right.draw_depth.panel_draw_command_rank_index())
                 .then(left.command_index.cmp(&right.command_index))
         });
 
@@ -1079,7 +1080,7 @@ pub(crate) fn assign_contiguous_runs(
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SdfRunCompatibility {
-    z_level:                i8,
+    z_index:                DrawZIndex,
     layers:                 BatchRenderLayers,
     shadow:                 VisualShadow,
     pipeline_compatibility: PipelineCompatibility,
@@ -1089,7 +1090,7 @@ struct SdfRunCompatibility {
 impl SdfRunCompatibility {
     fn from_surface(surface: &ResolvedSdfSurface<'_>, materials: &SdfRecordMaterialSlots) -> Self {
         Self {
-            z_level:                surface.draw_depth.z_level(),
+            z_index:                surface.draw_depth.z_index(),
             layers:                 BatchRenderLayers(surface.render_layers.clone()),
             shadow:                 surface.surface_shadow.into(),
             pipeline_compatibility: materials.pipeline_compatibility,
@@ -1509,7 +1510,7 @@ pub(crate) fn commit_sdf_batch_buffers(
     for (key, batch) in store.batches_mut() {
         batches += 1;
         perf.sdf_breakdown.push(super::batch_summary(
-            key.z_level,
+            key.z_index,
             &key.layers,
             key.shadow,
             &key.pipeline_compatibility,
@@ -1517,7 +1518,7 @@ pub(crate) fn commit_sdf_batch_buffers(
             batch.record_count(),
         ));
         diagnostics.batches.push(SdfBatchSummary {
-            z_level:                i32::from(key.z_level),
+            z_index:                key.z_index,
             render_layers:          key.layers.0.iter().map(usize::to_u32).collect(),
             shadow:                 format!("{:?}", key.shadow),
             contiguous_run:         key.contiguous_drawn_run.value,
@@ -2332,7 +2333,7 @@ mod tests {
                 });
                 pipeline_compatibility.double_sided = cull_mode.is_none();
                 let key = SdfBatchKey {
-                    z_level: 0,
+                    z_index: 0.into(),
                     layers: BatchRenderLayers(RenderLayers::layer(0)),
                     shadow,
                     contiguous_drawn_run: ContiguousDrawnRun::default(),
@@ -2563,7 +2564,7 @@ mod tests {
             fill_material:    SdfPaintMaterial::NotAuthored,
             border_material:  SdfPaintMaterial::NotAuthored,
             paint_mask:       SdfPaintMask::empty(),
-            depth_nudge:      0.0,
+            clip_depth_nudge: 0.0,
             oit_depth_offset: 0.0,
             flags:            0,
         };
@@ -2688,7 +2689,7 @@ mod tests {
 
     #[test]
     fn opaque_sdf_fill_is_pushed_back_relative_to_a_blend_fill() {
-        let fill_depth_nudge = |alpha_mode: AlphaMode| {
+        let fill_clip_depth_nudge = |alpha_mode: AlphaMode| {
             let mut app = sdf_pipeline_app();
             spawn_sdf_panel(
                 &mut app,
@@ -2701,11 +2702,11 @@ mod tests {
             settle_sdf_pipeline(&mut app);
             let records = sdf_records(&app);
             assert_eq!(records.len(), 1);
-            records[0].depth_nudge
+            records[0].clip_depth_nudge
         };
 
-        let opaque_nudge = fill_depth_nudge(AlphaMode::Opaque);
-        let blend_nudge = fill_depth_nudge(AlphaMode::Blend);
+        let opaque_nudge = fill_clip_depth_nudge(AlphaMode::Opaque);
+        let blend_nudge = fill_clip_depth_nudge(AlphaMode::Blend);
 
         assert_eq!(
             opaque_nudge.to_bits(),
@@ -3076,7 +3077,10 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].record_key.command_index, CommandIndex::from(0));
         assert_eq!(records[1].record_key.command_index, CommandIndex::from(1));
-        assert!(records[0].draw_depth.ordinal_index() <= records[1].draw_depth.ordinal_index());
+        assert!(
+            records[0].draw_depth.panel_draw_command_rank_index()
+                <= records[1].draw_depth.panel_draw_command_rank_index()
+        );
         assert!(records[0].oit_depth_offset < records[1].oit_depth_offset);
     }
 
@@ -3266,7 +3270,7 @@ mod tests {
 
     fn test_batch_key() -> SdfBatchKey {
         SdfBatchKey {
-            z_level:                0,
+            z_index:                0.into(),
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             shadow:                 VisualShadow::Cast,
             contiguous_drawn_run:   ContiguousDrawnRun::default(),

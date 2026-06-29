@@ -21,6 +21,7 @@ use bevy::prelude::Handle;
 use bevy::render::render_resource::Face;
 use bevy_kana::ToU32;
 
+use crate::DrawZIndex;
 use crate::layout::GlyphShadowMode;
 use crate::panel::BatchSummary;
 use crate::panel::SurfaceShadow;
@@ -361,15 +362,16 @@ impl From<&StandardMaterial> for ResourceCompatibility {
 /// (text, panel-line, SDF) shares this so the breakdowns stay uniform.
 #[must_use]
 pub(crate) fn batch_summary(
-    z_level: i8,
+    z_index: impl Into<DrawZIndex>,
     layers: &BatchRenderLayers,
     shadow: VisualShadow,
     pipeline: &PipelineCompatibility,
     resource: &ResourceCompatibility,
     record_count: u32,
 ) -> BatchSummary {
+    let z_index = z_index.into();
     BatchSummary {
-        z_level: i32::from(z_level),
+        z_index,
         render_layers: layers.0.iter().map(usize::to_u32).collect(),
         casts_shadow: matches!(shadow, VisualShadow::Cast),
         unlit: pipeline.unlit,

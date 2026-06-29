@@ -29,7 +29,7 @@ use bevy_kana::ToUsize;
 
 use super::PanelTextLayout;
 use super::PreparedPanelText;
-use super::layout::PanelTextZLevel;
+use super::layout::PanelTextDrawZIndex;
 use crate::cascade::CascadeDefault;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Resolved;
@@ -190,7 +190,7 @@ pub(super) fn update_panel_text_batches(
             Entity,
             Ref<PreparedPanelText>,
             Ref<PanelTextLayout>,
-            Ref<PanelTextZLevel>,
+            Ref<PanelTextDrawZIndex>,
             &ChildOf,
             &GlobalTransform,
             Option<&Visibility>,
@@ -232,7 +232,7 @@ pub(super) fn update_panel_text_batches(
         label_entity,
         prepared,
         panel_text_child,
-        z_level,
+        z_index,
         child_of,
         label_transform,
         label_visibility,
@@ -268,7 +268,7 @@ pub(super) fn update_panel_text_batches(
         let batch_key = batch_key_for_run(
             panel_layers,
             &prepared,
-            *z_level,
+            *z_index,
             material_candidate.pipeline_compatibility,
             material_candidate.resource_compatibility.clone(),
         );
@@ -279,7 +279,7 @@ pub(super) fn update_panel_text_batches(
         let geometry_changed = panel_text_geometry_changed(
             &prepared,
             &panel_text_child,
-            &z_level,
+            &z_index,
             &cascade_changed,
             label_entity,
             key_changed,
@@ -332,7 +332,7 @@ fn remove_emptied_panel_text_runs(
 fn panel_text_geometry_changed(
     prepared: &Ref<'_, PreparedPanelText>,
     panel_text_child: &Ref<'_, PanelTextLayout>,
-    z_level: &Ref<'_, PanelTextZLevel>,
+    z_index: &Ref<'_, PanelTextDrawZIndex>,
     cascade_changed: &EntityHashSet,
     label_entity: Entity,
     key_changed: bool,
@@ -341,7 +341,7 @@ fn panel_text_geometry_changed(
     // signal here re-derives the quads.
     (prepared.is_changed() && !prepared.render_only)
         || panel_text_child.is_changed()
-        || z_level.is_changed()
+        || z_index.is_changed()
         || cascade_changed.contains(&label_entity)
         || key_changed
 }
@@ -551,12 +551,12 @@ fn append_text_material_row(
 fn batch_key_for_run(
     panel_layers: Option<&RenderLayers>,
     prepared: &PreparedPanelText,
-    z_level: PanelTextZLevel,
+    z_index: PanelTextDrawZIndex,
     pipeline_compatibility: PipelineCompatibility,
     resource_compatibility: ResourceCompatibility,
 ) -> PathBatchKey {
     PathBatchKey {
-        z_level: z_level.0,
+        z_index: z_index.0,
         shadow: prepared.shadow_mode.into(),
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
         pipeline_compatibility,
@@ -578,7 +578,7 @@ fn run_record_for(
         transform:          label_transform.to_matrix(),
         material:           material.into(),
         render_mode:        u32::from(RenderMode::from(prepared.render_mode)),
-        depth_nudge:        panel_text_child.depth_bias,
+        clip_depth_nudge:   panel_text_child.depth_bias,
         oit_depth_offset:   panel_text_child.oit_depth_offset,
         aa_flags:           anti_alias.aa_flags(),
         text_coverage_bias: hdr_text_coverage_bias.shader_value(),
@@ -727,7 +727,7 @@ pub(super) fn commit_batch_buffers(
         runs += batch.run_count();
         glyph_records += batch.path_record_count().to_usize();
         perf.text_breakdown.push(render::batch_summary(
-            key.z_level,
+            key.z_index,
             &key.layers,
             key.shadow,
             &key.pipeline_compatibility,
@@ -806,7 +806,7 @@ fn padded_run_records(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Pa
             transform:          Mat4::ZERO,
             material:           SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:        0,
-            depth_nudge:        0.0,
+            clip_depth_nudge:   0.0,
             oit_depth_offset:   0.0,
             aa_flags:           0,
             text_coverage_bias: 0.0,
@@ -1078,7 +1078,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
         key.pipeline_compatibility,
     );
     base.alpha_mode = batch_gpu_alpha_mode(key.pipeline_compatibility.alpha.into());
-    base.depth_bias = draw_order::text_batch_depth_bias(key.z_level).get();
+    base.depth_bias = draw_order::text_batch_depth_bias(key.z_index).get();
     PathExtendedMaterial {
         base,
         extension: render::analytic_paths::vertex_pull(
@@ -1829,17 +1829,17 @@ mod tests {
         )
     }
 
-    fn batch_z_levels(app: &App) -> Vec<i8> {
+    fn batch_z_indices(app: &App) -> Vec<DrawZIndex> {
         let store = app.world().resource::<GlyphCache>().batch_store();
-        let mut z_levels: Vec<i8> = store.batches().map(|(key, _)| key.z_level).collect();
-        z_levels.sort_unstable();
-        z_levels
+        let mut z_indices: Vec<DrawZIndex> = store.batches().map(|(key, _)| key.z_index).collect();
+        z_indices.sort_unstable();
+        z_indices
     }
 
-    fn batch_material_depth_biases(app: &App) -> Vec<(i8, u32)> {
+    fn batch_material_depth_biases(app: &App) -> Vec<(DrawZIndex, u32)> {
         let store = app.world().resource::<GlyphCache>().batch_store();
         let materials = app.world().resource::<Assets<PathExtendedMaterial>>();
-        let mut depth_biases: Vec<(i8, u32)> = store
+        let mut depth_biases: Vec<(DrawZIndex, u32)> = store
             .batches()
             .map(|(key, batch)| {
                 let gpu = batch
@@ -1849,18 +1849,19 @@ mod tests {
                 let material = materials
                     .get(&gpu.material)
                     .expect("text batch material asset should exist");
-                (key.z_level, material.base.depth_bias.to_bits())
+                (key.z_index, material.base.depth_bias.to_bits())
             })
             .collect();
-        depth_biases.sort_by_key(|(z_level, _)| *z_level);
+        depth_biases.sort_by_key(|(z_index, _)| *z_index);
         depth_biases
     }
 
-    fn panel_text_z_levels(app: &mut App) -> Vec<i8> {
-        let mut state = app.world_mut().query::<&PanelTextZLevel>();
-        let mut z_levels: Vec<i8> = state.iter(app.world()).map(|z_level| z_level.0).collect();
-        z_levels.sort_unstable();
-        z_levels
+    fn panel_text_z_indices(app: &mut App) -> Vec<DrawZIndex> {
+        let mut state = app.world_mut().query::<&PanelTextDrawZIndex>();
+        let mut z_indices: Vec<DrawZIndex> =
+            state.iter(app.world()).map(|z_index| z_index.0).collect();
+        z_indices.sort_unstable();
+        z_indices
     }
 
     #[test]
@@ -1871,12 +1872,12 @@ mod tests {
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (1, 4, 18));
-        assert_eq!(batch_z_levels(&app), vec![0]);
+        assert_eq!(batch_z_indices(&app), vec![DrawZIndex::default()]);
         assert_eq!(batch_entities(&mut app).len(), 1);
     }
 
     #[test]
-    fn z_level_change_moves_run_to_level_batch() {
+    fn z_index_change_moves_run_to_level_batch() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
@@ -1886,16 +1887,19 @@ mod tests {
         app.world_mut()
             .commands()
             .entity(label)
-            .insert(PanelTextZLevel(1));
+            .insert(PanelTextDrawZIndex(1.into()));
         settle(&mut app);
 
         assert_eq!(store_stats(&app), (2, 2, 9));
-        assert_eq!(batch_z_levels(&app), vec![0, 1]);
+        assert_eq!(
+            batch_z_indices(&app),
+            vec![DrawZIndex::default(), DrawZIndex(1)]
+        );
         assert_eq!(batch_entities(&mut app).len(), 2);
     }
 
     #[test]
-    fn text_element_z_index_authors_z_level_batches() {
+    fn text_element_z_index_authors_z_index_batches() {
         let mut app = pipeline_app();
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(
@@ -1907,22 +1911,22 @@ mod tests {
         settle(&mut app);
 
         assert_eq!(
-            panel_text_z_levels(&mut app),
-            vec![LOWERED_LEVEL.0, RAISED_LEVEL.0]
+            panel_text_z_indices(&mut app),
+            vec![LOWERED_LEVEL, RAISED_LEVEL]
         );
-        assert_eq!(batch_z_levels(&app), vec![LOWERED_LEVEL.0, RAISED_LEVEL.0]);
+        assert_eq!(batch_z_indices(&app), vec![LOWERED_LEVEL, RAISED_LEVEL]);
         let (batches, runs, _) = store_stats(&app);
         assert_eq!(batches, 2);
         assert_eq!(runs, 2);
 
-        let lowered_depth_bias = draw_order::text_batch_depth_bias(LOWERED_LEVEL.0);
-        let default_depth_bias = draw_order::text_batch_depth_bias(0);
-        let raised_depth_bias = draw_order::text_batch_depth_bias(RAISED_LEVEL.0);
+        let lowered_depth_bias = draw_order::text_batch_depth_bias(LOWERED_LEVEL);
+        let default_depth_bias = draw_order::text_batch_depth_bias(DrawZIndex::default());
+        let raised_depth_bias = draw_order::text_batch_depth_bias(RAISED_LEVEL);
         assert_eq!(
             batch_material_depth_biases(&app),
             vec![
-                (LOWERED_LEVEL.0, lowered_depth_bias.get().to_bits()),
-                (RAISED_LEVEL.0, raised_depth_bias.get().to_bits()),
+                (LOWERED_LEVEL, lowered_depth_bias.get().to_bits()),
+                (RAISED_LEVEL, raised_depth_bias.get().to_bits()),
             ],
         );
         assert_ne!(
@@ -1945,14 +1949,18 @@ mod tests {
 
         let (depth_bias, oit_depth_offset) = batch_material_values(&app);
         let previous_text_lane =
-            constants::DRAW_LEVEL_TEXT_SUBLANE.to_f32() * constants::LAYER_DEPTH_BIAS;
+            constants::TEXT_BATCH_SORT_ANCHOR.to_f32() * constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             previous_text_lane.to_bits(),
-            draw_order::text_batch_depth_bias(0).get().to_bits()
+            draw_order::text_batch_depth_bias(DrawZIndex::default())
+                .get()
+                .to_bits()
         );
         assert_eq!(
             depth_bias.to_bits(),
-            draw_order::text_batch_depth_bias(0).get().to_bits()
+            draw_order::text_batch_depth_bias(DrawZIndex::default())
+                .get()
+                .to_bits()
         );
         assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
     }
@@ -1962,7 +1970,7 @@ mod tests {
         let mut records: Vec<_> = store
             .batches()
             .flat_map(|(_, batch)| batch.run_records())
-            .map(|record| (record.depth_nudge, record.oit_depth_offset))
+            .map(|record| (record.clip_depth_nudge, record.oit_depth_offset))
             .collect();
         records.sort_by(|left, right| left.0.total_cmp(&right.0));
         records
@@ -1975,9 +1983,9 @@ mod tests {
         settle(&mut app);
 
         let first_command_depth =
-            constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * constants::LAYER_DEPTH_BIAS;
-        let second_command_depth = (constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE + 1).to_f32()
-            * constants::LAYER_DEPTH_BIAS;
+            constants::FIRST_COMMAND_SORT_OFFSET.to_f32() * constants::LAYER_DEPTH_BIAS;
+        let second_command_depth =
+            (constants::FIRST_COMMAND_SORT_OFFSET + 1).to_f32() * constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             run_record_depths(&app),
             vec![
@@ -2196,7 +2204,7 @@ mod tests {
             transform:          Mat4::IDENTITY,
             material:           SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:        1,
-            depth_nudge:        0.0,
+            clip_depth_nudge:   0.0,
             oit_depth_offset:   0.0,
             aa_flags:           AntiAlias::Both.aa_flags(),
             text_coverage_bias: 0.0,

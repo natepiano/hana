@@ -175,8 +175,20 @@ pub enum Lighting {
 ///
 /// `DrawZIndex(0)` is the default level. Positive values move forward, and
 /// negative values move back.
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Default, Reflect)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Reflect)]
 pub struct DrawZIndex(pub i8);
+
+impl From<i8> for DrawZIndex {
+    fn from(value: i8) -> Self { Self(value) }
+}
+
+impl From<DrawZIndex> for i8 {
+    fn from(value: DrawZIndex) -> Self { value.0 }
+}
+
+impl From<DrawZIndex> for i32 {
+    fn from(value: DrawZIndex) -> Self { Self::from(value.0) }
+}
 
 // ── TextStyle ────────────────────────────────────────────────────────────────
 

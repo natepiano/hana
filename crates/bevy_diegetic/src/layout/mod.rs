@@ -87,7 +87,7 @@ pub use line::PanelShapePrimitiveKind;
 pub use line::PanelShapeSourceKey;
 pub use line::ResolvedPanelShape;
 pub use line::ResolvedPanelShapePrimitive;
-pub(crate) use render::DrawStep;
+pub(crate) use render::DrawSortTier;
 pub use render::RectangleSource;
 pub use render::RenderCommand;
 pub use render::RenderCommandKind;

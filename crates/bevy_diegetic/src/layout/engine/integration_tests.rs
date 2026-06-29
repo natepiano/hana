@@ -205,7 +205,7 @@ fn line_commands(commands: &[RenderCommand]) -> Vec<&[ResolvedPanelShape]> {
     commands
         .iter()
         .filter_map(|command| match &command.kind {
-            RenderCommandKind::Shapes { shapes } => Some(shapes.as_slice()),
+            RenderCommandKind::PanelShapes { shapes } => Some(shapes.as_slice()),
             _ => None,
         })
         .collect()
@@ -362,7 +362,7 @@ fn draw_commands_do_not_change_layout_bounds_or_non_line_commands() {
     let draw_non_line_commands: Vec<_> = draw_result
         .commands
         .iter()
-        .filter(|command| !matches!(command.kind, RenderCommandKind::Shapes { .. }))
+        .filter(|command| !matches!(command.kind, RenderCommandKind::PanelShapes { .. }))
         .collect();
     let base_non_line_commands: Vec<_> = base_result.commands.iter().collect();
     assert_eq!(draw_non_line_commands, base_non_line_commands);
@@ -429,7 +429,7 @@ fn line_commands_emit_before_child_text_and_shift_command_indices() {
         matches!(kind, RenderCommandKind::Text { .. })
     });
     let line_index = command_index(&draw_result.commands, |kind| {
-        matches!(kind, RenderCommandKind::Shapes { .. })
+        matches!(kind, RenderCommandKind::PanelShapes { .. })
     });
     let lines = line_commands(&draw_result.commands);
     let resolved = &lines[0][0];
@@ -467,7 +467,7 @@ fn overflow_visible_line_clips_only_to_explicit_clipped_ancestor() {
     let engine = LayoutEngine::new(monospace_measure());
     let result = engine.compute(&tree, VIEWPORT, VIEWPORT, 1.0);
     let line_index = command_index(&result.commands, |kind| {
-        matches!(kind, RenderCommandKind::Shapes { .. })
+        matches!(kind, RenderCommandKind::PanelShapes { .. })
     });
     let lines = line_commands(&result.commands);
     let resolved = &lines[0][0];
@@ -1884,7 +1884,7 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
         .commands
         .iter()
         .filter_map(|command| match &command.kind {
-            RenderCommandKind::Shapes { shapes } => Some(shapes.len()),
+            RenderCommandKind::PanelShapes { shapes } => Some(shapes.len()),
             _ => None,
         })
         .sum::<usize>();

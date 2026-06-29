@@ -291,7 +291,7 @@ fn path_quad_geometry_eq(left: &PathQuadRecord, right: &PathQuadRecord) -> bool 
 fn path_render_record_placement_eq(left: &PathRenderRecord, right: &PathRenderRecord) -> bool {
     left.transform == right.transform
         && left.render_mode == right.render_mode
-        && left.depth_nudge.to_bits() == right.depth_nudge.to_bits()
+        && left.clip_depth_nudge.to_bits() == right.clip_depth_nudge.to_bits()
         && left.oit_depth_offset.to_bits() == right.oit_depth_offset.to_bits()
         && left.aa_flags == right.aa_flags
 }
@@ -766,7 +766,7 @@ fn collect_line_primitives<'a>(
 ) -> Vec<ShapePrimitiveSource<'a>> {
     let mut primitives = Vec::new();
     for (command_index, command) in render_commands.iter().enumerate() {
-        let RenderCommandKind::Shapes { shapes } = &command.kind else {
+        let RenderCommandKind::PanelShapes { shapes } = &command.kind else {
             continue;
         };
         let Some(draw_depth) = draw_order.depth_for(command_index) else {
@@ -854,7 +854,7 @@ fn resolved_panel_shapes(
     render_commands
         .iter()
         .flat_map(|command| match &command.kind {
-            RenderCommandKind::Shapes { shapes } => shapes.as_slice(),
+            RenderCommandKind::PanelShapes { shapes } => shapes.as_slice(),
             _ => &[],
         })
 }
@@ -940,7 +940,7 @@ fn build_panel_line_group(
         return None;
     };
     let batch_key = PathBatchKey {
-        z_level:                first.draw_depth.z_level(),
+        z_index:                first.draw_depth.z_index(),
         shadow:                 context.shadow,
         layers:                 context.layers.clone(),
         pipeline_compatibility: appended.pipeline_compatibility,
@@ -957,7 +957,7 @@ fn build_panel_line_group(
         transform: context.panel_transform,
         material: appended.slot.into(),
         render_mode: u32::from(RenderMode::Text),
-        depth_nudge: depth_bias,
+        clip_depth_nudge: depth_bias,
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
         text_coverage_bias: 0.0,
@@ -1265,7 +1265,7 @@ pub(super) fn commit_panel_line_batch_buffers(
         batches += 1;
         records += batch.record_count().to_usize();
         perf.shape_breakdown.push(render::batch_summary(
-            key.z_level,
+            key.z_index,
             &key.layers,
             key.shadow,
             &key.pipeline_compatibility,
@@ -1337,7 +1337,7 @@ fn padded_line_runs(records: &[PathRenderRecord], run_capacity: u32) -> Vec<Path
             transform:          Mat4::ZERO,
             material:           SdfPaintMaterial::NotAuthored.to_gpu(),
             render_mode:        0,
-            depth_nudge:        0.0,
+            clip_depth_nudge:   0.0,
             oit_depth_offset:   0.0,
             aa_flags:           0,
             text_coverage_bias: 0.0,
@@ -1389,7 +1389,7 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMateri
         &mut base,
         key.pipeline_compatibility,
     );
-    base.depth_bias = draw_order::line_batch_depth_bias(key.z_level).get();
+    base.depth_bias = draw_order::panel_shape_batch_depth_bias(key.z_index).get();
     PathExtendedMaterial {
         base,
         extension: render::analytic_paths::vertex_pull(
@@ -1439,7 +1439,7 @@ mod tests {
     use crate::render::HairlineWidth;
     use crate::render::PathContour;
     use crate::render::QuadraticSegment;
-    use crate::render::constants::DRAW_LEVEL_GEOMETRY_START_SUBLANE;
+    use crate::render::constants::FIRST_COMMAND_SORT_OFFSET;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableAppendReady;
@@ -1537,7 +1537,8 @@ mod tests {
             .add(material)
     }
 
-    fn spawn_line_panel(app: &mut App, z_index: DrawZIndex) -> Entity {
+    fn spawn_line_panel(app: &mut App, z_index: impl Into<DrawZIndex>) -> Entity {
+        let z_index = z_index.into();
         let line_element = El::new()
             .size(40.0, 20.0)
             .draw(PanelDraw::lines([horizontal_line()]))
@@ -1558,7 +1559,7 @@ mod tests {
         }
     }
 
-    fn one_line_batch_values(app: &App) -> (i8, f32, f32, Vec<(f32, f32)>) {
+    fn one_line_batch_values(app: &App) -> (DrawZIndex, f32, f32, Vec<(f32, f32)>) {
         let store = app.world().resource::<PanelShapeBatchStore>();
         let Some((key, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -1576,11 +1577,11 @@ mod tests {
         let mut records: Vec<(f32, f32)> = batch
             .run_records()
             .into_iter()
-            .map(|record| (record.depth_nudge, record.oit_depth_offset))
+            .map(|record| (record.clip_depth_nudge, record.oit_depth_offset))
             .collect();
         records.sort_by(|left, right| left.0.total_cmp(&right.0));
         (
-            key.z_level,
+            key.z_index,
             material.base.depth_bias,
             render::path_material_oit_depth_offset(material),
             records,
@@ -2061,15 +2062,17 @@ mod tests {
         };
         assert_eq!(batch.record_count(), 2);
 
-        let (z_level, material_depth_bias, material_oit_offset, records) =
+        let (z_index, material_depth_bias, material_oit_offset, records) =
             one_line_batch_values(&app);
-        assert_eq!(z_level, 0);
+        assert_eq!(z_index, DrawZIndex::default());
         assert_eq!(
             material_depth_bias.to_bits(),
-            draw_order::line_batch_depth_bias(0).get().to_bits()
+            draw_order::panel_shape_batch_depth_bias(0_i8)
+                .get()
+                .to_bits()
         );
         assert_eq!(material_oit_offset.to_bits(), 0.0_f32.to_bits());
-        let default_command_depth = DRAW_LEVEL_GEOMETRY_START_SUBLANE.to_f32() * LAYER_DEPTH_BIAS;
+        let default_command_depth = FIRST_COMMAND_SORT_OFFSET.to_f32() * LAYER_DEPTH_BIAS;
         assert_eq!(
             records,
             vec![(default_command_depth, 0.0), (default_command_depth, 0.0)],
@@ -2080,17 +2083,17 @@ mod tests {
     #[test]
     fn line_z_indexes_route_to_matching_level_batches() {
         let mut app = line_batch_app();
-        spawn_line_panel(&mut app, DrawZIndex(-1));
-        spawn_line_panel(&mut app, DrawZIndex(1));
+        spawn_line_panel(&mut app, -1);
+        spawn_line_panel(&mut app, 1);
         settle(&mut app);
 
         let store = app.world().resource::<PanelShapeBatchStore>();
-        let mut levels: Vec<i8> = store.batches().map(|(key, _)| key.z_level).collect();
-        levels.sort_unstable();
-        assert_eq!(levels, vec![-1, 1]);
+        let mut z_indices: Vec<DrawZIndex> = store.batches().map(|(key, _)| key.z_index).collect();
+        z_indices.sort_unstable();
+        assert_eq!(z_indices, vec![DrawZIndex(-1), DrawZIndex(1)]);
 
         let materials = app.world().resource::<Assets<PathExtendedMaterial>>();
-        let mut depth_biases: Vec<(i8, u32)> = store
+        let mut depth_biases: Vec<(DrawZIndex, u32)> = store
             .batches()
             .map(|(key, batch)| {
                 let Some(gpu) = batch.gpu.as_ref() else {
@@ -2099,15 +2102,21 @@ mod tests {
                 let Some(material) = materials.get(&gpu.material) else {
                     panic!("line batch material should exist");
                 };
-                (key.z_level, material.base.depth_bias.to_bits())
+                (key.z_index, material.base.depth_bias.to_bits())
             })
             .collect();
-        depth_biases.sort_by_key(|(z_level, _)| *z_level);
+        depth_biases.sort_by_key(|(z_index, _)| *z_index);
         assert_eq!(
             depth_biases,
             vec![
-                (-1, draw_order::line_batch_depth_bias(-1).get().to_bits()),
-                (1, draw_order::line_batch_depth_bias(1).get().to_bits()),
+                (
+                    DrawZIndex(-1),
+                    draw_order::panel_shape_batch_depth_bias(-1).get().to_bits(),
+                ),
+                (
+                    DrawZIndex(1),
+                    draw_order::panel_shape_batch_depth_bias(1).get().to_bits(),
+                ),
             ],
         );
     }
@@ -2267,7 +2276,7 @@ mod tests {
         let commands = vec![RenderCommand {
             bounds:      command_bounds,
             element_idx: 0,
-            kind:        RenderCommandKind::Shapes {
+            kind:        RenderCommandKind::PanelShapes {
                 shapes: vec![first.clone(), second.clone()],
             },
             z_index:     DrawZIndex::default(),
@@ -2348,7 +2357,7 @@ mod tests {
         let commands = vec![RenderCommand {
             bounds:      primitive_bounds,
             element_idx: 1,
-            kind:        RenderCommandKind::Shapes { shapes: vec![line] },
+            kind:        RenderCommandKind::PanelShapes { shapes: vec![line] },
             z_index:     DrawZIndex::default(),
         }];
 
@@ -2517,7 +2526,7 @@ mod tests {
         let commands = vec![RenderCommand {
             bounds:      red.visual_bounds(),
             element_idx: 0,
-            kind:        RenderCommandKind::Shapes {
+            kind:        RenderCommandKind::PanelShapes {
                 shapes: vec![red.clone()],
             },
             z_index:     DrawZIndex::default(),
@@ -2656,7 +2665,7 @@ mod tests {
         };
         render::apply_sidedness(&mut material, Sidedness::BothSides);
         PathBatchKey {
-            z_level:                0,
+            z_index:                DrawZIndex::default(),
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             pipeline_compatibility: batch_key::PipelineCompatibility::from(&material),
@@ -2689,7 +2698,7 @@ mod tests {
                 transform:          Mat4::IDENTITY,
                 material:           SdfPaintMaterial::NotAuthored.to_gpu(),
                 render_mode:        u32::from(RenderMode::Text),
-                depth_nudge:        0.0,
+                clip_depth_nudge:   0.0,
                 oit_depth_offset:   0.0,
                 aa_flags:           AntiAlias::Both.aa_flags(),
                 text_coverage_bias: 0.0,

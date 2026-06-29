@@ -874,7 +874,7 @@ mod tests {
             .expect("layout result must exist")
             .commands
             .iter()
-            .filter(|command| matches!(command.kind, RenderCommandKind::Shapes { .. }))
+            .filter(|command| matches!(command.kind, RenderCommandKind::PanelShapes { .. }))
             .count();
         assert_eq!(
             shape_commands, 1,

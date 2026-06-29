@@ -3,20 +3,20 @@
 use bevy::asset::uuid_handle;
 use bevy::prelude::*;
 
-// layer ordering
-/// Screen sort lane used by the batched SDF fill. Lower sort ordinals draw
-/// first and stay behind later lanes: fill backgrounds use lane 0,
-/// per-command geometry uses lanes 1..=64, and text uses lane 65.
-pub(crate) const DRAW_LEVEL_FILL_SUBLANE: i32 = 0;
-/// Number of per-command geometry screen sort lanes inside one z-level band.
-pub(crate) const DRAW_LEVEL_GEOMETRY_LANES: i32 = 64;
-/// First screen sort lane available to panel-owned geometry commands.
-pub(crate) const DRAW_LEVEL_GEOMETRY_START_SUBLANE: i32 = DRAW_LEVEL_FILL_SUBLANE + 1;
-/// Number of screen sort lanes reserved for each z-level.
-pub(crate) const DRAW_LEVEL_STRIDE: i32 = DRAW_LEVEL_TEXT_SUBLANE + 1;
-/// Screen sort lane used by batched text inside each z-level band.
-pub(crate) const DRAW_LEVEL_TEXT_SUBLANE: i32 =
-    DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES;
+// Draw-order projection
+/// Screen-sort position reserved for the shared SDF surface batch within each
+/// authored z-index band.
+pub(crate) const SDF_SURFACE_BATCH_SORT_ANCHOR: i32 = 0;
+/// First command sort position inside each authored z-index band.
+pub(crate) const FIRST_COMMAND_SORT_OFFSET: i32 = SDF_SURFACE_BATCH_SORT_ANCHOR + 1;
+/// Number of command sort positions reserved inside each authored z-index band.
+pub(crate) const COMMAND_SORT_OFFSET_CAPACITY: i32 = 64;
+/// Screen-sort position reserved for the shared text batch within each authored
+/// z-index band.
+pub(crate) const TEXT_BATCH_SORT_ANCHOR: i32 =
+    FIRST_COMMAND_SORT_OFFSET + COMMAND_SORT_OFFSET_CAPACITY;
+/// Width of one authored z-index band in screen-sort positions.
+pub(crate) const DRAW_Z_INDEX_BAND_WIDTH: i32 = TEXT_BATCH_SORT_ANCHOR + 1;
 /// Per-command depth bias for Geometry mode sort ordering.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.

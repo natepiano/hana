@@ -41,24 +41,24 @@ pub enum RectangleSource {
 
 /// Fixed draw step derived from a [`RenderCommandKind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum DrawStep {
+pub(crate) enum DrawSortTier {
     /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`],
     /// [`RenderCommandKind::Image`], and [`RenderCommandKind::PrecomposeLdr`]
     /// commands.
-    Fill,
+    Surface,
     /// [`RenderCommandKind::Shapes`] commands.
-    Shapes,
+    PanelShape,
     /// [`RenderCommandKind::Text`] commands.
     Text,
 }
 
-impl DrawStep {
+impl DrawSortTier {
     /// Returns the stable ordinal for `DrawStep` sort keys.
     #[must_use]
-    pub const fn ordinal(self) -> u8 {
+    pub const fn sort_order(self) -> u8 {
         match self {
-            Self::Fill => 0,
-            Self::Shapes => 1,
+            Self::Surface => 0,
+            Self::PanelShape => 1,
             Self::Text => 2,
         }
     }
@@ -96,7 +96,7 @@ pub enum RenderCommandKind {
     /// An element subtree flattened through an LDR render target.
     PrecomposeLdr,
     /// Resolved panel-local line primitives.
-    Shapes {
+    PanelShapes {
         /// Resolved lines to render as one command group.
         shapes: Vec<ResolvedPanelShape>,
     },
@@ -110,14 +110,14 @@ pub enum RenderCommandKind {
 impl RenderCommandKind {
     /// Returns the fixed [`DrawStep`] for commands that draw pixels.
     #[must_use]
-    pub(crate) const fn draw_step(&self) -> Option<DrawStep> {
+    pub(crate) const fn draw_sort_tier(&self) -> Option<DrawSortTier> {
         match self {
             Self::Rectangle { .. }
             | Self::Border { .. }
             | Self::Image { .. }
-            | Self::PrecomposeLdr => Some(DrawStep::Fill),
-            Self::Shapes { .. } => Some(DrawStep::Shapes),
-            Self::Text { .. } => Some(DrawStep::Text),
+            | Self::PrecomposeLdr => Some(DrawSortTier::Surface),
+            Self::PanelShapes { .. } => Some(DrawSortTier::PanelShape),
+            Self::Text { .. } => Some(DrawSortTier::Text),
             Self::ScissorStart | Self::ScissorEnd => None,
         }
     }
@@ -133,9 +133,9 @@ mod tests {
 
     #[test]
     fn draw_step_ordinals_are_fixed() {
-        assert_eq!(DrawStep::Fill.ordinal(), FILL_ORDINAL);
-        assert_eq!(DrawStep::Shapes.ordinal(), SHAPES_ORDINAL);
-        assert_eq!(DrawStep::Text.ordinal(), TEXT_ORDINAL);
+        assert_eq!(DrawSortTier::Surface.sort_order(), FILL_ORDINAL);
+        assert_eq!(DrawSortTier::PanelShape.sort_order(), SHAPES_ORDINAL);
+        assert_eq!(DrawSortTier::Text.sort_order(), TEXT_ORDINAL);
     }
 
     #[test]
@@ -146,39 +146,42 @@ mod tests {
                     color:  Color::WHITE,
                     source: RectangleSource::Background,
                 },
-                Some(DrawStep::Fill),
+                Some(DrawSortTier::Surface),
             ),
             (
                 RenderCommandKind::Border {
                     border: Border::default(),
                 },
-                Some(DrawStep::Fill),
+                Some(DrawSortTier::Surface),
             ),
             (
                 RenderCommandKind::Image {
                     handle: Handle::<Image>::default(),
                     tint:   Color::WHITE,
                 },
-                Some(DrawStep::Fill),
+                Some(DrawSortTier::Surface),
             ),
             (
-                RenderCommandKind::Shapes { shapes: Vec::new() },
-                Some(DrawStep::Shapes),
+                RenderCommandKind::PanelShapes { shapes: Vec::new() },
+                Some(DrawSortTier::PanelShape),
             ),
-            (RenderCommandKind::PrecomposeLdr, Some(DrawStep::Fill)),
+            (
+                RenderCommandKind::PrecomposeLdr,
+                Some(DrawSortTier::Surface),
+            ),
             (
                 RenderCommandKind::Text {
                     text:   String::new(),
                     config: TextStyle::default(),
                 },
-                Some(DrawStep::Text),
+                Some(DrawSortTier::Text),
             ),
             (RenderCommandKind::ScissorStart, None),
             (RenderCommandKind::ScissorEnd, None),
         ];
 
         for (kind, expected) in cases {
-            assert_eq!(kind.draw_step(), expected);
+            assert_eq!(kind.draw_sort_tier(), expected);
         }
     }
 }

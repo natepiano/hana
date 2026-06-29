@@ -711,7 +711,7 @@ mod tests {
 
         let mut spine_seen = false;
         for command in &result.commands {
-            let RenderCommandKind::Shapes { shapes: lines } = &command.kind else {
+            let RenderCommandKind::PanelShapes { shapes: lines } = &command.kind else {
                 continue;
             };
             for (line_index, line) in lines.iter().enumerate() {

@@ -35,7 +35,7 @@ const OIT_MIN_DEPTH: f32 = 0.000003;
     inflate_subpixel_half_size,
 }
 
-const DEPTH_NUDGE_CLIP_PER_LAYER: f32 = 0.0000002;
+const CLIP_DEPTH_NUDGE_PER_LAYER: f32 = 0.0000002;
 const SDF_PAINT_FILL: u32 = 1u;
 const SDF_PAINT_BORDER: u32 = 2u;
 
@@ -130,7 +130,7 @@ struct SdfRenderRecord {
     border_material: u32,
     paint_mask: u32,
     flags: u32,
-    depth_nudge: f32,
+    clip_depth_nudge: f32,
     oit_depth_offset: f32,
 }
 
@@ -226,7 +226,7 @@ fn pull_sdf_vertex(vertex_index: u32, instance_index: u32) -> PulledSdfVertex {
     let world = record.transform * vec4<f32>(local, 0.0, 1.0);
     var clip = position_world_to_clip(world.xyz);
 #ifndef OIT_ENABLED
-    clip.z += record.depth_nudge * DEPTH_NUDGE_CLIP_PER_LAYER * clip.w;
+    clip.z += record.clip_depth_nudge * CLIP_DEPTH_NUDGE_PER_LAYER * clip.w;
 #endif
 
     out.clip_position = clip;

@@ -363,7 +363,7 @@ fn emit_shape_commands(
     push_command(
         commands,
         command_bounds,
-        RenderCommandKind::Shapes { shapes },
+        RenderCommandKind::PanelShapes { shapes },
         index,
         element.z_index,
     );

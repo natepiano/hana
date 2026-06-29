@@ -1045,7 +1045,6 @@ mod tests {
     use crate::layout::ChildDivider;
     use crate::layout::ChildLayoutState;
     use crate::layout::Dimension;
-    use crate::layout::DrawZIndex;
     use crate::layout::El;
     use crate::layout::LayoutBuilder;
     use crate::layout::Padding;
@@ -1357,7 +1356,7 @@ mod tests {
             El::new()
                 .width(Sizing::GROW)
                 .height(Sizing::GROW)
-                .z_index(DrawZIndex(1)),
+                .z_index(1),
         );
 
         assert_eq!(tree.classify_change(&next), LayoutTreeChange::VisualOnly);

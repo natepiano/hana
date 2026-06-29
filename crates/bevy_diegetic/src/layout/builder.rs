@@ -571,8 +571,8 @@ impl<L> El<L> {
     }
 
     /// Sets the authored `z_index` for this element's render commands.
-    pub const fn z_index(mut self, z_index: DrawZIndex) -> Self {
-        self.common.z_index = z_index;
+    pub fn z_index(mut self, z_index: impl Into<DrawZIndex>) -> Self {
+        self.common.z_index = z_index.into();
         self
     }
 
