@@ -12,7 +12,6 @@ use std::sync::mpsc::Receiver;
 use std::sync::mpsc::Sender;
 use std::sync::mpsc::SyncSender;
 use std::thread;
-use std::time::Duration;
 
 use bevy_kana::ToI32;
 use cpal::Device;
@@ -26,8 +25,8 @@ use cpal::traits::HostTrait;
 use cpal::traits::StreamTrait;
 use hound::WavSpec;
 
-const AUDIO_READY_TIMEOUT: Duration = Duration::from_secs(5);
-const AUDIO_THREAD_POLL: Duration = Duration::from_millis(50);
+use crate::constants::AUDIO_READY_TIMEOUT;
+use crate::constants::AUDIO_THREAD_POLL;
 
 /// A running default-input microphone capture thread.
 pub struct AudioInput {
@@ -159,17 +158,17 @@ pub fn write_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(), h
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
-    let spec = WavSpec {
+    let wav_spec = WavSpec {
         channels: 1,
         sample_rate,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer = hound::WavWriter::create(path, spec)?;
+    let mut wav_writer = hound::WavWriter::create(path, wav_spec)?;
     for sample in samples {
-        writer.write_sample(to_pcm_i16(*sample))?;
+        wav_writer.write_sample(to_pcm_i16(*sample))?;
     }
-    writer.finalize()
+    wav_writer.finalize()
 }
 
 fn to_pcm_i16(sample: f32) -> i16 {
@@ -194,15 +193,15 @@ fn run_audio_thread(
         |_| String::from("default input"),
         |description| description.name().to_string(),
     );
-    let supported = device
+    let supported_stream_config = device
         .default_input_config()
         .map_err(|error| AudioInputError::DefaultConfig(error.to_string()))?;
     let status = AudioInputStatus {
         device_name,
-        sample_rate: supported.sample_rate(),
-        channels: supported.channels(),
+        sample_rate: supported_stream_config.sample_rate(),
+        channels: supported_stream_config.channels(),
     };
-    let stream = build_stream(&device, &supported, sample_tx, error_tx)?;
+    let stream = build_stream(&device, &supported_stream_config, sample_tx, error_tx)?;
     stream
         .play()
         .map_err(|error| AudioInputError::Stream(error.to_string()))?;
@@ -214,30 +213,30 @@ fn run_audio_thread(
 
 fn build_stream(
     device: &Device,
-    supported: &SupportedStreamConfig,
+    supported_stream_config: &SupportedStreamConfig,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
 ) -> Result<Stream, AudioInputError> {
-    let config = StreamConfig::from(*supported);
-    let channels = usize::from(config.channels);
-    let stream = match supported.sample_format() {
-        SampleFormat::F32 => build_f32_stream(device, config, channels, sample_tx, error_tx),
-        SampleFormat::I16 => build_i16_stream(device, config, channels, sample_tx, error_tx),
-        SampleFormat::U16 => build_u16_stream(device, config, channels, sample_tx, error_tx),
-        format => return Err(AudioInputError::UnsupportedFormat(format)),
+    let stream_config = StreamConfig::from(*supported_stream_config);
+    let channels = usize::from(stream_config.channels);
+    let stream = match supported_stream_config.sample_format() {
+        SampleFormat::F32 => build_f32_stream(device, stream_config, channels, sample_tx, error_tx),
+        SampleFormat::I16 => build_i16_stream(device, stream_config, channels, sample_tx, error_tx),
+        SampleFormat::U16 => build_u16_stream(device, stream_config, channels, sample_tx, error_tx),
+        sample_format => return Err(AudioInputError::UnsupportedFormat(sample_format)),
     };
     stream.map_err(|error| AudioInputError::Stream(error.to_string()))
 }
 
 fn build_f32_stream(
     device: &Device,
-    config: StreamConfig,
+    stream_config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
 ) -> Result<Stream, CpalError> {
     device.build_input_stream(
-        config,
+        stream_config,
         move |data: &[f32], _| {
             let _send_result = sample_tx.send(downmix_f32(data, channels));
         },
@@ -250,13 +249,13 @@ fn build_f32_stream(
 
 fn build_i16_stream(
     device: &Device,
-    config: StreamConfig,
+    stream_config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
 ) -> Result<Stream, CpalError> {
     device.build_input_stream(
-        config,
+        stream_config,
         move |data: &[i16], _| {
             let _send_result = sample_tx.send(downmix_i16(data, channels));
         },
@@ -269,13 +268,13 @@ fn build_i16_stream(
 
 fn build_u16_stream(
     device: &Device,
-    config: StreamConfig,
+    stream_config: StreamConfig,
     channels: usize,
     sample_tx: Sender<Vec<f32>>,
     error_tx: Sender<String>,
 ) -> Result<Stream, CpalError> {
     device.build_input_stream(
-        config,
+        stream_config,
         move |data: &[u16], _| {
             let _send_result = sample_tx.send(downmix_u16(data, channels));
         },

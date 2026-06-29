@@ -5,6 +5,7 @@
 //! detection, WAV output, JSONL protocol writes, and optional transcription.
 
 mod audio;
+mod constants;
 mod event_log;
 mod session;
 mod stt;

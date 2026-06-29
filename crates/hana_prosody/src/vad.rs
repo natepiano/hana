@@ -8,8 +8,8 @@ use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 use earshot::Detector;
 
-const EARSHOT_SAMPLE_RATE: u32 = 16_000;
-const EARSHOT_FRAME_SAMPLES: usize = 256;
+use crate::constants::EARSHOT_FRAME_SAMPLES;
+use crate::constants::EARSHOT_SAMPLE_RATE;
 
 /// One VAD frame decision.
 #[derive(Clone, Copy, Debug, PartialEq)]

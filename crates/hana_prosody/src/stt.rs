@@ -22,22 +22,11 @@ use speech::SpeechError;
 use speech::SpeechRecognizer;
 
 #[cfg(target_os = "macos")]
-const HANA_STT_LOCALE: &str = "HANA_STT_LOCALE";
+use crate::constants::APPLE_CONTEXTUAL_STRINGS;
 #[cfg(target_os = "macos")]
-const HANA_STT_REQUIRE_ON_DEVICE: &str = "HANA_STT_REQUIRE_ON_DEVICE";
+use crate::constants::HANA_STT_LOCALE;
 #[cfg(target_os = "macos")]
-const APPLE_CONTEXTUAL_STRINGS: &[&str] = &[
-    "Hana",
-    "Codex",
-    "effects stack",
-    "bloom",
-    "glow",
-    "emissive",
-    "neon",
-    "video",
-    "shader",
-    "camera",
-];
+use crate::constants::HANA_STT_REQUIRE_ON_DEVICE;
 
 /// A background transcription job.
 #[derive(Debug)]
@@ -189,43 +178,45 @@ impl AppleSpeechTranscriber {
     fn transcribe(&self, audio_path: &Path) -> Result<Transcript, TranscriptionError> {
         use speech::prelude::*;
 
-        let status = Self::request_authorization();
-        if !status.is_authorized() {
+        let authorization_status = Self::request_authorization();
+        if !authorization_status.is_authorized() {
             return Err(TranscriptionError::AppleSpeech(format!(
-                "speech recognition not authorized: {status:?}"
+                "speech recognition not authorized: {authorization_status:?}"
             )));
         }
 
-        let recognizer = self
+        let speech_recognizer = self
             .recognizer()?
             .with_default_task_hint(TaskHint::Dictation)
             .with_callback_queue(CallbackQueue::named("hana-prosody-stt"));
-        if !recognizer.is_available() {
+        if !speech_recognizer.is_available() {
             return Err(TranscriptionError::AppleSpeech(String::from(
                 "Apple Speech recognizer is unavailable",
             )));
         }
 
-        let locale = recognizer.locale_identifier()?;
-        let on_device = recognizer.supports_on_device_recognition()?;
+        let locale = speech_recognizer.locale_identifier()?;
+        let on_device = speech_recognizer.supports_on_device_recognition()?;
         if self.recognition_mode == RecognitionMode::OnDeviceRequired && !on_device {
             return Err(TranscriptionError::AppleSpeech(format!(
                 "Apple Speech locale {locale} does not support on-device recognition"
             )));
         }
 
-        let mut options = RecognitionRequestOptions::new()
+        let mut recognition_request_options = RecognitionRequestOptions::new()
             .with_task_hint(TaskHint::Dictation)
             .with_contextual_strings(APPLE_CONTEXTUAL_STRINGS.iter().copied())
             .with_should_report_partial_results(false)
             .with_adds_punctuation(true);
         if self.recognition_mode == RecognitionMode::OnDeviceRequired {
-            options.set_requires_on_device_recognition(true);
+            recognition_request_options.set_requires_on_device_recognition(true);
         }
 
-        let request = UrlRecognitionRequest::new(audio_path).with_options(options);
-        let result = recognizer.recognize_request(&request)?;
-        let text = result.transcript().trim().to_string();
+        let url_recognition_request =
+            UrlRecognitionRequest::new(audio_path).with_options(recognition_request_options);
+        let detailed_recognition_result =
+            speech_recognizer.recognize_request(&url_recognition_request)?;
+        let text = detailed_recognition_result.transcript().trim().to_string();
         if !is_valid_transcript(&text) {
             return Err(TranscriptionError::NoSpeech(String::from(
                 "candidate window did not contain a usable transcript",
@@ -243,9 +234,9 @@ impl AppleSpeechTranscriber {
     }
 
     fn request_authorization() -> AuthorizationStatus {
-        let status = SpeechRecognizer::authorization_status();
-        if status.is_authorized() {
-            status
+        let authorization_status = SpeechRecognizer::authorization_status();
+        if authorization_status.is_authorized() {
+            authorization_status
         } else {
             SpeechRecognizer::request_authorization()
         }
@@ -306,7 +297,7 @@ impl Error for TranscriptionError {}
 
 #[cfg(target_os = "macos")]
 impl From<SpeechError> for TranscriptionError {
-    fn from(error: SpeechError) -> Self { classify_speech_error(error.to_string()) }
+    fn from(speech_error: SpeechError) -> Self { classify_speech_error(speech_error.to_string()) }
 }
 
 #[cfg(target_os = "macos")]

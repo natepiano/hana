@@ -14,7 +14,7 @@ use std::time::UNIX_EPOCH;
 use serde::Serialize;
 use serde_json::Value;
 
-const DEFAULT_RUNTIME_DIR: &str = "../hana/run/art";
+use crate::constants::DEFAULT_RUNTIME_DIR;
 
 /// Runtime file locations used by the sidecar.
 #[derive(Clone, Debug, Eq, PartialEq)]
