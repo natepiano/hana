@@ -24,6 +24,7 @@ evaluations.
 | 5 | Inner shadow / emboss / bevel | Real extruded + beveled geometry (faked blur-gradient fallback) | No |
 | 6 | Rounded / eroded edges | One-time contour fillet (or #1 offset close); noise on coverage for distress | No |
 | 7 | Knockout / legibility halo | Compose #1 stroke + #2 halo in contrasting color; auto-contrast policy; opt-in per WorldText | No |
+| — | Reverse text | Flip glyph and box UV handedness per run; do not negative-scale geometry | No |
 
 **The one engineering prerequisite: variable-font support.** It is
 the only item that needs real pipeline work rather than a render
@@ -739,3 +740,37 @@ casts its own shadow. The matrix's bespoke combinations become the
 default behavior of a composable system, and the cases it cannot
 express (mismatched shadows, solid quads) are either dropped or handled
 by composing a plain mesh.
+
+## 9. Reverse text
+
+Reverse Text is a follow-on text effect. It is recorded here so the
+design is settled before anyone implements it.
+
+`Sidedness` exposes three cull states: `BothSides` (cull none),
+`FrontOnly` (cull back), and `BackOnly` (cull front). `BackOnly` draws
+a glyph run that is visible only from behind the panel. On a
+transparent diegetic panel, that is a back-face label viewable through
+the glass. The glyph geometry is unchanged, so a `BackOnly` run reads
+mirror-reversed when viewed from behind, exactly like writing on the
+back of a window.
+
+Reverse Text flips glyph handedness so a back-facing run reads
+correctly. It is orthogonal to `Sidedness`: cull state decides which
+face is visible, while reverse decides which way round the letters
+are. The two compose. A correct-reading label on both faces of a
+transparent panel is authored as two runs: a normal `FrontOnly` run
+plus a reversed `BackOnly` run over the same box.
+
+Design constraints when it is implemented:
+
+- Flip in glyph UV / atlas-sample space by negating the per-glyph
+  horizontal texture coordinate, not by geometry negative-scale. A
+  negative scale flips triangle winding, which collides with
+  `cull_mode` and would make `BackOnly` cull the wrong face. UV-flip
+  keeps reverse and cull independent.
+- Reverse is per-glyph render data, not pipeline or resource state, so
+  it rides in the per-glyph instance record alongside the box UV and
+  does not split a batch. A reversed run and a normal run that are
+  otherwise compatible still batch together.
+- Mirror the run's box UV horizontally as well so any texture-backed
+  base color stays aligned with the flipped glyphs.

@@ -6,7 +6,7 @@ A CSS-style single ordering axis for the elements inside a diegetic panel. It
 replaced the flat `draw_slot` emission counter (a per-panel integer bumped on
 every filled element), the text-only `DEFAULT_DRAW_LAYER = 64` global layer, and
 the OIT depth clamp that limited reordering. Three inputs — a fixed per-kind draw
-step (`Fill < Lines < Text`), declaration order in the layout tree (`tree_order`),
+step (`Fill < Shapes < Text`), declaration order in the layout tree (`tree_order`),
 and one optional signed `DrawZIndex` per element — project to a single dense
 ordinal per render command. That one ordinal drives both the sorted screen view
 (via per-level `depth_bias` banding) and the OIT world view (via a
@@ -25,50 +25,91 @@ carry no draw step and do not participate.
 (`render/draw_order.rs`) orders lexicographically by `(z_level, step.ordinal(),
 tree_order)`:
 - `z_level` = the signed `i8` (default `0`)
-- `step.ordinal()` = `Fill (0) < Lines (1) < Text (2)`, fixed per
+- `step.ordinal()` = `Fill (0) < Shapes (1) < Text (2)`, fixed per
   `RenderCommandKind` (`layout/render.rs`, `RenderCommandKind::draw_step()`)
 - `tree_order` = the command's index in the layout-DFS stream
 
 **Enumeration → projection.** `enumerate_ordinals(&[RenderCommand]) ->
 Vec<Option<DrawOrdinal>>` sorts the draw-participating commands by the key and
-assigns each a dense rank (`None` for scissors), index-aligned with the stream.
+assigns each a panel-wide dense rank (`None` for scissors), index-aligned with the stream.
 `DrawOrderProjection::from_commands` wraps this into per-command
 `DrawCommandDepth { ordinal, z_level, screen_depth_bias, oit_depth_offset }`. It
 computes the panel's `text_anchor` (the lowest ordinal among `Text`-step commands)
-once, so default text lands at OIT offset `0.0`.
+once, so the lowest text command lands at OIT offset `0.0`.
+
+**Concrete example.** Layout first emits commands in layout-tree order. These are
+the raw `LayoutResult::commands` indices:
+
+| `command_index` | `RenderCommandKind` | `draw_step()` | `DrawZIndex` | Draw-participating? |
+| ---: | --- | --- | ---: | --- |
+| 0 | `Rectangle` | `Fill` | 0 | yes |
+| 1 | `Text` | `Text` | 0 | yes |
+| 2 | `Rectangle` | `Fill` | 0 | yes |
+| 3 | `Text` | `Text` | -1 | yes |
+| 4 | `ScissorStart` | `None` | 0 | no |
+| 5 | `Shapes` | `Shapes` | 1 | yes |
+| 6 | `Text` | `Text` | 1 | yes |
+
+`DrawOrderProjection::from_commands` then sorts only the draw-participating
+commands by `(z_level, step.ordinal(), tree_order)`. `DrawOrdinal` is the
+panel-wide sorted rank. `level_ordinal` is the rank within the current `z_level`
+only; it resets when `z_level` changes and is not stored in the final
+`DrawCommandDepth`.
+
+| Sorted rank (`DrawOrdinal`) | `command_index` | Sort key `(z_level, step, tree_order)` | `level_ordinal` | `ScreenDepthBias` math | `OitDepthOffset` math |
+| ---: | ---: | --- | ---: | --- | --- |
+| 0 | 3 | `(-1, Text, 3)` | 0 | `-1 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 0 = -65` | `(0 - text_anchor) * OIT_DEPTH_STEP = 0` |
+| 1 | 0 | `(0, Fill, 0)` | 0 | `0 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 0 = 1` | `(1 - text_anchor) * OIT_DEPTH_STEP` |
+| 2 | 2 | `(0, Fill, 2)` | 1 | `0 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 1 = 2` | `(2 - text_anchor) * OIT_DEPTH_STEP` |
+| 3 | 1 | `(0, Text, 1)` | 2 | `0 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 2 = 3` | `(3 - text_anchor) * OIT_DEPTH_STEP` |
+| 4 | 5 | `(1, Shapes, 5)` | 0 | `1 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 0 = 67` | `(4 - text_anchor) * OIT_DEPTH_STEP` |
+| 5 | 6 | `(1, Text, 6)` | 1 | `1 * DRAW_LEVEL_STRIDE + DRAW_LEVEL_GEOMETRY_START_SUBLANE + 1 = 68` | `(5 - text_anchor) * OIT_DEPTH_STEP` |
+
+`tree_order` only breaks ties inside the same `z_level` and `DrawStep`. In the
+example, command `1` is text at `DrawZIndex(0)`, so it sorts after command `2`
+even though command `2` was emitted later. In this example, `text_anchor` is `0`
+because the first sorted command is also the lowest text command.
 
 **Two depth axes from one ordinal.**
-- **Screen (non-OIT) view:** `screen_depth_bias = level_sublane_depth_bias(z_level,
-  level_ordinal)` places level `L` into the `depth_bias` window `[L ×
-  DRAW_LEVEL_STRIDE, (L+1) × DRAW_LEVEL_STRIDE)`. A batch is one draw and blends in
-  buffer order, so each z-level gets a fixed screen lane.
+- **Screen (non-OIT) view:** `screen_depth_bias = geometry_depth_bias(z_level,
+  level_ordinal)` places level `L` into the `depth_bias` window `[L *
+  DRAW_LEVEL_STRIDE, (L + 1) * DRAW_LEVEL_STRIDE)`. Internally,
+  `geometry_depth_bias` calls `level_sublane_depth_bias` with
+  `DRAW_LEVEL_GEOMETRY_START_SUBLANE + level_ordinal`. A batch is one draw and
+  blends in buffer order, so each z-level gets a fixed screen lane.
 - **OIT (world) view:** `oit_depth_offset = (ordinal − text_anchor) ×
   OIT_DEPTH_STEP`, computed by `text_anchored_oit_depth_offset`. Per-fragment sort
   means submission order is irrelevant; the offset alone resolves coplanar order.
 
 **Per-level band layout.** Within level `L`:
-- Geometry (fills, borders, images) take the low sub-lanes `0..DRAW_LEVEL_GEOMETRY_LANES`
-  (`= 64`) at per-command ordinal — each is its own SDF/mesh draw, so z-index already
-  moves it on screen.
-- The **line batch** takes the reserved sub-lane `DRAW_LEVEL_GEOMETRY_LANES − 1 =
-  63` via `line_batch_depth_bias(z_level)`.
-- The **text batch** takes sub-lane `DRAW_LEVEL_TEXT_SUBLANE = 64` via
+- The **SDF fill batch** takes `DRAW_LEVEL_FILL_SUBLANE = 0` via
+  `fill_batch_depth_bias(z_level)`.
+- Per-command ordering uses `DRAW_LEVEL_GEOMETRY_START_SUBLANE..=
+  DRAW_LEVEL_GEOMETRY_START_SUBLANE + DRAW_LEVEL_GEOMETRY_LANES - 1`
+  (`1..=64`) through `geometry_depth_bias(z_level, level_ordinal)`.
+- The **panel-shape line batch** takes sub-lane `64` via
+  `line_batch_depth_bias(z_level)`.
+- The **text batch** takes `DRAW_LEVEL_TEXT_SUBLANE = 65` via
   `text_batch_depth_bias(z_level)`.
+- `DRAW_LEVEL_STRIDE = 66`, so the next `DrawZIndex` level starts after text.
 
-**Batched vs. individual draws.** Lines (`render/panel_lines/batching.rs`) and text
+**Batched vs. individual draws.** SDF fills/borders (`render/fill_batch.rs`), panel
+shapes (`render/panel_shapes/batching.rs`), and text
 (`render/panel_text/batching.rs`) are vertex-pulled batches. Each splits its
-batches by z-level (`z_level` on the batch key), so default-level content stays one
-shared batch across panels while a raised/lowered run spawns its own batch in the
-matching band. Per-record OIT offsets (`PathRenderRecord` fields `depth_nudge` /
-`oit_depth_offset`) disambiguate within a batch on the OIT axis. Fills/borders/images
-are individual draws, each stamped with its command's full `DrawCommandDepth`.
+batches by z-level (`z_level` on `SdfBatchKey` or `PathBatchKey`), so a
+raised/lowered run spawns its own batch in the matching band. Per-record
+`depth_nudge` disambiguates within a batch on the non-OIT depth-buffer axis;
+per-record `oit_depth_offset` disambiguates within a batch on the OIT axis.
+Images and precomposed LDR leaves remain individual panel children stamped with
+their command's full `DrawCommandDepth`.
 
 **Reconcile identity.** A z-index or step change affects ordering only — it re-keys
 a record, never respawns the entity. Text-run identity stays `(PanelElementId,
-line_index)`; image identity is `command_index`; SDF surfaces carry `PanelSdfSurface
-{ command_index, draw_depth: DrawCommandDepth, … }`. The reuse signature stores the
-whole `DrawCommandDepth` (not a bare ordinal) so a `text_anchor` shift — toggling
-text on/off — invalidates reuse instead of leaving a stale `oit_depth_offset`.
+line_index)`; image identity is `command_index`; SDF fill records retain
+`draw_depth: DrawCommandDepth` before upload and are keyed by
+`SdfRecordKey { panel, command_index }`. Reuse signatures store the whole
+`DrawCommandDepth` (not a bare ordinal) so a `text_anchor` shift — toggling text
+on/off — invalidates reuse instead of leaving a stale `oit_depth_offset`.
 
 ## Invariants
 
@@ -96,27 +137,29 @@ text on/off — invalidates reuse instead of leaving a stale `oit_depth_offset`.
 ## Calibration / gotchas
 
 - **Per-level screen cap.** `DRAW_LEVEL_GEOMETRY_LANES = 64` is a hard ceiling on
-  geometry commands at one z-level — beyond it, fills reach the line/text sub-lanes
-  or spill into the next band. `DRAW_LEVEL_STRIDE = DRAW_LEVEL_TEXT_SUBLANE + 1 =
-  65`. This is a real screen-side limit, separate from the OIT budget.
+  draw-participating commands at one z-level. At `level_ordinal == 63`, a command
+  reaches the panel-shape line batch sub-lane. At `level_ordinal == 64`, it reaches
+  the text batch sub-lane. At `level_ordinal == 65`, it spills into the next
+  `DrawZIndex` band. `DRAW_LEVEL_STRIDE = DRAW_LEVEL_TEXT_SUBLANE + 1 = 66`. This
+  is a real screen-side limit, separate from the OIT budget.
 - **OIT budget.** `oit_depth_budget() = floor(OIT_FOCUS_DEPTH / OIT_DEPTH_STEP)` ≈
   1000 commands panel-wide (`OIT_FOCUS_DEPTH = 0.001`, `OIT_DEPTH_STEP = 1e-6`).
-- **Overflow guard.** `per_level_band_overflows` (busiest single z-level vs.
-  `per_level_band_capacity()`) and `oit_total_overflows` (panel total vs.
-  `oit_depth_budget()`) in `render/panel_geometry.rs` each `warn_once!`
-  independently — the guard fires at whichever ceiling hits first. Per-level
-  occupancy comes from `DrawOrderProjection::level_occupancy() -> Vec<(i8, usize)>`
-  (`enumerate_ordinals` returns flat panel-global ranks with the level discarded, so
-  a flat count would miss band occupancy).
-- **Shader floor.** `n = 3e-6` is hard-coded in all three shaders
-  (`sdf_panel.wgsl`, `analytic_path.wgsl`, `panel_line_batch.wgsl`). The
-  `EXPECTED_SHADER_FNV1A` tripwire (`text/slug/glyph/coverage_probe.rs`) hashes
+- **Overflow guard.** `warn_panel_draw_order_limits` in
+  `render/draw_order_limits.rs` checks `per_level_band_overflows` (busiest single
+  z-level vs. `per_level_band_capacity()`) and `oit_total_overflows` (panel total
+  vs. `oit_depth_budget()`) independently. Per-level occupancy comes from
+  `DrawOrderProjection::level_occupancy() -> Vec<(i8, usize)>`. The per-level
+  warning is conservative: it counts commands, not bounding-box overlap.
+- **Shader floor.** `OIT_MIN_DEPTH = 3e-6` is hard-coded in the SDF and analytic
+  fragment shaders (`shaders/sdf_panel.wgsl`, `render/analytic_paths/analytic_path.wgsl`).
+  The `EXPECTED_SHADER_FNV1A` tripwire (`text/slug/glyph/coverage_probe.rs`) hashes
   **only** `analytic_path.wgsl`; editing that shader requires pasting the printed
   new hash in the same change.
-- **Lane-boundary tie.** A `Fill` at the old `draw_slot == 63` tied the `Lines`
-  lane; the new key deterministically orders `Fill` below `Lines` via
-  `step.ordinal()` (the documented lane intent).
-- **Two-axis split is the precedent.** Lines and text are the two worked examples of
+- **Lane-boundary tie.** A command at `level_ordinal == 63` shares the panel-shape
+  line batch sub-lane. The warning starts at that boundary because further
+  per-command depth-bias values enter the shared batch sub-lanes and then the next
+  `DrawZIndex` band.
+- **Two-axis split is the precedent.** Panel shapes and text are the worked examples of
   "one batch per `(z_level, …)`, CPU-fixed screen lane (`line_batch_depth_bias` /
   `text_batch_depth_bias`) + per-record OIT offset." Any future batched-geometry path
   replicates this `PathRenderRecord` structure rather than re-deriving it.
@@ -133,7 +176,7 @@ text on/off — invalidates reuse instead of leaving a stale `oit_depth_offset`.
   `depth_bias` / `oit_depth_offset`, never in submission order. The stream index is
   the only later-wins definition stable through batching.
 - **Text-anchor-relative OIT offset.** Anchoring the lowest text rank to `0.0`
-  preserves the pre-existing calibration (default text sat at depth 0). Content above
+  preserves the pre-existing calibration. Content above
   text gets a positive offset, below gets negative — a symmetric budget growing from
   0, with no clamp.
 - **One signed z-index, uniform across types.** A single per-element field is simpler
