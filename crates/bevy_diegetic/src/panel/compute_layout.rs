@@ -101,11 +101,12 @@ pub(super) fn compute_panel_layouts(
         }
         let had_result = computed.result().is_some();
 
-        if panel_changed {
-            scaled_tree_cache.invalidate_source();
-        }
-        let scaled_tree =
-            scaled_tree_cache.get_or_update(panel_ref.tree(), layout_to_points, font_to_points);
+        let scaled_tree = scaled_tree_cache.get_or_update(
+            panel_ref.tree(),
+            panel_ref.tree_revision(),
+            layout_to_points,
+            font_to_points,
+        );
 
         let viewport_width = panel_ref.width() * layout_to_points;
         let viewport_height = panel_ref.height() * layout_to_points;
@@ -181,7 +182,7 @@ fn build_cached_measure(cache: &ShapedTextCache, measurer: &DiegeticTextMeasurer
 
 /// Finalizes a completed layout pass onto the panel.
 ///
-/// Records content bounds (converted to world units) and editable-field
+/// Records panel-surface bounds (converted to world units) and editable-field
 /// records, warning on duplicate field ids.
 fn commit_layout_result(
     computed: &mut ComputedDiegeticPanel,
@@ -190,7 +191,7 @@ fn commit_layout_result(
     result: LayoutResult,
     entity: Entity,
 ) {
-    if let Some(bounds) = result.content_bounds() {
+    if let Some(bounds) = result.panel_bounds() {
         let s = panel_ref.points_to_world();
         computed.set_content_size(bounds.width * s, bounds.height * s);
     }
@@ -206,11 +207,11 @@ fn commit_layout_result(
     computed.set_result_with_fields(result, field_records, field_id_conflicts);
 }
 
-/// Resolves `Fit`-axis world panels to their content bounds.
+/// Resolves `Fit`-axis world panels to their panel-surface bounds.
 ///
 /// Runs after [`compute_panel_layouts`] writes the layout result. For each
 /// world panel whose width or height is `Sizing::Fit { min, max }`, reads
-/// the computed content bounds (in layout points) and shrinks the panel's
+/// the computed root bounds (in layout points) and shrinks the panel's
 /// physical width / height to match, clamped to `[min, max]`.
 ///
 /// Screen panels resolve their own dynamic sizing earlier in the pipeline
@@ -231,7 +232,7 @@ pub(super) fn resolve_world_panel_fit(
             CoordinateSpace::Screen { .. } => continue,
         };
 
-        if let Some(bounds) = computed.content_bounds() {
+        if let Some(bounds) = computed.result().and_then(LayoutResult::panel_bounds) {
             let layout_to_points = panel.layout_unit().to_points();
             if layout_to_points > 0.0 {
                 let horizontal_content = bounds.width / layout_to_points;
@@ -280,11 +281,15 @@ mod tests {
     use bevy_kana::ToF32;
 
     use crate::Anchor;
+    use crate::Border;
+    use crate::El;
     use crate::Fit;
     use crate::FitMax;
     use crate::Mm;
+    use crate::Padding;
     use crate::Percent;
     use crate::Px;
+    use crate::Sizing;
     use crate::TextStyle;
     use crate::cascade::FontUnit;
     use crate::cascade::Resolved;
@@ -616,6 +621,74 @@ mod tests {
             (panel.height() - vertical_meters).abs() < 0.001,
             "panel.height() = {}, expected ~{vertical_meters}",
             panel.height()
+        );
+    }
+
+    #[test]
+    fn world_fit_panel_with_bordered_root_keeps_root_chrome_in_viewport() {
+        const PANEL_WIDTH_MM: f32 = 100.0;
+        const BORDER_MM: f32 = 2.0;
+        const PADDING_MM: f32 = 3.0;
+        const FONT_SIZE_MM: f32 = 6.0;
+        const EXPECTED_PANEL_HEIGHT_MM: f32 = FONT_SIZE_MM + PADDING_MM * 2.0 + BORDER_MM * 2.0;
+
+        let mut app = make_app();
+        let mut builder = LayoutBuilder::with_root(
+            El::column()
+                .width(Sizing::fixed(Mm(PANEL_WIDTH_MM)))
+                .height(Sizing::FIT)
+                .background(Color::BLACK)
+                .border(Border::all(Mm(BORDER_MM), Color::WHITE)),
+        );
+        builder.with(El::column().width(Sizing::GROW).height(Sizing::FIT), |b| {
+            b.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::FIT)
+                    .padding(Padding::all(Mm(PADDING_MM))),
+                |b| {
+                    b.text(("Hi", TextStyle::new(Mm(FONT_SIZE_MM))));
+                },
+            );
+        });
+
+        let entity = app
+            .world_mut()
+            .spawn(
+                DiegeticPanel::world()
+                    .size(Mm(PANEL_WIDTH_MM), Fit)
+                    .with_tree(builder.build())
+                    .build()
+                    .expect("Fit world panel with bordered root should build"),
+            )
+            .id();
+
+        app.update();
+        app.update();
+
+        let panel = app
+            .world()
+            .get::<DiegeticPanel>(entity)
+            .expect("panel component must exist");
+        assert_close(panel.height(), EXPECTED_PANEL_HEIGHT_MM);
+
+        let result = app
+            .world()
+            .get::<ComputedDiegeticPanel>(entity)
+            .expect("computed panel should exist")
+            .result()
+            .expect("layout result should exist");
+        let surface_bounds = result
+            .panel_bounds()
+            .expect("root surface bounds should exist");
+        let inner_bounds = result
+            .content_bounds()
+            .expect("inner content bounds should exist");
+        assert!(
+            surface_bounds.height > inner_bounds.height,
+            "surface height should include root chrome; surface={}, inner={}",
+            surface_bounds.height,
+            inner_bounds.height,
         );
     }
 

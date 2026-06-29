@@ -1360,6 +1360,7 @@ impl DiegeticPanelChangeClassification {
 /// are converted to points.
 #[derive(Component, Default)]
 pub(super) struct ScaledLayoutTreeCache {
+    source_revision:       u64,
     layout_to_points_bits: F32Bits,
     font_to_points_bits:   F32Bits,
     tree:                  Option<LayoutTree>,
@@ -1377,11 +1378,9 @@ impl F32Bits {
 }
 
 impl ScaledLayoutTreeCache {
-    /// Drops the source-tree-derived value while keeping the last scale keys.
-    ///
-    /// `compute_panel_layouts` calls this from Bevy's `Changed<DiegeticPanel>`
-    /// signal. Cache correctness therefore follows the actual component write,
-    /// not a caller-maintained tree revision counter.
+    /// Test helper that drops the source-tree-derived value while keeping the
+    /// last source revision and scale keys.
+    #[cfg(test)]
     pub(super) fn invalidate_source(&mut self) { self.tree = None; }
 
     /// Returns a point-scaled tree, rebuilding the cache when the source tree
@@ -1389,12 +1388,14 @@ impl ScaledLayoutTreeCache {
     pub(super) fn get_or_update(
         &mut self,
         source: &LayoutTree,
+        source_revision: u64,
         layout_to_points: f32,
         font_to_points: f32,
     ) -> &LayoutTree {
         let layout_to_points_bits = F32Bits::new(layout_to_points);
         let font_to_points_bits = F32Bits::new(font_to_points);
         let cache_hit = self.tree.is_some()
+            && self.source_revision == source_revision
             && self.layout_to_points_bits == layout_to_points_bits
             && self.font_to_points_bits == font_to_points_bits;
 
@@ -1404,6 +1405,7 @@ impl ScaledLayoutTreeCache {
                 self.hits += 1;
             }
         } else {
+            self.source_revision = source_revision;
             self.layout_to_points_bits = layout_to_points_bits;
             self.font_to_points_bits = font_to_points_bits;
             self.tree = None;
@@ -1444,19 +1446,20 @@ pub struct ComputedDiegeticPanel {
 }
 
 impl ComputedDiegeticPanel {
-    /// Actual computed content width in world units.
+    /// Actual computed panel-surface width in world units.
     ///
-    /// This is the width of the first user-defined element (the content),
-    /// not the full viewport. With `Sizing::FIT`, this shrinks to fit.
+    /// This is the solved root element width, including root padding and
+    /// border. With `Sizing::FIT`, this shrinks the panel viewport to the
+    /// visible surface instead of clipping root chrome.
     #[must_use]
     pub const fn content_width(&self) -> f32 { self.content_width }
 
-    /// Actual computed content height in world units.
+    /// Actual computed panel-surface height in world units.
     #[must_use]
     pub const fn content_height(&self) -> f32 { self.content_height }
 
-    /// Returns the bounding box of the panel's content in layout units,
-    /// or `None` if layout has not yet been computed.
+    /// Returns the bounding box of the first child content in layout units, or
+    /// `None` if layout has not yet been computed.
     #[must_use]
     pub fn content_bounds(&self) -> Option<BoundingBox> {
         self.result.as_ref().and_then(LayoutResult::content_bounds)
@@ -1589,26 +1592,42 @@ mod tests {
         let tree = test_tree("cache");
         let mut cache = ScaledLayoutTreeCache::default();
 
-        let _ = cache.get_or_update(&tree, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
         assert_eq!(cache.hits(), 0);
         assert_eq!(cache.misses(), 1);
 
-        let _ = cache.get_or_update(&tree, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 1);
 
         cache.invalidate_source();
-        let _ = cache.get_or_update(&tree, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 2);
 
-        let _ = cache.get_or_update(&tree, 4.0, 3.0);
+        let _ = cache.get_or_update(&tree, 1, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 3);
 
-        let _ = cache.get_or_update(&tree, 4.0, 5.0);
+        let _ = cache.get_or_update(&tree, 1, 4.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 4);
+
+        let _ = cache.get_or_update(&tree, 1, 4.0, 5.0);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 5);
+    }
+
+    #[test]
+    fn scaled_tree_cache_hits_across_unrelated_panel_component_changes() {
+        let tree = test_tree("cache");
+        let mut cache = ScaledLayoutTreeCache::default();
+
+        let _ = cache.get_or_update(&tree, 7, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 7, 2.0, 3.0);
+
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 1);
     }
 
     #[test]

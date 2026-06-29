@@ -59,7 +59,7 @@ Builder entry points (`builder.rs`):
 
 `b.with` returns `&mut Self`, so siblings chain. The "current parent" is whatever `with` you are inside.
 
-> **Fit-root panels:** with `with_root(El::new().width(FIT).height(FIT))`, `LayoutResult::content_bounds()` (element index 1) gives the real shrink-wrapped content box — this is how a panel sizes itself to its content rather than the viewport (`layout_engine.rs:198`).
+> **Fit-root panels:** with `with_root(El::new().width(FIT).height(FIT))`, the root element is the visible panel surface. Fit-sized panel viewports resolve from the solved root bounds so root padding and borders stay inside the viewport. `LayoutResult::content_bounds()` still reports the root's first child (element index 1) when you need the inner content box (`layout_engine.rs`).
 
 ---
 
