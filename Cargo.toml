@@ -35,7 +35,7 @@ bevy_brp_extras = "0.20.1"
 bevy_clerestory = { path = "crates/bevy_clerestory" }
 bevy_diegetic   = { path = "crates/bevy_diegetic" }
 bevy_lagrange   = { path = "crates/bevy_lagrange" }
-bevy_valence    = { path = "crates/bevy_valence" }
+hana_valence    = { path = "crates/hana_valence" }
 clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }
 fairy_dust      = { path = "crates/fairy_dust" }

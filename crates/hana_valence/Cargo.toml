@@ -1,12 +1,12 @@
 [package]
 authors.workspace    = true
 categories           = ["game-development"]
-description          = "bevy_valence provides the bonds that create interesting patterns"
+description          = "hana_valence provides the bonds that create interesting patterns"
 edition.workspace    = true
-homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_valence"
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/hana_valence"
 keywords             = ["bevy", "gamedev"]
 license.workspace    = true
-name                 = "bevy_valence"
+name                 = "hana_valence"
 readme               = "README.md"
 repository.workspace = true
 version              = "0.1.0"
