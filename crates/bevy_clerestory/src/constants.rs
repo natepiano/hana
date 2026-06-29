@@ -21,7 +21,7 @@ pub(crate) const STATE_FILE: &str = "windows.ron";
 
 // platform
 #[cfg(target_os = "linux")]
-pub(crate) const WAYLAND_DISPLAY_ENV_VAR: &str = "WAYLAND_DISPLAY";
+pub(crate) const WAYLAND_DISPLAY_ENVIRONMENT_VARIABLE: &str = "WAYLAND_DISPLAY";
 
 // restore strategy
 pub(crate) const RESTORE_STRATEGY_APPLY_UNCHANGED: &str = "ApplyUnchanged";
@@ -65,6 +65,9 @@ pub(crate) const SUBCLASS_REFERENCE_DATA: usize = 0;
 /// Number of values in `_NET_FRAME_EXTENTS` (left, right, top, bottom).
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 pub(crate) const FRAME_EXTENT_COUNT: u32 = 4;
+/// X11 property offset used when querying `_NET_FRAME_EXTENTS`.
+#[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
+pub(crate) const FRAME_EXTENT_PROPERTY_OFFSET: u32 = 0;
 #[cfg(all(target_os = "linux", feature = "workaround-winit-4445"))]
 pub(crate) const FRAME_EXTENTS_ATOM_NAME: &[u8] = b"_NET_FRAME_EXTENTS";
 /// Index of the "top" extent in `_NET_FRAME_EXTENTS`.

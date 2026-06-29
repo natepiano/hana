@@ -22,6 +22,7 @@ use x11rb::protocol::xproto::ConnectionExt;
 use x11rb::xcb_ffi::XCBConnection;
 
 use crate::constants::FRAME_EXTENT_COUNT;
+use crate::constants::FRAME_EXTENT_PROPERTY_OFFSET;
 use crate::constants::FRAME_EXTENT_TOP_INDEX;
 use crate::constants::FRAME_EXTENTS_ATOM_NAME;
 use crate::restore::MonitorScaleStrategy;
@@ -138,7 +139,7 @@ fn query_frame_top(window_id: u32) -> Option<i32> {
             window_id,
             atom,
             AtomEnum::CARDINAL,
-            0,
+            FRAME_EXTENT_PROPERTY_OFFSET,
             FRAME_EXTENT_COUNT,
         )
         .ok()?;

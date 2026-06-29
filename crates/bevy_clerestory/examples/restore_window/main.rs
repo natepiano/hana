@@ -28,7 +28,7 @@ use bevy::prelude::*;
 use bevy_brp_extras::BrpExtrasPlugin;
 use bevy_clerestory::WindowManagerPlugin;
 use constants::PRIMARY_WINDOW_TITLE;
-use constants::TEST_MODE_ENV_VAR;
+use constants::TEST_MODE_ENVIRONMENT_VARIABLE;
 use events::MismatchStates;
 use events::RestoredStates;
 use events::WindowsSettledCount;
@@ -69,7 +69,9 @@ fn main() {
         .add_observer(mode_observers::on_toggle_persistence)
         .add_observer(mode_observers::on_clear_state_and_quit)
         .add_observer(mode_observers::on_quit_app)
-        .insert_resource(KeyboardInputMode::from(var(TEST_MODE_ENV_VAR).is_err()))
+        .insert_resource(KeyboardInputMode::from(
+            var(TEST_MODE_ENVIRONMENT_VARIABLE).is_err(),
+        ))
         .init_resource::<SelectedVideoModes>()
         .init_resource::<WindowCounter>()
         .init_resource::<RestoredStates>()

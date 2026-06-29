@@ -28,7 +28,7 @@ pub(crate) const SECONDARY_WINDOW_WIDTH: u32 = 600;
 pub(crate) const STATE_FILE: &str = "windows.ron";
 
 // test mode
-pub(crate) const TEST_MODE_ENV_VAR: &str = "BWM_TEST_MODE";
+pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "BWM_TEST_MODE";
 
 // text
 pub(crate) const ACTIVE_VIDEO_MODE_SUFFIX: &str = " <- active";
