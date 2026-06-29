@@ -1,6 +1,6 @@
 use bevy::prelude::Component;
 
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::layout::BoundingBox;
 
 /// Layout payload for a panel-text run (a
@@ -14,7 +14,7 @@ pub struct PanelTextLayout {
     /// run (`0` for an unwrapped run). Together they form the reconcile reuse
     /// key, replacing the former positional `(element_idx, command_index)` pair
     /// so a named run survives a sibling reorder.
-    pub id:               PanelFieldId,
+    pub id:               PanelElementId,
     /// Line ordinal of this command within its run (`0`-based), so a wrapped
     /// multi-line run reuses each line stably.
     pub line_index:       usize,
@@ -104,7 +104,7 @@ mod tests {
 
     fn sample_layout() -> PanelTextLayout {
         PanelTextLayout {
-            id:               PanelFieldId::named("sample"),
+            id:               PanelElementId::named("sample"),
             line_index:       0,
             element_idx:      0,
             draw_ordinal:     0,

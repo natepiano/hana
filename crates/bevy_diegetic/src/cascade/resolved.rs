@@ -104,6 +104,10 @@ const HDR_TEXT_COVERAGE_BIAS_MIN: f32 = -4.0;
 const HDR_TEXT_COVERAGE_BIAS_MAX: f32 = 4.0;
 
 impl HdrTextCoverageBias {
+    /// No HDR coverage compensation; the shader uses analytic text coverage
+    /// unchanged.
+    pub(crate) const NO_BIAS: Self = Self(0.0);
+
     /// Value sent to `PathRenderRecord::text_coverage_bias`.
     ///
     /// The public authored value is intentionally plain `f32` so it can be

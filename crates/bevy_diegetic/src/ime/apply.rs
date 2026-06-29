@@ -103,7 +103,7 @@ impl ParsedBuiltInValue {
     }
 }
 
-const fn target_field_id(target: &ImeTarget) -> &super::PanelFieldId {
+const fn target_field_id(target: &ImeTarget) -> &super::PanelElementId {
     match target {
         ImeTarget::WorldPanelField { field_id, .. }
         | ImeTarget::ScreenPanelField { field_id, .. }

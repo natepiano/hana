@@ -4,7 +4,7 @@
 //! - **By user marker** — [`DiegeticTextMut`] retexts standalone
 //!   [`DiegeticText`](crate::DiegeticText) labels: name a marker `M`, call `set`/`for_each_mut`. It
 //!   traverses the panel→run relationship internally, the ergonomic path for "retext my labels".
-//! - **By [`PanelFieldId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
+//! - **By [`PanelElementId`]** — [`PanelText`] is the read-write `SystemParam` for a named run on a
 //!   multi-run panel; [`PanelTextReader`] is the read-only variant a reader system uses so it does
 //!   not serialize on the `&mut DiegeticPanel` write claim.
 //!
@@ -20,12 +20,12 @@ use bevy::prelude::*;
 
 use super::PanelTextLayout;
 use super::PanelTextRuns;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::layout::TextStyle;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPanelChangeClassification;
 
-/// Read-only access to panel text runs by [`PanelFieldId`].
+/// Read-only access to panel text runs by [`PanelElementId`].
 ///
 /// Reads come from the `El.text` layout cache, which is authoritative for the
 /// full run string — a wrapped run materializes as one child per visual line,
@@ -42,7 +42,7 @@ impl PanelTextReader<'_, '_> {
     /// Resolves a named run to its `line_index == 0` entity, or `None` if no run
     /// carries the id or the mapped entity is no longer a live run.
     #[must_use]
-    pub fn entity(&self, panel: Entity, id: &PanelFieldId) -> Option<Entity> {
+    pub fn entity(&self, panel: Entity, id: &PanelElementId) -> Option<Entity> {
         let (data, _) = self.panels.get(panel).ok()?;
         self.resolve(data, id)
     }
@@ -50,7 +50,7 @@ impl PanelTextReader<'_, '_> {
     /// Reads a named run's full string from the `El.text` cache, never a line
     /// slice, so a wrapped run returns its whole text.
     #[must_use]
-    pub fn text(&self, panel: Entity, id: &PanelFieldId) -> Option<&str> {
+    pub fn text(&self, panel: Entity, id: &PanelElementId) -> Option<&str> {
         let (data, _) = self.panels.get(panel).ok()?;
         let child = self.resolve(data, id)?;
         let layout = self.layouts.get(child).ok()?;
@@ -61,7 +61,7 @@ impl PanelTextReader<'_, '_> {
     /// `text`. Delegates to the free [`resolve_run_entity`] so [`PanelText`]
     /// (which holds a `&mut DiegeticPanel` query that cannot coexist with this
     /// reader's `&DiegeticPanel` one) shares the same resolution.
-    fn resolve(&self, data: &DiegeticPanel, id: &PanelFieldId) -> Option<Entity> {
+    fn resolve(&self, data: &DiegeticPanel, id: &PanelElementId) -> Option<Entity> {
         resolve_run_entity(data, id, &self.layouts)
     }
 
@@ -104,7 +104,7 @@ impl PanelTextReader<'_, '_> {
     }
 }
 
-/// Read-write access to panel text runs by [`PanelFieldId`].
+/// Read-write access to panel text runs by [`PanelElementId`].
 ///
 /// `set_text` writes the run's string into the panel's authoritative `El.text`
 /// cache (via `DiegeticPanel::sync_run_text_cache`) and bumps the tree
@@ -136,7 +136,7 @@ impl PanelText<'_, '_> {
     /// Resolves a named run to its `line_index == 0` entity. See
     /// [`PanelTextReader::entity`].
     #[must_use]
-    pub fn entity(&self, panel: Entity, id: &PanelFieldId) -> Option<Entity> {
+    pub fn entity(&self, panel: Entity, id: &PanelElementId) -> Option<Entity> {
         let (data, _, _) = self.panels.get(panel).ok()?;
         resolve_run_entity(data, id, &self.layouts)
     }
@@ -144,7 +144,7 @@ impl PanelText<'_, '_> {
     /// Reads a named run's full string from the `El.text` cache. See
     /// [`PanelTextReader::text`].
     #[must_use]
-    pub fn text(&self, panel: Entity, id: &PanelFieldId) -> Option<&str> {
+    pub fn text(&self, panel: Entity, id: &PanelElementId) -> Option<&str> {
         let (data, _, _) = self.panels.get(panel).ok()?;
         let child = resolve_run_entity(data, id, &self.layouts)?;
         let layout = self.layouts.get(child).ok()?;
@@ -173,7 +173,12 @@ impl PanelText<'_, '_> {
     /// whole string into the tree, so a wrapped run is retext by passing the
     /// whole replacement; an unchanged string leaves the panel un-dirtied (no
     /// relayout) via [`TextEdit::set_text`].
-    pub fn set_text(&mut self, panel: Entity, id: &PanelFieldId, text: impl Into<String>) -> bool {
+    pub fn set_text(
+        &mut self,
+        panel: Entity,
+        id: &PanelElementId,
+        text: impl Into<String>,
+    ) -> bool {
         let Some(child) = self.entity(panel, id) else {
             return false;
         };
@@ -232,7 +237,7 @@ impl PanelText<'_, '_> {
 /// window quiet.
 fn resolve_run_entity(
     data: &DiegeticPanel,
-    id: &PanelFieldId,
+    id: &PanelElementId,
     layouts: &Query<&PanelTextLayout>,
 ) -> Option<Entity> {
     if let Some(child) = data.text_child(id)
@@ -471,7 +476,7 @@ mod tests {
     use super::PanelText;
     use super::PanelTextReader;
     use crate::Mm;
-    use crate::PanelFieldId;
+    use crate::PanelElementId;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
@@ -549,7 +554,7 @@ mod tests {
         builder.build()
     }
 
-    fn named_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
+    fn named_tree(id: &PanelElementId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(Text::new(text, TextStyle::new(10.0)).id(id.clone()));
         builder.build()
@@ -627,7 +632,7 @@ mod tests {
     #[test]
     fn reader_resolves_a_named_run_and_reads_its_text() {
         let mut app = access_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
 
         let lookup = id.clone();
@@ -653,13 +658,13 @@ mod tests {
     #[test]
     fn unknown_id_resolves_to_none() {
         let mut app = access_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
 
         let resolved = app
             .world_mut()
             .run_system_once(move |reader: PanelTextReader| {
-                reader.entity(panel, &PanelFieldId::named("missing"))
+                reader.entity(panel, &PanelElementId::named("missing"))
             })
             .expect("system runs");
         assert!(resolved.is_none(), "an unknown id must not resolve");
@@ -670,11 +675,11 @@ mod tests {
         let mut app = access_app();
         let panel = settled_panel(&mut app, auto_tree("Hi"));
 
-        // No public `PanelFieldId` names an auto run, so a named lookup misses.
+        // No public `PanelElementId` names an auto run, so a named lookup misses.
         let by_name = app
             .world_mut()
             .run_system_once(move |reader: PanelTextReader| {
-                reader.entity(panel, &PanelFieldId::named("Hi"))
+                reader.entity(panel, &PanelElementId::named("Hi"))
             })
             .expect("system runs");
         assert!(by_name.is_none(), "an auto-id run is not name-addressable");
@@ -692,7 +697,7 @@ mod tests {
     #[test]
     fn set_text_through_panel_text_relayouts() {
         let mut app = access_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
         let before = content_width(&app, panel);
 
@@ -725,13 +730,13 @@ mod tests {
     #[test]
     fn set_text_unknown_id_is_a_noop() {
         let mut app = access_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
 
         let wrote = app
             .world_mut()
             .run_system_once(move |mut text: PanelText| {
-                text.set_text(panel, &PanelFieldId::named("missing"), "ignored")
+                text.set_text(panel, &PanelElementId::named("missing"), "ignored")
             })
             .expect("system runs");
         assert!(!wrote, "an unknown id must not write");
@@ -749,7 +754,7 @@ mod tests {
     #[test]
     fn orphaned_run_resolves_to_none_through_the_system_param() {
         let mut app = access_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
 
         // Despawn the run out of flow. The panel's `text_index` still maps the id
@@ -1042,7 +1047,7 @@ mod tests {
 
     /// A named run that wraps at explicit newlines, so it materializes as one
     /// entity per line while staying id-addressable.
-    fn named_wrapped_tree(id: &PanelFieldId, text: &str) -> LayoutTree {
+    fn named_wrapped_tree(id: &PanelElementId, text: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(
             Text::new(text, TextStyle::new(10.0))
@@ -1055,7 +1060,7 @@ mod tests {
     #[test]
     fn set_text_on_a_named_wrapped_run_replaces_the_whole_string() {
         let mut app = access_app();
-        let id = PanelFieldId::named("body");
+        let id = PanelElementId::named("body");
         let panel = settled_panel(&mut app, named_wrapped_tree(&id, "one\ntwo"));
 
         // Two wrapped lines materialize as two run entities sharing the id.
@@ -1126,7 +1131,7 @@ mod tests {
     #[test]
     fn a_set_text_edit_fires_exactly_one_relayout_pass() {
         let mut app = single_pass_app();
-        let id = PanelFieldId::named("title");
+        let id = PanelElementId::named("title");
         let panel = settled_panel(&mut app, named_tree(&id, "Hi"));
         // One more frame so the panel is fully quiescent before the edit.
         app.update();

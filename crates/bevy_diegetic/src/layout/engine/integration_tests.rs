@@ -221,6 +221,43 @@ fn command_index(
         .expect("command should exist")
 }
 
+#[test]
+fn precompose_ldr_emits_single_boundary_command_without_descendants() {
+    let mut builder = LayoutBuilder::new(100.0, 50.0);
+    builder.with(
+        El::column()
+            .size(80.0, 30.0)
+            .background(Color::WHITE)
+            .precompose_ldr(),
+        |builder| {
+            builder.text(("child", TextStyle::new(10.0)));
+        },
+    );
+    let tree = builder.build();
+    let engine = LayoutEngine::new(monospace_measure());
+
+    let result = engine.compute(&tree, 100.0, 50.0, 1.0);
+    let precompose_count = result
+        .commands
+        .iter()
+        .filter(|command| matches!(command.kind, RenderCommandKind::PrecomposeLdr))
+        .count();
+
+    assert_eq!(precompose_count, 1);
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| matches!(command.kind, RenderCommandKind::Text { .. }))
+    );
+    assert!(
+        !result
+            .commands
+            .iter()
+            .any(|command| matches!(command.kind, RenderCommandKind::Rectangle { .. }))
+    );
+}
+
 fn add_aligned_table_row(
     builder: &mut LayoutBuilder,
     bindings: &[&str],

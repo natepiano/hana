@@ -26,6 +26,7 @@ use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::events::LastPanelDimensions;
 use super::field::PanelFieldRecord;
+use super::precompose::PanelPrecomposeCache;
 use super::validate_screen_conversion;
 use super::validate_world_conversion;
 use crate::cascade;
@@ -88,6 +89,7 @@ use crate::render::HairlineFade;
     ComputedDiegeticPanel,
     DiegeticPanelChangeClassification,
     LastPanelDimensions,
+    PanelPrecomposeCache,
     ResolvedScreenPanelPosition,
     ScaledLayoutTreeCache,
     Transform,
@@ -97,7 +99,7 @@ pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
     pub(super) tree:                   LayoutTree,
-    /// Monotonic revision for cache invalidation when [`Self::tree`] is replaced.
+    /// Monotonic value token for edit sessions when [`Self::tree`] is replaced.
     #[reflect(ignore)]
     pub(super) tree_revision:          u64,
     /// Panel width in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
@@ -153,7 +155,7 @@ pub struct DiegeticPanel {
     pub(super) hdr_text_coverage_bias: Option<f32>,
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space:       CoordinateSpace,
-    /// Maps each text run's [`PanelFieldId`](crate::PanelFieldId) to the entity
+    /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
     /// reconcile materialized for it, so
     /// [`text_child`](Self::text_child) resolves a named run in O(1).
     ///
@@ -162,7 +164,7 @@ pub struct DiegeticPanel {
     /// layout; [`set_tree`](DiegeticPanelCommands::set_tree) clears it so a stale
     /// id stops resolving immediately.
     #[reflect(ignore)]
-    pub(crate) text_index:             HashMap<crate::PanelFieldId, Entity>,
+    pub(crate) text_index:             HashMap<crate::PanelElementId, Entity>,
 }
 
 impl Default for DiegeticPanel {
@@ -272,7 +274,7 @@ impl DiegeticPanel {
 
     pub(crate) const fn authored_world_height(&self) -> Option<f32> { self.world_height }
 
-    /// Resolves a text run's [`PanelFieldId`](crate::PanelFieldId) to the entity
+    /// Resolves a text run's [`PanelElementId`](crate::PanelElementId) to the entity
     /// reconcile materialized for it (its `line_index == 0` child), or `None` if
     /// no run carries that id.
     ///
@@ -286,7 +288,7 @@ impl DiegeticPanel {
     /// A `set_tree` in the same frame clears the index immediately, so a lookup
     /// before the next reconcile pass returns `None`.
     #[must_use]
-    pub fn text_child(&self, id: &crate::PanelFieldId) -> Option<Entity> {
+    pub fn text_child(&self, id: &crate::PanelElementId) -> Option<Entity> {
         self.text_index.get(id).copied()
     }
 }
@@ -327,6 +329,11 @@ impl DiegeticPanel {
         self.text_index.clear();
     }
 
+    fn replace_from_precompose_helper(&mut self, panel: Self) {
+        *self = panel;
+        self.text_index.clear();
+    }
+
     /// Bench-support wrapper for [`Self::replace_tree_full_rebuild`].
     #[cfg(feature = "bench_support")]
     #[doc(hidden)]
@@ -335,8 +342,7 @@ impl DiegeticPanel {
     }
 
     /// Writes a run-text edit into the authoritative `El.text` tree and bumps the
-    /// tree revision so [`ScaledLayoutTreeCache`] rebuilds with the new string.
-    /// Returns whether the cache changed.
+    /// edit-session revision. Returns whether the cache changed.
     ///
     /// `El.text` is the single source for run text; the child
     /// [`TextContent`](crate::TextContent) is derived output — reconcile overwrites
@@ -352,9 +358,8 @@ impl DiegeticPanel {
         }
     }
 
-    /// Writes a restyle into the authored `El.config` and bumps the tree
-    /// revision so [`ScaledLayoutTreeCache`] rebuilds and the layout engine
-    /// re-measures with the new style. Returns whether the style changed.
+    /// Writes a restyle into the authored `El.config` and bumps the edit-session
+    /// revision. Returns whether the style changed.
     ///
     /// Like run text (see [`sync_run_text_cache`](Self::sync_run_text_cache)),
     /// the tree is the single authoritative source: `El.config` for style,
@@ -690,6 +695,17 @@ fn set_tree_command(
     let change = panel.tree.classify_change(&next_tree);
     classification.record_tree_change(change);
     panel.replace_tree_full_rebuild(next_tree);
+}
+
+pub(crate) fn apply_precompose_helper_panel(
+    In((entity, next_panel)): In<(Entity, DiegeticPanel)>,
+    mut panels: Query<(&mut DiegeticPanel, &mut DiegeticPanelChangeClassification)>,
+) {
+    let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
+        return;
+    };
+    classification.record_tree_change(LayoutTreeChange::LayoutAffecting);
+    panel.replace_from_precompose_helper(next_panel);
 }
 
 pub(super) fn apply_pending_panel_conversions(
@@ -1344,7 +1360,6 @@ impl DiegeticPanelChangeClassification {
 /// are converted to points.
 #[derive(Component, Default)]
 pub(super) struct ScaledLayoutTreeCache {
-    tree_revision:         TreeRevision,
     layout_to_points_bits: F32Bits,
     font_to_points_bits:   F32Bits,
     tree:                  Option<LayoutTree>,
@@ -1355,13 +1370,6 @@ pub(super) struct ScaledLayoutTreeCache {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(super) struct TreeRevision(u64);
-
-impl From<u64> for TreeRevision {
-    fn from(value: u64) -> Self { Self(value) }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(super) struct F32Bits(u32);
 
 impl F32Bits {
@@ -1369,20 +1377,24 @@ impl F32Bits {
 }
 
 impl ScaledLayoutTreeCache {
+    /// Drops the source-tree-derived value while keeping the last scale keys.
+    ///
+    /// `compute_panel_layouts` calls this from Bevy's `Changed<DiegeticPanel>`
+    /// signal. Cache correctness therefore follows the actual component write,
+    /// not a caller-maintained tree revision counter.
+    pub(super) fn invalidate_source(&mut self) { self.tree = None; }
+
     /// Returns a point-scaled tree, rebuilding the cache when the source tree
     /// or scale factors change.
     pub(super) fn get_or_update(
         &mut self,
         source: &LayoutTree,
-        tree_revision: u64,
         layout_to_points: f32,
         font_to_points: f32,
     ) -> &LayoutTree {
-        let tree_revision = TreeRevision::from(tree_revision);
         let layout_to_points_bits = F32Bits::new(layout_to_points);
         let font_to_points_bits = F32Bits::new(font_to_points);
         let cache_hit = self.tree.is_some()
-            && self.tree_revision == tree_revision
             && self.layout_to_points_bits == layout_to_points_bits
             && self.font_to_points_bits == font_to_points_bits;
 
@@ -1392,7 +1404,6 @@ impl ScaledLayoutTreeCache {
                 self.hits += 1;
             }
         } else {
-            self.tree_revision = tree_revision;
             self.layout_to_points_bits = layout_to_points_bits;
             self.font_to_points_bits = font_to_points_bits;
             self.tree = None;
@@ -1427,7 +1438,7 @@ pub struct ComputedDiegeticPanel {
     #[reflect(ignore)]
     field_records:      Vec<PanelFieldRecord>,
     #[reflect(ignore)]
-    field_id_conflicts: Vec<crate::PanelFieldId>,
+    field_id_conflicts: Vec<crate::PanelElementId>,
     content_width:      f32,
     content_height:     f32,
 }
@@ -1457,7 +1468,7 @@ impl ComputedDiegeticPanel {
 
     /// Returns duplicated editable field ids found during the latest layout.
     #[must_use]
-    pub fn field_id_conflicts(&self) -> &[crate::PanelFieldId] { &self.field_id_conflicts }
+    pub fn field_id_conflicts(&self) -> &[crate::PanelElementId] { &self.field_id_conflicts }
 
     /// Resolves an editable field at a panel-local layout point.
     ///
@@ -1503,7 +1514,7 @@ impl ComputedDiegeticPanel {
         &mut self,
         result: LayoutResult,
         field_records: Vec<PanelFieldRecord>,
-        field_id_conflicts: Vec<crate::PanelFieldId>,
+        field_id_conflicts: Vec<crate::PanelElementId>,
     ) {
         self.draw_order = DrawOrderProjection::from_commands(&result.commands);
         self.result = Some(result);
@@ -1574,27 +1585,28 @@ mod tests {
     }
 
     #[test]
-    fn scaled_tree_cache_hits_until_revision_or_scale_changes() {
+    fn scaled_tree_cache_hits_until_source_invalidated_or_scale_changes() {
         let tree = test_tree("cache");
         let mut cache = ScaledLayoutTreeCache::default();
 
-        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 2.0, 3.0);
         assert_eq!(cache.hits(), 0);
         assert_eq!(cache.misses(), 1);
 
-        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        let _ = cache.get_or_update(&tree, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 1);
 
-        let _ = cache.get_or_update(&tree, 1, 2.0, 3.0);
+        cache.invalidate_source();
+        let _ = cache.get_or_update(&tree, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 2);
 
-        let _ = cache.get_or_update(&tree, 1, 4.0, 3.0);
+        let _ = cache.get_or_update(&tree, 4.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 3);
 
-        let _ = cache.get_or_update(&tree, 1, 4.0, 5.0);
+        let _ = cache.get_or_update(&tree, 4.0, 5.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 4);
     }

@@ -8,7 +8,7 @@ use super::PanelTextLayout;
 use super::PanelTextRuns;
 use super::TextRunOf;
 use super::layout::PanelTextZLevel;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::cascade;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
@@ -25,6 +25,7 @@ use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
+use crate::panel::PanelPrecomposeCache;
 use crate::render::clip;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::draw_order::DrawCommandDepth;
@@ -54,7 +55,7 @@ struct ReusableChild<'a> {
 type PendingTextChild = (
     usize,
     DrawCommandDepth,
-    PanelFieldId,
+    PanelElementId,
     usize,
     String,
     TextStyle,
@@ -84,10 +85,10 @@ fn collect_text_commands(
                 let draw_depth = draw_order.depth_for(cmd_index)?;
                 let id = panel
                     .tree()
-                    .element_field_id(cmd.element_idx)
+                    .text_element_id(cmd.element_idx)
                     .cloned()
                     .unwrap_or_else(|| {
-                        PanelFieldId::auto(u32::try_from(cmd.element_idx).unwrap_or(0))
+                        PanelElementId::auto(u32::try_from(cmd.element_idx).unwrap_or(0))
                     });
                 let counter = line_counter.entry(cmd.element_idx).or_insert(0);
                 let line_index = *counter;
@@ -121,7 +122,7 @@ fn collect_existing_text_children<'a>(
         Option<&Override<Sidedness>>,
         Option<&Override<HdrTextCoverageBias>>,
     )>,
-) -> HashMap<(PanelFieldId, usize), ReusableChild<'a>> {
+) -> HashMap<(PanelElementId, usize), ReusableChild<'a>> {
     let mut existing_by_key = HashMap::new();
     for &entity in existing_run_entities {
         let Ok((
@@ -217,8 +218,8 @@ pub(super) fn reconcile_panel_text_children(
         let existing_run_entities: &[Entity] = panel_runs.map_or(&[][..], |runs| &**runs);
         let existing_by_key = collect_existing_text_children(existing_run_entities, &existing_runs);
 
-        let mut visited_keys: Vec<(PanelFieldId, usize)> = Vec::new();
-        let mut text_index: HashMap<PanelFieldId, Entity> = HashMap::new();
+        let mut visited_keys: Vec<(PanelElementId, usize)> = Vec::new();
+        let mut text_index: HashMap<PanelElementId, Entity> = HashMap::new();
         for (element_idx, draw_depth, id, line_index, text, config, bounds, clip) in &text_commands
         {
             // A label's own cascade overrides (`TextStyle::with_alpha_mode` /
@@ -284,7 +285,7 @@ pub(super) fn reconcile_panel_text_children(
 
             // Address a run by its first line: `text_child(id)` resolves this
             // entity. Auto-id runs land here too but are unreachable — no caller
-            // can build their `PanelFieldId::Auto`.
+            // can build their `PanelElementId::Auto`.
             if *line_index == 0 {
                 text_index.insert(id.clone(), entity);
             }
@@ -539,7 +540,12 @@ struct ImageVisuals {
 /// (ordered first) resets it each frame.
 pub(super) fn reconcile_panel_image_children(
     changed_panels: Query<
-        (Entity, &DiegeticPanel, &ComputedDiegeticPanel),
+        (
+            Entity,
+            &DiegeticPanel,
+            &ComputedDiegeticPanel,
+            &PanelPrecomposeCache,
+        ),
         Changed<ComputedDiegeticPanel>,
     >,
     existing_children: Query<(
@@ -554,7 +560,7 @@ pub(super) fn reconcile_panel_image_children(
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     let reconcile_start = Instant::now();
-    for (panel_entity, panel, computed) in &changed_panels {
+    for (panel_entity, panel, computed, precompose_cache) in &changed_panels {
         let Some(result) = computed.result() else {
             continue;
         };
@@ -578,6 +584,18 @@ pub(super) fn reconcile_panel_image_children(
                         draw_depth,
                         handle: handle.clone(),
                         tint: *tint,
+                        bounds: cmd.bounds,
+                    })
+                },
+                RenderCommandKind::PrecomposeLdr => {
+                    clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
+                    let draw_depth = computed.draw_order().depth_for(cmd_index)?;
+                    let entry = precompose_cache.entry(cmd.element_idx)?;
+                    Some(PanelImageChild {
+                        element_idx: cmd.element_idx,
+                        draw_depth,
+                        handle: entry.image.clone(),
+                        tint: Color::WHITE,
                         bounds: cmd.bounds,
                     })
                 },
@@ -764,7 +782,7 @@ mod tests {
     use super::reconcile_panel_image_children;
     use super::reconcile_panel_text_children;
     use crate::Mm;
-    use crate::PanelFieldId;
+    use crate::PanelElementId;
     use crate::PanelText;
     use crate::cascade::Override;
     use crate::cascade::TextAlpha;
@@ -965,7 +983,7 @@ mod tests {
         // One wrapped run (shared id) across three lines: the `(id, line_index)`
         // key distinguishes the three children, while keying by id alone would
         // collapse them — the property reconcile relies on to reuse each line.
-        let id = PanelFieldId::named("run");
+        let id = PanelElementId::named("run");
         let existing: Vec<(Entity, PanelTextLayout)> = (0..3)
             .map(|line| {
                 let panel_text_child = PanelTextLayout {
@@ -994,13 +1012,13 @@ mod tests {
             })
             .collect();
 
-        let mut by_key: HashMap<(PanelFieldId, usize), Entity> = HashMap::new();
+        let mut by_key: HashMap<(PanelElementId, usize), Entity> = HashMap::new();
         for (entity, layout) in &existing {
             by_key.insert((layout.id.clone(), layout.line_index), *entity);
         }
         assert_eq!(by_key.len(), 3);
 
-        let mut by_id_only: HashMap<PanelFieldId, Entity> = HashMap::new();
+        let mut by_id_only: HashMap<PanelElementId, Entity> = HashMap::new();
         for (entity, layout) in &existing {
             by_id_only.insert(layout.id.clone(), *entity);
         }
@@ -1132,8 +1150,8 @@ mod tests {
 
     fn two_named_tree(first: &str, second: &str) -> LayoutTree {
         let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.text(Text::new(first, TextStyle::new(10.0)).id(PanelFieldId::named("a")));
-        builder.text(Text::new(second, TextStyle::new(10.0)).id(PanelFieldId::named("b")));
+        builder.text(Text::new(first, TextStyle::new(10.0)).id(PanelElementId::named("a")));
+        builder.text(Text::new(second, TextStyle::new(10.0)).id(PanelElementId::named("b")));
         builder.build()
     }
 
@@ -1206,11 +1224,11 @@ mod tests {
             .get::<DiegeticPanel>(panel)
             .expect("panel exists");
         assert!(
-            data.text_child(&PanelFieldId::named("a")).is_some(),
+            data.text_child(&PanelElementId::named("a")).is_some(),
             "named run 'a' resolves O(1) after repopulate",
         );
         assert!(
-            data.text_child(&PanelFieldId::named("b")).is_some(),
+            data.text_child(&PanelElementId::named("b")).is_some(),
             "named run 'b' resolves O(1) after repopulate",
         );
     }
@@ -1256,7 +1274,7 @@ mod tests {
         for text in autos {
             builder.text((*text, TextStyle::new(10.0)));
         }
-        builder.text(Text::new(named, TextStyle::new(10.0)).id(PanelFieldId::named("keep")));
+        builder.text(Text::new(named, TextStyle::new(10.0)).id(PanelElementId::named("keep")));
         builder.build()
     }
 

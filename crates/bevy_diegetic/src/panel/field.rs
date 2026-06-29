@@ -3,7 +3,7 @@
 use bevy::math::Vec2;
 
 use crate::ImeEditableFieldSpec;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::layout::BoundingBox;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -12,7 +12,7 @@ use crate::layout::LayoutTree;
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelFieldRecord {
     /// Panel-local semantic identity.
-    pub field_id:      PanelFieldId,
+    pub field_id:      PanelElementId,
     /// Element bounds in panel-local layout points.
     pub bounds:        BoundingBox,
     /// Editable behavior authored for this field.
@@ -34,7 +34,7 @@ impl PanelFieldRecord {
 pub(super) fn collect_panel_field_records(
     tree: &LayoutTree,
     result: &LayoutResult,
-) -> (Vec<PanelFieldRecord>, Vec<PanelFieldId>) {
+) -> (Vec<PanelFieldRecord>, Vec<PanelElementId>) {
     let mut records = Vec::new();
     let mut seen = Vec::new();
     let mut duplicates = Vec::new();

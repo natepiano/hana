@@ -2,7 +2,7 @@
 
 > **Archived 2026-06-07 — implemented, with axis 3 later inverted.** Axes 1 and 2
 > hold in the code today: `DiegeticText::world()/screen()` (`src/fluent.rs`)
-> replaced `WorldText`/`ScreenText`, and runs carry stable `PanelFieldId`s
+> replaced `WorldText`/`ScreenText`, and runs carry stable `PanelElementId`s
 > (`layout/builder.rs`). Axis 3 (Scope B: `TextContent` as the single source,
 > tree `El` storing only an id) shipped, then the ownership direction was
 > reversed during the June 2026 perf work: the tree's `El.text` is now
@@ -21,7 +21,7 @@ fact**:
 1. Collapse `WorldText` + `ScreenText` into a single **`DiegeticText`** with
    `DiegeticText::world(text)` / `DiegeticText::screen(text)` constructors,
    mirroring `DiegeticPanel::world()` / `DiegeticPanel::screen()`.
-2. Give panel **text elements stable identifiers**, reusing `PanelFieldId`, so a
+2. Give panel **text elements stable identifiers**, reusing `PanelElementId`, so a
    specific text run can be addressed and retexted at runtime.
 3. Make **`TextContent` the single source of truth** for every text string
    (Scope B): the layout `El` stores an id, not a copy of the string, and the
@@ -73,7 +73,7 @@ hand-built:                                   El.text (tree) ──► TextConte
   rebuilds.
 
 So the same string lives in up to three places, and the only existing
-named-element mechanism is `PanelFieldId` (`ime/ids.rs:62`, a `String` newtype),
+named-element mechanism is `PanelElementId` (`ime/ids.rs:62`, a `String` newtype),
 scoped to editable fields via `El::editable_field(field_id, …)`
 (`layout/builder.rs:231-236`) with not-found / duplicate-id lookup errors
 (`layout/element.rs:41-43`, `:403-414`).
@@ -118,7 +118,7 @@ Renames `WorldText`/`ScreenText` and the `FluentText` marker; folds
 One physical copy of each string. `TextContent` on the text-child entity is the
 source. Consequences:
 
-- The layout `El` stores a **`PanelFieldId`, not the string**
+- The layout `El` stores a **`PanelElementId`, not the string**
   (`ElementContent::Text` drops its `text: String` field, keeps `config`).
 - The layout pass resolves `id → &str` from `TextContent` transiently for
   measure/wrap — no stored second copy.
@@ -142,17 +142,17 @@ resolve path and the reconcile inversion are the central forks — see OQ1, OQ2.
 > `set_text` writes the line-0 child (reactor → `El.text` → re-wrap); `text` reads
 > `El.text`. See Phase 3 step 11.
 
-### D3 — Element identifiers reuse `PanelFieldId`
+### D3 — Element identifiers reuse `PanelElementId`
 
 `El::text(text, config).id("title")` assigns a panel-local id, reusing
-`PanelFieldId`. The id does double duty:
+`PanelElementId`. The id does double duty:
 
 - **Reconciliation identity** — replaces `(element_idx, command_index)` as the
   child reuse key, so a named run survives reorders (the fragility the
   `reconcile.rs:35-39` comment calls out).
 - **Lookup handle** — the public way to address a run (D5).
 
-Panel-local, like `PanelFieldId` today, so two panels may both use `"title"`.
+Panel-local, like `PanelElementId` today, so two panels may both use `"title"`.
 
 ### D4 — Auto-id for unnamed text
 
@@ -163,7 +163,7 @@ have one — it is no longer optional addressing sugar. Therefore:
   `.id("…")` is added only where a run is addressed/mutated. This keeps the
   100+ static-label call sites untouched.
 - **Namespace named vs auto** so they cannot collide by construction —
-  `PanelFieldId` distinguishes them (enum `{ Named(String), Auto(u32) }`, or auto
+  `PanelElementId` distinguishes them (enum `{ Named(String), Auto(u32) }`, or auto
   uses a reserved form `From<&str>` cannot produce). See OQ3.
 - Auto-id source: a **per-tree build-order counter** — i.e. exactly today's
   positional identity.
@@ -187,7 +187,7 @@ have one — it is no longer optional addressing sugar. Therefore:
   component: `Query<&PanelTextRuns, With<Marker>>`. For a `DiegeticText` (one
   run) `PanelTextRuns::sole() -> Option<Entity>` returns it with no id — this is
   what makes a standalone label addressable from a marker on the panel entity.
-- **Named lookup — `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>`,**
+- **Named lookup — `DiegeticPanel::text_child(&PanelElementId) -> Option<Entity>`,**
   the O(1) `id → Entity` map the panel retains, for a multi-run panel where a
   scan over `PanelTextRuns` would be O(n) (a large, possibly hidden panel must
   not table-scan). Unchecked: it returns the stored entity, which may be dead;
@@ -257,7 +257,7 @@ pub struct PanelTextRuns(Vec<Entity>);
 - **What it replaces.** The hand-built `text_index` full rebuild every reconcile
   pass (reconcile.rs:167-237) for the *liveness + traversal* job; Bevy maintains
   `PanelTextRuns` as runs spawn/despawn. The `id → Entity` map is retained **only**
-  for O(1) `PanelFieldId` lookup — a relationship target is an ordered `Vec`, not
+  for O(1) `PanelElementId` lookup — a relationship target is an ordered `Vec`, not
   keyed by id.
 - **No duplication.** Entity references only; the string stays single-homed in the
   run child's `TextContent` (D2). The run keeps `ChildOf(panel)` too (transform
@@ -295,10 +295,10 @@ items; resolution is noted on each. Kept here for the reasoning trail.
    reconcile and the relationship between `LayoutBuilder` (pure data) and entity
    spawning — the largest change in the doc.
 
-3. **OQ3 — `PanelFieldId` representation.** Enum `{ Named(String), Auto(u32) }`
+3. **OQ3 — `PanelElementId` representation.** Enum `{ Named(String), Auto(u32) }`
    vs `String` with a reserved auto-form. The enum is collision-proof by
    construction and keeps `From<&str>` always-`Named`; it is a small extension to
-   the "PanelFieldId is fine for now" decision.
+   the "PanelElementId is fine for now" decision.
 
 4. **OQ4 — `DiegeticText` as a live component.** Does `DiegeticText` persist as a
    component you can also mutate, or is it pure authoring sugar with all mutation
@@ -357,9 +357,9 @@ Each phase below cites the decision it implements.
    space is a runtime `CoordinateSpace` field, not a type param. `DiegeticText`
    is a lightweight marker component on the spawned text entity. Reuse the
    internal one-element-panel builder.
-2. **`PanelFieldId` → enum (DT3).** `enum { Named(String), Auto(u32) }`;
+2. **`PanelElementId` → enum (DT3).** `enum { Named(String), Auto(u32) }`;
    `From<&str>`/`From<String>` always yield `Named`. Editable-field call sites
-   (`impl Into<PanelFieldId>`) keep compiling.
+   (`impl Into<PanelElementId>`) keep compiling.
 3. **Remove the panel-root `TextContent` seed first (DTX-1).** Before any filter
    swap, delete the fluent panel-root `TextContent` seed (`fluent.rs:328`, `:441`)
    and the `FluentText` marker, so the only `TextContent` left is on run entities.
@@ -375,14 +375,14 @@ Each phase below cites the decision it implements.
    only. Broad but mechanical; no behavior change.
 
 ### Phase 1 — element ids
-5. **Id field + setter (DT3, DTX-3).** Add a `PanelFieldId` to
-   `ElementContent::Text` (alongside the `text` cache from Phase 2); add
-   `El::text(...).id(impl Into<PanelFieldId>)`. `.id()` returns `Self` to keep the
+5. **Id field + setter (DT3, DTX-3).** Add a `PanelElementId` to
+   `Element` (alongside the `text` cache from Phase 2); add
+   `El::id(...)` and `Text::id(...)`. `.id()` returns `Self` to keep the
    builder chain; callers that need the id at lookup bind it as a value first
-   (`let id = PanelFieldId::named("title"); ….id(id.clone())`), mirroring
+   (`let id = PanelElementId::named("title"); ….id(id.clone())`), mirroring
    `editable_field`'s arg-passed id (DTX-3=a) — no chain-returned handle. Auto-id
    from a per-tree build-order counter (`u32`, TR-E), reset per build (TR-N);
-   text-run ids and editable-field ids share one panel-local namespace and one
+   element ids and editable-field ids share one panel-local namespace and one
    duplicate check (TR-O). `Auto` is not publicly constructible (TR-K).
 6. **Duplicate ids → `Result` at build (DT6-i).** A repeated explicit id is an
    error on the existing `build() -> Result`; no silent release shadowing.
@@ -485,7 +485,7 @@ Outcomes folded in:
 **Status: ✅ complete.**
 
 11. **`text_child` + helper (DT5, DT6-ii, DT4-ii).**
-    `DiegeticPanel::text_child(&PanelFieldId) -> Option<Entity>` is an
+    `DiegeticPanel::text_child(&PanelElementId) -> Option<Entity>` is an
     **unchecked** index lookup — it returns the stored `Entity`, which may be
     dead (the method takes `&self` and has no `World`/`Entities` access, so it
     cannot validate liveness). The TR-Q liveness guarantee ("a despawned child
@@ -666,7 +666,7 @@ the broken marker path before any example migration depends on it.
     - **Field form matches `ChildOf`.** `ChildOf(#[entities] pub Entity)` ships a
       public field plus a `parent()` accessor (hierarchy.rs:107, :112); mirror it —
       `TextRunOf(#[entities] pub Entity)` with a `panel()` accessor. The TR-K
-      unforgeability rule is for the `PanelFieldId::Auto` value variant, not a
+      unforgeability rule is for the `PanelElementId::Auto` value variant, not a
       relationship source; the relationship machinery is the writer here.
     - **`Deref<[Entity]>` for `PanelTextRuns`.** `Children` impls it
       (hierarchy.rs:255); do the same so `sole()` reads the private `Vec` via
@@ -685,7 +685,7 @@ the broken marker path before any example migration depends on it.
 14. **Rewire reconcile + retain the named map.** Reconcile's reuse pass scans
     `existing_children` filtered by `child_of.parent() == panel_entity`
     (reconcile.rs:147-164); source the panel's existing runs from `PanelTextRuns`
-    instead. Keep the `text_index` (`id → Entity`) map for O(1) `PanelFieldId`
+    instead. Keep the `text_index` (`id → Entity`) map for O(1) `PanelElementId`
     lookup — the relationship target is an unkeyed `Vec`, and a large (possibly
     hidden) multi-run panel must not table-scan. Division of labor: the
     relationship owns liveness + traversal + single-run findability; the map owns
@@ -846,7 +846,7 @@ applied straight into the plan:
   and resolves the lone run by `line_index == 0`, not `PanelTextRuns::sole()`.
 - **Step 16d — distinct marker types are required, not stylistic.**
   `DiegeticTextMut<M>` is type-keyed, so the two standalone texts need distinct
-  markers (`WorldLabel`/`ScreenLabel`); the two panels address by `PanelFieldId`.
+  markers (`WorldLabel`/`ScreenLabel`); the two panels address by `PanelElementId`.
 - **Step 17 — `iter_mut` test struck (already shipped as `for_each_mut`).** Added
   the wrapped-label resolution test through `DiegeticTextMut`/`sole_text` (a new
   untested path — all existing tests are single-line). Specified the no-op
@@ -923,15 +923,15 @@ applied straight into the plan:
       The two texts **must use distinct marker types** (e.g. `WorldLabel`,
       `ScreenLabel`): `DiegeticTextMut<M>` is keyed by one marker type, so a shared
       marker's single `set` would rewrite both with one string and defeat the
-      side-by-side demo. The two *panels* address by `PanelFieldId`, not a marker,
+      side-by-side demo. The two *panels* address by `PanelElementId`, not a marker,
       so they need no distinct marker types.
-    - **The two panels** carry a named field (`PanelFieldId`) and mutate through
+    - **The two panels** carry a named field (`PanelElementId`) and mutate through
       `PanelText::set_text(panel, &id, …)` — the named-run path — proving the panel
       case uses the id-addressed SystemParam, not `DiegeticTextMut`.
     This makes the step-15 "which API when" split concrete and runnable: marker →
     `DiegeticTextMut<M>`; named field on a panel → `PanelText`. Organize the file
     per `/apply_example_layout`: module doc names `DiegeticTextMut<M>` and
-    `PanelText`/`PanelFieldId` as the demonstrated API; `main()`; a primary
+    `PanelText`/`PanelElementId` as the demonstrated API; `main()`; a primary
     banner-section holding the four spawns + four mutation systems (lead with a
     short "How it works" paragraph naming the order they fire); camera/scene
     scaffolding last. Gate it in Phase 6 (build + clippy + fmt like every example).
@@ -943,7 +943,7 @@ applied straight into the plan:
 
 **What worked:**
 - All three 16c sites converted exactly as planned: `orthographic.rs` → `DiegeticTextMut<CubeFaceLabel>::set` (uniform); `input_keyboard.rs` + `input_manual.rs` → `for_each_mut(|kind, label| …)` (per-face). The `for_each_mut` closure yielding `&M` mapped one-to-one onto the existing `match kind { … }` body — the loop became a closure with no logic change.
-- The 16d four-flavor example built first try once the cast was fixed; the `DiegeticTextMut<M>` (marker) vs `PanelText::set_text` + `PanelFieldId` (id) split read cleanly side by side, which was the example's whole purpose.
+- The 16d four-flavor example built first try once the cast was fixed; the `DiegeticTextMut<M>` (marker) vs `PanelText::set_text` + `PanelElementId` (id) split read cleanly side by side, which was the example's whole purpose.
 
 **What deviated from the plan:**
 - `time.elapsed_secs() as u64` tripped `clippy::cast_possible_truncation` + `cast_sign_loss` (workspace denies pedantic). Switched to `time.elapsed().as_secs()` (Duration → `u64`, no cast). The new example needs no `#[allow]`.
@@ -961,7 +961,7 @@ applied straight into the plan:
 
 - **Step 18 perf gate re-scoped (findings 1, 2, 8).** Corrected the "per-frame-`DiegeticTextMut` cube-face examples" framing: `orthographic` mutates only on keypress and `input_keyboard`/`input_manual` relayout only on string change, so their relayout load is on-input, not per-frame. Named `diegetic_mutation.rs` (16d) the canonical write-path subject and collapsed the now-satisfied 16c precondition to one line.
 - **Step 17 gained `--examples` (per crate) and a `cargo doc -D warnings` gate (findings 10, 4).** Plain `cargo build` skips examples, so `fairy_dust`'s new `examples/` dir would never be gated; the rename churn makes intra-doc-link rot a live defect class. Noted the one pre-existing out-of-scope broken link (`builder/primitive.rs` → `SprinkleBuilder::…`) that must be fixed for the doc gate to pass.
-- **Step 17 test list sharpened (findings 3, 6, 9).** The multi-run/zero-run `sole()` test must name the access-layer `sole_run_entity` (`line_index == 0`) vs raw `PanelTextRuns::sole`; added a TR-L assertion that an unchanged-string `set_text` re-invokes no `MeasureTextFn`; noted that `PanelFieldId` duplicate detection is panel-local, with `diegetic_mutation.rs`'s shared `"counter"` id across two panels as the proof no test may assert global id uniqueness.
+- **Step 17 test list sharpened (findings 3, 6, 9).** The multi-run/zero-run `sole()` test must name the access-layer `sole_run_entity` (`line_index == 0`) vs raw `PanelTextRuns::sole`; added a TR-L assertion that an unchanged-string `set_text` re-invokes no `MeasureTextFn`; noted that `PanelElementId` duplicate detection is panel-local, with `diegetic_mutation.rs`'s shared `"counter"` id across two panels as the proof no test may assert global id uniqueness.
 - **No-change confirmations (findings 5, 7):** the wrapped-label resolution tests (step 17) are genuinely absent and correctly scoped; the `text.as_str()`-in-loop borrow pattern in the panel mutators is correct as shipped and needs no test.
 
 ### Phase 6 — verify
@@ -1437,17 +1437,17 @@ Status legend: `proposed` = awaiting author choice.
   relayout. The literal inversion (b) is dropped — moot once the `El` holds the
   cached string.
 
-- **DT3 — `PanelFieldId` representation (OQ3). (important, type-system, proposed)**
+- **DT3 — `PanelElementId` representation (OQ3). (important, type-system, proposed)**
   Unanimous team rec: **enum `{ Named(String), Auto(u32) }`** — encodes the
   named-vs-auto invariant at the type level, `From<&str>` always yields `Named`,
   `Eq`/`Hash`/`Reflect` derive cleanly, editable-field call sites still compile.
-  Alternative kept on the table because you said "PanelFieldId is fine for now":
+  Alternative kept on the table because you said "PanelElementId is fine for now":
   the `String` newtype with a reserved auto-form (no public type change, but a
-  runtime escape hatch). Also decide whether text-run ids and editable-field ids
+  runtime escape hatch). Also decide whether element ids and editable-field ids
   share one panel-local namespace (and one duplicate check) or stay separate.
-  **→ DECIDED: enum + shared namespace.** `PanelFieldId` becomes
+  **→ DECIDED: enum + shared namespace.** `PanelElementId` becomes
   `enum { Named(String), Auto(u32) }`; `From<&str>`/`From<String>` always produce
-  `Named`, so no `&str` can forge an `Auto`. Text-run ids and editable-field ids
+  `Named`, so no `&str` can forge an `Auto`. Element ids and editable-field ids
   live in one panel-local id space with a single duplicate check and a single
   "address any element in a panel" lookup — consistent with the fewest-types lean.
   Auto ids are assigned from the per-tree build-order counter (TR-D/TR-E).
@@ -1480,15 +1480,15 @@ Status legend: `proposed` = awaiting author choice.
     `DiegeticText`'s text lives on its run entity, so the user marker lands there.
 
 - **DT5 — runtime lookup handle: typed vs stringly. (important, type-system/
-  ergonomics, proposed)** `.id("title")` at authoring + `text_child(&PanelFieldId)`
+  ergonomics, proposed)** `.id("title")` at authoring + `text_child(&PanelElementId)`
   at runtime is a stringly reuse — a typo is a silent `None`. Options:
-  **(a)** the `.id(...)` builder call returns the `PanelFieldId` for the caller to
+  **(a)** the `.id(...)` builder call returns the `PanelElementId` for the caller to
   hold and reuse; **(b)** authoring returns an opaque `TextId` handle (cannot be
   forged); **(c)** keep stringly lookup but make `text_child` return a helpful
   error for an unknown id ("did you forget `.id()`?"). Mirrors the existing
   editable-field handle pattern (`set_field_display_text(&field_id, …)`).
-  **→ DECIDED: look up by `PanelFieldId` (no new handle type).** A run is
-  addressed by the same `PanelFieldId` from DT3 — `text_child(&id)` — built from a
+  **→ DECIDED: look up by `PanelElementId` (no new handle type).** A run is
+  addressed by the same `PanelElementId` from DT3 — `text_child(&id)` — built from a
   string at the lookup site, consistent with the editable-field path and the
   fewest-types lean. No separate `TextId`. The cost is that a wrong id is a runtime
   miss, not a compile error; DT6 decides whether that miss is a quiet `None` or a
@@ -1516,7 +1516,7 @@ reported "Phase N not implemented" were filtered out — an unbuilt phase is the
 plan, not a defect. The findings below are in-intent clarifications with one
 sensible outcome; they refine the plan text, not its structure.
 
-- **TR-K — `Auto` variant must be unforgeable.** `PanelFieldId::Auto(u32)`
+- **TR-K — `Auto` variant must be unforgeable.** `PanelElementId::Auto(u32)`
   (DT3) must not be publicly constructible, or in-crate/external code could mint
   an `Auto(0)` that collides with the builder counter. Make the variant private
   (module-private constructor) or `#[doc(hidden)]` with a private tuple field;
@@ -1541,7 +1541,7 @@ sensible outcome; they refine the plan text, not its structure.
   the positional semantics TR-D promises. Never persist or cross-panel-compare
   auto ids. (risk, correctness)
 - **TR-O — one duplicate-id check spans both id kinds.** DT3's shared namespace
-  means `build()`'s duplicate check must collect text-run ids **and**
+  means `build()`'s duplicate check must collect element ids **and**
   editable-field ids into one panel-local set before erroring — not two separate
   checks. Name this explicitly where Phase 1 step 6 reuses the editable-field
   duplicate path. (type-system, correctness)
@@ -1577,7 +1577,7 @@ and decided in DT4, and runtime validation per TR-P closes the safety gap.
 > marker on its own `TextContent` write, the observer filters
 > `Without<ReconcileOwned>`, cleared next frame.
 > **DTX-3 → (a)** bind the id as a value and pass it in
-> (`let id = PanelFieldId::named("title"); El::text(..).id(id.clone());
+> (`let id = PanelElementId::named("title"); El::text(..).id(id.clone());
 > panel.text_child(&id)`), mirroring `editable_field`'s arg-passed id.
 
 - **DTX-1 — Phase 0 filter swap collides with fluent panel roots.
@@ -1616,20 +1616,20 @@ and decided in DT4, and runtime validation per TR-P closes the safety gap.
   `bypass_change_detection()` so the reconcile-owned write sets no `Changed` flag
   (terser, but risks masking a legitimately-coincident user edit the same frame).
 
-- **DTX-3 — does `.id("title")` return the `PanelFieldId`?
+- **DTX-3 — does `.id("title")` return the `PanelElementId`?
   (important, ergonomics/type-system, proposed)** DT5 keeps lookup stringly
-  (`text_child(&PanelFieldId)`, no new handle type) — a typo at the lookup site is
+  (`text_child(&PanelElementId)`, no new handle type) — a typo at the lookup site is
   a silent `None` + debug `warn!`. Three lenses independently flagged that the
   caller must hand-rebuild the exact string at the lookup site. This does **not**
   reopen DT5 (no new type): the question is only how a caller avoids retyping the
   exact string at the lookup site. *Cycle 2 found a constraint:* `.id()` sits
   mid-builder-chain, so it must return `Self` to keep chaining — it **cannot** also
-  return the `PanelFieldId`. So the realistic options are: **(a)** bind the id as a
-  value first and pass it in — `let id = PanelFieldId::named("title");
+  return the `PanelElementId`. So the realistic options are: **(a)** bind the id as a
+  value first and pass it in — `let id = PanelElementId::named("title");
   El::text(..).id(id.clone()); panel.text_child(&id)` — which mirrors how
-  `editable_field(PanelFieldId::from("name"), …)` already takes the id as an arg
+  `editable_field(PanelElementId::from("name"), …)` already takes the id as an arg
   (team-preferred — one pattern for both id families, no new surface); **(b)** keep
-  `.id("title")` taking a `&str` and rebuild `PanelFieldId::from("title")` at the
+  `.id("title")` taking a `&str` and rebuild `PanelElementId::from("title")` at the
   lookup site (status quo, accepts the typo cost, callers use a `const` if reused);
   **(c)** add an id-registry helper (`panel_ids! { TITLE = "title" }`) so the
   string is defined once and shared by both sites.

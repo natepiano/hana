@@ -48,7 +48,7 @@ pub use field::ImePanelField;
 pub use ids::ImeCommitAttemptId;
 pub use ids::ImeSessionId;
 pub use ids::ImeValueRevision;
-pub use ids::PanelFieldId;
+pub use ids::PanelElementId;
 pub use input::ImeAppInputContext;
 pub use input::ImeAppInputDisposition;
 pub use input::ImeAppInputDispositionHook;

@@ -38,7 +38,7 @@ use crate::LayoutTree;
 use crate::Padding;
 use crate::PanelAnchorGeometryParam;
 use crate::PanelAnchorPoints;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::PanelFieldRecord;
 use crate::PanelScreenBounds;
 use crate::Px;
@@ -83,7 +83,7 @@ impl PendingImePanelAnchor {
     pub(super) fn store(
         &mut self,
         panel: Entity,
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
         camera: Entity,
         window: Entity,
     ) {
@@ -107,7 +107,7 @@ impl PendingImePanelAnchor {
 #[derive(Clone, Debug)]
 struct ImePanelAnchorSource {
     panel:    Entity,
-    field_id: PanelFieldId,
+    field_id: PanelElementId,
     camera:   Entity,
     window:   Entity,
 }
@@ -535,7 +535,7 @@ impl ImeBlurClassification {
 
 fn field_record<'a>(
     computed: &'a ComputedDiegeticPanel,
-    field_id: &PanelFieldId,
+    field_id: &PanelElementId,
 ) -> Option<&'a PanelFieldRecord> {
     computed
         .field_records()
@@ -826,7 +826,7 @@ mod tests {
     use crate::ImePreedit;
     use crate::ImePreeditBoundary;
     use crate::ImeSelectionSnapshot;
-    use crate::PanelFieldId;
+    use crate::PanelElementId;
     use crate::PanelFieldRecord;
     use crate::PanelScreenBounds;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
@@ -912,7 +912,7 @@ mod tests {
     #[test]
     fn screen_panel_field_rect_uses_resolved_screen_bounds() {
         let record = PanelFieldRecord {
-            field_id:      PanelFieldId::named("title"),
+            field_id:      PanelElementId::named("title"),
             bounds:        BoundingBox {
                 x:      20.0,
                 y:      10.0,

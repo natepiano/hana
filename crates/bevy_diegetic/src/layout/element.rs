@@ -33,7 +33,7 @@ use super::Unit;
 use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -69,12 +69,25 @@ pub(super) enum ScrollAnchor {
     End,
 }
 
+/// Whether an element subtree should be rendered directly or flattened first.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum PrecomposeMode {
+    /// Draw this element and its descendants through the normal panel render path.
+    #[default]
+    Direct,
+    /// Render this element's subtree into an LDR image, then draw that image in
+    /// the parent panel.
+    Ldr,
+}
+
 /// A single element in the layout tree.
 ///
 /// Elements are either containers (with children) or text leaves. The tree
 /// is built via [`LayoutTree`] and then sized/positioned by the layout engine.
 #[derive(Clone, Debug)]
 pub(super) struct Element {
+    /// Optional panel-local identity for this layout element.
+    pub(super) id:              Option<PanelElementId>,
     /// Width sizing rule.
     pub(super) width:           Sizing,
     /// Height sizing rule.
@@ -116,6 +129,8 @@ pub(super) struct Element {
     /// Optional hairline fade override for this element's analytic line marks.
     /// `None` inherits the panel entity's cascade-resolved policy.
     pub(super) hairline_fade:   Option<HairlineFade>,
+    /// Optional subtree precomposition mode.
+    pub(super) precompose:      PrecomposeMode,
     /// Content of this element.
     pub(super) content:         ElementContent,
 }
@@ -127,12 +142,6 @@ pub(super) enum ElementContent {
     Children(SmallVec<[usize; INLINE_CHILDREN]>),
     /// Text leaf.
     Text {
-        /// Panel-local id for this run — an author-assigned
-        /// [`PanelFieldId::Named`] (addressable at runtime via
-        /// [`text_child`](crate::DiegeticPanel::text_child)) or a builder-minted
-        /// [`PanelFieldId::Auto`] for an unnamed run. Doubles as the reconcile
-        /// reuse identity, so a named run survives a sibling reorder.
-        id:     PanelFieldId,
         /// The text string.
         text:   String,
         /// Text configuration.
@@ -170,6 +179,7 @@ impl LayoutTreeChange {
 impl Default for Element {
     fn default() -> Self {
         Self {
+            id:              None,
             width:           Sizing::FIT,
             height:          Sizing::FIT,
             padding:         Padding::default(),
@@ -187,6 +197,7 @@ impl Default for Element {
             z_index:         DrawZIndex::default(),
             anti_alias:      None,
             hairline_fade:   None,
+            precompose:      PrecomposeMode::Direct,
             content:         ElementContent::Empty,
         }
     }
@@ -307,6 +318,30 @@ impl LayoutTree {
         }
     }
 
+    /// Clones `root_index` and its descendants into a standalone tree whose root
+    /// has the supplied fixed size.
+    ///
+    /// Used by LDR precomposition: the cloned tree renders offscreen with the
+    /// exact subtree content, while the source tree draws only the resulting
+    /// image. Precompose flags are cleared in the clone so the helper panel does
+    /// not recursively spawn another helper for the same subtree.
+    #[must_use]
+    pub(crate) fn precompose_subtree(
+        &self,
+        root_index: usize,
+        width: Dimension,
+        height: Dimension,
+    ) -> Option<Self> {
+        if root_index >= self.elements.len() {
+            return None;
+        }
+
+        let mut tree = Self::new();
+        let root = self.clone_subtree_into(root_index, &mut tree, width, height, true)?;
+        tree.set_root(root);
+        Some(tree)
+    }
+
     /// Returns an iterator over child indices of the given element.
     #[must_use]
     pub(super) fn children_of(&self, index: usize) -> &[usize] {
@@ -316,6 +351,48 @@ impl LayoutTree {
                 ElementContent::Children(children) => children.as_slice(),
                 _ => &[],
             })
+    }
+
+    fn clone_subtree_into(
+        &self,
+        source_index: usize,
+        target: &mut Self,
+        root_width: Dimension,
+        root_height: Dimension,
+        is_root: bool,
+    ) -> Option<usize> {
+        let source = self.elements.get(source_index)?;
+        let mut clone = source.clone();
+        clone.precompose = PrecomposeMode::Direct;
+        if let ElementContent::Text { config, .. } = &mut clone.content {
+            config.clear_hdr_text_coverage_bias();
+        }
+        if is_root {
+            clone.width = Sizing::Fixed(root_width);
+            clone.height = Sizing::Fixed(root_height);
+        }
+        let children = match &source.content {
+            ElementContent::Children(children) => Some(children.clone()),
+            _ => None,
+        };
+        if children.is_some() {
+            clone.content = ElementContent::Children(SmallVec::new());
+        }
+
+        let target_index = target.add(clone);
+        if let Some(children) = children {
+            for child in children {
+                let child_index =
+                    self.clone_subtree_into(child, target, root_width, root_height, false)?;
+                if let Some(target_element) = target.elements.get_mut(target_index)
+                    && let ElementContent::Children(target_children) = &mut target_element.content
+                {
+                    target_children.push(child_index);
+                }
+            }
+        }
+
+        Some(target_index)
     }
 
     /// Returns the number of elements in the tree.
@@ -409,6 +486,15 @@ impl LayoutTree {
         self.elements.get(index).and_then(|e| e.hairline_fade)
     }
 
+    /// Returns the subtree precomposition mode for the element at `index`.
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn element_precompose(&self, index: usize) -> PrecomposeMode {
+        self.elements
+            .get(index)
+            .map_or(PrecomposeMode::Direct, |element| element.precompose)
+    }
+
     /// Returns text content for the element at `index`, if any.
     #[must_use]
     pub(crate) fn element_text(&self, index: usize) -> Option<&str> {
@@ -475,20 +561,26 @@ impl LayoutTree {
         true
     }
 
-    /// Returns the panel-local id of the text run at `index`, if that element is
-    /// a text leaf. Reconcile reads this to key a child by its run id instead of
-    /// the former positional `(element_idx, command_index)` pair.
+    /// Returns the panel-local id of the element at `index`.
     #[must_use]
-    pub(crate) fn element_field_id(&self, index: usize) -> Option<&PanelFieldId> {
+    pub(crate) fn element_id(&self, index: usize) -> Option<&PanelElementId> {
         self.elements
             .get(index)
-            .and_then(|element| match &element.content {
-                ElementContent::Text { id, .. } => Some(id),
-                _ => None,
-            })
+            .and_then(|element| element.id.as_ref())
     }
 
-    /// Whether any text-run element in the tree carries `id`.
+    /// Returns the panel-local id of the text element at `index`, if that
+    /// element is a text leaf. Reconcile reads this to key a child by its id instead of
+    /// the former positional `(element_idx, command_index)` pair.
+    #[must_use]
+    pub(crate) fn text_element_id(&self, index: usize) -> Option<&PanelElementId> {
+        self.elements
+            .get(index)
+            .filter(|element| matches!(element.content, ElementContent::Text { .. }))
+            .and_then(|element| element.id.as_ref())
+    }
+
+    /// Whether any text element in the tree carries `id`.
     ///
     /// The tree is the authoritative list of valid run ids at build time,
     /// independent of reconcile timing, so a lookup that misses the panel's
@@ -499,23 +591,23 @@ impl LayoutTree {
     // `PanelTextReader::resolve`; test harnesses also compile this for coverage.
     #[cfg(any(debug_assertions, test))]
     #[must_use]
-    pub(crate) fn contains_text_id(&self, id: &PanelFieldId) -> bool {
-        (0..self.elements.len()).any(|index| self.element_field_id(index) == Some(id))
+    pub(crate) fn contains_text_id(&self, id: &PanelElementId) -> bool {
+        (0..self.elements.len()).any(|index| self.text_element_id(index) == Some(id))
     }
 
-    /// Returns the first author-assigned [`PanelFieldId::Named`] id that appears
-    /// on more than one element, scanning text-run ids and editable-field ids
+    /// Returns the first author-assigned [`PanelElementId::Named`] id that appears
+    /// on more than one element, scanning element ids and editable-field ids
     /// together — they share one panel-local namespace. Auto ids are skipped
     /// (unforgeable and unique by construction), so this only flags a real
     /// author collision. `DiegeticPanelBuilder::build` calls this to reject a
     /// duplicate at build time.
     #[must_use]
-    pub(crate) fn duplicate_named_field_id(&self) -> Option<&PanelFieldId> {
-        let mut seen: Vec<&PanelFieldId> = Vec::new();
+    pub(crate) fn duplicate_named_element_id(&self) -> Option<&PanelElementId> {
+        let mut seen: Vec<&PanelElementId> = Vec::new();
         for index in 0..self.elements.len() {
-            let text_id = self.element_field_id(index);
+            let element_id = self.element_id(index);
             let field_id = self.editable_field(index).map(|field| &field.field_id);
-            for id in [text_id, field_id].into_iter().flatten() {
+            for id in [element_id, field_id].into_iter().flatten() {
                 if id.is_named() {
                     if seen.contains(&id) {
                         return Some(id);
@@ -544,7 +636,7 @@ impl LayoutTree {
 
     pub(crate) fn set_field_display_text(
         &mut self,
-        field_id: &PanelFieldId,
+        field_id: &PanelElementId,
         text: impl Into<String>,
     ) -> FieldDisplayTextUpdate {
         let matches: Vec<usize> = self
@@ -668,6 +760,7 @@ impl LayoutTree {
 
 fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChange {
     let Element {
+        id,
         width,
         height,
         padding,
@@ -685,9 +778,11 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         z_index,
         anti_alias,
         hairline_fade,
+        precompose,
         content,
     } = element;
     let Element {
+        id: n_id,
         width: n_width,
         height: n_height,
         padding: n_padding,
@@ -705,6 +800,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         z_index: n_z_index,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
+        precompose: n_precompose,
         content: n_content,
     } = next;
 
@@ -731,6 +827,9 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     let mut change = border_change.combine(child_layout_change);
+    if id != n_id {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
     if background != n_background || corner_radius != n_corner_radius {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
@@ -740,6 +839,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
     }
 
     if anti_alias != n_anti_alias || hairline_fade != n_hairline_fade {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
+
+    if precompose != n_precompose {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -929,12 +1032,13 @@ mod tests {
     use super::FieldDisplayTextUpdate;
     use super::LayoutTree;
     use super::LayoutTreeChange;
+    use super::PrecomposeMode;
     use crate::CalloutCap;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
-    use crate::PanelFieldId;
+    use crate::PanelElementId;
     use crate::layout::AlignX;
     use crate::layout::AlignY;
     use crate::layout::Border;
@@ -967,7 +1071,7 @@ mod tests {
 
     #[test]
     fn contains_text_id_discriminates_named_typo_from_present() {
-        let present = PanelFieldId::named("title");
+        let present = PanelElementId::named("title");
         let mut builder = LayoutBuilder::new(100.0, 50.0);
         builder.text(Text::new("Hi", TextStyle::new(10.0)).id(present.clone()));
         let tree = builder.build();
@@ -976,18 +1080,118 @@ mod tests {
         // `PanelText` lookup miss consults to tell a real typo from a not-yet-built
         // run, so it only warns on the former.
         assert!(tree.contains_text_id(&present));
-        assert!(!tree.contains_text_id(&PanelFieldId::named("typo")));
+        assert!(!tree.contains_text_id(&PanelElementId::named("typo")));
 
         // An auto-id run (plain `.text`) is not name-addressable, so a named query
         // never matches it.
         let auto = text_tree("Hi", TextStyle::new(10.0));
-        assert!(!auto.contains_text_id(&PanelFieldId::named("Hi")));
+        assert!(!auto.contains_text_id(&PanelElementId::named("Hi")));
+    }
+
+    #[test]
+    fn text_id_survives_layout_without_its_own_id() {
+        let id = PanelElementId::named("title");
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(
+            Text::new("Hi", TextStyle::new(10.0))
+                .id(id.clone())
+                .layout(El::column()),
+        );
+        let tree = builder.build();
+
+        assert_eq!(tree.text_element_id(1), Some(&id));
+    }
+
+    #[test]
+    fn text_layout_id_overrides_prior_text_id() {
+        let id = PanelElementId::named("layout-id");
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(
+            Text::new("Hi", TextStyle::new(10.0))
+                .id("text-id")
+                .layout(El::column().id(id.clone())),
+        );
+        let tree = builder.build();
+
+        assert_eq!(tree.text_element_id(1), Some(&id));
     }
 
     fn root_tree<L: ChildLayoutState>(root: El<L>) -> LayoutTree {
         let mut builder = LayoutBuilder::with_root(root);
         builder.text(("child", TextStyle::new(10.0)));
         builder.build()
+    }
+
+    #[test]
+    fn precompose_ldr_sets_element_mode() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::column().precompose_ldr(), |builder| {
+            builder.text(("child", TextStyle::new(10.0)));
+        });
+        let tree = builder.build();
+
+        assert_eq!(tree.element_precompose(1), PrecomposeMode::Ldr);
+        assert_eq!(tree.element_precompose(2), PrecomposeMode::Direct);
+    }
+
+    #[test]
+    fn text_precompose_ldr_sets_text_element_mode() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.text(Text::new("child", TextStyle::new(10.0)).precompose_ldr());
+        let tree = builder.build();
+
+        assert_eq!(tree.element_precompose(1), PrecomposeMode::Ldr);
+    }
+
+    #[test]
+    fn precompose_subtree_clears_modes_and_fixes_root_size() {
+        let mut builder = LayoutBuilder::new(100.0, 50.0);
+        builder.with(El::column().precompose_ldr(), |builder| {
+            builder.text((
+                "child",
+                TextStyle::new(10.0).with_hdr_text_coverage_bias(2.0),
+            ));
+        });
+        let tree = builder.build();
+
+        let subtree = tree.precompose_subtree(
+            1,
+            Dimension {
+                value: 30.0,
+                unit:  None,
+            },
+            Dimension {
+                value: 20.0,
+                unit:  None,
+            },
+        );
+        assert!(subtree.is_some());
+        let Some(subtree) = subtree else {
+            return;
+        };
+        assert!(subtree.root.is_some());
+        let Some(root) = subtree.root else {
+            return;
+        };
+
+        assert_eq!(subtree.element_precompose(root), PrecomposeMode::Direct);
+        assert_eq!(subtree.element_precompose(1), PrecomposeMode::Direct);
+        assert_eq!(
+            subtree
+                .element_style(1)
+                .and_then(TextStyle::hdr_text_coverage_bias),
+            None
+        );
+        assert!(matches!(subtree.elements[root].width, Sizing::Fixed(_)));
+        let Sizing::Fixed(width) = subtree.elements[root].width else {
+            return;
+        };
+        assert!((width.value - 30.0).abs() < FLOAT_TOLERANCE);
+        assert!(matches!(subtree.elements[root].height, Sizing::Fixed(_)));
+        let Sizing::Fixed(height) = subtree.elements[root].height else {
+            return;
+        };
+        assert!((height.value - 20.0).abs() < FLOAT_TOLERANCE);
     }
 
     #[test]

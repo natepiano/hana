@@ -21,6 +21,7 @@ use crate::layout::element::ChildOverflow;
 use crate::layout::element::Element;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
+use crate::layout::element::PrecomposeMode;
 use crate::layout::element::ScrollAnchor;
 use crate::layout::line;
 use crate::layout::line::PanelShapeClipPolicy;
@@ -297,6 +298,21 @@ fn emit_down_traversal_commands(
             element.z_index,
         );
     }
+}
+
+fn emit_precompose_command(
+    commands: &mut Vec<RenderCommand>,
+    bounds: BoundingBox,
+    index: usize,
+    z_index: DrawZIndex,
+) {
+    push_command(
+        commands,
+        bounds,
+        RenderCommandKind::PrecomposeLdr,
+        index,
+        z_index,
+    );
 }
 
 fn emit_shape_commands(
@@ -719,26 +735,30 @@ pub(super) fn position_and_render(
             // Store the final bounding box for render-side culling and clipping.
             computed[index].bounds = bounds;
 
-            emit_down_traversal_commands(
-                &mut commands,
-                element,
-                wrapped.get(index).and_then(Option::as_ref),
-                bounds,
-                index,
-                font_scale,
-                entry.clip_context,
-            );
+            if matches!(element.precompose, PrecomposeMode::Ldr) {
+                emit_precompose_command(&mut commands, bounds, index, element.z_index);
+            } else {
+                emit_down_traversal_commands(
+                    &mut commands,
+                    element,
+                    wrapped.get(index).and_then(Option::as_ref),
+                    bounds,
+                    index,
+                    font_scale,
+                    entry.clip_context,
+                );
 
-            let child_clip = entry.clip_context.child(element, bounds);
-            if needs_up_traversal(element) {
-                stack.push(PositionStackEntry {
-                    visited: true,
-                    ..entry
-                });
+                let child_clip = entry.clip_context.child(element, bounds);
+                if needs_up_traversal(element) {
+                    stack.push(PositionStackEntry {
+                        visited: true,
+                        ..entry
+                    });
+                }
+                push_children_to_stack(
+                    tree, computed, &mut stack, index, entry.x, entry.y, child_clip,
+                );
             }
-            push_children_to_stack(
-                tree, computed, &mut stack, index, entry.x, entry.y, child_clip,
-            );
         }
     }
     commands
@@ -772,29 +792,33 @@ pub(super) fn render_commands_from_geometry(
             continue;
         }
 
-        emit_down_traversal_commands(
-            &mut commands,
-            element,
-            wrapped.get(index).and_then(Option::as_ref),
-            bounds,
-            index,
-            font_scale,
-            entry.clip_context,
-        );
+        if matches!(element.precompose, PrecomposeMode::Ldr) {
+            emit_precompose_command(&mut commands, bounds, index, element.z_index);
+        } else {
+            emit_down_traversal_commands(
+                &mut commands,
+                element,
+                wrapped.get(index).and_then(Option::as_ref),
+                bounds,
+                index,
+                font_scale,
+                entry.clip_context,
+            );
 
-        let child_clip = entry.clip_context.child(element, bounds);
-        if needs_up_traversal(element) {
-            stack.push(GeometryStackEntry {
-                visited: true,
-                ..entry
-            });
-        }
-        for &child_idx in tree.children_of(index).iter().rev() {
-            stack.push(GeometryStackEntry {
-                index:        child_idx,
-                visited:      false,
-                clip_context: child_clip,
-            });
+            let child_clip = entry.clip_context.child(element, bounds);
+            if needs_up_traversal(element) {
+                stack.push(GeometryStackEntry {
+                    visited: true,
+                    ..entry
+                });
+            }
+            for &child_idx in tree.children_of(index).iter().rev() {
+                stack.push(GeometryStackEntry {
+                    index:        child_idx,
+                    visited:      false,
+                    clip_context: child_clip,
+                });
+            }
         }
     }
 

@@ -49,11 +49,12 @@ use super::element::ChildOverflow;
 use super::element::Element;
 use super::element::ElementContent;
 use super::element::LayoutTree;
+use super::element::PrecomposeMode;
 use super::element::ScrollAnchor;
 use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -130,7 +131,6 @@ impl TextSizing {
 #[must_use]
 #[derive(Clone, Debug)]
 pub struct Text {
-    id:      Option<PanelFieldId>,
     layout:  CommonEl,
     content: String,
     style:   TextStyle,
@@ -141,7 +141,6 @@ impl Text {
     /// Creates a text declaration with visible text and style.
     pub fn new(text: impl Into<String>, style: TextStyle) -> Self {
         Self {
-            id: None,
             layout: CommonEl::default(),
             content: text.into(),
             style,
@@ -150,8 +149,19 @@ impl Text {
     }
 
     /// Assigns a panel-local id so this run can be addressed at runtime.
-    pub fn id(mut self, id: impl Into<PanelFieldId>) -> Self {
-        self.id = Some(id.into());
+    pub fn id(mut self, id: impl Into<PanelElementId>) -> Self {
+        self.layout.id = Some(id.into());
+        self
+    }
+
+    /// Renders this text leaf into an LDR image, then draws that image in the
+    /// parent panel.
+    ///
+    /// Use this when text should keep SDR edge behavior under an HDR scene
+    /// camera, while surrounding panel backgrounds and borders stay on the
+    /// normal analytic path.
+    pub const fn precompose_ldr(mut self) -> Self {
+        self.layout.precompose = PrecomposeMode::Ldr;
         self
     }
 
@@ -160,8 +170,12 @@ impl Text {
     where
         L: ChildLayoutState,
     {
+        let current_id = self.layout.id.take();
         let El { common, .. } = layout;
         self.layout = common;
+        if self.layout.id.is_none() {
+            self.layout.id = current_id;
+        }
         self
     }
 
@@ -189,9 +203,8 @@ impl Text {
         self
     }
 
-    fn into_element(self, id: PanelFieldId) -> Element {
+    fn into_element(self) -> Element {
         let Self {
-            id: _,
             layout,
             content,
             style,
@@ -200,7 +213,6 @@ impl Text {
         text_leaf_element(
             layout,
             ElementContent::Text {
-                id,
                 text: content,
                 config: style,
                 sizing,
@@ -257,6 +269,7 @@ impl ChildLayoutState for Overlay {}
 
 #[derive(Clone, Debug)]
 struct CommonEl {
+    id:              Option<PanelElementId>,
     width:           Sizing,
     height:          Sizing,
     padding:         Padding,
@@ -275,11 +288,13 @@ struct CommonEl {
     z_index:         DrawZIndex,
     anti_alias:      Option<AntiAlias>,
     hairline_fade:   Option<HairlineFade>,
+    precompose:      PrecomposeMode,
 }
 
 impl Default for CommonEl {
     fn default() -> Self {
         Self {
+            id:              None,
             width:           Sizing::FIT,
             height:          Sizing::FIT,
             padding:         Padding::default(),
@@ -298,12 +313,14 @@ impl Default for CommonEl {
             z_index:         DrawZIndex::default(),
             anti_alias:      None,
             hairline_fade:   None,
+            precompose:      PrecomposeMode::Direct,
         }
     }
 }
 
 fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
     Element {
+        id: common.id,
         width: common.width,
         height: common.height,
         padding: common.padding,
@@ -321,6 +338,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         z_index: common.z_index,
         anti_alias: common.anti_alias,
         hairline_fade: common.hairline_fade,
+        precompose: common.precompose,
         content,
     }
 }
@@ -387,6 +405,16 @@ impl<L> El<L> {
     /// Common patterns: [`Sizing::GROW`], [`Sizing::FIT`], [`Sizing::fixed`], [`Sizing::percent`].
     pub const fn width(mut self, sizing: Sizing) -> Self {
         self.common.width = sizing;
+        self
+    }
+
+    /// Assigns a panel-local id to this element.
+    ///
+    /// Named element ids share one namespace across the panel tree, including
+    /// text elements and editable fields. Use ids for persistent element
+    /// identity such as text lookup, hit targets, and precompose cache keys.
+    pub fn id(mut self, id: impl Into<PanelElementId>) -> Self {
+        self.common.id = Some(id.into());
         self
     }
 
@@ -526,7 +554,7 @@ impl<L> El<L> {
     /// anchoring, and commit routing.
     pub fn editable_field(
         mut self,
-        field_id: impl Into<PanelFieldId>,
+        field_id: impl Into<PanelElementId>,
         field_spec: ImeEditableFieldSpec,
     ) -> Self {
         self.common.editable = Some(ImePanelField::new(field_id, field_spec));
@@ -570,6 +598,18 @@ impl<L> El<L> {
         self
     }
 
+    /// Renders this element's subtree into an LDR image, then draws that image
+    /// in the parent panel.
+    ///
+    /// This is useful when a panel subtree should keep the SDR text edge
+    /// behavior even while the main scene camera renders HDR. The flattened
+    /// result behaves as one alpha-blended image in the parent panel; it does
+    /// not preserve per-descendant depth or interaction.
+    pub const fn precompose_ldr(mut self) -> Self {
+        self.common.precompose = PrecomposeMode::Ldr;
+        self
+    }
+
     /// Converts this declaration into an [`Element`] with the given content.
     fn into_element(self, content: ElementContent) -> Element
     where
@@ -588,6 +628,7 @@ impl<L> El<L> {
             private::Sealed::into_child_layout(child_layout, common.align_x, common.align_y)
         };
         Element {
+            id: common.id,
             width: common.width,
             height: common.height,
             padding: common.padding,
@@ -605,6 +646,7 @@ impl<L> El<L> {
             z_index: common.z_index,
             anti_alias: common.anti_alias,
             hairline_fade: common.hairline_fade,
+            precompose: common.precompose,
             content,
         }
     }
@@ -656,7 +698,7 @@ pub struct LayoutBuilder {
     tree:         LayoutTree,
     /// Stack of parent indices for nesting.
     parent_stack: Vec<usize>,
-    /// Per-build counter that mints [`PanelFieldId::Auto`] ids for unnamed text
+    /// Per-build counter that mints [`PanelElementId::Auto`] ids for unnamed text
     /// runs in build order. It starts at `0` for every builder, so auto ids are
     /// stable only within one build (`set_tree` rebuilds restart it) and never
     /// persisted or compared across panels — the positional identity an unnamed
@@ -801,19 +843,24 @@ impl LayoutBuilder {
     /// of their own. Use [`Self::with`] when you want to create another nested
     /// container instead of a text leaf.
     ///
-    /// The run is given a builder-minted [`PanelFieldId::Auto`] id unless the
+    /// The run is given a builder-minted [`PanelElementId::Auto`] id unless the
     /// declaration supplies [`Text::id`].
     pub fn text(&mut self, text: impl Into<Text>) -> &mut Self {
         let parent = self.current_parent();
-        let text = text.into();
-        let id = text.id.clone().unwrap_or_else(|| self.take_auto_id());
-        self.tree.add_child(parent, text.into_element(id));
+        let mut text = text.into();
+        let id = text
+            .layout
+            .id
+            .clone()
+            .unwrap_or_else(|| self.take_auto_id());
+        text.layout.id = Some(id);
+        self.tree.add_child(parent, text.into_element());
         self
     }
 
-    /// Mints the next build-order [`PanelFieldId::Auto`] id for an unnamed run.
-    const fn take_auto_id(&mut self) -> PanelFieldId {
-        let id = PanelFieldId::auto(self.next_auto_id);
+    /// Mints the next build-order [`PanelElementId::Auto`] id for an unnamed run.
+    const fn take_auto_id(&mut self) -> PanelElementId {
+        let id = PanelElementId::auto(self.next_auto_id);
         self.next_auto_id += 1;
         id
     }

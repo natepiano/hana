@@ -281,7 +281,7 @@ const MATERIAL_CASE_PAD_X: f32 = 2.0;
 const MATERIAL_CASE_PAD_Y: f32 = 1.0;
 const MATERIAL_VALUE_GAP: f32 = 2.0;
 const STATS_FONT_SIZE: f32 = 12.0;
-const SWATCH_FONT_SIZE: f32 = 31.5;
+const SWATCH_FONT_SIZE: f32 = 24.0;
 const MIXED_LABEL_WIDTH: f32 = 58.0;
 const MIXED_ROW_BG: Color = Color::srgba(0.14, 0.16, 0.20, 0.92);
 const MATERIAL_CASE_BG: Color = Color::srgba(0.10, 0.11, 0.13, 0.72);
@@ -312,7 +312,8 @@ const TEXT_EMISSIVE_GAIN: f32 = 1.8;
 const ALPHA_CELL_BG: Color = Color::WHITE;
 const ALPHA_CELL_INK: Color = Color::BLACK;
 const ALPHA_CELL_CAPTION: Color = Color::BLACK;
-const ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS: f32 = 2.0;
+// Previous HDR-path shader compensation for this cell:
+// const ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS: f32 = 2.0;
 
 // The alpha modes the center-left selector cycles through, in number-key order
 // (Digit1..Digit7). The selected mode is applied to the SDF panel's fills and
@@ -2550,19 +2551,20 @@ fn divergent_group(
 // drives the SDF panel. Sits on a light cell so `Multiply` reads as a tint
 // rather than vanishing into the dark panel.
 fn divergent_alpha_case(builder: &mut LayoutBuilder, alpha: AlphaMode) {
-    divergent_case_shell(
+    let caption_style = material_caption_style(ALPHA_CELL_CAPTION);
+    let value_style = material_value_style(ALPHA_CELL_INK).with_alpha_mode(alpha);
+    // Previous HDR-path shader compensation, replaced by LDR precompose:
+    // let caption_style =
+    //     caption_style.with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS);
+    // let value_style = value_style.with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS);
+
+    divergent_text_precomposed_case_shell(
         builder,
-        "alpha mode (selector)",
+        "alpha mode (precomposed text)",
         ALPHA_CELL_BG,
-        material_caption_style(ALPHA_CELL_CAPTION)
-            .with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS),
+        caption_style,
         |builder| {
-            builder.text((
-                alpha_mode_label(alpha),
-                material_value_style(ALPHA_CELL_INK)
-                    .with_alpha_mode(alpha)
-                    .with_hdr_text_coverage_bias(ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS),
-            ));
+            builder.text(Text::new(alpha_mode_label(alpha), value_style).precompose_ldr());
         },
     );
 }
@@ -2629,30 +2631,56 @@ fn divergent_case_shell(
     caption_style: TextStyle,
     values: impl FnOnce(&mut LayoutBuilder),
 ) {
-    builder.with(
-        El::column()
-            .width(Sizing::GROW)
-            .height(Sizing::FIT)
-            .gap(MATERIAL_CASE_GAP)
-            .padding(Padding::xy(MATERIAL_CASE_PAD_X, MATERIAL_CASE_PAD_Y))
-            .corner_radius(CornerRadius::all(Mm(1.5)))
-            .background(cell_bg)
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            builder.text((caption, caption_style));
-            // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
-            // bottom-up fit pass, forcing its text runs to wrap per word and
-            // measure tall, which balloons the case height. FIT measures each
-            // run at its intrinsic single-line width and packs them left.
-            builder.with(
-                El::row()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .gap(MATERIAL_VALUE_GAP),
-                values,
-            );
-        },
-    );
+    divergent_case_shell_impl(builder, caption, cell_bg, caption_style, false, values);
+}
+
+fn divergent_text_precomposed_case_shell(
+    builder: &mut LayoutBuilder,
+    caption: &str,
+    cell_bg: Color,
+    caption_style: TextStyle,
+    values: impl FnOnce(&mut LayoutBuilder),
+) {
+    divergent_case_shell_impl(builder, caption, cell_bg, caption_style, true, values);
+}
+
+fn divergent_case_shell_impl(
+    builder: &mut LayoutBuilder,
+    caption: &str,
+    cell_bg: Color,
+    caption_style: TextStyle,
+    precompose_text_ldr: bool,
+    values: impl FnOnce(&mut LayoutBuilder),
+) {
+    let shell = El::column()
+        .width(Sizing::GROW)
+        .height(Sizing::FIT)
+        .gap(MATERIAL_CASE_GAP)
+        .padding(Padding::xy(MATERIAL_CASE_PAD_X, MATERIAL_CASE_PAD_Y))
+        .corner_radius(CornerRadius::all(Mm(1.5)))
+        .background(cell_bg)
+        .alignment(AlignX::Left, AlignY::Center);
+
+    builder.with(shell, |builder| {
+        let caption_text = Text::new(caption, caption_style);
+        let caption_text = if precompose_text_ldr {
+            caption_text.precompose_ldr()
+        } else {
+            caption_text
+        };
+        builder.text(caption_text);
+        // FIT width, not GROW: a GROW-width row seeds to ~0 width in the
+        // bottom-up fit pass, forcing its text runs to wrap per word and
+        // measure tall, which balloons the case height. FIT measures each
+        // run at its intrinsic single-line width and packs them left.
+        builder.with(
+            El::row()
+                .width(Sizing::FIT)
+                .height(Sizing::FIT)
+                .gap(MATERIAL_VALUE_GAP),
+            values,
+        );
+    });
 }
 
 // One SDF fill: an El with a material background and a border (rendered in a

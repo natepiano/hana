@@ -1,7 +1,7 @@
 //! Editable field specifications and applied value summaries.
 
 use super::ImeValueRevision;
-use super::PanelFieldId;
+use super::PanelElementId;
 
 /// Editable field contract stored on a layout field or app-owned session.
 #[derive(Clone, Debug, PartialEq)]
@@ -85,7 +85,7 @@ pub enum ImeBuiltInValue {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImePanelField {
     /// Panel-local semantic identity.
-    pub field_id:   PanelFieldId,
+    pub field_id:   PanelElementId,
     /// Editable behavior for this field.
     pub field_spec: ImeEditableFieldSpec,
 }
@@ -93,7 +93,7 @@ pub struct ImePanelField {
 impl ImePanelField {
     /// Creates editable metadata for an authored panel field.
     #[must_use]
-    pub fn new(field_id: impl Into<PanelFieldId>, field_spec: ImeEditableFieldSpec) -> Self {
+    pub fn new(field_id: impl Into<PanelElementId>, field_spec: ImeEditableFieldSpec) -> Self {
         Self {
             field_id: field_id.into(),
             field_spec,

@@ -101,12 +101,11 @@ pub(super) fn compute_panel_layouts(
         }
         let had_result = computed.result().is_some();
 
-        let scaled_tree = scaled_tree_cache.get_or_update(
-            panel_ref.tree(),
-            panel_ref.tree_revision(),
-            layout_to_points,
-            font_to_points,
-        );
+        if panel_changed {
+            scaled_tree_cache.invalidate_source();
+        }
+        let scaled_tree =
+            scaled_tree_cache.get_or_update(panel_ref.tree(), layout_to_points, font_to_points);
 
         let viewport_width = panel_ref.width() * layout_to_points;
         let viewport_height = panel_ref.height() * layout_to_points;

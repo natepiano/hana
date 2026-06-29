@@ -4,7 +4,7 @@ use bevy::prelude::Entity;
 use bevy::prelude::Rect;
 use bevy::prelude::Vec2;
 
-use super::PanelFieldId;
+use super::PanelElementId;
 
 /// Semantic backing target for an IME session.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -14,21 +14,21 @@ pub enum ImeTarget {
         /// Panel entity that owns the field id.
         panel:    Entity,
         /// Panel-local semantic field id.
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
     /// Editable field authored on a screen-space diegetic panel.
     ScreenPanelField {
         /// Panel entity that owns the field id.
         panel:    Entity,
         /// Panel-local semantic field id.
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
     /// Caller-owned session with app-specific backing state.
     AppOwned {
         /// Entity that owns the app-side field state.
         owner:    Entity,
         /// Owner-local semantic field id.
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
 }
 

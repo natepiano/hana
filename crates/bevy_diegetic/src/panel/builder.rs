@@ -20,7 +20,7 @@ use super::coordinate_space::SurfaceShadow;
 use super::diegetic_panel::DiegeticPanel;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
-use crate::PanelFieldId;
+use crate::PanelElementId;
 use crate::layout;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
@@ -36,26 +36,24 @@ use crate::layout::Unit;
 
 /// Error returned by [`DiegeticPanelBuilder::build`].
 ///
-/// Either a sizing error or a duplicate author-assigned [`PanelFieldId`]: a
+/// Either a sizing error or a duplicate author-assigned [`PanelElementId`]: a
 /// build-time `Result` so a repeated id is rejected up front instead of one
-/// run silently replacing another at runtime.
+/// element silently replacing another at runtime.
 #[derive(Debug)]
 pub enum PanelBuildError {
     /// A fixed-size axis was zero or negative.
     InvalidSize(InvalidSize),
-    /// Two elements share the same author-assigned [`PanelFieldId`]. Text-run
+    /// Two elements share the same author-assigned [`PanelElementId`]. Element
     /// ids and editable-field ids share one panel-local namespace, so a name
     /// reused across either kind is a build error.
-    DuplicateFieldId(PanelFieldId),
+    DuplicateElementId(PanelElementId),
 }
 
 impl Display for PanelBuildError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::InvalidSize(error) => write!(formatter, "{error}"),
-            Self::DuplicateFieldId(id) => {
-                write!(formatter, "duplicate panel field id `{id}`")
-            },
+            Self::DuplicateElementId(id) => write!(formatter, "duplicate panel element id `{id}`"),
         }
     }
 }
@@ -665,9 +663,9 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<World, S> {
         }
 
         if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_field_id()
+            && let Some(duplicate) = tree.duplicate_named_element_id()
         {
-            return Err(PanelBuildError::DuplicateFieldId(duplicate.clone()));
+            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
         }
 
         Ok(build_panel(self.data))
@@ -784,9 +782,9 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
         let _ = (has_dynamic_width, has_dynamic_height);
 
         if let Some(tree) = self.data.tree.as_ref()
-            && let Some(duplicate) = tree.duplicate_named_field_id()
+            && let Some(duplicate) = tree.duplicate_named_element_id()
         {
-            return Err(PanelBuildError::DuplicateFieldId(duplicate.clone()));
+            return Err(PanelBuildError::DuplicateElementId(duplicate.clone()));
         }
 
         Ok(build_panel(self.data))
@@ -824,7 +822,7 @@ mod tests {
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
     use crate::Mm;
-    use crate::PanelFieldId;
+    use crate::PanelElementId;
     use crate::Text;
     use crate::TextStyle;
 
@@ -835,28 +833,29 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_named_text_ids_error_at_build() {
+    fn duplicate_named_element_ids_error_at_build() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.text(Text::new("A", style()).id("title"));
+                builder.with(El::new().id("title"), |_| {});
                 builder.text(Text::new("B", style()).id("title"));
             })
             .build();
 
         assert!(matches!(
             result,
-            Err(PanelBuildError::DuplicateFieldId(ref id)) if *id == PanelFieldId::named("title")
+            Err(PanelBuildError::DuplicateElementId(ref id)) if *id == PanelElementId::named("title")
         ));
     }
 
     #[test]
-    fn distinct_named_text_ids_build_ok() {
+    fn element_id_with_distinct_child_text_id_builds_ok() {
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
-                builder.text(Text::new("A", style()).id("a"));
-                builder.text(Text::new("B", style()).id("b"));
+                builder.with(El::column().id("cell"), |builder| {
+                    builder.text(Text::new("A", style()).id("label"));
+                });
             })
             .build();
 
@@ -881,8 +880,8 @@ mod tests {
 
     #[test]
     fn text_id_colliding_with_editable_field_errors() {
-        // Text-run ids and editable-field ids share one namespace (TR-O): a text
-        // run named `name` collides with an editable field of the same id.
+        // Element ids and editable-field ids share one namespace: a text element
+        // named `name` collides with an editable field of the same id.
         let result = DiegeticPanel::world()
             .size(Mm(50.0), Mm(30.0))
             .layout(|builder| {
@@ -893,6 +892,9 @@ mod tests {
             })
             .build();
 
-        assert!(matches!(result, Err(PanelBuildError::DuplicateFieldId(_))));
+        assert!(matches!(
+            result,
+            Err(PanelBuildError::DuplicateElementId(_))
+        ));
     }
 }

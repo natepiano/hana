@@ -64,7 +64,7 @@ matching band. Per-record OIT offsets (`PathRenderRecord` fields `depth_nudge` /
 are individual draws, each stamped with its command's full `DrawCommandDepth`.
 
 **Reconcile identity.** A z-index or step change affects ordering only — it re-keys
-a record, never respawns the entity. Text-run identity stays `(PanelFieldId,
+a record, never respawns the entity. Text-run identity stays `(PanelElementId,
 line_index)`; image identity is `command_index`; SDF surfaces carry `PanelSdfSurface
 { command_index, draw_depth: DrawCommandDepth, … }`. The reuse signature stores the
 whole `DrawCommandDepth` (not a bare ordinal) so a `text_anchor` shift — toggling

@@ -5,11 +5,11 @@
 //!     [`DiegeticTextMut<M>`], keyed on a marker component — one call, `labels.set(text)`,
 //!     regardless of coordinate space.
 //!   - `DiegeticPanel::world` / `DiegeticPanel::screen` (panels with a named field) mutate through
-//!     [`PanelText::set_text`], keyed on a [`PanelFieldId`] for a named run in a panel tree.
+//!     [`PanelText::set_text`], keyed on a [`PanelElementId`] for a named run in a panel tree.
 //!
 //! Both APIs write the same `TextContent` storage: standalone labels address it
 //! through `DiegeticTextMut<M>`, while panel fields address it through
-//! `PanelText` and `PanelFieldId`.
+//! `PanelText` and `PanelElementId`.
 
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
@@ -22,7 +22,7 @@ use bevy_diegetic::Fit;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
-use bevy_diegetic::PanelFieldId;
+use bevy_diegetic::PanelElementId;
 use bevy_diegetic::PanelText;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
@@ -70,14 +70,14 @@ fn main() {
 // happens once per second, not every frame. Each mutator gates on
 // `tick.is_changed()` and writes its flavor's text: the two standalone labels
 // through `DiegeticTextMut<M>::set` (marker-addressed), the two panels through
-// `PanelText::set_text` with a `PanelFieldId` (id-addressed).
+// `PanelText::set_text` with a `PanelElementId` (id-addressed).
 
 const HOME_YAW: f32 = 0.4;
 const HOME_PITCH: f32 = 0.3;
 
 const TEXT_COLOR: Color = Color::srgb(0.92, 0.92, 0.94);
 
-/// Shared field id for the single counter run inside each panel's tree. The
+/// Shared element id for the single counter run inside each panel's tree. The
 /// panel's structure is fixed, so the run is named once at build and retext in
 /// place rather than rebuilt.
 const COUNTER_FIELD: &str = "counter";
@@ -193,7 +193,7 @@ fn mutate_world_panel(
     }
     let text = world_panel_label(tick.0);
     for panel in &panels {
-        panel_text.set_text(panel, &PanelFieldId::named(COUNTER_FIELD), text.as_str());
+        panel_text.set_text(panel, &PanelElementId::named(COUNTER_FIELD), text.as_str());
     }
 }
 
@@ -209,7 +209,7 @@ fn mutate_screen_panel(
     }
     let text = screen_panel_label(tick.0);
     for panel in &panels {
-        panel_text.set_text(panel, &PanelFieldId::named(COUNTER_FIELD), text.as_str());
+        panel_text.set_text(panel, &PanelElementId::named(COUNTER_FIELD), text.as_str());
     }
 }
 
@@ -259,7 +259,7 @@ fn world_panel_tree(n: u64) -> LayoutTree {
             world_panel_label(n),
             TextStyle::new(WORLD_PANEL_TEXT_M).with_color(TEXT_COLOR),
         )
-        .id(PanelFieldId::named(COUNTER_FIELD)),
+        .id(PanelElementId::named(COUNTER_FIELD)),
     );
     builder.build()
 }
@@ -278,7 +278,7 @@ fn screen_panel_tree(n: u64) -> LayoutTree {
             screen_panel_label(n),
             TextStyle::new(SCREEN_PANEL_TEXT_PX).with_color(TEXT_COLOR),
         )
-        .id(PanelFieldId::named(COUNTER_FIELD)),
+        .id(PanelElementId::named(COUNTER_FIELD)),
     );
     builder.build()
 }

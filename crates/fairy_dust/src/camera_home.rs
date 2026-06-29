@@ -19,6 +19,7 @@ use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
 use bevy_diegetic::Anchor;
+use bevy_diegetic::PrecomposeHelper;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
@@ -198,14 +199,22 @@ fn world_aabb_union(
     children: &Query<&Children>,
     aabbs: &Query<&Aabb>,
     transforms: &Query<&GlobalTransform, Without<CameraHomeMarker>>,
+    precompose_helpers: &Query<(), With<PrecomposeHelper>>,
 ) -> Option<(Vec3, Vec3)> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     let mut found = false;
     for root in targets {
-        for entity in std::iter::once(root).chain(children.iter_descendants(root)) {
+        let mut stack = vec![root];
+        while let Some(entity) = stack.pop() {
+            if precompose_helpers.contains(entity) {
+                continue;
+            }
             let (Ok(aabb), Ok(global_transform)) = (aabbs.get(entity), transforms.get(entity))
             else {
+                if let Ok(child_entities) = children.get(entity) {
+                    stack.extend(child_entities.iter().rev());
+                }
                 continue;
             };
             let local_center = Vec3::from(aabb.center);
@@ -215,6 +224,9 @@ fn world_aabb_union(
                 min = min.min(world);
                 max = max.max(world);
                 found = true;
+            }
+            if let Ok(child_entities) = children.get(entity) {
+                stack.extend(child_entities.iter().rev());
             }
         }
     }
@@ -234,6 +246,7 @@ fn update_home_cube(
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
     target_transforms: Query<&GlobalTransform, Without<CameraHomeMarker>>,
+    precompose_helpers: Query<(), With<PrecomposeHelper>>,
     mut cube: Query<(&mut Transform, &mut GlobalTransform), With<CameraHomeMarker>>,
     mut warned_no_target: Local<bool>,
 ) {
@@ -250,8 +263,13 @@ fn update_home_cube(
         }
         return;
     }
-    let Some((center, size)) = world_aabb_union(&targets, &children, &aabbs, &target_transforms)
-    else {
+    let Some((center, size)) = world_aabb_union(
+        &targets,
+        &children,
+        &aabbs,
+        &target_transforms,
+        &precompose_helpers,
+    ) else {
         return;
     };
     let new_transform =
@@ -316,11 +334,22 @@ fn target_meshes_ready(
     targets: &Query<Entity, With<CameraHomeTarget>>,
     children: &Query<&Children>,
     aabbs: &Query<&Aabb>,
+    precompose_helpers: &Query<(), With<PrecomposeHelper>>,
 ) -> bool {
     targets.iter().any(|target| {
-        std::iter::once(target)
-            .chain(children.iter_descendants(target))
-            .any(|entity| aabbs.contains(entity))
+        let mut stack = vec![target];
+        while let Some(entity) = stack.pop() {
+            if precompose_helpers.contains(entity) {
+                continue;
+            }
+            if aabbs.contains(entity) {
+                return true;
+            }
+            if let Ok(child_entities) = children.get(entity) {
+                stack.extend(child_entities.iter().rev());
+            }
+        }
+        false
     })
 }
 
@@ -335,6 +364,7 @@ fn snap_home_on_ready(
     targets: Query<Entity, With<CameraHomeTarget>>,
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
+    precompose_helpers: Query<(), With<PrecomposeHelper>>,
     restore: Option<Res<RestartCameraRestore>>,
     mut state: Local<InitialAnimateState>,
 ) {
@@ -347,7 +377,7 @@ fn snap_home_on_ready(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    if !target_meshes_ready(&targets, &children, &aabbs) {
+    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
         return;
     }
     if restore
@@ -370,6 +400,7 @@ fn handle_home_key(
     targets: Query<Entity, With<CameraHomeTarget>>,
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
+    precompose_helpers: Query<(), With<PrecomposeHelper>>,
 ) {
     let Some(home) = home else {
         return;
@@ -377,7 +408,7 @@ fn handle_home_key(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    if !target_meshes_ready(&targets, &children, &aabbs) {
+    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
         return;
     }
     commands.trigger(home_fit(camera, home.0, &config, config.duration));
@@ -393,6 +424,7 @@ fn refit_on_window_resized(
     targets: Query<Entity, With<CameraHomeTarget>>,
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
+    precompose_helpers: Query<(), With<PrecomposeHelper>>,
 ) {
     if events.is_empty() {
         return;
@@ -407,7 +439,7 @@ fn refit_on_window_resized(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    if !target_meshes_ready(&targets, &children, &aabbs) {
+    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
         return;
     }
     commands.trigger(home_fit(camera, home.0, &config, Duration::ZERO));

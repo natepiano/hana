@@ -172,11 +172,11 @@ Feedback:
 - Treat layout-derived widget records as reification inputs, not as the long-lived runtime API.
 - Add keyboard shortcut and action routing hooks. The core widget API should expose semantic activation/change events that can be wired from `bevy_enhanced_input`.
 - Disabled/enabled is likely cascade-like: global widgets, panel widgets, layout subtree, and individual widget overrides all need a coherent resolution rule.
-- `WidgetId` should be panel-local by default, matching panel text ids. Public events should target the widget entity and carry `WidgetId`; panel ownership comes from the `WidgetOf` relationship.
+- `WidgetId` should be panel-local by default, matching panel element ids. Public events should target the widget entity and carry `WidgetId`; panel ownership comes from the `WidgetOf` relationship.
 - Widget picking should use Bevy picking on materialized widget entities. The picking geometry may start as the element bounds and later support shape-aware hit tests for rounded or custom shapes.
 - Disabled/interactivity should be treated as mostly visual-only. Changing disabled state should not normally force layout unless a preset explicitly chooses to render different content or dimensions.
 - Tooltips are required as a first-class widget affordance, not an afterthought.
-- Duplicate widget ids within one panel should be rejected, matching the existing duplicate field id build-time contract.
+- Duplicate widget ids within one panel should be rejected, matching the existing duplicate element id build-time contract.
 - Initial widget scope is IME integration, buttons, sliders, and tooltips.
 - Tooltip content should allow optional shortcut display, without forcing `bevy_enhanced_input` as the only shortcut source.
 - Tooltip presentation must support layout-authored tooltips and spawned world/screen tooltip panels with correct ordering.
@@ -196,7 +196,7 @@ Open questions:
 
 Decision: Keep.
 
-Use panel-local `WidgetId`s for stable semantic identity. Reject duplicate widget ids within one panel through `PanelBuildError`, matching the existing duplicate field id build-time contract. Treat layout-derived widget records as reification inputs only; runtime interaction happens through materialized widget child entities.
+Use panel-local `WidgetId`s for stable semantic identity. Reject duplicate widget ids within one panel through `PanelBuildError`, matching the existing duplicate element id build-time contract. Treat layout-derived widget records as reification inputs only; runtime interaction happens through materialized widget child entities.
 
 ### 3. Widget entities, relationships, and picking
 

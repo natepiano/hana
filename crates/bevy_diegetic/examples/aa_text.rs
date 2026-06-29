@@ -35,7 +35,7 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelBuildError;
-use bevy_diegetic::PanelFieldId;
+use bevy_diegetic::PanelElementId;
 use bevy_diegetic::PanelText;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
@@ -1062,7 +1062,7 @@ fn build_cube_status_tree(snapshot: CubeStatusSnapshot) -> LayoutTree {
         (STATUS_FIELD_OIT, oit_label(snapshot.oit_enabled)),
         (STATUS_FIELD_POST, post_label(snapshot.post)),
     ] {
-        builder.text(Text::new(label, style.clone()).id(PanelFieldId::named(field)));
+        builder.text(Text::new(label, style.clone()).id(PanelElementId::named(field)));
     }
     builder.build()
 }
@@ -1119,17 +1119,17 @@ fn refresh_cube_status_panels(
     for entity in &panels {
         panel_text.set_text(
             entity,
-            &PanelFieldId::named(STATUS_FIELD_MSAA),
+            &PanelElementId::named(STATUS_FIELD_MSAA),
             msaa_label(snapshot.msaa),
         );
         panel_text.set_text(
             entity,
-            &PanelFieldId::named(STATUS_FIELD_OIT),
+            &PanelElementId::named(STATUS_FIELD_OIT),
             oit_label(snapshot.oit_enabled),
         );
         panel_text.set_text(
             entity,
-            &PanelFieldId::named(STATUS_FIELD_POST),
+            &PanelElementId::named(STATUS_FIELD_POST),
             post_label(snapshot.post),
         );
     }

@@ -558,6 +558,11 @@ impl TextStyle {
         self
     }
 
+    /// Removes the per-label HDR text coverage-bias override.
+    pub(crate) const fn clear_hdr_text_coverage_bias(&mut self) {
+        self.hdr_text_coverage_bias = None;
+    }
+
     // ── In-place (set_*) setters ──────────────────────────────────────────
 
     /// Sets the font identifier.

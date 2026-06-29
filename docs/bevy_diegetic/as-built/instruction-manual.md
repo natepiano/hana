@@ -53,7 +53,7 @@ Builder entry points (`builder.rs`):
 | `LayoutBuilder::with_root(el)` | Your `El` *is* the root (no implicit wrapper). Use with `El::new().width(FIT).height(FIT)` for a shrink-wrap panel. |
 | `b.with(el, |b| { .. })` | Push `el` as a child and build its children inside the closure. |
 | `b.text(s, style)` | Add a text leaf to the current parent. |
-| `b.text_id(id, s, style)` | Text leaf with a `PanelFieldId` (for editable / addressable text). |
+| `b.text_id(id, s, style)` | Text leaf with a `PanelElementId` (for editable / addressable text). |
 | `b.image(el, handle, tint)` | Image leaf. |
 | `b.build()` | Finish, returns a `LayoutTree`. |
 
@@ -261,7 +261,7 @@ A text element's measured size feeds the `Fit` content size (its min **height** 
 
 ## 11. Editable & addressable fields
 
-- `.editable_field(id, ..)` on an `El`, or `b.text_id(id, s, style)` — give text a `PanelFieldId` so it can be targeted for IME / inline editing (see `as-built/ime.md`).
+- `.editable_field(id, ..)` on an `El`, or `b.text_id(id, s, style)` — give text a `PanelElementId` so it can be targeted for IME / inline editing (see `as-built/ime.md`).
 
 ---
 

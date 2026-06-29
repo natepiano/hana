@@ -42,8 +42,9 @@ pub enum RectangleSource {
 /// Fixed draw step derived from a [`RenderCommandKind`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum DrawStep {
-    /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`], and
-    /// [`RenderCommandKind::Image`] commands.
+    /// [`RenderCommandKind::Rectangle`], [`RenderCommandKind::Border`],
+    /// [`RenderCommandKind::Image`], and [`RenderCommandKind::PrecomposeLdr`]
+    /// commands.
     Fill,
     /// [`RenderCommandKind::Shapes`] commands.
     Shapes,
@@ -92,6 +93,8 @@ pub enum RenderCommandKind {
         /// Tint color multiplied against the texture (white = no tint).
         tint:   Color,
     },
+    /// An element subtree flattened through an LDR render target.
+    PrecomposeLdr,
     /// Resolved panel-local line primitives.
     Shapes {
         /// Resolved lines to render as one command group.
@@ -109,9 +112,10 @@ impl RenderCommandKind {
     #[must_use]
     pub(crate) const fn draw_step(&self) -> Option<DrawStep> {
         match self {
-            Self::Rectangle { .. } | Self::Border { .. } | Self::Image { .. } => {
-                Some(DrawStep::Fill)
-            },
+            Self::Rectangle { .. }
+            | Self::Border { .. }
+            | Self::Image { .. }
+            | Self::PrecomposeLdr => Some(DrawStep::Fill),
             Self::Shapes { .. } => Some(DrawStep::Shapes),
             Self::Text { .. } => Some(DrawStep::Text),
             Self::ScissorStart | Self::ScissorEnd => None,
@@ -161,6 +165,7 @@ mod tests {
                 RenderCommandKind::Shapes { shapes: Vec::new() },
                 Some(DrawStep::Shapes),
             ),
+            (RenderCommandKind::PrecomposeLdr, Some(DrawStep::Fill)),
             (
                 RenderCommandKind::Text {
                     text:   String::new(),

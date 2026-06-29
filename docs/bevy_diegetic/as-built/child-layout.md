@@ -71,7 +71,7 @@ where
 
 pub fn text_id_element<L>(
     &mut self,
-    id: impl Into<PanelFieldId>,
+    id: impl Into<PanelElementId>,
     el: El<L>,
     text: impl Into<String>,
     config: TextStyle,

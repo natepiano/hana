@@ -33,6 +33,7 @@ use super::PanelChildSystems;
 use super::material_table;
 use super::material_table::BatchResourcesReady;
 use super::material_table::MaterialTableAppendReady;
+use super::precompose;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
 use crate::cascade::CascadePlugin;
@@ -92,13 +93,23 @@ impl Plugin for TextRenderPlugin {
         app.add_systems(
             PostUpdate,
             (
-                reconcile_panel_text_children.in_set(PanelChildSystems::Build),
+                precompose::ensure_panel_precompose_caches.in_set(PanelChildSystems::Build),
+                precompose::activate_pending_precompose_cameras
+                    .in_set(PanelChildSystems::Build)
+                    .after(precompose::ensure_panel_precompose_caches),
+                precompose::cleanup_retired_precompose_images
+                    .in_set(PanelChildSystems::Build)
+                    .after(precompose::activate_pending_precompose_cameras),
+                reconcile_panel_text_children
+                    .in_set(PanelChildSystems::Build)
+                    .after(precompose::ensure_panel_precompose_caches),
                 // After the text reconcile so the two passes' shared
                 // `DiegeticPerfStats::reconcile_ms` reset-then-accumulate
                 // sequence is deterministic.
                 reconcile_panel_image_children
                     .in_set(PanelChildSystems::Build)
-                    .after(reconcile_panel_text_children),
+                    .after(reconcile_panel_text_children)
+                    .after(precompose::ensure_panel_precompose_caches),
                 shape_panel_text_children.after(reconcile_panel_text_children),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),

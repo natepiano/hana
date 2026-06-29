@@ -175,15 +175,15 @@ pub enum BuiltInApplied {
 pub enum Target {
     WorldPanelField {
         panel: Entity,
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
     ScreenPanelField {
         panel: Entity,
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
     AppOwned {
         owner: Entity,
-        field_id: PanelFieldId,
+        field_id: PanelElementId,
     },
 }
 
@@ -508,7 +508,7 @@ and target identity, and only one session can be active.
 
 #### Phase 1 Review
 
-- Phase 2 now explicitly adds authored `PanelFieldId` metadata, double-click
+- Phase 2 now explicitly adds authored `PanelElementId` metadata, double-click
   activation, and replacement of the temporary global Enter/Escape shortcut
   path with lease-scoped command routing.
 - Phase 3 now treats `Window::ime_position` as temporary/coarse until Phase 4
@@ -527,7 +527,7 @@ Add the panel boundary and ownership pieces that make session start reliable:
 
 - computed `PanelFieldRecord`s on the panel boundary,
 - replace the Phase 1 spec-only layout metadata with authored
-  `PanelFieldId` plus editable field spec metadata,
+  `PanelElementId` plus editable field spec metadata,
 - field-id uniqueness validation,
 - field hit resolution from panel-local coordinates,
 - double-click activation from panel picking,
@@ -547,7 +547,7 @@ ownership has one writer, and terminal causes clean up the session idempotently.
 **What worked:**
 
 - `PanelFieldRecord` now lives on `ComputedDiegeticPanel`, so activation and
-  later anchoring can resolve `PanelFieldId` without reading render commands.
+  later anchoring can resolve `PanelElementId` without reading render commands.
 - Panel double-click activation now routes through the Phase 1 `ImeOpenSession`
   observer and uses `ImeInputBlocker` for window-scoped ownership.
 
@@ -916,7 +916,7 @@ implementation decisions to carry into the plan:
 
 Status: accepted
 
-Editable values need a stable `EditableFieldId` or `PanelFieldId` supplied by
+Editable values need a stable `EditableFieldId` or `PanelElementId` supplied by
 the authoring API. Frame-local layout element indices and render command indices
 can still be used for geometry lookup, but they must not be the semantic target
 for picking, anchoring, or commit.
@@ -1089,7 +1089,7 @@ fields.
 Status: satisfied by Phase 2
 
 Stable field identity should be authored in the layout tree, not inferred by the
-resolver. Add an `EditableFieldId`/`PanelFieldId` newtype and an authoring path
+resolver. Add an `EditableFieldId`/`PanelElementId` newtype and an authoring path
 such as `LayoutBuilder::editable_text(...)`, `El::field_id(...)`, or an
 editable-field spec. Propagate that metadata into computed field records with
 bounds, style, clip state, draw order, and field id.
@@ -1325,17 +1325,17 @@ Class: design-improvement
 Field identity and hit resolution should not depend on render commands or raw
 layout indices. Add a panel-layer `PanelFieldRecord` produced from layout
 metadata and stored on `ComputedDiegeticPanel` as crate-internal data. Include
-stable `PanelFieldId`, role/spec, bounds, effective clip, draw order, style
+stable `PanelElementId`, role/spec, bounds, effective clip, draw order, style
 snapshot, panel-local geometry provenance, tree revision, computed field epoch,
 and the crate-private source element locator.
 
 Use distinct newtypes for semantic field identity and implementation locators,
-for example `PanelFieldId`, `LayoutElementIndex`, `RenderCommandIndex`, and
-`ComputedFieldIndex`. Public targets carry only semantic `PanelFieldId`;
+for example `PanelElementId`, `LayoutElementIndex`, `RenderCommandIndex`, and
+`ComputedFieldIndex`. Public targets carry only semantic `PanelElementId`;
 locators stay internal. Field-id uniqueness validation should return a typed
-error keyed by `PanelFieldId`.
+error keyed by `PanelElementId`.
 
-`PanelFieldId` is panel-local. Session identity should use an internal
+`PanelElementId` is panel-local. Session identity should use an internal
 `PanelFieldKey { panel, field_id }`; public events continue exposing the
 semantic `panel + field_id` pair and never expose layout or render indices.
 Duplicate-id errors should include the panel plus internal source locators.
@@ -1428,7 +1428,7 @@ Class: design-improvement
 The editable-field spec should be a closed enum split by ownership mode, for
 example `EditableFieldSpec::BuiltIn(BuiltInFieldSpec)` and
 `EditableFieldSpec::AppOwned(AppOwnedFieldSpec)`. Built-in specs pair
-`PanelFieldId` with an explicit value kind, typed range constraints,
+`PanelElementId` with an explicit value kind, typed range constraints,
 validation policy, display formatter, live-preview policy, apply sink, and
 typed rejection reasons. App-owned specs carry parser/apply keys or event
 sinks instead of making the IME core understand every app output type.
