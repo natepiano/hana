@@ -25,7 +25,3 @@ pub(crate) const APPLE_CONTEXTUAL_STRINGS: &[&str] = &[
 pub(crate) const HANA_STT_LOCALE: &str = "HANA_STT_LOCALE";
 #[cfg(target_os = "macos")]
 pub(crate) const HANA_STT_REQUIRE_ON_DEVICE: &str = "HANA_STT_REQUIRE_ON_DEVICE";
-
-// vad
-pub(crate) const EARSHOT_FRAME_SAMPLES: usize = 256;
-pub(crate) const EARSHOT_SAMPLE_RATE: u32 = 16_000;

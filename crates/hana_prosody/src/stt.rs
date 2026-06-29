@@ -219,7 +219,7 @@ impl AppleSpeechTranscriber {
         let text = detailed_recognition_result.transcript().trim().to_string();
         if !is_valid_transcript(&text) {
             return Err(TranscriptionError::NoSpeech(String::from(
-                "candidate window did not contain a usable transcript",
+                "recording did not contain a usable transcript",
             )));
         }
         let mode = match (self.recognition_mode, on_device) {
@@ -347,7 +347,7 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn apple_no_speech_errors_are_rejected_candidates() {
+    fn apple_no_speech_errors_are_rejected_recordings() {
         let error = classify_speech_error(String::from("recognition failed: No speech detected"));
 
         assert!(matches!(error, TranscriptionError::NoSpeech(_)));

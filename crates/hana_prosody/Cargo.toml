@@ -1,7 +1,7 @@
 [package]
 authors.workspace    = true
 categories           = ["development-tools", "game-development", "multimedia"]
-description          = "Keyboard-driven Hana prosody POC with microphone capture, VAD, JSONL output, and Bevy feedback"
+description          = "Keyboard-driven Hana prosody POC with microphone capture, Apple Speech, JSONL output, and Bevy feedback"
 edition.workspace    = true
 homepage             = "https://github.com/natepiano/hana/tree/main/crates/hana_prosody"
 keywords             = ["audio", "bevy", "hana", "prosody", "voice"]
@@ -17,7 +17,6 @@ workspace = true
 [dependencies]
 bevy_kana  = { workspace = true }
 cpal       = "0.18.1"
-earshot    = { workspace = true }
 hound      = "3.5.1"
 serde      = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -8,13 +8,10 @@ Run the feedback UI from the workspace root:
 cargo run -p hana_prosody --example voice_sidecar
 ```
 
-Press space to toggle continuous transcription. While the loop is on, the app
-records from the default macOS input device, detects speech with Earshot VAD,
-proposes final windows after silence, and probes active windows when background
-noise keeps the VAD from settling. Probe transcripts are tentative: a later
-probe with more words replaces the current tentative transcript, and stable
-tentative text is appended to the inbox when no better probe arrives. Unusable
-candidates are discarded and the loop keeps listening.
+Press space to start recording from the default macOS input device. Press space
+again to stop recording and send that captured window to Apple Speech. The
+sidecar does not infer speech boundaries while the user is talking; the keyboard
+presses define the audio window.
 
 Committed transcripts are appended to `../hana/run/art/inbox.jsonl` by default.
 Temporary WAV files live under `../hana/run/art/audio` while Apple Speech is
@@ -32,6 +29,5 @@ depend on macOS `say`, `afconvert`, and Apple Speech authorization:
 cargo nextest run -p hana_prosody --run-ignored ignored-only
 ```
 
-Those tests generate short `say` fixtures, replay the WAVs through the same
-session state machine used by the sidecar, and run Apple Speech over the named
+Those tests generate short `say` fixtures and run Apple Speech over the named
 fixtures with the expected phrase derived from the filename.
