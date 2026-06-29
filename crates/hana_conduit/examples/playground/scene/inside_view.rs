@@ -1,14 +1,14 @@
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CapStyle;
-use bevy_catenary::Faces;
-use bevy_catenary::Solver;
-use bevy_catenary::TubeConfig;
 use bevy_diegetic::DiegeticText;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CapStyle;
+use hana_conduit::Faces;
+use hana_conduit::Solver;
+use hana_conduit::TubeConfig;
 
 use super::constants::INSIDE_VIEW_END_Y_OFFSET;
 use super::constants::INSIDE_VIEW_ENDPOINT_X_OFFSET;

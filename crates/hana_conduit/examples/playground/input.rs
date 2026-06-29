@@ -5,12 +5,12 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_catenary::Cable;
-use bevy_catenary::CableMeshChild;
-use bevy_catenary::CurveKind;
-use bevy_catenary::Solver;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::FairyDustOrbitCam;
+use hana_conduit::Cable;
+use hana_conduit::CableMeshChild;
+use hana_conduit::CurveKind;
+use hana_conduit::Solver;
 
 use super::constants::DETACH_R_RESET_FLASH_SECONDS;
 use super::constants::MIN_TAUT_CABLE_SLACK;

@@ -3,27 +3,27 @@
     clippy::expect_used,
     reason = "tests should panic on unexpected values"
 )]
-//! Comprehensive tests for the `bevy_catenary` routing module.
+//! Comprehensive tests for the `hana_conduit` routing module.
 
 use bevy::math::Vec3;
-use bevy_catenary::AStarPlanner;
-use bevy_catenary::Anchor;
-use bevy_catenary::CableSegment;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::CurveSolver;
-use bevy_catenary::DirectPlanner;
-use bevy_catenary::LinearSolver;
-use bevy_catenary::Obstacle;
-use bevy_catenary::OrthogonalPlanner;
-use bevy_catenary::PathPlanner;
-use bevy_catenary::RouteRequest;
-use bevy_catenary::RouteSolver;
-use bevy_catenary::Router;
-use bevy_catenary::evaluate;
-use bevy_catenary::sample_3d;
-use bevy_catenary::solve_parameter;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
+use hana_conduit::AStarPlanner;
+use hana_conduit::Anchor;
+use hana_conduit::CableSegment;
+use hana_conduit::CatenarySolver;
+use hana_conduit::CurveSolver;
+use hana_conduit::DirectPlanner;
+use hana_conduit::LinearSolver;
+use hana_conduit::Obstacle;
+use hana_conduit::OrthogonalPlanner;
+use hana_conduit::PathPlanner;
+use hana_conduit::RouteRequest;
+use hana_conduit::RouteSolver;
+use hana_conduit::Router;
+use hana_conduit::evaluate;
+use hana_conduit::sample_3d;
+use hana_conduit::solve_parameter;
 
 const TOLERANCE: f32 = 0.01;
 

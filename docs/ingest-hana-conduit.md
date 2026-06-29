@@ -1,7 +1,7 @@
-# Ingest `bevy_catenary` into the `bevy_hana` workspace
+# Ingest `hana_conduit` into the `bevy_hana` workspace
 
-Use this for moving the sibling `../bevy_catenary` repo into
-`crates/bevy_catenary/`.
+Use this for moving the sibling `../hana_conduit` repo into
+`crates/hana_conduit/`.
 
 This is a crate relocation only: preserve history, do not squash, do not make
 API changes, and do not retire the standalone repo until the workspace import is
@@ -11,9 +11,9 @@ green and the user explicitly approves the retirement step.
 
 Checked from `/Users/natemccoy/rust/bevy_hana` on 2026-06-22:
 
-- source path: `../bevy_catenary`
+- source path: `../hana_conduit`
 - branch: `main`
-- remote: `https://github.com/natepiano/bevy_catenary.git`
+- remote: `https://github.com/natepiano/hana_conduit.git`
 - status: clean against `origin/main`
 - crate version: `0.1.0`
 - standalone cleanup files present: `Cargo.lock`, `rustfmt.toml`, `taplo.toml`,
@@ -35,9 +35,9 @@ git switch main
 git pull --ff-only
 git status --short
 
-git -C ../bevy_catenary switch main
-git -C ../bevy_catenary pull --ff-only
-git -C ../bevy_catenary status --short --branch
+git -C ../hana_conduit switch main
+git -C ../hana_conduit pull --ff-only
+git -C ../hana_conduit status --short --branch
 ```
 
 The source status should be clean and on `main...origin/main`. Stop if either
@@ -48,13 +48,13 @@ repo has unrelated dirty work.
 From `~/rust/bevy_hana`:
 
 ```bash
-git subtree add --prefix=crates/bevy_catenary ../bevy_catenary main
+git subtree add --prefix=crates/hana_conduit ../hana_conduit main
 ```
 
 Do not pass `--squash`. After the import:
 
 ```bash
-git log --follow crates/bevy_catenary/src/lib.rs
+git log --follow crates/hana_conduit/src/lib.rs
 ```
 
 should show the original crate history.
@@ -64,14 +64,14 @@ should show the original crate history.
 Delete the files that are now workspace-level concerns:
 
 ```bash
-git rm -r crates/bevy_catenary/.github
-git rm crates/bevy_catenary/.gitignore
-git rm crates/bevy_catenary/Cargo.lock
-git rm crates/bevy_catenary/rustfmt.toml
-git rm crates/bevy_catenary/taplo.toml
+git rm -r crates/hana_conduit/.github
+git rm crates/hana_conduit/.gitignore
+git rm crates/hana_conduit/Cargo.lock
+git rm crates/hana_conduit/rustfmt.toml
+git rm crates/hana_conduit/taplo.toml
 ```
 
-`crates/bevy_catenary/.gitignore` only ignores `/target`, and the workspace root
+`crates/hana_conduit/.gitignore` only ignores `/target`, and the workspace root
 already has that rule.
 
 Keep `assets/models/power_plug.glb`; the playground example loads it. Keep
@@ -84,10 +84,10 @@ separate docs cleanup.
 Add the crate to root `[workspace.dependencies]`:
 
 ```toml
-bevy_catenary = { path = "crates/bevy_catenary" }
+hana_conduit = { path = "crates/hana_conduit" }
 ```
 
-The root already has the other dependencies `bevy_catenary` needs:
+The root already has the other dependencies `hana_conduit` needs:
 
 - `bevy`
 - `bevy_brp_extras`
@@ -95,10 +95,10 @@ The root already has the other dependencies `bevy_catenary` needs:
 - `bevy_lagrange`
 
 Do not expect the existing registry `bevy_kana 0.1.0` package to disappear from
-`Cargo.lock` just because `bevy_catenary` now uses the workspace `bevy_kana`;
+`Cargo.lock` just because `hana_conduit` now uses the workspace `bevy_kana`;
 `bevy_brp_extras` still depends on that registry version.
 
-## 5. Normalize `crates/bevy_catenary/Cargo.toml`
+## 5. Normalize `crates/hana_conduit/Cargo.toml`
 
 Convert the package metadata and lint tables to the workspace pattern:
 
@@ -108,10 +108,10 @@ authors.workspace    = true
 categories           = ["game-development", "rendering"]
 description          = "Physics-based 3D cable routing with catenary geometry and automatic pathfinding for Bevy"
 edition.workspace    = true
-homepage             = "https://github.com/natepiano/hana/tree/main/crates/bevy_catenary"
+homepage             = "https://github.com/natepiano/hana/tree/main/crates/hana_conduit"
 keywords             = ["3d", "bevy", "cable", "catenary", "routing"]
 license.workspace    = true
-name                 = "bevy_catenary"
+name                 = "hana_conduit"
 readme               = "README.md"
 repository.workspace = true
 version              = "0.1.0"
@@ -150,11 +150,11 @@ The playground loads:
 asset_server.load("models/power_plug.glb#Scene0")
 ```
 
-The asset exists at `crates/bevy_catenary/assets/models/power_plug.glb` after
+The asset exists at `crates/hana_conduit/assets/models/power_plug.glb` after
 ingest. Smoke-test the example from the workspace root:
 
 ```bash
-cargo run -p bevy_catenary --example playground
+cargo run -p hana_conduit --example playground
 ```
 
 If the model does not load from the workspace root, keep the existing
@@ -171,7 +171,7 @@ DefaultPlugins
         ..default()
     })
     .set(bevy::asset::AssetPlugin {
-        file_path: "crates/bevy_catenary/assets".into(),
+        file_path: "crates/hana_conduit/assets".into(),
         ..default()
     })
 ```
@@ -190,7 +190,7 @@ instructions. During ingest, update it for the workspace location:
   ```bash
   git clone https://github.com/natepiano/hana.git
   cd hana
-  cargo run -p bevy_catenary --example playground
+  cargo run -p hana_conduit --example playground
   ```
 
 The source README also says "pre-release (0.0.x)" while the manifest is
@@ -213,7 +213,7 @@ cargo nextest run --workspace
 Then smoke-test the catenary playground:
 
 ```bash
-cargo run -p bevy_catenary --example playground
+cargo run -p hana_conduit --example playground
 ```
 
 Regenerate `Cargo.lock` as part of the manifest change and include it in the
@@ -223,24 +223,24 @@ import commit.
 
 `~/.claude/scripts/clean-fix/clean-fix.conf` currently has:
 
-- `[build]` already includes `bevy_catenary`
+- `[build]` already includes `hana_conduit`
 - `[build]` already includes `bevy_hana`
 - `[projects]` includes the existing `bevy_hana/crates/*` members
 
 During ingest, add the new workspace member under `[projects]`:
 
 ```text
-bevy_hana/crates/bevy_catenary
+bevy_hana/crates/hana_conduit
 ```
 
-Do not remove the standalone `bevy_catenary` build entry yet. Remove it only
+Do not remove the standalone `hana_conduit` build entry yet. Remove it only
 when the standalone repo is retired and the local checkout is deleted.
 
 ## 10. Stop before repo retirement
 
 After steps 1-9 are complete, stop and summarize:
 
-- subtree import landed at `crates/bevy_catenary/`
+- subtree import landed at `crates/hana_conduit/`
 - standalone config files removed
 - manifest normalized to workspace deps
 - README updated for the workspace
@@ -250,22 +250,22 @@ After steps 1-9 are complete, stop and summarize:
 
 Proceed to standalone repo retirement only after explicit approval. Retirement
 means replacing the standalone repo README with a moved pointer, pushing it,
-archiving `natepiano/bevy_catenary`, then deleting the local
-`../bevy_catenary` checkout and removing its standalone clean-fix entries.
+archiving `natepiano/hana_conduit`, then deleting the local
+`../hana_conduit` checkout and removing its standalone clean-fix entries.
 
 ## Definition of done
 
-- `git log --follow crates/bevy_catenary/src/lib.rs` shows the original history.
-- `crates/bevy_catenary/Cargo.toml` uses workspace package metadata, lints, and
+- `git log --follow crates/hana_conduit/src/lib.rs` shows the original history.
+- `crates/hana_conduit/Cargo.toml` uses workspace package metadata, lints, and
   dependencies.
-- Workspace root has `bevy_catenary = { path = "crates/bevy_catenary" }`.
+- Workspace root has `hana_conduit = { path = "crates/hana_conduit" }`.
 - `Cargo.lock` is regenerated.
 - `Cargo.lock`, `.github/`, `.gitignore`, `rustfmt.toml`, and `taplo.toml` are
-  removed from `crates/bevy_catenary/`.
+  removed from `crates/hana_conduit/`.
 - `cargo +nightly fmt --all -- --check`, `cargo build --workspace`,
   `cargo build --workspace --examples`, and `cargo nextest run --workspace` pass.
-- `cargo run -p bevy_catenary --example playground` runs and loads the plug
+- `cargo run -p hana_conduit --example playground` runs and loads the plug
   model.
-- `clean-fix.conf` has `bevy_hana/crates/bevy_catenary` under `[projects]`.
+- `clean-fix.conf` has `bevy_hana/crates/hana_conduit` under `[projects]`.
 - Standalone repo archival and local checkout deletion are not done until after
   the separate approval gate.

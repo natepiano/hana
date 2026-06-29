@@ -2,16 +2,16 @@
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_catenary::AttachedTo;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::DetachPolicy;
-use bevy_catenary::Solver;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::DiegeticText;
+use hana_conduit::AttachedTo;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CatenarySolver;
+use hana_conduit::DetachPolicy;
+use hana_conduit::Solver;
 
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::DESPAWN_GREEN;

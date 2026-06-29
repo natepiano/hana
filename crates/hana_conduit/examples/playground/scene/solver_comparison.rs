@@ -1,8 +1,8 @@
 use bevy::prelude::*;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::CurveKind;
-use bevy_catenary::PathStrategy;
-use bevy_catenary::Solver;
+use hana_conduit::CatenarySolver;
+use hana_conduit::CurveKind;
+use hana_conduit::PathStrategy;
+use hana_conduit::Solver;
 
 use super::constants::NODE_CUBE_DIMENSION;
 use super::constants::SOLVER_COMPARISON_CATENARY_Z;

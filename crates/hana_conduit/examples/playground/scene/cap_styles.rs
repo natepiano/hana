@@ -1,13 +1,13 @@
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CapStyle;
-use bevy_catenary::Faces;
-use bevy_catenary::Solver;
-use bevy_catenary::TubeConfig;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CapStyle;
+use hana_conduit::Faces;
+use hana_conduit::Solver;
+use hana_conduit::TubeConfig;
 
 use super::constants::CAP_STYLE_ENDPOINT_X_MULTIPLIERS;
 use super::constants::CAP_STYLE_LEFT_TUBE_INDEX;

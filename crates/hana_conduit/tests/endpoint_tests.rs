@@ -13,16 +13,16 @@ use bevy::math::Vec3;
 use bevy::mesh::MeshPlugin;
 use bevy::prelude::*;
 use bevy::transform::TransformPlugin;
-use bevy_catenary::AttachedTo;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CatenaryPlugin;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::ComputedCableGeometry;
-use bevy_catenary::DEFAULT_SLACK;
-use bevy_catenary::DetachPolicy;
-use bevy_catenary::Solver;
+use hana_conduit::AttachedTo;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CatenaryPlugin;
+use hana_conduit::CatenarySolver;
+use hana_conduit::ComputedCableGeometry;
+use hana_conduit::DEFAULT_SLACK;
+use hana_conduit::DetachPolicy;
+use hana_conduit::Solver;
 
 /// Spawn a world-attached cable and return the cable entity.
 fn spawn_world_cable(app: &mut App, start: Vec3, end: Vec3) -> Entity {

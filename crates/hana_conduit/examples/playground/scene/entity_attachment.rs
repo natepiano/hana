@@ -1,11 +1,11 @@
 use bevy::prelude::*;
-use bevy_catenary::AttachedTo;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::Solver;
+use hana_conduit::AttachedTo;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CatenarySolver;
+use hana_conduit::Solver;
 
 use super::constants::DRAGGABLE_CUBE_DIMENSION;
 use super::constants::ENTITY_ATTACHMENT_Z;

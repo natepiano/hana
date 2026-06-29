@@ -1,4 +1,4 @@
-//! `bevy_catenary` — Physics-based 3D cable routing for Bevy.
+//! `hana_conduit` — Physics-based 3D cable routing for Bevy.
 //!
 //! Provides catenary curves, A* pathfinding, and orthogonal routing for 3D cables,
 //! with a clean separation between route math and Bevy rendering.
@@ -14,7 +14,7 @@
 //!
 //! ```ignore
 //! use bevy::prelude::*;
-//! use bevy_catenary::*;
+//! use hana_conduit::*;
 //!
 //! App::new()
 //!     .add_plugins(DefaultPlugins)

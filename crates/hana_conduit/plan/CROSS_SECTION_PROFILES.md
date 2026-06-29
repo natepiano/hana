@@ -1,4 +1,4 @@
-# Pluggable Cross-Section Profiles for bevy_catenary
+# Pluggable Cross-Section Profiles for hana_conduit
 
 ## Context
 

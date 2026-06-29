@@ -1,14 +1,14 @@
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
-use bevy_catenary::AttachedTo;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CurveKind;
-use bevy_catenary::Obstacle;
-use bevy_catenary::PathStrategy;
-use bevy_catenary::Solver;
+use hana_conduit::AttachedTo;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CurveKind;
+use hana_conduit::Obstacle;
+use hana_conduit::PathStrategy;
+use hana_conduit::Solver;
 
 use super::constants::NODE_CUBE_DIMENSION;
 use super::constants::ORTHOGONAL_ROUTING_END_Z;

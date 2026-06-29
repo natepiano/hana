@@ -613,17 +613,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_catenary"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy_diegetic",
- "bevy_kana 0.2.0-dev",
- "bevy_lagrange",
- "fairy_dust",
-]
-
-[[package]]
 name = "bevy_clerestory"
 version = "0.1.0"
 dependencies = [
@@ -3277,6 +3266,17 @@ dependencies = [
  "num-traits",
  "serde",
  "zerocopy",
+]
+
+[[package]]
+name = "hana_conduit"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy_diegetic",
+ "bevy_kana 0.2.0-dev",
+ "bevy_lagrange",
+ "fairy_dust",
 ]
 
 [[package]]

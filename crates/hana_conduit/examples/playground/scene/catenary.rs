@@ -1,6 +1,6 @@
 use bevy::prelude::*;
-use bevy_catenary::CatenarySolver;
-use bevy_catenary::Solver;
+use hana_conduit::CatenarySolver;
+use hana_conduit::Solver;
 
 use crate::constants::CATENARY_SECTION_INDEX;
 use crate::constants::NODE_Y;

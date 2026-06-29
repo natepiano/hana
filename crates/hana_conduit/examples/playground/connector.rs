@@ -3,14 +3,14 @@
 use std::f32::consts::FRAC_PI_2;
 
 use bevy::prelude::*;
-use bevy_catenary::AttachedTo;
-use bevy_catenary::Cable;
-use bevy_catenary::CableEnd;
-use bevy_catenary::CableEndpoint;
-use bevy_catenary::CableMeshConfig;
-use bevy_catenary::CapStyle;
-use bevy_catenary::EndpointAlignment;
-use bevy_catenary::Solver;
+use hana_conduit::AttachedTo;
+use hana_conduit::Cable;
+use hana_conduit::CableEnd;
+use hana_conduit::CableEndpoint;
+use hana_conduit::CableMeshConfig;
+use hana_conduit::CapStyle;
+use hana_conduit::EndpointAlignment;
+use hana_conduit::Solver;
 
 use super::constants::CONNECTOR_LANE_AS_SPAWNED_INDEX;
 use super::constants::CONNECTOR_LANE_FIXED_INDEX;
