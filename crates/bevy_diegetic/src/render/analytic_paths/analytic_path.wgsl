@@ -736,6 +736,7 @@ fn accumulate_nearest(
 // is within scan_width.
 fn along_y_coverage_terms(
     point: vec2<f32>,
+    scan_width: f32,
     scan_width_sq: f32,
     hairline_target: f32,
     path: PackedPathRecord,
@@ -745,6 +746,11 @@ fn along_y_coverage_terms(
     var terms = empty_coverage_terms();
     for (var offset = 0u; offset < along_y_band.count; offset += 1u) {
         let curve = curves[along_y_band.start + offset];
+        // Along-Y bands are sorted by descending max-x. Once the whole curve is
+        // left of the AA scan window, all remaining curves are too.
+        if curve.bounds.z < point.x - scan_width {
+            break;
+        }
         if include_winding {
             let winding = curve_winding(curve, point);
             if curve.fade_exponent > 0.0 {
@@ -790,6 +796,7 @@ fn curve_bounds_distance_sq(point: vec2<f32>, curve: CurveRecord) -> f32 {
 // along-Y pass.
 fn nearest_along_x_curve(
     point: vec2<f32>,
+    scan_width: f32,
     scan_width_sq: f32,
     hairline_target: f32,
     path: PackedPathRecord,
@@ -799,6 +806,11 @@ fn nearest_along_x_curve(
     var terms = initial;
     for (var offset = 0u; offset < along_x_band.count; offset += 1u) {
         let curve = curves[along_x_band.start + offset];
+        // Along-X bands are sorted by descending max-y. Once the whole curve is
+        // below the AA scan window, all remaining curves are too.
+        if curve.bounds.w < point.y - scan_width {
+            break;
+        }
         if curve_bounds_distance_sq(point, curve) <= scan_width_sq {
             accumulate_nearest(&terms, point, curve, hairline_target);
         }
@@ -841,7 +853,11 @@ fn winding_at(point: vec2<f32>, path: PackedPathRecord) -> i32 {
     let band = bands[path.band_range.x + along_y_band_index(point, path)];
     var winding = 0;
     for (var offset = 0u; offset < band.count; offset += 1u) {
-        winding += curve_winding(curves[band.start + offset], point);
+        let curve = curves[band.start + offset];
+        if curve.bounds.z < point.x {
+            break;
+        }
+        winding += curve_winding(curve, point);
     }
     return winding;
 }
@@ -856,6 +872,9 @@ fn lane_winding_at(point: vec2<f32>, path: PackedPathRecord) -> vec2<i32> {
     var winding = vec2<i32>(0, 0);
     for (var offset = 0u; offset < band.count; offset += 1u) {
         let curve = curves[band.start + offset];
+        if curve.bounds.z < point.x {
+            break;
+        }
         let curve_winding_value = curve_winding(curve, point);
         if curve.fade_exponent > 0.0 {
             winding.y += curve_winding_value;
@@ -943,8 +962,8 @@ fn distance_coverage(
     // The distance scan must reach the most-dilated silhouette plus the AA ramp.
     let scan_width = edge_width + dilation_max;
     let scan_width_sq = scan_width * scan_width;
-    var terms = along_y_coverage_terms(point, scan_width_sq, hairline_target, path);
-    terms = nearest_along_x_curve(point, scan_width_sq, hairline_target, path, terms);
+    var terms = along_y_coverage_terms(point, scan_width, scan_width_sq, hairline_target, path);
+    terms = nearest_along_x_curve(point, scan_width, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
     let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, edge_width, path);
 
@@ -1007,8 +1026,8 @@ fn signed_distance_sample(
     path: PackedPathRecord,
 ) -> SdSample {
     let scan_width = sqrt(scan_width_sq);
-    var terms = along_y_coverage_terms(point, scan_width_sq, hairline_target, path);
-    terms = nearest_along_x_curve(point, scan_width_sq, hairline_target, path, terms);
+    var terms = along_y_coverage_terms(point, scan_width, scan_width_sq, hairline_target, path);
+    terms = nearest_along_x_curve(point, scan_width, scan_width_sq, hairline_target, path, terms);
     let union_terms = union_lane(terms);
     let no_outside = lanes_no_outside_neighbor(terms, union_terms, point, scan_width, path);
     return SdSample(

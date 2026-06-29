@@ -22,6 +22,7 @@ use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::Resolved;
 use crate::constants::MILLISECONDS_PER_SECOND;
+use crate::layout::BoundingBox;
 use crate::layout::LayoutEngine;
 use crate::layout::LayoutResult;
 use crate::layout::LayoutTree;
@@ -191,7 +192,7 @@ fn commit_layout_result(
     result: LayoutResult,
     entity: Entity,
 ) {
-    if let Some(bounds) = result.panel_bounds() {
+    if let Some(bounds) = panel_surface_bounds(&result) {
         let s = panel_ref.points_to_world();
         computed.set_content_size(bounds.width * s, bounds.height * s);
     }
@@ -205,6 +206,11 @@ fn commit_layout_result(
         );
     }
     computed.set_result_with_fields(result, field_records, field_id_conflicts);
+}
+
+/// Returns the solved root surface, including root padding and border.
+fn panel_surface_bounds(result: &LayoutResult) -> Option<BoundingBox> {
+    result.computed.first().map(|computed| computed.bounds)
 }
 
 /// Resolves `Fit`-axis world panels to their panel-surface bounds.
@@ -232,7 +238,7 @@ pub(super) fn resolve_world_panel_fit(
             CoordinateSpace::Screen { .. } => continue,
         };
 
-        if let Some(bounds) = computed.result().and_then(LayoutResult::panel_bounds) {
+        if let Some(bounds) = computed.result().and_then(panel_surface_bounds) {
             let layout_to_points = panel.layout_unit().to_points();
             if layout_to_points > 0.0 {
                 let horizontal_content = bounds.width / layout_to_points;
@@ -280,6 +286,7 @@ mod tests {
     use bevy::window::Window;
     use bevy_kana::ToF32;
 
+    use super::panel_surface_bounds;
     use crate::Anchor;
     use crate::Border;
     use crate::El;
@@ -678,9 +685,8 @@ mod tests {
             .expect("computed panel should exist")
             .result()
             .expect("layout result should exist");
-        let surface_bounds = result
-            .panel_bounds()
-            .expect("root surface bounds should exist");
+        let surface_bounds =
+            panel_surface_bounds(result).expect("root surface bounds should exist");
         let inner_bounds = result
             .content_bounds()
             .expect("inner content bounds should exist");

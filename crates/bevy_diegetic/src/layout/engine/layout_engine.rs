@@ -192,24 +192,14 @@ pub struct LayoutResult {
 }
 
 impl LayoutResult {
-    /// Returns the bounding box of the solved root element.
-    ///
-    /// This is the panel's physical layout surface: it includes the root's
-    /// padding and border. Fit-sized panels use this for their stored viewport
-    /// size so root chrome is not clipped away.
-    #[must_use = "callers use the panel bounds to resolve fit-sized panels"]
-    pub(crate) fn panel_bounds(&self) -> Option<BoundingBox> {
-        self.computed.first().map(|c| c.bounds)
-    }
-
     /// Returns the bounding box of the root's first child.
     ///
     /// For trees built with [`crate::layout::LayoutBuilder::new`], element 0 is
     /// the implicit root and element 1 is the first user-defined element. For
     /// trees built with [`crate::layout::LayoutBuilder::with_root`], element 0
-    /// is the authored root and element 1 is its first child. Use
-    /// [`Self::panel_bounds`] when a caller needs the physical root surface
-    /// including root padding and border.
+    /// is the authored root and element 1 is its first child. Use element 0's
+    /// bounds when a caller needs the physical root surface including root
+    /// padding and border.
     ///
     /// Returns `None` if the root has no child element.
     #[must_use = "callers use the content bounds to resolve fit-sized panels"]
