@@ -69,7 +69,7 @@ use crate::render::analytic_paths::PathAtlasHandles;
 use crate::render::batch_key;
 use crate::render::draw_order;
 use crate::render::draw_order::DrawCommandDepth;
-use crate::render::draw_order::DrawOrderProjection;
+use crate::render::draw_order::DrawOrder;
 use crate::render::material_table;
 use crate::render::material_table::FrameMaterialTableBuild;
 use crate::render::material_table::FrameMaterialTableBuilder;
@@ -519,7 +519,8 @@ struct PanelShapeMergeKey {
 /// Opaque material-source facts that require separate `PathRenderRecord` rows.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct PanelShapeMaterialIdentity {
-    /// Resolved `StandardMaterial` asset id used before table-row projection.
+    /// Resolved `StandardMaterial` asset id used before `FrameMaterialTable`
+    /// row assignment.
     source_material: AssetId<StandardMaterial>,
     /// Authored base-color source identity when the color is not the default.
     base_color:      PanelShapeBaseColorIdentity,
@@ -573,7 +574,7 @@ impl PanelShapeMergeKey {
             clip:              source.primitive.clip().map(bounding_box_bits),
             owner_bounds:      bounding_box_bits(source.line.owner_bounds()),
             layering:          [
-                source.draw_depth.depth_bias().get().to_bits(),
+                source.draw_depth.clip_depth_nudge().get().to_bits(),
                 source.draw_depth.oit_depth_offset().get().to_bits(),
             ],
             material_identity: PanelShapeMaterialIdentity::from_source(source, source_material),
@@ -746,7 +747,7 @@ const fn is_hidden(visibility: Option<&Visibility>) -> bool {
 fn collect_panel_records(
     context: &PanelShapeReconcileContext<'_>,
     render_commands: &[RenderCommand],
-    draw_order: &DrawOrderProjection,
+    draw_order: &DrawOrder,
     material_table: &mut FrameMaterialTableBuilder,
     source_entities: &HashMap<PanelShapeSourceKey, Entity>,
 ) -> Vec<(PathBatchKey, ShapeBatchRecord)> {
@@ -762,7 +763,7 @@ fn collect_panel_records(
 
 fn collect_line_primitives<'a>(
     render_commands: &'a [RenderCommand],
-    draw_order: &DrawOrderProjection,
+    draw_order: &DrawOrder,
     source_entities: &HashMap<PanelShapeSourceKey, Entity>,
 ) -> Vec<ShapePrimitiveSource<'a>> {
     let mut primitives = Vec::new();
@@ -905,9 +906,9 @@ fn build_panel_line_group(
     )?;
     // A merged silhouette has one depth; the lowest member offset keeps the
     // group at the depth the front-most authoring order produced alone.
-    let depth_bias = members
+    let clip_depth_nudge = members
         .iter()
-        .map(|source| primitive_depth_bias(source))
+        .map(|source| primitive_clip_depth_nudge(source))
         .fold(f32::INFINITY, f32::min);
     let oit_depth_offset = members
         .iter()
@@ -962,7 +963,7 @@ fn build_panel_line_group(
         transform: context.panel_transform,
         material: appended.slot.into(),
         render_mode: u32::from(RenderMode::Text),
-        clip_depth_nudge: depth_bias,
+        clip_depth_nudge,
         oit_depth_offset,
         aa_flags: anti_alias.aa_flags(),
         text_coverage_bias: 0.0,
@@ -1027,10 +1028,10 @@ fn panel_shape_path_members<'a>(
         .collect()
 }
 
-fn primitive_depth_bias(source: &ShapePrimitiveSource<'_>) -> f32 {
+fn primitive_clip_depth_nudge(source: &ShapePrimitiveSource<'_>) -> f32 {
     let line_depth = line_depth_order(source.line).to_f32().mul_add(
         PANEL_LINE_LINE_DEPTH_BIAS_STEP,
-        source.draw_depth.depth_bias().get(),
+        source.draw_depth.clip_depth_nudge().get(),
     );
     source
         .primitive
@@ -2302,7 +2303,9 @@ mod tests {
             primitive: &second.primitives()[0],
         };
 
-        assert!(primitive_depth_bias(&second_source) > primitive_depth_bias(&first_source));
+        assert!(
+            primitive_clip_depth_nudge(&second_source) > primitive_clip_depth_nudge(&first_source)
+        );
         assert!(
             primitive_oit_depth_offset(&second_source) > primitive_oit_depth_offset(&first_source)
         );
@@ -2366,10 +2369,10 @@ mod tests {
             z_index:     DrawZIndex::default(),
         }];
 
-        let projection = DrawOrderProjection::from_commands(&commands);
+        let draw_order = DrawOrder::from_commands(&commands);
         let mut source_entities = HashMap::new();
         source_entities.insert(source_key, Entity::from_bits(10));
-        let collected = collect_line_primitives(&commands, &projection, &source_entities);
+        let collected = collect_line_primitives(&commands, &draw_order, &source_entities);
 
         assert_eq!(collected.len(), 1);
         assert_eq!(collected[0].primitive.clip(), Some(inherited_clip));
@@ -2795,8 +2798,8 @@ mod tests {
         commands: &[RenderCommand],
         command_index: usize,
     ) -> DrawCommandDepth {
-        let projection = DrawOrderProjection::from_commands(commands);
-        match projection.depth_for(command_index) {
+        let draw_order = DrawOrder::from_commands(commands);
+        match draw_order.depth_for(command_index) {
             Some(draw_depth) => draw_depth,
             None => panic!("line command should receive draw depth"),
         }

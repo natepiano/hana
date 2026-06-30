@@ -6,6 +6,8 @@
 //! when analytic text looks too thin under HDR, especially dark text on light
 //! backgrounds.
 
+use std::fmt::Write as _;
+
 use bevy::camera::Hdr;
 use bevy::camera::primitives::Aabb;
 use bevy::core_pipeline::tonemapping::Tonemapping;
@@ -61,6 +63,8 @@ use fairy_dust::FairyDustOrbitCam;
 use fairy_dust::StatsPanelRow;
 use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
+use fairy_dust::TitleBarControl;
+use fairy_dust::TitleBarSegment;
 use fairy_dust::diegetic_stats_sections_panel;
 use fairy_dust::diegetic_stats_sections_tree;
 use fairy_dust::screen_panel_frame;
@@ -123,11 +127,15 @@ const MIXED_PANEL_STATS: PanelStats = PanelStats {
 const SDF_ANIMATION_GREEN_OFFSET: f32 = 2.1;
 const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
 const SDF_ANIMATION_SPEED: f32 = 0.9;
-const FPS_UPDATE_INTERVAL: f32 = 1.0;
+const DIAGNOSTIC_UPDATE_INTERVAL: f32 = 1.0;
 const HDR_CONTROL: &str = "R HDR";
 const BLOOM_CONTROL: &str = "B Bloom";
 const TONEMAPPING_CONTROL: &str = "T Tonemapping";
-const TEXT_COVERAGE_CONTROL: &str = "[] Text coverage";
+const TEXT_COVERAGE_CONTROL: &str = "Text Coverage";
+const TEXT_COVERAGE_LEFT_SEGMENT: &str = "text-coverage-left";
+const TEXT_COVERAGE_RIGHT_SEGMENT: &str = "text-coverage-right";
+const TEXT_COVERAGE_TARGET_VALUE_SEGMENT: &str = "text-coverage-target-value";
+const TEXT_COVERAGE_ACTIVE_VALUE_SEGMENT: &str = "text-coverage-active-value";
 
 // One render family's live batch decomposition, paired for the breakdown table.
 struct FamilyBreakdown<'a> {
@@ -235,6 +243,8 @@ const LEDGER_FONT_SIZE: f32 = 10.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
 const LEDGER_ROW_GAP: f32 = 2.0;
 const LEDGER_CELL_GAP: f32 = 4.0;
+const LEDGER_BREAKDOWN_CELL_GAP: f32 = 2.0;
+const LEDGER_BREAKDOWN_NUM_WIDTH: f32 = 22.0;
 const LEDGER_BATCH_REASON_MEASURE: &str = "L31 untextured shadow alphatocoverage";
 const LEDGER_MATERIAL_LABEL_MEASURE: &str = "upload us";
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
@@ -334,8 +344,6 @@ const TEXT_COVERAGE_BIAS_STEP: f32 = 0.1;
 const TEXT_COVERAGE_BIAS_RATE: f32 = 0.8;
 const TEXT_COVERAGE_BIAS_MIN: f32 = -4.0;
 const TEXT_COVERAGE_BIAS_MAX: f32 = 4.0;
-const TEXT_COVERAGE_ROW_GAP: f32 = 2.0;
-const TEXT_COVERAGE_ROW_WIDTH: f32 = 150.0;
 
 /// The alpha mode the SDF panel fills/borders and the Text panel alpha case
 /// currently render in, chosen from [`ALPHA_MODES`] by the center-left selector.
@@ -555,16 +563,13 @@ struct AlphaSelectorPanel;
 struct TonemappingSelectorPanel;
 
 #[derive(Component)]
-struct TextCoverageSelectorPanel;
-
-#[derive(Component)]
 struct BatchValidationStatsPanel;
 
 #[derive(Component)]
 struct BatchValidationLedgerPanel;
 
 #[derive(Resource, Default)]
-struct LastDisplayedStats {
+struct LastDisplayedDiagnostics {
     key: String,
 }
 
@@ -666,19 +671,25 @@ fn main() {
         .yaw(0.0)
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)
-        .with_title_bar(
-            TitleBar::new()
-                .with_title("Batch Validation")
-                .with_anchor(Anchor::TopLeft)
-                .active_control(HDR_CONTROL)
-                .active_control(BLOOM_CONTROL)
-                .active_control(TONEMAPPING_CONTROL)
-                .active_control(TEXT_COVERAGE_CONTROL),
-        )
+        .with_title_bar(batch_validation_title_bar(0.0, 0.0))
         .wire_chip_to_state::<RenderFeatures, _>(HDR_CONTROL, |features| features.hdr.activation())
         .wire_chip_to_state::<RenderFeatures, _>(BLOOM_CONTROL, |features| {
             features.bloom.activation()
         })
+        .wire_chip_to_state::<ButtonInput<KeyCode>, _>(TEXT_COVERAGE_LEFT_SEGMENT, |keyboard| {
+            activation_for(keyboard.pressed(KeyCode::BracketLeft))
+        })
+        .wire_chip_to_state::<ButtonInput<KeyCode>, _>(TEXT_COVERAGE_RIGHT_SEGMENT, |keyboard| {
+            activation_for(keyboard.pressed(KeyCode::BracketRight))
+        })
+        .wire_chip_to_state::<HdrTextCoverageSelection, _>(
+            TEXT_COVERAGE_TARGET_VALUE_SEGMENT,
+            |_selection| ControlActivation::Active,
+        )
+        .wire_chip_to_state::<CascadeDefault<HdrTextCoverageBias>, _>(
+            TEXT_COVERAGE_ACTIVE_VALUE_SEGMENT,
+            |_active_bias| ControlActivation::Active,
+        )
         .with_camera_control_panel()
         .with_shortcut(ALPHA_KEYS[0], select_alpha::<0>)
         .with_shortcut(ALPHA_KEYS[1], select_alpha::<1>)
@@ -690,7 +701,7 @@ fn main() {
         .with_shortcut(KeyCode::KeyR, toggle_hdr)
         .with_shortcut(KeyCode::KeyB, toggle_bloom)
         .with_shortcut(KeyCode::KeyT, cycle_tonemapping)
-        .init_resource::<LastDisplayedStats>()
+        .init_resource::<LastDisplayedDiagnostics>()
         .init_resource::<AlphaModeSelection>()
         .init_resource::<TonemappingSelection>()
         .init_resource::<HdrTextCoverageSelection>()
@@ -704,20 +715,20 @@ fn main() {
                 spawn_expected_batches_panel,
                 spawn_alpha_selector_panel,
                 spawn_tonemapping_selector_panel,
-                spawn_text_coverage_selector_panel,
             ),
         )
         .add_observer(anchor_alpha_selector_when_added)
         .add_observer(anchor_alpha_selector_when_title_added)
         .add_observer(anchor_tonemapping_selector_when_added)
         .add_observer(anchor_tonemapping_selector_when_alpha_added)
-        .add_observer(anchor_text_coverage_selector_when_added)
-        .add_observer(anchor_text_coverage_selector_when_tonemapping_added)
         .add_observer(apply_render_features_to_added_camera)
         .add_observer(apply_tonemapping_to_added_camera)
         .add_observer(apply_render_features_to_added_orbit_camera)
-        .add_systems(Update, validate_batch_counts.before(update_stats_panel))
-        .add_systems(Update, update_stats_panel)
+        .add_systems(
+            Update,
+            validate_batch_counts.before(update_diagnostic_panels),
+        )
+        .add_systems(Update, update_diagnostic_panels)
         .add_systems(Update, animate_sdf_surface_panel)
         .add_systems(Update, apply_alpha_selection)
         .add_systems(Update, apply_tonemapping_selection)
@@ -726,7 +737,7 @@ fn main() {
             (
                 adjust_text_coverage_bias,
                 apply_text_coverage_bias_default,
-                update_text_coverage_selector_panel,
+                update_text_coverage_title_bar,
             )
                 .chain(),
         )
@@ -867,6 +878,44 @@ const fn batch_validation_bloom() -> Bloom {
 
 const fn configure_batch_validation_bloom(bloom: &mut Bloom) { *bloom = batch_validation_bloom(); }
 
+fn batch_validation_title_bar(target_bias: f32, active_bias: f32) -> TitleBar {
+    TitleBar::new()
+        .with_title("Batch Validation")
+        .with_anchor(Anchor::TopLeft)
+        .active_control(HDR_CONTROL)
+        .active_control(BLOOM_CONTROL)
+        .active_control(TONEMAPPING_CONTROL)
+        .control(text_coverage_title_control(target_bias, active_bias))
+}
+
+fn text_coverage_title_control(target_bias: f32, active_bias: f32) -> TitleBarControl {
+    TitleBarControl::segmented(
+        TEXT_COVERAGE_CONTROL,
+        [
+            TitleBarSegment::new(TEXT_COVERAGE_LEFT_SEGMENT, "["),
+            TitleBarSegment::new(TEXT_COVERAGE_RIGHT_SEGMENT, "]"),
+            TitleBarSegment::new("text-coverage-target-label", "target"),
+            TitleBarSegment::new(
+                TEXT_COVERAGE_TARGET_VALUE_SEGMENT,
+                format!("{target_bias:+.2}"),
+            ),
+            TitleBarSegment::new("text-coverage-active-label", "active"),
+            TitleBarSegment::new(
+                TEXT_COVERAGE_ACTIVE_VALUE_SEGMENT,
+                format!("{active_bias:+.2}"),
+            ),
+        ],
+    )
+}
+
+const fn activation_for(active: bool) -> ControlActivation {
+    if active {
+        ControlActivation::Active
+    } else {
+        ControlActivation::Inactive
+    }
+}
+
 fn toggle_hdr(mut features: ResMut<RenderFeatures>) { features.toggle_hdr(); }
 
 fn toggle_bloom(mut features: ResMut<RenderFeatures>) { features.toggle_bloom(); }
@@ -988,21 +1037,17 @@ fn apply_tonemapping_selection(
     }
 }
 
-fn update_text_coverage_selector_panel(
+fn update_text_coverage_title_bar(
     selection: Res<HdrTextCoverageSelection>,
-    features: Res<RenderFeatures>,
     cascade_default: Res<CascadeDefault<HdrTextCoverageBias>>,
-    selectors: Query<Entity, With<TextCoverageSelectorPanel>>,
-    mut commands: Commands,
+    mut title_bars: Query<&mut TitleBar>,
 ) {
-    if !selection.is_changed() && !features.is_changed() && !cascade_default.is_changed() {
+    if !selection.is_changed() && !cascade_default.is_changed() {
         return;
     }
-    for entity in &selectors {
-        commands.set_tree(
-            entity,
-            text_coverage_selector_tree(selection.selected, cascade_default.0.0, features.hdr),
-        );
+    let next_title_bar = batch_validation_title_bar(selection.selected, cascade_default.0.0);
+    for mut title_bar in &mut title_bars {
+        *title_bar = next_title_bar.clone();
     }
 }
 
@@ -1115,7 +1160,7 @@ fn validation_panel(
 }
 
 fn spawn_stats_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
-    let sections = validation_stats_sections(None, 0.0, 0.0);
+    let sections = runtime_stats_sections(None, 0.0, 0.0);
     match diegetic_stats_sections_panel(&sections, &mut materials) {
         Ok(panel) => {
             commands.spawn((BatchValidationStatsPanel, panel, Transform::default()));
@@ -1163,28 +1208,6 @@ fn spawn_tonemapping_selector_panel(
     }
 }
 
-fn spawn_text_coverage_selector_panel(
-    mut commands: Commands,
-    selection: Res<HdrTextCoverageSelection>,
-    features: Res<RenderFeatures>,
-    cascade_default: Res<CascadeDefault<HdrTextCoverageBias>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
-    match build_text_coverage_selector_panel(
-        selection.selected,
-        cascade_default.0.0,
-        features.hdr,
-        &mut materials,
-    ) {
-        Ok(panel) => {
-            commands.spawn((TextCoverageSelectorPanel, panel, Transform::default()));
-        },
-        Err(error) => {
-            error!("batch_validation: failed to build text coverage selector panel: {error}");
-        },
-    }
-}
-
 fn build_alpha_selector_panel(
     index: usize,
     materials: &mut Assets<StandardMaterial>,
@@ -1196,22 +1219,6 @@ fn build_alpha_selector_panel(
         .material(unlit.clone())
         .text_material(unlit)
         .with_tree(alpha_selector_tree(index))
-        .build()
-}
-
-fn build_text_coverage_selector_panel(
-    selected_bias: f32,
-    active_bias: f32,
-    hdr: RenderFeature,
-    materials: &mut Assets<StandardMaterial>,
-) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
-    let unlit = materials.add(screen_panel_material());
-    DiegeticPanel::screen()
-        .size(Fit, Fit)
-        .anchor(Anchor::TopLeft)
-        .material(unlit.clone())
-        .text_material(unlit)
-        .with_tree(text_coverage_selector_tree(selected_bias, active_bias, hdr))
         .build()
 }
 
@@ -1295,40 +1302,6 @@ fn anchor_tonemapping_selector_when_alpha_added(
     }
 }
 
-// Pins the text coverage selector under the tonemapping selector so HDR,
-// tonemapping, and coverage controls stay together.
-fn text_coverage_selector_tonemapping_anchor(tonemapping_selector: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(tonemapping_selector, Anchor::TopLeft, Anchor::BottomLeft)
-        .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
-}
-
-fn anchor_text_coverage_selector_when_added(
-    trigger: On<Add, TextCoverageSelectorPanel>,
-    tonemapping_selectors: Query<Entity, With<TonemappingSelectorPanel>>,
-    mut commands: Commands,
-) {
-    let Ok(tonemapping_selector) = tonemapping_selectors.single() else {
-        return;
-    };
-    commands
-        .entity(trigger.entity)
-        .insert(text_coverage_selector_tonemapping_anchor(
-            tonemapping_selector,
-        ));
-}
-
-fn anchor_text_coverage_selector_when_tonemapping_added(
-    trigger: On<Add, TonemappingSelectorPanel>,
-    coverage_selectors: Query<Entity, With<TextCoverageSelectorPanel>>,
-    mut commands: Commands,
-) {
-    for selector in &coverage_selectors {
-        commands
-            .entity(selector)
-            .insert(text_coverage_selector_tonemapping_anchor(trigger.entity));
-    }
-}
-
 // Center-left key legend: a title plus one numbered row per alpha mode. The
 // selected row is tinted and sits on a highlight bar so the current choice is
 // obvious; pressing the matching number key (1-7) selects that mode for the SDF
@@ -1389,58 +1362,6 @@ fn tonemapping_selector_tree(selected: usize) -> LayoutTree {
         },
     );
     builder.build()
-}
-
-// Text coverage bias is a cascading analytic-text value. The panel is
-// deliberately small because the useful test is a visual sweep under HDR: `[`
-// makes text thinner, `]` makes fractional edge pixels more opaque. HDR-off
-// rendering keeps the active cascade value at zero so it remains the comparison
-// baseline.
-fn text_coverage_selector_tree(
-    selected_bias: f32,
-    active_bias: f32,
-    hdr: RenderFeature,
-) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
-    let hdr_label = match hdr {
-        RenderFeature::On => "HDR on",
-        RenderFeature::Off => "HDR off",
-    };
-    let title = format!("text coverage {hdr_label}  ([ ])");
-    screen_panel_frame(
-        &mut builder,
-        Sizing::FIT,
-        Sizing::FIT,
-        DEFAULT_PANEL_BACKGROUND,
-        |builder| {
-            builder.with(
-                El::column()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .gap(TEXT_COVERAGE_ROW_GAP),
-                |builder| {
-                    builder.text((title, ledger_title_style()));
-                    coverage_value_row(builder, "target", &format!("{selected_bias:+.2}"));
-                    coverage_value_row(builder, "active", &format!("{active_bias:+.2}"));
-                },
-            );
-        },
-    );
-    builder.build()
-}
-
-fn coverage_value_row(builder: &mut LayoutBuilder, label: &str, value: &str) {
-    let row = El::row()
-        .width(Sizing::fixed(TEXT_COVERAGE_ROW_WIDTH))
-        .height(Sizing::FIT)
-        .gap(LEDGER_CELL_GAP)
-        .padding(Padding::new(3.0, 3.0, 1.0, 1.0))
-        .corner_radius(CornerRadius::all(Mm(0.8)))
-        .alignment(AlignX::Left, AlignY::Center);
-    builder.with(row, |builder| {
-        builder.text((label, ledger_cell_style(TEXT_MUTED)));
-        builder.text((value, ledger_cell_style(ACCENT_YELLOW)));
-    });
 }
 
 fn selector_row(
@@ -1511,20 +1432,21 @@ fn validate_batch_counts(
     };
 }
 
-fn update_stats_panel(
+fn update_diagnostic_panels(
     time: Res<Time>,
     diagnostics: Res<DiagnosticsStore>,
     diegetic_perf: Res<DiegeticPerfStats>,
     selection: Res<AlphaModeSelection>,
     validation: Res<ValidationStatus>,
-    panels: Query<Entity, With<BatchValidationStatsPanel>>,
+    stats_panels: Query<Entity, With<BatchValidationStatsPanel>>,
     ledger_panels: Query<Entity, With<BatchValidationLedgerPanel>>,
-    mut last: ResMut<LastDisplayedStats>,
+    mut last: ResMut<LastDisplayedDiagnostics>,
     mut commands: Commands,
     mut timer: Local<Option<Timer>>,
 ) {
-    let timer =
-        timer.get_or_insert_with(|| Timer::from_seconds(FPS_UPDATE_INTERVAL, TimerMode::Repeating));
+    let timer = timer.get_or_insert_with(|| {
+        Timer::from_seconds(DIAGNOSTIC_UPDATE_INTERVAL, TimerMode::Repeating)
+    });
     timer.tick(time.delta());
     if !timer.just_finished() {
         return;
@@ -1533,20 +1455,19 @@ fn update_stats_panel(
     let fps = diagnostics
         .get(&FrameTimeDiagnosticsPlugin::FPS)
         .and_then(Diagnostic::smoothed);
-    let sections =
-        validation_stats_sections(Some(&diegetic_perf), fps.unwrap_or(0.0), time.delta_secs());
+    let stats_sections =
+        runtime_stats_sections(Some(&diegetic_perf), fps.unwrap_or(0.0), time.delta_secs());
     let key = format!(
-        "{}|alpha={}|val={}",
-        stats_key(&sections),
-        selection.index,
-        validation_key(&validation.state)
+        "{}|{}",
+        runtime_stats_key(&stats_sections),
+        ledger_key(&diegetic_perf, &validation.state, selection.index)
     );
     if key == last.key {
         return;
     }
     last.key = key;
-    for panel in &panels {
-        commands.set_tree(panel, diegetic_stats_sections_tree(&sections));
+    for panel in &stats_panels {
+        commands.set_tree(panel, diegetic_stats_sections_tree(&stats_sections));
     }
     for panel in &ledger_panels {
         commands.set_tree(
@@ -1554,6 +1475,36 @@ fn update_stats_panel(
             expected_batches_tree(Some(&diegetic_perf), &validation.state),
         );
     }
+}
+
+fn ledger_key(perf: &DiegeticPerfStats, state: &ValidationState, alpha_index: usize) -> String {
+    let mut key = format!("alpha={alpha_index}|val={}|", validation_key(state));
+    for family in family_breakdowns(perf) {
+        key.push_str(family.label);
+        key.push('=');
+        key.push_str(&family.batch_count.to_string());
+        key.push('/');
+        key.push_str(&family.record_total.to_string());
+        key.push('|');
+        for batch in family.batches {
+            key.push_str(&batch_reason(batch));
+            key.push(':');
+            key.push_str(&batch.record_count.to_string());
+            key.push('|');
+        }
+    }
+    let table = perf.material_table;
+    let _ = write!(
+        key,
+        "mat={}/{}/{}/{}/{}/{}",
+        table.rows,
+        table.capacity,
+        table.upload_bytes,
+        table.freeze_us,
+        table.upload_us,
+        table.allocations
+    );
+    key
 }
 
 // Short discriminant for the dedup key so the ledger rebuilds when the
@@ -1566,73 +1517,29 @@ fn validation_key(state: &ValidationState) -> String {
     }
 }
 
-fn validation_stats_sections(
+fn runtime_stats_sections(
     perf: Option<&DiegeticPerfStats>,
     fps: f64,
     frame_secs: f32,
 ) -> Vec<StatsPanelSection> {
     let perf = perf.cloned().unwrap_or_default();
     let batch = &perf.batch;
-    let shape_batch = perf.line_batch;
-    let sdf = perf.panel_geometry;
-    let material_table = perf.material_table;
-    let current_draws = sdf.sdf_batches + batch.batches + shape_batch.batches;
     let frame_ms = frame_secs * 1000.0;
-    vec![
-        StatsPanelSection::untitled([
-            StatsPanelRow::new(
-                "profile",
-                if cfg!(debug_assertions) {
-                    "debug"
-                } else {
-                    "release"
-                },
-            ),
-            StatsPanelRow::new("fps", format!("{fps:.0} / {frame_ms:.2} ms")),
-        ]),
-        StatsPanelSection::new(
-            "observed renderer",
-            [
-                StatsPanelRow::new("sdf batches", sdf.sdf_batches.to_string()),
-                StatsPanelRow::new("sdf records", sdf.sdf_records.to_string()),
-                StatsPanelRow::new("text batches", batch.batches.to_string()),
-                StatsPanelRow::new("text runs", batch.runs.to_string()),
-                StatsPanelRow::new("text glyphs", batch.glyph_records.to_string())
-                    .detail("live glyph instance records"),
-                StatsPanelRow::new(
-                    "text uploads",
-                    (batch.instance_uploads + batch.run_table_uploads).to_string(),
-                )
-                .detail(format!(
-                    "instance {} + run-table {}",
-                    batch.instance_uploads, batch.run_table_uploads
-                )),
-                StatsPanelRow::new("shape batches", shape_batch.batches.to_string()),
-                StatsPanelRow::new("path records", shape_batch.records.to_string()),
-                StatsPanelRow::new("shape uploads", shape_batch.uploads.to_string()),
-                StatsPanelRow::new("draws today", current_draws.to_string()).detail(format!(
-                    "sdf {} + text {} + shapes {}",
-                    sdf.sdf_batches, batch.batches, shape_batch.batches
-                )),
-            ],
+    vec![StatsPanelSection::untitled([
+        StatsPanelRow::new(
+            "profile",
+            if cfg!(debug_assertions) {
+                "debug"
+            } else {
+                "release"
+            },
         ),
-        StatsPanelSection::new(
-            "material table",
-            [
-                StatsPanelRow::new("sdf batches", sdf.sdf_batches.to_string())
-                    .detail("scalar/vector materials share; texture resource splits"),
-                StatsPanelRow::new("sdf records", sdf.sdf_records.to_string()),
-                StatsPanelRow::new("sdf uploads", sdf.sdf_uploads.to_string()),
-                StatsPanelRow::new("table rows", material_table.rows.to_string()),
-                StatsPanelRow::new("table bytes", material_table.upload_bytes.to_string()),
-                StatsPanelRow::new("table capacity", material_table.capacity.to_string())
-                    .detail("row capacity stays steady during SDF material animation"),
-            ],
-        ),
-    ]
+        StatsPanelRow::new("fps", format!("{fps:.0} / {frame_ms:.2} ms")),
+        StatsPanelRow::new("text runs", batch.runs.to_string()),
+    ])]
 }
 
-fn stats_key(sections: &[StatsPanelSection]) -> String {
+fn runtime_stats_key(sections: &[StatsPanelSection]) -> String {
     let mut key = String::new();
     for section in sections {
         key.push_str(&section.title);
@@ -1686,7 +1593,7 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationSt
                     .height(Sizing::FIT)
                     .gap(LEDGER_ROW_GAP),
                 |builder| {
-                    ledger_batch_section(builder, &families);
+                    ledger_batch_section(builder, &perf, &families);
 
                     // Per-frame cost of rebuilding and re-uploading the whole
                     // material table. freeze/upload us are paid every frame even
@@ -1714,7 +1621,11 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationSt
     builder.build()
 }
 
-fn ledger_batch_section(builder: &mut LayoutBuilder, families: &[FamilyBreakdown<'_>; 3]) {
+fn ledger_batch_section(
+    builder: &mut LayoutBuilder,
+    perf: &DiegeticPerfStats,
+    families: &[FamilyBreakdown<'_>; 3],
+) {
     builder.with(
         El::column()
             .width(Sizing::GROW)
@@ -1749,6 +1660,16 @@ fn ledger_batch_section(builder: &mut LayoutBuilder, families: &[FamilyBreakdown
                 "records/draw",
                 TEXT_MAIN,
                 families.each_ref().map(records_per_draw),
+            );
+            ledger_row(
+                builder,
+                "uploads",
+                TEXT_MAIN,
+                [
+                    (perf.batch.instance_uploads + perf.batch.run_table_uploads).to_string(),
+                    perf.line_batch.uploads.to_string(),
+                    perf.panel_geometry.sdf_uploads.to_string(),
+                ],
             );
 
             for family in families {
@@ -1828,6 +1749,18 @@ fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
     );
 }
 
+fn ledger_breakdown_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(LEDGER_BREAKDOWN_NUM_WIDTH))
+            .height(Sizing::FIT)
+            .alignment(AlignX::Right, AlignY::Center),
+        |builder| {
+            builder.text((value, ledger_cell_style(color)));
+        },
+    );
+}
+
 // The three-column family row: a left label, a GROW spacer, then text / shape /
 // sdf numbers right-aligned at the panel's padding edge.
 fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cells: [String; 3]) {
@@ -1855,9 +1788,9 @@ fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cell
     );
 }
 
-// Breakdown section header: the family label keeps its natural width, then a
-// grow spacer pushes "records" to the right. Follow-on rows reserve the longest
-// possible batch-reason label separately.
+// Breakdown section header owns only the section label and the "records" column
+// heading. Draw rows below use their own fit-width layout so this header text
+// does not widen the reason/value pair.
 fn ledger_breakdown_header(builder: &mut LayoutBuilder, label: &str, color: Color) {
     builder.with(
         El::row()
@@ -1889,14 +1822,15 @@ fn ledger_breakdown_header(builder: &mut LayoutBuilder, label: &str, color: Colo
     );
 }
 
-// One breakdown row: a left label (the batch's split reason), a GROW spacer, and
-// a single record count right-aligned under the rightmost family column.
+// One breakdown row: a measured reason label plus a nearby record count. No
+// grow spacer here: long reasons should land close to their count instead of
+// stretching to the wider section header.
 fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
     builder.with(
         El::row()
-            .width(Sizing::GROW)
+            .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .gap(LEDGER_CELL_GAP)
+            .gap(LEDGER_BREAKDOWN_CELL_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
             builder.with(
@@ -1911,8 +1845,7 @@ fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: 
                     );
                 },
             );
-            ledger_spacer(builder);
-            ledger_num_cell(builder, value, color);
+            ledger_breakdown_num_cell(builder, value, color);
         },
     );
 }

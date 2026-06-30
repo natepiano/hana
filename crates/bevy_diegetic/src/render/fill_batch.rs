@@ -296,7 +296,7 @@ pub(crate) struct SdfBatchKey {
     pub layers:                 BatchRenderLayers,
     /// Shadow participation for this batch.
     pub shadow:                 VisualShadow,
-    /// Maximal compatible command run in `DrawCommandDepth::ordinal_index()` order.
+    /// Maximal compatible command run in `DrawCommandDepth::draw_order_index()` order.
     pub contiguous_drawn_run:   ContiguousDrawnRun,
     /// Material-derived pipeline facts that must agree inside this SDF draw.
     pub pipeline_compatibility: PipelineCompatibility,
@@ -326,7 +326,7 @@ pub(crate) struct ResolvedSdfBatchRecord {
     pub fill_source:      SdfMaterialSourceKey,
     /// Border material source identity.
     pub border_source:    SdfMaterialSourceKey,
-    /// Full draw-depth projection for this command.
+    /// `DrawCommandDepth` for this command.
     pub draw_depth:       DrawCommandDepth,
     /// Batch key selected while appending frame material rows.
     pub batch_key:        SdfBatchKey,
@@ -415,7 +415,7 @@ impl ResolvedSdfBatchRecord {
             fill_material: materials.fill,
             border_material: materials.border,
             paint_mask,
-            clip_depth_nudge: surface.draw_depth.depth_bias().get()
+            clip_depth_nudge: surface.draw_depth.clip_depth_nudge().get()
                 - draw_order::sdf_surface_batch_depth_bias(surface.draw_depth.z_index()).get()
                 - opaque_fill_depth_push(
                     materials.pipeline_compatibility.alpha,
@@ -562,8 +562,8 @@ impl SdfBatch {
     fn sort_records(&mut self) {
         self.records.sort_by(|left, right| {
             left.draw_depth
-                .panel_draw_command_rank_index()
-                .cmp(&right.draw_depth.panel_draw_command_rank_index())
+                .draw_order_index()
+                .cmp(&right.draw_depth.draw_order_index())
                 .then(
                     left.record_key
                         .command_index
@@ -1058,8 +1058,8 @@ pub(crate) fn assign_contiguous_runs(
     for (_, mut partition) in by_layers {
         partition.sort_by(|(_, left), (_, right)| {
             left.draw_depth
-                .panel_draw_command_rank_index()
-                .cmp(&right.draw_depth.panel_draw_command_rank_index())
+                .draw_order_index()
+                .cmp(&right.draw_depth.draw_order_index())
                 .then(left.command_index.cmp(&right.command_index))
         });
 
@@ -3083,8 +3083,7 @@ mod tests {
         assert_eq!(records[0].record_key.command_index, CommandIndex::from(0));
         assert_eq!(records[1].record_key.command_index, CommandIndex::from(1));
         assert!(
-            records[0].draw_depth.panel_draw_command_rank_index()
-                <= records[1].draw_depth.panel_draw_command_rank_index()
+            records[0].draw_depth.draw_order_index() <= records[1].draw_depth.draw_order_index()
         );
         assert!(records[0].oit_depth_offset < records[1].oit_depth_offset);
     }
@@ -3365,7 +3364,7 @@ mod tests {
                 z_index: DrawZIndex(0),
             })
             .collect();
-        draw_order::DrawOrderProjection::from_commands(&commands)
+        draw_order::DrawOrder::from_commands(&commands)
             .depth_for(index)
             .expect("draw command should have depth")
     }

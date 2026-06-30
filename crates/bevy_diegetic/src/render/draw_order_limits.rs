@@ -9,7 +9,7 @@ use super::constants::OIT_FOCUS_DEPTH;
 use crate::layout::DrawZIndex;
 use crate::panel::ComputedDiegeticPanel;
 
-/// Warns when a panel's draw-order projection reaches the OIT depth budget.
+/// Warns when a panel's `DrawOrder` reaches the OIT depth budget.
 pub(super) fn warn_panel_draw_order_limits(
     changed_panels: Query<(Entity, &ComputedDiegeticPanel), Changed<ComputedDiegeticPanel>>,
 ) {
@@ -27,8 +27,8 @@ fn warn_panel_draw_order_limit_counts(
     if oit_total_overflows(panel_total) {
         warn_once!(
             "panel {:?} has {} total draw commands, reaching the OIT depth budget ({}); the \
-             panel-global ordinal span exhausts 24-bit OIT depth headroom and coplanar ordering \
-             degrades to OIT-list insertion order",
+             panel-global draw-order index span exhausts 24-bit OIT depth headroom and coplanar \
+             ordering degrades to OIT-list insertion order",
             panel_entity,
             panel_total,
             oit_depth_budget(),
@@ -57,7 +57,7 @@ mod tests {
     use crate::layout::RenderCommand;
     use crate::layout::RenderCommandKind;
     use crate::layout::TextStyle;
-    use crate::render::DrawOrderProjection;
+    use crate::render::DrawOrder;
 
     #[test]
     fn oit_total_overflows_at_depth_budget() {
@@ -80,8 +80,8 @@ mod tests {
     #[test]
     fn oit_warning_uses_full_draw_command_count() {
         let budget = oit_depth_budget();
-        let projection = DrawOrderProjection::from_commands(&repeated_commands(text(), budget));
-        let command_counts = projection.command_counts_by_z_index();
+        let draw_order = DrawOrder::from_commands(&repeated_commands(text(), budget));
+        let command_counts = draw_order.command_counts_by_z_index();
 
         assert_eq!(panel_draw_command_count(&command_counts), budget);
         assert!(oit_total_overflows(panel_draw_command_count(

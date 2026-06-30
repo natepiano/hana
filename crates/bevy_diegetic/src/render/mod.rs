@@ -66,7 +66,7 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 pub(crate) use dirty::Dirty;
 pub(crate) use draw_order::CommandIndex;
-pub(crate) use draw_order::DrawOrderProjection;
+pub(crate) use draw_order::DrawOrder;
 pub(crate) use draw_order::ElementIndex;
 #[expect(
     unused_imports,
@@ -128,8 +128,7 @@ pub(crate) enum PanelChildSystems {
     Build,
 }
 
-/// `PostUpdate` phase that reports draw-order capacity limits from
-/// `DrawOrderProjection`.
+/// `PostUpdate` phase that reports draw-order capacity limits from `DrawOrder`.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DrawOrderLimitSystems {
     /// Warn about per-level screen lanes and OIT ordinal budget.

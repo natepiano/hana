@@ -3,7 +3,7 @@
 use bevy::asset::uuid_handle;
 use bevy::prelude::*;
 
-// Draw-order projection
+// Draw order
 /// Screen-sort position reserved for the shared SDF surface batch within each
 /// authored z-index band.
 pub(crate) const SDF_SURFACE_BATCH_SORT_ANCHOR: i32 = 0;

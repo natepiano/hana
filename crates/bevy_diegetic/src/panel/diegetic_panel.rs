@@ -54,7 +54,7 @@ use crate::layout::Sizing;
 use crate::layout::TextStyle;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
-use crate::render::DrawOrderProjection;
+use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 
 /// A diegetic UI panel attached to a 3D entity.
@@ -1436,7 +1436,7 @@ pub struct ComputedDiegeticPanel {
     #[reflect(ignore)]
     result:             Option<LayoutResult>,
     #[reflect(ignore)]
-    draw_order:         DrawOrderProjection,
+    draw_order:         DrawOrder,
     #[reflect(ignore)]
     field_records:      Vec<PanelFieldRecord>,
     #[reflect(ignore)]
@@ -1489,25 +1489,26 @@ impl ComputedDiegeticPanel {
     #[must_use]
     pub const fn result(&self) -> Option<&LayoutResult> { self.result.as_ref() }
 
-    /// Returns the command-indexed draw-order projection for the latest result.
+    /// Returns the command-indexed `DrawOrder` for the latest result.
     #[must_use]
-    pub(crate) const fn draw_order(&self) -> &DrawOrderProjection { &self.draw_order }
+    pub(crate) const fn draw_order(&self) -> &DrawOrder { &self.draw_order }
 
-    /// Returns the computed layout result mutably, or `None` if not yet computed.
-    pub(super) const fn result_mut(&mut self) -> Option<&mut LayoutResult> { self.result.as_mut() }
+    /// Regenerates `LayoutResult::commands` and keeps `DrawOrder` synchronized.
+    ///
+    /// Returns `false` when the panel has no computed `LayoutResult` yet.
+    pub(super) fn regenerate_commands(&mut self, tree: &LayoutTree) -> bool {
+        let Some(result) = self.result.as_mut() else {
+            return false;
+        };
 
-    pub(super) fn refresh_draw_order_projection(&mut self) {
-        self.draw_order = self
-            .result
-            .as_ref()
-            .map_or_else(DrawOrderProjection::default, |result| {
-                DrawOrderProjection::from_commands(&result.commands)
-            });
+        result.regenerate_commands(tree);
+        self.draw_order = DrawOrder::from_commands(&result.commands);
+        true
     }
 
     /// Stores the computed layout result.
     pub fn set_result(&mut self, result: LayoutResult) {
-        self.draw_order = DrawOrderProjection::from_commands(&result.commands);
+        self.draw_order = DrawOrder::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records.clear();
         self.field_id_conflicts.clear();
@@ -1519,7 +1520,7 @@ impl ComputedDiegeticPanel {
         field_records: Vec<PanelFieldRecord>,
         field_id_conflicts: Vec<crate::PanelElementId>,
     ) {
-        self.draw_order = DrawOrderProjection::from_commands(&result.commands);
+        self.draw_order = DrawOrder::from_commands(&result.commands);
         self.result = Some(result);
         self.field_records = field_records;
         self.field_id_conflicts = field_id_conflicts;

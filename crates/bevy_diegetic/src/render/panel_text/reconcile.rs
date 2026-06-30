@@ -29,7 +29,7 @@ use crate::panel::PanelPrecomposeCache;
 use crate::render::clip;
 use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::draw_order::DrawCommandDepth;
-use crate::render::draw_order::DrawOrderProjection;
+use crate::render::draw_order::DrawOrder;
 use crate::render::world_text::TextContent;
 
 /// A reused panel-text child plus the components reconcile compares incoming
@@ -70,7 +70,7 @@ type PendingTextChild = (
 fn collect_text_commands(
     panel: &DiegeticPanel,
     commands: &[RenderCommand],
-    draw_order: &DrawOrderProjection,
+    draw_order: &DrawOrder,
     clip_rects: &[Option<BoundingBox>],
     viewport: BoundingBox,
 ) -> Vec<PendingTextChild> {
@@ -238,8 +238,8 @@ pub(super) fn reconcile_panel_text_children(
                 id: id.clone(),
                 line_index: *line_index,
                 element_idx: *element_idx,
-                draw_ordinal: draw_depth.panel_draw_command_rank_index(),
-                depth_bias: draw_depth.depth_bias().get(),
+                draw_ordinal: draw_depth.draw_order_index(),
+                depth_bias: draw_depth.clip_depth_nudge().get(),
                 oit_depth_offset: draw_depth.oit_depth_offset().get(),
                 bounds: *bounds,
                 scale_x,
@@ -741,7 +741,7 @@ fn build_image_visuals(
         double_sided: true,
         cull_mode: None,
         alpha_mode: AlphaMode::Blend,
-        depth_bias: incoming.draw_depth.depth_bias().get(),
+        depth_bias: incoming.draw_depth.screen_depth_bias().get(),
         ..default()
     });
 

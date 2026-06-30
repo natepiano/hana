@@ -1,7 +1,7 @@
-//! Projects panel render commands into draw-order values.
+//! Stores the draw order for one panel command stream.
 //!
-//! The projection maps each `(DrawZIndex, DrawSortTier, command_index)` key from
-//! a panel command stream to a screen [`ScreenDepthBias`] and an OIT
+//! `DrawOrder` maps each `(DrawZIndex, DrawSortTier, CommandIndex)` key from a
+//! panel command stream to a screen [`ScreenDepthBias`] and an OIT
 //! [`OitDepthOffset`].
 //!
 //! Each authored z-index owns one screen-sort band. The shared SDF surface
@@ -9,13 +9,15 @@
 //! [`FIRST_COMMAND_SORT_OFFSET`] and have [`COMMAND_SORT_OFFSET_CAPACITY`]
 //! reserved positions, and text uses [`TEXT_BATCH_SORT_ANCHOR`].
 //!
-//! [`OitDepthOffset`] is a panel-global ordinal span added to `position.z` and
-//! packed into 24-bit depth. [`OIT_DEPTH_STEP`] keeps adjacent layers about 17
-//! quanta apart, and the panel-global command total is bounded by
-//! `OIT_FOCUS_DEPTH / OIT_DEPTH_STEP`.
+//! [`OitDepthOffset`] is a panel-global draw-order index span added to
+//! `position.z` and packed into 24-bit depth. [`OIT_DEPTH_STEP`] keeps adjacent
+//! layers about 17 quanta apart, and the panel-global command total is bounded
+//! by `OIT_FOCUS_DEPTH / OIT_DEPTH_STEP`.
 //!
-//! The ceilings are independent: per-level band occupancy for screen ordering,
-//! and panel-global command total for OIT ordering.
+//! The active warning threshold is the panel-global command total for OIT
+//! ordering. Dense authored z-index bands are allowed; they only matter when
+//! actual overlapping fragments need finer ordering than the selected transport
+//! can preserve.
 
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
@@ -62,17 +64,15 @@ pub(crate) struct PrimitiveOrdinal(
     u32,
 );
 
-/// Shared draw-order ordinal for a panel's coplanar children.
+/// Dense index in one panel's sorted draw-command stream.
 ///
-/// `HierarchicalDrawKey` projection assigns this dense rank once per
-/// `RenderCommand` stream. [`DrawOrderProjection`] converts it into the two
-/// material ordering fields so sorted and OIT views use the same order.
+/// `DrawOrder` assigns this once per draw-participating `RenderCommand`.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) struct PanelDrawCommandRank(i32);
+pub(crate) struct DrawOrderIndex(i32);
 
-/// Dense rank among draw commands that share one `DrawZIndex`.
+/// Screen-sort offset among commands that share one authored `DrawZIndex`.
 #[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
-struct CommandRankInZIndex(i32);
+struct CommandSortOffset(i32);
 
 /// Screen `Transparent3d` sort value.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,18 +82,22 @@ pub(crate) struct ScreenDepthBias(f32);
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct OitDepthOffset(f32);
 
-/// Per-command material ordering values derived from one panel-local ordinal.
+/// Shader clip-depth nudge value for vertex-pulled records.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct ClipDepthNudge(f32);
+
+/// Per-command material ordering values derived from one panel-local draw order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DrawCommandDepth {
-    panel_draw_command_rank: PanelDrawCommandRank,
-    z_index:                 DrawZIndex,
-    screen_depth_bias:       ScreenDepthBias,
-    oit_depth_offset:        OitDepthOffset,
+    draw_order_index:  DrawOrderIndex,
+    z_index:           DrawZIndex,
+    screen_depth_bias: ScreenDepthBias,
+    oit_depth_offset:  OitDepthOffset,
 }
 
-/// Index-aligned draw-order projection for one panel's command stream.
+/// Index-aligned draw order for one panel's command stream.
 #[derive(Clone, Debug, Default)]
-pub(crate) struct DrawOrderProjection {
+pub(crate) struct DrawOrder {
     depths: Vec<Option<DrawCommandDepth>>,
 }
 
@@ -107,10 +111,10 @@ pub(crate) struct HierarchicalDrawKey {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct RankedDrawCommand {
-    panel_draw_command_rank: PanelDrawCommandRank,
-    z_index:                 DrawZIndex,
-    command_rank_in_z_index: CommandRankInZIndex,
+struct OrderedDrawCommand {
+    draw_order_index:    DrawOrderIndex,
+    z_index:             DrawZIndex,
+    command_sort_offset: CommandSortOffset,
 }
 
 impl From<usize> for CommandIndex {
@@ -174,14 +178,12 @@ impl OitDepthOffset {
     pub(crate) const fn get(self) -> f32 { self.0 }
 }
 
-impl PanelDrawCommandRank {
-    /// `Transparent3d` sort bias. Bevy adds it to the item's view-space
-    /// distance (`sort_distance = view_z + depth_bias`, ascending sort,
-    /// drawn back-to-front), so a higher ordinal composites in front.
-    pub(crate) fn depth_bias(self) -> ScreenDepthBias {
-        ScreenDepthBias(self.0.to_f32() * LAYER_DEPTH_BIAS)
-    }
+impl ClipDepthNudge {
+    #[must_use]
+    pub(crate) const fn get(self) -> f32 { self.0 }
+}
 
+impl DrawOrderIndex {
     fn text_anchored_oit_depth_offset(self, text_anchor: Self) -> OitDepthOffset {
         OitDepthOffset((self.0 - text_anchor.0).to_f32() * OIT_DEPTH_STEP)
     }
@@ -189,61 +191,60 @@ impl PanelDrawCommandRank {
     pub(crate) fn to_usize(self) -> usize { usize::try_from(self.0).unwrap_or(usize::MAX) }
 }
 
-impl CommandRankInZIndex {
+impl CommandSortOffset {
     const fn next(self) -> Self { Self(self.0.saturating_add(1)) }
 }
 
-impl From<i32> for CommandRankInZIndex {
+impl From<i32> for CommandSortOffset {
     fn from(value: i32) -> Self { Self(value) }
 }
 
 impl DrawCommandDepth {
     fn new(
-        ordinal: PanelDrawCommandRank,
+        draw_order_index: DrawOrderIndex,
         z_index: DrawZIndex,
-        command_rank_in_z_index: CommandRankInZIndex,
-        text_anchor: PanelDrawCommandRank,
+        command_sort_offset: CommandSortOffset,
+        text_anchor: DrawOrderIndex,
     ) -> Self {
         Self {
-            panel_draw_command_rank: ordinal,
+            draw_order_index,
             z_index,
-            screen_depth_bias: command_depth_bias(z_index, command_rank_in_z_index),
-            oit_depth_offset: ordinal.text_anchored_oit_depth_offset(text_anchor),
+            screen_depth_bias: command_depth_bias(z_index, command_sort_offset),
+            oit_depth_offset: draw_order_index.text_anchored_oit_depth_offset(text_anchor),
         }
     }
 
-    /// Returns the dense panel-local command ordinal.
+    /// Returns the dense index in the panel-local draw order.
     #[cfg(test)]
-    pub(crate) const fn panel_draw_command_rank(self) -> PanelDrawCommandRank {
-        self.panel_draw_command_rank
-    }
+    pub(crate) const fn draw_order_index_for_test(self) -> DrawOrderIndex { self.draw_order_index }
 
-    /// Returns the ordinal as a nonnegative index.
-    pub(crate) fn panel_draw_command_rank_index(self) -> usize {
-        self.panel_draw_command_rank.to_usize()
-    }
+    /// Returns the draw-order index as a nonnegative `usize`.
+    pub(crate) fn draw_order_index(self) -> usize { self.draw_order_index.to_usize() }
 
     /// Returns the command's authored z-index.
     pub(crate) const fn z_index(self) -> DrawZIndex { self.z_index }
 
     /// Returns the `Transparent3d` sort bias for this command.
-    pub(crate) const fn depth_bias(self) -> ScreenDepthBias { self.screen_depth_bias }
+    pub(crate) const fn screen_depth_bias(self) -> ScreenDepthBias { self.screen_depth_bias }
+
+    /// Returns the layer count consumed by non-OIT shader clip-depth nudging.
+    pub(crate) const fn clip_depth_nudge(self) -> ClipDepthNudge {
+        ClipDepthNudge(self.screen_depth_bias.get())
+    }
 
     /// Returns the OIT `position.z` offset for this command.
     pub(crate) const fn oit_depth_offset(self) -> OitDepthOffset { self.oit_depth_offset }
 }
 
-impl DrawOrderProjection {
-    /// Builds the command-indexed projection from a full panel command stream.
+impl DrawOrder {
+    /// Builds index-aligned draw order from a full panel command stream.
     pub(crate) fn from_commands(commands: &[RenderCommand]) -> Self {
         let enumerated = enumerate_draw_commands(commands);
         let text_anchor = commands
             .iter()
             .enumerate()
             .filter(|(_, command)| command.kind.draw_sort_tier() == Some(DrawSortTier::Text))
-            .filter_map(|(index, _)| {
-                enumerated[index].map(|command| command.panel_draw_command_rank)
-            })
+            .filter_map(|(index, _)| enumerated[index].map(|command| command.draw_order_index))
             .min()
             .unwrap_or_default();
         let depths = enumerated
@@ -251,9 +252,9 @@ impl DrawOrderProjection {
             .map(|command| {
                 command.map(|command| {
                     DrawCommandDepth::new(
-                        command.panel_draw_command_rank,
+                        command.draw_order_index,
                         command.z_index,
-                        command.command_rank_in_z_index,
+                        command.command_sort_offset,
                         text_anchor,
                     )
                 })
@@ -262,7 +263,7 @@ impl DrawOrderProjection {
         Self { depths }
     }
 
-    /// Returns this command's projected depth values, or `None` for scissor
+    /// Returns this command's draw-depth values, or `None` for scissor
     /// commands and out-of-range indices.
     pub(crate) fn depth_for(
         &self,
@@ -272,7 +273,7 @@ impl DrawOrderProjection {
         self.depths.get(command_index.get()).copied().flatten()
     }
 
-    /// Counts draw-participating commands at each projected z-index.
+    /// Counts draw-participating commands at each authored z-index.
     pub(crate) fn command_counts_by_z_index(&self) -> Vec<(DrawZIndex, usize)> {
         let mut counts: BTreeMap<DrawZIndex, usize> = BTreeMap::new();
 
@@ -325,13 +326,13 @@ pub(crate) fn panel_shape_batch_depth_bias(z_index: impl Into<DrawZIndex>) -> Sc
 
 fn command_depth_bias(
     z_index: impl Into<DrawZIndex>,
-    command_rank_in_z_index: impl Into<CommandRankInZIndex>,
+    command_sort_offset: impl Into<CommandSortOffset>,
 ) -> ScreenDepthBias {
     let z_index = z_index.into();
-    let command_rank_in_z_index = command_rank_in_z_index.into();
+    let command_sort_offset = command_sort_offset.into();
     let depth_bias = z_index_band_offset_depth_bias(
         z_index,
-        FIRST_COMMAND_SORT_OFFSET.saturating_add(command_rank_in_z_index.0),
+        FIRST_COMMAND_SORT_OFFSET.saturating_add(command_sort_offset.0),
     );
     debug_assert!(sdf_surface_batch_depth_bias(z_index).get() < depth_bias.get());
     depth_bias
@@ -341,24 +342,24 @@ fn z_index_band_offset_depth_bias(z_index: DrawZIndex, band_offset: i32) -> Scre
     let screen_sort_position = i32::from(z_index)
         .saturating_mul(DRAW_Z_INDEX_BAND_WIDTH)
         .saturating_add(band_offset);
-    PanelDrawCommandRank(screen_sort_position).depth_bias()
+    ScreenDepthBias(screen_sort_position.to_f32() * LAYER_DEPTH_BIAS)
 }
 
-/// Enumerates draw-participating commands into panel-local dense ranks.
+/// Enumerates draw-participating commands into panel-local draw-order indices.
 ///
 /// The returned vector is index-aligned with `commands`; scissor commands map
-/// to `None`. Each `PanelDrawCommandRank` stores the dense rank.
+/// to `None`. Each `DrawOrderIndex` stores the dense index.
 #[cfg(test)]
-pub(crate) fn rank_draw_commands_for_test(
+pub(crate) fn index_draw_commands_for_test(
     commands: &[RenderCommand],
-) -> Vec<Option<PanelDrawCommandRank>> {
+) -> Vec<Option<DrawOrderIndex>> {
     enumerate_draw_commands(commands)
         .into_iter()
-        .map(|command| command.map(|command| command.panel_draw_command_rank))
+        .map(|command| command.map(|command| command.draw_order_index))
         .collect()
 }
 
-fn enumerate_draw_commands(commands: &[RenderCommand]) -> Vec<Option<RankedDrawCommand>> {
+fn enumerate_draw_commands(commands: &[RenderCommand]) -> Vec<Option<OrderedDrawCommand>> {
     let mut keyed_commands = commands
         .iter()
         .enumerate()
@@ -379,20 +380,22 @@ fn enumerate_draw_commands(commands: &[RenderCommand]) -> Vec<Option<RankedDrawC
     keyed_commands.sort_by_key(|(key, _)| *key);
 
     let mut current_z_index = None;
-    let mut command_rank_in_z_index = CommandRankInZIndex::default();
+    let mut command_sort_offset = CommandSortOffset::default();
     let mut enumerated = vec![None; commands.len()];
-    for (rank, (key, index)) in keyed_commands.into_iter().enumerate() {
+    for (draw_order_position, (key, index)) in keyed_commands.into_iter().enumerate() {
         let z_index = key.z_index();
         if current_z_index != Some(z_index) {
             current_z_index = Some(z_index);
-            command_rank_in_z_index = CommandRankInZIndex::default();
+            command_sort_offset = CommandSortOffset::default();
         }
-        enumerated[index] = Some(RankedDrawCommand {
-            panel_draw_command_rank: PanelDrawCommandRank(i32::try_from(rank).unwrap_or(i32::MAX)),
+        enumerated[index] = Some(OrderedDrawCommand {
+            draw_order_index: DrawOrderIndex(
+                i32::try_from(draw_order_position).unwrap_or(i32::MAX),
+            ),
             z_index,
-            command_rank_in_z_index,
+            command_sort_offset,
         });
-        command_rank_in_z_index = command_rank_in_z_index.next();
+        command_sort_offset = command_sort_offset.next();
     }
     enumerated
 }
@@ -416,7 +419,7 @@ mod tests {
     use crate::render::constants::SDF_SURFACE_BATCH_SORT_ANCHOR;
 
     const LOWERED_LEVEL: DrawZIndex = DrawZIndex(-1);
-    /// Z-level pairs `(low, high)` spanning negative, default, positive, and
+    /// `DrawZIndex` pairs `(low, high)` spanning negative, default, positive, and
     /// saturated ranges.
     const ORDERED_Z_INDEX_PAIRS: [(i8, i8); 6] = [
         (i8::MIN, -1),
@@ -505,92 +508,92 @@ mod tests {
             .collect()
     }
 
-    fn panel_draw_command_rank_at(
-        ranks_by_command_index: &[Option<PanelDrawCommandRank>],
+    fn draw_order_index_at(
+        indices_by_command_index: &[Option<DrawOrderIndex>],
         command_index: CommandIndex,
-    ) -> PanelDrawCommandRank {
-        ranks_by_command_index[command_index.get()].expect("drawing commands receive ordinals")
+    ) -> DrawOrderIndex {
+        indices_by_command_index[command_index.get()].expect("drawing commands receive draw order")
     }
 
-    fn draw_depth_at(
-        projection: &DrawOrderProjection,
-        command_index: CommandIndex,
-    ) -> DrawCommandDepth {
-        projection
+    fn draw_depth_at(draw_order: &DrawOrder, command_index: CommandIndex) -> DrawCommandDepth {
+        draw_order
             .depth_for(command_index.get())
-            .expect("drawing command receives projected depth")
+            .expect("drawing command receives draw depth")
     }
 
-    fn text_anchor_rank(
+    fn text_anchor_index(
         commands: &[RenderCommand],
-        ordinals: &[Option<PanelDrawCommandRank>],
+        draw_order_indices: &[Option<DrawOrderIndex>],
     ) -> i32 {
         commands
             .iter()
             .enumerate()
             .filter(|(_, command)| command.kind.draw_sort_tier() == Some(DrawSortTier::Text))
-            .map(|(index, _)| panel_draw_command_rank_at(ordinals, CommandIndex::from(index)).0)
+            .map(|(index, _)| draw_order_index_at(draw_order_indices, CommandIndex::from(index)).0)
             .min()
             .unwrap_or(0)
     }
 
-    fn ranks_for_step(
+    fn draw_order_indices_for_tier(
         commands: &[RenderCommand],
-        ordinals: &[Option<PanelDrawCommandRank>],
-        step: DrawSortTier,
+        draw_order_indices: &[Option<DrawOrderIndex>],
+        draw_sort_tier: DrawSortTier,
     ) -> Vec<i32> {
         commands
             .iter()
             .enumerate()
-            .filter(|(_, command)| command.kind.draw_sort_tier() == Some(step))
-            .map(|(index, _)| panel_draw_command_rank_at(ordinals, CommandIndex::from(index)).0)
+            .filter(|(_, command)| command.kind.draw_sort_tier() == Some(draw_sort_tier))
+            .map(|(index, _)| draw_order_index_at(draw_order_indices, CommandIndex::from(index)).0)
             .collect()
     }
 
-    fn ranks_for_z_index(
+    fn draw_order_indices_for_z_index(
         commands: &[RenderCommand],
-        ordinals: &[Option<PanelDrawCommandRank>],
+        draw_order_indices: &[Option<DrawOrderIndex>],
         z_index: DrawZIndex,
     ) -> Vec<i32> {
         commands
             .iter()
             .enumerate()
             .filter(|(_, command)| command.z_index == z_index)
-            .map(|(index, _)| panel_draw_command_rank_at(ordinals, CommandIndex::from(index)).0)
+            .map(|(index, _)| draw_order_index_at(draw_order_indices, CommandIndex::from(index)).0)
             .collect()
     }
 
     fn assert_scissors_excluded(commands: &[RenderCommand]) {
-        let ordinals = rank_draw_commands_for_test(commands);
+        let draw_order_indices = index_draw_commands_for_test(commands);
         for (index, command) in commands.iter().enumerate() {
             if command.kind.draw_sort_tier().is_none() {
                 assert_eq!(
-                    ordinals[index], None,
+                    draw_order_indices[index], None,
                     "scissor command {index} maps to None"
                 );
             }
         }
         assert_eq!(
-            ordinals.iter().flatten().count(),
+            draw_order_indices.iter().flatten().count(),
             drawing_indices(commands).len(),
-            "only drawing commands receive ordinals",
+            "only drawing commands receive draw order indices",
         );
     }
 
     fn assert_depth_bias_and_text_anchored_oit_agree(commands: &[RenderCommand]) {
-        let ordinals = rank_draw_commands_for_test(commands);
-        let projection = DrawOrderProjection::from_commands(commands);
-        let text_anchor = text_anchor_rank(commands, &ordinals);
+        let draw_order_indices = index_draw_commands_for_test(commands);
+        let draw_order = DrawOrder::from_commands(commands);
+        let text_anchor = text_anchor_index(commands, &draw_order_indices);
         let indices = drawing_indices(commands);
 
         for &left_index in &indices {
             for &right_index in &indices {
-                let left_rank = panel_draw_command_rank_at(&ordinals, left_index).0;
-                let right_rank = panel_draw_command_rank_at(&ordinals, right_index).0;
-                let left_depth_bias = draw_depth_at(&projection, left_index).depth_bias();
-                let right_depth_bias = draw_depth_at(&projection, right_index).depth_bias();
-                let left_oit_depth_offset = (left_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
-                let right_oit_depth_offset = (right_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
+                let left_draw_order_index = draw_order_index_at(&draw_order_indices, left_index).0;
+                let right_draw_order_index =
+                    draw_order_index_at(&draw_order_indices, right_index).0;
+                let left_depth_bias = draw_depth_at(&draw_order, left_index).screen_depth_bias();
+                let right_depth_bias = draw_depth_at(&draw_order, right_index).screen_depth_bias();
+                let left_oit_depth_offset =
+                    (left_draw_order_index - text_anchor).to_f32() * OIT_DEPTH_STEP;
+                let right_oit_depth_offset =
+                    (right_draw_order_index - text_anchor).to_f32() * OIT_DEPTH_STEP;
 
                 assert_eq!(
                     left_depth_bias.get().total_cmp(&right_depth_bias.get()),
@@ -602,33 +605,36 @@ mod tests {
         }
     }
 
-    fn assert_no_override_projection_uses_geometry_sublanes(commands: &[RenderCommand]) {
+    fn assert_no_override_draw_order_uses_command_sort_offsets(commands: &[RenderCommand]) {
         assert!(
             commands
                 .iter()
                 .all(|command| command.z_index == DrawZIndex::default()),
             "no-override streams use the default z-index level",
         );
-        let ordinals = rank_draw_commands_for_test(commands);
-        let projection = DrawOrderProjection::from_commands(commands);
-        let text_anchor = text_anchor_rank(commands, &ordinals);
+        let draw_order_indices = index_draw_commands_for_test(commands);
+        let draw_order = DrawOrder::from_commands(commands);
+        let text_anchor = text_anchor_index(commands, &draw_order_indices);
 
         for index in drawing_indices(commands) {
             let command = &commands[index.get()];
-            let ordinal = panel_draw_command_rank_at(&ordinals, index);
-            let draw_command_depth = draw_depth_at(&projection, index);
+            let draw_order_index = draw_order_index_at(&draw_order_indices, index);
+            let draw_command_depth = draw_depth_at(&draw_order, index);
             assert_eq!(draw_command_depth.z_index(), 0.into());
-            assert_eq!(draw_command_depth.panel_draw_command_rank(), ordinal);
             assert_eq!(
-                draw_command_depth.depth_bias().get().to_bits(),
-                command_depth_bias(0, CommandRankInZIndex::from(ordinal.0))
+                draw_command_depth.draw_order_index_for_test(),
+                draw_order_index
+            );
+            assert_eq!(
+                draw_command_depth.screen_depth_bias().get().to_bits(),
+                command_depth_bias(0, CommandSortOffset::from(draw_order_index.0))
                     .get()
                     .to_bits(),
                 "no-override command {index:?} uses the command sort offset",
             );
             assert_eq!(
                 draw_command_depth.oit_depth_offset().get().to_bits(),
-                ((ordinal.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
+                ((draw_order_index.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
                 "no-override command {index:?} keeps its text-anchored OIT offset",
             );
 
@@ -643,11 +649,11 @@ mod tests {
                 (rectangle(), DrawZIndex(low)),
                 (rectangle(), DrawZIndex(high)),
             ]);
-            let projection = DrawOrderProjection::from_commands(&commands);
-            let low_depth = draw_depth_at(&projection, CommandIndex::from(0));
-            let high_depth = draw_depth_at(&projection, CommandIndex::from(1));
+            let draw_order = DrawOrder::from_commands(&commands);
+            let low_depth = draw_depth_at(&draw_order, CommandIndex::from(0));
+            let high_depth = draw_depth_at(&draw_order, CommandIndex::from(1));
             assert!(
-                low_depth.depth_bias().get() < high_depth.depth_bias().get(),
+                low_depth.screen_depth_bias().get() < high_depth.screen_depth_bias().get(),
                 "sorted bias must rise from {low} to {high}",
             );
             assert!(
@@ -658,7 +664,7 @@ mod tests {
     }
 
     #[test]
-    fn text_batch_depth_bias_uses_level_text_sublane() {
+    fn text_batch_depth_bias_uses_text_sort_anchor() {
         assert_eq!(
             text_batch_depth_bias(0).get().to_bits(),
             z_index_band_offset_depth_bias(DrawZIndex(0), TEXT_BATCH_SORT_ANCHOR)
@@ -679,7 +685,7 @@ mod tests {
     }
 
     #[test]
-    fn sdf_surface_batch_depth_bias_uses_level_fill_sublane() {
+    fn sdf_surface_batch_depth_bias_uses_fill_sort_anchor() {
         assert_eq!(
             sdf_surface_batch_depth_bias(0).get().to_bits(),
             z_index_band_offset_depth_bias(DrawZIndex(0), SDF_SURFACE_BATCH_SORT_ANCHOR)
@@ -710,7 +716,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchical_ordinals_order_steps_for_default_z_index() {
+    fn draw_order_indices_order_tiers_for_default_z_index() {
         for commands in representative_streams() {
             assert!(
                 commands
@@ -718,26 +724,32 @@ mod tests {
                     .all(|command| command.z_index == DrawZIndex::default()),
                 "representative streams use the default z-index level",
             );
-            let ordinals = rank_draw_commands_for_test(&commands);
-            let fill_max = ranks_for_step(&commands, &ordinals, DrawSortTier::Surface)
-                .into_iter()
-                .max()
-                .expect("representative streams include fill commands");
-            let line_min = ranks_for_step(&commands, &ordinals, DrawSortTier::PanelShape)
-                .into_iter()
-                .min()
-                .expect("representative streams include line commands");
-            let text_min = ranks_for_step(&commands, &ordinals, DrawSortTier::Text)
-                .into_iter()
-                .min()
-                .expect("representative streams include text commands");
-            assert!(fill_max < line_min);
-            assert!(line_min < text_min);
+            let draw_order_indices = index_draw_commands_for_test(&commands);
+            let fill_max =
+                draw_order_indices_for_tier(&commands, &draw_order_indices, DrawSortTier::Surface)
+                    .into_iter()
+                    .max()
+                    .expect("representative streams include fill commands");
+            let panel_shape_min = draw_order_indices_for_tier(
+                &commands,
+                &draw_order_indices,
+                DrawSortTier::PanelShape,
+            )
+            .into_iter()
+            .min()
+            .expect("representative streams include panel-shape commands");
+            let text_min =
+                draw_order_indices_for_tier(&commands, &draw_order_indices, DrawSortTier::Text)
+                    .into_iter()
+                    .min()
+                    .expect("representative streams include text commands");
+            assert!(fill_max < panel_shape_min);
+            assert!(panel_shape_min < text_min);
         }
     }
 
     #[test]
-    fn panel_shape_batch_depth_bias_uses_level_line_sublane() {
+    fn panel_shape_batch_depth_bias_uses_panel_shape_sort_anchor() {
         assert_eq!(
             panel_shape_batch_depth_bias(0).get().to_bits(),
             z_index_band_offset_depth_bias(DrawZIndex(0), PANEL_SHAPE_BATCH_SORT_ANCHOR)
@@ -757,7 +769,7 @@ mod tests {
     }
 
     #[test]
-    fn hierarchical_ordinals_exclude_scissors() {
+    fn draw_order_indices_exclude_scissors() {
         for commands in representative_streams() {
             assert_scissors_excluded(&commands);
         }
@@ -775,10 +787,10 @@ mod tests {
             (image(), RAISED_LEVEL),
             (border(), RAISED_LEVEL),
         ]);
-        let projection = DrawOrderProjection::from_commands(&commands);
+        let draw_order = DrawOrder::from_commands(&commands);
 
         assert_eq!(
-            projection.command_counts_by_z_index(),
+            draw_order.command_counts_by_z_index(),
             vec![
                 (LOWERED_LEVEL, 1),
                 (DrawZIndex::default(), 3),
@@ -793,15 +805,16 @@ mod tests {
             .into_iter()
             .next()
             .expect("representative streams include a text stream");
-        let ordinals = rank_draw_commands_for_test(&commands);
-        let text_anchor = text_anchor_rank(&commands, &ordinals);
-        let lowest_text_rank = ranks_for_step(&commands, &ordinals, DrawSortTier::Text)
-            .into_iter()
-            .min()
-            .expect("representative stream includes text commands");
-        let text_anchored_offset = (lowest_text_rank - text_anchor).to_f32() * OIT_DEPTH_STEP;
+        let draw_order_indices = index_draw_commands_for_test(&commands);
+        let text_anchor = text_anchor_index(&commands, &draw_order_indices);
+        let lowest_text_index =
+            draw_order_indices_for_tier(&commands, &draw_order_indices, DrawSortTier::Text)
+                .into_iter()
+                .min()
+                .expect("representative stream includes text commands");
+        let text_anchored_offset = (lowest_text_index - text_anchor).to_f32() * OIT_DEPTH_STEP;
 
-        assert_eq!(lowest_text_rank - text_anchor, 0);
+        assert_eq!(lowest_text_index - text_anchor, 0);
         assert_eq!(text_anchored_offset.to_bits(), 0.0f32.to_bits());
     }
 
@@ -813,41 +826,44 @@ mod tests {
     }
 
     #[test]
-    fn no_override_projection_uses_batch_lane_layout() {
+    fn no_override_draw_order_uses_command_sort_offsets() {
         for commands in representative_streams() {
-            assert_no_override_projection_uses_geometry_sublanes(&commands);
+            assert_no_override_draw_order_uses_command_sort_offsets(&commands);
         }
     }
 
     #[test]
-    fn draw_order_projection_uses_enumerated_rank_and_text_anchor() {
+    fn draw_order_uses_indices_and_text_anchor() {
         for commands in representative_streams() {
-            let ordinals = rank_draw_commands_for_test(&commands);
-            let text_anchor = text_anchor_rank(&commands, &ordinals);
-            let projection = DrawOrderProjection::from_commands(&commands);
+            let draw_order_indices = index_draw_commands_for_test(&commands);
+            let text_anchor = text_anchor_index(&commands, &draw_order_indices);
+            let draw_order = DrawOrder::from_commands(&commands);
 
             for index in drawing_indices(&commands) {
-                let ordinal = panel_draw_command_rank_at(&ordinals, index);
-                let draw_depth = projection
+                let draw_order_index = draw_order_index_at(&draw_order_indices, index);
+                let draw_depth = draw_order
                     .depth_for(index.get())
-                    .expect("drawing command receives projected depth");
-                assert_eq!(draw_depth.panel_draw_command_rank(), ordinal);
+                    .expect("drawing command receives draw depth");
+                assert_eq!(draw_depth.draw_order_index_for_test(), draw_order_index);
                 assert_eq!(
-                    draw_depth.depth_bias().get().to_bits(),
-                    command_depth_bias(draw_depth.z_index(), CommandRankInZIndex::from(ordinal.0),)
-                        .get()
-                        .to_bits(),
+                    draw_depth.screen_depth_bias().get().to_bits(),
+                    command_depth_bias(
+                        draw_depth.z_index(),
+                        CommandSortOffset::from(draw_order_index.0),
+                    )
+                    .get()
+                    .to_bits(),
                 );
                 assert_eq!(
                     draw_depth.oit_depth_offset().get().to_bits(),
-                    ((ordinal.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
+                    ((draw_order_index.0 - text_anchor).to_f32() * OIT_DEPTH_STEP).to_bits(),
                 );
             }
         }
     }
 
     #[test]
-    fn screen_depth_bias_orders_fills_lines_and_text_by_z_index() {
+    fn screen_depth_bias_orders_fills_panel_shapes_and_text_by_z_index() {
         let default_commands = commands_from_kinds([
             (rectangle(), DrawZIndex::default()),
             (rectangle(), DrawZIndex::default()),
@@ -855,16 +871,16 @@ mod tests {
             (panel_shapes(), DrawZIndex::default()),
             (text(), DrawZIndex::default()),
         ]);
-        let default_projection = DrawOrderProjection::from_commands(&default_commands);
-        let default_line_depth_bias = panel_shape_batch_depth_bias(0);
+        let default_draw_order = DrawOrder::from_commands(&default_commands);
+        let default_panel_shape_depth_bias = panel_shape_batch_depth_bias(0);
         let default_text_depth_bias = text_batch_depth_bias(0);
         let default_sdf_surface_batch_depth_bias = sdf_surface_batch_depth_bias(0);
         for (index, command) in default_commands.iter().enumerate() {
             if command.kind.draw_sort_tier() == Some(DrawSortTier::Surface) {
-                let fill_depth_bias =
-                    draw_depth_at(&default_projection, CommandIndex::from(index)).depth_bias();
+                let fill_depth_bias = draw_depth_at(&default_draw_order, CommandIndex::from(index))
+                    .screen_depth_bias();
                 assert!(default_sdf_surface_batch_depth_bias.get() < fill_depth_bias.get());
-                assert!(fill_depth_bias.get() < default_line_depth_bias.get());
+                assert!(fill_depth_bias.get() < default_panel_shape_depth_bias.get());
                 assert!(fill_depth_bias.get() < default_text_depth_bias.get());
             }
         }
@@ -874,15 +890,16 @@ mod tests {
             (rectangle(), RAISED_LEVEL),
             (text(), DrawZIndex::default()),
         ]);
-        let raised_fill_projection = DrawOrderProjection::from_commands(&raised_fill_commands);
+        let raised_fill_draw_order = DrawOrder::from_commands(&raised_fill_commands);
         let raised_fill_depth_bias = raised_fill_commands
             .iter()
             .enumerate()
             .find(|(_, command)| command.z_index == RAISED_LEVEL)
             .map(|(index, _)| {
-                draw_depth_at(&raised_fill_projection, CommandIndex::from(index)).depth_bias()
+                draw_depth_at(&raised_fill_draw_order, CommandIndex::from(index))
+                    .screen_depth_bias()
             })
-            .expect("raised fill command receives projected depth");
+            .expect("raised fill command receives draw depth");
         assert!(raised_fill_depth_bias.get() > default_text_depth_bias.get());
         assert!(panel_shape_batch_depth_bias(RAISED_LEVEL).get() > default_text_depth_bias.get());
         assert!(text_batch_depth_bias(RAISED_LEVEL).get() > default_text_depth_bias.get());
@@ -893,40 +910,44 @@ mod tests {
             (rectangle(), DrawZIndex::default()),
             (image(), DrawZIndex::default()),
         ]);
-        let lowered_text_projection = DrawOrderProjection::from_commands(&lowered_text_commands);
-        let lowered_line_depth_bias = panel_shape_batch_depth_bias(LOWERED_LEVEL);
+        let lowered_text_draw_order = DrawOrder::from_commands(&lowered_text_commands);
+        let lowered_panel_shape_depth_bias = panel_shape_batch_depth_bias(LOWERED_LEVEL);
         let lowered_text_depth_bias = text_batch_depth_bias(LOWERED_LEVEL);
         for (index, command) in lowered_text_commands.iter().enumerate() {
             if command.kind.draw_sort_tier() == Some(DrawSortTier::Surface) {
                 let fill_depth_bias =
-                    draw_depth_at(&lowered_text_projection, CommandIndex::from(index)).depth_bias();
-                assert!(lowered_line_depth_bias.get() < fill_depth_bias.get());
+                    draw_depth_at(&lowered_text_draw_order, CommandIndex::from(index))
+                        .screen_depth_bias();
+                assert!(lowered_panel_shape_depth_bias.get() < fill_depth_bias.get());
                 assert!(lowered_text_depth_bias.get() < fill_depth_bias.get());
             }
         }
     }
 
     #[test]
-    fn z_index_overrides_move_commands_between_step_groups() {
+    fn z_index_overrides_move_commands_between_sort_tiers() {
         let raised_fill_commands = commands_from_kinds([
             (text(), DrawZIndex::default()),
             (rectangle(), RAISED_LEVEL),
             (text(), DrawZIndex::default()),
         ]);
-        let raised_fill_ordinals = rank_draw_commands_for_test(&raised_fill_commands);
-        let raised_fill_rank =
-            ranks_for_z_index(&raised_fill_commands, &raised_fill_ordinals, RAISED_LEVEL)
-                .into_iter()
-                .next()
-                .expect("raised fill command receives an ordinal");
-        for text_rank in ranks_for_step(
+        let raised_fill_indices = index_draw_commands_for_test(&raised_fill_commands);
+        let raised_fill_index = draw_order_indices_for_z_index(
             &raised_fill_commands,
-            &raised_fill_ordinals,
+            &raised_fill_indices,
+            RAISED_LEVEL,
+        )
+        .into_iter()
+        .next()
+        .expect("raised fill command receives a draw order index");
+        for text_index in draw_order_indices_for_tier(
+            &raised_fill_commands,
+            &raised_fill_indices,
             DrawSortTier::Text,
         ) {
             assert!(
-                raised_fill_rank > text_rank,
-                "raised fill rank must sit above default text ranks",
+                raised_fill_index > text_index,
+                "raised fill draw order index must sit above default text indices",
             );
         }
 
@@ -935,23 +956,23 @@ mod tests {
             (rectangle(), DrawZIndex::default()),
             (image(), DrawZIndex::default()),
         ]);
-        let lowered_text_ordinals = rank_draw_commands_for_test(&lowered_text_commands);
-        let lowered_text_rank = ranks_for_z_index(
+        let lowered_text_indices = index_draw_commands_for_test(&lowered_text_commands);
+        let lowered_text_index = draw_order_indices_for_z_index(
             &lowered_text_commands,
-            &lowered_text_ordinals,
+            &lowered_text_indices,
             LOWERED_LEVEL,
         )
         .into_iter()
         .next()
-        .expect("lowered text command receives an ordinal");
-        for fill_rank in ranks_for_step(
+        .expect("lowered text command receives a draw order index");
+        for fill_index in draw_order_indices_for_tier(
             &lowered_text_commands,
-            &lowered_text_ordinals,
+            &lowered_text_indices,
             DrawSortTier::Surface,
         ) {
             assert!(
-                lowered_text_rank < fill_rank,
-                "lowered text rank must sit below default fill ranks",
+                lowered_text_index < fill_index,
+                "lowered text draw order index must sit below default fill indices",
             );
         }
     }

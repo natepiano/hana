@@ -21,7 +21,7 @@ use super::clip;
 use super::constants;
 use super::constants::SDF_STROKE_SHADER_HANDLE;
 use super::draw_order::DrawCommandDepth;
-use super::draw_order::DrawOrderProjection;
+use super::draw_order::DrawOrder;
 use super::material_table::MaterialTableAppendReady;
 use crate::cascade::CascadeDefault;
 use crate::cascade::Resolved;
@@ -146,8 +146,8 @@ fn build_panel_geometry(
             .collect();
         resolved.sort_by(|left, right| {
             left.draw_depth
-                .panel_draw_command_rank_index()
-                .cmp(&right.draw_depth.panel_draw_command_rank_index())
+                .draw_order_index()
+                .cmp(&right.draw_depth.draw_order_index())
                 .then(left.command_index.cmp(&right.command_index))
         });
         resolved_surfaces.upsert_panel(
@@ -251,7 +251,7 @@ struct GatheredCommands {
 fn gather_surfaces(
     panel: &DiegeticPanel,
     commands: &[RenderCommand],
-    draw_order: &DrawOrderProjection,
+    draw_order: &DrawOrder,
 ) -> GatheredCommands {
     let clip_rects = clip::compute_clip_rects(commands);
     let viewport = clip::panel_viewport(panel);
@@ -360,7 +360,7 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     pub(crate) command_index:   CommandIndex,
-    /// Full draw-depth projection for sorted and OIT ordering.
+    /// `DrawCommandDepth` for sorted and OIT ordering.
     pub(crate) draw_depth:      DrawCommandDepth,
     /// Fill material input consumed by the SDF material table.
     pub(crate) fill_material:   ResolvedSdfMaterial<'a>,
@@ -438,7 +438,7 @@ pub(crate) struct StoredResolvedSdfSurface {
     panel_entity:    Entity,
     /// Command identity inside the panel's `LayoutResult::commands` stream.
     command_index:   CommandIndex,
-    /// Full draw-depth projection for sorted and OIT ordering.
+    /// `DrawCommandDepth` for sorted and OIT ordering.
     draw_depth:      DrawCommandDepth,
     /// Fill material source for the SDF material table.
     fill_material:   StoredResolvedSdfMaterial,
@@ -1017,7 +1017,9 @@ mod tests {
         // Both ordering mechanisms must put the higher command index in
         // front: sorted bias rises and OIT offset rises (reverse-Z, positive =
         // closer).
-        assert!(below.draw_depth.depth_bias().get() < above.draw_depth.depth_bias().get());
+        assert!(
+            below.draw_depth.screen_depth_bias().get() < above.draw_depth.screen_depth_bias().get()
+        );
         assert!(
             below.draw_depth.oit_depth_offset().get() < above.draw_depth.oit_depth_offset().get()
         );

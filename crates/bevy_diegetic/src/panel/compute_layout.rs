@@ -129,10 +129,8 @@ pub(super) fn compute_panel_layouts(
             });
         if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
             && can_reuse_geometry
-            && let Some(result) = computed.result_mut()
+            && computed.regenerate_commands(scaled_tree)
         {
-            result.regenerate_commands(scaled_tree);
-            computed.refresh_draw_order_projection();
             events::trigger_panel_changed(&mut commands, entity, PanelChangeKind::VisualOnly);
             panel_count += 1;
             continue;
