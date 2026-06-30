@@ -4,28 +4,11 @@ use bevy::asset::uuid_handle;
 use bevy::prelude::*;
 
 // Draw order
-/// Screen-sort position reserved for the shared SDF surface batch within each
-/// authored z-index band.
-pub(crate) const SDF_SURFACE_BATCH_SORT_ANCHOR: i32 = 0;
-/// First command sort position inside each authored z-index band.
-pub(crate) const FIRST_COMMAND_SORT_OFFSET: i32 = SDF_SURFACE_BATCH_SORT_ANCHOR + 1;
-/// Number of command sort positions reserved inside each authored z-index band.
-pub(crate) const COMMAND_SORT_OFFSET_CAPACITY: i32 = 64;
-/// Screen-sort position reserved for the shared panel-shape batch within each
-/// authored z-index band.
-pub(crate) const PANEL_SHAPE_BATCH_SORT_ANCHOR: i32 =
-    FIRST_COMMAND_SORT_OFFSET + COMMAND_SORT_OFFSET_CAPACITY - 1;
-/// Screen-sort position reserved for the shared text batch within each authored
-/// z-index band.
-pub(crate) const TEXT_BATCH_SORT_ANCHOR: i32 = PANEL_SHAPE_BATCH_SORT_ANCHOR + 1;
-/// Width of one authored z-index band in screen-sort positions.
-pub(crate) const DRAW_Z_INDEX_BAND_WIDTH: i32 = TEXT_BATCH_SORT_ANCHOR + 1;
-/// Per-command depth bias for Geometry mode sort ordering.
+/// Per-step screen depth-bias spacing for Bevy draw-item sorting.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.
-/// Controls the `Transparent3d` sort key so back-to-front submission
-/// order matches the painter's order. Also wins the depth test for
-/// coplanar fragments.
+/// A batch material uses its minimum `DrawOrderIndex` times this value.
+/// Non-batched commands use their own `DrawOrderIndex` times this value.
 pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Per-command OIT depth offset for coplanar fragment ordering.
 ///

@@ -794,8 +794,9 @@ unchanged.
   while session accept/reject observers still ignore stale responses.
 
 **What deviated from the plan:**
-- Built-in backing is the authored panel tree text descendant plus
-  `tree_revision`, not a separate model-binding registry.
+- Built-in backing is the authored panel tree text descendant plus the next
+  `TreeRevision` reported by the panel tree source, not a separate model-binding
+  registry.
 - Outside blur currently commits when focus leaves the editor/source scope;
   blur cancellation remains covered by explicit cancel and stale-target cleanup.
 
@@ -864,7 +865,7 @@ UTF-8, duplicate-field, preedit, selection, and caret cases.
 - Later work now records that there are no remaining numbered phases; any
   unsatisfied items are explicit later-work gaps.
 - Later work now names the model-binding decision created by Phase 5's
-  panel-tree text sink and `tree_revision` value reporting.
+  panel-tree text sink and `TreeRevision` value reporting.
 - Later work now narrows `ScreenPanelFollowAnchor` to general screen-space
   cleanup because Phase 6 added `ImeSessionAnchor` for app-owned geometry.
 - R0-R7 now mark the portions satisfied or partially satisfied by Phases 1-6
@@ -892,10 +893,10 @@ Phase 6 app-owned sessions use `ImeSessionAnchor`, so this is now a general
 screen-space architecture cleanup rather than an app-owned IME blocker.
 
 Built-in field writeback currently updates the authored panel tree text
-descendant and reports `tree_revision` as `ImeValueRevision`. Keep that sink
-until a caller needs external backing-value conflict semantics; only then add a
-model-binding registry with original value snapshots, revisions, and conflict
-policy.
+descendant and reports the panel tree source's next `TreeRevision` as
+`ImeValueRevision`. Keep that sink until a caller needs external backing-value
+conflict semantics; only then add a model-binding registry with original value
+snapshots, revisions, and conflict policy.
 
 App-owned popup routing currently exposes a keyboard-frame
 `ImeAppInputDispositionHook` with edit, surface, commit, and cancel decisions.

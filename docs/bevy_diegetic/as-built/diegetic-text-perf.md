@@ -256,7 +256,7 @@ flag:
 - tree → child: `reconcile_panel_text_children` writes the child's `TextContent`
   from the panel's layout tree.
 - child → tree: `sync_run_text_to_cache` pulls a `TextContent` edit back into the
-  tree cache + bumps `tree_revision` → relayout.
+  panel tree source; `PanelTree` bumps its revision → relayout.
 
 That loop is circular — reconcile's own tree→child write trips `Changed`, which
 the child→tree sync would read as a user edit and re-fire forever. `ReconcileOwned`
@@ -323,7 +323,7 @@ cascades unchanged.
 
 The four writers reroute from `content.set_text(text)` to
 `panel.sync_run_text_cache(element_idx, &text)` (the same write the deleted sync
-system used — updates `El.text`, bumps `tree_revision`). The reader's existing
+system used — updates `El.text` through `PanelTree`). The reader's existing
 `resolve` / `lone_run` find the element.
 
 ### The API (one visible change)

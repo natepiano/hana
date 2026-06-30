@@ -67,7 +67,7 @@ pub(super) fn apply_builtin_commit(
         return;
     }
 
-    let value_revision = ImeValueRevision::new(panel.tree_revision().wrapping_add(1));
+    let value_revision = ImeValueRevision::new(u64::from(panel.next_tree_revision()));
     commands.set_tree(panel_entity, tree);
     commands.trigger(ImeAcceptCommit {
         session_id: event.session_id,

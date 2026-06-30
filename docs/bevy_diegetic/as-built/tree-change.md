@@ -250,15 +250,12 @@ for changed panel {
 ```
 
 The scaled-tree cache contract must account for visual-only changes.
-Visual-only changes and layout-affecting changes both bump the existing tree
-revision. `tree_revision` means "source tree content changed", while
-`PendingTreeChange` decides whether layout geometry must be recomputed. The
-cache should not rely on an out-of-band `clear` whose invalidation behavior is
-not visible in the key.
-
-Cache key fields should use narrow newtypes such as `TreeRevision` and
-`F32Bits` instead of raw `u64` / `u32` values once the cache surface is touched
-for this work.
+Visual-only changes and layout-affecting changes both mutate the source tree
+through `PanelTree`, which bumps its `TreeRevision`. The revision means "source
+tree content changed", while `PendingTreeChange` decides whether layout geometry
+must be recomputed. `ScaledLayoutTreeCache` takes the revision-owned
+`PanelTree`, not a separate `(&LayoutTree, revision)` pair, so callers cannot
+pass mismatched cache identity.
 
 ## Benchmark Plan
 
@@ -309,15 +306,15 @@ System tests:
   changing content bounds
 - repeated `VisualOnly` then `LayoutAffecting` changes in the same frame run
   the full layout path
-- repeated `VisualOnly` -> `LayoutAffecting` -> `VisualOnly` sequences bump
-  tree revision for each source-tree replacement and do not return stale scaled
-  trees from cache
+- repeated `VisualOnly` -> `LayoutAffecting` -> `VisualOnly` sequences mutate
+  through `PanelTree` for each source-tree replacement and do not return stale
+  scaled trees from cache
 - queued tree setter applies before `compute_panel_layouts` consumes the pending
   classification
-- queued tree setter with visual-only change bumps `tree_revision` but does not
-  recompute layout geometry
-- queued tree setter with layout-affecting change bumps `tree_revision` and
-  recomputes layout geometry
+- queued tree setter with visual-only change bumps `PanelTree`'s revision but
+  does not recompute layout geometry
+- queued tree setter with layout-affecting change bumps `PanelTree`'s revision
+  and recomputes layout geometry
 - visual-only update marks `ComputedDiegeticPanel` changed so render
   reconciliation runs
 
@@ -333,8 +330,8 @@ System tests:
 4. Add a `bench_support`-only full-rebuild tree setter for benchmark
    comparisons.
 5. Schedule layout response after the deferred tree setter has applied.
-6. Update tree revision semantics so any source-tree replacement bumps
-   `tree_revision`.
+6. Wrap the source tree and revision in `PanelTree` so any source-tree
+   replacement bumps `TreeRevision` through the same API.
 7. Extract render command generation from layout positioning into a reusable
    internal pass.
 8. Store wrapped text data, content bounds, scale inputs, and structural guards

@@ -57,6 +57,70 @@ use crate::render::AntiAlias;
 use crate::render::DrawOrder;
 use crate::render::HairlineFade;
 
+/// Source tree plus the revision token used by derived tree caches.
+#[derive(Clone, Default)]
+pub(super) struct PanelTree {
+    tree:     LayoutTree,
+    revision: TreeRevision,
+}
+
+impl PanelTree {
+    pub(super) const fn tree(&self) -> &LayoutTree { &self.tree }
+
+    pub(super) const fn revision(&self) -> TreeRevision { self.revision }
+
+    pub(super) const fn next_revision(&self) -> TreeRevision { self.revision.next() }
+
+    fn replace(&mut self, tree: LayoutTree) {
+        self.tree = tree;
+        self.revision.bump();
+    }
+
+    fn set_element_text(&mut self, index: usize, text: &str) -> bool {
+        if self.tree.set_element_text(index, text) {
+            self.revision.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn set_element_style(&mut self, index: usize, style: TextStyle) -> bool {
+        if self.tree.set_element_style(index, style) {
+            self.revision.bump();
+            true
+        } else {
+            false
+        }
+    }
+
+    const fn use_next_revision_after_replacement(&mut self, previous: &Self) {
+        self.revision = previous.next_revision();
+    }
+}
+
+impl From<LayoutTree> for PanelTree {
+    fn from(tree: LayoutTree) -> Self {
+        Self {
+            tree,
+            revision: TreeRevision::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct TreeRevision(u64);
+
+impl TreeRevision {
+    const fn next(self) -> Self { Self(self.0.wrapping_add(1)) }
+
+    const fn bump(&mut self) { *self = self.next(); }
+}
+
+impl From<TreeRevision> for u64 {
+    fn from(value: TreeRevision) -> Self { value.0 }
+}
+
 /// A diegetic UI panel attached to a 3D entity.
 ///
 /// Defines a layout tree and the panel's dimensions in layout units.
@@ -98,10 +162,7 @@ use crate::render::HairlineFade;
 pub struct DiegeticPanel {
     /// The layout tree defining this panel's UI structure.
     #[reflect(ignore)]
-    pub(super) tree:                   LayoutTree,
-    /// Monotonic value token for edit sessions when [`Self::tree`] is replaced.
-    #[reflect(ignore)]
-    pub(super) tree_revision:          u64,
+    tree:                              PanelTree,
     /// Panel width in layout `Unit`s. Prefer [`set_size`](Self::set_size) for
     /// mutation to keep dimensions and unit in sync.
     pub(super) width:                  f32,
@@ -170,8 +231,7 @@ pub struct DiegeticPanel {
 impl Default for DiegeticPanel {
     fn default() -> Self {
         Self {
-            tree:                   LayoutTree::default(),
-            tree_revision:          0,
+            tree:                   PanelTree::default(),
             width:                  0.0,
             height:                 0.0,
             layout_unit:            Unit::Meters,
@@ -191,16 +251,34 @@ impl Default for DiegeticPanel {
     }
 }
 
+impl DiegeticPanel {
+    pub(super) fn with_initial_tree(tree: LayoutTree) -> Self {
+        Self {
+            tree: PanelTree::from(tree),
+            ..Self::default()
+        }
+    }
+}
+
 // ── Public read-only accessors ──────────────────────────────────────────────
 
 impl DiegeticPanel {
     /// Returns a reference to the layout tree.
     #[must_use]
-    pub const fn tree(&self) -> &LayoutTree { &self.tree }
+    pub const fn tree(&self) -> &LayoutTree { self.tree.tree() }
 
     /// Revision of the current layout tree.
     #[must_use]
-    pub(crate) const fn tree_revision(&self) -> u64 { self.tree_revision }
+    #[cfg(test)]
+    pub(crate) const fn tree_revision(&self) -> TreeRevision { self.tree.revision() }
+
+    /// Returns the revision-owned tree source used by derived caches.
+    #[must_use]
+    pub(super) const fn tree_source(&self) -> &PanelTree { &self.tree }
+
+    /// Returns the revision a successful tree replacement will produce.
+    #[must_use]
+    pub(crate) const fn next_tree_revision(&self) -> TreeRevision { self.tree.next_revision() }
 
     /// Panel width in layout units.
     #[must_use]
@@ -324,14 +402,15 @@ impl DiegeticPanel {
     /// [`DiegeticPanelCommands::set_tree`]. A direct component
     /// method cannot update the sibling change-classification component.
     pub(crate) fn replace_tree_full_rebuild(&mut self, tree: LayoutTree) {
-        self.tree = tree;
-        self.tree_revision = self.tree_revision.wrapping_add(1);
+        self.tree.replace(tree);
         self.text_index.clear();
     }
 
     fn replace_from_precompose_helper(&mut self, panel: Self) {
+        let mut panel = panel;
+        panel.tree.use_next_revision_after_replacement(&self.tree);
+        panel.text_index.clear();
         *self = panel;
-        self.text_index.clear();
     }
 
     /// Bench-support wrapper for [`Self::replace_tree_full_rebuild`].
@@ -350,12 +429,7 @@ impl DiegeticPanel {
     /// via `TextEdit`) calls this to change a run's string. Skips the revision bump
     /// when the string is unchanged, avoiding a layout pass and a cache lookup.
     pub(crate) fn sync_run_text_cache(&mut self, index: usize, text: &str) -> bool {
-        if self.tree.set_element_text(index, text) {
-            self.tree_revision = self.tree_revision.wrapping_add(1);
-            true
-        } else {
-            false
-        }
+        self.tree.set_element_text(index, text)
     }
 
     /// Writes a restyle into the authored `El.config` and bumps the edit-session
@@ -369,12 +443,7 @@ impl DiegeticPanel {
     /// reconcile, so measurement and rendering stay on the same source. Skips the
     /// revision bump (and so the layout) when the style already matches.
     pub(crate) fn restyle_run(&mut self, index: usize, style: TextStyle) -> bool {
-        if self.tree.set_element_style(index, style) {
-            self.tree_revision = self.tree_revision.wrapping_add(1);
-            true
-        } else {
-            false
-        }
+        self.tree.set_element_style(index, style)
     }
 
     /// Sets the panel width directly (in layout units).
@@ -692,7 +761,7 @@ fn set_tree_command(
     let Ok((mut panel, mut classification)) = panels.get_mut(entity) else {
         return;
     };
-    let change = panel.tree.classify_change(&next_tree);
+    let change = panel.tree().classify_change(&next_tree);
     classification.record_tree_change(change);
     panel.replace_tree_full_rebuild(next_tree);
 }
@@ -1360,7 +1429,7 @@ impl DiegeticPanelChangeClassification {
 /// are converted to points.
 #[derive(Component, Default)]
 pub(super) struct ScaledLayoutTreeCache {
-    source_revision:       u64,
+    source_revision:       TreeRevision,
     layout_to_points_bits: F32Bits,
     font_to_points_bits:   F32Bits,
     tree:                  Option<LayoutTree>,
@@ -1387,11 +1456,11 @@ impl ScaledLayoutTreeCache {
     /// or scale factors change.
     pub(super) fn get_or_update(
         &mut self,
-        source: &LayoutTree,
-        source_revision: u64,
+        source: &PanelTree,
         layout_to_points: f32,
         font_to_points: f32,
     ) -> &LayoutTree {
+        let source_revision = source.revision();
         let layout_to_points_bits = F32Bits::new(layout_to_points);
         let font_to_points_bits = F32Bits::new(font_to_points);
         let cache_hit = self.tree.is_some()
@@ -1416,7 +1485,7 @@ impl ScaledLayoutTreeCache {
         }
 
         self.tree
-            .get_or_insert_with(|| source.scaled(layout_to_points, font_to_points))
+            .get_or_insert_with(|| source.tree().scaled(layout_to_points, font_to_points))
     }
 
     #[cfg(test)]
@@ -1569,6 +1638,7 @@ mod tests {
     use super::DiegeticPanelChangeClassification;
     use super::DiegeticPanelCommands;
     use super::PanelScreenHandoff;
+    use super::PanelTree;
     use super::PendingPanelConversion;
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
@@ -1590,45 +1660,77 @@ mod tests {
 
     #[test]
     fn scaled_tree_cache_hits_until_source_invalidated_or_scale_changes() {
-        let tree = test_tree("cache");
+        let mut source = PanelTree::from(test_tree("cache"));
         let mut cache = ScaledLayoutTreeCache::default();
 
-        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
         assert_eq!(cache.hits(), 0);
         assert_eq!(cache.misses(), 1);
 
-        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 1);
 
         cache.invalidate_source();
-        let _ = cache.get_or_update(&tree, 0, 2.0, 3.0);
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 2);
 
-        let _ = cache.get_or_update(&tree, 1, 2.0, 3.0);
+        source.replace(test_tree("cache"));
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 3);
 
-        let _ = cache.get_or_update(&tree, 1, 4.0, 3.0);
+        let _ = cache.get_or_update(&source, 4.0, 3.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 4);
 
-        let _ = cache.get_or_update(&tree, 1, 4.0, 5.0);
+        let _ = cache.get_or_update(&source, 4.0, 5.0);
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 5);
     }
 
     #[test]
     fn scaled_tree_cache_hits_across_unrelated_panel_component_changes() {
-        let tree = test_tree("cache");
+        let source = PanelTree::from(test_tree("cache"));
         let mut cache = ScaledLayoutTreeCache::default();
 
-        let _ = cache.get_or_update(&tree, 7, 2.0, 3.0);
-        let _ = cache.get_or_update(&tree, 7, 2.0, 3.0);
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
+        let _ = cache.get_or_update(&source, 2.0, 3.0);
 
         assert_eq!(cache.hits(), 1);
         assert_eq!(cache.misses(), 1);
+    }
+
+    #[test]
+    fn precompose_helper_replace_invalidates_scaled_tree_cache() {
+        let mut helper = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .font_unit(Unit::Millimeters)
+            .world_height(0.5)
+            .with_tree(test_tree("Blend"))
+            .build()
+            .expect("helper panel should build");
+        let mut cache = ScaledLayoutTreeCache::default();
+
+        let scaled = cache.get_or_update(helper.tree_source(), 1.0, 1.0);
+        assert_eq!(scaled.element_text(1), Some("Blend"));
+        assert_eq!(cache.misses(), 1);
+
+        let next = DiegeticPanel::world()
+            .size(Mm(100.0), Mm(50.0))
+            .font_unit(Unit::Millimeters)
+            .world_height(0.5)
+            .with_tree(test_tree("Add"))
+            .build()
+            .expect("replacement helper panel should build");
+
+        helper.replace_from_precompose_helper(next);
+        let scaled = cache.get_or_update(helper.tree_source(), 1.0, 1.0);
+
+        assert_eq!(scaled.element_text(1), Some("Add"));
+        assert_eq!(cache.hits(), 0);
+        assert_eq!(cache.misses(), 2);
     }
 
     #[test]
@@ -1777,18 +1879,18 @@ mod tests {
     #[test]
     fn tree_revision_changes_only_when_tree_is_replaced() {
         let mut panel = DiegeticPanel::default();
-        assert_eq!(panel.tree_revision(), 0);
+        assert_eq!(u64::from(panel.tree_revision()), 0);
 
         panel.set_width(120.0);
         panel.set_height(80.0);
-        assert_eq!(panel.tree_revision(), 0);
+        assert_eq!(u64::from(panel.tree_revision()), 0);
 
         let resize_result = panel.set_size((2.0, 1.0));
         assert!(resize_result.is_ok());
-        assert_eq!(panel.tree_revision(), 0);
+        assert_eq!(u64::from(panel.tree_revision()), 0);
 
         panel.set_tree_full_rebuild(test_tree("next"));
-        assert_eq!(panel.tree_revision(), 1);
+        assert_eq!(u64::from(panel.tree_revision()), 1);
     }
 
     #[test]
@@ -1799,6 +1901,6 @@ mod tests {
             .build()
             .expect("test panel should build");
 
-        assert_eq!(panel.tree_revision(), 0);
+        assert_eq!(u64::from(panel.tree_revision()), 0);
     }
 }

@@ -56,7 +56,7 @@ use crate::render::analytic_paths::PathAtlasHandles;
 use crate::render::batch_key;
 use crate::render::batch_key::PipelineCompatibility;
 use crate::render::batch_key::ResourceCompatibility;
-use crate::render::draw_order;
+use crate::render::draw_order::DrawOrderIndex;
 use crate::render::material_table::FrameMaterialSlotAppend;
 use crate::render::material_table::FrameMaterialTableBuild;
 use crate::render::material_table::FrameMaterialTableBuilder;
@@ -454,9 +454,13 @@ fn upsert_rebuilt_text_run(input: RebuiltTextRunInput<'_>) {
         hdr_text_coverage_bias,
         material_slot,
     );
-    backend
-        .batch_store_mut()
-        .upsert_run(batch_key, storage_key, glyphs, record);
+    backend.batch_store_mut().upsert_run(
+        batch_key,
+        storage_key,
+        DrawOrderIndex::from(panel_text_child.draw_ordinal),
+        glyphs,
+        record,
+    );
 }
 
 struct RenderOnlyTextRunInput<'a> {
@@ -645,6 +649,7 @@ fn reconcile_batch_entities(input: ReconcileBatchEntities<'_, '_, '_>) {
     for key in to_grow {
         grow_batch_assets(&key, backend, meshes, materials, storage_buffers, commands);
     }
+    refresh_batch_material_depth_biases(backend, materials);
 }
 
 /// Copies each routed label's propagated `GlobalTransform` into its
@@ -942,6 +947,7 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
     let mesh = meshes.add(inert_batch_mesh(capacity));
     let material = materials.add(batch_material(BatchMaterialInput {
         key,
+        batch_base: batch.batch_base(),
         atlas,
         instances: instances.clone(),
         run_table: run_table.clone(),
@@ -1053,6 +1059,7 @@ fn grow_batch_assets(
 /// Inputs for [`batch_material`].
 struct BatchMaterialInput<'a> {
     key:        &'a PathBatchKey,
+    batch_base: DrawOrderIndex,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
@@ -1065,6 +1072,7 @@ struct BatchMaterialInput<'a> {
 fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
     let BatchMaterialInput {
         key,
+        batch_base,
         atlas,
         instances,
         run_table,
@@ -1080,7 +1088,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
         key.pipeline_compatibility,
     );
     base.alpha_mode = batch_gpu_alpha_mode(key.pipeline_compatibility.alpha.into());
-    base.depth_bias = draw_order::text_batch_depth_bias(key.z_index).get();
+    base.depth_bias = batch_base.screen_depth_bias().get();
     PathExtendedMaterial {
         base,
         extension: render::analytic_paths::vertex_pull(
@@ -1095,6 +1103,24 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
                 run_records: run_table,
             },
         ),
+    }
+}
+
+fn refresh_batch_material_depth_biases(
+    backend: &mut GlyphCache,
+    materials: &mut Assets<PathExtendedMaterial>,
+) {
+    for (_, batch) in backend.batch_store_mut().batches_mut() {
+        let Some(gpu) = &batch.gpu else {
+            continue;
+        };
+        let Some(mut material) = materials.get_mut(&gpu.material) else {
+            continue;
+        };
+        let depth_bias = batch.batch_base().screen_depth_bias().get();
+        if material.base.depth_bias.to_bits() != depth_bias.to_bits() {
+            material.base.depth_bias = depth_bias;
+        }
     }
 }
 
@@ -1921,49 +1947,26 @@ mod tests {
         assert_eq!(batches, 2);
         assert_eq!(runs, 2);
 
-        let lowered_depth_bias = draw_order::text_batch_depth_bias(LOWERED_LEVEL);
-        let default_depth_bias = draw_order::text_batch_depth_bias(DrawZIndex::default());
-        let raised_depth_bias = draw_order::text_batch_depth_bias(RAISED_LEVEL);
+        let lowered_depth_bias = 0.0_f32;
+        let raised_depth_bias = constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             batch_material_depth_biases(&app),
             vec![
-                (LOWERED_LEVEL, lowered_depth_bias.get().to_bits()),
-                (RAISED_LEVEL, raised_depth_bias.get().to_bits()),
+                (LOWERED_LEVEL, lowered_depth_bias.to_bits()),
+                (RAISED_LEVEL, raised_depth_bias.to_bits()),
             ],
         );
-        assert_ne!(
-            lowered_depth_bias.get().to_bits(),
-            default_depth_bias.get().to_bits()
-        );
-        assert_ne!(
-            raised_depth_bias.get().to_bits(),
-            default_depth_bias.get().to_bits()
-        );
-        assert!(lowered_depth_bias.get() < default_depth_bias.get());
-        assert!(default_depth_bias.get() < raised_depth_bias.get());
+        assert!(lowered_depth_bias < raised_depth_bias);
     }
 
     #[test]
-    fn default_text_batch_material_uses_level_zero_text_lane() {
+    fn default_text_batch_material_uses_first_text_command_base() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
         let (depth_bias, oit_depth_offset) = batch_material_values(&app);
-        let previous_text_lane =
-            constants::TEXT_BATCH_SORT_ANCHOR.to_f32() * constants::LAYER_DEPTH_BIAS;
-        assert_eq!(
-            previous_text_lane.to_bits(),
-            draw_order::text_batch_depth_bias(DrawZIndex::default())
-                .get()
-                .to_bits()
-        );
-        assert_eq!(
-            depth_bias.to_bits(),
-            draw_order::text_batch_depth_bias(DrawZIndex::default())
-                .get()
-                .to_bits()
-        );
+        assert_eq!(depth_bias.to_bits(), 0.0_f32.to_bits());
         assert_eq!(oit_depth_offset.to_bits(), 0.0f32.to_bits());
     }
 
@@ -1984,16 +1987,9 @@ mod tests {
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);
 
-        let first_command_depth =
-            constants::FIRST_COMMAND_SORT_OFFSET.to_f32() * constants::LAYER_DEPTH_BIAS;
-        let second_command_depth =
-            (constants::FIRST_COMMAND_SORT_OFFSET + 1).to_f32() * constants::LAYER_DEPTH_BIAS;
         assert_eq!(
             run_record_depths(&app),
-            vec![
-                (first_command_depth, 0.0),
-                (second_command_depth, constants::OIT_DEPTH_STEP),
-            ],
+            vec![(0.0, 0.0), (1.0, constants::OIT_DEPTH_STEP),],
         );
     }
 

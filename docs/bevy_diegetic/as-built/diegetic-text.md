@@ -431,9 +431,9 @@ Each phase below cites the decision it implements.
   `clear_reconcile_owned.after(sync_run_text_to_cache)` in `Update`.
 
 **Surprises:**
-- The cache write **must bump `tree_revision`** or `ScaledLayoutTreeCache` serves a
-  stale scaled tree (keyed on revision). Added `DiegeticPanel::sync_run_text_cache`
-  to pair the `El.text` write with the bump; `LayoutTree::set_element_text` returns
+- The cache write must go through `DiegeticPanel::sync_run_text_cache`; it
+  writes `El.text` through `PanelTree`, which bumps the revision
+  `ScaledLayoutTreeCache` keys on. `LayoutTree::set_element_text` returns
   whether it changed so an equal string skips the bump (and the re-measure, per
   TR-L).
 - `ReconcileOwned` must survive into the **next frame's** sync pass: reconcile

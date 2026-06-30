@@ -98,7 +98,7 @@ const GLINT_LIGHT_LUMENS: f32 = 2000.0;
 const SDF_PANEL_STATS: PanelStats = PanelStats {
     sdf_fills:      4,
     sdf_borders:    5,
-    material_slots: 9,
+    material_slots: 10,
     text_runs:      10,
     shape_records:  0,
 };
@@ -241,10 +241,11 @@ const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BL
 const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
 const LEDGER_FONT_SIZE: f32 = 10.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
-const LEDGER_BREAKDOWN_VALUE_WIDTH: f32 = 56.0;
 const LEDGER_ROW_GAP: f32 = 2.0;
 const LEDGER_CELL_GAP: f32 = 4.0;
-const LEDGER_BATCH_REASON_MEASURE: &str = "L0 untextured shadow alphatocoverage";
+const LEDGER_BREAKDOWN_LABEL_MEASURE: &str = "L0 untextured shadow alphatocoverage";
+const LEDGER_BREAKDOWN_MIN_SPACER_MEASURE: &str = "  ";
+const LEDGER_BREAKDOWN_VALUE_MEASURE: &str = "00";
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
@@ -284,6 +285,8 @@ const EMISSIVE_WARM: Color = Color::linear_rgb(3.6, 2.3, 0.2);
 const GLINT: Color = Color::linear_rgb(0.95, 0.97, 1.0);
 const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
+const SDF_EMISSIVE_TEXT_INK: Color = Color::srgb(0.0, 0.06, 0.08);
+const SDF_EMISSIVE_TEXT_GLOW: Color = Color::linear_rgb(0.0, 3.2, 4.4);
 const BATCH_BLOOM_INTENSITY: f32 = 0.25;
 const BATCH_BLOOM_THRESHOLD: f32 = 4.0;
 const BATCH_BLOOM_THRESHOLD_SOFTNESS: f32 = 0.0;
@@ -405,7 +408,7 @@ struct PanelStats {
     sdf_fills:      usize,
     /// Element borders, each one authored SDF border surface.
     sdf_borders:    usize,
-    /// Authored SDF fill/border material-table rows for this panel.
+    /// Authored local material-table rows for this panel.
     material_slots: usize,
     /// `builder.text` runs.
     text_runs:      usize,
@@ -442,12 +445,14 @@ struct SdfSurfaceMaterialHandles {
     metallic:      Handle<StandardMaterial>,
     /// Source material for the emissive animated card.
     emissive:      Handle<StandardMaterial>,
+    /// Cool emissive text material for the warm emissive card.
+    emissive_text: Handle<StandardMaterial>,
     /// Source material for the texture-backed card.
     image:         Handle<StandardMaterial>,
 }
 
 impl SdfSurfaceMaterialHandles {
-    /// Registers the four SDF card materials once and returns their handles.
+    /// Registers the SDF card materials once and returns their handles.
     fn new(
         materials: &mut Assets<StandardMaterial>,
         image: Handle<Image>,
@@ -457,6 +462,7 @@ impl SdfSurfaceMaterialHandles {
             panel_default: materials.add(panel_default_card_material(alpha)),
             metallic:      materials.add(with_alpha(metallic_glint_material(0.0), alpha)),
             emissive:      materials.add(with_alpha(emissive_fill_material(0.0), alpha)),
+            emissive_text: materials.add(sdf_emissive_text_material()),
             image:         materials.add(with_alpha(image_fill_material(image), alpha)),
         }
     }
@@ -1626,6 +1632,7 @@ fn ledger_batch_section(
             .height(Sizing::FIT)
             .gap(LEDGER_ROW_GAP),
         |builder| {
+            ledger_width_anchor(builder);
             builder.text(("batch validation", ledger_title_style()));
             ledger_row(
                 builder,
@@ -1703,17 +1710,16 @@ fn ledger_material_section(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats
             ledger_plain_kv_row(builder, "bytes", TEXT_MUTED, table.upload_bytes.to_string());
             ledger_plain_kv_row(
                 builder,
-                "freeze us",
+                "freeze time us",
                 TEXT_MUTED,
                 table.freeze_us.to_string(),
             );
             ledger_plain_kv_row(
                 builder,
-                "upload us",
+                "upload time us",
                 TEXT_MUTED,
                 table.upload_us.to_string(),
             );
-            ledger_note(builder, "timed rewrite of shared material rows");
             ledger_plain_kv_row(
                 builder,
                 "reallocs",
@@ -1767,8 +1773,8 @@ fn ledger_upload_explainer(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats
             .height(Sizing::FIT)
             .gap(0.5),
         |builder| {
-            ledger_full_note(builder, "upload detail - record-buffer uploads");
-            ledger_full_note(builder, "from changed materials or instructions");
+            ledger_full_note(builder, "upload detail - record buffers");
+            ledger_full_note(builder, "changed materials or instructions");
             ledger_detail_kv_row(
                 builder,
                 "text record buffers",
@@ -1801,6 +1807,30 @@ fn ledger_spacer(builder: &mut LayoutBuilder) {
         El::new().width(Sizing::GROW).height(Sizing::FIT),
         |_builder| {},
     );
+}
+
+fn ledger_width_anchor(builder: &mut LayoutBuilder) {
+    builder.with(
+        El::row().width(Sizing::FIT).height(Sizing::fixed(0.0)),
+        |builder| {
+            ledger_hidden_measure_cell(builder, LEDGER_BREAKDOWN_LABEL_MEASURE);
+            ledger_hidden_measure_cell(builder, LEDGER_BREAKDOWN_MIN_SPACER_MEASURE);
+            ledger_hidden_measure_cell(builder, LEDGER_BREAKDOWN_VALUE_MEASURE);
+        },
+    );
+}
+
+fn ledger_hidden_measure_cell(builder: &mut LayoutBuilder, measure: &str) {
+    builder.text(
+        Text::new("", ledger_cell_style(TEXT_MUTED))
+            .layout(El::new().height(Sizing::fixed(0.0)))
+            .measure_as(measure),
+    );
+}
+
+fn ledger_min_spacer(builder: &mut LayoutBuilder) {
+    ledger_hidden_measure_cell(builder, LEDGER_BREAKDOWN_MIN_SPACER_MEASURE);
+    ledger_spacer(builder);
 }
 
 fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
@@ -1842,59 +1872,58 @@ fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cell
     );
 }
 
-// Breakdown section header owns only the section label and the "records" column
-// heading. Draw rows below use the same right edge so large counts don't drift.
+// Breakdown section header fills the width established by the data rows: the
+// left label is natural, then a spacer pushes `records` to the same right edge
+// as the counts. `records` must not be part of the measured data-row width.
 fn ledger_breakdown_header(builder: &mut LayoutBuilder, label: &str, color: Color) {
     builder.with(
         El::row()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .gap(LEDGER_CELL_GAP)
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            ledger_breakdown_label_cell(builder, label, color);
-            ledger_breakdown_value_cell(builder, "records".to_owned(), color);
-        },
-    );
-}
-
-// One breakdown row: a measured reason label plus a record count aligned to the
-// same right edge as the section header.
-fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
-    builder.with(
-        El::row()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .gap(LEDGER_CELL_GAP)
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            ledger_breakdown_label_cell(builder, label, color);
-            ledger_breakdown_value_cell(builder, value, color);
-        },
-    );
-}
-
-fn ledger_breakdown_label_cell(builder: &mut LayoutBuilder, label: &str, color: Color) {
-    builder.with(
-        El::new()
-            .width(Sizing::FIT)
+            .width(Sizing::GROW)
             .height(Sizing::FIT)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text(
-                Text::new(label, ledger_cell_style(color)).measure_as(LEDGER_BATCH_REASON_MEASURE),
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text((label, ledger_cell_style(color)));
+                },
+            );
+            ledger_min_spacer(builder);
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Right, AlignY::Center),
+                |builder| {
+                    builder.text(("records", ledger_cell_style(color)));
+                },
             );
         },
     );
 }
 
-fn ledger_breakdown_value_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
+// One breakdown row: a natural reason label plus a record count pushed to the
+// anchored ledger edge.
+fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
     builder.with(
-        El::new()
-            .width(Sizing::fixed(LEDGER_BREAKDOWN_VALUE_WIDTH))
+        El::row()
+            .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .alignment(AlignX::Right, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Center),
         |builder| {
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text((label, ledger_cell_style(color)));
+                },
+            );
+            ledger_min_spacer(builder);
             builder.text((value, ledger_cell_style(color)));
         },
     );
@@ -1911,25 +1940,21 @@ fn ledger_detail_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, 
 fn ledger_single_value_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
     builder.with(
         El::row()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .gap(LEDGER_CELL_GAP)
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| {
-            ledger_breakdown_label_cell(builder, label, color);
-            ledger_breakdown_value_cell(builder, value, color);
-        },
-    );
-}
-
-fn ledger_note(builder: &mut LayoutBuilder, text: impl Into<String>) {
-    builder.with(
-        El::new()
-            .width(Sizing::FIT)
+            .width(Sizing::GROW)
             .height(Sizing::FIT)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.text((text.into(), ledger_cell_style(TEXT_MUTED)));
+            builder.with(
+                El::new()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .alignment(AlignX::Left, AlignY::Center),
+                |builder| {
+                    builder.text((label, ledger_cell_style(color)));
+                },
+            );
+            ledger_min_spacer(builder);
+            builder.text((value, ledger_cell_style(color)));
         },
     );
 }
@@ -2029,12 +2054,13 @@ fn build_sdf_surface_panel(materials: &SdfSurfaceMaterialHandles) -> LayoutTree 
                     .height(Sizing::GROW)
                     .gap(ROW_GAP),
                 |builder| {
-                    sdf_fill_card(
+                    sdf_emissive_fill_card(
                         builder,
                         "El material",
                         "emissive value",
                         ACCENT_YELLOW,
                         materials.emissive.clone(),
+                        materials.emissive_text.clone(),
                     );
                     sdf_fill_card(
                         builder,
@@ -2674,6 +2700,45 @@ fn sdf_fill_card(
     );
 }
 
+fn sdf_emissive_fill_card(
+    builder: &mut LayoutBuilder,
+    label: &str,
+    caption: &str,
+    accent: Color,
+    material: Handle<StandardMaterial>,
+    text_material: Handle<StandardMaterial>,
+) {
+    builder.with(
+        El::new()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .padding(Padding::all(2.0))
+            .material(material)
+            .border(Border::all(Mm(0.3), accent))
+            .corner_radius(CornerRadius::all(Mm(1.4)))
+            .alignment(AlignX::Center, AlignY::Center),
+        |builder| {
+            let label_style = swatch_style(SDF_EMISSIVE_TEXT_INK)
+                .with_material(text_material.clone())
+                .with_hdr_text_coverage_bias(2.0);
+            let caption_style = small_style(SDF_EMISSIVE_TEXT_INK)
+                .with_material(text_material)
+                .with_hdr_text_coverage_bias(2.0);
+            builder.with(
+                El::column()
+                    .width(Sizing::FIT)
+                    .height(Sizing::FIT)
+                    .gap(1.0)
+                    .alignment(AlignX::Center, AlignY::Center),
+                |builder| {
+                    builder.text((label, label_style));
+                    builder.text((caption, caption_style));
+                },
+            );
+        },
+    );
+}
+
 fn sdf_panel_default_card(
     builder: &mut LayoutBuilder,
     label: &str,
@@ -2698,8 +2763,14 @@ fn sdf_panel_default_card(
                     .gap(1.0)
                     .alignment(AlignX::Center, AlignY::Center),
                 |builder| {
-                    builder.text((label, swatch_style(accent)));
-                    builder.text((caption, small_style(TEXT_MUTED)));
+                    builder.text((
+                        label,
+                        swatch_style(Color::BLACK).with_hdr_text_coverage_bias(2.0),
+                    ));
+                    builder.text((
+                        caption,
+                        small_style(Color::BLACK).with_hdr_text_coverage_bias(2.0),
+                    ));
                 },
             );
         },
@@ -2753,6 +2824,14 @@ fn emissive_fill_material(phase: f32) -> StandardMaterial {
     material.base_color = Color::srgb(0.06, 0.05, 0.03);
     let intensity = animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(0.8, 0.6);
     material.emissive = EMISSIVE_WARM.to_linear() * intensity;
+    material
+}
+
+fn sdf_emissive_text_material() -> StandardMaterial {
+    let mut material = default_panel_material();
+    material.base_color = SDF_EMISSIVE_TEXT_INK;
+    material.emissive = SDF_EMISSIVE_TEXT_GLOW.to_linear();
+    material.alpha_mode = AlphaMode::Blend;
     material
 }
 

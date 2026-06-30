@@ -103,8 +103,7 @@ pub(super) fn compute_panel_layouts(
         let had_result = computed.result().is_some();
 
         let scaled_tree = scaled_tree_cache.get_or_update(
-            panel_ref.tree(),
-            panel_ref.tree_revision(),
+            panel_ref.tree_source(),
             layout_to_points,
             font_to_points,
         );
@@ -487,7 +486,7 @@ mod tests {
             .world()
             .get::<DiegeticPanel>(entity)
             .expect("panel should exist");
-        assert_eq!(panel.tree_revision(), 1);
+        assert_eq!(u64::from(panel.tree_revision()), 1);
     }
 
     #[test]
@@ -579,7 +578,7 @@ mod tests {
             .world()
             .get::<DiegeticPanel>(entity)
             .expect("panel should exist");
-        assert_eq!(panel.tree_revision(), 2);
+        assert_eq!(u64::from(panel.tree_revision()), 2);
     }
 
     #[test]

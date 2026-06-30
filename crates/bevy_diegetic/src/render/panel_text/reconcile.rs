@@ -799,7 +799,6 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
-    use crate::render::constants::FIRST_COMMAND_SORT_OFFSET;
     use crate::render::constants::LAYER_DEPTH_BIAS;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
@@ -1574,7 +1573,7 @@ mod tests {
         app.update();
 
         let (_, material_before) = single_image_child(&mut app);
-        let first_command_depth = FIRST_COMMAND_SORT_OFFSET.to_f32() * LAYER_DEPTH_BIAS;
+        let first_command_depth = 0.0_f32;
         assert_eq!(
             material_depth_bias(&app, &material_before).to_bits(),
             first_command_depth.to_bits(),

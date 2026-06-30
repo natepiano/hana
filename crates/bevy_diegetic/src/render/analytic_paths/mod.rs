@@ -20,6 +20,7 @@ pub(crate) use batching::PathBatchResources;
 pub(crate) use batching::PathBatchStore;
 pub(crate) use batching::PlacementDirty;
 pub(crate) use batching::analytic_material_slot_candidate;
+pub(crate) use batching::path_render_record_relative_to_batch;
 use bevy::asset::embedded_asset;
 use bevy::asset::load_internal_asset;
 use bevy::pbr::MaterialPlugin;

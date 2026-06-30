@@ -792,25 +792,22 @@ impl<S: sealed::CanBuild> DiegeticPanelBuilder<Screen, S> {
 }
 
 fn build_panel(data: BuilderData) -> DiegeticPanel {
-    DiegeticPanel {
-        tree:                   data.tree.unwrap_or_default(),
-        tree_revision:          0,
-        width:                  data.width,
-        height:                 data.height,
-        layout_unit:            data.layout_unit,
-        font_unit:              data.font_unit,
-        anchor:                 data.anchor.unwrap_or(Anchor::TopLeft),
-        world_width:            data.world_width,
-        world_height:           data.world_height,
-        surface_shadow:         data.surface_shadow,
-        material:               data.material,
-        text_material:          data.text_material,
-        shape_material:         data.shape_material,
-        text_alpha_mode:        data.text_alpha_mode,
-        hdr_text_coverage_bias: data.hdr_text_coverage_bias,
-        coordinate_space:       data.coordinate_space,
-        text_index:             std::collections::HashMap::new(),
-    }
+    let mut panel = DiegeticPanel::with_initial_tree(data.tree.unwrap_or_default());
+    panel.width = data.width;
+    panel.height = data.height;
+    panel.layout_unit = data.layout_unit;
+    panel.font_unit = data.font_unit;
+    panel.anchor = data.anchor.unwrap_or(Anchor::TopLeft);
+    panel.world_width = data.world_width;
+    panel.world_height = data.world_height;
+    panel.surface_shadow = data.surface_shadow;
+    panel.material = data.material;
+    panel.text_material = data.text_material;
+    panel.shape_material = data.shape_material;
+    panel.text_alpha_mode = data.text_alpha_mode;
+    panel.hdr_text_coverage_bias = data.hdr_text_coverage_bias;
+    panel.coordinate_space = data.coordinate_space;
+    panel
 }
 
 #[cfg(test)]
