@@ -288,7 +288,7 @@ pub(crate) struct ContiguousDrawnRun {
 /// Key for one SDF fill batch and one `SdfBatchResources` entry.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct SdfBatchKey {
-    /// Authored z-index for the shared SDF fill sort lane.
+    /// Authored z-index for the shared SDF surface batch sort anchor.
     pub z_index:                DrawZIndex,
     /// Renderer family that owns this SDF batch.
     pub batch_family:           DrawBatchFamily,

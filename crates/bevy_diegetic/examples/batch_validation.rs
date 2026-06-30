@@ -241,12 +241,10 @@ const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BL
 const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
 const LEDGER_FONT_SIZE: f32 = 10.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
+const LEDGER_BREAKDOWN_VALUE_WIDTH: f32 = 56.0;
 const LEDGER_ROW_GAP: f32 = 2.0;
 const LEDGER_CELL_GAP: f32 = 4.0;
-const LEDGER_BREAKDOWN_CELL_GAP: f32 = 2.0;
-const LEDGER_BREAKDOWN_NUM_WIDTH: f32 = 22.0;
-const LEDGER_BATCH_REASON_MEASURE: &str = "L31 untextured shadow alphatocoverage";
-const LEDGER_MATERIAL_LABEL_MEASURE: &str = "upload us";
+const LEDGER_BATCH_REASON_MEASURE: &str = "L0 untextured shadow alphatocoverage";
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
@@ -718,7 +716,7 @@ fn main() {
             ),
         )
         .add_observer(anchor_alpha_selector_when_added)
-        .add_observer(anchor_alpha_selector_when_title_added)
+        .add_observer(anchor_alpha_selector_when_stats_added)
         .add_observer(anchor_tonemapping_selector_when_added)
         .add_observer(anchor_tonemapping_selector_when_alpha_added)
         .add_observer(apply_render_features_to_added_camera)
@@ -1236,44 +1234,43 @@ fn build_tonemapping_selector_panel(
         .build()
 }
 
-// Pins the alpha selector's top-left corner just under the title bar's
-// bottom-left, so it tracks the title across window resizes. Two observers cover
-// either spawn order: whichever of the selector or title appears second wires the
-// relationship.
-fn alpha_selector_title_anchor(title: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(title, Anchor::TopLeft, Anchor::BottomLeft)
+// Pins the alpha selector's top-right corner just under the stats panel's
+// bottom-right, so the diagnostics controls stay grouped on the right edge. Two
+// observers cover either spawn order.
+fn alpha_selector_stats_anchor(stats_panel: Entity) -> AnchoredToPanel {
+    AnchoredToPanel::new(stats_panel, Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
 fn anchor_alpha_selector_when_added(
     trigger: On<Add, AlphaSelectorPanel>,
-    titles: Query<Entity, With<TitleBar>>,
+    stats_panels: Query<Entity, With<BatchValidationStatsPanel>>,
     mut commands: Commands,
 ) {
-    let Ok(title) = titles.single() else {
+    let Ok(stats_panel) = stats_panels.single() else {
         return;
     };
     commands
         .entity(trigger.entity)
-        .insert(alpha_selector_title_anchor(title));
+        .insert(alpha_selector_stats_anchor(stats_panel));
 }
 
-fn anchor_alpha_selector_when_title_added(
-    trigger: On<Add, TitleBar>,
+fn anchor_alpha_selector_when_stats_added(
+    trigger: On<Add, BatchValidationStatsPanel>,
     selectors: Query<Entity, With<AlphaSelectorPanel>>,
     mut commands: Commands,
 ) {
     for selector in &selectors {
         commands
             .entity(selector)
-            .insert(alpha_selector_title_anchor(trigger.entity));
+            .insert(alpha_selector_stats_anchor(trigger.entity));
     }
 }
 
-// Pins the tonemapping selector's top-left corner just under the alpha
-// selector's bottom-left, so both diagnostic controls move as one stack.
+// Pins the tonemapping selector's top-right corner just under the alpha
+// selector's bottom-right, so both diagnostic controls move as one stack.
 fn tonemapping_selector_alpha_anchor(alpha_selector: Entity) -> AnchoredToPanel {
-    AnchoredToPanel::new(alpha_selector, Anchor::TopLeft, Anchor::BottomLeft)
+    AnchoredToPanel::new(alpha_selector, Anchor::TopRight, Anchor::BottomRight)
         .with_offset(PanelAnchorOffset::new(Px(0.0), Px(4.0)))
 }
 
@@ -1518,12 +1515,10 @@ fn validation_key(state: &ValidationState) -> String {
 }
 
 fn runtime_stats_sections(
-    perf: Option<&DiegeticPerfStats>,
+    _perf: Option<&DiegeticPerfStats>,
     fps: f64,
     frame_secs: f32,
 ) -> Vec<StatsPanelSection> {
-    let perf = perf.cloned().unwrap_or_default();
-    let batch = &perf.batch;
     let frame_ms = frame_secs * 1000.0;
     vec![StatsPanelSection::untitled([
         StatsPanelRow::new(
@@ -1535,7 +1530,6 @@ fn runtime_stats_sections(
             },
         ),
         StatsPanelRow::new("fps", format!("{fps:.0} / {frame_ms:.2} ms")),
-        StatsPanelRow::new("text runs", batch.runs.to_string()),
     ])]
 }
 
@@ -1671,6 +1665,10 @@ fn ledger_batch_section(
                     perf.panel_geometry.sdf_uploads.to_string(),
                 ],
             );
+            ledger_separator(builder);
+            ledger_record_explainer(builder, perf);
+            ledger_separator(builder);
+            ledger_upload_explainer(builder, perf);
 
             for family in families {
                 ledger_separator(builder);
@@ -1715,11 +1713,79 @@ fn ledger_material_section(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats
                 TEXT_MUTED,
                 table.upload_us.to_string(),
             );
+            ledger_note(builder, "timed rewrite of shared material rows");
             ledger_plain_kv_row(
                 builder,
                 "reallocs",
                 TEXT_MUTED,
                 table.allocations.to_string(),
+            );
+        },
+    );
+}
+
+fn ledger_record_explainer(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(0.5),
+        |builder| {
+            builder.text(("record detail", ledger_cell_style(TEXT_MUTED)));
+            ledger_detail_kv_row(
+                builder,
+                "glyph records",
+                ACCENT_GREEN,
+                perf.batch.glyph_records,
+            );
+            ledger_detail_kv_row(
+                builder,
+                "text runs (not records)",
+                TEXT_MUTED,
+                perf.batch.runs,
+            );
+            ledger_detail_kv_row(
+                builder,
+                "shape records",
+                ACCENT_YELLOW,
+                perf.line_batch.records,
+            );
+            ledger_detail_kv_row(
+                builder,
+                "sdf records",
+                ACCENT_BLUE,
+                perf.panel_geometry.sdf_records,
+            );
+        },
+    );
+}
+
+fn ledger_upload_explainer(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(0.5),
+        |builder| {
+            ledger_full_note(builder, "upload detail - record-buffer uploads");
+            ledger_full_note(builder, "from changed materials or instructions");
+            ledger_detail_kv_row(
+                builder,
+                "text record buffers",
+                ACCENT_GREEN,
+                perf.batch.instance_uploads + perf.batch.run_table_uploads,
+            );
+            ledger_detail_kv_row(
+                builder,
+                "shape record buffers",
+                ACCENT_YELLOW,
+                perf.line_batch.uploads,
+            );
+            ledger_detail_kv_row(
+                builder,
+                "sdf record buffers",
+                ACCENT_BLUE,
+                perf.panel_geometry.sdf_uploads,
             );
         },
     );
@@ -1741,18 +1807,6 @@ fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
     builder.with(
         El::new()
             .width(Sizing::fixed(LEDGER_NUM_WIDTH))
-            .height(Sizing::FIT)
-            .alignment(AlignX::Right, AlignY::Center),
-        |builder| {
-            builder.text((value, ledger_cell_style(color)));
-        },
-    );
-}
-
-fn ledger_breakdown_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
-    builder.with(
-        El::new()
-            .width(Sizing::fixed(LEDGER_BREAKDOWN_NUM_WIDTH))
             .height(Sizing::FIT)
             .alignment(AlignX::Right, AlignY::Center),
         |builder| {
@@ -1789,89 +1843,105 @@ fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cell
 }
 
 // Breakdown section header owns only the section label and the "records" column
-// heading. Draw rows below use their own fit-width layout so this header text
-// does not widen the reason/value pair.
+// heading. Draw rows below use the same right edge so large counts don't drift.
 fn ledger_breakdown_header(builder: &mut LayoutBuilder, label: &str, color: Color) {
     builder.with(
         El::row()
-            .width(Sizing::GROW)
+            .width(Sizing::FIT)
             .height(Sizing::FIT)
             .gap(LEDGER_CELL_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .alignment(AlignX::Left, AlignY::Center),
-                |builder| {
-                    builder.text((label, ledger_cell_style(color)));
-                },
-            );
-            ledger_spacer(builder);
-            builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .alignment(AlignX::Right, AlignY::Center),
-                |builder| {
-                    builder.text(("records", ledger_cell_style(color)));
-                },
-            );
+            ledger_breakdown_label_cell(builder, label, color);
+            ledger_breakdown_value_cell(builder, "records".to_owned(), color);
         },
     );
 }
 
-// One breakdown row: a measured reason label plus a nearby record count. No
-// grow spacer here: long reasons should land close to their count instead of
-// stretching to the wider section header.
+// One breakdown row: a measured reason label plus a record count aligned to the
+// same right edge as the section header.
 fn ledger_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
     builder.with(
         El::row()
             .width(Sizing::FIT)
             .height(Sizing::FIT)
-            .gap(LEDGER_BREAKDOWN_CELL_GAP)
+            .gap(LEDGER_CELL_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .alignment(AlignX::Left, AlignY::Center),
-                |builder| {
-                    builder.text(
-                        Text::new(label, ledger_cell_style(color))
-                            .measure_as(LEDGER_BATCH_REASON_MEASURE),
-                    );
-                },
+            ledger_breakdown_label_cell(builder, label, color);
+            ledger_breakdown_value_cell(builder, value, color);
+        },
+    );
+}
+
+fn ledger_breakdown_label_cell(builder: &mut LayoutBuilder, label: &str, color: Color) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text(
+                Text::new(label, ledger_cell_style(color)).measure_as(LEDGER_BATCH_REASON_MEASURE),
             );
-            ledger_breakdown_num_cell(builder, value, color);
+        },
+    );
+}
+
+fn ledger_breakdown_value_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
+    builder.with(
+        El::new()
+            .width(Sizing::fixed(LEDGER_BREAKDOWN_VALUE_WIDTH))
+            .height(Sizing::FIT)
+            .alignment(AlignX::Right, AlignY::Center),
+        |builder| {
+            builder.text((value, ledger_cell_style(color)));
         },
     );
 }
 
 fn ledger_plain_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
+    ledger_single_value_row(builder, label, color, value);
+}
+
+fn ledger_detail_kv_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: usize) {
+    ledger_single_value_row(builder, label, color, value.to_string());
+}
+
+fn ledger_single_value_row(builder: &mut LayoutBuilder, label: &str, color: Color, value: String) {
     builder.with(
         El::row()
-            .width(Sizing::GROW)
+            .width(Sizing::FIT)
             .height(Sizing::FIT)
             .gap(LEDGER_CELL_GAP)
             .alignment(AlignX::Left, AlignY::Center),
         |builder| {
-            builder.with(
-                El::new()
-                    .width(Sizing::FIT)
-                    .height(Sizing::FIT)
-                    .alignment(AlignX::Left, AlignY::Center),
-                |builder| {
-                    builder.text(
-                        Text::new(label, ledger_cell_style(color))
-                            .measure_as(LEDGER_MATERIAL_LABEL_MEASURE),
-                    );
-                },
-            );
-            ledger_spacer(builder);
-            ledger_num_cell(builder, value, color);
+            ledger_breakdown_label_cell(builder, label, color);
+            ledger_breakdown_value_cell(builder, value, color);
+        },
+    );
+}
+
+fn ledger_note(builder: &mut LayoutBuilder, text: impl Into<String>) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text((text.into(), ledger_cell_style(TEXT_MUTED)));
+        },
+    );
+}
+
+fn ledger_full_note(builder: &mut LayoutBuilder, text: &str) {
+    builder.with(
+        El::new()
+            .width(Sizing::FIT)
+            .height(Sizing::FIT)
+            .alignment(AlignX::Left, AlignY::Center),
+        |builder| {
+            builder.text((text, ledger_cell_style(TEXT_MUTED)));
         },
     );
 }

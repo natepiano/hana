@@ -61,8 +61,8 @@ flowchart TD
 ```
 
 `StandardMaterial::depth_bias` is deliberately not part of this flow — diegetic
-draw-order types own depth/OIT offsets (`DrawOrderProjection`, plus per-record
-`oit_depth_offset` / `depth_nudge`).
+draw-order types own depth/OIT offsets (`DrawOrder`, plus per-record
+`oit_depth_offset` / `clip_depth_nudge`).
 
 ## 2. Per-family vertical slices
 

@@ -960,12 +960,12 @@ Decision: reject and revert. The target paths did not improve, and the fixed cap
 
 ## Attempt 18: compute draw-order text anchor during enumeration
 
-Purpose: remove a scan in `DrawOrderProjection::from_commands` by recording the first text ordinal while commands are already being enumerated.
+Purpose: remove a scan in `DrawOrder::from_commands` by recording the first text ordinal while commands are already being enumerated.
 
 Change:
 
 - `enumerate_draw_commands` returns both enumerated commands and first text ordinal.
-- `DrawOrderProjection::from_commands` uses that value instead of scanning commands again.
+- `DrawOrder::from_commands` uses that value instead of scanning commands again.
 - Test-only ordinal enumeration adapts to the new return shape.
 
 Command:

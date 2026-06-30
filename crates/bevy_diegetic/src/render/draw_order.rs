@@ -104,7 +104,7 @@ pub(crate) struct DrawOrder {
 /// Sort key for draw commands: `DrawZIndex`, then `DrawSortTier::sort_order`,
 /// then `RenderCommand` stream index.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct HierarchicalDrawKey {
+pub(crate) struct DrawOrderKey {
     z_index:        DrawZIndex,
     draw_sort_tier: DrawSortTier,
     command_index:  CommandIndex,
@@ -285,7 +285,7 @@ impl DrawOrder {
     }
 }
 
-impl Ord for HierarchicalDrawKey {
+impl Ord for DrawOrderKey {
     fn cmp(&self, other: &Self) -> Ordering {
         self.z_index()
             .cmp(&other.z_index())
@@ -298,11 +298,11 @@ impl Ord for HierarchicalDrawKey {
     }
 }
 
-impl HierarchicalDrawKey {
+impl DrawOrderKey {
     const fn z_index(self) -> DrawZIndex { self.z_index }
 }
 
-impl PartialOrd for HierarchicalDrawKey {
+impl PartialOrd for DrawOrderKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 
@@ -366,7 +366,7 @@ fn enumerate_draw_commands(commands: &[RenderCommand]) -> Vec<Option<OrderedDraw
         .filter_map(|(index, command)| {
             command.kind.draw_sort_tier().map(|step| {
                 (
-                    HierarchicalDrawKey {
+                    DrawOrderKey {
                         z_index:        command.z_index,
                         draw_sort_tier: step,
                         command_index:  CommandIndex::from(index),

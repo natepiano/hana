@@ -131,7 +131,7 @@ pub(crate) enum PanelChildSystems {
 /// `PostUpdate` phase that reports draw-order capacity limits from `DrawOrder`.
 #[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DrawOrderLimitSystems {
-    /// Warn about per-level screen lanes and OIT ordinal budget.
+    /// Warn about panel-wide OIT draw-order budget pressure.
     Warn,
 }
 

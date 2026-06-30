@@ -99,7 +99,7 @@ PathQuadRecord (one per glyph, 40 B)         PathRenderRecord (one per run, 96 B
   rect_min:  vec2<f32>   // layout space, clipped   transform:   mat4x4<f32> // label world matrix
   rect_size: vec2<f32>                              fill_color:  vec4<f32>
   uv_min:    vec2<f32>   // padded quad UVs         render_mode: u32         // Text / PunchOut
-  uv_size:   vec2<f32>                              depth_nudge: f32
+  uv_size:   vec2<f32>                              clip_depth_nudge: f32
   packed_path_index: u32       // PackedPathRecord index
   render_index:   u32       // PathRenderRecord index
 ```
@@ -319,7 +319,7 @@ Today each run's `StandardMaterial.depth_bias` (derived from
 `command_index`) orders coplanar panel text in Geometry mode. In bevy that
 field is a per-material *sort* bias — meaningless inside a single batched
 draw, and already a no-op under OIT (see memory
-`project_depth_bias_oit_bug`). Replacement: a per-run `depth_nudge` applied
+`project_depth_bias_oit_bug`). Replacement: a per-run `clip_depth_nudge` applied
 in the vertex shader as a small view-space z offset for the non-OIT path,
 zero under OIT (matching today's `oit_depth_offset: 0.0` policy at
 `mesh_spawning.rs:273-278` — a positive OIT offset pulls text through
@@ -329,7 +329,7 @@ occluders).
 prepass vertex shader.** The depth prepass writes depth from the prepass
 vertex stage; if only the main pass nudges, main-pass fragment depth diverges
 from prepass depth and depth-equal testing rejects the fragments. Both
-stages read the same `PathRenderRecord.depth_nudge` through the shared WGSL
+stages read the same `PathRenderRecord.clip_depth_nudge` through the shared WGSL
 function in `slug_text_vertex_pull.wgsl` (decision 1), so this is one code
 path, not duplicated logic. Step 3b verifies Geometry-mode layering against
 the `panel_rendering` example before the old path is removed.
@@ -346,8 +346,8 @@ mask/opaque text, where prepass depth is real and divergence would reject
 fragments under depth-equal testing.
 
 The nudge *value* is computed exactly as today's bias:
-`depth_nudge = command_index as f32 × LAYER_DEPTH_BIAS` for the non-OIT
-path, `0.0` under OIT. Naming kept straight: `depth_nudge` (per-run,
+`clip_depth_nudge = command_index as f32 × LAYER_DEPTH_BIAS` for the non-OIT
+path, `0.0` under OIT. Naming kept straight: `clip_depth_nudge` (per-run,
 `PathRenderRecord`, vertex-applied) is a different field from `oit_depth_offset`
 (global policy in the binding-100 uniform, always 0.0, read by the OIT
 fragment branch) — the two never merge. Punch-out is also unaffected in
@@ -1737,7 +1737,7 @@ becomes `visibility(vertex, fragment)`, vertex forwards atlas index in
 `uv_b.x` (today's mechanism) and run index in `uv_b.y` (quad-uniform f32,
 round to recover), fragment's uniform reads become run-table reads, all
 recorded in the new Target-model bullet; prepass fragment confirmed
-per-run-free (coverage-only discard); `depth_nudge` formula pinned
+per-run-free (coverage-only discard); `clip_depth_nudge` formula pinned
 (`command_index × LAYER_DEPTH_BIAS`, 0 under OIT) and disambiguated from
 `oit_depth_offset`; punch-out is prepass-blind (noted in decision 3).
 Integration: `update_panel_text_alpha` gated to `PerRunMeshes` until 3a
