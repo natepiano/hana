@@ -52,6 +52,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
+use bevy_diegetic::TextWrap;
 use bevy_diegetic::default_panel_material;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
@@ -60,6 +61,7 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::SprinkleBuilder;
 use fairy_dust::StatsPanelRow;
 use fairy_dust::StatsPanelSection;
 use fairy_dust::TitleBar;
@@ -93,43 +95,13 @@ const GLINT_LIGHT_LUMENS: f32 = 2000.0;
 
 // Authored content each panel draws, counted by family. Each panel renders its
 // own copy in the upper-right corner, so per-panel readouts stay consistent.
-// One El background = one sdf fill, one El border = one sdf border, one
-// `builder.text` = one text run, one panel-shape render record = one path row.
-const SDF_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:      4,
-    sdf_borders:    5,
-    material_slots: 10,
-    text_runs:      10,
-    shape_records:  0,
-};
-const TEXT_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:      8,
-    sdf_borders:    3,
-    material_slots: 12,
-    text_runs:      23,
-    shape_records:  0,
-};
-const SHAPE_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:      3,
-    sdf_borders:    4,
-    material_slots: 6,
-    text_runs:      8,
-    shape_records:  6,
-};
-const MIXED_PANEL_STATS: PanelStats = PanelStats {
-    sdf_fills:      5,
-    sdf_borders:    2,
-    material_slots: 7,
-    text_runs:      15,
-    shape_records:  1,
-};
 
 const SDF_ANIMATION_GREEN_OFFSET: f32 = 2.1;
 const SDF_ANIMATION_RED_OFFSET: f32 = 4.2;
 const SDF_ANIMATION_SPEED: f32 = 0.9;
 const DIAGNOSTIC_UPDATE_INTERVAL: f32 = 1.0;
 const HDR_CONTROL: &str = "R HDR";
-const BLOOM_CONTROL: &str = "B Bloom";
+const BLOOM_CONTROL: &str = "M Bloom";
 const TONEMAPPING_CONTROL: &str = "T Tonemapping";
 const TEXT_COVERAGE_CONTROL: &str = "Text Coverage";
 const TEXT_COVERAGE_LEFT_SEGMENT: &str = "text-coverage-left";
@@ -235,8 +207,7 @@ fn batch_reason(batch: &BatchSummary) -> String {
     format!("{layer} {}", tags.join(" "))
 }
 
-// Per-family column colors, matching `panel_stats_block`: text green, shape
-// yellow, sdf blue.
+// Per-family column colors: text green, shape yellow, sdf blue.
 const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BLUE];
 const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
 const LEDGER_FONT_SIZE: f32 = 10.0;
@@ -251,18 +222,18 @@ const CARD_RADIUS: Mm = Mm(4.0);
 const PANEL_PAD: Mm = Mm(4.0);
 const ROW_GAP: f32 = 4.0;
 const TITLE_FONT_SIZE: f32 = 18.75;
-const SUBTITLE_FONT_SIZE: f32 = 13.5;
+const SUBTITLE_FONT_SIZE: f32 = 11.25;
 const BODY_FONT_SIZE: f32 = 15.75;
 const SMALL_FONT_SIZE: f32 = 12.75;
 const MATERIAL_GROUP_TITLE_FONT_SIZE: f32 = 16.0;
 const MATERIAL_CASE_FONT_SIZE: f32 = 15.0;
 const MATERIAL_CASE_CAPTION_FONT_SIZE: f32 = 11.75;
+const SHAPE_CARD_CAPTION_FONT_SIZE: f32 = 10.5;
 const MATERIAL_GROUP_GAP: f32 = 2.0;
 const MATERIAL_CASE_GAP: f32 = 0.5;
 const MATERIAL_CASE_PAD_X: f32 = 2.0;
 const MATERIAL_CASE_PAD_Y: f32 = 1.0;
 const MATERIAL_VALUE_GAP: f32 = 2.0;
-const STATS_FONT_SIZE: f32 = 12.0;
 const SWATCH_FONT_SIZE: f32 = 24.0;
 const MIXED_LABEL_WIDTH: f32 = 58.0;
 const MIXED_ROW_BG: Color = Color::srgba(0.14, 0.16, 0.20, 0.92);
@@ -285,8 +256,8 @@ const EMISSIVE_WARM: Color = Color::linear_rgb(3.6, 2.3, 0.2);
 const GLINT: Color = Color::linear_rgb(0.95, 0.97, 1.0);
 const TEXT_MAIN: Color = Color::srgb(0.90, 0.92, 0.96);
 const TEXT_MUTED: Color = Color::srgba(0.64, 0.70, 0.78, 0.9);
-const SDF_EMISSIVE_TEXT_INK: Color = Color::srgb(0.0, 0.06, 0.08);
-const SDF_EMISSIVE_TEXT_GLOW: Color = Color::linear_rgb(0.0, 3.2, 4.4);
+const SDF_EMISSIVE_TEXT_INK: Color = Color::srgb(0.06, 0.16, 0.95);
+const SDF_EMISSIVE_TEXT_GLOW: Color = Color::linear_rgb(0.0, 0.4, 4.6);
 const BATCH_BLOOM_INTENSITY: f32 = 0.25;
 const BATCH_BLOOM_THRESHOLD: f32 = 4.0;
 const BATCH_BLOOM_THRESHOLD_SOFTNESS: f32 = 0.0;
@@ -299,8 +270,8 @@ const ALPHA_CELL_CAPTION: Color = Color::BLACK;
 // Previous HDR-path shader compensation for this cell:
 // const ALPHA_CELL_HDR_TEXT_COVERAGE_BIAS: f32 = 2.0;
 
-// The alpha modes the center-left selector cycles through, in number-key order
-// (Digit1..Digit7). The selected mode is applied to the SDF panel's fills and
+// The alpha modes the center-left selector cycles through, in letter-key order
+// (A..G). The selected mode is applied to the SDF panel's fills and
 // borders and to the Text panel's live alpha case, so both render in the same
 // mode and the per-mode shadow behavior is observable on the ground plane.
 const ALPHA_MODES: [(&str, AlphaMode); 7] = [
@@ -313,9 +284,18 @@ const ALPHA_MODES: [(&str, AlphaMode); 7] = [
     ("AlphaToCoverage", AlphaMode::AlphaToCoverage),
 ];
 // Blend is the panel default, so the selector starts there and nothing changes
-// until a number is pressed.
+// until a letter key is pressed.
 const ALPHA_DEFAULT_INDEX: usize = 1;
 const ALPHA_KEYS: [KeyCode; 7] = [
+    KeyCode::KeyA,
+    KeyCode::KeyB,
+    KeyCode::KeyC,
+    KeyCode::KeyD,
+    KeyCode::KeyE,
+    KeyCode::KeyF,
+    KeyCode::KeyG,
+];
+const TONEMAPPING_KEYS: [KeyCode; 9] = [
     KeyCode::Digit1,
     KeyCode::Digit2,
     KeyCode::Digit3,
@@ -323,6 +303,8 @@ const ALPHA_KEYS: [KeyCode; 7] = [
     KeyCode::Digit5,
     KeyCode::Digit6,
     KeyCode::Digit7,
+    KeyCode::Digit8,
+    KeyCode::Digit9,
 ];
 const ALPHA_ROW_GAP: f32 = 2.0;
 const ALPHA_ROW_WIDTH: f32 = 120.0;
@@ -338,7 +320,7 @@ const TONEMAPPING_MODES: [(&str, Tonemapping); 9] = [
     ("BlenderFilmic", Tonemapping::BlenderFilmic),
     ("KhronosPbr", Tonemapping::KhronosPbrNeutral),
 ];
-const TONEMAPPING_DEFAULT_INDEX: usize = 6;
+const TONEMAPPING_DEFAULT_INDEX: usize = 8;
 const TONEMAPPING_ROW_GAP: f32 = 2.0;
 const TONEMAPPING_ROW_WIDTH: f32 = 150.0;
 const TEXT_COVERAGE_BIAS_STEP: f32 = 0.1;
@@ -397,32 +379,6 @@ impl HdrTextCoverageSelection {
             RenderFeature::On => self.selected,
             RenderFeature::Off => 0.0,
         }
-    }
-}
-
-/// Authored draw counts for one panel, split by render family. Drives the
-/// panel's own upper-right readout.
-#[derive(Clone, Copy)]
-struct PanelStats {
-    /// Element backgrounds, each one authored SDF fill surface.
-    sdf_fills:      usize,
-    /// Element borders, each one authored SDF border surface.
-    sdf_borders:    usize,
-    /// Authored local material-table rows for this panel.
-    material_slots: usize,
-    /// `builder.text` runs.
-    text_runs:      usize,
-    /// Panel-shape `PathRenderRecord` rows predicted for this panel.
-    shape_records:  usize,
-}
-
-impl PanelStats {
-    /// Fills plus borders: the panel's total authored SDF surfaces.
-    const fn sdf_surfaces(self) -> usize { self.sdf_fills + self.sdf_borders }
-
-    /// SDF surfaces, text runs, and analytic path groups rendered by this panel.
-    const fn rendered_records(self) -> usize {
-        self.sdf_surfaces() + self.text_runs + self.shape_records
     }
 }
 
@@ -652,7 +608,7 @@ const VALIDATION_STABLE_FRAMES: u32 = 30;
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
-    fairy_dust::sprinkle_example()
+    let sprinkle = fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_perf_mode()
         .with_save_window_position()
@@ -694,17 +650,9 @@ fn main() {
             TEXT_COVERAGE_ACTIVE_VALUE_SEGMENT,
             |_active_bias| ControlActivation::Active,
         )
-        .with_camera_control_panel()
-        .with_shortcut(ALPHA_KEYS[0], select_alpha::<0>)
-        .with_shortcut(ALPHA_KEYS[1], select_alpha::<1>)
-        .with_shortcut(ALPHA_KEYS[2], select_alpha::<2>)
-        .with_shortcut(ALPHA_KEYS[3], select_alpha::<3>)
-        .with_shortcut(ALPHA_KEYS[4], select_alpha::<4>)
-        .with_shortcut(ALPHA_KEYS[5], select_alpha::<5>)
-        .with_shortcut(ALPHA_KEYS[6], select_alpha::<6>)
-        .with_shortcut(KeyCode::KeyR, toggle_hdr)
-        .with_shortcut(KeyCode::KeyB, toggle_bloom)
-        .with_shortcut(KeyCode::KeyT, cycle_tonemapping)
+        .with_camera_control_panel();
+    let sprinkle = wire_batch_validation_shortcuts(sprinkle);
+    sprinkle
         .init_resource::<LastDisplayedDiagnostics>()
         .init_resource::<AlphaModeSelection>()
         .init_resource::<TonemappingSelection>()
@@ -747,6 +695,29 @@ fn main() {
         )
         .add_systems(PostUpdate, sync_render_feature_components)
         .run();
+}
+
+fn wire_batch_validation_shortcuts<S>(sprinkle: SprinkleBuilder<S>) -> SprinkleBuilder<S> {
+    sprinkle
+        .with_shortcut(ALPHA_KEYS[0], select_alpha::<0>)
+        .with_shortcut(ALPHA_KEYS[1], select_alpha::<1>)
+        .with_shortcut(ALPHA_KEYS[2], select_alpha::<2>)
+        .with_shortcut(ALPHA_KEYS[3], select_alpha::<3>)
+        .with_shortcut(ALPHA_KEYS[4], select_alpha::<4>)
+        .with_shortcut(ALPHA_KEYS[5], select_alpha::<5>)
+        .with_shortcut(ALPHA_KEYS[6], select_alpha::<6>)
+        .with_shortcut(TONEMAPPING_KEYS[0], select_tonemapping::<0>)
+        .with_shortcut(TONEMAPPING_KEYS[1], select_tonemapping::<1>)
+        .with_shortcut(TONEMAPPING_KEYS[2], select_tonemapping::<2>)
+        .with_shortcut(TONEMAPPING_KEYS[3], select_tonemapping::<3>)
+        .with_shortcut(TONEMAPPING_KEYS[4], select_tonemapping::<4>)
+        .with_shortcut(TONEMAPPING_KEYS[5], select_tonemapping::<5>)
+        .with_shortcut(TONEMAPPING_KEYS[6], select_tonemapping::<6>)
+        .with_shortcut(TONEMAPPING_KEYS[7], select_tonemapping::<7>)
+        .with_shortcut(TONEMAPPING_KEYS[8], select_tonemapping::<8>)
+        .with_shortcut(KeyCode::KeyR, toggle_hdr)
+        .with_shortcut(KeyCode::KeyM, toggle_bloom)
+        .with_shortcut(KeyCode::KeyT, cycle_tonemapping)
 }
 
 fn spawn_validation_panels(
@@ -925,6 +896,10 @@ fn toggle_hdr(mut features: ResMut<RenderFeatures>) { features.toggle_hdr(); }
 fn toggle_bloom(mut features: ResMut<RenderFeatures>) { features.toggle_bloom(); }
 
 fn cycle_tonemapping(mut selection: ResMut<TonemappingSelection>) { selection.cycle(); }
+
+fn select_tonemapping<const INDEX: usize>(mut selection: ResMut<TonemappingSelection>) {
+    selection.index = INDEX;
+}
 
 fn select_alpha<const INDEX: usize>(mut selection: ResMut<AlphaModeSelection>) {
     selection.index = INDEX;
@@ -1305,9 +1280,9 @@ fn anchor_tonemapping_selector_when_alpha_added(
     }
 }
 
-// Center-left key legend: a title plus one numbered row per alpha mode. The
+// Center-left key legend: a title plus one lettered row per alpha mode. The
 // selected row is tinted and sits on a highlight bar so the current choice is
-// obvious; pressing the matching number key (1-7) selects that mode for the SDF
+// obvious; pressing the matching letter key (A-G) selects that mode for the SDF
 // panel's fills/borders and the Text panel's live alpha case.
 fn alpha_selector_tree(selected: usize) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
@@ -1323,9 +1298,11 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
                     .height(Sizing::FIT)
                     .gap(ALPHA_ROW_GAP),
                 |builder| {
-                    builder.text(("alpha mode  (1-7)", ledger_title_style()));
+                    builder.text(("alpha mode  (A-G)", ledger_title_style()));
                     for (slot, (label, _)) in ALPHA_MODES.iter().enumerate() {
-                        selector_row(builder, slot + 1, label, slot == selected, ALPHA_ROW_WIDTH);
+                        let key =
+                            ((b'A' + u8::try_from(slot).unwrap_or(u8::MAX)) as char).to_string();
+                        selector_row(builder, &key, label, slot == selected, ALPHA_ROW_WIDTH);
                     }
                 },
             );
@@ -1335,7 +1312,8 @@ fn alpha_selector_tree(selected: usize) -> LayoutTree {
 }
 
 // Tonemapping is a camera component, so this selector makes HDR text comparisons
-// possible without restarting the example. Press `T` to cycle the active row.
+// possible without restarting the example. Press a number key (1-9) to select a
+// row directly, or `T` to cycle the active row.
 fn tonemapping_selector_tree(selected: usize) -> LayoutTree {
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     screen_panel_frame(
@@ -1350,11 +1328,12 @@ fn tonemapping_selector_tree(selected: usize) -> LayoutTree {
                     .height(Sizing::FIT)
                     .gap(TONEMAPPING_ROW_GAP),
                 |builder| {
-                    builder.text(("tonemapping  (T)", ledger_title_style()));
+                    builder.text(("tonemapping  (1-9)", ledger_title_style()));
                     for (slot, (label, _)) in TONEMAPPING_MODES.iter().enumerate() {
+                        let key = (slot + 1).to_string();
                         selector_row(
                             builder,
-                            slot + 1,
+                            &key,
                             label,
                             slot == selected,
                             TONEMAPPING_ROW_WIDTH,
@@ -1367,13 +1346,7 @@ fn tonemapping_selector_tree(selected: usize) -> LayoutTree {
     builder.build()
 }
 
-fn selector_row(
-    builder: &mut LayoutBuilder,
-    number: usize,
-    label: &str,
-    selected: bool,
-    width: f32,
-) {
+fn selector_row(builder: &mut LayoutBuilder, key: &str, label: &str, selected: bool, width: f32) {
     let color = if selected { ACCENT_YELLOW } else { TEXT_MUTED };
     let row = El::row()
         .width(Sizing::fixed(width))
@@ -1383,7 +1356,7 @@ fn selector_row(
         .corner_radius(CornerRadius::all(Mm(0.8)))
         .alignment(AlignX::Left, AlignY::Center);
     builder.with(row, |builder| {
-        builder.text((format!("{number}"), ledger_cell_style(color)));
+        builder.text((key, ledger_cell_style(color)));
         builder.text((label, ledger_cell_style(color)));
     });
 }
@@ -2017,8 +1990,8 @@ fn build_sdf_surface_panel(materials: &SdfSurfaceMaterialHandles) -> LayoutTree 
     panel_header(
         &mut builder,
         "SDF fills + borders",
-        "three batch together, image splits",
-        SDF_PANEL_STATS,
+        "Cards with plain StandardMaterial f32 values share one untextured record; \
+         the textured card splits into its own record.",
     );
     builder.with(
         El::row()
@@ -2171,9 +2144,9 @@ fn build_text_panel(materials: &TextPanelMaterialHandles, alpha: AlphaMode) -> L
     let mut builder = panel_root();
     panel_header(
         &mut builder,
-        "Text material cases",
-        "same batch values vs split keys",
-        TEXT_PANEL_STATS,
+        "Text",
+        "Text runs with matching values share one record; a different style key or \
+         a texture splits them into separate records.",
     );
     builder.with(
         // GROW height: claim the panel's leftover vertical space below the
@@ -2196,8 +2169,8 @@ fn build_shape_panel(materials: &ShapePanelMaterialHandles) -> LayoutTree {
     panel_header(
         &mut builder,
         "Analytic shapes",
-        "source materials share or split",
-        SHAPE_PANEL_STATS,
+        "Shapes that share a material batch into one shape record; a textured or \
+         differing material splits into its own record.",
     );
     builder.with(
         El::row()
@@ -2272,8 +2245,8 @@ fn build_mixed_panel() -> LayoutTree {
     panel_header(
         &mut builder,
         "Mixed stack",
-        "one panel, several draw families",
-        MIXED_PANEL_STATS,
+        "One panel mixing sdf, text, and shape records: matching values batch, \
+         while textures and differing keys split them apart.",
     );
     builder.with(
         El::column()
@@ -2340,74 +2313,24 @@ fn panel_root() -> LayoutBuilder {
     )
 }
 
-fn panel_header(builder: &mut LayoutBuilder, title: &str, subtitle: &str, stats: PanelStats) {
-    builder.with(
-        El::row()
-            .width(Sizing::GROW)
-            .height(Sizing::FIT)
-            .gap(ROW_GAP)
-            .padding(Padding::new(1.0, 1.0, 0.0, 2.0))
-            .alignment(AlignX::Left, AlignY::Top),
-        |builder| {
-            builder.with(
-                El::column()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .gap(1.0),
-                |builder| {
-                    builder.text((title, title_style()));
-                    builder.text((subtitle, subtitle_style(TEXT_MUTED)));
-                },
-            );
-            panel_stats_block(builder, stats);
-        },
-    );
-}
-
-// The panel's own authored counts, drawn small in the upper-right corner.
-// `panel_stats_block` omits per-panel batch and upload counts: `DiegeticPerfStats`
-// reports observed batch/upload totals globally because batches span panels and
-// uploads happen per batch buffer.
-fn panel_stats_block(builder: &mut LayoutBuilder, stats: PanelStats) {
+fn panel_header(builder: &mut LayoutBuilder, title: &str, note: &str) {
     builder.with(
         El::column()
-            .width(Sizing::FIT)
+            .width(Sizing::GROW)
             .height(Sizing::FIT)
-            .gap(0.5)
-            .alignment(AlignX::Right, AlignY::Top),
+            .gap(1.0)
+            .padding(Padding::new(0.0, 0.0, 0.0, 2.0))
+            .alignment(AlignX::Left, AlignY::Top),
         |builder| {
-            stats_block_row(
-                builder,
-                &[
-                    (format!("sdf {}", stats.sdf_surfaces()), ACCENT_BLUE),
-                    (format!("text {}", stats.text_runs), ACCENT_GREEN),
-                    (format!("shape {}", stats.shape_records), ACCENT_YELLOW),
-                ],
+            builder.text((title, title_style()));
+            // Full-width note beneath the title: GROW bounds the run to the panel
+            // content width so it wraps per word across as many lines as it needs.
+            builder.with(
+                El::new().width(Sizing::GROW).height(Sizing::FIT),
+                |builder| {
+                    builder.text(Text::new(note, subtitle_style(TEXT_MUTED)).wrap(TextWrap::Words));
+                },
             );
-            stats_block_row(
-                builder,
-                &[
-                    (format!("records {}", stats.rendered_records()), TEXT_MAIN),
-                    (format!("slots {}", stats.material_slots), ACCENT_RED),
-                ],
-            );
-        },
-    );
-}
-
-// One right-aligned line of the stats block: several short colored readouts side
-// by side, so the per-panel counts stay legible in three lines instead of six.
-fn stats_block_row(builder: &mut LayoutBuilder, cells: &[(String, Color)]) {
-    builder.with(
-        El::row()
-            .width(Sizing::FIT)
-            .height(Sizing::FIT)
-            .gap(4.0)
-            .alignment(AlignX::Right, AlignY::Top),
-        |builder| {
-            for (text, color) in cells {
-                builder.text((text.clone(), stats_style(*color)));
-            }
         },
     );
 }
@@ -2822,7 +2745,9 @@ fn metallic_glint_material(phase: f32) -> StandardMaterial {
 fn emissive_fill_material(phase: f32) -> StandardMaterial {
     let mut material = default_panel_material();
     material.base_color = Color::srgb(0.06, 0.05, 0.03);
-    let intensity = animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(0.8, 0.6);
+    // Drive the emissive into HDR at the peak so the bloom pass blooms:
+    // 1.0x at the trough, 5.0x at the crest of the animation cycle.
+    let intensity = animated_unit(phase, SDF_ANIMATION_GREEN_OFFSET).mul_add(4.0, 1.0);
     material.emissive = EMISSIVE_WARM.to_linear() * intensity;
     material
 }
@@ -2847,10 +2772,10 @@ fn image_fill_material(image: Handle<Image>) -> StandardMaterial {
     material
 }
 
-// Each card draws only the shape its label names. The shapes live in their own
-// strip element to the right of the label, so they resolve against that
-// element's local space: every row spans `start(3)` to `end(6)`, vertically
-// centered, which makes all three lines the same length regardless of width.
+// Each card draws only the shape its label names. The shapes live in a
+// full-card-width strip element between the title and the material caption, so
+// they resolve against that element's local space: every line spans `start(3)`
+// to `end(6)`, vertically centered, the same length regardless of card width.
 fn shape_strip(
     materials: &ShapePanelMaterialHandles,
     index: usize,
@@ -2936,27 +2861,22 @@ fn shape_group_card(
     detail: &str,
     color: Color,
 ) {
+    // Title on top, the drawn line spanning the full card width in the middle,
+    // and the material caption beneath in a smaller font. Stacking gives the
+    // line strip the whole card width so its start/end insets and end caps have
+    // room — a narrow side strip collapses the shaft and leaves only the caps.
     builder.with(
-        El::row()
+        El::column()
             .width(Sizing::GROW)
-            .height(Sizing::fixed(28.0))
-            .gap(ROW_GAP)
-            .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
+            .height(Sizing::GROW)
+            .gap(1.0)
+            .padding(Padding::new(4.0, 4.0, 3.0, 3.0))
             .background(Color::srgba(0.02, 0.03, 0.04, 0.42))
             .border(Border::all(Mm(0.25), CARD_BORDER_WARM))
             .corner_radius(CornerRadius::all(Mm(1.2)))
-            .alignment(AlignX::Left, AlignY::Center),
+            .alignment(AlignX::Left, AlignY::Top),
         |builder| {
-            builder.with(
-                El::column()
-                    .width(Sizing::fixed(58.0))
-                    .height(Sizing::FIT)
-                    .gap(1.0),
-                |builder| {
-                    builder.text((label, body_style(color)));
-                    builder.text((detail, small_style(TEXT_MUTED)));
-                },
-            );
+            builder.text((label, body_style(color)));
             builder.with(
                 El::new()
                     .width(Sizing::GROW)
@@ -2964,8 +2884,15 @@ fn shape_group_card(
                     .draw(PanelDraw::shapes(shape_strip(materials, index, color))),
                 |_builder| {},
             );
+            builder.text((detail, shape_card_caption_style(TEXT_MUTED)));
         },
     );
+}
+
+fn shape_card_caption_style(color: Color) -> TextStyle {
+    TextStyle::new(SHAPE_CARD_CAPTION_FONT_SIZE)
+        .with_color(color)
+        .with_shadow_mode(GlyphShadowMode::None)
 }
 
 // The Shape group row's draw family, drawn in the shape strip below the text:
@@ -3092,12 +3019,6 @@ fn title_style() -> TextStyle {
     TextStyle::new(TITLE_FONT_SIZE)
         .bold()
         .with_color(TEXT_MAIN)
-        .with_shadow_mode(GlyphShadowMode::None)
-}
-
-fn stats_style(color: Color) -> TextStyle {
-    TextStyle::new(STATS_FONT_SIZE)
-        .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
 }
 

@@ -3,6 +3,7 @@ use bevy::prelude::Component;
 use crate::PanelElementId;
 use crate::layout::BoundingBox;
 use crate::layout::DrawZIndex;
+use crate::render::draw_order::DrawZIndexRank;
 
 /// Layout payload for a panel-text run (a
 /// [`TextContent`](crate::TextContent) entity).
@@ -21,11 +22,15 @@ pub struct PanelTextLayout {
     pub line_index:       usize,
     /// Index of the source element in the layout tree.
     pub element_idx:      usize,
-    /// Dense panel-local ordinal assigned to the source text command.
+    /// Dense panel-local `DrawOrderIndex`, stored as a `usize` for text
+    /// batching.
     pub draw_ordinal:     usize,
-    /// `Transparent3d` sort bias projected from `draw_ordinal`.
+    /// Legacy field name for the text run's non-OIT `ClipDepthNudge`.
+    ///
+    /// This is not the batch material's `StandardMaterial::depth_bias`; text
+    /// batch materials derive that value from `PanelTextDrawZIndexRank`.
     pub depth_bias:       f32,
-    /// OIT `position.z` offset projected from `draw_ordinal`.
+    /// OIT `position.z` offset projected from the run's `DrawOrderIndex`.
     pub oit_depth_offset: f32,
     /// Layout-computed position and size in layout coordinates.
     pub bounds:           BoundingBox,
@@ -41,9 +46,13 @@ pub struct PanelTextLayout {
     pub clip_rect:        Option<BoundingBox>,
 }
 
-/// Private batch-routing depth level for a panel-text run.
+/// Private batch-routing z-index for a panel-text run.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PanelTextDrawZIndex(pub(super) DrawZIndex);
+
+/// Private batch-routing `DrawZIndexRank` for a panel-text run.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct PanelTextDrawZIndexRank(pub(super) DrawZIndexRank);
 
 impl PanelTextLayout {
     /// Bit-equality over the layout fields a panel-text glyph mesh depends on,

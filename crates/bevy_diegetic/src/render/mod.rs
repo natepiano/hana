@@ -7,7 +7,6 @@ mod clip;
 mod constants;
 mod dirty;
 mod draw_order;
-mod draw_order_limits;
 mod fill_batch;
 mod material;
 #[cfg(test)]
@@ -78,7 +77,6 @@ pub(crate) use draw_order::PrimitiveOrdinal;
     reason = "Phase 2 publishes shared ordinals before Phase 9 panel-shape routing consumes them"
 )]
 pub(crate) use draw_order::ShapeOrdinal;
-use draw_order_limits::warn_panel_draw_order_limits;
 use fill_batch::FillBatchPlugin;
 pub(crate) use fill_batch::SdfExtendedMaterial;
 pub(crate) use fill_batch::set_sdf_material_table_buffer;
@@ -126,13 +124,6 @@ use crate::cascade::TextMaterial;
 pub(crate) enum PanelChildSystems {
     /// Reconcile and mesh-build of every panel child entity.
     Build,
-}
-
-/// `PostUpdate` phase that reports draw-order capacity limits from `DrawOrder`.
-#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum DrawOrderLimitSystems {
-    /// Warn about panel-wide OIT draw-order budget pressure.
-    Warn,
 }
 
 /// Anti-aliasing applied to slug glyph edges, across all text materials.
@@ -420,10 +411,6 @@ impl Plugin for RenderPlugin {
             Update,
             (sync_anti_alias, sync_hairline_fade, sync_hairline_width)
                 .before(CascadeSet::Propagate),
-        )
-        .add_systems(
-            PostUpdate,
-            warn_panel_draw_order_limits.in_set(DrawOrderLimitSystems::Warn),
         )
         .add_observer(transparency::on_stable_transparency_added)
         .add_observer(transparency::on_stable_transparency_removed)

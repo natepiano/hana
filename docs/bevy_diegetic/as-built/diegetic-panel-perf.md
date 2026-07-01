@@ -998,14 +998,16 @@ Changed<Resolved<FontUnit>>)>`, `mod.rs`).
   `bounds`), extend `PanelImageChild` to cache the prior inputs to compare
   against, and widen the query to hold the `MeshMaterial3d<StandardMaterial>`
   handle for the in-place `base_color` mutation.
-- **Cache and compare `command_index` too — depth bias depends on it
-  (Phase-4/5 review, user-approved).** Image `depth_bias` derives from `cmd_index`
-  (`reconcile.rs:279`), but reuse is keyed by `element_idx` only
-  (`reconcile.rs:255`). When a sibling image is inserted/removed, a reused image's
-  draw-slot (`cmd_index`) shifts while its `handle`/`tint`/`bounds` do not — so a
-  gate that ignores `cmd_index` keeps a stale `depth_bias` and overlapping images
-  z-fight. Add `command_index` to `PanelImageChild`'s cached inputs and treat a
-  `cmd_index` change as a **material rebuild** (the bias lives on the material).
+- **Cache and compare command depth too
+  (Phase-4/5 review, user-approved; updated for the 2026-06-30 draw-order
+  model).** Image ordering derives from `DrawCommandDepth`: `ScreenDepthBias`
+  comes from `DrawZIndexRank`, while `ClipDepthNudge` and `OitDepthOffset` come
+  from `DrawOrderIndex`. Reuse is keyed by `element_idx` only
+  (`reconcile.rs:255`). When a sibling image is inserted/removed, a reused
+  image's command depth can shift while its `handle`/`tint`/`bounds` do not, so
+  a gate that ignores command depth can keep stale ordering values and make
+  overlapping images z-fight. Cache `DrawCommandDepth` in `PanelImageChild` and
+  treat a changed value as a visual rebuild.
   This gives images the layering-under-reorder correctness text gets from its
   `(element_idx, command_index)` reuse key (M2) — stronger than text's R7, which
   only loses a perf guarantee on reorder, because for images the stale bias is a

@@ -62,7 +62,7 @@ Public API entry points are re-exported from the crate root so examples can use
 ## Layout Resolution
 
 The layout engine resolves authored lines after element bounds are known and
-emits `RenderCommandKind::Lines`.
+emits `RenderCommandKind::PanelShapes`.
 
 Resolved line data includes:
 
@@ -1046,7 +1046,7 @@ crates/bevy_diegetic/src/
   layout/
     draw.rs                 # PanelDraw and DrawOverflow
     line.rs                 # authored/resolved line API and resolution
-    render.rs               # RenderCommandKind::Lines
+    render.rs               # RenderCommandKind::PanelShapes
     engine/positioning.rs   # line command emission
   panel/
     perf.rs                 # analytic line batch performance counters
@@ -1079,7 +1079,7 @@ panel marks are peers that feed the renderer.
 
 Useful verification points:
 
-- layout command tests for `RenderCommandKind::Lines`
+- layout command tests for `RenderCommandKind::PanelShapes`
 - helper tests in `units.rs` for tick generation
 - `DiegeticPerfStats::line_batch` for batch/record/upload counts
 - visual comparison against the Bevy 0.18 rectangle-backed ruler baseline

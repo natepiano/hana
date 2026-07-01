@@ -1130,12 +1130,19 @@ toggle flipped in the gate examples.
     clippy (workspace nursery + pedantic) clean, fmt run.
 
   **Step 3b implementation notes (found-and-fixed).**
+  Current note: this section records the old glyph-instancing text-batch
+  failure. Current diegetic panel ordering no longer uses
+  `BATCH_TEXT_DEPTH_BIAS`: batch material `depth_bias` comes from
+  `DrawZIndexRank`, per-record `clip_depth_nudge` / `oit_depth_offset` comes
+  from `DrawOrderIndex`, and `StableTransparency` now propagates OIT to
+  screen-space overlay cameras.
+
   - **Batch sort-bias bug — the gate's found-and-fixed bug.** Per-run
     text materials sort after their panel's SDF backing layers in
-    `Transparent3d` via `command_depth × LAYER_DEPTH_BIAS`
+    `Transparent3d` via the then-current command-depth material bias
     (`sort_distance = rangefinder.distance(mesh_center) + depth_bias`);
     `batch_material` zeroed `depth_bias`, so on sorted (non-OIT) views —
-    the screen-space overlay camera has no OIT — a panel's translucent
+    at the time, the screen-space overlay camera had no OIT — a panel's translucent
     backing could composite over the whole batch: text uniformly dimmed
     behind smoked glass, history-dependent (the batch's union
     Aabb/translation shifts as runs re-route, flipping the equal-key
@@ -1144,11 +1151,10 @@ toggle flipped in the gate examples.
     confirmed correct over BRP (the dim was *not* a cascade or re-key
     failure — the headless respawn test passes). Fix:
     `BATCH_TEXT_DEPTH_BIAS` (64 × `LAYER_DEPTH_BIAS`) on every batch
-    material — one bias for the whole batch, above every backing bias;
-    within-batch order stays with the per-record depth nudge. Per-batch
-    max-command-depth was rejected: it would rewrite the material asset
-    on record changes, re-introducing the per-change material churn
-    Step 2 eliminated.
+    material — the historical fix for that model. The current fix is the
+    split draw-order projection: batch material bias follows
+    `DrawZIndexRank`, and within-batch order stays with per-record
+    `ClipDepthNudge` / `OitDepthOffset`.
   - **All-white renderer wedge — gone with the same fix.** Pre-fix,
     flipping `BatchedRecords → PerRunMeshes` while Multiply was the
     cascade default produced a permanent all-white frame (no log
@@ -1176,7 +1182,9 @@ toggle flipped in the gate examples.
   `2e-6` constant; instead the layering risk materialized one level up —
   the `Transparent3d` SORT (material `depth_bias`), which the nudge
   cannot influence. The fix is a batch-material constant
-  (`BATCH_TEXT_DEPTH_BIAS`), not a shader change.
+  (`BATCH_TEXT_DEPTH_BIAS`). In the current draw-order model this is expressed
+  as `DrawZIndexRank` for batch material bias plus per-record
+  `ClipDepthNudge` / `OitDepthOffset`, not as a fixed text-batch constant.
   *Surprises:* batched text had no sort relation to panel backings at
   all on non-OIT views — Step 2's parity gate never caught it because
   its examples ran OIT-on main cameras and the screen-space overlay's
@@ -1189,7 +1197,7 @@ toggle flipped in the gate examples.
   (anything dim-behind-glass is the sort, not the cascade); 4b deletes
   the per-run path that motivated `BATCH_TEXT_DEPTH_BIAS`'s
   parity framing, so its doc comment should survive as the only record
-  of why 64; the `Msaa::Off` `AlphaToCoverage` routing
+  of why the historical value was 64; the `Msaa::Off` `AlphaToCoverage` routing
   (`MAY_DISCARD`) remains unexercised by any example.
 
   **Step 3b Review (architect re-evaluation of remaining phases).**
@@ -1248,13 +1256,15 @@ toggle flipped in the gate examples.
   `aa_text`) — the original "only `aa_text` and `panel_rendering`" claim
   was wrong — and OIT activation is now gated on the `oit_guard` shader
   patches (`render/oit_guard.rs`), falling back to sorted transparency
-  when a guard fails. The screen-space overlay camera is always sorted
-  (it never gets OIT —
-  `render/transparency.rs`), so the bake explicitly checks
+  when a guard fails. At the time, the screen-space overlay camera was always
+  sorted (it did not get OIT through `render/transparency.rs`; this is now
+  stale because `StableTransparency` propagates OIT to screen-space overlay
+  cameras), so the bake explicitly checks
   text-over-backing composition in the sorted-camera examples
   (`cascade`, `side_by_side`, `world_text`, `slug_text`, `screen_space`,
   `typography`, `diegetic_panel_stress`) — anything dim-behind-glass is
-  the `Transparent3d` sort (`BATCH_TEXT_DEPTH_BIAS`), not the cascade —
+  the `Transparent3d` sort (historically `BATCH_TEXT_DEPTH_BIAS`; currently
+  `DrawZIndexRank` material bias plus per-record shader offsets), not the cascade —
   including one case with two screen panels at clearly different depths
   (the batch's one bias rides its union-center distance, so per-panel
   depth separation is the untested axis). Also in the bake, while the
@@ -1263,8 +1273,8 @@ toggle flipped in the gate examples.
   and one `text_alpha` run forced to `Msaa::Off` so `AlphaToCoverage`'s
   `MAY_DISCARD` routing compiles the vertex-pull pipelines once before
   4b removes the per-run A/B. Code rider (3b review): state the
-  "backing layers per panel stay below 64" assumption on
-  `BATCH_TEXT_DEPTH_BIAS`'s doc comment.
+  historical "backing layers per panel stay below 64" assumption on the
+  removed `BATCH_TEXT_DEPTH_BIAS` model.
   `text_alpha`'s on-screen mode descriptions updated for batched
   behavior — Opaque renders glyph silhouettes under batching, not the
   "colored rectangle, no silhouette" the per-run copy describes (3a
@@ -1588,17 +1598,17 @@ expected not to move.
   nudge (decision 3). If a real ordering case falls through, the batch key
   can grow a coarse layer field — measured, in Step 3. *Step 3b outcome:*
   the batch-vs-backing case DID fall through (one sort key per batch, bias
-  was 0) and is fixed by `BATCH_TEXT_DEPTH_BIAS` on every batch material;
+  was 0) and was historically fixed by `BATCH_TEXT_DEPTH_BIAS` on every batch
+  material. Current code uses `DrawZIndexRank` for batch material bias and
+  `DrawOrderIndex` for per-record shader offsets;
   the coarse-layer-key escalation stays available if a per-panel ordering
   case surfaces in the 4a bake.
 - **Translucent world geometry near text (accepted limitation, 3b
-  review)** — a Blend world mesh within `BATCH_TEXT_DEPTH_BIAS` (64 world
-  units, view-distance terms) of a text batch can mis-sort against it. The
-  per-run path had the same wrong-window (its text biases were
-  `command_depth × LAYER_DEPTH_BIAS`), no example places translucent world
-  geometry near text, and OIT views are immune — so this is recorded, not
-  gated. If a real scene hits it, the fix space is the coarse layer key
-  above or OIT on that camera.
+  review)** — historical note for the removed `BATCH_TEXT_DEPTH_BIAS` model. A
+  Blend world mesh near a text batch could mis-sort against that fixed
+  material bias. Current code uses `DrawZIndexRank` for batch material bias and
+  OIT on `StableTransparency` screen-space cameras, so use
+  `panel-draw-order.md` for the current model.
 - **Atlas interaction** — records reference atlas indices, so a mid-frame
   atlas append must commit before batch buffers (same ordering
   `update_panel_text_geometry` enforces today at `mesh_spawning.rs:88-95`;
@@ -1737,9 +1747,9 @@ becomes `visibility(vertex, fragment)`, vertex forwards atlas index in
 `uv_b.x` (today's mechanism) and run index in `uv_b.y` (quad-uniform f32,
 round to recover), fragment's uniform reads become run-table reads, all
 recorded in the new Target-model bullet; prepass fragment confirmed
-per-run-free (coverage-only discard); `clip_depth_nudge` formula pinned
-(`command_index × LAYER_DEPTH_BIAS`, 0 under OIT) and disambiguated from
-`oit_depth_offset`; punch-out is prepass-blind (noted in decision 3).
+per-run-free (coverage-only discard); `clip_depth_nudge` was later revised to
+the current `DrawOrderIndex` projection, while batch material `depth_bias`
+comes from `DrawZIndexRank`; punch-out is prepass-blind (noted in decision 3).
 Integration: `update_panel_text_alpha` gated to `PerRunMeshes` until 3a
 (decision 10); batch-entity lifecycle pinned (spawn on first insert,
 despawn on empty — the batch R10 analogue); per-batch material construction

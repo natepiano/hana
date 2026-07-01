@@ -4,11 +4,11 @@ use bevy::asset::uuid_handle;
 use bevy::prelude::*;
 
 // Draw order
-/// Per-step screen depth-bias spacing for Bevy draw-item sorting.
+/// Per-`DrawZIndexRank` spacing for Bevy's hardware depth-bias path.
 ///
 /// Bevy packs this through `i32` into `DepthBiasState.constant`.
-/// A batch material uses its minimum `DrawOrderIndex` times this value.
-/// Non-batched commands use their own `DrawOrderIndex` times this value.
+/// A batch material uses its `DrawZIndexRank` times this value, so the hardware
+/// depth-bias integer changes once per authored z-index band.
 pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 /// Per-command OIT depth offset for coplanar fragment ordering.
 ///
@@ -19,23 +19,15 @@ pub(crate) const LAYER_DEPTH_BIAS: f32 = 1.0;
 ///
 /// Calibration: `bevy_lagrange` syncs the perspective near plane to
 /// `radius × 0.001`, so a fragment at the camera's focus distance has
-/// `position.z = near / d ≈ 0.001`. A 64-ordinal offset span must stay well
-/// below that or the offset drives `position.z` non-positive and
-/// `pack_24bit_depth_8bit_alpha` in `oit_draw` saturates it to the
-/// cleared-background depth, where bevy's resolve pass drops every
-/// fragment whose alpha < 1.0. At `1e-6`, 64 steps total `6.4e-5`
-/// (6.4% of the focus depth) and one step spans ~17 quanta of the
-/// 24-bit OIT depth packing, so adjacent ordinals stay distinct.
+/// `position.z = near / d ≈ 0.001`. At `1e-6`, one step spans ~17 quanta of the
+/// 24-bit OIT depth packing, so adjacent draw-order indices stay distinct while
+/// ordinary per-panel spans remain small relative to focus depth.
 ///
-/// Panels much farther than the camera focus shrink `position.z` below
-/// the 64-step budget (z = near/d crosses `6.4e-5` at ~15.6× the orbit
-/// radius). The `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl` and
-/// `analytic_path.wgsl` keeps those fragments
-/// storable; past the bound their coplanar ordering collapses to OIT-list
-/// insertion order instead of going invisible.
+/// Panels much farther than the camera focus shrink `position.z`. The
+/// `OIT_MIN_DEPTH` floor in `sdf_panel.wgsl` and `analytic_path.wgsl` keeps
+/// those fragments storable; past that bound their coplanar ordering collapses
+/// to OIT-list insertion order instead of going invisible.
 pub(crate) const OIT_DEPTH_STEP: f32 = 0.000_001;
-/// Nominal OIT `position.z` for fragments at the camera focus distance.
-pub(crate) const OIT_FOCUS_DEPTH: f32 = 0.001;
 
 // material defaults
 /// Default metallic value for panel surfaces. Non-metallic (dielectric).
@@ -58,8 +50,8 @@ pub(super) const SDF_STROKE_SHADER_HANDLE: Handle<Shader> =
 // text rendering
 /// Fixed panel-local Z for text and image meshes.
 ///
-/// Layering is handled by `StandardMaterial::depth_bias`, so panel-local
-/// geometry stays coplanar.
+/// Layering is handled by `StandardMaterial::depth_bias`, `ClipDepthNudge`, or
+/// `OitDepthOffset`, so panel-local geometry stays coplanar.
 pub(super) const TEXT_Z_OFFSET: f32 = 0.0;
 /// Default clip rect for unclipped text: effectively infinite panel-local
 /// bounds so the shader clip test becomes a no-op.

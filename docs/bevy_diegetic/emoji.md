@@ -160,8 +160,8 @@ These are the types and the GPU layout the phases below build toward.
   the existing `From<u32>` mapping, and assert the pairing in a test.
 - **Layer depth** — the main fragment adds `f32(layer_index) * stride` to
   `oit_pos.z` before `oit_draw`, layer 0 nearest. There is no separate
-  `base_offset`: the per-run `command_index` depth bias already rides in
-  `uniforms.oit_depth_offset`, and the per-layer term composes with it rather
+  `base_offset`: the per-run `oit_depth_offset` already carries the
+  `DrawOrderIndex` projection, and the per-layer term composes with it rather
   than overwriting it, so emoji layering and element layering stack correctly.
   Define the stride as a named constant with a max-layer cap and documented
   precision headroom, and verify ordering with a 40+-layer emoji.

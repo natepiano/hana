@@ -8,6 +8,7 @@ use super::PanelTextLayout;
 use super::PanelTextRuns;
 use super::TextRunOf;
 use super::layout::PanelTextDrawZIndex;
+use super::layout::PanelTextDrawZIndexRank;
 use crate::PanelElementId;
 use crate::cascade;
 use crate::cascade::HdrTextCoverageBias;
@@ -42,6 +43,7 @@ struct ReusableChild<'a> {
     style:                  &'a TextStyle,
     layout:                 &'a PanelTextLayout,
     z_index:                &'a PanelTextDrawZIndex,
+    z_index_rank:           &'a PanelTextDrawZIndexRank,
     alpha:                  Option<&'a Override<TextAlpha>>,
     material:               Option<&'a Override<TextMaterial>>,
     lighting:               Option<&'a Override<Lighting>>,
@@ -116,6 +118,7 @@ fn collect_existing_text_children<'a>(
         &TextStyle,
         &PanelTextLayout,
         &PanelTextDrawZIndex,
+        &PanelTextDrawZIndexRank,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
@@ -130,6 +133,7 @@ fn collect_existing_text_children<'a>(
             style,
             layout,
             z_index,
+            z_index_rank,
             alpha,
             material,
             lighting,
@@ -147,6 +151,7 @@ fn collect_existing_text_children<'a>(
                 style,
                 layout,
                 z_index,
+                z_index_rank,
                 alpha,
                 material,
                 lighting,
@@ -177,6 +182,7 @@ pub(super) fn reconcile_panel_text_children(
         &TextStyle,
         &PanelTextLayout,
         &PanelTextDrawZIndex,
+        &PanelTextDrawZIndexRank,
         Option<&Override<TextAlpha>>,
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
@@ -234,6 +240,7 @@ pub(super) fn reconcile_panel_text_children(
             let label_hdr_text_coverage_bias = config.hdr_text_coverage_bias();
             let style = config.for_shaping(Anchor::TopLeft);
             let z_index = PanelTextDrawZIndex(draw_depth.z_index());
+            let z_index_rank = PanelTextDrawZIndexRank(draw_depth.z_index_rank());
             let panel_text_child = PanelTextLayout {
                 id: id.clone(),
                 line_index: *line_index,
@@ -260,6 +267,7 @@ pub(super) fn reconcile_panel_text_children(
                     style,
                     layout: panel_text_child,
                     z_index,
+                    z_index_rank,
                     label_alpha,
                     label_material,
                     label_lighting,
@@ -275,6 +283,7 @@ pub(super) fn reconcile_panel_text_children(
                     style,
                     layout: panel_text_child,
                     z_index,
+                    z_index_rank,
                     label_alpha,
                     label_material,
                     label_lighting,
@@ -292,7 +301,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -318,6 +327,7 @@ struct SpawnPanelTextChild<'a, 'w, 's> {
     style:                        TextStyle,
     layout:                       PanelTextLayout,
     z_index:                      PanelTextDrawZIndex,
+    z_index_rank:                 PanelTextDrawZIndexRank,
     label_alpha:                  Option<AlphaMode>,
     label_material:               Option<Handle<StandardMaterial>>,
     label_lighting:               Option<Lighting>,
@@ -336,6 +346,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         style,
         layout,
         z_index,
+        z_index_rank,
         label_alpha,
         label_material,
         label_lighting,
@@ -353,6 +364,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             style,
             layout,
             z_index,
+            z_index_rank,
             TextRunOf(panel_entity),
         ));
         spawned = child.id();
@@ -385,6 +397,7 @@ struct UpdateReusedChild<'a, 'w, 's> {
     style:                        TextStyle,
     layout:                       PanelTextLayout,
     z_index:                      PanelTextDrawZIndex,
+    z_index_rank:                 PanelTextDrawZIndexRank,
     label_alpha:                  Option<AlphaMode>,
     label_material:               Option<Handle<StandardMaterial>>,
     label_lighting:               Option<Lighting>,
@@ -410,6 +423,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         style,
         layout,
         z_index,
+        z_index_rank,
         label_alpha,
         label_material,
         label_lighting,
@@ -428,6 +442,9 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     }
     if *reusable.z_index != z_index {
         child.insert(z_index);
+    }
+    if *reusable.z_index_rank != z_index_rank {
+        child.insert(z_index_rank);
     }
     match label_alpha {
         Some(alpha_mode) => {
@@ -674,8 +691,9 @@ struct ImageGeometry {
 ///
 /// Image tint has no cascade, so this comparison is the only no-op suppressor.
 /// Because `materials.get_mut` marks the asset modified on access, the tint
-/// branch is reached only when the cached tint actually differs. A
-/// `draw_depth` move rebuilds the material because `depth_bias` lives there.
+/// branch is reached only when the cached tint actually differs. A `draw_depth`
+/// move still rebuilds the image visual; same-z-index command-index shifts keep
+/// the same material depth bias, but z-index-rank changes do not.
 fn reconcile_existing_image(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -1562,7 +1580,7 @@ mod tests {
     }
 
     #[test]
-    fn ordinal_shift_rebuilds_material_so_depth_bias_stays_correct() {
+    fn command_index_shift_keeps_same_z_index_material_depth_bias() {
         let mut app = image_reconcile_app();
         let handle = Handle::<Image>::default();
         // No background: the image is the first drawing command.
@@ -1588,14 +1606,10 @@ mod tests {
         app.update();
 
         let (_, material_after) = single_image_child(&mut app);
-        assert_ne!(
-            material_before, material_after,
-            "an ordinal shift rebuilds the material (a new asset)"
-        );
         assert_eq!(
             material_depth_bias(&app, &material_after).to_bits(),
-            (first_command_depth + LAYER_DEPTH_BIAS).to_bits(),
-            "the rebuilt material picks up the shifted ordinal's depth bias"
+            first_command_depth.to_bits(),
+            "a same-z-index command-index shift does not change material depth bias"
         );
     }
 }

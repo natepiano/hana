@@ -16,13 +16,14 @@
 //!
 //! - **Default (not present):** no OIT, MSAA stays on (`Msaa::default()` on every camera). AA'd
 //!   mesh edges; coplanar Blend text may shift at angles.
-//! - **Opt-in (`StableTransparency` on a `Camera3d`):** three observers in this module manage MSAA
-//!   across every camera that shares the window:
+//! - **Opt-in (`StableTransparency` on a `Camera3d`):** three observers in this module manage OIT
+//!   and MSAA across every camera that shares the window:
 //!   - On add: insert `Msaa::Off` and `OrderIndependentTransparencySettings` on the OIT camera, set
-//!     its depth texture to `TEXTURE_BINDING`, and propagate `Msaa::Off` to every existing
+//!     its depth texture to `TEXTURE_BINDING`, and propagate OIT + `Msaa::Off` to every existing
 //!     `ScreenSpaceCamera`.
 //!   - On any new `ScreenSpaceCamera` spawned afterward (e.g. when a `DiegeticPanel::screen()`
-//!     appears mid-app): force `Msaa::Off` on it too, so the late-spawn case stays consistent.
+//!     appears mid-app): force OIT + `Msaa::Off` on it too, so the late-spawn case stays
+//!     consistent.
 //!   - On remove: strip OIT and restore `Msaa::default()` everywhere it forced `Off`.
 //!
 //! # Why so aggressive about MSAA
@@ -74,12 +75,12 @@ const OIT_FRAGMENTS_PER_PIXEL_AVERAGE: f32 = 8.0;
 /// with an OIT camera, for the entire time `StableTransparency` is present:
 ///
 /// 1. **OIT camera turns on**: `on_stable_transparency_added` inserts `Msaa::Off` and
-///    `OrderIndependentTransparencySettings` on the OIT camera and propagates `Msaa::Off` to every
-///    existing `ScreenSpaceCamera`.
+///    `OrderIndependentTransparencySettings` on the OIT camera and propagates OIT + `Msaa::Off` to
+///    every existing `ScreenSpaceCamera`.
 /// 2. **Screen-space camera spawns later** (e.g. when a `DiegeticPanel::screen()` triggers
 ///    `setup_screen_space_view`): `on_screen_space_camera_added` detects the active OIT camera and
-///    forces `Msaa::Off` on the new overlay camera before it can render with a default-MSAA
-///    pipeline.
+///    forces OIT + `Msaa::Off` on the new overlay camera before it can render with a non-OIT
+///    transparent pipeline.
 /// 3. **OIT camera turns off**: `on_stable_transparency_removed` strips OIT and restores
 ///    `Msaa::default()` on both the OIT camera and every `ScreenSpaceCamera`.
 ///
@@ -105,7 +106,8 @@ pub struct StableTransparency;
 /// Turns OIT on for a `StableTransparency` camera: inserts
 /// `OrderIndependentTransparencySettings` and `Msaa::Off`, sets the depth
 /// texture to `TEXTURE_BINDING` (required by the OIT resolve pass), and forces
-/// `Msaa::Off` on every existing `ScreenSpaceCamera` that shares the window.
+/// OIT + `Msaa::Off` on every existing `ScreenSpaceCamera` that shares the
+/// window.
 pub(super) fn on_stable_transparency_added(
     trigger: On<Add, StableTransparency>,
     mut cameras: Query<&mut Camera3d>,
@@ -116,15 +118,13 @@ pub(super) fn on_stable_transparency_added(
     if let Ok(mut camera_3d) = cameras.get_mut(cam) {
         camera_3d.depth_texture_usages.0 |= TextureUsages::TEXTURE_BINDING.bits();
     }
-    commands.entity(cam).insert((
-        OrderIndependentTransparencySettings {
-            fragments_per_pixel_average: OIT_FRAGMENTS_PER_PIXEL_AVERAGE,
-            ..default()
-        },
-        Msaa::Off,
-    ));
+    commands
+        .entity(cam)
+        .insert((stable_transparency_oit_settings(), Msaa::Off));
     for overlay in &mut msaa_overlays {
-        commands.entity(overlay).insert(Msaa::Off);
+        commands
+            .entity(overlay)
+            .insert((stable_transparency_oit_settings(), Msaa::Off));
     }
 }
 
@@ -139,16 +139,20 @@ pub(super) fn on_stable_transparency_removed(
         .remove::<OrderIndependentTransparencySettings>()
         .insert(Msaa::default());
     for overlay in &mut overlays {
-        commands.entity(overlay).insert(Msaa::default());
+        commands
+            .entity(overlay)
+            .remove::<OrderIndependentTransparencySettings>()
+            .insert(Msaa::default());
     }
 }
 
 /// Fires when a new `ScreenSpaceCamera` is added. If any camera already has
 /// `OrderIndependentTransparencySettings`, the framebuffer is in OIT mode and
-/// every camera sharing it must run with `Msaa::Off` — otherwise mismatched
-/// attachment formats stall the swap chain and the window only repaints on
-/// OS events. Pairs with [`on_stable_transparency_added`], which handles the
-/// reverse spawn order (screen-space camera already exists when OIT turns on).
+/// every camera sharing it must run with OIT + `Msaa::Off`. The OIT half matters
+/// for screen-space panel ordering: same-z-index SDF/text/shape batches now keep
+/// Bevy's hardware `depth_bias` at one value per `DrawZIndexRank`, so the
+/// overlay camera must use the shader-authored OIT offsets instead of non-OIT
+/// transparent draw-call sorting.
 pub(super) fn on_screen_space_camera_added(
     trigger: On<Add, ScreenSpaceCamera>,
     oit_cameras: Query<Entity, With<OrderIndependentTransparencySettings>>,
@@ -157,5 +161,113 @@ pub(super) fn on_screen_space_camera_added(
     if oit_cameras.iter().next().is_none() {
         return;
     }
-    commands.entity(trigger.entity).insert(Msaa::Off);
+    commands
+        .entity(trigger.entity)
+        .insert((stable_transparency_oit_settings(), Msaa::Off));
+}
+
+fn stable_transparency_oit_settings() -> OrderIndependentTransparencySettings {
+    OrderIndependentTransparencySettings {
+        fragments_per_pixel_average: OIT_FRAGMENTS_PER_PIXEL_AVERAGE,
+        ..default()
+    }
+}
+
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    reason = "tests should panic on unexpected missing ECS state"
+)]
+mod tests {
+    use bevy::window::PrimaryWindow;
+    use bevy::window::Window;
+
+    use super::*;
+    use crate::DiegeticPanel;
+    use crate::Px;
+    use crate::screen_space::ScreenSpacePlugin;
+
+    fn transparency_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(ScreenSpacePlugin);
+        app.add_observer(on_stable_transparency_added);
+        app.add_observer(on_stable_transparency_removed);
+        app.add_observer(on_screen_space_camera_added);
+        app.world_mut().spawn((
+            Window {
+                resolution: (800_u32, 600_u32).into(),
+                ..default()
+            },
+            PrimaryWindow,
+        ));
+        app
+    }
+
+    fn spawn_screen_panel(app: &mut App) -> Entity {
+        let panel = DiegeticPanel::screen()
+            .size(Px(100.0), Px(50.0))
+            .layout(|_| {})
+            .build()
+            .expect("screen panel builds");
+        app.world_mut().spawn(panel).id()
+    }
+
+    fn spawn_stable_camera(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((Camera3d::default(), StableTransparency))
+            .id()
+    }
+
+    fn screen_camera_entity(app: &mut App) -> Entity {
+        let mut query = app
+            .world_mut()
+            .query_filtered::<Entity, With<ScreenSpaceCamera>>();
+        query.single(app.world()).expect("one screen-space camera")
+    }
+
+    #[track_caller]
+    fn assert_oit_msaa_off(app: &App, entity: Entity) {
+        assert!(
+            app.world()
+                .get::<OrderIndependentTransparencySettings>(entity)
+                .is_some(),
+            "camera should have OIT settings",
+        );
+        assert_eq!(app.world().get::<Msaa>(entity), Some(&Msaa::Off));
+    }
+
+    #[test]
+    fn stable_transparency_updates_existing_screen_space_camera_for_oit() {
+        let mut app = transparency_test_app();
+        spawn_screen_panel(&mut app);
+        app.update();
+        let overlay = screen_camera_entity(&mut app);
+        assert!(
+            app.world()
+                .get::<OrderIndependentTransparencySettings>(overlay)
+                .is_none(),
+            "screen camera starts without OIT before StableTransparency is active",
+        );
+
+        let stable = spawn_stable_camera(&mut app);
+        app.update();
+
+        assert_oit_msaa_off(&app, stable);
+        assert_oit_msaa_off(&app, overlay);
+    }
+
+    #[test]
+    fn late_screen_space_camera_inherits_active_stable_transparency_oit() {
+        let mut app = transparency_test_app();
+        let stable = spawn_stable_camera(&mut app);
+        app.update();
+
+        spawn_screen_panel(&mut app);
+        app.update();
+        let overlay = screen_camera_entity(&mut app);
+
+        assert_oit_msaa_off(&app, stable);
+        assert_oit_msaa_off(&app, overlay);
+    }
 }

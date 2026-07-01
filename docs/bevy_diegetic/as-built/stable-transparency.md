@@ -9,6 +9,13 @@
 > and a resize-crash investigation added then removed an in-process shader
 > guard — see
 > [`../investigation/oit-resize-crash-investigation.md`](../investigation/oit-resize-crash-investigation.md).
+>
+> **Updated 2026-06-30.** Screen-space overlay cameras now receive OIT as well
+> as `Msaa::Off` while `StableTransparency` is active. This is required because
+> `StandardMaterial::depth_bias` now advances once per `DrawZIndexRank`, not
+> once per command. Screen-space panels therefore need the same per-command
+> `oit_depth_offset` path as world panels for same-z-index SDF/text/shape
+> ordering.
 
 ## Context
 
@@ -21,20 +28,22 @@ MSAA sample granularity, which is the aliasing we removed during the slug work.
 
 The OIT/`StableTransparency` stack was retired in **f45cef9** on the rationale that
 slug emits one mesh per run and orders via `depth_bias`. The shift persists, so we
-**revive it unchanged** — the **opt-in** `.with_stable_transparency()` API exactly as
-before, ported to bevy 0.19. No default-on flip.
+revive the same **opt-in** `.with_stable_transparency()` API and keep the no-default
+policy. The 2026-06-30 update changes the screen-space camera propagation: screen
+cameras now receive OIT as well as `Msaa::Off` while the marker is active.
 
-## Behavior (unchanged from the pre-f45cef9 design)
+## Current behavior
 
 - Call `.with_stable_transparency()` → that camera gets OIT + `Msaa::Off`; screen-space
-  cameras on the window are matched to `Off`.
+  cameras on the window are matched to OIT + `Off`.
 - Don't call it → no OIT, MSAA stays on (`Msaa::default()` everywhere).
-- **bevy_diegetic stays MSAA-agnostic.** The `StableTransparency` marker is the *only*
-  thing that ever forces `Off`. No blanket crate default.
+- **bevy_diegetic stays opt-in.** The `StableTransparency` marker is the only
+  thing that forces `Msaa::Off` or OIT onto screen-space overlay cameras. No
+  blanket crate default.
 
 | Setup | Main cam | Screen-space | Result |
 |-------|----------|--------------|--------|
-| `.with_stable_transparency()` | OIT, `Off` | forced `Off` | stable coplanar text |
+| `.with_stable_transparency()` | OIT, `Off` | OIT, forced `Off` | stable coplanar text and screen panels |
 | not called, with panels | `Sample4` | stays `Sample4` | AA'd meshes + panels, no OIT |
 | not called, no panels | `Sample4` | — | plain MSAA scene |
 
@@ -42,11 +51,11 @@ before, ported to bevy 0.19. No default-on flip.
 
 - **Opt-in via `.with_stable_transparency()`**, exactly as before. Not a default.
 - The **`StableTransparency` marker lives in bevy_diegetic**; fairy_dust is one producer.
-- **All three observers return** (port to 0.19):
+- **All three observers are the current contract:**
   - `on_stable_transparency_added` — OIT on: insert OIT + `Msaa::Off` on self, propagate
-    `Msaa::Off` to existing `ScreenSpaceCamera`s.
-  - `on_screen_space_camera_added` — panel spawns while OIT already on: force `Msaa::Off`
-    on the new screen-space camera (reverse spawn order).
+    OIT + `Msaa::Off` to existing `ScreenSpaceCamera`s.
+  - `on_screen_space_camera_added` — panel spawns while OIT already on: force OIT +
+    `Msaa::Off` on the new screen-space camera (reverse spawn order).
   - `on_stable_transparency_removed` — OIT off: strip OIT, restore `Msaa::default()`
     everywhere. **Kept.**
 - Screen-space camera spawn **keeps `Msaa::default()`** in its bundle; the observer
@@ -94,13 +103,16 @@ before, ported to bevy 0.19. No default-on flip.
 - **Example call sites**: re-add `.with_stable_transparency()` to the examples that had
   it (world_text, slug_text, typography, units).
 
-### D. Documentation — the five dependencies
+### D. Documentation — the six dependencies
 Rewrite the README "Text transparency" section to cover:
 1. OIT ⟂ MSAA — both on one camera panics.
 2. All cameras sharing a window must match MSAA — else macOS Metal swap-chain stall.
-3. OIT needs the shader `oit_draw` blocks — the camera setting alone is inert.
-4. `depth_bias` doesn't reach OIT fragments → manual `OIT_DEPTH_STEP` for coplanar order.
-5. Text must be `Blend`/`Premultiplied` — `Opaque`/`Mask` bypass OIT.
+3. Screen-space cameras sharing the window need OIT too, not only `Msaa::Off`;
+   same-z-index screen panels rely on `oit_depth_offset` after material
+   `depth_bias` moved to `DrawZIndexRank`.
+4. OIT needs the shader `oit_draw` blocks — the camera setting alone is inert.
+5. `depth_bias` doesn't reach OIT fragments → manual `OIT_DEPTH_STEP` for coplanar order.
+6. Text must be `Blend`/`Premultiplied` — `Opaque`/`Mask` bypass OIT.
 Plus: for mesh-edge AA *with* OIT, use a post-process AA (FXAA/SMAA/TAA) — MSAA is the
 one AA incompatible with OIT.
 
@@ -132,9 +144,10 @@ case). Independent of the OIT work — can land before or after.
 ## Verification
 1. `typography.rs` with `.with_stable_transparency()` → orbit the coplanar ground text →
    color shift gone.
-2. A scene with screen panels + OIT → panels composite correctly, window does NOT freeze.
+2. A scene with screen panels + OIT → screen panels receive OIT, composite correctly,
+   and the window does NOT freeze.
 3. Late-spawn: trigger a screen panel after startup with OIT on → no stall (exercises
-   `on_screen_space_camera_added`).
+   `on_screen_space_camera_added`) and the new screen-space camera has OIT + `Msaa::Off`.
 4. A scene **without** `.with_stable_transparency()` + panels → still works (MSAA on,
    no stall) — confirms the opt-in didn't break the default path.
 5. g-seam fix + 96-band slug quality still intact.

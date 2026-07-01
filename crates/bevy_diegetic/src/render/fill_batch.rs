@@ -50,6 +50,7 @@ use super::batch_key::VisualShadow;
 use super::draw_order;
 use super::draw_order::DrawCommandDepth;
 use super::draw_order::DrawOrderIndex;
+use super::draw_order::DrawZIndexRank;
 use super::material;
 use super::material_table;
 use super::material_table::BatchResourcesReady;
@@ -292,6 +293,9 @@ pub(crate) struct ContiguousDrawnRun {
 pub(crate) struct SdfBatchKey {
     /// Authored z-index splitter for this batch's SDF records.
     pub z_index:                DrawZIndex,
+    /// Dense panel-local rank for `z_index`, used by the batch material
+    /// `StandardMaterial::depth_bias`.
+    pub z_index_rank:           DrawZIndexRank,
     /// Renderer family that owns this SDF batch.
     pub batch_family:           DrawBatchFamily,
     /// Render layers copied from the panel.
@@ -380,6 +384,7 @@ impl ResolvedSdfBatchRecord {
         };
         let batch_key = SdfBatchKey {
             z_index: surface.draw_depth.z_index(),
+            z_index_rank: surface.draw_depth.z_index_rank(),
             batch_family: DrawBatchFamily::SdfSurface,
             layers: BatchRenderLayers(surface.render_layers.clone()),
             shadow: surface.surface_shadow.into(),
@@ -467,7 +472,7 @@ impl SdfRenderRecord {
     #[must_use]
     pub(crate) fn from_resolved(
         record: &ResolvedSdfBatchRecord,
-        batch_base: DrawOrderIndex,
+        first_draw_order_index: DrawOrderIndex,
     ) -> Self {
         Self {
             transform:        record.transform,
@@ -480,7 +485,8 @@ impl SdfRenderRecord {
             border_material:  record.border_material.to_gpu(),
             paint_mask:       record.paint_mask,
             flags:            record.flags,
-            clip_depth_nudge: record.clip_depth_nudge - batch_base.clip_depth_nudge().get(),
+            clip_depth_nudge: record.clip_depth_nudge
+                - first_draw_order_index.clip_depth_nudge().get(),
             oit_depth_offset: record.oit_depth_offset,
         }
     }
@@ -534,16 +540,19 @@ pub(crate) struct SdfBatchResources {
 #[derive(Debug, Default)]
 pub(crate) struct SdfBatch {
     /// Batch render entity; `None` before the first GPU allocation.
-    pub entity:        Option<Entity>,
+    pub entity:             Option<Entity>,
     /// GPU handles; `None` before the first GPU allocation.
-    pub gpu:           Option<SdfBatchResources>,
+    pub gpu:                Option<SdfBatchResources>,
     /// Record-buffer upload state for this batch.
-    pub record_upload: Dirty,
+    pub record_upload:      Dirty,
     /// Bounds recomputation state for this batch.
-    pub bounds_update: Dirty,
-    /// Minimum `DrawOrderIndex` for this batch's material depth bias.
-    batch_base:        DrawOrderIndex,
-    records:           Vec<ResolvedSdfBatchRecord>,
+    pub bounds_update:      Dirty,
+    /// Lowest `DrawOrderIndex` in this batch.
+    ///
+    /// `SdfRenderRecord::clip_depth_nudge` is uploaded relative to this value;
+    /// `SdfRenderRecord::oit_depth_offset` stays panel-absolute.
+    first_draw_order_index: DrawOrderIndex,
+    records:                Vec<ResolvedSdfBatchRecord>,
 }
 
 impl SdfBatch {
@@ -559,19 +568,21 @@ impl SdfBatch {
     #[must_use]
     pub(crate) const fn is_empty(&self) -> bool { self.records.is_empty() }
 
-    /// Minimum `DrawOrderIndex` among this batch's live records.
+    /// Lowest `DrawOrderIndex` among this batch's live records.
     #[must_use]
-    pub(crate) const fn batch_base(&self) -> DrawOrderIndex { self.batch_base }
+    pub(crate) const fn first_draw_order_index(&self) -> DrawOrderIndex {
+        self.first_draw_order_index
+    }
 
-    fn refresh_batch_base(&mut self) {
-        let previous = self.batch_base;
-        self.batch_base = self
+    fn refresh_first_draw_order_index(&mut self) {
+        let previous = self.first_draw_order_index;
+        self.first_draw_order_index = self
             .records
             .iter()
             .map(|record| record.draw_depth.draw_order_index_value())
             .min()
             .unwrap_or_default();
-        if self.batch_base != previous {
+        if self.first_draw_order_index != previous {
             self.record_upload.mark();
         }
     }
@@ -595,8 +606,15 @@ impl SdfBatch {
         });
     }
 
-    fn upsert_record(&mut self, record: ResolvedSdfBatchRecord) {
+    fn upsert_record(&mut self, mut record: ResolvedSdfBatchRecord) {
         if let Some(position) = self.position_of(record.record_key) {
+            // `transform` is the world matrix maintained by
+            // `update_sdf_batch_world_transforms`; `from_resolved` only stamps a
+            // panel-local placeholder here. Carry the maintained world matrix onto
+            // the rebuilt record so an unchanged surface compares equal and skips
+            // the record-buffer re-upload instead of failing the check on the
+            // local-vs-world matrix difference.
+            record.transform = self.records[position].transform;
             if self.records[position] == record {
                 return;
             }
@@ -605,7 +623,7 @@ impl SdfBatch {
             self.records.push(record);
         }
         self.sort_records();
-        self.refresh_batch_base();
+        self.refresh_first_draw_order_index();
         self.record_upload.mark();
         self.bounds_update.mark();
     }
@@ -613,7 +631,7 @@ impl SdfBatch {
     fn remove_record(&mut self, key: SdfRecordKey) {
         if let Some(position) = self.position_of(key) {
             self.records.remove(position);
-            self.refresh_batch_base();
+            self.refresh_first_draw_order_index();
             self.record_upload.mark();
             self.bounds_update.mark();
         }
@@ -834,8 +852,6 @@ fn material_group_is_stripped(descriptor: &RenderPipelineDescriptor) -> bool {
 pub(crate) struct SdfBatchMaterialInput {
     /// SDF batch key whose compatibility fields configure the material.
     pub key:          SdfBatchKey,
-    /// Minimum `DrawOrderIndex` for this batch's material depth bias.
-    pub batch_base:   DrawOrderIndex,
     /// SDF render-record buffer.
     pub records:      Handle<ShaderBuffer>,
     /// Reserved SDF mesh-record buffer.
@@ -847,7 +863,6 @@ pub(crate) struct SdfBatchMaterialInput {
 pub(crate) fn sdf_batch_material(input: SdfBatchMaterialInput) -> SdfExtendedMaterial {
     let SdfBatchMaterialInput {
         key,
-        batch_base,
         records,
         mesh_records,
     } = input;
@@ -862,7 +877,7 @@ pub(crate) fn sdf_batch_material(input: SdfBatchMaterialInput) -> SdfExtendedMat
     base.fog_enabled = key.pipeline_compatibility.fog_enabled;
     base.opaque_render_method = key.pipeline_compatibility.opaque_render_method.into();
     base.deferred_lighting_pass_id = key.pipeline_compatibility.deferred_lighting_pass_id;
-    base.depth_bias = batch_base.screen_depth_bias().get();
+    base.depth_bias = key.z_index_rank.screen_depth_bias().get();
     ExtendedMaterial {
         base,
         extension: SdfExtension {
@@ -1113,6 +1128,7 @@ pub(crate) fn assign_contiguous_runs(
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SdfRunCompatibility {
     z_index:                DrawZIndex,
+    z_index_rank:           DrawZIndexRank,
     layers:                 BatchRenderLayers,
     shadow:                 VisualShadow,
     pipeline_compatibility: PipelineCompatibility,
@@ -1123,6 +1139,7 @@ impl SdfRunCompatibility {
     fn from_surface(surface: &ResolvedSdfSurface<'_>, materials: &SdfRecordMaterialSlots) -> Self {
         Self {
             z_index:                surface.draw_depth.z_index(),
+            z_index_rank:           surface.draw_depth.z_index_rank(),
             layers:                 BatchRenderLayers(surface.render_layers.clone()),
             shadow:                 surface.surface_shadow.into(),
             pipeline_compatibility: materials.pipeline_compatibility,
@@ -1348,14 +1365,14 @@ fn refresh_sdf_batch_material_depth_biases(
     store: &mut SdfBatchStore,
     materials: &mut Assets<SdfExtendedMaterial>,
 ) {
-    for (_, batch) in store.batches_mut() {
+    for (key, batch) in store.batches_mut() {
         let Some(gpu) = &batch.gpu else {
             continue;
         };
         let Some(mut material) = materials.get_mut(&gpu.material) else {
             continue;
         };
-        let depth_bias = batch.batch_base().screen_depth_bias().get();
+        let depth_bias = key.z_index_rank.screen_depth_bias().get();
         if material.base.depth_bias.to_bits() != depth_bias.to_bits() {
             material.base.depth_bias = depth_bias;
         }
@@ -1364,14 +1381,14 @@ fn refresh_sdf_batch_material_depth_biases(
 
 fn padded_sdf_render_records(
     records: &[ResolvedSdfBatchRecord],
-    batch_base: DrawOrderIndex,
+    first_draw_order_index: DrawOrderIndex,
     capacity: u32,
 ) -> Vec<SdfRenderRecord> {
     let mut padded = Vec::with_capacity(capacity.to_usize());
     padded.extend(
         records
             .iter()
-            .map(|record| SdfRenderRecord::from_resolved(record, batch_base)),
+            .map(|record| SdfRenderRecord::from_resolved(record, first_draw_order_index)),
     );
     padded.resize(
         capacity.to_usize().max(records.len()),
@@ -1436,14 +1453,13 @@ pub(crate) fn spawn_sdf_batch_entity(
     let capacity = batch.record_count().max(1).next_power_of_two();
     let records = storage_buffers.add(ShaderBuffer::from(padded_sdf_render_records(
         batch.records(),
-        batch.batch_base(),
+        batch.first_draw_order_index(),
         capacity,
     )));
     let mesh_records = storage_buffers.add(ShaderBuffer::from(padded_sdf_mesh_records(capacity)));
     let mesh = meshes.add(inert_sdf_batch_mesh(capacity));
     let material = materials.add(sdf_batch_material(SdfBatchMaterialInput {
         key:          key.clone(),
-        batch_base:   batch.batch_base(),
         records:      records.clone(),
         mesh_records: mesh_records.clone(),
     }));
@@ -1494,7 +1510,7 @@ pub(crate) fn grow_sdf_batch_assets(
     }
     let records = storage_buffers.add(ShaderBuffer::from(padded_sdf_render_records(
         batch.records(),
-        batch.batch_base(),
+        batch.first_draw_order_index(),
         capacity,
     )));
     let mesh_records = storage_buffers.add(ShaderBuffer::from(padded_sdf_mesh_records(capacity)));
@@ -1587,7 +1603,7 @@ pub(crate) fn commit_sdf_batch_buffers(
         });
         records += batch.records().len();
         for resolved in batch.records() {
-            let record = SdfRenderRecord::from_resolved(resolved, batch.batch_base());
+            let record = SdfRenderRecord::from_resolved(resolved, batch.first_draw_order_index());
             diagnostics.records.push(SdfRecordSnapshot {
                 fill_material:   record.fill_material.as_u32(),
                 border_material: record.border_material.as_u32(),
@@ -1603,7 +1619,11 @@ pub(crate) fn commit_sdf_batch_buffers(
         let Some(gpu) = &batch.gpu else {
             continue;
         };
-        let payload = padded_sdf_render_records(batch.records(), batch.batch_base(), gpu.capacity);
+        let payload = padded_sdf_render_records(
+            batch.records(),
+            batch.first_draw_order_index(),
+            gpu.capacity,
+        );
         batch.record_upload.clear();
         if let Some(mut buffer) = storage_buffers.get_mut(&gpu.records) {
             buffer.set_data(payload);
@@ -2393,6 +2413,7 @@ mod tests {
                 pipeline_compatibility.double_sided = cull_mode.is_none();
                 let key = SdfBatchKey {
                     z_index: 0.into(),
+                    z_index_rank: DrawZIndexRank::default(),
                     batch_family: DrawBatchFamily::SdfSurface,
                     layers: BatchRenderLayers(RenderLayers::layer(0)),
                     shadow,
@@ -2404,7 +2425,6 @@ mod tests {
                 };
                 let material = sdf_batch_material(SdfBatchMaterialInput {
                     key,
-                    batch_base: DrawOrderIndex::default(),
                     records: Handle::default(),
                     mesh_records: Handle::default(),
                 });
@@ -3331,6 +3351,7 @@ mod tests {
     fn test_batch_key() -> SdfBatchKey {
         SdfBatchKey {
             z_index:                0.into(),
+            z_index_rank:           DrawZIndexRank::default(),
             batch_family:           DrawBatchFamily::SdfSurface,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
             shadow:                 VisualShadow::Cast,

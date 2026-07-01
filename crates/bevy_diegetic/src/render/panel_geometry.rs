@@ -991,7 +991,7 @@ mod tests {
     }
 
     #[test]
-    fn overlapping_backings_order_the_same_on_sorted_and_oit_paths() {
+    fn overlapping_backings_share_screen_depth_and_order_on_record_paths() {
         let mut app = geometry_app();
         app.world_mut().spawn(
             DiegeticPanel::world()
@@ -1014,11 +1014,15 @@ mod tests {
         let above = &surfaces[1];
         assert!(below.command_index < above.command_index);
 
-        // Both ordering mechanisms must put the higher command index in
-        // front: sorted bias rises and OIT offset rises (reverse-Z, positive =
-        // closer).
+        // Same-z-index surfaces share hardware screen depth. Per-record clip
+        // and OIT depth still put the higher command index in front
+        // (reverse-Z, positive = closer).
+        assert_eq!(
+            below.draw_depth.screen_depth_bias().get().to_bits(),
+            above.draw_depth.screen_depth_bias().get().to_bits()
+        );
         assert!(
-            below.draw_depth.screen_depth_bias().get() < above.draw_depth.screen_depth_bias().get()
+            below.draw_depth.clip_depth_nudge().get() < above.draw_depth.clip_depth_nudge().get()
         );
         assert!(
             below.draw_depth.oit_depth_offset().get() < above.draw_depth.oit_depth_offset().get()

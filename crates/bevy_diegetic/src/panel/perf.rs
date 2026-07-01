@@ -83,7 +83,7 @@ pub struct DiegeticPerfStats {
 /// is how many records routed into it.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Reflect)]
 pub struct BatchSummary {
-    /// Authored z-index / sort lane for the batch.
+    /// Authored `DrawZIndex` value for the batch.
     pub z_index:       DrawZIndex,
     /// Active render-layer indices copied from the batch key.
     pub render_layers: Vec<u32>,

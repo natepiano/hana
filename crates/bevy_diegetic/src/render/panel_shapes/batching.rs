@@ -155,13 +155,17 @@ struct ShapeBatchRecord {
 /// One render entity + material + mesh per [`PathBatchKey`].
 #[derive(Debug, Default)]
 struct ShapeBatch {
-    entity:          Option<Entity>,
-    gpu:             Option<ShapeBatchGpu>,
-    material_dirty:  MaterialDirty,
-    placement_dirty: PlacementDirty,
-    geometry_dirty:  GeometryDirty,
-    batch_base:      DrawOrderIndex,
-    records:         Vec<ShapeBatchRecord>,
+    entity:                 Option<Entity>,
+    gpu:                    Option<ShapeBatchGpu>,
+    material_dirty:         MaterialDirty,
+    placement_dirty:        PlacementDirty,
+    geometry_dirty:         GeometryDirty,
+    /// Lowest `DrawOrderIndex` in this batch.
+    ///
+    /// `PathRenderRecord::clip_depth_nudge` is uploaded relative to this value;
+    /// `PathRenderRecord::oit_depth_offset` stays panel-absolute.
+    first_draw_order_index: DrawOrderIndex,
+    records:                Vec<ShapeBatchRecord>,
 }
 
 impl ShapeBatch {
@@ -170,8 +174,6 @@ impl ShapeBatch {
     fn record_count(&self) -> u32 { self.records.len().to_u32() }
 
     fn run_count(&self) -> u32 { self.records.len().to_u32() }
-
-    const fn batch_base(&self) -> DrawOrderIndex { self.batch_base }
 
     fn instances(&self) -> Vec<PathQuadRecord> {
         self.records
@@ -188,27 +190,30 @@ impl ShapeBatch {
         self.records
             .iter()
             .map(|record| {
-                analytic_paths::path_render_record_relative_to_batch(record.run, self.batch_base)
+                analytic_paths::path_render_record_relative_to_first_draw_order_index(
+                    record.run,
+                    self.first_draw_order_index,
+                )
             })
             .collect()
     }
 
-    fn refresh_batch_base(&mut self) {
-        let previous = self.batch_base;
-        self.batch_base = self
+    fn refresh_first_draw_order_index(&mut self) {
+        let previous = self.first_draw_order_index;
+        self.first_draw_order_index = self
             .records
             .iter()
             .map(|record| record.draw_order_index)
             .min()
             .unwrap_or_default();
-        if self.batch_base != previous {
+        if self.first_draw_order_index != previous {
             self.placement_dirty.mark();
         }
     }
 
     fn push_record(&mut self, record: ShapeBatchRecord) {
         self.records.push(record);
-        self.refresh_batch_base();
+        self.refresh_first_draw_order_index();
         self.material_dirty.mark();
         self.placement_dirty.mark();
         self.geometry_dirty.mark();
@@ -217,7 +222,7 @@ impl ShapeBatch {
     fn remove_record(&mut self, key: PanelShapeRenderKey) {
         if let Some(index) = self.records.iter().position(|record| record.key == key) {
             self.records.remove(index);
-            self.refresh_batch_base();
+            self.refresh_first_draw_order_index();
             self.material_dirty.mark();
             self.placement_dirty.mark();
             self.geometry_dirty.mark();
@@ -233,7 +238,7 @@ impl ShapeBatch {
             self.push_record(incoming);
             return;
         };
-        let mut refresh_batch_base = false;
+        let mut refresh_first_draw_order_index = false;
         {
             let record = &mut self.records[index];
             if record.outline != incoming.outline
@@ -250,11 +255,11 @@ impl ShapeBatch {
                 self.material_dirty.mark();
                 self.placement_dirty.mark();
                 self.geometry_dirty.mark();
-                refresh_batch_base = true;
+                refresh_first_draw_order_index = true;
             } else {
                 if record.draw_order_index != incoming.draw_order_index {
                     record.draw_order_index = incoming.draw_order_index;
-                    refresh_batch_base = true;
+                    refresh_first_draw_order_index = true;
                 }
                 if path_render_record_placement_eq(&record.run, &incoming.run) {
                     if record.run.material != incoming.run.material {
@@ -268,8 +273,8 @@ impl ShapeBatch {
                 }
             }
         }
-        if refresh_batch_base {
-            self.refresh_batch_base();
+        if refresh_first_draw_order_index {
+            self.refresh_first_draw_order_index();
         }
     }
 
@@ -983,6 +988,7 @@ fn build_panel_line_group(
     };
     let batch_key = PathBatchKey {
         z_index:                first.draw_depth.z_index(),
+        z_index_rank:           first.draw_depth.z_index_rank(),
         batch_family:           DrawBatchFamily::PanelShape,
         shadow:                 context.shadow,
         layers:                 context.layers.clone(),
@@ -1172,7 +1178,6 @@ fn spawn_batch_entity(
     let mesh = meshes.add(inert_line_batch_mesh(capacity));
     let material = materials.add(line_batch_material(ShapeBatchMaterialInput {
         key,
-        batch_base: batch.batch_base(),
         atlas,
         instances: instances.clone(),
         run_table: run_table.clone(),
@@ -1412,7 +1417,6 @@ fn inert_line_batch_mesh(capacity: u32) -> Mesh {
 
 struct ShapeBatchMaterialInput<'a> {
     key:        &'a PathBatchKey,
-    batch_base: DrawOrderIndex,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
@@ -1422,7 +1426,6 @@ struct ShapeBatchMaterialInput<'a> {
 fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMaterial {
     let ShapeBatchMaterialInput {
         key,
-        batch_base,
         atlas,
         instances,
         run_table,
@@ -1437,7 +1440,7 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMateri
         &mut base,
         key.pipeline_compatibility,
     );
-    base.depth_bias = batch_base.screen_depth_bias().get();
+    base.depth_bias = key.z_index_rank.screen_depth_bias().get();
     PathExtendedMaterial {
         base,
         extension: render::analytic_paths::vertex_pull(
@@ -1459,14 +1462,14 @@ fn refresh_batch_material_depth_biases(
     store: &mut PanelShapeBatchStore,
     materials: &mut Assets<PathExtendedMaterial>,
 ) {
-    for (_, batch) in store.batches_mut() {
+    for (key, batch) in store.batches_mut() {
         let Some(gpu) = &batch.gpu else {
             continue;
         };
         let Some(mut material) = materials.get_mut(&gpu.material) else {
             continue;
         };
-        let depth_bias = batch.batch_base().screen_depth_bias().get();
+        let depth_bias = key.z_index_rank.screen_depth_bias().get();
         if material.base.depth_bias.to_bits() != depth_bias.to_bits() {
             material.base.depth_bias = depth_bias;
         }
@@ -1505,6 +1508,7 @@ mod tests {
     use crate::render::HairlineWidth;
     use crate::render::PathContour;
     use crate::render::QuadraticSegment;
+    use crate::render::draw_order::DrawZIndexRank;
     use crate::render::material_table::MaterialSlotValues;
     use crate::render::material_table::MaterialTableAppendReady;
     use crate::render::material_table::MaterialTablePlugin;
@@ -2720,6 +2724,7 @@ mod tests {
         render::apply_sidedness(&mut material, Sidedness::BothSides);
         PathBatchKey {
             z_index:                DrawZIndex::default(),
+            z_index_rank:           DrawZIndexRank::default(),
             batch_family:           DrawBatchFamily::PanelShape,
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),

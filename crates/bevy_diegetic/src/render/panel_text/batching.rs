@@ -30,6 +30,7 @@ use bevy_kana::ToUsize;
 use super::PanelTextLayout;
 use super::PreparedPanelText;
 use super::layout::PanelTextDrawZIndex;
+use super::layout::PanelTextDrawZIndexRank;
 use crate::cascade::CascadeDefault;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Resolved;
@@ -192,6 +193,7 @@ pub(super) fn update_panel_text_batches(
             Ref<PreparedPanelText>,
             Ref<PanelTextLayout>,
             Ref<PanelTextDrawZIndex>,
+            Ref<PanelTextDrawZIndexRank>,
             &ChildOf,
             &GlobalTransform,
             Option<&Visibility>,
@@ -234,6 +236,7 @@ pub(super) fn update_panel_text_batches(
         prepared,
         panel_text_child,
         z_index,
+        z_index_rank,
         child_of,
         label_transform,
         label_visibility,
@@ -270,6 +273,7 @@ pub(super) fn update_panel_text_batches(
             panel_layers,
             &prepared,
             *z_index,
+            *z_index_rank,
             material_candidate.pipeline_compatibility,
             material_candidate.resource_compatibility.clone(),
         );
@@ -281,6 +285,7 @@ pub(super) fn update_panel_text_batches(
             &prepared,
             &panel_text_child,
             &z_index,
+            &z_index_rank,
             &cascade_changed,
             label_entity,
             key_changed,
@@ -334,6 +339,7 @@ fn panel_text_geometry_changed(
     prepared: &Ref<'_, PreparedPanelText>,
     panel_text_child: &Ref<'_, PanelTextLayout>,
     z_index: &Ref<'_, PanelTextDrawZIndex>,
+    z_index_rank: &Ref<'_, PanelTextDrawZIndexRank>,
     cascade_changed: &EntityHashSet,
     label_entity: Entity,
     key_changed: bool,
@@ -343,6 +349,7 @@ fn panel_text_geometry_changed(
     (prepared.is_changed() && !prepared.render_only)
         || panel_text_child.is_changed()
         || z_index.is_changed()
+        || z_index_rank.is_changed()
         || cascade_changed.contains(&label_entity)
         || key_changed
 }
@@ -557,11 +564,13 @@ fn batch_key_for_run(
     panel_layers: Option<&RenderLayers>,
     prepared: &PreparedPanelText,
     z_index: PanelTextDrawZIndex,
+    z_index_rank: PanelTextDrawZIndexRank,
     pipeline_compatibility: PipelineCompatibility,
     resource_compatibility: ResourceCompatibility,
 ) -> PathBatchKey {
     PathBatchKey {
         z_index: z_index.0,
+        z_index_rank: z_index_rank.0,
         batch_family: DrawBatchFamily::Text,
         shadow: prepared.shadow_mode.into(),
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
@@ -947,7 +956,6 @@ fn spawn_batch_entity(input: SpawnBatchEntity<'_, '_, '_>) {
     let mesh = meshes.add(inert_batch_mesh(capacity));
     let material = materials.add(batch_material(BatchMaterialInput {
         key,
-        batch_base: batch.batch_base(),
         atlas,
         instances: instances.clone(),
         run_table: run_table.clone(),
@@ -1059,7 +1067,6 @@ fn grow_batch_assets(
 /// Inputs for [`batch_material`].
 struct BatchMaterialInput<'a> {
     key:        &'a PathBatchKey,
-    batch_base: DrawOrderIndex,
     atlas:      &'a PathAtlasHandles,
     instances:  Handle<ShaderBuffer>,
     run_table:  Handle<ShaderBuffer>,
@@ -1072,7 +1079,6 @@ struct BatchMaterialInput<'a> {
 fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
     let BatchMaterialInput {
         key,
-        batch_base,
         atlas,
         instances,
         run_table,
@@ -1088,7 +1094,7 @@ fn batch_material(input: BatchMaterialInput<'_>) -> PathExtendedMaterial {
         key.pipeline_compatibility,
     );
     base.alpha_mode = batch_gpu_alpha_mode(key.pipeline_compatibility.alpha.into());
-    base.depth_bias = batch_base.screen_depth_bias().get();
+    base.depth_bias = key.z_index_rank.screen_depth_bias().get();
     PathExtendedMaterial {
         base,
         extension: render::analytic_paths::vertex_pull(
@@ -1110,14 +1116,14 @@ fn refresh_batch_material_depth_biases(
     backend: &mut GlyphCache,
     materials: &mut Assets<PathExtendedMaterial>,
 ) {
-    for (_, batch) in backend.batch_store_mut().batches_mut() {
+    for (key, batch) in backend.batch_store_mut().batches_mut() {
         let Some(gpu) = &batch.gpu else {
             continue;
         };
         let Some(mut material) = materials.get_mut(&gpu.material) else {
             continue;
         };
-        let depth_bias = batch.batch_base().screen_depth_bias().get();
+        let depth_bias = key.z_index_rank.screen_depth_bias().get();
         if material.base.depth_bias.to_bits() != depth_bias.to_bits() {
             material.base.depth_bias = depth_bias;
         }
@@ -1960,7 +1966,7 @@ mod tests {
     }
 
     #[test]
-    fn default_text_batch_material_uses_first_text_command_base() {
+    fn default_text_batch_material_uses_z_index_rank() {
         let mut app = pipeline_app();
         spawn_panel(&mut app, two_text_tree());
         settle(&mut app);

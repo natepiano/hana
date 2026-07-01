@@ -42,6 +42,7 @@ use crate::render::VisualShadow;
 use crate::render::batch_key::PipelineCompatibility;
 use crate::render::batch_key::ResourceCompatibility;
 use crate::render::draw_order::DrawOrderIndex;
+use crate::render::draw_order::DrawZIndexRank;
 use crate::render::material_table::GpuMaterialSlotId;
 use crate::render::material_table::MaterialSlotCandidate;
 use crate::render::material_table::MaterialSlotId;
@@ -56,6 +57,9 @@ use crate::text::RunStorageKey;
 pub(crate) struct PathBatchKey {
     /// Authored z-index splitter for this batch's command records.
     pub z_index:                DrawZIndex,
+    /// Dense panel-local rank for `z_index`, used by the batch material
+    /// `StandardMaterial::depth_bias`.
+    pub z_index_rank:           DrawZIndexRank,
     /// Renderer family that owns this analytic path batch.
     pub batch_family:           DrawBatchFamily,
     /// Shadow participation for this analytic path draw.
@@ -86,11 +90,15 @@ pub(crate) fn analytic_material_slot_candidate(
 }
 
 /// Converts an absolute run record into the value uploaded for one batch.
-pub(crate) fn path_render_record_relative_to_batch(
+///
+/// `ClipDepthNudge` is uploaded relative to the batch's first
+/// `DrawOrderIndex`; `OitDepthOffset` stays absolute to the panel because OIT
+/// compares fragments across records.
+pub(crate) fn path_render_record_relative_to_first_draw_order_index(
     mut record: PathRenderRecord,
-    batch_base: DrawOrderIndex,
+    first_draw_order_index: DrawOrderIndex,
 ) -> PathRenderRecord {
-    record.clip_depth_nudge -= batch_base.clip_depth_nudge().get();
+    record.clip_depth_nudge -= first_draw_order_index.clip_depth_nudge().get();
     record
 }
 
@@ -223,20 +231,23 @@ struct BatchRun {
 #[derive(Debug, Default)]
 pub struct PathBatch {
     /// The batch render entity; `None` until the routing system spawns it.
-    pub entity:          Option<Entity>,
+    pub entity:             Option<Entity>,
     /// GPU handles; `None` until the routing system creates them.
-    pub gpu:             Option<PathBatchResources>,
+    pub gpu:                Option<PathBatchResources>,
     /// Material-slot row ids changed in `PathRenderRecord::material`.
-    pub material_dirty:  MaterialDirty,
+    pub material_dirty:     MaterialDirty,
     /// Placement, render mode, AA, or depth changed in path render records.
-    pub placement_dirty: PlacementDirty,
+    pub placement_dirty:    PlacementDirty,
     /// Path quad membership or geometry changed.
-    pub geometry_dirty:  GeometryDirty,
-    /// Minimum `DrawOrderIndex` for the batch material depth bias.
-    batch_base:          DrawOrderIndex,
-    runs:                Vec<BatchRun>,
-    path_records:        Vec<PathQuadRecord>,
-    run_records:         Vec<PathRenderRecord>,
+    pub geometry_dirty:     GeometryDirty,
+    /// Lowest `DrawOrderIndex` in this batch.
+    ///
+    /// `PathRenderRecord::clip_depth_nudge` is uploaded relative to this value;
+    /// `PathRenderRecord::oit_depth_offset` stays panel-absolute.
+    first_draw_order_index: DrawOrderIndex,
+    runs:                   Vec<BatchRun>,
+    path_records:           Vec<PathQuadRecord>,
+    run_records:            Vec<PathRenderRecord>,
 }
 
 impl PathBatch {
@@ -260,10 +271,6 @@ impl PathBatch {
     /// Whether the last member run has left.
     #[must_use]
     pub const fn is_empty(&self) -> bool { self.runs.is_empty() }
-
-    /// Minimum `DrawOrderIndex` among this batch's live runs.
-    #[must_use]
-    pub const fn batch_base(&self) -> DrawOrderIndex { self.batch_base }
 
     /// World-space bounds over every path rect × its run transform, for the
     /// Aabb-union system. `None` when the batch holds no records.
@@ -289,8 +296,8 @@ impl PathBatch {
         self.runs.iter().position(|run| run.key == key)
     }
 
-    fn refresh_batch_base(&mut self) {
-        self.batch_base = self
+    fn refresh_first_draw_order_index(&mut self) {
+        self.first_draw_order_index = self
             .runs
             .iter()
             .map(|run| run.draw_order_index)
@@ -303,10 +310,10 @@ impl PathBatch {
     /// stale relative to the vectors they index. Every record field is
     /// stamped from the run's source data — never defaulted.
     fn rebuild(&mut self) {
-        self.refresh_batch_base();
+        self.refresh_first_draw_order_index();
         self.path_records.clear();
         self.run_records.clear();
-        let batch_base = self.batch_base;
+        let first_draw_order_index = self.first_draw_order_index;
         for (index, run) in self.runs.iter_mut().enumerate() {
             let start = self.path_records.len().to_u32();
             let render_index = index.to_u32();
@@ -317,7 +324,10 @@ impl PathBatch {
                 }));
             run.range = start..self.path_records.len().to_u32();
             self.run_records
-                .push(path_render_record_relative_to_batch(run.record, batch_base));
+                .push(path_render_record_relative_to_first_draw_order_index(
+                    run.record,
+                    first_draw_order_index,
+                ));
         }
         self.geometry_dirty.mark();
         self.material_dirty.mark();
@@ -383,7 +393,10 @@ impl PathBatch {
                     path_records_changed = true;
                 }
             }
-            let batch_record = path_render_record_relative_to_batch(record, self.batch_base);
+            let batch_record = path_render_record_relative_to_first_draw_order_index(
+                record,
+                self.first_draw_order_index,
+            );
             if self.run_records[position] != batch_record {
                 self.run_records[position] = batch_record;
                 self.material_dirty.mark();
@@ -436,7 +449,10 @@ impl PathBatch {
         let Some(position) = self.position_of(key) else {
             return;
         };
-        let batch_record = path_render_record_relative_to_batch(record, self.batch_base);
+        let batch_record = path_render_record_relative_to_first_draw_order_index(
+            record,
+            self.first_draw_order_index,
+        );
         let current = self.run_records[position];
         if current == batch_record {
             return;
@@ -671,6 +687,7 @@ mod tests {
         };
         PathBatchKey {
             z_index:                0.into(),
+            z_index_rank:           DrawZIndexRank::default(),
             batch_family:           DrawBatchFamily::Text,
             shadow:                 VisualShadow::Cast,
             layers:                 BatchRenderLayers(RenderLayers::layer(0)),
