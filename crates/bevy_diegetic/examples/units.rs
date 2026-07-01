@@ -41,8 +41,8 @@ use bevy_diegetic::PanelPoint;
 use bevy_diegetic::PanelShapeBatchPerfStats;
 use bevy_diegetic::PaperSize;
 use bevy_diegetic::Pt;
+use bevy_diegetic::ShadowCasting;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
@@ -515,7 +515,7 @@ fn spawn_a4_with_titles(
         DiegeticPanel::world()
             .paper(PaperSize::A4)
             .anchor(Anchor::Center)
-            .surface_shadow(SurfaceShadow::On)
+            .shadow_casting(ShadowCasting::On)
             .layout(|b| build_a4_content(b, false))
             .build(),
         "A4 dimensions",
@@ -559,7 +559,7 @@ fn spawn_card_panel(commands: &mut Commands, card_x: f32, card_y: f32) {
         DiegeticPanel::world()
             .paper(PaperSize::BusinessCard)
             .anchor(Anchor::Center)
-            .surface_shadow(SurfaceShadow::On)
+            .shadow_casting(ShadowCasting::On)
             .layout(|b| build_card_content(b, false))
             .build(),
         "card dimensions",
@@ -588,7 +588,7 @@ fn spawn_photo_panel_with_title(
         DiegeticPanel::world()
             .paper(PaperSize::Photo5x7)
             .anchor(Anchor::Center)
-            .surface_shadow(SurfaceShadow::On)
+            .shadow_casting(ShadowCasting::On)
             .layout(|b| build_index_content(b, false))
             .build(),
         "index card dimensions",

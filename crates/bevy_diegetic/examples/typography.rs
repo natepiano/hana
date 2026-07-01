@@ -32,8 +32,8 @@ use bevy_diegetic::OverlayBoundingBox;
 use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
+use bevy_diegetic::ShadowCasting;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TypographyOverlay;
 use bevy_lagrange::OrbitCamPreset;
@@ -410,7 +410,7 @@ fn setup(
             .color(WORD_COLOR)
             .transform(Transform::from_xyz(0.0, DISPLAY_Y, DISPLAY_Z))
             .build(),
-        TypographyOverlay::default().with_shadow(SurfaceShadow::On),
+        TypographyOverlay::default().with_shadow(ShadowCasting::On),
     ));
 
     // Comment text — lies flat in the ground plane, in front of the word,
@@ -707,17 +707,17 @@ fn overlay_from_state(state: TypographyFeatureState) -> TypographyOverlay {
     } else {
         GlyphMetricVisibility::Hidden
     };
-    let surface_shadow = if state.shadow() {
-        SurfaceShadow::On
+    let shadow_casting = if state.shadow() {
+        ShadowCasting::On
     } else {
-        SurfaceShadow::Off
+        ShadowCasting::Off
     };
 
     TypographyOverlay {
         glyph_metrics,
         font_metrics,
         labels,
-        surface_shadow,
+        shadow_casting,
         ..TypographyOverlay::default()
     }
 }
@@ -781,13 +781,13 @@ fn toggle_overlay_shadow(
     mut state: ResMut<TypographyFeatureState>,
 ) {
     state.toggle(TypographyFeatureState::SHADOW);
-    let surface_shadow = if state.shadow() {
-        SurfaceShadow::On
+    let shadow_casting = if state.shadow() {
+        ShadowCasting::On
     } else {
-        SurfaceShadow::Off
+        ShadowCasting::Off
     };
     for mut overlay in &mut overlays {
-        overlay.surface_shadow = surface_shadow;
+        overlay.shadow_casting = shadow_casting;
     }
     for ground in &grounds {
         if state.shadow() {

@@ -7,6 +7,7 @@ use super::PanelWorldConversion;
 use super::PanelWorldProjection;
 use super::PanelWorldTarget;
 use super::SavedWorldRestoreMode;
+use crate::cascade::Cascade;
 use crate::layout::Anchor;
 use crate::layout::LayoutTree;
 use crate::layout::Lighting;
@@ -28,8 +29,8 @@ pub struct SavedPanelWorldState {
     pub height:             f32,
     /// Original panel layout unit.
     pub layout_unit:        Unit,
-    /// Original panel font unit override.
-    pub font_unit:          Option<Unit>,
+    /// Original panel font unit authoring.
+    pub font_unit:          Cascade<Unit>,
     /// Original resolved font unit.
     pub resolved_font_unit: Unit,
     /// Original resolved lighting.

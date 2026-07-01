@@ -445,7 +445,7 @@ Acceptance:
 - Phase E now focuses on planar classification, transparent-panel selection,
   coordinate mapping, stable source identity, and parity tests because Phase B
   already owns shaft/cap analytic rendering.
-- Phase E now names `CalloutLine::surface_shadow` preservation as a transparent
+- Phase E now names `CalloutLine` shadow-casting preservation as a transparent
   panel grouping or fallback requirement.
 - Phase F now includes path-neutral naming cleanup for glyph/text-compatible
   analytic renderer internals, or a deliberate deferral.
@@ -657,8 +657,9 @@ winding level, inside one record.
 As built:
 
 - **Per-line authoring**: `PanelLine::hairline_fade(HairlineFade)` /
-  `LineStyle::hairline_fade` (`Option<HairlineFade>`, `None` inherits the
-  element → panel → global resolution). Carried through
+  `LineStyle::hairline_fade` (`Cascade<HairlineFade>`,
+  `Cascade::Inherit` inherits the element -> panel -> global resolution).
+  Carried through
   `ResolvedPanelShape::hairline_fade`; resolved per member in
   `build_panel_line_group` and passed to `build_panel_shape_path` as
   `PanelShapeMember { primitive, fade_exponent }`. The merge key is unchanged
@@ -905,10 +906,11 @@ This phase is retained only as the sub-decisions that feed that plan:
   `callouts/render.rs::cap_perp`); the transparent-panel + element-owned
   authoring it routes into is already proven by Phase D
   (`glyph.rs::spawn_guide_panel`, `metric_lines.rs` arrow lines).
-- Shadow mode is a hard panel-grouping key: `CalloutLine::surface_shadow` is
-  per-callout while `DiegeticPanel::surface_shadow` is per-panel, so two
-  standalone callouts with different `SurfaceShadow` cannot share one backing
-  panel (matches callouts.md's render-context grouping list).
+- Shadow casting is a hard panel-grouping key: a callout-local
+  `ShadowCasting` override is per-callout while `DiegeticPanel::shadow_casting`
+  is per-panel, so two standalone callouts with different shadow-casting
+  policies cannot share one backing panel (matches callouts.md's
+  render-context grouping list).
 - Keep the direct `CalloutLine` SDF renderer for non-coplanar cases.
 - Parity is not pixel-exact: the panel-backed route applies cascade-resolved
   `AntiAlias` + hairline dilation, the direct `LegacySdfExtendedMaterial` route does

@@ -47,9 +47,9 @@ use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
 use bevy_diegetic::PanelShape;
 use bevy_diegetic::Px;
+use bevy_diegetic::ShadowCasting;
 use bevy_diegetic::Sidedness;
 use bevy_diegetic::Sizing;
-use bevy_diegetic::SurfaceShadow;
 use bevy_diegetic::Text;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
@@ -1121,7 +1121,7 @@ fn validation_panel(
     let builder = DiegeticPanel::world()
         .size(Mm(PANEL_W), Mm(PANEL_H))
         .anchor(Anchor::Center)
-        .surface_shadow(SurfaceShadow::On);
+        .shadow_casting(ShadowCasting::On);
     let builder = match text_material {
         Some(material) => builder.text_material(material),
         None => builder,

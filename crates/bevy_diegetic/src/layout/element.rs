@@ -26,6 +26,7 @@ use super::Dimension;
 use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
+use super::ShadowCasting;
 use super::Sizing;
 use super::TextSizing;
 use super::TextStyle;
@@ -34,6 +35,7 @@ use super::child_layout::ChildLayout;
 use super::constants::INLINE_CHILDREN;
 use crate::ImePanelField;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -112,23 +114,24 @@ pub(super) struct Element {
     pub(super) scroll_anchor_x: ScrollAnchor,
     /// Which vertical edge `scroll_offset.y` measures from.
     pub(super) scroll_anchor_y: ScrollAnchor,
-    /// Optional PBR source-material handle for this element's surfaces.
-    /// When present, render systems use this as the element-local override over
-    /// the panel material handle and global material cascade defaults.
+    /// Authored PBR source-material handle for this element's surfaces.
+    ///
+    /// When overridden, render systems use this over the panel material handle
+    /// and global material cascade defaults.
     /// `base_color` is overridden by layout or primitive color when both are set.
-    pub(super) material:        Option<Handle<StandardMaterial>>,
+    pub(super) material:        Cascade<Handle<StandardMaterial>>,
     /// Optional editable field contract.
     pub(super) editable:        Option<ImePanelField>,
     /// Optional paint-only draw data.
     pub(super) draw:            Option<PanelDraw>,
     /// `DrawZIndex` stamped onto this element's render commands.
     pub(super) z_index:         DrawZIndex,
-    /// Optional anti-alias override for this element's analytic line marks.
-    /// `None` inherits the panel entity's cascade-resolved mode.
-    pub(super) anti_alias:      Option<AntiAlias>,
-    /// Optional hairline fade override for this element's analytic line marks.
-    /// `None` inherits the panel entity's cascade-resolved policy.
-    pub(super) hairline_fade:   Option<HairlineFade>,
+    /// Authored anti-alias mode for this element's analytic line marks.
+    pub(super) anti_alias:      Cascade<AntiAlias>,
+    /// Authored hairline fade policy for this element's analytic line marks.
+    pub(super) hairline_fade:   Cascade<HairlineFade>,
+    /// Authored shadow-casting policy for this element and its render commands.
+    pub(super) shadow_casting:  Cascade<ShadowCasting>,
     /// Optional subtree precomposition mode.
     pub(super) precompose:      PrecomposeMode,
     /// Content of this element.
@@ -191,12 +194,13 @@ impl Default for Element {
             scroll_offset:   Vec2::ZERO,
             scroll_anchor_x: ScrollAnchor::Start,
             scroll_anchor_y: ScrollAnchor::Start,
-            material:        None,
+            material:        Cascade::Inherit,
             editable:        None,
             draw:            None,
             z_index:         DrawZIndex::default(),
-            anti_alias:      None,
-            hairline_fade:   None,
+            anti_alias:      Cascade::Inherit,
+            hairline_fade:   Cascade::Inherit,
+            shadow_casting:  Cascade::Inherit,
             precompose:      PrecomposeMode::Direct,
             content:         ElementContent::Empty,
         }
@@ -447,10 +451,12 @@ impl LayoutTree {
         hasher.finish()
     }
 
-    /// Returns the PBR material override for the element at `index`, if any.
+    /// Returns the PBR material authoring for the element at `index`.
     #[must_use]
-    pub fn element_material(&self, index: usize) -> Option<&Handle<StandardMaterial>> {
-        self.elements.get(index).and_then(|e| e.material.as_ref())
+    pub fn element_material(&self, index: usize) -> Cascade<&Handle<StandardMaterial>> {
+        self.elements
+            .get(index)
+            .map_or(Cascade::Inherit, |element| element.material.as_ref())
     }
 
     /// Returns the corner radius for the element at `index`.
@@ -474,16 +480,28 @@ impl LayoutTree {
         self.elements.get(index).and_then(|e| e.draw.as_ref())
     }
 
-    /// Returns the anti-alias override for the element at `index`, if any.
+    /// Returns the anti-alias authoring for the element at `index`.
     #[must_use]
-    pub fn element_anti_alias(&self, index: usize) -> Option<AntiAlias> {
-        self.elements.get(index).and_then(|e| e.anti_alias)
+    pub fn element_anti_alias(&self, index: usize) -> Cascade<AntiAlias> {
+        self.elements
+            .get(index)
+            .map_or(Cascade::Inherit, |element| element.anti_alias)
     }
 
-    /// Returns the hairline fade override for the element at `index`, if any.
+    /// Returns the hairline fade authoring for the element at `index`.
     #[must_use]
-    pub fn element_hairline_fade(&self, index: usize) -> Option<HairlineFade> {
-        self.elements.get(index).and_then(|e| e.hairline_fade)
+    pub fn element_hairline_fade(&self, index: usize) -> Cascade<HairlineFade> {
+        self.elements
+            .get(index)
+            .map_or(Cascade::Inherit, |element| element.hairline_fade)
+    }
+
+    /// Returns the shadow-casting authoring for the element at `index`.
+    #[must_use]
+    pub fn element_shadow_casting(&self, index: usize) -> Cascade<ShadowCasting> {
+        self.elements
+            .get(index)
+            .map_or(Cascade::Inherit, |element| element.shadow_casting)
     }
 
     /// Returns the subtree precomposition mode for the element at `index`.
@@ -778,6 +796,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         z_index,
         anti_alias,
         hairline_fade,
+        shadow_casting,
         precompose,
         content,
     } = element;
@@ -800,6 +819,7 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         z_index: n_z_index,
         anti_alias: n_anti_alias,
         hairline_fade: n_hairline_fade,
+        shadow_casting: n_shadow_casting,
         precompose: n_precompose,
         content: n_content,
     } = next;
@@ -838,7 +858,10 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    if anti_alias != n_anti_alias || hairline_fade != n_hairline_fade {
+    if anti_alias != n_anti_alias
+        || hairline_fade != n_hairline_fade
+        || shadow_casting != n_shadow_casting
+    {
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
@@ -846,10 +869,9 @@ fn classify_element_change(element: &Element, next: &Element) -> LayoutTreeChang
         change = change.combine(LayoutTreeChange::VisualOnly);
     }
 
-    change = change.combine(classify_material_change(
-        material.as_ref(),
-        n_material.as_ref(),
-    ));
+    if material != n_material {
+        change = change.combine(LayoutTreeChange::VisualOnly);
+    }
 
     change.combine(classify_content_change(content, n_content))
 }
@@ -956,17 +978,6 @@ fn classify_border_change(border: Option<Border>, next: Option<Border>) -> Layou
     }
 }
 
-fn classify_material_change(
-    material: Option<&Handle<StandardMaterial>>,
-    next: Option<&Handle<StandardMaterial>>,
-) -> LayoutTreeChange {
-    match (material, next) {
-        (None, None) => LayoutTreeChange::Identical,
-        (Some(material), Some(next)) if material == next => LayoutTreeChange::Identical,
-        (Some(_) | None, Some(_)) | (Some(_), None) => LayoutTreeChange::VisualOnly,
-    }
-}
-
 fn classify_content_change(content: &ElementContent, next: &ElementContent) -> LayoutTreeChange {
     match (content, next) {
         (ElementContent::Children(children), ElementContent::Children(next_children)) => {
@@ -1034,6 +1045,7 @@ mod tests {
     use super::LayoutTreeChange;
     use super::PrecomposeMode;
     use crate::CalloutCap;
+    use crate::Cascade;
     use crate::ImeBuiltInFieldKind;
     use crate::ImeBuiltInFieldSpec;
     use crate::ImeEditableFieldSpec;
@@ -1178,8 +1190,8 @@ mod tests {
         assert_eq!(
             subtree
                 .element_style(1)
-                .and_then(TextStyle::hdr_text_coverage_bias),
-            None
+                .map_or(Cascade::Inherit, TextStyle::hdr_text_coverage_bias),
+            Cascade::Inherit
         );
         assert!(matches!(subtree.elements[root].width, Sizing::Fixed(_)));
         let Sizing::Fixed(width) = subtree.elements[root].width else {
@@ -1234,7 +1246,7 @@ mod tests {
         };
         let expected_text_size = 3.0 * millimeters_to_points * points_to_pixels;
         assert!((config.size() - expected_text_size).abs() < FLOAT_TOLERANCE);
-        assert_eq!(config.unit(), Some(Unit::Pixels));
+        assert_eq!(config.unit(), Cascade::Override(Unit::Pixels));
     }
 
     fn assert_default_leaf_child_layout(child_layout: ChildLayout) {

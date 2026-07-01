@@ -10,6 +10,7 @@ use bevy::prelude::*;
 use bevy::window::WindowRef;
 
 use crate::layout::Dimension;
+use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 
 /// Where a screen-space panel is placed within the window.
@@ -26,18 +27,35 @@ pub enum ScreenPosition {
     At(Vec2),
 }
 
-/// Whether the panel's surface geometry casts 3D shadows.
+/// Compatibility adapter for the old panel-surface shadow API.
 ///
-/// "Surface" means backgrounds and borders — the structural parts of the
-/// panel. Text shadow casting is controlled independently per text element
-/// via `GlyphShadowMode`.
+/// New code should author [`ShadowCasting`] so fills, borders, panel shapes,
+/// text, and images share one cascade.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 pub enum SurfaceShadow {
-    /// Surface geometry does not cast shadows (default).
+    /// The panel surface does not cast shadows.
     #[default]
     Off,
-    /// Surface geometry participates in shadow casting.
+    /// The panel surface participates in shadow casting.
     On,
+}
+
+impl From<SurfaceShadow> for ShadowCasting {
+    fn from(value: SurfaceShadow) -> Self {
+        match value {
+            SurfaceShadow::Off => Self::Off,
+            SurfaceShadow::On => Self::On,
+        }
+    }
+}
+
+impl From<ShadowCasting> for SurfaceShadow {
+    fn from(value: ShadowCasting) -> Self {
+        match value {
+            ShadowCasting::Off => Self::Off,
+            ShadowCasting::On => Self::On,
+        }
+    }
 }
 
 /// Whether the panel is placed in 3D world space or rendered as a 2D screen

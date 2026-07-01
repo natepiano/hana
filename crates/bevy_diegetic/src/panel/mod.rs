@@ -110,6 +110,7 @@ use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
+use crate::layout::ShadowCasting;
 use crate::layout::ShapedTextCache;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
@@ -166,6 +167,7 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_plugins(CascadePlugin::<AntiAlias>::default())
             .add_plugins(CascadePlugin::<HairlineFade>::default())
             .add_plugins(CascadePlugin::<HdrTextCoverageBias>::default())
+            .add_plugins(CascadePlugin::<ShadowCasting>::default())
             .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()

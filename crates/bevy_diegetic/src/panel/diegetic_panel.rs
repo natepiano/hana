@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowRef;
@@ -30,6 +31,7 @@ use super::precompose::PanelPrecomposeCache;
 use super::validate_screen_conversion;
 use super::validate_world_conversion;
 use crate::cascade;
+use crate::cascade::Cascade;
 use crate::cascade::CascadeDefault;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
@@ -49,6 +51,7 @@ use crate::layout::LayoutTree;
 use crate::layout::LayoutTreeChange;
 use crate::layout::Lighting;
 use crate::layout::PanelSize;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::layout::Sizing;
 use crate::layout::TextStyle;
@@ -172,10 +175,8 @@ pub struct DiegeticPanel {
     /// Unit for `width`/`height`. Set automatically by
     /// [`DiegeticPanelBuilder::size`] or [`set_size`](Self::set_size).
     pub(super) layout_unit:            Unit,
-    /// Unit for font sizes in the layout tree. `None` inherits from
-    /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults) via the
-    /// cascade framework.
-    pub(super) font_unit:              Option<Unit>,
+    /// Unit for font sizes in the layout tree.
+    pub(super) font_unit:              Cascade<Unit>,
     /// Which point on the panel sits at the entity's [`Transform`] position.
     /// Defaults to [`Anchor::TopLeft`].
     pub(super) anchor:                 Anchor,
@@ -187,33 +188,27 @@ pub struct DiegeticPanel {
     /// Target world height in meters. When set, the panel is uniformly scaled
     /// so its height matches this value (width follows aspect ratio).
     pub(super) world_height:           Option<f32>,
-    /// Whether the panel surface casts 3D shadows. Defaults to [`SurfaceShadow::Off`].
-    /// Text shadow casting is controlled per-element via `GlyphShadowMode`.
-    pub(super) surface_shadow:         SurfaceShadow,
-    /// Default source-material handle for backgrounds and borders. When
-    /// `None`, the renderer falls back through `CascadeDefault<SdfMaterial>`.
+    /// Panel-level shadow casting authoring.
+    pub(super) shadow_casting:         Cascade<ShadowCasting>,
+    /// Default source-material handle for backgrounds and borders.
     /// Individual elements can override via `El::material`; `base_color` is
     /// overridden by the layout color when both are set.
     #[reflect(ignore)]
-    pub(super) material:               Option<Handle<StandardMaterial>>,
-    /// Default source-material handle for text. When `None`, the renderer
-    /// falls back through `CascadeDefault<TextMaterial>`. `base_color` is
-    /// overridden by `TextStyle::color` when set.
+    pub(super) material:               Cascade<Handle<StandardMaterial>>,
+    /// Default source-material handle for text.
+    ///
+    /// `base_color` is overridden by `TextStyle::color` when set.
     #[reflect(ignore)]
-    pub(super) text_material:          Option<Handle<StandardMaterial>>,
-    /// Default source-material handle for panel-shape primitives. When `None`,
-    /// the renderer falls back through `CascadeDefault<ShapeMaterial>`.
+    pub(super) text_material:          Cascade<Handle<StandardMaterial>>,
+    /// Default source-material handle for panel-shape primitives.
+    ///
     /// Shape-local colors override `base_color` before projection.
     #[reflect(ignore)]
-    pub(super) shape_material:         Option<Handle<StandardMaterial>>,
-    /// Panel-level override for text [`AlphaMode`]. When `None`, the resolution
-    /// falls through to the per-style setting and then to
-    /// `CascadeDefault<TextAlpha>`.
-    pub(super) text_alpha_mode:        Option<AlphaMode>,
-    /// Panel-level override for HDR text coverage compensation. When `None`,
-    /// text runs inherit from `CascadeDefault<HdrTextCoverageBias>` unless a
-    /// per-label `TextStyle` override is set.
-    pub(super) hdr_text_coverage_bias: Option<f32>,
+    pub(super) shape_material:         Cascade<Handle<StandardMaterial>>,
+    /// Panel-level authoring for text [`AlphaMode`].
+    pub(super) text_alpha_mode:        Cascade<AlphaMode>,
+    /// Panel-level authoring for HDR text coverage compensation.
+    pub(super) hdr_text_coverage_bias: Cascade<f32>,
     /// Whether the panel is world-space or screen-space.
     pub(super) coordinate_space:       CoordinateSpace,
     /// Maps each text run's [`PanelElementId`](crate::PanelElementId) to the entity
@@ -235,16 +230,16 @@ impl Default for DiegeticPanel {
             width:                  0.0,
             height:                 0.0,
             layout_unit:            Unit::Meters,
-            font_unit:              None,
+            font_unit:              Cascade::Inherit,
             anchor:                 Anchor::TopLeft,
             world_width:            None,
             world_height:           None,
-            surface_shadow:         SurfaceShadow::Off,
-            material:               None,
-            text_material:          None,
-            shape_material:         None,
-            text_alpha_mode:        None,
-            hdr_text_coverage_bias: None,
+            shadow_casting:         Cascade::Inherit,
+            material:               Cascade::Inherit,
+            text_material:          Cascade::Inherit,
+            shape_material:         Cascade::Inherit,
+            text_alpha_mode:        Cascade::Inherit,
+            hdr_text_coverage_bias: Cascade::Inherit,
             coordinate_space:       CoordinateSpace::default(),
             text_index:             HashMap::new(),
         }
@@ -292,57 +287,65 @@ impl DiegeticPanel {
     #[must_use]
     pub const fn layout_unit(&self) -> Unit { self.layout_unit }
 
-    /// The font unit override, or `None` if inheriting from
-    /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults).
+    /// The font unit authoring for this panel.
     #[must_use]
-    pub const fn font_unit(&self) -> Option<Unit> { self.font_unit }
+    pub const fn font_unit(&self) -> Cascade<Unit> { self.font_unit }
 
     /// The panel's anchor point.
     #[must_use]
     pub const fn anchor(&self) -> Anchor { self.anchor }
 
-    /// Whether the panel surface casts shadows.
+    /// Whether the panel surface casts shadows under the compatibility API.
     #[must_use]
-    pub const fn surface_shadow(&self) -> SurfaceShadow { self.surface_shadow }
+    pub const fn surface_shadow(&self) -> SurfaceShadow {
+        match self.shadow_casting.resolve_or(ShadowCasting::On) {
+            ShadowCasting::Off => SurfaceShadow::Off,
+            ShadowCasting::On => SurfaceShadow::On,
+        }
+    }
 
-    /// The default panel material, if set.
+    /// The panel-level shadow casting authoring.
     #[must_use]
-    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
+
+    /// The default panel material authoring.
+    #[must_use]
+    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Mutable access to the default panel material.
-    pub const fn material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
+    pub const fn material_mut(&mut self) -> &mut Cascade<Handle<StandardMaterial>> {
         &mut self.material
     }
 
-    /// The default text material, if set.
+    /// The default text material authoring.
     #[must_use]
-    pub const fn text_material(&self) -> Option<&Handle<StandardMaterial>> {
+    pub const fn text_material(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.text_material.as_ref()
     }
 
     /// Mutable access to the default text material.
-    pub const fn text_material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
+    pub const fn text_material_mut(&mut self) -> &mut Cascade<Handle<StandardMaterial>> {
         &mut self.text_material
     }
 
-    /// The default panel-shape material, if set.
+    /// The default panel-shape material authoring.
     #[must_use]
-    pub const fn shape_material(&self) -> Option<&Handle<StandardMaterial>> {
+    pub const fn shape_material(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.shape_material.as_ref()
     }
 
     /// Mutable access to the default panel-shape material handle.
-    pub const fn shape_material_mut(&mut self) -> &mut Option<Handle<StandardMaterial>> {
+    pub const fn shape_material_mut(&mut self) -> &mut Cascade<Handle<StandardMaterial>> {
         &mut self.shape_material
     }
 
-    /// The panel-level text [`AlphaMode`] override, if set.
+    /// The panel-level text [`AlphaMode`] authoring.
     #[must_use]
-    pub const fn text_alpha_mode(&self) -> Option<AlphaMode> { self.text_alpha_mode }
+    pub const fn text_alpha_mode(&self) -> Cascade<AlphaMode> { self.text_alpha_mode }
 
-    /// The panel-level HDR text coverage-bias override, if set.
+    /// The panel-level HDR text coverage-bias authoring.
     #[must_use]
-    pub const fn hdr_text_coverage_bias(&self) -> Option<f32> { self.hdr_text_coverage_bias }
+    pub const fn hdr_text_coverage_bias(&self) -> Cascade<f32> { self.hdr_text_coverage_bias }
 
     /// The panel's coordinate space (world or screen).
     #[must_use]
@@ -1013,7 +1016,7 @@ fn prepare_world_panel_for_screen_conversion(
     panel.width = conversion.size.x;
     panel.height = conversion.size.y;
     panel.layout_unit = Unit::Pixels;
-    panel.font_unit = Some(Unit::Pixels);
+    panel.font_unit = Cascade::Override(Unit::Pixels);
     panel.world_width = Some(old_world_width);
     panel.world_height = Some(old_world_height);
     panel.coordinate_space = CoordinateSpace::World {
@@ -1150,30 +1153,37 @@ fn apply_panel_world_conversion_now(
 /// `Resolved<TextAlpha>` of its own — only its labels render text, and they
 /// walk up to this `Override<TextAlpha>` directly. The panel twin of the
 /// standalone `TextStyle` authoring bridge.
+#[derive(SystemParam)]
+pub(super) struct PanelCascadeSeedParams<'w, 's> {
+    anti_alias_overrides:             Query<'w, 's, &'static Override<AntiAlias>>,
+    hairline_fade_overrides:          Query<'w, 's, &'static Override<HairlineFade>>,
+    sdf_material_overrides:           Query<'w, 's, &'static Override<SdfMaterial>>,
+    text_material_overrides:          Query<'w, 's, &'static Override<TextMaterial>>,
+    shape_material_overrides:         Query<'w, 's, &'static Override<ShapeMaterial>>,
+    hdr_text_coverage_bias_overrides: Query<'w, 's, &'static Override<HdrTextCoverageBias>>,
+    shadow_casting_overrides:         Query<'w, 's, &'static Override<ShadowCasting>>,
+    parents:                          Query<'w, 's, &'static ChildOf>,
+    anti_alias_default:               Res<'w, CascadeDefault<AntiAlias>>,
+    hairline_fade_default:            Res<'w, CascadeDefault<HairlineFade>>,
+    sdf_material_default:             Option<Res<'w, CascadeDefault<SdfMaterial>>>,
+    text_material_default:            Option<Res<'w, CascadeDefault<TextMaterial>>>,
+    shape_material_default:           Option<Res<'w, CascadeDefault<ShapeMaterial>>>,
+    hdr_text_coverage_bias_default:   Res<'w, CascadeDefault<HdrTextCoverageBias>>,
+    shadow_casting_default:           Res<'w, CascadeDefault<ShadowCasting>>,
+}
+
 pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
     defaults: Res<CascadeDefaults>,
-    anti_alias_overrides: Query<&Override<AntiAlias>>,
-    hairline_fade_overrides: Query<&Override<HairlineFade>>,
-    sdf_material_overrides: Query<&Override<SdfMaterial>>,
-    text_material_overrides: Query<&Override<TextMaterial>>,
-    shape_material_overrides: Query<&Override<ShapeMaterial>>,
-    hdr_text_coverage_bias_overrides: Query<&Override<HdrTextCoverageBias>>,
-    parents: Query<&ChildOf>,
-    anti_alias_default: Res<CascadeDefault<AntiAlias>>,
-    hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
-    sdf_material_default: Option<Res<CascadeDefault<SdfMaterial>>>,
-    text_material_default: Option<Res<CascadeDefault<TextMaterial>>>,
-    shape_material_default: Option<Res<CascadeDefault<ShapeMaterial>>>,
-    hdr_text_coverage_bias_default: Res<CascadeDefault<HdrTextCoverageBias>>,
+    cascade_params: PanelCascadeSeedParams,
     mut commands: Commands,
 ) {
     let entity = trigger.event_target();
     let Ok(panel) = panels.get(entity) else {
         return;
     };
-    let font_unit = panel.font_unit().unwrap_or(defaults.panel_font_unit);
+    let font_unit = panel.font_unit().resolve_or(defaults.panel_font_unit);
     // Per-context glyph defaults: screen panels are unlit, front-facing HUD
     // surfaces; world panels stay lit and double-sided (the global cascade
     // default). Labels still override per-label via
@@ -1188,47 +1198,58 @@ pub(super) fn seed_panel_overrides(
     // to the global defaults; later `override_*` verbs self-heal these.
     let anti_alias = cascade::resolve_walk::<AntiAlias>(
         entity,
-        &anti_alias_overrides,
-        &parents,
-        anti_alias_default.0,
+        &cascade_params.anti_alias_overrides,
+        &cascade_params.parents,
+        cascade_params.anti_alias_default.0,
     );
     let hairline_fade = cascade::resolve_walk::<HairlineFade>(
         entity,
-        &hairline_fade_overrides,
-        &parents,
-        hairline_fade_default.0,
+        &cascade_params.hairline_fade_overrides,
+        &cascade_params.parents,
+        cascade_params.hairline_fade_default.0,
     );
     let sdf_material = resolve_panel_sdf_material(
         entity,
         panel,
-        &sdf_material_overrides,
-        &parents,
-        sdf_material_default.as_deref(),
+        &cascade_params.sdf_material_overrides,
+        &cascade_params.parents,
+        cascade_params.sdf_material_default.as_deref(),
     );
     let text_material = resolve_panel_text_material(
         entity,
         panel,
-        &text_material_overrides,
-        &parents,
-        text_material_default.as_deref(),
+        &cascade_params.text_material_overrides,
+        &cascade_params.parents,
+        cascade_params.text_material_default.as_deref(),
     );
     let shape_material = resolve_panel_shape_material(
         entity,
         panel,
-        &shape_material_overrides,
-        &parents,
-        shape_material_default.as_deref(),
+        &cascade_params.shape_material_overrides,
+        &cascade_params.parents,
+        cascade_params.shape_material_default.as_deref(),
     );
     let hdr_text_coverage_bias = panel.hdr_text_coverage_bias().map_or_else(
         || {
             cascade::resolve_walk::<HdrTextCoverageBias>(
                 entity,
-                &hdr_text_coverage_bias_overrides,
-                &parents,
-                hdr_text_coverage_bias_default.0,
+                &cascade_params.hdr_text_coverage_bias_overrides,
+                &cascade_params.parents,
+                cascade_params.hdr_text_coverage_bias_default.0,
             )
         },
         HdrTextCoverageBias,
+    );
+    let shadow_casting = panel.shadow_casting().map_or_else(
+        || {
+            cascade::resolve_walk::<ShadowCasting>(
+                entity,
+                &cascade_params.shadow_casting_overrides,
+                &cascade_params.parents,
+                cascade_params.shadow_casting_default.0,
+            )
+        },
+        core::convert::identity,
     );
     let mut entity_commands = commands.entity(entity);
     entity_commands.insert((
@@ -1239,22 +1260,26 @@ pub(super) fn seed_panel_overrides(
         Resolved(text_material.clone()),
         Resolved(shape_material.clone()),
         Resolved(hdr_text_coverage_bias),
+        Resolved(shadow_casting),
     ));
     cascade::apply_cascade_override(&mut entity_commands, FontUnit(font_unit));
-    if let Some(alpha_mode) = panel.text_alpha_mode() {
+    if let Cascade::Override(alpha_mode) = panel.text_alpha_mode() {
         cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
     }
-    if let Some(bias) = panel.hdr_text_coverage_bias() {
+    if let Cascade::Override(bias) = panel.hdr_text_coverage_bias() {
         cascade::apply_cascade_override(&mut entity_commands, HdrTextCoverageBias(bias));
     }
-    if panel.material().is_some() {
+    if panel.material().is_override() {
         cascade::apply_cascade_override(&mut entity_commands, sdf_material);
     }
-    if panel.text_material().is_some() {
+    if panel.text_material().is_override() {
         cascade::apply_cascade_override(&mut entity_commands, text_material);
     }
-    if panel.shape_material().is_some() {
+    if panel.shape_material().is_override() {
         cascade::apply_cascade_override(&mut entity_commands, shape_material);
+    }
+    if panel.shadow_casting().is_override() {
+        cascade::apply_cascade_override(&mut entity_commands, shadow_casting);
     }
     if is_screen {
         cascade::apply_cascade_override(&mut entity_commands, Lighting::Unlit);
@@ -1332,35 +1357,51 @@ pub(super) fn sync_panel_cascade_overrides(
         }
         let mut entity_commands = commands.entity(entity);
         match panel.material().cloned() {
-            Some(material) => {
+            Cascade::Override(material) => {
                 cascade::apply_cascade_override(&mut entity_commands, SdfMaterial(material));
             },
-            None => {
+            Cascade::Inherit => {
                 cascade::remove_cascade_override::<SdfMaterial>(&mut entity_commands);
             },
         }
         match panel.text_material().cloned() {
-            Some(material) => {
+            Cascade::Override(material) => {
                 cascade::apply_cascade_override(&mut entity_commands, TextMaterial(material));
             },
-            None => {
+            Cascade::Inherit => {
                 cascade::remove_cascade_override::<TextMaterial>(&mut entity_commands);
             },
         }
         match panel.shape_material().cloned() {
-            Some(material) => {
+            Cascade::Override(material) => {
                 cascade::apply_cascade_override(&mut entity_commands, ShapeMaterial(material));
             },
-            None => {
+            Cascade::Inherit => {
                 cascade::remove_cascade_override::<ShapeMaterial>(&mut entity_commands);
             },
         }
         match panel.hdr_text_coverage_bias() {
-            Some(bias) => {
+            Cascade::Override(bias) => {
                 cascade::apply_cascade_override(&mut entity_commands, HdrTextCoverageBias(bias));
             },
-            None => {
+            Cascade::Inherit => {
                 cascade::remove_cascade_override::<HdrTextCoverageBias>(&mut entity_commands);
+            },
+        }
+        match panel.text_alpha_mode() {
+            Cascade::Override(alpha_mode) => {
+                cascade::apply_cascade_override(&mut entity_commands, TextAlpha(alpha_mode));
+            },
+            Cascade::Inherit => {
+                cascade::remove_cascade_override::<TextAlpha>(&mut entity_commands);
+            },
+        }
+        match panel.shadow_casting() {
+            Cascade::Override(shadow_casting) => {
+                cascade::apply_cascade_override(&mut entity_commands, shadow_casting);
+            },
+            Cascade::Inherit => {
+                cascade::remove_cascade_override::<ShadowCasting>(&mut entity_commands);
             },
         }
     }
@@ -1643,6 +1684,7 @@ mod tests {
     use super::PreparedPanelScreenConversion;
     use super::SavedPanelWorldState;
     use super::ScaledLayoutTreeCache;
+    use crate::Cascade;
     use crate::DiegeticTextMeasurer;
     use crate::HeadlessLayoutPlugin;
     use crate::LayoutBuilder;
@@ -1795,7 +1837,7 @@ mod tests {
         assert_eq!(panel.width(), 200.0);
         assert_eq!(panel.height(), 100.0);
         assert_eq!(panel.layout_unit(), Unit::Pixels);
-        assert_eq!(panel.font_unit(), Some(Unit::Pixels));
+        assert_eq!(panel.font_unit(), Cascade::Override(Unit::Pixels));
         assert_eq!(panel.world_width(), 1.0);
         assert_eq!(panel.world_height(), 0.5);
         assert!(app.world().get::<SavedPanelWorldState>(entity).is_some());

@@ -21,6 +21,7 @@ use super::diegetic_panel::DiegeticPanel;
 use super::sizing::CompatibleUnits;
 use super::sizing::PanelSizing;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
 use crate::layout;
 use crate::layout::Anchor;
 use crate::layout::Dimension;
@@ -31,6 +32,7 @@ use crate::layout::PanelSize;
 use crate::layout::PaperSize;
 use crate::layout::Pt;
 use crate::layout::Px;
+use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
 use crate::layout::Unit;
 
@@ -88,16 +90,16 @@ pub(super) struct BuilderData {
     width:                  f32,
     height:                 f32,
     layout_unit:            Unit,
-    font_unit:              Option<Unit>,
+    font_unit:              Cascade<Unit>,
     anchor:                 Option<Anchor>,
     world_width:            Option<f32>,
     world_height:           Option<f32>,
-    surface_shadow:         SurfaceShadow,
-    material:               Option<Handle<StandardMaterial>>,
-    text_material:          Option<Handle<StandardMaterial>>,
-    shape_material:         Option<Handle<StandardMaterial>>,
-    text_alpha_mode:        Option<AlphaMode>,
-    hdr_text_coverage_bias: Option<f32>,
+    shadow_casting:         Cascade<ShadowCasting>,
+    material:               Cascade<Handle<StandardMaterial>>,
+    text_material:          Cascade<Handle<StandardMaterial>>,
+    shape_material:         Cascade<Handle<StandardMaterial>>,
+    text_alpha_mode:        Cascade<AlphaMode>,
+    hdr_text_coverage_bias: Cascade<f32>,
     tree:                   Option<LayoutTree>,
     coordinate_space:       CoordinateSpace,
 }
@@ -208,7 +210,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// are set. Individual elements can override via `El::material`.
     #[must_use]
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.data.material = Some(material);
+        self.data.material = Cascade::Override(material);
         self
     }
 
@@ -218,7 +220,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// handle here. `base_color` is overridden by `TextStyle::color` when set.
     #[must_use]
     pub fn text_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.data.text_material = Some(material);
+        self.data.text_material = Cascade::Override(material);
         self
     }
 
@@ -229,7 +231,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// `base_color` before the frame material-table row is projected.
     #[must_use]
     pub fn shape_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.data.shape_material = Some(material);
+        self.data.shape_material = Cascade::Override(material);
         self
     }
 
@@ -242,7 +244,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// alternative for hard-edged coverage.
     #[must_use]
     pub const fn text_alpha_mode(mut self, mode: AlphaMode) -> Self {
-        self.data.text_alpha_mode = Some(mode);
+        self.data.text_alpha_mode = Cascade::Override(mode);
         self
     }
 
@@ -256,7 +258,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// still wins.
     #[must_use]
     pub const fn hdr_text_coverage_bias(mut self, bias: f32) -> Self {
-        self.data.hdr_text_coverage_bias = Some(bias);
+        self.data.hdr_text_coverage_bias = Cascade::Override(bias);
         self
     }
 
@@ -264,15 +266,27 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults)).
     #[must_use]
     pub const fn font_unit(mut self, unit: Unit) -> Self {
-        self.data.font_unit = Some(unit);
+        self.data.font_unit = Cascade::Override(unit);
         self
     }
 
-    /// Sets whether the panel surface casts 3D shadows.
-    /// Defaults to [`SurfaceShadow::Off`].
+    /// Compatibility adapter for old panel-surface shadow authoring.
+    ///
+    /// Prefer [`shadow_casting`](Self::shadow_casting), which participates in
+    /// the shared [`ShadowCasting`] cascade.
     #[must_use]
     pub const fn surface_shadow(mut self, shadow: SurfaceShadow) -> Self {
-        self.data.surface_shadow = shadow;
+        self.data.shadow_casting = Cascade::Override(match shadow {
+            SurfaceShadow::Off => ShadowCasting::Off,
+            SurfaceShadow::On => ShadowCasting::On,
+        });
+        self
+    }
+
+    /// Sets whether this panel and its descendants cast 3D shadows.
+    #[must_use]
+    pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.data.shadow_casting = Cascade::Override(shadow_casting);
         self
     }
 }
@@ -800,7 +814,7 @@ fn build_panel(data: BuilderData) -> DiegeticPanel {
     panel.anchor = data.anchor.unwrap_or(Anchor::TopLeft);
     panel.world_width = data.world_width;
     panel.world_height = data.world_height;
-    panel.surface_shadow = data.surface_shadow;
+    panel.shadow_casting = data.shadow_casting;
     panel.material = data.material;
     panel.text_material = data.text_material;
     panel.shape_material = data.shape_material;

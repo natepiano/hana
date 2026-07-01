@@ -17,6 +17,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
+use crate::Cascade;
 use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
@@ -184,19 +185,21 @@ fn helper_panel_for_subtree(
         .world_height(bounds.height.max(MIN_PRECOMPOSE_PIXELS.to_f32()))
         .anchor(Anchor::Center)
         .font_unit(Unit::Points)
-        .surface_shadow(source.surface_shadow())
         .hdr_text_coverage_bias(PRECOMPOSE_TEXT_COVERAGE_BIAS.0)
         .with_tree(subtree);
-    if let Some(material) = source.material().cloned() {
+    if let Cascade::Override(shadow_casting) = source.shadow_casting() {
+        builder = builder.shadow_casting(shadow_casting);
+    }
+    if let Cascade::Override(material) = source.material().cloned() {
         builder = builder.material(material);
     }
-    if let Some(material) = source.text_material().cloned() {
+    if let Cascade::Override(material) = source.text_material().cloned() {
         builder = builder.text_material(material);
     }
-    if let Some(material) = source.shape_material().cloned() {
+    if let Cascade::Override(material) = source.shape_material().cloned() {
         builder = builder.shape_material(material);
     }
-    if let Some(alpha_mode) = source.text_alpha_mode() {
+    if let Cascade::Override(alpha_mode) = source.text_alpha_mode() {
         builder = builder.text_alpha_mode(alpha_mode);
     }
     builder.build().ok()
@@ -586,7 +589,7 @@ mod tests {
             .expect("helper panel should exist");
         assert_eq!(
             helper_panel.hdr_text_coverage_bias(),
-            Some(PRECOMPOSE_TEXT_COVERAGE_BIAS.0)
+            Cascade::Override(PRECOMPOSE_TEXT_COVERAGE_BIAS.0)
         );
         assert!(app.world().get::<Camera>(entry.camera).is_some());
         let lighting = app

@@ -140,7 +140,7 @@ fn spawn_metric_guide_panel(
     let Ok(panel) = DiegeticPanel::world()
         .size(width, height)
         .anchor(Anchor::TopLeft)
-        .surface_shadow(ctx.overlay.surface_shadow)
+        .shadow_casting(ctx.overlay.shadow_casting)
         .material(material)
         .with_tree(tree)
         .build()

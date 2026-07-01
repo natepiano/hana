@@ -31,8 +31,8 @@ pub(super) use pipeline::build_typography_overlay;
 use super::constants::DEFAULT_LINE_WIDTH;
 use crate::DiegeticText;
 use crate::layout::GlyphShadowMode;
+use crate::layout::ShadowCasting;
 use crate::layout::TextStyle;
-use crate::panel::SurfaceShadow;
 
 /// Spawns a world-space overlay label as a one-element [`DiegeticText`] panel
 /// child of `container`.
@@ -105,7 +105,7 @@ pub struct TypographyOverlay {
     /// How far annotation lines extend beyond text bounds (in layout units).
     pub extend:         f32,
     /// Whether overlay geometry and labels cast shadows.
-    pub surface_shadow: SurfaceShadow,
+    pub shadow_casting: ShadowCasting,
 }
 
 impl Default for TypographyOverlay {
@@ -118,7 +118,7 @@ impl Default for TypographyOverlay {
             line_width:     DEFAULT_LINE_WIDTH,
             label_size:     DEFAULT_OVERLAY_LABEL_SIZE,
             extend:         DEFAULT_OVERLAY_EXTEND,
-            surface_shadow: SurfaceShadow::Off,
+            shadow_casting: ShadowCasting::Off,
         }
     }
 }
@@ -126,15 +126,15 @@ impl Default for TypographyOverlay {
 impl TypographyOverlay {
     /// Sets whether overlay constituents cast shadows.
     #[must_use]
-    pub const fn with_shadow(mut self, surface_shadow: SurfaceShadow) -> Self {
-        self.surface_shadow = surface_shadow;
+    pub const fn with_shadow(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.shadow_casting = shadow_casting;
         self
     }
 
     const fn label_shadow_mode(&self) -> GlyphShadowMode {
-        match self.surface_shadow {
-            SurfaceShadow::Off => GlyphShadowMode::None,
-            SurfaceShadow::On => GlyphShadowMode::Cast,
+        match self.shadow_casting {
+            ShadowCasting::Off => GlyphShadowMode::None,
+            ShadowCasting::On => GlyphShadowMode::Cast,
         }
     }
 }

@@ -41,6 +41,7 @@ use super::Dimension;
 use super::DrawZIndex;
 use super::Padding;
 use super::PanelDraw;
+use super::ShadowCasting;
 use super::Sizing;
 use super::TextStyle;
 use super::TextWrap;
@@ -55,6 +56,7 @@ use crate::DimensionMatch;
 use crate::ImeEditableFieldSpec;
 use crate::ImePanelField;
 use crate::PanelElementId;
+use crate::cascade::Cascade;
 use crate::render::AntiAlias;
 use crate::render::HairlineFade;
 
@@ -282,12 +284,13 @@ struct CommonEl {
     scroll_offset:   Vec2,
     scroll_anchor_x: ScrollAnchor,
     scroll_anchor_y: ScrollAnchor,
-    material:        Option<Handle<StandardMaterial>>,
+    material:        Cascade<Handle<StandardMaterial>>,
     editable:        Option<ImePanelField>,
     draw:            Option<PanelDraw>,
     z_index:         DrawZIndex,
-    anti_alias:      Option<AntiAlias>,
-    hairline_fade:   Option<HairlineFade>,
+    anti_alias:      Cascade<AntiAlias>,
+    hairline_fade:   Cascade<HairlineFade>,
+    shadow_casting:  Cascade<ShadowCasting>,
     precompose:      PrecomposeMode,
 }
 
@@ -307,12 +310,13 @@ impl Default for CommonEl {
             scroll_offset:   Vec2::ZERO,
             scroll_anchor_x: ScrollAnchor::Start,
             scroll_anchor_y: ScrollAnchor::Start,
-            material:        None,
+            material:        Cascade::Inherit,
             editable:        None,
             draw:            None,
             z_index:         DrawZIndex::default(),
-            anti_alias:      None,
-            hairline_fade:   None,
+            anti_alias:      Cascade::Inherit,
+            hairline_fade:   Cascade::Inherit,
+            shadow_casting:  Cascade::Inherit,
             precompose:      PrecomposeMode::Direct,
         }
     }
@@ -338,6 +342,7 @@ fn text_leaf_element(common: CommonEl, content: ElementContent) -> Element {
         z_index: common.z_index,
         anti_alias: common.anti_alias,
         hairline_fade: common.hairline_fade,
+        shadow_casting: common.shadow_casting,
         precompose: common.precompose,
         content,
     }
@@ -544,7 +549,7 @@ impl<L> El<L> {
     /// color overrides the material's `base_color`. Create the material asset
     /// once through `Assets<StandardMaterial>`; do not create assets per frame.
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.common.material = Some(material);
+        self.common.material = Cascade::Override(material);
         self
     }
 
@@ -582,7 +587,7 @@ impl<L> El<L> {
     /// cascade-resolved [`AntiAlias`] (panel override else the global
     /// resource). Per-record data — an override never splits a batch.
     pub const fn anti_alias(mut self, mode: AntiAlias) -> Self {
-        self.common.anti_alias = Some(mode);
+        self.common.anti_alias = Cascade::Override(mode);
         self
     }
 
@@ -594,7 +599,13 @@ impl<L> El<L> {
     /// [`HairlineWidth::fade`](crate::HairlineWidth)). Per-record data — an
     /// override never splits a batch.
     pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
-        self.common.hairline_fade = Some(fade);
+        self.common.hairline_fade = Cascade::Override(fade);
+        self
+    }
+
+    /// Overrides shadow casting for this element and its render commands.
+    pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.common.shadow_casting = Cascade::Override(shadow_casting);
         self
     }
 
@@ -646,6 +657,7 @@ impl<L> El<L> {
             z_index: common.z_index,
             anti_alias: common.anti_alias,
             hairline_fade: common.hairline_fade,
+            shadow_casting: common.shadow_casting,
             precompose: common.precompose,
             content,
         }

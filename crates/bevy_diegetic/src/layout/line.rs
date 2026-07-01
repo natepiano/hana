@@ -16,10 +16,12 @@ use super::In;
 use super::Mm;
 use super::Pt;
 use super::Px;
+use super::ShadowCasting;
 use crate::CalloutCap;
 use crate::callouts::CalloutCapPrimitiveKind;
 use crate::callouts::ResolvedCalloutCap;
 use crate::callouts::ResolvedCalloutCapPrimitive;
+use crate::cascade::Cascade;
 use crate::render::HairlineFade;
 
 const POINT_SPACE_SCALE: f32 = 1.0;
@@ -65,31 +67,33 @@ pub struct PanelLine {
 /// A filled circle authored in an element's local panel coordinate space.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PanelCircle {
-    center:        PanelPoint,
-    radius:        Dimension,
-    color:         Color,
+    center:         PanelPoint,
+    radius:         Dimension,
+    color:          Color,
     /// Shape-local source material handle for this filled circle.
     ///
     /// This handle resolves before material-table projection. The circle's
     /// `color` remains a row `base_color` override, not a separate shader path.
-    material:      Option<Handle<StandardMaterial>>,
-    hairline_fade: Option<HairlineFade>,
+    material:       Cascade<Handle<StandardMaterial>>,
+    hairline_fade:  Cascade<HairlineFade>,
+    shadow_casting: Cascade<ShadowCasting>,
 }
 
 /// Visual style for a [`PanelLine`].
 #[derive(Clone, Debug, PartialEq)]
 pub struct LineStyle {
-    width:         Dimension,
-    color:         Color,
+    width:          Dimension,
+    color:          Color,
     /// Shape-local source material handle for lines using this style.
     ///
     /// This handle resolves before material-table projection. The line color
     /// remains a row `base_color` override.
-    material:      Option<Handle<StandardMaterial>>,
-    cap_size:      Dimension,
-    start_cap:     CalloutCap,
-    end_cap:       CalloutCap,
-    hairline_fade: Option<HairlineFade>,
+    material:       Cascade<Handle<StandardMaterial>>,
+    cap_size:       Dimension,
+    start_cap:      CalloutCap,
+    end_cap:        CalloutCap,
+    hairline_fade:  Cascade<HairlineFade>,
+    shadow_casting: Cascade<ShadowCasting>,
 }
 
 /// A 2D point authored relative to an element's resolved box.
@@ -187,11 +191,12 @@ pub struct ResolvedPanelShape {
     pub(crate) width:                f32,
     /// Resolved base line color.
     pub(crate) color:                Color,
-    /// Resolved source material handle shared by this shape's primitives.
-    pub(crate) material:             Option<Handle<StandardMaterial>>,
-    /// Authored hairline fade override; `None` inherits the owning element's
-    /// resolution.
-    pub(crate) hairline_fade:        Option<HairlineFade>,
+    /// Resolved source material authoring shared by this shape's primitives.
+    pub(crate) material:             Cascade<Handle<StandardMaterial>>,
+    /// Authored hairline fade policy for this resolved shape.
+    pub(crate) hairline_fade:        Cascade<HairlineFade>,
+    /// Authored shadow-casting policy for this resolved shape.
+    pub(crate) shadow_casting:       Cascade<ShadowCasting>,
     /// Shaft and cap primitives in stable part order.
     pub(crate) primitives:           Vec<ResolvedPanelShapePrimitive>,
 }
@@ -245,8 +250,8 @@ pub struct ResolvedPanelShapePrimitive {
     pub(crate) geometry:   PanelShapePrimitiveGeometry,
     /// Resolved primitive color.
     pub(crate) color:      Color,
-    /// Source material handle resolved for this primitive.
-    pub(crate) material:   Option<Handle<StandardMaterial>>,
+    /// Source material authoring resolved for this primitive.
+    pub(crate) material:   Cascade<Handle<StandardMaterial>>,
     /// Primitive visual bounds.
     pub(crate) bounds:     BoundingBox,
     /// Effective clip for this primitive.
@@ -357,6 +362,13 @@ impl PanelLine {
         self
     }
 
+    /// Overrides shadow casting for this line and its caps.
+    #[must_use]
+    pub fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.style = self.style.shadow_casting(shadow_casting);
+        self
+    }
+
     /// Insets the visible start tip inward from `start`.
     #[must_use]
     pub fn start_inset(mut self, inset: impl Into<Dimension>) -> Self {
@@ -430,6 +442,15 @@ impl PanelShape {
         }
     }
 
+    /// Sets the shape-local shadow-casting policy.
+    #[must_use]
+    pub fn shadow_casting(self, shadow_casting: ShadowCasting) -> Self {
+        match self {
+            Self::Line(line) => Self::Line(line.shadow_casting(shadow_casting)),
+            Self::Circle(circle) => Self::Circle(circle.shadow_casting(shadow_casting)),
+        }
+    }
+
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         match self {
             Self::Line(line) => Self::Line(line.scaled(default_scale)),
@@ -451,11 +472,12 @@ impl PanelCircle {
     #[must_use]
     pub fn new(center: impl Into<PanelPoint>, radius: impl Into<Dimension>) -> Self {
         Self {
-            center:        center.into(),
-            radius:        radius.into(),
-            color:         Color::WHITE,
-            material:      None,
-            hairline_fade: None,
+            center:         center.into(),
+            radius:         radius.into(),
+            color:          Color::WHITE,
+            material:       Cascade::Inherit,
+            hairline_fade:  Cascade::Inherit,
+            shadow_casting: Cascade::Inherit,
         }
     }
 
@@ -469,7 +491,7 @@ impl PanelCircle {
     /// Sets the source material handle for this filled circle.
     #[must_use]
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.material = Some(material);
+        self.material = Cascade::Override(material);
         self
     }
 
@@ -478,7 +500,14 @@ impl PanelCircle {
     /// [`PanelLine::hairline_fade`].
     #[must_use]
     pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
-        self.hairline_fade = Some(fade);
+        self.hairline_fade = Cascade::Override(fade);
+        self
+    }
+
+    /// Overrides shadow casting for this circle.
+    #[must_use]
+    pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.shadow_casting = Cascade::Override(shadow_casting);
         self
     }
 
@@ -494,23 +523,28 @@ impl PanelCircle {
     #[must_use]
     pub const fn color_value(&self) -> Color { self.color }
 
-    /// Returns the shape-local source material handle, if set.
+    /// Returns the shape-local source material authoring.
     #[must_use]
-    pub const fn material_handle(&self) -> Option<&Handle<StandardMaterial>> {
+    pub const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.material.as_ref()
     }
 
-    /// Returns the hairline fade override, if any.
+    /// Returns the hairline fade authoring.
     #[must_use]
-    pub const fn hairline_fade_value(&self) -> Option<HairlineFade> { self.hairline_fade }
+    pub const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+
+    /// Returns the shadow-casting authoring.
+    #[must_use]
+    pub const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {
-            center:        self.center.scaled(default_scale),
-            radius:        scaled_dimension(self.radius, default_scale),
-            color:         self.color,
-            material:      self.material.clone(),
-            hairline_fade: self.hairline_fade,
+            center:         self.center.scaled(default_scale),
+            radius:         scaled_dimension(self.radius, default_scale),
+            color:          self.color,
+            material:       self.material.clone(),
+            hairline_fade:  self.hairline_fade,
+            shadow_casting: self.shadow_casting,
         }
     }
 }
@@ -593,13 +627,17 @@ impl ResolvedPanelShape {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
-    /// Returns the source material handle resolved for this shape, if any.
+    /// Returns the source material authoring resolved for this shape.
     #[must_use]
-    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
 
-    /// Returns the authored hairline fade override, if any.
+    /// Returns the authored hairline fade policy.
     #[must_use]
-    pub const fn hairline_fade(&self) -> Option<HairlineFade> { self.hairline_fade }
+    pub const fn hairline_fade(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+
+    /// Returns the authored shadow-casting policy.
+    #[must_use]
+    pub const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
     /// Returns shaft and cap primitives in stable part order.
     #[must_use]
@@ -623,9 +661,9 @@ impl ResolvedPanelShapePrimitive {
     #[must_use]
     pub const fn color(&self) -> Color { self.color }
 
-    /// Returns the source material handle resolved for this primitive, if any.
+    /// Returns the source material authoring resolved for this primitive.
     #[must_use]
-    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Returns this primitive's visual bounds.
     #[must_use]
@@ -759,6 +797,7 @@ pub(crate) fn resolve_panel_line(
         color,
         material,
         hairline_fade: line.line_style().hairline_fade_value(),
+        shadow_casting: line.line_style().shadow_casting_value(),
         primitives,
     })
 }
@@ -816,6 +855,7 @@ pub(crate) fn resolve_panel_circle(
         color,
         material,
         hairline_fade: circle.hairline_fade_value(),
+        shadow_casting: circle.shadow_casting_value(),
         primitives,
     })
 }
@@ -869,7 +909,7 @@ fn push_segment_primitive(
     end: Vec2,
     width: f32,
     color: Color,
-    material: Option<Handle<StandardMaterial>>,
+    material: Cascade<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     let Some(bounds) = segment_bounds(start, end, width) else {
@@ -895,7 +935,7 @@ fn push_cap_primitives(
     direction: Vec2,
     cap: &ResolvedCalloutCap,
     width: f32,
-    material: Option<Handle<StandardMaterial>>,
+    material: Cascade<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     for primitive in cap.primitives() {
@@ -919,7 +959,7 @@ fn push_cap_primitive(
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
     width: f32,
-    material: Option<Handle<StandardMaterial>>,
+    material: Cascade<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     if !primitive.length.is_finite()
@@ -1006,7 +1046,7 @@ fn push_centered_cap_form(
     tip: Vec2,
     direction: Vec2,
     primitive: ResolvedCalloutCapPrimitive,
-    material: Option<Handle<StandardMaterial>>,
+    material: Cascade<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     let half_size = Vec2::new(primitive.length * 0.5, primitive.width * 0.5);
@@ -1031,7 +1071,7 @@ fn push_form_primitive(
     axis: Vec2,
     half_size: Vec2,
     color: Color,
-    material: Option<Handle<StandardMaterial>>,
+    material: Cascade<Handle<StandardMaterial>>,
     clip: Option<BoundingBox>,
 ) {
     if !center.is_finite() || !axis.is_finite() || !half_size.is_finite() {
@@ -1157,7 +1197,7 @@ impl LineStyle {
     /// Sets the source material handle for lines using this style.
     #[must_use]
     pub fn material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.material = Some(material);
+        self.material = Cascade::Override(material);
         self
     }
 
@@ -1190,9 +1230,9 @@ impl LineStyle {
     #[must_use]
     pub const fn color_value(&self) -> Color { self.color }
 
-    /// Returns the source material handle for this line style, if set.
+    /// Returns the source material authoring for this line style.
     #[must_use]
-    pub const fn material_handle(&self) -> Option<&Handle<StandardMaterial>> {
+    pub const fn material_handle(&self) -> Cascade<&Handle<StandardMaterial>> {
         self.material.as_ref()
     }
 
@@ -1211,23 +1251,35 @@ impl LineStyle {
     /// Overrides the hairline fade policy for lines using this style.
     #[must_use]
     pub const fn hairline_fade(mut self, fade: HairlineFade) -> Self {
-        self.hairline_fade = Some(fade);
+        self.hairline_fade = Cascade::Override(fade);
         self
     }
 
-    /// Returns the hairline fade override, if any.
+    /// Overrides shadow casting for lines using this style.
     #[must_use]
-    pub const fn hairline_fade_value(&self) -> Option<HairlineFade> { self.hairline_fade }
+    pub const fn shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.shadow_casting = Cascade::Override(shadow_casting);
+        self
+    }
+
+    /// Returns the hairline fade authoring.
+    #[must_use]
+    pub const fn hairline_fade_value(&self) -> Cascade<HairlineFade> { self.hairline_fade }
+
+    /// Returns the shadow-casting authoring.
+    #[must_use]
+    pub const fn shadow_casting_value(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
     pub(crate) fn scaled(&self, default_scale: f32) -> Self {
         Self {
-            width:         scaled_dimension(self.width, default_scale),
-            color:         self.color,
-            material:      self.material.clone(),
-            cap_size:      scaled_dimension(self.cap_size, default_scale),
-            start_cap:     self.start_cap.scaled_dimensions(default_scale),
-            end_cap:       self.end_cap.scaled_dimensions(default_scale),
-            hairline_fade: self.hairline_fade,
+            width:          scaled_dimension(self.width, default_scale),
+            color:          self.color,
+            material:       self.material.clone(),
+            cap_size:       scaled_dimension(self.cap_size, default_scale),
+            start_cap:      self.start_cap.scaled_dimensions(default_scale),
+            end_cap:        self.end_cap.scaled_dimensions(default_scale),
+            hairline_fade:  self.hairline_fade,
+            shadow_casting: self.shadow_casting,
         }
     }
 }
@@ -1235,13 +1287,14 @@ impl LineStyle {
 impl Default for LineStyle {
     fn default() -> Self {
         Self {
-            width:         DEFAULT_LINE_WIDTH,
-            color:         Color::WHITE,
-            material:      None,
-            cap_size:      DEFAULT_CAP_SIZE,
-            start_cap:     CalloutCap::None,
-            end_cap:       CalloutCap::None,
-            hairline_fade: None,
+            width:          DEFAULT_LINE_WIDTH,
+            color:          Color::WHITE,
+            material:       Cascade::Inherit,
+            cap_size:       DEFAULT_CAP_SIZE,
+            start_cap:      CalloutCap::None,
+            end_cap:        CalloutCap::None,
+            hairline_fade:  Cascade::Inherit,
+            shadow_casting: Cascade::Inherit,
         }
     }
 }

@@ -63,7 +63,7 @@ cameras now receive OIT as well as `Msaa::Off` while the marker is active.
   break the no-OIT MSAA-plus-panels case.
 - Text must be `Blend`/`Premultiplied` (already the cascade default; `Opaque`/`Mask`
   bypass OIT).
-- **Do NOT revert** f45cef9's cascade `Exclude`/`ExcludeNone` fix. HueOffset stays deleted.
+- Keep the current parent-walking cascade model. HueOffset stays deleted.
 
 ## Work items
 
@@ -132,8 +132,8 @@ render in the normal passes; only `Blend`/`Premultiplied` route through `oit_dra
 Delete `panel_rtt.rs`, its plugin registration, and any RTT panel API (no current use
 case). Independent of the OIT work — can land before or after.
 
-## Must preserve (do NOT undo from f45cef9)
-- cascade `Exclude` / `ExcludeNone` machinery.
+## Must preserve
+- The current parent-walking cascade model stays in place.
 - HueOffset stays deleted; text_stress rework stays.
 
 ## Committed slug-quality work to keep intact (commit c3cfcbd)

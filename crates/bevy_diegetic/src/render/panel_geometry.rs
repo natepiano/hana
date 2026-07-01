@@ -30,9 +30,9 @@ use crate::layout::BoundingBox;
 use crate::layout::RectangleSource;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
+use crate::layout::ShadowCasting;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
-use crate::panel::SurfaceShadow;
 
 /// The invisible full-panel interaction quad (Geometry mode only), tagged with
 /// its world size and center so a rebuild can leave it untouched when the panel
@@ -105,10 +105,12 @@ fn build_panel_geometry(
             &ComputedDiegeticPanel,
             Option<&RenderLayers>,
             Option<&Resolved<SdfMaterial>>,
+            Option<&Resolved<ShadowCasting>>,
         ),
         Or<(
             Changed<ComputedDiegeticPanel>,
             Changed<Resolved<SdfMaterial>>,
+            Changed<Resolved<ShadowCasting>>,
         )>,
     >,
     old_interaction: Query<(Entity, &ChildOf, &PanelInteractionMesh)>,
@@ -118,7 +120,9 @@ fn build_panel_geometry(
     mut resolved_surfaces: ResMut<ResolvedSdfSurfaceRegistry>,
     mut commands: Commands,
 ) {
-    for (panel_entity, panel, computed, panel_layers, panel_sdf_material) in &changed_panels {
+    for (panel_entity, panel, computed, panel_layers, panel_sdf_material, panel_shadow_casting) in
+        &changed_panels
+    {
         let Some(result) = computed.result() else {
             resolved_surfaces.remove_panel(panel_entity);
             continue;
@@ -131,7 +135,7 @@ fn build_panel_geometry(
             points_to_world: panel.points_to_world(),
             anchor_x,
             anchor_y,
-            surface_shadow: panel.surface_shadow(),
+            shadow_casting: panel_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0),
             layer: panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
             sdf_material: panel_sdf_material.map_or_else(
                 || sdf_material_default.0.0.clone(),
@@ -180,8 +184,8 @@ pub(crate) struct PanelReconcileContext<'a> {
     pub(crate) anchor_x:        f32,
     /// Panel-local vertical anchor offset.
     pub(crate) anchor_y:        f32,
-    /// Surface shadow policy copied onto each resolved SDF surface.
-    pub(crate) surface_shadow:  SurfaceShadow,
+    /// Shadow-casting policy copied onto each resolved SDF surface.
+    pub(crate) shadow_casting:  ShadowCasting,
     /// Render layers copied onto each resolved SDF surface.
     pub(crate) layer:           RenderLayers,
     /// Panel's cascade-resolved SDF material handle.
@@ -383,8 +387,8 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) clip_rect:       Vec4,
     /// Render layers copied to SDF fill batch records.
     pub(crate) render_layers:   RenderLayers,
-    /// Surface shadow policy copied to SDF fill batch records.
-    pub(crate) surface_shadow:  SurfaceShadow,
+    /// Shadow-casting policy copied to SDF fill batch records.
+    pub(crate) shadow_casting:  ShadowCasting,
 }
 
 /// Authorship state for a fill or border role in `ResolvedSdfMaterial`.
@@ -485,7 +489,7 @@ impl StoredResolvedSdfSurface {
     pub(crate) const fn as_resolved(
         &self,
         render_layers: RenderLayers,
-        surface_shadow: SurfaceShadow,
+        shadow_casting: ShadowCasting,
     ) -> ResolvedSdfSurface<'_> {
         ResolvedSdfSurface {
             panel_entity: self.panel_entity,
@@ -501,7 +505,7 @@ impl StoredResolvedSdfSurface {
             border_widths: self.border_widths,
             clip_rect: self.clip_rect,
             render_layers,
-            surface_shadow,
+            shadow_casting,
         }
     }
 }
@@ -547,11 +551,11 @@ pub(crate) fn resolve_sdf_surface<'a>(
     context: &'a PanelReconcileContext<'a>,
 ) -> ResolvedSdfSurface<'a> {
     let element_mat = context.panel.tree().element_material(surface.index.get());
-    let base_material = element_mat.unwrap_or(&context.sdf_material);
+    let base_material = element_mat.map_or(&context.sdf_material, core::convert::identity);
 
     // Fill color from .background() or element .material() — never panel material.
     let effective_color = surface.fill_color.or_else(|| {
-        if element_mat.is_some() {
+        if element_mat.is_override() {
             None
         } else {
             Some(Color::NONE)
@@ -636,7 +640,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
         command_index: surface.command_index,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
-            authorship:    if surface.fill_color.is_some() || element_mat.is_some() {
+            authorship:    if surface.fill_color.is_some() || element_mat.is_override() {
                 SdfRoleAuthorship::Authored
             } else {
                 SdfRoleAuthorship::Unauthored
@@ -661,7 +665,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
         border_widths,
         clip_rect,
         render_layers: context.layer.clone(),
-        surface_shadow: context.surface_shadow,
+        shadow_casting: context.shadow_casting,
     }
 }
 
@@ -865,7 +869,7 @@ mod tests {
             .resource::<ResolvedSdfSurfaceRegistry>()
             .surfaces()
             .map(|surface| {
-                let resolved = surface.as_resolved(RenderLayers::layer(0), SurfaceShadow::Off);
+                let resolved = surface.as_resolved(RenderLayers::layer(0), ShadowCasting::Off);
                 SurfaceSnapshot {
                     command_index:     resolved.command_index,
                     draw_depth:        resolved.draw_depth,

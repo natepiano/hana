@@ -311,23 +311,21 @@ passes:
 
 That pass model must preserve the existing choices:
 
-- visible render mode: `Invisible`, `Text`, `PunchOut`, and
-  `SolidQuad`
-- shadow mode: `None`, `Text`, `PunchOut`, and `SolidQuad`
+- visible render mode: `Text` and `PunchOut`
+- shadow mode: `None` and `Cast`
 
 The same Slug run data can serve those policies:
 
 - `Text`: evaluate Slug coverage and draw the glyph fill.
 - `PunchOut`: evaluate Slug coverage and draw the inverse inside the
   glyph quad.
-- `SolidQuad`: draw the glyph quad without curve evaluation.
-- `Invisible`: skip the visible pass while still allowing a shadow pass
-  when requested.
+- ghost text: use `GlyphShadowMode::Cast` with a fill color alpha of `0` so
+  the color pass paints nothing while the shadow pass casts the glyph
+  silhouette.
 
 Shadow support should be expressed as another pass over the same run
-data. Text and punch-out shadows evaluate Slug coverage in the
-shadow/prepass path. Solid-quad shadows can use the quad geometry. `None`
-suppresses shadow casting. This keeps run-level GPU storage compatible
+data. Cast shadows evaluate Slug coverage in the shadow/prepass path.
+`None` suppresses shadow casting. This keeps run-level GPU storage compatible
 with the current feature matrix without forcing Slug to preserve every
 internal MTSDF mesh/proxy detail.
 
@@ -467,8 +465,8 @@ Completed:
 - Updated the WGSL shader so each quad selects the right glyph record
   from the run-level data.
 - Kept render mode and future shadow-pass mode as explicit inputs to
-  the run-level path so `Text`, `PunchOut`, `SolidQuad`, `Invisible`,
-  and all current shadow modes remain representable.
+  the run-level path so `Text`, `PunchOut`, and the current `None`/`Cast`
+  shadow modes remain representable.
 - Kept the `WorldText` contrast overlay in the example.
 
 Exit criteria: met. The isolated `slug_text` example renders `Typography`
@@ -699,10 +697,9 @@ Remaining:
 - Support `WorldText` anchoring from Slug/native glyph bounds, without
   depending on distance-field atlas metrics, and preserve
   backend-neutral readiness behavior.
-- Preserve material color, alpha mode, depth behavior, and the full
-  visible/shadow mode matrix:
-  `Invisible`, `Text`, `PunchOut`, `SolidQuad`, and shadow
-  `None`, `Text`, `PunchOut`, `SolidQuad`.
+- Preserve material color, alpha mode, depth behavior, and the current
+  visible/shadow mode matrix: visible `Text`/`PunchOut` and shadow
+  `None`/`Cast`.
 - Add regression tests around glyph readiness, backend swaps, font
   changes, cache misses, current cache-key invalidation dimensions,
   and `WorldTextReady` timing. Defer storage-profile and effect-profile
@@ -1223,9 +1220,8 @@ reviewed.
 11. **WorldText behavior compatibility:** Run-level Slug rendering
     should replace the glyph silhouette source, not the visible/shadow
     behavior contract. The design must preserve the existing separation
-    between visible render mode (`Invisible`, `Text`, `PunchOut`,
-    `SolidQuad`) and shadow mode (`None`, `Text`, `PunchOut`,
-    `SolidQuad`). Phase 3 is now the run-level GPU data step, because
+    between visible render mode (`Text`, `PunchOut`) and shadow mode
+    (`None`, `Cast`). Phase 3 is now the run-level GPU data step, because
     it proves that Slug can render a coherent text run while still
     carrying those behavior choices forward. Shared production
     prerequisites and backend integration follow after that proof.

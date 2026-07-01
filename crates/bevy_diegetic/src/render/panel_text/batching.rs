@@ -38,7 +38,9 @@ use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::DrawBatchFamily;
+use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
@@ -90,6 +92,8 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
     alphas:                         Query<'w, 's, &'static Resolved<TextAlpha>, With<TextContent>>,
     lightings:                      Query<'w, 's, &'static Resolved<Lighting>, With<TextContent>>,
     sidednesses:                    Query<'w, 's, &'static Resolved<Sidedness>, With<TextContent>>,
+    shadow_castings: Query<'w, 's, &'static Resolved<ShadowCasting>, With<TextContent>>,
+    glyph_shadow_modes: Query<'w, 's, &'static Resolved<GlyphShadowMode>, With<TextContent>>,
     anti_aliases:                   Query<'w, 's, &'static Resolved<AntiAlias>, With<TextContent>>,
     materials: Query<'w, 's, &'static Resolved<TextMaterial>, With<TextContent>>,
     hdr_text_coverage_biases:
@@ -97,6 +101,8 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
     alpha_default:                  Res<'w, CascadeDefault<TextAlpha>>,
     lighting_default:               Res<'w, CascadeDefault<Lighting>>,
     sidedness_default:              Res<'w, CascadeDefault<Sidedness>>,
+    shadow_casting_default:         Res<'w, CascadeDefault<ShadowCasting>>,
+    glyph_shadow_mode_default:      Res<'w, CascadeDefault<GlyphShadowMode>>,
     anti_alias_default:             Res<'w, CascadeDefault<AntiAlias>>,
     hdr_text_coverage_bias_default: Res<'w, CascadeDefault<HdrTextCoverageBias>>,
     placement_changed: Query<
@@ -110,6 +116,8 @@ pub(super) struct PathBatchKeyCascades<'w, 's> {
                 Changed<Resolved<TextAlpha>>,
                 Changed<Resolved<Lighting>>,
                 Changed<Resolved<Sidedness>>,
+                Changed<Resolved<ShadowCasting>>,
+                Changed<Resolved<GlyphShadowMode>>,
                 Changed<Resolved<AntiAlias>>,
             )>,
         ),
@@ -155,6 +163,21 @@ impl PathBatchKeyCascades<'_, '_> {
         self.sidednesses
             .get(label)
             .map_or(self.sidedness_default.0, |resolved| resolved.0)
+    }
+
+    fn visual_shadow(&self, label: Entity) -> VisualShadow {
+        let shadow_casting = self
+            .shadow_castings
+            .get(label)
+            .map_or(self.shadow_casting_default.0, |resolved| resolved.0);
+        let glyph_shadow_mode = self
+            .glyph_shadow_modes
+            .get(label)
+            .map_or(self.glyph_shadow_mode_default.0, |resolved| resolved.0);
+        match shadow_casting {
+            ShadowCasting::Off => VisualShadow::None,
+            ShadowCasting::On => glyph_shadow_mode.into(),
+        }
     }
 
     fn anti_alias(&self, label: Entity) -> AntiAlias {
@@ -255,6 +278,7 @@ pub(super) fn update_panel_text_batches(
         let alpha_mode = cascades.alpha(label_entity);
         let lighting = cascades.lighting(label_entity);
         let sidedness = cascades.sidedness(label_entity);
+        let shadow = cascades.visual_shadow(label_entity);
         let material = cascades.material(label_entity, &text_material_default);
         let Some(material_candidate) = text_material_candidate_for_frame(
             &material,
@@ -271,9 +295,9 @@ pub(super) fn update_panel_text_batches(
         };
         let batch_key = batch_key_for_run(
             panel_layers,
-            &prepared,
             *z_index,
             *z_index_rank,
+            shadow,
             material_candidate.pipeline_compatibility,
             material_candidate.resource_compatibility.clone(),
         );
@@ -562,9 +586,9 @@ fn append_text_material_row(
 
 fn batch_key_for_run(
     panel_layers: Option<&RenderLayers>,
-    prepared: &PreparedPanelText,
     z_index: PanelTextDrawZIndex,
     z_index_rank: PanelTextDrawZIndexRank,
+    shadow: VisualShadow,
     pipeline_compatibility: PipelineCompatibility,
     resource_compatibility: ResourceCompatibility,
 ) -> PathBatchKey {
@@ -572,7 +596,7 @@ fn batch_key_for_run(
         z_index: z_index.0,
         z_index_rank: z_index_rank.0,
         batch_family: DrawBatchFamily::Text,
-        shadow: prepared.shadow_mode.into(),
+        shadow,
         layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
         pipeline_compatibility,
         resource_compatibility,
@@ -1231,6 +1255,7 @@ mod tests {
             .add_plugins(CascadePlugin::<TextMaterial>::default())
             .add_plugins(CascadePlugin::<Lighting>::default())
             .add_plugins(CascadePlugin::<Sidedness>::default())
+            .add_plugins(CascadePlugin::<GlyphShadowMode>::default())
             .insert_resource(FontRegistry::new().expect("embedded font should parse"))
             .init_resource::<TextShapingContext>()
             .init_resource::<GlyphCache>()

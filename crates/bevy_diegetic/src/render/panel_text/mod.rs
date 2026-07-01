@@ -36,6 +36,7 @@ use super::material_table::MaterialTableAppendReady;
 use super::precompose;
 use super::text_shaping::TextShapingContext;
 use super::world_text;
+use crate::cascade::Cascade;
 use crate::cascade::CascadePlugin;
 use crate::cascade::TextAlpha;
 use crate::layout::GlyphRenderMode;
@@ -62,7 +63,7 @@ pub(super) struct PreparedPanelText {
     /// Glyph render mode for this text element.
     pub render_mode: GlyphRenderMode,
     /// Glyph shadow mode for this text element.
-    pub shadow_mode: GlyphShadowMode,
+    pub shadow_mode: Cascade<GlyphShadowMode>,
     /// Text fill color.
     pub fill_color:  Color,
     /// Optional panel-local clipping rect.
@@ -83,6 +84,7 @@ pub(super) struct TextRenderPlugin;
 impl Plugin for TextRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(CascadePlugin::<TextAlpha>::default());
+        app.add_plugins(CascadePlugin::<GlyphShadowMode>::default());
         app.add_plugins(CascadePlugin::<Lighting>::default());
         app.add_plugins(CascadePlugin::<Sidedness>::default());
         app.add_observer(seed_panel_text_child_alpha);

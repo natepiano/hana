@@ -292,13 +292,13 @@ differing on several fields at once still lands in exactly one batch.
 `fill_color`, `render_mode`, and the depth nudge move *into* the records,
 so they do not split.
 
-**Base-material keying — intern by value (decided, review cycle 2).**
-`StandardMaterial` is neither `Hash` nor `Eq`, and
-`DiegeticPanel::text_material` stores an `Option<StandardMaterial>` *by
-value* (`diegetic_panel.rs:113`). A small interner compares the fields panel
-text materials actually carry — `base_color`, texture handles (by
-`AssetId`), `emissive`, `metallic`, `perceptual_roughness`, `reflectance`,
-`unlit`, `double_sided`, `cull_mode`; floats bitwise — and assigns a
+**Base-material keying.**
+`StandardMaterial` is neither `Hash` nor `Eq`, and panel text resolves a
+`TextMaterial` source handle through the cascade before batching. A small
+interner compares the fields panel text materials actually carry:
+`base_color`, texture handles by `AssetId`, `emissive`, `metallic`,
+`perceptual_roughness`, `reflectance`, `unlit`, `double_sided`, and
+`cull_mode`; floats bitwise. The interner assigns a
 `BaseMaterialId`. Concretely: an `InternedMaterialKey` struct (the compared
 fields — floats stored as `to_bits` u32s, textures as `AssetId` — so
 `derive(Hash, Eq)` is mechanical) in a

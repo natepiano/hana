@@ -108,6 +108,7 @@ pub use text_props::FontWeight;
 pub use text_props::GlyphRenderMode;
 pub use text_props::GlyphShadowMode;
 pub use text_props::Lighting;
+pub use text_props::ShadowCasting;
 pub use text_props::Sidedness;
 pub use text_props::TextAlign;
 pub use text_props::TextDimensions;

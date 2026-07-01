@@ -44,6 +44,7 @@ use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
 use crate::layout::ResolvedPanelShape;
 use crate::layout::ResolvedPanelShapePrimitive;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
@@ -498,31 +499,32 @@ impl PanelShapeBatchStore {
 }
 
 struct PanelShapeReconcileContext<'a> {
-    panel_entity:        Entity,
-    panel:               &'a DiegeticPanel,
+    panel_entity:         Entity,
+    panel:                &'a DiegeticPanel,
     /// Current `StandardMaterial` assets used to project source handles.
-    standard_materials:  &'a Assets<StandardMaterial>,
+    standard_materials:   &'a Assets<StandardMaterial>,
     /// Seeded shape-material cascade default used as the final source handle.
-    shape_default:       &'a CascadeDefault<ShapeMaterial>,
+    shape_default:        &'a CascadeDefault<ShapeMaterial>,
     /// Panel's cascade-resolved panel-shape material handle.
-    shape_material:      Handle<StandardMaterial>,
-    asset_server:        &'a AssetServer,
-    panel_transform:     Mat4,
-    path_context:        PanelShapePathContext,
-    shadow:              VisualShadow,
-    layers:              BatchRenderLayers,
+    shape_material:       Handle<StandardMaterial>,
+    asset_server:         &'a AssetServer,
+    panel_transform:      Mat4,
+    path_context:         PanelShapePathContext,
+    /// Panel-level shadow casting resolved by the cascade.
+    panel_shadow_casting: ShadowCasting,
+    layers:               BatchRenderLayers,
     /// The panel entity's cascade-resolved lighting mode; every line on the
     /// panel renders with it, matching the panel's glyph runs.
-    panel_lighting:      Lighting,
+    panel_lighting:       Lighting,
     /// The panel entity's cascade-resolved sidedness; every line on the panel
     /// renders with it, matching the panel's glyph runs.
-    panel_sidedness:     Sidedness,
+    panel_sidedness:      Sidedness,
     /// The panel entity's cascade-resolved anti-alias mode; elements without
     /// their own override inherit it.
-    panel_anti_alias:    AntiAlias,
+    panel_anti_alias:     AntiAlias,
     /// The panel entity's cascade-resolved hairline fade policy; elements
     /// without their own override inherit it.
-    panel_hairline_fade: HairlineFade,
+    panel_hairline_fade:  HairlineFade,
 }
 
 #[derive(SystemParam)]
@@ -556,6 +558,7 @@ struct PanelShapeMergeKey {
     owner_bounds:      [u32; 4],
     layering:          [u32; 2],
     material_identity: PanelShapeMaterialIdentity,
+    shadow:            VisualShadow,
 }
 
 /// Opaque material-source facts that require separate `PathRenderRecord` rows.
@@ -610,16 +613,18 @@ impl PanelShapeMergeKey {
     fn from_source(
         source: &ShapePrimitiveSource<'_>,
         source_material: &Handle<StandardMaterial>,
+        shadow: VisualShadow,
     ) -> Self {
         Self {
-            element_index:     source.element_index,
-            clip:              source.primitive.clip().map(bounding_box_bits),
-            owner_bounds:      bounding_box_bits(source.line.owner_bounds()),
-            layering:          [
+            element_index: source.element_index,
+            clip: source.primitive.clip().map(bounding_box_bits),
+            owner_bounds: bounding_box_bits(source.line.owner_bounds()),
+            layering: [
                 source.draw_depth.clip_depth_nudge().get().to_bits(),
                 source.draw_depth.oit_depth_offset().get().to_bits(),
             ],
             material_identity: PanelShapeMaterialIdentity::from_source(source, source_material),
+            shadow,
         }
     }
 }
@@ -655,7 +660,11 @@ fn group_line_primitives<'a>(
     let mut group_indices: HashMap<PanelShapeMergeKey, usize> = HashMap::new();
     for source in sources {
         let material = resolved_source_material(&source, context);
-        let key = PanelShapeMergeKey::from_source(&source, material);
+        let key = PanelShapeMergeKey::from_source(
+            &source,
+            material,
+            effective_shape_shadow(&source, context),
+        );
         if let Some(&index) = group_indices.get(&key) {
             groups[index].push(source);
         } else {
@@ -678,6 +687,7 @@ pub(super) fn reconcile_panel_line_batches(
         Option<&Resolved<Sidedness>>,
         Option<&Resolved<AntiAlias>>,
         Option<&Resolved<HairlineFade>>,
+        Option<&Resolved<ShadowCasting>>,
         Option<&Resolved<ShapeMaterial>>,
         Option<&PanelShapes>,
     )>,
@@ -715,6 +725,7 @@ pub(super) fn reconcile_panel_line_batches(
         panel_sidedness,
         panel_anti_alias,
         panel_hairline_fade,
+        panel_shadow_casting,
         panel_shape_material,
         panel_shapes,
     ) in &panels
@@ -745,7 +756,8 @@ pub(super) fn reconcile_panel_line_batches(
                 anchor_x,
                 anchor_y,
             },
-            shadow: panel.surface_shadow().into(),
+            panel_shadow_casting: panel_shadow_casting
+                .map_or(ShadowCasting::On, |resolved| resolved.0),
             layers: BatchRenderLayers(panel_layers.cloned().unwrap_or(RenderLayers::layer(0))),
             panel_lighting: panel_lighting.map_or(lighting_default.0, |resolved| resolved.0),
             panel_sidedness: panel_sidedness.map_or(sidedness_default.0, |resolved| resolved.0),
@@ -938,7 +950,7 @@ fn build_panel_line_group(
         .panel
         .tree()
         .element_hairline_fade(first.element_index)
-        .unwrap_or(context.panel_hairline_fade);
+        .resolve_or(context.panel_hairline_fade);
     let path_members = panel_shape_path_members(&members, element_hairline_fade);
     let path = path::build_panel_shape_path(
         &path_members,
@@ -990,7 +1002,7 @@ fn build_panel_line_group(
         z_index:                first.draw_depth.z_index(),
         z_index_rank:           first.draw_depth.z_index_rank(),
         batch_family:           DrawBatchFamily::PanelShape,
-        shadow:                 context.shadow,
+        shadow:                 effective_shape_shadow(first, context),
         layers:                 context.layers.clone(),
         pipeline_compatibility: appended.pipeline_compatibility,
         resource_compatibility: appended.resource_compatibility,
@@ -1001,7 +1013,7 @@ fn build_panel_line_group(
         .panel
         .tree()
         .element_anti_alias(first.element_index)
-        .unwrap_or(context.panel_anti_alias);
+        .resolve_or(context.panel_anti_alias);
     let run = PathRenderRecord {
         transform: context.panel_transform,
         material: appended.slot.into(),
@@ -1048,11 +1060,32 @@ fn resolved_source_material<'a, 'source>(
 where
     'source: 'a,
 {
+    source.primitive.material().map_or_else(
+        || {
+            context
+                .panel
+                .tree()
+                .element_material(source.element_index)
+                .map_or(&context.shape_material, core::convert::identity)
+        },
+        core::convert::identity,
+    )
+}
+
+fn effective_shape_shadow(
+    source: &ShapePrimitiveSource<'_>,
+    context: &PanelShapeReconcileContext<'_>,
+) -> VisualShadow {
+    let element_shadow = context
+        .panel
+        .tree()
+        .element_shadow_casting(source.element_index)
+        .resolve_or(context.panel_shadow_casting);
     source
-        .primitive
-        .material()
-        .or_else(|| context.panel.tree().element_material(source.element_index))
-        .unwrap_or(&context.shape_material)
+        .line
+        .shadow_casting()
+        .resolve_or(element_shadow)
+        .into()
 }
 
 fn panel_shape_path_members<'a>(
@@ -1066,7 +1099,7 @@ fn panel_shape_path_members<'a>(
             fade_exponent: source
                 .line
                 .hairline_fade()
-                .unwrap_or(element_hairline_fade)
+                .resolve_or(element_hairline_fade)
                 .fade_exponent(),
         })
         .collect()
@@ -1487,6 +1520,7 @@ mod tests {
 
     use super::*;
     use crate::CalloutCap;
+    use crate::Cascade;
     use crate::El;
     use crate::Mm;
     use crate::cascade::CascadePlugin;
@@ -2385,7 +2419,7 @@ mod tests {
                 width: 2.0,
             },
             color:      Color::WHITE,
-            material:   None,
+            material:   Cascade::Inherit,
             bounds:     BoundingBox {
                 x:      0.0,
                 y:      -1.0,
@@ -2408,8 +2442,9 @@ mod tests {
             shaft_end: Vec2::new(50.0, 0.0),
             width: 2.0,
             color: Color::WHITE,
-            material: None,
-            hairline_fade: None,
+            material: Cascade::Inherit,
+            hairline_fade: Cascade::Inherit,
+            shadow_casting: Cascade::Inherit,
             primitives: vec![primitive],
         };
         let commands = vec![RenderCommand {
@@ -2628,20 +2663,20 @@ mod tests {
         };
 
         assert_eq!(
-            PanelShapeMergeKey::from_source(&red_source, &material),
-            PanelShapeMergeKey::from_source(&red_same_source, &material),
+            PanelShapeMergeKey::from_source(&red_source, &material, VisualShadow::Cast),
+            PanelShapeMergeKey::from_source(&red_same_source, &material, VisualShadow::Cast),
         );
         assert_eq!(
-            PanelShapeMergeKey::from_source(&red_source, &material),
-            PanelShapeMergeKey::from_source(&red_different_source, &material),
+            PanelShapeMergeKey::from_source(&red_source, &material, VisualShadow::Cast),
+            PanelShapeMergeKey::from_source(&red_different_source, &material, VisualShadow::Cast),
         );
         assert_ne!(
-            PanelShapeMergeKey::from_source(&red_source, &material),
-            PanelShapeMergeKey::from_source(&blue_same_source, &material),
+            PanelShapeMergeKey::from_source(&red_source, &material, VisualShadow::Cast),
+            PanelShapeMergeKey::from_source(&blue_same_source, &material, VisualShadow::Cast),
         );
         assert_ne!(
-            PanelShapeMergeKey::from_source(&red_source, &material),
-            PanelShapeMergeKey::from_source(&blue_different_source, &material),
+            PanelShapeMergeKey::from_source(&red_source, &material, VisualShadow::Cast),
+            PanelShapeMergeKey::from_source(&blue_different_source, &material, VisualShadow::Cast),
         );
     }
 
@@ -2813,7 +2848,7 @@ mod tests {
                 width: 1.0,
             },
             color:      Color::WHITE,
-            material:   None,
+            material:   Cascade::Inherit,
             bounds:     BoundingBox {
                 x:      0.0,
                 y:      0.0,
@@ -2840,8 +2875,9 @@ mod tests {
             shaft_end: Vec2::X,
             width: 1.0,
             color: Color::WHITE,
-            material: None,
-            hairline_fade: None,
+            material: Cascade::Inherit,
+            hairline_fade: Cascade::Inherit,
+            shadow_casting: Cascade::Inherit,
             primitives: vec![primitive],
         }
     }

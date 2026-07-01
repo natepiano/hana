@@ -15,6 +15,7 @@ use super::FontFeatureFlags;
 use super::FontFeatures;
 use super::Unit;
 use super::constants::DEFAULT_FONT_SIZE;
+use crate::cascade::Cascade;
 
 /// Controls how the layout engine breaks text across lines.
 ///
@@ -136,6 +137,16 @@ pub enum GlyphShadowMode {
     Cast,
 }
 
+/// Whether rendered diegetic content casts 3D shadows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Reflect)]
+pub enum ShadowCasting {
+    /// Do not cast 3D shadows.
+    Off,
+    /// Cast 3D shadows.
+    #[default]
+    On,
+}
+
 /// Which face(s) of a glyph mesh render, by back/front-face culling.
 ///
 /// World text defaults to both faces; screen text defaults to front-only.
@@ -224,13 +235,14 @@ pub struct TextStyle {
     align:                  TextAlign,
     anchor:                 Anchor,
     render_mode:            GlyphRenderMode,
-    shadow_mode:            GlyphShadowMode,
-    /// Per-label sidedness override. `None` = inherit from the `Sidedness`
-    /// cascade attribute (world panels default `BothSides`, screen `FrontOnly`).
-    sidedness:              Option<Sidedness>,
-    /// Per-label lighting override. `None` = inherit from the `Lighting`
-    /// cascade attribute (world panels default `Lit`, screen `Unlit`).
-    lighting:               Option<Lighting>,
+    /// Per-label glyph-shadow authoring.
+    shadow_mode:            Cascade<GlyphShadowMode>,
+    /// Per-label shadow-casting authoring.
+    shadow_casting:         Cascade<ShadowCasting>,
+    /// Per-label sidedness authoring.
+    sidedness:              Cascade<Sidedness>,
+    /// Per-label lighting authoring.
+    lighting:               Cascade<Lighting>,
     /// Per-label source material handle for text runs.
     ///
     /// This is an authored cascade/source handle. It is not a Bevy render
@@ -238,18 +250,14 @@ pub struct TextStyle {
     /// keys. Create the material once through `Assets<StandardMaterial>` and
     /// pass the handle here; do not create a fresh asset while rebuilding panel
     /// data each frame.
-    material:               Option<Handle<StandardMaterial>>,
+    material:               Cascade<Handle<StandardMaterial>>,
     font_features:          FontFeatures,
-    /// What unit `size` is expressed in. `None` = inherit from the resolved
-    /// `FontUnit` cascade attribute (panel font unit for panel text, world
-    /// units for standalone, pixels for screen text).
-    unit:                   Option<Unit>,
-    /// Per-label alpha-mode override. `None` = inherit from the `TextAlpha`
-    /// cascade attribute.
-    alpha_mode:             Option<AlphaMode>,
-    /// Per-label HDR text coverage-bias override. `None` = inherit from the
-    /// `HdrTextCoverageBias` cascade attribute.
-    hdr_text_coverage_bias: Option<f32>,
+    /// What unit `size` is expressed in.
+    unit:                   Cascade<Unit>,
+    /// Per-label alpha-mode authoring.
+    alpha_mode:             Cascade<AlphaMode>,
+    /// Per-label HDR text coverage-bias authoring.
+    hdr_text_coverage_bias: Cascade<f32>,
 }
 
 impl PartialEq for TextStyle {
@@ -266,6 +274,7 @@ impl PartialEq for TextStyle {
             && self.anchor == other.anchor
             && self.render_mode == other.render_mode
             && self.shadow_mode == other.shadow_mode
+            && self.shadow_casting == other.shadow_casting
             && self.sidedness == other.sidedness
             && self.lighting == other.lighting
             && self.material == other.material
@@ -304,14 +313,15 @@ impl TextStyle {
             align:                  TextAlign::Left,
             anchor:                 Anchor::Center,
             render_mode:            GlyphRenderMode::Text,
-            shadow_mode:            GlyphShadowMode::Cast,
-            sidedness:              None,
-            lighting:               None,
-            material:               None,
+            shadow_mode:            Cascade::Inherit,
+            shadow_casting:         Cascade::Inherit,
+            sidedness:              Cascade::Inherit,
+            lighting:               Cascade::Inherit,
+            material:               Cascade::Inherit,
             font_features:          FontFeatures::NONE,
-            unit:                   font_size.unit,
-            alpha_mode:             None,
-            hdr_text_coverage_bias: None,
+            unit:                   Cascade::from(font_size.unit),
+            alpha_mode:             Cascade::Inherit,
+            hdr_text_coverage_bias: Cascade::Inherit,
         }
     }
 
@@ -353,29 +363,33 @@ impl TextStyle {
     #[must_use]
     pub const fn render_mode(&self) -> GlyphRenderMode { self.render_mode }
 
-    /// Returns the glyph shadow mode.
+    /// Returns the glyph shadow mode authoring.
     #[must_use]
-    pub const fn shadow_mode(&self) -> GlyphShadowMode { self.shadow_mode }
+    pub const fn shadow_mode(&self) -> Cascade<GlyphShadowMode> { self.shadow_mode }
 
-    /// Returns the per-label sidedness override, if set (`None` = inherit).
+    /// Returns the shadow-casting authoring.
     #[must_use]
-    pub const fn sidedness(&self) -> Option<Sidedness> { self.sidedness }
+    pub const fn shadow_casting(&self) -> Cascade<ShadowCasting> { self.shadow_casting }
 
-    /// Returns the per-label lighting override, if set (`None` = inherit).
+    /// Returns the per-label sidedness authoring.
     #[must_use]
-    pub const fn lighting(&self) -> Option<Lighting> { self.lighting }
+    pub const fn sidedness(&self) -> Cascade<Sidedness> { self.sidedness }
 
-    /// Returns the text-run source material handle, if set.
+    /// Returns the per-label lighting authoring.
     #[must_use]
-    pub const fn material(&self) -> Option<&Handle<StandardMaterial>> { self.material.as_ref() }
+    pub const fn lighting(&self) -> Cascade<Lighting> { self.lighting }
+
+    /// Returns the text-run source material authoring.
+    #[must_use]
+    pub const fn material(&self) -> Cascade<&Handle<StandardMaterial>> { self.material.as_ref() }
 
     /// Returns the font feature overrides.
     #[must_use]
     pub const fn font_features(&self) -> FontFeatures { self.font_features }
 
-    /// Returns the per-label unit override, if set.
+    /// Returns the per-label unit authoring.
     #[must_use]
-    pub const fn unit(&self) -> Option<Unit> { self.unit }
+    pub const fn unit(&self) -> Cascade<Unit> { self.unit }
 
     /// Returns the text alignment.
     #[must_use]
@@ -385,19 +399,13 @@ impl TextStyle {
     #[must_use]
     pub const fn anchor(&self) -> Anchor { self.anchor }
 
-    /// Returns the per-label alpha-mode override, if any.
-    ///
-    /// `None` means the label inherits the panel-level override, then
-    /// `CascadeDefault<TextAlpha>`.
+    /// Returns the per-label alpha-mode authoring.
     #[must_use]
-    pub const fn alpha_mode(&self) -> Option<AlphaMode> { self.alpha_mode }
+    pub const fn alpha_mode(&self) -> Cascade<AlphaMode> { self.alpha_mode }
 
-    /// Returns the per-label HDR text coverage-bias override, if any.
-    ///
-    /// `None` means the label inherits the panel-level override, then
-    /// `CascadeDefault<HdrTextCoverageBias>`.
+    /// Returns the per-label HDR text coverage-bias authoring.
     #[must_use]
-    pub const fn hdr_text_coverage_bias(&self) -> Option<f32> { self.hdr_text_coverage_bias }
+    pub const fn hdr_text_coverage_bias(&self) -> Cascade<f32> { self.hdr_text_coverage_bias }
 
     // ── Chained (with_*) setters ──────────────────────────────────────────
 
@@ -474,7 +482,28 @@ impl TextStyle {
     /// Sets the glyph shadow mode.
     #[must_use]
     pub const fn with_shadow_mode(mut self, mode: GlyphShadowMode) -> Self {
-        self.shadow_mode = mode;
+        self.shadow_mode = Cascade::Override(mode);
+        self
+    }
+
+    /// Removes the per-label glyph shadow mode override.
+    #[must_use]
+    pub const fn inherit_shadow_mode(mut self) -> Self {
+        self.shadow_mode = Cascade::Inherit;
+        self
+    }
+
+    /// Sets whether this label casts 3D shadows.
+    #[must_use]
+    pub const fn with_shadow_casting(mut self, shadow_casting: ShadowCasting) -> Self {
+        self.shadow_casting = Cascade::Override(shadow_casting);
+        self
+    }
+
+    /// Removes the per-label shadow-casting override.
+    #[must_use]
+    pub const fn inherit_shadow_casting(mut self) -> Self {
+        self.shadow_casting = Cascade::Inherit;
         self
     }
 
@@ -495,21 +524,21 @@ impl TextStyle {
     /// Sets a per-label sidedness override (overrides the panel/context default).
     #[must_use]
     pub const fn with_sidedness(mut self, sidedness: Sidedness) -> Self {
-        self.sidedness = Some(sidedness);
+        self.sidedness = Cascade::Override(sidedness);
         self
     }
 
     /// Sets a per-label lighting override (overrides the panel/context default).
     #[must_use]
     pub const fn with_lighting(mut self, lighting: Lighting) -> Self {
-        self.lighting = Some(lighting);
+        self.lighting = Cascade::Override(lighting);
         self
     }
 
     /// Sets the glyph material to render unlit, bypassing PBR lighting.
     #[must_use]
     pub const fn with_unlit(mut self) -> Self {
-        self.lighting = Some(Lighting::Unlit);
+        self.lighting = Cascade::Override(Lighting::Unlit);
         self
     }
 
@@ -521,7 +550,7 @@ impl TextStyle {
     /// that row's `base_color`.
     #[must_use]
     pub fn with_material(mut self, material: Handle<StandardMaterial>) -> Self {
-        self.material = Some(material);
+        self.material = Cascade::Override(material);
         self
     }
 
@@ -553,7 +582,7 @@ impl TextStyle {
     /// on the label.
     #[must_use]
     pub const fn with_alpha_mode(mut self, alpha_mode: AlphaMode) -> Self {
-        self.alpha_mode = Some(alpha_mode);
+        self.alpha_mode = Cascade::Override(alpha_mode);
         self
     }
 
@@ -566,13 +595,13 @@ impl TextStyle {
     /// backgrounds look heavier.
     #[must_use]
     pub const fn with_hdr_text_coverage_bias(mut self, bias: f32) -> Self {
-        self.hdr_text_coverage_bias = Some(bias);
+        self.hdr_text_coverage_bias = Cascade::Override(bias);
         self
     }
 
     /// Removes the per-label HDR text coverage-bias override.
     pub(crate) const fn clear_hdr_text_coverage_bias(&mut self) {
-        self.hdr_text_coverage_bias = None;
+        self.hdr_text_coverage_bias = Cascade::Inherit;
     }
 
     // ── In-place (set_*) setters ──────────────────────────────────────────
@@ -611,19 +640,34 @@ impl TextStyle {
     pub const fn set_render_mode(&mut self, mode: GlyphRenderMode) { self.render_mode = mode; }
 
     /// Sets the glyph shadow mode.
-    pub const fn set_shadow_mode(&mut self, mode: GlyphShadowMode) { self.shadow_mode = mode; }
+    pub const fn set_shadow_mode(&mut self, mode: GlyphShadowMode) {
+        self.shadow_mode = Cascade::Override(mode);
+    }
+
+    /// Removes the per-label glyph shadow mode override.
+    pub const fn set_shadow_mode_inherit(&mut self) { self.shadow_mode = Cascade::Inherit; }
+
+    /// Sets whether this label casts 3D shadows.
+    pub const fn set_shadow_casting(&mut self, shadow_casting: ShadowCasting) {
+        self.shadow_casting = Cascade::Override(shadow_casting);
+    }
+
+    /// Removes the per-label shadow-casting override.
+    pub const fn set_shadow_casting_inherit(&mut self) { self.shadow_casting = Cascade::Inherit; }
 
     /// Sets a per-label sidedness override (overrides the panel/context default).
     pub const fn set_sidedness(&mut self, sidedness: Sidedness) {
-        self.sidedness = Some(sidedness);
+        self.sidedness = Cascade::Override(sidedness);
     }
 
     /// Sets a per-label lighting override (overrides the panel/context default).
-    pub const fn set_lighting(&mut self, lighting: Lighting) { self.lighting = Some(lighting); }
+    pub const fn set_lighting(&mut self, lighting: Lighting) {
+        self.lighting = Cascade::Override(lighting);
+    }
 
     /// Sets the source material handle for this text run.
     pub fn set_material(&mut self, material: Handle<StandardMaterial>) {
-        self.material = Some(material);
+        self.material = Cascade::Override(material);
     }
 
     /// Sets font feature overrides.
@@ -640,17 +684,17 @@ impl TextStyle {
     pub fn set_dimension(&mut self, size: impl Into<Dimension>) {
         let dimension = size.into();
         self.size = dimension.value;
-        self.unit = dimension.unit;
+        self.unit = Cascade::from(dimension.unit);
     }
 
     /// Sets the per-label [`AlphaMode`] override.
     pub const fn set_alpha_mode(&mut self, alpha_mode: AlphaMode) {
-        self.alpha_mode = Some(alpha_mode);
+        self.alpha_mode = Cascade::Override(alpha_mode);
     }
 
     /// Sets the per-label HDR text coverage-bias override.
     pub const fn set_hdr_text_coverage_bias(&mut self, bias: f32) {
-        self.hdr_text_coverage_bias = Some(bias);
+        self.hdr_text_coverage_bias = Cascade::Override(bias);
     }
 
     // ── Conversions and derived views ─────────────────────────────────────
@@ -677,7 +721,7 @@ impl TextStyle {
     #[must_use]
     pub(crate) fn scaled_as_unit(&self, factor: f32, unit: Unit) -> Self {
         let mut copy = self.scaled(factor);
-        copy.unit = Some(unit);
+        copy.unit = Cascade::Override(unit);
         copy
     }
 
@@ -693,9 +737,9 @@ impl TextStyle {
         Self {
             align: TextAlign::Left,
             anchor,
-            unit: None,
-            alpha_mode: None,
-            hdr_text_coverage_bias: None,
+            unit: Cascade::Inherit,
+            alpha_mode: Cascade::Inherit,
+            hdr_text_coverage_bias: Cascade::Inherit,
             ..self.clone()
         }
     }
@@ -741,6 +785,7 @@ impl TextStyle {
             color: _,
             render_mode: _,
             shadow_mode: _,
+            shadow_casting: _,
             sidedness: _,
             lighting: _,
             material: _,
@@ -783,6 +828,7 @@ impl TextStyle {
             color: _,
             render_mode: _,
             shadow_mode: _,
+            shadow_casting: _,
             sidedness: _,
             lighting: _,
             material: _,
@@ -811,7 +857,7 @@ impl TextStyle {
     /// via `to_bits`.
     ///
     /// Excludes render/material fields (`color`, `render_mode`, `shadow_mode`,
-    /// `sidedness`, `lighting`, `material`, `alpha_mode`,
+    /// `shadow_casting`, `sidedness`, `lighting`, `material`, `alpha_mode`,
     /// `hdr_text_coverage_bias`) because `PreparedPanelText`, cascade
     /// overrides, `PathRenderRecord`, and the frame material table own those
     /// updates without changing glyph geometry.
@@ -832,6 +878,7 @@ impl TextStyle {
             color: _,
             render_mode: _,
             shadow_mode: _,
+            shadow_casting: _,
             sidedness: _,
             lighting: _,
             material: _,
@@ -1029,15 +1076,18 @@ mod tests {
             .for_shaping(Anchor::TopLeft);
 
         assert_eq!(
-            prepared.unit, None,
+            prepared.unit,
+            Cascade::Inherit,
             "unit authoring routes through FontUnit, not the per-run view"
         );
         assert_eq!(
-            prepared.alpha_mode, None,
+            prepared.alpha_mode,
+            Cascade::Inherit,
             "alpha authoring routes through TextAlpha, not the per-run view"
         );
         assert_eq!(
-            prepared.hdr_text_coverage_bias, None,
+            prepared.hdr_text_coverage_bias,
+            Cascade::Inherit,
             "HDR coverage authoring routes through HdrTextCoverageBias, not the per-run view"
         );
     }

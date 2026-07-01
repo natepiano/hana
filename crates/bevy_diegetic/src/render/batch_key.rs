@@ -23,6 +23,7 @@ use bevy_kana::ToU32;
 
 use crate::DrawZIndex;
 use crate::layout::GlyphShadowMode;
+use crate::layout::ShadowCasting;
 use crate::panel::BatchSummary;
 use crate::panel::SurfaceShadow;
 
@@ -153,6 +154,15 @@ impl From<GlyphShadowMode> for VisualShadow {
         match shadow {
             GlyphShadowMode::Cast => Self::Cast,
             GlyphShadowMode::None => Self::None,
+        }
+    }
+}
+
+impl From<ShadowCasting> for VisualShadow {
+    fn from(shadow: ShadowCasting) -> Self {
+        match shadow {
+            ShadowCasting::On => Self::Cast,
+            ShadowCasting::Off => Self::None,
         }
     }
 }

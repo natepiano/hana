@@ -122,6 +122,7 @@
 //! `TextStyle::with_alpha_mode` and insert `Override<TextAlpha>`.
 
 mod attributes;
+mod authoring;
 mod cascade_set;
 mod constants;
 mod defaults;
@@ -139,18 +140,22 @@ pub(crate) use attributes::apply_cascade_override;
 pub(crate) use attributes::remove_cascade_override;
 pub use attributes::resolved_anti_alias;
 pub use attributes::resolved_font_unit;
+pub use attributes::resolved_glyph_shadow_mode;
 pub use attributes::resolved_hairline_fade;
 pub use attributes::resolved_hdr_text_coverage_bias;
 pub use attributes::resolved_lighting;
 pub use attributes::resolved_sdf_material;
+pub use attributes::resolved_shadow_casting;
 pub use attributes::resolved_shape_material;
 pub use attributes::resolved_sidedness;
 pub use attributes::resolved_text_alpha;
 pub use attributes::resolved_text_material;
+pub use authoring::Cascade;
 pub use cascade_set::CascadeSet;
 pub use defaults::CascadeDefault;
 pub use defaults::CascadeDefaults;
 pub(crate) use plugin::CascadePlugin;
+pub(crate) use resolved::CascadeAttr;
 pub use resolved::CascadeProperty;
 pub(crate) use resolved::Override;
 pub(crate) use resolved::Resolved;

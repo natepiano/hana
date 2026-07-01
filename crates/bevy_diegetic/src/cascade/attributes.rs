@@ -13,7 +13,9 @@ pub use super::resolved::SdfMaterial;
 pub use super::resolved::ShapeMaterial;
 pub use super::resolved::TextAlpha;
 pub use super::resolved::TextMaterial;
+use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
@@ -55,6 +57,18 @@ pub trait CascadeEntityCommandsExt {
 
     /// Remove this entity's authored lighting mode.
     fn inherit_lighting(&mut self) -> &mut Self;
+
+    /// Author this entity's shadow-casting policy.
+    fn override_shadow_casting(&mut self, shadow_casting: ShadowCasting) -> &mut Self;
+
+    /// Remove this entity's authored shadow-casting policy.
+    fn inherit_shadow_casting(&mut self) -> &mut Self;
+
+    /// Author this entity's glyph shadow mode.
+    fn override_glyph_shadow_mode(&mut self, mode: GlyphShadowMode) -> &mut Self;
+
+    /// Remove this entity's authored glyph shadow mode.
+    fn inherit_glyph_shadow_mode(&mut self) -> &mut Self;
 
     /// Author this entity's sidedness.
     fn override_sidedness(&mut self, sidedness: Sidedness) -> &mut Self;
@@ -119,6 +133,22 @@ impl CascadeEntityCommandsExt for EntityCommands<'_> {
     }
 
     fn inherit_lighting(&mut self) -> &mut Self { remove_cascade_override::<Lighting>(self) }
+
+    fn override_shadow_casting(&mut self, shadow_casting: ShadowCasting) -> &mut Self {
+        apply_cascade_override(self, shadow_casting)
+    }
+
+    fn inherit_shadow_casting(&mut self) -> &mut Self {
+        remove_cascade_override::<ShadowCasting>(self)
+    }
+
+    fn override_glyph_shadow_mode(&mut self, mode: GlyphShadowMode) -> &mut Self {
+        apply_cascade_override(self, mode)
+    }
+
+    fn inherit_glyph_shadow_mode(&mut self) -> &mut Self {
+        remove_cascade_override::<GlyphShadowMode>(self)
+    }
 
     fn override_sidedness(&mut self, sidedness: Sidedness) -> &mut Self {
         apply_cascade_override(self, sidedness)
@@ -197,6 +227,24 @@ pub fn resolved_hdr_text_coverage_bias(world: &World, entity: Entity) -> f32 {
 #[must_use]
 pub fn resolved_lighting(world: &World, entity: Entity) -> Lighting {
     resolved_cascade::<Lighting>(world, entity)
+}
+
+/// Resolve an entity's current shadow-casting policy.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_shadow_casting(world: &World, entity: Entity) -> ShadowCasting {
+    resolved_cascade::<ShadowCasting>(world, entity)
+}
+
+/// Resolve an entity's current glyph shadow mode.
+///
+/// Reads the cached resolved value when present. If the entity has not been
+/// seeded yet, this falls back to the same parent walk used by propagation.
+#[must_use]
+pub fn resolved_glyph_shadow_mode(world: &World, entity: Entity) -> GlyphShadowMode {
+    resolved_cascade::<GlyphShadowMode>(world, entity)
 }
 
 /// Resolve an entity's current sidedness.

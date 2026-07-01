@@ -73,6 +73,7 @@ use crate::cascade::SdfMaterial;
 use crate::constants::EMBEDDED_SDF_PANEL_BATCH_SHADER_PATH;
 use crate::layout::DrawBatchFamily;
 use crate::layout::Lighting;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
@@ -387,7 +388,7 @@ impl ResolvedSdfBatchRecord {
             z_index_rank: surface.draw_depth.z_index_rank(),
             batch_family: DrawBatchFamily::SdfSurface,
             layers: BatchRenderLayers(surface.render_layers.clone()),
-            shadow: surface.surface_shadow.into(),
+            shadow: surface.shadow_casting.into(),
             contiguous_drawn_run,
             pipeline_compatibility: materials.pipeline_compatibility,
             resource_compatibility: materials.resource_compatibility.clone(),
@@ -425,7 +426,7 @@ impl ResolvedSdfBatchRecord {
             clip_depth_nudge: surface.draw_depth.clip_depth_nudge().get()
                 - opaque_fill_depth_push(
                     materials.pipeline_compatibility.alpha,
-                    surface.surface_shadow.into(),
+                    surface.shadow_casting.into(),
                 ),
             oit_depth_offset: surface.draw_depth.oit_depth_offset().get(),
             flags: 0,
@@ -1141,7 +1142,7 @@ impl SdfRunCompatibility {
             z_index:                surface.draw_depth.z_index(),
             z_index_rank:           surface.draw_depth.z_index_rank(),
             layers:                 BatchRenderLayers(surface.render_layers.clone()),
-            shadow:                 surface.surface_shadow.into(),
+            shadow:                 surface.shadow_casting.into(),
             pipeline_compatibility: materials.pipeline_compatibility,
             resource_compatibility: materials.resource_compatibility.clone(),
         }
@@ -1214,6 +1215,7 @@ fn route_sdf_batch_records(
         Option<&Visibility>,
         Option<&Resolved<Lighting>>,
         Option<&Resolved<Sidedness>>,
+        Option<&Resolved<ShadowCasting>>,
     )>,
     mut store: ResMut<SdfBatchStore>,
 ) {
@@ -1224,8 +1226,14 @@ fn route_sdf_batch_records(
     let mut active_records = HashSet::new();
     let mut stale_panels = HashSet::new();
     for stored_surface in surfaces.surfaces() {
-        let Ok((panel, panel_layers, panel_visibility, resolved_lighting, resolved_sidedness)) =
-            panels.get(stored_surface.panel_entity())
+        let Ok((
+            _panel,
+            panel_layers,
+            panel_visibility,
+            resolved_lighting,
+            resolved_sidedness,
+            resolved_shadow_casting,
+        )) = panels.get(stored_surface.panel_entity())
         else {
             stale_panels.insert(stored_surface.panel_entity());
             continue;
@@ -1235,10 +1243,12 @@ fn route_sdf_batch_records(
         }
         let panel_lighting = resolved_lighting.map_or(lighting_default.0, |resolved| resolved.0);
         let panel_sidedness = resolved_sidedness.map_or(sidedness_default.0, |resolved| resolved.0);
+        let panel_shadow_casting =
+            resolved_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
         resolved_surfaces.push((
             stored_surface.as_resolved(
                 panel_layers.cloned().unwrap_or(RenderLayers::layer(0)),
-                panel.surface_shadow(),
+                panel_shadow_casting,
             ),
             panel_lighting,
             panel_sidedness,
@@ -1672,13 +1682,13 @@ mod tests {
     use crate::layout::RectangleSource;
     use crate::layout::RenderCommand;
     use crate::layout::RenderCommandKind;
+    use crate::layout::ShadowCasting;
     use crate::layout::Sizing;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
-    use crate::panel::SurfaceShadow;
     use crate::render::PathExtendedMaterial;
     use crate::render::material_table::FrameMaterialSlotAppend;
     use crate::render::material_table::FrameMaterialTableBuild;
@@ -3389,7 +3399,7 @@ mod tests {
             border_widths:   [0.0; 4],
             clip_rect:       Vec4::new(-1.0, -1.0, 1.0, 1.0),
             render_layers:   RenderLayers::layer(0),
-            surface_shadow:  SurfaceShadow::Off,
+            shadow_casting:  ShadowCasting::Off,
         }
     }
 

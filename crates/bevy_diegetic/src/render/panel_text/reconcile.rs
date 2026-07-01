@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::PanelTextLayout;
@@ -11,16 +12,22 @@ use super::layout::PanelTextDrawZIndex;
 use super::layout::PanelTextDrawZIndexRank;
 use crate::PanelElementId;
 use crate::cascade;
+use crate::cascade::Cascade;
+use crate::cascade::CascadeAttr;
+use crate::cascade::CascadeDefault;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
+use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
+use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
 use crate::layout::RenderCommand;
 use crate::layout::RenderCommandKind;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
@@ -48,6 +55,8 @@ struct ReusableChild<'a> {
     material:               Option<&'a Override<TextMaterial>>,
     lighting:               Option<&'a Override<Lighting>>,
     sidedness:              Option<&'a Override<Sidedness>>,
+    shadow_casting:         Option<&'a Override<ShadowCasting>>,
+    glyph_shadow_mode:      Option<&'a Override<GlyphShadowMode>>,
     hdr_text_coverage_bias: Option<&'a Override<HdrTextCoverageBias>>,
 }
 
@@ -123,6 +132,8 @@ fn collect_existing_text_children<'a>(
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
+        Option<&Override<ShadowCasting>>,
+        Option<&Override<GlyphShadowMode>>,
         Option<&Override<HdrTextCoverageBias>>,
     )>,
 ) -> HashMap<(PanelElementId, usize), ReusableChild<'a>> {
@@ -138,6 +149,8 @@ fn collect_existing_text_children<'a>(
             material,
             lighting,
             sidedness,
+            shadow_casting,
+            glyph_shadow_mode,
             hdr_text_coverage_bias,
         )) = existing_runs.get(entity)
         else {
@@ -156,6 +169,8 @@ fn collect_existing_text_children<'a>(
                 material,
                 lighting,
                 sidedness,
+                shadow_casting,
+                glyph_shadow_mode,
                 hdr_text_coverage_bias,
             },
         );
@@ -187,6 +202,8 @@ pub(super) fn reconcile_panel_text_children(
         Option<&Override<TextMaterial>>,
         Option<&Override<Lighting>>,
         Option<&Override<Sidedness>>,
+        Option<&Override<ShadowCasting>>,
+        Option<&Override<GlyphShadowMode>>,
         Option<&Override<HdrTextCoverageBias>>,
     )>,
     mut commands: Commands,
@@ -233,11 +250,7 @@ pub(super) fn reconcile_panel_text_children(
             // captured before `for_shaping()` clears them, then inserted as
             // `Override<A>` on the label. `None` means the label inherits the
             // panel value.
-            let label_alpha = config.alpha_mode();
-            let label_material = config.material().cloned();
-            let label_lighting = config.lighting();
-            let label_sidedness = config.sidedness();
-            let label_hdr_text_coverage_bias = config.hdr_text_coverage_bias();
+            let label_cascades = TextLabelCascadeOverrides::from_style(config);
             let style = config.for_shaping(Anchor::TopLeft);
             let z_index = PanelTextDrawZIndex(draw_depth.z_index());
             let z_index_rank = PanelTextDrawZIndexRank(draw_depth.z_index_rank());
@@ -268,11 +281,7 @@ pub(super) fn reconcile_panel_text_children(
                     layout: panel_text_child,
                     z_index,
                     z_index_rank,
-                    label_alpha,
-                    label_material,
-                    label_lighting,
-                    label_sidedness,
-                    label_hdr_text_coverage_bias,
+                    label_cascades,
                 });
                 reusable.entity
             } else {
@@ -284,11 +293,7 @@ pub(super) fn reconcile_panel_text_children(
                     layout: panel_text_child,
                     z_index,
                     z_index_rank,
-                    label_alpha,
-                    label_material,
-                    label_lighting,
-                    label_sidedness,
-                    label_hdr_text_coverage_bias,
+                    label_cascades,
                 })
             };
 
@@ -301,7 +306,7 @@ pub(super) fn reconcile_panel_text_children(
         }
 
         for &entity in existing_run_entities {
-            let Ok((_, _, layout, _, _, _, _, _, _, _)) = existing_runs.get(entity) else {
+            let Ok((_, _, layout, _, _, _, _, _, _, _, _, _)) = existing_runs.get(entity) else {
                 continue;
             };
             if !visited_keys.contains(&(layout.id.clone(), layout.line_index)) {
@@ -321,18 +326,14 @@ pub(super) fn reconcile_panel_text_children(
 /// threads text, style, layout, and captured cascade overrides through to a
 /// freshly spawned child.
 struct SpawnPanelTextChild<'a, 'w, 's> {
-    commands:                     &'a mut Commands<'w, 's>,
-    panel_entity:                 Entity,
-    text:                         &'a str,
-    style:                        TextStyle,
-    layout:                       PanelTextLayout,
-    z_index:                      PanelTextDrawZIndex,
-    z_index_rank:                 PanelTextDrawZIndexRank,
-    label_alpha:                  Option<AlphaMode>,
-    label_material:               Option<Handle<StandardMaterial>>,
-    label_lighting:               Option<Lighting>,
-    label_sidedness:              Option<Sidedness>,
-    label_hdr_text_coverage_bias: Option<f32>,
+    commands:       &'a mut Commands<'w, 's>,
+    panel_entity:   Entity,
+    text:           &'a str,
+    style:          TextStyle,
+    layout:         PanelTextLayout,
+    z_index:        PanelTextDrawZIndex,
+    z_index_rank:   PanelTextDrawZIndexRank,
+    label_cascades: TextLabelCascadeOverrides,
 }
 
 /// Spawns a new panel-text child under `panel_entity` and applies whichever of
@@ -347,11 +348,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
         layout,
         z_index,
         z_index_rank,
-        label_alpha,
-        label_material,
-        label_lighting,
-        label_sidedness,
-        label_hdr_text_coverage_bias,
+        label_cascades,
     } = request;
     let mut spawned = Entity::PLACEHOLDER;
     commands.entity(panel_entity).with_children(|children| {
@@ -368,21 +365,7 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
             TextRunOf(panel_entity),
         ));
         spawned = child.id();
-        if let Some(alpha_mode) = label_alpha {
-            cascade::apply_cascade_override(&mut child, TextAlpha(alpha_mode));
-        }
-        if let Some(material) = label_material {
-            cascade::apply_cascade_override(&mut child, TextMaterial(material));
-        }
-        if let Some(lighting) = label_lighting {
-            cascade::apply_cascade_override(&mut child, lighting);
-        }
-        if let Some(sidedness) = label_sidedness {
-            cascade::apply_cascade_override(&mut child, sidedness);
-        }
-        if let Some(bias) = label_hdr_text_coverage_bias {
-            cascade::apply_cascade_override(&mut child, HdrTextCoverageBias(bias));
-        }
+        sync_label_cascade_overrides(&mut child, label_cascades, None);
     });
     spawned
 }
@@ -391,18 +374,40 @@ fn spawn_panel_text_child(request: SpawnPanelTextChild<'_, '_, '_>) -> Entity {
 /// reconcile threads text, style, layout, and captured cascade overrides through
 /// to a reused child.
 struct UpdateReusedChild<'a, 'w, 's> {
-    commands:                     &'a mut Commands<'w, 's>,
-    reusable:                     ReusableChild<'a>,
-    text:                         &'a str,
-    style:                        TextStyle,
-    layout:                       PanelTextLayout,
-    z_index:                      PanelTextDrawZIndex,
-    z_index_rank:                 PanelTextDrawZIndexRank,
-    label_alpha:                  Option<AlphaMode>,
-    label_material:               Option<Handle<StandardMaterial>>,
-    label_lighting:               Option<Lighting>,
-    label_sidedness:              Option<Sidedness>,
-    label_hdr_text_coverage_bias: Option<f32>,
+    commands:       &'a mut Commands<'w, 's>,
+    reusable:       ReusableChild<'a>,
+    text:           &'a str,
+    style:          TextStyle,
+    layout:         PanelTextLayout,
+    z_index:        PanelTextDrawZIndex,
+    z_index_rank:   PanelTextDrawZIndexRank,
+    label_cascades: TextLabelCascadeOverrides,
+}
+
+/// Cascade overrides authored by one `TextStyle` before shaping clears
+/// render-only fields from the glyph-layout style.
+struct TextLabelCascadeOverrides {
+    alpha:                  Cascade<AlphaMode>,
+    material:               Cascade<Handle<StandardMaterial>>,
+    lighting:               Cascade<Lighting>,
+    sidedness:              Cascade<Sidedness>,
+    shadow_casting:         Cascade<ShadowCasting>,
+    glyph_shadow_mode:      Cascade<GlyphShadowMode>,
+    hdr_text_coverage_bias: Cascade<f32>,
+}
+
+impl TextLabelCascadeOverrides {
+    fn from_style(style: &TextStyle) -> Self {
+        Self {
+            alpha:                  style.alpha_mode(),
+            material:               style.material().cloned(),
+            lighting:               style.lighting(),
+            sidedness:              style.sidedness(),
+            shadow_casting:         style.shadow_casting(),
+            glyph_shadow_mode:      style.shadow_mode(),
+            hdr_text_coverage_bias: style.hdr_text_coverage_bias(),
+        }
+    }
 }
 
 /// Writes each component of a reused panel-text child only when it differs, so
@@ -424,11 +429,7 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
         layout,
         z_index,
         z_index_rank,
-        label_alpha,
-        label_material,
-        label_lighting,
-        label_sidedness,
-        label_hdr_text_coverage_bias,
+        label_cascades,
     } = request;
     let mut child = commands.entity(reusable.entity);
     if reusable.text.text() != text {
@@ -446,70 +447,70 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
     if *reusable.z_index_rank != z_index_rank {
         child.insert(z_index_rank);
     }
-    match label_alpha {
-        Some(alpha_mode) => {
-            let incoming = TextAlpha(alpha_mode);
-            if reusable.alpha.map(|node_override| node_override.0) != Some(incoming) {
-                cascade::apply_cascade_override(&mut child, incoming);
+    sync_label_cascade_overrides(&mut child, label_cascades, Some(reusable));
+}
+
+fn sync_label_cascade_overrides(
+    child: &mut EntityCommands<'_>,
+    label_cascades: TextLabelCascadeOverrides,
+    reusable: Option<ReusableChild<'_>>,
+) {
+    sync_cascade_override(
+        child,
+        label_cascades.alpha.map(TextAlpha),
+        reusable.and_then(|r| r.alpha),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades.material.map(TextMaterial),
+        reusable.and_then(|r| r.material),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades.lighting,
+        reusable.and_then(|r| r.lighting),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades.sidedness,
+        reusable.and_then(|r| r.sidedness),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades.shadow_casting,
+        reusable.and_then(|r| r.shadow_casting),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades.glyph_shadow_mode,
+        reusable.and_then(|r| r.glyph_shadow_mode),
+    );
+    sync_cascade_override(
+        child,
+        label_cascades
+            .hdr_text_coverage_bias
+            .map(HdrTextCoverageBias),
+        reusable.and_then(|r| r.hdr_text_coverage_bias),
+    );
+}
+
+fn sync_cascade_override<A>(
+    child: &mut EntityCommands<'_>,
+    incoming: Cascade<A>,
+    current: Option<&Override<A>>,
+) where
+    A: CascadeAttr,
+    CascadeDefault<A>: Default + Resource,
+{
+    match incoming {
+        Cascade::Override(value) => {
+            if current.map(|node_override| &node_override.0) != Some(&value) {
+                cascade::apply_cascade_override(child, value);
             }
         },
-        None => {
-            if reusable.alpha.is_some() {
-                cascade::remove_cascade_override::<TextAlpha>(&mut child);
-            }
-        },
-    }
-    match label_material {
-        Some(material) => {
-            let incoming = TextMaterial(material);
-            if reusable.material.map(|node_override| &node_override.0) != Some(&incoming) {
-                cascade::apply_cascade_override(&mut child, incoming);
-            }
-        },
-        None => {
-            if reusable.material.is_some() {
-                cascade::remove_cascade_override::<TextMaterial>(&mut child);
-            }
-        },
-    }
-    match label_lighting {
-        Some(incoming) => {
-            if reusable.lighting.map(|node_override| node_override.0) != Some(incoming) {
-                cascade::apply_cascade_override(&mut child, incoming);
-            }
-        },
-        None => {
-            if reusable.lighting.is_some() {
-                cascade::remove_cascade_override::<Lighting>(&mut child);
-            }
-        },
-    }
-    match label_sidedness {
-        Some(incoming) => {
-            if reusable.sidedness.map(|node_override| node_override.0) != Some(incoming) {
-                cascade::apply_cascade_override(&mut child, incoming);
-            }
-        },
-        None => {
-            if reusable.sidedness.is_some() {
-                cascade::remove_cascade_override::<Sidedness>(&mut child);
-            }
-        },
-    }
-    match label_hdr_text_coverage_bias {
-        Some(bias) => {
-            let incoming = HdrTextCoverageBias(bias);
-            if reusable
-                .hdr_text_coverage_bias
-                .map(|node_override| node_override.0)
-                != Some(incoming)
-            {
-                cascade::apply_cascade_override(&mut child, incoming);
-            }
-        },
-        None => {
-            if reusable.hdr_text_coverage_bias.is_some() {
-                cascade::remove_cascade_override::<HdrTextCoverageBias>(&mut child);
+        Cascade::Inherit => {
+            if current.is_some() {
+                cascade::remove_cascade_override::<A>(child);
             }
         },
     }
@@ -517,21 +518,24 @@ fn update_reused_panel_text_child(request: UpdateReusedChild<'_, '_, '_>) {
 
 /// Marker plus cached reconcile inputs for an image child entity.
 ///
-/// `reconcile_panel_image_children` compares the incoming `handle` / `tint` /
-/// `bounds` / `draw_depth` against these cached values to decide whether to
-/// skip the child, mutate its tint in place, or rebuild its mesh and material.
+/// `reconcile_panel_image_children` compares the incoming `handle`, `tint`,
+/// `bounds`, `draw_depth`, and `shadow_casting` against these cached values to
+/// decide whether to skip the child, mutate its tint/shadow state in place, or
+/// rebuild its mesh and material.
 #[derive(Component, Clone, Debug)]
 pub(super) struct PanelImageChild {
     /// Index of the source element in the layout tree (the reuse key).
-    pub element_idx: usize,
+    pub element_idx:    usize,
     /// Projected ordering values for the source image command.
-    pub draw_depth:  DrawCommandDepth,
+    pub draw_depth:     DrawCommandDepth,
     /// Image asset handle from the most recent build.
-    pub handle:      Handle<Image>,
+    pub handle:         Handle<Image>,
     /// Tint color from the most recent build.
-    pub tint:        Color,
+    pub tint:           Color,
     /// Layout bounds from the most recent build.
-    pub bounds:      BoundingBox,
+    pub bounds:         BoundingBox,
+    /// Shadow-casting policy resolved from the panel cascade for this image.
+    pub shadow_casting: ShadowCasting,
 }
 
 /// A reused image child plus the material handle reconcile mutates for a
@@ -562,8 +566,14 @@ pub(super) fn reconcile_panel_image_children(
             &DiegeticPanel,
             &ComputedDiegeticPanel,
             &PanelPrecomposeCache,
+            Option<&RenderLayers>,
+            Option<&Resolved<ShadowCasting>>,
         ),
-        Changed<ComputedDiegeticPanel>,
+        Or<(
+            Changed<ComputedDiegeticPanel>,
+            Changed<RenderLayers>,
+            Changed<Resolved<ShadowCasting>>,
+        )>,
     >,
     existing_children: Query<(
         Entity,
@@ -577,48 +587,28 @@ pub(super) fn reconcile_panel_image_children(
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
     let reconcile_start = Instant::now();
-    for (panel_entity, panel, computed, precompose_cache) in &changed_panels {
+    for (panel_entity, panel, computed, precompose_cache, panel_layers, panel_shadow_casting) in
+        &changed_panels
+    {
         let Some(result) = computed.result() else {
             continue;
         };
 
         let points_to_world = panel.points_to_world();
         let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let layer = RenderLayers::layer(0);
+        let layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
+        let shadow_casting = panel_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
 
         let clip_rects = clip::compute_clip_rects(&result.commands);
         let viewport = clip::panel_viewport(panel);
-        let image_commands: Vec<_> = result
-            .commands
-            .iter()
-            .enumerate()
-            .filter_map(|(cmd_index, cmd)| match &cmd.kind {
-                RenderCommandKind::Image { handle, tint } => {
-                    clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
-                    let draw_depth = computed.draw_order().depth_for(cmd_index)?;
-                    Some(PanelImageChild {
-                        element_idx: cmd.element_idx,
-                        draw_depth,
-                        handle: handle.clone(),
-                        tint: *tint,
-                        bounds: cmd.bounds,
-                    })
-                },
-                RenderCommandKind::PrecomposeLdr => {
-                    clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
-                    let draw_depth = computed.draw_order().depth_for(cmd_index)?;
-                    let entry = precompose_cache.entry(cmd.element_idx)?;
-                    Some(PanelImageChild {
-                        element_idx: cmd.element_idx,
-                        draw_depth,
-                        handle: entry.image.clone(),
-                        tint: Color::WHITE,
-                        bounds: cmd.bounds,
-                    })
-                },
-                _ => None,
-            })
-            .collect();
+        let image_commands = collect_panel_image_commands(
+            &result.commands,
+            computed.draw_order(),
+            precompose_cache,
+            &clip_rects,
+            viewport,
+            shadow_casting,
+        );
 
         let mut existing_by_idx: HashMap<usize, ReusableImageChild> = HashMap::new();
         for (entity, cached, material, child_of) in &existing_children {
@@ -655,13 +645,17 @@ pub(super) fn reconcile_panel_image_children(
             } else {
                 let visuals =
                     build_image_visuals(&incoming, &geometry, &mut meshes, &mut materials);
-                commands.entity(panel_entity).with_child((
-                    incoming,
-                    visuals.mesh,
-                    visuals.material,
-                    visuals.transform,
-                    layer.clone(),
-                ));
+                let shadow_casting = incoming.shadow_casting;
+                commands.entity(panel_entity).with_children(|children| {
+                    let mut child = children.spawn((
+                        incoming,
+                        visuals.mesh,
+                        visuals.material,
+                        visuals.transform,
+                        layer.clone(),
+                    ));
+                    apply_image_shadow_casting(&mut child, shadow_casting);
+                });
             }
         }
 
@@ -675,6 +669,46 @@ pub(super) fn reconcile_panel_image_children(
         .elapsed()
         .as_secs_f32()
         .mul_add(MILLISECONDS_PER_SECOND, perf.reconcile_ms);
+}
+
+fn collect_panel_image_commands(
+    commands: &[RenderCommand],
+    draw_order: &DrawOrder,
+    precompose_cache: &PanelPrecomposeCache,
+    clip_rects: &[Option<BoundingBox>],
+    viewport: BoundingBox,
+    shadow_casting: ShadowCasting,
+) -> Vec<PanelImageChild> {
+    commands
+        .iter()
+        .enumerate()
+        .filter_map(|(cmd_index, cmd)| {
+            clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
+            let draw_depth = draw_order.depth_for(cmd_index)?;
+            match &cmd.kind {
+                RenderCommandKind::Image { handle, tint } => Some(PanelImageChild {
+                    element_idx: cmd.element_idx,
+                    draw_depth,
+                    handle: handle.clone(),
+                    tint: *tint,
+                    bounds: cmd.bounds,
+                    shadow_casting,
+                }),
+                RenderCommandKind::PrecomposeLdr => {
+                    let entry = precompose_cache.entry(cmd.element_idx)?;
+                    Some(PanelImageChild {
+                        element_idx: cmd.element_idx,
+                        draw_depth,
+                        handle: entry.image.clone(),
+                        tint: Color::WHITE,
+                        bounds: cmd.bounds,
+                        shadow_casting,
+                    })
+                },
+                _ => None,
+            }
+        })
+        .collect()
 }
 
 /// Panel-to-world placement factors for one reconcile pass.
@@ -707,28 +741,48 @@ fn reconcile_existing_image(
     let visuals_unchanged = cached.handle == incoming.handle
         && cached.draw_depth == incoming.draw_depth
         && bounds_bits(&cached.bounds) == bounds_bits(&incoming.bounds);
+    let tint_changed = cached.tint != incoming.tint;
+    let shadow_changed = cached.shadow_casting != incoming.shadow_casting;
 
     if visuals_unchanged {
-        if cached.tint == incoming.tint {
+        let mut entity_commands = commands.entity(reusable.entity);
+        entity_commands.insert(layer.clone());
+        apply_image_shadow_casting(&mut entity_commands, incoming.shadow_casting);
+        if !tint_changed && !shadow_changed {
             return;
         }
-        if let Some(mut material) = materials.get_mut(&reusable.material.0)
+        if tint_changed
+            && let Some(mut material) = materials.get_mut(&reusable.material.0)
             && material.base_color != incoming.tint
         {
             material.base_color = incoming.tint;
         }
-        commands.entity(reusable.entity).insert(incoming);
+        entity_commands.insert(incoming);
         return;
     }
 
     let visuals = build_image_visuals(&incoming, geometry, meshes, materials);
-    commands.entity(reusable.entity).insert((
+    let shadow_casting = incoming.shadow_casting;
+    let mut entity_commands = commands.entity(reusable.entity);
+    entity_commands.insert((
         incoming,
         visuals.mesh,
         visuals.material,
         visuals.transform,
         layer.clone(),
     ));
+    apply_image_shadow_casting(&mut entity_commands, shadow_casting);
+}
+
+fn apply_image_shadow_casting(child: &mut EntityCommands<'_>, shadow_casting: ShadowCasting) {
+    match shadow_casting {
+        ShadowCasting::On => {
+            child.remove::<NotShadowCaster>();
+        },
+        ShadowCasting::Off => {
+            child.insert(NotShadowCaster);
+        },
+    }
 }
 
 /// Builds the rectangle mesh, tinted-texture material, and panel-local

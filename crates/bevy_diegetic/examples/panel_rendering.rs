@@ -12,6 +12,7 @@ use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
 use bevy_diegetic::Border;
+use bevy_diegetic::Cascade;
 use bevy_diegetic::ChildDivider;
 use bevy_diegetic::CornerRadius;
 use bevy_diegetic::DiegeticPanel;
@@ -278,8 +279,8 @@ fn cycle_lighting_preset(
     };
 
     for mut panel in &mut panels {
-        *panel.material_mut() = Some(source_material.clone());
-        *panel.text_material_mut() = Some(source_material.clone());
+        *panel.material_mut() = Cascade::Override(source_material.clone());
+        *panel.text_material_mut() = Cascade::Override(source_material.clone());
     }
 
     // Restore saved illuminance for lights-on, zero for lights-off.

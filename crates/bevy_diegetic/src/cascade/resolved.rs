@@ -14,7 +14,9 @@ use private::Sealed;
 use super::constants::CASCADE_ATTRIBUTE_BYTES;
 use super::constants::CASCADE_DEPTH_CAP;
 use super::defaults::CascadeDefault;
+use crate::layout::GlyphShadowMode;
 use crate::layout::Lighting;
+use crate::layout::ShadowCasting;
 use crate::layout::Sidedness;
 use crate::layout::Unit;
 use crate::render::AntiAlias;
@@ -190,6 +192,12 @@ const _: () = assert!(size_of::<ShapeMaterial>() <= CASCADE_ATTRIBUTE_BYTES);
 // screen-panel construction bridge overrides it to `Unlit`. Consumed by both
 // glyph runs and panel lines.
 cascade_attr!(existing Lighting, default = Lighting::Lit);
+// Diegetic shadow-casting cascade attribute. Global default follows Bevy mesh
+// behavior: rendered content casts shadows unless a local override opts out.
+cascade_attr!(existing ShadowCasting, default = ShadowCasting::On);
+// Glyph-shadow silhouette cascade attribute. Text casts its glyph silhouette
+// when shadow casting is enabled unless a local override opts out.
+cascade_attr!(existing GlyphShadowMode, default = GlyphShadowMode::Cast);
 // Sidedness cascade attribute. Global default is `BothSides` (world text);
 // the screen-panel construction bridge overrides it to `FrontOnly`. Consumed by
 // both glyph runs and panel lines.
