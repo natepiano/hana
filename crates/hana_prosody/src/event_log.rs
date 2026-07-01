@@ -89,7 +89,8 @@ impl RuntimeLog {
     pub fn new(paths: RuntimePaths) -> io::Result<Self> {
         paths.prepare()?;
         normalize_inbox(&paths.inbox)?;
-        Ok(Self { paths, seq: 0 })
+        let seq = max_transcript_seq(&paths.inbox)?;
+        Ok(Self { paths, seq })
     }
 
     /// Runtime paths.
@@ -164,14 +165,31 @@ fn normalize_inbox(path: &Path) -> io::Result<()> {
     fs::write(path, normalized)
 }
 
-fn is_transcript_line(line: &str) -> bool {
+fn is_transcript_line(line: &str) -> bool { transcript_seq(line).is_some() }
+
+fn max_transcript_seq(path: &Path) -> io::Result<u64> {
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(0),
+        Err(error) => return Err(error),
+    };
+
+    Ok(contents
+        .lines()
+        .filter_map(transcript_seq)
+        .max()
+        .unwrap_or(0))
+}
+
+fn transcript_seq(line: &str) -> Option<u64> {
     let Ok(value) = serde_json::from_str::<Value>(line) else {
-        return false;
+        return None;
     };
     value
         .get("kind")
         .and_then(Value::as_str)
-        .is_some_and(|kind| kind == "transcript_committed")
+        .filter(|kind| *kind == "transcript_committed")?;
+    Some(value.get("seq").and_then(Value::as_u64).unwrap_or(0))
 }
 
 /// Current Unix timestamp in milliseconds.
@@ -211,8 +229,10 @@ mod tests {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
 
+    use super::RuntimeLog;
     use super::RuntimePaths;
     use super::default_runtime_dir_from;
+    use super::max_transcript_seq;
     use super::normalize_inbox;
 
     static TEST_DIR_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -255,6 +275,26 @@ mod tests {
             std::fs::read_to_string(&inbox)?,
             "{\"kind\":\"transcript_committed\",\"text\":\"make it glow\"}\n"
         );
+        std::fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    #[test]
+    fn runtime_log_next_seq_continues_existing_inbox() -> Result<(), Box<dyn std::error::Error>> {
+        let dir = temp_test_dir();
+        std::fs::create_dir_all(&dir)?;
+        std::fs::write(
+            dir.join("inbox.jsonl"),
+            concat!(
+                "{\"kind\":\"transcript_committed\",\"seq\":3,\"text\":\"first\"}\n",
+                "{\"kind\":\"transcript_committed\",\"seq\":8,\"text\":\"latest\"}\n"
+            ),
+        )?;
+
+        let mut log = RuntimeLog::new(RuntimePaths::new(&dir))?;
+
+        assert_eq!(max_transcript_seq(&dir.join("inbox.jsonl"))?, 8);
+        assert_eq!(log.next_seq(), 9);
         std::fs::remove_dir_all(dir)?;
         Ok(())
     }

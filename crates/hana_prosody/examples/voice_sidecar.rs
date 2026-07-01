@@ -30,6 +30,11 @@ use bevy_diegetic::TextWrap;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_remote::BrpError;
+use bevy_remote::BrpResult;
+use bevy_remote::RemoteMethodSystemId;
+use bevy_remote::RemoteMethods;
+use bevy_remote::error_codes;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::CubeFacePanelStyle;
@@ -49,6 +54,9 @@ use hana_prosody::TranscriptionOutcome;
 use hana_prosody::now_unix_millis;
 use hana_prosody::spawn_transcription;
 use hana_prosody::write_wav;
+use serde::Deserialize;
+use serde_json::Value as JsonValue;
+use serde_json::json;
 
 const TITLE: &str = "Hana Prosody";
 const SPACE_CONTROL: &str = "Space Record/Send";
@@ -79,11 +87,13 @@ const FIELD_EVENT: &str = "event";
 const FIELD_TRANSCRIPT: &str = "transcript";
 const FIELD_MIC: &str = "mic";
 const FIELD_QUEUE: &str = "queue";
+const VOICE_RUNTIME_METHOD: &str = "hana_voice/runtime";
+const VOICE_SET_RUNTIME_METHOD: &str = "hana_voice/set_runtime";
 
 fn main() {
     let runtime = SidecarRuntime::new(RuntimePaths::from_env_or_default());
 
-    fairy_dust::sprinkle_example()
+    let mut app = fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_hdr()
         .with_save_window_position()
@@ -112,8 +122,9 @@ fn main() {
                 .with_anchor(Anchor::TopLeft)
                 .control(SPACE_CONTROL),
         )
-        .insert_resource(runtime)
-        .add_systems(Startup, spawn_status_panel)
+        .insert_resource(runtime);
+    register_runtime_brp_methods(app.app_mut());
+    app.add_systems(Startup, spawn_status_panel)
         .add_systems(PostStartup, spawn_cube_prompt_faces)
         .add_systems(
             Update,
@@ -198,6 +209,15 @@ impl SidecarRuntime {
 
     fn has_transcription_work(&self) -> bool { self.transcription_work_count() > 0 }
 
+    fn set_paths(&mut self, paths: RuntimePaths) -> Result<(), String> {
+        let log = RuntimeLog::new(paths).map_err(|error| error.to_string())?;
+        self.log = Ok(log);
+        if let Some(paths) = self.paths() {
+            self.last_status = format!("Runtime: {}", paths.root().display());
+        }
+        Ok(())
+    }
+
     fn clear_error_text(&mut self) {
         if self
             .last_text
@@ -220,6 +240,103 @@ impl SidecarRuntime {
         self.recording.as_ref().map_or(0, |recording| {
             duration_ms(recording.samples.len(), self.sample_rate)
         })
+    }
+}
+
+#[derive(Deserialize)]
+struct SetRuntimeParams {
+    run_dir: PathBuf,
+}
+
+fn register_runtime_brp_methods(app: &mut App) {
+    let runtime_system_id = app.world_mut().register_system(voice_runtime_handler);
+    let set_runtime_system_id = app.world_mut().register_system(voice_set_runtime_handler);
+    let Some(mut remote_methods) = app.world_mut().get_resource_mut::<RemoteMethods>() else {
+        warn!(
+            "{VOICE_RUNTIME_METHOD} and {VOICE_SET_RUNTIME_METHOD} were not registered because Bevy Remote is unavailable"
+        );
+        return;
+    };
+
+    remote_methods.insert(
+        VOICE_RUNTIME_METHOD,
+        RemoteMethodSystemId::Instant(runtime_system_id),
+    );
+    remote_methods.insert(
+        VOICE_SET_RUNTIME_METHOD,
+        RemoteMethodSystemId::Instant(set_runtime_system_id),
+    );
+}
+
+fn voice_runtime_handler(
+    In(params): In<Option<JsonValue>>,
+    runtime: Res<SidecarRuntime>,
+) -> BrpResult {
+    if params.as_ref().is_some_and(|params| !params.is_object()) {
+        return Err(invalid_params("runtime params must be an object"));
+    }
+
+    Ok(runtime_json(&runtime))
+}
+
+fn voice_set_runtime_handler(
+    In(params): In<Option<JsonValue>>,
+    mut runtime: ResMut<SidecarRuntime>,
+) -> BrpResult {
+    let params = params.ok_or_else(|| invalid_params("missing set_runtime params"))?;
+    let SetRuntimeParams { run_dir } = serde_json::from_value(params).map_err(invalid_params)?;
+    if runtime.recording.is_some() {
+        return Err(invalid_params(
+            "cannot change voice runtime while recording is active",
+        ));
+    }
+    if runtime.has_transcription_work() {
+        return Err(invalid_params(
+            "cannot change voice runtime while transcription work is pending",
+        ));
+    }
+
+    let previous = runtime.paths().map(|paths| paths.root().to_path_buf());
+    let paths = RuntimePaths::new(run_dir);
+    runtime.set_paths(paths).map_err(invalid_params)?;
+    let changed = runtime
+        .paths()
+        .is_some_and(|paths| previous.as_deref() != Some(paths.root()));
+    let mut response = runtime_json(&runtime);
+    if let Some(response) = response.as_object_mut() {
+        response.insert("changed".to_string(), json!(changed));
+    }
+    Ok(response)
+}
+
+fn runtime_json(runtime: &SidecarRuntime) -> JsonValue {
+    let Some(paths) = runtime.paths() else {
+        return json!({
+            "kind": "hana_voice_runtime",
+            "version": 1,
+            "configured": false,
+            "error": runtime.last_status,
+        });
+    };
+
+    json!({
+        "kind": "hana_voice_runtime",
+        "version": 1,
+        "configured": true,
+        "root": paths.root().to_string_lossy(),
+        "inbox": paths.inbox().to_string_lossy(),
+        "audio_dir": paths.audio_dir().to_string_lossy(),
+        "recording": runtime.recording.is_some(),
+        "pending_transcriptions": runtime.pending.len(),
+        "queued_transcriptions": runtime.queued.len(),
+    })
+}
+
+fn invalid_params(error: impl ToString) -> BrpError {
+    BrpError {
+        code:    error_codes::INVALID_PARAMS,
+        message: error.to_string(),
+        data:    None,
     }
 }
 

@@ -3274,6 +3274,7 @@ dependencies = [
  "bevy_diegetic",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
+ "bevy_remote",
  "cpal 0.18.1",
  "fairy_dust",
  "hound",

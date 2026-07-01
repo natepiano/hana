@@ -12,16 +12,17 @@ version    = "0.0.1"
 
 [workspace.dependencies]
 bevy = { version = "0.19.0", default-features = false }
-hana_conduit = { path = "crates/hana_conduit" }
 bevy_diagnostic = "0.19.0"
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
 ] }
 bevy_kana = { path = "crates/bevy_kana" }
+bevy_remote = "0.19.0"
 bevy_render = "0.19.0"
 bitflags = "2"
 bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
+hana_conduit = { path = "crates/hana_conduit" }
 image = { version = "0.25", default-features = false }
 nonmax = "0.5"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
@@ -35,11 +36,11 @@ bevy_brp_extras = "0.20.1"
 bevy_clerestory = { path = "crates/bevy_clerestory" }
 bevy_diegetic   = { path = "crates/bevy_diegetic" }
 bevy_lagrange   = { path = "crates/bevy_lagrange" }
-hana_valence    = { path = "crates/hana_valence" }
 clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }
 fairy_dust      = { path = "crates/fairy_dust" }
 float-cmp       = "0.10.0"
+hana_valence    = { path = "crates/hana_valence" }
 
 [workspace.lints.clippy]
 # Our strict lints

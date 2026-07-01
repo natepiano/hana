@@ -16,7 +16,9 @@ presses define the audio window.
 Committed transcripts are appended to `../hana/run/art/inbox.jsonl` by default.
 Temporary WAV files live under `../hana/run/art/audio` while Apple Speech is
 working, and successful transcripts remove their WAV file after the inbox write
-succeeds. Set `HANA_ART_RUN_DIR` to redirect these paths.
+succeeds. Set `HANA_ART_RUN_DIR` before launch to choose these paths. A running
+sidecar can also be redirected over BRP with `hana_voice/set_runtime`, which is
+what Hana's `scripts/tell_me.py` uses when it reuses an already-open sidecar.
 
 On macOS, Apple Speech is the STT backend. Set `HANA_STT_LOCALE` to choose a
 recognizer locale, and set `HANA_STT_REQUIRE_ON_DEVICE=1` when the loop must
