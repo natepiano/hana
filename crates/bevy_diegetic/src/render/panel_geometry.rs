@@ -1022,8 +1022,18 @@ mod tests {
         // and OIT depth still put the higher command index in front
         // (reverse-Z, positive = closer).
         assert_eq!(
-            below.draw_depth.screen_depth_bias().get().to_bits(),
-            above.draw_depth.screen_depth_bias().get().to_bits()
+            below
+                .draw_depth
+                .z_index_rank()
+                .screen_depth_bias()
+                .get()
+                .to_bits(),
+            above
+                .draw_depth
+                .z_index_rank()
+                .screen_depth_bias()
+                .get()
+                .to_bits()
         );
         assert!(
             below.draw_depth.clip_depth_nudge().get() < above.draw_depth.clip_depth_nudge().get()

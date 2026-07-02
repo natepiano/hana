@@ -24,7 +24,6 @@ use self::batching::update_panel_text_batches;
 use self::batching::write_batch_run_transforms;
 use self::glyph_cascade::seed_panel_text_child_glyph;
 pub use self::layout::PanelTextLayout;
-use self::reconcile::reconcile_panel_image_children;
 use self::reconcile::reconcile_panel_text_children;
 pub use self::relationship::PanelTextRuns;
 pub use self::relationship::TextRunOf;
@@ -77,8 +76,8 @@ pub(super) struct PreparedPanelText {
 
 /// Plugin that adds text rendering for diegetic panels.
 ///
-/// Reconciles panel text/image children, runs text shaping for panel text, and
-/// builds the glyph meshes.
+/// Reconciles panel text children, runs text shaping for panel text, and builds
+/// the glyph meshes.
 pub(super) struct TextRenderPlugin;
 
 impl Plugin for TextRenderPlugin {
@@ -105,13 +104,9 @@ impl Plugin for TextRenderPlugin {
                 reconcile_panel_text_children
                     .in_set(PanelChildSystems::Build)
                     .after(precompose::ensure_panel_precompose_caches),
-                // After the text reconcile so the two passes' shared
-                // `DiegeticPerfStats::reconcile_ms` reset-then-accumulate
-                // sequence is deterministic.
-                reconcile_panel_image_children
-                    .in_set(PanelChildSystems::Build)
-                    .after(reconcile_panel_text_children)
-                    .after(precompose::ensure_panel_precompose_caches),
+                // `reconcile_panel_text_children` is the sole writer for
+                // `DiegeticPerfStats::reconcile_ms`; `ImageBatchPlugin` routes
+                // image records without adding to this text-child timing.
                 shape_panel_text_children.after(reconcile_panel_text_children),
                 world_text::emit_world_text_ready.after(VisibilitySystems::CalculateBounds),
             ),

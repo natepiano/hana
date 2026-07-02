@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
-use bevy::camera::visibility::RenderLayers;
-use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 
 use super::PanelTextLayout;
@@ -17,7 +15,6 @@ use crate::cascade::CascadeAttr;
 use crate::cascade::CascadeDefault;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
-use crate::cascade::Resolved;
 use crate::cascade::TextAlpha;
 use crate::cascade::TextMaterial;
 use crate::constants::MILLISECONDS_PER_SECOND;
@@ -33,9 +30,7 @@ use crate::layout::TextStyle;
 use crate::panel::ComputedDiegeticPanel;
 use crate::panel::DiegeticPanel;
 use crate::panel::DiegeticPerfStats;
-use crate::panel::PanelPrecomposeCache;
 use crate::render::clip;
-use crate::render::constants::TEXT_Z_OFFSET;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrder;
 use crate::render::world_text::TextContent;
@@ -180,8 +175,9 @@ fn collect_existing_text_children<'a>(
 
 /// Reconciles [`TextContent`] children for each changed [`ComputedDiegeticPanel`].
 ///
-/// Resets [`DiegeticPerfStats::reconcile_ms`] to this pass's wall time each
-/// frame; the image reconcile (ordered after) accumulates onto it.
+/// Writes [`DiegeticPerfStats::reconcile_ms`] with this pass's wall time.
+/// `route_image_batch_records` owns image command routing and does not add to
+/// this text-child timing.
 pub(super) fn reconcile_panel_text_children(
     mut changed_panels: Query<
         (
@@ -516,327 +512,6 @@ fn sync_cascade_override<A>(
     }
 }
 
-/// Marker plus cached reconcile inputs for an image child entity.
-///
-/// `reconcile_panel_image_children` compares the incoming `handle`, `tint`,
-/// `bounds`, `draw_depth`, and `shadow_casting` against these cached values to
-/// decide whether to skip the child, mutate its tint/shadow state in place, or
-/// rebuild its mesh and material.
-#[derive(Component, Clone, Debug)]
-pub(super) struct PanelImageChild {
-    /// Index of the source element in the layout tree (the reuse key).
-    pub element_idx:    usize,
-    /// Projected ordering values for the source image command.
-    pub draw_depth:     DrawCommandDepth,
-    /// Image asset handle from the most recent build.
-    pub handle:         Handle<Image>,
-    /// Tint color from the most recent build.
-    pub tint:           Color,
-    /// Layout bounds from the most recent build.
-    pub bounds:         BoundingBox,
-    /// Shadow-casting policy resolved from the panel cascade for this image.
-    pub shadow_casting: ShadowCasting,
-}
-
-/// A reused image child plus the material handle reconcile mutates for a
-/// tint-only change. References borrow the `existing_children` query for one
-/// reconcile pass.
-#[derive(Clone, Copy)]
-struct ReusableImageChild<'a> {
-    entity:   Entity,
-    cached:   &'a PanelImageChild,
-    material: &'a MeshMaterial3d<StandardMaterial>,
-}
-
-/// Mesh, material, and transform for one image child.
-struct ImageVisuals {
-    mesh:      Mesh3d,
-    material:  MeshMaterial3d<StandardMaterial>,
-    transform: Transform,
-}
-
-/// Reconciles image children for each changed [`ComputedDiegeticPanel`].
-///
-/// Accumulates onto [`DiegeticPerfStats::reconcile_ms`]; the text reconcile
-/// (ordered first) resets it each frame.
-pub(super) fn reconcile_panel_image_children(
-    changed_panels: Query<
-        (
-            Entity,
-            &DiegeticPanel,
-            &ComputedDiegeticPanel,
-            &PanelPrecomposeCache,
-            Option<&RenderLayers>,
-            Option<&Resolved<ShadowCasting>>,
-        ),
-        Or<(
-            Changed<ComputedDiegeticPanel>,
-            Changed<RenderLayers>,
-            Changed<Resolved<ShadowCasting>>,
-        )>,
-    >,
-    existing_children: Query<(
-        Entity,
-        &PanelImageChild,
-        &MeshMaterial3d<StandardMaterial>,
-        &ChildOf,
-    )>,
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut perf: ResMut<DiegeticPerfStats>,
-) {
-    let reconcile_start = Instant::now();
-    for (panel_entity, panel, computed, precompose_cache, panel_layers, panel_shadow_casting) in
-        &changed_panels
-    {
-        let Some(result) = computed.result() else {
-            continue;
-        };
-
-        let points_to_world = panel.points_to_world();
-        let (anchor_x, anchor_y) = panel.anchor_offsets();
-        let layer = panel_layers.cloned().unwrap_or(RenderLayers::layer(0));
-        let shadow_casting = panel_shadow_casting.map_or(ShadowCasting::On, |resolved| resolved.0);
-
-        let clip_rects = clip::compute_clip_rects(&result.commands);
-        let viewport = clip::panel_viewport(panel);
-        let image_commands = collect_panel_image_commands(
-            &result.commands,
-            computed.draw_order(),
-            precompose_cache,
-            &clip_rects,
-            viewport,
-            shadow_casting,
-        );
-
-        let mut existing_by_idx: HashMap<usize, ReusableImageChild> = HashMap::new();
-        for (entity, cached, material, child_of) in &existing_children {
-            if child_of.parent() == panel_entity {
-                existing_by_idx.insert(
-                    cached.element_idx,
-                    ReusableImageChild {
-                        entity,
-                        cached,
-                        material,
-                    },
-                );
-            }
-        }
-
-        let mut visited_indices: Vec<usize> = Vec::new();
-        for incoming in image_commands {
-            visited_indices.push(incoming.element_idx);
-            let geometry = ImageGeometry {
-                points_to_world,
-                anchor_x,
-                anchor_y,
-            };
-            if let Some(reusable) = existing_by_idx.get(&incoming.element_idx).copied() {
-                reconcile_existing_image(
-                    &mut commands,
-                    &mut meshes,
-                    &mut materials,
-                    reusable,
-                    incoming,
-                    &geometry,
-                    &layer,
-                );
-            } else {
-                let visuals =
-                    build_image_visuals(&incoming, &geometry, &mut meshes, &mut materials);
-                let shadow_casting = incoming.shadow_casting;
-                commands.entity(panel_entity).with_children(|children| {
-                    let mut child = children.spawn((
-                        incoming,
-                        visuals.mesh,
-                        visuals.material,
-                        visuals.transform,
-                        layer.clone(),
-                    ));
-                    apply_image_shadow_casting(&mut child, shadow_casting);
-                });
-            }
-        }
-
-        for (entity, cached, _, child_of) in &existing_children {
-            if child_of.parent() == panel_entity && !visited_indices.contains(&cached.element_idx) {
-                commands.entity(entity).despawn();
-            }
-        }
-    }
-    perf.reconcile_ms = reconcile_start
-        .elapsed()
-        .as_secs_f32()
-        .mul_add(MILLISECONDS_PER_SECOND, perf.reconcile_ms);
-}
-
-fn collect_panel_image_commands(
-    commands: &[RenderCommand],
-    draw_order: &DrawOrder,
-    precompose_cache: &PanelPrecomposeCache,
-    clip_rects: &[Option<BoundingBox>],
-    viewport: BoundingBox,
-    shadow_casting: ShadowCasting,
-) -> Vec<PanelImageChild> {
-    commands
-        .iter()
-        .enumerate()
-        .filter_map(|(cmd_index, cmd)| {
-            if cmd.kind.draw_batch_family().is_some() {
-                return None;
-            }
-            clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
-            let draw_depth = draw_order.depth_for(cmd_index)?;
-            match &cmd.kind {
-                RenderCommandKind::Image { handle, tint } => Some(PanelImageChild {
-                    element_idx: cmd.element_idx,
-                    draw_depth,
-                    handle: handle.clone(),
-                    tint: *tint,
-                    bounds: cmd.bounds,
-                    shadow_casting,
-                }),
-                RenderCommandKind::PrecomposeLdr => {
-                    let entry = precompose_cache.entry(cmd.element_idx)?;
-                    Some(PanelImageChild {
-                        element_idx: cmd.element_idx,
-                        draw_depth,
-                        handle: entry.image.clone(),
-                        tint: Color::WHITE,
-                        bounds: cmd.bounds,
-                        shadow_casting,
-                    })
-                },
-                _ => None,
-            }
-        })
-        .collect()
-}
-
-/// Panel-to-world placement factors for one reconcile pass.
-struct ImageGeometry {
-    points_to_world: f32,
-    anchor_x:        f32,
-    anchor_y:        f32,
-}
-
-/// Updates one reused image child against its cached inputs: skips it when
-/// nothing changed, mutates `base_color` in place on a tint-only change, or
-/// rebuilds its mesh and material when the handle, bounds, or command depth
-/// moved.
-///
-/// Image tint has no cascade, so this comparison is the only no-op suppressor.
-/// Because `materials.get_mut` marks the asset modified on access, the tint
-/// branch is reached only when the cached tint actually differs. A `draw_depth`
-/// move still rebuilds the image visual; same-z-index command-index shifts keep
-/// the same material depth bias, but z-index-rank changes do not.
-fn reconcile_existing_image(
-    commands: &mut Commands,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-    reusable: ReusableImageChild,
-    incoming: PanelImageChild,
-    geometry: &ImageGeometry,
-    layer: &RenderLayers,
-) {
-    let cached = reusable.cached;
-    let visuals_unchanged = cached.handle == incoming.handle
-        && cached.draw_depth == incoming.draw_depth
-        && bounds_bits(&cached.bounds) == bounds_bits(&incoming.bounds);
-    let tint_changed = cached.tint != incoming.tint;
-    let shadow_changed = cached.shadow_casting != incoming.shadow_casting;
-
-    if visuals_unchanged {
-        let mut entity_commands = commands.entity(reusable.entity);
-        entity_commands.insert(layer.clone());
-        apply_image_shadow_casting(&mut entity_commands, incoming.shadow_casting);
-        if !tint_changed && !shadow_changed {
-            return;
-        }
-        if tint_changed
-            && let Some(mut material) = materials.get_mut(&reusable.material.0)
-            && material.base_color != incoming.tint
-        {
-            material.base_color = incoming.tint;
-        }
-        entity_commands.insert(incoming);
-        return;
-    }
-
-    let visuals = build_image_visuals(&incoming, geometry, meshes, materials);
-    let shadow_casting = incoming.shadow_casting;
-    let mut entity_commands = commands.entity(reusable.entity);
-    entity_commands.insert((
-        incoming,
-        visuals.mesh,
-        visuals.material,
-        visuals.transform,
-        layer.clone(),
-    ));
-    apply_image_shadow_casting(&mut entity_commands, shadow_casting);
-}
-
-fn apply_image_shadow_casting(child: &mut EntityCommands<'_>, shadow_casting: ShadowCasting) {
-    match shadow_casting {
-        ShadowCasting::On => {
-            child.remove::<NotShadowCaster>();
-        },
-        ShadowCasting::Off => {
-            child.insert(NotShadowCaster);
-        },
-    }
-}
-
-/// Builds the rectangle mesh, tinted-texture material, and panel-local
-/// transform for one image child.
-fn build_image_visuals(
-    incoming: &PanelImageChild,
-    geometry: &ImageGeometry,
-    meshes: &mut Assets<Mesh>,
-    materials: &mut Assets<StandardMaterial>,
-) -> ImageVisuals {
-    let bounds = &incoming.bounds;
-    let world_width = bounds.width * geometry.points_to_world;
-    let world_height = bounds.height * geometry.points_to_world;
-    let world_x = bounds
-        .x
-        .mul_add(geometry.points_to_world, world_width * 0.5)
-        - geometry.anchor_x;
-    let world_y = -(bounds
-        .y
-        .mul_add(geometry.points_to_world, world_height * 0.5)
-        - geometry.anchor_y);
-
-    let mesh = meshes.add(Rectangle::new(world_width, world_height));
-    let material = materials.add(StandardMaterial {
-        base_color: incoming.tint,
-        base_color_texture: Some(incoming.handle.clone()),
-        unlit: true,
-        double_sided: true,
-        cull_mode: None,
-        alpha_mode: AlphaMode::Blend,
-        depth_bias: incoming.draw_depth.screen_depth_bias().get(),
-        ..default()
-    });
-
-    ImageVisuals {
-        mesh:      Mesh3d(mesh),
-        material:  MeshMaterial3d(material),
-        transform: Transform::from_xyz(world_x, world_y, TEXT_Z_OFFSET),
-    }
-}
-
-/// A [`BoundingBox`]'s four floats as raw bits for exact comparison.
-const fn bounds_bits(bounds: &BoundingBox) -> [u32; 4] {
-    [
-        bounds.x.to_bits(),
-        bounds.y.to_bits(),
-        bounds.width.to_bits(),
-        bounds.height.to_bits(),
-    ]
-}
-
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -860,13 +535,8 @@ mod tests {
     use crate::cascade::TextAlpha;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::BoundingBox;
-    use crate::layout::DrawZIndex;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
-    use crate::layout::RectangleSource;
-    use crate::layout::RenderCommand;
-    use crate::layout::RenderCommandKind;
-    use crate::layout::ShadowCasting;
     use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -875,24 +545,11 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
-    use crate::panel::PanelPrecomposeCache;
-    use crate::panel::PrecomposeCacheEntry;
-    use crate::render::clip;
     use crate::render::constants::LAYER_DEPTH_BIAS;
-    use crate::render::draw_order::DrawOrder;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
-
-    const BACKGROUND_ELEMENT_INDEX: usize = 0;
-    const IMAGE_ELEMENT_INDEX: usize = 1;
-    const PRECOMPOSE_CAMERA_BITS: u64 = 2;
-    const PRECOMPOSE_ELEMENT_INDEX: usize = 2;
-    const PRECOMPOSE_HELPER_BITS: u64 = 1;
-    const TEST_BOUNDS_SIZE: f32 = 10.0;
-    const TEST_VIEWPORT_SIZE: f32 = 100.0;
-    const TEST_Z_INDEX: DrawZIndex = DrawZIndex(0);
 
     /// Records which reused children had each gated component rewritten in the
     /// most recent reconcile pass, so a test can assert an unchanged run stays
@@ -1456,88 +1113,5 @@ mod tests {
             baseline,
             "a no-op set_text must not re-invoke MeasureTextFn",
         );
-    }
-
-    #[test]
-    fn image_batch_family_commands_do_not_spawn_legacy_children() {
-        let commands = vec![
-            background_command(BACKGROUND_ELEMENT_INDEX),
-            image_command(IMAGE_ELEMENT_INDEX),
-            precompose_command(PRECOMPOSE_ELEMENT_INDEX),
-        ];
-        let draw_order = DrawOrder::from_commands(&commands);
-        let clip_rects = clip::compute_clip_rects(&commands);
-        let mut precompose_cache = PanelPrecomposeCache::default();
-        precompose_cache.entries_mut().insert(
-            PRECOMPOSE_ELEMENT_INDEX,
-            PrecomposeCacheEntry {
-                image:        Handle::<Image>::default(),
-                helper_panel: Entity::from_bits(PRECOMPOSE_HELPER_BITS),
-                camera:       Entity::from_bits(PRECOMPOSE_CAMERA_BITS),
-                pixel_size:   UVec2::ONE,
-            },
-        );
-
-        let image_children = super::collect_panel_image_commands(
-            &commands,
-            &draw_order,
-            &precompose_cache,
-            &clip_rects,
-            test_viewport(),
-            ShadowCasting::On,
-        );
-
-        assert!(image_children.is_empty());
-    }
-
-    fn background_command(element_idx: usize) -> RenderCommand {
-        RenderCommand {
-            bounds: test_bounds(),
-            kind: RenderCommandKind::Rectangle {
-                color:  Color::WHITE,
-                source: RectangleSource::Background,
-            },
-            element_idx,
-            z_index: TEST_Z_INDEX,
-        }
-    }
-
-    fn image_command(element_idx: usize) -> RenderCommand {
-        RenderCommand {
-            bounds: test_bounds(),
-            kind: RenderCommandKind::Image {
-                handle: Handle::<Image>::default(),
-                tint:   Color::WHITE,
-            },
-            element_idx,
-            z_index: TEST_Z_INDEX,
-        }
-    }
-
-    fn precompose_command(element_idx: usize) -> RenderCommand {
-        RenderCommand {
-            bounds: test_bounds(),
-            kind: RenderCommandKind::PrecomposeLdr,
-            element_idx,
-            z_index: TEST_Z_INDEX,
-        }
-    }
-
-    fn test_bounds() -> BoundingBox {
-        BoundingBox {
-            x:      0.0,
-            y:      0.0,
-            width:  TEST_BOUNDS_SIZE,
-            height: TEST_BOUNDS_SIZE,
-        }
-    }
-
-    fn test_viewport() -> BoundingBox {
-        BoundingBox {
-            x:      0.0,
-            y:      0.0,
-            width:  TEST_VIEWPORT_SIZE,
-            height: TEST_VIEWPORT_SIZE,
-        }
     }
 }

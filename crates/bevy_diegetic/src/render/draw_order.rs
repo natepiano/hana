@@ -81,12 +81,11 @@ pub(crate) struct ClipDepthNudge(f32);
 /// Per-command material ordering values derived from one panel-local draw order.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) struct DrawCommandDepth {
-    draw_order_index:  DrawOrderIndex,
-    z_index_rank:      DrawZIndexRank,
-    z_index:           DrawZIndex,
-    screen_depth_bias: ScreenDepthBias,
-    clip_depth_nudge:  ClipDepthNudge,
-    oit_depth_offset:  OitDepthOffset,
+    draw_order_index: DrawOrderIndex,
+    z_index_rank:     DrawZIndexRank,
+    z_index:          DrawZIndex,
+    clip_depth_nudge: ClipDepthNudge,
+    oit_depth_offset: OitDepthOffset,
 }
 
 /// Index-aligned draw order for one panel's command stream.
@@ -212,7 +211,6 @@ impl DrawCommandDepth {
             draw_order_index,
             z_index_rank,
             z_index,
-            screen_depth_bias: z_index_rank.screen_depth_bias(),
             clip_depth_nudge: draw_order_index.clip_depth_nudge(),
             oit_depth_offset: draw_order_index.text_anchored_oit_depth_offset(text_anchor),
         }
@@ -233,9 +231,6 @@ impl DrawCommandDepth {
 
     /// Returns the dense rank of the command's authored z-index in its panel.
     pub(crate) const fn z_index_rank(self) -> DrawZIndexRank { self.z_index_rank }
-
-    /// Returns the `Transparent3d` sort bias for this command.
-    pub(crate) const fn screen_depth_bias(self) -> ScreenDepthBias { self.screen_depth_bias }
 
     /// Returns the layer count consumed by non-OIT shader clip-depth nudging.
     pub(crate) const fn clip_depth_nudge(self) -> ClipDepthNudge { self.clip_depth_nudge }
@@ -479,6 +474,10 @@ mod tests {
             .expect("drawing command receives draw depth")
     }
 
+    fn screen_depth_bias(draw_depth: DrawCommandDepth) -> ScreenDepthBias {
+        draw_depth.z_index_rank().screen_depth_bias()
+    }
+
     fn text_anchor_index(
         commands: &[RenderCommand],
         draw_order_indices: &[Option<DrawOrderIndex>],
@@ -541,7 +540,7 @@ mod tests {
         for index in drawing_indices(commands) {
             let draw_command_depth = draw_depth_at(&draw_order, index);
             assert_eq!(
-                draw_command_depth.screen_depth_bias().get().to_bits(),
+                screen_depth_bias(draw_command_depth).get().to_bits(),
                 draw_command_depth
                     .z_index_rank()
                     .screen_depth_bias()
@@ -574,7 +573,7 @@ mod tests {
             );
             assert_eq!(draw_command_depth.z_index_rank(), DrawZIndexRank::default());
             assert_eq!(
-                draw_command_depth.screen_depth_bias().get().to_bits(),
+                screen_depth_bias(draw_command_depth).get().to_bits(),
                 DrawZIndexRank::default()
                     .screen_depth_bias()
                     .get()
@@ -607,7 +606,7 @@ mod tests {
             let low_depth = draw_depth_at(&draw_order, CommandIndex::from(0));
             let high_depth = draw_depth_at(&draw_order, CommandIndex::from(1));
             assert!(
-                low_depth.screen_depth_bias().get() < high_depth.screen_depth_bias().get(),
+                screen_depth_bias(low_depth).get() < screen_depth_bias(high_depth).get(),
                 "sorted bias must rise from {low} to {high}",
             );
             assert!(
@@ -704,7 +703,7 @@ mod tests {
                     .expect("drawing command receives draw depth");
                 assert_eq!(draw_depth.draw_order_index_for_test(), draw_order_index);
                 assert_eq!(
-                    draw_depth.screen_depth_bias().get().to_bits(),
+                    screen_depth_bias(draw_depth).get().to_bits(),
                     draw_depth
                         .z_index_rank()
                         .screen_depth_bias()
@@ -747,8 +746,8 @@ mod tests {
         assert_eq!(raised_text.z_index_rank(), DrawZIndexRank(2));
 
         assert_eq!(
-            lowered_text.screen_depth_bias().get().to_bits(),
-            lowered_shape.screen_depth_bias().get().to_bits(),
+            screen_depth_bias(lowered_text).get().to_bits(),
+            screen_depth_bias(lowered_shape).get().to_bits(),
             "commands in the same authored z-index share screen depth",
         );
         assert_ne!(
@@ -757,20 +756,20 @@ mod tests {
             "commands in the same authored z-index still keep separate per-command clip depth",
         );
         assert_eq!(
-            default_rectangle.screen_depth_bias().get().to_bits(),
-            default_image.screen_depth_bias().get().to_bits(),
+            screen_depth_bias(default_rectangle).get().to_bits(),
+            screen_depth_bias(default_image).get().to_bits(),
             "commands in the default authored z-index share screen depth",
         );
         assert_eq!(
-            lowered_text.screen_depth_bias().get().to_bits(),
+            screen_depth_bias(lowered_text).get().to_bits(),
             DrawZIndexRank(0).screen_depth_bias().get().to_bits(),
         );
         assert_eq!(
-            default_rectangle.screen_depth_bias().get().to_bits(),
+            screen_depth_bias(default_rectangle).get().to_bits(),
             DrawZIndexRank(1).screen_depth_bias().get().to_bits(),
         );
         assert_eq!(
-            raised_text.screen_depth_bias().get().to_bits(),
+            screen_depth_bias(raised_text).get().to_bits(),
             DrawZIndexRank(2).screen_depth_bias().get().to_bits(),
         );
     }

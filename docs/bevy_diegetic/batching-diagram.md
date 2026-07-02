@@ -174,15 +174,44 @@ N-row mix.
 
 ## 5. Image batch routing
 
-Images now have a CPU store path separate from the frame material table.
-`route_image_batch_records` scans `RenderCommandKind::Image` and
-`RenderCommandKind::PrecomposeLdr` every frame, skips empty clips and missing
-precompose cache entries, and keys `ImageBatchStore` by texture, render layers,
-shadow policy, `DrawZIndex`, and `DrawZIndexRank`.
+Images are drawn only by `ImageBatchPlugin`; the former per-image child entity
+path has been removed from `panel_text::reconcile`. `route_image_batch_records`
+runs before `TransformSystems::Propagate`, scans `RenderCommandKind::Image` and
+`RenderCommandKind::PrecomposeLdr`, skips empty clips and missing precompose
+cache entries, and keys `ImageBatchStore` by texture, render layers, shadow
+policy, `DrawZIndex`, and `DrawZIndexRank`.
 
-Each record keeps `{ panel, command_index }` identity, command bounds, linear
-tint, a full-texture UV rect, and `DrawCommandDepth`. Rendering resources arrive
-in later image-batch phases.
+```mermaid
+flowchart TD
+    cmd["`RenderCommandKind::Image / PrecomposeLdr`"] --> route["route_image_batch_records"]
+    route --> collect["`collect_panel_image_records`"]
+    collect --> helpers["`local_transform_from_bounds`
+    `image_size_from_bounds`
+    `linear_tint`"]
+    helpers --> record["`ResolvedImageRecord
+    key: { panel, command_index }
+    transform + size + UV + DrawCommandDepth`"]
+    record --> store["`ImageBatchStore
+    retain_records removes inactive keys`"]
+    store --> entity["`reconcile_image_batch_entities
+    one render entity per ImageBatchKey`"]
+    entity --> bounds["`update_image_batch_bounds
+    Aabb from record transforms`"]
+    bounds --> commit["`commit_image_batch_buffers
+    image_breakdown + ShaderBuffer upload`"]
+    commit --> material["`ImageExtendedMaterial
+    texture + record storage buffer`"]
+```
+
+Each `ResolvedImageRecord` keeps `{ panel, command_index }` identity, a
+panel-local transform, world-space size, linear tint, a full-texture UV rect,
+and `DrawCommandDepth`. `reconcile_image_batch_entities` creates or grows the
+mesh, `ImageExtendedMaterial`, and record buffer for each non-empty
+`ImageBatchKey`; `commit_image_batch_buffers` writes the current records and
+refreshes `DiegeticPerfStats::image_breakdown`.
+
+The image route does not add wall time to `DiegeticPerfStats::reconcile_ms`.
+That diagnostic now reports `reconcile_panel_text_children` only.
 
 ## 6. Shader read path (shared by all three families)
 

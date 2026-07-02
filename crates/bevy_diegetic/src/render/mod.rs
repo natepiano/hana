@@ -113,7 +113,7 @@ use crate::cascade::SdfMaterial;
 use crate::cascade::ShapeMaterial;
 use crate::cascade::TextMaterial;
 /// `PostUpdate` phase that spawns and despawns a panel's child entities —
-/// text runs, images, glyph meshes, and SDF geometry.
+/// text runs, glyph meshes, and SDF geometry.
 ///
 /// Any system that reads a panel's [`Children`](bevy::prelude::Children) to act
 /// on the child set — notably screen-space

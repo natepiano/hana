@@ -48,9 +48,9 @@ pub struct DiegeticPerfStats {
     pub compute_ms:      f32,
     /// Stage 1 — panels processed by the most recent layout run.
     pub compute_panels:  usize,
-    /// Between stages 1 and 2 — `reconcile_panel_text_children` plus
-    /// `reconcile_panel_image_children` wall time in milliseconds: re-deriving
-    /// text / image child entities from each changed panel's render commands.
+    /// Between stages 1 and 2 — `reconcile_panel_text_children` wall time in
+    /// milliseconds: re-deriving text child entities from each changed panel's
+    /// render commands. `route_image_batch_records` does not add to this timing.
     pub reconcile_ms:    f32,
     /// Stages 2 & 3 — panel-text shaping + record-build timings and counts.
     pub panel_text:      PanelTextPerfStats,
@@ -167,8 +167,8 @@ pub struct MaterialTablePerfStats {
 
 /// Panel-text per-frame timings. Covers stages 2 and 3 of the panel pipeline:
 ///
-/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then the child reconcile →
-///    [`DiegeticPerfStats::reconcile_ms`]
+/// 1. `compute_panel_layouts` → [`DiegeticPerfStats::compute_ms`], then
+///    `reconcile_panel_text_children` → [`DiegeticPerfStats::reconcile_ms`]
 /// 2. `shape_panel_text_children` → [`Self::shape_ms`] (strings → positioned glyphs)
 /// 3. `update_panel_text_batches` → [`Self::mesh_build_ms`] (glyphs → batch records)
 ///
