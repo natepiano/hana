@@ -67,6 +67,8 @@ impl DrawSortTier {
 /// GPU batch family derived from a [`RenderCommandKind`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DrawBatchFamily {
+    /// Textured image batches for image and precompose commands.
+    Image,
     /// SDF surface batches for rectangle and border commands.
     SdfSurface,
     /// Analytic path batches for panel-shape commands.
@@ -140,9 +142,8 @@ impl RenderCommandKind {
             Self::Rectangle { .. } | Self::Border { .. } => Some(DrawBatchFamily::SdfSurface),
             Self::PanelShapes { .. } => Some(DrawBatchFamily::PanelShape),
             Self::Text { .. } => Some(DrawBatchFamily::Text),
-            Self::Image { .. } | Self::PrecomposeLdr | Self::ScissorStart | Self::ScissorEnd => {
-                None
-            },
+            Self::Image { .. } | Self::PrecomposeLdr => Some(DrawBatchFamily::Image),
+            Self::ScissorStart | Self::ScissorEnd => None,
         }
     }
 }
@@ -241,9 +242,12 @@ mod tests {
                     handle: Handle::<Image>::default(),
                     tint:   Color::WHITE,
                 },
-                None,
+                Some(DrawBatchFamily::Image),
             ),
-            (RenderCommandKind::PrecomposeLdr, None),
+            (
+                RenderCommandKind::PrecomposeLdr,
+                Some(DrawBatchFamily::Image),
+            ),
             (RenderCommandKind::ScissorStart, None),
             (RenderCommandKind::ScissorEnd, None),
         ];

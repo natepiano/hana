@@ -8,6 +8,8 @@ mod constants;
 mod dirty;
 mod draw_order;
 mod fill_batch;
+mod image_batch;
+mod image_material;
 mod material;
 #[cfg(test)]
 mod material_slot_lifetime_probe;
@@ -80,6 +82,7 @@ pub(crate) use draw_order::ShapeOrdinal;
 use fill_batch::FillBatchPlugin;
 pub(crate) use fill_batch::SdfExtendedMaterial;
 pub(crate) use fill_batch::set_sdf_material_table_buffer;
+use image_batch::ImageBatchPlugin;
 pub(crate) use material::apply_sidedness;
 pub use material::default_panel_material;
 pub(crate) use material::material_asset_for_frame;
@@ -396,6 +399,7 @@ impl Plugin for RenderPlugin {
             MaterialTablePlugin,
             AnalyticPathPlugin,
             FillBatchPlugin,
+            ImageBatchPlugin,
             TextRenderPlugin,
             PanelGeometryPlugin,
             PanelShapePlugin,

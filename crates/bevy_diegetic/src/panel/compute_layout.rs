@@ -89,7 +89,7 @@ pub(super) fn compute_panel_layouts(
         // `panel_font_unit` seed only guards a missing-component edge.
         let font_unit = panel_font_units
             .get(entity)
-            .map_or(defaults.panel_font_unit, |resolved| resolved.0 .0);
+            .map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
         let layout_to_points = layout_unit.to_points();
         let font_to_points = font_unit.to_points();
 
@@ -284,25 +284,6 @@ mod tests {
     use bevy_kana::ToF32;
 
     use super::panel_surface_bounds;
-    use crate::cascade::FontUnit;
-    use crate::cascade::Resolved;
-    use crate::constants::MONOSPACE_WIDTH_RATIO;
-    use crate::layout::LayoutBuilder;
-    use crate::layout::LayoutTree;
-    use crate::layout::RenderCommandKind;
-    use crate::layout::TextDimensions;
-    use crate::layout::TextMeasure;
-    use crate::layout::Unit;
-    use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
-    use crate::panel::ComputedDiegeticPanel;
-    use crate::panel::DiegeticPanel;
-    use crate::panel::DiegeticPanelCommands;
-    use crate::panel::HeadlessLayoutPlugin;
-    use crate::panel::PanelChangeKind;
-    use crate::panel::PanelChanged;
-    use crate::panel::PanelDimensionsChanged;
-    use crate::screen_space::ScreenSpacePlugin;
-    use crate::text::DiegeticTextMeasurer;
     use crate::Anchor;
     use crate::Border;
     use crate::El;
@@ -314,6 +295,25 @@ mod tests {
     use crate::Px;
     use crate::Sizing;
     use crate::TextStyle;
+    use crate::cascade::FontUnit;
+    use crate::cascade::Resolved;
+    use crate::constants::MONOSPACE_WIDTH_RATIO;
+    use crate::layout::LayoutBuilder;
+    use crate::layout::LayoutTree;
+    use crate::layout::RenderCommandKind;
+    use crate::layout::TextDimensions;
+    use crate::layout::TextMeasure;
+    use crate::layout::Unit;
+    use crate::panel::ComputedDiegeticPanel;
+    use crate::panel::DiegeticPanel;
+    use crate::panel::DiegeticPanelCommands;
+    use crate::panel::HeadlessLayoutPlugin;
+    use crate::panel::PanelChangeKind;
+    use crate::panel::PanelChanged;
+    use crate::panel::PanelDimensionsChanged;
+    use crate::panel::diegetic_panel::ScaledLayoutTreeCache;
+    use crate::screen_space::ScreenSpacePlugin;
+    use crate::text::DiegeticTextMeasurer;
 
     fn monospace_measurer() -> DiegeticTextMeasurer {
         DiegeticTextMeasurer {
@@ -1072,6 +1072,6 @@ mod tests {
             .world()
             .get::<Resolved<FontUnit>>(entity)
             .expect("panel should carry seeded Resolved<FontUnit>");
-        assert_eq!(resolved.0 .0, Unit::Points);
+        assert_eq!(resolved.0.0, Unit::Points);
     }
 }

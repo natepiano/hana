@@ -1,10 +1,10 @@
-use bevy::camera::visibility::RenderLayers;
 use bevy::camera::Camera3d;
 use bevy::camera::ClearColorConfig;
 use bevy::camera::ImageRenderTarget;
 use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::Viewport;
+use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
 use bevy::ecs::entity::Entity;
 use bevy::image::Image;
@@ -17,6 +17,7 @@ use bevy::render::render_resource::TextureFormat;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
+use crate::Cascade;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
@@ -37,7 +38,6 @@ use crate::panel::DiegeticPanel;
 use crate::panel::PanelPrecomposeCache;
 use crate::panel::PrecomposeCacheEntry;
 use crate::panel::PrecomposeHelper;
-use crate::Cascade;
 
 const PRECOMPOSE_RENDER_LAYER: usize = 30;
 const PRECOMPOSE_CAMERA_ORDER: isize = -100;
@@ -75,7 +75,7 @@ pub(super) fn ensure_panel_precompose_caches(
             continue;
         }
 
-        let font_unit = font_unit.map_or(defaults.panel_font_unit, |resolved| resolved.0 .0);
+        let font_unit = font_unit.map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
         let scaled_tree = panel
             .tree()
             .scaled(panel.layout_unit().to_points(), font_unit.to_points());
@@ -572,15 +572,17 @@ mod tests {
                 PRECOMPOSE_HEIGHT.to_u32() * PRECOMPOSE_SUPERSAMPLE,
             )
         );
-        assert!(app
-            .world()
-            .resource::<Assets<Image>>()
-            .get(&entry.image)
-            .is_some());
-        assert!(app
-            .world()
-            .get::<DiegeticPanel>(entry.helper_panel)
-            .is_some());
+        assert!(
+            app.world()
+                .resource::<Assets<Image>>()
+                .get(&entry.image)
+                .is_some()
+        );
+        assert!(
+            app.world()
+                .get::<DiegeticPanel>(entry.helper_panel)
+                .is_some()
+        );
         let helper_panel = app
             .world()
             .get::<DiegeticPanel>(entry.helper_panel)

@@ -8,7 +8,7 @@
 
 ** think of this as input to thinking about how maybe there could be a trait system to unify the batching call flow across all types **
 
-The plan's load-bearing idea: a batch key carries no scalar/vector PBR values.
+The plan's critical idea: a batch key carries no scalar/vector PBR values.
 Those live in a per-frame dense table (`FrameMaterialTable`) addressed by a
 frame-local `MaterialSlotId`. Two records that differ only by table values share
 a batch; they split only on pipeline/resource compatibility.
@@ -172,7 +172,19 @@ Frame-atomic guarantee: records and table rows extract together each frame, so a
 render-world record never indexes a different frame's table — no N-1-record /
 N-row mix.
 
-## 5. Shader read path (shared by all three families)
+## 5. Image batch routing
+
+Images now have a CPU store path separate from the frame material table.
+`route_image_batch_records` scans `RenderCommandKind::Image` and
+`RenderCommandKind::PrecomposeLdr` every frame, skips empty clips and missing
+precompose cache entries, and keys `ImageBatchStore` by texture, render layers,
+shadow policy, `DrawZIndex`, and `DrawZIndexRank`.
+
+Each record keeps `{ panel, command_index }` identity, command bounds, linear
+tint, a full-texture UV rect, and `DrawCommandDepth`. Rendering resources arrive
+in later image-batch phases.
+
+## 6. Shader read path (shared by all three families)
 
 Both the SDF fill shader and the analytic path shader read the table through one
 guarded helper. Direct `material_table[...]` reads outside the helper are

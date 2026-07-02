@@ -72,6 +72,10 @@ pub struct DiegeticPerfStats {
     /// Per-batch decomposition of the live SDF surface batches, rebuilt each
     /// frame by `commit_sdf_batch_buffers`.
     pub sdf_breakdown:   Vec<BatchSummary>,
+    /// Per-batch decomposition of the live image batches, rebuilt each frame by
+    /// `commit_image_batch_buffers`. Every image batch is `Blend`, unlit, and
+    /// textured; batches split by texture, render layer, shadow, and z-index.
+    pub image_breakdown: Vec<BatchSummary>,
 }
 
 /// One live batch's identity, for the per-family batch decomposition in

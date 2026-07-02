@@ -156,7 +156,7 @@ mod tests {
             .get::<Resolved<TestUnit>>(entity)
             .expect("Resolved<TestUnit> should be present")
             .0
-             .0
+            .0
     }
 
     #[test]

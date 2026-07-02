@@ -45,7 +45,6 @@ use bevy_diegetic::PanelCoord;
 use bevy_diegetic::PanelDraw;
 use bevy_diegetic::PanelLine;
 use bevy_diegetic::PanelPoint;
-use bevy_diegetic::PanelShape;
 use bevy_diegetic::Px;
 use bevy_diegetic::ShadowCasting;
 use bevy_diegetic::Sidedness;
@@ -118,8 +117,10 @@ struct FamilyBreakdown<'a> {
     batches:      &'a [BatchSummary],
 }
 
-// The three families in the order the diagnostic renders: text, shape, sdf.
-fn family_breakdowns(perf: &DiegeticPerfStats) -> [FamilyBreakdown<'_>; 3] {
+// The four families in the order the diagnostic renders: text, shape, sdf,
+// image. Image has no dedicated counter struct; its batch and record totals are
+// derived from the per-batch breakdown `commit_image_batch_buffers` publishes.
+fn family_breakdowns(perf: &DiegeticPerfStats) -> [FamilyBreakdown<'_>; 4] {
     [
         FamilyBreakdown {
             label:        "text",
@@ -141,6 +142,17 @@ fn family_breakdowns(perf: &DiegeticPerfStats) -> [FamilyBreakdown<'_>; 3] {
             batch_count:  perf.panel_geometry.sdf_batches,
             record_total: perf.panel_geometry.sdf_records,
             batches:      &perf.sdf_breakdown,
+        },
+        FamilyBreakdown {
+            label:        "image",
+            color:        ACCENT_RED,
+            batch_count:  perf.image_breakdown.len(),
+            record_total: perf
+                .image_breakdown
+                .iter()
+                .map(|batch| batch.record_count.to_usize())
+                .sum(),
+            batches:      &perf.image_breakdown,
         },
     ]
 }
@@ -207,8 +219,8 @@ fn batch_reason(batch: &BatchSummary) -> String {
     format!("{layer} {}", tags.join(" "))
 }
 
-// Per-family column colors: text green, shape yellow, sdf blue.
-const LEDGER_FAMILY_COLORS: [Color; 3] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BLUE];
+// Per-family column colors: text green, shape yellow, sdf blue, image red.
+const LEDGER_FAMILY_COLORS: [Color; 4] = [ACCENT_GREEN, ACCENT_YELLOW, ACCENT_BLUE, ACCENT_RED];
 const LEDGER_TITLE_FONT_SIZE: f32 = 11.25;
 const LEDGER_FONT_SIZE: f32 = 10.0;
 const LEDGER_NUM_WIDTH: f32 = 40.0;
@@ -235,8 +247,6 @@ const MATERIAL_CASE_PAD_X: f32 = 2.0;
 const MATERIAL_CASE_PAD_Y: f32 = 1.0;
 const MATERIAL_VALUE_GAP: f32 = 2.0;
 const SWATCH_FONT_SIZE: f32 = 24.0;
-const MIXED_LABEL_WIDTH: f32 = 58.0;
-const MIXED_ROW_BG: Color = Color::srgba(0.14, 0.16, 0.20, 0.92);
 const MATERIAL_CASE_BG: Color = Color::srgba(0.10, 0.11, 0.13, 0.72);
 const CARD_BG: Color = Color::srgba(0.055, 0.065, 0.075, 0.94);
 const CARD_BG_ALT: Color = Color::srgba(0.075, 0.055, 0.075, 0.94);
@@ -540,7 +550,7 @@ struct LastDisplayedDiagnostics {
 #[derive(Resource, Default)]
 struct ValidationStatus {
     state:         ValidationState,
-    last_observed: Option<[usize; 3]>,
+    last_observed: Option<[usize; 4]>,
     stable_frames: u32,
     last_alpha:    usize,
 }
@@ -753,7 +763,12 @@ fn spawn_validation_panels(
             None,
             Some(shape_materials.panel_default.clone()),
         ),
-        ("mixed-stack", build_mixed_panel(), None, None),
+        (
+            "images",
+            build_image_panel(sdf_fill_image.clone()),
+            None,
+            None,
+        ),
     ];
     for (index, (name, tree, text_material, shape_material)) in panels.into_iter().enumerate() {
         let (x, y) = panel_grid_position(index);
@@ -1375,6 +1390,7 @@ fn validate_batch_counts(
         perf.batch.batches,
         perf.line_batch.batches,
         perf.panel_geometry.sdf_batches,
+        perf.image_breakdown.len(),
     ];
     if selection.index != status.last_alpha {
         status.last_alpha = selection.index;
@@ -1597,7 +1613,7 @@ fn expected_batches_tree(perf: Option<&DiegeticPerfStats>, status: &ValidationSt
 fn ledger_batch_section(
     builder: &mut LayoutBuilder,
     perf: &DiegeticPerfStats,
-    families: &[FamilyBreakdown<'_>; 3],
+    families: &[FamilyBreakdown<'_>; 4],
 ) {
     builder.with(
         El::column()
@@ -1611,7 +1627,12 @@ fn ledger_batch_section(
                 builder,
                 "",
                 TEXT_MUTED,
-                ["text".to_owned(), "shape".to_owned(), "sdf".to_owned()],
+                [
+                    "text".to_owned(),
+                    "shape".to_owned(),
+                    "sdf".to_owned(),
+                    "image".to_owned(),
+                ],
             );
             ledger_row(
                 builder,
@@ -1643,6 +1664,8 @@ fn ledger_batch_section(
                     (perf.batch.instance_uploads + perf.batch.run_table_uploads).to_string(),
                     perf.line_batch.uploads.to_string(),
                     perf.panel_geometry.sdf_uploads.to_string(),
+                    // Image batches expose no per-frame upload counter.
+                    "-".to_owned(),
                 ],
             );
             ledger_separator(builder);
@@ -1735,6 +1758,15 @@ fn ledger_record_explainer(builder: &mut LayoutBuilder, perf: &DiegeticPerfStats
                 ACCENT_BLUE,
                 perf.panel_geometry.sdf_records,
             );
+            ledger_detail_kv_row(
+                builder,
+                "image records",
+                ACCENT_RED,
+                perf.image_breakdown
+                    .iter()
+                    .map(|batch| batch.record_count.to_usize())
+                    .sum(),
+            );
         },
     );
 }
@@ -1820,7 +1852,7 @@ fn ledger_num_cell(builder: &mut LayoutBuilder, value: String, color: Color) {
 
 // The three-column family row: a left label, a GROW spacer, then text / shape /
 // sdf numbers right-aligned at the panel's padding edge.
-fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cells: [String; 3]) {
+fn ledger_row(builder: &mut LayoutBuilder, label: &str, label_color: Color, cells: [String; 4]) {
     builder.with(
         El::row()
             .width(Sizing::GROW)
@@ -2240,65 +2272,94 @@ fn build_shape_panel(materials: &ShapePanelMaterialHandles) -> LayoutTree {
     builder.build()
 }
 
-fn build_mixed_panel() -> LayoutTree {
+// Draws real images through the batch path (`LayoutBuilder::image`). Every card
+// samples the same texture, so post-key they route into ONE image batch — the
+// tint varies per record but stays in-batch. This is the runtime confirmation
+// that batched images render before the legacy entity path is retired.
+fn build_image_panel(image: Handle<Image>) -> LayoutTree {
     let mut builder = panel_root();
     panel_header(
         &mut builder,
-        "Mixed stack",
-        "One panel mixing sdf, text, and shape records: matching values batch, \
-         while textures and differing keys split them apart.",
+        "Image batches",
+        "Images sampling one texture share a single batch; the per-record tint \
+         varies without splitting the draw.",
     );
     builder.with(
-        El::column()
+        El::row()
             .width(Sizing::GROW)
             .height(Sizing::GROW)
-            .gap(2.0),
+            .gap(ROW_GAP),
         |builder| {
-            mixed_row(
-                builder,
-                "SDF surface",
-                "global default",
-                "2 records",
-                ACCENT_BLUE,
-                Border::all(Mm(0.4), ACCENT_BLUE),
-            );
-            mixed_row(
-                builder,
-                "Text run A",
-                "shared material",
-                "1 run",
-                ACCENT_GREEN,
-                Border::new(),
-            );
-            mixed_row(
-                builder,
-                "Text run B",
-                "different color",
-                "same batch",
-                ACCENT_YELLOW,
-                Border::new(),
-            );
-            mixed_shape_row(
-                builder,
-                "Shape default",
-                "global/default",
-                "3 primitives",
-                ACCENT_RED,
+            builder.with(
+                El::column()
+                    .width(Sizing::GROW)
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
+                |builder| {
+                    image_card(
+                        builder,
+                        image.clone(),
+                        Color::WHITE,
+                        "plain",
+                        "full texture",
+                    );
+                    image_card(
+                        builder,
+                        image.clone(),
+                        ACCENT_GREEN,
+                        "green tint",
+                        "same batch",
+                    );
+                },
             );
             builder.with(
-                El::new()
+                El::column()
                     .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
-                    .background(MIXED_ROW_BG)
-                    .alignment(AlignX::Left, AlignY::Center),
+                    .height(Sizing::GROW)
+                    .gap(ROW_GAP),
                 |builder| {
-                    builder.text(("Expected: SDF + text + path batches", body_style(TEXT_MAIN)));
+                    image_card(
+                        builder,
+                        image.clone(),
+                        ACCENT_BLUE,
+                        "blue tint",
+                        "same batch",
+                    );
+                    image_card(builder, image, ACCENT_RED, "red tint", "one image batch");
                 },
             );
         },
     );
     builder.build()
+}
+
+// One image card: a bordered frame filled by an image leaf, captioned below.
+fn image_card(
+    builder: &mut LayoutBuilder,
+    image: Handle<Image>,
+    tint: Color,
+    label: &str,
+    caption: &str,
+) {
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::GROW)
+            .gap(1.0)
+            .padding(Padding::all(2.0))
+            .border(Border::all(Mm(0.3), ACCENT_RED))
+            .corner_radius(CornerRadius::all(Mm(1.4)))
+            .alignment(AlignX::Center, AlignY::Center),
+        |builder| {
+            builder.image(
+                El::new().width(Sizing::GROW).height(Sizing::GROW),
+                image,
+                tint,
+            );
+            builder.text((label, swatch_style(ACCENT_RED)));
+            builder.text((caption, small_style(TEXT_MUTED)));
+        },
+    );
 }
 
 fn panel_root() -> LayoutBuilder {
@@ -2893,107 +2954,6 @@ fn shape_card_caption_style(color: Color) -> TextStyle {
     TextStyle::new(SHAPE_CARD_CAPTION_FONT_SIZE)
         .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
-}
-
-// The Shape group row's draw family, drawn in the shape strip below the text:
-// one stroked line plus a start and end cap — the three analytic primitives the
-// row's "line + caps" / "3 primitives" readout describes. The circle start cap
-// sits on the line's first point so it touches the stroke.
-fn mixed_shape_group(color: Color) -> PanelDraw {
-    PanelDraw::shapes([
-        PanelShape::from(
-            PanelLine::new(PanelPoint::new(6.0, 4.0), PanelPoint::new(146.0, 4.0))
-                .width(Mm(0.5))
-                .color(color)
-                .end_cap(CalloutCap::arrow().solid().length(4.0).width(3.2)),
-        ),
-        PanelShape::from(PanelCircle::new(PanelPoint::new(6.0, 4.0), Mm(2.0)).color(color)),
-    ])
-}
-
-// The label / value / count text shared by every mixed row.
-fn mixed_row_body(
-    builder: &mut LayoutBuilder,
-    label: &str,
-    value: &str,
-    count: &str,
-    color: Color,
-) {
-    builder.with(
-        El::new()
-            .width(Sizing::fixed(MIXED_LABEL_WIDTH))
-            .height(Sizing::FIT),
-        |builder| {
-            builder.text((label, body_style(color)));
-        },
-    );
-    builder.with(
-        El::new().width(Sizing::GROW).height(Sizing::FIT),
-        |builder| {
-            builder.text((value, body_style(TEXT_MAIN)));
-        },
-    );
-    builder.text((count, body_style(TEXT_MUTED)));
-}
-
-fn mixed_row(
-    builder: &mut LayoutBuilder,
-    label: &str,
-    value: &str,
-    count: &str,
-    color: Color,
-    border: Border,
-) {
-    builder.with(
-        El::row()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(15.0))
-            .gap(ROW_GAP)
-            .padding(Padding::new(4.0, 4.0, 4.0, 4.0))
-            .background(MIXED_ROW_BG)
-            .border(border)
-            .corner_radius(CornerRadius::all(Mm(1.0)))
-            .alignment(AlignX::Left, AlignY::Center),
-        |builder| mixed_row_body(builder, label, value, count, color),
-    );
-}
-
-// Taller than a text row: the label/value/count sit on top and the analytic
-// shape group draws in its own strip below, so the line and caps no longer
-// overlap the text.
-fn mixed_shape_row(
-    builder: &mut LayoutBuilder,
-    label: &str,
-    value: &str,
-    count: &str,
-    color: Color,
-) {
-    builder.with(
-        El::column()
-            .width(Sizing::GROW)
-            .height(Sizing::fixed(26.0))
-            .gap(2.0)
-            .padding(Padding::new(4.0, 4.0, 4.0, 3.0))
-            .background(MIXED_ROW_BG)
-            .corner_radius(CornerRadius::all(Mm(1.0)))
-            .alignment(AlignX::Left, AlignY::Top),
-        |builder| {
-            builder.with(
-                El::row()
-                    .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .gap(ROW_GAP),
-                |builder| mixed_row_body(builder, label, value, count, color),
-            );
-            builder.with(
-                El::new()
-                    .width(Sizing::GROW)
-                    .height(Sizing::GROW)
-                    .draw(mixed_shape_group(color)),
-                |_builder| {},
-            );
-        },
-    );
 }
 
 fn material_group_title_style() -> TextStyle {

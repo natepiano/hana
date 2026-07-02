@@ -75,18 +75,6 @@ use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
-pub use cascade::resolved_anti_alias;
-pub use cascade::resolved_font_unit;
-pub use cascade::resolved_glyph_shadow_mode;
-pub use cascade::resolved_hairline_fade;
-pub use cascade::resolved_hdr_text_coverage_bias;
-pub use cascade::resolved_lighting;
-pub use cascade::resolved_sdf_material;
-pub use cascade::resolved_shadow_casting;
-pub use cascade::resolved_shape_material;
-pub use cascade::resolved_sidedness;
-pub use cascade::resolved_text_alpha;
-pub use cascade::resolved_text_material;
 pub use cascade::Cascade;
 pub use cascade::CascadeDefault;
 pub use cascade::CascadeEntityCommandsExt;
@@ -99,6 +87,18 @@ pub use cascade::SdfMaterial;
 pub use cascade::ShapeMaterial;
 pub use cascade::TextAlpha;
 pub use cascade::TextMaterial;
+pub use cascade::resolved_anti_alias;
+pub use cascade::resolved_font_unit;
+pub use cascade::resolved_glyph_shadow_mode;
+pub use cascade::resolved_hairline_fade;
+pub use cascade::resolved_hdr_text_coverage_bias;
+pub use cascade::resolved_lighting;
+pub use cascade::resolved_sdf_material;
+pub use cascade::resolved_shadow_casting;
+pub use cascade::resolved_shape_material;
+pub use cascade::resolved_sidedness;
+pub use cascade::resolved_text_alpha;
+pub use cascade::resolved_text_material;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -288,7 +288,6 @@ pub use panel::SavedPanelWorldState;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
-pub use render::default_panel_material;
 #[doc(hidden)]
 pub use render::AnalyticLine;
 #[doc(hidden)]
@@ -310,6 +309,7 @@ pub use render::TextContent;
 pub use render::TextEdit;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
+pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
@@ -356,6 +356,7 @@ impl Plugin for DiegeticUiPlugin {
             bevy::shader::Shader::from_wgsl
         );
         embedded_asset!(app, "shaders/sdf_panel.wgsl");
+        embedded_asset!(app, "shaders/image_panel.wgsl");
 
         app.init_resource::<PanelDefaults>();
         app.add_plugins((

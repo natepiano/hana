@@ -683,6 +683,9 @@ fn collect_panel_image_commands(
         .iter()
         .enumerate()
         .filter_map(|(cmd_index, cmd)| {
+            if cmd.kind.draw_batch_family().is_some() {
+                return None;
+            }
             clip::effective_clip(cmd.bounds, clip_rects[cmd_index], viewport)?;
             let draw_depth = draw_order.depth_for(cmd_index)?;
             match &cmd.kind {
@@ -845,13 +848,10 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::atomic::Ordering;
 
-    use bevy::asset::AssetPlugin;
     use bevy::ecs::system::RunSystemOnce;
     use bevy::prelude::*;
     use bevy_kana::ToF32;
 
-    use super::PanelImageChild;
-    use super::reconcile_panel_image_children;
     use super::reconcile_panel_text_children;
     use crate::Mm;
     use crate::PanelElementId;
@@ -860,9 +860,13 @@ mod tests {
     use crate::cascade::TextAlpha;
     use crate::constants::MONOSPACE_WIDTH_RATIO;
     use crate::layout::BoundingBox;
-    use crate::layout::El;
+    use crate::layout::DrawZIndex;
     use crate::layout::LayoutBuilder;
     use crate::layout::LayoutTree;
+    use crate::layout::RectangleSource;
+    use crate::layout::RenderCommand;
+    use crate::layout::RenderCommandKind;
+    use crate::layout::ShadowCasting;
     use crate::layout::Text;
     use crate::layout::TextDimensions;
     use crate::layout::TextMeasure;
@@ -871,11 +875,24 @@ mod tests {
     use crate::panel::DiegeticPanel;
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
+    use crate::panel::PanelPrecomposeCache;
+    use crate::panel::PrecomposeCacheEntry;
+    use crate::render::clip;
     use crate::render::constants::LAYER_DEPTH_BIAS;
+    use crate::render::draw_order::DrawOrder;
     use crate::render::panel_text::PanelTextLayout;
     use crate::render::panel_text::PanelTextRuns;
     use crate::render::world_text::TextContent;
     use crate::text::DiegeticTextMeasurer;
+
+    const BACKGROUND_ELEMENT_INDEX: usize = 0;
+    const IMAGE_ELEMENT_INDEX: usize = 1;
+    const PRECOMPOSE_CAMERA_BITS: u64 = 2;
+    const PRECOMPOSE_ELEMENT_INDEX: usize = 2;
+    const PRECOMPOSE_HELPER_BITS: u64 = 1;
+    const TEST_BOUNDS_SIZE: f32 = 10.0;
+    const TEST_VIEWPORT_SIZE: f32 = 100.0;
+    const TEST_Z_INDEX: DrawZIndex = DrawZIndex(0);
 
     /// Records which reused children had each gated component rewritten in the
     /// most recent reconcile pass, so a test can assert an unchanged run stays
@@ -1441,229 +1458,86 @@ mod tests {
         );
     }
 
-    /// Accumulates the `StandardMaterial` ids that fired `AssetEvent::Modified`,
-    /// so a test can assert an unchanged image's material was never re-touched.
-    #[derive(Resource, Default)]
-    struct ModifiedMaterials(Vec<AssetId<StandardMaterial>>);
+    #[test]
+    fn image_batch_family_commands_do_not_spawn_legacy_children() {
+        let commands = vec![
+            background_command(BACKGROUND_ELEMENT_INDEX),
+            image_command(IMAGE_ELEMENT_INDEX),
+            precompose_command(PRECOMPOSE_ELEMENT_INDEX),
+        ];
+        let draw_order = DrawOrder::from_commands(&commands);
+        let clip_rects = clip::compute_clip_rects(&commands);
+        let mut precompose_cache = PanelPrecomposeCache::default();
+        precompose_cache.entries_mut().insert(
+            PRECOMPOSE_ELEMENT_INDEX,
+            PrecomposeCacheEntry {
+                image:        Handle::<Image>::default(),
+                helper_panel: Entity::from_bits(PRECOMPOSE_HELPER_BITS),
+                camera:       Entity::from_bits(PRECOMPOSE_CAMERA_BITS),
+                pixel_size:   UVec2::ONE,
+            },
+        );
 
-    fn record_modified_materials(
-        mut events: MessageReader<AssetEvent<StandardMaterial>>,
-        mut probe: ResMut<ModifiedMaterials>,
-    ) {
-        for event in events.read() {
-            if let AssetEvent::Modified { id } = event {
-                probe.0.push(*id);
-            }
+        let image_children = super::collect_panel_image_commands(
+            &commands,
+            &draw_order,
+            &precompose_cache,
+            &clip_rects,
+            test_viewport(),
+            ShadowCasting::On,
+        );
+
+        assert!(image_children.is_empty());
+    }
+
+    fn background_command(element_idx: usize) -> RenderCommand {
+        RenderCommand {
+            bounds: test_bounds(),
+            kind: RenderCommandKind::Rectangle {
+                color:  Color::WHITE,
+                source: RectangleSource::Background,
+            },
+            element_idx,
+            z_index: TEST_Z_INDEX,
         }
     }
 
-    /// App with headless layout plus the gated image reconcile and a probe that
-    /// records every modified `StandardMaterial`.
-    fn image_reconcile_app() -> App {
-        let mut app = App::new();
-        app.add_plugins(MinimalPlugins)
-            .add_plugins(AssetPlugin::default())
-            .insert_resource(monospace_measurer())
-            .add_plugins(HeadlessLayoutPlugin)
-            .init_asset::<Mesh>()
-            .init_asset::<StandardMaterial>()
-            .init_resource::<ModifiedMaterials>()
-            .add_systems(
-                PostUpdate,
-                (reconcile_panel_image_children, record_modified_materials).chain(),
-            );
-        app
-    }
-
-    /// A single image leaf sized in panel units; `with_background` toggles the
-    /// element's background, which prepends a rectangle command and shifts the
-    /// image's command ordinal without changing its `element_idx`.
-    fn one_image_tree(handle: Handle<Image>, tint: Color, with_background: bool) -> LayoutTree {
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        let mut element = El::new().size(10.0, 10.0);
-        if with_background {
-            element = element.background(Color::srgb(0.2, 0.2, 0.2));
+    fn image_command(element_idx: usize) -> RenderCommand {
+        RenderCommand {
+            bounds: test_bounds(),
+            kind: RenderCommandKind::Image {
+                handle: Handle::<Image>::default(),
+                tint:   Color::WHITE,
+            },
+            element_idx,
+            z_index: TEST_Z_INDEX,
         }
-        builder.image(element, handle, tint);
-        builder.build()
     }
 
-    fn two_image_tree(handle: Handle<Image>, first: Color, second: Color) -> LayoutTree {
-        let mut builder = LayoutBuilder::new(100.0, 50.0);
-        builder.image(El::new().size(10.0, 10.0), handle.clone(), first);
-        builder.image(El::new().size(10.0, 10.0), handle, second);
-        builder.build()
-    }
-
-    fn spawn_image_panel(app: &mut App, tree: LayoutTree) -> Entity {
-        app.world_mut()
-            .spawn(
-                DiegeticPanel::world()
-                    .size(Mm(100.0), Mm(50.0))
-                    .with_tree(tree)
-                    .build()
-                    .expect("panel should build"),
-            )
-            .id()
-    }
-
-    /// The single image child's entity and its material handle.
-    fn single_image_child(app: &mut App) -> (Entity, Handle<StandardMaterial>) {
-        let mut state =
-            app.world_mut()
-                .query::<(Entity, &PanelImageChild, &MeshMaterial3d<StandardMaterial>)>();
-        let children: Vec<_> = state
-            .iter(app.world())
-            .map(|(entity, _, material)| (entity, material.0.clone()))
-            .collect();
-        assert_eq!(children.len(), 1, "expected exactly one image child");
-        children[0].clone()
-    }
-
-    /// Every image child as `(element_idx, material handle)`, sorted by index.
-    fn image_children_by_element(app: &mut App) -> Vec<(usize, Handle<StandardMaterial>)> {
-        let mut state = app
-            .world_mut()
-            .query::<(&PanelImageChild, &MeshMaterial3d<StandardMaterial>)>();
-        let mut children: Vec<_> = state
-            .iter(app.world())
-            .map(|(cached, material)| (cached.element_idx, material.0.clone()))
-            .collect();
-        children.sort_by_key(|(element_idx, _)| *element_idx);
-        children
-    }
-
-    fn image_mesh_handle(app: &App, entity: Entity) -> Handle<Mesh> {
-        app.world()
-            .get::<Mesh3d>(entity)
-            .expect("image child should carry a mesh")
-            .0
-            .clone()
-    }
-
-    fn material_base_color(app: &App, handle: &Handle<StandardMaterial>) -> Color {
-        app.world()
-            .resource::<Assets<StandardMaterial>>()
-            .get(handle)
-            .expect("material asset should exist")
-            .base_color
-    }
-
-    fn material_depth_bias(app: &App, handle: &Handle<StandardMaterial>) -> f32 {
-        app.world()
-            .resource::<Assets<StandardMaterial>>()
-            .get(handle)
-            .expect("material asset should exist")
-            .depth_bias
-    }
-
-    #[test]
-    fn tint_only_change_mutates_base_color_without_rebuilding_mesh() {
-        let mut app = image_reconcile_app();
-        let handle = Handle::<Image>::default();
-        let panel = spawn_image_panel(
-            &mut app,
-            one_image_tree(handle.clone(), Color::WHITE, false),
-        );
-        app.update();
-
-        let (entity, material_before) = single_image_child(&mut app);
-        let mesh_before = image_mesh_handle(&app, entity);
-        assert_eq!(material_base_color(&app, &material_before), Color::WHITE);
-
-        // Change only the tint — handle, bounds, and command slot are unchanged.
-        let red = Color::srgb(1.0, 0.0, 0.0);
-        app.world_mut()
-            .commands()
-            .set_tree(panel, one_image_tree(handle, red, false));
-        app.update();
-
-        let (_, material_after) = single_image_child(&mut app);
-        let mesh_after = image_mesh_handle(&app, entity);
-        assert_eq!(
-            mesh_before, mesh_after,
-            "a tint-only change must not rebuild the mesh"
-        );
-        assert_eq!(
-            material_before, material_after,
-            "a tint-only change reuses the material asset in place"
-        );
-        assert_eq!(
-            material_base_color(&app, &material_after),
-            red,
-            "base_color is mutated in place to the new tint"
-        );
-    }
-
-    #[test]
-    fn unchanged_image_material_is_not_re_touched() {
-        let mut app = image_reconcile_app();
-        let handle = Handle::<Image>::default();
-        let panel = spawn_image_panel(
-            &mut app,
-            two_image_tree(handle.clone(), Color::WHITE, Color::WHITE),
-        );
-        app.update();
-
-        let children = image_children_by_element(&mut app);
-        let unchanged_material = children[0].1.clone();
-        let recolored_material = children[1].1.clone();
-
-        // Start recording from a clean slate, then recolor only the second image.
-        app.world_mut()
-            .resource_mut::<ModifiedMaterials>()
-            .0
-            .clear();
-        let red = Color::srgb(1.0, 0.0, 0.0);
-        app.world_mut()
-            .commands()
-            .set_tree(panel, two_image_tree(handle, Color::WHITE, red));
-        for _ in 0..4 {
-            app.update();
+    fn precompose_command(element_idx: usize) -> RenderCommand {
+        RenderCommand {
+            bounds: test_bounds(),
+            kind: RenderCommandKind::PrecomposeLdr,
+            element_idx,
+            z_index: TEST_Z_INDEX,
         }
-
-        let modified = &app.world().resource::<ModifiedMaterials>().0;
-        assert!(
-            !modified.contains(&unchanged_material.id()),
-            "the unchanged image's material must not be re-touched (no get_mut)"
-        );
-        assert!(
-            modified.contains(&recolored_material.id()),
-            "the recolored image's material is mutated in place"
-        );
     }
 
-    #[test]
-    fn command_index_shift_keeps_same_z_index_material_depth_bias() {
-        let mut app = image_reconcile_app();
-        let handle = Handle::<Image>::default();
-        // No background: the image is the first drawing command.
-        let panel = spawn_image_panel(
-            &mut app,
-            one_image_tree(handle.clone(), Color::WHITE, false),
-        );
-        app.update();
+    fn test_bounds() -> BoundingBox {
+        BoundingBox {
+            x:      0.0,
+            y:      0.0,
+            width:  TEST_BOUNDS_SIZE,
+            height: TEST_BOUNDS_SIZE,
+        }
+    }
 
-        let (_, material_before) = single_image_child(&mut app);
-        let first_command_depth = 0.0_f32;
-        assert_eq!(
-            material_depth_bias(&app, &material_before).to_bits(),
-            first_command_depth.to_bits(),
-            "the lone image uses ordinal 0"
-        );
-
-        // Adding a background to the element prepends a rectangle command,
-        // shifting the image to ordinal 1 while its element_idx is stable.
-        app.world_mut()
-            .commands()
-            .set_tree(panel, one_image_tree(handle, Color::WHITE, true));
-        app.update();
-
-        let (_, material_after) = single_image_child(&mut app);
-        assert_eq!(
-            material_depth_bias(&app, &material_after).to_bits(),
-            first_command_depth.to_bits(),
-            "a same-z-index command-index shift does not change material depth bias"
-        );
+    fn test_viewport() -> BoundingBox {
+        BoundingBox {
+            x:      0.0,
+            y:      0.0,
+            width:  TEST_VIEWPORT_SIZE,
+            height: TEST_VIEWPORT_SIZE,
+        }
     }
 }
