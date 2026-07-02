@@ -34,7 +34,7 @@
 //!
 //! ```ignore
 //! App::new()
-//!     .insert_resource(CascadeDefaults {
+//!     .insert_resource(PanelDefaults {
 //!         panel_font_unit: Unit::Millimeters,
 //!         ..default()
 //!     })
@@ -75,18 +75,6 @@ use bevy::asset::embedded_asset;
 use bevy::prelude::*;
 pub use callouts::ArrowStyle;
 pub use callouts::CalloutCap;
-pub use cascade::Cascade;
-pub use cascade::CascadeDefault;
-pub use cascade::CascadeDefaults;
-pub use cascade::CascadeEntityCommandsExt;
-pub use cascade::CascadeProperty;
-pub use cascade::CascadeSet;
-pub use cascade::FontUnit;
-pub use cascade::HdrTextCoverageBias;
-pub use cascade::SdfMaterial;
-pub use cascade::ShapeMaterial;
-pub use cascade::TextAlpha;
-pub use cascade::TextMaterial;
 pub use cascade::resolved_anti_alias;
 pub use cascade::resolved_font_unit;
 pub use cascade::resolved_glyph_shadow_mode;
@@ -99,6 +87,18 @@ pub use cascade::resolved_shape_material;
 pub use cascade::resolved_sidedness;
 pub use cascade::resolved_text_alpha;
 pub use cascade::resolved_text_material;
+pub use cascade::Cascade;
+pub use cascade::CascadeDefault;
+pub use cascade::CascadeEntityCommandsExt;
+pub use cascade::CascadeProperty;
+pub use cascade::CascadeSet;
+pub use cascade::FontUnit;
+pub use cascade::HdrTextCoverageBias;
+pub use cascade::PanelDefaults;
+pub use cascade::SdfMaterial;
+pub use cascade::ShapeMaterial;
+pub use cascade::TextAlpha;
+pub use cascade::TextMaterial;
 #[cfg(feature = "typography_overlay")]
 pub use debug::GlyphMetricVisibility;
 #[cfg(feature = "typography_overlay")]
@@ -288,6 +288,7 @@ pub use panel::SavedPanelWorldState;
 pub use panel::ScreenPosition;
 pub use panel::ShowTextGizmos;
 pub use panel::SurfaceShadow;
+pub use render::default_panel_material;
 #[doc(hidden)]
 pub use render::AnalyticLine;
 #[doc(hidden)]
@@ -309,7 +310,6 @@ pub use render::TextContent;
 pub use render::TextEdit;
 pub use render::TextRunOf;
 pub use render::WorldTextReady;
-pub use render::default_panel_material;
 pub use screen_space::ScreenSpaceCamera;
 pub use screen_space::ScreenSpaceLight;
 use screen_space::ScreenSpacePlugin;
@@ -330,7 +330,7 @@ use text::TextPlugin;
 /// Bevy plugin that adds diegetic UI panel support.
 ///
 /// Composes layout, rendering, text, and screen-space overlay
-/// support into a single plugin. Insert [`CascadeDefaults`] or
+/// support into a single plugin. Insert [`PanelDefaults`] or
 /// [`CascadeDefault<A>`](CascadeDefault) resources before adding this plugin;
 /// they take effect through the child plugins at build time.
 ///
@@ -357,7 +357,7 @@ impl Plugin for DiegeticUiPlugin {
         );
         embedded_asset!(app, "shaders/sdf_panel.wgsl");
 
-        app.init_resource::<CascadeDefaults>();
+        app.init_resource::<PanelDefaults>();
         app.add_plugins((
             TextPlugin,
             PanelPlugin,

@@ -1,10 +1,12 @@
 # Batching Call Flow — Diagrams
 
-> Companion to [`sdf-material-table-batching.md`](./sdf-material-table-batching.md).
+> Companion to [`material-table-batching.md`](./as-built/material-table-batching.md).
 > Mermaid views of the call flow the plan builds: the three render families
 > (SDF fills/borders, text runs, panel shapes) converging on one shared frame
 > material table, then splitting back into two batch stores and two render
 > materials, both reading the same GPU table.
+
+** think of this as input to thinking about how maybe there could be a trait system to unify the batching call flow across all types **
 
 The plan's load-bearing idea: a batch key carries no scalar/vector PBR values.
 Those live in a per-frame dense table (`FrameMaterialTable`) addressed by a

@@ -1,347 +1,156 @@
-# Tree Change Optimization Plan
+# Tree Change Classification
 
-> **Archived 2026-06-07 — implemented.** Its deletion commit (f29c568,
-> 2026-05-18) verified it against the codebase. `commands.set_tree` runs
-> `classify_change` and records the result in the per-frame
-> change-classification component consumed by the panel layout system
-> (`panel/diegetic_panel.rs`), so visual-only replacements skip layout.
+Explicit panel-tree replacement chooses the cheapest correct update path. When
+user code replaces a panel's layout tree, the setter classifies old-vs-new and
+records the result so a visual-only replacement (colors, backgrounds, border
+color) skips the layout solve and only re-emits render commands, while a
+structural or sizing change runs the full layout path.
 
-Goal: make explicit panel-tree replacement choose the cheapest correct update
-path.
+This runs only when a caller explicitly replaces a tree through the optimized
+API. It adds no per-frame comparison work to unchanged panels.
 
-This should only run when a caller explicitly replaces a panel tree with
-the optimized tree setter. It should not add per-frame comparison work.
-
-## Target Workflow
-
-When user code replaces a panel tree through the optimized API:
+## Public API
 
 ```rust
 commands.set_tree(panel_entity, next_tree);
 ```
 
-the queued setter should classify the change:
+`set_tree` is a `DiegeticPanelCommands` trait method (`panel/diegetic_panel.rs`)
+implemented on `Commands`. It queues `set_tree_command` via
+`run_system_cached_with`, so the replacement is **deferred**. Systems that
+respond to the change (layout, screen placement) must run after the deferred
+setter applies — the panel plugin provides that ordering (see Schedule).
 
-```rust
-match old_tree.classify_change(&next_tree) {
-    TreeChange::Identical => skip layout and skip render command regeneration,
-    TreeChange::VisualOnly => reuse existing layout geometry and regenerate render commands,
-    TreeChange::LayoutAffecting => run the full layout path,
-}
-```
+`set_tree_command` classifies `panel.tree().classify_change(&next_tree)`, records
+the result on the sibling `DiegeticPanelChangeClassification` component, then
+replaces the tree via `replace_tree_full_rebuild`.
 
-The important split is:
+A `bench_support`-gated `DiegeticPanel::set_tree_full_rebuild` component method
+forces the conservative full-layout path for benchmark comparisons. It is not
+normal public API — a direct component method cannot update the sibling
+classification component, which is why the optimized path goes through
+`Commands`.
 
-- `LayoutAffecting`: geometry, measurement, wrapping, content bounds, or command
-  placement may change.
-- `VisualOnly`: geometry is still valid, but render commands may need to be
-  re-emitted because colors/materials/backgrounds/borders/images may differ.
+## Classification: `LayoutTreeChange`
 
-## Why This Design
-
-Today `LayoutEngine::compute` does two jobs:
-
-1. Compute layout geometry.
-2. Emit render commands from that geometry.
-
-That coupling makes visual-only changes expensive, because skipping layout also
-skips the only place render commands are currently generated.
-
-The general solution is to separate those phases:
-
-1. Compute and store layout geometry.
-2. Generate render commands from the stored geometry plus the current tree.
-
-Then a visual-only tree replacement can skip measurement, sizing, wrapping, and
-positioning while still producing a fresh render command list.
-
-## Change Classification
-
-Classification should be exhaustive over stored tree fields. Adding a new field
-to `Element`, `ElementContent`, `ChildLayout`, `ChildDivider`, `Border`, or
-`LayoutTextStyle` should force us to decide whether that field is
-layout-affecting or visual-only. Implement this with exhaustive destructuring
-rather than field-by-field `if` chains so new fields fail compilation until they
-are classified.
-
-Layout-affecting examples:
-
-- tree root, element count, child order, child references
-- width, height, padding, child layout variant, row/column gap, alignment
-- text content
-- text measurement fields: font id, size, weight, slant, line height, letter
-  spacing, word spacing, wrap mode, font features
-- outer border widths and row/column `ChildDivider` width
-- clip behavior
-
-Visual-only examples:
-
-- text color
-- background color, including adding or removing a background
-- outer border color, including adding or removing a zero-width visual border
-  only if command generation can represent it safely
-- row/column `ChildDivider` color
-- corner radius
-- material changes only after a dedicated comparator confirms the changed
-  material data is visual-only; otherwise treat material changes as
-  `LayoutAffecting`
-- image tint
-- image handle under current behavior, because images are not intrinsically
-  measured by layout today
-- text render/compositing fields that do not affect measurement
-
-If image intrinsic sizing is added later, image handle changes must move to
-`LayoutAffecting`. The classifier should make that dependency explicit, for
-example with a shared intrinsic-image-sizing predicate or feature gate.
-
-## Data Model Changes
-
-Add a sibling required component that stores internal pending-change state:
-
-```rust
-#[derive(Component, Default)]
-pub(super) struct DiegeticPanelChangeClassification {
-    pending: Option<PendingTreeChange>,
-}
-```
-
-The component lives for the lifetime of the panel entity. Its `pending` value is
-transient: most frames it is `None`, and `compute_panel_layouts` consumes it with
-`take()` after a tree replacement has been applied.
-
-```rust
-enum PendingTreeChange {
-    Identical,
-    VisualOnly,
-    LayoutAffecting,
-}
-```
-
-Absence of pending work should be modeled separately:
-
-```rust
-pending: Option<PendingTreeChange>
-```
-
-Repeated queued tree replacements in one frame must compose by taking the strongest
-change, not by last-wins assignment:
-
-```rust
-pending = Some(match pending.take() {
-    None => change,
-    Some(prior) => prior.combine(change),
-});
-```
-
-`PendingTreeChange` should be ordered as a small lattice:
+`layout/element.rs`, re-exported as `crate::LayoutTreeChange`.
 
 ```rust
 #[repr(u8)]
-enum PendingTreeChange {
-    Identical = 0,
-    VisualOnly = 1,
+pub enum LayoutTreeChange {
+    Identical       = 0,
+    VisualOnly      = 1,
     LayoutAffecting = 2,
 }
 ```
 
-`combine` can then be implemented with `max`.
+Ordered as a lattice; `combine` is `max`. Repeated queued replacements in one
+frame compose to the strongest change, never last-wins.
 
-The optimized public mutation path should be a `Commands` extension that queues
-a cached setter system:
+- `LayoutAffecting`: geometry, measurement, wrapping, content bounds, or command
+  placement may change. Full solve required.
+- `VisualOnly`: geometry is still valid, but render commands must be re-emitted
+  because colors/materials/backgrounds/borders/images may differ.
+- `Identical`: nothing the classifier inspects changed.
 
-```rust
-commands.set_tree(entity, next_tree);
+`LayoutTree::classify_change` returns `LayoutAffecting` immediately on a root or
+element-count mismatch, otherwise zips the two element vectors and `combine`s
+per-element results, short-circuiting on the first `LayoutAffecting`.
+
+Per-element classification (`classify_element_change`) **exhaustively
+destructures** `Element` on both sides. Adding a field to `Element` (or the
+content/border/child-layout helpers) fails compilation until the new field is
+classified as layout-affecting or visual-only. Helpers: `classify_content_change`
+(text/image/children/empty), `classify_border_change`,
+`classify_child_layout_change`, `classify_child_divider_change`.
+
+Current classification:
+
+- **LayoutAffecting**: width, height, padding, overflow, scroll offset/anchors,
+  editable field metadata, child-layout variant or gap/alignment, child order or
+  references, border side widths, divider width, add/remove of border or
+  divider, text sizing, text config fields that affect measurement
+  (`config.layout_eq_excluding_visuals`), and visible-text content changes when
+  `sizing.visible_text_affects_layout()`.
+- **VisualOnly**: element id, background (including add/remove), corner radius,
+  `draw` / `z_index`, anti-alias / hairline-fade / shadow-casting authoring,
+  precompose mode, material handle, border color, divider color, text color and
+  measurement-neutral config, and image handle or tint.
+
+Image handle changes are `VisualOnly` because images are not intrinsically
+measured by layout today. If intrinsic image sizing is ever added, image-handle
+changes must move to `LayoutAffecting`.
+
+## Panel-side state
+
+`DiegeticPanelChangeClassification` is a required component of `DiegeticPanel`.
+Its `pending: Option<LayoutTreeChange>` is transient — `None` on most frames,
+`take`n by `compute_panel_layouts` after a replacement applies. It also tracks
+`tree_visual_geometry_stable`, set true only when accumulated changes are
+`VisualOnly` and each contributing change kept geometry stable.
+
+- `record_tree_change` composes `pending` with `combine` and updates the
+  geometry-stable flag.
+- `note_text_edit` records a per-frame run-text edit as `VisualOnly` but clears
+  the geometry-stable flag (the leaf must be re-measured to confirm its box did
+  not move).
+- `take_with_tree_visual_geometry_stable` drains both for the layout system.
+
+`PanelTree` wraps the source `LayoutTree` with a `TreeRevision`; every
+replacement or text/style edit bumps the revision. The revision means "source
+tree content changed"; `LayoutTreeChange` decides whether layout geometry must
+be recomputed. `ScaledLayoutTreeCache` (the point-scaled derived tree) is keyed
+on `source_revision` plus the layout/font scale bits, so it takes the
+revision-owned `PanelTree` and callers cannot pass mismatched cache identity.
+
+## Geometry reuse: `LayoutResult`
+
+`LayoutResult` (`layout/engine/layout_engine.rs`) caches enough to regenerate
+render commands without re-running the solve: `computed` element bounds,
+per-element `wrapped` text lines, `viewport_width`/`viewport_height`,
+`font_scale`, and a `structure_hash`.
+
+- `regenerate_commands(&mut self, tree)` rebuilds `commands` from cached
+  positions and wrapped text via `render_commands_from_geometry`. Debug-asserts
+  the structural invariant (same element count, same `structure_hash`) — the new
+  tree must have the same structure as the tree that produced the geometry. Text
+  and visual-only config are re-read from `tree`, so those flow through without a
+  solve.
+- `can_reuse_geometry(...)` is the correctness gate: returns `false` (forcing a
+  full solve) on any structural change, viewport or `font_scale` change, a
+  word-wrapped text leaf (cached line breaks belong to the old string), a newline
+  in the new text, or a changed measured leaf width.
+
+`ComputedDiegeticPanel::regenerate_commands` wraps the `LayoutResult` method and
+rebuilds `DrawOrder` from the new commands. It returns `false` when no computed
+result exists yet.
+
+## System flow
+
+`compute_panel_layouts` (`panel/compute_layout.rs`) processes each panel that is
+`Changed` or has pending classification:
+
+1. Skip entirely if neither changed nor pending.
+2. `take` the pending change and geometry-stable flag.
+3. `Identical` with an existing result → continue (no work).
+4. `VisualOnly` and geometry is reusable (`tree_visual_geometry_stable`, or
+   `can_reuse_geometry` re-measures and accepts) → `regenerate_commands`, fire a
+   `PanelChangeKind::VisualOnly` panel-changed event, continue. Mutating
+   `ComputedDiegeticPanel` marks it `Changed`, so render reconciliation
+   (`render/panel_text/`) re-emits.
+5. Otherwise run the full `LayoutEngine::compute` solve and commit.
+
+## Schedule (invariant)
+
+`panel/mod.rs`, `HeadlessLayoutPlugin`:
+
+```
+PanelSystems::ApplyTreeChanges  (ApplyDeferred)
+  → ApplyConversions            (before ComputeLayout)
+  → ComputeLayout               (compute_panel_layouts)
 ```
 
-Internally that extension can use `run_system_cached_with` so the system has
-access to both components:
-
-```rust
-fn set_tree_command(
-    In((entity, next_tree)): In<(Entity, LayoutTree)>,
-    mut panels: Query<(
-        &mut DiegeticPanel,
-        &mut DiegeticPanelChangeClassification,
-    )>,
-) {
-    // classify old tree vs next_tree, compose pending, then replace panel.tree
-}
-```
-
-This setter is deferred. Systems that respond to tree changes, including
-`compute_panel_layouts`, must run after the deferred setter has been applied.
-The plugin schedule must provide an `ApplyDeferred` boundary between user code
-that queues `commands.set_tree(...)` and layout systems that consume the pending
-classification.
-
-Full-rebuild benchmark comparisons should use a `bench_support`-only helper
-that replaces the tree and forces the conservative full-layout path. Normal
-callers that want optimized change classification should use
-`commands.set_tree(entity, next_tree)`. Benchmark comparisons
-can use the `bench_support`-gated `DiegeticPanel::set_tree_full_rebuild`
-component method to opt into the conservative full-layout path explicitly.
-
-## Layout Result Refactor
-
-Refactor `LayoutResult` so render command generation can run independently from
-layout geometry computation.
-
-Current structure:
-
-```rust
-LayoutResult {
-    computed: Vec<ComputedLayout>,
-    commands: Vec<RenderCommand>,
-}
-```
-
-Target structure can stay source-compatible at first, but internally it needs enough
-cached layout data to regenerate commands without recomputing geometry:
-
-- computed element bounds
-- wrapped text line data
-- content bounds
-- layout-time scale inputs used for geometry and text wrapping
-- a structural guard, such as an element-count check plus a layout-time
-  structure hash
-
-Then expose an internal method:
-
-```rust
-impl LayoutResult {
-    fn regenerate_commands(&mut self, tree: &LayoutTree);
-}
-```
-
-This method should use existing element bounds and wrapped text lines, not call
-text measurement or layout sizing. It should also assert the structural
-invariant that the new tree has the same element order and count as the tree
-that produced the cached geometry.
-
-`regenerate_commands` should use the scale data captured at layout time. If a
-caller supplies live scale inputs, debug assertions must verify they match the
-layout-time values; otherwise a font-unit change could reuse wrapped text with
-the wrong scale.
-
-## System Flow
-
-`compute_panel_layouts` should become:
-
-```rust
-// Runs after ApplyDeferred for commands.set_tree(...).
-for changed panel {
-    match pending_tree_change.take() {
-        None => {
-            run full layout;
-        }
-        Some(PendingTreeChange::Identical) => {
-            continue;
-        }
-        Some(PendingTreeChange::VisualOnly) => {
-            computed.regenerate_commands(panel.tree());
-            handle_scaled_tree_cache_visual_change();
-            continue;
-        }
-        Some(PendingTreeChange::LayoutAffecting) => {
-            run full layout;
-        }
-    }
-}
-```
-
-The scaled-tree cache contract must account for visual-only changes.
-Visual-only changes and layout-affecting changes both mutate the source tree
-through `PanelTree`, which bumps its `TreeRevision`. The revision means "source
-tree content changed", while `PendingTreeChange` decides whether layout geometry
-must be recomputed. `ScaledLayoutTreeCache` takes the revision-owned
-`PanelTree`, not a separate `(&LayoutTree, revision)` pair, so callers cannot
-pass mismatched cache identity.
-
-## Benchmark Plan
-
-Keep benchmarks in the existing matrix:
-
-1. `layout_engine_raw`
-   - keep `layout_tree_diff_*` classifier benches
-   - add `regenerate_commands_only`
-   - compare against `scale_tree_only` and `raw_compute_prebuilt_tree`
-
-2. `panel_perf`
-   - add `visual_only_rebuild`
-   - compare against current `color_change_rebuild`
-   - use a fixture matching the typography font list: stable labels, stable
-     fonts, active color changes
-
-Success criteria:
-
-- `VisualOnly` public path is materially faster than full `color_change_rebuild`.
-- `LayoutAffecting` path is not slower in common cases.
-- No work is added to unchanged frames.
-
-## Test Plan
-
-Unit tests:
-
-- identical tree classifies as `Identical`
-- text color-only classifies as `VisualOnly`
-- background add/remove classifies as `VisualOnly`
-- text content change classifies as `LayoutAffecting`
-- font size/id change classifies as `LayoutAffecting`
-- outer border color-only classifies as `VisualOnly`
-- outer border width change classifies as `LayoutAffecting`
-- row/column `ChildDivider` color-only classifies as `VisualOnly`
-- row/column `ChildDivider` width change classifies as `LayoutAffecting`
-- combined visual and layout changes classify as `LayoutAffecting`
-- empty tree to populated tree, and populated tree to empty tree, classify as
-  `LayoutAffecting`
-- material changes are classified by an explicit material comparator, not by
-  `Option::is_some`
-- image handle changes follow the documented intrinsic-sizing guard
-- layout-text `unit` / `world_scale` behavior is covered so the classifier does
-  not report layout-affecting changes for fields that layout text truly ignores
-
-System tests:
-
-- queued tree setter with visual-only change updates render commands without
-  changing content bounds
-- repeated `VisualOnly` then `LayoutAffecting` changes in the same frame run
-  the full layout path
-- repeated `VisualOnly` -> `LayoutAffecting` -> `VisualOnly` sequences mutate
-  through `PanelTree` for each source-tree replacement and do not return stale
-  scaled trees from cache
-- queued tree setter applies before `compute_panel_layouts` consumes the pending
-  classification
-- queued tree setter with visual-only change bumps `PanelTree`'s revision but
-  does not recompute layout geometry
-- queued tree setter with layout-affecting change bumps `PanelTree`'s revision
-  and recomputes layout geometry
-- visual-only update marks `ComputedDiegeticPanel` changed so render
-  reconciliation runs
-
-## Implementation Order
-
-1. Move `LayoutTree::classify_change` into crate-private production code before
-   the optimized path uses it. Keep only benchmark harness access behind
-   `bench_support`.
-2. Implement classifier methods with exhaustive destructuring and add the
-   classification unit tests.
-3. Add the required `DiegeticPanelChangeClassification` component and the
-   command-backed `set_tree` API.
-4. Add a `bench_support`-only full-rebuild tree setter for benchmark
-   comparisons.
-5. Schedule layout response after the deferred tree setter has applied.
-6. Wrap the source tree and revision in `PanelTree` so any source-tree
-   replacement bumps `TreeRevision` through the same API.
-7. Extract render command generation from layout positioning into a reusable
-   internal pass.
-8. Store wrapped text data, content bounds, scale inputs, and structural guards
-   in `LayoutResult` so commands can be regenerated without measurement.
-9. Add pending tree-change recording to the queued tree setter.
-10. Add the `VisualOnly` branch in `compute_panel_layouts`.
-11. Add public-path benchmark coverage for visual-only tree replacement.
-12. Migrate crate examples from direct tree replacement to
-    `commands.set_tree(entity, next_tree)` once the optimized
-    command API is tested and benchmarked.
-13. Gate the direct component fallback
-    `DiegeticPanel::set_tree_full_rebuild` behind `bench_support` so full
-    recomputation remains available to benchmarks but is not normal public API.
+The `ApplyTreeChanges` `ApplyDeferred` boundary guarantees the deferred
+`set_tree` command has applied — and recorded pending classification — before
+`compute_panel_layouts` consumes it. Layout systems must stay ordered after this
+boundary.

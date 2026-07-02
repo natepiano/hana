@@ -5,7 +5,7 @@
 This document records the deferred design for tangent-bitangent-normal
 (`TBN`) support on diegetic analytic surfaces: SDF fills/borders, slug text,
 and panel shapes. It replaces the old tangent-basis appendix in
-`sdf-material-table-batching.md`.
+`as-built/material-table-batching.md`.
 
 The feature is not part of the active batching plan. Build it only after the
 main SDF/text/shape material-table path is stable and there is a concrete
@@ -106,7 +106,7 @@ until this feature lands:
 - `depth_map`: `ResourceCompatibility` texture splitter. The texture is already
   exposed by the `StandardMaterial` half of the batch material; batching across
   many distinct height maps is the texture-array problem in Appendix B of
-  `sdf-material-table-batching.md`.
+  `as-built/material-table-batching.md`.
 - `normal_map_texture`, `normal_map_channel`, and `flip_normal_map_y` remain
   resource/compatibility facts, not table values.
 
@@ -189,7 +189,7 @@ Runtime validation should include a small panel with:
   after base-color or normal sampling is wrong.
 - This does not reduce texture batch splitting. Many distinct normal/depth maps
   still need the texture-array extension from Appendix B of
-  `sdf-material-table-batching.md`.
+  `as-built/material-table-batching.md`.
 
 ## Non-Goals
 

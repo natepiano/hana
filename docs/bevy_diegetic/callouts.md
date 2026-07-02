@@ -5,16 +5,18 @@ screen-space UI, world-space UI, and panel-local drawing.
 
 ## Current shape
 
-`bevy_diegetic` already has two relevant systems:
+`bevy_diegetic` has one relevant system today:
 
-- Standalone `CalloutLine` entities in `crates/bevy_diegetic/src/callouts/`.
 - Panel-local drawing through `PanelDraw`, `PanelShape`, `PanelLine`, and
   `PanelCircle` in `crates/bevy_diegetic/src/layout/`.
 
-Those systems are related but not unified. `PanelLine` already shares the
-`CalloutCap` vocabulary and cap resolver, but its endpoints, units, clipping,
-draw order, and lifecycle are panel-local. `CalloutLine` is currently an ECS
-component with local/world `Vec3` endpoints and direct SDF child-mesh rendering.
+`crates/bevy_diegetic/src/callouts/` no longer hosts a standalone renderer: the
+`CalloutLine` component and its direct SDF child-mesh route were removed, and the
+module now owns only the `CalloutCap` cap primitives that `layout::line` resolves
+and emits as panel-shape primitives. `PanelLine` shares that `CalloutCap`
+vocabulary and cap resolver; its endpoints, units, clipping, draw order, and
+lifecycle are panel-local, and it renders through the shared analytic-path
+batched renderer.
 
 Text provides the most useful precedent:
 

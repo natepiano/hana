@@ -18,6 +18,7 @@ mod precompose;
 mod sizing;
 mod world_anchoring;
 
+pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchor_geometry::PanelAnchorEdge;
 pub use anchor_geometry::PanelAnchorEdgeEndpoints;
 pub use anchor_geometry::PanelAnchorGeometryError;
@@ -27,22 +28,26 @@ pub use anchor_geometry::PanelAnchorPoints;
 pub use anchor_geometry::PanelPlane;
 pub use anchor_geometry::PanelScreenBounds;
 pub use anchor_geometry::ResolvedPanelAnchorGeometry;
-pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
 pub use anchoring::PanelAnchorPose;
 pub use anchoring::PanelsAnchoredHere;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
+pub(crate) use attachment_resolver::resolve_panel_attachments;
 pub(crate) use attachment_resolver::AttachmentResolveAction;
 pub(crate) use attachment_resolver::AttachmentResolveCandidate;
 pub(crate) use attachment_resolver::AttachmentResolveDiagnostics;
 pub(crate) use attachment_resolver::AttachmentResolveReasons;
-pub(crate) use attachment_resolver::resolve_panel_attachments;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 pub use builder::DiegeticPanelBuilder;
 pub use builder::PanelBuildError;
+pub(crate) use conversion::apply_screen_conversion;
+pub(crate) use conversion::apply_screen_root_sizing;
+pub(crate) use conversion::apply_world_conversion;
+pub(crate) use conversion::validate_screen_conversion;
+pub(crate) use conversion::validate_world_conversion;
 pub use conversion::PanelProjectionError;
 pub use conversion::PanelProjectionParam;
 pub use conversion::PanelScreenConversion;
@@ -56,25 +61,20 @@ pub use conversion::PanelWorldProjection;
 pub use conversion::PanelWorldTarget;
 pub use conversion::SavedPanelScreenState;
 pub use conversion::SavedPanelWorldState;
-pub(crate) use conversion::apply_screen_conversion;
-pub(crate) use conversion::apply_screen_root_sizing;
-pub(crate) use conversion::apply_world_conversion;
-pub(crate) use conversion::validate_screen_conversion;
-pub(crate) use conversion::validate_world_conversion;
 pub use coordinate_space::CoordinateSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
+pub(crate) use diegetic_panel::apply_precompose_helper_panel;
 pub use diegetic_panel::ComputedDiegeticPanel;
 pub use diegetic_panel::DiegeticPanel;
 pub(crate) use diegetic_panel::DiegeticPanelChangeClassification;
 pub use diegetic_panel::DiegeticPanelCommands;
-pub(crate) use diegetic_panel::apply_precompose_helper_panel;
+pub(crate) use events::trigger_panel_dimensions_changed;
 pub(crate) use events::LastPanelDimensions;
 pub use events::PanelChangeKind;
 pub use events::PanelChanged;
 pub use events::PanelDimensions;
 pub use events::PanelDimensionsChanged;
-pub(crate) use events::trigger_panel_dimensions_changed;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
@@ -105,11 +105,11 @@ pub use sizing::Pixels;
 pub use sizing::Points;
 use world_anchoring::WorldAnchorResolveDiagnostics;
 
-use crate::cascade::CascadeDefaults;
 use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
+use crate::cascade::PanelDefaults;
 use crate::layout::ShadowCasting;
 use crate::layout::ShapedTextCache;
 use crate::render::AntiAlias;
@@ -152,7 +152,7 @@ pub enum PanelSystems {
 /// External consumers (benchmarks, non-UI apps) register this plugin
 /// instead of [`DiegeticUiPlugin`](crate::DiegeticUiPlugin) when they
 /// only need [`DiegeticPanel`] → [`ComputedDiegeticPanel`] computation.
-/// The plugin initializes [`CascadeDefaults`] itself (idempotent); callers
+/// The plugin initializes [`PanelDefaults`] itself (idempotent); callers
 /// insert their own [`DiegeticTextMeasurer`](crate::DiegeticTextMeasurer)
 /// and optionally override construction defaults before adding this plugin.
 pub struct HeadlessLayoutPlugin;
@@ -171,7 +171,7 @@ impl Plugin for HeadlessLayoutPlugin {
             .add_observer(diegetic_panel::seed_panel_overrides)
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
-            .init_resource::<CascadeDefaults>()
+            .init_resource::<PanelDefaults>()
             .init_resource::<WorldAnchorResolveDiagnostics>()
             .configure_sets(
                 Update,

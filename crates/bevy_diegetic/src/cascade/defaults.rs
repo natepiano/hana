@@ -23,7 +23,7 @@ pub struct CascadeDefault<A: CascadeProperty>(pub A);
 /// propagated by the cascade plugin.
 #[derive(Resource, Clone, Copy, Debug, Reflect)]
 #[reflect(Resource)]
-pub struct CascadeDefaults {
+pub struct PanelDefaults {
     /// Construction-time seed for a panel's `Override<FontUnit>`. Read once by
     /// the panel authoring bridge when a panel has no explicit `font_unit`;
     /// **not** a cascade global and **not** propagated at runtime.
@@ -33,7 +33,7 @@ pub struct CascadeDefaults {
     pub layout_unit:     Unit,
 }
 
-impl Default for CascadeDefaults {
+impl Default for PanelDefaults {
     fn default() -> Self {
         Self {
             panel_font_unit: Unit::Points,

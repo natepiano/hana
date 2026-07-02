@@ -1650,7 +1650,7 @@ fn build_two_column_article(
                     );
                     debug_text(
                         b,
-                        "CascadeDefaults sets panel construction defaults: \
+                        "PanelDefaults sets panel construction defaults: \
                          layout in meters, fonts in points. \
                          Override per-panel with layout_unit and font_unit, or \
                          per-element with types like Mm(10.0) and Pt(24.0) \

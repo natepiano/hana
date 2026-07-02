@@ -1,564 +1,144 @@
-# Diegetic text performance — options
+# Diegetic text performance — main-thread CPU
 
-> **Status: RETIRED 2026-06-03.** Options A, C, and D are landed and measured;
-> the one remaining option, **B (true instancing)**, has its own plan in
-> [`glyph-instancing.md`](glyph-instancing.md) (since landed in full,
-> 2026-06-06). This file stays as the record of phases A / C / D and of the
-> waterfall overlay design.
+This doc covers the **layout / main-thread** cost of panel text: how per-frame
+text edits stay cheap. The **render-thread** side (glyph geometry, batching,
+material rows, the shared glyph-outline atlas) lives in
+[`material-table-batching.md`](material-table-batching.md) and
+[`slug.md`](slug.md); this doc does not
+repeat it.
 
-## Baseline
+The reference workload is `examples/diegetic_text_stress.rs`: 100 world labels,
+each restrung every frame with a fixed-width `"NN MMM"` string. Every lever below
+is what keeps that per-frame restringing off the layout solve.
 
-Conditions: `diegetic_text_stress`, 100 world labels each restrung every frame,
-M2 Max, release, `with_perf_mode` (AutoNoVsync + `WinitSettings::continuous`).
-Add a column after each phase lands.
+## The three levers
 
-Rows match the `diegetic_text_stress` overlay labels. The layout-area cells for
-the instrumented columns (1a / 1b) read `now / 5s-max` to mirror the overlay's two
-value columns; the `now` (moving mean) is the stable number, `5s-max` is peak-hold
-and spiky (a single hitch spikes it). Where a column lacks a separately-captured
-peak, only `now` is shown. The `After 3 ⊙` column is the geometry-stable skip — it
-recovers the 1b regression and is the current state.
+### 1. The tree is the single source of truth for text
 
-| Overlay row                  | Baseline (2026-06-02) | After A     | After C      | After 1a ⊗ (now) | After 1b ⊘ (now / 5s-max) | After 3 ⊙ (now) | After B |
-| ---------------------------- | --------------------- | ----------- | ------------ | ---------------- | ------------------------- | --------------- | ------- |
-| `ms` (frame) ‡               | ~25 ms                | ~24 ms      | ~18.5 ms ‡   | —                | —                         | —               |         |
-| `fps` ‡                      | 40                    | 42          | 55 ‡         | —                | —                         | —               |         |
-| `layout` †                   | 0 / 5.8 ms            | 0 / 5.8 ms  | 0 / 5.8 ms ⊕ | 0.14 ⊗           | 0.15 / 0.69 ⊘             | **~0.10** ⊙     |         |
-| `shaping`                    | ~0.6 ms               | ~0.31 ms    | ~0.33 ms     | 0.39             | 0.39 / 0.95 ⊘            | ~0.37 ⊙         |         |
-| `mesh`                       | 1.8 ms                | **1.29 ms** | **0.12 ms**  | 0.12             | 0.12 / 0.37 ⊘            | ~0.12 ⊙         |         |
-| `remainder` ‡ (now `rest`)   | —                     | ~18 ms ‡    | ~14.7 ms ‡   | —                | —                         | —               |         |
-| Paused `fps` ‡ (not on HUD)  | 98                    | ~55         |              | —                | —                         | —               |         |
+Panel text has one authoritative home: `El.text` in the panel's layout tree,
+reached through `DiegeticPanel::sync_run_text_cache`. The per-run child's
+`TextContent` component is **derived output only** — `reconcile_panel_text_children`
+writes it tree→child, `shape_panel_text_children` reads it. Nothing writes
+`TextContent` back into the tree.
 
-The `setup` / `scale` / `solve` / `commit` layout sub-rows were retired after
-Step 3 — the breakdown's job was finding the dominant share inside `compute_ms`,
-and with `setup` deleted (1a) and `solve` / `commit` skipped on geometry-stable
-edits (3) there is nothing left inside it worth a per-frame `Instant` each. Their
-historical values live in the ⊕ / ⊗ / ⊘ / ⊙ notes below.
-
-† Pre-1b the `layout` row reads `min / max` over alternate frames — the flip-flop
-zeroed it every other frame, so the moving mean is halved. From 1b on, layout runs
-every frame (steady 100 panels), so the `now` column is the true per-frame mean.
-
-‡ The frame-time, FPS, paused, and render-floor rows are fill-rate-bound and scale
-with window size, and the A and C columns were captured in separate sessions; the
-absolute numbers are **not** comparable across columns. The window-independent
-measure is the CPU `mesh_build_ms` row: 1.8 → 1.29 (A) → **0.12** (C).
-
-⊕ Step-0 instrumentation (2026-06-03) split `compute_ms` into `setup` / `scale` /
-`solve` / `commit`. `setup` (the per-frame `ShapedTextCache` clone) is the dominant
-share of `compute_ms`, and it is **bounded**: `label_text` is
-`format!("{index:02} {:03}", frame % 1000)`, so the distinct-string set caps at
-100 indices × 1000 counter values = 100 000 entries. The cache fills over the first
-~1000 frames, then every string is a hit and the clone plateaus — **steady ~2 ms,
-5s-max ~3 ms** (observed uncontended in prior runs). A live BRP sample during this
-session read `setup` climbing to ~13 ms, but that was concurrent-compile CPU
-contention inflating the clone, not the cache growing — discard those magnitudes.
-`scale` / `solve` / `commit` stay sub-millisecond (the cells below are contended-
-sample upper bounds; a clean run will lower them). The split is the point: `setup`
-is the largest single layout cost, so removing the clone (share the cache behind its
-`Arc<Mutex>` instead of cloning) is the real win — paired with removing the flip-flop
-for correctness. See Step 1a / Step 1b.
-
-⊗ Step-1a result (2026-06-03, this session, uncontended). Moved `ShapedTextCache`'s
-two maps behind one internal `Arc<Mutex<…>>`, so `cache.clone()` in
-`compute_panel_layouts` is now a refcount bump (not a map copy) and the measure
-closure's cache-miss inserts persist into the shared cache instead of being thrown
-away. Sampled 73 active frames over ~5 s (flip-flop still alternating, so the other
-half of frames skip layout and read 0). `setup` dropped from ~2 ms steady / ~3 ms
-5s-max to **mean 0.0003 ms, max 0.0011 ms** — gone. `compute_ms` fell to **mean
-0.14 ms, max 0.21 ms** (the whole `setup` share removed). `scale` / `solve` /
-`commit` are unchanged — the layout work itself did not change; the values here are
-clean means, below C's contended upper bounds. 259 crate tests pass; clippy
-(nursery + pedantic) clean. The `Res<ShapedTextCache>` clones the handle into the
-`'static` measure closure; the renderer and overlay paths now hold it as `Res` and
-mutate through `&self`. Flip-flop still in place — Step 1b removes it next.
-
-⊘ Step-1b result (2026-06-03, this session) — the deliberate regression Step 3
-recovers. Deleted the flip-flop: removed `ReconcileOwned`, `sync_run_text_to_cache`,
-and `clear_reconcile_owned`; routed the four writers to the authoritative tree
-through a new `TextEdit` cursor (`PanelText` / `DiegeticTextMut::for_each_mut`),
-making the tree the single source and `TextContent` pure derived output reconcile
-rewrites. `compute_panels` went from alternating 100 / 0 to **steady 100 every
-frame** (147 / 150 sampled frames at 100; the 3 at 101 are the FPS overlay panel),
-so layout now runs every frame instead of every other.
-
-Quiet-machine readout (overlay `now / 5s-max`, ms): `layout` **0.15 / 0.69**,
-`setup` ~0 / 0.001, `scale` 0.04 / 0.32, `solve` **0.08 / 0.24**, `commit`
-0.02 / 0.10. The clean per-frame layout cost is **essentially the same as 1a's**
-(layout `now` 0.15 vs 0.14, `solve` 0.08 vs 0.08) — removing the flip-flop did not
-make each pass heavier; the regression is **frequency**: layout now runs every
-frame instead of every other, so per-frame-averaged layout CPU roughly doubled
-(~0.07 → ~0.15 ms) while the per-active-frame `solve` is unchanged. (An earlier
-sample this session read `solve` 0.31 / `layout` 0.38; that was concurrent-build
-CPU contention inflating it — same effect as the original `setup` misread —
-discard those magnitudes.) `setup`, `scale`, `commit`, and the text path
-(`shaping` ~0.39, `mesh` ~0.12) are unchanged.
-
-258 crate tests pass (the two `ReconcileOwned` / sync-back lifecycle tests were
-retired; the "no-op set_text fires no measure" and "one edit = one relayout"
-properties were rewritten to drive the public tree path and still hold); clippy
-(nursery + pedantic) clean, full workspace builds. `TextEdit::set_text`
-read-compares before the `&mut DiegeticPanel` borrow, so the no-op-no-relayout
-guard the deleted sync held is preserved. Step 3 (the geometry-stable skip) routes
-text-only edits whose measured size is unchanged to the cheap `VisualOnly` path —
-every stress label is fixed-width `"NN MMM"`, so it should drop the full `solve` to
-genuine-reflow only and pull `compute_panels` back down from steady 100.
-
-⊙ Step-3 result (2026-06-03, this session, quiet machine, port 12000 release).
-The text-edit path now records `VisualOnly` on the change-classification sibling
-(via `TextEdit` → `DiegeticPanelChangeClassification::note_text_edit`), and
-`compute_panel_layouts` gates the existing `VisualOnly` → `regenerate_commands`
-branch on a new `LayoutResult::can_reuse_geometry` probe: it re-measures each text
-leaf (cache-backed) and reuses the cached geometry only when structure, viewport,
-and every leaf's measured width are bit-identical and no leaf is wrapped. Every
-`"NN MMM"` label measures identical frame to frame, so all 100 take the cheap path.
-Three live samples: `layout` **~0.10** (was 0.15), `solve` **~0.02** (was 0.08 —
-the full `engine.compute` is replaced by `regenerate_commands`), `commit` **~0**
-(was 0.02 — the cheap path `continue`s before `commit_layout_result`); `scale`
-~0.03, `setup` ~0, text path unchanged (`shaping` ~0.37, `mesh` ~0.12). Layout is
-now **below the flip-flop-era per-frame cost** with no marker, no every-other-frame
-gating, and no reflow lag. One correction to the 1b prediction: `compute_panels`
-**stays 100**, not lower — the regenerate path still counts each panel
-(`panel_count += 1`); the win is in `solve` / `commit` per pass, not in the count.
-A real reflow (a width-changing edit) still classifies as a full solve, so the skip
-never renders stale geometry. `can_reuse_geometry`'s three guards (same-width swap,
-newline rejection, wrapped-leaf rejection) are covered by engine unit tests; full
-crate suite + clippy (nursery + pedantic) green.
-
-At the time the sub-rows were live, `setup`+`scale`+`solve`+`commit` ≈ 0.05 did
-not sum to the `layout` total (~0.10): the total is the whole system's wall-clock,
-the sub-rows only their own timed spans. The ~0.05 gap was un-instrumented
-per-panel loop work (change-detection reads, two query `get`s) plus the new
-`can_reuse_geometry` probe (100 cache-backed re-measures/frame), left outside
-`solve`. Known and small; the sub-row instrumentation was removed rather than
-closed.
-
-## Overlay rows since Step 3 — a per-thread waterfall
-
-After Step 3 the overlay was restructured into two additive blocks, one per
-thread, indented rows summing exactly to their block header
-(`crates/bevy_diegetic/examples/diegetic_text_stress.rs`):
-
-- **Main-thread block** — `ms` (raw frame delta) = `layout` (`compute_ms`) +
-  **`reconcile`** (new `DiegeticPerfStats::reconcile_ms` —
-  `reconcile_panel_text_children` + `reconcile_panel_image_children`, published
-  as `bevy_diegetic/panel/reconcile_ms`) + `shaping` + `mesh` + **`other`**
-  (the measured `First`→`Last` main-schedule span minus the four diegetic rows:
-  cascade, transform propagation, every other main system) + **`wait`** (`ms` −
-  the main-schedule span: the main thread blocked handing off to the render
-  thread, plus the extract copy).
-- **Render-thread block**, overlaps `ms` (pipelined rendering — the render
-  thread works on frame N while the main world runs N+1, so `ms` ≈ max(main,
-  render+GPU), not the sum): **`render`** (the whole `Render` schedule,
-  bracketed with `Instant` marks at set boundaries) = **`assets`** (the
-  `PrepareAssets` stage — re-uploading every mesh / image / buffer asset
-  modified this frame; with 100 label meshes rewritten per frame this is the
-  prime suspect for render-thread weight) + **`prep`** (extract-commands
-  apply, prepare meshes and views, specialize, queue, sort, bind groups,
-  cleanup) + **`gpu wait`** (the `PrepareViews` stage containing the swapchain
-  acquire — where the render thread blocks when the GPU is behind) +
-  **`graph`** (render-graph execution: pass encoding, submit, present).
-
-Reading it: `gpu wait` ≈ `render` ≈ `ms` with small `prep` / `graph` means the
-GPU paces the frame — the case Option B's instancing targets (fewer draws →
-less encode CPU *and* less vertex/overdraw work). On the main side, `wait` is
-the same pacing seen from the other thread: main blocked on render, render
-blocked on GPU.
-
-Platform caveat: per-pass **GPU** times are unobtainable in-app on this
-machine. Bevy 0.19 disables encoder GPU timestamps on macOS outright
-(bevy#22257), Apple-silicon Metal only supports stage-boundary counter sampling
-(no `TIMESTAMP_QUERY_INSIDE_PASSES`), and the shadow pass records no diagnostic
-span at all. `RenderDiagnosticsPlugin` is still registered, so per-pass *CPU*
-encode spans (`render/*/elapsed_cpu`) are readable from the `DiagnosticsStore`
-over BRP. For a true per-pass GPU breakdown (shadow / opaque / transparent /
-OIT), use Instruments' Metal System Trace (`xctrace`) against a release run.
-
-## Finding — A is CPU-only; this stress test is render-bound
-
-A landed correctly and all 255 tests pass: runs now overwrite their mesh and
-three GPU buffers in place behind stable handles keyed by the label entity
-(`RunStorageKey::from(entity)`), and the mesh child + material persist instead of
-being despawned and re-added every frame. The measured effect is
-`mesh_build_ms` 1.8 → 1.29 ms — the per-frame `meshes.add()` + 3×
-`storage_buffers.add()` + mesh-entity respawn + `materials.add()` are gone.
-
-But the moving frame time barely moved, and that corrects the earlier model. The
-paused frame — text not changing, diegetic CPU ≈ 0 — is still ~18 ms, so that
-entire floor is GPU render: OIT transparency + shadows + 3-light studio lighting
-over ~600 glyph quads, which A does not touch. Diegetic CPU is only ~1.6–7 ms of
-the frame (alternating with the layout toggle), **not** the ~7–10 ms the prior
-note attributed to "asset churn." The per-frame text mutation costs ~6 ms
-(moving − paused); A optimizes a ~0.5–1 ms slice of it, and the ~18 ms render
-floor is the dominant, untouched cost.
-
-Implication for ordering: to move *this* test's frame time, attack the render
-(transparency / OIT / shadow / fill-rate) and per-frame upload volume
-(instancing — **B**), not CPU churn. **D** still removes the alternating ~5.8 ms
-layout CPU. A remains the right foundation — stable per-label identity is what a
-later content-hash skip would build on — it just isn't where this test's wall
-clock goes.
-
-## Finding — C: shared glyph atlas (done 2026-06-02)
-
-Each run formerly re-copied its glyphs' curves/bands into per-run `Vec`s and
-uploaded three per-run `ShaderBuffer`s every frame (100 runs × the same digits
-`0`–`9` = 100× duplication). C packs each glyph ONCE into one shared append-only
-atlas (`GlyphOutlineCache` now holds `record_indices` / `curves` / `bands` /
-`glyph_records` / `revision`); the run mesh stores the glyph's GLOBAL atlas index
-in `UV_1.x`, and every material binds the same three shared buffers.
-`RunRenderData` / `RunStorage` shrank to mesh-only; `commit_glyph_atlas` uploads
-the shared buffers in place, only when `revision` grows → zero in steady state.
-Shader + record formats unchanged.
-
-Measured with the mesh sub-breakdown instrumentation (pre-C session), now / 5s-max:
-- pack 0.85 → **0.04**, upload 0.93 → **0.06**, material 0.05 → **0.03**,
-  `mesh_build_ms` 1.82 → **0.12 ms** (~15×).
-- Bonus: dropping 300 per-frame buffer uploads cut render-world extract/prepare
-  too — render remainder ~18.3 → **~14.7 ms**.
-- 257 tests pass. Atlas is append-only (no eviction) — fine for the stress test.
-
-## Options
-
-**A. Reuse the geometry (in-place mesh/buffer update)** — DONE 2026-06-02
-- Keep each label's existing mesh + buffers and overwrite their contents when the
-  text changes, instead of allocating a new asset and dropping the old one.
-- Removes the ~400-per-frame allocate/upload/discard churn.
-
-**B. True instancing (one shared quad)** — MOVED to
-[`glyph-instancing.md`](glyph-instancing.md)
-- Stop storing a quad per glyph. Keep one unit quad and draw it N times, feeding a
-  per-glyph table (position + glyph id) the GPU expands.
-- No per-label meshes; moving text just updates a small table. Also removes the
-  duplicate quads.
-- Big change — needs a custom instanced render pipeline. The eventual destination;
-  the implementation plan lives in the new doc.
-
-**C. Share glyph outlines across labels** — DONE 2026-06-02
-- Store each glyph's outline once; labels point at the shared copy. See Finding — C.
-
-**D. Single source of truth + geometry-stable skip** — DONE 2026-06-03
-- Started as "skip full layout on a text-only change," but the right fix is to
-  remove the model that forces the every-other-frame toggle. See the phase plan
-  below.
-- Step 0 (instrumentation) done 2026-06-03; it surfaced a second cost — the per-frame
-  `ShapedTextCache` clone (`setup`, ~2 ms) — so the plan now also kills the clone
-  (Step 1a) before removing the flip-flop (Step 1b).
-- Saves the alternating layout-solve CPU, removes the per-frame cache clone, and
-  removes a 1-frame reflow lag.
-
-## Phase D — tree as single source of truth, paired with a geometry-stable skip
-
-### The problem
-
-Text has two homes kept in bidirectional sync over one `Changed<TextContent>`
-flag:
-- tree → child: `reconcile_panel_text_children` writes the child's `TextContent`
-  from the panel's layout tree.
-- child → tree: `sync_run_text_to_cache` pulls a `TextContent` edit back into the
-  panel tree source; `PanelTree` bumps its revision → relayout.
-
-That loop is circular — reconcile's own tree→child write trips `Changed`, which
-the child→tree sync would read as a user edit and re-fire forever. `ReconcileOwned`
-is a one-frame marker whose only job is to hide reconcile's writes from the one
-sync pass; `clear_reconcile_owned` strips it next frame. Delicate ordering holds
-it together (`sync.before(ApplyTreeChanges)`, `clear.after(sync)`, reconcile in
-PostUpdate). A second consumer, `shape_panel_text_children`, reads the same
-`Changed<TextContent>` with NO gating.
-
-Side effects of the marker:
-- Layout is gated to every OTHER frame (`compute_panels` alternates 100 / 0) — a
-  fragile accidental optimization, not a designed one.
-- Glyphs do **not** lag (shaping reads `Changed<TextContent>` directly, ungated),
-  but a layout-affecting (reflow / width) edit that lands on a marked frame is
-  delayed one frame under continuous editing.
-
-### Why it was built this way (the ergonomic reason)
-
-`TextContent` was made a directly-mutable ECS component on the run child so
-"retext my label" is a normal component mutation reached through a marker
-(`access.rs:213-243`). The marker `M` sits on the panel and `TextContent` on the
-child, so `DiegeticTextMut<M>` hops the panel→run relationship — a naive
-`Query<&mut TextContent, With<M>>` matches nothing. That mutate-the-component
-ergonomic forced the sync-back-to-tree, which forced `ReconcileOwned`.
-
-### The de-risking asymmetry (verified in code)
-
-Reads already go to the TREE: `PanelTextReader::text` / `sole_text` return
-`tree().element_text(layout.element_idx)` (`access.rs:57,94`); the `resolve` doc
-calls the tree "authoritative for valid ids at build time." The builder authors
-text into the tree. ONLY the four writers detour through `&mut TextContent`
-(`access.rs:172,186,258,276`). So the tree is already the single source for
-everything except writes.
-
-### The clone fix (Step 1a) — share the cache, stop discarding measurements
-
-Independent of the tree-authoritative work and sequenced first, because removing the
-flip-flop (1b) makes `setup` run every frame instead of every other — doubling the
-clone's per-frame cost right as 1b lands. Fixing the clone first means 1b's
-regression is measured against a `setup`-free layout, and the fix is measurable on
-its own against today's flip-flop baseline.
-
-Today `compute_panel_layouts` does `cache.clone()` of the whole `ShapedTextCache`
-(`compute_layout.rs:61`), the measure-closure inserts cache misses into that *clone*,
-and the clone is dropped at end of system — so every measurement computed during
-layout is **thrown away** and the ~2 ms full-map copy repeats next frame. Move
-`ShapedTextCache`'s maps behind an internal `Arc<Mutex<…>>` (interior mutability) so
-that:
-- `cache.clone()` (or a cheap `.handle()`) becomes a refcount bump, not a map copy →
-  `setup` drops toward ~0;
-- the measure-closure's inserts persist into the shared cache instead of being
-  discarded → layout-side measurements are reused, not recomputed.
-
-The closure already needs `'static + Send + Sync` to live inside `MeasureTextFn`; an
-`Arc<Mutex>`-backed cache satisfies that without the per-frame clone. Expect `setup`
-~2 ms → ~0; `compute_ms` drops by the `setup` share; behavior unchanged.
-
-### The fix — route writes to the tree too (Step 1b)
-
-`TextContent` becomes pure derived output (reconcile writes it tree→child; shaping
-reads it). Delete `sync_run_text_to_cache`, `clear_reconcile_owned`,
-`ReconcileOwned`, and every `Without<ReconcileOwned>` filter. Shaping / mesh /
-cascades unchanged.
-
-The four writers reroute from `content.set_text(text)` to
-`panel.sync_run_text_cache(element_idx, &text)` (the same write the deleted sync
-system used — updates `El.text` through `PanelTree`). The reader's existing
-`resolve` / `lone_run` find the element.
-
-### The API (one visible change)
-
-`DiegeticTextMut<M>` keeps the marker-query-then-mutate ergonomic; only the
-mutated handle's type changes. New tree-edit cursor:
+Writes go through the `TextEdit` cursor
+(`render/panel_text/access.rs`), handed to the `DiegeticTextMut::for_each_mut`
+closure and used internally by `PanelText`:
 
 ```rust
-pub struct TextEdit<'a> {       // name TBD: TextEdit / TextCursor / PanelTextEdit
-    panel:       &'a mut DiegeticPanel,
-    element_idx: usize,
-}
-impl TextEdit<'_> {
-    pub fn set_text(&mut self, text: impl Into<String>) {
-        self.panel.sync_run_text_cache(self.element_idx, &text.into());
-    }
-    #[must_use]
-    pub fn text(&self) -> &str {
-        self.panel.tree().element_text(self.element_idx).unwrap_or("")
-    }
+pub struct TextEdit<'a> {
+    panel:          Mut<'a, DiegeticPanel>,
+    classification: Mut<'a, DiegeticPanelChangeClassification>,
+    element_idx:    usize,
 }
 ```
 
+`TextEdit::set_text` writes `El.text` and records the edit for the skip below.
+`text()` reads back from the tree cache.
+
+Why single-source: the previous model kept text in two homes synced over one
+`Changed<TextContent>` flag, which needs a one-frame `ReconcileOwned` marker to
+stop reconcile's own tree→child write from looping back as a user edit. That
+marker had a side effect — layout ran every *other* frame (a fragile accidental
+gate) and a reflow edit landing on a marked frame lagged one frame. Removing the
+two-way sync (`ReconcileOwned`, `sync_run_text_to_cache`, `clear_reconcile_owned`
+are all gone) removed the lag and the accidental gate; the geometry-stable skip
+(lever 3) replaces the gate with a designed one.
+
+**Gotcha — no-op guard is load-bearing.** `TextEdit::set_text` read-compares
+against the current tree string through `Deref` *before* taking the `&mut DiegeticPanel`
+borrow, so an unchanged write dirties nothing: no relayout, no measure, no change
+record. Restringing a label to the same value must stay free. Keep the equality
+check before the mutable access.
+
+### 2. `ShapedTextCache` is shared, not cloned per frame
+
+`ShapedTextCache` (`layout/shape_cache.rs`) holds its two maps (glyph runs +
+measurements) behind one `Arc<Mutex<ShapedTextCacheMaps>>`:
+
 ```rust
-#[derive(SystemParam)]
-pub struct DiegeticTextMut<'w, 's, M: Component> {
-    markers: Query<'w, 's, (Entity, &'static M, &'static PanelTextRuns)>,
-    layouts: Query<'w, 's, &'static PanelTextLayout>,
-    panels:  Query<'w, 's, &'static mut DiegeticPanel>,   // was: Query<&mut TextContent>
+#[derive(Resource, Clone, Default)]
+pub struct ShapedTextCache {
+    inner: Arc<Mutex<ShapedTextCacheMaps>>,
 }
 ```
 
-`M`, `PanelTextRuns`, `DiegeticPanel` are disjoint components, so the marker read
-and the tree write don't conflict on the same entity. Call site is unchanged
-except the binding name: `for_each_mut(|label, edit| edit.set_text(...))`.
-`set` / `set_text` / `set_sole_text` signatures are unaffected (string-only; pure
-internal change). The single visible change is `for_each_mut`'s closure parameter
-type: `&mut TextContent` → `&mut TextEdit`.
+All methods take `&self` and lock internally. `compute_panel_layouts` calls
+`build_cached_measure`, which `cache.clone()`s the handle (a refcount bump, not a
+map copy) into the `'static` `MeasureTextFn` closure the layout engine needs.
+Two consequences that are the whole point:
 
-### The geometry-stable skip (Step 3, runtime decision)
+- Cloning the cache into the closure each frame is free — no full-map copy.
+- Cache misses the measure closure computes during layout are inserted back into
+  the shared cache, so they persist for the renderer's shaper instead of being
+  discarded at end of system.
 
-Without the toggle, the layout solve would run every frame text changes (twice
-today's count). The skip keeps the common case free: on a text edit, re-measure
-that element (the cheap per-element measure via `ShapedTextCache`, NOT the
-whole-tree solve); if the measured width/height equals the cached size, route to
-the existing cheap `LayoutTreeChange::VisualOnly` regenerate-commands path
-(`compute_layout.rs:121-127`) and skip the engine solve; else full solve. Stress
-labels (`"NN MMM"`, fixed 6 chars) measure identical every frame → always
-skippable. This is content-agnostic — works whether the width is fixed by
-declaration or stable by content.
+**Gotcha:** if you add a code path that clones `ShapedTextCache` expecting an
+independent copy, you get a shared handle instead — every write is visible through
+every clone. That is intentional. Do not "fix" it into an owned copy.
 
-Keep the two "measurements" distinct: the `solve` ms row is human verification;
-the per-element measured size is the runtime skip decision.
+### 3. Geometry-stable skip
 
-### Incremental plan (measure as you go)
+`compute_panel_layouts` (`panel/compute_layout.rs`) runs the full layout solve
+only when geometry can actually move. A text-only edit is classified `VisualOnly`
+(via `TextEdit::set_text` → `DiegeticPanelChangeClassification::note_text_edit`).
+For a `VisualOnly` change the system re-measures the edited leaves (cache-backed,
+cheap) and, if every leaf's box is unchanged, takes the cheap path:
+`regenerate_commands` from the cached positions and skip `LayoutEngine::compute`
+entirely. The guard is `LayoutResult::can_reuse_geometry`
+(`layout/engine/layout_engine.rs`): it rejects the reuse unless structure,
+viewport, and every leaf's measured width are bit-identical and no leaf wraps —
+so a genuine reflow (a width-changing edit) always falls through to the full
+solve and never renders stale geometry.
 
-- **Step 0 — Layout breakdown instrumentation.** DONE 2026-06-03. Added `setup` /
-  `scale` / `solve` / `commit` sub-rows under `layout` in `DiegeticPerfStats` + the
-  `diegetic_text_stress` overlay; removed the now-tiny `mesh` pack/upload/material
-  sub-rows. 375 tests pass. Baseline recorded WITH the flip-flop still in place (see
-  the ⊕ note on the table). Result: `setup` (the per-frame cache clone) is the
-  dominant share of `compute_ms` — bounded (the 3-digit wrap caps distinct strings
-  at ~100k), plateauing ~2 ms steady / ~3 ms 5s-max. Confirms the prime suspect:
-  Step 1a removes the clone (`Arc<Mutex>`-share the cache); Step 1b removes the
-  flip-flop for correctness.
-  - `setup` = `Arc::new(Mutex::new(cache.clone()))` + measure-closure
-    (`compute_layout.rs:61-77`); confirmed dominant cost — the `ShapedTextCache`
-    clone runs every frame over a cache that fills to its bounded steady size (the
-    3-digit wrap caps distinct strings) then plateaus.
-  - `scale` = `scaled_tree_cache.get_or_update` (`:114-119`).
-  - `solve` = `engine.compute` + the VisualOnly regen (`:121-135`).
-  - `commit` = field collection + `set_result_with_fields` (`:137-151`).
-- **Step 1a — Kill the clone** (`Arc<Mutex>`-share `ShapedTextCache`). DONE
-  2026-06-03. Moved the cache's two maps behind one internal `Arc<Mutex<…>>`; the
-  layout pass clones the handle (refcount bump) into the `'static` measure closure
-  and its cache-miss inserts now persist; methods are `&self`, and the renderer +
-  overlay paths hold the cache as `Res`. Measured (see ⊗ on the table): `setup`
-  ~2 ms → ~0 (max 0.001 ms), `compute_ms` 0.14 ms mean / 0.21 ms max, flip-flop
-  still in place. 259 crate tests pass; clippy (nursery + pedantic) clean. STOP for
-  user review before Step 1b.
-- **Step 1b — Remove the flip-flop** (tree-authoritative + the `TextEdit` API). DONE
-  2026-06-03. Deleted `ReconcileOwned` + `sync_run_text_to_cache` +
-  `clear_reconcile_owned`; added the `TextEdit` cursor (kept the public API — option A,
-  not a return-based closure) and routed `PanelText` / `DiegeticTextMut` writes to the
-  tree through it. `PanelText` dropped its embedded `PanelTextReader` to avoid a
-  `&DiegeticPanel` / `&mut DiegeticPanel` conflict; run resolution moved to the free
-  `resolve_run_entity`. The no-op-no-relayout guard moved into `TextEdit::set_text`
-  (read-compare before the `&mut` borrow). 258 crate tests pass; clippy clean;
-  workspace builds; lagrange examples compile unchanged (closure binds `&mut TextEdit`
-  by inference).
-- **Step 2 — Measure the regression.** DONE 2026-06-03 (see ⊘ on the table).
-  `compute_panels` 100 / 0 → **steady 100 every frame**. Quiet-machine readout
-  (overlay `now / 5s-max`): `layout` 0.15 / 0.69 ms, `solve` 0.08 / 0.24 ms. The
-  per-frame cost is essentially unchanged from 1a (layout `now` 0.15 vs 0.14) — the
-  regression is purely **frequency** (every frame vs every other), so per-frame-
-  averaged layout CPU roughly doubled. An earlier same-session reading (`solve` 0.31,
-  `layout` 0.38) was concurrent-build contention; discard it. This is what the Step 3
-  skip must recover. STOP for user review before Step 3.
-- **Step 3 — Geometry-stable skip.** DONE 2026-06-03 (see ⊙ on the table). The
-  text-edit path records `VisualOnly` (`TextEdit` →
-  `DiegeticPanelChangeClassification::note_text_edit`); `compute_panel_layouts`
-  gates the `VisualOnly` → `regenerate_commands` branch on a new
-  `LayoutResult::can_reuse_geometry` probe (structure + viewport + per-leaf
-  measured width bit-identical, no wrapped leaf, no new newline). Restyle / resize
-  stay full solves, so the skip never renders stale geometry. Engine unit tests
-  cover the three guards; full crate suite + clippy (nursery + pedantic) green.
-- **Step 4 — Measure the win.** DONE 2026-06-03 (see ⊙ on the table). `solve`
-  0.08 → ~0.02, `commit` 0.02 → ~0, `layout` 0.15 → ~0.10 — below the flip-flop-era
-  per-frame cost, with no reflow lag, no marker, and no per-frame cache clone.
-  `compute_panels` stays 100 (the cheap path is still counted; the win is per-pass).
+```rust
+let can_reuse_geometry = tree_visual_geometry_stable
+    || computed.result().is_some_and(|result| {
+        result.can_reuse_geometry(scaled_tree, &cached_measure,
+            viewport_width, viewport_height, 1.0)
+    });
+if matches!(pending_change, Some(LayoutTreeChange::VisualOnly))
+    && can_reuse_geometry
+    && computed.regenerate_commands(scaled_tree)
+{
+    // cheap path: regenerate render commands, no engine solve
+    continue;
+}
+```
 
-### Step 0 handoff — fresh-agent start guide (Step 0 is now DONE — kept as the record of what was edited)
+Every `"NN MMM"` stress label measures identical frame to frame, so all 100 take
+the cheap path each frame — the layout solve does not run for a same-width text
+edit. This is content-agnostic: it works whether width is fixed by declaration or
+merely stable by content.
 
-Everything below is verified against the code at HEAD `bb51603` (option C / glyph
-atlas, after `enh/showcase-example` merged into `update/0.19.0-rc.2`). A fresh
-agent should re-confirm line numbers with `rg` before editing —
-they drift. Options A and C are landed and committed; **Step 0 landed 2026-06-03**
-(uncommitted working-tree edits at the time of writing) — the edit map below is the
-record of those changes, and Step 1a is the next edit.
+## Change-detection gating (upstream of all three)
 
-**Orientation.** This work is on `update/0.19.0-rc.2`. The `enh/showcase-example`
-line — where options A and C landed (it diverged at `8d5f2d1`) — has been merged
-back in, so there is no separate branch to track. Step 0 is pure instrumentation —
-it adds and removes perf rows and changes no runtime behavior, so it is safe to
-land and measure before the structural Step 1b.
+`compute_panel_layouts` only touches a panel whose `DiegeticPanel` is
+`Ref::is_changed()` or has a pending tree change; an unchanged panel is skipped
+before any measure. A `LayoutTreeChange::Identical` change with an existing result
+also skips. So an idle frame does no layout work at all, and a text-only frame
+does the lever-3 cheap path.
 
-**Run & measure.**
-- Release is required (the Baseline conditions): `cargo run --release --example
-  diegetic_text_stress -p bevy_diegetic`, or launch over BRP.
-- The example is built on `fairy_dust::sprinkle_example().with_perf_mode()`
-  (`examples/diegetic_text_stress.rs:208`), which uncaps vsync and the unfocused
-  winit throttle so the frame time is the true per-frame cost. `with_brp_extras`
-  pulls in `FrameTimeDiagnosticsPlugin` (the overlay's fps / ms source). The
-  bottom-left overlay reads `DiegeticPerfStats` directly and shows a `now` column
-  and a 5-second peak (`5s max`) column.
-- `Space` pauses per-frame mutation → the idle floor (diegetic CPU ≈ 0, pure
-  render).
-- Read the layout rows (`setup` / `scale` / `solve` / `commit`) and `compute_ms`
-  off the **`5s max`** column: the `ReconcileOwned` flip-flop still zeros them on
-  alternate frames, so the moving average reads half the real cost. The `5s max`
-  column is the with-flip-flop baseline you record.
-- The fps / ms / `remainder` rows are fill-rate-bound and scale with window size
-  (`with_save_window_position` restores the last window). Compare the
-  window-independent CPU rows across runs, never the absolute frame time.
+## Invariants
 
-**Step 0 edit map (four files, verified line refs).**
+1. **Tree is authoritative for text; `TextContent` is derived.** Only reconcile
+   writes `TextContent` (tree→child); only shaping reads it. Route every writer
+   through `TextEdit` / `sync_run_text_cache`, never back into `TextContent`. Do
+   not reintroduce a child→tree sync or a `ReconcileOwned`-style marker.
+2. **No-op-no-work.** A `set_text` to the current value drives zero relayout and
+   zero measure. The `Deref` equality check must stay before the `&mut` borrow.
+3. **`ShapedTextCache` is a shared handle.** Clone is a refcount bump; measure
+   closures write through it. Keep methods `&self`.
+4. **Geometry-stable skip never renders stale geometry.** `can_reuse_geometry`'s
+   three guards (same measured width, no newline/wrap, same structure+viewport)
+   gate the cheap regenerate path; a width-changing edit must fall through to the
+   full solve.
 
-1. `crates/bevy_diegetic/src/panel/perf.rs`
-   - `DiegeticPerfStats` (`:29-37`): add `compute_setup_ms`, `compute_scale_ms`,
-     `compute_solve_ms`, `compute_commit_ms: f32` alongside `compute_ms`.
-   - `PanelTextPerfStats` (`:52-91`): remove `mesh_pack_ms` (`:81`),
-     `mesh_upload_ms` (`:85`), `mesh_material_ms` (`:88`), and rewrite the
-     `mesh_build_ms` doc comment that names them (`:73-76`).
-   - `publish_perf_diagnostics` (`:124-142`) and the `DIAG_*` constants stay as
-     they are. The overlay reads the resource directly, so the new sub-rows need
-     no `DiagnosticPath`. The three removed fields were never published, so no
-     `DIAG_*` reference breaks (confirm with `rg`).
+## Observability
 
-2. `crates/bevy_diegetic/src/panel/compute_layout.rs` — instrument
-   `compute_panel_layouts`. Four stages, one runs once and three run per panel:
-   - `setup` = `cache.clone()` + the `cached_measure` closure build (`:61-77`),
-     **once**, before the panel loop → a single `Instant`.
-   - `scale` = `scaled_tree_cache.get_or_update` (`:114-119`).
-   - `solve` = the `VisualOnly` regen branch **and** `engine.compute` (`:121-135`).
-   - `commit` = `collect_panel_field_records` → `set_result_with_fields`
-     (+ `set_content_size`) (`:137-151`).
-   - Write all four into `perf` next to `compute_ms` / `compute_panels`
-     (`:154-159`), each gated to `0.0` when `panel_count == 0`, exactly like
-     `compute_ms`.
-
-3. `crates/bevy_diegetic/src/render/panel_text/mesh_spawning.rs` — delete the
-   mesh sub-timing that Step 0 retires:
-   - the accumulators `pack_time` / `upload_time` / `material_time` (`:90-92`);
-   - every per-iteration `Instant::now()` + `.elapsed()` add for them (`:100`,
-     `:102`, `:113`, `:115`, `:128`, `:130`, `:133`, `:174`);
-   - the three perf writes (`:188-190`).
-   - Keep `mesh_build_ms` (`:186-187`) and `total_ms` (`:191`). `mesh_build_start`
-     still uses `Instant`, so the `Instant` import stays; the `Duration` import
-     likely goes unused after the cut — drop it if the compiler flags it.
-
-4. `crates/bevy_diegetic/examples/diegetic_text_stress.rs` — the overlay:
-   - `[MetricRow; 9]` → `[; 10]` (`:100`); `INITIAL_METRICS: [&str; 9]` → `[; 10]`
-     (`:138`).
-   - Replace the three `SubStage` rows `pack` / `upload` / `material` (`:121-132`)
-     with four `SubStage` rows `setup` / `scale` / `solve` / `commit`, and move
-     them to sit directly under the `layout` row (`:109-112`). The `mesh` row
-     (`:117-120`) becomes a plain `TopLevel` row with no children.
-   - `PerfSnapshot` (`:165-189`): swap `pack_ms` / `upload_ms` / `material_ms` for
-     `setup_ms` / `scale_ms` / `solve_ms` / `commit_ms`; keep `mesh_ms` /
-     `remainder_ms`. Update `ZERO` (`:185-189`).
-   - Snapshot read (`:489-504`): read the four off `diegetic_perf.compute_setup_ms`
-     etc.; delete the three `mesh_*` reads (`:501-503`).
-   - mean (`:535-539`, `:587-591`), peak (`:546-550`, `:603-607`), and the window
-     accumulate (`:575-579`): swap the three fields for four.
-   - Retarget the doc comments that say sub-stages sit under `mesh` to `layout`:
-     `RowIndent` (`:80-86`), `MetricRow` (`:88-94`), `METRIC_ROWS` (`:96-99`), and
-     `SUB_ROW_INDENT` (`:71-72`). (The module-level doc comment was rewritten in the
-     merge and no longer describes mesh sub-stages, so it needs no retarget.)
-     `remainder` (8 chars) stays the longest label, so `LABEL_COLUMN_WIDTH` (`:70`)
-     needs no change.
-
-**The timing detail that will trip you.** `setup` is measured once with a single
-`Instant`, but `scale` / `solve` / `commit` run per panel inside the loop, so each
-needs a `Duration` accumulator summed across panels — the same pattern being
-deleted from `mesh_spawning.rs`, moved over to layout. Watch the two early
-`continue`s: the `Identical` skip (`:108-112`) returns before `scale`, and the
-`VisualOnly` branch (`:121-127`) does `scale` then regenerates and `continue`s, so
-its elapsed time must be added to the `solve` accumulator **before** the `continue`
-or skip-heavy frames undercount.
-
-**Verify.**
-- Shut down the BRP app before building (build-dir lock).
-- `rg -n "mesh_pack_ms|mesh_upload_ms|mesh_material_ms" crates/` returns nothing.
-- `cargo build && cargo +nightly fmt`.
-- `cargo nextest run` — 257 tests are green at HEAD; none reference the removed
-  fields, so expect 257 still green.
-
-**Record & stop.** Add four sub-rows under `layout` (`setup` / `scale` / `solve` /
-`commit`) to the Baseline table above and fill the current column from the
-`5s max` overlay values. Because Step 0 changes only instrumentation, that column
-is the After-C runtime state with the flip-flop still in place — the baseline the
-rest of Phase D measures against. Then STOP for user review before Step 1a.
-(Done 2026-06-03: baseline recorded, plan split into 1a/1b, reviewed and approved.)
-
-**Open question carried into Step 1b (the API change, not Step 0 or 1a).** The
-tree-edit handle name is still unsettled — `TextEdit` / `TextCursor` /
-`PanelTextEdit`. The user picks before Step 1b lands. It is a new public type, so
-this is the user's editor-global rename to make. (Step 1a touches no public type and
-needs no name decision.)
-
-## Suggested order
-
-A (done) → C (done) → D (done: Steps 0 / 1a / 1b / 2 / 3 / 4 all landed
-2026-06-03) → B ([`glyph-instancing.md`](glyph-instancing.md), landed
-2026-06-06).
-
-Detail also in the memory notes `project_diegetic_text_single_source`,
-`project_diegetic_text_perf_targets`, and `project_perf_mode_measurement`.
+`DiegeticPerfStats` (`panel/perf.rs`) publishes the main-thread layout cost:
+`compute_ms` (the `compute_panel_layouts` wall-clock, zeroed on a no-panel frame)
+and `compute_panels` (how many panels relaid out this frame). The
+`diegetic_text_stress` overlay reads these plus the render-thread rows. For the
+render-thread breakdown and per-pass timing constraints on macOS, see
+`material-table-batching.md`.

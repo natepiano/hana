@@ -313,7 +313,7 @@ Acceptance:
 - The renderer still exposes glyph-compatible aliases such as `PackedPathRecord` and
   `PathQuadRecord` while Phase B begins consuming the path names.
 - The existing text batch key remains text-oriented, while the already-shared
-  `VisualBatchKey` remains the generic render compatibility key for future path
+  `PathBatchKey` remains the generic render compatibility key for future path
   producers.
 
 **Surprises:**
@@ -629,7 +629,7 @@ Acceptance:
   between the panel-backed and direct routes and restricts parity geometry or
   tolerance accordingly.
 - Phase F's SDF deliverable is split into removable (quarantined panel-line
-  files) vs retained (`LegacySdfExtendedMaterial` for backgrounds and the non-coplanar
+  files) vs retained (`SdfExtendedMaterial` for backgrounds and the non-coplanar
   callout fallback), plus the stale `sdf_material.rs` discriminant doc.
 - Phase F's rename audit now covers the Phase C mirror surfaces (`PathRenderRecord`
   WGSL mirrors, `AA_FLAG_*` pair, coverage-probe tripwire) and re-counts the
@@ -913,7 +913,7 @@ This phase is retained only as the sub-decisions that feed that plan:
   render-context grouping list).
 - Keep the direct `CalloutLine` SDF renderer for non-coplanar cases.
 - Parity is not pixel-exact: the panel-backed route applies cascade-resolved
-  `AntiAlias` + hairline dilation, the direct `LegacySdfExtendedMaterial` route does
+  `AntiAlias` + hairline dilation, the direct `SdfExtendedMaterial` route does
   not, so a sub-floor stroke renders wider panel-backed. Restrict any parity
   test to at-floor-or-wider strokes. There is no in-tree planar `CalloutLine`
   consumer after Phase D, so the first real consumers arrive through

@@ -263,7 +263,7 @@ impl<M, S> DiegeticPanelBuilder<M, S> {
     }
 
     /// Overrides the font unit (default inherits from
-    /// [`CascadeDefaults::panel_font_unit`](crate::CascadeDefaults)).
+    /// [`PanelDefaults::panel_font_unit`](crate::PanelDefaults)).
     #[must_use]
     pub const fn font_unit(mut self, unit: Unit) -> Self {
         self.data.font_unit = Cascade::Override(unit);

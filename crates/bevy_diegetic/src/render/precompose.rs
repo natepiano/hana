@@ -1,10 +1,10 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::camera::Camera3d;
 use bevy::camera::ClearColorConfig;
 use bevy::camera::ImageRenderTarget;
 use bevy::camera::RenderTarget;
 use bevy::camera::ScalingMode;
 use bevy::camera::Viewport;
-use bevy::camera::visibility::RenderLayers;
 use bevy::color::Color;
 use bevy::ecs::entity::Entity;
 use bevy::image::Image;
@@ -17,11 +17,10 @@ use bevy::render::render_resource::TextureFormat;
 use bevy_kana::ToF32;
 use bevy_kana::ToU32;
 
-use crate::Cascade;
-use crate::cascade::CascadeDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
+use crate::cascade::PanelDefaults;
 use crate::cascade::Resolved;
 use crate::layout::Anchor;
 use crate::layout::BoundingBox;
@@ -38,6 +37,7 @@ use crate::panel::DiegeticPanel;
 use crate::panel::PanelPrecomposeCache;
 use crate::panel::PrecomposeCacheEntry;
 use crate::panel::PrecomposeHelper;
+use crate::Cascade;
 
 const PRECOMPOSE_RENDER_LAYER: usize = 30;
 const PRECOMPOSE_CAMERA_ORDER: isize = -100;
@@ -62,7 +62,7 @@ pub(super) fn ensure_panel_precompose_caches(
     >,
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
-    defaults: Res<CascadeDefaults>,
+    defaults: Res<PanelDefaults>,
 ) {
     for (panel_entity, panel, computed, mut cache, font_unit) in &mut panels {
         let Some(result) = computed.result() else {
@@ -75,7 +75,7 @@ pub(super) fn ensure_panel_precompose_caches(
             continue;
         }
 
-        let font_unit = font_unit.map_or(defaults.panel_font_unit, |resolved| resolved.0.0);
+        let font_unit = font_unit.map_or(defaults.panel_font_unit, |resolved| resolved.0 .0);
         let scaled_tree = panel
             .tree()
             .scaled(panel.layout_unit().to_points(), font_unit.to_points());
@@ -529,7 +529,7 @@ mod tests {
     fn cache_sync_spawns_helper_panel_camera_and_image() {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>();
-        app.init_resource::<CascadeDefaults>();
+        app.init_resource::<PanelDefaults>();
         app.add_systems(Update, ensure_panel_precompose_caches);
 
         let panel = DiegeticPanel::world()
@@ -572,17 +572,15 @@ mod tests {
                 PRECOMPOSE_HEIGHT.to_u32() * PRECOMPOSE_SUPERSAMPLE,
             )
         );
-        assert!(
-            app.world()
-                .resource::<Assets<Image>>()
-                .get(&entry.image)
-                .is_some()
-        );
-        assert!(
-            app.world()
-                .get::<DiegeticPanel>(entry.helper_panel)
-                .is_some()
-        );
+        assert!(app
+            .world()
+            .resource::<Assets<Image>>()
+            .get(&entry.image)
+            .is_some());
+        assert!(app
+            .world()
+            .get::<DiegeticPanel>(entry.helper_panel)
+            .is_some());
         let helper_panel = app
             .world()
             .get::<DiegeticPanel>(entry.helper_panel)
@@ -613,7 +611,7 @@ mod tests {
     fn cache_sync_preserves_image_when_precompose_bounds_are_unchanged() {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>();
-        app.init_resource::<CascadeDefaults>();
+        app.init_resource::<PanelDefaults>();
         app.add_systems(Update, ensure_panel_precompose_caches);
 
         let panel = DiegeticPanel::world()
@@ -672,7 +670,7 @@ mod tests {
     fn cache_sync_refreshes_helper_tree_when_text_changes_with_same_bounds() {
         let mut app = App::new();
         app.init_resource::<Assets<Image>>();
-        app.init_resource::<CascadeDefaults>();
+        app.init_resource::<PanelDefaults>();
         app.add_systems(Update, ensure_panel_precompose_caches);
 
         let panel = precompose_panel("Blend");

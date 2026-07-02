@@ -1,21 +1,4 @@
-# Plan: Revive OIT / `StableTransparency` for diegetic text (bevy 0.19)
-
-> **Archived 2026-06-07 — implemented.** Lived at the docs root; archived under
-> bevy_diegetic since the `StableTransparency` marker and OIT activation live in
-> `crates/bevy_diegetic/src/render/transparency.rs`, surfaced through fairy_dust's
-> `.with_stable_transparency()` (builder/sprinkle.rs). Subsequent OIT history on
-> bevy 0.19: the shared fragment pool was raised to
-> `OIT_FRAGMENTS_PER_PIXEL_AVERAGE = 8.0` after close-up exhaustion artifacts,
-> and a resize-crash investigation added then removed an in-process shader
-> guard — see
-> [`../investigation/oit-resize-crash-investigation.md`](../investigation/oit-resize-crash-investigation.md).
->
-> **Updated 2026-06-30.** Screen-space overlay cameras now receive OIT as well
-> as `Msaa::Off` while `StableTransparency` is active. This is required because
-> `StandardMaterial::depth_bias` now advances once per `DrawZIndexRank`, not
-> once per command. Screen-space panels therefore need the same per-command
-> `oit_depth_offset` path as world panels for same-z-index SDF/text/shape
-> ordering.
+# OIT / `StableTransparency` for diegetic text
 
 ## Context
 
@@ -24,13 +7,16 @@ shifts**: text is `AlphaMode::Blend`, and Blend transparency sorts view-dependen
 so at grazing angles the per-pixel composite order flips. OIT (order-independent
 transparency) makes Blend stable **without** sacrificing slug's analytic coverage AA
 — the only other order-independent option, `AlphaToCoverage`, re-coarsens the AA to
-MSAA sample granularity, which is the aliasing we removed during the slug work.
+MSAA sample granularity, which is the aliasing removed during the slug work.
 
-The OIT/`StableTransparency` stack was retired in **f45cef9** on the rationale that
-slug emits one mesh per run and orders via `depth_bias`. The shift persists, so we
-revive the same **opt-in** `.with_stable_transparency()` API and keep the no-default
-policy. The 2026-06-30 update changes the screen-space camera propagation: screen
-cameras now receive OIT as well as `Msaa::Off` while the marker is active.
+OIT is **opt-in** via `.with_stable_transparency()`; there is no crate default. Slug
+emits one mesh per run and orders via `depth_bias`, but `depth_bias` does not reach
+fragments under OIT, so coplanar ordering inside the OIT buffer runs through a
+per-command `oit_depth_offset` (see below). Screen-space overlay cameras that share
+the window receive OIT **and** `Msaa::Off` while the marker is active — screen panels
+need the same per-command `oit_depth_offset` path as world panels for same-z-index
+SDF/text/shape ordering, because material `depth_bias` advances once per
+`DrawZIndexRank`, not once per command.
 
 ## Current behavior
 
@@ -47,108 +33,87 @@ cameras now receive OIT as well as `Msaa::Off` while the marker is active.
 | not called, with panels | `Sample4` | stays `Sample4` | AA'd meshes + panels, no OIT |
 | not called, no panels | `Sample4` | — | plain MSAA scene |
 
-## Decisions locked in
+## Contract
 
-- **Opt-in via `.with_stable_transparency()`**, exactly as before. Not a default.
+- **Opt-in via `.with_stable_transparency()`.** Not a default.
 - The **`StableTransparency` marker lives in bevy_diegetic**; fairy_dust is one producer.
-- **All three observers are the current contract:**
+- **Three observers form the contract:**
   - `on_stable_transparency_added` — OIT on: insert OIT + `Msaa::Off` on self, propagate
     OIT + `Msaa::Off` to existing `ScreenSpaceCamera`s.
   - `on_screen_space_camera_added` — panel spawns while OIT already on: force OIT +
     `Msaa::Off` on the new screen-space camera (reverse spawn order).
   - `on_stable_transparency_removed` — OIT off: strip OIT, restore `Msaa::default()`
-    everywhere. **Kept.**
+    everywhere.
 - Screen-space camera spawn **keeps `Msaa::default()`** in its bundle; the observer
-  overrides to `Off` only when OIT is present. Do **not** hardcode it `Off` — that would
+  overrides to `Off` only when OIT is present. It is not hardcoded `Off` — that would
   break the no-OIT MSAA-plus-panels case.
-- Text must be `Blend`/`Premultiplied` (already the cascade default; `Opaque`/`Mask`
-  bypass OIT).
-- Keep the current parent-walking cascade model. HueOffset stays deleted.
+- Text must be `Blend`/`Premultiplied` (the cascade default; `Opaque`/`Mask` bypass OIT).
+- The parent-walking cascade model applies. HueOffset does not exist.
 
-## Work items
+## Where it lives
 
-### A. bevy_diegetic — marker + observers (port to 0.19)
-- **Recreate `src/render/transparency.rs`** (~138 lines, port imports):
-  `bevy::core_pipeline::oit::OrderIndependentTransparencySettings`,
+- **`src/render/transparency.rs`** — the `StableTransparency` marker and all three
+  observers. Uses `bevy::core_pipeline::oit::OrderIndependentTransparencySettings`,
   `bevy::render::view::Msaa`, `bevy::camera::Camera3d`,
-  `bevy::render::render_resource::TextureUsages`. All three observers as above.
-  0.19 OIT WGSL/Rust API confirmed intact (`oit_draw(position, color)` under
-  `#ifdef OIT_ENABLED`; the settings struct still ORs `TEXTURE_BINDING` into depth usage).
-- **`src/render/mod.rs`**: re-add `mod transparency;`, `pub use transparency::StableTransparency;`,
-  register the 3 observers in `RenderPlugin::build`, re-add `pub(crate) use constants::OIT_DEPTH_STEP;`.
-- **`src/lib.rs`**: re-add `pub use render::StableTransparency;`.
-- **`src/render/constants.rs`**: re-add `OIT_DEPTH_STEP: f32 = 0.000_001` (1e-6).
+  `bevy::render::render_resource::TextureUsages`. The settings struct ORs
+  `TEXTURE_BINDING` into the camera depth-texture usage.
+- **`src/render/mod.rs`** — `mod transparency;`, `pub use transparency::StableTransparency;`,
+  and the three observers registered in `RenderPlugin::build`.
+- **`src/lib.rs`** — `pub use render::StableTransparency;`.
+- **`src/render/constants.rs`** — `OIT_DEPTH_STEP: f32 = 0.000_001` (1e-6), the coplanar
+  step applied inside the OIT buffer.
+- **Shader OIT path** — `src/render/analytic_paths/analytic_path.wgsl` (text/shape) and
+  `src/shaders/sdf_panel.wgsl` (panel fills) each carry an `#ifdef OIT_ENABLED` block:
+  `#import bevy_core_pipeline::oit::oit_draw`, add `oit_depth_offset` to `position.z`
+  (floored at `OIT_MIN_DEPTH`), then `oit_draw(...)` + `discard` instead of returning the
+  color. The analytic block must not disturb the winding/coverage functions
+  (`n`, `lane_n`, `lanes_n`).
+- **`oit_depth_offset` threading** — computed in `src/render/draw_order.rs` (from
+  `DrawOrderIndex`, text-anchored) and threaded into draw commands / materials through
+  `panel_geometry.rs`, `panel_text/*`, `panel_shapes/*`, and `analytic_paths/*`.
+- **fairy_dust** — `src/transparency.rs` `install(app)` ensures `DiegeticUiPlugin` and
+  adds the `Add<FairyDustOrbitCam>` observer that inserts `StableTransparency`; the
+  `.with_stable_transparency()` method lives on `SprinkleBuilder<WithOrbitCam>`
+  (`src/lib.rs`) and `CameraHomeBuilder<WithOrbitCam>` (`src/builder/camera_home.rs`).
 
-### B. bevy_diegetic — shader OIT path (the bulk of the work)
-- **`src/text/slug/shaders/slug_text.wgsl`**: restore the `#ifdef OIT_ENABLED` block —
-  `#import bevy_core_pipeline::oit::oit_draw`, apply `oit_depth_offset` to `position.z`,
-  call `oit_draw(...)` + `discard` instead of returning the color in the main fragment.
-  Must not disturb the committed g-seam functions (`winding_at`, `any_outside_neighbor`).
-- **`src/shaders/sdf_panel.wgsl`**: restore the same OIT block.
-- **`src/render/sdf_material.rs`**: re-thread the `oit_depth_offset` uniform into the
-  material/extension (~39-line hunk in f45cef9).
-- **`src/render/panel_geometry.rs`** + **`src/callouts/render.rs`**: re-thread
-  `oit_depth_offset` into the draw commands.
-- Rationale: pipeline `depth_bias` does NOT reach `in.position.z` under OIT, so
-  `OIT_DEPTH_STEP` is the coplanar-ordering mechanism *inside* the OIT buffer.
-- Pull exact hunks with `git show f45cef9 -- <file>` and reverse, adjusting for 0.19.
+## Text-transparency dependencies
 
-### C. fairy_dust — revive the opt-in builder method (as before)
-- **Recreate `src/transparency.rs`**: `install(app)` ensures `DiegeticUiPlugin` and
-  adds the `Add<FairyDustOrbitCam>` observer that inserts `StableTransparency`.
-- **`src/lib.rs`**: re-add `mod transparency;` and the `.with_stable_transparency()`
-  method on `SprinkleBuilder<WithOrbitCam>` (calls `transparency::install`).
-- **`src/builder/camera_home.rs`**: re-add `with_stable_transparency()` on
-  `CameraHomeBuilder<WithOrbitCam>`.
-- **Example call sites**: re-add `.with_stable_transparency()` to the examples that had
-  it (world_text, slug_text, typography, units).
-
-### D. Documentation — the six dependencies
-Rewrite the README "Text transparency" section to cover:
 1. OIT ⟂ MSAA — both on one camera panics.
-2. All cameras sharing a window must match MSAA — else macOS Metal swap-chain stall.
+2. All cameras sharing a window must match MSAA — else macOS Metal swap-chain stall
+   (window only repaints on OS-level events).
 3. Screen-space cameras sharing the window need OIT too, not only `Msaa::Off`;
-   same-z-index screen panels rely on `oit_depth_offset` after material
-   `depth_bias` moved to `DrawZIndexRank`.
+   same-z-index screen panels rely on `oit_depth_offset` because material `depth_bias`
+   advances per `DrawZIndexRank`, not per command.
 4. OIT needs the shader `oit_draw` blocks — the camera setting alone is inert.
-5. `depth_bias` doesn't reach OIT fragments → manual `OIT_DEPTH_STEP` for coplanar order.
-6. Text must be `Blend`/`Premultiplied` — `Opaque`/`Mask` bypass OIT.
-Plus: for mesh-edge AA *with* OIT, use a post-process AA (FXAA/SMAA/TAA) — MSAA is the
-one AA incompatible with OIT.
+5. `depth_bias` does not reach OIT fragments → manual `OIT_DEPTH_STEP` for coplanar order.
+6. Text must be `Blend`/`Premultiplied` — `Opaque`/`Mask` bypass OIT and render in the
+   normal passes.
 
-### E. MSAA-vs-OIT comparison example
-Add an example with a **hand-coded camera spawn** that lets people see the difference
-between the two paths:
-- MSAA on, no `StableTransparency` → AA'd mesh edges, but coplanar text shifts at angles.
-- MSAA off + `StableTransparency` (OIT) → stable coplanar text, aliased mesh edges.
-Hand-coding the camera (not via fairy_dust) is the point — the contrast is the lesson.
+For mesh-edge AA *with* OIT, use a post-process AA (FXAA/SMAA/TAA) — MSAA is the one AA
+incompatible with OIT.
 
-### F. text_alpha example
-Rework to demo blend modes **without** MSAA. Drop the `AlphaToCoverage` entry (degrades
-to `Mask(0.5)` without MSAA) or annotate "needs MSAA". Under OIT, `Opaque`/`Mask` still
-render in the normal passes; only `Blend`/`Premultiplied` route through `oit_draw`.
+## OIT fragment pool
 
-### G. RTT removal (separate step)
-Delete `panel_rtt.rs`, its plugin registration, and any RTT panel API (no current use
-case). Independent of the OIT work — can land before or after.
+Bevy's shared OIT fragment pool is sized at
+`OIT_FRAGMENTS_PER_PIXEL_AVERAGE = 8.0`; fragments past the budget are discarded for the
+frame (flashing black blocks). The default was too small for close-up diegetic scenes
+that stack glyph quads, overlay boxes, and panels on most pixels. Details in
+`src/render/transparency.rs`.
 
-## Must preserve
-- The current parent-walking cascade model stays in place.
-- HueOffset stays deleted; text_stress rework stays.
+## Slug-quality invariants
 
-## Committed slug-quality work to keep intact (commit c3cfcbd)
-- `packing.rs` `DEFAULT_BAND_COUNT = 96`.
-- `slug_text.wgsl` dedup gate OFF + the g-seam silhouette/interior detection.
-- The OIT `#ifdef` block restored in B must not disturb the g-seam functions.
+- `render/analytic_paths/packing.rs` `DEFAULT_BAND_COUNT = 96`.
+- The OIT `#ifdef OIT_ENABLED` block in `analytic_path.wgsl` must not disturb the
+  winding/coverage functions (`n`, `lane_n`, `lanes_n`).
 
-## Verification
+## Verifying it works
+
 1. `typography.rs` with `.with_stable_transparency()` → orbit the coplanar ground text →
-   color shift gone.
+   no color shift.
 2. A scene with screen panels + OIT → screen panels receive OIT, composite correctly,
-   and the window does NOT freeze.
+   the window does not freeze.
 3. Late-spawn: trigger a screen panel after startup with OIT on → no stall (exercises
-   `on_screen_space_camera_added`) and the new screen-space camera has OIT + `Msaa::Off`.
+   `on_screen_space_camera_added`); the new screen-space camera has OIT + `Msaa::Off`.
 4. A scene **without** `.with_stable_transparency()` + panels → still works (MSAA on,
-   no stall) — confirms the opt-in didn't break the default path.
-5. g-seam fix + 96-band slug quality still intact.
-6. Comparison example (E) visibly shows the MSAA-vs-OIT trade.
+   no stall).
+5. g-seam fix + 96-band slug quality intact.

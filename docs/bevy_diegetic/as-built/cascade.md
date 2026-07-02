@@ -36,7 +36,7 @@ Do not treat public `Cascade<T>` and internal `Override<A>` as interchangeable.
 - `src/cascade/authoring.rs` defines `Cascade<T>`.
 - `src/cascade/resolved.rs` defines `CascadeProperty`, `CascadeAttr`,
   `Override<A>`, `Resolved<A>`, `resolve_walk`, and the attribute declarations.
-- `src/cascade/defaults.rs` defines `CascadeDefault<A>` and `CascadeDefaults`.
+- `src/cascade/defaults.rs` defines `CascadeDefault<A>` and `PanelDefaults`.
 - `src/cascade/plugin.rs` defines `CascadePlugin<A>` and the propagation pass.
 - `src/cascade/attributes.rs` defines typed entity commands and readers such as
   `override_text_alpha`, `inherit_text_alpha`, `resolved_text_alpha`,

@@ -66,7 +66,7 @@ Today's monochrome path (all under `crates/bevy_diegetic/src/text/slug/`):
   (`bounds_min_size`, `band_range`).
 - `render/run_data.rs` — `RunRenderData { mesh, curves, bands, glyphs }`: one
   quad per glyph instance, combined curve/band/glyph buffers for the run.
-- `render/material.rs` — `TextExtension` binds `uniforms` (100, a single
+- `render/material.rs` — `PathExtension` binds `uniforms` (100, a single
   `fill_color` + `render_mode` + AA flags), `curves` (101), `bands` (102),
   `glyphs` (103). `RenderMode` is an enum (`Text` / `PunchOut`).
 - `shaders/slug_text.wgsl` — each quad reads its glyph index from `UV_1.x`,
@@ -145,15 +145,18 @@ These are the types and the GPU layout the phases below build toward.
   `impl From<&Brush>` with `#[repr(u32)]` tags (`BrushTag`, `ExtendMode`,
   `CompositeMode`). A `ShaderType` layout test asserts size+offsets match the
   WGSL structs, mirroring the `packing.rs` record tests.
-- **GPU bindings** — `brushes` (104), `gradient_stops` (105), `quad_records`
-  (106) are declared on the single shared `TextExtension`, so every run supplies
+- **GPU bindings** — `brushes`, `gradient_stops`, `quad_records` are declared on
+  the single shared `PathExtension`, so every run supplies
   them (a StandardMaterial extension is one bind-group layout, and wgpu requires
   the bound group to match it). A monochrome run binds one app-global
   `ColorBindings::empty()` — shared zero-length brush / stop / quad tables,
   reached through the `RenderMode::Text` arm and never read by the shader's mono
   path. `ColorBindings::empty()`'s name and doc comment are the canonical
-  explanation for why a mono run carries empty color tables. Confirm 104–106 are
-  free against StandardMaterial + OIT bindings.
+  explanation for why a mono run carries empty color tables. Bindings 104–106 are
+  no longer free: `PathExtension` now binds `instances` (104), `run_records`
+  (105), and the shared material-slot table (106, `MATERIAL_TABLE_BINDING`), so
+  the color tables must take free slots above 106; confirm the chosen slots
+  against StandardMaterial + OIT bindings.
 - **`RenderMode::ColorLayer`** — a new variant on the existing `RenderMode` enum
   (not a separate `has_color` bool). One discriminant routes the shader per-run;
   keep the WGSL render-mode constant in sync with the Rust discriminant through
@@ -465,7 +468,7 @@ in-intent outcome and are accepted; the three genuine choices are under
   certain depths.
 - **M2 — Bindings 104–106 audit is a hard go/no-go. Accepted.** Keep the existing
   Phase 6 gate (line 274) but run it *first*, before any Phase 6 implementation:
-  instantiate `TextExtension` with dummy 104–106 buffers + OIT and confirm the
+  instantiate `PathExtension` with dummy color-table buffers + OIT and confirm the
   material compiles. Record the verified Bevy version in a `material.rs` comment.
 - **M3 — Intern brushes and stops per run. Accepted.** `RunPacker` deduplicates
   identical `Brush` (and `StopRecord`) values within a run via a hash map;

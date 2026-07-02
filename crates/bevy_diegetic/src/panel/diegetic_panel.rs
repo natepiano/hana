@@ -33,7 +33,7 @@ use super::validate_world_conversion;
 use crate::cascade;
 use crate::cascade::Cascade;
 use crate::cascade::CascadeDefault;
-use crate::cascade::CascadeDefaults;
+use crate::cascade::PanelDefaults;
 use crate::cascade::FontUnit;
 use crate::cascade::HdrTextCoverageBias;
 use crate::cascade::Override;
@@ -129,7 +129,7 @@ impl From<TreeRevision> for u64 {
 /// Defines a layout tree and the panel's dimensions in layout units.
 /// World-space size is computed automatically from the panel's
 /// `layout_unit`. Font sizes in the tree are interpreted in `font_unit`
-/// (defaults through [`CascadeDefaults::panel_font_unit`]).
+/// (defaults through [`PanelDefaults::panel_font_unit`]).
 ///
 /// Construct via [`DiegeticPanel::world`] or [`DiegeticPanel::screen`]:
 ///
@@ -590,7 +590,7 @@ impl DiegeticPanel {
     /// to layout units. Callers pass the panel's resolved font unit —
     /// read from `Resolved<FontUnit>` on the panel
     /// entity (every panel carries one, seeded from `font_unit` or
-    /// [`CascadeDefaults::panel_font_unit`]).
+    /// [`PanelDefaults::panel_font_unit`]).
     #[must_use]
     pub fn font_scale(&self, panel_font_unit: Unit) -> f32 {
         let font_meters_per_unit = panel_font_unit.meters_per_unit();
@@ -681,7 +681,7 @@ impl PreparedPanelScreenConversion {
 
 #[derive(Clone, Copy)]
 struct ScreenConversionSource<'a> {
-    defaults:           &'a CascadeDefaults,
+    defaults:           &'a PanelDefaults,
     font_resolved:      Option<&'a Resolved<FontUnit>>,
     lighting_resolved:  Option<&'a Resolved<Lighting>>,
     sidedness_resolved: Option<&'a Resolved<Sidedness>>,
@@ -781,7 +781,7 @@ pub(crate) fn apply_precompose_helper_panel(
 }
 
 pub(super) fn apply_pending_panel_conversions(
-    defaults: Res<CascadeDefaults>,
+    defaults: Res<PanelDefaults>,
     mut commands: Commands,
     primary: Query<Entity, With<PrimaryWindow>>,
     windows: Query<&Window>,
@@ -1144,7 +1144,7 @@ fn apply_panel_world_conversion_now(
 ///
 /// A panel is depth-1 with no cascade ancestor, so it cannot inherit `FontUnit`
 /// from a parent — it therefore **always** carries `Override<FontUnit>`, from
-/// `panel.font_unit()` when set else [`CascadeDefaults::panel_font_unit`]. That
+/// `panel.font_unit()` when set else [`PanelDefaults::panel_font_unit`]. That
 /// is why `panel_font_unit` is a construction-time seed, not a cascade global:
 /// no panel ever reads the `FontUnit` global, and a runtime `font_unit` change
 /// does not reach existing panels. `text_alpha_mode` is the panel's optional
@@ -1175,7 +1175,7 @@ pub(super) struct PanelCascadeSeedParams<'w, 's> {
 pub(super) fn seed_panel_overrides(
     trigger: On<Add, DiegeticPanel>,
     panels: Query<&DiegeticPanel>,
-    defaults: Res<CascadeDefaults>,
+    defaults: Res<PanelDefaults>,
     cascade_params: PanelCascadeSeedParams,
     mut commands: Commands,
 ) {

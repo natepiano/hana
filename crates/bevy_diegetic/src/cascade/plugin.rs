@@ -120,7 +120,7 @@ fn collect_subtree(root: Entity, children: &Query<&Children>, dirty: &mut HashSe
 mod tests {
     use super::*;
     use crate::cascade::constants::CASCADE_DEPTH_CAP;
-    use crate::cascade::defaults::CascadeDefaults;
+    use crate::cascade::defaults::PanelDefaults;
     use crate::cascade::resolved::TestUnit;
     use crate::layout::Unit;
 
@@ -145,7 +145,7 @@ mod tests {
     fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
-            .init_resource::<CascadeDefaults>()
+            .init_resource::<PanelDefaults>()
             .add_plugins(CascadePlugin::<TestUnit>::default())
             .add_observer(seed_test_node);
         app
@@ -156,7 +156,7 @@ mod tests {
             .get::<Resolved<TestUnit>>(entity)
             .expect("Resolved<TestUnit> should be present")
             .0
-            .0
+             .0
     }
 
     #[test]
@@ -380,21 +380,19 @@ mod tests {
 
         let before = app
             .world()
-            .get_resource_ref::<CascadeDefaults>()
-            .expect("CascadeDefaults should exist")
+            .get_resource_ref::<PanelDefaults>()
+            .expect("PanelDefaults should exist")
             .last_changed();
 
         // Mutate a separate non-cascade default resource.
-        app.world_mut()
-            .resource_mut::<CascadeDefaults>()
-            .layout_unit = Unit::Inches;
+        app.world_mut().resource_mut::<PanelDefaults>().layout_unit = Unit::Inches;
         app.update();
 
         assert_eq!(read(&app, entity), Unit::Meters);
         let after = app
             .world()
-            .get_resource_ref::<CascadeDefaults>()
-            .expect("CascadeDefaults should exist")
+            .get_resource_ref::<PanelDefaults>()
+            .expect("PanelDefaults should exist")
             .last_changed();
         assert!(after.get() > before.get());
     }
