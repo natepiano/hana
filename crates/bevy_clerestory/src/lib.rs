@@ -183,7 +183,9 @@ impl Plugin for WindowManagerPluginCustomPath {
 
         #[cfg(target_os = "macos")]
         {
-            app.add_systems(Startup, macos_tabbing_fix::disable_tabbing_on_primary);
+            // App-wide opt-out of automatic window tabbing, before winit creates
+            // any OS window. See `macos_tabbing_fix` module docs.
+            macos_tabbing_fix::disable_automatic_tabbing();
             app.add_systems(
                 Update,
                 macos_tabbing_fix::disable_tabbing_on_managed.before(restore::restore_windows),
