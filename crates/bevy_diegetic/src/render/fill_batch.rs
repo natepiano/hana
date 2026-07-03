@@ -373,6 +373,7 @@ impl ResolvedSdfBatchRecord {
         materials: SdfRecordMaterialSlots,
         contiguous_drawn_run: ContiguousDrawnRun,
     ) -> Self {
+        let pipeline_compatibility = sdf_record_pipeline_compatibility(surface, &materials);
         let fill_source = SdfMaterialSourceKey {
             panel:         surface.panel_entity,
             command_index: surface.command_index,
@@ -390,7 +391,7 @@ impl ResolvedSdfBatchRecord {
             layers: BatchRenderLayers(surface.render_layers.clone()),
             shadow: surface.shadow_casting.into(),
             contiguous_drawn_run,
-            pipeline_compatibility: materials.pipeline_compatibility,
+            pipeline_compatibility,
             resource_compatibility: materials.resource_compatibility.clone(),
         };
         let paint_mask = SdfPaintMask::from_materials(materials.fill, materials.border);
@@ -425,7 +426,7 @@ impl ResolvedSdfBatchRecord {
             paint_mask,
             clip_depth_nudge: surface.draw_depth.clip_depth_nudge().get()
                 - opaque_fill_depth_push(
-                    materials.pipeline_compatibility.alpha,
+                    pipeline_compatibility.alpha,
                     surface.shadow_casting.into(),
                 ),
             oit_depth_offset: surface.draw_depth.oit_depth_offset().get(),
@@ -437,6 +438,28 @@ impl ResolvedSdfBatchRecord {
     pub(crate) fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
         self.transform = panel_transform.to_matrix() * self.local_transform.to_matrix();
     }
+}
+
+fn sdf_record_pipeline_compatibility(
+    surface: &ResolvedSdfSurface<'_>,
+    materials: &SdfRecordMaterialSlots,
+) -> PipelineCompatibility {
+    let mut pipeline_compatibility = materials.pipeline_compatibility;
+    if clipped_border_uses_transparent_phase(surface, materials)
+        && opaque_fill_depth_push(pipeline_compatibility.alpha, surface.shadow_casting.into()) > 0.0
+    {
+        pipeline_compatibility.alpha = BatchAlphaMode::Blend;
+    }
+    pipeline_compatibility
+}
+
+fn clipped_border_uses_transparent_phase(
+    surface: &ResolvedSdfSurface<'_>,
+    materials: &SdfRecordMaterialSlots,
+) -> bool {
+    matches!(materials.fill, SdfPaintMaterial::NotAuthored)
+        && matches!(materials.border, SdfPaintMaterial::Authored(_))
+        && surface.clip_rect_limits_mesh()
 }
 
 /// GPU mirror for one batched SDF fill/border surface.
@@ -1143,7 +1166,7 @@ impl SdfRunCompatibility {
             z_index_rank:           surface.draw_depth.z_index_rank(),
             layers:                 BatchRenderLayers(surface.render_layers.clone()),
             shadow:                 surface.shadow_casting.into(),
-            pipeline_compatibility: materials.pipeline_compatibility,
+            pipeline_compatibility: sdf_record_pipeline_compatibility(surface, materials),
             resource_compatibility: materials.resource_compatibility.clone(),
         }
     }
@@ -1664,6 +1687,7 @@ mod tests {
     use bevy::asset::AssetPlugin;
     use bevy::camera::visibility::RenderLayers;
     use bevy::ecs::message::Messages;
+    use bevy::image::Image;
     use bevy::prelude::AlphaMode;
     use bevy::render::render_resource::Face;
     use bevy::render::render_resource::FragmentState;
@@ -1690,6 +1714,9 @@ mod tests {
     use crate::panel::DiegeticPanelCommands;
     use crate::panel::HeadlessLayoutPlugin;
     use crate::render::PathExtendedMaterial;
+    use crate::render::image_batch::ImageBatchPlugin;
+    use crate::render::image_batch::ImageBatchStore;
+    use crate::render::image_batch::ResolvedImageRecord;
     use crate::render::material_table::FrameMaterialSlotAppend;
     use crate::render::material_table::FrameMaterialTableBuild;
     use crate::render::material_table::INVALID_GPU_MATERIAL_SLOT;
@@ -1709,6 +1736,8 @@ mod tests {
     const ANIMATED_BASE_COLOR_SWING: f32 = 0.05;
     const ANIMATED_BASE_GREEN_SPEED: f32 = 0.23;
     const ANIMATED_BASE_RED_SPEED: f32 = 0.19;
+    const IMAGE_BORDER_COLOR: Color = Color::srgb(0.9, 0.8, 0.2);
+    const IMAGE_BORDER_WIDTH_MM: f32 = 1.0;
     const SDF_SETTLE_FRAMES: usize = 3;
 
     fn zero_measurer() -> DiegeticTextMeasurer {
@@ -1742,6 +1771,12 @@ mod tests {
         app.insert_resource(CascadeDefault(SdfMaterial(default_material)));
         app.insert_resource(CascadeDefault(Lighting::Lit));
         app.insert_resource(CascadeDefault(Sidedness::BothSides));
+        app
+    }
+
+    fn image_sdf_pipeline_app() -> App {
+        let mut app = sdf_pipeline_app();
+        app.init_asset::<Image>().add_plugins(ImageBatchPlugin);
         app
     }
 
@@ -1843,6 +1878,70 @@ mod tests {
         .build()
     }
 
+    fn border_only_tree() -> LayoutTree {
+        LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR)),
+        )
+        .build()
+    }
+
+    fn clipped_image_border_tree(image: Handle<Image>) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .clip()
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR)),
+        );
+        builder.image(
+            El::new().width(Sizing::GROW).height(Sizing::GROW),
+            image,
+            Color::WHITE,
+        );
+        builder.build()
+    }
+
+    fn filled_clipped_image_border_tree(image: Handle<Image>) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .clip()
+                .background(Color::BLACK)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR)),
+        );
+        builder.image(
+            El::new().width(Sizing::GROW).height(Sizing::GROW),
+            image,
+            Color::WHITE,
+        );
+        builder.build()
+    }
+
+    fn material_filled_clipped_image_border_tree(
+        image: Handle<Image>,
+        material: Handle<StandardMaterial>,
+    ) -> LayoutTree {
+        let mut builder = LayoutBuilder::with_root(
+            El::new()
+                .width(Sizing::GROW)
+                .height(Sizing::GROW)
+                .clip()
+                .background(Color::BLACK)
+                .material(material)
+                .border(Border::all(Mm(IMAGE_BORDER_WIDTH_MM), IMAGE_BORDER_COLOR)),
+        );
+        builder.image(
+            El::new().width(Sizing::GROW).height(Sizing::GROW),
+            image,
+            Color::WHITE,
+        );
+        builder.build()
+    }
+
     /// Text-command state used by `text_toggle_tree`.
     #[derive(Clone, Copy)]
     enum TextContentState {
@@ -1896,6 +1995,21 @@ mod tests {
         let mut records: Vec<ResolvedSdfBatchRecord> = app
             .world()
             .resource::<SdfBatchStore>()
+            .batches()
+            .flat_map(|(_, batch)| batch.records().iter().cloned())
+            .collect();
+        records.sort_by(|left, right| {
+            left.record_key
+                .command_index
+                .cmp(&right.record_key.command_index)
+        });
+        records
+    }
+
+    fn image_records(app: &App) -> Vec<ResolvedImageRecord> {
+        let mut records: Vec<ResolvedImageRecord> = app
+            .world()
+            .resource::<ImageBatchStore>()
             .batches()
             .flat_map(|(_, batch)| batch.records().iter().cloned())
             .collect();
@@ -2802,6 +2916,333 @@ mod tests {
         assert_eq!(
             opaque_nudge.to_bits(),
             (blend_nudge - OPAQUE_FILL_DEPTH_PUSH_LAYERS).to_bits()
+        );
+    }
+
+    #[test]
+    fn transparent_clipped_border_keeps_authored_alpha_mode() {
+        let mut app = image_sdf_pipeline_app();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        spawn_sdf_panel(
+            &mut app,
+            clipped_image_border_tree(image),
+            StandardMaterial {
+                alpha_mode: AlphaMode::Add,
+                ..Default::default()
+            },
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+
+        assert_eq!(
+            record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Add
+        );
+        assert_ne!(
+            record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Blend
+        );
+        assert_eq!(
+            record.clip_depth_nudge.to_bits(),
+            record.draw_depth.clip_depth_nudge().get().to_bits()
+        );
+    }
+
+    #[test]
+    fn non_clipped_fill_border_stays_one_opaque_record() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(
+            &mut app,
+            bordered_surface_tree(Color::BLACK, IMAGE_BORDER_COLOR),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+
+        assert!(matches!(
+            record.fill_material,
+            SdfPaintMaterial::Authored(_)
+        ));
+        assert!(matches!(
+            record.border_material,
+            SdfPaintMaterial::Authored(_)
+        ));
+        assert_eq!(record.record_key.command_index.get(), 0);
+        assert_eq!(
+            record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Opaque
+        );
+        assert_eq!(
+            record.clip_depth_nudge.to_bits(),
+            (record.draw_depth.clip_depth_nudge().get() - OPAQUE_FILL_DEPTH_PUSH_LAYERS).to_bits()
+        );
+    }
+
+    #[test]
+    fn clipping_border_routes_in_front_of_coplanar_image() {
+        let mut app = image_sdf_pipeline_app();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        spawn_sdf_panel(
+            &mut app,
+            clipped_image_border_tree(image),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let sdf_records = sdf_records(&app);
+        let image_records = image_records(&app);
+        assert_eq!(sdf_records.len(), 1);
+        assert_eq!(image_records.len(), 1);
+        let border_record = &sdf_records[0];
+        let image_record = &image_records[0];
+
+        assert!(matches!(
+            border_record.fill_material,
+            SdfPaintMaterial::NotAuthored
+        ));
+        assert!(matches!(
+            border_record.border_material,
+            SdfPaintMaterial::Authored(_)
+        ));
+        assert!(image_record.record_key.command_index < border_record.record_key.command_index);
+        assert_eq!(
+            border_record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Blend
+        );
+        assert_eq!(
+            sdf_batch_alpha_mode(
+                border_record.batch_key.pipeline_compatibility.alpha,
+                border_record.batch_key.shadow,
+            ),
+            AlphaMode::Blend
+        );
+        assert_eq!(
+            border_record.clip_depth_nudge.to_bits(),
+            border_record.draw_depth.clip_depth_nudge().get().to_bits()
+        );
+        assert!(image_record.draw_depth.clip_depth_nudge().get() < border_record.clip_depth_nudge);
+        assert!(image_record.draw_depth.oit_depth_offset().get() < border_record.oit_depth_offset);
+        assert_eq!(
+            image_record
+                .draw_depth
+                .z_index_rank()
+                .screen_depth_bias()
+                .get()
+                .to_bits(),
+            border_record
+                .batch_key
+                .z_index_rank
+                .screen_depth_bias()
+                .get()
+                .to_bits()
+        );
+        assert_eq!(
+            image_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits(),
+            border_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn clipped_filled_border_splits_fill_behind_and_border_in_front_of_image() {
+        let mut app = image_sdf_pipeline_app();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        spawn_sdf_panel(
+            &mut app,
+            filled_clipped_image_border_tree(image),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let sdf_records = sdf_records(&app);
+        let image_records = image_records(&app);
+        assert_eq!(sdf_records.len(), 2);
+        assert_eq!(image_records.len(), 1);
+        let image_record = &image_records[0];
+        let Some(fill_record) = sdf_records.iter().find(|record| {
+            matches!(record.fill_material, SdfPaintMaterial::Authored(_))
+                && matches!(record.border_material, SdfPaintMaterial::NotAuthored)
+        }) else {
+            panic!("expected one fill-only SDF record");
+        };
+        let Some(border_record) = sdf_records.iter().find(|record| {
+            matches!(record.fill_material, SdfPaintMaterial::NotAuthored)
+                && matches!(record.border_material, SdfPaintMaterial::Authored(_))
+        }) else {
+            panic!("expected one border-only SDF record");
+        };
+
+        assert_eq!(
+            fill_record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Opaque
+        );
+        assert_eq!(
+            fill_record.clip_depth_nudge.to_bits(),
+            (fill_record.draw_depth.clip_depth_nudge().get() - OPAQUE_FILL_DEPTH_PUSH_LAYERS)
+                .to_bits()
+        );
+        assert!(fill_record.oit_depth_offset <= image_record.draw_depth.oit_depth_offset().get());
+
+        assert_eq!(
+            border_record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Blend
+        );
+        assert_eq!(
+            border_record.clip_depth_nudge.to_bits(),
+            border_record.draw_depth.clip_depth_nudge().get().to_bits()
+        );
+        assert!(image_record.draw_depth.oit_depth_offset().get() < border_record.oit_depth_offset);
+        assert_eq!(
+            image_record
+                .draw_depth
+                .z_index_rank()
+                .screen_depth_bias()
+                .get()
+                .to_bits(),
+            border_record
+                .batch_key
+                .z_index_rank
+                .screen_depth_bias()
+                .get()
+                .to_bits()
+        );
+        assert_eq!(
+            image_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits(),
+            border_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn clipped_material_filled_border_splits_fill_behind_and_border_in_front_of_image() {
+        let mut app = image_sdf_pipeline_app();
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let element_material = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .add(StandardMaterial::default());
+        spawn_sdf_panel(
+            &mut app,
+            material_filled_clipped_image_border_tree(image, element_material),
+            StandardMaterial::default(),
+        );
+        settle_sdf_pipeline(&mut app);
+
+        let sdf_records = sdf_records(&app);
+        let image_records = image_records(&app);
+        assert_eq!(sdf_records.len(), 2);
+        assert_eq!(image_records.len(), 1);
+        let image_record = &image_records[0];
+        let Some(fill_record) = sdf_records.iter().find(|record| {
+            matches!(record.fill_material, SdfPaintMaterial::Authored(_))
+                && matches!(record.border_material, SdfPaintMaterial::NotAuthored)
+        }) else {
+            panic!("expected one fill-only SDF record");
+        };
+        let Some(border_record) = sdf_records.iter().find(|record| {
+            matches!(record.fill_material, SdfPaintMaterial::NotAuthored)
+                && matches!(record.border_material, SdfPaintMaterial::Authored(_))
+        }) else {
+            panic!("expected one border-only SDF record");
+        };
+
+        assert_eq!(
+            fill_record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Opaque
+        );
+        assert_eq!(
+            fill_record.clip_depth_nudge.to_bits(),
+            (fill_record.draw_depth.clip_depth_nudge().get() - OPAQUE_FILL_DEPTH_PUSH_LAYERS)
+                .to_bits()
+        );
+        assert!(fill_record.oit_depth_offset <= image_record.draw_depth.oit_depth_offset().get());
+
+        assert_eq!(
+            border_record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Blend
+        );
+        assert_eq!(
+            border_record.clip_depth_nudge.to_bits(),
+            border_record.draw_depth.clip_depth_nudge().get().to_bits()
+        );
+        assert!(image_record.draw_depth.oit_depth_offset().get() < border_record.oit_depth_offset);
+        assert_eq!(
+            image_record
+                .draw_depth
+                .z_index_rank()
+                .screen_depth_bias()
+                .get()
+                .to_bits(),
+            border_record
+                .batch_key
+                .z_index_rank
+                .screen_depth_bias()
+                .get()
+                .to_bits()
+        );
+        assert_eq!(
+            image_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits(),
+            border_record
+                .transform
+                .transform_point3(Vec3::ZERO)
+                .z
+                .to_bits()
+        );
+    }
+
+    #[test]
+    fn normal_border_keeps_opaque_depth_push() {
+        let mut app = sdf_pipeline_app();
+        spawn_sdf_panel(&mut app, border_only_tree(), StandardMaterial::default());
+        settle_sdf_pipeline(&mut app);
+
+        let records = sdf_records(&app);
+        assert_eq!(records.len(), 1);
+        let record = &records[0];
+
+        assert_eq!(
+            record.batch_key.pipeline_compatibility.alpha,
+            BatchAlphaMode::Opaque
+        );
+        assert_eq!(
+            record.clip_depth_nudge.to_bits(),
+            (record.draw_depth.clip_depth_nudge().get() - OPAQUE_FILL_DEPTH_PUSH_LAYERS).to_bits()
         );
     }
 

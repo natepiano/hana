@@ -231,6 +231,9 @@ const LEDGER_BREAKDOWN_MIN_SPACER_MEASURE: &str = "  ";
 const LEDGER_BREAKDOWN_VALUE_MEASURE: &str = "00";
 const LEDGER_SEPARATOR_COLOR: Color = Color::srgba(0.1, 0.4, 0.6, 0.3);
 const CARD_RADIUS: Mm = Mm(4.0);
+const IMAGE_CARD_CLIPPED_BORDER_FILL: Color = Color::srgba(0.08, 0.11, 0.12, 1.0);
+const IMAGE_CARD_CLIPPED_BORDER_RADIUS: Mm = Mm(1.0);
+const IMAGE_CARD_CLIPPED_BORDER_WIDTH: Mm = Mm(0.35);
 const PANEL_PAD: Mm = Mm(4.0);
 const ROW_GAP: f32 = 4.0;
 const TITLE_FONT_SIZE: f32 = 18.75;
@@ -2302,6 +2305,7 @@ fn build_image_panel(image: Handle<Image>) -> LayoutTree {
                         Color::WHITE,
                         "plain",
                         "full texture",
+                        ImageCardFrame::ClippedBorder,
                     );
                     image_card(
                         builder,
@@ -2309,6 +2313,7 @@ fn build_image_panel(image: Handle<Image>) -> LayoutTree {
                         ACCENT_GREEN,
                         "green tint",
                         "same batch",
+                        ImageCardFrame::FilledClippedBorder,
                     );
                 },
             );
@@ -2324,13 +2329,28 @@ fn build_image_panel(image: Handle<Image>) -> LayoutTree {
                         ACCENT_BLUE,
                         "blue tint",
                         "same batch",
+                        ImageCardFrame::Direct,
                     );
-                    image_card(builder, image, ACCENT_RED, "red tint", "one image batch");
+                    image_card(
+                        builder,
+                        image,
+                        ACCENT_RED,
+                        "red tint",
+                        "one image batch",
+                        ImageCardFrame::Direct,
+                    );
                 },
             );
         },
     );
     builder.build()
+}
+
+#[derive(Clone, Copy)]
+enum ImageCardFrame {
+    Direct,
+    ClippedBorder,
+    FilledClippedBorder,
 }
 
 // One image card: a bordered frame filled by an image leaf, captioned below.
@@ -2340,6 +2360,7 @@ fn image_card(
     tint: Color,
     label: &str,
     caption: &str,
+    frame: ImageCardFrame,
 ) {
     builder.with(
         El::column()
@@ -2351,11 +2372,50 @@ fn image_card(
             .corner_radius(CornerRadius::all(Mm(1.4)))
             .alignment(AlignX::Center, AlignY::Center),
         |builder| {
-            builder.image(
-                El::new().width(Sizing::GROW).height(Sizing::GROW),
-                image,
-                tint,
-            );
+            match frame {
+                ImageCardFrame::Direct => {
+                    builder.image(
+                        El::new().width(Sizing::GROW).height(Sizing::GROW),
+                        image,
+                        tint,
+                    );
+                },
+                ImageCardFrame::ClippedBorder => {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .clip()
+                            .border(Border::all(IMAGE_CARD_CLIPPED_BORDER_WIDTH, ACCENT_GREEN))
+                            .corner_radius(CornerRadius::all(IMAGE_CARD_CLIPPED_BORDER_RADIUS)),
+                        |builder| {
+                            builder.image(
+                                El::new().width(Sizing::GROW).height(Sizing::GROW),
+                                image,
+                                tint,
+                            );
+                        },
+                    );
+                },
+                ImageCardFrame::FilledClippedBorder => {
+                    builder.with(
+                        El::new()
+                            .width(Sizing::GROW)
+                            .height(Sizing::GROW)
+                            .clip()
+                            .background(IMAGE_CARD_CLIPPED_BORDER_FILL)
+                            .border(Border::all(IMAGE_CARD_CLIPPED_BORDER_WIDTH, ACCENT_GREEN))
+                            .corner_radius(CornerRadius::all(IMAGE_CARD_CLIPPED_BORDER_RADIUS)),
+                        |builder| {
+                            builder.image(
+                                El::new().width(Sizing::GROW).height(Sizing::GROW),
+                                image,
+                                tint,
+                            );
+                        },
+                    );
+                },
+            }
             builder.text((label, swatch_style(ACCENT_RED)));
             builder.text((caption, small_style(TEXT_MUTED)));
         },

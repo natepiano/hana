@@ -69,25 +69,99 @@ impl Plugin for PanelGeometryPlugin {
 }
 
 /// Gathered fill + border data for a single element.
+#[derive(Clone, Copy)]
 pub(crate) struct ElementSurface {
     /// `Element` index in the layout tree.
-    index:         ElementIndex,
+    index:                  ElementIndex,
     /// Bounding box from the render command.
-    bounds:        BoundingBox,
-    /// Fill color (from Rectangle command), if any.
-    fill_color:    Option<Color>,
-    /// Border widths [top, right, bottom, left] in layout points.
-    border_widths: [f32; 4],
-    /// Border color.
-    border_color:  Option<Color>,
+    bounds:                 BoundingBox,
+    /// Fill command state, if the element has an authored fill command.
+    fill:                   Option<ElementFill>,
+    /// Border command state, if the element has an authored border command.
+    border:                 Option<ElementBorder>,
     /// Index of the first render command for this element (the reconcile
     /// reuse key).
-    command_index: CommandIndex,
+    command_index:          CommandIndex,
     /// Projected ordering values of the first render command for this element.
-    draw_depth:    DrawCommandDepth,
+    draw_depth:             DrawCommandDepth,
     /// Active clip rect in layout coordinates when this surface was
     /// gathered. `None` means unclipped.
+    clip_rect:              Option<BoundingBox>,
+    /// Element material override handling for this record's fill role.
+    fill_material_override: FillMaterialOverride,
+}
+
+/// Controls material-only fill authorship for split SDF records.
+#[derive(Clone, Copy)]
+enum FillMaterialOverride {
+    /// Element material overrides author the fill role.
+    Included,
+    /// Element material overrides do not author the fill role.
+    Suppressed,
+}
+
+impl FillMaterialOverride {
+    const fn is_included(self) -> bool { matches!(self, Self::Included) }
+}
+
+/// Fill-specific command state retained for split SDF records.
+#[derive(Clone, Copy)]
+struct ElementFill {
+    /// Fill color from the rectangle command.
+    color:         Color,
+    /// Command identity of the rectangle command.
+    command_index: CommandIndex,
+    /// Draw ordering for the rectangle command.
+    draw_depth:    DrawCommandDepth,
+    /// Active clip rect for the rectangle command.
     clip_rect:     Option<BoundingBox>,
+}
+
+/// Border-specific command state retained for split SDF records.
+#[derive(Clone, Copy)]
+struct ElementBorder {
+    /// Border widths [top, right, bottom, left] in layout points.
+    widths:        [f32; 4],
+    /// Border color from the border command.
+    color:         Color,
+    /// Command identity of the border command.
+    command_index: CommandIndex,
+    /// Draw ordering for the border command.
+    draw_depth:    DrawCommandDepth,
+    /// Active clip rect for the border command.
+    clip_rect:     Option<BoundingBox>,
+}
+
+impl ElementSurface {
+    const fn fill_only(self) -> Self {
+        let Some(fill) = self.fill else {
+            return self;
+        };
+        Self {
+            fill: Some(fill),
+            border: None,
+            command_index: fill.command_index,
+            draw_depth: fill.draw_depth,
+            clip_rect: fill.clip_rect,
+            fill_material_override: FillMaterialOverride::Included,
+            ..self
+        }
+    }
+
+    const fn border_only(self) -> Self {
+        let Some(border) = self.border else {
+            return self;
+        };
+        Self {
+            fill: None,
+            border: Some(border),
+            command_index: border.command_index,
+            draw_depth: border.draw_depth,
+            clip_rect: border.clip_rect,
+            fill_material_override: FillMaterialOverride::Suppressed,
+            ..self
+        }
+    }
 }
 
 /// Resolves each panel's SDF surfaces from its render commands.
@@ -144,10 +218,10 @@ fn build_panel_geometry(
         };
         let gathered = gather_surfaces(context.panel, &result.commands, computed.draw_order());
         let desired = desired_surfaces(gathered);
-        let mut resolved: Vec<ResolvedSdfSurface<'_>> = desired
-            .iter()
-            .map(|surface| resolve_sdf_surface(surface, &context))
-            .collect();
+        let mut resolved: Vec<ResolvedSdfSurface<'_>> = Vec::with_capacity(desired.len());
+        for surface in &desired {
+            push_resolved_sdf_surfaces(surface, &context, &mut resolved);
+        }
         resolved.sort_by(|left, right| {
             left.draw_depth
                 .draw_order_index()
@@ -277,28 +351,38 @@ fn gather_surfaces(
                     dividers.push(ElementSurface {
                         index: ElementIndex::CHILD_DIVIDER,
                         bounds: cmd.bounds,
-                        fill_color: Some(*color),
-                        border_widths: [0.0; 4],
-                        border_color: None,
+                        fill: Some(ElementFill {
+                            color: *color,
+                            command_index,
+                            draw_depth,
+                            clip_rect: Some(active_clip),
+                        }),
+                        border: None,
                         command_index,
                         draw_depth,
                         clip_rect: Some(active_clip),
+                        fill_material_override: FillMaterialOverride::Included,
                     });
                 } else {
                     let element_index = ElementIndex::from(cmd.element_idx);
-                    surfaces
+                    let surface = surfaces
                         .entry(element_index)
                         .or_insert_with(|| ElementSurface {
                             index: element_index,
                             bounds: cmd.bounds,
-                            fill_color: None,
-                            border_widths: [0.0; 4],
-                            border_color: None,
+                            fill: None,
+                            border: None,
                             command_index,
                             draw_depth,
                             clip_rect: Some(active_clip),
-                        })
-                        .fill_color = Some(*color);
+                            fill_material_override: FillMaterialOverride::Included,
+                        });
+                    surface.fill = Some(ElementFill {
+                        color: *color,
+                        command_index,
+                        draw_depth,
+                        clip_rect: Some(active_clip),
+                    });
                 }
             },
             RenderCommandKind::Border { border } => {
@@ -315,20 +399,25 @@ fn gather_surfaces(
                     .or_insert_with(|| ElementSurface {
                         index: element_index,
                         bounds: cmd.bounds,
-                        fill_color: None,
-                        border_widths: [0.0; 4],
-                        border_color: None,
+                        fill: None,
+                        border: None,
                         command_index,
                         draw_depth,
                         clip_rect: Some(active_clip),
+                        fill_material_override: FillMaterialOverride::Included,
                     });
-                surface.border_widths = [
-                    border.top.value,
-                    border.right.value,
-                    border.bottom.value,
-                    border.left.value,
-                ];
-                surface.border_color = Some(border.color);
+                surface.border = Some(ElementBorder {
+                    widths: [
+                        border.top.value,
+                        border.right.value,
+                        border.bottom.value,
+                        border.left.value,
+                    ],
+                    color: border.color,
+                    command_index,
+                    draw_depth,
+                    clip_rect: Some(active_clip),
+                });
             },
             _ => {},
         }
@@ -389,6 +478,26 @@ pub(crate) struct ResolvedSdfSurface<'a> {
     pub(crate) render_layers:   RenderLayers,
     /// Shadow-casting policy copied to SDF fill batch records.
     pub(crate) shadow_casting:  ShadowCasting,
+}
+
+impl ResolvedSdfSurface<'_> {
+    /// Returns whether `ResolvedSdfSurface::clip_rect` trims the padded SDF mesh.
+    #[must_use]
+    pub(crate) fn clip_rect_limits_mesh(&self) -> bool {
+        let clip_left = self.clip_rect.x;
+        let clip_bottom = self.clip_rect.y;
+        let clip_right = self.clip_rect.z;
+        let clip_top = self.clip_rect.w;
+        let mesh_left = -self.mesh_half_size.x;
+        let mesh_bottom = -self.mesh_half_size.y;
+        let mesh_right = self.mesh_half_size.x;
+        let mesh_top = self.mesh_half_size.y;
+
+        clip_left > mesh_left
+            || clip_bottom > mesh_bottom
+            || clip_right < mesh_right
+            || clip_top < mesh_top
+    }
 }
 
 /// Authorship state for a fill or border role in `ResolvedSdfMaterial`.
@@ -546,16 +655,54 @@ impl ResolvedSdfSurfaceRegistry {
 /// This performs only pre-propagation panel-local math. `fill_batch` appends
 /// `StandardMaterial` rows and writes `SdfRenderRecord` values later in the
 /// `PostUpdate` schedule.
+fn push_resolved_sdf_surfaces<'a>(
+    surface: &ElementSurface,
+    context: &'a PanelReconcileContext<'a>,
+    output: &mut Vec<ResolvedSdfSurface<'a>>,
+) {
+    let resolved = resolve_sdf_surface(surface, context);
+    if surface.fill.is_none() || surface.border.is_none() {
+        output.push(resolved);
+        return;
+    }
+
+    let border_surface = surface.border_only();
+    let border_resolved = resolve_sdf_surface(&border_surface, context);
+    if !should_split_clipped_border(surface, &resolved, &border_resolved) {
+        output.push(resolved);
+        return;
+    }
+
+    output.push(resolve_sdf_surface(&surface.fill_only(), context));
+    output.push(border_resolved);
+}
+
+fn should_split_clipped_border(
+    surface: &ElementSurface,
+    resolved: &ResolvedSdfSurface<'_>,
+    border_resolved: &ResolvedSdfSurface<'_>,
+) -> bool {
+    surface.fill.is_some()
+        && surface.border.is_some()
+        && resolved.fill_material.authorship.is_authored()
+        && resolved.border_material.authorship.is_authored()
+        && border_resolved.clip_rect_limits_mesh()
+}
+
 pub(crate) fn resolve_sdf_surface<'a>(
     surface: &ElementSurface,
     context: &'a PanelReconcileContext<'a>,
 ) -> ResolvedSdfSurface<'a> {
     let element_mat = context.panel.tree().element_material(surface.index.get());
     let base_material = element_mat.map_or(&context.sdf_material, core::convert::identity);
+    let fill_color = surface.fill.map(|fill| fill.color);
+    let border_color = surface.border.map(|border| border.color);
+    let material_override_authors_fill =
+        element_mat.is_override() && surface.fill_material_override.is_included();
 
     // Fill color from .background() or element .material() — never panel material.
-    let effective_color = surface.fill_color.or_else(|| {
-        if element_mat.is_override() {
+    let effective_color = fill_color.or({
+        if material_override_authors_fill {
             None
         } else {
             Some(Color::NONE)
@@ -567,7 +714,8 @@ pub(crate) fn resolve_sdf_surface<'a>(
     let corner_radii =
         panel_local_corner_radii(context.panel, surface.index, context.points_to_world);
     let border_widths = surface
-        .border_widths
+        .border
+        .map_or([0.0; 4], |border| border.widths)
         .map(|width| width * context.points_to_world);
 
     let half_width = local_width * 0.5;
@@ -640,7 +788,7 @@ pub(crate) fn resolve_sdf_surface<'a>(
         command_index: surface.command_index,
         draw_depth: surface.draw_depth,
         fill_material: ResolvedSdfMaterial {
-            authorship:    if surface.fill_color.is_some() || element_mat.is_override() {
+            authorship:    if fill_color.is_some() || material_override_authors_fill {
                 SdfRoleAuthorship::Authored
             } else {
                 SdfRoleAuthorship::Unauthored
@@ -649,13 +797,13 @@ pub(crate) fn resolve_sdf_surface<'a>(
             color:         effective_color,
         },
         border_material: ResolvedSdfMaterial {
-            authorship:    if surface.border_color.is_some() {
+            authorship:    if border_color.is_some() {
                 SdfRoleAuthorship::Authored
             } else {
                 SdfRoleAuthorship::Unauthored
             },
             base_material: Some(base_material),
-            color:         surface.border_color,
+            color:         border_color,
         },
         local_center,
         local_transform: Transform::from_xyz(local_center.x, local_center.y, 0.0),
