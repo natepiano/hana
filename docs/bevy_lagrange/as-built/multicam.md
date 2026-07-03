@@ -12,7 +12,7 @@ Source: `crates/bevy_lagrange/examples/viewports_windows.rs`
 - `Camera::viewport` clips the minimap overlay to a square in the top-right
   corner of the primary window.
 - `RenderTarget::Window(WindowRef::Entity(..))` aims a third camera at a
-  second OS window spawned via `bevy_window_manager::ManagedWindow`.
+  second OS window spawned via `bevy_clerestory::ManagedWindow`.
 - `ResolvedOrbitCamInputRoute::routed_camera()` resolves which camera the
   cursor is over, so input — and the `H` home key — applies to that camera.
 
