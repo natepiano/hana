@@ -360,8 +360,8 @@ impl CurveSolver for CatenarySolver {
 impl RouteSolver for CatenarySolver {
     fn solve(&self, request: &RouteRequest) -> CableGeometry {
         let resolution = request.effective_resolution(self.resolution);
-        let segment = self.solve_segment(request.start, request.end, resolution);
-        let waypoints = vec![request.start, request.end];
+        let segment = self.solve_segment(request.start.position, request.end.position, resolution);
+        let waypoints = vec![request.start.position, request.end.position];
         CableGeometry::from_segments(vec![segment], waypoints)
     }
 }

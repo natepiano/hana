@@ -11,10 +11,13 @@
 
 use bevy::math::Vec3;
 use bevy::reflect::Reflect;
+use bevy_kana::ToUsize;
 
 use super::catenary::CatenarySolver;
 use super::constants::DEFAULT_RESOLUTION;
 use super::constants::DEFAULT_RESOLUTION_SENTINEL;
+use super::constants::MIN_CABLE_SAMPLE_POINTS;
+use super::constants::MIN_SEGMENT_LENGTH;
 use super::geometry::CableGeometry;
 use super::geometry::CableSegment;
 use super::geometry::RouteRequest;
@@ -67,23 +70,53 @@ pub enum CurveKind {
 
 impl Solver {
     /// Dispatch to the underlying solver implementation.
+    ///
+    /// Anchors with an [`AnchorExit::Lead`](super::geometry::AnchorExit) exit
+    /// contribute a straight lead segment first; the solver routes between the
+    /// lead tips. This runs here, above the individual solvers, so every path
+    /// strategy and curve kind honors leads.
     #[must_use]
     pub fn solve(&self, request: &RouteRequest) -> CableGeometry {
+        let start_tip = request.start.lead_tip();
+        let end_tip = request.end.lead_tip();
+        let span_start = start_tip.unwrap_or(request.start.position);
+        let span_end = end_tip.unwrap_or(request.end.position);
+
+        // Leads that leave the tips closer than `MIN_SEGMENT_LENGTH` (e.g. a
+        // drag hovering next to the source jack) collapse the routed span;
+        // route the bare anchor positions instead.
+        if span_start.distance(span_end) < MIN_SEGMENT_LENGTH {
+            return self.solve_span(request.start.position, request.end.position, request);
+        }
+
+        let span = self.solve_span(span_start, span_end, request);
+        wrap_with_leads(span, request)
+    }
+
+    /// Route between two bare positions, ignoring anchor exits.
+    fn solve_span(&self, start: Vec3, end: Vec3, request: &RouteRequest) -> CableGeometry {
+        let span_request = RouteRequest {
+            start:      start.into(),
+            end:        end.into(),
+            obstacles:  request.obstacles,
+            resolution: request.resolution,
+        };
+
         match self {
-            Self::Catenary(catenary) => catenary.solve(request),
-            Self::Linear => LinearSolver.solve(request),
+            Self::Catenary(catenary) => catenary.solve(&span_request),
+            Self::Linear => LinearSolver.solve(&span_request),
             Self::Routed {
                 path_strategy,
                 curve_kind,
                 resolution,
             } => {
-                let waypoints = path_strategy.plan(request.start, request.end, request.obstacles);
+                let waypoints = path_strategy.plan(start, end, span_request.obstacles);
                 let default_resolution = if *resolution == DEFAULT_RESOLUTION_SENTINEL {
                     DEFAULT_RESOLUTION
                 } else {
                     *resolution
                 };
-                let resolution = request.effective_resolution(default_resolution);
+                let resolution = span_request.effective_resolution(default_resolution);
 
                 let segments: Vec<CableSegment> = waypoints
                     .windows(2)
@@ -94,6 +127,39 @@ impl Solver {
             },
         }
     }
+}
+
+/// Wrap a routed span with the straight lead segments declared by the request's
+/// anchors, extending the waypoint list back out to the true anchor positions.
+fn wrap_with_leads(span: CableGeometry, request: &RouteRequest) -> CableGeometry {
+    let start_tip = request.start.lead_tip();
+    let end_tip = request.end.lead_tip();
+    if start_tip.is_none() && end_tip.is_none() {
+        return span;
+    }
+
+    let mut segments = Vec::with_capacity(span.segments.len() + 2);
+    let mut waypoints = Vec::with_capacity(span.waypoints.len() + 2);
+    if let Some(tip) = start_tip {
+        segments.push(CableSegment::straight_line(
+            request.start.position,
+            tip,
+            MIN_CABLE_SAMPLE_POINTS.to_usize(),
+        ));
+        waypoints.push(request.start.position);
+    }
+    segments.extend(span.segments);
+    waypoints.extend(span.waypoints);
+    if let Some(tip) = end_tip {
+        segments.push(CableSegment::straight_line(
+            tip,
+            request.end.position,
+            MIN_CABLE_SAMPLE_POINTS.to_usize(),
+        ));
+        waypoints.push(request.end.position);
+    }
+
+    CableGeometry::from_segments(segments, waypoints)
 }
 
 impl PathStrategy {

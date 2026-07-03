@@ -53,6 +53,7 @@ use cable::CablePlugin;
 pub use cable::ComputedCableGeometry;
 pub use cable::DetachPolicy;
 pub use cable::EndpointAlignment;
+pub use cable::EndpointExit;
 // Gizmos
 pub use gizmos::CableGizmoGroup;
 pub use gizmos::DebugGizmos;
@@ -74,6 +75,7 @@ pub use mesh::generate_tube_mesh;
 // Routing
 pub use routing::AStarPlanner;
 pub use routing::Anchor;
+pub use routing::AnchorExit;
 pub use routing::AxisOrder;
 pub use routing::CableGeometry;
 pub use routing::CableSegment;

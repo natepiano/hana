@@ -6,6 +6,9 @@ use super::AttachedTo;
 use super::Cable;
 use super::CableEnd;
 use super::CableEndpoint;
+use super::EndpointExit;
+use crate::routing::Anchor;
+use crate::routing::AnchorExit;
 use crate::routing::CableGeometry;
 use crate::routing::MIN_SEGMENT_LENGTH;
 use crate::routing::RouteRequest;
@@ -131,8 +134,8 @@ fn recompute_cable_route(
         return;
     };
 
-    let mut start_position = None;
-    let mut end_position = None;
+    let mut start_anchor = None;
+    let mut end_anchor = None;
 
     for child in children.iter() {
         let Ok((endpoint, attached_to, resolved_endpoint_position)) = endpoints.get_mut(child)
@@ -140,12 +143,20 @@ fn recompute_cable_route(
             continue;
         };
 
-        let endpoint_position = if let Some(attached) = attached_to
-            && let Ok(target_transform) = transforms.get(attached.0)
-        {
-            target_transform.transform_point(endpoint.offset)
-        } else {
-            endpoint.offset
+        let target_transform = attached_to.and_then(|attached| transforms.get(attached.0).ok());
+
+        let endpoint_position = target_transform.map_or(endpoint.offset, |target| {
+            target.transform_point(endpoint.offset)
+        });
+
+        // `EndpointExit::Lead` declares its axis in the target's local space;
+        // rotate it into world space for the routing layer's `AnchorExit`.
+        let exit = match endpoint.exit {
+            EndpointExit::Unconstrained => AnchorExit::Unconstrained,
+            EndpointExit::Lead { axis, length } => AnchorExit::Lead {
+                direction: target_transform.map_or(axis, |target| target.rotation() * axis),
+                length,
+            },
         };
 
         if let Some(mut resolved) = resolved_endpoint_position {
@@ -158,17 +169,21 @@ fn recompute_cable_route(
                 .insert(ResolvedEndpointPosition(endpoint_position));
         }
 
+        let anchor = Anchor {
+            position: endpoint_position,
+            exit,
+        };
         match endpoint.end {
-            CableEnd::Start => start_position = Some(endpoint_position),
-            CableEnd::End => end_position = Some(endpoint_position),
+            CableEnd::Start => start_anchor = Some(anchor),
+            CableEnd::End => end_anchor = Some(anchor),
         }
     }
 
-    let (Some(start), Some(end)) = (start_position, end_position) else {
+    let (Some(start), Some(end)) = (start_anchor, end_anchor) else {
         return;
     };
 
-    if start.distance(end) < MIN_SEGMENT_LENGTH {
+    if start.position.distance(end.position) < MIN_SEGMENT_LENGTH {
         return;
     }
 

@@ -41,11 +41,13 @@ pub struct CableEndpoint {
     pub detach_policy: DetachPolicy,
     /// How the endpoint's [`AttachedTo`] target rotates to follow the cable's tangent.
     pub alignment:     EndpointAlignment,
+    /// How the cable leaves this endpoint before the solver takes over.
+    pub exit:          EndpointExit,
 }
 
 impl CableEndpoint {
     /// Create a new endpoint with default cap style (`Round`), detach policy (`Remain`),
-    /// and alignment (`AsSpawned`).
+    /// alignment (`AsSpawned`), and exit (`Unconstrained`).
     #[must_use]
     pub fn new(end: CableEnd, offset: impl Into<Vec3>) -> Self {
         Self {
@@ -54,6 +56,7 @@ impl CableEndpoint {
             cap_style: CapStyle::Round,
             detach_policy: DetachPolicy::Remain,
             alignment: EndpointAlignment::AsSpawned,
+            exit: EndpointExit::Unconstrained,
         }
     }
 
@@ -77,6 +80,36 @@ impl CableEndpoint {
         self.alignment = alignment;
         self
     }
+
+    /// Set the exit behavior for this endpoint.
+    #[must_use]
+    pub const fn with_exit(mut self, exit: EndpointExit) -> Self {
+        self.exit = exit;
+        self
+    }
+}
+
+/// How the cable leaves a [`CableEndpoint`] before the solver takes over.
+///
+/// A lead is waypoint-level geometry, so every [`Solver`] honors it — the
+/// routed span begins at the lead's tip and the lead itself is always a
+/// straight segment. Curve-level exit behavior (bending a catenary's end
+/// tangent) is a solver concern and belongs on `CatenarySolver`, not here.
+#[derive(Clone, Copy, Debug, Default, Reflect)]
+pub enum EndpointExit {
+    /// The solver routes directly from the endpoint position.
+    #[default]
+    Unconstrained,
+    /// The cable leaves along `axis` as a straight lead of `length` metres,
+    /// and the solver routes the remainder from the lead's tip. `axis` is in
+    /// the [`AttachedTo`] target's local space; world space when
+    /// world-attached.
+    Lead {
+        /// Exit axis the lead points along.
+        axis:   Dir3,
+        /// Length of the straight lead, in metres.
+        length: f32,
+    },
 }
 
 /// How the [`AttachedTo`] target of a [`CableEndpoint`] rotates to follow the cable's

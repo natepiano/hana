@@ -22,6 +22,7 @@ pub use constants::DEFAULT_SLACK;
 pub(crate) use constants::MIN_CABLE_SAMPLE_POINTS;
 pub(crate) use constants::MIN_SEGMENT_LENGTH;
 pub use geometry::Anchor;
+pub use geometry::AnchorExit;
 pub use geometry::CableGeometry;
 pub use geometry::CableSegment;
 pub use geometry::RouteRequest;

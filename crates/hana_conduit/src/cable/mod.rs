@@ -1,6 +1,6 @@
 //! `Cable`, `CableEndpoint`, `AttachedTo`, `AttachedEndpoints`, `DetachPolicy`,
-//! and `EndpointAlignment`, plus `on_endpoint_alignment_update` and
-//! `on_endpoint_detached`.
+//! `EndpointAlignment`, and `EndpointExit`, plus `on_endpoint_alignment_update`
+//! and `on_endpoint_detached`.
 
 mod compute;
 mod constants;
@@ -16,6 +16,7 @@ pub use endpoint::CableEnd;
 pub use endpoint::CableEndpoint;
 pub use endpoint::DetachPolicy;
 pub use endpoint::EndpointAlignment;
+pub use endpoint::EndpointExit;
 
 use crate::mesh::CableMeshConfig;
 use crate::routing::Obstacle;

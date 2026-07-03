@@ -5,11 +5,13 @@
 )]
 //! Comprehensive tests for the `hana_conduit` routing module.
 
+use bevy::math::Dir3;
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
 use hana_conduit::AStarPlanner;
 use hana_conduit::Anchor;
+use hana_conduit::AnchorExit;
 use hana_conduit::CableSegment;
 use hana_conduit::CatenarySolver;
 use hana_conduit::CurveSolver;
@@ -21,6 +23,7 @@ use hana_conduit::PathPlanner;
 use hana_conduit::RouteRequest;
 use hana_conduit::RouteSolver;
 use hana_conduit::Router;
+use hana_conduit::Solver;
 use hana_conduit::evaluate;
 use hana_conduit::sample_3d;
 use hana_conduit::solve_parameter;
@@ -407,8 +410,8 @@ fn linear_solver_produces_straight_line() {
 fn linear_solver_as_route_solver() {
     let solver = LinearSolver;
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(3.0, 4.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(3.0, 4.0, 0.0).into(),
         obstacles:  &[],
         resolution: 10,
     };
@@ -418,7 +421,7 @@ fn linear_solver_as_route_solver() {
     assert_eq!(geometry.waypoints.len(), 2);
     assert_eq!(geometry.segments[0].points.len(), 10);
 
-    let expected_length = request.start.distance(request.end);
+    let expected_length = request.start.position.distance(request.end.position);
     assert!(
         (geometry.total_length - expected_length).abs() < TOLERANCE,
         "total length should be ~{expected_length}, got {}",
@@ -434,8 +437,8 @@ fn linear_solver_as_route_solver() {
 fn router_composes_planner_and_curve_solver() {
     let router = Router::new(DirectPlanner, LinearSolver);
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(5.0, 0.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(5.0, 0.0, 0.0).into(),
         obstacles:  &[],
         resolution: 20,
     };
@@ -452,8 +455,8 @@ fn router_composes_planner_and_curve_solver() {
 fn router_with_catenary_solver() {
     let router = Router::new(DirectPlanner, CatenarySolver::new().with_slack(1.3));
     let request = RouteRequest {
-        start:      Vec3::new(-3.0, 2.0, 0.0),
-        end:        Vec3::new(3.0, 2.0, 0.0),
+        start:      Vec3::new(-3.0, 2.0, 0.0).into(),
+        end:        Vec3::new(3.0, 2.0, 0.0).into(),
         obstacles:  &[],
         resolution: 32,
     };
@@ -476,8 +479,8 @@ fn router_with_catenary_solver() {
 fn router_with_custom_resolution() {
     let router = Router::new(DirectPlanner, LinearSolver).with_resolution(64);
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::X * 5.0,
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        (Vec3::X * 5.0).into(),
         obstacles:  &[],
         resolution: 0, // use router's default
     };
@@ -511,8 +514,8 @@ fn catenary_solver_implements_curve_solver() {
 fn catenary_solver_implements_route_solver() {
     let solver = CatenarySolver::new().with_slack(1.3);
     let request = RouteRequest {
-        start:      Vec3::new(-3.0, 5.0, 0.0),
-        end:        Vec3::new(3.0, 5.0, 0.0),
+        start:      Vec3::new(-3.0, 5.0, 0.0).into(),
+        end:        Vec3::new(3.0, 5.0, 0.0).into(),
         obstacles:  &[],
         resolution: 24,
     };
@@ -881,8 +884,8 @@ fn cable_geometry_all_points_iterates_across_segments() {
     // Build geometry with multiple segments via an orthogonal planner + linear solver
     let router = Router::new(OrthogonalPlanner::new(), solver);
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(5.0, 3.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(5.0, 3.0, 0.0).into(),
         obstacles:  &[],
         resolution: 10,
     };
@@ -903,8 +906,8 @@ fn cable_geometry_total_length_is_sum_of_segments() {
     let solver = LinearSolver;
     let router = Router::new(OrthogonalPlanner::new(), solver);
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(4.0, 3.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(4.0, 3.0, 0.0).into(),
         obstacles:  &[],
         resolution: 10,
     };
@@ -925,19 +928,127 @@ fn cable_geometry_total_length_is_sum_of_segments() {
 
 #[test]
 fn anchor_constructors() {
-    let a = Anchor::from(Vec3::new(1.0, 2.0, 3.0));
-    assert_vec3_approx(a.position, Vec3::new(1.0, 2.0, 3.0), "anchor position");
+    let unconstrained = Anchor::from(Vec3::new(1.0, 2.0, 3.0));
+    assert_vec3_approx(
+        unconstrained.position,
+        Vec3::new(1.0, 2.0, 3.0),
+        "anchor position",
+    );
     assert!(
-        a.direction.is_none(),
-        "default anchor should have no direction"
+        unconstrained.lead_tip().is_none(),
+        "default anchor should have no lead tip"
     );
 
-    let b = Anchor::with_direction(Vec3::new(0.0, 0.0, 0.0), Vec3::Y);
-    assert!(
-        b.direction.is_some(),
-        "directed anchor should have a direction"
+    let lead = Anchor {
+        position: Vec3::new(0.0, 0.0, 0.0),
+        exit:     AnchorExit::Lead {
+            direction: Dir3::Y,
+            length:    2.0,
+        },
+    };
+    let tip = lead.lead_tip();
+    assert!(tip.is_some(), "lead anchor should have a lead tip");
+    assert_vec3_approx(
+        tip.unwrap_or(Vec3::ZERO),
+        Vec3::new(0.0, 2.0, 0.0),
+        "lead tip position",
     );
-    assert_vec3_approx(b.direction.unwrap(), Vec3::Y, "anchor direction");
+}
+
+#[test]
+fn solver_routes_between_lead_tips() {
+    let solver = Solver::Linear;
+    let request = RouteRequest {
+        start:      Anchor {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            exit:     AnchorExit::Lead {
+                direction: Dir3::Y,
+                length:    1.0,
+            },
+        },
+        end:        Anchor {
+            position: Vec3::new(5.0, 0.0, 0.0),
+            exit:     AnchorExit::Lead {
+                direction: Dir3::Y,
+                length:    1.0,
+            },
+        },
+        obstacles:  &[],
+        resolution: 10,
+    };
+
+    let geometry = solver.solve(&request);
+
+    // Straight lead + routed span + straight lead.
+    assert_eq!(geometry.segments.len(), 3, "lead, span, lead");
+    assert_eq!(
+        geometry.waypoints.first().copied(),
+        Some(Vec3::new(0.0, 0.0, 0.0)),
+        "waypoints begin at the start anchor"
+    );
+    assert_eq!(
+        geometry.waypoints.last().copied(),
+        Some(Vec3::new(5.0, 0.0, 0.0)),
+        "waypoints end at the end anchor"
+    );
+
+    // The start lead runs straight along +Y to its tip.
+    let start_lead = &geometry.segments[0];
+    assert_vec3_approx(start_lead.points[0], Vec3::new(0.0, 0.0, 0.0), "lead base");
+    assert_vec3_approx(
+        *start_lead.points.last().unwrap(),
+        Vec3::new(0.0, 1.0, 0.0),
+        "lead tip",
+    );
+
+    // The routed span connects the two lead tips.
+    let span = &geometry.segments[1];
+    assert_vec3_approx(span.points[0], Vec3::new(0.0, 1.0, 0.0), "span start");
+    assert_vec3_approx(
+        *span.points.last().unwrap(),
+        Vec3::new(5.0, 1.0, 0.0),
+        "span end",
+    );
+}
+
+#[test]
+fn solver_ignores_leads_when_tips_collapse() {
+    // Leads pointing at each other from anchors closer than their combined
+    // length leave no routable span; the solver falls back to the bare
+    // anchor positions.
+    let solver = Solver::Linear;
+    let request = RouteRequest {
+        start:      Anchor {
+            position: Vec3::new(0.0, 0.0, 0.0),
+            exit:     AnchorExit::Lead {
+                direction: Dir3::X,
+                length:    0.5,
+            },
+        },
+        end:        Anchor {
+            position: Vec3::new(1.0, 0.0, 0.0),
+            exit:     AnchorExit::Lead {
+                direction: Dir3::NEG_X,
+                length:    0.5,
+            },
+        },
+        obstacles:  &[],
+        resolution: 10,
+    };
+
+    let geometry = solver.solve(&request);
+
+    assert_eq!(geometry.segments.len(), 1, "single unrouted segment");
+    assert_vec3_approx(
+        geometry.segments[0].points[0],
+        Vec3::new(0.0, 0.0, 0.0),
+        "fallback start",
+    );
+    assert_vec3_approx(
+        *geometry.segments[0].points.last().unwrap(),
+        Vec3::new(1.0, 0.0, 0.0),
+        "fallback end",
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -957,8 +1068,8 @@ fn full_pipeline_astar_catenary() {
     )];
 
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(6.0, 0.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(6.0, 0.0, 0.0).into(),
         obstacles:  &obstacles,
         resolution: 16,
     };
@@ -985,8 +1096,8 @@ fn full_pipeline_orthogonal_linear() {
     let router = Router::new(OrthogonalPlanner::new(), LinearSolver);
 
     let request = RouteRequest {
-        start:      Vec3::new(0.0, 0.0, 0.0),
-        end:        Vec3::new(5.0, 3.0, 0.0),
+        start:      Vec3::new(0.0, 0.0, 0.0).into(),
+        end:        Vec3::new(5.0, 3.0, 0.0).into(),
         obstacles:  &[],
         resolution: 10,
     };

@@ -3,6 +3,7 @@
 
 use std::iter;
 
+use bevy::math::Dir3;
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 use bevy_kana::ToUsize;
@@ -29,32 +30,52 @@ impl TangentSample {
     }
 }
 
+/// How a cable leaves an [`Anchor`] before the solver takes over.
+///
+/// This is the routing-layer, world-space form of a cable endpoint's exit
+/// configuration — see `EndpointExit` in the `cable` module for the ECS-side
+/// counterpart with a target-local axis.
+#[derive(Clone, Copy, Debug, Default)]
+pub enum AnchorExit {
+    /// The solver routes directly from the anchor position.
+    #[default]
+    Unconstrained,
+    /// The cable leaves along `direction` as a straight lead of `length`
+    /// metres; the solver routes from the lead's tip.
+    Lead {
+        /// World-space direction the lead points along.
+        direction: Dir3,
+        /// Length of the straight lead, in metres.
+        length:    f32,
+    },
+}
+
 /// Where a cable connects to an object.
 #[derive(Clone, Copy, Debug)]
 pub struct Anchor {
     /// World-space position of the connection point.
-    pub position:  Vec3,
-    /// Preferred exit direction at this anchor (for tangent continuity).
-    /// When `None`, the solver chooses the natural direction.
-    pub direction: Option<Vec3>,
+    pub position: Vec3,
+    /// How the cable leaves this anchor before the solver takes over.
+    pub exit:     AnchorExit,
 }
 
 impl From<Vec3> for Anchor {
     fn from(position: Vec3) -> Self {
         Self {
             position,
-            direction: None,
+            exit: AnchorExit::Unconstrained,
         }
     }
 }
 
 impl Anchor {
-    /// Create an anchor with a preferred exit direction.
+    /// World position of this anchor's lead tip, or `None` when the exit is
+    /// [`AnchorExit::Unconstrained`].
     #[must_use]
-    pub fn with_direction(position: impl Into<Vec3>, direction: Vec3) -> Self {
-        Self {
-            position:  position.into(),
-            direction: Some(direction),
+    pub fn lead_tip(&self) -> Option<Vec3> {
+        match self.exit {
+            AnchorExit::Unconstrained => None,
+            AnchorExit::Lead { direction, length } => Some(self.position + direction * length),
         }
     }
 }
@@ -62,10 +83,10 @@ impl Anchor {
 /// Everything a solver needs to compute a route.
 #[derive(Clone, Debug)]
 pub struct RouteRequest<'a> {
-    /// Starting position of the cable.
-    pub start:      Vec3,
-    /// Ending position of the cable.
-    pub end:        Vec3,
+    /// Starting anchor of the cable.
+    pub start:      Anchor,
+    /// Ending anchor of the cable.
+    pub end:        Anchor,
     /// Obstacles to route around (may be empty).
     pub obstacles:  &'a [Obstacle],
     /// Number of sample points per segment.

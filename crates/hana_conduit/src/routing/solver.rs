@@ -73,8 +73,12 @@ impl CurveSolver for LinearSolver {
 
 impl RouteSolver for LinearSolver {
     fn solve(&self, request: &RouteRequest) -> CableGeometry {
-        let segment = self.solve_segment(request.start, request.end, request.resolution);
-        let waypoints = vec![request.start, request.end];
+        let segment = self.solve_segment(
+            request.start.position,
+            request.end.position,
+            request.resolution,
+        );
+        let waypoints = vec![request.start.position, request.end.position];
         CableGeometry::from_segments(vec![segment], waypoints)
     }
 }
@@ -112,9 +116,11 @@ impl Router {
 
 impl RouteSolver for Router {
     fn solve(&self, request: &RouteRequest) -> CableGeometry {
-        let waypoints = self
-            .path_planner
-            .plan(request.start, request.end, request.obstacles);
+        let waypoints = self.path_planner.plan(
+            request.start.position,
+            request.end.position,
+            request.obstacles,
+        );
         let resolution = request.effective_resolution(self.resolution);
         let segments: Vec<CableSegment> = waypoints
             .windows(2)
