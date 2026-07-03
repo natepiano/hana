@@ -79,9 +79,10 @@ pub(crate) enum VisualShadow { Cast, None }
 ```
 
 It has `From<ShadowCasting>` (`On -> Cast`, `Off -> None`), `From<GlyphShadowMode>`
-(`Cast -> Cast`, `None -> None`), and `From<SurfaceShadow>`. It is a field in both
-`SdfBatchKey` (`render/fill_batch.rs`, `shadow: VisualShadow`) and `PathBatchKey`
-(`render/analytic_paths/batching.rs`). When a batch entity is spawned,
+(`Cast -> Cast`, `None -> None`), and `From<SurfaceShadow>`. It is a field in
+`SdfBatchKey` (`render/fill_batch.rs`, `shadow: VisualShadow`), `PathBatchKey`
+(`render/analytic_paths/batching.rs`), and `ImageBatchKey`
+(`render/image_batch.rs`). When a batch entity is spawned,
 `key.shadow == VisualShadow::None` inserts `NotShadowCaster`; mixed participation
 therefore produces distinct keys and separate draws.
 
@@ -170,14 +171,15 @@ analogous mapping at a **separate** code site in `render/panel_text/batching.rs`
 (opaque caster -> `Mask(0.0)` to satisfy wgpu depth-only shadow-pipeline
 validation) — same observable mapping, not shared code with the SDF helper.
 
-### Image child entities (not yet batched)
+### Image batches
 
-`route_sdf_batch_records` and the image reconcile
-(`render/panel_text/reconcile.rs`, `reconcile_panel_image_children`) read the
-owning panel's `Resolved<ShadowCasting>` (defaulting to `ShadowCasting::On`) and
-its `RenderLayers` (defaulting to `RenderLayers::layer(0)`), then
-`apply_image_shadow_casting` inserts or removes `NotShadowCaster` directly on the
-child and clones the panel layer onto it.
+`route_image_batch_records` (`render/image_batch.rs`) reads the owning panel's
+`Resolved<ShadowCasting>` (defaulting to `ShadowCasting::On`) and its
+`RenderLayers` (defaulting to `RenderLayers::layer(0)`) and hashes both into
+`ImageBatchKey { shadow, layers, .. }`. `reconcile_image_batch_entities` inserts
+`NotShadowCaster` on a batch entity whose `key.shadow == VisualShadow::None` and
+clones the key's layers onto it — same key-splitting model as SDF and path
+batches.
 
 ### Precompose
 
@@ -196,8 +198,8 @@ It never freezes a resolved value into an override.
 ## Invariants
 
 - **Mixed shadow participation must split batches.** `VisualShadow` stays a field
-  of `SdfBatchKey` and `PathBatchKey`, because one batch entity either casts or
-  carries `NotShadowCaster`.
+  of `SdfBatchKey`, `PathBatchKey`, and `ImageBatchKey`, because one batch entity
+  either casts or carries `NotShadowCaster`.
 - **`ShadowCasting::On` is the global default**, matching Bevy's default
   `Mesh3d` / `MeshMaterial3d<StandardMaterial>` behavior. `GlyphShadowMode`
   defaults to `Cast`. Every fallback uses `ShadowCasting::On`.
@@ -210,10 +212,11 @@ It never freezes a resolved value into an override.
 - **Authored public fields default to `Cascade::Inherit`, never `Override(On)`**,
   so inheritance stays live.
 - **Shadow changes are visual/render changes only.** Invalidation runs off
-  `Changed<Resolved<ShadowCasting>>` (SDF, shape, text, image, precompose
-  routing), `Changed<Resolved<GlyphShadowMode>>` (text), and
-  `Changed<RenderLayers>` (image children). They must not trigger text reshaping
-  or structural layout rebuilds.
+  `Changed<Resolved<ShadowCasting>>` (SDF, shape, text routing) and
+  `Changed<Resolved<GlyphShadowMode>>` (text); the image router rebuilds per
+  frame and re-reads `Resolved<ShadowCasting>` + `RenderLayers` into
+  `ImageBatchKey`. They must not trigger text reshaping or structural layout
+  rebuilds.
 - **The opaque -> `Mask(0.0)` remap is a batch-material adjustment only.** The
   caller's authored material must remain `Opaque`.
 
@@ -231,9 +234,10 @@ It never freezes a resolved value into an override.
 - **Text has its own opaque -> `Mask(0.0)` remap** for a different reason (wgpu
   validation of the depth-only shadow pipeline for opaque casters), implemented
   separately in `panel_text/batching.rs`, not shared with the SDF helper.
-- **Images are still entity-based, not batched.** Their shadow/layers handling
-  (`apply_image_shadow_casting` + panel-layer clone) is the interim correctness
-  fix, to be replaced when an image batch key lands.
+- **Image shadow is a prepass discard, not an alpha remap.** Images are always
+  `Blend`, so their material bind group survives the shadow pipeline without an
+  opaque -> `Mask(0.0)` remap; the prepass fragment samples texture alpha and
+  discards (see `as-built/image-batching.md`).
 - **`SurfaceShadow`** (`crates/bevy_diegetic/src/panel/coordinate_space.rs`,
   `enum SurfaceShadow { Off, On }`) still exists but is compatibility-only:
   bidirectional `From<SurfaceShadow>` / `From<ShadowCasting>`,

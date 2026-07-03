@@ -141,10 +141,11 @@ silhouette shadow only when both of these are true:
 
 ## Images
 
-Panel image children currently use the entity path, not the SDF/text/shape
-batch paths. Reconcile still applies the panel's resolved `ShadowCasting` and
-`RenderLayers` to image child entities so images participate in the same
-panel-level policy as the rest of the subtree.
+Panel images render through the batched image family
+(`render/image_batch.rs`). The image router reads the panel's resolved
+`ShadowCasting` and `RenderLayers` each frame and hashes them into
+`ImageBatchKey`, so images participate in the same panel-level policy as the
+rest of the subtree. Image tint is per-record data, not a cascade attribute.
 
 ## Invariants
 

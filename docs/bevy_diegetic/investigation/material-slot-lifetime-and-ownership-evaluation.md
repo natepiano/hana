@@ -30,7 +30,7 @@ This evaluation answers four questions:
     the relationship is a typed traversal index.
 - Panel shapes are currently store-owned:
   - `crates/bevy_diegetic/src/render/panel_shapes/batching.rs`
-  - `PanelShapeBatchStore` owns `panel_index: HashMap<Entity, Vec<_>>`.
+  - `ShapeBatchStore` owns `panel_members: HashMap<Entity, Vec<_>>`.
   - `remove_panel(panel)` removes retained shape records from batches.
   - `PanelShapeRenderKey` is `(panel, PanelShapePrimitiveKey)`.
 - SDF panel surfaces are currently entity-backed only through the old
@@ -45,7 +45,7 @@ This evaluation answers four questions:
 
 - Do not implement SDF batching here.
 - Do not migrate text or panel-shape producers here.
-- Do not update `sdf-material-table-batching.md` until this evaluation has a
+- Do not update `as-built/material-table-batching.md` until this evaluation has a
   result.
 - Do not keep a throwaway workspace member after the evaluation unless its tests
   are renamed into durable regression tests.
@@ -289,7 +289,7 @@ At the end of this evaluation, update this document with:
 - the exact scheduler ordering;
 - the test names that prove the decision;
 - rejected alternatives and why they were rejected;
-- the required updates to `sdf-material-table-batching.md`.
+- the required updates to `as-built/material-table-batching.md`.
 
 Only after this document has that result should the batching implementation
 plan be reviewed or regenerated.

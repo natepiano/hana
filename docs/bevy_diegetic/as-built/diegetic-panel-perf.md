@@ -1,6 +1,6 @@
 # Panel Text Change Detection & Flash-Fix Scheduling
 
-Panel text and images feed the batched-records render pipeline
+Panel text feeds the batched-records render pipeline
 ([`material-table-batching.md`](material-table-batching.md)) through a reconcile pass that runs
 every time a panel's tree changes. A single value change on a panel (one chip
 flipping color, one label's text edited) must touch only the run(s) that
@@ -90,9 +90,8 @@ derives no `PartialEq`, so `sync_cascade_override` compares the inner value and
 either applies the override, removes it (on `Inherit` when one is present), or
 no-ops.
 
-`reconcile_panel_image_children` is ordered `.after(reconcile_panel_text_children)`
-so the two passes' shared `DiegeticPerfStats::reconcile_ms` reset-then-accumulate
-is deterministic (text reconcile resets it, image reconcile accumulates).
+`reconcile_panel_text_children` is the sole writer of
+`DiegeticPerfStats::reconcile_ms` (it records its own wall time each pass).
 
 ## `gating_eq` comparators
 
@@ -139,28 +138,13 @@ place instead of re-deriving identical glyph quads; it is `false` on every full
 reshape. `style_gate` is the `TextStyle` snapshot used for this comparison next
 frame.
 
-## Image gating + tint split
+## Images: no reconcile pass
 
-`reconcile_panel_image_children` (`reconcile.rs`) caches each image child's
-inputs on its `PanelImageChild` component: `element_idx` (the reuse key),
-`handle`, `tint`, `bounds`, `draw_depth` (`DrawCommandDepth`), `shadow_casting`.
-`reconcile_existing_image` compares incoming against cached and branches:
-
-- **`handle` / `bounds` / `draw_depth` moved** → rebuild the rectangle mesh +
-  `StandardMaterial` (`build_image_visuals`). `depth_bias` is set from
-  `draw_depth.screen_depth_bias()`, so a draw-order shift under sibling
-  insert/remove rebuilds the material and keeps overlapping images from
-  z-fighting.
-- **tint-only** → mutate `base_color` on the existing material in place, guarded
-  by `material.base_color != incoming.tint`.
-- **nothing changed** (still refreshing layer + shadow-casting) → no material
-  touch.
-
-**Why the guard is at the comparison, not just the write.** Image tint has no
-cascade layer suppressing no-ops (unlike text alpha, which `propagate_cascade`
-value-guards upstream). `materials.get_mut` marks the asset modified on *access*,
-so the tint branch must be *reached* only when the cached tint differs — the
-input comparison in `reconcile_existing_image` is the sole no-op suppressor.
-Images carry their material on the same entity (no `ChildOf` hop), reuse by
-`element_idx`, and despawn orphans synchronously, so they need no reparenting and
-no remove-observer.
+Images do not go through reconcile or per-command child entities.
+`route_image_batch_records` (`render/image_batch.rs`) rebuilds each visible
+panel's `ResolvedImageRecord`s every frame and upserts them into the batched
+image family (`ImageBatchStore`); tint is stored in the record, not a
+`StandardMaterial`. The no-op suppressor is the record equality check in the
+upsert: the router carries the stored world transform onto the rebuilt record
+before comparing, so a static image re-upserts clean with no per-frame dirty.
+See [`image-batching.md`](image-batching.md).

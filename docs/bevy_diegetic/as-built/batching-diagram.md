@@ -1,6 +1,6 @@
 # Batching Call Flow — Diagrams
 
-> Companion to [`material-table-batching.md`](./as-built/material-table-batching.md).
+> Companion to [`material-table-batching.md`](./material-table-batching.md) and [`image-batching.md`](./image-batching.md).
 > Mermaid views of the batching call flow as built: four render families
 > (SDF fills/borders, text runs, panel shapes, images) routing retained members
 > through one generic `BatchStore`, with three of those families converging on a

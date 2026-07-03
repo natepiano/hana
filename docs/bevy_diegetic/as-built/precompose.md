@@ -14,7 +14,7 @@
 
 **Subtree cloning (`layout/element.rs`).** `LayoutTree::precompose_subtree(root_index, width, height)` (`:333`) clones the boundary element and its descendants into a standalone tree via `clone_subtree_into`, which sets each clone's `precompose = PrecomposeMode::Direct` (so the helper never recursively precomposes), clears per-text HDR coverage bias (`config.clear_hdr_text_coverage_bias()`), and on the root fixes `width`/`height` to `Sizing::Fixed` from the passed dimensions.
 
-**Render command classification (`layout/render.rs`).** `RenderCommandKind::PrecomposeLdr` (`:108`) maps to `DrawSortTier::Surface` (`:129`) — same tier as rectangles/borders/images — and returns `None` from `draw_batch_family` (`:143`), so it is not folded into an SDF/text/shape GPU batch; it draws as a standalone image like `Image`.
+**Render command classification (`layout/render.rs`).** `RenderCommandKind::PrecomposeLdr` (`:110`) maps to `DrawSortTier::Surface` (`:131`) — same tier as rectangles/borders/images — and `draw_batch_family()` (`:145`) routes it to `DrawBatchFamily::Image`, so it draws through the batched image family exactly like `Image` (see `as-built/image-batching.md`).
 
 **Render side (`render/precompose.rs`).** `ensure_panel_precompose_caches` (`:52`, runs on `Changed<ComputedDiegeticPanel>`) drives everything:
 - `collect_precompose_commands` (`:132`) gathers `(element_idx, bounds)` for each `PrecomposeLdr` command.
@@ -24,7 +24,7 @@
 - The owned `Image` (`precompose_image`, `:413`) is `TextureFormat::Bgra8UnormSrgb` (LDR) with linear sampling.
 - `PanelPrecomposeCache` (`panel/precompose.rs`) holds `entries: HashMap<usize, PrecomposeCacheEntry>` keyed by source `element_idx`, plus retirement/activation queues. `cleanup_retired_precompose_images` (`:106`) and `activate_pending_precompose_cameras` (`:119`) defer image removal and camera reactivation by a frame so Bevy's render-world target bookkeeping settles.
 
-**Draw in source panel (`render/panel_text/reconcile.rs`).** `collect_panel_image_commands` (`:674`) handles `PrecomposeLdr` at `:697` by looking up `precompose_cache.entry(element_idx)` and emitting a `PanelImageChild` with the cached `entry.image`, `Color::WHITE` tint, and the boundary bounds — it draws exactly like a normal panel image.
+**Draw in source panel (`render/image_batch.rs`).** `route_image_batch_records` (`:498`, ordered `.after(cleanup_retired_precompose_images)`) handles `PrecomposeLdr` in `image_record_source` (`:596`) by looking up `precompose_cache.entry(command.element_idx)` — skipping the command if the entry is absent, never synthesizing a default handle — and emitting a `ResolvedImageRecord` with the cached `entry.image`, white tint, and the boundary bounds into the batched image family. It draws exactly like a normal panel image.
 
 ## Invariants
 

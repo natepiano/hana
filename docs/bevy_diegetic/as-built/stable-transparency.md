@@ -62,15 +62,17 @@ SDF/text/shape ordering, because material `depth_bias` advances once per
 - **`src/lib.rs`** — `pub use render::StableTransparency;`.
 - **`src/render/constants.rs`** — `OIT_DEPTH_STEP: f32 = 0.000_001` (1e-6), the coplanar
   step applied inside the OIT buffer.
-- **Shader OIT path** — `src/render/analytic_paths/analytic_path.wgsl` (text/shape) and
-  `src/shaders/sdf_panel.wgsl` (panel fills) each carry an `#ifdef OIT_ENABLED` block:
+- **Shader OIT path** — `src/render/analytic_paths/analytic_path.wgsl` (text/shape),
+  `src/shaders/sdf_panel.wgsl` (panel fills), and `src/shaders/image_panel.wgsl`
+  (batched images) each carry an `#ifdef OIT_ENABLED` block:
   `#import bevy_core_pipeline::oit::oit_draw`, add `oit_depth_offset` to `position.z`
   (floored at `OIT_MIN_DEPTH`), then `oit_draw(...)` + `discard` instead of returning the
   color. The analytic block must not disturb the winding/coverage functions
   (`n`, `lane_n`, `lanes_n`).
 - **`oit_depth_offset` threading** — computed in `src/render/draw_order.rs` (from
   `DrawOrderIndex`, text-anchored) and threaded into draw commands / materials through
-  `panel_geometry.rs`, `panel_text/*`, `panel_shapes/*`, and `analytic_paths/*`.
+  `panel_geometry.rs`, `panel_text/*`, `panel_shapes/*`, `analytic_paths/*`, and
+  `image_batch.rs`.
 - **fairy_dust** — `src/transparency.rs` `install(app)` ensures `DiegeticUiPlugin` and
   adds the `Add<FairyDustOrbitCam>` observer that inserts `StableTransparency`; the
   `.with_stable_transparency()` method lives on `SprinkleBuilder<WithOrbitCam>`

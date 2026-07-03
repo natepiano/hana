@@ -16,7 +16,7 @@ Diegetic UI panels render three families of translucent surface — SDF panel fi
 
 Text runs and `PanelShape` primitives **share** `PathExtendedMaterial` / `PathExtension` and the same `analytic_path` shader — there is no `TextExtension`/`ShapeExtension`. Text runs and `PanelShape` primitives use separate stores (`TextRunBatchStore` and `ShapeBatchStore`) over shared analytic record types. `PathExtension` (`analytic_paths/material.rs`) owns the analytic storage-buffer plumbing at bindings 100–105, plus `RenderMode`, AA, and `vertex_pull` specialization via `PathExtensionKey`. `SdfExtension` (`fill_batch.rs`) owns the `SdfRenderRecord` buffer + inert mesh at bindings 107/108, and specializes on `SdfPipelineMode { VertexPulled, MeshAttributes }` via `SdfExtensionKey` (`MeshAttributes` exists but is test-only today). Both extensions bind the shared material table at `MATERIAL_TABLE_BINDING = 106`.
 
-`DrawBatchFamily { SdfSurface, PanelShape, Text }` and `DrawSortTier { Surface, PanelShape, Text }` are derived from `RenderCommandKind` (`layout/render.rs`: `draw_batch_family()` / `draw_sort_tier()`), keeping the coarse cross-family ordering.
+`DrawBatchFamily { Image, SdfSurface, PanelShape, Text }` and `DrawSortTier { Surface, PanelShape, Text }` are derived from `RenderCommandKind` (`layout/render.rs`: `draw_batch_family()` / `draw_sort_tier()`), keeping the coarse cross-family ordering. The fourth family, `Image` (`Image`/`PrecomposeLdr` commands), batches through the same `BatchStore` container but binds no material table — tint is record data (see `image-batching.md`).
 
 ### The frame material table (`render/material_table.rs`)
 
