@@ -27,6 +27,7 @@ pub use geometry::CableGeometry;
 pub use geometry::CableSegment;
 pub use geometry::RouteRequest;
 pub use obstacle::Obstacle;
+pub(crate) use obstacle::push_out_of_obstacles;
 pub use orthogonal::AxisOrder;
 pub use orthogonal::OrthogonalPlanner;
 pub use pathfinding::AStarPlanner;

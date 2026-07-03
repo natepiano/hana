@@ -1,3 +1,4 @@
+use bevy::camera::primitives::Aabb;
 use bevy::ecs::entity::EntityHashSet;
 use bevy::prelude::*;
 
@@ -7,10 +8,16 @@ use super::Cable;
 use super::CableEnd;
 use super::CableEndpoint;
 use super::EndpointExit;
+use super::RouteObstacle;
+use super::animation;
+use super::animation::RouteAnimation;
+use super::animation::SolvedRoute;
+use super::route_obstacle::resolve_obstacles;
 use crate::routing::Anchor;
 use crate::routing::AnchorExit;
 use crate::routing::CableGeometry;
 use crate::routing::MIN_SEGMENT_LENGTH;
+use crate::routing::Obstacle;
 use crate::routing::RouteRequest;
 
 /// `SystemSet` for cross-plugin ordering. `GizmosPlugin` render systems run
@@ -41,8 +48,10 @@ impl Plugin for ComputePlugin {
                     queue_changed_cables,
                     queue_endpoint_changes,
                     queue_attached_target_moves,
+                    queue_obstacle_changes,
                 ),
                 recompute_dirty_cables,
+                animation::animate_routes,
             )
                 .chain()
                 .in_set(CableSystems::Compute),
@@ -96,18 +105,48 @@ fn queue_attached_target_moves(
     }
 }
 
+/// Queues every cable when any [`RouteObstacle`] entity moved, changed, or was
+/// removed, so routes re-solve against the obstacle's current bounds.
+fn queue_obstacle_changes(
+    changed: Query<
+        (),
+        (
+            With<RouteObstacle>,
+            Or<(Changed<GlobalTransform>, Changed<RouteObstacle>)>,
+        ),
+    >,
+    mut removed: RemovedComponents<RouteObstacle>,
+    cables: Query<Entity, With<Cable>>,
+    mut dirty_cables: ResMut<DirtyCables>,
+) {
+    if changed.is_empty() && removed.is_empty() {
+        return;
+    }
+    removed.clear();
+    for cable_entity in &cables {
+        dirty_cables.insert(cable_entity);
+    }
+}
+
 /// Drains [`DirtyCables`] and recomputes geometry for each queued cable.
 fn recompute_dirty_cables(
     mut commands: Commands,
     mut dirty_cables: ResMut<DirtyCables>,
-    cables: Query<(&Cable, &Children)>,
+    cables: Query<(&Cable, &Children, Has<RouteAnimation>)>,
     mut endpoints: Query<(
         &CableEndpoint,
         Option<&AttachedTo>,
         Option<&mut ResolvedEndpointPosition>,
     )>,
     transforms: Query<&GlobalTransform>,
+    route_obstacles: Query<(Entity, &RouteObstacle, &GlobalTransform)>,
+    children: Query<&Children>,
+    aabbs: Query<&Aabb>,
 ) {
+    if dirty_cables.is_empty() {
+        return;
+    }
+    let world_obstacles = resolve_obstacles(&route_obstacles, &children, &aabbs, &transforms);
     for cable_entity in dirty_cables.drain() {
         recompute_cable_route(
             cable_entity,
@@ -115,6 +154,7 @@ fn recompute_dirty_cables(
             &cables,
             &mut endpoints,
             &transforms,
+            &world_obstacles,
         );
     }
 }
@@ -122,15 +162,16 @@ fn recompute_dirty_cables(
 fn recompute_cable_route(
     cable_entity: Entity,
     commands: &mut Commands,
-    cables: &Query<(&Cable, &Children)>,
+    cables: &Query<(&Cable, &Children, Has<RouteAnimation>)>,
     endpoints: &mut Query<(
         &CableEndpoint,
         Option<&AttachedTo>,
         Option<&mut ResolvedEndpointPosition>,
     )>,
     transforms: &Query<&GlobalTransform>,
+    world_obstacles: &[Obstacle],
 ) {
-    let Ok((cable, children)) = cables.get(cable_entity) else {
+    let Ok((cable, children, animated)) = cables.get(cable_entity) else {
         return;
     };
 
@@ -187,15 +228,36 @@ fn recompute_cable_route(
         return;
     }
 
+    // The cable's own static obstacles, merged with this frame's resolved
+    // `RouteObstacle` snapshots.
+    let obstacles: Vec<Obstacle> = cable
+        .obstacles
+        .iter()
+        .copied()
+        .chain(world_obstacles.iter().copied())
+        .collect();
+
     let route_request = RouteRequest {
         start,
         end,
-        obstacles: &cable.obstacles,
+        obstacles: &obstacles,
         resolution: cable.resolution,
     };
 
     let cable_geometry = cable.solver.solve(&route_request);
-    commands.entity(cable_entity).insert(ComputedCableGeometry {
-        cable_geometry: Some(cable_geometry),
-    });
+    if animated {
+        // `animate_routes` runs after this system and blends the displayed
+        // geometry toward the `SolvedRoute` before writing
+        // `ComputedCableGeometry` itself. The anchors let it recognize the
+        // geometry's lead segments and keep them out of the blend.
+        commands.entity(cable_entity).insert(SolvedRoute {
+            geometry: cable_geometry,
+            start:    route_request.start,
+            end:      route_request.end,
+        });
+    } else {
+        commands.entity(cable_entity).insert(ComputedCableGeometry {
+            cable_geometry: Some(cable_geometry),
+        });
+    }
 }

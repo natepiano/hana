@@ -7,9 +7,12 @@ use std::collections::HashMap;
 use bevy::math::Vec3;
 use bevy_kana::ToF32;
 use bevy_kana::ToI32;
+use bevy_kana::ToU32;
 use bevy_kana::ToUsize;
 
+use super::constants::ASTAR_CLEAR_CELL_SEARCH_RADIUS;
 use super::constants::ASTAR_SEGMENT_SAMPLE_STEPS;
+use super::constants::ASTAR_SHORTCUT_SAMPLES_PER_CELL;
 use super::constants::COLLINEARITY_THRESHOLD;
 use super::constants::DEFAULT_ASTAR_MAX_CELLS;
 use super::constants::DEFAULT_GRID_SIZE;
@@ -130,6 +133,40 @@ impl AStarPlanner {
         }
     }
 
+    /// The clear cell nearest to `cell`, searched within
+    /// [`ASTAR_CLEAR_CELL_SEARCH_RADIUS`]. A route endpoint can sit clear of an
+    /// obstacle while its quantized cell center lands inside the inflated box
+    /// (when `margin` or `grid_size` exceeds the endpoint's distance to the
+    /// obstacle face); snapping keeps `find_path`'s goal reachable instead of
+    /// silently falling back to a straight line through the obstacle.
+    fn nearest_clear_cell(&self, cell: Cell, origin: Vec3, obstacles: &[Obstacle]) -> Option<Cell> {
+        let target = cell.to_world(origin, self.grid_size);
+        let radius = ASTAR_CLEAR_CELL_SEARCH_RADIUS;
+        (-radius..=radius)
+            .flat_map(|dx| {
+                (-radius..=radius)
+                    .flat_map(move |dy| (-radius..=radius).map(move |dz| (dx, dy, dz)))
+            })
+            .map(|(dx, dy, dz)| Cell {
+                x: cell.x + dx,
+                y: cell.y + dy,
+                z: cell.z + dz,
+            })
+            .filter(|candidate| {
+                match self.is_blocked(candidate.to_world(origin, self.grid_size), obstacles) {
+                    Blockage::Clear => true,
+                    Blockage::Blocked => false,
+                }
+            })
+            .min_by(|a, b| {
+                let a_distance = a.to_world(origin, self.grid_size).distance_squared(target);
+                let b_distance = b.to_world(origin, self.grid_size).distance_squared(target);
+                a_distance
+                    .partial_cmp(&b_distance)
+                    .unwrap_or(Ordering::Equal)
+            })
+    }
+
     /// 26-connected neighbors (all adjacent cells including diagonals).
     fn neighbors(cell: Cell) -> impl Iterator<Item = Cell> {
         (-1..=1)
@@ -234,8 +271,15 @@ impl PathPlanner for AStarPlanner {
         }
 
         let origin = start;
-        let start_cell = self.world_to_cell(start, origin);
-        let goal_cell = self.world_to_cell(end, origin);
+        // Snap each endpoint's cell to the nearest clear cell; the exact
+        // start/end positions are restored on the waypoint list below.
+        let snapped_cells = (
+            self.nearest_clear_cell(self.world_to_cell(start, origin), origin, obstacles),
+            self.nearest_clear_cell(self.world_to_cell(end, origin), origin, obstacles),
+        );
+        let (Some(start_cell), Some(goal_cell)) = snapped_cells else {
+            return vec![start, end];
+        };
 
         let Some(path_cells) = self.find_path(start_cell, goal_cell, origin, obstacles) else {
             return vec![start, end];
@@ -255,6 +299,11 @@ impl PathPlanner for AStarPlanner {
             *last = end;
         }
 
+        // Pull the path taut before dropping collinear points: A*'s
+        // cell-by-cell moves leave staircase jogs that `shortcut_path`
+        // replaces with the longest clear straight runs.
+        self.shortcut_path(&mut waypoints, obstacles);
+
         // `simplify_path` removes collinear entries from `waypoints`.
         simplify_path(&mut waypoints);
 
@@ -272,6 +321,46 @@ impl AStarPlanner {
             self.margin,
             ASTAR_SEGMENT_SAMPLE_STEPS,
         )
+    }
+
+    /// Pull the path taut: from each kept waypoint, jump straight to the
+    /// farthest later waypoint whose connecting segment clears every obstacle,
+    /// discarding the grid staircase in between.
+    fn shortcut_path(&self, waypoints: &mut Vec<Vec3>, obstacles: &[Obstacle]) {
+        let Some(&first) = waypoints.first() else {
+            return;
+        };
+        let mut shortened = vec![first];
+        let mut current = 0;
+        while current + 1 < waypoints.len() {
+            let next = (current + 1..waypoints.len())
+                .rev()
+                .find(|&candidate| {
+                    match self.is_shortcut_blocked(
+                        waypoints[current],
+                        waypoints[candidate],
+                        obstacles,
+                    ) {
+                        Blockage::Clear => true,
+                        Blockage::Blocked => false,
+                    }
+                })
+                .unwrap_or(current + 1);
+            shortened.push(waypoints[next]);
+            current = next;
+        }
+        *waypoints = shortened;
+    }
+
+    /// Segment blockage test whose sample count scales with segment length
+    /// ([`ASTAR_SHORTCUT_SAMPLES_PER_CELL`] per grid cell), so a long shortcut
+    /// cannot step over a thin obstacle between samples.
+    fn is_shortcut_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
+        let steps = (start.distance(end) / self.grid_size * ASTAR_SHORTCUT_SAMPLES_PER_CELL)
+            .ceil()
+            .to_u32()
+            .max(1);
+        obstacle::is_segment_blocked(start, end, obstacles, self.margin, steps)
     }
 }
 

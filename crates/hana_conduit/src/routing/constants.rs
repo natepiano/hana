@@ -31,7 +31,14 @@ pub(super) const DEFAULT_RESOLUTION_SENTINEL: u32 = 0;
 pub const DEFAULT_SLACK: f32 = 1.2;
 
 // grid pathfinding
+/// Chebyshev radius, in cells, searched for a clear cell when a route
+/// endpoint's quantized cell lands inside an obstacle.
+pub(super) const ASTAR_CLEAR_CELL_SEARCH_RADIUS: i32 = 3;
 pub(super) const ASTAR_SEGMENT_SAMPLE_STEPS: u32 = 20;
+/// Sample points per grid cell of segment length when testing whether a
+/// shortcut between two route waypoints stays clear of obstacles. Scaling by
+/// length keeps long shortcuts from stepping over thin obstacles.
+pub(super) const ASTAR_SHORTCUT_SAMPLES_PER_CELL: f32 = 2.0;
 pub(super) const COLLINEARITY_THRESHOLD: f32 = 0.999;
 pub(super) const DEFAULT_ASTAR_MAX_CELLS: usize = 10_000;
 

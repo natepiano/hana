@@ -56,7 +56,12 @@ pub enum PathStrategy {
     /// Orthogonal (right-angle) routing.
     Orthogonal,
     /// A* grid-based pathfinding.
-    AStar,
+    AStar {
+        /// Voxel size of the search grid, in metres.
+        grid_size: f32,
+        /// Clearance kept around obstacles, in metres.
+        margin:    f32,
+    },
 }
 
 /// Curve generation strategy (fills between waypoints).
@@ -168,7 +173,10 @@ impl PathStrategy {
         match self {
             Self::Direct => DirectPlanner.plan(start, end, obstacles),
             Self::Orthogonal => OrthogonalPlanner::new().plan(start, end, obstacles),
-            Self::AStar => AStarPlanner::new().plan(start, end, obstacles),
+            Self::AStar { grid_size, margin } => AStarPlanner::new()
+                .with_grid_size(*grid_size)
+                .with_margin(*margin)
+                .plan(start, end, obstacles),
         }
     }
 }

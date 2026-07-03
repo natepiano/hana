@@ -20,8 +20,13 @@ use hana_conduit::CableEndpoint;
 use hana_conduit::CatenaryPlugin;
 use hana_conduit::CatenarySolver;
 use hana_conduit::ComputedCableGeometry;
+use hana_conduit::CurveKind;
 use hana_conduit::DEFAULT_SLACK;
 use hana_conduit::DetachPolicy;
+use hana_conduit::Obstacle;
+use hana_conduit::PathStrategy;
+use hana_conduit::RouteAnimation;
+use hana_conduit::RouteObstacle;
 use hana_conduit::Solver;
 
 /// Spawn a world-attached cable and return the cable entity.
@@ -410,4 +415,209 @@ fn catenary_detach_slack_bump_increases_slack_on_detach() {
             catenary_solver.slack
         );
     }
+}
+
+#[test]
+fn route_obstacle_entity_diverts_routed_cable() {
+    let mut app = build_test_app();
+
+    // A box straddling the straight line between the endpoints.
+    let obstacle = app
+        .world_mut()
+        .spawn((
+            RouteObstacle::HalfExtents(Vec3::splat(0.5)),
+            Transform::default(),
+        ))
+        .id();
+
+    let cable = app
+        .world_mut()
+        .spawn(Cable {
+            solver:     Solver::Routed {
+                path_strategy: PathStrategy::AStar {
+                    grid_size: 0.25,
+                    margin:    0.1,
+                },
+                curve_kind:    CurveKind::Linear,
+                resolution:    0,
+            },
+            obstacles:  vec![],
+            resolution: 0,
+        })
+        .id();
+    app.world_mut().spawn((
+        CableEndpoint::new(CableEnd::Start, Vec3::new(-2.0, 0.0, 0.0)),
+        ChildOf(cable),
+    ));
+    app.world_mut().spawn((
+        CableEndpoint::new(CableEnd::End, Vec3::new(2.0, 0.0, 0.0)),
+        ChildOf(cable),
+    ));
+
+    app.update();
+
+    let geometry = routed_waypoints(&mut app, cable);
+    assert!(
+        geometry.len() > 2,
+        "route should divert around the RouteObstacle entity, got {} waypoints",
+        geometry.len()
+    );
+
+    // Moving the obstacle out of the way re-queues the cable via
+    // `queue_obstacle_changes` and the route straightens.
+    app.world_mut()
+        .entity_mut(obstacle)
+        .insert(Transform::from_translation(Vec3::new(0.0, 50.0, 0.0)));
+    app.update();
+    app.update();
+
+    let geometry = routed_waypoints(&mut app, cable);
+    assert_eq!(
+        geometry.len(),
+        2,
+        "route should straighten after the RouteObstacle moves away"
+    );
+}
+
+#[test]
+fn route_animation_sweeps_toward_reroute_instead_of_jumping() {
+    let mut app = build_test_app();
+    let cable = app
+        .world_mut()
+        .spawn((
+            Cable {
+                solver:     Solver::Routed {
+                    path_strategy: PathStrategy::AStar {
+                        grid_size: 0.5,
+                        margin:    0.2,
+                    },
+                    curve_kind:    CurveKind::Linear,
+                    resolution:    0,
+                },
+                obstacles:  vec![],
+                resolution: 0,
+            },
+            RouteAnimation::default(),
+        ))
+        .id();
+    app.world_mut().spawn((
+        CableEndpoint::new(CableEnd::Start, Vec3::new(-3.0, 0.0, 0.0)),
+        ChildOf(cable),
+    ));
+    app.world_mut().spawn((
+        CableEndpoint::new(CableEnd::End, Vec3::new(3.0, 0.0, 0.0)),
+        ChildOf(cable),
+    ));
+
+    app.update();
+    assert_eq!(
+        routed_waypoints(&mut app, cable).len(),
+        2,
+        "first solve shows immediately: an unobstructed route is a straight line"
+    );
+
+    // Blocking the straight line re-solves to a detour with bends. An
+    // in-flight animated route reports only its two pinned endpoints as
+    // waypoints, so the waypoint count distinguishes transit from convergence.
+    app.world_mut()
+        .get_mut::<Cable>(cable)
+        .unwrap()
+        .obstacles
+        .push(Obstacle::new(Vec3::ONE, Vec3::ZERO));
+    app.update();
+    assert_eq!(
+        routed_waypoints(&mut app, cable).len(),
+        2,
+        "displayed route must ease toward the detour, not jump to it"
+    );
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while routed_waypoints(&mut app, cable).len() == 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "animation never converged to the detour route"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        app.update();
+    }
+    assert!(
+        routed_waypoints(&mut app, cable).len() > 2,
+        "converged route keeps the detour's bends"
+    );
+}
+
+#[test]
+fn route_animation_snaps_while_endpoint_drags() {
+    let mut app = build_test_app();
+    let cable = app
+        .world_mut()
+        .spawn((
+            Cable {
+                solver:     Solver::Routed {
+                    path_strategy: PathStrategy::AStar {
+                        grid_size: 0.5,
+                        margin:    0.2,
+                    },
+                    curve_kind:    CurveKind::Linear,
+                    resolution:    0,
+                },
+                obstacles:  vec![],
+                resolution: 0,
+            },
+            RouteAnimation::default(),
+        ))
+        .id();
+    let start = Vec3::new(-3.0, 0.0, 0.0);
+    app.world_mut()
+        .spawn((CableEndpoint::new(CableEnd::Start, start), ChildOf(cable)));
+    let end = app
+        .world_mut()
+        .spawn((
+            CableEndpoint::new(CableEnd::End, Vec3::new(3.0, 0.0, 0.0)),
+            ChildOf(cable),
+        ))
+        .id();
+
+    app.update();
+
+    // Dragging the free end re-solves with a moved anchor: the displayed
+    // route must be the fresh solve — a straight line to the new position —
+    // not a blend lagging along the old line.
+    let moved = Vec3::new(3.0, 2.0, 0.0);
+    app.world_mut()
+        .get_mut::<CableEndpoint>(end)
+        .unwrap()
+        .offset = moved;
+    app.update();
+
+    let geometry = app
+        .world()
+        .get::<ComputedCableGeometry>(cable)
+        .unwrap()
+        .cable_geometry
+        .clone()
+        .unwrap();
+    let direction = (moved - start).normalize();
+    let length = (moved - start).length();
+    for &point in geometry.all_points() {
+        let along = (point - start).dot(direction).clamp(0.0, length);
+        let nearest = start + direction * along;
+        assert!(
+            point.distance(nearest) < 1e-3,
+            "displayed route must snap to the fresh solve while the endpoint \
+             drags; sample {point} strays from the straight line"
+        );
+    }
+}
+
+/// The routed waypoints of `cable`'s computed geometry.
+fn routed_waypoints(app: &mut App, cable: Entity) -> Vec<Vec3> {
+    app.world()
+        .get::<ComputedCableGeometry>(cable)
+        .unwrap()
+        .cable_geometry
+        .as_ref()
+        .unwrap()
+        .waypoints
+        .clone()
 }

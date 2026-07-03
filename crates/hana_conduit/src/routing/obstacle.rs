@@ -49,6 +49,59 @@ impl Obstacle {
             PointContainment::Outside
         }
     }
+
+    /// Move a point inside this box out through its nearest face, landing
+    /// `clearance` metres beyond the face. Points already outside pass through
+    /// unchanged.
+    fn push_out(&self, point: Vec3, clearance: f32) -> Vec3 {
+        match self.point_containment(point, 0.0) {
+            PointContainment::Outside => point,
+            PointContainment::Inside => {
+                let min = self.position - self.half_extents;
+                let max = self.position + self.half_extents;
+                let exits = [
+                    (
+                        point.x - min.x,
+                        Vec3::new(min.x - clearance, point.y, point.z),
+                    ),
+                    (
+                        max.x - point.x,
+                        Vec3::new(max.x + clearance, point.y, point.z),
+                    ),
+                    (
+                        point.y - min.y,
+                        Vec3::new(point.x, min.y - clearance, point.z),
+                    ),
+                    (
+                        max.y - point.y,
+                        Vec3::new(point.x, max.y + clearance, point.z),
+                    ),
+                    (
+                        point.z - min.z,
+                        Vec3::new(point.x, point.y, min.z - clearance),
+                    ),
+                    (
+                        max.z - point.z,
+                        Vec3::new(point.x, point.y, max.z + clearance),
+                    ),
+                ];
+                exits
+                    .into_iter()
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map_or(point, |(_, exit)| exit)
+            },
+        }
+    }
+}
+
+/// Move `point` outside every [`Obstacle`] box it falls inside, exiting each
+/// through its nearest face plus `clearance`. Used by route animation to keep
+/// an in-flight cable from sweeping through the boxes its target route avoids.
+#[must_use]
+pub(crate) fn push_out_of_obstacles(point: Vec3, obstacles: &[Obstacle], clearance: f32) -> Vec3 {
+    obstacles.iter().fold(point, |current, obstacle| {
+        obstacle.push_out(current, clearance)
+    })
 }
 
 /// Check whether a point falls inside any obstacle's `AABB`, expanded by `margin`.
@@ -88,4 +141,25 @@ pub(super) fn is_segment_blocked(
     }
 
     Blockage::Clear
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const CLEARANCE: f32 = 0.1;
+
+    #[test]
+    fn push_out_moves_inside_point_through_nearest_face() {
+        let obstacle = Obstacle::new(Vec3::ONE, Vec3::ZERO);
+        let pushed = push_out_of_obstacles(Vec3::new(0.9, 0.0, 0.0), &[obstacle], CLEARANCE);
+        assert_eq!(pushed, Vec3::new(1.0 + CLEARANCE, 0.0, 0.0));
+    }
+
+    #[test]
+    fn push_out_leaves_outside_point_unchanged() {
+        let obstacle = Obstacle::new(Vec3::ONE, Vec3::ZERO);
+        let point = Vec3::new(2.0, 0.0, 0.0);
+        assert_eq!(push_out_of_obstacles(point, &[obstacle], CLEARANCE), point);
+    }
 }

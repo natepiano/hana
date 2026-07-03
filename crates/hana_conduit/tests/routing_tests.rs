@@ -584,6 +584,51 @@ fn astar_routes_around_single_obstacle() {
 }
 
 #[test]
+fn astar_shortcut_pulls_route_taut() {
+    let planner = AStarPlanner::new().with_grid_size(0.5).with_margin(0.2);
+
+    let start = Vec3::new(0.0, 0.0, 0.0);
+    let end = Vec3::new(6.0, 0.0, 0.0);
+    let obstacles = vec![Obstacle::new(
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(3.0, 0.0, 0.0),
+    )];
+
+    let waypoints = planner.plan(start, end, &obstacles);
+
+    // The shortcut pass collapses the grid staircase: start, a bend on each
+    // side of the obstacle, end — nothing close to a cell-by-cell walk.
+    assert!(
+        (3..=5).contains(&waypoints.len()),
+        "taut route should keep only the forced bends, got {} waypoints",
+        waypoints.len()
+    );
+}
+
+#[test]
+fn astar_routes_when_goal_cell_quantizes_into_obstacle() {
+    let planner = AStarPlanner::new().with_grid_size(0.5).with_margin(0.2);
+
+    let start = Vec3::new(-3.0, 0.0, 0.0);
+    // Just above the inflated obstacle top (1.0 + 0.2 margin), but the nearest
+    // grid cell center (y = 1.0) falls inside the inflated box — without the
+    // clear-cell snap, `find_path` returns `None` and the route degrades to a
+    // straight line through the obstacle.
+    let end = Vec3::new(0.0, 1.24, 0.0);
+    let obstacles = vec![Obstacle::new(Vec3::splat(1.0), Vec3::ZERO)];
+
+    let waypoints = planner.plan(start, end, &obstacles);
+
+    assert!(
+        waypoints.len() > 2,
+        "should route around the obstacle, got {} waypoints",
+        waypoints.len()
+    );
+    assert_vec3_approx(waypoints[0], start, "snapped-goal path start");
+    assert_vec3_approx(*waypoints.last().unwrap(), end, "snapped-goal path end");
+}
+
+#[test]
 fn astar_returns_direct_path_when_no_obstacles() {
     let planner = AStarPlanner::new();
     let start = Vec3::new(0.0, 0.0, 0.0);

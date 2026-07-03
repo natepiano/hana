@@ -54,6 +54,8 @@ pub use cable::ComputedCableGeometry;
 pub use cable::DetachPolicy;
 pub use cable::EndpointAlignment;
 pub use cable::EndpointExit;
+pub use cable::RouteAnimation;
+pub use cable::RouteObstacle;
 // Gizmos
 pub use gizmos::CableGizmoGroup;
 pub use gizmos::DebugGizmos;
@@ -105,8 +107,8 @@ pub use routing::solve_parameter;
 /// - [`DebugGizmos`] resource (default: off).
 /// - [`CableGizmoGroup`] for controlling debug visibility.
 /// - `CablePlugin`, including `queue_changed_cables`, `queue_endpoint_changes`,
-///   `queue_attached_target_moves`, `recompute_dirty_cables`, `on_endpoint_alignment_update`, and
-///   `on_endpoint_detached`.
+///   `queue_attached_target_moves`, `queue_obstacle_changes`, `recompute_dirty_cables`,
+///   `animate_routes`, `on_endpoint_alignment_update`, and `on_endpoint_detached`.
 /// - `MeshPlugin`, including `on_geometry_computed`.
 /// - `GizmosPlugin`, including `render_cable_gizmos` and `render_debug_gizmos`.
 pub struct CatenaryPlugin;

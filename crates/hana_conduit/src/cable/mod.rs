@@ -1,11 +1,14 @@
 //! `Cable`, `CableEndpoint`, `AttachedTo`, `AttachedEndpoints`, `DetachPolicy`,
-//! `EndpointAlignment`, and `EndpointExit`, plus `on_endpoint_alignment_update`
-//! and `on_endpoint_detached`.
+//! `EndpointAlignment`, `EndpointExit`, `RouteObstacle`, and `RouteAnimation`,
+//! plus `on_endpoint_alignment_update` and `on_endpoint_detached`.
 
+mod animation;
 mod compute;
 mod constants;
 mod endpoint;
+mod route_obstacle;
 
+pub use animation::RouteAnimation;
 use bevy::prelude::*;
 pub(crate) use compute::CableSystems;
 use compute::ComputePlugin;
@@ -17,6 +20,7 @@ pub use endpoint::CableEndpoint;
 pub use endpoint::DetachPolicy;
 pub use endpoint::EndpointAlignment;
 pub use endpoint::EndpointExit;
+pub use route_obstacle::RouteObstacle;
 
 use crate::mesh::CableMeshConfig;
 use crate::routing::Obstacle;
@@ -42,7 +46,8 @@ impl Plugin for CablePlugin {
 pub struct Cable {
     /// The routing algorithm to use.
     pub solver:     Solver,
-    /// Obstacles to route around.
+    /// Static obstacles to route around, merged at recompute time with the
+    /// boxes resolved from every [`RouteObstacle`] entity in the world.
     pub obstacles:  Vec<Obstacle>,
     /// Number of sample points per segment (0 = use solver default).
     pub resolution: u32,

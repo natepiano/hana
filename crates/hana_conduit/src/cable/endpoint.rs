@@ -155,7 +155,8 @@ pub enum DetachPolicy {
 /// reactively when the target's transform changes.
 ///
 /// If the target entity is despawned, the endpoint's [`DetachPolicy`] determines behavior.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 #[relationship(relationship_target = AttachedEndpoints)]
 pub struct AttachedTo(pub Entity);
 

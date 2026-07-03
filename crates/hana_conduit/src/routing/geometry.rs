@@ -35,7 +35,7 @@ impl TangentSample {
 /// This is the routing-layer, world-space form of a cable endpoint's exit
 /// configuration — see `EndpointExit` in the `cable` module for the ECS-side
 /// counterpart with a target-local axis.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum AnchorExit {
     /// The solver routes directly from the anchor position.
     #[default]
@@ -51,7 +51,7 @@ pub enum AnchorExit {
 }
 
 /// Where a cable connects to an object.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Anchor {
     /// World-space position of the connection point.
     pub position: Vec3,
