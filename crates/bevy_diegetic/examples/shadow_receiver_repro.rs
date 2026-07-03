@@ -51,7 +51,7 @@ fn main() {
         .with_save_window_position()
         .with_studio_lighting()
         .with_ground_plane()
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::BlenderLike)
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_stable_transparency()
         .with_camera_home()
         .yaw(HOME_YAW)

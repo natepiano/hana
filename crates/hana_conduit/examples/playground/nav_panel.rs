@@ -84,10 +84,11 @@ pub(crate) struct NavPanel;
 
 pub(crate) fn spawn_nav_panel(
     mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     current_section: Res<CurrentSection>,
     selection: Res<NavSelection>,
 ) {
-    let unlit = fairy_dust::screen_panel_material();
+    let unlit = materials.add(fairy_dust::screen_panel_material());
     let panel = DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomLeft)
@@ -219,14 +220,14 @@ fn build_nav_tree(current: usize, direction: Option<NavigationDirection>) -> Lay
             builder.with(El::column().gap(NAV_PANEL_ROW_GAP), |builder| {
                 build_header(builder, current, direction);
                 for (section, title) in SECTION_TITLES.iter().enumerate() {
-                    builder.text(
+                    builder.text((
                         format!("{} {title}", section + 1),
                         text_style(if section == current {
                             NAV_PANEL_ACTIVE_COLOR
                         } else {
                             NAV_PANEL_NORMAL_COLOR
                         }),
-                    );
+                    ));
                 }
             });
         },
@@ -244,9 +245,9 @@ fn build_header(
     builder.with(
         El::row().gap(NAV_PANEL_HEADER_GAP).align_y(AlignY::Center),
         |builder| {
-            builder.text(NAV_PANEL_LEFT_ARROW, text_style(left));
-            builder.text("Sections", header_text_style(TITLE_COLOR));
-            builder.text(NAV_PANEL_RIGHT_ARROW, text_style(right));
+            builder.text((NAV_PANEL_LEFT_ARROW, text_style(left)));
+            builder.text(("Sections", header_text_style(TITLE_COLOR)));
+            builder.text((NAV_PANEL_RIGHT_ARROW, text_style(right)));
         },
     );
 }

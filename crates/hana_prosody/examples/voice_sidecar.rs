@@ -21,9 +21,10 @@ use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelBuildError;
-use bevy_diegetic::PanelFieldId;
+use bevy_diegetic::PanelElementId;
 use bevy_diegetic::PanelText;
 use bevy_diegetic::Sizing;
+use bevy_diegetic::Text;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::TextWrap;
@@ -384,8 +385,8 @@ struct VoiceStatusPanel;
 #[derive(Component)]
 struct VoicePromptFace;
 
-fn spawn_status_panel(mut commands: Commands) {
-    match status_panel() {
+fn spawn_status_panel(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
+    match status_panel(&mut materials) {
         Ok(panel) => {
             commands.spawn((VoiceStatusPanel, panel, Transform::default()));
         },
@@ -395,7 +396,11 @@ fn spawn_status_panel(mut commands: Commands) {
     }
 }
 
-fn spawn_cube_prompt_faces(mut commands: Commands, cubes: Query<Entity, With<VoiceCube>>) {
+fn spawn_cube_prompt_faces(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    cubes: Query<Entity, With<VoiceCube>>,
+) {
     let Ok(cube) = cubes.single() else {
         return;
     };
@@ -408,7 +413,7 @@ fn spawn_cube_prompt_faces(mut commands: Commands, cubes: Query<Entity, With<Voi
             Face::Top,
             Face::Bottom,
         ] {
-            match prompt_face_panel() {
+            match prompt_face_panel(&mut materials) {
                 Ok(panel) => {
                     parent.spawn((
                         Name::new(FACE_PROMPT_NAME),
@@ -741,22 +746,24 @@ fn rms(samples: &[f32]) -> f32 {
 }
 
 fn set_status_field(panel_text: &mut PanelText, panel: Entity, field: &str, text: &str) {
-    panel_text.set_text(panel, &PanelFieldId::named(field), text);
+    panel_text.set_text(panel, &PanelElementId::named(field), text);
 }
 
-fn prompt_face_panel() -> Result<DiegeticPanel, PanelBuildError> {
+fn prompt_face_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
     let mut style = CubeFacePanelStyle::for_cube(CUBE_SIZE);
     style.size *= 1.02;
     style.padding *= 0.18;
     style.title_size *= 1.85;
     style.color = FACE_PROMPT_COLOR;
-    let transparent = cube_face_panel_material();
+    let transparent = materials.add(cube_face_panel_material());
     DiegeticPanel::world()
         .size(style.size, style.size)
         .font_unit(Unit::Millimeters)
         .anchor(Anchor::Center)
         .material(transparent)
-        .text_material(prompt_text_material())
+        .text_material(materials.add(prompt_text_material()))
         .with_tree(prompt_face_tree(style))
         .build()
 }
@@ -778,18 +785,22 @@ fn prompt_face_tree(style: CubeFacePanelStyle) -> LayoutTree {
             .clip(),
     );
     builder.text(
-        PROMPT_TEXT,
-        TextStyle::new(style.title_size)
-            .with_color(style.color)
-            .with_align(TextAlign::Center)
-            .with_shadow_mode(GlyphShadowMode::None)
-            .wrap(TextWrap::Words),
+        Text::new(
+            PROMPT_TEXT,
+            TextStyle::new(style.title_size)
+                .with_color(style.color)
+                .with_align(TextAlign::Center)
+                .with_shadow_mode(GlyphShadowMode::None),
+        )
+        .wrap(TextWrap::Words),
     );
     builder.build()
 }
 
-fn status_panel() -> Result<DiegeticPanel, PanelBuildError> {
-    let unlit = screen_panel_material();
+fn status_panel(
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let unlit = materials.add(screen_panel_material());
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::TopRight)
@@ -813,7 +824,7 @@ fn status_panel_tree() -> LayoutTree {
                     .height(Sizing::FIT)
                     .gap(STATUS_PANEL_GAP),
                 |builder| {
-                    builder.text("Voice session", status_title_style());
+                    builder.text(("Voice session", status_title_style()));
                     status_divider(builder);
                     status_row(builder, "State", FIELD_STATE, "Ready");
                     status_row(builder, "Recording", FIELD_RECORDING, "0 ms");
@@ -841,16 +852,16 @@ fn status_row(builder: &mut LayoutBuilder, label: &'static str, field: &'static 
                     .width(Sizing::fixed(STATUS_LABEL_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(label, status_label_style());
+                    builder.text((label, status_label_style()));
                 },
             );
             builder.with(
                 El::new().width(Sizing::GROW).height(Sizing::FIT),
                 |builder| {
-                    builder.text_id(
-                        PanelFieldId::named(field),
-                        value,
-                        status_value_style(status_value_role(field)),
+                    builder.text(
+                        Text::new(value, status_value_style(status_value_role(field)))
+                            .id(PanelElementId::named(field))
+                            .wrap(TextWrap::Words),
                     );
                 },
             );
@@ -878,7 +889,6 @@ fn status_title_style() -> TextStyle {
 fn status_label_style() -> TextStyle {
     TextStyle::new(13.0)
         .with_color(MUTED_COLOR)
-        .no_wrap()
         .with_shadow_mode(GlyphShadowMode::None)
 }
 
@@ -897,5 +907,4 @@ fn status_value_style(role: StatusValueRole) -> TextStyle {
     TextStyle::new(13.0)
         .with_color(color)
         .with_shadow_mode(GlyphShadowMode::None)
-        .wrap(TextWrap::Words)
 }
