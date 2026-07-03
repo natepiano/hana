@@ -456,7 +456,7 @@ fn route_obstacle_entity_diverts_routed_cable() {
 
     app.update();
 
-    let geometry = routed_waypoints(&mut app, cable);
+    let geometry = routed_waypoints(&app, cable);
     assert!(
         geometry.len() > 2,
         "route should divert around the RouteObstacle entity, got {} waypoints",
@@ -471,7 +471,7 @@ fn route_obstacle_entity_diverts_routed_cable() {
     app.update();
     app.update();
 
-    let geometry = routed_waypoints(&mut app, cable);
+    let geometry = routed_waypoints(&app, cable);
     assert_eq!(
         geometry.len(),
         2,
@@ -511,7 +511,7 @@ fn route_animation_sweeps_toward_reroute_instead_of_jumping() {
 
     app.update();
     assert_eq!(
-        routed_waypoints(&mut app, cable).len(),
+        routed_waypoints(&app, cable).len(),
         2,
         "first solve shows immediately: an unobstructed route is a straight line"
     );
@@ -526,13 +526,13 @@ fn route_animation_sweeps_toward_reroute_instead_of_jumping() {
         .push(Obstacle::new(Vec3::ONE, Vec3::ZERO));
     app.update();
     assert_eq!(
-        routed_waypoints(&mut app, cable).len(),
+        routed_waypoints(&app, cable).len(),
         2,
         "displayed route must ease toward the detour, not jump to it"
     );
 
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
-    while routed_waypoints(&mut app, cable).len() == 2 {
+    while routed_waypoints(&app, cable).len() == 2 {
         assert!(
             std::time::Instant::now() < deadline,
             "animation never converged to the detour route"
@@ -541,7 +541,7 @@ fn route_animation_sweeps_toward_reroute_instead_of_jumping() {
         app.update();
     }
     assert!(
-        routed_waypoints(&mut app, cable).len() > 2,
+        routed_waypoints(&app, cable).len() > 2,
         "converged route keeps the detour's bends"
     );
 }
@@ -611,7 +611,7 @@ fn route_animation_snaps_while_endpoint_drags() {
 }
 
 /// The routed waypoints of `cable`'s computed geometry.
-fn routed_waypoints(app: &mut App, cable: Entity) -> Vec<Vec3> {
+fn routed_waypoints(app: &App, cable: Entity) -> Vec<Vec3> {
     app.world()
         .get::<ComputedCableGeometry>(cable)
         .unwrap()

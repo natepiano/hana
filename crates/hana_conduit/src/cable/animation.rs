@@ -22,17 +22,19 @@ use super::constants::DEFAULT_ROUTE_ANIMATION_SECONDS;
 use super::constants::ROUTE_ANIMATION_LEAD_MATCH_DISTANCE;
 use super::constants::ROUTE_ANIMATION_OBSTACLE_CLEARANCE;
 use super::constants::ROUTE_ANIMATION_SNAP_DISTANCE;
-use super::route_obstacle::resolve_obstacles;
+use super::route_obstacle;
+use crate::routing;
 use crate::routing::Anchor;
 use crate::routing::CableGeometry;
 use crate::routing::CableSegment;
 use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 use crate::routing::MIN_SEGMENT_LENGTH;
 use crate::routing::Obstacle;
-use crate::routing::push_out_of_obstacles;
 
 /// Blends a cable's displayed route from the old route to each newly solved
-/// route instead of jumping. Only re-solves with endpoints at rest animate —
+/// route instead of jumping.
+///
+/// Only re-solves with endpoints at rest animate —
 /// the first solve and any solve whose anchors moved (the endpoint is being
 /// dragged) show immediately, so the cable always tracks the pointer exactly.
 /// A transition runs over [`RouteAnimation::seconds`] with an ease-out curve,
@@ -177,9 +179,10 @@ pub(super) fn animate_routes(
         // A re-solve landed since last frame: restart the transition from
         // wherever the displayed span is now.
         if displayed_route.target != route_parts.span {
-            displayed_route.source = displayed_route.current.clone();
-            displayed_route.target = route_parts.span.clone();
-            displayed_route.elapsed = 0.0;
+            let route = &mut *displayed_route;
+            route.source.clone_from(&route.current);
+            route.target.clone_from(&route_parts.span);
+            route.elapsed = 0.0;
         }
 
         if displayed_route.current == displayed_route.target {
@@ -194,7 +197,8 @@ pub(super) fn animate_routes(
         // collapsed source span (the drag just left the jack) has no usable
         // blend source and lands immediately.
         if progress >= 1.0 || polyline_length(&displayed_route.source) < MIN_SEGMENT_LENGTH {
-            displayed_route.current = displayed_route.target.clone();
+            let route = &mut *displayed_route;
+            route.current.clone_from(&route.target);
             commands.entity(cable_entity).insert(ComputedCableGeometry {
                 cable_geometry: Some(solved_route.geometry.clone()),
             });
@@ -202,7 +206,7 @@ pub(super) fn animate_routes(
         }
 
         let world = world_obstacles.get_or_insert_with(|| {
-            resolve_obstacles(&route_obstacles, &children, &aabbs, &transforms)
+            route_obstacle::resolve_obstacles(&route_obstacles, &children, &aabbs, &transforms)
         });
         let obstacles: Vec<Obstacle> = cable
             .obstacles
@@ -218,7 +222,8 @@ pub(super) fn animate_routes(
             &obstacles,
         ) {
             Blend::Converged => {
-                displayed_route.current = displayed_route.target.clone();
+                let route = &mut *displayed_route;
+                route.current.clone_from(&route.target);
                 commands.entity(cable_entity).insert(ComputedCableGeometry {
                     cable_geometry: Some(solved_route.geometry.clone()),
                 });
@@ -318,7 +323,7 @@ fn blend_span(source: &[Vec3], target: &[Vec3], ease: f32, obstacles: &[Obstacle
             if index == 0 || index == last {
                 point
             } else {
-                push_out_of_obstacles(point, obstacles, ROUTE_ANIMATION_OBSTACLE_CLEARANCE)
+                routing::push_out_of_obstacles(point, obstacles, ROUTE_ANIMATION_OBSTACLE_CLEARANCE)
             }
         })
         .collect();

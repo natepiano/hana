@@ -12,7 +12,7 @@ use super::RouteObstacle;
 use super::animation;
 use super::animation::RouteAnimation;
 use super::animation::SolvedRoute;
-use super::route_obstacle::resolve_obstacles;
+use super::route_obstacle;
 use crate::routing::Anchor;
 use crate::routing::AnchorExit;
 use crate::routing::CableGeometry;
@@ -146,7 +146,8 @@ fn recompute_dirty_cables(
     if dirty_cables.is_empty() {
         return;
     }
-    let world_obstacles = resolve_obstacles(&route_obstacles, &children, &aabbs, &transforms);
+    let world_obstacles =
+        route_obstacle::resolve_obstacles(&route_obstacles, &children, &aabbs, &transforms);
     for cable_entity in dirty_cables.drain() {
         recompute_cable_route(
             cable_entity,

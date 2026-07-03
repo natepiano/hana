@@ -10,7 +10,7 @@ use crate::routing::Obstacle;
 /// Declares that cables route around this entity.
 ///
 /// The component stores no position: each recompute reads the entity's live
-/// `GlobalTransform` through [`resolve_obstacles`] and produces a fresh
+/// `GlobalTransform` through `resolve_obstacles` and produces a fresh
 /// world-space [`Obstacle`] snapshot for the solver, so there is no stored
 /// copy of the transform to go stale.
 #[derive(Component, Clone, Copy, Debug, Default, Reflect)]
