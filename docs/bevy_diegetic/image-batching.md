@@ -1,9 +1,16 @@
 # Image Batching
 
-> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Route diegetic image
+> **Status: IMPLEMENTATION COMPLETE — all 14 phases done, uncommitted.** Two
+> on-screen checks remain before `/plan:to_as_built`: the Phase 12
+> `batch_validation` re-check and Phase 14's shape-rendering-unchanged check.
+> Route diegetic image
 > and precompose leaves through a batched render family (`ImageBatchStore`) instead
-> of per-command child entities, then collapse the four batch families onto a
-> generic `BatchStore<F>`.
+> of per-command child entities, then unify batch-store bookkeeping on a generic
+> member-routing `BatchStore<K, B>`. Principle: a batch member is one element's
+> draw contribution; a store is member↔batch routing (batches keyed by
+> GPU-compatibility, a member index mapping each member to its current batch).
+> SDF, Image, and text runs instantiate the generic store; Shape routes members
+> through it behind its per-panel delivery wrapper.
 
 ## Delegation Context
 <!-- Shared across all phases. /plan:delegate prepends this to every dispatch. -->
@@ -16,19 +23,23 @@
   - WGSL: `crates/bevy_diegetic/src/shaders/` (`sdf_panel.wgsl`, `sdf_material_table.wgsl`) and `crates/bevy_diegetic/src/render/` (`sdf_stroke.wgsl`, `material_table.wgsl`). New image shader lands under `src/shaders/`.
   - Doc to update as-built: `docs/bevy_diegetic/batching-diagram.md`.
 - **Key files:**
-  - `crates/bevy_diegetic/src/render/fill_batch.rs` — SDF batch store/key/systems reference implementation to copy-adapt; `FillBatchPlugin` (registration), `OPAQUE_FILL_DEPTH_PUSH_LAYERS` (:89), `contiguous_drawn_run`/`assign_contiguous_runs` (:392), `sort_records`/`refresh_first_draw_order_index` (:597), specialization/entry-point declarations (:807-813), `sdf_batch_alpha_mode` shadow remap (:906), material `depth_bias` from rank (:881), `register_sdf_batch_materials::<T>` (:1180), `update_sdf_batch_world_transforms` marks both dirty flags (:1288-1316), `linear_color` tint (:1940).
+  - `crates/bevy_diegetic/src/render/fill_batch.rs` — SDF batch store/key/systems reference implementation to copy-adapt; `FillBatchPlugin` (registration), `OPAQUE_FILL_DEPTH_PUSH_LAYERS` (:95), `contiguous_drawn_run` key field (:313)/`assign_contiguous_runs` (:1126), `sort_records` (:636)/`refresh_first_draw_order_index` (:617), specialization/entry-point declarations (:836-848), `sdf_batch_alpha_mode` shadow remap (:943), material `depth_bias` from rank (`sdf_batch_material`, :897), `register_sdf_batch_materials::<T>` (:1217), `update_sdf_batch_world_transforms` is a thin `#[cfg(test)]`-instrumented wrapper delegating to the generic body (:1325-1337; the both-dirty-flags behavior lives in `batch_store.rs:131-155`), `SdfMemberFamily` (:776), `linear_color` tint (test-mod helper, :2031).
   - `crates/bevy_diegetic/src/render/batch_key.rs` — shared `BatchAlphaMode`/`BatchRenderLayers`/`VisualShadow` key fragments (home of any shared shadow-alpha helper — helper removed from image scope per PD-1).
-  - `crates/bevy_diegetic/src/render/draw_order.rs` — `ScreenDepthBias` (f32, `PartialEq` only, no `Eq+Hash`, :70), `DrawZIndex`/`DrawZIndexRank` (hashable), `ClipDepthNudge`/`OitDepthOffset`, `DrawOrderIndex`; per-record depth plumbing.
+  - `crates/bevy_diegetic/src/render/draw_order.rs` — `ScreenDepthBias` (f32, `PartialEq` only, no `Eq+Hash`, :71), `DrawZIndex`/`DrawZIndexRank` (hashable), `ClipDepthNudge`/`OitDepthOffset`, `DrawOrderIndex`; per-record depth plumbing.
   - `crates/bevy_diegetic/src/render/precompose.rs` — `precompose_image(pixel_size)`, offscreen target `TextureFormat::Bgra8UnormSrgb` (:417) — keep as-is (PD-2).
-  - `crates/bevy_diegetic/src/render/panel_text/reconcile.rs` — `PanelImageChild` (:526), `reconcile_panel_image_children` (:562), `collect_panel_image_commands` (:674), empty-clip image cull (:686), precompose `entry(...)?` skip (:697), image hard-`Blend` at `TEXT_Z_OFFSET` (entity-path spawn, deleted in Phase 8), `reconcile_ms` image accumulate (Phase 6 shifted it to ~:668-671; text writer is an assignment). Image test helpers (`record_modified_materials`, `image_reconcile_app`, the three old assertions) were DELETED by Phase 6 — only the guard test `image_batch_family_commands_do_not_spawn_legacy_children` (~:1461) remains, itself deleted in Phase 8.
-  - `crates/bevy_diegetic/src/render/panel_text/batching.rs` — text unconditional `Opaque -> Mask(0.0)` remap (:1169), growth-guard test `commit_payloads_keep_a_constant_length_between_growths` (:2220).
-  - `crates/bevy_diegetic/src/render/panel_shapes/batching.rs` — `PanelShapeBatchStore` (:344), `draw_batch_family` router-gate model (:825), Shape-only atlas; no buffer-growth test here.
-  - `crates/bevy_diegetic/src/render/analytic_paths/batching.rs` + `crates/bevy_diegetic/src/render/analytic_paths/material.rs` — Path family store (`PathBatchStore`, per-run) + `PathExtendedMaterial` (generic-collapse reference).
-  - `crates/bevy_diegetic/src/layout/render.rs` — `DrawBatchFamily` enum (:69, has `SdfSurface`/`PanelShape`/`Text` — add `Image`), `draw_batch_family()` returns `None` for `Image`/`PrecomposeLdr` (:138/:143 — route to new `Image`).
+  - `crates/bevy_diegetic/src/render/panel_text/reconcile.rs` — text-label reconcile only; the image entity path (`PanelImageChild`, `reconcile_panel_image_children`, `collect_panel_image_commands`, its guard test) was deleted in Phase 8. The empty-clip cull and precompose `entry(...)?` skip now live in `image_batch.rs` (`collect_panel_image_records`, :545).
+  - `crates/bevy_diegetic/src/render/image_batch.rs` — image batch family: `ImageBatchStore` newtype over `BatchStore<ImageBatchKey, ImageBatch>` (:395), `ImageMemberFamily` (:432), `ImageBatchPlugin` system registration (:448-497, registers the generic transform/bounds instantiations directly), router `route_image_batch_records` (:498), `collect_panel_image_records` (:545).
+  - `crates/bevy_diegetic/src/render/panel_text/batching.rs` — text unconditional `Opaque -> Mask(0.0)` remap (`batch_gpu_alpha_mode` :1173, doc records the camera depth/normal-prepass reason), growth-guard test `commit_payloads_keep_a_constant_length_between_growths` (:2224); the text-run store drivers: `upsert_run` (:488), `update_run_material` (:393), `update_run_record` (:537), `write_batch_run_transforms` (:691, post-`Propagate`), `take_empty_batches` (:651).
+  - `crates/bevy_diegetic/src/render/panel_text/mod.rs` — text batch system registration (:118-142); `write_batch_run_transforms.after(TransformSystems::Propagate)` (:130).
+  - `crates/bevy_diegetic/src/render/panel_shapes/batching.rs` — `ShapeBatchStore` (:371, per-panel delivery; renamed from `PanelShapeBatchStore` in Phase 14; `store: BatchStore<PathBatchKey, ShapeBatch>` :372 + `panel_members` panel-scoped retain bookkeeping :374, `impl Batch for ShapeBatch` :334, per-panel drivers `upsert_panel` :380 / `try_refresh_panel` :433 / `remove_panel` :467, delegating accessors :528+), `draw_batch_family` router-gate model (:865), in-store `PathAtlas` + `atlas_dirty` (:375-376); no buffer-growth test here.
+  - `crates/bevy_diegetic/src/render/analytic_paths/batching.rs` + `crates/bevy_diegetic/src/render/analytic_paths/material.rs` — `TextRunBatchStore` (:549, a newtype over `BatchStore<PathBatchKey, TextRunBatch>` since Phase 11; renamed from `PathBatchStore` in Phase 13; `TextRunBatch` :234, `impl Batch` :514) is the TEXT glyph-run store: a plain field of `GlyphCache` (not a Resource), driven only from `panel_text/`; `AnalyticPathPlugin` registers zero batch systems. `PathExtendedMaterial` is the shared technique layer (text + Shape); its two record buffers bind at 104/105 (`material.rs:107/:111`).
+  - `crates/bevy_diegetic/src/text/slug/runtime/glyph_cache.rs` — `GlyphCache` owns the text-run batch store (a `TextRunBatchStore`; `batch_store` field :71, accessors :210/:213) and the glyph atlas (`PathAtlasHandles` :73, `commit_glyph_atlas` :152).
+  - `crates/bevy_diegetic/src/render/batch_store.rs` — `BatchEntry` + shared `take_empty_batches` + the `Batch` trait + generic `BatchStore<K, B>` (member routing: `upsert`/`remove`/`retain`/`contains`/`key_for`/`member_batch_mut`/`get`/`get_mut`/`batches`/`batches_mut`/`take_empty_batches`, struct :185 / methods :199+) + the retained-member traits `MemberRecord` (:83)/`MemberBatch` (:95; no `batch_entity` — `update_batch_bounds` calls the `BatchEntry::entity()` supertrait method since Phase 13)/`MemberFamily` (:116) + the shared post-`Propagate` system bodies `update_batch_world_transforms` (:131) and `update_batch_bounds` (:155), instantiated via `SdfMemberFamily`/`ImageMemberFamily`; module doc carries the family taxonomy + transform/bounds participation (:1-29). All four batch types implement `Batch`.
+  - `crates/bevy_diegetic/src/layout/render.rs` — `DrawBatchFamily` enum (`Image` variant :71) and `draw_batch_family()` routing (:145) — image/precompose routing done since Phase 6.
   - `crates/bevy_diegetic/src/shaders/sdf_panel.wgsl` — SDF shader; prepass fragment samples alpha and `discard`s (`fill_alpha_for_prepass` ~:312-342) — pattern for the image prepass discard.
   - `crates/bevy_diegetic/src/render/dirty.rs` — shared `Dirty` flag.
-  - `crates/bevy_diegetic/src/render/material_table.rs` — `MaterialTablePlugin`, per-frame material register/rebind (:859); image family binds NO `material_table` and must skip register+rebind.
-  - `crates/bevy_diegetic/src/render/mod.rs` — `RenderPlugin` (:372/:385), `add_plugins((MaterialTablePlugin, AnalyticPathPlugin, FillBatchPlugin, TextRenderPlugin, PanelGeometryPlugin, PanelShapePlugin))` (:395) — new `ImageBatchPlugin` registers here.
+  - `crates/bevy_diegetic/src/render/material_table.rs` — `MaterialTablePlugin`; per-frame material register/rebind: `register_path_batch_materials` (:920), `register_sdf_batch_materials` (:937), `rebind_registered_material_table_buffers` (:864); image family binds NO `material_table` and must skip register+rebind.
+  - `crates/bevy_diegetic/src/render/mod.rs` — `RenderPlugin` (:376/:389), `add_plugins` tuple (:399, includes `ImageBatchPlugin`).
   - `crates/bevy_diegetic/src/render/transparency.rs` — OIT is opt-in (`StableTransparency` on a `Camera3d`); intra-batch order OIT-off relies on `sort_records`.
 - **Build:** `cargo build`
 - **Test:** `cargo nextest run -p bevy_diegetic`
@@ -44,7 +55,7 @@
   - Tint is linear `Vec4` multiplied post-sRGB-decode; do not use `StandardMaterial::base_color` for per-record tint.
   - Image material must NOT strip `MATERIAL_BIND_GROUP_INDEX` (its record buffer + texture live there); `ImageExtension` always carries a `#[storage]` entry so the group is never empty (structural, no runtime guard).
   - Declare main/prepass/shadow vertex entry points (vertex-pull from record buffer over inert mesh); image-shadow alpha comes from a prepass fragment that samples texture alpha and `discard`s, NOT the alpha-mode helper.
-  - Router is a full per-frame rebuild (model on SDF/`panel_shapes:825` gate, read effective `RenderLayers`/`Resolved<ShadowCasting>` from panel query); preserve empty-clip cull and precompose `entry(...)?` skip (never synthesize `Handle::<Image>::default()`).
+  - Router is a full per-frame rebuild (model on SDF/`panel_shapes/batching.rs:865` gate, read effective `RenderLayers`/`Resolved<ShadowCasting>` from panel query); preserve empty-clip cull and precompose `entry(...)?` skip (never synthesize `Handle::<Image>::default()`).
   - Atomic cutover: do NOT flip `draw_batch_family(Image)=Some` until the batch path is live — flip + `collect_panel_image_commands` gate + activation in one commit (no double-draw / no no-draw window).
   - `b.image(el, handle, tint)` authoring API must not change; no atlas/bindless in this pass (`uv_rect` forward-compat only).
   - Keep precompose target `Bgra8UnormSrgb` sampled via `base_color_texture` (PD-2, no format change).
@@ -466,74 +477,299 @@ Architect re-review of Phases 10–12 against the landed split + reroute. All fi
 - **Phase 10 gate:** added an explicit requirement that the five Phase-9 `fill_batch.rs` tests + the material-override split test stay green post-migration (the pre/post reference for split + border-over-image ordering).
 - **Phases 11 (Path) / 12 (Shape):** untouched by Phase 9 (neither touches SDF surface resolution); no re-scoping — they depend only on Phase 10's extension-point set, which Phase 9 did not alter.
 
-### Phase 10 — Generic collapse pt.1: `BatchFamily` trait + SDF+Image  · status: todo
+### Phase 10 — Batch-store module: `BatchEntry` + shared `take_empty_batches`  · status: done (uncommitted)
 
 #### Work Order
 
-**Goal:** Extract a `BatchFamily` trait + generic `BatchStore<F>`; migrate SDF and Image (the true nearest per-record pair) behind before/after parity tests; resolve the SDF/text shadow-alpha rule.
+**Goal:** The four byte-identical `take_empty_batches` bodies collapse into one shared helper in a new `render/batch_store.rs`, adopted by all four families; the module doc records the family taxonomy.
 
 **Spec:**
-Define a `BatchFamily` trait carrying the associated types and the per-family logic that genuinely differs:
-- `type Key: Eq + Hash`, `type Record` (CPU), `type GpuRecord: ShaderType`, `type Resources`, `type Member`, `type Dirty`.
-- hooks: `build` (records from command + resolved state), `pack` (→ `GpuRecord`), `material` (produce the batch material), `grow`, `world_bounds`.
-Generic `BatchStore<F: BatchFamily>` owns store bookkeeping (`upsert`/`remove`/`retain`/`take_empty`), the batch container, and the six systems as `system::<F>` instantiations. Explicit extension points the cycle-2 review found (do not collapse them away):
-- **Material-table register/rebind is opt-in:** SDF/text/Shape register their batch material each frame and get `extension.material_table` rebound (`material_table.rs:859`); Image binds none and skips both — an extension point separate from the "appends rows" build hook.
-- **System topology differs:** append families run before `TransformSystems::Propagate`; SDF and Image need a separate post-`Propagate` transform system (cross-panel per-record membership forces per-record transform lookup); Shape folds one transform at build. Add extension points for before/after-`Propagate` gating and transform-update strategy.
-- `world_bounds` is a bespoke per-family hook, not covered by `build`.
-- **`grow`/material-rebind hook must tolerate two shapes:** SDF only re-points the material's record binding on growth; Image's `grow_image_batch_resources` (`image_batch.rs`) added an `else`-branch that rebuilds + re-inserts the material when `materials.get_mut` misses. The hook must cover both.
-- **Commit is a helper + system split:** both SDF (`commit_sdf_batch_buffers`) and Image (`commit_image_batch_buffers` wrapping the per-batch `commit_image_batch_records`) use this shape — model the generic commit the same way.
-- **`type Dirty` may be over-abstraction for the per-record pair:** SDF and Image use the identical two-flag `Dirty` (`record_upload` + `bounds_update`). Validate that a per-family `type Dirty` earns its place against Path/Shape before adding it; if not, make the two-flag `Dirty` shared machinery.
-- **Per-family perf-breakdown population is bespoke (revealed by Phase 7b):** each family fills its `DiegeticPerfStats::*_breakdown: Vec<BatchSummary>` in its commit system, but the SOURCE differs — SDF/Path/Shape derive `BatchSummary` from their `PipelineCompatibility`/`ResourceCompatibility` key fragments, while Image has neither and fills `BatchSummary` DIRECTLY via `image_batch_summary(key, record_count)` (`image_batch.rs`). This is a divergence the commit helper/system split does NOT cover — add a `batch_summary`/perf-breakdown extension point, and decide (alongside the shadow-alpha rule below) whether to unify on a compatibility-derived summary or keep the per-family fill.
+New module `crates/bevy_diegetic/src/render/batch_store.rs`:
+```rust
+/// Implemented by `SdfBatch`, `ImageBatch`, `PathBatch`, `ShapeBatch`.
+pub(crate) trait BatchEntry {
+    /// True when no members remain.
+    fn is_empty(&self) -> bool;
+    /// The spawned batch entity, if reconciled.
+    fn entity(&self) -> Option<Entity>;
+}
 
-Migrate SDF + Image first (both per-record). Expect ~3 store templates overall: per-record (SDF+Image), per-run (Path), per-panel+atlas (Shape).
+/// Drops empty batch entries, returning their entities for despawn.
+pub(crate) fn take_empty_batches<K: Clone + Eq + Hash, B: BatchEntry>(
+    batches: &mut HashMap<K, B>,
+) -> Vec<Entity>
+```
+The body is today's shared shape (filter `is_empty` → remove → collect `entity`; reference `fill_batch.rs:760`). Implement `BatchEntry` for the four batch types and replace the four hand-rolled bodies (`fill_batch.rs:760`, `image_batch.rs:415`, `analytic_paths/batching.rs:623`, `panel_shapes/batching.rs:470`) with delegation to the helper.
 
-**SDF/text shadow-alpha rule (PD-1) MUST be decided in this phase.** SDF remaps `(Opaque, Cast) -> Mask(0.0)` shadow-gated (`fill_batch.rs:906`); text remaps `Opaque -> Mask(0.0)` unconditionally (`batching.rs:1169`) because opaque text loses its material bind group in the camera depth/normal prepass, not just the shadow pass; images are always `Blend` and need neither. Choose one: (a) one shared opaque-remap hook the families parameterize — this forces SDF onto text's unconditional rule and REQUIRES a prepass-strip parity test proving SDF still renders correctly; or (b) a per-family hook that keeps the two rules distinct with a documented reason. Do not carry the divergence forward silently.
+**Module-level doc comment carries the family taxonomy** (this answers "why doesn't family X participate in Y" at the point a developer asks it): a batch member is one element's draw contribution; batches group members by GPU-compatibility key; a store is member↔batch routing. Membership units: per-record (SDF — one or two records per element after the Phase-9 split; Image — one record per image), per-run (text — a run owns its glyph quads), per-shape-group (Shape — grouped per element, but *delivered* per panel because shapes are re-derived wholesale from the panel's resolved command stream; there is no retained per-member update channel yet — see Phase 14 and `docs/bevy_diegetic/retained-shapes.md`). Which pieces each family shares: `BatchEntry` + `take_empty_batches` — all four; `BatchStore<K, B>` (Phase 11) — SDF, Image, text, Shape-behind-wrapper; shared transform/bounds system bodies (Phase 12) — SDF + Image only (text's transform system reaches through `GlyphCache`; Shape folds transform at build).
 
-**SDF surface split + clipped-border alpha reroute (LANDED by Phase 9) MUST survive migration.** The SDF family now has two behaviors Image lacks, both UPSTREAM of / adjacent to the store bookkeeping (surface resolution + key derivation), NOT in the shared `BatchStore<F>` container — so do NOT move them into shared machinery; they stay in SDF's `build`/key derivation:
-- **Surface split** (`panel_geometry.rs`): `push_resolved_sdf_surfaces` + `should_split_clipped_border` + `ElementSurface::fill_only()`/`border_only()` fan ONE clipped fill+border element into TWO `ResolvedSdfSurface`s (fill-only Opaque, border-only Blend). A non-clipped fill+border stays one merged record. So a single SDF element can own ONE OR TWO `record_key`s (`surface.command_index` when merged; `fill.command_index` + `border.command_index` when split), and toggling clip at runtime changes which keys exist — the generic membership index is NOT 1:1 with elements; the per-frame `retain` must handle the fan-out. `ResolvedSdfSurface::clip_rect_limits_mesh()` is the shared predicate; `FillMaterialOverride::{Included,Suppressed}` suppresses the material-override fill role on the split border half only.
-- **Clipped-border alpha reroute** (`fill_batch.rs`): `sdf_record_pipeline_compatibility` coerces a clipped border-only record's `pipeline_compatibility.alpha` to `BatchAlphaMode::Blend` (gate: `clipped_border_uses_transparent_phase` = fill `NotAuthored` + border `Authored` + `clip_rect_limits_mesh()`, only when `opaque_fill_depth_push(...) > 0.0`). This coercion is applied at TWO call sites — `ResolvedSdfBatchRecord::new` (per-record path) AND `SdfRunCompatibility::from` (run-compat/batch-key path). The generic MUST apply it identically wherever SDF derives `pipeline_compatibility.alpha`; applying it in only one path makes a record's key alpha disagree with its run-compat alpha and silently breaks merge/split. It is a THIRD alpha-mutation stage that runs at key-build and precedes PD-1's shadow remap (`sdf_batch_alpha_mode` reads the already-coerced value); keep the two transforms SEPARATE and ORDERED (coercion → shadow remap) — folding them into one hook regresses border-over-image ordering.
+Behavior-neutral refactor; no store API changes.
 
 **Files:**
-- new generic module (`BatchFamily` + `BatchStore<F>`).
-- `crates/bevy_diegetic/src/render/fill_batch.rs` — SDF migration (incl. the Phase-9 `sdf_record_pipeline_compatibility`/`clipped_border_uses_transparent_phase` reroute at both call sites).
-- `crates/bevy_diegetic/src/render/panel_geometry.rs` — SDF surface resolution incl. the Phase-9 split (`push_resolved_sdf_surfaces`/`should_split_clipped_border`/`fill_only`/`border_only`, `clip_rect_limits_mesh`, `FillMaterialOverride`); the SDF `build` hook must preserve the 1→2 record fan-out this produces.
-- image batch module — Image migration.
-- `crates/bevy_diegetic/src/render/batch_key.rs` — shadow-alpha hook home.
+- `crates/bevy_diegetic/src/render/batch_store.rs` (new).
+- `crates/bevy_diegetic/src/render/fill_batch.rs`, `crates/bevy_diegetic/src/render/image_batch.rs`, `crates/bevy_diegetic/src/render/analytic_paths/batching.rs`, `crates/bevy_diegetic/src/render/panel_shapes/batching.rs` — `BatchEntry` impls + delegation.
+- `crates/bevy_diegetic/src/render/mod.rs` — `mod batch_store;`.
 
-**Constraints from prior phases:** all four concrete families exist and are live (Image is fully shipped after Phase 6's cutover; SDF/Path/Shape shipped) — Phase 10 depends on Phases 2-6 (the complete image family), NOT on Phase 8 (deletion) or Phase 9 (border ordering), which are independent and may not have run yet. **Phase 9 HAS LANDED (border-over-image ordering):** its clipping-border change is in the working tree across `fill_batch.rs` (the `sdf_record_pipeline_compatibility`/`clipped_border_uses_transparent_phase` alpha reroute, at BOTH the per-record and run-compat call sites) and `panel_geometry.rs` (the fill+border surface split — `push_resolved_sdf_surfaces`/`should_split_clipped_border`/`fill_only`/`border_only`/`clip_rect_limits_mesh`/`FillMaterialOverride`). The SDF migration MUST carry both forward (see the Spec "SDF surface split + clipped-border alpha reroute" section for the survival rules), and the SDF parity test MUST keep the five Phase-9 tests green and preserve the border-over-image ordering. Phase 9 also added a filled clipping-border image card to `examples/batch_validation.rs` — that card is the manual on-screen A/B reference for border-over-image order and must still render correctly after migration. Phase 8 already removed the image-only `DrawCommandDepth::screen_depth_bias` accessor, so both SDF and Image now key material `depth_bias` purely on `DrawZIndexRank` — one fewer accessor the generic material hook must reconcile. The per-record membership + post-`Propagate` transform pattern is shared by SDF and Image; the image render template is the vertex-pull shader shape shipped in Phase 6 (record index from `vertex_index`, `record.transform` as full world transform, `@binding(107)` records over an inert UV0+UV1 mesh; per-family embedded-shader registration lives in `lib.rs`); the growth-guard + `sort_records` invariants must survive the migration unchanged. Concrete shipped image names Phase 10 references: `local_transform_from_bounds`/`image_size_from_bounds`/`linear_tint`/`centered_corners` (`image_batch.rs`), `collect_panel_image_records` (`image_batch.rs:534`), the `grow_image_batch_resources` `else`-rebuild branch, and the `commit_image_batch_buffers`+`commit_image_batch_records` helper/system split.
+**Constraints from prior phases:** each batch type already carries `entity: Option<Entity>` and an `is_empty()`; the four bodies are byte-identical modulo key/batch types. `PathBatchKey` is `Clone` (not `Copy`) — the helper's `K: Clone` bound covers all four key types.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` green + before/after parity tests for SDF and Image (batch output identical pre/post migration, INCLUDING each family's `DiegeticPerfStats::*_breakdown` output); the SDF parity MUST explicitly preserve the Phase-9 split and border-over-image ordering — the five Phase-9 tests in `fill_batch.rs` (`clipping_border_routes_in_front_of_coplanar_image`, `normal_border_keeps_opaque_depth_push`, `transparent_clipped_border_keeps_authored_alpha_mode`, `non_clipped_fill_border_stays_one_opaque_record`, `clipped_filled_border_splits_fill_behind_and_border_in_front_of_image`, plus the material-override split test) are the pre/post reference and must stay green post-migration; the shadow-alpha decision AND the perf-breakdown decision (compatibility-derived vs per-family fill) recorded in code + the as-built doc; if the shared-hook path (a) is chosen, a passing prepass-strip parity test for SDF.
+**Acceptance gate:** `cargo build` + `cargo nextest run -p bevy_diegetic` green; the `clippy` skill clean; no behavior change (pure delegation).
 
-### Phase 11 — Generic collapse pt.2: Path (per-run template)  · status: todo
+### Retrospective
+
+**What worked:** fast-path dispatch straight from the Work Order (no codebase research); codex matched the spec verbatim — 630 tests green, clippy clean; the blind reviewer found zero code issues.
+**What deviated from the plan:** the `batch_store.rs` module doc cannot spell the literal `retained-shapes.md` filename — the repo forbidden-words scanner rejects the standalone word in that filename in added lines (code identifiers like `ShapeBatch` are exempt); the doc says "retained per-member update channel" without naming the file.
+**Surprises:** the blind reviewer's only finding was plan-doc drift — the Delegation Context key-files row described `batch_store.rs` with its eventual Phase 11/12 contents; the row now states per-phase contents. The post-phase comment sweep removed the module doc's forward references to unbuilt APIs (`BatchStore<K, B>`, shared transform/bounds bodies) and the phase-number markers.
+**Implications for remaining phases:** Phases 11 and 12 must extend the `batch_store.rs` module-doc taxonomy with their participation lists when the APIs land (Phase 11: `BatchStore<K, B>` — SDF, Image, text, Shape-behind-wrapper; Phase 12: shared transform/bounds bodies — SDF + Image only). Phase 14's stub filename `retained-shapes.md` contains a scanner-rejected word — Rust doc comments must reference it as a code span or by role, and the stub-creation step may need the scanner exemption checked.
+
+### Phase 10 Review
+
+- Delegation Context `batch_store.rs` key-files row corrected to state per-phase contents (was written as the post-Phase-12 end state; caught by the blind reviewer).
+- Phase 11 and Phase 12 Work Orders gained a module-doc extension step (taxonomy participation lists removed from the shipped doc by the comment sweep because they described unbuilt APIs).
+- Phase 14 gained a filename-scanner note for the `retained-shapes.md` stub.
+- Architect review of Phases 11–14: no scope/ordering changes; all findings mechanical and applied — line-ref sweep across Phases 11/13/14 and the Delegation Context (Phase 10's +2/+8/−6 edit pattern plus pre-existing drift in `fill_batch.rs` system refs); Phase 11 Constraints gained the `Self::is_empty` disambiguation fact (not needed for `insert`/`update`/`remove` — no inherent-name collisions) and the corrected `SdfBatch::upsert_record` ref (`:635-655`); Phase 12 Spec now names the per-batch state the shared bodies need beyond `Batch` (records iteration, `record_key.panel`, `update_world_transform` — already same-named on both record types, dirty flags, `entity`, `world_bounds()`); Phase 13's wrong-doc-comment note retargeted to `PathBatchStore`'s doc (`:514`, dies with the alias replacement); Phase 14 recorded that `panel_index` currently stores `(PathBatchKey, PanelShapeRenderKey)` pairs (`:355`) whose key half moves into the generic member index.
+
+### Phase 11 — `Batch` trait + generic `BatchStore<K, B>`: SDF + Image migrate  · status: done (uncommitted)
 
 #### Work Order
 
-**Goal:** Migrate `PathBatchStore` (per-run membership) onto `BatchStore<F>` — the second store template.
+**Goal:** One generic member-routing store replaces the duplicated `SdfBatchStore`/`ImageBatchStore` bookkeeping (~140 byte-similar lines); SDF's upsert unified to key-beside-member; the shadow-alpha and perf-breakdown divergences recorded as per-family by construction.
 
 **Spec:**
-Path membership is per-run (`upsert_run`) expanding to many quads — exercise the `type Member` extension point for per-run granularity. Path binds `material_table` (register + rebind), so its material hook is the opt-in-ON case. Path runs before `TransformSystems::Propagate` and folds transform at build (no separate post-`Propagate` transform system). Confirm dirty granularity against `analytic_paths/batching.rs`. Migrate behind a before/after parity test.
+In `render/batch_store.rs`:
+```rust
+/// A batch's membership surface. The store never looks inside `Payload` —
+/// the concrete batch type owns payload semantics (GPU records, dirty flags).
+pub(crate) trait Batch: BatchEntry + Default {
+    type MemberKey: Copy + Eq + Hash;
+    type Payload;
+    /// Add a member not currently present in this batch.
+    fn insert(&mut self, member: Self::MemberKey, payload: Self::Payload);
+    /// Update a member already present in this batch.
+    fn update(&mut self, member: Self::MemberKey, payload: Self::Payload);
+    fn remove(&mut self, member: Self::MemberKey);
+}
+
+pub(crate) struct BatchStore<K, B: Batch> {
+    batches:      HashMap<K, B>,
+    member_index: HashMap<B::MemberKey, K>,
+}
+```
+Methods (bodies copied from today's `SdfBatchStore`, `fill_batch.rs:696-771` — the routing dance is line-for-line identical across SDF/Image/text): `upsert(key: K, member: B::MemberKey, payload: B::Payload)` (same key → `batch.update`; changed key → remove from old batch, re-index, `insert` into new; absent → insert), `remove(member)`, `retain(active: &HashSet<B::MemberKey>)`, `contains(member)`, `key_for(member) -> Option<&K>`, `member_batch_mut(member) -> Option<&mut B>` (index lookup → `get_mut`; the substrate for per-member update channels), `get`/`get_mut(&K)`, `batches()`/`batches_mut()` iterators, `take_empty_batches()` (delegates to the Phase-10 helper).
+
+Extend the `batch_store.rs` module-doc taxonomy with the `BatchStore<K, B>` participation list now that the API exists: SDF, Image, and text instantiate it directly; Shape routes through it behind its per-panel wrapper (Phase 10's comment sweep removed this line because it described an unbuilt API). Keep the doc free of phase numbers — state participation as a current fact.
+
+**SDF migration.** `impl Batch for SdfBatch`: `MemberKey = SdfRecordKey`, `Payload = ResolvedSdfBatchRecord`; `insert` and `update` both delegate to the existing `SdfBatch::upsert_record` (which owns the compare + transform carry-over), `remove` → `remove_record`. `SdfBatchStore` becomes a newtype `Resource` wrapping `BatchStore<SdfBatchKey, SdfBatch>`, keeping its current unconditional accessor surface. The route now calls `upsert(record.batch_key.clone(), record.record_key, record)` — key beside member (was: key embedded, `fill_batch.rs:707-708`); `ResolvedSdfBatchRecord` keeps its `batch_key`/`record_key` fields for their other readers.
+
+**Image migration.** Same shape: `MemberKey = ImageRecordKey`, `Payload = ResolvedImageRecord`; `ImageBatchStore` newtype keeps its `#[cfg(test)]`-only `batches`/`get_mut` accessors — the cfg-gating lives on the wrapper, never on the generic.
+
+**Divergences resolved by construction** (route/key derivation and commit stay per-family; the store never touches alpha modes or perf stats) — record both in code doc comments where each lives:
+- **Shadow-alpha (PD-1, resolved: per-family rules stay distinct).** SDF remaps `(Opaque, Cast) -> Mask(0.0)` shadow-gated (`sdf_batch_alpha_mode`, `fill_batch.rs:923`), applied via the coercion call sites `ResolvedSdfBatchRecord::from_resolved` (`:373`, call `:378`) and `SdfRunCompatibility::from_surface` (`:1157`, call `:1163`). Text remaps `Opaque -> Mask(0.0)` unconditionally (`batch_gpu_alpha_mode`, `panel_text/batching.rs:1169`) because opaque text loses its material bind group in the camera depth/normal prepass, not just the shadow pass. Images are always `Blend` and need neither. The gates differ for real reasons — no shared hook; document each rule's reason at its definition.
+- **Perf breakdown (resolved: per-family commit; the shared core already exists).** The uniform part is already centralized: `BatchSummary` + the shared builder `batch_summary()` (`batch_key.rs:374`), called identically by SDF/text/Shape inside their commit loops. Only the push site stays per-family, and for structural reasons: Image's key carries no `PipelineCompatibility`/`ResourceCompatibility` so it fills `BatchSummary` directly via `image_batch_summary` (`image_batch.rs:724`); text's store lives inside `GlyphCache` (unreachable by a generic system over `F::Store: Resource`); the push is embedded in each family's upload loop alongside family extras — SDF also fills the SDF-only `SdfRecordDiagnostics` resource in the same iteration (`fill_batch.rs:1596-1642`). Family-specific diagnostics layer on top of the shared summary, SDF-style; a future generalization attempt must account for all three constraints. Perf fields are `sdf_breakdown`/`text_breakdown`/`image_breakdown`/`shape_breakdown` — there is no `path_*`.
+
+**Phase-9 survival (unchanged rules, restated).** The SDF surface split (`push_resolved_sdf_surfaces`/`should_split_clipped_border`/`fill_only`/`border_only`/`clip_rect_limits_mesh`/`FillMaterialOverride` in `panel_geometry.rs`) and the clipped-border alpha reroute (`sdf_record_pipeline_compatibility`/`clipped_border_uses_transparent_phase` in `fill_batch.rs`, applied at BOTH call sites named above) are upstream of the store and are NOT moved. An SDF element can own one or two member keys (the split fan-out); member-key-granular `retain` already handles it. The coercion precedes the PD-1 shadow remap — keep the two alpha stages separate and ordered.
 
 **Files:**
-- `crates/bevy_diegetic/src/render/analytic_paths/batching.rs`, `crates/bevy_diegetic/src/render/analytic_paths/material.rs` — Path migration.
-- generic module — per-run `Member` template if additional extension points surface.
+- `crates/bevy_diegetic/src/render/batch_store.rs` — `Batch` + `BatchStore<K, B>`.
+- `crates/bevy_diegetic/src/render/fill_batch.rs` — SDF store newtype + `Batch` impl + route call-site change.
+- `crates/bevy_diegetic/src/render/image_batch.rs` — Image store newtype + `Batch` impl.
+- `crates/bevy_diegetic/src/render/panel_geometry.rs` — reference only (surface split untouched).
 
-**Constraints from prior phases:** `BatchFamily` trait + `BatchStore<F>` + the extension point set (`Member`/`Dirty`/`grow`/`build`/`world_bounds`, material-table opt-in, before-`Propagate` topology) from Phase 10; SDF+Image already migrated as the per-record template.
+**Constraints from prior phases:** `BatchEntry` + `take_empty_batches` from Phase 10; the generic's `K: Clone + Eq + Hash` bound is what the helper delegation requires. The four batch types keep inherent `is_empty` methods, so their `BatchEntry` impls use `Self::is_empty(self)` disambiguation — the `Batch` methods (`insert`/`update`/`remove`) collide with no inherent names on any of the four types, so no disambiguation is needed there. Image's transform carry-over (Phase 3) lives inside `ImageBatch::upsert_record` — the `Batch` impl's delegation preserves it; same for SDF (`SdfBatch::upsert_record`, `fill_batch.rs:635-655`: transform carry-over `:637-643`, equality compare + early return `:644-646`). Batch internals (GPU buffers, growth guard, `sort_records`, dirty flags) are untouched — only store bookkeeping goes generic. Phase 9's `batch_validation` clipping-border image card is the on-screen A/B reference.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` green + a Path before/after parity test.
+**Acceptance gate:** `cargo build` + `cargo nextest run -p bevy_diegetic` green; the five Phase-9 tests in `fill_batch.rs` (`clipping_border_routes_in_front_of_coplanar_image`, `normal_border_keeps_opaque_depth_push`, `transparent_clipped_border_keeps_authored_alpha_mode`, `non_clipped_fill_border_stays_one_opaque_record`, `clipped_filled_border_splits_fill_behind_and_border_in_front_of_image`) + the material-override split test stay green; image tests (incl. static-re-upsert-stays-clean) stay green; `DiegeticPerfStats::*_breakdown` outputs unchanged; `batch_validation` clipping-border image card renders correctly on screen; the `clippy` skill clean.
 
-### Phase 12 — Generic collapse pt.3: Shape (per-panel + atlas template)  · status: todo
+### Retrospective
+
+**What worked:** fast-path dispatch from the Work Order. The generic `BatchStore<K, B>` reproduces the SDF routing dance verbatim; SDF/Image newtypes keep their surfaces (Image's `#[cfg(test)]` accessors gated on the wrapper, generic ungated). Build + 630 tests + the `clippy` skill green.
+
+**What deviated from the plan:** codex ALSO migrated text's `PathBatchStore` (newtype over `BatchStore<PathBatchKey, PathBatch>` + `impl Batch for PathBatch` + a `PathBatchPayload` bundle; granular updaters re-expressed via `member_batch_mut`) and Shape's `PanelShapeBatchStore` (`batches` field is now `BatchStore<PathBatchKey, ShapeBatch>` + `impl Batch for ShapeBatch`) — Phase 13/14 work, outside the Files list. User chose to KEEP the early migrations; Phases 13/14 rescope to the remainder. The SDF route call site is unchanged — key-beside-member landed inside `SdfBatchStore::upsert_record(record)`, which extracts the key and calls `BatchStore::upsert(batch_key, record_key, record)`; surface-compatible with the spec. The two required divergence doc comments (text alpha-remap camera-prepass reason; per-family perf-push rationale) did not land in codex's pass; Claude wrote them directly on user instruction — the perf rationale lives on `batch_summary()` (`batch_key.rs`), the alpha reason on `batch_gpu_alpha_mode` (`panel_text/batching.rs`), plus codex's cross-family contrast on `sdf_batch_alpha_mode` and the `image_batch.rs` module doc.
+
+**Surprises:**
+- The three concrete `Batch` impls (SDF/Image/Shape) add `debug_assert_eq!(member, payload.record_key)` (payload key field varies) — member/payload agreement is asserted, not typed.
+- `PanelShapeBatchStore::remove_panel` gained `debug_assert_eq!(self.batches.key_for(record_key), Some(&key))`; it would fire only if one panel pass produced duplicate `PanelShapeRenderKey`s, which today's grouping cannot (one group per source primitive; the key embeds the panel entity). Guard against a future grouping edit, not a live risk.
+- The on-screen `batch_validation` clipping-border check passed (user screenshot, 2026-07-03): the green clipped borders on the "plain" and "green tint" image tiles draw on top of their images, images clip inside the rounded frames, all four tints render from one batch.
+
+**Implications for remaining phases:**
+- Phase 13 shrinks to renames + surface polish: `PathBatch` → `TextRunBatch`, `PathBatchPayload` → `TextRunPayload` (fields stay private — the payload is built and consumed inside the module), renaming the `PathBatchStore` store type to `TextRunBatchStore`, doc corrections; the store migration and `member_batch_mut` re-expression already shipped.
+- Phase 14 shrinks to: `panel_index` slimming to member-keys-only (`panel_members`), the per-member retain path in `upsert_panel` (today it still tears down via `remove_panel` then reinserts), the `ShapeBatchStore` rename candidate, and the retained-shapes stub; `impl Batch for ShapeBatch` + the `BatchStore` field already shipped.
+- Phase 12 is unaffected in scope, but all FOUR `Batch` implementers now exist (Phase 14's constraints text said three).
+
+### Phase 11 Review
+
+- **Store-rename mechanism (user-approved):** Phase 13's planned `TextRunBatchStore` type ALIAS is infeasible against the shipped newtype (inherent methods cannot live on an alias of `BatchStore<…>` outside `batch_store.rs`; an extension trait is churn) — Phase 13 rewritten to RENAME the newtype in place.
+- Phase 13 Work Order rewritten to the shrunk scope: renames (`TextRunBatch`/`TextRunPayload`/`TextRunBatchStore`) + doc corrections only; the migration section now reads as an "already shipped — do not rebuild" record. The mis-copied store doc ("Routes every text or panel-shape run") survived the Phase 11 replacement onto the new newtype (`analytic_paths/batching.rs:547-548`) — its rewrite is now an explicit Phase 13 step. Payload fields stay private (the plan sketch's `pub` fields dropped — built and consumed inside one module).
+- Phase 14 Work Order rewritten as the delta from the shipped code (`impl Batch for ShapeBatch` + the `BatchStore` field marked done); gained the two pair-key consumers the `panel_index` slimming must rework — `try_refresh_panel`'s key compare (`:408-416` → `key_for`) and dropping the `remove_panel` debug assert (`:436`); implementer count corrected to four.
+- Phase 12 Spec: `MemberFamily` sketch now declares `Key`/`Batch` associated types + an explicit `store_mut` hook (neither newtype has `Deref`/`Borrow`; the ungated `batches_mut()` accessors are the route — Image's `batches()`/`get_mut()` are `#[cfg(test)]`-gated); SDF needs TWO cfg(test) wrapper systems (bounds also carries the run-order param). Gate gained a precondition: run Phase 11's pending on-screen `batch_validation` check before dispatching Phase 12.
+- Line-ref sweep across Phases 12/13/14 and the Delegation Context (Phase 11's store rewrites shifted all five render files); stale done-state rows (`layout/render.rs`, `panel_text/reconcile.rs`, `batch_store.rs`) rewritten to current state.
+- Duplicate-member debug-assert finding (blind reviewer): traced as impossible on today's grouping (one group per source primitive; key embeds the panel entity) — no code change; the assert is dropped by Phase 14's slimming anyway.
+
+### Phase 12 — Shared transform/bounds system bodies (`MemberFamily`)  · status: done (uncommitted; on-screen batch_validation re-check pending)
 
 #### Work Order
 
-**Goal:** Migrate `PanelShapeBatchStore` (per-panel + atlas) onto `BatchStore<F>` — the third store template; all four families on the generic.
+**Goal:** The two token-identical post-`Propagate` system bodies exist once, parameterized over the store resource + marker component.
 
 **Spec:**
-Shape membership is per-panel (`upsert_panel`). The Shape-only atlas (`PanelShapeBatchStore.atlas`) plus Shape-only per-record `outline` are a Shape-specific store extension, not a shared trait member — model them as an `F`-specific extension, not shared machinery. Shape folds one transform at build (before `Propagate`, no separate transform system). Shape has two GPU grow policies + a shared atlas upload — exercise the `grow` hook accordingly. Migrate behind a before/after parity test. After this phase, per-family code is reduced to key/record definitions + the handful of differing hooks.
+In `render/batch_store.rs`, a mini-trait supplying exactly what the two shared bodies need — the store resource, the batch marker component, and the per-member world-transform write:
+```rust
+pub(crate) trait MemberFamily: 'static {
+    type Key: Clone + Eq + Hash;
+    type Batch: Batch;
+    type Store: Resource;
+    type Marker: Component;
+    fn store_mut(store: &mut Self::Store) -> &mut BatchStore<Self::Key, Self::Batch>;
+    // + the member world-transform update hook the transform body calls
+}
+fn update_batch_world_transforms<F: MemberFamily>(/* today's identical body */)
+fn update_batch_bounds<F: MemberFamily>(/* today's identical body */)
+```
+Store access must be an explicit hook like `store_mut` above: neither newtype implements `Deref`/`Borrow` to the generic. Both wrappers already expose an ungated `batches_mut()` (`fill_batch.rs:736`, `image_batch.rs:389`) — the only store access the two bodies need. Do NOT route through `ImageBatchStore::batches()`/`get_mut()` — those are `#[cfg(test)]`-gated (`image_batch.rs:383/:396`).
+The two shared bodies reach per-batch state that Phase 11's `Batch` trait deliberately does NOT expose (payload-opaque by design): the `batch.records` iteration, `record.record_key.panel`, the per-record `update_world_transform(&GlobalTransform)` method (both record types already have it under that name — a convergence fact, no rename needed), the `record_upload`/`bounds_update` dirty flags, `batch.entity`, and `batch.world_bounds()`. `MemberFamily` (or a companion per-batch trait) must supply these accessors/hooks — do not try to route them through `Batch`.
+
+Implemented by SDF and Image only (all four batch types implement `Batch` since Phase 11, but only SDF and Image get `MemberFamily`). Text does NOT implement (its post-`Propagate` transform system `write_batch_run_transforms` reaches the store through `GlyphCache`, not a `Res<Store>` — same pattern, different access path; it stays concrete). Shape does NOT implement (folds transform at build: capture `panel_shapes/batching.rs:761`, application `:1026`; no post-`Propagate` system). Note the corrected topology: post-`Propagate` per-member transform is the MAJORITY pattern (SDF, Image, text); build-time transform is the Shape exception.
+
+SDF's `#[cfg(test)]` run-order instrumentation stays in thin SDF wrapper systems that call the generic bodies — TWO wrappers, not one: both the transform system (`fill_batch.rs:1286`) and the bounds system (`:1541`) carry the run-order param. Both plugins register the generic instantiations with their existing ordering edges byte-identical — zero scheduling-edge changes (the Phase-6 `SetsHaveOrderButIntersect` class of bug lives in those edges; do not touch them).
+
+Extend the `batch_store.rs` module-doc taxonomy with the shared transform/bounds participation list now that the bodies exist: SDF + Image implement `MemberFamily`; text's post-`Propagate` transform system reaches the store through `GlyphCache` and stays concrete; Shape folds transform at build. Keep the doc free of phase numbers — state participation as a current fact.
 
 **Files:**
-- `crates/bevy_diegetic/src/render/panel_shapes/batching.rs` — Shape migration.
-- generic module — per-panel `Member` + atlas-extension point.
+- `crates/bevy_diegetic/src/render/batch_store.rs` — `MemberFamily` + the two generic bodies.
+- `crates/bevy_diegetic/src/render/fill_batch.rs`, `crates/bevy_diegetic/src/render/image_batch.rs` — impls, thin wrappers, registration swap.
 
-**Constraints from prior phases:** trait + generic store from Phase 10; Path per-run template from Phase 11; atlas is a Shape-only extension (not the mis-named "Path/Shape" pair the early sketch assumed). Note: `render/mod.rs` carries pre-existing `#[expect(unused_imports)]` reasons on `PrimitiveOrdinal`/`ShapeOrdinal` citing "Phase 2"/"Phase 9" — those belong to a separate draw-order effort and predate this plan's numbering (Shape is Phase 12 here); ignore them, they are unrelated to this migration.
+**Constraints from prior phases:** `BatchStore<K, B>` + newtype store Resources from Phase 11. `update_sdf_batch_world_transforms` marks BOTH dirty flags (`fill_batch.rs:1285-1313`, flag writes `:1308-1311`); the image twin (`image_batch.rs:593`) does the same — the generic body must preserve the both-flags contract. Bounds twins: `update_sdf_batch_bounds` (`fill_batch.rs:1540`), image at `image_batch.rs:653`. The two transform bodies and two bounds bodies are token-identical modulo store/marker types and SDF's `#[cfg(test)]` run-order params (verified post-Phase-11). Phases 13/14 also edit `batch_store.rs` (module-doc rename sweep / taxonomy wording) — whichever lands second rebases trivially.
 
-**Acceptance gate:** `cargo nextest run -p bevy_diegetic` green + a Shape before/after parity test; all four families (`SdfBatchStore`, image, `PathBatchStore`, `PanelShapeBatchStore`) run on `BatchStore<F>`; the `clippy` skill clean.
+**Acceptance gate:** Precondition satisfied 2026-07-03: Phase 11's on-screen `batch_validation` clipping-border check passed before this phase (it exercises the same transform/bounds systems this phase rewires). Gate: `cargo build` + `cargo nextest run -p bevy_diegetic` green; SDF driver-run-order test passes; `FillBatchPlugin`/`ImageBatchPlugin` scheduling-edge diffs are zero; the `clippy` skill clean; re-check the `batch_validation` image card on screen after the system-body swap.
+
+### Retrospective
+
+**What worked:** fast-path dispatch; the two generic bodies (`update_batch_world_transforms`/`update_batch_bounds`, `batch_store.rs:133/:157`) reproduce the removed SDF/Image twins token-for-token, including the per-batch aggregate mark of BOTH dirty flags and the bounds-clear-at-end. SDF keeps two `#[cfg(test)]`-instrumented wrappers with registration untouched; the image plugin registers the generic instantiations directly with structurally identical ordering edges. Blind review: APPROVE, zero findings. Build + 630 tests re-verified independently; the `clippy` skill green (lint mend applied 4 import fixes).
+
+**What deviated from the plan:** codex split the accessor surface into two companion traits instead of putting everything on `MemberFamily`: `MemberRecord` (`panel()`/`transform()`/`update_world_transform()`, on the two record types) and `MemberBatch: Batch` (`records_mut`/`record_upload_mut`/`bounds_update`/`bounds_update_mut`/`batch_entity`/`world_bounds`, on the two batch types) — the spec explicitly allowed "or a companion per-batch trait". `MemberFamily::Store` carries `Resource<Mutability = Mutable>` (required by `ResMut<F::Store>` in the generic signatures).
+
+**Surprises:**
+- `MemberBatch::batch_entity()` duplicates `BatchEntry::entity()` (`MemberBatch: Batch: BatchEntry`); the supertrait method would have resolved fine in the generic bodies. Redundant surface, nit — `batch_store.rs` is edited again by Phases 13/14 if worth collapsing.
+- The module-doc participation sentence says `MemberFamily` "is implemented only for `SdfBatchStore` and `ImageBatchStore`" — it is implemented for the private family marker types (`SdfMemberFamily`, `ImageMemberFamily`) whose `Store` associated types are those resources. Loose wording, nit.
+- The `### Phase 12` heading line itself had been lost in an earlier plan edit (the Work Order sat directly under the Phase 11 Review block); restored before dispatch.
+
+**Implications for remaining phases:**
+- Phase 13's `batch_store.rs` module-doc rename sweep now has more targets: the taxonomy extension names `PathBatchStore` and `PathBatch` (`batch_store.rs:26-28`) in addition to the previously recorded `:17-18`/`:28` mentions.
+- Phase 14's Shape non-participation is now stated in the module doc as a current fact ("Panel Shape batches fold the panel transform while `PanelShapeBatchStore` builds `PathBatch` records") — if Phase 14's rename lands (`ShapeBatchStore`) that sentence needs the sweep too.
+
+### Phase 12 Review
+
+- Neither remaining phase is redundant; all Phase 13/14 file/line refs verified exact against the working tree (Phase 12 touched only `batch_store.rs`/`fill_batch.rs`/`image_batch.rs`, which they cite by line only in the module doc).
+- Phase 13's sweep step expanded: `batch_store.rs` targets are now `:17-18`/`:22`/`:26`/`:28`; the `:28` sentence must be REWRITTEN, not renamed (it misnames `PathBatch` — Shape builds `ShapeBatchRecord`s wrapping `PathRenderRecord` runs — so a mechanical rename would produce an actively false claim); the `:22` implementer-wording fix and the `MemberBatch::batch_entity()` → supertrait `entity()` collapse were added to Phase 13 (both nits from this phase's retrospective, resolved as fix-in-13 rather than leave-as-is).
+- Phase 14: `PanelShapeBatchStore` module-doc refs enumerated (`:13`/`:19`/`:28`) for the rename candidate; Constraints gained "Phase 13 rewrote the `:28` sentence — sweep whatever it now says".
+- Delegation Context refreshed: `batch_store.rs` row restated as shipped (traits + generic bodies with line refs); `fill_batch.rs` row's eleven line refs corrected for the Phase 12 shift and its transform-system description changed to the thin-wrapper fact; new `image_batch.rs` row added (the module had no row); `collect_panel_image_records` cross-ref corrected to `:547`.
+- Phase 12's own gate keeps one open item: the on-screen `batch_validation` image-card re-check (user-side; does not block Phase 13/14 dispatch — neither touches the transform/bounds systems or scheduling edges — but must be resolved before `/plan:to_as_built`).
+
+### Phase 13 — Text runs migrate onto `BatchStore`; content-vs-technique renames  · status: done (uncommitted)
+
+#### Work Order
+
+**Goal:** The text-only `Path*` names become text names (`TextRunBatch`, `TextRunBatchStore`, `TextRunPayload`) and the store docs are corrected; genuinely shared technique-layer `Path*` types keep their names. (The store migration itself shipped early with Phase 11.)
+
+**Spec:**
+**Corrected family facts** (the earlier plan mis-scoped this family as "Path" in `analytic_paths/`): `PathBatchStore` (`analytic_paths/batching.rs:549`) is the TEXT glyph-run store — a plain field of the `GlyphCache` resource (`glyph_cache.rs:71`, accessors `batch_store()`/`batch_store_mut()` `:210/:213`), NOT a `Resource`. Its only non-test drivers are in `panel_text/batching.rs` (`upsert_run` `:488`, `update_run_material` `:393`, `update_run_record` `:537`, `write_batch_run_transforms` `:691`, `take_empty_batches` `:651`), registered in `panel_text/mod.rs:118-142`; `AnalyticPathPlugin` registers zero batch systems. Text runs a post-`Propagate` transform system like SDF/Image (`write_batch_run_transforms.after(TransformSystems::Propagate)`, `panel_text/mod.rs:130`) — build writes a snapshot, the system rewrites it. The glyph atlas lives in `GlyphCache` (`PathAtlasHandles` `:73`, `commit_glyph_atlas` `:152`), keyed by glyph so identical glyphs share one outline.
+
+**Already shipped (Phase 11) — do not rebuild:** `impl Batch for PathBatch` (`:514`: `MemberKey = RunStorageKey`, `Payload = PathBatchPayload`; `insert` → `push_run`, `update` → `update_run`, `remove` → `remove_run`), the `PathBatchPayload` bundle (`:541`, fields private — correct: built only in `upsert_run`, consumed only by the `Batch` impl in the same module; keep them private through the rename), and the store newtype `PathBatchStore(BatchStore<PathBatchKey, PathBatch>)` (`:549`) keeping today's call-site surface: `upsert_run` (`:563`) builds the payload and calls `self.0.upsert`; `remove_run` (`:584`); the granular updaters (`update_run_transform`/`update_run_material`/`update_run_record`, `:588-608`) go through `member_batch_mut(run)`; `take_empty_batches` (`:627`) delegates to the generic's method. Do NOT extract the store from `GlyphCache` (~23 call sites through ~10 helper signatures of churn, no correctness gain).
+
+**This phase's delta — renames + docs** (resolved: RENAME the shipped newtype in place; no type alias — inherent methods cannot live on an alias of `BatchStore<…>` outside `batch_store.rs`, and an extension trait is churn):
+- `PathBatch` → `TextRunBatch` (its own doc at `:230-233` is accurate — keep).
+- `PathBatchPayload` → `TextRunPayload` (fields stay private).
+- `PathBatchStore` → `TextRunBatchStore` (newtype rename).
+- Rewrite the store's doc comment at `:547-548`: the claim "Routes every text or panel-shape run to its analytic path batch" is wrong — shapes have their own `ShapeBatch`; this store routes text runs only.
+- Sweep the rename through the `batch_store.rs` module doc: "text path batches" (`:17-18`), `PathBatchStore` (`:26`), `PathBatch` (`:28`). TRAP at `:28`: the sentence "Panel Shape batches fold the panel transform while `PanelShapeBatchStore` builds `PathBatch` records" already misnames the type — Shape builds `ShapeBatchRecord`s (`panel_shapes/batching.rs:151`) wrapping technique-layer `PathRenderRecord` runs (`:156`); `PathBatch` is the text batch, so a mechanical rename would produce "builds `TextRunBatch` records", actively false. REWRITE that clause (e.g. "builds its `PathRenderRecord` runs") instead of renaming it.
+- While in that module doc, fix the implementer wording at `:22`: `MemberFamily` "is implemented only for `SdfBatchStore` and `ImageBatchStore`" — the implementers are the private marker types `SdfMemberFamily` (`fill_batch.rs:778`) and `ImageMemberFamily` (`image_batch.rs:434`) whose `Store` associated types are those resources.
+- Collapse `MemberBatch::batch_entity()` into the supertrait method: `MemberBatch: Batch: BatchEntry` already supplies `entity()`, so delete `batch_entity` from the trait (`batch_store.rs:110-111`), switch `update_batch_bounds` (`:165`) to call `batch.entity()`, and drop the two impl lines (`fill_batch.rs` `MemberBatch for SdfBatch` block at `:726`, `image_batch.rs` `MemberBatch for ImageBatch` block at `:379`). Behavior-neutral, ~10 lines.
+- Technique-layer types KEEP their `Path*` names — they are genuinely shared by text and Shape: `PathBatchKey`, `PathQuadRecord`, `PathRenderRecord`, `PathAtlas`, `PathExtendedMaterial`. Types stay in `analytic_paths/batching.rs` this phase (rename in place; no file moves).
+
+The three dirty types (`MaterialDirty`/`PlacementDirty`/`GeometryDirty`, `analytic_paths/batching.rs:109-190`) are unchanged — they exist because this family uploads two GPU buffers with independent lifecycles (`PathQuadRecord` at `capacity` + `PathRenderRecord` at `run_capacity`, bindings 104/105, `analytic_paths/material.rs:107/:111`); the store does not model buffers or dirtiness.
+
+**Files:**
+- `crates/bevy_diegetic/src/render/analytic_paths/batching.rs` — the three renames + the store-doc rewrite.
+- `crates/bevy_diegetic/src/text/slug/runtime/glyph_cache.rs` — type names in the field/accessors.
+- `crates/bevy_diegetic/src/render/panel_text/batching.rs`, `crates/bevy_diegetic/src/render/panel_text/mod.rs` — call-site type-name adjustments (minimal).
+- `crates/bevy_diegetic/src/render/batch_store.rs` — module-doc rename sweep (`:17-18`, `:22`, `:26`, `:28`) + the `batch_entity` trait-method collapse.
+- `crates/bevy_diegetic/src/render/fill_batch.rs`, `crates/bevy_diegetic/src/render/image_batch.rs` — drop the `batch_entity` impl lines only.
+
+**Constraints from prior phases:** `Batch`/`BatchStore` from Phase 11; the text migration and `member_batch_mut` re-expression already shipped with Phase 11 (see its retrospective) — this phase is renames and doc corrections only, behavior-neutral. Text does NOT implement Phase 12's `MemberFamily` (store not a `Resource`; its transform system stays concrete in `panel_text`). PD-1: text's unconditional `Opaque -> Mask(0.0)` remap (`batch_gpu_alpha_mode`, `panel_text/batching.rs:1173`; its doc now records the camera depth/normal-prepass reason) is per-family by the Phase 11 resolution — untouched here. Phase 12 shipped: the `batch_store.rs` module doc now carries the transform/bounds participation taxonomy (`:22-28`) — the sweep targets above are its current text.
+
+**Acceptance gate:** `cargo build` + `cargo nextest run -p bevy_diegetic` green (incl. `commit_payloads_keep_a_constant_length_between_growths`, `panel_text/batching.rs:2224`, and the `analytic_paths/batching.rs` store tests); rename-only, no behavior change; the `clippy` skill clean.
+
+### Retrospective
+
+**What worked:** Fast-path dispatch from the Work Order (no research); all three renames + the `:28` REWRITE trap + the `batch_entity` collapse landed exactly as specced; build + 630 tests + clippy skill verified green twice (codex, then independently).
+**What deviated from the plan:** The Files list omitted the two re-export modules the rename mechanically forces (`analytic_paths/mod.rs`, `render/mod.rs:39-50`) — codex touched them, correctly. Codex also swept stale live references beyond the list: `batching-diagram.md`, `as-built/material-table-batching.md`, `as-built/slug.md`, `panel-shape-api.md`, and one string label in `examples/diegetic_text_stress.rs:1673`.
+**Surprises:** The blind reviewer caught that codex's diagram sweep fixed section 2 of `batching-diagram.md` but missed the section-1 top-level mermaid (still one merged text+shape node → `PathBatchResources`); fixed directly with user approval — section 1 now splits `TextRunBatchStore`/`PathBatchResources` from `PanelShapeBatchStore`/`ShapeBatchGpu`. The reviewer also flagged this plan's own Delegation Context still naming `PathBatchStore`/`PathBatch` — handled below as forward-propagation, not a code fix.
+**Implications for remaining phases:** Delegation Context rows for `analytic_paths/batching.rs`, `glyph_cache.rs`, `batch_store.rs`, and `panel_text/batching.rs` must carry the new type names (applied in this review). Phase 14's `batch_store.rs:28` sweep note is now anchored to the rewritten sentence "`PanelShapeBatchStore` applies the panel transform while building its `PathRenderRecord` runs."
+
+### Phase 13 Review
+
+- Phase 14 scope confirmed live in full — nothing Phase 13 shipped satisfies or overlaps it; no rescope. All `panel_shapes/batching.rs` line refs in its Work Order verified exact (Phase 13 didn't touch that file), as were the `batch_store.rs` `:13`/`:19`/`:28` rename targets.
+- Phase 14 constraint firmed from prediction to landed fact: the `batch_store.rs:28-29` sentence's exact current text is now quoted, making the rename sweep a pure type-name substitution.
+- Phase 14 Files grew the `ShapeBatchStore` rename surface: `panel_shapes/mod.rs` re-exports (`:12`/`:25`) plus the three docs Phase 13 just corrected (`batching-diagram.md`, `panel-shape-api.md`, `as-built/material-table-batching.md`) so the rename doesn't immediately re-stale them.
+- Phase 14 Spec gained a third `panel_index` consumer (the `recreated_guide_panels_leave_no_stale_records` test reads `panel_index.keys()` at `:2350` — mechanical rename) and an explicit resolution that a batch-key-only member move marks `atlas_dirty` (preserves today's teardown-path behavior).
+- Delegation Context refreshed: `analytic_paths/batching.rs` row carries `TextRunBatchStore`/`TextRunBatch` (renamed in Phase 13), `glyph_cache.rs` row names the field type, `batch_store.rs` row re-anchored (traits `:83`/`:95`/`:116`, bodies `:131`/`:155`, `batch_entity` deletion noted), `fill_batch.rs`/`image_batch.rs` rows shifted −2 past the dropped impl lines. `panel_text/batching.rs` and `glyph_cache.rs` refs verified current.
+- Still open from Phase 12: the on-screen `batch_validation` re-check (blocks `/plan:to_as_built` only; Phase 14's own gate re-exercises shape rendering on screen).
+
+### Phase 14 — Shape migrates to member routing; retained-mode groundwork  · status: done (uncommitted; on-screen batch_validation check pending)
+
+#### Work Order
+
+**Goal:** Shape members route through the generic store behind the existing per-panel delivery API, behavior-neutral; the constraints future retained shape updates build on are recorded in a follow-on design stub.
+
+**Spec:**
+Shapes are element things delivered per panel: the batched member is a merged silhouette group, grouped per element + material (`group_line_primitives` via `PanelShapeMergeKey`, `panel_shapes/batching.rs:663`; the group key is `PanelShapeRenderKey { panel, source }`, `primitive.rs:9`). The per-panel `upsert_panel` API exists because shapes are re-derived wholesale from the panel's resolved command stream (`collect_panel_records` walks `result.commands`) — there is no retained per-member update channel. This phase keeps that delivery model and finishes the bookkeeping swap Phase 11 started.
+
+**Already shipped (Phase 11):** `impl Batch for ShapeBatch` (`:334`; `insert` → `push_record`, `update` → `refresh_record`, `remove` → `remove_record`) and the store field — `PanelShapeBatchStore` (`:371`) already holds `batches: BatchStore<PathBatchKey, ShapeBatch>` (`:372`) routed via `upsert`/`remove`. Do not rebuild these.
+
+**This phase's delta** — the target struct (note: today's field is named `batches`, the sketch renames it `store`):
+```rust
+#[derive(Resource, Default)]
+pub(super) struct PanelShapeBatchStore {
+    store:         BatchStore<PathBatchKey, ShapeBatch>,
+    /// Panel-scoped retain bookkeeping only (batch keys live in the store's member index).
+    panel_members: HashMap<Entity, Vec<PanelShapeRenderKey>>,
+    atlas:         PathAtlas<PanelShapeRenderKey>,
+    atlas_dirty:   Dirty,
+}
+```
+- `upsert_panel(panel, records)` stays the public surface (`batching.rs:379`): the `try_refresh_panel` fast path survives (same member set → in-place refresh; `atlas_dirty` only on a geometry-dirty transition, `batching.rs:397`); otherwise per-member `store.upsert` + panel-scoped retain (remove members in `panel_members[panel]` absent from the incoming set), replacing today's `remove_panel`-then-reinsert teardown (`:383`). `remove_panel` removes that panel's members. `atlas_dirty` marking is preserved at today's trigger points: any membership insert/remove, refresh geometry transitions, `remove_panel`; a batch-key-only member move counts as remove+insert and marks `atlas_dirty` (conservative — today's teardown path marks it unconditionally, so this preserves observable behavior). Today's `panel_index` stores `(PathBatchKey, PanelShapeRenderKey)` pairs (`:373`) — the batch-key half moves into the generic member index; `panel_members` keeps only the member keys.
+- Two shipped consumers of the pair's key half must be reworked with the slimming: (a) `try_refresh_panel` compares the stored batch key against the incoming key (`:408-416`) — read the old key via `self.batches.key_for(record_key)` instead; (b) `remove_panel`'s `debug_assert_eq!(self.batches.key_for(record_key), Some(&key))` (`:436`) consumes the pair's key half — drop it (the generic `remove` already no-ops on unrouted members). A third consumer touches only the member half: the test `recreated_guide_panels_leave_no_stale_records` (`:2299`) reads `store.panel_index.keys()` directly (`:2350`) — a keys-only read that renames mechanically to `panel_members`.
+- Behavior note (strict improvement, must stay observably equivalent): a batch-key change on one member now moves only that member instead of tearing down and reinserting the whole panel set — final store state must be identical; the membership tests (`batching.rs:2475+`: `two_panels_with_same_key_share_one_line_batch` :2475, `removing_a_panel_removes_only_its_line_records` :2495) are the gate.
+- `rebuild_path_atlas_if_dirty` / `commit_path_atlas` unchanged.
+- Rename candidate (content vs technique, mirrors Phase 13): `PanelShapeBatchStore` → `ShapeBatchStore`.
+
+**Retained-mode constraints (binding on this design; recorded here and in the stub so the follow-on never reworks this phase):**
+1. Future per-member update channels (e.g. rotate a clock's second hand by writing one member's transform — no path rebuild, no atlas touch) use `member_batch_mut`; no new store surface is needed.
+2. The atlas stays wrapper-local so a member-keyed → content-keyed (outline hash) swap is a local change: identical outlines share one entry, and a transform-only member change touches the atlas zero times. Today's atlas rebuild is wholesale and marks EVERY shape batch geometry-dirty (`batching.rs:441-466`) — the content-keyed swap is what fixes that, in the follow-on.
+3. The incremental authoring channel (change one shape without full panel relayout) is out of scope here — create `docs/bevy_diegetic/retained-shapes.md` as a stub stating the goal (retained per-shape updates: transform/material/record channels like text runs), these three constraints, and the clock-face motivating case. Scanner note (from Phase 10): the standalone word in this filename is on the repo forbidden-words list (code identifiers are exempt) — Rust doc comments must not spell the filename in prose; reference it as a code span or by role ("the retained-mode design stub"). The markdown stub itself is a docs file, outside the Rust style scan.
+
+**Files:**
+- `crates/bevy_diegetic/src/render/panel_shapes/batching.rs` — `panel_index` → `panel_members` slimming, per-member retain in `upsert_panel`, rename candidate.
+- `crates/bevy_diegetic/src/render/batch_store.rs` — module-doc taxonomy wording only if the Shape line changes (the fourth `Batch` implementer already shipped in Phase 11); if the `ShapeBatchStore` rename lands, `PanelShapeBatchStore` is named at `:13`, `:19`, and `:28`.
+- `crates/bevy_diegetic/src/render/panel_shapes/mod.rs` — re-exports name `PanelShapeBatchStore` at `:12`/`:25` (compiler-forced if the rename lands).
+- Docs sweep if the rename lands (Phase 13 just corrected these — don't re-stale them): `docs/bevy_diegetic/batching-diagram.md` (`:54`, `:101`, `:114`), `docs/bevy_diegetic/panel-shape-api.md` (`:833`), `docs/bevy_diegetic/as-built/material-table-batching.md` (`:15`, `:17`). The `investigation/material-slot-lifetime-and-ownership-evaluation.md:33` mention is historical — leave it.
+- `docs/bevy_diegetic/retained-shapes.md` (new stub).
+
+**Constraints from prior phases:** `Batch`/`BatchStore` from Phase 11 — ALL FOUR implementers live (SDF, Image, text, Shape; Shape's `impl Batch` at `panel_shapes/batching.rs:334` shipped with Phase 11). `ShapeBatch` member methods behind the impl: `push_record` `:218`, `remove_record` `:226`, `refresh_record` `:240`. Shape does NOT implement Phase 12's `MemberFamily` (folds transform at build: capture `:761`, application `:1026`; transform updates flow through the wholesale re-derive + refresh path). Shape's route/reconcile/atlas system fusion (`reconcile_panel_line_batches`, `:686`; router gate `:833`) is untouched — only the panel-scoped bookkeeping changes. Note: `render/mod.rs` carries pre-existing `#[expect(unused_imports)]` reasons on `PrimitiveOrdinal`/`ShapeOrdinal` (`:73-82`) citing "Phase 2"/"Phase 9" — those belong to a separate draw-order effort and predate this plan's numbering; ignore them. Phase 13 rewrote the `batch_store.rs:28-29` sentence; it now reads "`PanelShapeBatchStore` applies the panel transform while building its `PathRenderRecord` runs" — the rename sweep there is a pure type-name substitution.
+
+**Acceptance gate:** `cargo build` + `cargo nextest run -p bevy_diegetic` green (incl. the `upsert_panel` membership/refresh tests at `panel_shapes/batching.rs:2475+`); `batch_validation` shape rendering unchanged on screen; the retained-shapes stub exists and names the three constraints; the `clippy` skill clean.
+
+#### Retrospective
+
+**What worked:** Fast-path dispatch from the Work Order. The slimming landed exactly as specced: `ShapeBatchStore` (renamed, see below) now holds `store: BatchStore<PathBatchKey, ShapeBatch>` (`:372`) + `panel_members: HashMap<Entity, Vec<PanelShapeRenderKey>>` (`:374`); `upsert_panel` (`:380`) does per-member stale-removal + `store.upsert` instead of remove-panel-then-reinsert; `try_refresh_panel` (`:433`) reads the old key via `store.key_for`; `remove_panel` (`:467`) delegates to `store.remove` with the `debug_assert_eq!` dropped; `take_empty_batches`/accessors delegate (`:528+`). `atlas_dirty` marked at every specced trigger (stale removal, new insert / key move via `key_for` mismatch, geometry-dirty transition, `remove_panel`). Codex added an unrequested but on-point regression test `batch_key_change_preserves_unmoved_line_record` (`:2548`) proving an unmoved record survives a sibling's key move in place. The retained-mode stub (`docs/bevy_diegetic/retained-shapes.md`) names the goal, all three constraints, and the clock-face case. Blind review: APPROVE, zero findings. Gate re-run independently: 631 passed / 3 skipped, clippy clean.
+
+**What deviated from the plan:** Codex read "Rename candidate" as optional and skipped `PanelShapeBatchStore` → `ShapeBatchStore` plus its docs sweep. Resolved post-review: the user applied the type rename via editor global rename; Claude swept the prose mentions the rename couldn't reach — `batch_store.rs` module doc (`:13`/`:19`/`:28`), `batching-diagram.md` (`:54`/`:101`/`:114`), `panel-shape-api.md:833` (reworded to "the shape batch store (now `ShapeBatchStore`)" since that line records the earlier Line→Shape rename history), `as-built/material-table-batching.md` (`:15`/`:17`). Gate re-run green after the rename. The `investigation/material-slot-lifetime-and-ownership-evaluation.md:33` mention left historical per the Work Order.
+
+**Surprises:** none — the generic `BatchStore::upsert` move semantics (remove from old batch, insert into new, member index updated) covered the batch-key move case with no store changes.
+
+**Implications for remaining phases:** none — final phase. Two on-screen checks remain before `/plan:to_as_built`: the Phase 12 `batch_validation` re-check and this phase's "shape rendering unchanged on screen".
+
+### Phase 14 Review
+
+- All architect findings minor; no user decisions. Confirmations: `batch_store.rs` Delegation Context row exact against the shipped tree; the rename sweep left zero stale mentions outside the sanctioned historical spots; both open acceptance items recorded; no scope gaps — the retained-mode follow-on is properly deferred to `docs/bevy_diegetic/retained-shapes.md`.
+- Delegation Context `panel_shapes/batching.rs` row rewritten for the shipped shape: `ShapeBatchStore` :371, `store` :372, `panel_members` :374, drivers `upsert_panel` :380 / `try_refresh_panel` :433 / `remove_panel` :467, accessors :528+, router gate :865, atlas :375-376.
+- Invariants router bullet line ref corrected `panel_shapes:825` → `panel_shapes/batching.rs:865` (text unchanged; the :825 in Phase 6's done Work Order is archive, left as-is).
+- Doc header Status line updated to IMPLEMENTATION COMPLETE with the two pending on-screen checks named as the `/plan:to_as_built` gate.

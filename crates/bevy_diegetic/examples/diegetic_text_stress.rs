@@ -1670,7 +1670,7 @@ fn batch_stats_rows(values: &BatchStatsValues) -> Vec<StatsPanelRow> {
         StatsPanelRow::new("material capacity", values.material_capacity.to_string())
             .detail("shared material-table row capacity"),
         StatsPanelRow::new("text batches", values.text_batches.to_string()).details([
-            "PathBatchStore: compatible text/shapes share draws".to_string(),
+            "TextRunBatchStore: compatible text runs share draws".to_string(),
             "labels and panel text route together by key".to_string(),
         ]),
         StatsPanelRow::new("text runs", values.text_runs.to_string())

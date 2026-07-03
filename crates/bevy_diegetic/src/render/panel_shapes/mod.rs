@@ -9,7 +9,7 @@ use bevy::camera::visibility::VisibilitySystems;
 use bevy::prelude::*;
 
 use self::batching::DiegeticPanelShapeBatch;
-use self::batching::PanelShapeBatchStore;
+use self::batching::ShapeBatchStore;
 use self::batching::commit_panel_line_batch_buffers;
 use self::batching::reconcile_panel_line_batches;
 use self::batching::update_panel_line_batch_bounds;
@@ -22,7 +22,7 @@ pub(super) struct PanelShapePlugin;
 
 impl Plugin for PanelShapePlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<PanelShapeBatchStore>().add_systems(
+        app.init_resource::<ShapeBatchStore>().add_systems(
             PostUpdate,
             (
                 reconcile_panel_line_batches,

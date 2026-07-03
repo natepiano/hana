@@ -2,9 +2,10 @@
 //!
 //! Image batches always render through `AlphaMode::Blend`: authored images have
 //! no alpha-mode source, so `ImageBatchKey` omits alpha mode and orders records
-//! with per-record `DrawCommandDepth::oit_depth_offset()`.
+//! with per-record `DrawCommandDepth::oit_depth_offset()`. SDF and text batches
+//! have family-specific alpha remaps for prepass/shadow pipeline layouts; image
+//! batches need no remap because every image draw is already transparent.
 
-use std::collections::HashMap;
 use std::collections::HashSet;
 
 use bevy::asset::RenderAssetUsages;
@@ -14,7 +15,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::image::Image;
 use bevy::light::NotShadowCaster;
-use bevy::math::Vec3A;
 use bevy::mesh::Indices;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
@@ -30,6 +30,13 @@ use super::BatchRenderLayers;
 use super::CommandIndex;
 use super::Dirty;
 use super::VisualShadow;
+use super::batch_store;
+use super::batch_store::Batch;
+use super::batch_store::BatchEntry;
+use super::batch_store::BatchStore;
+use super::batch_store::MemberBatch;
+use super::batch_store::MemberFamily;
+use super::batch_store::MemberRecord;
 use super::clip;
 use super::constants::TEXT_Z_OFFSET;
 use super::draw_order::DrawCommandDepth;
@@ -53,8 +60,8 @@ use crate::panel::PanelPrecomposeCache;
 
 /// Per-command image record identity.
 ///
-/// `ImageBatchStore::record_index` uses this key as the membership index for
-/// moving records between `ImageBatchKey` buckets.
+/// `ImageBatchStore` uses this key as the membership index for moving records
+/// between `ImageBatchKey` buckets.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct ImageRecordKey {
     /// Panel entity whose command stream produced this image record.
@@ -154,6 +161,16 @@ impl ResolvedImageRecord {
 
     fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
         self.transform = panel_transform.to_matrix() * self.local_transform.to_matrix();
+    }
+}
+
+impl MemberRecord for ResolvedImageRecord {
+    fn panel(&self) -> Entity { self.record_key.panel }
+
+    fn transform(&self) -> Mat4 { self.transform }
+
+    fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
+        Self::update_world_transform(self, panel_transform);
     }
 }
 
@@ -336,98 +353,92 @@ impl ImageBatch {
     }
 }
 
+impl BatchEntry for ImageBatch {
+    fn is_empty(&self) -> bool { Self::is_empty(self) }
+
+    fn entity(&self) -> Option<Entity> { self.entity }
+}
+
+impl Batch for ImageBatch {
+    type MemberKey = ImageRecordKey;
+    type Payload = ResolvedImageRecord;
+
+    fn insert(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.record_key);
+        self.upsert_record(payload);
+    }
+
+    fn update(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.record_key);
+        self.upsert_record(payload);
+    }
+
+    fn remove(&mut self, member: Self::MemberKey) { self.remove_record(member); }
+}
+
+impl MemberBatch for ImageBatch {
+    type Record = ResolvedImageRecord;
+
+    fn records_mut(&mut self) -> &mut [Self::Record] { &mut self.records }
+
+    fn record_upload_mut(&mut self) -> &mut Dirty { &mut self.record_upload }
+
+    fn bounds_update(&self) -> Dirty { self.bounds_update }
+
+    fn bounds_update_mut(&mut self) -> &mut Dirty { &mut self.bounds_update }
+
+    fn world_bounds(&self) -> Option<(Vec3, Vec3)> { Self::world_bounds(self) }
+}
+
 /// Store that maps image records to `ImageBatchKey` batches.
 #[derive(Debug, Default, Resource)]
-pub(crate) struct ImageBatchStore {
-    /// Batch entries keyed by compatibility and ordering fields.
-    batches:      HashMap<ImageBatchKey, ImageBatch>,
-    /// Current batch key for each routed image record.
-    record_index: HashMap<ImageRecordKey, ImageBatchKey>,
-}
+pub(crate) struct ImageBatchStore(BatchStore<ImageBatchKey, ImageBatch>);
 
 impl ImageBatchStore {
     /// Inserts or moves one retained image record.
     pub(crate) fn upsert_record(&mut self, batch_key: ImageBatchKey, record: ResolvedImageRecord) {
         let record_key = record.record_key;
-        if let Some(current) = self.record_index.get(&record_key) {
-            if *current == batch_key {
-                if let Some(batch) = self.batches.get_mut(&batch_key) {
-                    batch.upsert_record(record);
-                }
-                return;
-            }
-            let previous = current.clone();
-            if let Some(batch) = self.batches.get_mut(&previous) {
-                batch.remove_record(record_key);
-            }
-            self.record_index.remove(&record_key);
-        }
-        self.batches
-            .entry(batch_key.clone())
-            .or_default()
-            .upsert_record(record);
-        self.record_index.insert(record_key, batch_key);
-    }
-
-    /// Removes one image record from its batch.
-    pub(crate) fn remove_record(&mut self, record_key: ImageRecordKey) {
-        let Some(batch_key) = self.record_index.remove(&record_key) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(&batch_key) {
-            batch.remove_record(record_key);
-        }
+        self.0.upsert(batch_key, record_key, record);
     }
 
     /// Removes every retained image record absent from the current append pass.
     pub(crate) fn retain_records(&mut self, active: &HashSet<ImageRecordKey>) {
-        let stale: Vec<ImageRecordKey> = self
-            .record_index
-            .keys()
-            .copied()
-            .filter(|record_key| !active.contains(record_key))
-            .collect();
-        for record_key in stale {
-            self.remove_record(record_key);
-        }
+        self.0.retain(active);
     }
 
     /// All image batches.
     #[cfg(test)]
     pub(crate) fn batches(&self) -> impl Iterator<Item = (&ImageBatchKey, &ImageBatch)> {
-        self.batches.iter()
+        self.0.batches()
     }
 
     /// All image batches, mutable.
     pub(crate) fn batches_mut(
         &mut self,
     ) -> impl Iterator<Item = (&ImageBatchKey, &mut ImageBatch)> {
-        self.batches.iter_mut()
+        self.0.batches_mut()
     }
 
     /// One image batch by key, mutable.
     #[cfg(test)]
     pub(crate) fn get_mut(&mut self, key: &ImageBatchKey) -> Option<&mut ImageBatch> {
-        self.batches.get_mut(key)
+        self.0.get_mut(key)
     }
 
     /// Drops empty batch entries, returning their entities for despawn.
-    pub(crate) fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<ImageBatchKey> = self
-            .batches
-            .iter()
-            .filter(|(_, batch)| batch.is_empty())
-            .map(|(key, _)| key.clone())
-            .collect();
-        let mut entities = Vec::new();
-        for key in empty {
-            if let Some(batch) = self.batches.remove(&key)
-                && let Some(entity) = batch.entity
-            {
-                entities.push(entity);
-            }
-        }
-        entities
+    pub(crate) fn take_empty_batches(&mut self) -> Vec<Entity> { self.0.take_empty_batches() }
+}
+
+struct ImageMemberFamily;
+
+impl MemberFamily for ImageMemberFamily {
+    type Key = ImageBatchKey;
+    type Batch = ImageBatch;
+    type Store = ImageBatchStore;
+    type Marker = DiegeticImageBatch;
+
+    fn store_mut(store: &mut Self::Store) -> &mut BatchStore<Self::Key, Self::Batch> {
+        &mut store.0
     }
 }
 
@@ -455,20 +466,20 @@ impl Plugin for ImageBatchPlugin {
             )
             .add_systems(
                 PostUpdate,
-                update_image_batch_world_transforms
+                batch_store::update_batch_world_transforms::<ImageMemberFamily>
                     .after(TransformSystems::Propagate)
                     .in_set(BatchResourcesReady),
             )
             .add_systems(
                 PostUpdate,
                 reconcile_image_batch_entities
-                    .after(update_image_batch_world_transforms)
+                    .after(batch_store::update_batch_world_transforms::<ImageMemberFamily>)
                     .before(VisibilitySystems::CalculateBounds)
                     .in_set(BatchResourcesReady),
             )
             .add_systems(
                 PostUpdate,
-                update_image_batch_bounds
+                batch_store::update_batch_bounds::<ImageMemberFamily>
                     .after(reconcile_image_batch_entities)
                     .after(VisibilitySystems::CalculateBounds)
                     .before(VisibilitySystems::CheckVisibility)
@@ -477,7 +488,7 @@ impl Plugin for ImageBatchPlugin {
             .add_systems(
                 PostUpdate,
                 commit_image_batch_buffers
-                    .after(update_image_batch_bounds)
+                    .after(batch_store::update_batch_bounds::<ImageMemberFamily>)
                     .after(VisibilitySystems::CheckVisibility)
                     .in_set(BatchResourcesReady),
             );
@@ -619,29 +630,6 @@ fn linear_tint(color: Color) -> Vec4 {
     Vec4::new(linear.red, linear.green, linear.blue, linear.alpha)
 }
 
-fn update_image_batch_world_transforms(
-    mut store: ResMut<ImageBatchStore>,
-    panel_transforms: Query<&GlobalTransform, With<DiegeticPanel>>,
-) {
-    for (_, batch) in store.batches_mut() {
-        let mut transform_update = Dirty::No;
-        for record in &mut batch.records {
-            let Ok(panel_transform) = panel_transforms.get(record.record_key.panel) else {
-                continue;
-            };
-            let previous = record.transform;
-            record.update_world_transform(panel_transform);
-            if record.transform != previous {
-                transform_update.mark();
-            }
-        }
-        if transform_update.is_set() {
-            batch.record_upload.mark();
-            batch.bounds_update.mark();
-        }
-    }
-}
-
 fn reconcile_image_batch_entities(
     mut store: ResMut<ImageBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -676,37 +664,6 @@ fn reconcile_image_batch_entities(
                 &mut storage_buffers,
             );
         }
-    }
-}
-
-fn update_image_batch_bounds(
-    mut store: ResMut<ImageBatchStore>,
-    mut batch_entities: Query<
-        (&mut Transform, &mut GlobalTransform, &mut Aabb),
-        With<DiegeticImageBatch>,
-    >,
-) {
-    for (_, batch) in store.batches_mut() {
-        if !batch.bounds_update.is_set() {
-            continue;
-        }
-        let Some(entity) = batch.entity else {
-            continue;
-        };
-        let Ok((mut transform, mut global, mut aabb)) = batch_entities.get_mut(entity) else {
-            continue;
-        };
-        let Some((min, max)) = batch.world_bounds() else {
-            continue;
-        };
-        let center = (min + max) * 0.5;
-        *transform = Transform::from_translation(center);
-        *global = GlobalTransform::from(*transform);
-        *aabb = Aabb {
-            center:       Vec3A::ZERO,
-            half_extents: Vec3A::from((max - min) * 0.5),
-        };
-        batch.bounds_update.clear();
     }
 }
 

@@ -69,6 +69,9 @@ use crate::render::VisualShadow;
 use crate::render::analytic_paths;
 use crate::render::analytic_paths::PathAtlasHandles;
 use crate::render::batch_key;
+use crate::render::batch_store::Batch;
+use crate::render::batch_store::BatchEntry;
+use crate::render::batch_store::BatchStore;
 use crate::render::draw_order::DrawCommandDepth;
 use crate::render::draw_order::DrawOrder;
 use crate::render::draw_order::DrawOrderIndex;
@@ -322,6 +325,29 @@ impl ShapeBatch {
     }
 }
 
+impl BatchEntry for ShapeBatch {
+    fn is_empty(&self) -> bool { Self::is_empty(self) }
+
+    fn entity(&self) -> Option<Entity> { self.entity }
+}
+
+impl Batch for ShapeBatch {
+    type MemberKey = PanelShapeRenderKey;
+    type Payload = ShapeBatchRecord;
+
+    fn insert(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.key);
+        self.push_record(payload);
+    }
+
+    fn update(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.key);
+        self.refresh_record(payload);
+    }
+
+    fn remove(&mut self, member: Self::MemberKey) { self.remove_record(member); }
+}
+
 fn path_quad_geometry_eq(left: &PathQuadRecord, right: &PathQuadRecord) -> bool {
     left.rect_min == right.rect_min
         && left.rect_size == right.rect_size
@@ -342,32 +368,65 @@ fn path_render_record_placement_eq(left: &PathRenderRecord, right: &PathRenderRe
 
 /// Routes panel-line primitives into compatible cross-panel batches.
 #[derive(Debug, Default, Resource)]
-pub(super) struct PanelShapeBatchStore {
-    batches:     HashMap<PathBatchKey, ShapeBatch>,
-    panel_index: HashMap<Entity, Vec<(PathBatchKey, PanelShapeRenderKey)>>,
-    atlas:       PathAtlas<PanelShapeRenderKey>,
-    atlas_dirty: Dirty,
+pub(super) struct ShapeBatchStore {
+    store:         BatchStore<PathBatchKey, ShapeBatch>,
+    /// Panel-scoped retain bookkeeping only. Batch keys live in `store`.
+    panel_members: HashMap<Entity, Vec<PanelShapeRenderKey>>,
+    atlas:         PathAtlas<PanelShapeRenderKey>,
+    atlas_dirty:   Dirty,
 }
 
-impl PanelShapeBatchStore {
+impl ShapeBatchStore {
     fn upsert_panel(&mut self, panel: Entity, records: Vec<(PathBatchKey, ShapeBatchRecord)>) {
         if self.try_refresh_panel(panel, &records) {
             return;
         }
-        self.remove_panel(panel);
-        if !records.is_empty() {
-            self.atlas_dirty.mark();
+        let incoming_members: Vec<PanelShapeRenderKey> =
+            records.iter().map(|(_, record)| record.key).collect();
+        let stale_members: Vec<PanelShapeRenderKey> =
+            self.panel_members
+                .get(&panel)
+                .map_or_else(Vec::new, |members| {
+                    members
+                        .iter()
+                        .copied()
+                        .filter(|member| !incoming_members.contains(member))
+                        .collect()
+                });
+        let mut atlas_update = Dirty::No;
+        if !stale_members.is_empty() {
+            atlas_update.mark();
+        }
+        for member in stale_members {
+            self.store.remove(member);
         }
         for (key, record) in records {
             let record_key = record.key;
-            self.batches
-                .entry(key.clone())
-                .or_default()
-                .push_record(record);
-            self.panel_index
-                .entry(panel)
-                .or_default()
-                .push((key, record_key));
+            let current_key = self.store.key_for(record_key).cloned();
+            if current_key.as_ref() != Some(&key) {
+                atlas_update.mark();
+            }
+            let was_geometry_dirty = self
+                .store
+                .get(&key)
+                .is_some_and(ShapeBatch::path_quads_are_dirty);
+            self.store.upsert(key.clone(), record_key, record);
+            if self
+                .store
+                .get(&key)
+                .is_some_and(ShapeBatch::path_quads_are_dirty)
+                && !was_geometry_dirty
+            {
+                atlas_update.mark();
+            }
+        }
+        if incoming_members.is_empty() {
+            self.panel_members.remove(&panel);
+        } else {
+            self.panel_members.insert(panel, incoming_members);
+        }
+        if atlas_update.is_set() {
+            self.atlas_dirty.mark();
         }
     }
 
@@ -376,7 +435,7 @@ impl PanelShapeBatchStore {
         panel: Entity,
         records: &[(PathBatchKey, ShapeBatchRecord)],
     ) -> bool {
-        let Some(existing) = self.panel_index.get(&panel) else {
+        let Some(existing) = self.panel_members.get(&panel) else {
             return false;
         };
         if existing.len() != records.len() {
@@ -385,14 +444,15 @@ impl PanelShapeBatchStore {
         if existing
             .iter()
             .zip(records)
-            .any(|((old_key, old_record_key), (new_key, new_record))| {
-                old_key != new_key || *old_record_key != new_record.key
+            .any(|(old_record_key, (new_key, new_record))| {
+                self.store.key_for(*old_record_key) != Some(new_key)
+                    || *old_record_key != new_record.key
             })
         {
             return false;
         }
         for (key, record) in records.iter().cloned() {
-            let Some(batch) = self.batches.get_mut(&key) else {
+            let Some(batch) = self.store.get_mut(&key) else {
                 return false;
             };
             let was_geometry_dirty = batch.path_quads_are_dirty();
@@ -405,14 +465,12 @@ impl PanelShapeBatchStore {
     }
 
     fn remove_panel(&mut self, panel: Entity) {
-        let Some(records) = self.panel_index.remove(&panel) else {
+        let Some(records) = self.panel_members.remove(&panel) else {
             return;
         };
         self.atlas_dirty.mark();
-        for (key, record_key) in records {
-            if let Some(batch) = self.batches.get_mut(&key) {
-                batch.remove_record(record_key);
-            }
+        for record_key in records {
+            self.store.remove(record_key);
         }
     }
 
@@ -421,9 +479,9 @@ impl PanelShapeBatchStore {
             return;
         }
         let paths: Vec<(PanelShapeRenderKey, PathOutline)> = self
-            .batches
-            .values()
-            .flat_map(|batch| {
+            .store
+            .batches()
+            .flat_map(|(_, batch)| {
                 batch
                     .records
                     .iter()
@@ -432,7 +490,7 @@ impl PanelShapeBatchStore {
             .collect();
         self.atlas
             .rebuild(paths, PANEL_LINE_BAND_TARGET_DESIGN_UNITS);
-        for batch in self.batches.values_mut() {
+        for (_, batch) in self.store.batches_mut() {
             for record in &mut batch.records {
                 if let Some(packed_path_index) = self.atlas.index(&record.key) {
                     record.instance.packed_path_index = packed_path_index;
@@ -450,7 +508,7 @@ impl PanelShapeBatchStore {
     ) -> Option<PathAtlasHandles> {
         let (atlas, uploaded) = self.atlas.upload(storage_buffers)?;
         if uploaded {
-            for batch in self.batches.values() {
+            for (_, batch) in self.store.batches() {
                 let Some(gpu) = &batch.gpu else {
                     continue;
                 };
@@ -467,35 +525,17 @@ impl PanelShapeBatchStore {
         Some(atlas)
     }
 
-    fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<PathBatchKey> = self
-            .batches
-            .iter()
-            .filter(|(_, batch)| batch.is_empty())
-            .map(|(key, _)| key.clone())
-            .collect();
-        let mut entities = Vec::new();
-        for key in empty {
-            if let Some(batch) = self.batches.remove(&key)
-                && let Some(entity) = batch.entity
-            {
-                entities.push(entity);
-            }
-        }
-        entities
-    }
+    fn take_empty_batches(&mut self) -> Vec<Entity> { self.store.take_empty_batches() }
 
-    fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &ShapeBatch)> { self.batches.iter() }
+    fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &ShapeBatch)> { self.store.batches() }
 
     fn batches_mut(&mut self) -> impl Iterator<Item = (&PathBatchKey, &mut ShapeBatch)> {
-        self.batches.iter_mut()
+        self.store.batches_mut()
     }
 
-    fn get(&self, key: &PathBatchKey) -> Option<&ShapeBatch> { self.batches.get(key) }
+    fn get(&self, key: &PathBatchKey) -> Option<&ShapeBatch> { self.store.get(key) }
 
-    fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut ShapeBatch> {
-        self.batches.get_mut(key)
-    }
+    fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut ShapeBatch> { self.store.get_mut(key) }
 }
 
 struct PanelShapeReconcileContext<'a> {
@@ -701,7 +741,7 @@ pub(super) fn reconcile_panel_line_batches(
     hairline_fade_default: Res<CascadeDefault<HairlineFade>>,
     material_assets: PanelShapeMaterialAssets,
     mut material_table: ResMut<FrameMaterialTableBuild>,
-    mut store: ResMut<PanelShapeBatchStore>,
+    mut store: ResMut<ShapeBatchStore>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<PathExtendedMaterial>>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
@@ -1143,7 +1183,7 @@ fn clipped_out(bounds: BoundingBox, clip: Option<BoundingBox>) -> bool {
 fn reconcile_batch_entities(
     atlas: Option<&PathAtlasHandles>,
     anti_alias: AntiAlias,
-    store: &mut PanelShapeBatchStore,
+    store: &mut ShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -1189,7 +1229,7 @@ fn spawn_batch_entity(
     key: &PathBatchKey,
     atlas: &PathAtlasHandles,
     anti_alias: AntiAlias,
-    store: &mut PanelShapeBatchStore,
+    store: &mut ShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -1246,7 +1286,7 @@ fn spawn_batch_entity(
 
 fn grow_batch_assets(
     key: &PathBatchKey,
-    store: &mut PanelShapeBatchStore,
+    store: &mut ShapeBatchStore,
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<PathExtendedMaterial>,
     storage_buffers: &mut Assets<ShaderBuffer>,
@@ -1306,7 +1346,7 @@ fn grow_batch_assets(
 }
 
 pub(super) fn update_panel_line_batch_bounds(
-    mut store: ResMut<PanelShapeBatchStore>,
+    mut store: ResMut<ShapeBatchStore>,
     mut batch_entities: Query<
         (&mut Transform, &mut GlobalTransform, &mut Aabb),
         With<DiegeticPanelShapeBatch>,
@@ -1337,7 +1377,7 @@ pub(super) fn update_panel_line_batch_bounds(
 }
 
 pub(super) fn commit_panel_line_batch_buffers(
-    mut store: ResMut<PanelShapeBatchStore>,
+    mut store: ResMut<ShapeBatchStore>,
     mut storage_buffers: ResMut<Assets<ShaderBuffer>>,
     mut perf: ResMut<DiegeticPerfStats>,
 ) {
@@ -1492,7 +1532,7 @@ fn line_batch_material(input: ShapeBatchMaterialInput<'_>) -> PathExtendedMateri
 }
 
 fn refresh_batch_material_depth_biases(
-    store: &mut PanelShapeBatchStore,
+    store: &mut ShapeBatchStore,
     materials: &mut Assets<PathExtendedMaterial>,
 ) {
     for (key, batch) in store.batches_mut() {
@@ -1570,7 +1610,7 @@ mod tests {
             .add_plugins(CascadePlugin::<Sidedness>::default())
             .init_resource::<AntiAlias>()
             .init_resource::<HairlineWidth>()
-            .init_resource::<PanelShapeBatchStore>()
+            .init_resource::<ShapeBatchStore>()
             .init_asset::<Mesh>()
             .init_asset::<PathExtendedMaterial>()
             .init_asset::<ShaderBuffer>()
@@ -1662,7 +1702,7 @@ mod tests {
     }
 
     fn one_line_batch_values(app: &App) -> (DrawZIndex, f32, f32, Vec<(f32, f32)>) {
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let Some((key, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
         };
@@ -1691,7 +1731,7 @@ mod tests {
     }
 
     fn first_shape_material_values(app: &App) -> MaterialSlotValues {
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
         };
@@ -1708,7 +1748,7 @@ mod tests {
     }
 
     fn first_line_batch_material_values(app: &App) -> Vec<MaterialSlotValues> {
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
         };
@@ -1734,7 +1774,7 @@ mod tests {
     /// Per record: the run's AA flags and the packed outline's fade exponent
     /// (fade is per-curve data carried by the record's contours, not a run
     /// field).
-    fn sorted_run_fields(store: &PanelShapeBatchStore) -> Vec<(u32, u32)> {
+    fn sorted_run_fields(store: &ShapeBatchStore) -> Vec<(u32, u32)> {
         let mut fields: Vec<(u32, u32)> = store
             .batches()
             .flat_map(|(_, batch)| &batch.records)
@@ -1768,7 +1808,7 @@ mod tests {
         app.world_mut().spawn(panel);
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 1);
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -1805,7 +1845,7 @@ mod tests {
         );
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 1);
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -1832,7 +1872,7 @@ mod tests {
         );
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 1);
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -1880,7 +1920,7 @@ mod tests {
             first_shape_material_values(&app).base_color,
             material_base_color(blue)
         );
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
         };
@@ -2053,7 +2093,7 @@ mod tests {
         app.world_mut().spawn(panel);
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 1);
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -2108,7 +2148,7 @@ mod tests {
         assert_eq!(
             alpha_app
                 .world()
-                .resource::<PanelShapeBatchStore>()
+                .resource::<ShapeBatchStore>()
                 .batches()
                 .count(),
             2
@@ -2141,7 +2181,7 @@ mod tests {
                 .unwrap_or_else(|error| panic!("line panel should build: {error:?}")),
         );
         settle(&mut texture_app);
-        let store = texture_app.world().resource::<PanelShapeBatchStore>();
+        let store = texture_app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 2);
         assert!(
             store
@@ -2157,7 +2197,7 @@ mod tests {
         spawn_line_panel(&mut app, DrawZIndex::default());
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(store.batches().count(), 1);
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
@@ -2183,7 +2223,7 @@ mod tests {
         spawn_line_panel(&mut app, 1);
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let mut z_indices: Vec<DrawZIndex> = store.batches().map(|(key, _)| key.z_index).collect();
         z_indices.sort_unstable();
         assert_eq!(z_indices, vec![DrawZIndex(-1), DrawZIndex(1)]);
@@ -2247,7 +2287,7 @@ mod tests {
         }
 
         {
-            let store = app.world().resource::<PanelShapeBatchStore>();
+            let store = app.world().resource::<ShapeBatchStore>();
             assert_eq!(
                 store.batches().count(),
                 1,
@@ -2272,7 +2312,7 @@ mod tests {
             app.update();
         }
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         assert_eq!(
             sorted_run_fields(store),
             vec![
@@ -2326,7 +2366,7 @@ mod tests {
                 app.update();
             }
 
-            let store = app.world().resource::<PanelShapeBatchStore>();
+            let store = app.world().resource::<ShapeBatchStore>();
             let stale_records: Vec<Entity> = store
                 .batches()
                 .flat_map(|(_, batch)| &batch.records)
@@ -2339,7 +2379,7 @@ mod tests {
             );
 
             let stale_index: Vec<Entity> = store
-                .panel_index
+                .panel_members
                 .keys()
                 .copied()
                 .filter(|panel| *panel != current)
@@ -2350,7 +2390,7 @@ mod tests {
             );
         }
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let record_count: usize = store.batches().map(|(_, batch)| batch.records.len()).sum();
         assert_eq!(
             record_count, 1,
@@ -2465,7 +2505,7 @@ mod tests {
 
     #[test]
     fn two_panels_with_same_key_share_one_line_batch() {
-        let mut store = PanelShapeBatchStore::default();
+        let mut store = ShapeBatchStore::default();
         let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -2485,7 +2525,7 @@ mod tests {
 
     #[test]
     fn removing_a_panel_removes_only_its_line_records() {
-        let mut store = PanelShapeBatchStore::default();
+        let mut store = ShapeBatchStore::default();
         let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -2505,8 +2545,64 @@ mod tests {
     }
 
     #[test]
+    fn batch_key_change_preserves_unmoved_line_record() {
+        let mut store = ShapeBatchStore::default();
+        let first_key = test_batch_key();
+        let mut second_key = test_batch_key();
+        second_key.z_index_rank = DrawZIndexRank::from(1);
+        let panel = Entity::from_bits(1);
+        let stable_member = test_batch_record(panel, 0).key;
+
+        store.upsert_panel(
+            panel,
+            vec![
+                (first_key.clone(), test_batch_record(panel, 0)),
+                (first_key.clone(), test_batch_record(panel, 1)),
+            ],
+        );
+        {
+            let Some(batch) = store.get_mut(&first_key) else {
+                panic!("first batch should exist");
+            };
+            let Some(record) = batch
+                .records
+                .iter_mut()
+                .find(|record| record.key == stable_member)
+            else {
+                panic!("stable member should exist before the key change");
+            };
+            record.instance.packed_path_index = u32::MAX;
+        }
+
+        store.upsert_panel(
+            panel,
+            vec![
+                (first_key.clone(), test_batch_record(panel, 0)),
+                (second_key.clone(), test_batch_record(panel, 1)),
+            ],
+        );
+
+        assert_eq!(store.get(&first_key).map(ShapeBatch::record_count), Some(1));
+        assert_eq!(
+            store.get(&second_key).map(ShapeBatch::record_count),
+            Some(1)
+        );
+        let Some(batch) = store.get(&first_key) else {
+            panic!("first batch should still exist");
+        };
+        let Some(record) = batch
+            .records
+            .iter()
+            .find(|record| record.key == stable_member)
+        else {
+            panic!("stable member should remain in the first batch");
+        };
+        assert_eq!(record.instance.packed_path_index, u32::MAX);
+    }
+
+    #[test]
     fn atlas_rebuild_compacts_surviving_panel_line_paths() {
-        let mut store = PanelShapeBatchStore::default();
+        let mut store = ShapeBatchStore::default();
         let key = test_batch_key();
         let first_panel = Entity::from_bits(1);
         let second_panel = Entity::from_bits(2);
@@ -2593,7 +2689,7 @@ mod tests {
         );
         settle(&mut app);
 
-        let store = app.world().resource::<PanelShapeBatchStore>();
+        let store = app.world().resource::<ShapeBatchStore>();
         let Some((_, batch)) = store.batches().next() else {
             panic!("one line batch should exist");
         };

@@ -42,7 +42,7 @@ lives in `render/analytic_paths/` and is shared with panel-line vector marks.
 - `geometry.rs` — `QuadraticSegment`, `Bounds`, `PathContour`, `PathOutline`.
 - `packing.rs` — GPU records and `build_packed_path` / `DEFAULT_BAND_COUNT`.
 - `material.rs` — `PathExtendedMaterial`, `RenderMode { Text = 1, PunchOut = 2 }`.
-- `batching.rs` — `PathBatchStore`, `PathBatchKey`, run upsert/removal.
+- `batching.rs` — `TextRunBatchStore`, `PathBatchKey`, run upsert/removal.
 - `analytic_path.wgsl` / `analytic_path_vertex_pull.wgsl` — the coverage shader.
 
 Panel and world text drive Slug from `render/panel_text/{shaping,batching}.rs`
@@ -81,7 +81,7 @@ and `render/world_text/`. They own the ECS systems; `text/slug` owns the data.
 - `outline_cache: GlyphOutlineCache` — the CPU outline cache **and** the shared
   append-only GPU atlas (curve / band / glyph-record tables).
 - `units_per_em: HashMap<FontKey, f32>` — parsed once per font.
-- `batch_store: PathBatchStore` — the batched-run routing state.
+- `batch_store: TextRunBatchStore` — the batched-run routing state.
 - `atlas: Option<PathAtlasHandles>` + `uploaded_revision` — GPU upload state.
 - `preprocess_version` — bumped to invalidate cached glyph data on a
   preprocessing change (folded into every `GlyphKey`).

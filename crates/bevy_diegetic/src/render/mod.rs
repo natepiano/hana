@@ -3,6 +3,7 @@
 mod analytic_line_probe;
 mod analytic_paths;
 mod batch_key;
+mod batch_store;
 mod clip;
 mod constants;
 mod dirty;
@@ -38,7 +39,6 @@ pub(crate) use analytic_paths::PathAtlas;
 pub(crate) use analytic_paths::PathAtlasHandles;
 pub(crate) use analytic_paths::PathBatchKey;
 pub(crate) use analytic_paths::PathBatchResources;
-pub(crate) use analytic_paths::PathBatchStore;
 pub(crate) use analytic_paths::PathContour;
 pub(crate) use analytic_paths::PathExtendedMaterial;
 #[allow(unused_imports, reason = "render module compatibility surface")]
@@ -50,6 +50,7 @@ pub(crate) use analytic_paths::PathRenderRecord;
 pub(crate) use analytic_paths::PlacementDirty;
 pub(crate) use analytic_paths::QuadraticSegment;
 pub(crate) use analytic_paths::RenderMode;
+pub(crate) use analytic_paths::TextRunBatchStore;
 pub(crate) use analytic_paths::analytic_material_slot_candidate;
 pub(crate) use analytic_paths::build_packed_path;
 #[cfg(test)]

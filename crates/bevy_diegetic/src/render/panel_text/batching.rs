@@ -1159,13 +1159,17 @@ fn refresh_batch_material_depth_biases(
 /// authored alpha mode — only the material differs, and only where bevy's
 /// pipeline routing requires it.
 ///
-/// `Opaque` becomes `Mask(0.0)`: opaque casters take bevy's depth-only shadow
-/// pipelines, which strip the material bind group from the pipeline layout —
-/// and the vertex-pull stage reads bindings 104/105 from that group, so
-/// pipeline creation fails wgpu validation. `Mask(0.0)` renders the same
-/// pixels (cutoff 0 never discards by alpha; the coverage discards cut the
-/// glyph outlines; depth writes, nothing blends) and its `MAY_DISCARD`
-/// pipelines keep the material bind group.
+/// `Opaque` becomes `Mask(0.0)` for every batch: opaque meshes take bevy's
+/// depth-only pipelines — the camera depth/normal prepass as well as the
+/// shadow pass — which strip the material bind group from the pipeline
+/// layout, and the vertex-pull stage reads bindings 104/105 from that group,
+/// so pipeline creation fails wgpu validation. The camera prepass is why this
+/// remap is unconditional while `sdf_batch_alpha_mode` gates its remap on
+/// `VisualShadow::Cast`: a non-casting opaque SDF batch enters no depth-only
+/// pass, but opaque text would still hit the camera prepass. `Mask(0.0)`
+/// renders the same pixels (cutoff 0 never discards by alpha; the coverage
+/// discards cut the glyph outlines; depth writes, nothing blends) and its
+/// `MAY_DISCARD` pipelines keep the material bind group.
 const fn batch_gpu_alpha_mode(authored: AlphaMode) -> AlphaMode {
     match authored {
         AlphaMode::Opaque => AlphaMode::Mask(0.0),

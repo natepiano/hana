@@ -14,7 +14,6 @@ use bevy::camera::visibility::NoAutoAabb;
 use bevy::camera::visibility::RenderLayers;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::light::NotShadowCaster;
-use bevy::math::Vec3A;
 use bevy::mesh::Indices;
 use bevy::mesh::MeshVertexBufferLayoutRef;
 use bevy::pbr::ExtendedMaterial;
@@ -46,6 +45,13 @@ use super::batch_key;
 use super::batch_key::PipelineCompatibility;
 use super::batch_key::ResourceCompatibility;
 use super::batch_key::VisualShadow;
+use super::batch_store;
+use super::batch_store::Batch;
+use super::batch_store::BatchEntry;
+use super::batch_store::BatchStore;
+use super::batch_store::MemberBatch;
+use super::batch_store::MemberFamily;
+use super::batch_store::MemberRecord;
 #[cfg(test)]
 use super::draw_order;
 use super::draw_order::DrawCommandDepth;
@@ -440,6 +446,16 @@ impl ResolvedSdfBatchRecord {
     }
 }
 
+impl MemberRecord for ResolvedSdfBatchRecord {
+    fn panel(&self) -> Entity { self.record_key.panel }
+
+    fn transform(&self) -> Mat4 { self.transform }
+
+    fn update_world_transform(&mut self, panel_transform: &GlobalTransform) {
+        Self::update_world_transform(self, panel_transform);
+    }
+}
+
 fn sdf_record_pipeline_compatibility(
     surface: &ResolvedSdfSurface<'_>,
     materials: &SdfRecordMaterialSlots,
@@ -684,95 +700,89 @@ impl SdfBatch {
     }
 }
 
+impl BatchEntry for SdfBatch {
+    fn is_empty(&self) -> bool { Self::is_empty(self) }
+
+    fn entity(&self) -> Option<Entity> { self.entity }
+}
+
+impl Batch for SdfBatch {
+    type MemberKey = SdfRecordKey;
+    type Payload = ResolvedSdfBatchRecord;
+
+    fn insert(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.record_key);
+        self.upsert_record(payload);
+    }
+
+    fn update(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        debug_assert_eq!(member, payload.record_key);
+        self.upsert_record(payload);
+    }
+
+    fn remove(&mut self, member: Self::MemberKey) { self.remove_record(member); }
+}
+
+impl MemberBatch for SdfBatch {
+    type Record = ResolvedSdfBatchRecord;
+
+    fn records_mut(&mut self) -> &mut [Self::Record] { &mut self.records }
+
+    fn record_upload_mut(&mut self) -> &mut Dirty { &mut self.record_upload }
+
+    fn bounds_update(&self) -> Dirty { self.bounds_update }
+
+    fn bounds_update_mut(&mut self) -> &mut Dirty { &mut self.bounds_update }
+
+    fn world_bounds(&self) -> Option<(Vec3, Vec3)> { Self::world_bounds(self) }
+}
+
 /// Store that maps SDF records to `SdfBatchKey` batches.
 #[derive(Debug, Default, Resource)]
-pub(crate) struct SdfBatchStore {
-    /// Batch entries keyed by compatibility and ordering fields.
-    batches:      HashMap<SdfBatchKey, SdfBatch>,
-    /// Current batch key for each routed SDF record.
-    record_index: HashMap<SdfRecordKey, SdfBatchKey>,
-}
+pub(crate) struct SdfBatchStore(BatchStore<SdfBatchKey, SdfBatch>);
 
 impl SdfBatchStore {
     /// Inserts or moves one retained SDF record.
     pub(crate) fn upsert_record(&mut self, record: ResolvedSdfBatchRecord) {
         let record_key = record.record_key;
         let batch_key = record.batch_key.clone();
-        if let Some(current) = self.record_index.get(&record_key) {
-            if *current == batch_key {
-                if let Some(batch) = self.batches.get_mut(&batch_key) {
-                    batch.upsert_record(record);
-                }
-                return;
-            }
-            let previous = current.clone();
-            if let Some(batch) = self.batches.get_mut(&previous) {
-                batch.remove_record(record_key);
-            }
-            self.record_index.remove(&record_key);
-        }
-        self.batches
-            .entry(batch_key.clone())
-            .or_default()
-            .upsert_record(record);
-        self.record_index.insert(record_key, batch_key);
-    }
-
-    /// Removes one SDF record from its batch.
-    pub(crate) fn remove_record(&mut self, record_key: SdfRecordKey) {
-        let Some(batch_key) = self.record_index.remove(&record_key) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(&batch_key) {
-            batch.remove_record(record_key);
-        }
+        self.0.upsert(batch_key, record_key, record);
     }
 
     /// Removes every retained SDF record absent from the current append pass.
     pub(crate) fn retain_records(&mut self, active: &HashSet<SdfRecordKey>) {
-        let stale: Vec<SdfRecordKey> = self
-            .record_index
-            .keys()
-            .copied()
-            .filter(|record_key| !active.contains(record_key))
-            .collect();
-        for record_key in stale {
-            self.remove_record(record_key);
-        }
+        self.0.retain(active);
     }
 
     /// All SDF batches.
     pub(crate) fn batches(&self) -> impl Iterator<Item = (&SdfBatchKey, &SdfBatch)> {
-        self.batches.iter()
+        self.0.batches()
     }
 
     /// All SDF batches, mutable.
     pub(crate) fn batches_mut(&mut self) -> impl Iterator<Item = (&SdfBatchKey, &mut SdfBatch)> {
-        self.batches.iter_mut()
+        self.0.batches_mut()
     }
 
     /// One SDF batch by key, mutable.
     pub(crate) fn get_mut(&mut self, key: &SdfBatchKey) -> Option<&mut SdfBatch> {
-        self.batches.get_mut(key)
+        self.0.get_mut(key)
     }
 
     /// Drops empty batch entries, returning their entities for despawn.
-    pub(crate) fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<SdfBatchKey> = self
-            .batches
-            .iter()
-            .filter(|(_, batch)| batch.is_empty())
-            .map(|(key, _)| key.clone())
-            .collect();
-        let mut entities = Vec::new();
-        for key in empty {
-            if let Some(batch) = self.batches.remove(&key)
-                && let Some(entity) = batch.entity
-            {
-                entities.push(entity);
-            }
-        }
-        entities
+    pub(crate) fn take_empty_batches(&mut self) -> Vec<Entity> { self.0.take_empty_batches() }
+}
+
+struct SdfMemberFamily;
+
+impl MemberFamily for SdfMemberFamily {
+    type Key = SdfBatchKey;
+    type Batch = SdfBatch;
+    type Store = SdfBatchStore;
+    type Marker = DiegeticSdfFillBatch;
+
+    fn store_mut(store: &mut Self::Store) -> &mut BatchStore<Self::Key, Self::Batch> {
+        &mut store.0
     }
 }
 
@@ -925,6 +935,10 @@ pub(crate) fn sdf_batch_material(input: SdfBatchMaterialInput) -> SdfExtendedMat
 /// shadow/prepass pipeline (the SDF prepass shader reads the table for
 /// `fill_alpha`); a non-casting opaque batch enters no prepass and stays
 /// `Opaque`, rendering in the opaque phase like a normal Bevy mesh.
+///
+/// This differs from text and image batches by construction: text remaps
+/// `Opaque` for every batch because the vertex-pull bindings are absent in the
+/// depth/normal prepass layout, while image batches always use `Blend`.
 #[must_use]
 pub(crate) fn sdf_batch_alpha_mode(alpha: BatchAlphaMode, shadow: VisualShadow) -> AlphaMode {
     match (AlphaMode::from(alpha), shadow) {
@@ -1310,7 +1324,7 @@ fn route_sdf_batch_records(
 
 fn update_sdf_batch_world_transforms(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
-    mut store: ResMut<SdfBatchStore>,
+    store: ResMut<SdfBatchStore>,
     panel_transforms: Query<&GlobalTransform, With<DiegeticPanel>>,
 ) {
     #[cfg(test)]
@@ -1319,23 +1333,7 @@ fn update_sdf_batch_world_transforms(
         material_table::SDF_DRIVER_WORLD_TRANSFORMS,
     );
 
-    for (_, batch) in store.batches_mut() {
-        let mut transform_update = Dirty::No;
-        for record in &mut batch.records {
-            let Ok(panel_transform) = panel_transforms.get(record.record_key.panel) else {
-                continue;
-            };
-            let previous = record.transform;
-            record.update_world_transform(panel_transform);
-            if record.transform != previous {
-                transform_update.mark();
-            }
-        }
-        if transform_update.is_set() {
-            batch.record_upload.mark();
-            batch.bounds_update.mark();
-        }
-    }
+    batch_store::update_batch_world_transforms::<SdfMemberFamily>(store, panel_transforms);
 }
 
 fn reconcile_sdf_batch_entities(
@@ -1565,8 +1563,8 @@ pub(crate) fn grow_sdf_batch_assets(
 /// Updates SDF batch entity placement and local `Aabb` from record bounds.
 pub(crate) fn update_sdf_batch_bounds(
     #[cfg(test)] mut run_order: Option<ResMut<SdfDriverRunOrder>>,
-    mut store: ResMut<SdfBatchStore>,
-    mut batch_entities: Query<
+    store: ResMut<SdfBatchStore>,
+    batch_entities: Query<
         (&mut Transform, &mut GlobalTransform, &mut Aabb),
         With<DiegeticSdfFillBatch>,
     >,
@@ -1574,28 +1572,7 @@ pub(crate) fn update_sdf_batch_bounds(
     #[cfg(test)]
     material_table::record_sdf_driver_run(&mut run_order, material_table::SDF_DRIVER_BOUNDS);
 
-    for (_, batch) in store.batches_mut() {
-        if !batch.bounds_update.is_set() {
-            continue;
-        }
-        let Some(entity) = batch.entity else {
-            continue;
-        };
-        let Ok((mut transform, mut global, mut aabb)) = batch_entities.get_mut(entity) else {
-            continue;
-        };
-        let Some((min, max)) = batch.world_bounds() else {
-            continue;
-        };
-        let center = (min + max) * 0.5;
-        *transform = Transform::from_translation(center);
-        *global = GlobalTransform::from(*transform);
-        *aabb = Aabb {
-            center:       Vec3A::ZERO,
-            half_extents: Vec3A::from((max - min) * 0.5),
-        };
-        batch.bounds_update.clear();
-    }
+    batch_store::update_batch_bounds::<SdfMemberFamily>(store, batch_entities);
 }
 
 /// Uploads dirty SDF record buffers with fixed-capacity payloads.

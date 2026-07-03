@@ -1,16 +1,15 @@
-//! Batch store for analytic path instancing: groups runs by batch key, owns
-//! each batch's CPU record vectors and GPU handles, and derives run ranges by
-//! rebuild.
+//! Text-run batch store for analytic path instancing: groups runs by batch key,
+//! owns each batch's CPU record vectors and GPU handles, and derives run ranges
+//! by rebuild.
 //!
-//! Membership has a single mutation point — [`PathBatchStore::upsert_run`] /
-//! [`PathBatchStore::remove_run`] update the run→batch index and the batch's
+//! Membership has a single mutation point — [`TextRunBatchStore::upsert_run`] /
+//! [`TextRunBatchStore::remove_run`] update the run→batch index and the batch's
 //! run set together — and ranges have a single writer: `rebuild` recomputes
 //! them from the live run set, so they cannot go stale relative to the record
 //! vectors they index. The store is plain data; the routing systems own all
 //! entity and asset work (spawning batch entities, creating meshes and
 //! buffers, uploading dirty records).
 
-use std::collections::HashMap;
 use std::ops::Range;
 
 use bevy::color::Color;
@@ -41,6 +40,9 @@ use crate::render::Dirty;
 use crate::render::VisualShadow;
 use crate::render::batch_key::PipelineCompatibility;
 use crate::render::batch_key::ResourceCompatibility;
+use crate::render::batch_store::Batch;
+use crate::render::batch_store::BatchEntry;
+use crate::render::batch_store::BatchStore;
 use crate::render::draw_order::DrawOrderIndex;
 use crate::render::draw_order::DrawZIndexRank;
 use crate::render::material_table::GpuMaterialSlotId;
@@ -229,7 +231,7 @@ struct BatchRun {
 /// record vectors the GPU tables upload from, the member runs they derive
 /// from, and the split dirty flags the commit system reads.
 #[derive(Debug, Default)]
-pub struct PathBatch {
+pub struct TextRunBatch {
     /// The batch render entity; `None` until the routing system spawns it.
     pub entity:             Option<Entity>,
     /// GPU handles; `None` until the routing system creates them.
@@ -250,7 +252,7 @@ pub struct PathBatch {
     run_records:            Vec<PathRenderRecord>,
 }
 
-impl PathBatch {
+impl TextRunBatch {
     /// Concatenated path records, `render_index` stamped — the instance-buffer
     /// upload payload.
     #[must_use]
@@ -503,24 +505,57 @@ impl PathBatch {
     }
 }
 
-/// Routes every text or panel-shape run to its analytic path batch.
-#[derive(Debug, Default)]
-pub(crate) struct PathBatchStore {
-    batches:      HashMap<PathBatchKey, PathBatch>,
-    /// Current batch key for each routed run.
-    render_index: HashMap<RunStorageKey, PathBatchKey>,
+impl BatchEntry for TextRunBatch {
+    fn is_empty(&self) -> bool { Self::is_empty(self) }
+
+    fn entity(&self) -> Option<Entity> { self.entity }
 }
 
-impl PathBatchStore {
+impl Batch for TextRunBatch {
+    type MemberKey = RunStorageKey;
+    type Payload = TextRunPayload;
+
+    fn insert(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        self.push_run(
+            member,
+            payload.draw_order_index,
+            payload.path_records,
+            payload.record,
+        );
+    }
+
+    fn update(&mut self, member: Self::MemberKey, payload: Self::Payload) {
+        self.update_run(
+            member,
+            payload.draw_order_index,
+            payload.path_records,
+            payload.record,
+        );
+    }
+
+    fn remove(&mut self, member: Self::MemberKey) { self.remove_run(member); }
+}
+
+/// Routed text-run payload owned by `TextRunBatch`.
+#[derive(Debug)]
+pub struct TextRunPayload {
+    draw_order_index: DrawOrderIndex,
+    path_records:     Vec<PathQuadRecord>,
+    record:           PathRenderRecord,
+}
+
+/// Routes each text run to the analytic-path batch keyed by `PathBatchKey`.
+#[derive(Debug, Default)]
+pub(crate) struct TextRunBatchStore(BatchStore<PathBatchKey, TextRunBatch>);
+
+impl TextRunBatchStore {
     /// Whether a run is currently routed to any batch.
     #[must_use]
-    pub fn is_routed(&self, run: RunStorageKey) -> bool { self.render_index.contains_key(&run) }
+    pub fn is_routed(&self, run: RunStorageKey) -> bool { self.0.contains(run) }
 
     /// Current batch key for a routed run.
     #[must_use]
-    pub fn key_for_run(&self, run: RunStorageKey) -> Option<&PathBatchKey> {
-        self.render_index.get(&run)
-    }
+    pub fn key_for_run(&self, run: RunStorageKey) -> Option<&PathBatchKey> { self.0.key_for(run) }
 
     /// Inserts a run into its key's batch, moves it when its key changed, or
     /// updates it in place — the single membership mutation point, together
@@ -533,46 +568,25 @@ impl PathBatchStore {
         path_records: Vec<PathQuadRecord>,
         record: PathRenderRecord,
     ) {
-        if let Some(current) = self.render_index.get(&run) {
-            if *current == key {
-                if let Some(batch) = self.batches.get_mut(&key) {
-                    batch.update_run(run, draw_order_index, path_records, record);
-                }
-                return;
-            }
-            let previous = current.clone();
-            if let Some(batch) = self.batches.get_mut(&previous) {
-                batch.remove_run(run);
-            }
-            self.render_index.remove(&run);
-        }
-        self.batches.entry(key.clone()).or_default().push_run(
+        self.0.upsert(
+            key,
             run,
-            draw_order_index,
-            path_records,
-            record,
+            TextRunPayload {
+                draw_order_index,
+                path_records,
+                record,
+            },
         );
-        self.render_index.insert(run, key);
     }
 
     /// Removes a run from its batch. The emptied batch keeps its store entry
     /// until the routing system reconciles it via [`Self::take_empty_batches`].
-    pub fn remove_run(&mut self, run: RunStorageKey) {
-        let Some(key) = self.render_index.remove(&run) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(&key) {
-            batch.remove_run(run);
-        }
-    }
+    pub fn remove_run(&mut self, run: RunStorageKey) { self.0.remove(run); }
 
     /// Writes a routed run's world transform into its `PathRenderRecord` slot. A
     /// no-op for unrouted runs (e.g. a fully clipped label).
     pub fn update_run_transform(&mut self, run: RunStorageKey, transform: Mat4) {
-        let Some(key) = self.render_index.get(&run) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(key) {
+        if let Some(batch) = self.0.member_batch_mut(run) {
             batch.update_run_transform(run, transform);
         }
     }
@@ -580,10 +594,7 @@ impl PathBatchStore {
     /// Writes a routed run's frame-local material-table row id. A no-op for
     /// unrouted runs and for unchanged row ids.
     pub fn update_run_material(&mut self, run: RunStorageKey, material: MaterialSlotId) {
-        let Some(key) = self.render_index.get(&run) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(key) {
+        if let Some(batch) = self.0.member_batch_mut(run) {
             batch.update_run_material(run, GpuMaterialSlotId::from(material));
         }
     }
@@ -591,52 +602,33 @@ impl PathBatchStore {
     /// Rewrites a routed run's full render record without rebuilding its glyph
     /// quads. A no-op for unrouted runs.
     pub fn update_run_record(&mut self, run: RunStorageKey, record: PathRenderRecord) {
-        let Some(key) = self.render_index.get(&run) else {
-            return;
-        };
-        if let Some(batch) = self.batches.get_mut(key) {
+        if let Some(batch) = self.0.member_batch_mut(run) {
             batch.update_run_record(run, record);
         }
     }
 
     /// All batches.
-    pub fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &PathBatch)> {
-        self.batches.iter()
+    pub fn batches(&self) -> impl Iterator<Item = (&PathBatchKey, &TextRunBatch)> {
+        self.0.batches()
     }
 
     /// All batches, mutable.
-    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&PathBatchKey, &mut PathBatch)> {
-        self.batches.iter_mut()
+    pub fn batches_mut(&mut self) -> impl Iterator<Item = (&PathBatchKey, &mut TextRunBatch)> {
+        self.0.batches_mut()
     }
 
     /// One batch by key.
     #[must_use]
-    pub fn get(&self, key: &PathBatchKey) -> Option<&PathBatch> { self.batches.get(key) }
+    pub fn get(&self, key: &PathBatchKey) -> Option<&TextRunBatch> { self.0.get(key) }
 
     /// One batch by key, mutable.
-    pub fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut PathBatch> {
-        self.batches.get_mut(key)
+    pub fn get_mut(&mut self, key: &PathBatchKey) -> Option<&mut TextRunBatch> {
+        self.0.get_mut(key)
     }
 
     /// Drops batches whose last run left, returning their entities for the
     /// routing system to despawn (the batch analogue of the empty-run path).
-    pub fn take_empty_batches(&mut self) -> Vec<Entity> {
-        let empty: Vec<PathBatchKey> = self
-            .batches
-            .iter()
-            .filter(|(_, batch)| batch.is_empty())
-            .map(|(key, _)| key.clone())
-            .collect();
-        let mut entities = Vec::new();
-        for key in empty {
-            if let Some(batch) = self.batches.remove(&key)
-                && let Some(entity) = batch.entity
-            {
-                entities.push(entity);
-            }
-        }
-        entities
-    }
+    pub fn take_empty_batches(&mut self) -> Vec<Entity> { self.0.take_empty_batches() }
 }
 
 #[cfg(test)]
@@ -699,7 +691,7 @@ mod tests {
     fn run_key(bits: u64) -> RunStorageKey { RunStorageKey::from(Entity::from_bits(bits)) }
 
     fn upsert_run(
-        store: &mut PathBatchStore,
+        store: &mut TextRunBatchStore,
         batch_key: PathBatchKey,
         run: RunStorageKey,
         path_records: Vec<PathQuadRecord>,
@@ -716,7 +708,7 @@ mod tests {
 
     #[test]
     fn two_runs_one_key_share_a_batch_with_contiguous_ranges() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
@@ -754,7 +746,7 @@ mod tests {
 
     #[test]
     fn runs_differing_only_by_render_layers_route_to_separate_batches() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let layer0 = key(AlphaMode::Blend);
         let layer1 = PathBatchKey {
             layers: BatchRenderLayers(RenderLayers::layer(1)),
@@ -785,7 +777,7 @@ mod tests {
 
     #[test]
     fn removing_a_run_rebuilds_the_survivors_ranges() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let first = run_key(1);
         let second = run_key(2);
@@ -817,7 +809,7 @@ mod tests {
 
     #[test]
     fn same_count_edit_writes_in_place_without_touching_the_run_table() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         let stamped = record(Mat4::IDENTITY);
@@ -864,7 +856,7 @@ mod tests {
 
     #[test]
     fn identical_same_count_quads_do_not_dirty_geometry() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         let path_records = vec![path_record(Vec2::ZERO, 0), path_record(Vec2::X, 1)];
@@ -911,7 +903,7 @@ mod tests {
 
     #[test]
     fn count_change_takes_the_rebuild_path() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         upsert_run(
@@ -940,7 +932,7 @@ mod tests {
 
     #[test]
     fn key_change_moves_the_run_between_batches() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let blend = key(AlphaMode::Blend);
         let add = key(AlphaMode::Add);
         let run = run_key(1);
@@ -971,7 +963,7 @@ mod tests {
 
     #[test]
     fn move_then_remove_in_one_pass_leaves_both_maps_consistent() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let blend = key(AlphaMode::Blend);
         let add = key(AlphaMode::Add);
         let run = run_key(1);
@@ -1007,7 +999,7 @@ mod tests {
 
     #[test]
     fn transform_update_dirties_the_run_table_only_on_change() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         upsert_run(
@@ -1065,7 +1057,7 @@ mod tests {
 
     #[test]
     fn world_bounds_unions_rects_across_run_transforms() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         upsert_run(
             &mut store,
@@ -1095,7 +1087,7 @@ mod tests {
 
     #[test]
     fn material_slot_refresh_dirties_only_render_records() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         upsert_run(
@@ -1124,7 +1116,7 @@ mod tests {
 
     #[test]
     fn record_refresh_rewrites_the_run_table_without_touching_glyph_quads() {
-        let mut store = PathBatchStore::default();
+        let mut store = TextRunBatchStore::default();
         let batch_key = key(AlphaMode::Blend);
         let run = run_key(1);
         upsert_run(

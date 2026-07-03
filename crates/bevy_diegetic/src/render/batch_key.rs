@@ -370,6 +370,13 @@ impl From<&StandardMaterial> for ResourceCompatibility {
 /// into more than one draw — render layer, lit/unlit path, alpha mode, and
 /// base-color texture binding — into [`BatchSummary`]. Every visual batch store
 /// (text, panel-line, SDF) shares this so the breakdowns stay uniform.
+///
+/// The `DiegeticPerfStats` push that consumes each summary stays per-family:
+/// `ImageBatchKey` carries no [`PipelineCompatibility`]/[`ResourceCompatibility`],
+/// so `image_batch_summary` fills [`BatchSummary`] from the image key directly;
+/// the text store lives inside `GlyphCache` rather than its own `Resource`; and
+/// each push sits inside its family's upload loop next to family-only work
+/// (SDF also fills `SdfRecordDiagnostics` in the same iteration).
 #[must_use]
 pub(crate) fn batch_summary(
     z_index: impl Into<DrawZIndex>,

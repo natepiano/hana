@@ -830,7 +830,7 @@ Acceptance:
   decision and partially answers the Non-Line Panel Marks question.
 - The whole renderer module and identity layer were renamed
   `panel_lines` → `panel_shapes`, Line → Shape (`PanelShapeSourceKey`,
-  `PanelShapeBatchStore`, `PathBatchKey`, `ResolvedPanelShape`,
+  the shape batch store (now `ShapeBatchStore`), `PathBatchKey`, `ResolvedPanelShape`,
   `build_panel_shape_path`, `PanelShapeMember`). At Phase D close-out this
   document and its title were renamed to "Panel Shape API" /
   `panel-shape-api.md` and the live module-tree references updated to
@@ -1057,7 +1057,7 @@ crates/bevy_diegetic/src/
     analytic_paths/
       mod.rs
       atlas.rs              # generic non-glyph path atlas
-      batching.rs           # analytic path batch store (PathBatchStore) and shared GPU handle types
+      batching.rs           # text-run batch store (TextRunBatchStore) and shared GPU handle types
       geometry.rs           # Bounds / PathOutline / PathContour / QuadraticSegment
       material.rs           # shared analytic-path PathExtendedMaterial route
       packing.rs            # curve, band, path, instance, and run records

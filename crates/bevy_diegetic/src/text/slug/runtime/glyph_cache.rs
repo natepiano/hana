@@ -20,8 +20,8 @@ use super::TextRun;
 use crate::layout::ShapedGlyph;
 use crate::render;
 use crate::render::PathAtlasHandles;
-use crate::render::PathBatchStore;
 use crate::render::PathExtendedMaterial;
+use crate::render::TextRunBatchStore;
 use crate::text::Font;
 use crate::text::slug::glyph::OutlineError;
 
@@ -68,7 +68,7 @@ pub(crate) struct GlyphCache {
     /// per font so run preparation never re-parses font tables per glyph.
     units_per_em:       HashMap<FontKey, f32>,
     /// Batched-records routing state.
-    batch_store:        PathBatchStore,
+    batch_store:        TextRunBatchStore,
     preprocess_version: u32,
     atlas:              Option<PathAtlasHandles>,
     uploaded_revision:  u32,
@@ -207,10 +207,10 @@ impl GlyphCache {
 
     /// The glyph batch store (records, batch keys, GPU handles per batch).
     #[must_use]
-    pub const fn batch_store(&self) -> &PathBatchStore { &self.batch_store }
+    pub const fn batch_store(&self) -> &TextRunBatchStore { &self.batch_store }
 
     /// The glyph batch store, mutable.
-    pub const fn batch_store_mut(&mut self) -> &mut PathBatchStore { &mut self.batch_store }
+    pub const fn batch_store_mut(&mut self) -> &mut TextRunBatchStore { &mut self.batch_store }
 
     /// Stable key for a glyph in the current preprocessing profile.
     #[must_use]
