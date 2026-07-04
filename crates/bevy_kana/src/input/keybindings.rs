@@ -8,6 +8,55 @@ struct ModifierBlockers {
     non_shift_entities: Vec<Entity>,
 }
 
+impl ModifierBlockers {
+    fn new(shift_entity: Entity, primary_entity: Entity, alt_entity: Entity) -> Self {
+        Self {
+            all_entities:       vec![shift_entity, primary_entity, alt_entity],
+            non_shift_entities: vec![primary_entity, alt_entity],
+        }
+    }
+
+    fn add_non_shift_modifier(&mut self, entity: Entity) {
+        self.all_entities.push(entity);
+        self.non_shift_entities.push(entity);
+    }
+
+    fn all_entities(&self) -> Vec<Entity> { self.all_entities.clone() }
+
+    fn non_shift_entities(&self) -> Vec<Entity> { self.non_shift_entities.clone() }
+}
+
+/// Non-consuming modifier action for `Cmd` (macOS) / `Ctrl` (other platforms).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct PrimaryShortcutsModifier;
+
+/// Non-consuming modifier action for `Option` (macOS) / `Alt` (other platforms).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct AltModifier;
+
+/// Non-consuming modifier action for `Ctrl` on macOS (distinct from `Cmd`).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct ControlModifier;
+
+#[derive(Clone, Copy)]
+enum PlatformShortcutMode {
+    Command,
+    Control,
+}
+
+impl PlatformShortcutMode {
+    const fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Command
+        } else {
+            Self::Control
+        }
+    }
+}
+
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
 ///
 /// Spawns modifier actions and provides methods to bind keys with automatic
@@ -170,54 +219,5 @@ impl<C: Component> Keybindings<C> {
             PlatformShortcutMode::Control => bindings![key_code.with_mod_keys(ModKeys::CONTROL)],
         };
         action_spawner.spawn((Action::<A>::new(), self.action_settings, platform_bindings));
-    }
-}
-
-impl ModifierBlockers {
-    fn new(shift_entity: Entity, primary_entity: Entity, alt_entity: Entity) -> Self {
-        Self {
-            all_entities:       vec![shift_entity, primary_entity, alt_entity],
-            non_shift_entities: vec![primary_entity, alt_entity],
-        }
-    }
-
-    fn add_non_shift_modifier(&mut self, entity: Entity) {
-        self.all_entities.push(entity);
-        self.non_shift_entities.push(entity);
-    }
-
-    fn all_entities(&self) -> Vec<Entity> { self.all_entities.clone() }
-
-    fn non_shift_entities(&self) -> Vec<Entity> { self.non_shift_entities.clone() }
-}
-
-/// Non-consuming modifier action for `Cmd` (macOS) / `Ctrl` (other platforms).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct PrimaryShortcutsModifier;
-
-/// Non-consuming modifier action for `Option` (macOS) / `Alt` (other platforms).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct AltModifier;
-
-/// Non-consuming modifier action for `Ctrl` on macOS (distinct from `Cmd`).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct ControlModifier;
-
-#[derive(Clone, Copy)]
-enum PlatformShortcutMode {
-    Command,
-    Control,
-}
-
-impl PlatformShortcutMode {
-    const fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Command
-        } else {
-            Self::Control
-        }
     }
 }
