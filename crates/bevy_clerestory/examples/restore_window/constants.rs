@@ -1,36 +1,28 @@
 use bevy::prelude::*;
 
-// colors
 pub(crate) const DEFAULT_COLOR: Color = Color::WHITE;
 pub(crate) const MISMATCH_COLOR: Color = Color::linear_rgb(1.0, 0.3, 0.3);
 pub(crate) const MISMATCH_WARN_COLOR: Color = Color::linear_rgb(1.0, 0.7, 0.2);
 
-// layout
 pub(crate) const COMPARISON_COLUMN_PADDING: usize = 2;
 pub(crate) const FONT_SIZE: f32 = 14.0;
 pub(crate) const LABEL_WIDTH: usize = 22;
 pub(crate) const MARGIN: Val = Val::Px(20.0);
 pub(crate) const MIN_COMPARISON_COLUMN_WIDTH: usize = 16;
 
-// monitor selection
 pub(crate) const PRIMARY_MONITOR_INDEX: usize = 0;
 
-// primary window
 pub(crate) const PRIMARY_WINDOW_TITLE: &str = "Window Restore - Primary Window";
 
-// secondary window
 pub(crate) const MANAGED_WINDOW_NAME_PREFIX: &str = "window-";
 pub(crate) const MANAGED_WINDOW_TITLE_PREFIX: &str = "Managed: ";
 pub(crate) const SECONDARY_WINDOW_HEIGHT: u32 = 400;
 pub(crate) const SECONDARY_WINDOW_WIDTH: u32 = 600;
 
-// state file
 pub(crate) const STATE_FILE: &str = "windows.ron";
 
-// test mode
 pub(crate) const TEST_MODE_ENVIRONMENT_VARIABLE: &str = "BWM_TEST_MODE";
 
-// text
 pub(crate) const ACTIVE_VIDEO_MODE_SUFFIX: &str = " <- active";
 pub(crate) const ACTUAL_COLUMN_TITLE: &str = "Actual";
 pub(crate) const AUTOMATIC_TEXT: &str = "Automatic";
@@ -72,7 +64,6 @@ pub(crate) const WAYLAND_PLATFORM_SUFFIX: &str = " (Wayland)";
 #[cfg(target_os = "linux")]
 pub(crate) const X11_PLATFORM_SUFFIX: &str = " (X11)";
 
-// video mode list
 /// When the selected video mode falls below the visible window, scroll down so
 /// the new selection lands at row 2 of the 5-row window (i.e.
 /// `selected - BACKWARD_SCROLL_OFFSET`). Mathematically:

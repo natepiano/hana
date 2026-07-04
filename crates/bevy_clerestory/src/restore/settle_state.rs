@@ -22,6 +22,15 @@ use crate::events::WindowRestoreMismatch;
 use crate::events::WindowRestored;
 use crate::monitors::CurrentMonitor;
 
+/// Snapshot of compared values for change detection between frames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+struct SettleSnapshot {
+    physical_position: Option<IVec2>,
+    physical_size:     UVec2,
+    window_mode:       WindowMode,
+    monitor:           usize,
+}
+
 /// Tracks the two-timer settling state after restore completes.
 #[derive(Debug, Clone, Reflect)]
 pub(crate) struct SettleState {
@@ -43,15 +52,6 @@ impl SettleState {
             last_snapshot:   None,
         }
     }
-}
-
-/// Snapshot of compared values for change detection between frames.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Reflect)]
-struct SettleSnapshot {
-    physical_position: Option<IVec2>,
-    physical_size:     UVec2,
-    window_mode:       WindowMode,
-    monitor:           usize,
 }
 
 /// Build a [`SettleSnapshot`] from the current window state, returning the snapshot

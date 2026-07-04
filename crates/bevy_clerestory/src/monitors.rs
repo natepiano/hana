@@ -150,12 +150,12 @@ impl Monitors {
         reason = "fail fast - no monitors means unrecoverable state"
     )]
     pub fn closest_to(&self, physical_x: i32, physical_y: i32) -> &MonitorInfo {
-        // Try exact match first
         if let Some(monitor) = self.at(physical_x, physical_y) {
             return monitor;
         }
 
-        // Find closest monitor by distance to bounding box
+        // `min_by_key` scores each `MonitorInfo` by squared distance to its
+        // physical bounds.
         self.list
             .iter()
             .min_by_key(|monitor| {

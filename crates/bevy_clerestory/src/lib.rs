@@ -228,7 +228,7 @@ impl Plugin for WindowManagerPluginCustomPath {
                 .run_if(|p: Res<Platform>| p.is_x11()),
         );
 
-        // Unified monitor detection + save window state
+        // `monitor::update_current_monitor` runs before persistence systems read `CurrentMonitor`.
         app.add_systems(
             Update,
             (

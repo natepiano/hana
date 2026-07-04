@@ -113,7 +113,7 @@ impl Platform {
     pub const fn should_hide_on_startup(self) -> bool {
         #[cfg(feature = "workaround-winit-4445")]
         {
-            // X11 needs visible window for frame extent query
+            // `Platform::X11` keeps the window visible so `_NET_FRAME_EXTENTS` can be queried.
             !matches!(self, Self::X11)
         }
         #[cfg(not(feature = "workaround-winit-4445"))]

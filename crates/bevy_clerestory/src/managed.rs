@@ -264,7 +264,7 @@ pub(crate) fn on_managed_window_load(
     };
     let name = &managed_window.name;
 
-    // Hide window during restore (on Linux X11 with frame extent compensation, don't hide)
+    // `Platform::should_hide_on_startup` keeps Linux X11 windows visible for frame extents.
     if let Ok(mut window) = windows.get_mut(entity)
         && platform.should_hide_on_startup()
     {

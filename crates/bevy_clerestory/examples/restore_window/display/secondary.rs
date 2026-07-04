@@ -20,8 +20,6 @@ use super::comparison::build_comparison_spans;
 #[derive(Component)]
 pub(crate) struct SecondaryDisplay(pub(crate) Entity);
 
-// --- Secondary Window Displays ---
-
 #[expect(
     clippy::too_many_arguments,
     reason = "Bevy system — each param is a distinct system resource"
@@ -75,7 +73,6 @@ pub(crate) fn update_secondary_displays(
         commands
             .entity(display_entity)
             .with_children(|child_spawner| {
-                // Window name + monitor header
                 let monitor_row = input::format_monitor_row(&current_monitor, &refresh_display);
                 add_span(
                     child_spawner,
@@ -84,7 +81,6 @@ pub(crate) fn update_secondary_displays(
                     DEFAULT_COLOR,
                 );
 
-                // Comparison table
                 build_comparison_spans(
                     child_spawner,
                     cached_restored_state,
@@ -94,7 +90,6 @@ pub(crate) fn update_secondary_displays(
                     &text_font,
                 );
 
-                // Video modes
                 add_span(
                     child_spawner,
                     &text_font,
@@ -102,7 +97,6 @@ pub(crate) fn update_secondary_displays(
                     DEFAULT_COLOR,
                 );
 
-                // Controls
                 add_span(
                     child_spawner,
                     &text_font,

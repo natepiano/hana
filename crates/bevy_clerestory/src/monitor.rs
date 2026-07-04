@@ -59,7 +59,6 @@ pub(crate) fn update_current_monitor(
             _ => (*monitors.first(), MONITOR_SOURCE_FALLBACK),
         };
 
-        // Compute effective window mode.
         let effective_window_mode = compute_effective_window_mode(window, &monitor_info, &monitors);
 
         let new_current = CurrentMonitor {
@@ -67,7 +66,7 @@ pub(crate) fn update_current_monitor(
             effective_window_mode,
         };
 
-        // Only insert if changed to avoid unnecessary change detection triggers
+        // `changed` prevents redundant `CurrentMonitor` inserts and Bevy change detection.
         let changed = existing.is_none_or(|current_monitor| {
             current_monitor.monitor_info.index != new_current.monitor_info.index
                 || current_monitor.effective_window_mode != new_current.effective_window_mode
@@ -120,22 +119,23 @@ fn compute_effective_window_mode(
     monitor_info: &MonitorInfo,
     monitors: &Monitors,
 ) -> WindowMode {
-    // Trust exclusive fullscreen - OS manages this mode
+    // `WindowMode::Fullscreen` stays authoritative because the OS controls exclusive fullscreen.
     if matches!(window.mode, WindowMode::Fullscreen(_, _)) {
         return window.mode;
     }
 
-    // Can't determine effective mode without monitors
+    // An empty `Monitors` resource leaves no `MonitorInfo` for fullscreen inference.
     if monitors.is_empty() {
         return window.mode;
     }
 
-    // On Wayland, position is unavailable so we can only trust self.mode
+    // `WindowPosition::Automatic` leaves no physical position, so `window.mode` stays
+    // authoritative.
     let WindowPosition::At(physical_position) = window.position else {
         return window.mode;
     };
 
-    // Check if window spans full width and reaches bottom of monitor
+    // `full_width`, `left_aligned`, and `reaches_bottom` model macOS fullscreen detection.
     let full_width = window.physical_width() == monitor_info.physical_size.x;
     let left_aligned = physical_position.x == monitor_info.physical_position.x;
     let reaches_bottom = physical_position.y + window.physical_height().to_i32()
@@ -217,7 +217,8 @@ mod tests {
     fn effective_window_mode_windowed_when_not_left_aligned() {
         let monitor_info = monitor_0();
         let monitors = monitors_with(monitor_info);
-        // Full width + reaches bottom, but offset from left edge
+        // This `window_at` value sets `full_width` and `reaches_bottom` while
+        // keeping `left_aligned` false.
         let window = window_at(
             IVec2::new(1, 0),
             monitor_info.physical_size.x,
@@ -253,7 +254,7 @@ mod tests {
         window
             .resolution
             .set_physical_resolution(monitor_info.physical_size.x, monitor_info.physical_size.y);
-        // position is Automatic (no position available, like Wayland)
+        // `WindowPosition::Automatic` leaves no position for `compute_effective_window_mode`.
 
         let effective_window_mode =
             compute_effective_window_mode(&window, &monitor_info, &monitors);

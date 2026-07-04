@@ -195,7 +195,7 @@ fn persist_remember_all(
 
     let mut states = load::load_all_states(&config.path).unwrap_or_default();
 
-    // Update with current window states from cache
+    // `WindowStateCache` entries refresh the persisted `WindowState` map.
     for (entity, entry) in &cached.0 {
         let window_key = if primary_query.get(*entity).is_ok() {
             WindowKey::Primary
@@ -271,7 +271,7 @@ pub(crate) fn save_window_state(
     mut cached: Local<WindowStateCache>,
     _: NonSendMarker,
 ) {
-    // Can't save state if no monitors exist (e.g., laptop lid closed).
+    // An empty `Monitors` resource leaves no monitor index or scale for `WindowState`.
     if monitors.is_empty() {
         return;
     }
@@ -279,7 +279,7 @@ pub(crate) fn save_window_state(
     let mut state_write = StateWrite::NotNeeded;
 
     for (window_entity, window, existing_monitor, managed) in &windows {
-        // Determine the key for this window in the state file
+        // `WindowKey` selects the primary slot or a `ManagedWindow::name` entry.
         let window_key = if primary_query.get(window_entity).is_ok() {
             WindowKey::Primary
         } else if let Some(managed_window) = managed {
@@ -288,7 +288,7 @@ pub(crate) fn save_window_state(
             continue;
         };
 
-        // Get window position for saving state.
+        // `get_window_position` returns the physical position saved in `WindowState`.
         let physical_position = get_window_position(window_entity, window);
 
         let physical_width = window.resolution.physical_width();
@@ -297,8 +297,7 @@ pub(crate) fn save_window_state(
         let logical_height = window.resolution.height().to_u32();
         let resolution_scale = window.resolution.scale_factor();
 
-        // Read monitor and effective mode from `CurrentMonitor` (maintained by
-        // `update_current_monitor`)
+        // `CurrentMonitor` from `update_current_monitor` supplies monitor scale and saved mode.
         let (monitor_index, monitor_scale) = existing_monitor.map_or_else(
             || {
                 let monitor_info = monitors.first();
@@ -313,7 +312,7 @@ pub(crate) fn save_window_state(
 
         let cached_window_state = cached.0.entry(window_entity).or_default();
 
-        // Only save if position, size, or mode actually changed
+        // `WindowStateCache` suppresses writes until position, size, mode, or monitor changes.
         let position_changed = cached_window_state.physical_position != physical_position;
         let size_changed =
             cached_window_state.logical_size != UVec2::new(logical_width, logical_height);
@@ -328,7 +327,7 @@ pub(crate) fn save_window_state(
             "[save_window_state] [{window_key}] SAVE DETAIL: position={physical_position:?} physical={physical_width}x{physical_height} logical={logical_width}x{logical_height} resolution_scale={resolution_scale} monitor={monitor_index} mode={saved_window_mode:?}",
         );
 
-        // Log monitor transitions with detailed info
+        // When `monitor_changed`, log the cached monitor index and scale transition.
         if monitor_changed {
             let previous_scale = cached_window_state
                 .monitor
@@ -340,7 +339,7 @@ pub(crate) fn save_window_state(
             );
         }
 
-        // Update cache
+        // `WindowStateCache` stores the values just written to `WindowState`.
         cached_window_state.physical_position = physical_position;
         cached_window_state.logical_size = UVec2::new(logical_width, logical_height);
         cached_window_state.saved_window_mode = Some(saved_window_mode.clone());
@@ -359,7 +358,7 @@ pub(crate) fn save_window_state(
 
     match *managed_window_persistence {
         ManagedWindowPersistence::ActiveOnly => {
-            // Build state from all active windows and write in one shot
+            // `save_active_window_state` rebuilds persisted state from active windows.
             save_active_window_state(
                 &restore_window_config,
                 &monitors,

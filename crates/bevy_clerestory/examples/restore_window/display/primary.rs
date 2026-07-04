@@ -26,8 +26,6 @@ use super::comparison::build_comparison_spans;
 #[derive(Component)]
 pub(crate) struct PrimaryDisplay;
 
-// --- Primary Window Display ---
-
 #[expect(
     clippy::too_many_arguments,
     reason = "Bevy system — each param is a distinct system resource"
@@ -73,7 +71,6 @@ pub(crate) fn update_primary_display(
     commands
         .entity(display_entity)
         .with_children(|child_spawner| {
-            // Monitor header
             let monitor_row = input::format_monitor_row(current_monitor, &refresh_display);
             add_span(
                 child_spawner,
@@ -82,7 +79,6 @@ pub(crate) fn update_primary_display(
                 DEFAULT_COLOR,
             );
 
-            // Comparison table
             build_comparison_spans(
                 child_spawner,
                 cached_restored_state,
@@ -92,7 +88,6 @@ pub(crate) fn update_primary_display(
                 &text_font,
             );
 
-            // Video modes
             add_span(
                 child_spawner,
                 &text_font,
@@ -100,7 +95,6 @@ pub(crate) fn update_primary_display(
                 DEFAULT_COLOR,
             );
 
-            // Controls
             add_span(
                 child_spawner,
                 &text_font,
@@ -117,7 +111,6 @@ pub(crate) fn update_primary_display(
                 DEFAULT_COLOR,
             );
 
-            // Managed windows list
             let mut managed_lines = Vec::new();
             for (managed_window, managed, current_monitor) in &managed_query {
                 let monitor_info = current_monitor.map_or_else(

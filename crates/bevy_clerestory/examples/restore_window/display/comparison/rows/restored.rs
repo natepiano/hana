@@ -367,7 +367,7 @@ fn add_standard_comparison_row(
         MISMATCH_COLOR
     };
 
-    // Label + file value (always white)
+    // `comparison_row.label` and `comparison_row.restored` use `DEFAULT_COLOR`.
     add_span(
         child_spawner,
         text_font,
@@ -378,7 +378,8 @@ fn add_standard_comparison_row(
         ),
         DEFAULT_COLOR,
     );
-    // Current value (colored)
+    // `comparison_row.current` uses `MISMATCH_COLOR` when it differs from
+    // `comparison_row.restored`.
     add_span(
         child_spawner,
         text_font,
@@ -407,7 +408,7 @@ fn add_extended_comparison_row(
         MISMATCH_WARN_COLOR
     };
 
-    // Label + restored value (always white)
+    // `comparison_row.label` and `comparison_row.restored` use `DEFAULT_COLOR`.
     add_span(
         child_spawner,
         text_font,
@@ -418,14 +419,15 @@ fn add_extended_comparison_row(
         ),
         DEFAULT_COLOR,
     );
-    // Current value
+    // `comparison_row.current` uses `MISMATCH_COLOR` when it differs from
+    // `comparison_row.restored`.
     add_span(
         child_spawner,
         text_font,
         &format!("{current:<column_width$}", current = comparison_row.current),
         current_color,
     );
-    // Expected value (always white)
+    // `comparison_mismatch.expected` uses `DEFAULT_COLOR`.
     add_span(
         child_spawner,
         text_font,
@@ -435,7 +437,7 @@ fn add_extended_comparison_row(
         ),
         DEFAULT_COLOR,
     );
-    // Actual value (warning color if mismatch)
+    // `comparison_mismatch.actual` uses `MISMATCH_WARN_COLOR` on mismatch.
     add_span(
         child_spawner,
         text_font,
