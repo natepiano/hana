@@ -1,435 +1,367 @@
-# Headless Widgets Adhoc Review
-
-Date: 2026-06-16
-Source: High-level headless widget architecture discussion for `bevy_diegetic`.
-
-Related plan: [`surface-panels.md`](./surface-panels.md) maps panels (and the
-widgets on them) onto curved parametric surfaces. Widgets stay curvature-blind —
-the surface remap is confined to the panel boundary — but two touchpoints here
-must be authored surface-ready to avoid re-churn: the anchoring generalization
-(Decision 20, Phase 0) and widget picking geometry (Decision 3). Both are
-annotated below.
-
-## Ordered Concepts
-
-1. Headless widget boundary
-   - Widgets own semantic behavior, state transitions, and typed events.
-   - Visuals remain ordinary diegetic layout and render primitives.
-   - No new renderer or Bevy UI dependency is introduced for widgets.
-
-2. Widget identity and layout records
-   - Add panel-local `WidgetId` values for semantic identity.
-   - Reject duplicate widget ids within one panel through the panel builder's `Result<_, PanelBuildError>` path.
-   - Treat layout-derived widget records as reification inputs that create/update widget child entities.
-
-3. Widget entities, relationships, and picking
-   - Materialize widgets as panel child entities, analogous to panel text runs.
-   - Add a `WidgetOf` / `PanelWidgets` relationship index.
-   - Emit picking geometry for widget entities so Bevy picking can target widgets directly.
-
-4. Typed widget event contract
-   - Emit widget-specific events rather than exposing raw pointer handling.
-   - Keep app state authoritative; widget events request changes, app code applies them.
-   - Target the materialized widget entity and include the panel-local widget id.
-   - Resolve the owning panel through the widget relationship rather than duplicating panel ownership on widget components.
-   - Expose semantic activation/change inputs so keyboard shortcuts and `bevy_enhanced_input` can wire into widgets.
-
-5. `ButtonPressed`
-   - Fired when an interactive button accepts a press/capture gesture.
-   - Targets the widget entity and carries its `WidgetId`.
-   - Used for behavior observers that care about press-down timing, not ordinary activation.
-
-6. `ButtonReleased`
-   - Fired when a previously pressed button receives a valid release.
-   - Targets the widget entity and carries its `WidgetId`.
-   - Describes release timing separately from whether the button activates.
-
-7. `ButtonClicked`
-   - Fired for the button's primary activation.
-   - Covers pointer click and semantic activation from keyboard/action routing.
-   - No double-click button event in the first API.
-
-8. `ButtonCanceled`
-   - Fired when a press/capture sequence is abandoned before activation.
-   - Covers pointer leaving/capture loss, disabled transitions, or explicit cancellation.
-   - Lets consumers clean up press-start side effects when no click occurs.
-
-9. Button hover state
-   - Track whether pointer hover currently targets the button.
-   - Use hover for visual styling and tooltip eligibility.
-   - Do not add hover enter/exit events unless review decides consumers need them.
-
-10. Button focus state
-   - Track keyboard/action focus separately from pointer hover.
-   - Use focus for visual styling, tooltip eligibility, and semantic activation routing.
-   - Define how focus is gained, lost, and transferred between widgets.
-   - Provide keyboard-only traversal and activation hooks across all widgets.
-   - Design with accessibility (`a11y`) and Bevy's accessibility stack in mind.
-   - Mirror `bevy_lagrange` input patterns: semantic actions, binding/control summaries, and a thin enhanced-input adapter.
-
-11. Button disabled handling
-   - Read resolved `WidgetInteractivity`.
-   - Prevent pointer and semantic activation while disabled.
-   - Cancel an active press if the button becomes disabled while pressed.
-   - Surface disabled as visual state for presets/custom styling.
-
-12. Button pointer activation
-   - Use Bevy picking on the materialized widget entity.
-   - Emit `ButtonPressed`, `ButtonReleased`, `ButtonClicked`, and `ButtonCanceled` according to the lifecycle invariants.
-   - Capture the pointer during press so release/cancel is deterministic.
-
-13. Button semantic activation
-   - Expose a non-pointer activation path for keyboard shortcuts and action systems.
-   - Align with `bevy_lagrange`-style semantic action and control-summary patterns.
-   - Emit `ButtonClicked` without fabricating pointer press/release events.
-
-14. Slider behavior slice
-   - Implement grab, drag, value change, release, cancel, disabled, and optional snapping.
-   - Map panel-local pointer position to a normalized value, then to the slider range.
-   - Use an explicit headless direction such as left-to-right, right-to-left, bottom-to-top, or top-to-bottom.
-   - Include bottom-to-top for fader-style controls such as mixing panels.
-
-15. Preset and custom styling boundary
-   - Built-in presets are helper builders that generate `LayoutTree` fragments.
-   - Users can build their own presets from the same headless state and events.
-   - Presets should read widget state and produce normal `El`, `TextStyle`, `PanelDraw`, and `DrawZIndex` output.
-   - Preset style slots should be material-first. Plain colors and images are convenience inputs that resolve to `StandardMaterial`; custom animation/shader cases can use custom material handles or `ExtendedMaterial`.
-   - Presets should allow richer content such as text, images/icons, custom materials, and animation hooks.
-   - Avoid vague shared visual nouns. Prefer widget-specific preset structs such as `ButtonPreset`/`ButtonStyle` and `SliderPreset`/`SliderStyle`, with shared internal helpers only where they remove real duplication.
-
-16. Widget interactivity and disabled resolution
-   - Design a concrete `WidgetInteractivity` model.
-   - Use enums instead of booleans for interaction state.
-   - Split inherited/specification from the concrete enabled/disabled state.
-   - Resolve global, panel, layout subtree, and individual-widget disabled/interactive overrides.
-   - Do not carry a disabled reason in the first API.
-   - Make disabled changes visual-only by default, with no layout recompute unless a preset opts into different content or dimensions.
-
-17. Tooltips
-   - Treat tooltips as first-class headless widget affordances.
-   - Model a tooltip as a normal `DiegeticPanel`/panel template that is shown for a target, not as a separate placement/layout primitive.
-   - Do not add a separate `TooltipOf` / `TooltipsFor` relationship in the first API. `AnchoredTo` already identifies the target entity, and `Tooltip` identifies the anchored panel as a tooltip.
-   - Generalize the existing panel-specific anchoring layer (`AnchoredToPanel`, `PanelsAnchoredHere`, `PanelAnchorGeometryParam`) so a tooltip panel can anchor to any target entity that exposes anchor geometry, not only another panel.
-   - For panel targets, attach `Tooltip` and generic `AnchoredTo` to the tooltip panel.
-   - For widget targets, reuse the same `Anchor` and `AnchorOffset` vocabulary against materialized widget geometry through the generic anchoring resolver.
-   - Do not require full recursive panel-in-panel composition for first-pass tooltips. Treat embedded/nested panels as a plausible follow-up where a panel-backed element is measured like an element and exposes anchor geometry.
-   - Concrete tooltip anchoring path:
-     - A tooltip is a normal `DiegeticPanel` entity.
-     - The tooltip panel carries `Tooltip` for show/hide policy.
-     - The tooltip panel carries `AnchoredTo` for both target association and spatial placement.
-     - `AnchorGeometryParam::get(target)` resolves target anchor geometry from either a panel or materialized widget.
-     - The generic anchoring resolver places the tooltip panel by pinning its source anchor to the target anchor plus `AnchorOffset`.
-   - Do not bake shortcut/keybinding semantics into the headless tooltip API. Shortcut labels are normal tooltip panel content supplied by the client or a later helper.
-   - Keep the first tooltip type surface small: `Tooltip` should assume hover-or-focus behavior and carry only show/hide delays plus `TooltipDisabledPolicy`.
-   - Do not add a public `TooltipTrigger` enum or separate `TooltipTiming` struct in the first API. Special trigger policies can be added later with extra marker components or helper systems if real use cases appear.
-   - Keep tooltip runtime state private and minimal. Use a private `TooltipTimer` component for delayed show/hide timing; visibility should be represented by component presence on the tooltip panel entity, not by a `visible: bool` field.
-   - Tooltip timer behavior: while hidden, `TooltipTimer` waits to show and is removed if the target stops hovering/focusing; while visible, `TooltipTimer` waits to hide after the configured duration, and the tooltip is also hidden immediately if the target stops hovering/focusing.
-   - Provide authoring helpers that build the same runtime components. Widget builders should accept either a prebuilt tooltip panel or a tooltip layout closure, with defaults for `show_after`, `hide_after`, `disabled_policy`, anchors, and offset.
-   - Do not promise a bare `.tooltip(|b| { ... })` API unless a prototype proves closure inference works without annotating the builder parameter. The fallback ergonomic shape is `.tooltip(TooltipPanel::layout(|b| { ... }))` or a separate `.tooltip_layout(|b| { ... })` method.
-   - Reuse the same tooltip builder machinery for standalone tooltip creation and widget-attached tooltip authoring, so presets and custom widgets both end in `DiegeticPanel + Tooltip + AnchoredTo`.
-   - Support rich tooltip panels: text, dividers, secondary metadata, images/icons, custom materials, and multiple text styles.
-   - Keep overflow avoidance as optional presentation helper behavior, not as a first-pass headless `fit` concept. If added, it should adjust anchors/offsets within the existing anchor model.
-   - Support tooltips authored in layout, plus world-space and screen-space tooltip panels.
-
-18. Slider overlay preset
-   - Use `El::overlay()` for the default slider preset.
-   - Layer track, fill, thumb, and optional labels in one shared content rectangle.
-   - Use `DrawZIndex` for thumb-over-track ordering.
-
-19. Module structure and exports
-   - Add a private `widgets` module next to `ime`.
-   - Keep widget headless APIs in their own modules: `button.rs`, `slider.rs`, and tooltip modules.
-   - Keep relationship, reification, interactivity, picking geometry, and preset support as shared private modules.
-   - Re-export curated public types from `lib.rs`, not the whole implementation module.
-
-20. Rollout and tests
-    - Phase 0: Rename and generalize anchoring before widget-specific work.
-      - Rename the panel-specific anchoring relationship names to generic names, such as `AnchoredToPanel` -> `AnchoredTo` and `PanelsAnchoredHere` -> `AnchoredHere`.
-      - Rename anchor geometry access from panel-specific names to generic names, such as `PanelAnchorGeometryParam` -> `AnchorGeometryParam`.
-      - Rename other public anchor geometry types only where they become generic in the same pass, such as `PanelAnchorOffset` -> `AnchorOffset`, while keeping behavior unchanged.
-      - Preserve the current panel-to-panel behavior while making the target side generic enough to resolve panel and widget anchor geometry.
-      - Rename entity-creation-from-computed-output terminology from `reconcile`/`materialize` to `reify` where the concept is shared. Existing panel text `reconcile_panel_text_children` can become `reify_text_entities`; widget entity creation can live in `widgets/reify.rs`.
-    - Phase 1: Build widget identity, widget relationships, reification, and picking geometry.
-    - Phase 2: Add button behavior and a simple preset.
-    - Phase 3: Add slider behavior and the overlay preset.
-    - Phase 4: Add tooltip behavior and one default tooltip panel presentation.
-    - Phase 5: Stop and review how to demonstrate the widget system.
-      - Decide with the project owner which existing examples should change and which new examples should be added.
-      - Use the demonstration plan to prove widgets, tooltips, focus, disabled state, sliders, buttons, panel ordering, and existing IME/text input can coexist.
-    - Cover headless behavior with `HeadlessLayoutPlugin`/minimal app tests and examples.
-
-## Decisions
-
-Decisions from the adhoc review will be recorded here.
+# Headless Widgets
+
+> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Adds headless widgets (buttons, sliders, tooltips, focus, interactivity) to `bevy_diegetic`: widgets own semantic behavior and typed events, visuals stay ordinary layout primitives, widgets materialize as panel child entities targeted by Bevy picking, and anchoring comes from `hana_valence`.
+
+## Delegation Context
+
+- **Project** — `bevy_diegetic` (workspace member at `crates/bevy_diegetic`). Diegetic UI layout engine for Bevy — in-world panels driven by a Clay-inspired layout algorithm. This plan adds a headless `widgets` module that materializes widgets as panel child entities.
+- **Stack** — Rust (edition 2024). Bevy `0.19.0` (workspace pin, `crates/bevy_diegetic/Cargo.toml:14`). `bevy_picking` + `mesh_picking` features already enabled (reuse `bevy_picking::Hovered`/`PickingInteraction`; custom picking backend; no bevy_ui). `bevy_enhanced_input` `0.26.0` at workspace level for semantic-action adapters. `hana_valence` is a workspace path dep (`Cargo.toml:43`).
+- **Layout** (only phase-touched paths):
+  - `crates/bevy_diegetic/src/widgets/` — NEW module: `mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `id.rs`, `relationship.rs`, `interactivity.rs`, `focus.rs`, `picking.rs`, `reify.rs`, `presets/` (`mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `style.rs`).
+  - `crates/bevy_diegetic/src/ime/` — `activation.rs`, `field.rs`, `ids.rs`, `mod.rs` (`ImePlugin`).
+  - `crates/bevy_diegetic/src/panel/` — `builder.rs`, `anchoring.rs`, `anchor_geometry.rs`, `diegetic_panel.rs`, `world_anchoring.rs`, `attachment_resolver.rs`, `perf.rs`.
+  - `crates/bevy_diegetic/src/render/panel_text/` — `reconcile.rs`, `relationship.rs`, `mod.rs`.
+  - `crates/bevy_diegetic/src/screen_space/anchoring/` — `candidate.rs`, `placement.rs`, `projection.rs`, `rect.rs`, `resolve.rs`, `window.rs`, `mod.rs`.
+  - `crates/bevy_diegetic/src/cascade/` — `attributes.rs`, `resolved.rs`, `cascade_set.rs`, `plugin.rs`, `mod.rs`.
+  - `crates/bevy_diegetic/src/lib.rs` — curated public re-exports.
+- **Key files:**
+  - `src/panel/builder.rs` — panel builder; `PanelBuildError` (`:45`), `DuplicateElementId(PanelElementId)` (`:51`), `build()` calls `tree.duplicate_named_element_id()` (`:680`). Widget ids reuse this exact validation path.
+  - `src/render/panel_text/reconcile.rs` — text reify: `reconcile_panel_text_children` (rename target), `update_reused_panel_text_child` (`:419`, the reuse-on-diff pattern widget reify mirrors).
+  - `src/render/panel_text/relationship.rs` — `TextRunOf` / `PanelTextRuns` (template for `WidgetOf`/`PanelWidgets`; no `linked_spawn`).
+  - `src/render/panel_text/mod.rs` — text-child ordering in `PanelChildSystems::Build` (`:104`).
+  - `src/ime/activation.rs` — IME double-click activation observer: `On<Pointer<Click>>` gated `click.count < 2` (`:28`); calls `computed.field_at_local_position(panel_local)` (`:39`).
+  - `src/panel/diegetic_panel.rs` — `field_at_local_position(&self, panel_local: Vec2) -> Option<&PanelFieldRecord>` (`:1591`); panel-local record-lookup pattern for the picking backend.
+  - `src/ime/ids.rs` — id types; `PanelElementId::auto` (`:64`). Widget ids land in this element-id namespace; no new `WidgetId` newtype.
+  - `src/ime/mod.rs` — `ImePlugin` (`pub(crate)` `:70`, `impl Plugin` `:89`); mirror for `WidgetsPlugin`.
+  - `src/cascade/mod.rs` — `Override<A>`, `Resolved<A>`, `resolve_walk` parent-walk, most-specific-wins (`:43`, `:75`, `:95`).
+  - `src/cascade/attributes.rs`, `src/cascade/resolved.rs` — attribute defs + `Resolved<A>` cache.
+  - `src/panel/anchor_geometry.rs` — current diegetic geometry provider: `PanelAnchorGeometryParam` (`:34`), `ResolvedPanelAnchorGeometry` with `from_screen_panel`/`from_world_panel` (`:67`, `:79`). The `ResolvedAnchorGeometry` widgets publish is the `hana_valence` contract component (see `../hana_valence/initialize.md`).
+  - `src/panel/world_anchoring.rs` + `src/panel/attachment_resolver.rs` — panel anchoring bridge keyed on `AnchoredToPanel` (`AnchoredTo`/`AnchoredHere` are the hana_valence successors).
+  - `src/screen_space/anchoring/candidate.rs` — screen placer builds candidate rects from panels only today; Phase 11 teaches it widget targets. Ordered `.after(PanelChildSystems::Build)`.
+  - `src/panel/perf.rs` — `DiegeticPerfStats` (`:45`), `pub reconcile_ms: f32` (`:54`, rename target), `DIAG_PANEL_RECONCILE_MS` (`:258`).
+  - `src/render/mod.rs` — `PanelChildSystems` set enum (`:128`); `TextRunOf`/`PanelTextRuns` re-exports.
+  - `src/lib.rs` — curated re-exports (`PanelBuildError` `:255`); widget public types re-export here.
+- **Build:** `cargo build && cargo +nightly fmt` after changes.
+- **Test:** `cargo nextest run` (never `cargo test`).
+- **Lint:** the `clippy` skill. Workspace lints are strict: `all`/`cargo`/`nursery`/`pedantic` denied, `unwrap_used`/`expect_used`/`panic`/`unreachable` denied, `missing_docs = "deny"`, `self_named_module_files` denied (use `module/mod.rs` directory form).
+- **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_hana`
+- **Invariants:**
+  - **Valence gate:** `hana_valence` exists at `crates/hana_valence`, but Phases 1+ are gated on its milestones 1 and 4 — skeleton + resolver extracted, panel bridge and screen-placer re-pointed — per `../hana_valence/initialize.md`. The gate excludes M4's `panel_anchoring` example port (that transitively needs M2). hana_valence types stay out of diegetic's public signatures; diegetic authoring helpers insert `hana_valence::AnchoredTo` internally.
+  - No bevy_ui / bevy_a11y dependency. `WidgetDisabled`, `WidgetFocused`, `ButtonPress` stay bespoke; only already-present deps may be reused (`bevy_picking::Hovered`, `bevy_enhanced_input`).
+  - Widgets materialize as panel child entities under `ChildOf(panel)`; the `WidgetOf`/`PanelWidgets` relationship is a traversal index only, no `linked_spawn` — `ChildOf` owns despawn.
+  - Behavior modules never construct layout/render primitives (`El`, `LayoutTree`, `PanelDraw`, materials, `TextStyle`, `DrawZIndex`). Presets depend on behavior, never the reverse.
+  - No relayout on hover/press/focus/disabled flips: pure-visual component-level writes only; presets must not regenerate their `LayoutTree` fragment on state change (that trips `Changed<DiegeticPanel>` and forces a full relayout).
+  - Change-gated systems, never unconditional per-frame walks: reify gated on `Changed<ComputedDiegeticPanel>` and reuses entities by id; interactivity resolver writes `WidgetDisabled` only on diff; anchor-geometry fill is lazy (`With<AnchoredHere>`-gated).
+  - Widget ids reuse `PanelElementId` and its `duplicate_named_element_id` → `DuplicateElementId` validation; event-emitting widgets require `Named` ids (auto ids reposition on structural edits and would fire spurious cancels).
+  - Cascade attributes use the existing `Override<A>`/`Resolved<A>`/`resolve_walk` convention, most-specific-wins.
+  - Widget events derive `EntityEvent` targeting the widget entity; the panel-local id is a payload convenience only, never the routing key. Owning panel resolves through `WidgetOf`, never duplicated on components or events.
+  - Widget picking geometry stays in **panel-local space** (surface-panels coordination: the panel's single `PanelSurface::project()` converts world hits to panel-local at the panel boundary, so widget picking needs no curvature logic; never place widget picking geometry independently in world space).
+
+## Phases
+
+### Phase 0 — `reify` terminology rename  · status: todo
+
+#### Work Order
+
+**Goal:** Rename entity-creation-from-computed-output terminology from `reconcile`/`materialize` to `reify` everywhere the concept is shared.
+
+**Spec:**
+- Rename the system `reconcile_panel_text_children` → `reify_text_entities` in `src/render/panel_text/reconcile.rs`; rename the file to `reify.rs` and update `mod.rs` accordingly.
+- Rename `DiegeticPerfStats::reconcile_ms` → `reify_ms` (`src/panel/perf.rs:54`) — this field is crate-public, so update every reader. Rename the `DIAG_PANEL_RECONCILE_MS` diagnostic (`src/panel/perf.rs:258`) and its string path to the `reify` spelling.
+- Update doc comments and panel-text test names that use `reconcile` in this entity-creation sense. Do not touch unrelated uses of the word.
+
+**Files:**
+- `src/render/panel_text/reconcile.rs` → `reify.rs` — system + helper renames
+- `src/render/panel_text/mod.rs` — module decl, ordering references
+- `src/panel/perf.rs` — field + diagnostic rename
+- any test files referencing the renamed items (find with `rg -n "reconcile" crates/bevy_diegetic`)
+
+**Constraints from prior phases:** None. Note: this phase is independent of the valence gate; the gate blocks Phase 1, not this rename.
+
+**Acceptance gate:** `cargo build && cargo +nightly fmt` clean; `cargo nextest run` green; `rg -n "reconcile" crates/bevy_diegetic` shows no remaining uses in the entity-creation sense.
+
+### Phase 1 — Widget identity, authoring, relationship, reify, plugin skeleton  · status: todo
+
+#### Work Order
+
+**Goal:** Widgets can be authored in a panel's element tree and materialize as reused, relationship-indexed panel child entities.
+
+**Precondition (verify before starting):** hana_valence milestones 1 and 4 complete per the Valence gate invariant. If not landed, stop and report.
+
+**Spec:**
+- **Ids** (`widgets/id.rs`): widget ids ARE `PanelElementId` — no newtype. Event-emitting widgets require `Named` ids; reject auto/positional ids for widgets at build time. Duplicate rejection comes free: the widget id lands in the element-id namespace, so `duplicate_named_element_id` → `PanelBuildError::DuplicateElementId` already covers it. `id.rs` holds only validation helpers (e.g. the named-id requirement).
+- **Authoring** (`src/panel/builder.rs` + element config types): an `El` config method `.button(id, spec)` mirroring `.editable_field(id, spec)` — NOT an `El::button` constructor (collides with the layout-mode-constructor role of `row`/`column`/`overlay`) and NOT a `LayoutBuilder` leaf (leaves cannot hold children; a button wraps arbitrary child layout). The builder stores `common.widget: Option<WidgetSpec>` carried onto `Element` parallel to `editable`. `WidgetSpec` is a type-erased record with a kind (button first; slider added in Phase 8); it must be `Clone` + comparable for diffing.
+- **Relationship** (`widgets/relationship.rs`): `WidgetOf` / `PanelWidgets`, modeled on `TextRunOf`/`PanelTextRuns` (`src/render/panel_text/relationship.rs`). No `linked_spawn` — widgets sit under `ChildOf(panel)`, which owns despawn; the relationship is a traversal index only.
+- **Reify** (`widgets/reify.rs`): a change-gated system (`Changed<ComputedDiegeticPanel>`) walking the computed tree's widget records. Reuses existing widget entities keyed by widget id; writes components only on diff — mirror `update_reused_panel_text_child` (`src/render/panel_text/reconcile.rs:419`, post-Phase-0 name `reify.rs`). An in-flight press/drag/focus survives an unrelated layout recompute because the entity is reused, not recreated.
+- **Plugin** (`widgets/mod.rs`): `WidgetsPlugin` (`pub(crate)`, mirror `ImePlugin` at `src/ime/mod.rs:70`) + a `WidgetSystems` set. Reify runs in `PanelChildSystems::Build` after precompose caches, like text reify (`src/render/panel_text/mod.rs:104`). Register the plugin where `ImePlugin` is registered.
+- **Module structure:** private `widgets` module next to `ime`; curated public types re-exported from `lib.rs`/`widgets/mod.rs`, never the whole tree.
+
+**Files:**
+- `src/widgets/mod.rs`, `src/widgets/id.rs`, `src/widgets/relationship.rs`, `src/widgets/reify.rs` — new
+- `src/panel/builder.rs` — `.button(id, spec)` config method + `common.widget`
+- `src/lib.rs` — re-exports + plugin registration site
+- Read-only templates: `src/render/panel_text/relationship.rs`, `src/render/panel_text/reify.rs`, `src/ime/mod.rs`
+
+**Constraints from prior phases:** Phase 0 renamed `reconcile_panel_text_children` → `reify_text_entities` and `reconcile.rs` → `reify.rs`.
+
+**Acceptance gate:** `cargo nextest run` green with new tests: duplicate widget id rejected via `DuplicateElementId`; auto-id widget rejected; reify creates widget entities under `ChildOf(panel)` with `WidgetOf`/`PanelWidgets`; a structural edit keeps named widget entities (reuse, not respawn); panel despawn drops all widgets without double-despawn (analogous to `panel_despawn_drops_all_runs_without_double_despawn`).
+
+### Phase 2 — Interactivity resolution  · status: todo
+
+#### Work Order
 
-### 1. Headless widget boundary
+**Goal:** Enabled/disabled resolves across global, panel, layout-subtree, and widget levels into a `WidgetDisabled` marker on widget entities.
 
-Decision: Keep.
+**Spec:**
+- Authoring enum (`widgets/interactivity.rs`):
+  ```rust
+  pub enum WidgetInteractivity {
+      Inherited,
+      Enabled,
+      Disabled,
+  }
+  ```
+  (flattened — no nested `InteractionState`). Runtime shape: `pub struct WidgetDisabled;` — a presence marker queried via `Has<WidgetDisabled>`, mirroring Bevy's `InteractionDisabled` pattern but bespoke (bevy_ui is not a dependency). No `ResolvedWidgetInteractivity` type, no `enabled: bool` authoring, no disabled reason.
+- **Cascade:** implement on the existing `Override<A>`/`Resolved<A>`/`resolve_walk` convention (`src/cascade/mod.rs:43,75,95`): `WidgetInteractivity::Enabled/Disabled` becomes an `Override<WidgetInteractivity>`; precedence is most-specific-wins (first override starting at the entity itself). A child `Set(Enabled)` inside a disabled panel is enabled. Sticky-ancestor-disabled is rejected as inconsistent with every other diegetic cascade attribute.
+- **Layout-subtree level:** layout Els have no entity, so the subtree level is delivered by pre-seeding widget `Override`s during reify's tree-walk (the walk Phase 1 already performs): when an ancestor El sets disabled, reify stamps the widget entity's `Override<WidgetInteractivity>`.
+- **Resolver:** change-gated on any cascade source change; inserts/removes `WidgetDisabled` only on diff — never an unconditional per-frame walk (archetype-move churn across hundreds of widgets).
+- Disabled changes are visual/state-only by default: no layout recompute unless a preset explicitly opts into different content or dimensions.
 
-Widgets own semantic behavior, state transitions, and typed events. Visuals stay ordinary diegetic layout and render primitives. Enforce this by keeping widget behavior modules independent from preset/layout modules: behavior systems may read computed widget records and emit events, but they should not construct `El`, `LayoutTree`, `PanelDraw`, materials, text styles, or render commands.
+**Files:**
+- `src/widgets/interactivity.rs` — new
+- `src/widgets/reify.rs` — subtree pre-seed in the tree-walk
+- `src/cascade/attributes.rs` — attribute registration
+- `src/panel/builder.rs` — El-level interactivity authoring
+- Read-only: `src/cascade/mod.rs`, `src/cascade/resolved.rs`
 
-Feedback:
+**Constraints from prior phases:** Phase 1 built `widgets/reify.rs` (change-gated tree-walk, reuse by id), `WidgetSpec` on `common.widget`, and `WidgetsPlugin`/`WidgetSystems`.
 
-- Use Bevy's built-in picking for widget and panel pointer routing.
-- Keep each widget's public headless API in its widget module, such as `widgets/button.rs` or `widgets/slider.rs`.
-- Keep presets as optional pre-built layout helpers. Users must be able to attach a headless widget marker to custom layout and style it themselves.
-- Revisit naming for the `El` builder helper. `El::button(Button::new(...))` may be too redundant if common usage can be `El::button(...)` or `El::button_id(...)`.
-- Materialize widgets as panel child entities, analogous to panel text runs, so Bevy picking can target widget entities directly.
-- Use a relationship index for panel widgets, analogous to `TextRunOf` / `PanelTextRuns`.
-- Treat layout-derived widget records as reification inputs, not as the long-lived runtime API.
-- Add keyboard shortcut and action routing hooks. The core widget API should expose semantic activation/change events that can be wired from `bevy_enhanced_input`.
-- Disabled/enabled is likely cascade-like: global widgets, panel widgets, layout subtree, and individual widget overrides all need a coherent resolution rule.
-- `WidgetId` should be panel-local by default, matching panel element ids. Public events should target the widget entity and carry `WidgetId`; panel ownership comes from the `WidgetOf` relationship.
-- Widget picking should use Bevy picking on materialized widget entities. The picking geometry may start as the element bounds and later support shape-aware hit tests for rounded or custom shapes.
-- Disabled/interactivity should be treated as mostly visual-only. Changing disabled state should not normally force layout unless a preset explicitly chooses to render different content or dimensions.
-- Tooltips are required as a first-class widget affordance, not an afterthought.
-- Duplicate widget ids within one panel should be rejected, matching the existing duplicate element id build-time contract.
-- Initial widget scope is IME integration, buttons, sliders, and tooltips.
-- Tooltip content should allow optional shortcut display, without forcing `bevy_enhanced_input` as the only shortcut source.
-- Tooltip presentation must support layout-authored tooltips and spawned world/screen tooltip panels with correct ordering.
-- The shortcut/action design should follow the shape of `bevy_lagrange`: semantic action types, binding descriptions/control summaries, and a thin enhanced-input adapter rather than raw key handling embedded in widgets.
-- Panel-in-panel/subpanel composition is out of scope for this widget plan. Basic headless widgets should use element-tree authoring plus materialized widget entities.
+**Acceptance gate:** `cargo nextest run` green with new tests: most-specific-wins precedence (child `Enabled` inside disabled panel is enabled); layout-subtree disable pre-seeds widget overrides; resolver writes `WidgetDisabled` only on diff (assert no archetype move when state is unchanged across a relayout).
 
-Open questions:
+### Phase 3 — Widget `Transform`, single rect source, custom picking backend  · status: todo
 
-- Define panel dragging support as part of the library surface. A diegetic panel may contain draggable controls, but the app may also want to select and drag the whole panel.
-- Decide event precedence between panel dragging and child widget gestures. Candidate policy: child draggable widgets capture first, while panel dragging starts only from panel background or from explicitly marked drag regions.
-- Decide whether fallback panel drag from a button press that becomes a drag is allowed, configurable, or explicitly disabled.
-- Decide whether disabled/enabled uses the existing entity cascade, a layout-tree propagation pass, or a hybrid. Element-subtree disable implies layout-tree propagation unless layout elements become an entity hierarchy.
-- Define how tooltip authoring works for custom-styled headless widgets and preset widgets, and whether tooltip contents are plain text, a panel builder callback, or both.
-- Define the exact `WidgetInteractivity` type surface and override/resolution rules.
+#### Work Order
 
-### 2. Widget identity and layout records
+**Goal:** Widgets are first-class Bevy picking targets via a custom backend testing panel-local rects; pointer hover works on widget entities.
 
-Decision: Keep.
+**Spec:**
+- **Transform:** widgets carry a real panel-local `Transform` — translation = the widget's panel-local offset; `GlobalTransform` propagates via `ChildOf(panel)`. This is deliberately unlike text runs (which carry no `Transform`; their placement is baked into run records) — copying the text-run shape would break the picking backend and collapse anchor geometry to the panel origin.
+- **Single rect source:** reify writes each widget's panel-local rect exactly once. Picking bounds (this phase) and anchor-geometry points (Phase 4) are both projections of that one rect — no duplicate rect computation with divergent triggers.
+- **Picking backend** (`widgets/picking.rs`): a system in `PickingSystems::Backend` emitting `PointerHits` — bevy_picking backends only produce hits; all downstream events/observers work unchanged. Per pointer: raycast the panel surface once (reuse the existing panel interaction-mesh hit path), convert to panel-local coordinates (the `field_at_local_position` pattern, `src/panel/diegetic_panel.rs:1591`), test widget rects, emit hits targeting widget entities. Emit widget hits with depth slightly nearer than the panel so widgets are the deeper (first) pick target — this ordering is what widget-vs-IME observer precedence relies on in Phase 6. Panel-local space keeps curvature out: on curved panels `PanelSurface::project()` handles the world→panel-local mapping at the panel boundary (surface-panels invariant).
+- **Hover:** insert `bevy_picking::Hovered` on materialized widget entities (opt-in, immutable, change-detected — already a dependency; no bespoke `WidgetHovered`). `PickingInteraction` remains available for pressed/hovered/none styling.
 
-Use panel-local `WidgetId`s for stable semantic identity. Reject duplicate widget ids within one panel through `PanelBuildError`, matching the existing duplicate element id build-time contract. Treat layout-derived widget records as reification inputs only; runtime interaction happens through materialized widget child entities.
+**Files:**
+- `src/widgets/picking.rs` — new (backend)
+- `src/widgets/reify.rs` — Transform + rect writes, `Hovered` insertion
+- Read-only: `src/panel/diegetic_panel.rs`, the panel interaction-mesh picking path
 
-### 3. Widget entities, relationships, and picking
+**Constraints from prior phases:** Phase 1: widgets reified under `ChildOf(panel)`, reuse keyed by id, `WidgetSystems` set exists. Phase 2: `WidgetDisabled` marker exists (backend may still report hits on disabled widgets; behavior systems gate on the marker).
 
-Decision: Keep.
+**Acceptance gate:** `cargo nextest run` green with new tests: pointer over a widget rect yields `Pointer<Over>`/`Pointer<Out>` targeting the widget entity; the widget hit is deeper (preferred) over its panel; `Hovered` flips on hover enter/exit; an off-origin widget picks at its actual location (Transform correctness).
 
-Materialize widgets as child entities under their panel. Add a typed widget relationship index, analogous to `TextRunOf` / `PanelTextRuns`, so a panel can enumerate its widgets without scanning all children. Emit widget picking geometry on those widget entities, starting with resolved bounds and allowing custom shapes for compound widgets such as sliders.
+### Phase 4 — Lazy anchor-geometry publication  · status: todo
 
-Surface-panels coordination: keep widget picking geometry in **panel-local
-space**. The panel's single `PanelSurface::project()` (see `surface-panels.md`)
-converts a world-space pointer hit to panel-local coordinates at the panel
-boundary, before any widget bounds test, so widget picking needs no curvature
-logic and works unchanged on curved panels. Do not place widget picking meshes
-independently in world space.
+#### Work Order
 
-### 4. Typed widget event contract
+**Goal:** Entities can anchor to widgets: widget reify publishes `hana_valence` `ResolvedAnchorGeometry` on demand.
 
-Decision: Keep.
+**Spec:**
+- Publish `ResolvedAnchorGeometry` (the hana_valence contract component — the valence resolver reads a component, never a diegetic `SystemParam`) on widget entities **lazily**: only widgets `With<AnchoredHere>`, triggered on widget-layout change or `Added<AnchoredHere>`. Never eager on every widget (a resident ~9-entry map per untargeted widget, hundreds mostly never read), and never `Changed<Transform>`-gated refill (valence M34 forbids it).
+- Runs inside valence's `AnchorSystems::FillGeometry` set, before `Resolve`, so panel and widget geometry providers order cleanly ahead of the resolver — and in the same frame as reify so widget geometry is published before tooltip/anchor resolve.
+- Geometry points are projections of the Phase 3 single rect, expressed in the **widget-local frame** matching the panel provider's centered convention; the resolver composes `global_transform * geometry[anchor]`, which is why the widget's own `Transform` must carry its panel-local offset.
+- Publication lives in the same system that writes the rect (no divergent triggers).
+- **Diagnostics:** warn once per target-and-reason (not once-ever) when `AnchoredTo` targets an entity lacking `ResolvedAnchorGeometry` or a despawned target — parity with valence M16, sharing valence's dedup key convention so both crates deduplicate the same way.
 
-Widgets emit semantic events, not raw pointer events. Events target the materialized widget entity and carry the panel-local `WidgetId`; owning panel context is resolved through the `WidgetOf` relationship instead of duplicated on widget state or events. Widgets also expose semantic activation/change inputs so pointer picking, keyboard shortcuts, and enhanced-input actions can drive the same behavior path.
+**Files:**
+- `src/widgets/reify.rs` (or a sibling geometry system in `widgets/`) — publication + lazy gating
+- `src/widgets/mod.rs` — `AnchorSystems::FillGeometry` set membership
+- Read-only: `src/panel/anchor_geometry.rs` (centered-convention reference), `crates/hana_valence` (contract types), `../hana_valence/initialize.md`
 
-### 5. `ButtonPressed`
+**Constraints from prior phases:** Phase 3 built the single panel-local rect source and gave widgets a real panel-local `Transform` (`GlobalTransform` via `ChildOf`). Phase 1's reify is change-gated on `Changed<ComputedDiegeticPanel>`.
 
-Decision: Keep.
+**Acceptance gate:** `cargo nextest run` green with new tests: a panel `AnchoredTo` an **off-origin** widget's corner resolves to the correct world position (catches the Transform/centered-frame composition); geometry is absent on widgets nothing anchors to; geometry refills on widget-layout change; missing-geometry warning fires once per target-and-reason.
 
-Fire `ButtonPressed` when an interactive button accepts a press/capture gesture. This is a press-down event, not activation. It targets the widget entity and carries the panel-local `WidgetId`.
+### Phase 5 — Focus subsystem  · status: todo
 
-### 6. `ButtonReleased`
+#### Work Order
 
-Decision: Keep.
+**Goal:** Keyboard/action focus works across all widgets: tracking, traversal, semantic actions, and an enhanced-input adapter.
 
-Fire `ButtonReleased` when a previously pressed button receives a release. This is an interaction lifecycle event, not activation. A normal pointer click emits `ButtonPressed`, then `ButtonReleased`, then `ButtonClicked`. A release can happen without a click when activation is no longer valid, and keyboard/action activation can emit `ButtonClicked` without a pointer release.
+**Spec:**
+- `widgets/focus.rs`. Focus is a shared widget subsystem, not button-local. Track the focused widget entity separately from hover.
+- `WidgetFocusable` participation component, inserted on materialized widget entities by default; removing it opts a widget out of keyboard traversal without changing pointer picking.
+- `WidgetFocused` presence marker on the focused entity (bespoke — bevy_input_focus is not a dependency), so presets restyle via `Has<WidgetFocused>` component-flip, no relayout.
+- Focus gained by: pointer focus, keyboard traversal, semantic action routing, app request. Lost by: transfer, disable, despawn/removal, panel/window input-scope loss, explicit clear.
+- Semantic focus actions: next, previous, first, last, activate-focused, cancel-focused. Mirror `bevy_lagrange` input patterns: semantic action types, neutral control summaries, and a thin `bevy_enhanced_input` adapter — no raw key handling embedded in widgets.
+- Disabled widgets may retain or receive focus, but widget behavior ignores activation/change input while disabled (activation gating happens in behavior systems, not focus).
+- Design with accessibility in mind (structure the traversal so an a11y layer can attach later), without adding bevy_a11y.
 
-### 7. `ButtonClicked`
+**Files:**
+- `src/widgets/focus.rs` — new
+- `src/widgets/mod.rs` — systems in `WidgetSystems` after picking
+- `src/widgets/reify.rs` — default `WidgetFocusable` insertion
+- Read-only reference: `bevy_lagrange` semantic-action/control-summary patterns (`/Users/natemccoy/rust/bevy_hana/crates/bevy_lagrange`)
 
-Decision: Keep.
+**Constraints from prior phases:** Phase 2: `WidgetDisabled` presence marker. Phase 3: widgets are pick targets with `Hovered`. Activation of a focused button (emitting `ButtonClicked`) lands in Phase 6 — this phase only routes the activate-focused action to a seam Phase 6 fills.
 
-Fire `ButtonClicked` for the button's primary activation. Pointer clicks emit it after a valid press/release sequence. Keyboard shortcuts and enhanced-input semantic activation may emit it directly without pointer press/release. Do not add a double-click button event in the first API.
+**Acceptance gate:** `cargo nextest run` green with new tests: traversal next/previous/first/last order; focus loss on disable, despawn, and explicit clear; `WidgetFocusable` removal skips the widget in traversal; disabled widget retains focus but the activate-focused action is a no-op on it.
 
-### 8. `ButtonCanceled`
+### Phase 6 — Button behavior  · status: todo
 
-Decision: Keep.
+#### Work Order
 
-Fire `ButtonCanceled` when a press/capture sequence is abandoned before activation. The implementation must explicitly cover pointer capture loss, a button becoming disabled while pressed, widget despawn, panel/tree replacement removing the widget, and explicit cancellation. A pressed button must always resolve to exactly one terminal lifecycle path: `ButtonReleased` with optional `ButtonClicked`, or `ButtonCanceled`.
+**Goal:** Headless button with the four-event lifecycle, emulated pointer capture, semantic activation, and IME coexistence.
 
-Implementation invariant:
+**Spec:**
+- `widgets/button.rs`. Events derive `EntityEvent` targeting the widget entity, carrying the panel-local id as a payload convenience: `ButtonPressed`, `ButtonReleased`, `ButtonClicked`, `ButtonCanceled`. No double-click event.
+- **Lifecycle invariant** — a pressed button resolves to exactly one terminal path:
+  - `Pressed -> Released -> Clicked` for a valid pointer click.
+  - `Pressed -> Released` without `Clicked` for a valid release that no longer activates.
+  - `Pressed -> Canceled` for capture loss, disable-while-pressed, despawn/removal, panel/tree replacement, pointer cancellation/removal, or explicit cancel.
+  - Semantic activation emits `ButtonClicked` without entering the pointer lifecycle.
+- **Emulated capture** (bevy_picking has no capture API): press inserts `ButtonPress { pointer: PointerId }` on the widget. Facts the implementation relies on: there is **no drag threshold** — `DragStart` fires on the first non-zero move while pressed, so a still click never enters the drag lifecycle; a release over empty space emits **no** `Pointer<Release>` at all, making `DragEnd` (which keeps dispatching to the origin entity) the only terminal signal for drag-off-then-release-in-void; `Pointer<Release>`/`Pointer<Cancel>` observers must be **global** (`add_observer`), not entity observers, because those events target the currently-hovered entity. (`bevy_ui_widgets::Button` implements exactly this shape.)
+- **Choke point:** centralize terminal-event emission in one `On<Remove, ButtonPress>` observer that inspects the removal cause and emits exactly one terminal event — exactly-one-terminal-path is structural, not a convention across five observers.
+- **Disable-while-pressed:** inserting `WidgetDisabled` on a pressed button must actively remove the live `ButtonPress` with a Canceled cause — a flag alone lets the pending Release/DragEnd resolve as Clicked. Disabled buttons ignore pointer and semantic activation and cannot keep capture.
+- **Semantic activation:** a non-pointer path (keyboard shortcuts, action systems, the Phase 5 activate-focused seam) targeting the focused or an explicitly targeted button; emits `ButtonClicked` directly, no fabricated pointer events.
+- **IME precedence:** widget entities are the deeper pick target (Phase 3), so widget observers see pointer events first and call `propagate(false)` before panel-level IME double-click activation (`src/ime/activation.rs:28`). Schedule ordering does not govern observer trigger order — pick depth/bubbling does.
+- Hover state comes from `bevy_picking::Hovered` (Phase 3); no hover enter/exit events in the first API.
 
-- `Pressed -> Released -> Clicked` for a valid pointer click.
-- `Pressed -> Released` without `Clicked` for a valid release that no longer activates.
-- `Pressed -> Canceled` for capture loss, disable-while-pressed, despawn/removal, or explicit cancel.
-- Semantic keyboard/action activation can emit `ButtonClicked` without entering the pointer press lifecycle.
+**Files:**
+- `src/widgets/button.rs` — new
+- `src/widgets/mod.rs` — observers + systems registration
+- Read-only: `src/ime/activation.rs`, `/Users/natemccoy/rust/bevy/crates/bevy_ui_widgets/src/button.rs` (shape reference)
 
-### 9. Button hover state
+**Constraints from prior phases:** Phase 1: `WidgetSpec` button kind; reify reuse means in-flight `ButtonPress` survives unrelated relayouts. Phase 2: `WidgetDisabled` via `Has<>`. Phase 3: widget hits are deeper than panel hits; `Hovered` present. Phase 5: activate-focused action seam to wire to semantic activation.
 
-Decision: Keep.
+**Acceptance gate:** `cargo nextest run` green with new tests: press→release→click sequence; release-without-click; every cancel path — capture loss (drag off + release in void, via DragEnd), **disable-while-pressed asserts `ButtonCanceled` (not Released)**, widget despawn/removal, explicit cancel; semantic activation emits `ButtonClicked` alone; a button over an editable field consumes the click and IME double-click activation still works beside it (coexistence test).
 
-Track hover state from Bevy picking on the materialized widget entity. Hover feeds visual styling and tooltip eligibility. Hover enter/exit events are not part of the first public API unless a later review promotes them.
+### Phase 7 — `.on_click` sugar + ButtonPreset  · status: todo
 
-### 10. Button focus state
+#### Work Order
 
-Decision: Keep.
+**Goal:** Ergonomic click handling and a default button visual preset.
 
-Focus is a shared widget focus/navigation/a11y system, not button-local behavior. Track focused widget entity separately from hover. Focus can be gained by pointer focus, keyboard traversal, semantic action routing, or app request; lost by transfer, disable, despawn/removal, panel/window input-scope loss, or explicit clear. Provide semantic focus actions such as next, previous, first, last, activate focused, and cancel focused. Mirror `bevy_lagrange` by exposing semantic actions and neutral control summaries, with a thin enhanced-input adapter.
+**Spec:**
+- **Event consumption, base path:** app code writes a global observer for `ButtonClicked` filtered by widget id; document the id→Entity lookup through `PanelWidgets`. This ships alongside the sugar, not instead of it.
+- **`.on_click` sugar:** a raw closure cannot live in the type-erased `WidgetSpec` (records are `Clone`/comparable; `IntoObserverSystem` closures are neither). Instead: `.on_click(closure)` registers the closure as a system and stores its `SystemId` (plain data) in the widget record; reify inserts one uniform observer that runs the stored `SystemId` on `ButtonClicked`. Same mechanism as bevy_ui_widgets callbacks.
+- **ButtonPreset / ButtonStyle** (`widgets/presets/button.rs`, shared helpers in `presets/style.rs`): helper builders generating `LayoutTree` fragments. Material-first: plain colors and images are convenience inputs resolving to `StandardMaterial` (color stays zero-ceremony, parity with `.background(color)`); custom animation/shader cases use custom material handles or `ExtendedMaterial`. Widget-specific names only — no `WidgetSurface`/`WidgetMaterial`/`Paint` shared nouns. Presets read `Hovered`, `Has<WidgetDisabled>`, `Has<WidgetFocused>`, and press state, and restyle via component-level writes (material handle, color, `DrawZIndex`) on already-materialized children — never regenerating the `LayoutTree` fragment on state change. Rich content allowed: text, images/icons, custom materials, animation hooks.
+- **Boundary guardrail:** presets depend on behavior, never the reverse; add a test/lint asserting behavior modules (`button.rs`, `focus.rs`, `interactivity.rs`, …) reference no layout/material types.
 
-Add a focus participation component, likely `WidgetFocusable`, to materialized widget entities by default. Removing it opts a widget out of keyboard focus traversal without changing pointer picking. Disabled state should not remove focusability by itself; disabled widgets may retain or receive focus, but widget behavior must ignore activation/change input while disabled.
+**Files:**
+- `src/widgets/presets/mod.rs`, `src/widgets/presets/button.rs`, `src/widgets/presets/style.rs` — new
+- `src/widgets/button.rs` or `src/panel/builder.rs` — `.on_click` on the button spec/builder
+- `src/widgets/reify.rs` — uniform `SystemId`-running observer insertion
+- `src/lib.rs` — preset re-exports
 
-### 11. Button disabled handling
+**Constraints from prior phases:** Phase 6 defined the four `EntityEvent`s and the `ButtonPress` lifecycle. Phase 1's `WidgetSpec` is `Clone` + comparable — the `SystemId` field must preserve that.
 
-Decision: Keep.
+**Acceptance gate:** `cargo nextest run` green with new tests: `.on_click` closure runs on click; global-observer path works via `PanelWidgets` lookup; hover/press/disabled/focus restyle causes no relayout (assert `Changed<DiegeticPanel>` does not fire on a hover flip); behavior-module boundary test passes.
 
-Buttons read resolved `WidgetInteractivity`. Disabled buttons ignore pointer and semantic activation, cannot keep focus/capture, and cancel an active press if they become disabled while pressed. Disabled state is exposed for preset and custom styling, and disabled changes should be visual-only by default.
+### Phase 8 — Slider behavior  · status: todo
 
-### 12. Button pointer activation
+#### Work Order
 
-Decision: Keep.
+**Goal:** Headless slider: grab, drag, value change, release, cancel, disabled, optional snapping, with correct out-of-bounds drag mapping.
 
-Use Bevy picking on the materialized button entity. Pointer press captures the pointer and emits `ButtonPressed`. Release/cancel follows the button lifecycle invariants: valid pointer clicks emit `ButtonReleased` then `ButtonClicked`; non-activating releases emit `ButtonReleased` only; capture loss, disable-while-pressed, despawn/removal, and explicit cancel emit `ButtonCanceled`.
+**Spec:**
+- `widgets/slider.rs`; extend `WidgetSpec` with the slider kind and add the `.slider(id, spec)` authoring method mirroring `.button`.
+- **Types:** `SliderDirection` is a single four-variant enum — `LeftToRight`, `RightToLeft`, `BottomToTop`, `TopToBottom` (never `vertical: bool` + `reversed: bool`); bottom-to-top serves fader-style mixing controls. Value stored raw plus a `SliderRange` with clamp-on-write (or a normalized newtype clamping to [0,1]).
+- **Value seam:** app state is authoritative — slider events request changes, app code applies them (the IME app-owned value path). Specify the component/field carrying the current value that the headless slider exposes and presets read for thumb/fill placement.
+- **Drag mapping:** map panel-local pointer position to a normalized value, then to the range. During a drag, reproject **per frame** from `Pointer<Drag>.pointer_location.position` (viewport px, present on every pointer event) via `Camera::viewport_to_world` → ray → panel-plane intersection → panel-local map → clamp. `Pointer<Drag>` carries no `HitData`, so `panel_local_from_hit` cannot be reused — add a `panel_local_from_ray(ray, panel, transform)` helper; `Drag.delta` screen pixels are unusable on world panels under perspective.
+- **Lifecycle:** grab/release/cancel reuse the Phase 6 emulated-capture machinery (press state component, global Release/Cancel observers, DragEnd terminal, choke-point removal observer); disabled handling per the button rules including cancel-on-disable-while-dragging. Slider change events derive `EntityEvent` targeting the widget entity.
+- Optional snapping applied after clamp.
 
-### 13. Button semantic activation
+**Files:**
+- `src/widgets/slider.rs` — new
+- `src/widgets/picking.rs` (or a shared geometry module) — `panel_local_from_ray` helper
+- `src/panel/builder.rs` — `.slider(id, spec)`
+- `src/widgets/reify.rs` — slider kind reify
 
-Decision: Keep.
+**Constraints from prior phases:** Phase 6 built the emulated-capture pattern (`ButtonPress`-style state component, global observers, `On<Remove, …>` choke point) — mirror it, don't re-derive it. Phase 3's rect source gives the slider its panel-local track geometry. Phase 2's `WidgetDisabled` gates input.
 
-Expose a non-pointer activation path for keyboard shortcuts, action systems, and `bevy_enhanced_input`. Semantic activation can target the focused button or an explicitly targeted button. It emits `ButtonClicked` without fabricating pointer press/release events.
+**Acceptance gate:** `cargo nextest run` green with new tests: direction/value mapping for all four directions; clamp-on-write; snapping; **drag-beyond-panel-bounds** still tracks and clamps (the reprojection path); cancel paths incl. disable-while-dragging; disabled slider ignores grab.
 
-### 14. Slider behavior slice
+### Phase 9 — Slider overlay preset  · status: todo
 
-Decision: Keep.
+#### Work Order
 
-Headless slider behavior includes grab, drag, value change, release, cancel, disabled handling, optional snapping, and mapping panel-local pointer position to a normalized value. The headless slider owns an explicit direction, such as left-to-right, right-to-left, bottom-to-top, or top-to-bottom; bottom-to-top supports fader-style controls such as mixing panels.
+**Goal:** Default slider visual preset using overlay layout.
 
-### 15. Preset and custom styling boundary
+**Spec:**
+- `widgets/presets/slider.rs`: `SliderPreset` / `SliderStyle` (widget-specific names, material-first slots like ButtonPreset).
+- Use `El::overlay()` — track, fill, thumb, and optional labels share one content rectangle and are layered, not arranged. `DrawZIndex` orders thumb above fill above track.
+- Thumb/fill placement reads the Phase 8 value seam; restyle and thumb movement via component-level writes on materialized children — no `LayoutTree` regeneration per value change.
+- Preset respects `SliderDirection` for fill/thumb placement in all four directions.
 
-Decision: Modify.
+**Files:**
+- `src/widgets/presets/slider.rs` — new
+- `src/widgets/presets/style.rs` — shared helpers only where they remove real duplication
+- `src/lib.rs` — re-exports
 
-Use widget-specific preset and style names, such as `ButtonPreset`, `ButtonStyle`, `SliderPreset`, and `SliderStyle`. Avoid vague shared visual nouns such as `WidgetSurface`, `WidgetMaterial`, `WidgetPartStyle`, or `Paint` in the public preset API. The built-in presets should be material-first: plain color and image inputs are convenience APIs that resolve to `StandardMaterial`, while custom shader or animated cases can use custom material handles or `ExtendedMaterial` through custom presets or later generic extension points.
+**Constraints from prior phases:** Phase 8: `SliderDirection`, `SliderRange`, and the value-seam component the preset reads. Phase 7: preset conventions (material-first slots, component-flip restyle, boundary guardrail).
 
-Presets remain layout/render helpers, not headless behavior. They read headless widget state and generate normal diegetic layout/render primitives. Users can skip presets entirely and style a headless widget with their own element tree and material systems.
+**Acceptance gate:** `cargo nextest run` green with new tests: thumb/fill placement tracks value in all four directions; value change causes no relayout; preset builds under the behavior/preset boundary test.
 
-### 16. Widget interactivity and disabled resolution
+### Phase 10 — Tooltip behavior + authoring  · status: todo
 
-Decision: Modify.
+#### Work Order
 
-Use enum-based authoring for inherited/default/overridden interactivity, then materialize the resolved state as a Bevy-style marker component on the widget entity.
+**Goal:** Tooltips as normal anchored panels with hover/focus show-hide policy, lazy-spawned on first show.
 
-Authoring shape:
+**Spec:**
+- `widgets/tooltip.rs`. A tooltip is a normal `DiegeticPanel` + `Tooltip` + `hana_valence::AnchoredTo` — no separate `TooltipOf`/`TooltipsFor` relationship (`AnchoredTo` already identifies the target; `Tooltip` marks the panel as a tooltip). Ownership split: hana_valence owns placement (`AnchoredTo`, geometry contract, resolver); diegetic owns tooltip behavior (show/hide policy, timers) and geometry provision. Authoring helpers insert `AnchoredTo` internally; hana_valence types stay out of public signatures.
+- Public policy type:
+  ```rust
+  pub struct Tooltip {
+      pub show_after: Duration,
+      pub hide_after: Duration,
+      pub disabled_policy: TooltipDisabledPolicy,
+  }
 
-```rust
-pub enum WidgetInteractivity {
-    Inherited,
-    Set(InteractionState),
-}
+  pub enum TooltipDisabledPolicy {
+      Show,
+      Suppress,
+  }
+  ```
+  No public `TooltipTrigger` enum, no `TooltipTiming` struct; hover-or-focus behavior is assumed.
+- **Runtime state is component-driven and private.** Split the delay timers into `TooltipShowDelay`/`TooltipHideDelay` (or an explicit phase enum) so "waiting to show while already visible" is unrepresentable. Visibility is represented by component presence on the tooltip panel entity, never a `visible: bool` field — name that component explicitly. While hidden: the show timer waits and is removed if hover/focus stops. While visible: the hide timer waits out `hide_after`, and the tooltip hides immediately if hover/focus stops.
+- **Residency:** lazy-spawn the tooltip panel on first show — `show_after` masks the spawn+layout latency (only `show_after == 0` risks a one-frame flash). After first spawn, subsequent show/hide transitions toggle `Visibility` (Hidden/Inherited) only — never despawn/respawn per hover (a spawn costs full layout + reify + geometry fill). Lazy spawn also defers the Phase 4 geometry fill to first show (`Added<AnchoredHere>` trigger).
+- **Lifecycle:** hide/despawn the tooltip when its `AnchoredTo` target despawns — do not ride valence M16's silent last-transform fallback. Specify the visible→disabled transition per `TooltipDisabledPolicy`. Hover/focus eligibility reads `Hovered` and `WidgetFocused`.
+- **Authoring:** widget builders accept a prebuilt tooltip panel or a layout helper — `TooltipPanel::layout(|b| { ... })` or a `.tooltip_layout(|b| { ... })` method; do not promise bare `.tooltip(|b| { ... })` unless a prototype proves closure inference works without annotating the builder parameter. Defaults for `show_after`, `hide_after`, `disabled_policy`, anchors, offset. Standalone tooltip creation uses the same `TooltipPanel` machinery — both entry points visibly lower to `DiegeticPanel + Tooltip + AnchoredTo`; include the standalone snippet in module docs. Rich content (text, dividers, icons, materials, multiple styles) is ordinary panel content; shortcut labels are content supplied by the client, not headless behavior. Overflow avoidance is not a first-pass concept.
+- **Placement spaces:** world tooltip on world target → valence 3D placer; screen tooltip on screen target → existing diegetic screen placer (widget targets land in Phase 11). Cross-space (screen tooltip on world target) is out of scope; the later seam is projecting the world anchor to viewport coordinates.
 
-pub enum InteractionState {
-    Enabled,
-    Disabled,
-}
-```
+**Files:**
+- `src/widgets/tooltip.rs` — new
+- `src/panel/builder.rs` / widget spec types — tooltip authoring hooks
+- `src/widgets/presets/tooltip.rs` — default tooltip panel presentation
+- Read-only: `crates/hana_valence` resolver + `AnchoredTo`, `src/panel/attachment_resolver.rs`
 
-Runtime shape:
+**Constraints from prior phases:** Phase 4 publishes widget `ResolvedAnchorGeometry` lazily on `Added<AnchoredHere>` — tooltip spawn triggers it; the same-frame ordering guarantee (widget geometry before resolve, both in `AnchorSystems::FillGeometry`→`Resolve`) holds. Phase 3's `Hovered` and Phase 5's `WidgetFocused` drive eligibility. Phase 2's `WidgetDisabled` drives `TooltipDisabledPolicy`.
 
-```rust
-pub struct WidgetDisabled;
-```
+**Acceptance gate:** `cargo nextest run` green with new tests: show-delay timer removed when hover stops before `show_after`; visible tooltip hides immediately on hover/focus stop and after `hide_after`; first show spawns, second show only toggles `Visibility`; target despawn hides/despawns the tooltip; `TooltipDisabledPolicy::Suppress` blocks show on a disabled widget; world-space tooltip anchored to a widget places correctly.
 
-The resolver applies global, panel, layout-subtree, and widget-level values, then inserts or removes `WidgetDisabled` on the materialized widget entity. Widget behavior and styling systems query `Has<WidgetDisabled>`, mirroring Bevy's `InteractionDisabled` pattern. Do not expose a `ResolvedWidgetInteractivity`, do not use `enabled: bool` as the authoring API, and do not carry a disabled reason in the first API.
+### Phase 11 — Screen-placer widget targets  · status: todo
 
-Disabled changes should remain visual/state-only by default. A disabled widget must ignore pointer and semantic activation, lose focus/capture if needed, and cancel any active press/drag lifecycle according to the widget's event contract.
+#### Work Order
 
-### 17. Tooltips
+**Goal:** Screen-space tooltips and anchored panels can target widgets, not only panels.
 
-Decision: Modify.
+**Spec:**
+- The screen placer (`src/screen_space/anchoring/`) builds candidate rects solely from panels today and silently drops non-panel targets; valence M4 only re-pointed the panel path. Teach `candidate.rs`/`resolve.rs` to read widget targets: when an `AnchoredTo` target is a widget, derive the candidate rect from the widget's published `ResolvedAnchorGeometry` (projected to viewport space via the existing projection helpers) instead of the panel rect.
+- Keep the placer's existing ordering (`.after(PanelChildSystems::Build)`) and fit-on-screen fallback behavior; it stays in diegetic (needs window sizes) and plugs into the valence attachment skeleton.
+- Apply the Phase 4 diagnostics convention here too: a screen-space `AnchoredTo` naming a target with no geometry warns once per target-and-reason with the shared dedup key.
 
-A tooltip is a normal `DiegeticPanel` with tooltip behavior and generic anchoring. The first API should not add a separate `TooltipOf` / `TooltipsFor` relationship because `AnchoredTo` already identifies the target entity, and the `Tooltip` component identifies the anchored panel as a tooltip.
+**Files:**
+- `src/screen_space/anchoring/candidate.rs` — widget-target candidate rects
+- `src/screen_space/anchoring/resolve.rs` — target resolution
+- `src/screen_space/anchoring/projection.rs` — reuse/extend projection helpers
 
-Runtime shape:
+**Constraints from prior phases:** Phase 4: widgets publish `ResolvedAnchorGeometry` (widget-local frame, composed through `GlobalTransform`) lazily on `AnchoredHere`. Phase 10: screen-space tooltips lower to `DiegeticPanel + Tooltip + AnchoredTo` and currently only place against panel targets.
 
-```rust
-pub struct Tooltip {
-    pub show_after: Duration,
-    pub hide_after: Duration,
-    pub disabled_policy: TooltipDisabledPolicy,
-}
+**Acceptance gate:** `cargo nextest run` green with new tests: screen-space tooltip anchored to a widget places at the widget's viewport rect (not the panel's); panel-target placement is unregressed; missing-geometry warning dedups per target-and-reason.
 
-pub enum TooltipDisabledPolicy {
-    Show,
-    Suppress,
-}
-```
+### Phase 12 — Demonstration checkpoint (stop and discuss)  · status: todo
 
-The tooltip panel also carries `AnchoredTo::new(target, tooltip_anchor, target_anchor).with_offset(offset)`. `AnchorGeometryParam::get(target)` must resolve anchor geometry from either a panel or a materialized widget entity.
+#### Work Order
 
-Keep runtime state component-driven. Use private `TooltipTimer` for delayed show/hide timing. Visibility is represented by component presence on the tooltip panel entity, not by a `visible: bool` field. While hidden, the timer waits to show and is removed if hover/focus stops. While visible, the timer waits to hide after `hide_after`, and the tooltip hides immediately if hover/focus stops.
+**Goal:** Decide, with the project owner, how to demonstrate the widget system. This phase is a discussion checkpoint, not delegated implementation.
 
-Shortcut/keybinding display is normal tooltip panel content supplied by the user or a later helper; it is not headless tooltip behavior.
+**Spec:**
+- Stop after Phase 11 and design the demonstration plan together: which existing examples change, which new examples are added.
+- The plan must prove the pieces work together in real diegetic UI: buttons, sliders, tooltips, focus traversal, disabled state, panel ordering, and existing IME/text input coexisting on one panel.
 
-Authoring helpers should all lower to the same runtime shape: `DiegeticPanel + Tooltip + AnchoredTo`. Widget builders should accept a prebuilt `TooltipPanel`, and support a named layout helper such as `TooltipPanel::layout(|b| { ... })`. Do not promise bare `.tooltip(|b| { ... })` unless a prototype proves it works without closure parameter annotations.
+**Files:** none until the discussion lands.
 
-### 18. Slider overlay preset
+**Constraints from prior phases:** All widget subsystems (Phases 1–11) complete and tested headlessly (`HeadlessLayoutPlugin`/minimal-app tests) before demonstration work begins.
 
-Decision: Keep.
-
-Use `El::overlay()` for the default slider preset. Track, fill, thumb, and optional labels share one content rectangle and are layered rather than arranged. Use `DrawZIndex` so thumb renders above fill and fill renders above track. This preserves overlay layout mode as the standard way to build slider visuals.
-
-### 19. Module structure and exports
-
-Decision: Keep.
-
-Use a cohesive `widgets` module with public headless widget APIs in widget-named files and shared support in narrowly named cross-widget modules.
-
-Proposed shape:
-
-```text
-crates/bevy_diegetic/src/widgets/
-  mod.rs
-  button.rs
-  slider.rs
-  tooltip.rs
-  id.rs
-  relationship.rs
-  interactivity.rs
-  focus.rs
-  picking.rs
-  reify.rs
-  presets/
-    mod.rs
-    button.rs
-    slider.rs
-    tooltip.rs
-    style.rs
-```
-
-`button.rs` owns the headless button component, state transitions, typed events, pointer behavior, disabled handling, and semantic activation path. `slider.rs` does the same for sliders. `tooltip.rs` owns the `Tooltip` policy component, `TooltipDisabledPolicy`, private `TooltipTimer`, and tooltip show/hide systems.
-
-Shared modules should stay narrow:
-
-- `id.rs`: `WidgetId` and duplicate-id validation helpers.
-- `relationship.rs`: `WidgetOf` and `PanelWidgets`.
-- `interactivity.rs`: `WidgetInteractivity`, `InteractionState`, and runtime `WidgetDisabled`.
-- `focus.rs`: `WidgetFocusable`, focus traversal, and focus actions.
-- `picking.rs`: picking geometry emitted for materialized widget entities.
-- `reify.rs`: turns computed widget records into concrete widget entities.
-
-Presets live under `widgets/presets/` and are optional layout/render builders. They may generate `El`, text, materials, and draw ordering, but headless widget modules should not depend on presets.
-
-Re-export curated public types from `lib.rs` or `widgets/mod.rs`. Do not expose the whole implementation tree as the public API.
-
-### 20. Rollout and tests
-
-Decision: Modify.
-
-Keep the rollout phased, but make Phase 5 an explicit stop-and-discuss checkpoint rather than an implementation phase. After the core widget system exists, pause and decide how to demonstrate it. That discussion should cover which existing examples should be changed and which new examples should be created.
-
-Phase outline:
-
-- Phase 0: Rename and generalize anchoring, and rename shared entity-creation terminology to `reify`.
-  - Surface-panels coordination: the generalized `AnchorGeometryParam` should
-    return an **oriented frame** (point + tangent frame, matching
-    `SurfaceSample` in `surface-panels.md`), not the concrete flat `PanelPlane`.
-    That result covers screen bounds (2D), the flat plane (constant frame), and a
-    curved-surface sampler, so `surface-panels.md` Phase 5 reuses this layer
-    instead of rewriting it.
-- Phase 1: Build widget identity, widget relationships, reification, and picking geometry.
-- Phase 2: Add button behavior and a simple preset.
-- Phase 3: Add slider behavior and the overlay preset.
-- Phase 4: Add tooltip behavior and one default tooltip panel presentation.
-- Phase 5: Stop and design the demonstration plan with the project owner.
-
-The demonstration plan should prove the pieces work together in real diegetic UI examples: buttons, sliders, tooltips, focus, disabled state, panel ordering, and existing IME/text input. It will likely include both changes to existing examples and new examples, but those choices should be made at the Phase 5 review point.
-
-Tests should protect the headless contracts before the demonstration work: duplicate widget ids, button press/release/click/cancel paths, disable-while-pressed, despawn/removal cancellation, semantic activation without fabricated pointer events, slider direction/value mapping, tooltip timer behavior, and generic anchoring to both panels and materialized widgets.
+**Acceptance gate:** A written demonstration plan agreed with the project owner; no code gate.

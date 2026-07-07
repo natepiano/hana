@@ -1,613 +1,555 @@
-# hana_valence — initialization plan
+# hana_valence — implementation plan
 
-Status: design / not started. A new shape-agnostic crate extracted from the
-anchoring machinery currently living in `bevy_diegetic`.
+> **Status: IMPLEMENTATION PLAN — phased, delegate-ready.** Extracts bevy_diegetic's
+> anchoring machinery into the standalone shape-agnostic `hana_valence` crate
+> (geometry contract, attachment relation, resolver, hinge, arrangements), then
+> re-points bevy_diegetic as one provider of anchor geometry.
 
-## Name (README seed)
+## Delegation Context
 
-In chemistry, an atom's **valence** is its capacity to bond: the number and
-arrangement of connection points it offers to the world. This crate gives shapes
-the same thing — programmable anchor points by which they bond to one another,
-assemble into larger structures, and animate as those bonds form, break, and
-reconfigure: magnetizing together, folding into volumes, articulating. The
-metaphor is inherently spatial, so it carries cleanly from 2D into 3D, and it
-follows the workspace's naming convention of borrowing one precise term from an
-outside field — diegetic (film theory), Lagrange (orbital mechanics), liminal
-(anthropology), valence (chemistry).
+- **Project:** `hana_valence` — a new shape-agnostic workspace crate ("shapes expose connection points and bond into animatable assemblies"), extracted from `bevy_diegetic`'s anchoring machinery. Workspace root `/Users/natemccoy/rust/bevy_hana` (repo "hana", `natepiano/hana`). Members declared by **glob**: root `Cargo.toml:3` `members = ["crates/*"]` (with `exclude = ["crates/hana", "vendor/clay-layout"]`) — a crate at `crates/hana_valence` is auto-registered as a member, no edit needed. To be consumed by `bevy_diegetic` it must be a `[workspace.dependencies]` entry, which **already exists**: root `Cargo.toml:43` `hana_valence = { path = "crates/hana_valence" }`. The crate dir also **already exists** (`crates/hana_valence/` with `Cargo.toml`, `src/lib.rs` = just `//! hana_valence`, README, LICENSEs, CHANGELOG). Model small crate for the inherited-Cargo pattern: `crates/bevy_lagrange/Cargo.toml` (and `crates/bevy_liminal/Cargo.toml`) — both use `authors.workspace = true`, `edition.workspace = true`, `license.workspace = true`, `repository.workspace = true`, and `[lints] workspace = true`. The existing `crates/hana_valence/Cargo.toml` already follows this but currently pulls full `bevy.workspace = true` (violates the dep-surface invariant; Phase 1 narrows it).
+- **Stack:** Rust **edition 2024** (`[workspace.package] edition = "2024"`); Bevy **0.19.0** (`[workspace.dependencies] bevy = { version = "0.19.0", default-features = false }`). `bevy_tween` is **NOT** a workspace dependency (absent from root Cargo.toml entirely) — Phase 5 introduces it. The workspace depends on **full `bevy`** (default-features=false, features selected per-crate); it does **NOT** expose `bevy_ecs` / `bevy_transform` / `bevy_math` / `bevy_platform` as separate `[workspace.dependencies]` — Phase 1 adds those subcrate entries (today code reaches them via `bevy::ecs`, `bevy::platform::collections`, etc.). Strict workspace lints: clippy `all`/`cargo`/`nursery`/`pedantic` = deny, plus `unwrap_used`/`expect_used`/`panic`/`unreachable` = deny, and `missing_docs = "deny"` — every pub item needs docs; fallible paths return `Result`, never panic.
+- **Layout:**
+  - `crates/hana_valence/` — the new crate (already scaffolded; `src/lib.rs` is a stub). Phases add `src/geometry.rs`, `src/relation.rs`, `src/pose.rs`, `src/attachment.rs`, `src/resolve.rs`, `src/hinge.rs`, `src/tween.rs`, `src/arrange.rs`, `examples/`.
+  - `crates/bevy_diegetic/src/panel/` — anchoring source: `attachment_resolver.rs`, `world_anchoring.rs`, `anchoring.rs`, `anchor_geometry.rs`, `gizmos.rs`, `mod.rs` (`PanelSystems`).
+  - `crates/bevy_diegetic/src/screen_space/anchoring/` — `mod.rs`, `candidate.rs`, `placement.rs`, `projection.rs`, `rect.rs`, `resolve.rs`, `window.rs` (screen placer that consumes the shared skeleton).
+  - `crates/bevy_diegetic/examples/` — flat `.rs` examples plus the `panel_anchoring/` subdir (multi-file example). `diegetic_text_stress.rs` also uses anchoring.
+  - Integration tests live in `crates/bevy_diegetic/tests/` (only `trybuild.rs` + `trybuild/`); all anchoring unit tests are `#[cfg(test)]` modules **inside** the `src/` files.
+- **Key files:**
+  - `crates/bevy_diegetic/src/panel/attachment_resolver.rs` — generic attachment skeleton (all `pub(crate)`). `AttachmentResolveCandidate<R>` enum L14 (`Active`/`Skipped`, hard-codes `AnchoredToPanel` payload → becomes `AnchoredTo` on port); `AttachmentResolveAction` enum L39 (`Place`/`Fallback`); `resolve_panel_attachments<R,F>` L51 (topological, callback `F: FnMut(AttachmentResolveAction)->Result<(),R>`); `AttachmentGraph` struct L88 + impl L95; `AttachmentResolveDiagnostics<R>` struct L285, impl L291, `Default` L329. Imports: `super::AnchoredToPanel` (L10), `bevy::platform::collections::{HashMap,HashSet}` (L6-7), and **`bevy::prelude::*`** (L8) — the prelude imports must de-prelude on port.
+  - `crates/bevy_diegetic/src/panel/world_anchoring.rs` — world resolver. Main system `resolve_world_space_panel_attachments` L50; `restore_inactive_world_panel_poses` L27; `placement` L95 / `desired_local_transform` L147 (calls `validate_supported_parent_transform`); `classify_candidates` L170 / `classify_candidate` L185 / `validate_candidate` L213; `place_world_attachment` L247 / `world_anchor_placement` L270; `target_anchor_point` L342 (the **Y-flip**: `right*offset.x − up*offset.y + normal*offset.z`, L350-351); `target_offset_meters` L355 (unit resolution); `plane_frame_translation` L378 (pose-translation in plane basis); `scaled_source_anchor_offset` L382 (`* source_scale`, L394); `plane_rotation` L397; `anchor_offset` L401; `validate_supported_parent_transform` L436 (rejects non-uniform parent scale). Source scale finiteness check L119-120.
+  - `crates/bevy_diegetic/src/panel/anchoring.rs` — relationship pair + pose/offset. `AnchoredToPanel` struct L27 (derives/attrs L23-30: `#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]`, `#[component(immutable)]`, `#[reflect(PartialEq, Debug, FromWorld, Clone)]`, `#[relationship(relationship_target = PanelsAnchoredHere)]`, and on the `target` field `#[relationship] #[entities] #[reflect(ignore, default = "placeholder_entity")]`); `impl FromWorld for AnchoredToPanel` L71; `PanelAnchorPose` struct L86 (`#[reflect(Component, PartialEq, Debug, Default)]` L85); `PanelAnchorOffset` struct L112 (three `Dimension`s, impl L123); `PanelsAnchoredHere(Vec<Entity>)` L174 (`#[relationship_target(relationship = AnchoredToPanel)]` L173, `#[reflect(FromWorld, Default)]` L172).
+  - `crates/bevy_diegetic/src/layout/units/anchor.rs:8` — the `Anchor` enum (TopLeft…Center authoring vocabulary).
+  - `crates/bevy_diegetic/src/panel/anchor_geometry.rs` — geometry provider (computed on demand, not stored). `PanelAnchorGeometryParam` SystemParam struct L34, impl L48, `.get()` L56 (returns `Result<ResolvedPanelAnchorGeometry, PanelAnchorGeometryError>`); `ResolvedPanelAnchorGeometry` struct L109, impl L113 (`from_screen_panel`/`from_world_panel`); `PanelAnchorPoints` L170, `PanelAnchorPoint` L225, `PanelAnchorEdgeEndpoints` L254, `PanelAnchorEdge` L283, `PanelScreenBounds` L296, `PanelPlane` L367 (`point(Anchor)`, `right/up/normal` basis), `PanelAnchorGeometryError` L486.
+  - `crates/bevy_diegetic/src/screen_space/anchoring/resolve.rs` — screen placer. `AnchorResolveDiagnostics` type alias L20 (`= AttachmentResolveDiagnostics<AnchorResolveSkip>`; re-exported `mod.rs:12`); calls `panel::resolve_panel_attachments` L61 (the callback seam); consumes `AttachmentResolveCandidate` L14/L49-52. `candidate.rs` L15 `classify_candidates` (→ `AttachmentResolveCandidate<AnchorResolveSkip>`, classification stays diegetic). `placement.rs` L105-115 is the `Place`/`Fallback` callback body + `AttachmentResolveReasons` L210. `projection.rs`/`rect.rs`/`window.rs` are viewport/window math (no skeleton refs).
+  - `PanelSystems` enum — `crates/bevy_diegetic/src/panel/mod.rs:124`; `AnimateAnchorPose` variant L145; also referenced `world_anchoring.rs:1210`.
+  - Named tests: `world_anchoring_respects_source_scale_and_parent_rotation` → `world_anchoring.rs:959`; `pose_written_in_animation_set_lands_this_frame` → `world_anchoring.rs:1205`; `insert_replace_and_remove_update_reverse_index` → `anchoring.rs:241`; `anchor_types_are_registered_with_expected_reflect_component_data` → `anchoring.rs:323`; `point_offsets_resolve_to_screen_pixels` → `screen_space/anchoring/resolve.rs:798`.
+  - Example: `crates/bevy_diegetic/examples/panel_anchoring/` (multi-file). `hinge.rs` — `FoldPattern` enum L49 (`Accordion` L51, `Coil` L53), `HingeChain` L103, `crease_sign` L257 (Accordion alternation), `Quat::from_rotation_x` L330 (the per-shape fold the resolver generalizes to `from_axis_angle`). `anchor_demo.rs:828` `collect_tiles_by_order` (assumes contiguous orders), called from `scene.rs:299` and `anchor_demo.rs:794/904/1129`.
+  - `crates/bevy_diegetic/examples/diegetic_text_stress.rs` — uses `Anchor` L53, `AnchoredToPanel` L54, `PanelAnchorOffset` L65.
+- **Build:** `cargo build && cargo +nightly fmt` after changes (CI: `cargo build --release --workspace --all-features --examples`, format check `cargo +nightly fmt -- --check`, plus `taplo fmt --check` for TOML and `cargo mend --fail-on-warn`).
+- **Test:** `cargo nextest run` (CI runs `cargo nextest run --all-features --workspace --tests`). No `.config/nextest.toml` exists — nextest is the runner convention, no committed config.
+- **Lint:** the `clippy` skill.
+- **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_hana` (verified present). No repo-local `docs/style/` overlay.
+- **Invariants:**
+  - Dep surface: `hana_valence` depends only on `bevy_ecs + bevy_transform + bevy_math + bevy_platform`, never full `bevy` and never `bevy_app` (so the crate exposes systems + sets, **no `Plugin` type** — consumers register). Gate: `cargo check -p hana_valence --no-default-features` stays green. Dev-dependencies (examples) may use full `bevy`.
+  - Sole-Transform-writer: `resolve_anchors` is the only `Transform` writer for entities carrying `AnchoredTo`; drivers write `Transform` only on un-anchored entities (fly-together before the relation is added).
+  - Double-writer guard: through Phases 1–6 the valence systems are **never registered into a diegetic-linked app** (unit-test schedules only); Phase 7's swap (delete diegetic world resolver + diagnostics ⇔ register provider + valence resolver + diagnostics) is atomic in one change.
+  - Compile continuity: Phases 2–3 **copy** the skeleton + resolver into valence (the diegetic originals keep compiling for the screen placer); consumers switch and diegetic copies delete only in Phase 7. Every phase lands compiling and green.
+  - `publish = false` on `crates/hana_valence/Cargo.toml` until the API is intended to ship.
+  - Reflection split: `ReflectComponent` only on the mutable input components (`AnchorPose`, `Hinge`, `ResolvedAnchorGeometry`, `ResolvedAnchorOffset`, `ResolvedAnchorWorld`); the relationship pair (`AnchoredTo`/`AnchoredHere`) registers the Reflect *type* only — reflection insert/apply bypasses relationship hooks and would corrupt `AnchoredHere`. Mirror today's `anchor_types_are_registered_with_expected_reflect_component_data` split.
+  - Provider write discipline: geometry-fill systems filter on `Changed<DiegeticPanel>` (or the provider's own data component), never `Changed<Transform>` (the resolver writes `Transform` every frame on exactly the anchored set — that filter self-triggers); mutate `ResolvedAnchorGeometry` in place (stable keys, retained allocation), insert only when absent. Precondition: providers emit **centered-local points in authored units with no transform baking**; the resolver applies `GlobalTransform` including scale.
+  - Preserve child scale (`− rot * (child_global_scale ⊙ source_local)`) and parent-scale rejection (`validate_supported_parent_transform`) exactly; keep `point_offsets_resolve_to_screen_pixels` (DPI Pt→px) green; unit/DPI/size offset resolution stays diegetic-side (lowering), never in valence.
+  - API boundary (compose, not re-export): no hana_valence type ever appears in a bevy_diegetic **public signature** (function returns, pub fields, trait bounds). Diegetic sugar is insert-only bundles with private fields; users who drive poses import `hana_valence` directly. Writing valence components from internal diegetic systems is the intended protocol.
+  - `AnchoredHere` is `Vec<Entity>`: insertion order is the deterministic resolve + arrangement order. Never swap it for a set type.
+  - Repo hygiene: after changes run `cargo build && cargo +nightly fmt` (and `taplo fmt` for TOML edits, unsandboxed); never commit or push without being asked.
 
-One-liner: *hana_valence — shapes expose connection points and bond into
-animatable assemblies; named for valence, an atom's capacity to bond.*
+## Phases
 
-Note on vocabulary: the crate is `hana_valence`, but its types keep the
-**anchor** noun (`AnchorId`, `AnchoredTo`, `AnchorPose`, `ResolvedAnchorGeometry`,
-`AnchorSystems`) — an anchor *point* is the concrete connection site; *valence*
-is the capacity those points add up to. Bond-flavored verbs (`magnetize`, fold,
-hinge) name the behaviors built on top.
+### Phase 1 — crate scaffold + core contract types  · status: todo
 
-## Goal
+#### Work Order
 
-A standalone crate that attaches **anchors** to any tileable shape (quad,
-triangle, pentagon, hexagon, arbitrary polygon) and resolves
-**anchor-to-anchor attachments** into transforms, composing down chains. On top
-of that primitive it provides **named arrangements** (Accordion, Strip, Ring,
-box/polyhedral nets) whose animations are driven by **any animator** —
-bevy_tween, bevy_animation, or hand-written systems — through a single
-component-write seam.
+**Goal:** `hana_valence` compiles standalone on the narrow dep surface with the complete core type contract, fill-time validation, and the reflection-registration split, proven by unit tests.
 
-`bevy_diegetic` becomes one *provider* of anchor geometry (panels), not the
-owner of the anchor system. Triangles, hexagons, and procedural shapes are other
-providers. The fold/placement math lives once, in `hana_valence`, and is reused
-across every shape.
+**Spec:**
 
-## Layering — what is inside vs outside
+Cargo setup:
+- Add to root `Cargo.toml` `[workspace.dependencies]`: `bevy_ecs`, `bevy_transform`, `bevy_math`, `bevy_platform`, all version `0.19.0`, `default-features = false`, with the features the derives need (`bevy_ecs` needs its reflect feature for `Reflect`/`ReflectComponent`; `bevy_math` needs its reflect feature for `Vec3`/`Quat` reflection; enable only what compiles — the gate is `cargo check -p hana_valence --no-default-features`).
+- Rewrite `crates/hana_valence/Cargo.toml`: drop `bevy.workspace = true`; depend on the four subcrates; add `publish = false`; keep the workspace-inherited fields and `[lints] workspace = true` (model: `crates/bevy_lagrange/Cargo.toml`).
 
-Three concerns, kept separate (collapsing the last two is the trap):
-
-1. **Anchor geometry** — which points a shape exposes (vertices, edge-midpoints,
-   centroid) and which pairs form edges. A pure function of a shape outline.
-   *Provided by each shape crate.*
-2. **Pose / attachment** — a local pose primitive read by a resolver that pins
-   one anchor onto another and composes the result down a chain into
-   `Transform`. *Owned by `hana_valence`. Shape-agnostic.*
-3. **Animation driver** — whatever changes the pose/params over time.
-   *Interchangeable: bevy_tween, bevy_animation, or user systems.*
-
-Crate dependency direction:
-
-```
-hana_valence   (geometry contract + resolver + pose + arrangements + recipes)
-   ▲                    ▲
-   │                    │
-bevy_diegetic       (triangle / hex / procedural shape crates)
-(panel provider,    (other providers)
- anchor feature)
-        ▲
-        │
-   user / examples  (Anchor::TopLeft ergonomics + choose a driver)
-```
-
-`hana_valence` knows **nothing** about panels or any concrete shape. The contract
-between a shape and the engine is a **component**, not a runtime trait call — see
-"The contract is a component."
-
-## The contract is a component (not dyn dispatch)
-
-The resolver never calls a trait at runtime. Each shape crate runs its own system
-that fills a component the resolver reads:
+Core types (module layout: `src/geometry.rs`, `src/relation.rs`, `src/pose.rs`, re-exported from `lib.rs`):
 
 ```rust
-// hana_valence
-pub enum AnchorId { Vertex(u32), EdgeMid(u32), Center }
+// geometry.rs
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default, Reflect)]
+#[non_exhaustive]              // a future Face(u32) must not silently break provider matches
+pub enum AnchorId {
+    Vertex(u32),
+    EdgeMid(u32),
+    #[default]                 // Default is REQUIRED: the relationship derive constructs
+    Center,                    // non-relationship fields via Default::default()
+}
 
-#[derive(Component)]
+#[derive(Clone, Copy, Debug, Default, Reflect)]
+pub struct AnchorPoint {
+    pub position: Vec3,         // local frame, centered, authored units — no transform baking
+    pub frame:    Option<Quat>, // per-anchor tangent frame; None = entity frame (flat providers)
+}
+impl AnchorPoint {
+    // Sole owner of the default — consumers never inline unwrap_or(IDENTITY).
+    pub fn rotation(&self) -> Quat { self.frame.unwrap_or(Quat::IDENTITY) }
+}
+
+// No Default for Edge: Vertex(0)→Vertex(0) is a degenerate default.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Reflect)]
+pub struct Edge { pub start: AnchorId, pub end: AnchorId }
+impl Edge {
+    // axis = end − start, order-significant: swapping endpoints flips fold sign.
+    pub fn axis(&self, geom: &ResolvedAnchorGeometry) -> Result<Dir3, EdgeAxisError> { … }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum EdgeAxisError { MissingAnchor(AnchorId), Degenerate, FrameDivergent }
+
+#[derive(Component, Reflect)]
+#[reflect(Component)]           // mutable input: full ReflectComponent
 pub struct ResolvedAnchorGeometry {
-    pub points: HashMap<AnchorId, Vec3>,   // local frame
-    pub edges:  Vec<(AnchorId, AnchorId)>, // shared-edge lookup for folding
+    pub points: HashMap<AnchorId, AnchorPoint>,   // bevy_platform HashMap
+    pub edges:  Vec<Edge>,
 }
-```
 
-- One `ResolvedAnchorGeometry` **per entity** (per panel, per triangle). 1000
-  shapes = 1000 components, ~9 entries each. Never a global table; the resolver
-  reads only a child's own component and its parent's, so cost scales per
-  relation, not per total anchors.
-- An optional authoring helper trait `AnchorGeometry { fn anchor_point(&self, id)
-  -> Option<Vec3> }` may exist for a provider to *compute* points internally, but
-  it is not a dispatch point — the resolver only reads the component.
-
-## Core types (hana_valence)
-
-```rust
-#[derive(Component)]
-pub struct AnchoredTo {            // the relation: glue source anchor onto target's anchor
-    pub target:       Entity,
-    pub source:       AnchorId,
+// relation.rs — mirror the attribute pattern of today's AnchoredToPanel
+// (anchoring.rs:23-30) exactly, including FromWorld + placeholder-entity default.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[component(immutable)]
+#[reflect(PartialEq, Debug, FromWorld, Clone)]   // type-only registration — NO ReflectComponent
+#[relationship(relationship_target = AnchoredHere)]
+pub struct AnchoredTo {
+    #[relationship]
+    #[entities]
+    #[reflect(ignore, default = "placeholder_entity")]
+    target:            Entity,   // private; pub fn target(&self) -> Entity accessor
+    pub source_anchor: AnchorId,
     pub target_anchor: AnchorId,
-    pub offset:       Vec3,
+    pub offset:        Vec3,     // authored static, raw resolver-frame units
 }
+// Doc on the type: #[component(immutable)] makes retargeting a full re-insert
+// (on_replace + on_insert re-fire, reverse index updates); provide a
+// retargeted()-style full-value constructor, never partial mutation.
 
-#[derive(Component, Default)]
-pub struct AnchorPose {            // the driven local pose — the animation seam
-    pub rotation:    Quat,
-    pub translation: Vec3,
-}
+#[derive(Component, Debug, Default, Reflect)]
+#[reflect(FromWorld, Default)]                   // type-only — NO ReflectComponent
+#[relationship_target(relationship = AnchoredTo)]
+pub struct AnchoredHere(Vec<Entity>);            // insertion order = resolve/arrangement order
 
-#[derive(Component)]
-pub struct Hinge {                 // scalar fold about a shared edge; converter writes AnchorPose
-    pub edge:  (AnchorId, AnchorId),
-    pub angle: f32,
-}
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, Default)]
+pub struct ResolvedAnchorOffset(pub Vec3);       // mutable per-frame override; the resolver
+                                                 // prefers it over AnchoredTo.offset
 
-#[derive(Component)]              // optional cached world-space points for gizmos/UI
-pub struct ResolvedAnchorWorld { /* world points */ }
+// pose.rs
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Default)]
+pub struct AnchorPose { pub rotation: Quat, pub translation: Vec3 }
+// Doc on the type: AnchorPose is deliberately NOT Transform — it is the
+// local-frame animation seam the resolver converts; merging them would make
+// animators and the resolver race on one component.
 
-#[derive(SystemSet)]
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, Default)]
+pub struct ResolvedAnchorWorld { pub points: HashMap<AnchorId, Vec3> }
+// Opt-in cache for gizmos/UI; Phase 3's resolver recomputes it each frame
+// for entities that carry it, so it cannot go stale.
+
+#[derive(SystemSet, Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum AnchorSystems {
-    AnimatePose,  // ordering point: drivers write AnchorPose / Hinge.angle / Transform here
+    FillGeometry, // providers write ResolvedAnchorGeometry here
+    AnimatePose,  // drivers write AnchorPose / Hinge.angle / Transform here
     Resolve,      // resolve_anchors reads geometry + relation + pose, writes Transform
 }
+// FillGeometry and AnimatePose both run before Resolve; consumers configure
+// the sets (valence exposes no Plugin — see Delegation Context dep-surface rule).
 ```
 
-### The resolver
+Fill-time validation (always available, provider-called):
+- `ResolvedAnchorGeometry::validate(&self) -> Result<(), GeometryError>`: every `Edge` references two existing, distinct points; all positions finite; frame-divergent edges rejected (`GeometryError` variant — an edge is valid only when both endpoint frames are equal or both `None`; for flat providers this is trivially true). Debug-assert frames are normalized (a non-unit provider quat silently scales/shears every downstream transform).
+- `Edge::axis` returns `Err(MissingAnchor)` / `Err(Degenerate)` (`|end−start| < ε`) / `Err(FrameDivergent)` rather than NaN axes.
+- Optional authoring helper trait `AnchorGeometry { fn anchor_point(&self, id: AnchorId) -> Option<Vec3>; }` may exist for providers to compute points internally — it is authoring sugar, never a resolver dispatch point.
+
+`lib.rs`: crate overview docs (shapes expose anchor points and bond; the contract is a component, not dyn dispatch; one `ResolvedAnchorGeometry` per entity — never a global table) plus a registration snippet (marked `ignore`) showing a consumer configuring `AnchorSystems` in `PostUpdate` before `TransformSystems::Propagate`.
+
+Tests (in-file `#[cfg(test)]`, run via `World` + `Schedule` — no `App`):
+- Reverse-index maintenance: insert / replace / remove `AnchoredTo` updates `AnchoredHere` (mirror `anchoring.rs:241` `insert_replace_and_remove_update_reverse_index`).
+- Reflection-registration split test (mirror `anchoring.rs:323`): mutable inputs expose `ReflectComponent`; `AnchoredTo`/`AnchoredHere` are registered types without `ReflectComponent`.
+- Validation: missing-anchor edge, degenerate edge, non-finite point, frame-divergent edge each produce the right error; a valid flat-quad geometry passes.
+- `AnchorPoint::rotation()` returns identity for `None`, the quat for `Some`.
+
+**Files:**
+- `Cargo.toml` (workspace root) — add the four subcrate `[workspace.dependencies]` entries.
+- `crates/hana_valence/Cargo.toml` — narrow deps, `publish = false`.
+- `crates/hana_valence/src/lib.rs` — module wiring + crate docs.
+- `crates/hana_valence/src/geometry.rs`, `src/relation.rs`, `src/pose.rs` — new.
+- Read-only reference: `crates/bevy_diegetic/src/panel/anchoring.rs` (attribute pattern, FromWorld impl, both mirrored tests).
+
+**Constraints from prior phases:** none (first phase).
+
+**Acceptance gate:** `cargo build` green; `cargo check -p hana_valence --no-default-features` green; `cargo nextest run -p hana_valence` green with the four test groups above; `cargo +nightly fmt`; the `clippy` skill clean.
+
+---
+
+### Phase 2 — attachment skeleton port (copy)  · status: todo
+
+#### Work Order
+
+**Goal:** The generic attachment skeleton (topological ordering, fallback dispatch, diagnostics) lives in `hana_valence` with an `AnchoredTo` payload, unit-tested; the diegetic original is untouched.
+
+**Spec:**
+
+Copy `crates/bevy_diegetic/src/panel/attachment_resolver.rs` into `crates/hana_valence/src/attachment.rs` (a **copy** — the diegetic file keeps compiling for the screen placer until Phase 7), with these changes:
+- Payload re-type: `AttachmentResolveCandidate::Active` / `AttachmentResolveAction::Place` / `AttachmentGraph` carry `AnchoredTo` (Phase 1) instead of `AnchoredToPanel`. No extra `<A>` payload generic — `AnchoredTo` is the one stored relation both placers will read. The payload's `AnchorId` fields are simply unused by consumers that speak their own vocabulary.
+- Rename `resolve_panel_attachments` → `resolve_attachments` (nothing panel-shaped remains).
+- De-prelude: replace `bevy::prelude::*` / `bevy::platform::…` imports with granular `bevy_ecs` / `bevy_math` / `bevy_platform` paths (the no-default-features gate fails otherwise).
+- Visibility: `pub` (was `pub(crate)`), with docs on every item (`missing_docs` is deny).
+- Keep the name `AttachmentResolveDiagnostics<R>` exactly — it is already the one generic diagnostics type; diegetic's `WorldAnchorResolveDiagnostics` and screen `AnchorResolveDiagnostics` are aliases of it, and keeping the name means no rename anywhere and no cross-crate collision.
+- Keep the callback shape: `resolve_attachments<R, F>` with `F: FnMut(AttachmentResolveAction) -> Result<(), R>`; candidates arrive **pre-classified** (`Active`/`Skipped`) — classification is the consumer's job, the skeleton owns ordering, dispatch, and diagnostics. Add warn-on-repeated-skip logging so a consumer can see why an attachment isn't moving.
+
+Tests: chain ordering (3-level chain resolves parent-before-child in one pass), fallback dispatch (a `Skipped` candidate routes to `Fallback` with its reason recorded), diagnostics accumulation across frames, missing-target behavior preserved from the original.
+
+**Files:**
+- `crates/hana_valence/src/attachment.rs` — new (ported copy).
+- `crates/hana_valence/src/lib.rs` — module + re-exports.
+- Read-only source: `crates/bevy_diegetic/src/panel/attachment_resolver.rs` (L14 candidate enum, L39 action enum, L51 resolve fn, L88 graph, L285 diagnostics).
+
+**Constraints from prior phases:** Phase 1 provides `AnchoredTo` (fields `target` private + `target()` accessor, `source_anchor`, `target_anchor`, `offset: Vec3`) in `crates/hana_valence/src/relation.rs`; `bevy_platform` HashMap/HashSet are workspace deps.
+
+**Acceptance gate:** `cargo build` green; `cargo nextest run -p hana_valence` green including the four new skeleton tests; no-default-features check green; diegetic untouched (`git diff --stat` shows no `bevy_diegetic` changes); fmt + `clippy` skill clean.
+
+---
+
+### Phase 3 — `resolve_anchors` resolver  · status: todo
+
+#### Work Order
+
+**Goal:** The shape-agnostic resolver places anchored children from geometry + relation + pose, proven by the standalone two-quad test and ports of the existing green world-anchoring tests.
+
+**Spec:**
+
+`src/resolve.rs`: system `resolve_anchors`, the sole `Transform` writer for entities with `AnchoredTo`. The math (final, review-verified):
 
 ```
-target_world = parent.global * parent.geometry[target_anchor]
-source_local = child.geometry[source]
-rot          = parent.global.rotation * pose.rotation        // pose pins the anchor
-child.translation = target_world + rot * offset − rot * source_local
+target_world = parent.global * parent.geometry[target_anchor].position
+source_local = child.geometry[source_anchor].position
+base         = parent.global.rotation * target_point.rotation()  // rotation() = frame.unwrap_or(IDENTITY)
+rot          = base * pose.rotation * source_point.rotation().inverse()
+                                    // seats the child's source frame onto the target frame;
+                                    // flat children (frame None) reduce to base * pose.rotation
+offset_eff   = resolved_anchor_offset.unwrap_or(anchored_to.offset)
+                                    // mutable per-frame override, else the authored static
+child.translation = target_world + base * (offset_eff + pose.translation)
+                  − rot * (child_global_scale ⊙ source_local)     // child scale preserved
 child.rotation    = rot
 ```
 
-Sole `Transform` writer for anchored entities; composes down chains. This is the
-math currently in `bevy_diegetic`'s `world_anchoring.rs` resolver — it moves to
-`hana_valence` unchanged in spirit.
+Invariants baked into the math:
+- `offset_eff` and `pose.translation` apply in the target-anchor frame (`base`), independent of `pose.rotation` — the static offset does NOT rotate with the pose (matches today's plane-basis behavior, `plane_frame_translation` at `world_anchoring.rs:378`).
+- The pin holds because the same `rot` appears in the `− rot * (…)` term and `child.rotation`.
+- `source_point.rotation().inverse()` is a clean inverse only for unit quats — Phase 1's normalized-frame validation backs it.
+- The child-scale factor sits inside the rotated term (today: `scaled_source_anchor_offset` × `source_scale`, `world_anchoring.rs:382-394`); uniform child scale is supported, non-uniform child scale is documented unsupported.
+- No Y-flip and no unit resolution here: `offset` is raw resolver-frame units; unit/DPI/size lowering is diegetic-side (Phase 7).
 
-### Hinge → pose converter (the universal fold)
+Mechanics:
+- Read parent `GlobalTransform` + parent `ResolvedAnchorGeometry`; child `ResolvedAnchorGeometry`, `Option<&AnchorPose>` (default identity), `Option<&ResolvedAnchorOffset>`, child `GlobalTransform` (scale), `&mut Transform`.
+- Port `validate_supported_parent_transform` (`world_anchoring.rs:436`): reject non-uniform parent scale with a skip reason. Keep the source-scale finiteness check (L119-120).
+- Order + dispatch through Phase 2's `resolve_attachments` skeleton. Define the valence skip reason enum, e.g. `ResolveSkip { MissingSourceGeometry, MissingTargetGeometry, MissingAnchor(AnchorId), DespawnedTarget, UnsupportedParentTransform, NonFiniteScale }`, and expose `AttachmentResolveDiagnostics<ResolveSkip>` as a resource the consumer registers. Skipped entities keep their last/authored `Transform` (fallback), with warn-on-repeated-skip.
+- Recompute `ResolvedAnchorWorld` each frame for entities that carry it (opt-in cache, never stale).
+- Scheduling contract (docs + test wiring, no `Plugin`): `resolve_anchors` runs in `AnchorSystems::Resolve`; consumers place `Resolve` in `PostUpdate` before `TransformSystems::Propagate`. Document the staleness rule: same-frame `GlobalTransform` reads of anchored entities are one frame stale by design (Resolve writes local; Propagate computes global after).
+- **Do not register these systems into any diegetic-linked app** — unit-test schedules only until Phase 7 (double-writer guard).
+
+Tests:
+- `two_quads_top_left_to_top_right` — the decoupling proof: two entities, hand-filled `ResolvedAnchorGeometry` (quad W×H: `Vertex(0)=(-W/2,+H/2,0)` TL, `Vertex(1)=(+W/2,+H/2,0)` TR, `Vertex(2)=(+W/2,-H/2,0)`, `Vertex(3)=(-W/2,-H/2,0)`, `EdgeMid(0..4)` at edge midpoints, `Center=(0,0,0)`, 4 perimeter edges), `AnchoredTo { source_anchor: Vertex(0), target_anchor: Vertex(1), .. }`, run the schedule, assert the child `Transform` seats TL on TR. If this test needs any panel type, the layering failed.
+- Offset trace: target anchor at world `(3,3,0)`, raw `offset (0.25,−0.5,0)`, identity frames → child anchor lands `(3.25,2.5,0)` (the verified trace; diegetic's Y-flip happens in the Phase 7 lowering, so the raw offset here is pre-flipped).
+- Scale + parent rotation port: child global scale 0.5 under a rotated parent reproduces today's green expectation `(1.5,1.25,0)` (mirror `world_anchoring_respects_source_scale_and_parent_rotation`, `world_anchoring.rs:959`).
+- Same-frame pose: a system writing `AnchorPose` in `AnimatePose` lands in this frame's `Transform` (mirror `pose_written_in_animation_set_lands_this_frame`, `world_anchoring.rs:1205`).
+- Frame seating: target anchor with `frame: Some(q)` → child rotation = `base * pose.rotation`, pin preserved; a child source frame composes out (`rot * source_frame = base * pose.rotation`).
+- Wide + deep tree: >10 entities, mixed fan-out and a 4-deep chain, all resolve in one frame in topological order.
+- `ResolvedAnchorOffset` override beats `AnchoredTo.offset` when present.
+
+`lib.rs`: add the resolver math trace to the crate docs (the block above, with the offset-trace worked example).
+
+**Files:**
+- `crates/hana_valence/src/resolve.rs` — new.
+- `crates/hana_valence/src/lib.rs` — module, re-exports, math-trace docs.
+- Read-only source: `crates/bevy_diegetic/src/panel/world_anchoring.rs` (system L50, placement L95-147, `target_anchor_point` L342, `target_offset_meters` L355, `plane_frame_translation` L378, `scaled_source_anchor_offset` L382, `validate_supported_parent_transform` L436, tests L959/L1205).
+
+**Constraints from prior phases:** Phase 1 types (`AnchorPoint::rotation()`, `ResolvedAnchorOffset`, `AnchorSystems`, `ResolvedAnchorWorld`) and Phase 2 skeleton (`resolve_attachments`, `AttachmentResolveCandidate<R>` with `AnchoredTo` payload, `AttachmentResolveDiagnostics<R>`) are in place; tests run via `World`+`Schedule`, no `App`/`Plugin` exists in the crate.
+
+**Acceptance gate:** `cargo build` green; `cargo nextest run -p hana_valence` green including all seven named tests above; no-default-features check green; fmt + `clippy` skill clean.
+
+---
+
+### Phase 4 — `Hinge` + `hinge_to_pose`  · status: todo
+
+#### Work Order
+
+**Goal:** Scalar edge-fold works for any shape: `Hinge { edge, angle }` converts to `AnchorPose` via the edge axis, proven by an N-quad accordion test.
+
+**Spec:**
+
+`src/hinge.rs`:
 
 ```rust
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Component)]                 // mutable input: full ReflectComponent
+pub struct Hinge {
+    pub edge:  Edge,                  // child-LOCAL endpoints; axis = end − start,
+    pub angle: f32,                   // swapping endpoints flips fold sign
+}
+// Hinge is per-relation: a tile may be a child on one edge and a parent on
+// several (polyhedral nets are trees — one Hinge per entity at its single
+// AnchoredTo parent edge). angle is a plain f32 deliberately: the easiest
+// possible target for any animator.
+
 fn hinge_to_pose(q: Query<(&Hinge, &ResolvedAnchorGeometry, &mut AnchorPose)>) {
-    let (a, b) = (geom.points[&hinge.edge.0], geom.points[&hinge.edge.1]);
-    pose.rotation = Quat::from_axis_angle((b - a).normalize(), hinge.angle);
+    // per entity:
+    let axis = match hinge.edge.axis(geom) {
+        Ok(axis) => axis,
+        Err(reason) => { /* skip + diagnostics (MissingAnchor / Degenerate / FrameDivergent) */ }
+    };
+    pose.rotation = Quat::from_axis_angle(*axis, hinge.angle);
 }   // runs in AnchorSystems::AnimatePose, before Resolve
 ```
 
-A fold is about an **edge**, not "top/bottom." Generalizing the old
-`Quat::from_rotation_x` to `from_axis_angle(edge_axis, angle)` makes quads,
-triangles, pentagons, hexagons all fold with the same code. The only per-shape
-input is which two vertices form the hinge edge — and that comes from
-`ResolvedAnchorGeometry.edges`.
+- This is the generalization of the example's `Quat::from_rotation_x` (`panel_anchoring/hinge.rs:330`): a fold is about an **edge**, not "top/bottom" — the only per-shape input is which two anchors form the hinge edge, and that comes from `ResolvedAnchorGeometry.edges`.
+- Frame-divergent edges cannot fold (the chord is neither endpoint's tangent): Phase 1's fill-time validation already rejects them from geometry; `Edge::axis` returns `FrameDivergent` as defense-in-depth, feeding diagnostics. For now the invariant is trivially "all frames `None`" (only flat providers exist); a frame-aware axis is a later, additive extension.
+- Driver-conflict policy (last-writer-wins): `hinge_to_pose` overwrites `AnchorPose` every frame; to drive `AnchorPose` directly, remove `Hinge`. Document on both types; add a debug-only warning when an entity carries `Hinge` and something else also mutated `AnchorPose` this frame.
+- Register `Hinge` with `ReflectComponent` (it is a mutable input).
 
-`Hinge.angle` being a plain `f32` is deliberate: it is the easiest possible
-target for any animator.
+Tests:
+- N-quad straight strip: 5 hand-filled quads chained TL→TR (or edge-mid pairs), each with a `Hinge` on the shared edge; a manual system in `AnimatePose` drives angles; assert the folded transforms after one frame (accordion alternation = alternating angle signs, as `crease_sign` does in the example).
+- Degenerate edge (`start == end` positions) skips with a diagnostic, no NaN in any `Transform`.
+- Endpoint swap flips fold sign.
 
-## The animation seam — "any animator"
+**Files:**
+- `crates/hana_valence/src/hinge.rs` — new.
+- `crates/hana_valence/src/lib.rs` — module + re-exports.
+- Read-only reference: `crates/bevy_diegetic/examples/panel_anchoring/hinge.rs` (L49 `FoldPattern`, L257 `crease_sign`, L330 `from_rotation_x`).
 
-`hana_valence` exposes **targets to write**, not the writing. Three inputs an
-animator can drive, all read in `AnchorSystems::AnimatePose` and consumed by
-`Resolve` the same frame:
+**Constraints from prior phases:** `Edge::axis(&geom) -> Result<Dir3, EdgeAxisError>` exists (Phase 1); the resolver consumes `AnchorPose` in `Resolve` after `AnimatePose` (Phase 3); diagnostics type is `AttachmentResolveDiagnostics<R>` (Phase 2).
 
-- `AnchorPose { rotation, translation }` — direct local pose
-- `Hinge { angle }` — scalar fold (converter turns it into a pose)
-- `Transform` — for fly-together translation before an attachment locks
+**Acceptance gate:** `cargo build` green; `cargo nextest run -p hana_valence` green including the three tests above; no-default-features check green; fmt + `clippy` skill clean.
 
-Driver options (engine unchanged for all):
+---
 
-- **Manual system** — mutate the component in `AnimatePose`. Same as the current
-  hinge demo.
-- **bevy_tween** — one `Lens` per input component is the entire integration:
-  `HingeAngleLens`, `AnchorPoseLens` (slerp rot / lerp trans); `Transform` has a
-  built-in lens. bevy_tween owns *when/how* (timers, easings, sequences);
-  staggered start delays read as a propagating unfold "path."
-- **bevy_animation** — expose the same fields as `AnimatableProperty` /
-  `animated_field!(Hinge::angle)`. Fits when choreographies are authored ahead
-  and want graph blending; awkward for procedurally-spawned nets (clip +
-  named-hierarchy retargeting ceremony). Not the primary path, but free to add.
+### Phase 5 — bevy_tween adapters (`tween` feature)  · status: todo
 
-Published contract for animators: *(1) these components are the tweenable
-targets, (2) write them in `AnchorSystems::AnimatePose`, (3) here are ready-made
-Lenses/AnimatableProperties for the common animators.*
+#### Work Order
 
-## Arrangements — named moves over an ordered set
+**Goal:** bevy_tween drives hinges and poses through shipped lenses, demonstrated by a staggered-unfold example.
 
-An **Arrangement** is a named rule over an ordered set of anchored entities that
-owns both placement and the drivable parameters:
+**Spec:**
 
-- `placement(i) → (AnchoredTo, hinge edge, rest pose)` — where tile `i` seats
-  relative to `i−1`. Used by spawn-markers for auto-placement.
-- exposed params — the named scalars an animator drives, e.g.
-  `Accordion { fold: 0..1, lean, pattern }`, `Strip {}`, `Ring { closure }`.
+- Add `bevy_tween` as an **optional** dependency behind a new `tween` feature (pick the release compatible with Bevy 0.19; it is not yet a workspace dependency — add it to `[workspace.dependencies]`). The `tween` feature must not violate the no-default-features gate (adapters live in `src/tween.rs` behind `#[cfg(feature = "tween")]`).
+- `src/tween.rs`: `HingeAngleLens` (lerp `Hinge.angle`) and `AnchorPoseLens` (slerp `rotation`, lerp `translation`), implementing bevy_tween's lens/interpolator trait for the version chosen. Tweens write in `AnchorSystems::AnimatePose` — document how to order bevy_tween's systems into that set.
+- Published animator contract (crate docs): (1) `AnchorPose`, `Hinge.angle`, and `Transform` (un-anchored entities only) are the tweenable targets; (2) write them in `AnchorSystems::AnimatePose`; (3) these lenses are the ready-made adapters. bevy_animation `AnimatableProperty` impls are a possible later feature, not this phase.
+- Example `crates/hana_valence/examples/staggered_unfold.rs` (dev-dependencies: full `bevy` with rendering, `bevy_tween`): 5 quads with hand-filled geometry in a strip, each hinge tweened to its target angle with per-entity start delays so the unfold propagates down the chain. Concrete per-entity tween targeting and delay composition — this is the worked proof that "any animator" is real, not a claim.
 
-Both static layout and animation fall out of the same rule. Drive one number
-(`fold`) and the whole set folds.
+**Files:**
+- `Cargo.toml` (workspace root) — `bevy_tween` workspace dependency.
+- `crates/hana_valence/Cargo.toml` — `tween` feature + optional dep + example's dev-dependencies.
+- `crates/hana_valence/src/tween.rs` — new.
+- `crates/hana_valence/examples/staggered_unfold.rs` — new.
 
-### Shape-generality split (the key insight)
+**Constraints from prior phases:** `Hinge`/`hinge_to_pose` (Phase 4), `AnchorPose` (Phase 1), scheduling contract (Phase 3: consumers configure `AnchorSystems` in `PostUpdate` before propagate; the example does its own registration since valence has no Plugin).
 
-- **Folding is universal** — rotate about the shared edge; identical for every
-  polygon.
-- **Tiling / rest-layout is per-shape** — *where* slot `i` sits and *which* edge
-  is shared differs: quads share parallel edges (straight strip), triangles
-  **alternate up/down** (shared edge + flip change each step), hexes zigzag. An
-  Arrangement takes a small per-shape **tiling rule** (`next_edge(i)`,
-  `rest_delta(i)`) supplied by the shape provider (~10 lines each).
+**Acceptance gate:** `cargo build --workspace --all-features --examples` green; `cargo check -p hana_valence --no-default-features` still green; `cargo nextest run -p hana_valence --all-features` green; the example runs and visibly unfolds (manual spot-check); fmt + `clippy` skill clean.
 
-So `Accordion` = universal fold math + a shape's tiling rule. Quad/triangle/hex
-each supply a tiny rule and the ergonomic `Accordion::new(tiles)` then works
-across all of them with the same drivable `fold`.
+---
 
-### Spawn markers (anchor intercedes for placement)
+### Phase 6 — diegetic provider bridge + vocabulary maps (additive)  · status: todo
 
-Spawn a tile with `Member { arrangement }`; an observer reads the current count,
-assigns index `i`, applies `placement(i)` (relation + rest pose), and — if a fold
-is in flight — seats it at the live angle. A new instance joins mid-animation
-automatically and animates with the full set.
+#### Work Order
 
-### Nets — box / polyhedral folding
+**Goal:** bevy_diegetic can produce valence geometry and translate its `Anchor` vocabulary both ways — defined and unit-tested, but registered into no app schedule yet.
 
-A polyhedral net is a **tree** of edge-shared tiles, each with an `AnchoredTo`
-pinning one edge to a parent edge and a target dihedral `Hinge.angle`. Folding =
-drive every hinge to its target angle. A shipping box = 6 quads in a cross net at
-90°; a tetrahedron = 4 triangles. Same resolver, same pose, same recipe — only
-topology and per-edge target angles differ. `Hinge` is therefore **per-relation**
-(a tile may be a child on one edge and a parent on several).
+**Spec:**
 
-### Magnetize (edge behavior, not panel behavior)
+- `crates/bevy_diegetic/Cargo.toml`: add `hana_valence.workspace = true`.
+- New module `crates/bevy_diegetic/src/panel/valence_provider.rs`:
+  - `impl From<Anchor> for AnchorId` — the quad-provider map (this lives in diegetic on purpose; other shapes supply their own names):
+    ```rust
+    Anchor::TopLeft      => AnchorId::Vertex(0),
+    Anchor::TopRight     => AnchorId::Vertex(1),
+    Anchor::BottomRight  => AnchorId::Vertex(2),
+    Anchor::BottomLeft   => AnchorId::Vertex(3),
+    Anchor::TopCenter    => AnchorId::EdgeMid(0),
+    Anchor::CenterRight  => AnchorId::EdgeMid(1),
+    Anchor::BottomCenter => AnchorId::EdgeMid(2),
+    Anchor::CenterLeft   => AnchorId::EdgeMid(3),
+    Anchor::Center       => AnchorId::Center,
+    ```
+  - `impl TryFrom<AnchorId> for Anchor` — the partial inverse (`AnchorId` is non-exhaustive; unmappable ids return an error the screen placer will turn into a skip reason in Phase 7).
+  - `write_panel_anchor_geometry` system: query `(Entity, &DiegeticPanel, …)` filtered `Changed<DiegeticPanel>` **only** (never `Changed<Transform>` — self-triggering; and local geometry is transform-invariant). For world-space panels, compute the 9 centered-local points + 4 perimeter edges from panel W×H in authored meters (reuse the size math behind `ResolvedPanelAnchorGeometry::from_world_panel`, `anchor_geometry.rs:113`) with **no transform baking** and `frame: None` everywhere; mutate an existing `ResolvedAnchorGeometry` in place (stable keys, retained allocation), insert only when absent. Panel resize reaches `Changed<DiegeticPanel>` (`set_width`/`set_height` mutate in place), so the filter misses nothing. The existing computed-on-demand `PanelAnchorGeometryParam` path stays for its own consumers (gizmos) — this is a new data flow, not a rename.
+- **Do not register** the system into `DiegeticPanelPlugin` or any schedule — Phase 7's atomic swap does that (double-writer guard). Unit tests register it into a bare test schedule.
 
-`magnetize(group)` finds nearest unpaired edges across loose tiles, creates the
-`AnchoredTo` relation, and tweens each transform to close the gap and seat the
-edge — pure edge math in `hana_valence`, works for any provider. Decide one knob:
-locked tiles stay rigid, or become a hinge net so "magnetize then fold" composes.
+Tests (in `valence_provider.rs`):
+- A spawned world panel gets a `ResolvedAnchorGeometry` with 9 points/4 edges at the expected centered-local positions; `validate()` passes.
+- Resizing the panel updates positions in place (same map allocation observable via key stability; no remove/reinsert of the component).
+- Round-trip: `Anchor -> AnchorId -> Anchor` is identity for all nine variants; `TryFrom` on an unmapped id errors.
 
-## Naming vs indexing
+**Files:**
+- `crates/bevy_diegetic/Cargo.toml` — dependency.
+- `crates/bevy_diegetic/src/panel/valence_provider.rs` — new.
+- `crates/bevy_diegetic/src/panel/mod.rs` — module declaration only (no scheduling).
+- Read-only reference: `crates/bevy_diegetic/src/panel/anchor_geometry.rs` (`from_world_panel` L113, `PanelPlane` L367), `crates/bevy_diegetic/src/layout/units/anchor.rs:8` (`Anchor`).
 
-- The engine **never uses names** — `AnchoredTo`, `Hinge`, the resolver, the
-  recipes all speak raw `AnchorId` (`Vertex(2)`, `EdgeMid(0)`).
-- Names are per-shape authoring sugar, optional and cheap. Provide them only when
-  a shape has a small meaningful fixed set: quad → `Anchor::TopLeft…`; triangle →
-  maybe `Apex/BaseLeft/…`; hexagon → probably leave unnamed (`Vertex(0..6)`).
-- **Recipes never hardcode ids** — a reusable accordion asks geometry "what edge
-  do I share with my parent?" and gets `(AnchorId, AnchorId)`. Names/explicit ids
-  appear only when a human hand-authors a specific net; generated nets derive
-  hinge edges from adjacency.
+**Constraints from prior phases:** valence types come from Phases 1–3 (`AnchorId`, `AnchorPoint`, `Edge`, `ResolvedAnchorGeometry::validate`); the valence resolver is NOT running in diegetic apps yet — this phase writes an input component nothing reads, which is exactly why it is safely additive.
 
-Three tiers, pick per case: (1) generated/procedural — no names; (2)
-hand-authored regular shape — names if offered; (3) one-off — raw `AnchorId`.
+**Acceptance gate:** full `cargo build` green; `cargo nextest run` green (workspace) including the three new tests; no behavior change anywhere (no scheduling edits); fmt + `clippy` skill clean.
 
-## bevy_diegetic as a panel provider
+---
 
-Behind an `anchor` feature (on for our apps, off by default for outside users; a
-later semver bump can flip the default):
+### Phase 7 — the atomic swap: relation, resolvers, placers, examples  · status: todo
 
-1. depend on `hana_valence`.
-2. map vocabulary to ids:
-   ```rust
-   impl From<Anchor> for AnchorId {
-       fn from(a: Anchor) -> AnchorId {
-           match a {
-               Anchor::TopLeft      => AnchorId::Vertex(0),
-               Anchor::TopRight     => AnchorId::Vertex(1),
-               Anchor::BottomRight  => AnchorId::Vertex(2),
-               Anchor::BottomLeft   => AnchorId::Vertex(3),
-               Anchor::TopCenter    => AnchorId::EdgeMid(0),
-               Anchor::CenterRight  => AnchorId::EdgeMid(1),
-               Anchor::BottomCenter => AnchorId::EdgeMid(2),
-               Anchor::CenterLeft   => AnchorId::EdgeMid(3),
-               Anchor::Center       => AnchorId::Center,
-           }
-       }
-   }
-   ```
-3. the bridge system — the only thing that makes a panel "a shape":
-   ```rust
-   fn write_panel_anchor_geometry(
-       panels: Query<(Entity, &DiegeticPanel), Or<(Changed<DiegeticPanel>, Changed<Transform>)>>,
-       mut commands: Commands,
-   ) {
-       // from panel W×H (+ plane), compute 9 local points + 4 edges,
-       // insert ResolvedAnchorGeometry { points, edges }
-   }
-   ```
-   Replaces today's `ResolvedPanelAnchorGeometry` — same math, new component type.
-4. scheduling glue: `write_panel_anchor_geometry.before(AnchorSystems::Resolve)`;
-   forward the existing `PanelSystems::AnimateAnchorPose` to
-   `AnchorSystems::AnimatePose` so pose drivers keep same-frame timing.
-5. optional ergonomic constructor so users never touch `AnchorId`:
-   ```rust
-   AnchoredToPanel::new(parent, Anchor::TopLeft, Anchor::TopRight)
-   // → AnchoredTo { source: a.into(), target_anchor: b.into(), .. }
-   ```
+#### Work Order
 
-Panel user code is unchanged from today — `Anchor::TopLeft` stays the public
-vocabulary; `AnchorPose` is used directly from `hana_valence`. **diegetic does not
-re-export or drive the pose system.**
+**Goal:** bevy_diegetic runs entirely on hana_valence — one stored relation (`AnchoredTo`), valence resolver on the world path, screen placer on the valence skeleton, diegetic copies deleted — with all existing behavior and tests preserved.
 
-## Worked example — two quads, TopLeft glued to TopRight
+This phase is intentionally large because it cannot be split: the stored relation flips from `AnchoredToPanel` to `hana_valence::AnchoredTo`, and both placers read that one relation, so the world swap, the screen re-point, and the sugar rewrite must land together (double-writer/atomicity invariant). Work the checklist in order; the tree compiles only at the end — commit-sized intermediate states are not expected within this phase.
 
-1. provider fills each panel's `ResolvedAnchorGeometry` (local frame, centered):
-   `Vertex(0)=(-W/2,+H/2,0)`, `Vertex(1)=(+W/2,+H/2,0)`, …, `Center=(0,0,0)`.
-2. relation: `child: AnchoredTo { target: parent, source: Vertex(0),
-   target_anchor: Vertex(1), offset }`.
-3. resolver places child so its TopLeft lands on parent's TopRight, then
-   `AnchorPose.rotation` swings the child about that pinned point — the hinge
-   fold.
+**Spec:**
 
-The resolver only ever indexes `geometry[id]`; "TopLeft means a corner" lives
-entirely in the provider (it placed `Vertex(0)`) and the `Anchor → AnchorId` map.
-Swap a triangle provider in and the same resolver folds triangles unchanged.
+1. **Sugar rewrite** (`crates/bevy_diegetic/src/panel/anchoring.rs`):
+   - Delete the `AnchoredToPanel` relationship component and `PanelsAnchoredHere` (and the `pub use` re-export; consumers now read `hana_valence::AnchoredHere`).
+   - New `AnchoredToPanel` = insert-only `#[derive(Bundle)]` with **private fields** wrapping: `hana_valence::AnchoredTo` (anchors lowered via `From<Anchor>`), the stored typed offset `PanelAnchorOffset`, and the authored component `PanelAttachmentAuthored { source: Anchor, target_anchor: Anchor }` (new, this file) that the screen placer reads by entity. Constructor `new(target: Entity, source: Anchor, target_anchor: Anchor) -> Self`; preserve the existing builder surface (offset et al.) so example call sites change minimally. No hana_valence type appears in any public signature.
+   - Delete `PanelAnchorPose`; all consumers use `hana_valence::AnchorPose` directly (compose, no re-export).
+   - `PanelAnchorOffset` stays diegetic (three `Dimension`s — unit/DPI/target-size knowledge does not move).
+2. **Offset lowering (world)** — new system in `anchoring.rs` or `valence_provider.rs`: per frame, for world-space attachments with a `PanelAnchorOffset`, resolve against the live target exactly as today (`target_offset_meters` `world_anchoring.rs:355`: `to_layout_units(target.layout_unit())`, `target_size/panel_size` normalization) and apply the world Y-flip (today's `right*x − up*y + normal*z`, L350-351, becomes lowered `Vec3(x_m, −y_m, z_m)` since the valence resolver applies `base * offset` with no flip); write `hana_valence::ResolvedAnchorOffset`. One Vec3 write per frame, no relation re-insert. Screen-space attachments resolve their typed offset inside the placer callback as today (zero `ResolvedAnchorOffset` writes on the screen path).
+3. **World path swap**: delete `world_anchoring.rs` (resolver, classify, placement, `WorldAnchorResolveDiagnostics` registration — the world path dissolves into provider + valence resolver). In `DiegeticPanelPlugin` (`panel/mod.rs`): configure `AnchorSystems` (`FillGeometry` and `AnimatePose` before `Resolve`, `Resolve` in `PostUpdate` before `TransformSystems::Propagate`); register `write_panel_anchor_geometry` (Phase 6) in `FillGeometry`, the offset-lowering system before `Resolve`, `hana_valence::resolve_anchors` + `hinge_to_pose` + the `AttachmentResolveDiagnostics<ResolveSkip>` resource, and hana_valence type registrations; order `PanelSystems::AnimateAnchorPose` inside `AnchorSystems::AnimatePose`.
+4. **Screen placer re-point** (`screen_space/anchoring/`): `resolve.rs` calls `hana_valence::resolve_attachments` with `AttachmentResolveCandidate<AnchorResolveSkip>` carrying the `AnchoredTo` payload; `candidate.rs` classification reads `PanelAttachmentAuthored` (+ `PanelAnchorOffset`) by entity for its `Anchor`-typed math, with `TryFrom<AnchorId>` as fallback and a new skip-reason variant for unmappable ids; `placement.rs` callback body unchanged in spirit. The alias `AnchorResolveDiagnostics = AttachmentResolveDiagnostics<AnchorResolveSkip>` keeps working (same generic name, now from hana_valence).
+5. **Delete** `crates/bevy_diegetic/src/panel/attachment_resolver.rs` (the last consumer just switched).
+6. **Collateral updates**: `panel/gizmos.rs` (reads of `PanelsAnchoredHere`/pose types → `AnchoredHere`/`AnchorPose`); any `panel/mod.rs` re-exports; `panel/anchor_geometry.rs` untouched except doc references.
+7. **Tests**:
+   - Port from `world_anchoring.rs` into the new seams: `world_anchoring_respects_source_scale_and_parent_rotation` (same expected `(1.5,1.25,0)`) and `pose_written_in_animation_set_lands_this_frame` now run through provider + lowering + valence resolver in a diegetic test app.
+   - `anchoring.rs`: replace the relationship tests with sugar-level ones (bundle insert creates `AnchoredTo` + `AnchoredHere`; reverse-index mechanics are covered valence-side since Phase 1). Update `anchor_types_are_registered_with_expected_reflect_component_data` for the new registration set (valence types registered by the plugin; split rule per Delegation Context).
+   - `point_offsets_resolve_to_screen_pixels` (`screen_space/anchoring/resolve.rs:798`) must stay green — it is the DPI Pt→px guard for the lowering split.
+   - New: world offset lowering test — a `PanelAnchorOffset` in Pt/target-relative units tracks a target resize/DPI change frame-to-frame via `ResolvedAnchorOffset`.
+8. **Examples**: update `examples/panel_anchoring/*` (constructor call sites; `PanelAnchorPose` → `hana_valence::AnchorPose`; the example's own fold systems now write valence components in `AnchorSystems::AnimatePose`) and `examples/diegetic_text_stress.rs` (L53-65 call sites). Recipe-ification of hinge/spin/morph waits for Phase 8 — this phase is compile-and-behavior parity only.
+9. **Breaking-changes record** (`crates/bevy_diegetic/CHANGELOG.md`): `Query<&AnchoredToPanel>` no longer possible (bundle, not component — query `hana_valence::AnchoredTo`); `PanelsAnchoredHere` → `hana_valence::AnchoredHere`; `PanelAnchorPose` → `hana_valence::AnchorPose`; `pub use PanelsAnchoredHere` removed. `Anchor::TopLeft` authoring and `AnchoredToPanel::new` call sites are unchanged.
 
-## Migration from bevy_diegetic
+**Files:**
+- `crates/bevy_diegetic/src/panel/anchoring.rs` — sugar rewrite + authored component + lowering.
+- `crates/bevy_diegetic/src/panel/world_anchoring.rs` — deleted (tests ported first).
+- `crates/bevy_diegetic/src/panel/attachment_resolver.rs` — deleted.
+- `crates/bevy_diegetic/src/panel/mod.rs` — plugin scheduling + set config + re-exports.
+- `crates/bevy_diegetic/src/panel/gizmos.rs`, `src/panel/valence_provider.rs` — collateral.
+- `crates/bevy_diegetic/src/screen_space/anchoring/{resolve,candidate,placement,mod}.rs` — re-point.
+- `crates/bevy_diegetic/examples/panel_anchoring/*`, `examples/diegetic_text_stress.rs` — call sites.
+- `crates/bevy_diegetic/CHANGELOG.md` — breaking list.
 
-The pieces to extract / generalize (already exist in some form):
+**Constraints from prior phases:** Phase 1–4 valence API (`AnchoredTo` private-target bundle-friendly ctor, `AnchoredHere`, `AnchorPose`, `ResolvedAnchorOffset`, `AnchorSystems`, `resolve_anchors`, `hinge_to_pose`, `resolve_attachments`, `AttachmentResolveDiagnostics<R>`, `ResolveSkip`); Phase 6 provider (`write_panel_anchor_geometry`, `From<Anchor>`, `TryFrom<AnchorId>`, `PanelAttachmentAuthored` is defined HERE not in Phase 6); valence exposes no Plugin — this phase owns all registration; the valence resolver applies no Y-flip and no unit resolution (both live in the lowering written here).
 
-- `panel/world_anchoring.rs` resolver → `hana_valence` `resolve_anchors`
-  (generalize `from_rotation_x` → `from_axis_angle(edge_axis, …)`).
-- `ResolvedPanelAnchorGeometry` → `ResolvedAnchorGeometry { points, edges }`.
-- `PanelAnchorPose` → `AnchorPose` (re-exported, not panel-owned).
-- `AnchoredToPanel` → thin sugar over `hana_valence::AnchoredTo`.
-- `PanelSystems::AnimateAnchorPose` → forwards to `AnchorSystems::AnimatePose`.
-- the `panel_anchoring` example's hinge/spin/morph become `hana_valence`
-  arrangement recipes + a chosen driver; they stay as examples, not library.
+**Acceptance gate:** `cargo build --workspace --all-features --examples` green; `cargo nextest run --all-features --workspace` green including the ported/updated named tests and the new lowering test; `panel_anchoring` example launches with hinge/spin/morph behavior parity (manual spot-check); fmt + `clippy` skill clean.
 
-## Open questions
+---
 
-- Does `magnetize` leave locked tiles rigid or convert them to a hinge net?
-- `ResolvedAnchorGeometry` returns local points + entity transform applies world
-  placement — confirm no shape needs world-aware geometry.
-- `collect_tiles_by_order` (example) assumes contiguous orders; the general
-  membership/spawn-marker observer must not rely on that invariant.
-- Triangle tiling rule: confirm the up/down alternation (shared edge + flip)
-  generalizes cleanly to the `next_edge(i)` / `rest_delta(i)` interface.
-- Whether arrangement recipes live in `hana_valence` core or a sibling
-  `hana_valence_fold` / `hana_valence_tween` glue crate.
+### Phase 8 — arrangements: tiling rule, Accordion/Strip, Member observer  · status: todo
 
-## Team review — auto-recorded (mechanical / converged)
+#### Work Order
 
-Findings with a single sensible in-intent outcome. These refine the plan; apply
-when implementing.
+**Goal:** Named arrangements place and fold ordered sets of anchored tiles through one drivable parameter, with mid-animation spawn join.
 
-- **M1 — resolver extraction is adapted, not copy-paste.** The doc's "moves
-  unchanged in spirit" overstates it: the current `world_anchoring.rs` resolver
-  looks up `PanelPlane.point(anchor)` and applies offsets in plane-frame basis
-  (`plane.right/up/normal`). Generalizing means replacing those with
-  `geometry[AnchorId]` lookups and deriving the basis from `Transform`. The math
-  (pin source onto target, compose down chain, topological order) is preserved;
-  the geometry access path changes.
-- **M2 — `ResolvedAnchorGeometry` is a contract; make it enforce.** Provider MUST
-  fill every point referenced by `edges`; the resolver and `hinge_to_pose` only
-  look up ids known present. Add debug-only validation (edges reference existing,
-  distinct points; points finite). The optional `AnchorGeometry` authoring trait
-  returns `Result<_, GeometryError>` so a bad provider fails loudly, not with
-  silent NaN geometry.
-- **M3 — degenerate/scope constraints.** Require distinct hinge endpoints (a≠b,
-  else `from_axis_angle` gets a zero axis → NaN). Anchors must be discrete and
-  coplanar / on-surface. Defer circles & curved boundaries to future work (drop
-  "maybe circles" from the headline claim). Coplanar stacked tiles need a small
-  provider z-offset or separate render layers to avoid z-fighting.
-- **M4 — frame/ordering contract (port existing).** Resolve must topologically
-  sort so each parent resolves before its children within one pass (this is what
-  `resolve_panel_attachments` already does — chaining tests confirm 3-level
-  chains resolve in one frame). `hinge_to_pose` runs in `AnimatePose` strictly
-  before `Resolve`; writes in `AnimatePose` land the same frame (existing test
-  `pose_written_in_animation_set_lands_this_frame` validates it).
-- **M5 — Transform ownership rule.** The resolver is the *sole* `Transform`
-  writer for entities that have `AnchoredTo`. Drivers may write `Transform`
-  directly only on **un-anchored** entities (fly-together translation before the
-  `AnchoredTo` relation is added). State this so "fly-together then lock" has no
-  write race.
-- **M6 — hinge frame semantics (document + trace).** Edge endpoints `(a,b)` are
-  child-LOCAL; `pose.rotation` folds about the local edge axis; the resolver
-  composes `parent.global.rotation * pose.rotation`; the pinned point is
-  preserved by subtracting `rot * source_local`. `AnchorPose.translation` is
-  applied in the parent/plane frame *before* rotation. Add the explicit quad
-  trace (verified correct against the existing `BottomLeft` attachment test:
-  target at (3,3,0), offset (0.25,−0.5,0) → child at (3.25,2.5,0)).
-- **M7 — "any animator" ≠ plug-and-play (sharpen the contract).** bevy_tween
-  needs a small authored adapter, not a drop-in. Before publishing the contract,
-  add a worked 5-quad staggered-unfold example with concrete `Lens` signatures,
-  per-entity tween targeting, and delay composition. Keep bevy_tween as an
-  implementation milestone, not a design claim.
-- **M8 — define the Arrangement / tiling-rule trait before milestone 5.**
-  `placement(i) → (AnchoredTo, Hinge, rest)` over a per-shape tiling rule
-  (`next_edge(i)`, `rest_delta(i)`). Validate the triangle up/down alternation
-  *first* (already an open question — keep). The `fold`-distribution choice
-  (uniform vs cumulative) is already encoded by the existing
-  `FoldPattern::Accordion` vs `Coil` in `hinge.rs` — reference it rather than
-  re-inventing.
-- **M9 — reframe naming tiers as workflows.** auto-generated-from-topology (no
-  names) / authored-with-shape-names / one-off raw `AnchorId`, plus a one-line
-  pick guide. Clarify that `From<Anchor> for AnchorId` lives in the *quad
-  provider* (bevy_diegetic); other shapes supply their own names — it is not a
-  generality leak in `hana_valence`.
-- **M10 — migration clarity.** Add a "For existing bevy_diegetic users" note:
-  `Anchor::TopLeft` and `AnchoredToPanel` are unchanged, no migration required;
-  mark `AnchoredToPanel` the recommended panel entry point and `AnchoredTo` the
-  shape-agnostic one.
+**Spec:**
 
-## Team review — cycle 2 additions (auto-recorded)
+`src/arrange.rs`:
+- **Tiling rule** (per-shape input, ~10 lines per shape): `next_edge(i) -> (Edge, Edge)` (which source/target edges seat tile `i` on tile `i−1`) and `rest_delta(i)` (rest pose between neighbors). Folding is universal (rotate about the shared edge — Phase 4); tiling is the only per-shape part: quads share parallel edges (straight strip), triangles alternate up/down, hexes zigzag.
+- **Arrangement** = a named rule over an ordered set owning `placement(i) -> (AnchoredTo, Edge /* hinge edge */, rest pose)` plus exposed drivable params:
+  - `Accordion { fold: f32 /* 0..1 */, lean: f32, pattern: FoldPattern }` — `FoldPattern::{Accordion, Coil}` encodes the fold distribution (uniform-alternating vs cumulative), ported from the example's `FoldPattern` (`panel_anchoring/hinge.rs:49`) rather than re-invented. Drive `fold` and the whole set folds.
+  - `Strip {}` — static straight layout.
+- A quad tiling rule ships in-crate for tests and the quad-based recipes (quads are plain geometry, no shape crate needed). Ordering over the set = `AnchoredHere` insertion order (deterministic by contract).
+- **Member spawn-marker observer**: spawn a tile with `Member { arrangement }`; the observer reads the current member count, assigns index `i`, applies `placement(i)` (relation + rest pose + hinge), and seats it at the live fold angle if a fold is in flight — a new instance joins mid-animation and animates with the set. It must NOT assume contiguous order indices (the example's `collect_tiles_by_order`, `anchor_demo.rs:828`, has that bug — do not port it). Geometry-fill timing: if a spawned tile's geometry is not yet filled on its spawn frame, defer its first placement one frame rather than resolving at the authored pose and snapping.
+- Docs (`lib.rs`): the naming-tiers workflow — (1) generated/procedural: no names, ids derived from adjacency; (2) hand-authored regular shape: provider names (`Anchor::TopLeft`) if offered; (3) one-off: raw `AnchorId` — with a one-line pick guide; recipes never hardcode ids (a reusable accordion asks geometry which edge it shares with its parent).
+- Update `examples/panel_anchoring`: re-express the hinge/spin/morph demos on `Accordion` + a driver where they map (they stay examples, not library code).
 
-- **M11 — shape-provider registration seam.** `hana_valence` publishes the
-  component contract (`ResolvedAnchorGeometry`) and the system sets; it does NOT
-  expose a provider trait/plugin for dispatch. Each provider (incl. bevy_diegetic
-  under `anchor`) registers its own `write_<shape>_anchor_geometry` system that
-  reads `Changed<Shape>` and writes the component, scheduled before resolve. Add
-  a third set `AnchorSystems::FillGeometry` so multiple providers order cleanly:
-  `AnimatePose` and `FillGeometry` both before `Resolve`.
-- **M12 — resolver reads parent `GlobalTransform`, not just `Transform`.**
-  Geometry points are local; world-framing a target anchor needs
-  `parent.global_transform * geometry[id]`. Amends M1: the fold math is
-  preserved, but the resolver loads `GlobalTransform` and transforms local
-  geometry to world explicitly (the old plane-basis path did this implicitly).
-- **M13 — schedule/propagate timing.** All geometry-fill systems run before
-  `Resolve`; `Resolve` writes `Transform` in `PostUpdate` before
-  `TransformSystems::Propagate`. Same-frame `GlobalTransform` reads of anchored
-  entities are one frame stale by design (resolve writes local; propagate
-  computes global next). Document this guarantee.
-- **M14 — runtime guards, not just docs (corrected in cycle 3).**
-  `hinge_to_pose` must guard `|b−a| < ε` (degenerate edge → skip + warn, not
-  NaN). On scale: the existing resolver already *rejects* non-uniform **parent**
-  scale (`validate_supported_parent_transform` in `world_anchoring.rs`) and only
-  checks the **child/source** scale for finiteness, applying it component-wise to
-  the offset (`* source_scale`). So the open shear is non-uniform **child**
-  scale, not parent. Carry the parent guard forward and additionally validate (or
-  document as unsupported) non-uniform child scale.
-- **M15 — net closure is not enforced.** A tree net's last flap meeting the
-  first is a property of topology + target angles, not a resolver invariant;
-  cumulative float error can leave a gap. Hand-authored/generated nets must be
-  built to close; optionally add a `NetClosure` validator. (Tree topology is the
-  chosen model — see PD1 resolution below.)
-- **M16 — diagnostics parity (avoid a regression).** Today's
-  `WorldAnchorResolveDiagnostics` / `AttachmentResolveDiagnostics<R>` must have a
-  `hana_valence` equivalent (`AnchorResolveDiagnostics<R>`, generic over
-  skip-reason). Missing geometry and despawned `AnchoredTo` targets currently
-  silent-fallback to the last/authored Transform — add warn-on-repeated-skip
-  logging so providers can see why a tile isn't moving.
-- **M17 — `Member` observer vs geometry-fill ordering.** The auto-seat observer
-  runs before `AnimatePose`; if a tile's geometry is not yet filled on its spawn
-  frame, it resolves at the authored pose and snaps to the live fold next frame.
-  Document, or one-frame-defer first resolution until geometry exists.
-- **M18 — type hardening.** Mark `AnchorId` `#[non_exhaustive]` (a future
-  `Face(u32)` must not silently break provider matches). Document `Hinge.edge`
-  order-significance (axis = `end − start`; swapping endpoints flips fold sign)
-  and debug-assert distinct endpoints. Keep `AnchorPose` distinct from
-  `Transform` (it is the local-frame seam the resolver converts; merging them
-  reintroduces the write race M5 forbids) — state the rationale on the type.
-- **M19 — recipe/crate boundary (resolves the doc's last open question).**
-  Arrangements (`Accordion`, `Strip`, `Ring`) and the animator adapters
-  (`HingeAngleLens`, `AnimatableProperty` impls) live in `hana_valence` core, the
-  adapters behind optional `tween` / `animation` feature modules. No separate
-  `hana_valence_fold` crate — folding is the core primitive. Procedural shape
-  providers (triangle, hex) are separate crates or example code.
-- **M20 — headline wording.** Drop "maybe circles" from the goal (deferred per
-  M3). Move bevy_tween out of the goal sentence into a post-milestone-3
-  implementation; the goal is "one animation seam," animators are swappable.
-- **M21 — scalability test + `ResolvedAnchorWorld`.** Add a resolver test with a
-  wide and a deep tree (>10 entities) before 1.0 (current chain test is only
-  3-deep linear). Decide `ResolvedAnchorWorld`'s ownership: either drop it
-  (compute world points on demand in gizmo systems) or have `Resolve` recompute
-  it each frame so it can't go stale.
+Tests: 5-quad accordion folds under `fold` with both patterns (assert alternating vs cumulative angles); `Member` spawned mid-fold seats at the live angle; placement with non-contiguous indices works; `Strip` rest layout positions match hand-computed seats.
 
-## Team review — cycle 3 additions (auto-recorded)
+**Files:**
+- `crates/hana_valence/src/arrange.rs` — new.
+- `crates/hana_valence/src/lib.rs` — module + naming-tiers docs.
+- `crates/bevy_diegetic/examples/panel_anchoring/*` — recipe port.
+- Read-only reference: `crates/bevy_diegetic/examples/panel_anchoring/hinge.rs` (`FoldPattern` L49, `crease_sign` L257), `anchor_demo.rs:828`.
 
-Cycle 3 verified M11–M21 against the code (M12, M13, M16, PD1-tree CONFIRMED;
-M14 corrected above) and added the deliverable-surface items two cycles missed:
+**Constraints from prior phases:** full valence stack live in diegetic since Phase 7 (provider fills geometry; `AnchorSystems` configured by `DiegeticPanelPlugin`; `Hinge`/`hinge_to_pose` drive folds); `AnchoredHere` iteration order = insertion order; observers are `bevy_ecs`-level (no `bevy_app` — the observer registers via `World::add_observer` or is exported for consumers to register).
 
-- **M22 — milestone 1 needs a concrete standalone test fixture.** "Unit-test
-  two-quad attachment with hand-filled geometry (no diegetic dependency)" is the
-  gate that proves the crate is actually decoupled. Specify it:
-  `#[test] two_quads_top_left_to_top_right()` — build two entities, hand-fill
-  `ResolvedAnchorGeometry`, insert `AnchoredTo`, run `resolve_anchors`, assert the
-  child `Transform`. If this test needs any panel type, the layering failed.
-- **M23 — `Reflect` + type registration is a contract, not optional.** The
-  existing `AnchoredToPanel` / `PanelAnchorPose` derive `Reflect` and register
-  `ReflectComponent` (there is a test for it). The `hana_valence` core components
-  (`AnchorId`, `AnchoredTo`, `AnchorPose`, `Hinge`, `ResolvedAnchorGeometry`) must
-  carry the same so BRP inspection and scene serialization of nets work. Add a
-  registry round-trip test.
-- **M24 — declare a minimal bevy dependency surface.** "Standalone" needs a
-  stated dep contract: `hana_valence` should depend only on
-  `bevy_ecs + bevy_transform + bevy_math` (not full `bevy`), gated by a
-  `cargo check --no-default-features` CI step. A full-bevy dep undercuts the
-  standalone claim and inflates the footprint for non-render consumers.
-- **M25 — optional debug-draw module.** The panel system has anchor gizmos; the
-  generalized crate should publish an optional `debug` module
-  (`draw_anchor_geometry`, `draw_relations`, `draw_hinge_axes`) behind a
-  `GizmoConfigGroup`, so providers get an authoring aid instead of each
-  reimplementing it. Optional feature, not required.
-- **M26 — publishing metadata.** Before milestone 1: verify the `hana_valence`
-  name on crates.io and set `publish = false` until the API is intended to ship,
-  so an accidental publish or name collision can't block integration.
-- **M27 — docs deliverables.** Name where things live: `lib.rs` carries the
-  public-API overview + the resolver math trace (M6) + the naming-tiers workflow
-  (M9); arrangement recipes ship with worked snippets; README mirrors the
-  bevy_diegetic one (quick-start, examples dir, bevy compat). `lib.rs` is the
-  single source of truth for the public surface.
+**Acceptance gate:** `cargo build --workspace --all-features --examples` green; `cargo nextest run --all-features` green including the four arrangement tests; no-default-features check green; `panel_anchoring` still behavior-par (spot-check); fmt + `clippy` skill clean.
 
-## Proposed user decisions
+---
 
-Surfaced after the final cycle. Converged items are recorded above and marked
-resolved here (kept so a future run does not relitigate them).
+### Phase 9 — triangle provider + box net demo + README  · status: todo
 
-- **PD1 — net topology — RESOLVED → tree (auto-recorded).** Cycle 2 consensus
-  (Correctness, Architecture, Type System): a **tree** (one `Hinge` per entity at
-  its single `AnchoredTo` parent edge) is *required* and *sufficient* — the net
-  of any convex polyhedron is a simply-connected planar tree, so boxes,
-  tetrahedra, octahedra all fit; DAG support forces a per-edge `HingeAngles` map
-  and an extra `AnchoredTo.target_edge` field for generality outside the stated
-  intent. Closure caveat recorded as M15. Not surfaced.
-- **PD2 — geometry contract — RESOLVED → `HashMap` + validation (auto-recorded).**
-  Typed per-shape arrays give compile-time validity but `AnchorId`'s `Vertex(u32)`
-  /`EdgeMid(u32)` enum plus the "arbitrary polygon" intent defeat a const-generic
-  `Polygon<N>`, reverting to runtime checks anyway. Keep `HashMap<AnchorId,Vec3>`
-  + `Vec<edges>` with always-on validation (M2); providers may offer typed
-  *builders* that produce it. Optional `EdgeId` indexing is an O(1) optimization,
-  not a contract change. Not surfaced.
-- **PD3 — multi-driver conflict — RESOLVED → last-writer-wins + debug-warn
-  (auto-recorded).** The `AnimatePose`-before-`Resolve` barrier already makes the
-  resolver read the final pose; the only real hazard is `Hinge` + a direct
-  `AnchorPose` driver on one entity (`hinge_to_pose` overwrites every frame).
-  Policy: last-writer-wins, documented ("remove `Hinge` to drive `AnchorPose`
-  directly"), with a debug-only warning when both are present. Not surfaced.
-- **PD4 — `anchor` feature default / backward-compat (important) — STILL OPEN,
-  recommend (a) + split.** Cycle-3 facts: there is no `anchor` feature today;
-  anchoring types are exported unconditionally; in-tree consumers are the
-  `panel_anchoring` example (~3.3k LOC) *and* `diegetic_text_stress.rs`; both
-  world-anchoring systems query **only** entities that carry `AnchoredToPanel` /
-  the pose component, so gating them off is zero-overhead for non-anchored panels
-  and does **not** change core panel behavior. Options:
-  (a) gate panel anchoring behind `anchor`, **off** by default — matches the
-  stated intent; the in-tree examples declare `required-features = ["anchor"]`;
-  external default builds ship panels without anchoring (clean opt-in);
-  (b) gate it, **on** by default — non-breaking now, but flipping to off later is
-  a semver break;
-  (c) leave panel anchoring **ungated / always-on**; `anchor` only adds the
-  `hana_valence` bridge + non-panel shapes (zero migration, small always-present
-  API surface).
-  Also flagged: **split** PD4 from the hana_valence extraction — the extraction can
-  proceed independently; the feature gate applies only to the bevy_diegetic panel
-  anchoring machinery. Recommendation: **(a)**, because bevy_diegetic is a
-  *provider* of anchor geometry, not the owner, and the resolver is already a
-  self-contained opt-in subsystem keyed on `AnchoredToPanel`. Class:
-  design-improvement (scope/behavior). Source: Risk vs Architecture (settled to a
-  recommendation in cycle 3).
-  **Decision: (a) — gate behind `anchor`, off by default.** The maintainer always
-  enables it in both primary projects (`required-features = ["anchor"]` on the
-  in-tree examples); off-by-default is for external consumers who want panels
-  without anchoring. Keep the gate split from the hana_valence extraction.
-- **PD5 — magnetize lock behavior (minor).** After `magnetize` seats edges, do
-  locked tiles stay rigid, or convert into a hinge net so "magnetize then fold"
-  composes? (Also listed in Open questions.) Class: design-improvement. Source:
-  Architecture. **Decision: (b) — seated edges become hinges**, so "magnetize
-  then fold" composes into one continuous motion.
+#### Work Order
 
-- **PD6 — re-export vs compose for hana_valence types (emerged during review).**
-  With `anchor` on, bevy_diegetic depends on hana_valence. Does diegetic
-  `pub use hana_valence::{AnchorPose, Hinge, AnchoredTo, AnchorId}` (one import,
-  but hana_valence's types join diegetic's public/semver surface), or stay
-  **compose** (current plan — no re-export; the user adds `hana_valence` directly
-  and writes `hana_valence::AnchorPose`; clean semver boundary)? Attachment
-  vocabulary (`AnchoredToPanel`, `Anchor::TopLeft`) is diegetic-native either way;
-  bevy_diegetic never *writes* `AnchorPose` (it writes `ResolvedAnchorGeometry` +
-  the `AnchoredTo` relation; the animation driver writes the pose). Class:
-  design-improvement (API surface). **Decision: (a) — compose, no re-export.**
-  Keep a clean semver boundary; the user imports `hana_valence` directly for pose
-  types. Diegetic must keep hana_valence types out of its *public* signatures
-  (writing protocol components in internal systems is fine — see note below).
+**Goal:** A second shape proves the tiling-rule split, a box net folds shut, and the crate is documented for external use.
 
-### Note — is it a "leak" when diegetic writes an anchor component?
+**Spec:**
 
-No. Two different meanings of "leak":
+- **Triangle provider** as example code (per the recipe/crate boundary: procedural shape providers are separate crates or example code — not core): `examples/triangle_accordion.rs` fills `ResolvedAnchorGeometry` for equilateral triangles (3 vertices, 3 edge-mids, centroid, 3 edges) and supplies the triangle tiling rule — shared edge + up/down flip alternate each step. This validates the open design question: the alternation must express cleanly through `next_edge(i)` / `rest_delta(i)`; if it cannot, the rule interface is wrong — fix the interface, do not special-case triangles.
+- **Box net demo** `examples/box_net.rs`: 6 quads in a cross net — a **tree** of edge-shared tiles (one `Hinge` per tile at its single `AnchoredTo` parent edge; tree topology is the committed model — the net of any convex polyhedron is a simply-connected planar tree), each with target dihedral 90°; drive every hinge to its target (manual system or `tween` feature) and the box folds shut. Net closure is topology + target angles, not a resolver invariant — build the net to close; assert final face positions within an epsilon that tolerates cumulative float error.
+- Optional stretch: tetrahedron (4 triangles) reusing the triangle geometry — include only if the triangle rule lands cleanly.
+- **README** (`crates/hana_valence/README.md`), mirroring the bevy_diegetic README shape (quick-start, examples dir, bevy compat): name story — in chemistry, an atom's **valence** is its capacity to bond: the number and arrangement of connection points it offers. This crate gives shapes the same thing — programmable anchor points by which they bond, assemble, and animate as bonds form, break, and reconfigure. One-liner: *hana_valence — shapes expose connection points and bond into animatable assemblies; named for valence, an atom's capacity to bond.* Vocabulary note: the crate is `hana_valence` but types keep the **anchor** noun (`AnchorId`, `AnchoredTo`, `AnchorPose`) — an anchor point is the concrete connection site, valence the capacity those points add up to. Follows the workspace convention of borrowing one precise outside-field term (diegetic — film theory, lagrange — orbital mechanics, liminal — anthropology, valence — chemistry).
 
-- **API-surface leak (the bad kind):** a crate's *public* signature — a function
-  return, a public struct field, a trait bound a consumer must satisfy — names a
-  foreign type, forcing every consumer to depend on and know that other crate.
-  This is what PD6's re-export branch would create; compose avoids it.
-  `AnchoredToPanel` is diegetic-native and exposes no hana_valence type, so its
-  public API stays clean.
-- **Protocol participation (not a leak):** a system inserts a foreign crate's
-  *component* onto an entity for that crate's system to read. In ECS, components
-  are a shared public data contract, not an encapsulation boundary. bevy_diegetic
-  filling `ResolvedAnchorGeometry` (or `AnchoredTo`) so hana_valence's resolver
-  reads it is the same category as any crate writing `Transform` (bevy_transform)
-  for transform propagation — composition, not leakage. The doc's "the contract
-  is a component" is exactly this: providers fill input components, the resolver
-  consumes them.
+Tests: box-net fold closure within epsilon (headless, fixed frame count); triangle strip alternation positions match hand-computed seats.
 
-The dependency flows one way (diegetic → anchor) and the data flows one way
-(diegetic produces geometry → anchor consumes it). The only thing to police is
-keeping hana_valence types out of diegetic's public *signatures*; writing its
-components from internal systems is the intended mechanism.
+**Files:**
+- `crates/hana_valence/examples/triangle_accordion.rs` — new.
+- `crates/hana_valence/examples/box_net.rs` — new.
+- `crates/hana_valence/README.md` — rewrite.
+- `crates/hana_valence/src/arrange.rs` — only if the tiling-rule interface needs adjustment for triangles.
 
-## Suggested first milestones
+**Constraints from prior phases:** arrangements + quad tiling rule (Phase 8); `Hinge` per-relation semantics (Phase 4); examples use full `bevy` dev-dependencies (Phase 5 precedent); the lib dep-surface gate still applies.
 
-1. `hana_valence` crate skeleton: `AnchorId`, `ResolvedAnchorGeometry`,
-   `AnchoredTo`, `AnchorPose`, `AnchorSystems`, `resolve_anchors`. Port the
-   diegetic resolver. Unit-test two-quad attachment with a hand-filled geometry
-   component (no diegetic dependency).
-2. `Hinge` + `hinge_to_pose`; test an N-quad straight-strip accordion driven by a
-   manual system.
-3. bevy_tween adapters (`HingeAngleLens`, `AnchorPoseLens`); reproduce the
-   staggered unfold as tween tracks.
-4. `bevy_diegetic` `anchor` feature: `From<Anchor>`, `write_panel_anchor_geometry`,
-   `AnchoredToPanel`, scheduling forward. Port the `panel_anchoring` example onto
-   the new crate.
-5. `Arrangement` trait + `Accordion`/`Strip`; `Member` spawn-marker observer.
-6. Second shape provider (triangle) to validate the tiling-rule split; box net
-   demo.
+**Acceptance gate:** `cargo build --workspace --all-features --examples` green; `cargo nextest run --all-features` green including closure + alternation tests; both examples run and visibly fold (manual spot-check); fmt + `clippy` skill clean.
+
+---
+
+## Deferred (recorded decisions, not scheduled in this plan)
+
+- **Magnetize** — `magnetize(group)` finds nearest unpaired edges across loose tiles, creates `AnchoredTo`, tweens transforms to seat the edge. Decided: seated edges become hinges, so "magnetize then fold" composes. Pure edge math in valence; unscheduled.
+- **Ring arrangement** (`Ring { closure }`) — follows the Phase 8 pattern when wanted.
+- **Frame-aware hinge axis** — folding on frame-divergent (curved-surface) edges; additive extension after the curved-surface sampler (`surface-panels.md` `SurfaceSample`) fills `AnchorPoint.frame`.
+- **Cross-space anchoring** — screen panel anchored to a world target needs a camera-projection step neither placer has; the seam: project the world anchor to viewport coordinates, feed the screen placer.
+- **Debug gizmo module** — optional `debug` feature (`draw_anchor_geometry`, `draw_relations`, `draw_hinge_axes` behind a `GizmoConfigGroup`) so providers get an authoring aid; needs `bevy_gizmos`, so it must be feature-gated to protect the dep surface.
+- **bevy_animation adapters** — `AnimatableProperty` / `animated_field!(Hinge::angle)` behind an `animation` feature; fits pre-authored choreography with graph blending, awkward for procedural nets.
+- **`NetClosure` validator** — optional check that a net's topology + target angles close.
+- **Widgets handoff** (binds `widgets.md` Phase 1, unblocked after Phase 7): widget reification publishes `ResolvedAnchorGeometry` on materialized widget entities, gated on `Has<AnchoredHere>` (widgets are high-cardinality; fill only actual anchor targets — panels stay unconditional); widget-side sugar mirrors `AnchoredToPanel::new` but takes `WidgetId` (resolved to the stable entity internally); widget reification also publishes screen rects (widget bounds + parent `ResolvedScreenPanelPosition` → the existing `screen_panel_rects` path) so screen-space tooltips cover widget targets, plus a cleanup sweep when a panel leaves screen space.
+
+## Appendix — further research: Verlet dynamics over the anchor graph
+
+Not a design; a research direction noted 2026-07-07. Nothing in the contract
+above depends on it, and nothing above blocks it.
+
+The valence resolver is kinematic: parent pose in, child pose out, one
+direction, no state. Verlet integration is the standard cheap way to add
+dynamics on top of exactly this kind of constraint network (Jakobsen,
+"Advanced Character Physics", 2001 — ropes, cloth, ragdolls). Each particle
+stores current + previous position (velocity is implicit); constraints are
+enforced by iterative relaxation that corrects both endpoints, so coupling is
+two-way — the piece the kinematic resolver deliberately lacks.
+
+Why it fits valence specifically — the crate's data already *is* the
+constraint topology a Verlet solver needs:
+
+- `AnchorPoint`s = constraint attachment sites.
+- `AnchoredTo` edges = distance constraints between bodies.
+- A `Hinge` edge = two shared particles along the pivot line; free swing
+  around them is a hinge with no special-casing.
+- The anchored-to target = the pinned particles a chain hangs from.
+
+A hypothetical `hana_verlet` layer would read the anchor graph to build its
+particle/constraint set, simulate, and write results back — either into
+valence inputs (`Hinge` angle, `AnchorPose`) for spring-driven secondary
+motion, or directly to `Transform` for fully simulated bodies while valence
+keeps resolving the kinematic ones. Same division of labor as animation:
+valence owns topology and pose resolution; simulation is a separate writer of
+its inputs.
+
+Known problems to research, not solved here:
+
+- **Rigid-body orientation.** A particle has no rotation. Standard fix:
+  3-4 particles per panel (corners) with rigid mutual distance constraints,
+  recover position + rotation from the corner set (or shape matching).
+- **Stiffness vs cost.** Rigidity comes from relaxation iteration count;
+  droop is a feature at low counts, but stiff chains need enough iterations
+  to avoid visible stretch.
+- **Collision.** World/panel collision needs additional constraint types;
+  out of scope for a first pass.
+- **Deformation.** Bodies stay rigid quads unless subdivided into particle
+  grids — which is exactly Verlet cloth, and a plausible follow-on for
+  banner-like panels.
+- **Handoff semantics.** A body switching between kinematic (valence
+  resolver) and simulated (Verlet writes `Transform`) needs a clean
+  ownership rule so both never write the same entity in one frame.
+
+Payoff if pursued: hanging sign chains, cables between panels, cloth-ish
+banners — a few dozen lines of solver, no physics-engine dependency. It would
+also be a second consumer of the geometry contract, reinforcing the decision
+to carry per-point frames.
