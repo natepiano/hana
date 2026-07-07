@@ -376,7 +376,12 @@ fn sync_hairline_width(
 pub(crate) struct RenderPlugin;
 
 pub(crate) fn seed_default_material_cascades(app: &mut App) {
-    app.init_asset::<StandardMaterial>();
+    // Guarded: `init_asset` replaces an existing `Assets` store outright,
+    // orphaning every material handle created by earlier plugins. Only init
+    // when absent (headless tests); real apps already have it from bevy.
+    if !app.world().contains_resource::<Assets<StandardMaterial>>() {
+        app.init_asset::<StandardMaterial>();
+    }
     let default_material = app
         .world_mut()
         .resource_mut::<Assets<StandardMaterial>>()

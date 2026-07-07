@@ -23,6 +23,8 @@ use hana_prosody::PendingTranscription;
 #[cfg(target_os = "macos")]
 use hana_prosody::TranscriptionOutcome;
 #[cfg(target_os = "macos")]
+use hana_prosody::TranscriptionRequest;
+#[cfg(target_os = "macos")]
 use hana_prosody::spawn_transcription;
 
 #[cfg(target_os = "macos")]
@@ -50,7 +52,13 @@ fn generated_say_fixtures_transcribe_with_apple_speech() -> Result<(), Box<dyn E
     let root = FixtureRoot::new("stt")?;
     for phrase in FIXTURE_PHRASES {
         let wav_path = generate_fixture(root.path(), phrase)?;
-        let pending = spawn_transcription((*phrase).to_string(), wav_path);
+        let (sample_rate, samples) = read_wav_samples(&wav_path)?;
+        let pending = spawn_transcription(TranscriptionRequest::new(
+            *phrase,
+            sample_rate,
+            samples,
+            root.path(),
+        ));
         let outcome = wait_for_transcription(&pending)?;
 
         assert_transcript_matches(phrase, outcome)?;
@@ -125,6 +133,25 @@ fn run_command(command: &mut Command, tool: &str, phrase: &str) -> Result<(), Bo
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
+fn read_wav_samples(path: &Path) -> Result<(u32, Vec<f32>), Box<dyn Error>> {
+    let mut reader = hound::WavReader::open(path)?;
+    let spec = reader.spec();
+    if spec.sample_format != hound::SampleFormat::Int || spec.bits_per_sample != 16 {
+        return Err(io::Error::other(format!(
+            "unsupported fixture WAV format: {:?} {} bits",
+            spec.sample_format, spec.bits_per_sample
+        ))
+        .into());
+    }
+
+    let mut samples = Vec::new();
+    for sample in reader.samples::<i16>() {
+        samples.push(f32::from(sample?) / f32::from(i16::MAX));
+    }
+    Ok((spec.sample_rate, samples))
+}
+
 fn slugify(phrase: &str) -> String {
     let mut slug = String::new();
     let mut boundary = SlugBoundary::Separator;
@@ -178,7 +205,7 @@ fn wait_for_transcription(
         if started.elapsed() > STT_TIMEOUT {
             return Err(io::Error::other(format!(
                 "Apple Speech timed out after {STT_TIMEOUT:?} for {}",
-                pending.audio_path().display()
+                pending.session_id()
             ))
             .into());
         }

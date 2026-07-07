@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::core_pipeline::prepass::MotionVectorPrepass;
 use bevy::core_pipeline::prepass::NormalPrepass;
 use bevy::pbr::MeshPipelineKey;
@@ -9,6 +10,7 @@ use bevy_render::camera::ExtractedCamera;
 use bevy_render::mesh::RenderMesh;
 use bevy_render::mesh::allocator::MeshAllocator;
 use bevy_render::render_asset::RenderAssets;
+use bevy_render::render_phase::BinnedRenderPhase;
 use bevy_render::render_phase::BinnedRenderPhaseType;
 use bevy_render::render_phase::DrawFunctions;
 use bevy_render::render_phase::ViewBinnedRenderPhases;
@@ -62,6 +64,7 @@ pub(crate) fn queue_outline(
             &Msaa,
             Has<NormalPrepass>,
             Has<MotionVectorPrepass>,
+            Has<OrderIndependentTransparencySettings>,
         ),
         With<OutlineCamera>,
     >,
@@ -69,43 +72,40 @@ pub(crate) fn queue_outline(
 ) {
     let draw_function_id = draw_functions.read().id::<DrawOutline>();
 
-    for (_, view, camera, visible_entities, msaa, has_normal_prepass, has_motion_vector_prepass) in
-        views.iter()
+    for (
+        _,
+        view,
+        camera,
+        visible_entities,
+        msaa,
+        has_normal_prepass,
+        has_motion_vector_prepass,
+        has_oit,
+    ) in views.iter()
     {
         let Some(outline_phase) = outline_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
 
-        // Binned phases are retained across frames in 0.19, so explicitly remove the
-        // entities binned last frame before re-binning this frame's visible set.
-        let previously_queued = queued_entities
-            .entry(view.retained_view_entity)
-            .or_default();
-        for &main_entity in previously_queued.iter() {
-            outline_phase.remove(main_entity);
-        }
-        previously_queued.clear();
+        let previously_queued = clear_previous_outline_bins(
+            outline_phase,
+            &mut queued_entities,
+            view.retained_view_entity,
+        );
 
         let Some(render_visible_entities) = visible_entities.get::<Mesh3d>() else {
             continue;
         };
 
-        let mut view_key =
-            MeshPipelineKey::from_msaa_samples(msaa.samples()) | MeshPipelineKey::DEPTH_PREPASS;
-
-        if has_normal_prepass {
-            view_key |= MeshPipelineKey::NORMAL_PREPASS;
-        }
-        if has_motion_vector_prepass {
-            view_key |= MeshPipelineKey::MOTION_VECTOR_PREPASS;
-        }
-        // Match the view's `mesh_view_bind_group` layout: bevy includes the in-shader
-        // tonemapping LUT bindings whenever the camera is SDR (`!camera.hdr`), so the
-        // mask pipeline (which binds that group via `SetMeshViewBindGroup`) must declare
-        // them too or the bind group is incompatible at draw time.
-        if !camera.hdr {
-            view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
-        }
+        let view_key = MeshPipelineKey::from_msaa_samples(msaa.samples())
+            | MeshPipelineKey::DEPTH_PREPASS
+            | include_pipeline_key(has_normal_prepass, MeshPipelineKey::NORMAL_PREPASS)
+            | include_pipeline_key(
+                has_motion_vector_prepass,
+                MeshPipelineKey::MOTION_VECTOR_PREPASS,
+            )
+            | include_pipeline_key(!camera.hdr, MeshPipelineKey::TONEMAP_IN_SHADER)
+            | include_pipeline_key(has_oit, MeshPipelineKey::OIT_ENABLED);
 
         for (render_entity, main_entity) in render_visible_entities.iter_visible() {
             let render_entity = *render_entity;
@@ -184,12 +184,39 @@ pub(crate) fn queue_outline(
     }
 }
 
+fn clear_previous_outline_bins<'a>(
+    outline_phase: &mut BinnedRenderPhase<JumpFloodOutlinePhase>,
+    queued_entities: &'a mut HashMap<RetainedViewEntity, Vec<MainEntity>>,
+    retained_view_entity: RetainedViewEntity,
+) -> &'a mut Vec<MainEntity> {
+    let previously_queued = queued_entities.entry(retained_view_entity).or_default();
+    for &main_entity in previously_queued.iter() {
+        outline_phase.remove(main_entity);
+    }
+    previously_queued.clear();
+    previously_queued
+}
+
+const fn include_pipeline_key(include: bool, key: MeshPipelineKey) -> MeshPipelineKey {
+    if include {
+        key
+    } else {
+        MeshPipelineKey::empty()
+    }
+}
+
 /// Builds the view-level [`MeshPipelineKey`] for the hull outline pass: MSAA
-/// sample count plus depth prepass, the normal prepass bit when present, and the
-/// in-shader tonemapping LUT bindings present whenever the camera is SDR.
+/// sample count plus depth prepass, the normal prepass bit when present, the
+/// in-shader tonemapping LUT bindings present whenever the camera is SDR, and
+/// the OIT bindings when the camera uses order-independent transparency.
 /// Matching the view's `mesh_view_bind_group` layout keeps the bind group
 /// compatible at draw time; see `queue_outline`.
-fn hull_view_key(msaa: Msaa, has_normal_prepass: bool, hdr: bool) -> MeshPipelineKey {
+fn hull_view_key(
+    msaa: Msaa,
+    has_normal_prepass: bool,
+    hdr: bool,
+    has_oit: bool,
+) -> MeshPipelineKey {
     let mut view_key =
         MeshPipelineKey::from_msaa_samples(msaa.samples()) | MeshPipelineKey::DEPTH_PREPASS;
     if has_normal_prepass {
@@ -197,6 +224,9 @@ fn hull_view_key(msaa: Msaa, has_normal_prepass: bool, hdr: bool) -> MeshPipelin
     }
     if !hdr {
         view_key |= MeshPipelineKey::TONEMAP_IN_SHADER;
+    }
+    if has_oit {
+        view_key |= MeshPipelineKey::OIT_ENABLED;
     }
     view_key
 }
@@ -220,6 +250,7 @@ pub(crate) fn queue_hull_outline(
             &RenderVisibleEntities,
             &Msaa,
             Has<NormalPrepass>,
+            Has<OrderIndependentTransparencySettings>,
         ),
         With<OutlineCamera>,
     >,
@@ -231,7 +262,7 @@ pub(crate) fn queue_hull_outline(
 
     let draw_function_id = draw_functions.read().id::<DrawHull>();
 
-    for (_, view, camera, visible_entities, msaa, has_normal_prepass) in views.iter() {
+    for (_, view, camera, visible_entities, msaa, has_normal_prepass, has_oit) in views.iter() {
         let Some(outline_phase) = outline_phases.get_mut(&view.retained_view_entity) else {
             continue;
         };
@@ -250,7 +281,7 @@ pub(crate) fn queue_hull_outline(
             continue;
         };
 
-        let view_key = hull_view_key(*msaa, has_normal_prepass, camera.hdr);
+        let view_key = hull_view_key(*msaa, has_normal_prepass, camera.hdr, has_oit);
 
         for (render_entity, main_entity) in render_visible_entities.iter_visible() {
             let render_entity = *render_entity;

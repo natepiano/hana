@@ -6,6 +6,8 @@ use std::error::Error;
 use std::fmt;
 use std::fmt::Display;
 use std::fmt::Formatter;
+use std::fs;
+use std::io::ErrorKind;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -27,12 +29,43 @@ use crate::constants::APPLE_CONTEXTUAL_STRINGS;
 use crate::constants::HANA_STT_LOCALE;
 #[cfg(target_os = "macos")]
 use crate::constants::HANA_STT_REQUIRE_ON_DEVICE;
+use crate::write_wav;
+
+/// Audio samples and scratch location for one transcription request.
+#[derive(Clone, Debug)]
+pub struct TranscriptionRequest {
+    /// Session id reported in the transcription outcome.
+    pub session_id:  String,
+    /// Sample rate in hertz.
+    pub sample_rate: u32,
+    /// Mono `f32` audio samples.
+    pub samples:     Vec<f32>,
+    /// Directory used for the temporary WAV required by Apple Speech.
+    pub scratch_dir: PathBuf,
+}
+
+impl TranscriptionRequest {
+    /// Creates a transcription request from in-memory samples.
+    #[must_use]
+    pub fn new(
+        session_id: impl Into<String>,
+        sample_rate: u32,
+        samples: Vec<f32>,
+        scratch_dir: impl Into<PathBuf>,
+    ) -> Self {
+        Self {
+            session_id: session_id.into(),
+            sample_rate,
+            samples,
+            scratch_dir: scratch_dir.into(),
+        }
+    }
+}
 
 /// A background transcription job.
 #[derive(Debug)]
 pub struct PendingTranscription {
     session_id: String,
-    audio_path: PathBuf,
     receiver:   Mutex<Receiver<TranscriptionOutcome>>,
 }
 
@@ -41,17 +74,12 @@ impl PendingTranscription {
     #[must_use]
     pub fn session_id(&self) -> &str { &self.session_id }
 
-    /// Audio path being transcribed.
-    #[must_use]
-    pub fn audio_path(&self) -> &Path { &self.audio_path }
-
     /// Tries to receive the finished transcription result.
     #[must_use]
     pub fn try_recv(&self) -> Option<TranscriptionOutcome> {
         let Ok(receiver) = self.receiver.lock() else {
             return Some(TranscriptionOutcome::Failed {
                 session_id: self.session_id.clone(),
-                audio_path: self.audio_path.clone(),
                 error:      String::from("transcription receiver lock failed"),
             });
         };
@@ -60,7 +88,6 @@ impl PendingTranscription {
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => Some(TranscriptionOutcome::Failed {
                 session_id: self.session_id.clone(),
-                audio_path: self.audio_path.clone(),
                 error:      String::from("transcription worker disconnected"),
             }),
         }
@@ -74,8 +101,6 @@ pub enum TranscriptionOutcome {
     Transcribed {
         /// Session id.
         session_id: String,
-        /// Audio path.
-        audio_path: PathBuf,
         /// Text produced by Apple Speech.
         text:       String,
         /// Transcription backend descriptor.
@@ -85,8 +110,6 @@ pub enum TranscriptionOutcome {
     Rejected {
         /// Session id.
         session_id: String,
-        /// Audio path.
-        audio_path: PathBuf,
         /// Rejection reason.
         reason:     String,
     },
@@ -94,8 +117,6 @@ pub enum TranscriptionOutcome {
     Failed {
         /// Session id.
         session_id: String,
-        /// Audio path.
-        audio_path: PathBuf,
         /// Error message.
         error:      String,
     },
@@ -103,40 +124,78 @@ pub enum TranscriptionOutcome {
 
 /// Starts transcription in a background thread.
 #[must_use]
-pub fn spawn_transcription(session_id: String, audio_path: PathBuf) -> PendingTranscription {
+pub fn spawn_transcription(request: TranscriptionRequest) -> PendingTranscription {
     let (sender, receiver) = mpsc::channel();
-    let worker_session_id = session_id.clone();
-    let worker_audio_path = audio_path.clone();
+    let session_id = request.session_id.clone();
     thread::spawn(move || {
-        let outcome = transcribe(worker_session_id, worker_audio_path);
+        let outcome = transcribe(request);
         let _send_result = sender.send(outcome);
     });
     PendingTranscription {
         session_id,
-        audio_path,
         receiver: Mutex::new(receiver),
     }
 }
 
-fn transcribe(session_id: String, audio_path: PathBuf) -> TranscriptionOutcome {
+fn transcribe(request: TranscriptionRequest) -> TranscriptionOutcome {
+    let session_id = request.session_id;
+    let audio_path = request
+        .scratch_dir
+        .join(format!("{}.wav", audio_file_stem(&session_id)));
+    if let Err(error) = write_wav(&audio_path, request.sample_rate, &request.samples) {
+        return TranscriptionOutcome::Failed {
+            session_id,
+            error: format!("temporary WAV write failed: {error}"),
+        };
+    }
+
     match transcribe_with_apple_speech(&audio_path) {
         Ok(Transcript { text, backend }) => TranscriptionOutcome::Transcribed {
             session_id,
-            audio_path,
             text,
             backend,
         },
         #[cfg(target_os = "macos")]
-        Err(TranscriptionError::NoSpeech(reason)) => TranscriptionOutcome::Rejected {
-            session_id,
-            audio_path,
-            reason,
+        Err(TranscriptionError::NoSpeech(reason)) => {
+            TranscriptionOutcome::Rejected { session_id, reason }
         },
         Err(error) => TranscriptionOutcome::Failed {
             session_id,
-            audio_path,
             error: error.to_string(),
         },
+    }
+    .with_temp_audio_removed(&audio_path)
+}
+
+trait TempAudioCleanup {
+    fn with_temp_audio_removed(self, audio_path: &Path) -> Self;
+}
+
+impl TempAudioCleanup for TranscriptionOutcome {
+    fn with_temp_audio_removed(self, audio_path: &Path) -> Self {
+        match fs::remove_file(audio_path) {
+            Ok(()) => self,
+            Err(error) if error.kind() == ErrorKind::NotFound => self,
+            Err(_error) => self,
+        }
+    }
+}
+
+fn audio_file_stem(session_id: &str) -> String {
+    let stem: String = session_id
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if stem.is_empty() {
+        String::from("recording")
+    } else {
+        stem
     }
 }
 
@@ -328,6 +387,7 @@ fn recognition_mode_from_env() -> RecognitionMode {
 mod tests {
     #[cfg(target_os = "macos")]
     use super::TranscriptionError;
+    use super::audio_file_stem;
     #[cfg(target_os = "macos")]
     use super::classify_speech_error;
     use super::is_valid_transcript;
@@ -343,6 +403,12 @@ mod tests {
         assert!(!is_valid_transcript(""));
         assert!(!is_valid_transcript("?"));
         assert!(!is_valid_transcript("..."));
+    }
+
+    #[test]
+    fn audio_file_stem_rejects_path_separators() {
+        assert_eq!(audio_file_stem("../voice/1"), ".._voice_1");
+        assert_eq!(audio_file_stem(""), "recording");
     }
 
     #[cfg(target_os = "macos")]

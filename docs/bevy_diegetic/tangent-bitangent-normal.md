@@ -1,5 +1,17 @@
 # Tangent-Bitangent-Normal For Analytic Materials
 
+> **Frame source note.** This doc's "Design" section and Implementation-Outline
+> steps 1–2 synthesize a *planar* T/B/N from the panel transform. That planar
+> derivation is the flat case of the per-vertex surface frame defined in
+> [`surface-panels.md`](./surface-panels.md) (`SurfaceSample`). When surface
+> panels land, source `T`/`B`/`N` from `S(u,v)` per vertex instead of from the
+> single panel plane; everything else in this doc — normal-map sampling,
+> parallax/relief mapping, `uv_transform` handling, material-table classification,
+> batch compatibility, and validation — is unchanged and remains the scope of
+> this plan. This doc is **not** superseded by `surface-panels.md`; the two are
+> complementary (surface produces the frame, this doc's material feature consumes
+> it).
+
 ## Purpose
 
 This document records the deferred design for tangent-bitangent-normal

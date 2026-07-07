@@ -447,10 +447,13 @@ pub(super) struct ImageBatchPlugin;
 
 impl Plugin for ImageBatchPlugin {
     fn build(&self, app: &mut App) {
+        // Never `init_asset` bevy-owned asset types here: `init_asset` replaces
+        // any existing `Assets` store, orphaning every handle created by
+        // plugins that built earlier. The host app's render setup owns
+        // `Assets<Mesh>` and `Assets<ShaderBuffer>`; headless tests init them
+        // explicitly.
         app.init_resource::<ImageBatchStore>()
             .init_resource::<DiegeticPerfStats>()
-            .init_asset::<Mesh>()
-            .init_asset::<ShaderBuffer>()
             .add_plugins(MaterialPlugin::<ImageExtendedMaterial>::default())
             .add_systems(
                 PostUpdate,
@@ -1466,6 +1469,8 @@ mod tests {
         app.add_plugins(MinimalPlugins)
             .add_plugins(TransformPlugin)
             .add_plugins(AssetPlugin::default())
+            .init_asset::<Mesh>()
+            .init_asset::<ShaderBuffer>()
             .add_plugins(ImageBatchPlugin);
         app
     }

@@ -1,6 +1,6 @@
 # Hana Prosody
 
-Prototype sidecar for the Hana voice-art loop.
+Audio and transcription primitives for Hana voice input.
 
 Run the feedback UI from the workspace root:
 
@@ -9,16 +9,16 @@ cargo run -p hana_prosody --example voice_sidecar
 ```
 
 Press space to start recording from the default macOS input device. Press space
-again to stop recording and send that captured window to Apple Speech. The
-sidecar does not infer speech boundaries while the user is talking; the keyboard
-presses define the audio window.
+again to stop recording and send that captured window to Apple Speech. The demo
+does not infer speech boundaries while the user is talking; the keyboard presses
+define the audio window.
 
-Committed transcripts are appended to `../hana/run/art/inbox.jsonl` by default.
-Temporary WAV files live under `../hana/run/art/audio` while Apple Speech is
-working, and successful transcripts remove their WAV file after the inbox write
-succeeds. Set `HANA_ART_RUN_DIR` before launch to choose these paths. A running
-sidecar can also be redirected over BRP with `hana_voice/set_runtime`, which is
-what Hana's `scripts/tell_me.py` uses when it reuses an already-open sidecar.
+The library does not own Hana's transcript or renderer command files. Clients
+receive transcription outcomes and decide whether to write JSONL, keep audio, or
+discard everything. Apple Speech still requires a WAV file, so
+`spawn_transcription` writes a temporary WAV under the caller-provided scratch
+directory and removes it after transcription. Call `write_wav` directly only
+when a client explicitly wants to keep an audio artifact.
 
 On macOS, Apple Speech is the STT backend. Set `HANA_STT_LOCALE` to choose a
 recognizer locale, and set `HANA_STT_REQUIRE_ON_DEVICE=1` when the loop must

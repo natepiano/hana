@@ -4,10 +4,9 @@
 //! that captured audio window to Apple Speech.
 
 use std::collections::VecDeque;
-use std::fs;
-use std::io::ErrorKind;
-use std::path::Path;
+use std::env;
 use std::path::PathBuf;
+use std::process;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
@@ -48,13 +47,10 @@ use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
 use hana_prosody::AudioInput;
 use hana_prosody::PendingTranscription;
-use hana_prosody::RuntimeEvent;
-use hana_prosody::RuntimeLog;
-use hana_prosody::RuntimePaths;
 use hana_prosody::TranscriptionOutcome;
+use hana_prosody::TranscriptionRequest;
 use hana_prosody::now_unix_millis;
 use hana_prosody::spawn_transcription;
-use hana_prosody::write_wav;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use serde_json::json;
@@ -88,11 +84,12 @@ const FIELD_EVENT: &str = "event";
 const FIELD_TRANSCRIPT: &str = "transcript";
 const FIELD_MIC: &str = "mic";
 const FIELD_QUEUE: &str = "queue";
+const HANA_ART_RUN_DIR_ENV: &str = "HANA_ART_RUN_DIR";
 const VOICE_RUNTIME_METHOD: &str = "hana_voice/runtime";
-const VOICE_SET_RUNTIME_METHOD: &str = "hana_voice/set_runtime";
+const RUNTIME_SET_PATHS_METHOD: &str = "hana_runtime/set_paths";
 
 fn main() {
-    let runtime = SidecarRuntime::new(RuntimePaths::from_env_or_default());
+    let runtime = SidecarRuntime::new(SidecarPaths::from_env_or_temp());
 
     let mut app = fairy_dust::sprinkle_example()
         .with_brp_extras()
@@ -138,7 +135,7 @@ fn main() {
 #[derive(Resource)]
 struct SidecarRuntime {
     audio:       Result<AudioInput, String>,
-    log:         Result<RuntimeLog, String>,
+    paths:       SidecarPaths,
     sample_rate: u32,
     recording:   Option<RecordingSession>,
     pending:     Vec<PendingTranscriptionJob>,
@@ -155,28 +152,60 @@ struct RecordingSession {
 }
 
 struct QueuedTranscription {
-    session_id: String,
-    audio_path: PathBuf,
+    session_id:  String,
+    sample_rate: u32,
+    samples:     Vec<f32>,
 }
 
 struct PendingTranscriptionJob {
     transcription: PendingTranscription,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct SidecarPaths {
+    root:        PathBuf,
+    scratch_dir: PathBuf,
+}
+
+impl SidecarPaths {
+    fn from_env_or_temp() -> Self {
+        let root = env::var_os(HANA_ART_RUN_DIR_ENV).map_or_else(
+            || {
+                env::temp_dir()
+                    .join("hana_prosody")
+                    .join(process::id().to_string())
+            },
+            PathBuf::from,
+        );
+        Self::new(root)
+    }
+
+    fn new(root: impl Into<PathBuf>) -> Self {
+        let root = root.into();
+        Self {
+            scratch_dir: root.join("audio"),
+            root,
+        }
+    }
+
+    fn root(&self) -> &std::path::Path { &self.root }
+
+    fn scratch_dir(&self) -> &std::path::Path { &self.scratch_dir }
+}
+
 impl SidecarRuntime {
-    fn new(paths: RuntimePaths) -> Self {
+    fn new(paths: SidecarPaths) -> Self {
         let audio = AudioInput::open_default().map_err(|error| error.to_string());
         let sample_rate = audio
             .as_ref()
             .map_or(48_000, |input| input.status().sample_rate);
-        let log = RuntimeLog::new(paths).map_err(|error| error.to_string());
         let last_status = match &audio {
             Ok(_input) => String::from(MIC_READY),
             Err(error) => format!("Mic unavailable: {error}"),
         };
         Self {
             audio,
-            log,
+            paths,
             sample_rate,
             recording: None,
             pending: Vec::new(),
@@ -188,35 +217,15 @@ impl SidecarRuntime {
         }
     }
 
-    fn next_seq(&mut self) -> u64 { self.log.as_mut().map_or(0, RuntimeLog::next_seq) }
-
-    fn append_inbox(&mut self, event: RuntimeEvent) -> InboxAppend {
-        if let Ok(log) = &self.log
-            && let Err(error) = log.append_inbox(&event)
-        {
-            self.last_status = format!("Inbox write failed: {error}");
-            return InboxAppend::Skipped;
-        }
-        if self.log.is_ok() {
-            InboxAppend::Written
-        } else {
-            InboxAppend::Skipped
-        }
-    }
-
-    fn paths(&self) -> Option<&RuntimePaths> { self.log.as_ref().ok().map(RuntimeLog::paths) }
+    const fn paths(&self) -> &SidecarPaths { &self.paths }
 
     fn transcription_work_count(&self) -> usize { self.pending.len() + self.queued.len() }
 
     fn has_transcription_work(&self) -> bool { self.transcription_work_count() > 0 }
 
-    fn set_paths(&mut self, paths: RuntimePaths) -> Result<(), String> {
-        let log = RuntimeLog::new(paths).map_err(|error| error.to_string())?;
-        self.log = Ok(log);
-        if let Some(paths) = self.paths() {
-            self.last_status = format!("Runtime: {}", paths.root().display());
-        }
-        Ok(())
+    fn set_paths(&mut self, paths: SidecarPaths) {
+        self.paths = paths;
+        self.last_status = format!("Runtime: {}", self.paths.root().display());
     }
 
     fn clear_error_text(&mut self) {
@@ -254,7 +263,7 @@ fn register_runtime_brp_methods(app: &mut App) {
     let set_runtime_system_id = app.world_mut().register_system(voice_set_runtime_handler);
     let Some(mut remote_methods) = app.world_mut().get_resource_mut::<RemoteMethods>() else {
         warn!(
-            "{VOICE_RUNTIME_METHOD} and {VOICE_SET_RUNTIME_METHOD} were not registered because Bevy Remote is unavailable"
+            "{VOICE_RUNTIME_METHOD} and {RUNTIME_SET_PATHS_METHOD} were not registered because Bevy Remote is unavailable"
         );
         return;
     };
@@ -264,7 +273,7 @@ fn register_runtime_brp_methods(app: &mut App) {
         RemoteMethodSystemId::Instant(runtime_system_id),
     );
     remote_methods.insert(
-        VOICE_SET_RUNTIME_METHOD,
+        RUNTIME_SET_PATHS_METHOD,
         RemoteMethodSystemId::Instant(set_runtime_system_id),
     );
 }
@@ -297,12 +306,10 @@ fn voice_set_runtime_handler(
         ));
     }
 
-    let previous = runtime.paths().map(|paths| paths.root().to_path_buf());
-    let paths = RuntimePaths::new(run_dir);
-    runtime.set_paths(paths).map_err(invalid_params)?;
-    let changed = runtime
-        .paths()
-        .is_some_and(|paths| previous.as_deref() != Some(paths.root()));
+    let previous = runtime.paths().root().to_path_buf();
+    let paths = SidecarPaths::new(run_dir);
+    runtime.set_paths(paths);
+    let changed = previous != runtime.paths().root();
     let mut response = runtime_json(&runtime);
     if let Some(response) = response.as_object_mut() {
         response.insert("changed".to_string(), json!(changed));
@@ -311,22 +318,14 @@ fn voice_set_runtime_handler(
 }
 
 fn runtime_json(runtime: &SidecarRuntime) -> JsonValue {
-    let Some(paths) = runtime.paths() else {
-        return json!({
-            "kind": "hana_voice_runtime",
-            "version": 1,
-            "configured": false,
-            "error": runtime.last_status,
-        });
-    };
+    let paths = runtime.paths();
 
     json!({
         "kind": "hana_voice_runtime",
         "version": 1,
         "configured": true,
         "root": paths.root().to_string_lossy(),
-        "inbox": paths.inbox().to_string_lossy(),
-        "audio_dir": paths.audio_dir().to_string_lossy(),
+        "scratch_dir": paths.scratch_dir().to_string_lossy(),
         "recording": runtime.recording.is_some(),
         "pending_transcriptions": runtime.pending.len(),
         "queued_transcriptions": runtime.queued.len(),
@@ -362,12 +361,6 @@ impl InterfacePhase {
 enum AudioDrainMode {
     IgnoreSamples,
     RecordSamples,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum InboxAppend {
-    Written,
-    Skipped,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -469,29 +462,19 @@ fn send_recording(runtime: &mut SidecarRuntime) {
         return;
     }
 
-    let Some(paths) = runtime.paths() else {
-        runtime.last_status = String::from("Runtime log unavailable; audio was not written");
-        runtime.last_event = String::from("Recording could not be sent");
-        return;
-    };
-    let audio_path = paths.audio_path(&recording.session_id);
-    match write_wav(&audio_path, runtime.sample_rate, &recording.samples) {
-        Ok(()) => {
-            runtime.last_event = format!("Sent {recorded_ms} ms recording");
-            debug!(
-                session_id = %recording.session_id,
-                audio_path = %audio_path.display(),
-                recorded_ms,
-                "manual recording sent"
-            );
-            queue_transcription(runtime, recording.session_id, audio_path);
-        },
-        Err(error) => {
-            warn!(error = %error, "WAV write failed");
-            runtime.last_status = format!("WAV write failed: {error}");
-            runtime.last_event = String::from("Recording could not be sent");
-        },
-    }
+    runtime.last_event = format!("Sent {recorded_ms} ms recording");
+    debug!(
+        session_id = %recording.session_id,
+        recorded_ms,
+        "manual recording sent"
+    );
+    let sample_rate = runtime.sample_rate;
+    queue_transcription(
+        runtime,
+        recording.session_id,
+        sample_rate,
+        recording.samples,
+    );
 }
 
 fn drain_audio(mut runtime: ResMut<SidecarRuntime>) {
@@ -541,42 +524,30 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
     match outcome {
         TranscriptionOutcome::Transcribed {
             session_id,
-            audio_path,
             text,
             backend,
         } => {
-            commit_transcript(runtime, session_id, audio_path, text, backend);
+            commit_transcript(runtime, session_id, text, backend);
         },
-        TranscriptionOutcome::Failed {
-            session_id,
-            audio_path,
-            error,
-        } => {
+        TranscriptionOutcome::Failed { session_id, error } => {
             runtime.last_event = String::from("Transcription failed");
             runtime.last_status = format!("Transcription failed: {error}");
             runtime.last_text = Some(format!("Error: {error}"));
             warn!(
                 session_id = %session_id,
-                audio_path = %audio_path.display(),
                 error = %error,
                 "transcription failed"
             );
         },
-        TranscriptionOutcome::Rejected {
-            session_id,
-            audio_path,
-            reason,
-        } => {
+        TranscriptionOutcome::Rejected { session_id, reason } => {
             runtime.last_event = String::from("No speech detected");
             runtime.last_status = format!("No transcript: {reason}");
             runtime.clear_error_text();
             debug!(
                 session_id = %session_id,
-                audio_path = %audio_path.display(),
                 reason = %reason,
                 "recording transcription rejected"
             );
-            remove_discarded_audio(runtime, &audio_path);
         },
     }
 }
@@ -584,30 +555,25 @@ fn handle_transcription_outcome(runtime: &mut SidecarRuntime, outcome: Transcrip
 fn commit_transcript(
     runtime: &mut SidecarRuntime,
     session_id: String,
-    audio_path: PathBuf,
     text: String,
     backend: String,
 ) {
     runtime.clear_transcription_status();
     runtime.last_event = String::from("Transcript committed");
     runtime.last_text = Some(text.clone());
-    let event = RuntimeEvent::TranscriptCommitted {
-        session_id,
-        seq: runtime.next_seq(),
-        created_at_unix_ms: now_unix_millis(),
-        text,
-        audio_path: audio_path.to_string_lossy().into_owned(),
-        backend,
-    };
-    if runtime.append_inbox(event) == InboxAppend::Written {
-        remove_transcribed_audio(runtime, &audio_path);
-    }
+    debug!(session_id = %session_id, backend = %backend, text = %text, "transcript committed");
 }
 
-fn queue_transcription(runtime: &mut SidecarRuntime, session_id: String, audio_path: PathBuf) {
+fn queue_transcription(
+    runtime: &mut SidecarRuntime,
+    session_id: String,
+    sample_rate: u32,
+    samples: Vec<f32>,
+) {
     let job = QueuedTranscription {
         session_id,
-        audio_path,
+        sample_rate,
+        samples,
     };
     if runtime.pending.is_empty() {
         runtime.last_event = String::from("Transcribing recording");
@@ -618,7 +584,6 @@ fn queue_transcription(runtime: &mut SidecarRuntime, session_id: String, audio_p
         runtime.last_event = format!("Recording queued ({})", runtime.queued.len() + 1);
         debug!(
             session_id = %job.session_id,
-            audio_path = %job.audio_path.display(),
             queued = runtime.queued.len() + 1,
             "recording queued behind active transcription"
         );
@@ -627,12 +592,10 @@ fn queue_transcription(runtime: &mut SidecarRuntime, session_id: String, audio_p
     }
     warn!(
         session_id = %job.session_id,
-        audio_path = %job.audio_path.display(),
         queued = runtime.queued.len(),
         "dropping recording because transcription queue is full"
     );
     runtime.last_event = String::from("Recording dropped; STT busy");
-    remove_discarded_audio(runtime, &job.audio_path);
 }
 
 fn start_next_transcription(runtime: &mut SidecarRuntime) {
@@ -651,42 +614,13 @@ fn start_next_transcription(runtime: &mut SidecarRuntime) {
 
 fn spawn_transcription_job(runtime: &mut SidecarRuntime, job: QueuedTranscription) {
     runtime.pending.push(PendingTranscriptionJob {
-        transcription: spawn_transcription(job.session_id, job.audio_path),
+        transcription: spawn_transcription(TranscriptionRequest::new(
+            job.session_id,
+            job.sample_rate,
+            job.samples,
+            runtime.paths.scratch_dir(),
+        )),
     });
-}
-
-fn remove_transcribed_audio(runtime: &mut SidecarRuntime, audio_path: &Path) {
-    match fs::remove_file(audio_path) {
-        Ok(()) => {
-            runtime.last_event = String::from("Transcript committed; WAV removed");
-        },
-        Err(error) if error.kind() == ErrorKind::NotFound => {
-            runtime.last_event = String::from("Transcript committed; WAV already removed");
-        },
-        Err(error) => {
-            warn!(
-                audio_path = %audio_path.display(),
-                error = %error,
-                "WAV cleanup failed"
-            );
-            runtime.last_status = format!("WAV cleanup failed: {error}");
-        },
-    }
-}
-
-fn remove_discarded_audio(runtime: &mut SidecarRuntime, audio_path: &Path) {
-    match fs::remove_file(audio_path) {
-        Ok(()) => {},
-        Err(error) if error.kind() == ErrorKind::NotFound => {},
-        Err(error) => {
-            warn!(
-                audio_path = %audio_path.display(),
-                error = %error,
-                "discarded WAV cleanup failed"
-            );
-            runtime.last_status = format!("Discarded WAV cleanup failed: {error}");
-        },
-    }
 }
 
 fn refresh_feedback(

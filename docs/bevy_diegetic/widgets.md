@@ -3,6 +3,13 @@
 Date: 2026-06-16
 Source: High-level headless widget architecture discussion for `bevy_diegetic`.
 
+Related plan: [`surface-panels.md`](./surface-panels.md) maps panels (and the
+widgets on them) onto curved parametric surfaces. Widgets stay curvature-blind —
+the surface remap is confined to the panel boundary — but two touchpoints here
+must be authored surface-ready to avoid re-churn: the anchoring generalization
+(Decision 20, Phase 0) and widget picking geometry (Decision 3). Both are
+annotated below.
+
 ## Ordered Concepts
 
 1. Headless widget boundary
@@ -204,6 +211,13 @@ Decision: Keep.
 
 Materialize widgets as child entities under their panel. Add a typed widget relationship index, analogous to `TextRunOf` / `PanelTextRuns`, so a panel can enumerate its widgets without scanning all children. Emit widget picking geometry on those widget entities, starting with resolved bounds and allowing custom shapes for compound widgets such as sliders.
 
+Surface-panels coordination: keep widget picking geometry in **panel-local
+space**. The panel's single `PanelSurface::project()` (see `surface-panels.md`)
+converts a world-space pointer hit to panel-local coordinates at the panel
+boundary, before any widget bounds test, so widget picking needs no curvature
+logic and works unchanged on curved panels. Do not place widget picking meshes
+independently in world space.
+
 ### 4. Typed widget event contract
 
 Decision: Keep.
@@ -404,6 +418,12 @@ Keep the rollout phased, but make Phase 5 an explicit stop-and-discuss checkpoin
 Phase outline:
 
 - Phase 0: Rename and generalize anchoring, and rename shared entity-creation terminology to `reify`.
+  - Surface-panels coordination: the generalized `AnchorGeometryParam` should
+    return an **oriented frame** (point + tangent frame, matching
+    `SurfaceSample` in `surface-panels.md`), not the concrete flat `PanelPlane`.
+    That result covers screen bounds (2D), the flat plane (constant frame), and a
+    curved-surface sampler, so `surface-panels.md` Phase 5 reuses this layer
+    instead of rewriting it.
 - Phase 1: Build widget identity, widget relationships, reification, and picking geometry.
 - Phase 2: Add button behavior and a simple preset.
 - Phase 3: Add slider behavior and the overlay preset.
