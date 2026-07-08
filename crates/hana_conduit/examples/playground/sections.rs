@@ -76,7 +76,7 @@ pub(crate) fn update_current_section_from_camera(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    let camera_x = camera.focus.x;
+    let camera_x = camera.pan.current().0.x;
     let nearest = SECTION_X
         .iter()
         .enumerate()

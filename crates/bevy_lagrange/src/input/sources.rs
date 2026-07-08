@@ -16,11 +16,11 @@ bitflags::bitflags! {
 
 /// Source-attribution flags for camera interaction lifecycle events.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
-pub struct CameraInteractionSources {
+pub struct InteractionSources {
     bits: u16,
 }
 
-impl CameraInteractionSources {
+impl InteractionSources {
     /// Empty source set.
     pub const NONE: Self = Self::from_source_bits(CameraInteractionSourceBits::empty());
     /// Mouse button or mouse-motion source.
@@ -79,7 +79,7 @@ impl CameraInteractionSources {
 /// Source token for app-authored manual camera input.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ManualInputSource {
-    sources: CameraInteractionSources,
+    sources: InteractionSources,
 }
 
 impl Default for ManualInputSource {
@@ -91,31 +91,27 @@ impl ManualInputSource {
     #[must_use]
     pub const fn manual() -> Self {
         Self {
-            sources: CameraInteractionSources::MANUAL,
+            sources: InteractionSources::MANUAL,
         }
     }
 
     /// Creates a manual source token with additional attribution.
     #[must_use]
-    pub const fn with_sources(sources: CameraInteractionSources) -> Self {
+    pub const fn with_sources(sources: InteractionSources) -> Self {
         Self {
-            sources: sources.union(CameraInteractionSources::MANUAL),
+            sources: sources.union(InteractionSources::MANUAL),
         }
     }
 
     /// Creates a manual source token for keyboard-driven app code.
     #[must_use]
-    pub const fn observed_keyboard() -> Self {
-        Self::with_sources(CameraInteractionSources::KEYBOARD)
-    }
+    pub const fn observed_keyboard() -> Self { Self::with_sources(InteractionSources::KEYBOARD) }
 
     /// Creates a manual source token for gamepad-driven app code.
     #[must_use]
-    pub const fn observed_gamepad() -> Self {
-        Self::with_sources(CameraInteractionSources::GAMEPAD)
-    }
+    pub const fn observed_gamepad() -> Self { Self::with_sources(InteractionSources::GAMEPAD) }
 
-    /// Returns the source set, always including [`CameraInteractionSources::MANUAL`].
+    /// Returns the source set, always including [`InteractionSources::MANUAL`].
     #[must_use]
-    pub const fn sources(self) -> CameraInteractionSources { self.sources }
+    pub const fn sources(self) -> InteractionSources { self.sources }
 }

@@ -290,21 +290,29 @@ pub(crate) fn log_animation_end(event: On<AnimationEnd>, mut log: ResMut<EventLo
         },
         AnimationReason::Cancelled { interrupted_move } => {
             log.push_error(format!(
-                "AnimationEnd\n  source={:?}\n  reason=Cancelled\n  move_translation={}\n  \
-                 move_focus={}",
+                "AnimationEnd\n  source={:?}\n  reason=Cancelled\n  move_position={}\n  \
+                 move_target={}",
                 event.source,
-                format_vec3(interrupted_move.translation()),
-                format_vec3(interrupted_move.focus()),
+                format_vec3(interrupted_move.position()),
+                format_vec3(interrupted_move.target()),
             ));
         },
     }
 }
 
+pub(crate) fn log_camera_homed(event: On<CameraHomed>, mut log: ResMut<EventLog>) {
+    log.push(format!(
+        "CameraHomed\n  camera={:?}\n  sources={:?}",
+        event.camera, event.sources
+    ));
+    log.separator();
+}
+
 pub(crate) fn log_camera_move_start(event: On<CameraMoveBegin>, mut log: ResMut<EventLog>) {
     log.push(format!(
-        "CameraMoveBegin\n  translation={}\n  focus={}\n  duration={:.0}ms\n  easing={:?}",
-        format_vec3(event.camera_move.translation()),
-        format_vec3(event.camera_move.focus()),
+        "CameraMoveBegin\n  position={}\n  target={}\n  duration={:.0}ms\n  easing={:?}",
+        format_vec3(event.camera_move.position()),
+        format_vec3(event.camera_move.target()),
         event.camera_move.duration_ms(),
         event.camera_move.easing(),
     ));

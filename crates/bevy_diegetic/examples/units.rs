@@ -52,6 +52,7 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::Radius;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -350,7 +351,6 @@ fn main() {
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
-        .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
@@ -818,10 +818,9 @@ fn switch_projection(
     let to_perspective = next == CameraProjection::Perspective;
     for (mut proj, mut poc) in &mut cameras {
         if to_ortho && matches!(&*proj, Projection::Perspective(_)) {
-            let r = poc.radius.unwrap_or(1.0);
+            let r = poc.zoom.current().0;
             let ortho_r = perspective_to_orthographic_radius(r);
-            poc.radius = Some(ortho_r);
-            poc.target_radius = ortho_r;
+            poc.zoom.snap_to(Radius(ortho_r));
             *proj = Projection::Orthographic(OrthographicProjection {
                 scaling_mode: bevy::camera::ScalingMode::FixedVertical {
                     viewport_height: 1.0,
@@ -832,10 +831,9 @@ fn switch_projection(
             poc.force_update();
             *projection_state = CameraProjection::Orthographic;
         } else if to_perspective && matches!(&*proj, Projection::Orthographic(_)) {
-            let r = poc.radius.unwrap_or(1.0);
+            let r = poc.zoom.current().0;
             let persp_r = orthographic_to_perspective_radius(r);
-            poc.radius = Some(persp_r);
-            poc.target_radius = persp_r;
+            poc.zoom.snap_to(Radius(persp_r));
             *proj = Projection::Perspective(PerspectiveProjection {
                 near: 0.001,
                 near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),

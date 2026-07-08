@@ -1,115 +1,63 @@
-//! Validates a [`super::OrbitCamBindingsDescriptor`] and converts it into a
-//! [`super::OrbitCamBindings`].
+//! Camera-agnostic descriptor validation and lowering shared by every camera kind's binding
+//! validator.
 //!
-//! [`validate_bindings`] is the single entry point called by both
-//! [`super::OrbitCamBindingsBuilder::build`] and the [`TryFrom`] impl on
-//! [`super::OrbitCamBindings`]. The remaining functions are private helpers that walk the
-//! per-action descriptor entries, enforce the held/impulse invariants, and lower the
-//! descriptor entries into [`super::action_set::HeldActionBindingEntry`] /
-//! [`super::action_set::ActionBindingEntry`] storage.
+//! Functions:
+//! - [`validate_held_entries`] / [`validate_impulse_entries`] — enforce the held/impulse invariants
+//!   on a per-action slice of descriptor entries.
+//! - [`validate_slow_mode`] — enforces the slow-mode scale-policy invariants.
+//! - [`held_descriptors_to_set`] / [`held_descriptor_to_entry`] / [`action_descriptor_to_entry`] —
+//!   lower validated descriptor entries into the generic [`HeldActionBindingSet`] /
+//!   [`HeldActionBindingEntry`] / [`ImpulseActionBindingEntry`] storage.
+//!
+//! Each camera's `validate` module calls these to build its per-action binding sets, then wraps the
+//! results in its own per-action newtypes.
 
 use std::marker::PhantomData;
 
-use super::OrbitCamBindings;
-use super::OrbitCamBindingsDescriptor;
-use super::action_set::ActionBindingEntry;
-use super::action_set::ActionBindingSet;
 use super::action_set::BindingEngagement;
 use super::action_set::HeldActionBindingEntry;
 use super::action_set::HeldActionBindingSet;
-use super::action_set::OrbitCamOrbitActionBindings;
-use super::action_set::OrbitCamPanActionBindings;
-use super::action_set::OrbitCamZoomCoarseActionBindings;
-use super::action_set::OrbitCamZoomSmoothActionBindings;
-use super::builder::OrbitCamBindingWithInputGain;
-use super::builder::OrbitCamTouchBindingConfig;
+use super::action_set::ImpulseActionBindingEntry;
 use super::descriptor::ActionBindingDescriptor;
+use super::descriptor::CameraInputScalePolicy;
+use super::descriptor::CameraSlowMode;
 use super::descriptor::HeldBindingDescriptor;
 use super::descriptor::InputBindingDescriptor;
 use super::descriptor::InputBindingEntry;
-use super::descriptor::OrbitCamScalePolicy;
-use super::descriptor::OrbitCamSlowMode;
-use super::error::OrbitCamBindingsError;
+use super::error::BindingsError;
 use super::held_binding::BindingGates;
-use super::held_binding::OrbitCamGatePolarity;
+use super::held_binding::GatePolarity;
 use crate::input::CameraSemanticAction;
 use crate::input::HeldCameraAction;
 use crate::input::ImpulseCameraAction;
-use crate::input::constants::ORBIT_ACTION_NAME;
-use crate::input::constants::PAN_ACTION_NAME;
-use crate::input::constants::ZOOM_COARSE_ACTION_NAME;
-use crate::input::constants::ZOOM_SMOOTH_ACTION_NAME;
 
-/// Validates and builds `OrbitCamBindings` from a descriptor.
+/// Validates the held-binding invariants for one action's descriptor entries.
 ///
 /// # Errors
 ///
-/// Returns [`OrbitCamBindingsError`] when any binding invariant fails.
-pub fn validate_bindings(
-    descriptor: &OrbitCamBindingsDescriptor,
-) -> Result<OrbitCamBindings, OrbitCamBindingsError> {
-    validate_held_entries(ORBIT_ACTION_NAME, &descriptor.orbit)?;
-    validate_held_entries(PAN_ACTION_NAME, &descriptor.pan)?;
-    validate_held_entries(ZOOM_SMOOTH_ACTION_NAME, &descriptor.zoom_smooth)?;
-    validate_impulse_entries(ZOOM_COARSE_ACTION_NAME, &descriptor.zoom_coarse)?;
-    validate_adapter_entries(descriptor)?;
-    validate_slow_mode(descriptor.slow_mode.as_ref())?;
-
-    Ok(OrbitCamBindings {
-        orbit:            OrbitCamOrbitActionBindings(held_descriptors_to_set(
-            ORBIT_ACTION_NAME,
-            &descriptor.orbit,
-        )?),
-        pan:              OrbitCamPanActionBindings(held_descriptors_to_set(
-            PAN_ACTION_NAME,
-            &descriptor.pan,
-        )?),
-        zoom_smooth:      OrbitCamZoomSmoothActionBindings(held_descriptors_to_set(
-            ZOOM_SMOOTH_ACTION_NAME,
-            &descriptor.zoom_smooth,
-        )?),
-        zoom_coarse:      OrbitCamZoomCoarseActionBindings(ActionBindingSet {
-            entries: descriptor
-                .zoom_coarse
-                .iter()
-                .map(action_descriptor_to_entry)
-                .collect(),
-            action:  PhantomData,
-        }),
-        trackpad_orbit:   descriptor.trackpad_orbit.clone(),
-        trackpad_pan:     descriptor.trackpad_pan.clone(),
-        trackpad_zoom:    descriptor.trackpad_zoom.clone(),
-        mouse_wheel_zoom: descriptor.mouse_wheel_zoom,
-        pinch_zoom:       descriptor.pinch_zoom,
-        touch:            descriptor.touch,
-        gamepad:          descriptor.gamepad,
-        zoom_inversion:   descriptor.zoom_inversion,
-        button_drag_zoom: descriptor.button_drag_zoom,
-        slow_mode:        descriptor.slow_mode.clone(),
-    })
-}
-
-fn validate_held_entries(
+/// Returns [`BindingsError`] when any held entry lacks sources or engagement, mismatches its motion
+/// and engagement sources, or carries an invalid modifier or gate.
+pub fn validate_held_entries(
     action: &'static str,
     entries: &[HeldBindingDescriptor],
-) -> Result<(), OrbitCamBindingsError> {
+) -> Result<(), BindingsError> {
     for entry in entries {
         if entry.sources.is_empty() {
-            return Err(OrbitCamBindingsError::MissingSources);
+            return Err(BindingsError::MissingSources);
         }
         if entry.engagement.is_none() {
-            return Err(OrbitCamBindingsError::HeldMotionMissingEngagement { action });
+            return Err(BindingsError::HeldMotionMissingEngagement { action });
         }
         if entry.sources != entry.engagement_sources {
-            return Err(OrbitCamBindingsError::HeldSourceMismatch { action });
+            return Err(BindingsError::HeldSourceMismatch { action });
         }
         if entry.motion.is_empty()
             || entry
                 .engagement
                 .as_ref()
-                .is_some_and(super::descriptor::InputBindingDescriptor::is_empty)
+                .is_some_and(InputBindingDescriptor::is_empty)
         {
-            return Err(OrbitCamBindingsError::MissingSources);
+            return Err(BindingsError::MissingSources);
         }
         validate_gates(action, &entry.gates)?;
         validate_descriptor_entries(&entry.motion)?;
@@ -120,53 +68,57 @@ fn validate_held_entries(
     Ok(())
 }
 
-fn validate_impulse_entries(
+/// Validates the impulse-binding invariants for one action's descriptor entries.
+///
+/// # Errors
+///
+/// Returns [`BindingsError`] when any impulse entry lacks sources, is empty, is configured with
+/// held engagement, or carries an invalid modifier.
+pub fn validate_impulse_entries(
     action: &'static str,
     entries: &[ActionBindingDescriptor],
-) -> Result<(), OrbitCamBindingsError> {
+) -> Result<(), BindingsError> {
     for entry in entries {
         if entry.sources.is_empty() || entry.binding.is_empty() {
-            return Err(OrbitCamBindingsError::MissingSources);
+            return Err(BindingsError::MissingSources);
         }
         if entry.engagement == BindingEngagement::Held {
-            return Err(OrbitCamBindingsError::ImpulseEngagement { action });
+            return Err(BindingsError::ImpulseEngagement { action });
         }
         validate_descriptor_entries(&entry.binding)?;
     }
     Ok(())
 }
 
-fn validate_gates(action: &'static str, gates: &BindingGates) -> Result<(), OrbitCamBindingsError> {
+fn validate_gates(action: &'static str, gates: &BindingGates) -> Result<(), BindingsError> {
     for gate in gates.entries() {
         let opposite = match gate.polarity {
-            OrbitCamGatePolarity::Required => OrbitCamGatePolarity::Blocked,
-            OrbitCamGatePolarity::Blocked => OrbitCamGatePolarity::Required,
+            GatePolarity::Required => GatePolarity::Blocked,
+            GatePolarity::Blocked => GatePolarity::Required,
         };
         if gates
             .entries()
             .iter()
             .any(|candidate| candidate.input == gate.input && candidate.polarity == opposite)
         {
-            return Err(OrbitCamBindingsError::ContradictoryGate { action });
+            return Err(BindingsError::ContradictoryGate { action });
         }
     }
     Ok(())
 }
 
-fn validate_descriptor_entries(
-    descriptor: &InputBindingDescriptor,
-) -> Result<(), OrbitCamBindingsError> {
+fn validate_descriptor_entries(descriptor: &InputBindingDescriptor) -> Result<(), BindingsError> {
     for entry in descriptor.entries_slice() {
         validate_entry(entry)?;
     }
     Ok(())
 }
 
-fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError> {
+fn validate_entry(entry: &InputBindingEntry) -> Result<(), BindingsError> {
     entry.input_gain().validate()?;
     let modifiers = entry.modifiers();
     if modifiers.scale().is_some_and(|scale| !scale.is_finite()) {
-        return Err(OrbitCamBindingsError::InvalidScale);
+        return Err(BindingsError::InvalidScale);
     }
     let Some(dead_zone) = modifiers.dead_zone() else {
         return Ok(());
@@ -174,71 +126,45 @@ fn validate_entry(entry: &InputBindingEntry) -> Result<(), OrbitCamBindingsError
     let lower = dead_zone.lower_threshold;
     let upper = dead_zone.upper_threshold;
     if !lower.is_finite() || !upper.is_finite() || lower < 0.0 || upper > 1.0 || lower >= upper {
-        return Err(OrbitCamBindingsError::InvalidDeadZone);
+        return Err(BindingsError::InvalidDeadZone);
     }
     Ok(())
 }
 
-fn validate_adapter_entries(
-    descriptor: &OrbitCamBindingsDescriptor,
-) -> Result<(), OrbitCamBindingsError> {
-    validate_sensitive_entries(&descriptor.trackpad_orbit)?;
-    validate_sensitive_entries(&descriptor.trackpad_pan)?;
-    validate_sensitive_entries(&descriptor.trackpad_zoom)?;
-    validate_sensitive_option(descriptor.mouse_wheel_zoom)?;
-    validate_sensitive_option(descriptor.pinch_zoom)?;
-    validate_sensitive_option(descriptor.button_drag_zoom)?;
-    if let Some(touch) = descriptor.touch {
-        validate_touch_config(touch)?;
-    }
-    Ok(())
-}
-
-fn validate_sensitive_entries<T>(
-    entries: &[OrbitCamBindingWithInputGain<T>],
-) -> Result<(), OrbitCamBindingsError> {
-    for entry in entries {
-        entry.input_gain().validate()?;
-    }
-    Ok(())
-}
-
-fn validate_sensitive_option<T>(
-    entry: Option<OrbitCamBindingWithInputGain<T>>,
-) -> Result<(), OrbitCamBindingsError> {
-    if let Some(entry) = entry {
-        entry.input_gain().validate()?;
-    }
-    Ok(())
-}
-
-fn validate_touch_config(touch: OrbitCamTouchBindingConfig) -> Result<(), OrbitCamBindingsError> {
-    touch.input_gain().validate()
-}
-
-fn validate_slow_mode(slow_mode: Option<&OrbitCamSlowMode>) -> Result<(), OrbitCamBindingsError> {
+/// Validates an optional slow-mode policy's scale invariants.
+///
+/// # Errors
+///
+/// Returns [`BindingsError::InvalidScale`] when the slow or normal scale is non-finite,
+/// non-positive, or the slow scale exceeds the normal scale.
+pub fn validate_slow_mode(slow_mode: Option<&CameraSlowMode>) -> Result<(), BindingsError> {
     let Some(slow_mode) = slow_mode else {
         return Ok(());
     };
-    validate_scale_policy(&slow_mode.scale)
+    validate_scale_policy(slow_mode.scale)
 }
 
-fn validate_scale_policy(policy: &OrbitCamScalePolicy) -> Result<(), OrbitCamBindingsError> {
+fn validate_scale_policy(policy: CameraInputScalePolicy) -> Result<(), BindingsError> {
     if !policy.normal.is_finite()
         || !policy.slow.is_finite()
         || policy.normal <= 0.0
         || policy.slow <= 0.0
         || policy.slow > policy.normal
     {
-        return Err(OrbitCamBindingsError::InvalidScale);
+        return Err(BindingsError::InvalidScale);
     }
     Ok(())
 }
 
-fn held_descriptors_to_set<A: HeldCameraAction, E: CameraSemanticAction>(
+/// Lowers a slice of validated held descriptors into a generic held action binding set.
+///
+/// # Errors
+///
+/// Returns [`BindingsError::HeldMotionMissingEngagement`] when a descriptor lacks its engagement.
+pub fn held_descriptors_to_set<A: HeldCameraAction, E: CameraSemanticAction>(
     action: &'static str,
     descriptors: &[HeldBindingDescriptor],
-) -> Result<HeldActionBindingSet<A, E>, OrbitCamBindingsError> {
+) -> Result<HeldActionBindingSet<A, E>, BindingsError> {
     Ok(HeldActionBindingSet {
         entries: descriptors
             .iter()
@@ -248,14 +174,15 @@ fn held_descriptors_to_set<A: HeldCameraAction, E: CameraSemanticAction>(
     })
 }
 
+/// Lowers one validated held descriptor into a generic held action binding entry.
 fn held_descriptor_to_entry<A: HeldCameraAction>(
     action: &'static str,
     descriptor: &HeldBindingDescriptor,
-) -> Result<HeldActionBindingEntry<A>, OrbitCamBindingsError> {
+) -> Result<HeldActionBindingEntry<A>, BindingsError> {
     let engagement = descriptor
         .engagement
         .clone()
-        .ok_or(OrbitCamBindingsError::HeldMotionMissingEngagement { action })?;
+        .ok_or(BindingsError::HeldMotionMissingEngagement { action })?;
 
     Ok(HeldActionBindingEntry {
         motion: descriptor.motion.clone(),
@@ -268,47 +195,15 @@ fn held_descriptor_to_entry<A: HeldCameraAction>(
     })
 }
 
-fn action_descriptor_to_entry<A: ImpulseCameraAction>(
+/// Lowers one validated impulse descriptor into a generic action binding entry.
+pub fn action_descriptor_to_entry<A: ImpulseCameraAction>(
     descriptor: &ActionBindingDescriptor,
-) -> ActionBindingEntry<A> {
-    ActionBindingEntry {
+) -> ImpulseActionBindingEntry<A> {
+    ImpulseActionBindingEntry {
         binding:    descriptor.binding.clone(),
         sources:    descriptor.sources,
         route:      descriptor.route,
         engagement: BindingEngagement::Impulse,
         action:     PhantomData,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use bevy::prelude::*;
-
-    use super::*;
-    use crate::input::InputGain;
-    use crate::input::OrbitCamMouseDrag;
-
-    #[test]
-    fn validation_preserves_authored_disabled_entries_but_enabled_views_filter_them()
-    -> Result<(), OrbitCamBindingsError> {
-        let bindings = OrbitCamBindings::builder()
-            .orbit(OrbitCamMouseDrag::new(MouseButton::Left).with_input_gain(InputGain::DISABLED.0))
-            .build()?;
-
-        assert_eq!(bindings.orbit().entries().len(), 1);
-        assert_eq!(bindings.orbit().enabled_entries().count(), 0);
-        let [entry] = bindings.orbit().entries() else {
-            assert_eq!(bindings.orbit().entries().len(), 1);
-            return Ok(());
-        };
-        let [motion] = entry.motion_descriptor().entries_slice() else {
-            assert_eq!(entry.motion_descriptor().entries_slice().len(), 1);
-            return Ok(());
-        };
-        assert_eq!(motion.input_gain(), InputGain::DISABLED);
-        assert_eq!(entry.enabled_motion_entries().count(), 0);
-        assert_eq!(entry.engagement_descriptor().enabled_entries().count(), 1);
-
-        Ok(())
     }
 }

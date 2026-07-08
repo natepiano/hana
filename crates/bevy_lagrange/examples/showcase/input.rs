@@ -3,15 +3,15 @@
 //!
 //! Every showcase shortcut lives in one of two input contexts:
 //!
-//! - [`ShowcaseUiInput`] (always active): `Esc` pause, `G` log toggle, `C` clear log, and
+//! - [`ShowcaseUiInput`] (always active): `Esc` pause, `G` log toggle, `Backspace` clear log, and
 //!   `Up`/`Down` log scroll.
-//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `Y P O R E A I Q
+//! - [`ShowcaseGameplayInput`] (deactivated while paused via [`ContextActivity`]): `Y P O R 0 M I C
 //!   K L`.
 //!
 //! Single keys are spawned through [`Keybindings::spawn_key`], which attaches a
 //! `BlockBy` on every modifier. A bare key therefore stays quiet while a
 //! modifier is held, so `fairy_dust`'s `Shift+C` preset cycle no longer also
-//! fires the showcase's `C` clear-log.
+//! fires the showcase's `C` conflict-policy shortcut.
 //!
 //! Discrete shortcuts are wired with [`bind_action_system!`]; the two scroll
 //! keys are continuous and run from `On<Fire<…>>` observers that scale by frame
@@ -173,7 +173,7 @@ fn spawn_ui_actions(spawner: &mut ActionSpawner<ShowcaseUiInput>) {
     let keybindings = Keybindings::new::<ShowcaseShift>(spawner, ActionSettings::default());
     keybindings.spawn_key::<TogglePause>(spawner, KeyCode::Escape);
     keybindings.spawn_key::<ToggleLog>(spawner, KeyCode::KeyG);
-    keybindings.spawn_key::<ClearLog>(spawner, KeyCode::KeyC);
+    keybindings.spawn_key::<ClearLog>(spawner, KeyCode::Backspace);
     keybindings.spawn_key::<ScrollLogUp>(spawner, KeyCode::ArrowUp);
     keybindings.spawn_key::<ScrollLogDown>(spawner, KeyCode::ArrowDown);
 }
@@ -184,10 +184,10 @@ fn spawn_gameplay_actions(spawner: &mut ActionSpawner<ShowcaseGameplayInput>) {
     keybindings.spawn_key::<SetPerspective>(spawner, KeyCode::KeyP);
     keybindings.spawn_key::<SetOrthographic>(spawner, KeyCode::KeyO);
     keybindings.spawn_key::<RandomizeEasing>(spawner, KeyCode::KeyR);
-    keybindings.spawn_key::<ResetEasing>(spawner, KeyCode::KeyE);
-    keybindings.spawn_key::<AnimateCamera>(spawner, KeyCode::KeyA);
+    keybindings.spawn_key::<ResetEasing>(spawner, KeyCode::Digit0);
+    keybindings.spawn_key::<AnimateCamera>(spawner, KeyCode::KeyM);
     keybindings.spawn_key::<ToggleInterruptBehavior>(spawner, KeyCode::KeyI);
-    keybindings.spawn_key::<ToggleConflictPolicy>(spawner, KeyCode::KeyQ);
+    keybindings.spawn_key::<ToggleConflictPolicy>(spawner, KeyCode::KeyC);
     keybindings.spawn_key::<LookAtHovered>(spawner, KeyCode::KeyK);
     keybindings.spawn_key::<LookAtAndFitHovered>(spawner, KeyCode::KeyL);
 }

@@ -27,6 +27,7 @@ pub use performance::diegetic_stats_tree;
 pub use performance::fps_stats_panel;
 pub use performance::gpu_meter_panel;
 pub use title_bar::ControlActivation;
+pub(crate) use title_bar::HomeTitleBarFlash;
 pub use title_bar::TitleBar;
 pub use title_bar::TitleBarControl;
 pub(crate) use title_bar::TitleBarControlRegistry;
@@ -64,6 +65,8 @@ pub(crate) fn install_description(app: &mut App, panel: DescriptionPanel) {
 pub(crate) fn install_title_bar(app: &mut App, title_bar: TitleBar) {
     ensure_plugin(app, DiegeticUiPlugin);
     help_overlay::install(app);
+    app.init_resource::<HomeTitleBarFlash>();
+    app.add_systems(Update, title_bar::tick_home_title_bar_flash);
     app.add_systems(PostUpdate, title_bar::refresh_changed_title_bar);
     app.add_systems(
         Startup,

@@ -34,6 +34,7 @@ use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 
@@ -171,10 +172,13 @@ fn main() {
         .transform(Transform::from_xyz(0.0, -0.04, 0.0))
         .with_orbit_cam_preset_bundle(
             |cam| {
-                cam.focus = HOME_FOCUS;
-                cam.radius = Some(HOME_RADIUS);
-                cam.yaw = Some(HOME_YAW);
-                cam.pitch = Some(HOME_PITCH);
+                OrbitCamPose {
+                    focus:  HOME_FOCUS,
+                    yaw:    HOME_YAW,
+                    pitch:  HOME_PITCH,
+                    radius: HOME_RADIUS,
+                }
+                .apply_to(cam);
                 cam.zoom.set_sensitivity(1.0);
             },
             OrbitCamPreset::blender_like(),
@@ -195,7 +199,6 @@ fn main() {
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
         .margin(HOME_MARGIN)
-        .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .with_title_bar(panel_rendering_title_bar(SCENE_ILLUMINANCE))
         .with_camera_control_panel()
         .init_resource::<LightingPreset>()

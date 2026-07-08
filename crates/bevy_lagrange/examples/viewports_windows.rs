@@ -3,7 +3,7 @@
 //! `Camera::viewport` clips that overlay to a square in the top-right corner;
 //! `RenderTarget::Window` aims a third camera at a second OS window spawned
 //! via `bevy_clerestory::ManagedWindow`; and
-//! `ResolvedOrbitCamInputRoute::routed_camera()` resolves which camera the
+//! `ResolvedCameraInputRoute::routed_camera()` resolves which camera the
 //! cursor is currently over so input goes to that one.
 //!
 //! The primary window has a full-size view and a minimap overlay in the
@@ -12,7 +12,6 @@
 //! Controls:
 //!   H - Home the camera the cursor is currently over.
 
-use std::collections::HashMap;
 use std::time::Duration;
 
 use bevy::camera::RenderTarget;
@@ -26,7 +25,6 @@ use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::ResolvedOrbitCamInputRoute;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeEntity;
 use fairy_dust::CameraHomeTarget;
@@ -55,17 +53,11 @@ const LEFT_FACE_LABEL: &str = "LEFT";
 const RIGHT_FACE_LABEL: &str = "RIGHT";
 const TOP_FACE_LABEL: &str = "TOP";
 
-// home pose (per camera)
+// home pose
 const PRIMARY_HOME_YAW: f32 = 0.0;
 const PRIMARY_HOME_PITCH: f32 = 0.46;
-const MINIMAP_HOME_YAW: f32 = 0.0;
-const MINIMAP_HOME_PITCH: f32 = 1.4;
-const SECOND_HOME_YAW: f32 = 0.8;
-const SECOND_HOME_PITCH: f32 = 0.4;
 
 // home animation
-const HOME_CONTROL: &str = "H Home";
-const HOME_DURATION: Duration = Duration::from_millis(800);
 const HOME_MARGIN: f32 = 0.2;
 const HOME_PROXY_READY_EPSILON: f32 = 0.001;
 
@@ -124,13 +116,11 @@ fn main() {
         .with_camera_home()
         .yaw(PRIMARY_HOME_YAW)
         .pitch(PRIMARY_HOME_PITCH)
-        .duration(HOME_DURATION)
         .margin(HOME_MARGIN)
         .with_title_bar(
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
-                .with_anchor(Anchor::TopLeft)
-                .control(HOME_CONTROL),
+                .with_anchor(Anchor::TopLeft),
         )
         .with_camera_control_panel()
         .add_systems(Startup, setup)
@@ -140,7 +130,6 @@ fn main() {
                 cleanup_cameras_on_window_close,
                 set_camera_viewports,
                 home_main_camera_on_startup,
-                home_on_keypress,
             ),
         )
         .run();
@@ -148,23 +137,23 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // MULTI-CAMERA SETUP — composing OrbitCam with Camera::order, Camera::viewport,
-// RenderTarget::Window, and ResolvedOrbitCamInputRoute.
+// RenderTarget::Window, and ResolvedCameraInputRoute.
 //
 // How it works:
 //   1. `setup` (Startup) spawns three OrbitCams. The main camera renders the whole primary window.
 //      The minimap camera has `order: 1` and a transparent clear so it composites on top of the
 //      main view; its `viewport` is left None here and filled in by `set_camera_viewports`. The
 //      second camera carries `RenderTarget::Window(WindowRef::Entity(...))` so its output goes to
-//      the second OS window. `setup` also records each camera's home `(yaw, pitch)` in
-//      `CameraHomes`.
+//      the second OS window. Each camera's `OrbitCamHomePose` is captured by Lagrange from its
+//      spawn pose.
 //   2. `set_camera_viewports` (Update) listens for `WindowResized` and resets the minimap camera's
 //      `Camera::viewport` to a square in physical pixels. Viewports are physical-pixel rects, so
 //      they must be recomputed each resize.
 //   3. `home_main_camera_on_startup` (Update, fires once) waits until the Fairy Dust home proxy has
 //      settled at `CUBE_TRANSLATION`, then fires `AnimateToFit` on the main camera with
 //      `Duration::ZERO` so the scene opens already framed.
-//   4. `home_on_keypress` (Update) reads `ResolvedOrbitCamInputRoute` to find the camera the cursor
-//      is over and fires `AnimateToFit` on it with the per-camera pose from `CameraHomes`.
+//   4. Lagrange's filled home binding handles H for the routed camera. Non-routed cameras have
+//      inactive input contexts, so only the hovered camera receives home.
 //   5. `cleanup_cameras_on_window_close` (Update) despawns any camera whose `RenderTarget::Window`
 //      references a `ClosingWindow`, so Bevy's camera system doesn't panic on a stale render
 //      target.
@@ -176,45 +165,32 @@ struct MainCamera;
 #[derive(Component)]
 struct MinimapCamera;
 
-#[derive(Clone, Copy)]
-struct HomePose {
-    yaw:   f32,
-    pitch: f32,
-}
-
-#[derive(Resource, Default)]
-struct CameraHomes(HashMap<Entity, HomePose>);
-
 // Spawns the three OrbitCams. The main camera renders the full primary window;
 // the minimap camera renders on top of it with a higher `Camera::order` and a
 // transparent clear so its viewport (set later by `set_camera_viewports`)
 // composites over the main view. The second camera renders to its own OS
 // window via `RenderTarget::Window`.
 fn setup(mut commands: Commands) {
-    let primary = commands
-        .spawn((
-            Name::new(PRIMARY_CAMERA_NAME),
-            Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
-            orbit_cam_default(),
-            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
-            MainCamera,
-        ))
-        .id();
+    commands.spawn((
+        Name::new(PRIMARY_CAMERA_NAME),
+        Transform::from_translation(PRIMARY_CAMERA_TRANSLATION),
+        orbit_cam_default(),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
+        MainCamera,
+    ));
 
-    let minimap = commands
-        .spawn((
-            Name::new(MINIMAP_CAMERA_NAME),
-            Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
-            Camera {
-                order: MINIMAP_CAMERA_ORDER,
-                clear_color: ClearColorConfig::None,
-                ..default()
-            },
-            orbit_cam_default(),
-            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
-            MinimapCamera,
-        ))
-        .id();
+    commands.spawn((
+        Name::new(MINIMAP_CAMERA_NAME),
+        Transform::from_translation(MINIMAP_CAMERA_TRANSLATION),
+        Camera {
+            order: MINIMAP_CAMERA_ORDER,
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        orbit_cam_default(),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
+        MinimapCamera,
+    ));
 
     let second_window = commands
         .spawn((
@@ -228,40 +204,14 @@ fn setup(mut commands: Commands) {
         ))
         .id();
 
-    let second = commands
-        .spawn((
-            Name::new(SECOND_WINDOW_CAMERA_NAME),
-            Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
-            Camera::default(),
-            RenderTarget::Window(WindowRef::Entity(second_window)),
-            orbit_cam_default(),
-            OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
-        ))
-        .id();
-
-    commands.insert_resource(CameraHomes(HashMap::from([
-        (
-            primary,
-            HomePose {
-                yaw:   PRIMARY_HOME_YAW,
-                pitch: PRIMARY_HOME_PITCH,
-            },
-        ),
-        (
-            minimap,
-            HomePose {
-                yaw:   MINIMAP_HOME_YAW,
-                pitch: MINIMAP_HOME_PITCH,
-            },
-        ),
-        (
-            second,
-            HomePose {
-                yaw:   SECOND_HOME_YAW,
-                pitch: SECOND_HOME_PITCH,
-            },
-        ),
-    ])));
+    commands.spawn((
+        Name::new(SECOND_WINDOW_CAMERA_NAME),
+        Transform::from_translation(SECOND_WINDOW_CAMERA_TRANSLATION),
+        Camera::default(),
+        RenderTarget::Window(WindowRef::Entity(second_window)),
+        orbit_cam_default(),
+        OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
+    ));
 }
 
 // Fires AnimateToFit on the main camera once the home proxy entity has
@@ -297,36 +247,6 @@ fn home_main_camera_on_startup(
             .margin(HOME_MARGIN),
     );
     *fired = true;
-}
-
-/// Homes the camera the cursor is currently over while still using the shared
-/// Fairy Dust home target and fit margin.
-fn home_on_keypress(
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    route: Res<ResolvedOrbitCamInputRoute>,
-    home: Option<Res<CameraHomeEntity>>,
-    homes: Res<CameraHomes>,
-) {
-    if !keys.just_pressed(KeyCode::KeyH) {
-        return;
-    }
-    let Some(home) = home else {
-        return;
-    };
-    let Some(routed_camera) = route.routed_camera() else {
-        return;
-    };
-    let Some(&pose) = homes.0.get(&routed_camera) else {
-        return;
-    };
-    commands.trigger(
-        AnimateToFit::new(routed_camera, home.0)
-            .yaw(pose.yaw)
-            .pitch(pose.pitch)
-            .duration(HOME_DURATION)
-            .margin(HOME_MARGIN),
-    );
 }
 
 /// Despawns cameras whose render-target window is marked `ClosingWindow`.

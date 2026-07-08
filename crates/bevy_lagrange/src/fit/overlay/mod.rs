@@ -4,24 +4,17 @@
 //! line, and label visualization for the current camera fit target.
 
 mod constants;
-mod context;
-mod convex_hull;
-mod fit_target_bounds;
-mod frame;
-mod labels;
-mod lines;
-mod reconciliation;
-mod screen_space;
-mod visual;
+mod geometry;
+mod render;
 
 use bevy::asset::AssetServer;
 use bevy::camera::visibility::VisibilitySystems;
 use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-pub use fit_target_bounds::FitTargetOverlayConfig;
-use lines::FitOverlayLineMaterial;
-use lines::FitOverlayLineMaterials;
+use render::FitOverlayLineMaterial;
+use render::FitOverlayLineMaterials;
+pub use render::FitTargetOverlayConfig;
 
 /// Enables the fit target debug overlay on a camera entity.
 ///
@@ -47,14 +40,14 @@ pub(crate) struct FitOverlayPlugin;
 impl Plugin for FitOverlayPlugin {
     fn build(&self, app: &mut App) {
         if app.world().contains_resource::<AssetServer>() {
-            app.add_plugins(MaterialPlugin::<lines::FitOverlayLineMaterial>::default());
+            app.add_plugins(MaterialPlugin::<FitOverlayLineMaterial>::default());
         } else {
             app.init_resource::<Assets<FitOverlayLineMaterial>>();
         }
 
         app.init_resource::<FitTargetOverlayConfig>()
             .init_resource::<FitOverlayLineMaterials>()
-            .add_observer(fit_target_bounds::on_remove_fit_visualization)
+            .add_observer(render::on_remove_fit_visualization)
             .configure_sets(
                 PostUpdate,
                 FitOverlaySystemSet
@@ -65,8 +58,8 @@ impl Plugin for FitOverlayPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    reconciliation::deduplicate_fit_overlay_visuals,
-                    fit_target_bounds::draw_fit_target_bounds,
+                    render::deduplicate_fit_overlay_visuals,
+                    render::draw_fit_target_bounds,
                 )
                     .chain()
                     .in_set(FitOverlaySystemSet)
@@ -74,7 +67,7 @@ impl Plugin for FitOverlayPlugin {
             )
             .add_systems(
                 PostUpdate,
-                reconciliation::cleanup_orphan_fit_overlay_visuals.in_set(FitOverlaySystemSet),
+                render::cleanup_orphan_fit_overlay_visuals.in_set(FitOverlaySystemSet),
             );
     }
 }

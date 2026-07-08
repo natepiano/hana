@@ -13,9 +13,10 @@ only the row matching the live zoom direction highlights.
 Two orthogonal types, correctly named:
 
 - `ZoomInversion { Normal, Inverted }` — global invert-zoom **config** toggle
-  (relative). In `input/bindings/builder.rs`; field / builder method / accessor
-  are all `zoom_inversion` (`OrbitCamBindings::zoom_inversion()`, descriptor
-  field `zoom_inversion`).
+  (relative). The type lives in `orbit_cam/input/bindings/binding_kinds.rs`; the
+  field / builder method / accessor are all `zoom_inversion`
+  (`OrbitCamBindings::zoom_inversion()`, descriptor field `zoom_inversion`, in
+  `builder.rs`).
 - `ZoomDirection { In, Out }` — actual absolute direction (display/derived). In
   `input/control_summary.rs`. Two variants, no neutral.
 
@@ -75,14 +76,14 @@ built-in preset) stay single rows.
 ## Wheel/pinch bindings
 
 `OrbitCamMouseWheelZoom` and `OrbitCamPinchZoom` are both marker structs
-(`input/bindings/builder.rs`). Inversion is governed solely by `ZoomInversion`;
-`zoom_signed` in `input/adapter/inject.rs` applies the inversion sign
+(`orbit_cam/input/bindings/binding_kinds.rs`). Inversion is governed solely by `ZoomInversion`;
+`zoom_signed` in `orbit_cam/input/adapter/inject.rs` applies the inversion sign
 (`ZoomInversion::Normal` → `1.0`, `Inverted` → `-1.0`) and takes no per-binding
 polarity param.
 
 ## Slow-mode scaling
 
-Slow-mode zoom scaling applies once in `input/adapter/resolve.rs`. `AdapterScale`
+Slow-mode zoom scaling applies once in `orbit_cam/input/adapter/resolve.rs`. `AdapterScale`
 is built per camera from the slow-mode-active flag
 (`AdapterScale::from_bindings(.., is_slow_mode_active(..))`) and applied to each
 accumulated value (`adapter_scale.f32(...)`) for zoom (and orbit/pan). The active

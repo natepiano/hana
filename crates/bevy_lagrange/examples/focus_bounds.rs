@@ -1,6 +1,6 @@
-//! Demonstrates how to keep the camera focus inside a cuboid by setting
-//! `OrbitCam::focus_bounds_shape` and `focus_bounds_origin`. The Left/Right
-//! arrows resize the bounds; the gold sphere marks the clamped focus.
+//! Demonstrates how to keep the camera focus inside a cuboid by setting the
+//! `OrbitCam` pan operation's `RegionLimit`. The Left/Right arrows resize the
+//! bounds; the gold marker and label track the clamped focus.
 //!
 //! Controls:
 //!   P      - Pause cube spin
@@ -15,6 +15,7 @@ use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor as PanelAnchor;
 use bevy_diegetic::DiegeticPanel;
+use bevy_diegetic::DiegeticText;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
@@ -28,6 +29,7 @@ use bevy_diegetic::Unit;
 use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::RegionLimit;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -66,7 +68,7 @@ fn main() {
         .with_camera_control_panel()
         .init_resource::<AnimationPause>()
         .init_resource::<FocusBounds>()
-        .add_systems(PostStartup, spawn_story_panels)
+        .add_systems(PostStartup, (spawn_story_panels, spawn_focus_marker))
         // `P` and the arrow keys run through Fairy Dust's shortcut binding,
         // which fires each only when no modifier is held.
         .with_shortcut(KeyCode::KeyP, toggle_pause)
@@ -74,7 +76,13 @@ fn main() {
         .with_shortcut(KeyCode::ArrowRight, grow_focus_bounds)
         .add_systems(
             Update,
-            (sync_focus_bounds, rotate_cube, draw_focus_gizmos).chain(),
+            (
+                sync_focus_bounds,
+                sync_focus_marker,
+                rotate_cube,
+                draw_focus_bounds_gizmo,
+            )
+                .chain(),
         )
         .run();
 }
@@ -83,12 +91,13 @@ fn main() {
 // FOCUS BOUNDS — apply, resize, and visualize the OrbitCam focus cuboid.
 // ═════════════════════════════════════════════════════════════════════════════
 //
-// How it works: configure_camera writes focus_bounds_shape and
-// focus_bounds_origin onto the OrbitCam at startup. shrink_focus_bounds /
+// How it works: configure_camera sets the pan operation's RegionLimit (a cuboid
+// centered on an origin) onto the OrbitCam at startup. shrink_focus_bounds /
 // grow_focus_bounds (bound to ← / → through Fairy Dust's shortcut binding)
 // adjust the FocusBounds resource; sync_focus_bounds writes the updated size
-// back to every OrbitCam each frame. draw_focus_gizmos draws the bounds cuboid
-// and a sphere at the camera's clamped focus point.
+// back to every OrbitCam each frame. draw_focus_bounds_gizmo draws the bounds
+// cuboid; the FocusMarker entity follows the camera's clamped focus point and
+// carries a billboarded world-text label.
 
 const BOUNDS_GIZMO_COLOR: Color = Color::linear_rgb(1.6, 1.6, 1.5);
 const BOUNDS_LARGER_CONTROL: &str = "→ Increase";
@@ -98,11 +107,22 @@ const FOCUS_BOUNDS_MAX_SIZE: f32 = 3.0;
 const FOCUS_BOUNDS_MIN_SIZE: f32 = 0.5;
 const FOCUS_BOUNDS_ORIGIN: Vec3 = Vec3::splat(1.0);
 const FOCUS_BOUNDS_STEP: f32 = 0.25;
-const FOCUS_GIZMO_COLOR: Color = Color::linear_rgb(3.5, 2.8, 0.2);
-const FOCUS_GIZMO_RADIUS: f32 = 0.06;
+const FOCUS_LABEL_COLOR: Color = Color::linear_rgb(3.5, 2.8, 0.2);
+const FOCUS_LABEL_OFFSET: f32 = 0.12;
+const FOCUS_LABEL_SIZE: f32 = 0.055;
+const FOCUS_LABEL_TEXT: &str = "focus";
+const FOCUS_MARKER_COLOR: Color = Color::linear_rgb(3.5, 2.8, 0.2);
+const FOCUS_MARKER_NAME: &str = "Camera focus marker";
+const FOCUS_MARKER_RADIUS: f32 = 0.035;
 
 #[derive(Component)]
 struct Cube;
+
+#[derive(Component)]
+struct FocusLabel;
+
+#[derive(Component)]
+struct FocusMarker;
 
 #[derive(Resource)]
 struct FocusBounds {
@@ -117,13 +137,15 @@ impl Default for FocusBounds {
     }
 }
 
-fn configure_camera(camera: &mut OrbitCam) {
+const fn configure_camera(camera: &mut OrbitCam) {
     apply_focus_bounds(camera, FOCUS_BOUNDS_INITIAL_SIZE);
 }
 
-fn apply_focus_bounds(camera: &mut OrbitCam, size: f32) {
-    camera.focus_bounds_shape = Some(Cuboid::new(size, size, size).into());
-    camera.focus_bounds_origin = FOCUS_BOUNDS_ORIGIN;
+const fn apply_focus_bounds(camera: &mut OrbitCam, size: f32) {
+    *camera.pan.limit_mut() = RegionLimit::Cuboid {
+        origin: FOCUS_BOUNDS_ORIGIN,
+        cuboid: Cuboid::new(size, size, size),
+    };
 }
 
 fn shrink_focus_bounds(mut bounds: ResMut<FocusBounds>) {
@@ -147,19 +169,79 @@ fn sync_focus_bounds(bounds: Res<FocusBounds>, mut cameras: Query<&mut OrbitCam>
     }
 }
 
-fn draw_focus_gizmos(bounds: Res<FocusBounds>, cameras: Query<&OrbitCam>, mut gizmos: Gizmos) {
-    gizmos.cube(
-        Transform::from_translation(FOCUS_BOUNDS_ORIGIN).with_scale(Vec3::splat(bounds.size)),
-        BOUNDS_GIZMO_COLOR,
-    );
-
+fn spawn_focus_marker(
+    mut commands: Commands,
+    cameras: Query<&OrbitCam>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     let Ok(camera) = cameras.single() else {
         return;
     };
-    gizmos.sphere(
-        Isometry3d::new(camera.focus, Quat::IDENTITY),
-        FOCUS_GIZMO_RADIUS,
-        FOCUS_GIZMO_COLOR,
+
+    commands
+        .spawn((
+            FocusMarker,
+            Name::new(FOCUS_MARKER_NAME),
+            Mesh3d(meshes.add(Sphere::new(FOCUS_MARKER_RADIUS))),
+            MeshMaterial3d(materials.add(focus_marker_material())),
+            Transform::from_translation(camera.pan.current().0),
+        ))
+        .with_children(|marker| {
+            marker.spawn((
+                FocusLabel,
+                Name::new("Camera focus label"),
+                DiegeticText::world(FOCUS_LABEL_TEXT)
+                    .size(FOCUS_LABEL_SIZE)
+                    .color(FOCUS_LABEL_COLOR)
+                    .anchor(PanelAnchor::BottomCenter)
+                    .unlit()
+                    .transform(Transform::from_translation(Vec3::Y * FOCUS_LABEL_OFFSET))
+                    .build(),
+            ));
+        });
+}
+
+fn sync_focus_marker(
+    cameras: Query<(&OrbitCam, &GlobalTransform)>,
+    mut markers: Query<&mut Transform, (With<FocusMarker>, Without<FocusLabel>)>,
+    mut labels: Query<&mut Transform, (With<FocusLabel>, Without<FocusMarker>)>,
+) {
+    let Ok((camera, camera_transform)) = cameras.single() else {
+        return;
+    };
+    let Ok(mut marker) = markers.single_mut() else {
+        return;
+    };
+
+    marker.translation = camera.pan.current().0;
+
+    let billboard = camera_transform.rotation();
+    let screen_up = billboard * Vec3::Y;
+    for mut label in &mut labels {
+        label.translation = screen_up * FOCUS_LABEL_OFFSET;
+        label.rotation = billboard;
+    }
+}
+
+fn focus_marker_material() -> StandardMaterial {
+    let mut emissive: LinearRgba = FOCUS_MARKER_COLOR.into();
+    emissive.red *= 4.0;
+    emissive.green *= 4.0;
+    emissive.blue *= 4.0;
+
+    StandardMaterial {
+        base_color: FOCUS_MARKER_COLOR,
+        emissive,
+        unlit: true,
+        ..default()
+    }
+}
+
+fn draw_focus_bounds_gizmo(bounds: Res<FocusBounds>, mut gizmos: Gizmos) {
+    gizmos.cube(
+        Transform::from_translation(FOCUS_BOUNDS_ORIGIN).with_scale(Vec3::splat(bounds.size)),
+        BOUNDS_GIZMO_COLOR,
     );
 }
 
@@ -175,9 +257,8 @@ const FACE_PANEL_SIZE: f32 = CUBE_SIZE * 0.88;
 const FACE_PANEL_TEXT_SIZE: f32 = 56.0;
 const STORY_PANEL_NAME: &str = "Focus bounds story panel";
 
-const BOUNDS_SHAPE_LINES: &[&str] = &["OrbitCam has", "focus_bounds_shape", "set to a cuboid"];
-const BOUNDS_ORIGIN_LINES: &[&str] =
-    &["focus_bounds_origin", "places the cuboid", "in world space"];
+const BOUNDS_SHAPE_LINES: &[&str] = &["OrbitCam pan", "limit is a", "RegionLimit cuboid"];
+const BOUNDS_ORIGIN_LINES: &[&str] = &["the cuboid origin", "places it in", "world space"];
 const PAN_CLAMP_LINES: &[&str] = &["panning clamps", "camera focus", "inside the cuboid"];
 const RESIZE_LINES: &[&str] = &["Left and Right", "resize the", "bounds cuboid"];
 const TOP_LABEL_LINES: &[&str] = &["Focus", "Bounds"];

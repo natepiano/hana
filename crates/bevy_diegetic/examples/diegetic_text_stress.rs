@@ -81,6 +81,7 @@ use diagnostics::timeline_duration_ms;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::StatsPanelRow;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
@@ -106,12 +107,12 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_SIZE)
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = GRID_FOCUS;
-                cam.radius = Some(CAMERA_INITIAL_RADIUS);
-                cam.yaw = Some(0.0);
-                cam.pitch = Some(0.18);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  GRID_FOCUS,
+                yaw:    0.0,
+                pitch:  0.18,
+                radius: CAMERA_INITIAL_RADIUS,
             },
             OrbitCamPreset::blender_like(),
         )

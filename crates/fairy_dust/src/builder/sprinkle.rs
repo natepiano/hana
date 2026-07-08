@@ -34,6 +34,7 @@ use crate::environment_map;
 use crate::hdr;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
+use crate::orbit_cam::OrbitCamPose;
 use crate::primitive::PrimitiveConfig;
 use crate::restart;
 use crate::restart_camera;
@@ -263,11 +264,12 @@ impl<S> SprinkleBuilder<S> {
 
     /// Begin configuring a generalized camera "home" pose.
     ///
-    /// Wires `H` to an [`bevy_lagrange::AnimateToFit`] of the union of every
-    /// [`crate::CameraHomeTarget`] entity using the configured `yaw`/`pitch`. If
-    /// a title bar is installed, the `H Home` chip is prepended automatically
-    /// and highlights for the duration of the home animation unless disabled
-    /// with [`CameraHomeBuilder::without_title_bar_control`].
+    /// Snaps the camera to the union of every [`crate::CameraHomeTarget`] on
+    /// startup, refits it on window resize while still home, and fills empty
+    /// Lagrange presets with Fairy Dust's home input (`H` for keyboard-family
+    /// presets, Select for gamepads). If a title bar is installed, the `H Home`
+    /// chip is prepended automatically unless disabled with
+    /// [`CameraHomeBuilder::without_title_bar_control`].
     #[must_use]
     pub const fn with_camera_home(self) -> CameraHomeBuilder<S> {
         CameraHomeBuilder {
@@ -275,7 +277,6 @@ impl<S> SprinkleBuilder<S> {
             config: CameraHomeConfig {
                 yaw:               0.0,
                 pitch:             0.0,
-                duration:          crate::constants::HOME_DEFAULT_DURATION,
                 margin:            crate::constants::HOME_DEFAULT_MARGIN,
                 anchor:            Anchor::Center,
                 offset_px:         Vec2::ZERO,
@@ -394,6 +395,24 @@ impl SprinkleBuilder<NoOrbitCam> {
         self.with_orbit_cam(configure, OrbitCamInputMode::with_preset(preset))
     }
 
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
+    /// explicit startup pose, and install one built-in input preset.
+    pub fn with_orbit_cam_preset_pose(
+        mut self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        orbit_cam::install_pose_with_bundle(
+            &mut self.app,
+            pose,
+            OrbitCamInputMode::with_preset(preset),
+        );
+        SprinkleBuilder {
+            app:          self.app,
+            state_marker: PhantomData,
+        }
+    }
+
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity,
     /// install one built-in input preset, and insert extra camera-side
     /// components.
@@ -408,6 +427,29 @@ impl SprinkleBuilder<NoOrbitCam> {
         B: Bundle + Send + Sync + 'static,
     {
         self.with_orbit_cam(configure, (OrbitCamInputMode::with_preset(preset), bundle))
+    }
+
+    /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity with an
+    /// explicit startup pose, install one built-in input preset, and insert extra
+    /// camera-side components.
+    pub fn with_orbit_cam_preset_pose_bundle<B>(
+        mut self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        B: Bundle + Send + Sync + 'static,
+    {
+        orbit_cam::install_pose_with_bundle(
+            &mut self.app,
+            pose,
+            (OrbitCamInputMode::with_preset(preset), bundle),
+        );
+        SprinkleBuilder {
+            app:          self.app,
+            state_marker: PhantomData,
+        }
     }
 
     /// Add `bevy_lagrange::LagrangePlugin`, spawn an `OrbitCam` entity, and
@@ -516,8 +558,8 @@ impl SprinkleBuilder<WithOrbitCam> {
     }
 
     /// Clear the example-default pitch and zoom limits on the spawned
-    /// `OrbitCam`: `pitch_upper_limit`/`pitch_lower_limit`/`zoom_upper_limit`
-    /// become `None` and `zoom_lower_limit` drops to a tiny positive floor.
+    /// `OrbitCam`: the `orbit` angle limit resets to unbounded and the `zoom`
+    /// limit drops its ceiling, keeping only a tiny positive floor.
     /// Use to inspect geometry from steep angles or at extreme zoom. Overrides
     /// limits set in the camera `configure` closure.
     #[must_use]

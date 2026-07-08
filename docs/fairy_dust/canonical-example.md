@@ -214,6 +214,20 @@ with `FairyDustOrbitCam` or trigger `AnimateToFit` against
 exception: camera setup is part of what they demonstrate, while
 `CameraHomeTarget` still defines the AABB.
 
+FreeCam-specific examples should use the same exception path while Fairy Dust
+has no FreeCam setup helper: spawn `FreeCam` directly, attach
+`FreeCamInputMode::with_preset(...)` using the built-in keyboard/mouse preset,
+keep `.with_camera_control_panel()`, and call `.lock_camera_preset()` when the
+example is fixed to FreeCam rather than teaching camera switching. Use
+`.with_camera_home()` with `CameraHomeTarget` so `H Home` stays available; the
+home capability uses the camera-neutral `AnimateToFit` path rather than hiding
+FreeCam behind an orbit setup helper. FreeCam preset settings that the camera
+panel owns, such as `alt-i` for `Invert Y`, do not need title-bar chips; let the
+panel mutate the active `FreeCamInputMode` and render the matching row from
+Lagrange's control summary. Fairy Dust defaults FreeCam examples and preset
+cycling to inverted Y while the core `FreeCamPreset::keyboard_mouse()` remains a
+normal-Y library default.
+
 ### Keyboard shortcuts — use the builder
 
 Bind example keyboard shortcuts with `.with_shortcut(key, system)` (runs once
@@ -369,8 +383,9 @@ the fallback for activation logic the wiring helpers cannot express.
   or multi-camera behavior may keep manual camera spawns, but should still use
   fairy_dust for the surrounding app plumbing, HUD, and home target markers,
   and should tag the Fairy Dust-controlled camera with `FairyDustOrbitCam`.
-- Custom `home_camera` keyboard system + `PlayAnimation::new(... ToOrbit ...)` →
-  delete, use `.with_camera_home()` plus `CameraHomeTarget`.
+- Custom `home_camera` keyboard system +
+  `PlayAnimation::new(... ToOrbitalLookAt ...)` → delete, use
+  `.with_camera_home()` plus `CameraHomeTarget`.
 - Raw `Res<ButtonInput<KeyCode>>` systems that read bare keys for incidental HUD
   shortcuts → replace with `.with_shortcut(key, system)` /
   `.with_held_shortcut(key, system)`. Keep raw input only where it is the point:

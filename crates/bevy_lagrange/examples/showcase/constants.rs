@@ -83,7 +83,7 @@ pub(super) const EVENT_LOG_TITLE: &str = "Event Log";
 pub(super) const EVENT_LOG_WIDTH: f32 = 272.0;
 pub(super) const EVENT_LOG_ZOOM_CANCELLED: &str = "ZoomEnd\n  reason=Cancelled";
 pub(super) const EVENT_LOG_ZOOM_COMPLETED: &str = "ZoomEnd\n  reason=Completed";
-pub(super) const LOG_CLEAR_HINT_TEXT: &str = "C clear";
+pub(super) const LOG_CLEAR_HINT_TEXT: &str = "⌫ clear";
 pub(super) const LOG_SCROLL_HINT_TEXT: &str = "↑↓ scroll log";
 
 // gizmos
@@ -95,14 +95,14 @@ pub(super) const GIZMO_SCALE: f32 = 1.001;
 pub(super) const HINT_TEXT_COLOR: Color = Color::srgba(0.7, 0.7, 0.7, 0.7);
 
 // easing flash
-/// Seconds the `R Random Easing` / `E Reset Easing` title-bar chips stay highlighted
+/// Seconds the `R Random Easing` / `0 Reset Easing` title-bar chips stay highlighted
 /// after a press.
 pub(super) const EASING_FLASH_SECONDS: f32 = 0.5;
 
 // title bar controls
-pub(super) const ANIMATE_CONTROL: &str = "A Animate";
+pub(super) const ANIMATE_CONTROL: &str = "M Animate";
 pub(super) const EASING_CONTROL: &str = "R Random Easing";
-pub(super) const EASING_RESET_CONTROL: &str = "E Reset Easing";
+pub(super) const EASING_RESET_CONTROL: &str = "0 Reset Easing";
 pub(super) const EVENT_LOG_CONTROL: &str = "G Log";
 pub(super) const LOOK_AND_FIT_CONTROL: &str = "L LookAt+Fit";
 pub(super) const LOOK_AT_CONTROL: &str = "K LookAt";
@@ -127,7 +127,7 @@ pub(super) const POLICY_PANEL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
 pub(super) const POLICY_PANEL_ARROW: &str = "->";
 pub(super) const POLICY_PANEL_COLUMN_GAP: f32 = 8.0;
 pub(super) const POLICY_PANEL_CONFLICT_HEADER: &str = "AnimationConflictPolicy";
-pub(super) const POLICY_PANEL_CONFLICT_KEY: &str = "Q";
+pub(super) const POLICY_PANEL_CONFLICT_KEY: &str = "C";
 pub(super) const POLICY_PANEL_GROUP_GAP: f32 = 10.0;
 pub(super) const POLICY_PANEL_HEADER_GAP: f32 = 6.0;
 pub(super) const POLICY_PANEL_HEADER_SIZE: f32 = 12.0;

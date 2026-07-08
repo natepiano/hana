@@ -25,6 +25,7 @@ use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_diegetic::PanelSystems;
 use bevy_lagrange::OrbitCamPreset;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -88,12 +89,12 @@ fn build_panel_anchoring_app() -> fairy_dust::SprinkleBuilder<fairy_dust::WithOr
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = CAMERA_FOCUS;
-                cam.radius = Some(CAMERA_RADIUS);
-                cam.yaw = Some(CAMERA_YAW);
-                cam.pitch = Some(CAMERA_PITCH);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  CAMERA_FOCUS,
+                yaw:    CAMERA_YAW,
+                pitch:  CAMERA_PITCH,
+                radius: CAMERA_RADIUS,
             },
             OrbitCamPreset::blender_like(),
         )

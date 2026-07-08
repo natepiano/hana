@@ -26,8 +26,11 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
+use bevy_lagrange::Focus;
 use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitAngles;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Radius;
 
 /// World-space panel height. Width follows the window aspect ratio.
 const PANEL_WORLD_HEIGHT: f32 = 3.1;
@@ -176,13 +179,14 @@ fn setup(
         Transform::from_xyz(-1.5, 7.5, -6.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((OrbitCam {
-        focus: Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7),
-        radius: Some(4.385_594_4),
-        yaw: Some(-0.004_848_164),
-        pitch: Some(0.026_128_9),
-        ..default()
-    },));
+    commands.spawn((OrbitCam::from_pose(
+        Focus(Vec3::new(0.067_647_74, 1.913_066_5, 2.400_296_7)),
+        OrbitAngles {
+            yaw:   -0.004_848_164,
+            pitch: 0.026_128_9,
+        },
+        Radius(4.385_594_4),
+    ),));
 }
 
 /// Returns layout dimensions in points, matching the window aspect ratio.

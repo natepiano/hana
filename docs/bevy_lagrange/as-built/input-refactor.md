@@ -16,29 +16,53 @@ device input or binding policy.
 ## Module layout
 
 ```text
-input/
+input/                shared, camera-neutral input layer (generic over CameraKind)
   mod.rs              public overview docs + re-exports
   actions.rs          public semantic actions + sealed action traits
-  adapter/            private BEI adapter plugin, install, inject, resolve
-  bindings/           OrbitCamBindings, builder, descriptor, validation, presets
+  action_resolution.rs generic action-resolution shell (resolve_actions_into_camera_input::<K>)
+  axis_response.rs    per-axis response shaping
+  bindings/           shared binding infrastructure (descriptor, validation, held/source bindings, BindingsError)
   constants.rs        control-summary row/label string constants
-  context.rs          OrbitCamInputContext (BEI context component)
-  control_summary.rs  describe_orbit_cam_controls + display row/label derivation
+  context.rs          OrbitCamInputContext / FreeCamInputContext (BEI context components)
+  control_summary.rs  describe_controls / describe_controls_for + CameraControlSummary (plus legacy OrbitCam path)
   disabled.rs         CameraInputDisabled
   events.rs           interaction lifecycle events
-  intent.rs           OrbitCamInput, typed deltas, CameraMotion
+  install.rs          CameraInstallKind per-kind enhanced-input install gate
+  intent.rs           generic intent core: CameraInputKind, IntentChannels, InputIntent<K>, IntentChannel<D>, activity types
   interaction_state.rs OrbitCamInteractionState (read-only tracker)
-  lifecycle.rs        finalization, lifecycle event emission
-  manual.rs           OrbitCamManualInput / OrbitCamManualInputWriter
+  lifecycle.rs        generic finalize_camera_input::<K>, lifecycle event emission
+  manual.rs           per-kind manual input writers
   metrics.rs          CameraInputSurfaceMetrics, CameraInputMetricKind
-  modes.rs            OrbitCamInputMode + reconciliation + installation record
-  routing/            routing config, resolved route, latches, blockers
-  sources.rs          CameraInteractionSources, ManualInputSource
+  modes.rs            public mode API only: InputMode<K> (OrbitCamInputMode / FreeCamInputMode aliases), CameraInputModeKind, CameraManual
+  mode_reconciliation.rs private PreUpdate runtime: CameraResolvedBindings<K>, CameraInstalledBindings<K>, installation components, CameraInputModesPlugin, reconcile/apply systems
+  routing/            camera-neutral routing config, resolved route, latches, blockers
+  source_input_gain.rs camera-neutral source-gain traits (MouseInputGain / SmoothScrollInputGain / GamepadInputGain)
+  sources.rs          InteractionSources, ManualInputSource
+  touch.rs            touch tracking
 ```
+
+Per-camera intent vocabulary lives beside each camera, not under `input/`:
+`orbit_cam/intent.rs` (`OrbitDelta`/`PanDelta`/`CoarseZoomDelta`/`SmoothZoomDelta`/`ZoomDelta`,
+`OrbitCamChannels`, alias `OrbitCamInput`, the `pub(crate)` mutators) and
+`free_cam/intent.rs` (`TranslateDelta`/`LookDelta`/`RollDelta`, `FreeCamChannels`,
+alias `FreeCamInput`). These modules sit at **depth 2** (`src/<camera>/intent.rs`,
+private `mod intent;` re-exported through the camera `mod.rs`), not under
+`src/<camera>/input/`, because cargo-mend's `forbidden_pub_crate` only permits
+`pub(crate)` at crate root or in depth-2 private modules and the mutators' callers
+(`input/{lifecycle,interaction_state,manual}.rs`) sit outside the camera trees.
+Crate-root paths (`bevy_lagrange::OrbitDelta`, etc.) resolve unchanged.
+
+The per-kind BEI adapter and concrete bindings live under each camera's module, not
+under `input/`: `orbit_cam/input/adapter/` + `orbit_cam/input/bindings/` (OrbitCamBindings,
+builder, presets, descriptor) and `free_cam/input/adapter.rs` + `free_cam/input/bindings/`.
+`input/bindings/` holds only the shared descriptor/validation infrastructure and the
+shared `BindingsError`.
 
 The public API is grouped under `bevy_lagrange::input` and re-exported from the crate
 root. Private engagement/source actions (`OrbitCamOrbitEngagedAction`, etc.) and adapter
-actions are not re-exported.
+actions are not re-exported. This doc uses OrbitCam as the worked example; the FreeCam
+analogs sit in the structurally identical locations and are covered in
+[`free-cam.md`](free-cam.md).
 
 ## Input mode
 
@@ -86,18 +110,21 @@ adapter policy.
 
 ### Spawn helpers
 
-`OrbitCam::*()` helpers (`orbit_cam/preset_helpers.rs`) return `impl Bundle`, pairing
+`OrbitCam::*()` helpers (`orbit_cam/presets.rs`) return `impl Bundle`, pairing
 `OrbitCam::default()` with the matching `OrbitCamInputMode`: `simple_mouse()`,
-`blender_like()`, `gamepad()`, `keyboard()`, `simple_mouse_keyboard()`,
-`blender_like_keyboard()`, `with_bindings(bindings)`, and `manual()`. There is no
-`OrbitCamPresetBundle` type.
+`blender_like()`, `gamepad()`, `with_preset(impl Into<OrbitCamPreset>)`,
+`with_bindings(bindings)`, and `manual()`. There are no
+`keyboard`/`simple_mouse_keyboard`/`blender_like_keyboard` helpers (zero callers);
+those `OrbitCamPreset` variants are still reachable via `with_preset`. `FreeCam`
+mirrors this in `free_cam/presets.rs` with `with_preset`/`with_bindings`/`manual`.
+There is no `OrbitCamPresetBundle` type.
 
 ### Reconciliation and installation
 
-`OrbitCamInputModesPlugin` (`modes.rs`) runs reconciliation in `PreUpdate` inside
-`OrbitCamInputInternalSet::InputModes` (a sub-set of `OrbitCamInputPhase::PreInput`).
-`reconcile_input_modes` fires on `Changed<OrbitCamInputMode>` or when the installation
-record is missing, and for each camera:
+`CameraInputModesPlugin` (`mode_reconciliation.rs`) runs reconciliation in `PreUpdate` inside
+`CameraInputInternalSet::InputModes` (a sub-set of `CameraInputPhase::PreInput`).
+`reconcile_input_modes` fires on `Changed<OrbitCamInputMode>`/`Changed<FreeCamInputMode>`
+or when the installation record is missing, and for each camera:
 
 1. clears `OrbitCamInput`;
 2. lowers the enum into runtime state — `Preset`/`Bindings` insert
@@ -106,7 +133,7 @@ record is missing, and for each camera:
 3. despawns the previous BEI installation via the
    `Actions<OrbitCamInputContext>` relationship and records a new
    `OrbitCamInputInstallation`;
-4. triggers the crate-private `OrbitCamInputModeReplaced` hook, which routing/lifecycle
+4. triggers the crate-private `CameraInputModeReplaced` hook, which routing/lifecycle
    cleanup consume.
 
 If `preset.to_bindings()` fails, the camera falls back to the `Manual` runtime state
@@ -130,7 +157,7 @@ reconciliation on `Changed<OrbitCamInputModeDescriptor>`:
   `OrbitCamInputModeApplied`;
 - rejection leaves the previous `OrbitCamInputMode` in place, sets
   `state: Rejected` with the error string, triggers `OrbitCamInputModeRejected`
-  (carrying the structured `OrbitCamBindingsError`), and warns.
+  (carrying the structured `BindingsError`), and warns.
 
 The feature gates only these apply systems and the status/event types. The concrete
 descriptor value types and the `OrbitCamInputMode` enum derive `Reflect` and are
@@ -141,7 +168,7 @@ runtime mode.
 
 ## Bindings
 
-`OrbitCamBindings` (`bindings/`) is a validated data spec turned into BEI action
+`OrbitCamBindings` (`orbit_cam/input/bindings/`) is a validated data spec turned into BEI action
 entities plus adapter policy. It has private fields and is built through
 `OrbitCamBindings::builder()` (`OrbitCamBindingsBuilder`). The builder is behavior-first:
 bindings are added to `.orbit(...)`, `.pan(...)`, and `.zoom(...)`, and the binding
@@ -159,8 +186,8 @@ OrbitCamBindings::builder()
 
 Binding value types: `OrbitCamMouseDrag`, `OrbitCamTrackpadScroll`,
 `OrbitCamMouseWheelZoom`, `OrbitCamPinchZoom` / `PinchGestureZoom`,
-`OrbitCamButtonDragZoom` (+ `OrbitCamButtonDragZoomAxis`), `OrbitCamHeldBinding`,
-`OrbitCamTouchBinding`, and `OrbitCamInputBinding` (wraps a direct BEI `Binding` plus
+`OrbitCamButtonDragZoom` (+ `OrbitCamButtonDragZoomAxis`), `HeldBinding`,
+`OrbitCamTouchBinding`, and `InputBinding` (wraps a direct BEI `Binding` plus
 composite helpers like `bidirectional_keys`, `gamepad_axes_2d`,
 `bidirectional_gamepad_buttons`). `CameraInputGamepadSelectionPolicy` is `Disabled` or
 `Active`; selected-device ownership is not implemented. `ZoomDirection`
@@ -177,10 +204,27 @@ markers are sealed via `CameraSemanticAction: InputAction + Sealed`, with
 `HeldCameraAction` / `ImpulseCameraAction` sub-traits; downstream crates cannot
 implement them. Held bindings are one irreducible source-aware entry
 (`HeldActionBindingEntry`) pairing motion and engagement; impulse bindings
-(`ActionBindingEntry` with `BindingEngagement::Impulse`) carry no engagement half.
+(`ImpulseActionBindingEntry` with `BindingEngagement::Impulse`) carry no engagement half.
+
+There are nine per-action newtypes (orbit: orbit/pan/zoom-smooth/zoom-coarse/home;
+free: translate/look/roll/home). They forward their accessors through one
+declarative macro `impl_binding_forwards!` (`input/bindings/binding_forwards.rs`,
+reached via a `#[macro_use]` chain `lib.rs` → `input` → `bindings` →
+`binding_forwards`, so `mod input;` precedes the camera mods in `lib.rs`); the macro
+parameterizes accessor visibility (home newtypes expose narrower accessors), and the
+home newtypes' `bindings()` / `to_vec()` stay hand-written. The shared backing
+storage is `ImpulseActionBindingSet` / `ImpulseActionBindingEntry` (impulse) and
+`HeldActionBindingSet` / `HeldActionBindingEntry` (held), all four in
+`input/bindings/action_set.rs`; the impulse pair was renamed from
+`ActionBindingSet` / `ActionBindingEntry` to parallel the held names, and
+`ActionBindingSet` / `ActionBindingEntry` / `HeldActionBindingEntry` are no longer
+publicly re-exported (kept crate-internal — an unreleased leak, zero external
+callers). Installed resolved bindings use one generic
+`CameraInstalledBindings<K>(K::Bindings)` (`mode_reconciliation.rs`), replacing the
+former per-camera `OrbitCamInstalledBindings` / `FreeCamInstalledBindings`.
 
 Every construction path — builder, preset, descriptor, reflection, dynamic keymap —
-funnels through the shared `validate_bindings`. Errors are `OrbitCamBindingsError`
+funnels through the shared `validate_bindings`. Errors are `BindingsError`
 (e.g. `InvalidScale`, `InvalidDeadZone`, held-motion/engagement and source-mismatch
 variants). `build`/`try_from` return `Result` because binding errors are app/keymap
 configuration errors, not library bugs. Reflected editing of runtime bindings is
@@ -189,10 +233,10 @@ inserting `OrbitCamBindings`.
 
 ### Presets
 
-`OrbitCamPreset` (`bindings/preset/enum_preset.rs`) is a `#[non_exhaustive]` 6-variant
+`OrbitCamPreset` (`orbit_cam/input/bindings/preset/enum_preset.rs`) is a `#[non_exhaustive]` 6-variant
 enum: `SimpleMouse` (default), `BlenderLike`, `Keyboard`, `SimpleMouseKeyboard`,
 `BlenderLikeKeyboard`, `Gamepad`. `OrbitCamPreset::to_bindings()` returns
-`Result<OrbitCamBindings, OrbitCamBindingsError>`, delegating each variant to a concrete
+`Result<OrbitCamBindings, BindingsError>`, delegating each variant to a concrete
 config struct's public `build()`. The configs implement a crate-private sealed
 `OrbitCamPresetConfig` trait (`preset/config.rs`) with
 `build(self) -> Result<OrbitCamBindings, _>`. Reconciliation always operates on an
@@ -202,12 +246,12 @@ and slow-mode wiring are covered in [`orbit-cam-preset-api.md`](orbit-cam-preset
 
 ### Slow mode
 
-Slow (precise) mode scales held input. `OrbitCamScalePolicy { normal, slow }` and
-`OrbitCamSlowMode { toggle_key, mod_keys, scale }` live in `bindings/descriptor.rs`;
-they reach the runtime spec as `OrbitCamBindings.slow_mode: Option<OrbitCamSlowMode>`.
+Slow (precise) mode scales held input. `CameraInputScalePolicy { normal, slow }` and
+`CameraSlowMode { toggle_key, mod_keys, scale }` are camera-neutral types in the shared `input/bindings/descriptor.rs`;
+they reach the runtime spec as `OrbitCamBindings.slow_mode: Option<CameraSlowMode>`.
 The default toggle is `KeyCode::KeyS` + `ModKeys::ALT` (slow scale `0.05`). Per-camera
-toggle state is `OrbitCamSlowModeLatches` (`routing/latches.rs`), flipped on the toggle
-key's press edge. Scaling is applied once, in `adapter/resolve.rs` via `AdapterScale`
+toggle state is `CameraSlowModeLatches` (`routing/latches.rs`), flipped on the toggle
+key's press edge. Scaling is applied once, in `orbit_cam/input/adapter/resolve.rs` via `AdapterScale`
 (`AdapterScale::from_bindings(..., is_slow_mode_active(...))`), across all scaled
 sources — there is no double application. The resolver also writes per-kind speed
 (`set_orbit_speed` / `set_pan_speed` / `set_zoom_speed`) so the control summary and
@@ -231,9 +275,55 @@ interaction is active. The controller needs the engagement edge to keep the orbi
 latch (including upside-down yaw). These engagement and adapter source actions stay
 private; UI observes lifecycle events and `OrbitCamInteractionState` instead.
 
+## Camera-kind trait family
+
+The per-kind engine registers through a **sealed** trait chain — `CameraKind`,
+`CameraInputKind`, `CameraInputModeKind`, `IntentChannels`, `HeldCameraAction` —
+each sealed by a private per-file `mod sealed { pub trait Sealed {} }` with the
+`impl sealed::Sealed for …` lines in the same file. Sealing (not visibility
+demotion, which E0445 blocks) is the mechanism. The only implementers are
+`OrbitCamKind` and `FreeCamKind` (plus `OrbitCamChannels` / `FreeCamChannels` for
+`IntentChannels`). Two vacuous single-value associated types were dropped:
+`CameraActionResolutionKind::{Manual, InstalledBindings}` (`Manual` hardcoded to
+`CameraManual<K>`, installed bindings unified into `CameraInstalledBindings<K>`) and
+`CameraInputModeKind::Error` (replaced by the concrete `BindingsError`).
+`OrbitCamChannels` has a crate-root re-export for parity with the already-public
+`FreeCamChannels`.
+
+## Input gain
+
+Input gain is a deliberate **two-layer** design: source-level *gain* scales raw
+input (like microphone gain), while separately-named behavior *scale* modifiers tune
+what the input drives — keep the two distinguishable (gain = source-side multiplier;
+scale = behavior-side). Both cameras carry a per-action gain set: `OrbitCamInputGain`
+(`orbit_cam/input/bindings/input_gain.rs`) and `FreeCamInputGain { translate, look,
+roll }` (`free_cam/input/bindings/input_gain.rs`), each with const setters,
+`uniform`, and `validate`.
+
+The three source-gain traits — `MouseInputGain`, `SmoothScrollInputGain`,
+`GamepadInputGain` (each one `type Gain` + one setter) — live in the camera-neutral
+`input/source_input_gain.rs` because both cameras implement them. They stay
+**unsealed** (deliberate: fluent-setter vocabulary with a genuinely varying `Gain`
+type, nothing bounds on them — unlike the sealed kind chain). OrbitCam's per-binding
+gain uses a bespoke `OrbitCamBindingWithInputGain` wrapper (`binding_kinds.rs`);
+FreeCam's gain uses the existing shared `InputBindingDescriptor.scale` path,
+installed as BEI `Scale` by shared `input/install.rs`, with no new binding-kind
+type.
+
+**Gotchas (durable):** keyboard roll gain must be applied motion-only via
+`HeldBinding::same(InputBinding::bidirectional_keys(...)).with_input_gain(...)`, never
+baked into the raw `InputBinding` — `HeldBinding::same` copies the raw binding to
+*both* the motion and engagement descriptors, so a low roll gain baked at the
+`InputBinding` level could shrink the engagement signal below actuation and stop roll
+engaging at all. Relatedly, `InputBinding::with_input_gain` (bakes gain into the
+binding, landing on every descriptor it is copied to, including engagement) and
+`HeldBinding::with_input_gain` (touches only the motion descriptor) share a name but
+differ in reach — for any binding that doubles as its own engagement source, only the
+`HeldBinding`-level call is correct.
+
 ## Adapter
 
-The adapter (`adapter/`) is a private input-policy shim for source detail BEI does not
+The adapter (`orbit_cam/input/adapter/`) is a private input-policy shim for source detail BEI does not
 carry richly enough: `MouseWheel::unit` line/pixel split, `PinchGesture`, `Touches`
 arity, and smooth-scroll routing. `install.rs` attaches BEI actions and private adapter
 state to the installation record; `inject.rs` injects adapter-backed values (via
@@ -252,7 +342,7 @@ routed camera's resolved modifier state.
 
 ## Camera intent and manual input
 
-`OrbitCamInput` (`intent.rs`) is the per-frame semantic snapshot: per-kind movement
+`OrbitCamInput` (`orbit_cam/intent.rs`) is the per-frame semantic snapshot: per-kind movement
 deltas plus per-kind active source sets, with read-only public accessors
 (`orbit_delta()`, `pan_delta()`, `zoom_coarse_delta()`, `zoom_smooth_delta()`).
 Per-kind source sets let simultaneous interactions (mouse orbit + wheel zoom) coexist.
@@ -268,20 +358,22 @@ that yields a writer only for `OrbitCamManual` cameras:
 ```rust
 fn manual_camera_input(mut writer: OrbitCamManualInputWriter) {
     if let Ok(mut cam) = writer.get_mut(camera, ManualInputSource::observed_keyboard()) {
-        cam.orbit_pixels((-4.0, 0.0)).pan_active();
+        cam.orbit((-4.0, 0.0)).mark_pan_active();
     }
 }
 ```
 
 `get_mut(camera, ManualInputSource)` returns `OrbitCamManualInput`, whose builder
-methods (`orbit_pixels`, `pan_pixels`, `zoom_coarse_amount`, `zoom_smooth_amount`,
-`orbit_active`, `pan_active`, `clear`) record intent and chain. Source provenance is
-fixed by the `ManualInputSource` passed to `get_mut`. `ManualInputSource` always carries
-`CameraInteractionSources::MANUAL`; `manual()`, `with_sources(..)`, and observed-device
-constructors (`observed_keyboard`, `observed_gamepad`, ...) add device flags without
-dropping `MANUAL`. It does not derive `Reflect` and has no raw-bit constructor, so the
-`MANUAL` bit cannot be lost. Manual writes run in `OrbitCamInputPhase::WriteManual` and
-still respect `CameraInputDisabled`, egui focus, animation-ignore, and other blockers.
+methods (`orbit`, `pan`, `zoom_coarse`, `zoom_smooth`, `mark_orbit_active`,
+`mark_pan_active`, `mark_zoom_active`, `clear`) record intent and chain. The FreeCam
+manual writer exposes the matching `translate`, `look`, `roll`, and `mark_*_active`
+verbs. Source provenance is fixed by the `ManualInputSource` passed to `get_mut`.
+`ManualInputSource` always carries `InteractionSources::MANUAL`; `manual()`,
+`with_sources(..)`, and observed-device constructors (`observed_keyboard`,
+`observed_gamepad`, ...) add device flags without dropping `MANUAL`. It does not derive
+`Reflect` and has no raw-bit constructor, so the `MANUAL` bit cannot be lost. Manual
+writes run in `CameraInputPhase::WriteManual` and still respect `CameraInputDisabled`,
+egui focus, animation-ignore, and other blockers.
 
 Screen-pixel manual deltas need logical surface metrics. Metrics are derived once per
 frame during routing and cached on the resolved route; an explicit
@@ -292,7 +384,7 @@ emitted.
 
 ## Sources
 
-`CameraInteractionSources` (`sources.rs`) is the only public source-set type, backed by
+`InteractionSources` (`sources.rs`) is the only public source-set type, backed by
 private `bitflags`. Public constants: `MOUSE`, `KEYBOARD`, `WHEEL`, `SMOOTH_SCROLL`,
 `PINCH`, `TOUCH`, `GAMEPAD`, `MANUAL`, plus `NONE`. It exposes `is_empty`, `contains`,
 `intersects`, `union`, `difference`, `BitOr`/`BitOrAssign`, and `const` composition; no
@@ -336,10 +428,12 @@ from finalized per-kind source deltas in `OrbitCamInput`. App UI should read
 - `Bindings(_)` → `mode_label = "Input"`, `mode_value = "custom bindings"`;
 - `Manual` → `mode_label = "Input"`, `mode_value = "manual input"`.
 
-`OrbitCamControlRow` carries the interaction `kind`, label, `CameraInteractionSources`,
+`OrbitCamControlRow` carries the interaction `kind`, label, `InteractionSources`,
 `ControlSpeed` (`Normal` / `Slow`), and an optional `ZoomDirection` so a panel can
-highlight only the engaged zoom direction. `OrbitCamPreset::name()` returns the variant
-string (`"SimpleMouse"`, `"BlenderLike"`, `"Gamepad"`, ...).
+highlight only the engaged zoom direction. `OrbitCamPreset::name()` returns
+`kind().name()` — the setting-insensitive `OrbitCamPresetKind` string
+(`"SimpleMouse"`, `"BlenderLike"`, `"Gamepad"`, ...) — so a tuned preset still
+labels by its kind rather than degrading to custom bindings.
 
 ## Routing and ownership
 
@@ -351,7 +445,7 @@ retroactively re-route the current frame. `CameraInputRouting::Explicit` chooses
 camera receives input and is distinct from `Manual` mode (which has the app write
 `OrbitCamInput` itself).
 
-The internal `ResolvedOrbitCamInputRoute` (`routing/mod.rs`) is rewritten every frame
+The internal `ResolvedCameraInputRoute` (`routing/mod.rs`) is rewritten every frame
 and is the only route state that gating, injection, and finalization consult. It carries
 the routed camera, per-source held latches, per-camera surface metrics, and the blocker
 snapshot. Held sources (mouse drags, keyboard) latch their owning camera until release,
@@ -370,7 +464,7 @@ dropped with a rate-limited `debug!`.
 `CameraInputDisabled` (`disabled.rs`) is the public app-level pause marker; it suppresses
 input without changing the selected mode. Transient blockers stay internal: animation
 ignore, egui pointer/keyboard focus, inactive camera, unavailable owner. They are
-computed once in `PreInput` into `OrbitCamInputBlockers` (the single source of truth)
+computed once in `PreInput` into `CameraInputBlockers` (the single source of truth)
 and consumed by context gating, adapter injection, resolution, and finalization. Two
 gates apply: pre-input gating deactivates/resets BEI state for blocked contexts before
 `EnhancedInputSystems::Update` so held state and condition timers do not advance
@@ -381,9 +475,9 @@ before suppressing further input. `BlockOnEguiFocus` feeds the UI-focus blocker 
 
 ## Scheduling
 
-The public scheduling surface is `OrbitCamInputPhase::{PreInput, WriteManual, Finalize}`
+The public scheduling surface is `CameraInputPhase::{PreInput, WriteManual, Finalize}`
 (`system_sets.rs`), chained in `PreUpdate`. Internal finer phases (e.g.
-`OrbitCamInputInternalSet::InputModes`) stay `pub(crate)`. Input resolution lives in
+`CameraInputInternalSet::InputModes`) stay `pub(crate)`. Input resolution lives in
 `PreUpdate`; the controller stays in `PostUpdate`.
 
 ```text
@@ -395,7 +489,7 @@ PreUpdate (PreInput, exclusive structural boundary):
 WriteManual:  user systems write OrbitCamInput for Manual cameras
 Finalize:     recover latches, clear blocked/stale input, emit lifecycle events,
               update interaction state
-Update:       process_camera_move_list reads finalized OrbitCamInput
+Update:       process_orbit_camera_move_list reads finalized OrbitCamInput
               (animation interrupt: Ignore clears input, Cancel/Complete handle animation)
 PostUpdate:   OrbitCam controller reads OrbitCamInput -> updates targets -> clears input
               -> transform propagation -> camera updates

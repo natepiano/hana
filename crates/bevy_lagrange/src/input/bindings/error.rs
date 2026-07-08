@@ -1,8 +1,8 @@
-//! Structured binding validation error returned by [`super::validate::validate_bindings`].
+//! Structured binding-validation error produced when a camera's binding descriptor violates an
+//! invariant.
 //!
 //! Types:
-//! - [`OrbitCamBindingsError`] — the public error enum produced when an
-//!   [`super::OrbitCamBindingsDescriptor`] violates an invariant.
+//! - [`BindingsError`] — the public error enum surfaced by each camera's binding validation path.
 
 use std::error::Error;
 use std::fmt;
@@ -11,8 +11,7 @@ use std::fmt::Formatter;
 
 /// Structured binding validation error.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum OrbitCamBindingsError {
+pub enum BindingsError {
     /// A binding entry did not provide source metadata.
     MissingSources,
     /// A held action has motion without engagement.
@@ -41,7 +40,7 @@ pub enum OrbitCamBindingsError {
     InvalidDeadZone,
 }
 
-impl OrbitCamBindingsError {
+impl BindingsError {
     /// Returns the semantic action name attached to the error, when available.
     #[must_use]
     pub const fn action_name(&self) -> Option<&'static str> {
@@ -55,7 +54,7 @@ impl OrbitCamBindingsError {
     }
 }
 
-impl Display for OrbitCamBindingsError {
+impl Display for BindingsError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingSources => formatter.write_str("binding source metadata is missing"),
@@ -93,4 +92,4 @@ impl Display for OrbitCamBindingsError {
     }
 }
 
-impl Error for OrbitCamBindingsError {}
+impl Error for BindingsError {}

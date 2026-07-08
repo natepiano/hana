@@ -95,11 +95,12 @@ impl RestartCameraPose {
     }
 
     const fn camera_move(self) -> CameraMove {
-        CameraMove::ToOrbit {
-            focus:    self.focus,
+        CameraMove::ToOrbitalLookAt {
+            target:   self.focus,
             yaw:      self.yaw,
             pitch:    self.pitch,
             radius:   self.radius,
+            roll:     None,
             duration: RESTART_CAMERA_RESTORE_DURATION,
             easing:   EaseFunction::CubicOut,
         }
@@ -108,11 +109,12 @@ impl RestartCameraPose {
 
 impl From<&OrbitCam> for RestartCameraPose {
     fn from(orbit_cam: &OrbitCam) -> Self {
+        let angles = orbit_cam.orbit.current();
         Self {
-            focus:  orbit_cam.focus,
-            yaw:    orbit_cam.yaw.unwrap_or(orbit_cam.target_yaw),
-            pitch:  orbit_cam.pitch.unwrap_or(orbit_cam.target_pitch),
-            radius: orbit_cam.radius.unwrap_or(orbit_cam.target_radius),
+            focus:  orbit_cam.pan.current().0,
+            yaw:    angles.yaw,
+            pitch:  angles.pitch,
+            radius: orbit_cam.zoom.current().0,
         }
     }
 }

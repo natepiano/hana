@@ -21,14 +21,14 @@ impl From<f32> for Sensitivity {
     fn from(value: f32) -> Self { Self(value) }
 }
 
-/// Smoothing applied to an axis's motion. `0.0` maps input to camera position
+/// Damping applied to an axis's motion. `0.0` maps input to camera position
 /// one-to-one; higher values lag the camera toward its target, approaching
 /// infinite smoothing at `1.0`.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct Damping(pub f32);
 
 impl Damping {
-    /// Returns the smoothing factor.
+    /// Returns the damping factor.
     #[must_use]
     pub const fn value(self) -> f32 { self.0 }
 }
@@ -38,7 +38,7 @@ impl From<f32> for Damping {
 }
 
 /// Per-axis input tuning: how strongly input drives the axis and how much its
-/// motion is smoothed. One controller axis (orbit, pan, zoom, …) per value.
+/// motion is dampened. One controller axis (orbit, pan, zoom, …) per value.
 #[derive(Clone, Copy, Debug, PartialEq, Reflect)]
 pub struct AxisResponse {
     sensitivity: Sensitivity,

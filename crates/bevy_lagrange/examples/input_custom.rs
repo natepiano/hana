@@ -8,6 +8,7 @@
 //!   Orbit — middle mouse drag, smooth scroll
 //!   Pan   — right mouse drag, Shift + smooth scroll
 //!   Zoom  — wheel, Ctrl + smooth scroll, pinch
+//!   H     — return to the camera home pose
 //!   T     — toggle camera input
 
 use std::f32::consts::TAU;
@@ -15,13 +16,13 @@ use std::f32::consts::TAU;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
 use bevy_enhanced_input::prelude::ModKeys;
+use bevy_lagrange::BindingsError;
 use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraInputRoutingConfig;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBindings;
-use bevy_lagrange::OrbitCamBindingsError;
 use bevy_lagrange::OrbitCamControlSummary;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
@@ -107,7 +108,7 @@ fn main() {
 //   2. `spawn_camera` clones that binding set into `OrbitCamInputMode::Bindings(...)` on the
 //      `OrbitCam`, while also showing camera-level sensitivity, limit, and upside-down settings.
 //   3. `toggle_camera_controls` adds or removes `CameraInputDisabled`; Lagrange keeps the binding
-//      set installed, but ignores camera input while the component is present.
+//      set installed, but ignores camera input, including H home, while the component is present.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
@@ -137,13 +138,7 @@ impl TitleChipActivation for InputDisabledState {
 struct CustomCamera;
 
 fn spawn_camera(mut commands: Commands, bindings: Res<CustomBindings>) {
-    let mut camera = OrbitCam {
-        focus: CAMERA_FOCUS,
-        yaw: Some(CAMERA_YAW),
-        pitch: Some(CAMERA_PITCH),
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
+    let mut camera = OrbitCam::from_pose(CAMERA_FOCUS, (CAMERA_YAW, CAMERA_PITCH), CAMERA_RADIUS);
     camera.orbit.set_sensitivity(CAMERA_ORBIT_SENSITIVITY);
     camera.pan.set_sensitivity(CAMERA_PAN_SENSITIVITY);
     camera.zoom.set_sensitivity(CAMERA_ZOOM_SENSITIVITY);
@@ -177,7 +172,7 @@ fn toggle_camera_controls(
     }
 }
 
-fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
+fn custom_bindings() -> Result<OrbitCamBindings, BindingsError> {
     OrbitCamBindings::builder()
         .orbit(OrbitCamMouseDrag::new(MouseButton::Middle))
         .orbit(OrbitCamTrackpadScroll::default())
@@ -186,6 +181,7 @@ fn custom_bindings() -> Result<OrbitCamBindings, OrbitCamBindingsError> {
         .zoom(OrbitCamMouseWheelZoom.with_input_gain(CUSTOM_WHEEL_INPUT_GAIN))
         .zoom(OrbitCamTrackpadScroll::default().with_mod_keys(ModKeys::CONTROL))
         .zoom(OrbitCamPinchZoom)
+        .home(KeyCode::KeyH)
         .zoom_inversion(ZoomInversion::Inverted)
         .build()
 }
@@ -424,7 +420,7 @@ fn idle_labels(summary: &OrbitCamControlSummary, kind: OrbitCamInteractionKind) 
 fn active_labels(
     summary: &OrbitCamControlSummary,
     kind: OrbitCamInteractionKind,
-    sources: CameraInteractionSources,
+    sources: InteractionSources,
     zoom_direction: Option<ZoomDirection>,
 ) -> Option<Vec<String>> {
     let labels = summary

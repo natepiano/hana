@@ -55,7 +55,6 @@ const COMMENT_Z: f32 = (DISPLAY_Z + GROUND_FRONT_Z) * 0.5;
 /// Mirrors `bevy_diegetic::debug::constants::BBOX_COLOR`, which is `pub(super)`.
 const COMMENT_COLOR: Color = Color::srgba(1.0, 1.0, 0.6, 0.7);
 const ZOOM_TO_FIT_MARGIN: f32 = 0.05;
-const ZOOM_DURATION_MS: u64 = 1000;
 const GROUND_SIZE: f32 = 5.4;
 const GROUND_DEPTH_SCALE: f32 = 0.7;
 const GROUND_CENTER_Z: f32 = GROUND_SIZE * 0.5 * (1.0 - GROUND_DEPTH_SCALE);
@@ -291,7 +290,6 @@ fn main() {
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
-        .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .margin(ZOOM_TO_FIT_MARGIN)
         .with_restore_camera_on_restart()
         .with_title_bar(title_bar())

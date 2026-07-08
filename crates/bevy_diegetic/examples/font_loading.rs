@@ -31,8 +31,11 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
 use bevy_kana::ToF32;
+use bevy_lagrange::Focus;
 use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitAngles;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Radius;
 use bevy_lagrange::ZoomToFit;
 
 const ZOOM_MARGIN_TEXT: f32 = 0.3;
@@ -151,13 +154,14 @@ fn setup(
             brightness:                 300.0,
             affects_lightmapped_meshes: false,
         },
-        OrbitCam {
-            focus: Vec3::new(0.0, 2.0, 0.0),
-            radius: Some(5.0),
-            yaw: Some(0.0),
-            pitch: Some(-0.1),
-            ..default()
-        },
+        OrbitCam::from_pose(
+            Focus(Vec3::new(0.0, 2.0, 0.0)),
+            OrbitAngles {
+                yaw:   0.0,
+                pitch: -0.1,
+            },
+            Radius(5.0),
+        ),
     ));
 
     // Status panel.

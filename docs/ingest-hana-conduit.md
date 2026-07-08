@@ -16,7 +16,7 @@ Checked from `/Users/natemccoy/rust/bevy_hana` on 2026-06-22:
 - remote: `https://github.com/natepiano/hana_conduit.git`
 - status: clean against `origin/main`
 - crate version: `0.1.0`
-- standalone cleanup files present: `Cargo.lock`, `rustfmt.toml`, `taplo.toml`,
+- standalone cleanup files present: `Cargo.lock`, `rustfmt.toml`,taplo.toml`,
   `.github/workflows/ci.yml`, `.gitignore`
 - source-owned files to keep initially: `README.md`, `LICENSE-APACHE`,
   `LICENSE-MIT`, `assets/models/power_plug.glb`, `examples/playground/`,

@@ -5,9 +5,9 @@ use bevy_enhanced_input::prelude::EnhancedInputSystems;
 /// Public schedule phases for camera input processing.
 ///
 /// App-authored manual camera input writers should run in
-/// `OrbitCamInputPhase::WriteManual`.
+/// `CameraInputPhase::WriteManual`.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub enum OrbitCamInputPhase {
+pub enum CameraInputPhase {
     /// Library-owned preparation before enhanced-input context evaluation.
     PreInput,
     /// App-authored manual camera intent writers.
@@ -16,8 +16,17 @@ pub enum OrbitCamInputPhase {
     Finalize,
 }
 
+/// Public `PostUpdate` set for lagrange camera controller systems.
+///
+/// Use this to run systems before camera controllers read input and operation
+/// state, or after they write camera `Transform`s. Kind-specific public labels
+/// such as [`crate::OrbitCamSystemSet`] remain available for targeting one
+/// controller.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
-pub(crate) enum OrbitCamInputInternalSet {
+pub struct CameraControllerSystemSet;
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum CameraInputInternalSet {
     InputModes,
     Routing,
     Installation,
@@ -32,32 +41,32 @@ impl Plugin for LagrangeSystemSetsPlugin {
         app.configure_sets(
             PreUpdate,
             (
-                OrbitCamInputPhase::PreInput
+                CameraInputPhase::PreInput
                     .after(InputSystems)
                     .before(EnhancedInputSystems::Update),
-                OrbitCamInputPhase::WriteManual
-                    .after(OrbitCamInputPhase::PreInput)
+                CameraInputPhase::WriteManual
+                    .after(CameraInputPhase::PreInput)
                     .after(EnhancedInputSystems::Apply)
-                    .after(OrbitCamInputInternalSet::ActionResolution),
-                OrbitCamInputPhase::Finalize.after(OrbitCamInputPhase::WriteManual),
+                    .after(CameraInputInternalSet::ActionResolution),
+                CameraInputPhase::Finalize.after(CameraInputPhase::WriteManual),
             ),
         );
         app.configure_sets(
             PreUpdate,
             (
-                OrbitCamInputInternalSet::InputModes.in_set(OrbitCamInputPhase::PreInput),
-                OrbitCamInputInternalSet::Routing
-                    .in_set(OrbitCamInputPhase::PreInput)
-                    .after(OrbitCamInputInternalSet::InputModes),
-                OrbitCamInputInternalSet::Installation
-                    .in_set(OrbitCamInputPhase::PreInput)
-                    .after(OrbitCamInputInternalSet::Routing),
-                OrbitCamInputInternalSet::AdapterInjection
-                    .in_set(OrbitCamInputPhase::PreInput)
-                    .after(OrbitCamInputInternalSet::Installation),
-                OrbitCamInputInternalSet::ActionResolution
+                CameraInputInternalSet::InputModes.in_set(CameraInputPhase::PreInput),
+                CameraInputInternalSet::Routing
+                    .in_set(CameraInputPhase::PreInput)
+                    .after(CameraInputInternalSet::InputModes),
+                CameraInputInternalSet::Installation
+                    .in_set(CameraInputPhase::PreInput)
+                    .after(CameraInputInternalSet::Routing),
+                CameraInputInternalSet::AdapterInjection
+                    .in_set(CameraInputPhase::PreInput)
+                    .after(CameraInputInternalSet::Installation),
+                CameraInputInternalSet::ActionResolution
                     .after(EnhancedInputSystems::Apply)
-                    .before(OrbitCamInputPhase::WriteManual),
+                    .before(CameraInputPhase::WriteManual),
             ),
         );
     }
@@ -75,7 +84,7 @@ mod tests {
     use bevy::prelude::*;
     use bevy::window::WindowRef;
 
-    use super::OrbitCamInputPhase;
+    use super::CameraInputPhase;
     use crate::AnimationEnd;
     use crate::AnimationReason;
     use crate::CameraInputInterruptBehavior;
@@ -115,7 +124,7 @@ mod tests {
             .init_resource::<AnimationEventCounts>()
             .add_systems(
                 PreUpdate,
-                write_manual_orbit_input.in_set(OrbitCamInputPhase::WriteManual),
+                write_manual_orbit_input.in_set(CameraInputPhase::WriteManual),
             );
         app.finish();
         app
@@ -131,7 +140,7 @@ mod tests {
         let Ok(mut input) = writer.get_mut(camera, ManualInputSource::observed_keyboard()) else {
             return;
         };
-        input.orbit_pixels(MANUAL_ORBIT_DELTA);
+        input.orbit(MANUAL_ORBIT_DELTA);
     }
 
     fn observe_animation_cancelled(world: &mut World, camera: Entity) {
@@ -145,11 +154,12 @@ mod tests {
     }
 
     fn animation_move() -> CameraMove {
-        CameraMove::ToOrbit {
-            focus:    Vec3::ZERO,
+        CameraMove::ToOrbitalLookAt {
+            target:   Vec3::ZERO,
             yaw:      ANIMATION_YAW,
             pitch:    0.0,
             radius:   ANIMATION_RADIUS,
+            roll:     None,
             duration: Duration::from_millis(MOVE_DURATION_MILLIS),
             easing:   EaseFunction::Linear,
         }
@@ -193,7 +203,7 @@ mod tests {
             .world()
             .get::<OrbitCam>(camera)
             .ok_or("camera missing OrbitCam")?;
-        assert!(orbit_cam.target_yaw < -1.0);
+        assert!(orbit_cam.orbit.target().yaw < -1.0);
         Ok(())
     }
 }

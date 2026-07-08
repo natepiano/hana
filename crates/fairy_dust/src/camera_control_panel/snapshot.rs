@@ -3,16 +3,19 @@
 //! components, and supplies the label helpers used by the layout pass.
 
 use bevy::prelude::*;
-use bevy_enhanced_input::prelude::ModKeys;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::CameraControlBinding;
+use bevy_lagrange::CameraControlSummary;
 use bevy_lagrange::ControlSpeed;
+use bevy_lagrange::FreeCam;
+use bevy_lagrange::FreeCamActiveDirections;
+use bevy_lagrange::FreeCamInputMode;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamInteractionKind;
-use bevy_lagrange::OrbitCamPreset;
-use bevy_lagrange::OrbitCamSlowMode;
 use bevy_lagrange::ZoomDirection;
-use bevy_lagrange::describe_orbit_cam_controls;
+use bevy_lagrange::describe_controls;
+use bevy_lagrange::describe_controls_for;
 
+use super::guidance;
 use super::guidance::CameraGuidance;
 use super::guidance::CameraGuidanceContent;
 use super::guidance::CameraGuidanceRow;
@@ -23,13 +26,16 @@ pub(super) struct CameraGuidanceSnapshot {
     pub(super) mode_label:              String,
     pub(super) mode_value:              String,
     pub(super) slow_mode_binding_label: Option<String>,
+    pub(super) settings:                Vec<CameraControlBinding>,
     pub(super) rows:                    Vec<CameraGuidanceRow>,
 }
 
 pub(super) fn resolve_guidance_snapshot(
     name: Option<&Name>,
     guidance: Option<&CameraGuidance>,
-    mode: Option<&OrbitCamInputMode>,
+    orbit_mode: Option<&OrbitCamInputMode>,
+    free_cam: Option<&FreeCam>,
+    free_mode: Option<&FreeCamInputMode>,
 ) -> CameraGuidanceSnapshot {
     let name_label = name.map(|n| n.as_str().to_string());
     let title_label = guidance.and_then(|g| g.title.clone());
@@ -39,103 +45,81 @@ pub(super) fn resolve_guidance_snapshot(
     });
 
     if let Some((guidance, rows)) = explicit {
-        let (mode_label, mode_value) = resolve_mode_labels(mode);
-        let has_effective_rows = mode_has_effective_rows(mode);
+        let summary = resolve_camera_summary(orbit_mode, free_cam, free_mode);
+        let (summary_settings, _) = guidance::split_summary_bindings(summary.bindings.clone());
+        let settings = if guidance.settings.is_empty() {
+            summary_settings
+        } else {
+            guidance.settings.clone()
+        };
         return CameraGuidanceSnapshot {
             camera_label: name_label
                 .or(title_label)
-                .unwrap_or_else(|| "OrbitCam".to_string()),
-            mode_label: guidance.mode_label.clone().unwrap_or(mode_label),
-            mode_value: guidance.mode_value.clone().unwrap_or(mode_value),
-            slow_mode_binding_label: slow_mode_binding_label(mode, has_effective_rows),
+                .unwrap_or_else(|| summary.camera_label.clone()),
+            mode_label: guidance
+                .mode_label
+                .clone()
+                .unwrap_or_else(|| summary.mode_label.clone()),
+            mode_value: guidance
+                .mode_value
+                .clone()
+                .unwrap_or_else(|| summary.mode_value.clone()),
+            slow_mode_binding_label: summary.slow_mode_binding_label,
+            settings,
             rows,
         };
     }
 
-    let summary = mode.map_or_else(
-        || describe_orbit_cam_controls(&OrbitCamInputMode::default()),
-        describe_orbit_cam_controls,
-    );
+    let summary = resolve_camera_summary(orbit_mode, free_cam, free_mode);
+    let (settings, rows) = guidance::split_summary_bindings(summary.bindings);
     CameraGuidanceSnapshot {
-        camera_label:            name_label.or(title_label).unwrap_or(summary.camera_label),
-        mode_label:              summary.mode_label,
-        mode_value:              summary.mode_value,
-        slow_mode_binding_label: slow_mode_binding_label(mode, !summary.rows.is_empty()),
-        rows:                    summary.rows.into_iter().map(Into::into).collect(),
+        camera_label: name_label.or(title_label).unwrap_or(summary.camera_label),
+        mode_label: summary.mode_label,
+        mode_value: summary.mode_value,
+        slow_mode_binding_label: summary.slow_mode_binding_label,
+        settings,
+        rows,
     }
 }
 
-fn mode_has_effective_rows(mode: Option<&OrbitCamInputMode>) -> bool {
-    mode.is_some_and(|mode| !describe_orbit_cam_controls(mode).rows.is_empty())
-}
-
-fn resolve_mode_labels(mode: Option<&OrbitCamInputMode>) -> (String, String) {
-    let Some(mode) = mode else {
-        let preset = OrbitCamPreset::default();
-        return ("Preset".to_string(), preset.kind().name().to_string());
-    };
-    match mode {
-        OrbitCamInputMode::Preset(preset) => {
-            ("Preset".to_string(), preset.kind().name().to_string())
-        },
-        OrbitCamInputMode::Bindings(_) => ("Bindings".to_string(), "Custom".to_string()),
-        OrbitCamInputMode::Manual => ("Input".to_string(), "Manual".to_string()),
-        _ => ("Input".to_string(), "Custom".to_string()),
+fn resolve_camera_summary(
+    orbit_mode: Option<&OrbitCamInputMode>,
+    free_cam: Option<&FreeCam>,
+    free_mode: Option<&FreeCamInputMode>,
+) -> CameraControlSummary {
+    if let Some(mode) = free_mode {
+        if let Some(camera) = free_cam {
+            return describe_controls_for(camera, mode);
+        }
+        return describe_controls(mode);
     }
-}
-
-fn slow_mode_binding_label(
-    mode: Option<&OrbitCamInputMode>,
-    has_effective_rows: bool,
-) -> Option<String> {
-    if !has_effective_rows {
-        return None;
-    }
-
-    let slow_mode = match mode? {
-        OrbitCamInputMode::Preset(preset) => preset.to_bindings().ok()?.slow_mode().cloned(),
-        OrbitCamInputMode::Bindings(bindings) => bindings.slow_mode().cloned(),
-        _ => None,
-    }?;
-    Some(slow_mode_binding_hint(&slow_mode).to_string())
-}
-
-const fn slow_mode_binding_hint(slow_mode: &OrbitCamSlowMode) -> &'static str {
-    match (slow_mode.toggle_key, slow_mode.mod_keys) {
-        (KeyCode::KeyS, ModKeys::ALT) => "alt-s",
-        _ => "slow",
+    match orbit_mode {
+        Some(mode) => describe_controls(mode),
+        None => describe_controls(&OrbitCamInputMode::default()),
     }
 }
 
 pub(super) fn row_active(
     row: &CameraGuidanceRow,
-    sources: CameraInteractionSources,
+    sources: InteractionSources,
     live_zoom_direction: Option<ZoomDirection>,
+    live_free_directions: FreeCamActiveDirections,
 ) -> bool {
     if sources.is_empty() || !sources.intersects(row.camera_interaction_sources()) {
         return false;
     }
-    match row.zoom_direction() {
-        // Orbit, pan, and unsplit zoom rows match on source alone.
+    // A decomposed `FreeCam` row lights only while its own direction is engaged,
+    // so pressing one affordance never lights the whole action's rows.
+    if let Some(direction) = row.direction() {
+        return live_free_directions.contains(direction);
+    }
+    match row.action().zoom_direction() {
+        // Non-directional action rows match on source alone.
         None => true,
         // A directional zoom row lights only when the live zoom matches it. Until
         // a direction is known (no zoom engaged yet) fall back to source-only so
         // the row can still light rather than going dark.
         Some(direction) => live_zoom_direction.is_none_or(|live| live == direction),
-    }
-}
-
-pub(super) const fn action_label(
-    kind: OrbitCamInteractionKind,
-    direction: Option<ZoomDirection>,
-) -> &'static str {
-    match (kind, direction) {
-        (OrbitCamInteractionKind::Orbit, _) => "Orbit",
-        (OrbitCamInteractionKind::Pan, _) => "Pan",
-        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)) => "Zoom In",
-        (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)) => "Zoom Out",
-        (OrbitCamInteractionKind::Zoom, None) => "Zoom",
-        _ => "",
     }
 }
 
@@ -148,25 +132,32 @@ pub(super) const fn speed_label(speed: ControlSpeed) -> &'static str {
 
 #[cfg(test)]
 mod tests {
+    use bevy_enhanced_input::prelude::ModKeys;
+    use bevy_lagrange::BindingsError;
+    use bevy_lagrange::CameraControlActivation;
+    use bevy_lagrange::CameraControlBindingKind;
+    use bevy_lagrange::CameraInputScalePolicy;
+    use bevy_lagrange::CameraSlowMode;
+    use bevy_lagrange::FreeCamControlDirection;
+    use bevy_lagrange::FreeCamKeyboardMousePreset;
+    use bevy_lagrange::FreeCamLookPitch;
+    use bevy_lagrange::FreeCamPreset;
     use bevy_lagrange::InputGain;
     use bevy_lagrange::OrbitCamBindings;
-    use bevy_lagrange::OrbitCamBindingsError;
     use bevy_lagrange::OrbitCamBlenderLikePreset;
     use bevy_lagrange::OrbitCamInputGain;
     use bevy_lagrange::OrbitCamMouseDrag;
-    use bevy_lagrange::OrbitCamScalePolicy;
+    use bevy_lagrange::OrbitCamPreset;
 
     use super::*;
+    use crate::camera_control_panel::guidance::CameraGuidanceAction;
 
     const CUSTOM_SLOW_SCALE: f32 = 0.25;
 
     fn zoom_row(direction: Option<ZoomDirection>) -> CameraGuidanceRow {
-        let row = CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, "rt")
-            .with_camera_interaction_sources(CameraInteractionSources::GAMEPAD);
-        match direction {
-            Some(direction) => row.with_zoom_direction(direction),
-            None => row,
-        }
+        let action = CameraGuidanceAction::from_orbit_zoom_direction(direction);
+        CameraGuidanceRow::new(action, "rt")
+            .with_camera_interaction_sources(InteractionSources::GAMEPAD)
     }
 
     #[test]
@@ -174,20 +165,27 @@ mod tests {
         let row = zoom_row(Some(ZoomDirection::In));
         assert!(row_active(
             &row,
-            CameraInteractionSources::GAMEPAD,
-            Some(ZoomDirection::In)
+            InteractionSources::GAMEPAD,
+            Some(ZoomDirection::In),
+            FreeCamActiveDirections::NONE,
         ));
         assert!(!row_active(
             &row,
-            CameraInteractionSources::GAMEPAD,
-            Some(ZoomDirection::Out)
+            InteractionSources::GAMEPAD,
+            Some(ZoomDirection::Out),
+            FreeCamActiveDirections::NONE,
         ));
     }
 
     #[test]
     fn directional_zoom_row_lights_when_live_direction_unknown() {
         let row = zoom_row(Some(ZoomDirection::Out));
-        assert!(row_active(&row, CameraInteractionSources::GAMEPAD, None));
+        assert!(row_active(
+            &row,
+            InteractionSources::GAMEPAD,
+            None,
+            FreeCamActiveDirections::NONE,
+        ));
     }
 
     #[test]
@@ -195,13 +193,15 @@ mod tests {
         let row = zoom_row(None);
         assert!(row_active(
             &row,
-            CameraInteractionSources::GAMEPAD,
-            Some(ZoomDirection::In)
+            InteractionSources::GAMEPAD,
+            Some(ZoomDirection::In),
+            FreeCamActiveDirections::NONE,
         ));
         assert!(row_active(
             &row,
-            CameraInteractionSources::GAMEPAD,
-            Some(ZoomDirection::Out)
+            InteractionSources::GAMEPAD,
+            Some(ZoomDirection::Out),
+            FreeCamActiveDirections::NONE,
         ));
     }
 
@@ -210,13 +210,33 @@ mod tests {
         let row = zoom_row(Some(ZoomDirection::In));
         assert!(!row_active(
             &row,
-            CameraInteractionSources::WHEEL,
-            Some(ZoomDirection::In)
+            InteractionSources::WHEEL,
+            Some(ZoomDirection::In),
+            FreeCamActiveDirections::NONE,
         ));
         assert!(!row_active(
             &row,
-            CameraInteractionSources::NONE,
-            Some(ZoomDirection::In)
+            InteractionSources::NONE,
+            Some(ZoomDirection::In),
+            FreeCamActiveDirections::NONE,
+        ));
+    }
+
+    #[test]
+    fn free_direction_row_lights_only_when_its_direction_is_engaged() {
+        let row = CameraGuidanceRow::new(CameraGuidanceAction::Translate, "rt")
+            .with_camera_interaction_sources(InteractionSources::GAMEPAD)
+            .with_direction(FreeCamControlDirection::Up);
+        let up = FreeCamActiveDirections::NONE.with(FreeCamControlDirection::Up);
+        let down = FreeCamActiveDirections::NONE.with(FreeCamControlDirection::Down);
+
+        assert!(row_active(&row, InteractionSources::GAMEPAD, None, up));
+        assert!(!row_active(&row, InteractionSources::GAMEPAD, None, down));
+        assert!(!row_active(
+            &row,
+            InteractionSources::GAMEPAD,
+            None,
+            FreeCamActiveDirections::NONE,
         ));
     }
 
@@ -228,6 +248,8 @@ mod tests {
             Some(&OrbitCamInputMode::with_preset(
                 OrbitCamPreset::blender_like(),
             )),
+            None,
+            None,
         );
 
         assert_eq!(snapshot.slow_mode_binding_label.as_deref(), Some("alt-s"));
@@ -239,8 +261,13 @@ mod tests {
         let preset = OrbitCamBlenderLikePreset::default()
             .mouse_input_gain(OrbitCamInputGain::uniform(disabled))
             .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled));
-        let snapshot =
-            resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::with_preset(preset)));
+        let snapshot = resolve_guidance_snapshot(
+            None,
+            None,
+            Some(&OrbitCamInputMode::with_preset(preset)),
+            None,
+            None,
+        );
         let labels = row_labels(&snapshot);
 
         assert_eq!(snapshot.mode_label, "Preset");
@@ -254,21 +281,26 @@ mod tests {
 
     #[test]
     fn custom_slow_mode_snapshot_omits_hint_when_all_controls_are_disabled()
-    -> Result<(), OrbitCamBindingsError> {
+    -> Result<(), BindingsError> {
         let disabled = InputGain::DISABLED.0;
         let bindings = OrbitCamBindings::builder()
-            .slow_mode(OrbitCamSlowMode {
+            .slow_mode(CameraSlowMode {
                 toggle_key: KeyCode::KeyS,
                 mod_keys:   ModKeys::ALT,
-                scale:      OrbitCamScalePolicy {
+                scale:      CameraInputScalePolicy {
                     normal: InputGain::DEFAULT.0,
                     slow:   CUSTOM_SLOW_SCALE,
                 },
             })
             .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_input_gain(disabled))
             .build()?;
-        let snapshot =
-            resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::Bindings(bindings)));
+        let snapshot = resolve_guidance_snapshot(
+            None,
+            None,
+            Some(&OrbitCamInputMode::Bindings(bindings)),
+            None,
+            None,
+        );
 
         assert_eq!(snapshot.slow_mode_binding_label, None);
         assert!(snapshot.rows.is_empty());
@@ -283,12 +315,90 @@ mod tests {
             Some(&OrbitCamInputMode::with_preset(
                 OrbitCamPreset::simple_mouse(),
             )),
+            None,
+            None,
         );
 
         assert_eq!(snapshot.slow_mode_binding_label, None);
     }
 
+    #[test]
+    fn free_cam_snapshot_uses_free_actions() {
+        let preset = FreeCamKeyboardMousePreset::default().with_home(KeyCode::KeyH);
+        let mode = FreeCamInputMode::with_preset(preset);
+        let snapshot = resolve_guidance_snapshot(None, None, None, None, Some(&mode));
+
+        assert_eq!(
+            row_actions(&snapshot),
+            vec![
+                CameraGuidanceAction::Look,
+                CameraGuidanceAction::Translate,
+                CameraGuidanceAction::Roll,
+                CameraGuidanceAction::Home,
+            ]
+        );
+    }
+
+    #[test]
+    fn free_cam_snapshot_includes_invert_y_status() {
+        let mode = FreeCamInputMode::with_preset(
+            FreeCamKeyboardMousePreset::default().with_look_pitch(FreeCamLookPitch::Inverted),
+        );
+        let snapshot = resolve_guidance_snapshot(None, None, None, None, Some(&mode));
+        let setting = single_setting_binding(&snapshot);
+
+        assert_eq!(
+            CameraGuidanceAction::from(setting.action),
+            CameraGuidanceAction::Look
+        );
+        assert_eq!(setting.label, "alt-i");
+        assert_eq!(setting_value(setting), Some("Invert Y"));
+        assert_eq!(setting.speed, ControlSpeed::Normal);
+        assert_eq!(
+            setting_activation(setting),
+            Some(CameraControlActivation::Active)
+        );
+    }
+
+    #[test]
+    fn horizon_locked_free_cam_snapshot_reports_disabled_roll() {
+        let free_cam = FreeCam::horizon_locked();
+        let mode = FreeCamInputMode::with_preset(FreeCamPreset::keyboard_mouse());
+        let snapshot = resolve_guidance_snapshot(None, None, None, Some(&free_cam), Some(&mode));
+        let labels = row_labels(&snapshot);
+
+        assert!(labels.contains(&"Roll disabled"));
+        assert!(!labels.contains(&"q/e"));
+    }
+
     fn row_labels(snapshot: &CameraGuidanceSnapshot) -> Vec<&str> {
         snapshot.rows.iter().map(CameraGuidanceRow::label).collect()
+    }
+
+    fn row_actions(snapshot: &CameraGuidanceSnapshot) -> Vec<CameraGuidanceAction> {
+        snapshot
+            .rows
+            .iter()
+            .map(CameraGuidanceRow::action)
+            .collect()
+    }
+
+    fn single_setting_binding(snapshot: &CameraGuidanceSnapshot) -> &CameraControlBinding {
+        assert_eq!(snapshot.settings.len(), 1);
+        &snapshot.settings[0]
+    }
+
+    fn setting_value(binding: &CameraControlBinding) -> Option<&str> {
+        match &binding.kind {
+            CameraControlBindingKind::Setting { value, .. } => Some(value.as_str()),
+            CameraControlBindingKind::Direct => None,
+        }
+    }
+
+    fn setting_activation(binding: &CameraControlBinding) -> Option<CameraControlActivation> {
+        match &binding.kind {
+            CameraControlBindingKind::Setting { activation, .. } => Some(*activation),
+            CameraControlBindingKind::Direct => None,
+        }
     }
 }

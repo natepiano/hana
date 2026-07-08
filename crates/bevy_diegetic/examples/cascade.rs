@@ -15,8 +15,6 @@
 //! - `F` — toggle the standalone font-unit override: `Points` / inherit.
 //! - `H` — home the camera.
 
-use std::time::Duration;
-
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
@@ -66,7 +64,6 @@ const SCENE_FRAME_Z_OFFSET: f32 = -0.01;
 const HOME_PITCH: f32 = 0.055;
 const HOME_YAW: f32 = 0.0;
 const HOME_MARGIN: f32 = 0.08;
-const HOME_DURATION_MS: u64 = 900;
 
 const GLOBAL_ALPHA_A: AlphaMode = AlphaMode::Blend;
 const GLOBAL_ALPHA_B: AlphaMode = AlphaMode::AlphaToCoverage;
@@ -154,7 +151,6 @@ fn main() {
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .margin(HOME_MARGIN)
-        .duration(Duration::from_millis(HOME_DURATION_MS))
         .with_title_bar(TitleBar::new().with_title(EXAMPLE_TITLE))
         .with_camera_control_panel()
         .insert_resource(CascadeDefault(TextAlpha(GLOBAL_ALPHA_A)))

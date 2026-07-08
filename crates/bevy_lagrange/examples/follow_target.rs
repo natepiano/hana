@@ -1,7 +1,7 @@
-//! Demonstrates how to drive `OrbitCam::target_focus` from a moving entity so
-//! the camera tracks it. `animate_cube` orbits the cube around the Y axis;
-//! `camera_follow` copies the cube translation into `target_focus` each frame
-//! and the camera interpolates the rendered focus toward it.
+//! Demonstrates how to drive the `OrbitCam` pan operation's target from a moving
+//! entity so the camera tracks it. `animate_cube` orbits the cube around the Y
+//! axis; `camera_follow` copies the cube translation into `pan.set_target` each
+//! frame and the camera interpolates the rendered focus toward it.
 //!
 //! Controls:
 //!   P - Pause cube motion
@@ -33,6 +33,7 @@ use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::Face;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleChipActivation;
 
@@ -74,14 +75,14 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CAMERA FOLLOW — drive OrbitCam::target_focus from the moving cube.
+// CAMERA FOLLOW — drive the OrbitCam pan target from the moving cube.
 // ═════════════════════════════════════════════════════════════════════════════
 //
 // How it works: configure_camera disables panning at startup so user input
 // cannot override the focus. animate_cube moves the cube around a horizontal
 // circle each frame (P pauses it). camera_follow then copies the cube
-// translation into OrbitCam::target_focus; the camera interpolates the
-// rendered focus toward that target.
+// translation into the OrbitCam pan operation's target; the camera interpolates
+// the rendered focus toward that target.
 
 const CAMERA_PAN_SENSITIVITY: f32 = 0.0;
 const CAMERA_PAN_SMOOTHNESS: f32 = 0.0;
@@ -115,11 +116,13 @@ impl TitleChipActivation for AnimationPause {
 }
 
 fn configure_camera(camera: &mut OrbitCam) {
-    camera.focus = CUBE_TRANSLATION;
-    camera.target_focus = CUBE_TRANSLATION;
-    camera.yaw = Some(HOME_YAW);
-    camera.pitch = Some(HOME_PITCH);
-    camera.radius = Some(CAMERA_RADIUS);
+    OrbitCamPose {
+        focus:  CUBE_TRANSLATION,
+        yaw:    HOME_YAW,
+        pitch:  HOME_PITCH,
+        radius: CAMERA_RADIUS,
+    }
+    .apply_to(camera);
     // Panning the camera changes the focus, so disable it while this example
     // drives the focus from the moving cube.
     camera.pan.set_sensitivity(CAMERA_PAN_SENSITIVITY);
@@ -157,7 +160,7 @@ fn camera_follow(
     if let Ok(mut orbit_cam) = orbit_cam_query.single_mut()
         && let Ok(cube_transform) = cube_query.single()
     {
-        orbit_cam.target_focus = cube_transform.translation;
+        orbit_cam.pan.set_target(cube_transform.translation);
     }
 }
 

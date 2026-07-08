@@ -1,15 +1,15 @@
-//! Internal descriptor and entry types used to feed [`super::validate::validate_bindings`].
+//! Descriptor and entry types plus the runtime binding-active predicates.
 //!
 //! Types:
 //! - [`HeldBindingDescriptor`] / [`ActionBindingDescriptor`] — reflectable descriptor entries
-//!   stored on [`super::OrbitCamBindingsDescriptor`] (the editor/keymap-facing draft).
+//!   stored on a camera's binding descriptor (the editor/keymap-facing draft).
 //! - [`InputBindingDescriptor`] / [`InputBindingEntry`] / [`InputBindingModifiers`] — flattened
 //!   list of native `bevy_enhanced_input` bindings plus the per-entry modifiers applied by the
 //!   adapter when it spawns enhanced-input binding entities.
 //!
 //! Functions:
-//! - [`binding_active`] / [`mod_keys_pressed`] — runtime predicates evaluated against `ButtonInput`
-//!   to decide whether a binding is currently held.
+//! - [`InputBindingDescriptor::enabled_is_active`] — runtime predicate evaluated against live input
+//!   resources.
 
 use bevy::prelude::*;
 use bevy_enhanced_input::prelude::Binding;
@@ -17,29 +17,63 @@ use bevy_enhanced_input::prelude::ModKeys;
 
 use super::action_set::BindingEngagement;
 use super::action_set::BindingRoutePolicy;
-use super::error::OrbitCamBindingsError;
+use super::error::BindingsError;
+use super::held_binding;
 use super::held_binding::BindingGates;
-use crate::input::CameraInteractionSources;
+use super::source_binding;
+use super::source_binding::LiveInputs;
 use crate::input::ControlSpeed;
+use crate::input::InteractionSources;
 
 #[derive(Clone, Debug, PartialEq, Reflect)]
-pub(super) struct HeldBindingDescriptor {
-    pub(super) motion:             InputBindingDescriptor,
-    pub(super) engagement:         Option<InputBindingDescriptor>,
-    pub(super) gates:              BindingGates,
-    pub(super) sources:            CameraInteractionSources,
-    pub(super) engagement_sources: CameraInteractionSources,
-    pub(super) route:              BindingRoutePolicy,
-    pub(super) speed:              ControlSpeed,
+pub struct HeldBindingDescriptor {
+    /// Motion input descriptor.
+    pub motion:             InputBindingDescriptor,
+    /// Optional engagement descriptor that latches the held action.
+    pub engagement:         Option<InputBindingDescriptor>,
+    /// Additional gate inputs required or blocked for this binding.
+    pub gates:              BindingGates,
+    /// Source metadata reported for the motion binding.
+    pub sources:            InteractionSources,
+    /// Source metadata reported for the engagement binding.
+    pub engagement_sources: InteractionSources,
+    /// Routing policy for this held binding.
+    pub route:              BindingRoutePolicy,
+    /// Runtime speed tier for this held binding.
+    pub speed:              ControlSpeed,
 }
 
 /// Reflectable descriptor for an impulse action binding.
 #[derive(Clone, Debug, PartialEq, Reflect)]
 pub struct ActionBindingDescriptor {
-    pub(super) binding:    InputBindingDescriptor,
-    pub(super) sources:    CameraInteractionSources,
-    pub(super) route:      BindingRoutePolicy,
-    pub(super) engagement: BindingEngagement,
+    /// Native input descriptor for this action.
+    pub binding:    InputBindingDescriptor,
+    /// Source metadata reported for this action.
+    pub sources:    InteractionSources,
+    /// Routing policy for this action.
+    pub route:      BindingRoutePolicy,
+    /// Whether this action is impulse or held.
+    pub engagement: BindingEngagement,
+}
+
+impl From<Binding> for ActionBindingDescriptor {
+    fn from(binding: Binding) -> Self {
+        let sources = held_binding::sources_for_binding(binding);
+        Self {
+            binding: InputBindingDescriptor::single(binding),
+            sources,
+            route: route_for_sources(sources),
+            engagement: BindingEngagement::Impulse,
+        }
+    }
+}
+
+const fn route_for_sources(sources: InteractionSources) -> BindingRoutePolicy {
+    if sources.contains(InteractionSources::MOUSE) {
+        BindingRoutePolicy::CursorPosition
+    } else {
+        BindingRoutePolicy::NoPosition
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Reflect)]
@@ -92,25 +126,10 @@ impl InputBindingDescriptor {
         self
     }
 
-    /// Returns `true` when any entry's binding is currently pressed.
-    pub fn is_active(
-        &self,
-        keyboard: Option<&ButtonInput<KeyCode>>,
-        mouse_buttons: Option<&ButtonInput<MouseButton>>,
-    ) -> bool {
-        self.entries
-            .iter()
-            .any(|entry| binding_active(entry.binding, keyboard, mouse_buttons))
-    }
-
     /// Returns `true` when any enabled entry's binding is currently pressed.
-    pub fn enabled_is_active(
-        &self,
-        keyboard: Option<&ButtonInput<KeyCode>>,
-        mouse_buttons: Option<&ButtonInput<MouseButton>>,
-    ) -> bool {
+    pub fn enabled_is_active(&self, inputs: &LiveInputs<'_>) -> bool {
         self.enabled_entries()
-            .any(|entry| binding_active(entry.binding, keyboard, mouse_buttons))
+            .any(|entry| source_binding::binding_is_active(entry.binding, inputs))
     }
 
     /// Returns the first mouse-button binding entry's button and modifier keys.
@@ -218,91 +237,22 @@ impl InputGain {
     #[must_use]
     pub const fn is_enabled(self) -> bool { self.0 != Self::DISABLED.0 }
 
-    pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
+    /// Validates that this gain is finite and non-negative.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BindingsError::InvalidScale`] when the gain is negative or non-finite.
+    pub fn validate(self) -> Result<(), BindingsError> {
         if self.0.is_finite() && self.0 >= Self::DISABLED.0 {
             Ok(())
         } else {
-            Err(OrbitCamBindingsError::InvalidScale)
+            Err(BindingsError::InvalidScale)
         }
     }
 }
 
 impl Default for InputGain {
     fn default() -> Self { Self::DEFAULT }
-}
-
-/// Per-action orbit-camera `InputGain` values.
-#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
-pub struct OrbitCamInputGain {
-    orbit: InputGain,
-    pan:   InputGain,
-    zoom:  InputGain,
-}
-
-impl OrbitCamInputGain {
-    /// Creates an input gain set with all actions enabled at the default multiplier.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            orbit: InputGain::DEFAULT,
-            pan:   InputGain::DEFAULT,
-            zoom:  InputGain::DEFAULT,
-        }
-    }
-
-    /// Creates an input gain set using the same multiplier for every action.
-    #[must_use]
-    pub const fn uniform(value: f32) -> Self {
-        let input_gain = InputGain(value);
-        Self {
-            orbit: input_gain,
-            pan:   input_gain,
-            zoom:  input_gain,
-        }
-    }
-
-    /// Sets orbit input gain.
-    #[must_use]
-    pub const fn orbit(mut self, value: f32) -> Self {
-        self.orbit = InputGain(value);
-        self
-    }
-
-    /// Sets pan input gain.
-    #[must_use]
-    pub const fn pan(mut self, value: f32) -> Self {
-        self.pan = InputGain(value);
-        self
-    }
-
-    /// Sets zoom input gain.
-    #[must_use]
-    pub const fn zoom(mut self, value: f32) -> Self {
-        self.zoom = InputGain(value);
-        self
-    }
-
-    /// Returns orbit input gain.
-    #[must_use]
-    pub const fn orbit_input_gain(self) -> InputGain { self.orbit }
-
-    /// Returns pan input gain.
-    #[must_use]
-    pub const fn pan_input_gain(self) -> InputGain { self.pan }
-
-    /// Returns zoom input gain.
-    #[must_use]
-    pub const fn zoom_input_gain(self) -> InputGain { self.zoom }
-
-    pub(super) fn validate(self) -> Result<(), OrbitCamBindingsError> {
-        self.orbit.validate()?;
-        self.pan.validate()?;
-        self.zoom.validate()
-    }
-}
-
-impl Default for OrbitCamInputGain {
-    fn default() -> Self { Self::new() }
 }
 
 /// Canonical modifier descriptor attached to a flattened binding entry.
@@ -408,23 +358,23 @@ impl InputDeadZone {
 }
 
 /// Normal and slow scalar multipliers for per-camera slow mode.
-#[derive(Clone, Debug, PartialEq, Reflect)]
-pub struct OrbitCamScalePolicy {
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct CameraInputScalePolicy {
     /// Scale used when slow mode is inactive.
     pub normal: f32,
     /// Scale used when slow mode is active.
     pub slow:   f32,
 }
 
-/// Key-driven slow-mode policy stored on validated orbit-camera bindings.
-#[derive(Clone, Debug, PartialEq, Reflect)]
-pub struct OrbitCamSlowMode {
+/// Key-driven slow-mode policy stored on validated camera bindings.
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+pub struct CameraSlowMode {
     /// Key whose press edge toggles slow mode for the routed camera.
     pub toggle_key: KeyCode,
     /// Modifier keys held with `toggle_key` for the toggle to fire.
     pub mod_keys:   ModKeys,
     /// Scale policy applied while resolving camera input.
-    pub scale:      OrbitCamScalePolicy,
+    pub scale:      CameraInputScalePolicy,
 }
 
 /// Whether a held binding is scaled by frame delta.
@@ -449,6 +399,10 @@ pub enum InputAxisTransform {
     Swizzle,
     /// Swizzle X into Y and negate it.
     SwizzleNegate,
+    /// Swizzle X into Z.
+    SwizzleZ,
+    /// Swizzle X into Z and negate it.
+    SwizzleZNegate,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
@@ -456,6 +410,7 @@ pub(super) enum InputBindingOutputAxis {
     #[default]
     X,
     Y,
+    Z,
 }
 
 const fn scale_component(
@@ -467,6 +422,9 @@ const fn scale_component(
         Some(InputBindingScale::Axes2d(value)) => match output_axis {
             InputBindingOutputAxis::X => Some(value.x),
             InputBindingOutputAxis::Y => Some(value.y),
+            // A 2D per-axis scale defines no Z component, so a Z-axis entry keeps
+            // no per-axis scale (its input gain still applies downstream).
+            InputBindingOutputAxis::Z => None,
         },
         None => None,
     }
@@ -478,35 +436,4 @@ fn combined_scale(scale: Option<f32>, input_gain: InputGain) -> Option<f32> {
         None if input_gain == InputGain::DEFAULT => None,
         None => Some(input_gain.value()),
     }
-}
-
-fn binding_active(
-    binding: Binding,
-    keyboard: Option<&ButtonInput<KeyCode>>,
-    mouse_buttons: Option<&ButtonInput<MouseButton>>,
-) -> bool {
-    match binding {
-        Binding::Keyboard { key, mod_keys } => keyboard
-            .is_some_and(|keyboard| keyboard.pressed(key) && mod_keys_pressed(keyboard, mod_keys)),
-        Binding::MouseButton { button, mod_keys } => {
-            mouse_buttons.is_some_and(|buttons| buttons.pressed(button))
-                && keyboard.is_some_and(|keyboard| mod_keys_pressed(keyboard, mod_keys))
-        },
-        Binding::AnyKey => {
-            keyboard.is_some_and(|keyboard| keyboard.get_pressed().next().is_some())
-                || mouse_buttons
-                    .is_some_and(|mouse_buttons| mouse_buttons.get_pressed().next().is_some())
-        },
-        Binding::MouseMotion { .. }
-        | Binding::MouseWheel { .. }
-        | Binding::GamepadButton(_)
-        | Binding::GamepadAxis(_)
-        | Binding::Custom(_)
-        | Binding::None => false,
-    }
-}
-
-/// Returns `true` when every required modifier key is currently pressed.
-pub(crate) fn mod_keys_pressed(keyboard: &ButtonInput<KeyCode>, mod_keys: ModKeys) -> bool {
-    mod_keys.iter_keys().all(|keys| keyboard.any_pressed(keys))
 }

@@ -9,13 +9,13 @@
 //!   "`AnimateToFit` target" name on each face.
 //!
 //! Two cubes sit as a centered pair on the ground: the home cube and the
-//! `AnimateToFit` target. Both are `CameraHomeTarget`s, so `H` frames their union;
-//! `A` flies in to frame the `AnimateToFit` target alone.
+//! `AnimateToFit` target. Both are `CameraHomeTarget`s, so the startup home fit
+//! frames their union and Lagrange stores that pose. `H` returns to the stored
+//! pose; `A` animates in to frame the `AnimateToFit` target alone.
 //!
-//! `AnimateToFit` and Home both fit a target, so they would be
-//! indistinguishable by animation source alone. The `A AnimateToFit` chip is
-//! wired with `fairy_dust`'s `wire_chip_to_fit_target`, which matches on the
-//! framed `target` entity, so pressing `A` and `H` light only their own chips.
+//! `AnimateToFit` fits a target while home uses Lagrange's stored-pose glide.
+//! The `A AnimateToFit` chip is wired with `fairy_dust`'s
+//! `wire_chip_to_fit_target`, which matches on the framed `target` entity.
 //!
 //! Controls:
 //!   M - Toggle manual orbit animation on/off
@@ -51,11 +51,15 @@ use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraHomeKind;
 use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamHomePose;
+use bevy_lagrange::OrbitCamKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::PlayAnimation;
+use bevy_lagrange::Radius;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
@@ -107,9 +111,9 @@ fn main() {
         )
         // M / A / P run through Fairy Dust's shortcut binding, which fires each
         // only when no modifier is held — so the `Ctrl+Shift+A` home-gizmo chord
-        // no longer also triggers the bare-`A` AnimateToFit. `H` is bound by
-        // Fairy Dust's camera home; `stop_manual_on_animation_begin` lets manual
-        // orbit yield to that fit (and to A / P) without the example reading `H`.
+        // no longer also triggers the bare-`A` AnimateToFit. H is read in
+        // `manual_animate` only while manual mode has disabled the camera input
+        // context; otherwise Fairy Dust's filled preset handles home.
         .with_shortcut(KeyCode::KeyM, toggle_manual)
         .with_shortcut(KeyCode::KeyA, animate_to_fit)
         .with_shortcut(KeyCode::KeyP, play_animation)
@@ -128,13 +132,13 @@ fn main() {
 // `Update` system; the rest are one-shot handlers and an observer:
 //   - `M` (`toggle_manual`) flips `ManualAnimationState`. While active, `manual_animate` writes
 //     `OrbitCam` targets every frame with camera input disabled and smoothing zeroed, so the writes
-//     apply with no easing lag.
+//     apply with no easing lag. While manual mode is active, H calls `OrbitCamKind::apply_home`
+//     because `CameraInputDisabled` gates the filled preset binding.
 //   - `P` (`play_animation`) triggers `PlayAnimation`, handing the camera a `VecDeque<CameraMove>`
 //     built from `PLAY_ANIMATION_STEPS`; bevy_lagrange interpolates it move by move.
 //   - `A` (`animate_to_fit`) triggers `AnimateToFit` on the `FitTarget` cube.
-//   - `stop_manual_on_animation_begin` observes `AnimationBegin` and leaves manual mode whenever
-//     any animation starts — A, P, or Fairy Dust's `H` home fit — so manual writes never fight it.
-//     `H` itself is bound by `fairy_dust`'s camera home, not this example.
+//   - `stop_manual_on_animation_begin` observes `AnimationBegin` and leaves manual mode whenever A,
+//     P, or another animation starts, so manual writes never fight it.
 
 // HUD chip strings
 const FIT_CONTROL: &str = "A AnimateToFit";
@@ -161,7 +165,7 @@ const HOME_MARGIN: f32 = 0.5;
 const HOME_PITCH: f32 = ANIMATE_TO_FIT_PITCH;
 const HOME_YAW: f32 = ANIMATE_TO_FIT_YAW;
 
-/// One step of the `P` sequence; `play_animation` maps each to a `CameraMove::ToOrbit`.
+/// One step of the `P` sequence; `play_animation` maps each to a `CameraMove::ToOrbitalLookAt`.
 #[derive(Clone, Copy)]
 struct OrbitAnimationStep {
     duration: Duration,
@@ -257,10 +261,10 @@ fn toggle_manual(
         orbit_cam.orbit.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
         orbit_cam.zoom.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
         orbit_cam.pan.set_damping(MANUAL_MODE_SMOOTHNESS_ACTIVE);
-        if let (Some(yaw), Some(pitch)) = (orbit_cam.yaw, orbit_cam.pitch) {
-            orbit_cam.target_yaw = yaw;
-            orbit_cam.target_pitch = pitch;
-        }
+        // Freeze the orbit target at the current angle so manual writes start
+        // from where the camera is.
+        let current = orbit_cam.orbit.current();
+        orbit_cam.orbit.set_target(current);
     }
 }
 
@@ -292,11 +296,12 @@ fn play_animation(mut commands: Commands, camera_query: Query<Entity, With<Orbit
     let Ok(camera) = camera_query.single() else {
         return;
     };
-    let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbit {
-        focus:    PLAY_ANIMATION_FOCUS,
+    let moves = PLAY_ANIMATION_STEPS.map(|step| CameraMove::ToOrbitalLookAt {
+        target:   PLAY_ANIMATION_FOCUS,
         yaw:      step.yaw,
         pitch:    step.pitch,
         radius:   step.radius,
+        roll:     None,
         duration: step.duration,
         easing:   step.easing,
     });
@@ -305,9 +310,8 @@ fn play_animation(mut commands: Commands, camera_query: Query<Entity, With<Orbit
 }
 
 /// Leaves manual orbit when any camera animation starts, so the per-frame
-/// manual writes never fight a triggered fly. This is what handles `H`: Fairy
-/// Dust's camera home triggers the home fit, whose `AnimationBegin` lands here
-/// — the example never reads the reserved `H` key itself.
+/// manual writes never fight a triggered animation. The manual-mode H path is
+/// handled in `manual_animate` because stored-pose home has no `AnimationBegin`.
 fn stop_manual_on_animation_begin(
     _begin: On<AnimationBegin>,
     mut commands: Commands,
@@ -326,20 +330,33 @@ fn stop_manual_on_animation_begin(
 /// Per-frame manual animation; only runs when the resource flag is active.
 fn manual_animate(
     time: Res<Time>,
-    manual: Res<ManualAnimationState>,
-    mut query: Query<&mut OrbitCam>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut commands: Commands,
+    mut manual: ResMut<ManualAnimationState>,
+    mut query: Query<(Entity, &mut OrbitCam, &OrbitCamHomePose)>,
 ) {
     if manual.mode != ManualAnimationMode::Active {
         return;
     }
-    for mut orbit_cam in &mut query {
-        orbit_cam.target_yaw =
-            MANUAL_ORBIT_YAW_RADIANS_PER_SECOND.mul_add(time.delta_secs(), orbit_cam.target_yaw);
-        orbit_cam.target_pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
-        orbit_cam.radius = Some(
+    let home_pressed = keys.just_pressed(KeyCode::KeyH);
+    for (camera, mut orbit_cam, home) in &mut query {
+        if home_pressed {
+            // No manual `CameraHomed` trigger here: `stop_manual`
+            // re-enables camera input, so the preset home action sees the
+            // still-held H next frame and fires the event itself. Triggering
+            // here as well would announce the same press twice.
+            stop_manual(&mut commands, &mut manual, camera, &mut orbit_cam);
+            OrbitCamKind::apply_home(&mut orbit_cam, home);
+            continue;
+        }
+        let mut angles = orbit_cam.orbit.target();
+        angles.yaw = MANUAL_ORBIT_YAW_RADIANS_PER_SECOND.mul_add(time.delta_secs(), angles.yaw);
+        angles.pitch = time.elapsed_secs_wrapped().sin() * MANUAL_ORBIT_PITCH_AMPLITUDE;
+        orbit_cam.orbit.set_target(angles);
+        orbit_cam.zoom.set_current(Radius(
             (((time.elapsed_secs_wrapped() * MANUAL_ORBIT_RADIUS_FREQUENCY).cos() + 1.0) * 0.5)
                 .mul_add(MANUAL_ORBIT_RADIUS_DELTA, MANUAL_ORBIT_RADIUS_BASE),
-        );
+        ));
         orbit_cam.force_update();
     }
 }
@@ -372,9 +389,9 @@ const KEY_LIGHT_ILLUMINANCE: f32 = 2_500.0;
 
 // Both cubes use the canonical `example_cube_on_ground` launch height and sit
 // mirrored across the origin (`±CUBE_OFFSET_X`) so the pair reads as a centered
-// group on the ground plane with a gap between them. Both are
-// `CameraHomeTarget`s, so `H` frames their union; `A` frames only the
-// AnimateToFit target.
+// group on the ground plane with a gap between them. Both are `CameraHomeTarget`s,
+// so the startup fit stores a home pose for their union; H returns to that pose,
+// while A frames only the AnimateToFit target.
 const CUBE_SIZE: f32 = EXAMPLE_CUBE_SIZE;
 const CUBE_OFFSET_X: f32 = 1.5;
 /// Lift off the ground plane, matching the other examples' canonical clearance.
@@ -572,7 +589,7 @@ const EXPLAINERS: [Explainer; 3] = [
     Explainer {
         title: "Manual Orbit",
         lines: &[
-            "Writes OrbitCam target_yaw, target_pitch, and radius directly each frame for a continuous orbit.",
+            "Writes the OrbitCam orbit and zoom operations directly each frame for a continuous orbit.",
             "Camera input is disabled and smoothing zeroed so the writes apply with no easing lag.",
         ],
     },

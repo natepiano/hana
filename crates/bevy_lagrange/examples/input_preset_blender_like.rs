@@ -7,7 +7,7 @@
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBlenderLikePreset;
 use bevy_lagrange::OrbitCamControlSummary;
@@ -293,7 +293,7 @@ fn idle_labels(summary: &OrbitCamControlSummary, kind: OrbitCamInteractionKind) 
 fn active_labels(
     summary: &OrbitCamControlSummary,
     kind: OrbitCamInteractionKind,
-    sources: CameraInteractionSources,
+    sources: InteractionSources,
     zoom_direction: Option<ZoomDirection>,
 ) -> Option<Vec<String>> {
     let labels = summary

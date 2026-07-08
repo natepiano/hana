@@ -110,7 +110,6 @@ const POST_MODES: [(KeyCode, &str, PostAa); 4] = [
 const HOME_PITCH: f32 = 0.24;
 const HOME_YAW: f32 = 0.0;
 const HOME_FIT_MARGIN: f32 = 0.1;
-const HOME_FIT_DURATION_MS: u64 = 900;
 const DEMO_MOVE_DURATION_MS: u64 = 1200;
 
 /// `A` -- Off vs Anisotropic shows edge blur versus a crisp grazing edge.
@@ -258,7 +257,6 @@ fn main() {
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
         .margin(HOME_FIT_MARGIN)
-        .duration(Duration::from_millis(HOME_FIT_DURATION_MS))
         .with_title_bar(
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
@@ -616,11 +614,12 @@ struct DemoView {
 impl DemoView {
     /// The single eased orbital glide the key plays to reach this view.
     const fn camera_move(&self) -> CameraMove {
-        CameraMove::ToOrbit {
-            focus:    self.focus,
+        CameraMove::ToOrbitalLookAt {
+            target:   self.focus,
             yaw:      self.yaw,
             pitch:    self.pitch,
             radius:   self.radius,
+            roll:     None,
             duration: Duration::from_millis(DEMO_MOVE_DURATION_MS),
             easing:   EaseFunction::CubicInOut,
         }

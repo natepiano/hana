@@ -319,18 +319,15 @@ fn setup(
         Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    // Camera.
-    let midpoint = Vec3::ZERO;
+    // Camera. The default pan focus is the origin, and `FromTransform` derives
+    // the radius and orbit angles from this `Transform`.
     commands.spawn((
         Transform {
             translation: Vec3::new(0.00, 0.15, 2.7),
             rotation: Quat::from_xyzw(0.00, 0.0, 0.0, 1.0),
             ..default()
         },
-        OrbitCam {
-            focus: midpoint,
-            ..default()
-        },
+        OrbitCam::default(),
     ));
 
     // Panel entities.
@@ -432,7 +429,7 @@ fn update_dynamic_rows(
     mut dynamic: ResMut<DynamicRows>,
 ) {
     if let Ok(cam) = camera.single() {
-        dynamic.radius = format!("{:.1}", cam.radius.unwrap_or(3.0));
+        dynamic.radius = format!("{:.1}", cam.zoom.current().0);
     }
 
     dynamic.timer.tick(time.delta());

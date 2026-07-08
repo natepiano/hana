@@ -46,41 +46,46 @@ pub(crate) fn animate_camera(
     };
 
     let easing_function = easing.0;
-    let yaw = orbit_camera.target_yaw;
-    let pitch = orbit_camera.target_pitch;
-    let radius = orbit_camera.target_radius;
-    let focus = orbit_camera.target_focus;
+    let angles = orbit_camera.orbit.target();
+    let yaw = angles.yaw;
+    let pitch = angles.pitch;
+    let radius = orbit_camera.zoom.target().0;
+    let focus = orbit_camera.pan.target().0;
 
     let camera_moves = [
-        CameraMove::ToOrbit {
-            focus,
+        CameraMove::ToOrbitalLookAt {
+            target: focus,
             yaw: yaw + QUARTER_TURN_RADIANS,
             pitch,
             radius,
+            roll: None,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
-        CameraMove::ToOrbit {
-            focus,
+        CameraMove::ToOrbitalLookAt {
+            target: focus,
             yaw: QUARTER_TURN_RADIANS.mul_add(SECOND_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
+            roll: None,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
-        CameraMove::ToOrbit {
-            focus,
+        CameraMove::ToOrbitalLookAt {
+            target: focus,
             yaw: QUARTER_TURN_RADIANS.mul_add(THIRD_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
+            roll: None,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
-        CameraMove::ToOrbit {
-            focus,
+        CameraMove::ToOrbitalLookAt {
+            target: focus,
             yaw: QUARTER_TURN_RADIANS.mul_add(FOURTH_ORBIT_MOVE_QUARTER_TURNS, yaw),
             pitch,
             radius,
+            roll: None,
             duration: Duration::from_millis(ORBIT_MOVE_DURATION_MILLIS),
             easing: easing_function,
         },
@@ -111,7 +116,7 @@ pub(crate) fn reset_easing(
     flash.flash_reset();
 }
 
-/// Briefly highlights the `R Random Easing` / `E Reset Easing` title-bar chips after a
+/// Briefly highlights the `R Random Easing` / `0 Reset Easing` title-bar chips after a
 /// press. Each press arms a one-shot timer; [`tick_easing_flash`] clears it when
 /// it elapses, and the title bar polls [`Self::random_active`] /
 /// [`Self::reset_active`] to drive the chip highlight.
@@ -136,7 +141,7 @@ impl EasingFlash {
 }
 
 /// Ticks the easing-chip flash timers, clearing each when it elapses so the
-/// title bar's `R Random Easing` / `E Reset Easing` chips flip back to inactive.
+/// title bar's `R Random Easing` / `0 Reset Easing` chips flip back to inactive.
 pub(crate) fn tick_easing_flash(time: Res<Time>, mut flash: ResMut<EasingFlash>) {
     if flash.random.is_none() && flash.reset.is_none() {
         return;

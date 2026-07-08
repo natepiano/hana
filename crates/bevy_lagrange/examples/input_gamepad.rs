@@ -1,15 +1,14 @@
 //! Spawns an `OrbitCam` with `OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad())`
-//! and wires `GamepadButton::South` to an `AnimateToFit` home animation. The
-//! `GamepadHomeBegin` / `GamepadHomeEnd` events drive the title-bar chip via
-//! `wire_chip_to_events`, and a `GamepadConnection` resource updates the
-//! connection chip via `wire_chip_to_activation`. Cube faces show the preset's
-//! orbit / pan / zoom controls and light up while sticks and triggers move.
+//! and uses the filled camera-home bindings for H and Select. A
+//! `GamepadConnection` resource updates the connection chip via
+//! `wire_chip_to_activation`. Cube faces show the preset's orbit / pan / zoom
+//! controls and light up while sticks and triggers move.
 //!
 //! Controls:
 //!   Orbit — right stick (RB + RS for slow)
 //!   Pan   — left stick (LB + LS for slow)
 //!   Zoom  — RT in / LT out (RB + RT, LB + LT for slow)
-//!   South — fly camera home via `AnimateToFit`
+//!   H / Select — return to the camera home pose
 
 use std::time::Duration;
 
@@ -27,10 +26,6 @@ use bevy_diegetic::Padding;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextAlign;
 use bevy_diegetic::TextStyle;
-use bevy_kana::event;
-use bevy_lagrange::AnimateToFit;
-use bevy_lagrange::AnimationEnd;
-use bevy_lagrange::AnimationSource;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::NoPositionFallback;
@@ -42,7 +37,6 @@ use bevy_lagrange::OrbitCamInteractionState;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::describe_orbit_cam_controls;
 use fairy_dust::Anchor;
-use fairy_dust::CameraHomeEntity;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::CubeFacePanelContent;
@@ -84,23 +78,19 @@ fn main() {
         .yaw(CAMERA_YAW)
         .pitch(CAMERA_PITCH)
         .margin(HOME_MARGIN)
-        .without_title_bar_control()
         .with_title_bar(
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
-                .control(GAMEPAD_HOME_CONTROL)
                 .control(GAMEPAD_CONNECTED_CONTROL),
         )
         .wire_chip_to_activation::<GamepadConnection>(GAMEPAD_CONNECTED_CONTROL)
-        .wire_chip_to_events::<GamepadHomeBegin, GamepadHomeEnd>(GAMEPAD_HOME_CONTROL)
         .with_cube_spin_config::<GamepadInputCube>(
             CubeSpinConfig::new()
                 .without_key()
                 .with_chip(TitleChip::new(CUBE_SPIN_CHIP_ID, CUBE_SPIN_CHIP_LABEL)),
         )
         .init_resource::<GamepadConnection>()
-        .init_resource::<GamepadHomeAnimation>()
         .insert_resource(FaceLabelHold::default())
         .with_camera_control_panel()
         .lock_camera_preset()
@@ -111,26 +101,22 @@ fn main() {
             (
                 update_gamepad_connection,
                 update_face_labels,
-                home_on_gamepad_south,
                 toggle_spin_on_gamepad_west,
             ),
         )
-        .add_observer(finish_gamepad_home)
         .run();
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// GAMEPAD CAMERA — OrbitCamPreset::gamepad() + AnimateToFit on GamepadButton::South.
+// GAMEPAD CAMERA — OrbitCamPreset::gamepad() + filled H / Select home bindings.
 //
 // How it works:
 //   1. `spawn_camera` installs `OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad())` so
-//      Lagrange reads the gamepad sticks and triggers for orbit, pan, and zoom.
+//      Lagrange reads the gamepad sticks and triggers for orbit, pan, and zoom. Fairy Dust fills H
+//      and Select into the preset's home bindings.
 //   2. `update_gamepad_connection` polls `Query<&Gamepad>` and updates `GamepadConnection`; the
 //      connection chip is updated through `wire_chip_to_activation`.
-//   3. `home_on_gamepad_south` watches `GamepadButton::South`, triggers `AnimateToFit` to fly the
-//      camera back to the home pose, and fires `GamepadHomeBegin` so the home chip lights up.
-//   4. `finish_gamepad_home` observes `AnimationEnd` from `AnimationSource::AnimateToFit` and fires
-//      `GamepadHomeEnd` so the home chip turns off when the fly finishes.
+//   3. H and Select use the same stored-pose home glide as every preset-mode camera.
 // ═════════════════════════════════════════════════════════════════════════════
 
 const CAMERA_FOCUS: Vec3 = CUBE_TRANSLATION;
@@ -138,8 +124,6 @@ const CAMERA_PITCH: f32 = 0.45;
 const CAMERA_RADIUS: f32 = 6.0;
 const CAMERA_YAW: f32 = 0.55;
 const GAMEPAD_CONNECTED_CONTROL: &str = "Gamepad Connected";
-const GAMEPAD_HOME_CONTROL: &str = "GamepadButton::South - Home";
-const GAMEPAD_HOME_DURATION: Duration = Duration::from_millis(800);
 const HOME_MARGIN: f32 = 0.5;
 
 #[derive(Resource)]
@@ -159,36 +143,8 @@ impl TitleChipActivation for GamepadConnection {
     fn activation(&self) -> ControlActivation { self.control_activation }
 }
 
-#[derive(Resource)]
-struct GamepadHomeAnimation {
-    control_activation: ControlActivation,
-}
-
-impl Default for GamepadHomeAnimation {
-    fn default() -> Self {
-        Self {
-            control_activation: ControlActivation::Inactive,
-        }
-    }
-}
-
-event!(
-    /// Fires when the gamepad south face button starts a home animation.
-    GamepadHomeBegin
-);
-event!(
-    /// Fires when the gamepad south-button home animation ends.
-    GamepadHomeEnd
-);
-
 fn spawn_camera(mut commands: Commands) {
-    let mut camera = OrbitCam {
-        focus: CAMERA_FOCUS,
-        yaw: Some(CAMERA_YAW),
-        pitch: Some(CAMERA_PITCH),
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
+    let mut camera = OrbitCam::from_pose(CAMERA_FOCUS, (CAMERA_YAW, CAMERA_PITCH), CAMERA_RADIUS);
     apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
         camera,
@@ -211,38 +167,6 @@ fn update_gamepad_connection(
     }
 }
 
-fn home_on_gamepad_south(
-    gamepads: Query<&Gamepad>,
-    mut commands: Commands,
-    home: Option<Res<CameraHomeEntity>>,
-    cameras: Query<Entity, With<FairyDustOrbitCam>>,
-    mut gamepad_home: ResMut<GamepadHomeAnimation>,
-) {
-    if !gamepads
-        .iter()
-        .any(|gamepad| gamepad.just_pressed(GamepadButton::South))
-    {
-        return;
-    }
-
-    let Some(home) = home else {
-        return;
-    };
-    let Ok(camera) = cameras.single() else {
-        return;
-    };
-
-    gamepad_home.control_activation = ControlActivation::Active;
-    commands.trigger(GamepadHomeBegin);
-    commands.trigger(
-        AnimateToFit::new(camera, home.0)
-            .yaw(CAMERA_YAW)
-            .pitch(CAMERA_PITCH)
-            .margin(HOME_MARGIN)
-            .duration(GAMEPAD_HOME_DURATION),
-    );
-}
-
 fn toggle_spin_on_gamepad_west(
     gamepads: Query<&Gamepad>,
     mut control: ResMut<CubeSpinControl<GamepadInputCube>>,
@@ -253,20 +177,6 @@ fn toggle_spin_on_gamepad_west(
     {
         control.toggle();
     }
-}
-
-fn finish_gamepad_home(
-    event: On<AnimationEnd>,
-    mut commands: Commands,
-    mut gamepad_home: ResMut<GamepadHomeAnimation>,
-) {
-    if gamepad_home.control_activation != ControlActivation::Active
-        || event.source != AnimationSource::AnimateToFit
-    {
-        return;
-    }
-    gamepad_home.control_activation = ControlActivation::Inactive;
-    commands.trigger(GamepadHomeEnd);
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -459,7 +369,6 @@ fn gamepad_has_input(gamepad: &Gamepad) -> bool {
         || gamepad.left_stick().length() > STICK_ACTIVE_THRESHOLD
         || trigger_value(gamepad, GamepadButton::RightTrigger2) > TRIGGER_ACTIVE_THRESHOLD
         || trigger_value(gamepad, GamepadButton::LeftTrigger2) > TRIGGER_ACTIVE_THRESHOLD
-        || gamepad.pressed(GamepadButton::South)
 }
 
 fn active_orbit_content(

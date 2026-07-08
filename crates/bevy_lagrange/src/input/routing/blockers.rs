@@ -1,14 +1,14 @@
 //! Per-camera input gating state derived from the routing snapshot.
 //!
 //! Types:
-//! - [`OrbitCamInputBlockers`] — component carrying the set of reasons (if any) why a camera should
+//! - [`CameraInputBlockers`] — component carrying the set of reasons (if any) why a camera should
 //!   not receive input this frame. Computed once per frame from a
 //!   [`CameraRoutingSnapshot`](super::snapshot::CameraRoutingSnapshot).
-//! - [`OrbitCamInputBlockerBits`] — internal bitflag set of blocker reasons
+//! - [`CameraInputBlockerBits`] — internal bitflag set of blocker reasons
 //!   (`DISABLED`/`INACTIVE_CAMERA`/`ANIMATION_IGNORE`/`UNAVAILABLE_OWNER`).
-//! - [`OrbitCamInputContextGated`] — component flipping each camera's interaction context between
-//!   allowed and blocked, derived from `OrbitCamInputBlockers::is_blocked`.
-//! - [`ContextGate`] — `Allowed`/`Blocked` enum that `OrbitCamInputContextGated` wraps.
+//! - [`CameraInputContextGated`] — component flipping each camera's interaction context between
+//!   allowed and blocked, derived from `CameraInputBlockers::is_blocked`.
+//! - [`ContextGate`] — `Allowed`/`Blocked` enum that `CameraInputContextGated` wraps.
 
 use bevy::prelude::*;
 
@@ -17,7 +17,7 @@ use super::snapshot::CameraRoutingSnapshotFlags;
 
 bitflags::bitflags! {
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-    pub(crate) struct OrbitCamInputBlockerBits: u8 {
+    pub(crate) struct CameraInputBlockerBits: u8 {
         const DISABLED = 1 << 0;
         const INACTIVE_CAMERA = 1 << 1;
         const ANIMATION_IGNORE = 1 << 2;
@@ -26,35 +26,35 @@ bitflags::bitflags! {
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct OrbitCamInputBlockers {
-    pub(crate) bits: OrbitCamInputBlockerBits,
+pub(crate) struct CameraInputBlockers {
+    pub(crate) bits: CameraInputBlockerBits,
 }
 
-impl OrbitCamInputBlockers {
+impl CameraInputBlockers {
     pub const fn is_blocked(self) -> bool { !self.bits.is_empty() }
 
     pub(super) fn from_snapshot(
         snapshot: &CameraRoutingSnapshot,
         routed_camera: Option<Entity>,
     ) -> Self {
-        let mut bits = OrbitCamInputBlockerBits::empty();
+        let mut bits = CameraInputBlockerBits::empty();
         if snapshot.has(CameraRoutingSnapshotFlags::DISABLED) {
-            bits.insert(OrbitCamInputBlockerBits::DISABLED);
+            bits.insert(CameraInputBlockerBits::DISABLED);
         }
         if !snapshot.has(CameraRoutingSnapshotFlags::MANUAL)
             && routed_camera != Some(snapshot.entity)
         {
-            bits.insert(OrbitCamInputBlockerBits::INACTIVE_CAMERA);
+            bits.insert(CameraInputBlockerBits::INACTIVE_CAMERA);
         }
         if snapshot.has(CameraRoutingSnapshotFlags::ANIMATION_IGNORE) {
-            bits.insert(OrbitCamInputBlockerBits::ANIMATION_IGNORE);
+            bits.insert(CameraInputBlockerBits::ANIMATION_IGNORE);
         }
         Self { bits }
     }
 }
 
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct OrbitCamInputContextGated {
+pub(crate) struct CameraInputContextGated {
     pub(crate) context_gate: ContextGate,
 }
 

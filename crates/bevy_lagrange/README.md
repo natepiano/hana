@@ -144,11 +144,12 @@ Chain multiple movements into a sequence:
 
 ```rust ignore
 commands.trigger(PlayAnimation::new(camera, [
-    CameraMove::ToOrbit {
-        focus: Vec3::ZERO,
+    CameraMove::ToOrbitalLookAt {
+        target: Vec3::ZERO,
         yaw: 0.0,
         pitch: 0.5,
         radius: 5.0,
+        roll: None,
         duration: Duration::from_millis(800),
         easing: EaseFunction::CubicOut,
     },

@@ -1,7 +1,5 @@
 //! `CameraHomeBuilder` impls.
 
-use std::time::Duration;
-
 use bevy::app::Plugins;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::ScheduleLabel;
@@ -18,6 +16,7 @@ use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
 use crate::Anchor;
+use crate::OrbitCamPose;
 use crate::camera_home;
 use crate::camera_home::CameraHomeConfig;
 use crate::camera_home::HomeTitleBarControl;
@@ -49,16 +48,6 @@ impl<S> CameraHomeBuilder<S> {
     #[must_use]
     pub const fn pitch(mut self, pitch: f32) -> Self {
         self.config.pitch = pitch;
-        self
-    }
-
-    /// Sets the duration of the `H`-triggered home animation.
-    ///
-    /// The startup framing is always instant; this only affects subsequent
-    /// `H` presses.
-    #[must_use]
-    pub const fn duration(mut self, duration: Duration) -> Self {
-        self.config.duration = duration;
         self
     }
 
@@ -237,6 +226,16 @@ impl CameraHomeBuilder<NoOrbitCam> {
         self.finish().with_orbit_cam_preset(configure, preset)
     }
 
+    /// Finalizes the current home registration, spawns an `OrbitCam` with an
+    /// explicit startup pose, and installs one built-in input preset.
+    pub fn with_orbit_cam_preset_pose(
+        self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_orbit_cam_preset_pose(pose, preset)
+    }
+
     /// Finalizes the current home registration, spawns an `OrbitCam`, installs
     /// one built-in input preset, and inserts extra camera-side components.
     pub fn with_orbit_cam_preset_bundle<F, B>(
@@ -251,6 +250,22 @@ impl CameraHomeBuilder<NoOrbitCam> {
     {
         self.finish()
             .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the current home registration, spawns an `OrbitCam` with an
+    /// explicit startup pose, installs one built-in input preset, and inserts
+    /// extra camera-side components.
+    pub fn with_orbit_cam_preset_pose_bundle<B>(
+        self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_pose_bundle(pose, preset, bundle)
     }
 
     /// Finalizes the current home registration, spawns an `OrbitCam`, and

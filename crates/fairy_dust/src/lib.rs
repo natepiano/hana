@@ -7,8 +7,13 @@
 //!
 //! ```ignore
 //! fairy_dust::sprinkle_example()
-//!     .with_orbit_cam_preset(
-//!         |orbit_cam| { orbit_cam.radius = Some(5.0); },
+//!     .with_orbit_cam_preset_pose(
+//!         OrbitCamPose {
+//!             focus:  Vec3::ZERO,
+//!             yaw:    0.0,
+//!             pitch:  0.3,
+//!             radius: 5.0,
+//!         },
 //!         OrbitCamPreset::blender_like(),
 //!     )
 //!     .with_stable_transparency()       // only callable after with_orbit_cam_*
@@ -71,6 +76,7 @@ pub use builder::StudioLightingBuilder;
 pub use builder::TitleBarBuilder;
 pub use builder::WithOrbitCam;
 pub use camera_control_panel::CameraGuidance;
+pub use camera_control_panel::CameraGuidanceAction;
 pub use camera_control_panel::CameraGuidanceRow;
 pub use camera_home::CameraHomeEntity;
 pub use camera_home::CameraHomeTarget;
@@ -93,6 +99,7 @@ pub use cube_spin::CubeSpinTimeSource;
 pub use cube_spin::FairyDustCubeSpinTarget;
 pub use lighting::FairyDustStudioLightingSet;
 pub use orbit_cam::FairyDustOrbitCam;
+pub use orbit_cam::OrbitCamPose;
 pub use orbit_cam::apply_example_orbit_cam_limits;
 pub use primitive::CubeFaceLabel;
 pub use primitive::CubeFacePanelActivity;

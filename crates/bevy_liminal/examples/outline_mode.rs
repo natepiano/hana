@@ -166,17 +166,18 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let mut orbit_cam = OrbitCam {
-        focus: CAMERA_FOCUS,
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
+    let mut orbit_cam = OrbitCam::default();
+    orbit_cam.pan.snap_to(CAMERA_FOCUS);
     orbit_cam.orbit.set_damping(CAMERA_SMOOTHNESS);
     orbit_cam.pan.set_damping(CAMERA_SMOOTHNESS);
     orbit_cam.zoom.set_damping(CAMERA_SMOOTHNESS);
+    // Place the camera at `CAMERA_RADIUS` along the view ray so `FromTransform`
+    // derives the focus, radius, and orbit angles to match.
+    let camera_position =
+        CAMERA_FOCUS + (CAMERA_POSITION - CAMERA_FOCUS).normalize() * CAMERA_RADIUS;
     commands.spawn((
         Camera3d::default(),
-        Transform::from_translation(CAMERA_POSITION).looking_at(CAMERA_FOCUS, Vec3::Y),
+        Transform::from_translation(camera_position).looking_at(CAMERA_FOCUS, Vec3::Y),
         orbit_cam,
         OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         OutlineCamera,

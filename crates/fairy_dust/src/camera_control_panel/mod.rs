@@ -1,14 +1,15 @@
 //! Capability: a singleton screen-space `bevy_diegetic` camera control panel
-//! that follows the currently-routed `bevy_lagrange::OrbitCam`.
+//! that follows the currently selected lagrange camera.
 //!
 //! Single-camera examples and multi-camera examples both produce exactly one
-//! panel at the bottom-right; its contents swap to reflect whichever camera
-//! the cursor is currently routing input to (per `ResolvedOrbitCamInputRoute`).
-//! Cameras may optionally carry a `Name` component — when present, it drives
-//! the `CAMERA: <name>` title.
+//! panel at the bottom-right; its contents swap to reflect the routed
+//! `OrbitCam`, or the currently-selected `FreeCam` when Fairy Dust switches
+//! camera kind. Cameras may optionally carry a `Name` component — when present,
+//! it drives the `CAMERA: <name>` title.
 
 mod constants;
 mod display;
+mod free_settings;
 mod guidance;
 mod layout;
 mod preset_switch;
@@ -22,20 +23,28 @@ use bevy_diegetic::DiegeticPanelCommands;
 use bevy_diegetic::DiegeticUiPlugin;
 use bevy_diegetic::Fit;
 use bevy_diegetic::PanelChanged;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::CameraHomed;
+use bevy_lagrange::CameraSlowModeState;
+use bevy_lagrange::FreeCam;
+use bevy_lagrange::FreeCamInputMode;
+use bevy_lagrange::FreeCamInteractionEnded;
+use bevy_lagrange::FreeCamInteractionSourcesChanged;
+use bevy_lagrange::FreeCamInteractionSpeedChanged;
+use bevy_lagrange::FreeCamInteractionStarted;
+use bevy_lagrange::FreeCamInteractionState;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionEnded;
 use bevy_lagrange::OrbitCamInteractionSourcesChanged;
 use bevy_lagrange::OrbitCamInteractionSpeedChanged;
 use bevy_lagrange::OrbitCamInteractionStarted;
 use bevy_lagrange::OrbitCamInteractionState;
-use bevy_lagrange::OrbitCamSlowModeState;
-use bevy_lagrange::ResolvedOrbitCamInputRoute;
+use bevy_lagrange::ResolvedCameraInputRoute;
 use display::CameraGuidanceDisplay;
 use display::CameraGuidanceDisplayState;
 use display::RenderState;
-use display::SlowMode;
 pub use guidance::CameraGuidance;
+pub use guidance::CameraGuidanceAction;
 pub use guidance::CameraGuidanceRow;
 use layout::build_guidance_tree;
 pub(crate) use preset_switch::CameraPresetSwitching;
@@ -47,8 +56,8 @@ use crate::ensure_plugin;
 use crate::screen_panels;
 
 /// Singleton marker for the camera control panel. `bound_camera` records
-/// which `OrbitCam` the panel is currently showing — updated each frame from
-/// `ResolvedOrbitCamInputRoute`.
+/// which lagrange camera the panel is currently showing — updated each frame
+/// from routing and panel camera candidates.
 #[derive(Component)]
 pub(crate) struct CameraGuidancePanel {
     bound_camera: Option<Entity>,
@@ -69,6 +78,7 @@ impl Default for CameraControlPanelBackground {
 
 pub(crate) fn install(app: &mut App) {
     ensure_panel_plugins(app);
+    free_settings::install(app);
     preset_switch::install(app);
     app.init_resource::<CameraControlPanelBackground>();
     app.add_systems(Startup, spawn_panel);
@@ -78,6 +88,7 @@ pub(crate) fn install(app: &mut App) {
             rebind_panel_on_route_change,
             track_slow_mode_state,
             track_live_zoom_direction,
+            track_live_free_direction,
             tick_highlight_release,
             repaint_panel_display,
         )
@@ -86,7 +97,12 @@ pub(crate) fn install(app: &mut App) {
     app.add_observer(refresh_on_interaction_started)
         .add_observer(refresh_on_interaction_ended)
         .add_observer(refresh_on_sources_changed)
-        .add_observer(refresh_on_speed_changed);
+        .add_observer(refresh_on_speed_changed)
+        .add_observer(refresh_on_free_interaction_started)
+        .add_observer(refresh_on_free_interaction_ended)
+        .add_observer(refresh_on_free_sources_changed)
+        .add_observer(refresh_on_free_speed_changed)
+        .add_observer(refresh_on_camera_homed);
 }
 
 fn ensure_panel_plugins(app: &mut App) {
@@ -134,23 +150,34 @@ fn spawn_panel(
 /// Placeholder snapshot rendered for the one frame before the panel binds to a
 /// camera. Uses the default input mode so it never claims an unrelated preset.
 fn default_snapshot() -> CameraGuidanceSnapshot {
-    resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::default()))
+    resolve_guidance_snapshot(None, None, Some(&OrbitCamInputMode::default()), None, None)
 }
 
-/// Rebuilds the panel snapshot when the routed camera changes, or when the
+/// Rebuilds the panel snapshot when the selected camera changes, or when the
 /// currently-bound camera's input-mode components change.
 fn rebind_panel_on_route_change(
     mut commands: Commands,
-    route: Res<ResolvedOrbitCamInputRoute>,
+    route: Res<ResolvedCameraInputRoute>,
     cameras: Query<(
         Option<&Name>,
         Option<&CameraGuidance>,
         Option<&OrbitCamInteractionState>,
-        Option<&OrbitCamSlowModeState>,
+        Option<&FreeCamInteractionState>,
+        Option<&CameraSlowModeState>,
         Option<&OrbitCamInputMode>,
+        Option<&FreeCam>,
+        Option<&FreeCamInputMode>,
     )>,
-    orbit_cameras: Query<Entity, With<OrbitCamInputMode>>,
-    changed_cameras: Query<Entity, Or<(Changed<CameraGuidance>, Changed<OrbitCamInputMode>)>>,
+    panel_cameras: Query<Entity, Or<(With<OrbitCamInputMode>, With<FreeCamInputMode>)>>,
+    changed_cameras: Query<
+        Entity,
+        Or<(
+            Changed<CameraGuidance>,
+            Changed<FreeCam>,
+            Changed<OrbitCamInputMode>,
+            Changed<FreeCamInputMode>,
+        )>,
+    >,
     panel: Single<(
         Entity,
         &mut CameraGuidancePanel,
@@ -158,11 +185,9 @@ fn rebind_panel_on_route_change(
     )>,
     background: Res<CameraControlPanelBackground>,
 ) {
-    // Before the cursor routes to a camera, follow an orbit camera so the panel
-    // shows a real preset instead of the fabricated default. With one camera
-    // that is the only choice; with several, the lowest-entity camera (first
-    // spawned) stands in until the cursor routes input to a specific one.
-    let routed = route.routed_camera().or_else(|| orbit_cameras.iter().min());
+    // Before routing selects a camera, follow the first panel-capable camera so
+    // the panel shows a real preset instead of the fabricated default.
+    let routed = route.routed_camera().or_else(|| panel_cameras.iter().min());
     let (panel_entity, mut panel_marker, mut display_state) = panel.into_inner();
 
     let route_changed = panel_marker.bound_camera != routed;
@@ -176,25 +201,38 @@ fn rebind_panel_on_route_change(
     let Some(cam) = routed else {
         return;
     };
-    let Ok((name, guidance, state, slow_mode, mode)) = cameras.get(cam) else {
+    let Ok((name, guidance, orbit_state, free_state, slow_mode, orbit_mode, free_cam, free_mode)) =
+        cameras.get(cam)
+    else {
         return;
     };
 
-    let snapshot = resolve_guidance_snapshot(name, guidance, mode);
-    let slow_mode = if snapshot.slow_mode_binding_label.is_some()
-        && slow_mode.is_some_and(|state| state.is_active())
-    {
-        SlowMode::Active
+    let snapshot = resolve_guidance_snapshot(name, guidance, orbit_mode, free_cam, free_mode);
+    let slow_mode_active = snapshot.slow_mode_binding_label.is_some()
+        && slow_mode.is_some_and(|state| state.is_active());
+    let display = if free_mode.is_some() {
+        CameraGuidanceDisplay::from_free_camera_state(
+            free_state.copied().unwrap_or_default(),
+            slow_mode_active,
+        )
     } else {
-        SlowMode::Inactive
+        CameraGuidanceDisplay::from_orbit_camera_state(
+            orbit_state.copied().unwrap_or_default(),
+            slow_mode_active,
+        )
     };
-    let display =
-        CameraGuidanceDisplay::from_camera_state(state.copied().unwrap_or_default(), slow_mode);
+    // A same-camera rebuild (the camera is easing home) re-derives interaction
+    // rows from camera state but must keep the panel-side home pulse; a camera
+    // switch drops it so the new camera starts unlit.
+    let home_highlight = (!route_changed).then(|| display_state.home_highlight());
     *display_state = CameraGuidanceDisplayState::from_display(display);
+    if let Some((home, home_release)) = home_highlight {
+        display_state.restore_home_highlight(home, home_release);
+    }
     commands.entity(panel_entity).insert(snapshot.clone());
     commands.set_tree(
         panel_entity,
-        build_guidance_tree(&snapshot, display, background.0),
+        build_guidance_tree(&snapshot, display_state.display(), background.0),
     );
 }
 
@@ -206,10 +244,11 @@ fn refresh_on_interaction_started(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.set_sources(event.kind, event.sources);
+    let action = CameraGuidanceAction::from_orbit_interaction(event.kind);
+    display.set_sources(action, event.sources);
     // A fresh interaction's speed is unsettled until lagrange reports it, so the
     // singular variant does not flash before a slow-gate chord registers.
-    display.set_speed(event.kind, None);
+    display.set_speed(action, None);
 }
 
 fn refresh_on_interaction_ended(
@@ -220,7 +259,8 @@ fn refresh_on_interaction_ended(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.set_sources(event.kind, CameraInteractionSources::NONE);
+    let action = CameraGuidanceAction::from_orbit_interaction(event.kind);
+    display.set_sources(action, InteractionSources::NONE);
 }
 
 fn refresh_on_sources_changed(
@@ -231,11 +271,12 @@ fn refresh_on_sources_changed(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.set_sources(event.kind, event.current);
+    let action = CameraGuidanceAction::from_orbit_interaction(event.kind);
+    display.set_sources(action, event.current);
 }
 
 fn track_slow_mode_state(
-    cameras: Query<&OrbitCamSlowModeState>,
+    cameras: Query<&CameraSlowModeState>,
     panel: Single<(
         &CameraGuidancePanel,
         &CameraGuidanceSnapshot,
@@ -246,16 +287,12 @@ fn track_slow_mode_state(
     let Some(camera) = panel_marker.bound_camera else {
         return;
     };
-    let slow_mode = if snapshot.slow_mode_binding_label.is_some()
-        && cameras
-            .get(camera)
-            .is_ok_and(|slow_mode| slow_mode.is_active())
-    {
-        SlowMode::Active
-    } else {
-        SlowMode::Inactive
-    };
-    display.set_slow_mode(slow_mode);
+    display.set_slow_mode_active(
+        snapshot.slow_mode_binding_label.is_some()
+            && cameras
+                .get(camera)
+                .is_ok_and(|slow_mode| slow_mode.is_active()),
+    );
 }
 
 /// Mirrors the bound camera's reported zoom direction onto the panel display
@@ -275,6 +312,23 @@ fn track_live_zoom_direction(
     }
 }
 
+/// Mirrors the bound `FreeCam`'s reported move directions onto the panel display
+/// each frame, so a decomposed row lights only while its own affordance — the
+/// stick, its boost gate, a vertical trigger, or a roll direction — is engaged,
+/// instead of every row that shares the `Translate` or `Roll` action.
+fn track_live_free_direction(
+    cameras: Query<&FreeCamInteractionState>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    let Some(camera) = panel_marker.bound_camera else {
+        return;
+    };
+    if let Ok(state) = cameras.get(camera) {
+        display.set_free_directions(state.directions());
+    }
+}
+
 fn tick_highlight_release(time: Res<Time>, panel: Single<&mut CameraGuidanceDisplayState>) {
     panel.into_inner().tick_highlight_release(time.delta());
 }
@@ -287,7 +341,70 @@ fn refresh_on_speed_changed(
     if panel_marker.bound_camera != Some(event.camera) {
         return;
     }
-    display.set_speed(event.kind, Some(event.speed));
+    let action = CameraGuidanceAction::from_orbit_interaction(event.kind);
+    display.set_speed(action, Some(event.speed));
+}
+
+fn refresh_on_free_interaction_started(
+    event: On<FreeCamInteractionStarted>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    let action = CameraGuidanceAction::from_free_interaction(event.kind);
+    display.set_sources(action, event.sources);
+    display.set_speed(action, None);
+}
+
+fn refresh_on_free_interaction_ended(
+    event: On<FreeCamInteractionEnded>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    let action = CameraGuidanceAction::from_free_interaction(event.kind);
+    display.set_sources(action, InteractionSources::NONE);
+}
+
+fn refresh_on_free_sources_changed(
+    event: On<FreeCamInteractionSourcesChanged>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    let action = CameraGuidanceAction::from_free_interaction(event.kind);
+    display.set_sources(action, event.current);
+}
+
+fn refresh_on_free_speed_changed(
+    event: On<FreeCamInteractionSpeedChanged>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    let action = CameraGuidanceAction::from_free_interaction(event.kind);
+    display.set_speed(action, Some(event.speed));
+}
+
+/// Lights the home row when a camera home is invoked. The row holds through the
+/// eased glide via the display's home countdown, then fades.
+fn refresh_on_camera_homed(
+    event: On<CameraHomed>,
+    panel: Single<(&CameraGuidancePanel, &mut CameraGuidanceDisplayState)>,
+) {
+    let (panel_marker, mut display) = panel.into_inner();
+    if panel_marker.bound_camera != Some(event.camera) {
+        return;
+    }
+    display.pulse_home(event.sources);
 }
 
 /// Rebuilds the panel tree when the mirrored display state changes between

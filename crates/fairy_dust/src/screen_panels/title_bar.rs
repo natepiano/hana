@@ -18,6 +18,7 @@ use super::constants::CONTROL_ACTIVE_COLOR;
 use super::constants::CONTROL_INACTIVE_COLOR;
 use super::constants::DIVIDER_COLOR;
 use super::constants::HELP_CONTROL;
+use super::constants::HOME_TITLE_BAR_HIGHLIGHT_HOLD;
 use super::constants::SEPARATOR_HEIGHT;
 use super::constants::SEPARATOR_WIDTH;
 use super::constants::TITLE_BAR_CHILD_GAP;
@@ -302,6 +303,36 @@ impl TitleBarControlState {
 
 #[derive(Component)]
 struct TitleBarMarker;
+
+#[derive(Resource, Default)]
+pub(crate) struct HomeTitleBarFlash {
+    timer: Option<Timer>,
+}
+
+impl HomeTitleBarFlash {
+    pub(crate) fn start(&mut self) {
+        self.timer = Some(Timer::new(HOME_TITLE_BAR_HIGHLIGHT_HOLD, TimerMode::Once));
+    }
+
+    pub(crate) const fn cancel(&mut self) { self.timer = None; }
+}
+
+pub(crate) fn tick_home_title_bar_flash(
+    time: Res<Time>,
+    mut flash: ResMut<HomeTitleBarFlash>,
+    mut bars: Query<&mut TitleBarControlState>,
+) {
+    let Some(timer) = flash.timer.as_mut() else {
+        return;
+    };
+    if !timer.tick(time.delta()).just_finished() {
+        return;
+    }
+    for mut bar in &mut bars {
+        bar.set_active(HOME_CONTROL, ControlActivation::Inactive);
+    }
+    flash.timer = None;
+}
 
 pub(super) fn spawn_title_bar_with_home_chip(
     commands: &mut Commands,

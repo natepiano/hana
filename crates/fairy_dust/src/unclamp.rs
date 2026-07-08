@@ -7,7 +7,9 @@
 //! observer, so it overrides whatever limits the camera `configure` closure set.
 
 use bevy::prelude::*;
+use bevy_lagrange::AnglePairLimit;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::ScalarLimit;
 
 use crate::constants::UNCLAMPED_ZOOM_LOWER_LIMIT;
 use crate::orbit_cam::FairyDustOrbitCam;
@@ -18,8 +20,11 @@ fn unclamp_limits(trigger: On<Add, FairyDustOrbitCam>, mut cameras: Query<&mut O
     let Ok(mut camera) = cameras.get_mut(trigger.entity) else {
         return;
     };
-    camera.pitch_upper_limit = None;
-    camera.pitch_lower_limit = None;
-    camera.zoom_upper_limit = None;
-    camera.zoom_lower_limit = UNCLAMPED_ZOOM_LOWER_LIMIT;
+    // Clear the per-axis angle limits and drop the zoom ceiling, keeping only a
+    // small positive floor so the camera can't pass through the focus.
+    *camera.orbit.limit_mut() = AnglePairLimit::default();
+    *camera.zoom.limit_mut() = ScalarLimit::Clamp {
+        min: UNCLAMPED_ZOOM_LOWER_LIMIT,
+        max: f32::INFINITY,
+    };
 }

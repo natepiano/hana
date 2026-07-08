@@ -30,8 +30,12 @@ use bevy_diegetic::Pt;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use bevy_diegetic::Unit;
+use bevy_lagrange::Focus;
 use bevy_lagrange::LagrangePlugin;
+use bevy_lagrange::OrbitAngles;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::Radius;
+use bevy_lagrange::ScalarLimit;
 use bevy_lagrange::ZoomToFit;
 
 // ── Layout ───────────────────────────────────────────────────────────
@@ -201,15 +205,20 @@ fn spawn_lighting_and_camera(commands: &mut Commands, total_height: f32) {
         Transform::from_xyz(-0.5, 1.5, -1.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn((
-        OrbitCam {
-            focus: Vec3::new(0.0, total_height / 2.0, 0.0),
-            radius: Some(0.25),
-            yaw: Some(0.0),
-            pitch: Some(0.0),
-            zoom_lower_limit: 0.000_000_1,
-            ..default()
+    let mut camera = OrbitCam::from_pose(
+        Focus(Vec3::new(0.0, total_height / 2.0, 0.0)),
+        OrbitAngles {
+            yaw:   0.0,
+            pitch: 0.0,
         },
+        Radius(0.25),
+    );
+    *camera.zoom.limit_mut() = ScalarLimit::Clamp {
+        min: 0.000_000_1,
+        max: f32::INFINITY,
+    };
+    commands.spawn((
+        camera,
         Projection::Perspective(PerspectiveProjection {
             near: 0.001,
             near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.001),

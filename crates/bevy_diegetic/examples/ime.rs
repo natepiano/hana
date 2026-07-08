@@ -33,6 +33,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use fairy_dust::Face;
 use fairy_dust::OrbitCam;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::sprinkle_example;
 
@@ -124,11 +125,14 @@ fn title_bar() -> TitleBar {
         .controls(["/ Edit", "Enter Save", "Esc Cancel"])
 }
 
-const fn configure_camera(orbit_cam: &mut OrbitCam) {
-    orbit_cam.focus = CAMERA_FOCUS;
-    orbit_cam.radius = Some(CAMERA_RADIUS);
-    orbit_cam.yaw = Some(CAMERA_YAW);
-    orbit_cam.pitch = Some(CAMERA_PITCH);
+fn configure_camera(orbit_cam: &mut OrbitCam) {
+    OrbitCamPose {
+        focus:  CAMERA_FOCUS,
+        yaw:    CAMERA_YAW,
+        pitch:  CAMERA_PITCH,
+        radius: CAMERA_RADIUS,
+    }
+    .apply_to(orbit_cam);
 }
 
 fn setup_editable_text(

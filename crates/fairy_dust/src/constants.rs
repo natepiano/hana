@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use bevy::prelude::Color;
+use bevy::prelude::GamepadButton;
 use bevy::prelude::KeyCode;
 use bevy::prelude::Vec3;
 use bevy_diegetic::Pt;
@@ -37,9 +38,11 @@ pub(crate) const BLOOM_THRESHOLD_SOFTNESS: f32 = 0.2;
 /// dark background.
 pub(crate) const HOME_AABB_GIZMO_COLOR: Color = Color::srgb(1.0, 0.5, 0.0);
 pub(crate) const HOME_CONTROL: &str = "H Home";
-pub(crate) const HOME_DEFAULT_DURATION: Duration = Duration::from_millis(800);
 pub(crate) const HOME_DEFAULT_MARGIN: f32 = 0.15;
+/// Keyboard binding filled into Lagrange keyboard-family presets when camera home is enabled.
 pub(crate) const HOME_KEY: KeyCode = KeyCode::KeyH;
+/// Gamepad binding filled into Lagrange gamepad presets when camera home is enabled.
+pub(crate) const HOME_BUTTON: GamepadButton = GamepadButton::Select;
 /// Minimum cube scale along any axis. Text and other planar geometry can give
 /// a union with zero extent in one axis; the fit math handles a zero-extent
 /// vertex cloud poorly, so floor each axis to a small positive value.
@@ -242,6 +245,6 @@ pub const LABEL_SIZE: Pt = Pt(11.0);
 pub const TITLE_SIZE: Pt = Pt(14.0);
 
 // unclamp
-/// Zoom floor left in place after unclamping. `zoom_lower_limit` is not
-/// optional and must stay > 0, or the camera sticks at radius 0.
+/// Zoom floor left in place after unclamping. The zoom limit's lower bound must
+/// stay > 0, or the camera sticks at radius 0.
 pub(crate) const UNCLAMPED_ZOOM_LOWER_LIMIT: f32 = 1e-9;

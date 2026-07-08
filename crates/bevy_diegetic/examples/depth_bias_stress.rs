@@ -36,6 +36,7 @@ use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -166,12 +167,12 @@ fn main() {
         .with_save_window_position()
         .with_studio_lighting()
         .with_ground_plane()
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = HOME_FOCUS;
-                cam.radius = Some(HOME_RADIUS);
-                cam.yaw = Some(HOME_YAW);
-                cam.pitch = Some(HOME_PITCH);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  HOME_FOCUS,
+                yaw:    HOME_YAW,
+                pitch:  HOME_PITCH,
+                radius: HOME_RADIUS,
             },
             OrbitCamPreset::blender_like(),
         )

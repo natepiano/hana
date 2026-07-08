@@ -4,8 +4,6 @@
 //! The controls change only the sweep element's `DrawZIndex`; the layout stays
 //! an `El::overlay()` with both children sharing the panel content rectangle.
 
-use std::time::Duration;
-
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -34,6 +32,7 @@ use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::LABEL_SIZE;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -46,7 +45,6 @@ const HOME_RADIUS: f32 = 0.50;
 const HOME_YAW: f32 = 0.0;
 const PANEL_BACKGROUND_ALPHA: f32 = 0.88;
 const PANEL_TRANSLATION: Vec3 = Vec3::new(0.0, 0.015, 0.0);
-const ZOOM_DURATION_MS: u64 = 650;
 
 const PAGE_BORDER_COLOR: Color = Color::srgba(0.15, 0.7, 0.9, 0.5);
 const PAGE_BORDER_IN: f32 = 0.014;
@@ -134,18 +132,17 @@ fn main() {
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = HOME_FOCUS;
-                cam.radius = Some(HOME_RADIUS);
-                cam.yaw = Some(HOME_YAW);
-                cam.pitch = Some(HOME_PITCH);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  HOME_FOCUS,
+                yaw:    HOME_YAW,
+                pitch:  HOME_PITCH,
+                radius: HOME_RADIUS,
             },
             OrbitCamPreset::blender_like(),
         )
         .with_stable_transparency()
         .with_camera_home()
-        .duration(Duration::from_millis(ZOOM_DURATION_MS))
         .margin(HOME_MARGIN)
         .with_title_bar(title_bar())
         .wire_chip_to_state::<DemoState, _>(BEHIND_SEGMENT, |state| {

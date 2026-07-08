@@ -1,10 +1,15 @@
-//! Capability: a generalized "home" pose for the spawned `OrbitCam`.
+//! Capability: a generalized "home" pose for Lagrange cameras.
 //!
-//! Wires up `H` to [`bevy_lagrange::AnimateToFit`] the union of every
-//! [`CameraHomeTarget`] entity. The builder's `yaw`/`pitch` set the orbit
-//! orientation. The home pose drives both the startup framing (instant) and the
-//! `H` key animation. If a title bar is installed, the `H Home` control chip is
-//! prepended automatically unless the home builder opts out.
+//! Maintains an invisible fit cube for every [`CameraHomeTarget`] entity, snaps
+//! the camera to that cube on startup, and refits it after window resizes while
+//! the camera is still home. When the capability is installed, empty Lagrange
+//! presets are filled with Fairy Dust's home inputs: `H` for keyboard-family
+//! presets, and both `H` and Select for gamepad presets. Those inputs invoke Lagrange's
+//! stored-pose home glide through `bevy_enhanced_input`; Fairy Dust does not
+//! bind a separate home action.
+//!
+//! If a title bar is installed, the `H Home` control chip is prepended
+//! automatically unless the home builder opts out.
 //!
 //! Add [`CameraHomeTarget`] to any entity to frame that entity (and its
 //! descendants). [`bevy_lagrange::AnimateToFit`] extracts every descendant
@@ -19,7 +24,6 @@ use bevy::camera::primitives::Aabb;
 use bevy::prelude::*;
 use bevy::window::WindowResized;
 use bevy_diegetic::Anchor;
-use bevy_diegetic::PrecomposeHelper;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
@@ -29,11 +33,23 @@ use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraHomePending;
+use bevy_lagrange::CameraHomed;
+use bevy_lagrange::CameraInputPhase;
 use bevy_lagrange::FitAnchor;
+use bevy_lagrange::FreeCam;
+use bevy_lagrange::FreeCamInputMode;
+use bevy_lagrange::FreeCamInteractionStarted;
+use bevy_lagrange::FreeCamPreset;
+use bevy_lagrange::FreeCamPresetKind;
+use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionStarted;
+use bevy_lagrange::OrbitCamPreset;
+use bevy_lagrange::OrbitCamPresetKind;
 
 use crate::constants::AABB_CORNER_SIGNS;
 use crate::constants::HOME_AABB_GIZMO_COLOR;
+use crate::constants::HOME_BUTTON;
 use crate::constants::HOME_CONTROL;
 use crate::constants::HOME_KEY;
 use crate::constants::MIN_HOME_CUBE_SCALE;
@@ -42,14 +58,15 @@ use crate::orbit_cam::FairyDustOrbitCam;
 use crate::restart_camera::RestartCameraRestore;
 use crate::restart_camera::RestoreWindowAnimation;
 use crate::screen_panels::ControlActivation;
+use crate::screen_panels::HomeTitleBarFlash;
 use crate::screen_panels::TitleBarControlState;
 use crate::shortcuts;
 
 #[derive(Component)]
 struct CameraHomeContext;
 
-action!(HomeCamera);
-event!(HomeCameraEvent);
+type HomeFitCameraFilter = Or<(With<FairyDustOrbitCam>, With<FreeCam>)>;
+
 action!(ToggleHomeAabbGizmo);
 event!(ToggleHomeAabbGizmoEvent);
 
@@ -79,7 +96,6 @@ pub struct CameraHomeTarget;
 pub(crate) struct CameraHomeConfig {
     pub yaw:               f32,
     pub pitch:             f32,
-    pub duration:          Duration,
     pub margin:            f32,
     pub anchor:            Anchor,
     pub offset_px:         Vec2,
@@ -110,35 +126,17 @@ enum AtHome {
     No,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-enum HomeAabbGizmoDisplay {
-    Shown,
-    #[default]
-    Hidden,
-}
-
-impl HomeAabbGizmoDisplay {
-    const fn toggled(self) -> Self {
-        match self {
-            Self::Shown => Self::Hidden,
-            Self::Hidden => Self::Shown,
-        }
-    }
-}
-
 /// Tracks whether [`draw_home_aabb_gizmo`] is currently drawing a wireframe
 /// of the home cube. Toggled by **Ctrl+Shift+A** — undocumented debug
 /// affordance available in every `fairy_dust`-built example, no setup needed.
 /// Defaults to off.
 #[derive(Resource, Default)]
-struct HomeAabbGizmoVisible(HomeAabbGizmoDisplay);
+struct HomeAabbGizmoVisible(bool);
 
 /// Flips [`HomeAabbGizmoVisible`] on Ctrl+Shift+A. The gizmo combo is a chord,
 /// not a single key, so it doesn't collide with bare-`A` bindings the caller
 /// may have.
-fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) {
-    visible.0 = visible.0.toggled();
-}
+fn toggle_home_aabb_gizmo(mut visible: ResMut<HomeAabbGizmoVisible>) { visible.0 = !visible.0; }
 
 /// Draws a wireframe of the home cube — sized to the union of every
 /// [`CameraHomeTarget`] entity — while [`HomeAabbGizmoVisible`] is on. Lets
@@ -149,7 +147,7 @@ fn draw_home_aabb_gizmo(
     cube: Query<&Transform, With<CameraHomeMarker>>,
     mut gizmos: Gizmos,
 ) {
-    if visible.0 == HomeAabbGizmoDisplay::Hidden {
+    if !visible.0 {
         return;
     }
     let Some(home) = home else {
@@ -168,7 +166,11 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.init_resource::<HomeAabbGizmoVisible>();
     app.add_input_context::<CameraHomeContext>();
     shortcuts::reserve_key(app, HOME_KEY, HOME_CONTROL);
-    app.add_systems(Startup, (spawn_home_marker, spawn_home_actions));
+    app.add_systems(Startup, (spawn_home_marker, spawn_home_debug_actions));
+    app.add_systems(
+        PreUpdate,
+        fill_camera_home_presets.before(CameraInputPhase::PreInput),
+    );
     // `update_home_cube` runs first so the cube reflects the current union of
     // `CameraHomeTarget` entities before any handler triggers `AnimateToFit`
     // off it.
@@ -183,7 +185,6 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     );
     // Ctrl+Shift+A debug toggle — always available, opt-in by keypress.
     app.add_systems(Update, draw_home_aabb_gizmo);
-    bind_action_system!(app, HomeCamera, HomeCameraEvent, handle_home_key);
     bind_action_system!(
         app,
         ToggleHomeAabbGizmo,
@@ -193,20 +194,71 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.add_observer(on_home_animation_begin);
     app.add_observer(on_home_animation_end);
     app.add_observer(on_non_home_animation_begin);
-    app.add_observer(on_user_interaction_started);
+    app.add_observer(on_camera_homed);
+    app.add_observer(on_orbit_user_interaction_started);
+    app.add_observer(on_free_user_interaction_started);
 }
 
-fn spawn_home_actions(mut commands: Commands) {
+fn spawn_home_debug_actions(mut commands: Commands) {
     commands.spawn((
         CameraHomeContext,
         actions!(CameraHomeContext[
-            (Action::<HomeCamera>::new(), bindings![HOME_KEY]),
             (
                 Action::<ToggleHomeAabbGizmo>::new(),
                 bindings![KeyCode::KeyA.with_mod_keys(ModKeys::CONTROL | ModKeys::SHIFT)],
             ),
         ]),
     ));
+}
+
+pub(crate) fn fill_camera_home_presets(
+    config: Option<Res<CameraHomeConfig>>,
+    mut orbit_modes: Query<&mut OrbitCamInputMode, Changed<OrbitCamInputMode>>,
+    mut free_modes: Query<&mut FreeCamInputMode, Changed<FreeCamInputMode>>,
+) {
+    if config.is_none() {
+        return;
+    }
+    for mut mode in &mut orbit_modes {
+        if let Some(filled_mode) = fill_orbit_cam_home(&mode) {
+            *mode = filled_mode;
+        }
+    }
+    for mut mode in &mut free_modes {
+        if let Some(filled_mode) = fill_free_cam_home(&mode) {
+            *mode = filled_mode;
+        }
+    }
+}
+
+fn fill_orbit_cam_home(mode: &OrbitCamInputMode) -> Option<OrbitCamInputMode> {
+    let OrbitCamInputMode::Preset(preset) = mode else {
+        return None;
+    };
+    (!preset.has_home())
+        .then(|| OrbitCamInputMode::with_preset(orbit_cam_home_preset(preset.clone())))
+}
+
+fn orbit_cam_home_preset(preset: OrbitCamPreset) -> OrbitCamPreset {
+    match preset.kind() {
+        OrbitCamPresetKind::Gamepad => preset.home(HOME_KEY).home(HOME_BUTTON),
+        _ => preset.home(HOME_KEY),
+    }
+}
+
+fn fill_free_cam_home(mode: &FreeCamInputMode) -> Option<FreeCamInputMode> {
+    let FreeCamInputMode::Preset(preset) = mode else {
+        return None;
+    };
+    (!preset.has_home())
+        .then(|| FreeCamInputMode::with_preset(free_cam_home_preset(preset.clone())))
+}
+
+fn free_cam_home_preset(preset: FreeCamPreset) -> FreeCamPreset {
+    match preset.kind() {
+        FreeCamPresetKind::Gamepad => preset.with_home(HOME_KEY).with_home(HOME_BUTTON),
+        _ => preset.with_home(HOME_KEY),
+    }
 }
 
 /// World-space union of every [`CameraHomeTarget`] entity and its
@@ -217,22 +269,14 @@ fn world_aabb_union(
     children: &Query<&Children>,
     aabbs: &Query<&Aabb>,
     transforms: &Query<&GlobalTransform, Without<CameraHomeMarker>>,
-    precompose_helpers: &Query<(), With<PrecomposeHelper>>,
 ) -> Option<(Vec3, Vec3)> {
     let mut min = Vec3::splat(f32::INFINITY);
     let mut max = Vec3::splat(f32::NEG_INFINITY);
     let mut found = false;
     for root in targets {
-        let mut stack = vec![root];
-        while let Some(entity) = stack.pop() {
-            if precompose_helpers.contains(entity) {
-                continue;
-            }
+        for entity in std::iter::once(root).chain(children.iter_descendants(root)) {
             let (Ok(aabb), Ok(global_transform)) = (aabbs.get(entity), transforms.get(entity))
             else {
-                if let Ok(child_entities) = children.get(entity) {
-                    stack.extend(child_entities.iter().rev());
-                }
                 continue;
             };
             let local_center = Vec3::from(aabb.center);
@@ -242,9 +286,6 @@ fn world_aabb_union(
                 min = min.min(world);
                 max = max.max(world);
                 found = true;
-            }
-            if let Ok(child_entities) = children.get(entity) {
-                stack.extend(child_entities.iter().rev());
             }
         }
     }
@@ -264,7 +305,6 @@ fn update_home_cube(
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
     target_transforms: Query<&GlobalTransform, Without<CameraHomeMarker>>,
-    precompose_helpers: Query<(), With<PrecomposeHelper>>,
     mut cube: Query<(&mut Transform, &mut GlobalTransform), With<CameraHomeMarker>>,
     mut warned_no_target: Local<bool>,
 ) {
@@ -281,13 +321,8 @@ fn update_home_cube(
         }
         return;
     }
-    let Some((center, size)) = world_aabb_union(
-        &targets,
-        &children,
-        &aabbs,
-        &target_transforms,
-        &precompose_helpers,
-    ) else {
+    let Some((center, size)) = world_aabb_union(&targets, &children, &aabbs, &target_transforms)
+    else {
         return;
     };
     let new_transform =
@@ -352,22 +387,11 @@ fn target_meshes_ready(
     targets: &Query<Entity, With<CameraHomeTarget>>,
     children: &Query<&Children>,
     aabbs: &Query<&Aabb>,
-    precompose_helpers: &Query<(), With<PrecomposeHelper>>,
 ) -> bool {
     targets.iter().any(|target| {
-        let mut stack = vec![target];
-        while let Some(entity) = stack.pop() {
-            if precompose_helpers.contains(entity) {
-                continue;
-            }
-            if aabbs.contains(entity) {
-                return true;
-            }
-            if let Ok(child_entities) = children.get(entity) {
-                stack.extend(child_entities.iter().rev());
-            }
-        }
-        false
+        std::iter::once(target)
+            .chain(children.iter_descendants(target))
+            .any(|entity| aabbs.contains(entity))
     })
 }
 
@@ -378,11 +402,10 @@ fn snap_home_on_ready(
     mut commands: Commands,
     home: Option<Res<CameraHomeEntity>>,
     config: Res<CameraHomeConfig>,
-    cameras: Query<Entity, With<FairyDustOrbitCam>>,
+    cameras: Query<Entity, HomeFitCameraFilter>,
     targets: Query<Entity, With<CameraHomeTarget>>,
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
-    precompose_helpers: Query<(), With<PrecomposeHelper>>,
     restore: Option<Res<RestartCameraRestore>>,
     mut state: Local<InitialAnimateState>,
 ) {
@@ -395,7 +418,7 @@ fn snap_home_on_ready(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
+    if !target_meshes_ready(&targets, &children, &aabbs) {
         return;
     }
     if restore
@@ -410,39 +433,16 @@ fn snap_home_on_ready(
     *state = InitialAnimateState::Fired;
 }
 
-fn handle_home_key(
-    mut commands: Commands,
-    home: Option<Res<CameraHomeEntity>>,
-    config: Res<CameraHomeConfig>,
-    cameras: Query<Entity, With<FairyDustOrbitCam>>,
-    targets: Query<Entity, With<CameraHomeTarget>>,
-    children: Query<&Children>,
-    aabbs: Query<&Aabb>,
-    precompose_helpers: Query<(), With<PrecomposeHelper>>,
-) {
-    let Some(home) = home else {
-        return;
-    };
-    let Ok(camera) = cameras.single() else {
-        return;
-    };
-    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
-        return;
-    }
-    commands.trigger(home_fit(camera, home.0, &config, config.duration));
-}
-
 fn refit_on_window_resized(
     mut events: MessageReader<WindowResized>,
     mut commands: Commands,
     home: Option<Res<CameraHomeEntity>>,
     config: Res<CameraHomeConfig>,
-    cameras: Query<Entity, With<FairyDustOrbitCam>>,
+    cameras: Query<Entity, HomeFitCameraFilter>,
     at_home: Res<AtHome>,
     targets: Query<Entity, With<CameraHomeTarget>>,
     children: Query<&Children>,
     aabbs: Query<&Aabb>,
-    precompose_helpers: Query<(), With<PrecomposeHelper>>,
 ) {
     if events.is_empty() {
         return;
@@ -457,9 +457,10 @@ fn refit_on_window_resized(
     let Ok(camera) = cameras.single() else {
         return;
     };
-    if !target_meshes_ready(&targets, &children, &aabbs, &precompose_helpers) {
+    if !target_meshes_ready(&targets, &children, &aabbs) {
         return;
     }
+    commands.entity(camera).insert(CameraHomePending);
     commands.trigger(home_fit(camera, home.0, &config, Duration::ZERO));
 }
 
@@ -481,10 +482,12 @@ fn on_home_animation_begin(
     trigger: On<AnimationBegin>,
     home: Option<Res<CameraHomeEntity>>,
     mut bars: Query<&mut TitleBarControlState>,
+    flash: Option<ResMut<HomeTitleBarFlash>>,
 ) {
     if !frames_home(home.as_deref(), trigger.source, trigger.target) {
         return;
     }
+    cancel_home_title_bar_flash(flash);
     for mut bar in &mut bars {
         bar.set_active(HOME_CONTROL, ControlActivation::Active);
     }
@@ -507,6 +510,13 @@ fn on_home_animation_end(
     }
 }
 
+fn cancel_home_title_bar_flash(flash: Option<ResMut<HomeTitleBarFlash>>) {
+    let Some(mut flash) = flash else {
+        return;
+    };
+    flash.cancel();
+}
+
 fn on_non_home_animation_begin(
     trigger: On<AnimationBegin>,
     home: Option<Res<CameraHomeEntity>>,
@@ -517,9 +527,381 @@ fn on_non_home_animation_begin(
     }
 }
 
-fn on_user_interaction_started(
-    _trigger: On<OrbitCamInteractionStarted>,
+fn pulse_home_title_bar(
+    flash: Option<ResMut<HomeTitleBarFlash>>,
+    bars: &mut Query<&mut TitleBarControlState>,
+) {
+    for mut bar in &mut *bars {
+        bar.set_active(HOME_CONTROL, ControlActivation::Active);
+    }
+    let Some(mut flash) = flash else {
+        return;
+    };
+    flash.start();
+}
+
+fn on_camera_homed(
+    _: On<CameraHomed>,
+    mut at_home: ResMut<AtHome>,
+    flash: Option<ResMut<HomeTitleBarFlash>>,
+    mut bars: Query<&mut TitleBarControlState>,
+) {
+    *at_home = AtHome::Yes;
+    pulse_home_title_bar(flash, &mut bars);
+}
+
+fn on_orbit_user_interaction_started(
+    trigger: On<OrbitCamInteractionStarted>,
     mut at_home: ResMut<AtHome>,
 ) {
+    if trigger.sources.is_empty() {
+        return;
+    }
     *at_home = AtHome::No;
+}
+
+fn on_free_user_interaction_started(
+    trigger: On<FreeCamInteractionStarted>,
+    mut at_home: ResMut<AtHome>,
+) {
+    if trigger.sources.is_empty() {
+        return;
+    }
+    *at_home = AtHome::No;
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::camera::RenderTarget;
+    use bevy::input::mouse::AccumulatedMouseMotion;
+    use bevy::input::mouse::AccumulatedMouseScroll;
+    use bevy::prelude::Messages;
+    use bevy::window::WindowRef;
+    use bevy_enhanced_input::prelude::Binding;
+    use bevy_lagrange::CameraBasis;
+    use bevy_lagrange::CameraInputRoutingConfig;
+    use bevy_lagrange::FreeCamHomePose;
+    use bevy_lagrange::InteractionSources;
+    use bevy_lagrange::LagrangePlugin;
+    use bevy_lagrange::LookAngles;
+    use bevy_lagrange::OrbitCam;
+    use bevy_lagrange::OrbitCamInteractionKind;
+    use bevy_lagrange::Position;
+    use bevy_lagrange::Roll;
+
+    use super::*;
+
+    const CAMERA_POSITION: Vec3 = Vec3::new(0.0, 0.0, 8.0);
+    const HOME_TARGET_MAX: Vec3 = Vec3::new(0.5, 0.5, 0.5);
+    const HOME_TARGET_MIN: Vec3 = Vec3::new(-0.5, -0.5, -0.5);
+    const RESIZED_HEIGHT: f32 = 768.0;
+    const RESIZED_WIDTH: f32 = 1024.0;
+    const STALE_HOME_PITCH: f32 = 0.125;
+    const STALE_HOME_POSITION: Vec3 = Vec3::new(8.0, 7.0, 6.0);
+    const STALE_HOME_ROLL: f32 = 0.25;
+    const STALE_HOME_YAW: f32 = 0.5;
+
+    type TestResult = Result<(), &'static str>;
+
+    #[derive(Clone, Copy)]
+    enum ConfigResource {
+        Present,
+        Missing,
+    }
+
+    fn test_config() -> CameraHomeConfig {
+        CameraHomeConfig {
+            yaw:               0.0,
+            pitch:             0.0,
+            margin:            0.0,
+            anchor:            Anchor::Center,
+            offset_px:         Vec2::ZERO,
+            title_bar_control: HomeTitleBarControl::Hidden,
+        }
+    }
+
+    fn test_app(config: ConfigResource) -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, LagrangePlugin))
+            .add_systems(
+                PreUpdate,
+                fill_camera_home_presets.before(CameraInputPhase::PreInput),
+            );
+        if matches!(config, ConfigResource::Present) {
+            app.insert_resource(test_config());
+        }
+        app.finish();
+        app
+    }
+
+    fn refit_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, LagrangePlugin))
+            .init_resource::<Assets<Mesh>>()
+            .init_resource::<ButtonInput<KeyCode>>()
+            .init_resource::<ButtonInput<MouseButton>>()
+            .init_resource::<AccumulatedMouseMotion>()
+            .init_resource::<AccumulatedMouseScroll>()
+            .add_message::<WindowResized>()
+            .insert_resource(test_config())
+            .insert_resource(AtHome::Yes)
+            .add_systems(Update, (update_home_cube, refit_on_window_resized).chain());
+        app.finish();
+        app
+    }
+
+    fn spawn_orbit_mode(app: &mut App, mode: OrbitCamInputMode) -> Entity {
+        app.world_mut()
+            .spawn((
+                OrbitCam::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                mode,
+            ))
+            .id()
+    }
+
+    fn spawn_free_mode(app: &mut App, mode: FreeCamInputMode) -> Entity {
+        app.world_mut()
+            .spawn((
+                FreeCam::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                mode,
+            ))
+            .id()
+    }
+
+    fn stale_free_home_pose() -> FreeCamHomePose {
+        FreeCamHomePose {
+            position: Position(STALE_HOME_POSITION),
+            look:     LookAngles {
+                yaw:   STALE_HOME_YAW,
+                pitch: STALE_HOME_PITCH,
+            },
+            roll:     Roll(STALE_HOME_ROLL),
+        }
+    }
+
+    fn spawn_home_cube(app: &mut App) -> Entity {
+        let mesh = app
+            .world_mut()
+            .resource_mut::<Assets<Mesh>>()
+            .add(Cuboid::from_size(Vec3::ONE));
+        let entity = app
+            .world_mut()
+            .spawn((
+                CameraHomeMarker,
+                Mesh3d(mesh),
+                Transform::default(),
+                GlobalTransform::default(),
+                Visibility::Hidden,
+            ))
+            .id();
+        app.world_mut().insert_resource(CameraHomeEntity(entity));
+        entity
+    }
+
+    fn spawn_home_target(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((
+                CameraHomeTarget,
+                Aabb::from_min_max(HOME_TARGET_MIN, HOME_TARGET_MAX),
+                Transform::default(),
+                GlobalTransform::default(),
+            ))
+            .id()
+    }
+
+    fn spawn_free_fit_camera(app: &mut App) -> Entity {
+        app.world_mut()
+            .spawn((
+                FreeCam::from_pose(CAMERA_POSITION, (0.0, 0.0), 0.0),
+                Projection::Perspective(PerspectiveProjection::default()),
+                Camera::default(),
+                CameraBasis::Y_UP,
+                Transform::from_translation(CAMERA_POSITION),
+                stale_free_home_pose(),
+            ))
+            .id()
+    }
+
+    fn free_home_pose(app: &App, camera: Entity) -> Result<FreeCamHomePose, &'static str> {
+        app.world()
+            .get::<FreeCamHomePose>(camera)
+            .copied()
+            .ok_or("camera missing FreeCamHomePose")
+    }
+
+    fn write_window_resized(app: &mut App) {
+        let window = app.world_mut().spawn_empty().id();
+        app.world_mut()
+            .resource_mut::<Messages<WindowResized>>()
+            .write(WindowResized {
+                window,
+                width: RESIZED_WIDTH,
+                height: RESIZED_HEIGHT,
+            });
+    }
+
+    fn orbit_home_bindings(app: &App, camera: Entity) -> Result<Vec<Binding>, String> {
+        let Some(mode) = app.world().get::<OrbitCamInputMode>(camera) else {
+            return Err("missing OrbitCamInputMode".to_string());
+        };
+        let OrbitCamInputMode::Preset(preset) = mode else {
+            return Err("expected OrbitCam preset mode".to_string());
+        };
+        preset
+            .to_bindings()
+            .map(|bindings| bindings.home().to_vec())
+            .map_err(|error| error.to_string())
+    }
+
+    fn free_home_bindings(app: &App, camera: Entity) -> Result<Vec<Binding>, String> {
+        let Some(mode) = app.world().get::<FreeCamInputMode>(camera) else {
+            return Err("missing FreeCamInputMode".to_string());
+        };
+        let FreeCamInputMode::Preset(preset) = mode else {
+            return Err("expected FreeCam preset mode".to_string());
+        };
+        preset
+            .to_bindings()
+            .map(|bindings| bindings.home().to_vec())
+            .map_err(|error| error.to_string())
+    }
+
+    #[test]
+    fn window_resize_refit_recaptures_free_cam_home_pose() -> TestResult {
+        let mut app = refit_test_app();
+        let camera = spawn_free_fit_camera(&mut app);
+        spawn_home_cube(&mut app);
+        spawn_home_target(&mut app);
+        let stale_home = free_home_pose(&app, camera)?;
+
+        write_window_resized(&mut app);
+        app.update();
+
+        let recaptured_home = free_home_pose(&app, camera)?;
+        let free_cam = app
+            .world()
+            .get::<FreeCam>(camera)
+            .ok_or("camera missing FreeCam")?;
+
+        assert_ne!(recaptured_home, stale_home);
+        assert_eq!(recaptured_home.position, free_cam.translate.current());
+        assert_eq!(recaptured_home.look, free_cam.look.current());
+        assert_eq!(recaptured_home.roll, free_cam.roll.current());
+        assert!(app.world().get::<CameraHomePending>(camera).is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn camera_home_config_fills_keyboard_and_gamepad_presets() -> Result<(), String> {
+        let mut app = test_app(ConfigResource::Present);
+        let orbit_keyboard = spawn_orbit_mode(
+            &mut app,
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
+        );
+        let orbit_gamepad = spawn_orbit_mode(
+            &mut app,
+            OrbitCamInputMode::with_preset(OrbitCamPreset::gamepad()),
+        );
+        let free_keyboard = spawn_free_mode(
+            &mut app,
+            FreeCamInputMode::with_preset(FreeCamPreset::keyboard_mouse()),
+        );
+        let free_gamepad = spawn_free_mode(
+            &mut app,
+            FreeCamInputMode::with_preset(FreeCamPreset::gamepad()),
+        );
+        app.insert_resource(CameraInputRoutingConfig::explicit(orbit_keyboard));
+
+        app.update();
+
+        assert_eq!(
+            orbit_home_bindings(&app, orbit_keyboard)?,
+            vec![Binding::from(HOME_KEY)]
+        );
+        assert_eq!(
+            orbit_home_bindings(&app, orbit_gamepad)?,
+            vec![Binding::from(HOME_KEY), Binding::from(HOME_BUTTON)]
+        );
+        assert_eq!(
+            free_home_bindings(&app, free_keyboard)?,
+            vec![Binding::from(HOME_KEY)]
+        );
+        assert_eq!(
+            free_home_bindings(&app, free_gamepad)?,
+            vec![Binding::from(HOME_KEY), Binding::from(HOME_BUTTON)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn presets_keep_empty_home_without_camera_home_config() -> Result<(), String> {
+        let mut app = test_app(ConfigResource::Missing);
+        let orbit = spawn_orbit_mode(
+            &mut app,
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
+        );
+        let free = spawn_free_mode(
+            &mut app,
+            FreeCamInputMode::with_preset(FreeCamPreset::keyboard_mouse()),
+        );
+
+        app.update();
+
+        assert_eq!(orbit_home_bindings(&app, orbit)?, Vec::<Binding>::new());
+        assert_eq!(free_home_bindings(&app, free)?, Vec::<Binding>::new());
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_preset_home_bindings_are_preserved() -> Result<(), String> {
+        let mut app = test_app(ConfigResource::Present);
+        let orbit = spawn_orbit_mode(
+            &mut app,
+            OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse().home(KeyCode::KeyR)),
+        );
+        let free = spawn_free_mode(
+            &mut app,
+            FreeCamInputMode::with_preset(FreeCamPreset::gamepad().with_home(GamepadButton::North)),
+        );
+
+        app.update();
+
+        assert_eq!(
+            orbit_home_bindings(&app, orbit)?,
+            vec![Binding::from(KeyCode::KeyR)]
+        );
+        assert_eq!(
+            free_home_bindings(&app, free)?,
+            vec![Binding::from(GamepadButton::North)]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn lagrange_camera_homed_rearms_resize_refit() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<AtHome>()
+            .add_observer(on_orbit_user_interaction_started)
+            .add_observer(on_camera_homed);
+        app.finish();
+        let camera = app.world_mut().spawn_empty().id();
+
+        app.world_mut().trigger(OrbitCamInteractionStarted {
+            camera,
+            kind: OrbitCamInteractionKind::Orbit,
+            sources: InteractionSources::KEYBOARD,
+        });
+        assert_eq!(*app.world().resource::<AtHome>(), AtHome::No);
+
+        app.world_mut().trigger(CameraHomed {
+            camera,
+            sources: InteractionSources::KEYBOARD,
+        });
+        assert_eq!(*app.world().resource::<AtHome>(), AtHome::Yes);
+    }
 }

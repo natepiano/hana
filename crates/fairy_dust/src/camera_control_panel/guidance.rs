@@ -2,15 +2,19 @@
 
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::CameraControlAction;
+use bevy_lagrange::CameraControlBinding;
+use bevy_lagrange::CameraControlBindingKind;
+use bevy_lagrange::CameraControlSummary;
 use bevy_lagrange::ControlSpeed;
-use bevy_lagrange::OrbitCamControlRow;
-use bevy_lagrange::OrbitCamControlSummary;
+use bevy_lagrange::FreeCamControlDirection;
+use bevy_lagrange::FreeCamInteractionKind;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::OrbitCamInputMode;
 use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomDirection;
-use bevy_lagrange::describe_orbit_cam_controls;
+use bevy_lagrange::describe_controls;
 
 /// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
 /// examples.
@@ -20,6 +24,7 @@ pub struct CameraGuidance {
     pub(super) title:      Option<String>,
     pub(super) mode_label: Option<String>,
     pub(super) mode_value: Option<String>,
+    pub(super) settings:   Vec<CameraControlBinding>,
     pub(super) content:    CameraGuidanceContent,
 }
 
@@ -36,6 +41,7 @@ impl CameraGuidance {
             title:      None,
             mode_label: None,
             mode_value: None,
+            settings:   Vec::new(),
             content:    CameraGuidanceContent::Auto,
         }
     }
@@ -43,9 +49,7 @@ impl CameraGuidance {
     /// Builds guidance rows for a built-in orbit-camera preset.
     #[must_use]
     pub fn for_preset(preset: impl Into<OrbitCamPreset>) -> Self {
-        Self::from_summary(describe_orbit_cam_controls(
-            &OrbitCamInputMode::with_preset(preset),
-        ))
+        Self::from_summary(describe_controls(&OrbitCamInputMode::with_preset(preset)))
     }
 
     /// Builds custom camera guidance rows.
@@ -56,6 +60,7 @@ impl CameraGuidance {
             title:      None,
             mode_label: None,
             mode_value: None,
+            settings:   Vec::new(),
             content:    CameraGuidanceContent::Rows(rows.into_iter().collect()),
         }
     }
@@ -85,17 +90,32 @@ impl CameraGuidance {
         }
     }
 
-    fn from_summary(summary: OrbitCamControlSummary) -> Self {
+    fn from_summary(summary: CameraControlSummary) -> Self {
+        let (settings, rows) = split_summary_bindings(summary.bindings);
         Self {
-            anchor:     Anchor::BottomRight,
-            title:      Some(summary.camera_label),
+            anchor: Anchor::BottomRight,
+            title: Some(summary.camera_label),
             mode_label: Some(summary.mode_label),
             mode_value: Some(summary.mode_value),
-            content:    CameraGuidanceContent::Rows(
-                summary.rows.into_iter().map(Into::into).collect(),
-            ),
+            settings,
+            content: CameraGuidanceContent::Rows(rows),
         }
     }
+}
+
+pub(super) fn split_summary_bindings(
+    bindings: Vec<CameraControlBinding>,
+) -> (Vec<CameraControlBinding>, Vec<CameraGuidanceRow>) {
+    let mut settings = Vec::new();
+    let mut rows = Vec::new();
+    for binding in bindings {
+        if matches!(&binding.kind, CameraControlBindingKind::Direct) {
+            rows.push(CameraGuidanceRow::from_direct(binding));
+        } else {
+            settings.push(binding);
+        }
+    }
+    (settings, rows)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -104,26 +124,105 @@ pub(super) enum CameraGuidanceContent {
     Rows(Vec<CameraGuidanceRow>),
 }
 
+/// Semantic action represented by a camera guidance row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CameraGuidanceAction {
+    /// Orbit around the camera focus.
+    Orbit,
+    /// Pan the camera focus.
+    Pan,
+    /// Zoom in or out without a specific direction.
+    Zoom,
+    /// Zoom in toward the target.
+    ZoomIn,
+    /// Zoom out away from the target.
+    ZoomOut,
+    /// Rotate the free-flight camera view.
+    Look,
+    /// Translate the free-flight camera position.
+    Translate,
+    /// Roll the free-flight camera around its forward axis.
+    Roll,
+    /// Reset the camera to its home pose.
+    Home,
+    /// Fallback for custom or future camera actions the panel cannot name yet.
+    Other,
+}
+
+impl CameraGuidanceAction {
+    pub(super) const fn from_orbit_interaction(kind: OrbitCamInteractionKind) -> Self {
+        match kind {
+            OrbitCamInteractionKind::Orbit => Self::Orbit,
+            OrbitCamInteractionKind::Pan => Self::Pan,
+            OrbitCamInteractionKind::Zoom => Self::Zoom,
+            _ => Self::Other,
+        }
+    }
+
+    pub(super) const fn from_free_interaction(kind: FreeCamInteractionKind) -> Self {
+        match kind {
+            FreeCamInteractionKind::Translate => Self::Translate,
+            FreeCamInteractionKind::Look => Self::Look,
+            FreeCamInteractionKind::Roll => Self::Roll,
+            _ => Self::Other,
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) const fn from_orbit_zoom_direction(direction: Option<ZoomDirection>) -> Self {
+        match direction {
+            Some(ZoomDirection::In) => Self::ZoomIn,
+            Some(ZoomDirection::Out) => Self::ZoomOut,
+            None => Self::Zoom,
+        }
+    }
+
+    pub(super) const fn label(self) -> &'static str {
+        match self {
+            Self::Orbit => "Orbit",
+            Self::Pan => "Pan",
+            Self::Zoom => "Zoom",
+            Self::ZoomIn => "Zoom In",
+            Self::ZoomOut => "Zoom Out",
+            Self::Look => "Look",
+            Self::Translate => "Translate",
+            Self::Roll => "Roll",
+            Self::Home => "Home",
+            Self::Other => "Action",
+        }
+    }
+
+    pub(super) const fn zoom_direction(self) -> Option<ZoomDirection> {
+        match self {
+            Self::ZoomIn => Some(ZoomDirection::In),
+            Self::ZoomOut => Some(ZoomDirection::Out),
+            _ => None,
+        }
+    }
+}
+
 /// A single camera guidance row.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CameraGuidanceRow {
-    orbit_cam_interaction_kind: OrbitCamInteractionKind,
+    action:                     CameraGuidanceAction,
     label:                      String,
-    camera_interaction_sources: CameraInteractionSources,
+    camera_interaction_sources: InteractionSources,
     speed:                      ControlSpeed,
-    zoom_direction:             Option<ZoomDirection>,
+    action_label:               Option<String>,
+    direction:                  Option<FreeCamControlDirection>,
 }
 
 impl CameraGuidanceRow {
-    /// Creates a row for an interaction kind.
+    /// Creates a row for a camera action.
     #[must_use]
-    pub fn new(kind: OrbitCamInteractionKind, label: impl Into<String>) -> Self {
+    pub fn new(action: CameraGuidanceAction, label: impl Into<String>) -> Self {
         Self {
-            orbit_cam_interaction_kind: kind,
-            label:                      label.into(),
-            camera_interaction_sources: CameraInteractionSources::NONE,
-            speed:                      ControlSpeed::Normal,
-            zoom_direction:             None,
+            action,
+            label: label.into(),
+            camera_interaction_sources: InteractionSources::NONE,
+            speed: ControlSpeed::Normal,
+            action_label: None,
+            direction: None,
         }
     }
 
@@ -134,11 +233,18 @@ impl CameraGuidanceRow {
         self
     }
 
-    /// Tags the row with the zoom direction it drives, so the panel highlights
-    /// only the row matching the live zoom direction.
+    /// Sets the right-column label shown in place of the action's default name.
     #[must_use]
-    pub const fn with_zoom_direction(mut self, zoom_direction: ZoomDirection) -> Self {
-        self.zoom_direction = Some(zoom_direction);
+    pub fn with_action_label(mut self, action_label: impl Into<String>) -> Self {
+        self.action_label = Some(action_label.into());
+        self
+    }
+
+    /// Tags this row with the decomposed `FreeCam` direction it drives, so the
+    /// panel lights it only while that direction is engaged.
+    #[must_use]
+    pub const fn with_direction(mut self, direction: FreeCamControlDirection) -> Self {
+        self.direction = Some(direction);
         self
     }
 
@@ -146,19 +252,19 @@ impl CameraGuidanceRow {
     #[must_use]
     pub const fn with_camera_interaction_sources(
         mut self,
-        camera_interaction_sources: CameraInteractionSources,
+        camera_interaction_sources: InteractionSources,
     ) -> Self {
         self.camera_interaction_sources = camera_interaction_sources;
         self
     }
 
-    /// Returns the interaction kind matched by this row.
+    /// Returns the camera action represented by this row.
     #[must_use]
-    pub const fn kind(&self) -> OrbitCamInteractionKind { self.orbit_cam_interaction_kind }
+    pub const fn action(&self) -> CameraGuidanceAction { self.action }
 
     /// Returns this row's camera-interaction source metadata.
     #[must_use]
-    pub const fn camera_interaction_sources(&self) -> CameraInteractionSources {
+    pub const fn camera_interaction_sources(&self) -> InteractionSources {
         self.camera_interaction_sources
     }
 
@@ -166,24 +272,43 @@ impl CameraGuidanceRow {
     #[must_use]
     pub fn label(&self) -> &str { &self.label }
 
+    /// Returns the right-column label override, when set.
+    #[must_use]
+    pub fn action_label(&self) -> Option<&str> { self.action_label.as_deref() }
+
+    /// Returns the decomposed direction this row drives, when set.
+    #[must_use]
+    pub const fn direction(&self) -> Option<FreeCamControlDirection> { self.direction }
+
     /// Returns the binding speed variant.
     #[must_use]
     pub const fn speed(&self) -> ControlSpeed { self.speed }
-
-    /// Returns the zoom direction this row drives, or `None` when the row is not
-    /// direction-specific (orbit, pan, or an unsplit bidirectional zoom).
-    #[must_use]
-    pub const fn zoom_direction(&self) -> Option<ZoomDirection> { self.zoom_direction }
 }
 
-impl From<OrbitCamControlRow> for CameraGuidanceRow {
-    fn from(row: OrbitCamControlRow) -> Self {
-        let base = Self::new(row.kind, row.label)
-            .with_camera_interaction_sources(row.camera_interaction_sources)
-            .with_speed(row.speed);
-        match row.zoom_direction {
-            Some(direction) => base.with_zoom_direction(direction),
-            None => base,
+impl From<CameraControlAction> for CameraGuidanceAction {
+    fn from(action: CameraControlAction) -> Self {
+        match action {
+            CameraControlAction::Orbit => Self::Orbit,
+            CameraControlAction::Pan => Self::Pan,
+            CameraControlAction::Zoom => Self::Zoom,
+            CameraControlAction::ZoomIn => Self::ZoomIn,
+            CameraControlAction::ZoomOut => Self::ZoomOut,
+            CameraControlAction::Look => Self::Look,
+            CameraControlAction::Translate => Self::Translate,
+            CameraControlAction::Roll => Self::Roll,
+            CameraControlAction::Home => Self::Home,
+            _ => Self::Other,
         }
+    }
+}
+
+impl CameraGuidanceRow {
+    fn from_direct(binding: CameraControlBinding) -> Self {
+        let mut row = Self::new(CameraGuidanceAction::from(binding.action), binding.label)
+            .with_camera_interaction_sources(binding.interaction_sources)
+            .with_speed(binding.speed);
+        row.action_label = binding.action_label;
+        row.direction = binding.direction;
+        row
     }
 }

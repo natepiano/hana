@@ -43,6 +43,7 @@ use bevy_kana::ToUsize;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material;
@@ -189,12 +190,12 @@ fn main() {
         .with_perf_mode()
         .with_save_window_position()
         .with_studio_lighting()
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25);
-                cam.radius = Some(8.0);
-                cam.yaw = Some(0.0);
-                cam.pitch = Some(0.35);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  Vec3::new(0.0, 1.0, GROUND_SIZE * 0.25),
+                yaw:    0.0,
+                pitch:  0.35,
+                radius: 8.0,
             },
             OrbitCamPreset::blender_like(),
         )

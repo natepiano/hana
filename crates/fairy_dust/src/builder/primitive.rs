@@ -16,6 +16,7 @@ use super::SprinkleBuilder;
 use super::StudioLightingBuilder;
 use super::TitleBarBuilder;
 use super::WithOrbitCam;
+use crate::OrbitCamPose;
 use crate::cube_spin;
 use crate::cube_spin::CubeSpinConfig;
 use crate::cube_spin::FairyDustCubeSpinTarget;
@@ -273,6 +274,16 @@ impl PrimitiveBuilder<NoOrbitCam> {
         self.finish().with_orbit_cam_preset(configure, preset)
     }
 
+    /// Finalizes the current primitive, spawns an `OrbitCam` with an explicit
+    /// startup pose, and installs one built-in input preset.
+    pub fn with_orbit_cam_preset_pose(
+        self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+    ) -> SprinkleBuilder<WithOrbitCam> {
+        self.finish().with_orbit_cam_preset_pose(pose, preset)
+    }
+
     /// Finalizes the current primitive, spawns an `OrbitCam`, installs one
     /// built-in input preset, and inserts extra camera-side components.
     pub fn with_orbit_cam_preset_bundle<F, B>(
@@ -287,6 +298,22 @@ impl PrimitiveBuilder<NoOrbitCam> {
     {
         self.finish()
             .with_orbit_cam_preset_bundle(configure, preset, bundle)
+    }
+
+    /// Finalizes the current primitive, spawns an `OrbitCam` with an explicit
+    /// startup pose, installs one built-in input preset, and inserts extra
+    /// camera-side components.
+    pub fn with_orbit_cam_preset_pose_bundle<B>(
+        self,
+        pose: OrbitCamPose,
+        preset: impl Into<OrbitCamPreset>,
+        bundle: B,
+    ) -> SprinkleBuilder<WithOrbitCam>
+    where
+        B: Bundle + Send + Sync + 'static,
+    {
+        self.finish()
+            .with_orbit_cam_preset_pose_bundle(pose, preset, bundle)
     }
 
     /// Finalizes the current primitive, spawns an `OrbitCam`, and installs

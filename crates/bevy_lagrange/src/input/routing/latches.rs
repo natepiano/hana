@@ -1,11 +1,11 @@
 //! Per-source ownership latches that keep camera input flowing across frames.
 //!
 //! Types:
-//! - [`OrbitCamInputOwnerLatch`] — handle naming a single owning camera entity.
+//! - [`CameraInputOwnerLatch`] — handle naming a single owning camera entity.
 //! - [`CameraInputSourceLatches`] — resource holding the active mouse and keyboard owners. While a
 //!   latch is set, that source routes to the latched camera even when the cursor leaves its
 //!   viewport.
-//! - [`OrbitCamSlowModeLatches`] — resource storing per-camera slow-mode state.
+//! - [`CameraSlowModeLatches`] — resource storing per-camera slow-mode state.
 //!
 //! Also contains the [`clear_latches_on_mode_replaced`] observer that drops a camera's
 //! latches when its input mode is replaced.
@@ -14,46 +14,47 @@ use std::collections::HashSet;
 
 use bevy::prelude::*;
 
-use crate::input::CameraInteractionSources;
-use crate::input::OrbitCamInputModeReplaced;
+use crate::input::CameraInputModeReplaced;
+use crate::input::FreeCamResolvedBindings;
+use crate::input::InteractionSources;
 use crate::input::OrbitCamResolvedBindings;
 use crate::input::control_summary;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct OrbitCamInputOwnerLatch(Entity);
+pub(super) struct CameraInputOwnerLatch(Entity);
 
-impl OrbitCamInputOwnerLatch {
+impl CameraInputOwnerLatch {
     pub(super) const fn camera(self) -> Entity { self.0 }
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct CameraInputSourceLatches {
-    mouse:    Option<OrbitCamInputOwnerLatch>,
-    keyboard: Option<OrbitCamInputOwnerLatch>,
+    mouse:    Option<CameraInputOwnerLatch>,
+    keyboard: Option<CameraInputOwnerLatch>,
 }
 
 impl CameraInputSourceLatches {
-    pub const fn acquire_sources(&mut self, camera: Entity, sources: CameraInteractionSources) {
-        if sources.contains(CameraInteractionSources::MOUSE)
-            || sources.contains(CameraInteractionSources::WHEEL)
-            || sources.contains(CameraInteractionSources::SMOOTH_SCROLL)
+    pub const fn acquire_sources(&mut self, camera: Entity, sources: InteractionSources) {
+        if sources.contains(InteractionSources::MOUSE)
+            || sources.contains(InteractionSources::WHEEL)
+            || sources.contains(InteractionSources::SMOOTH_SCROLL)
         {
-            self.mouse = Some(OrbitCamInputOwnerLatch(camera));
+            self.mouse = Some(CameraInputOwnerLatch(camera));
         }
-        if sources.contains(CameraInteractionSources::KEYBOARD) {
-            self.keyboard = Some(OrbitCamInputOwnerLatch(camera));
+        if sources.contains(InteractionSources::KEYBOARD) {
+            self.keyboard = Some(CameraInputOwnerLatch(camera));
         }
     }
 
-    pub fn release_sources(&mut self, camera: Entity, sources: CameraInteractionSources) {
-        if (sources.contains(CameraInteractionSources::MOUSE)
-            || sources.contains(CameraInteractionSources::WHEEL)
-            || sources.contains(CameraInteractionSources::SMOOTH_SCROLL))
+    pub fn release_sources(&mut self, camera: Entity, sources: InteractionSources) {
+        if (sources.contains(InteractionSources::MOUSE)
+            || sources.contains(InteractionSources::WHEEL)
+            || sources.contains(InteractionSources::SMOOTH_SCROLL))
             && self.mouse.is_some_and(|latch| latch.camera() == camera)
         {
             self.mouse = None;
         }
-        if sources.contains(CameraInteractionSources::KEYBOARD)
+        if sources.contains(InteractionSources::KEYBOARD)
             && self.keyboard.is_some_and(|latch| latch.camera() == camera)
         {
             self.keyboard = None;
@@ -75,37 +76,37 @@ impl CameraInputSourceLatches {
             .mouse
             .is_some_and(|latch| !is_available(latch.camera()))
         {
-            debug!("cleared stale mouse OrbitCam input latch");
+            debug!("cleared stale mouse camera input latch");
             self.mouse = None;
         }
         if self
             .keyboard
             .is_some_and(|latch| !is_available(latch.camera()))
         {
-            debug!("cleared stale keyboard OrbitCam input latch");
+            debug!("cleared stale keyboard camera input latch");
             self.keyboard = None;
         }
     }
 
-    pub(super) const fn mouse_latch(&self) -> Option<OrbitCamInputOwnerLatch> { self.mouse }
+    pub(super) const fn mouse_latch(&self) -> Option<CameraInputOwnerLatch> { self.mouse }
 
-    pub(super) const fn keyboard_latch(&self) -> Option<OrbitCamInputOwnerLatch> { self.keyboard }
+    pub(super) const fn keyboard_latch(&self) -> Option<CameraInputOwnerLatch> { self.keyboard }
 }
 
 #[derive(Resource, Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct OrbitCamSlowModeLatches {
+pub(crate) struct CameraSlowModeLatches {
     active_cameras: HashSet<Entity>,
 }
 
-/// Read-only state describing whether an `OrbitCam`'s toggled slow mode is
+/// Read-only state describing whether a camera's toggled slow mode is
 /// active.
 #[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
 #[reflect(Component, Default)]
-pub struct OrbitCamSlowModeState {
+pub struct CameraSlowModeState {
     active: bool,
 }
 
-impl OrbitCamSlowModeState {
+impl CameraSlowModeState {
     /// Returns `true` while the camera's toggled slow mode is active.
     #[must_use]
     pub const fn is_active(self) -> bool { self.active }
@@ -118,7 +119,7 @@ impl OrbitCamSlowModeState {
     pub const fn set_active(&mut self, active: bool) { self.active = active; }
 }
 
-impl OrbitCamSlowModeLatches {
+impl CameraSlowModeLatches {
     pub(super) fn is_active(&self, camera: Entity) -> bool { self.active_cameras.contains(&camera) }
 
     pub(super) fn toggle(&mut self, camera: Entity) {
@@ -133,7 +134,7 @@ impl OrbitCamSlowModeLatches {
         self.active_cameras.retain(|camera| {
             let retain = available_cameras.contains(camera);
             if !retain {
-                debug!("cleared stale OrbitCam slow-mode latch");
+                debug!("cleared stale camera slow-mode latch");
             }
             retain
         });
@@ -141,15 +142,19 @@ impl OrbitCamSlowModeLatches {
 }
 
 pub(super) fn clear_latches_on_mode_replaced(
-    replaced: On<OrbitCamInputModeReplaced>,
+    replaced: On<CameraInputModeReplaced>,
     mut latches: ResMut<CameraInputSourceLatches>,
-    mut slow_latches: ResMut<OrbitCamSlowModeLatches>,
-    bindings: Query<&OrbitCamResolvedBindings>,
+    mut slow_latches: ResMut<CameraSlowModeLatches>,
+    orbit_bindings: Query<&OrbitCamResolvedBindings>,
+    free_bindings: Query<&FreeCamResolvedBindings>,
 ) {
     latches.clear_camera(replaced.camera);
-    let has_effective_slow_mode = bindings
+    let has_effective_slow_mode = orbit_bindings
         .get(replaced.camera)
-        .is_ok_and(|bindings| control_summary::effective_slow_mode(&bindings.0).is_some());
+        .is_ok_and(|bindings| control_summary::effective_slow_mode(&bindings.0).is_some())
+        || free_bindings
+            .get(replaced.camera)
+            .is_ok_and(|bindings| control_summary::effective_free_slow_mode(&bindings.0).is_some());
     if !has_effective_slow_mode {
         slow_latches.clear_camera(replaced.camera);
     }

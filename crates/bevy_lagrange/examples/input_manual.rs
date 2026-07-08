@@ -10,18 +10,23 @@
 //!   Arrows — orbit
 //!   WASD   — pan
 //!   +/-    — zoom
+//!   H      — return to the camera home pose
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticTextMut;
-use bevy_lagrange::CameraInteractionSources;
+use bevy_lagrange::CameraHomeKind;
+use bevy_lagrange::CameraHomed;
+use bevy_lagrange::CameraInputPhase;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::ManualInputSource;
 use bevy_lagrange::OrbitCam;
+use bevy_lagrange::OrbitCamHomePose;
 use bevy_lagrange::OrbitCamInputMode;
-use bevy_lagrange::OrbitCamInputPhase;
-use bevy_lagrange::OrbitCamInteractionKind;
+use bevy_lagrange::OrbitCamKind;
 use bevy_lagrange::OrbitCamManualInputWriter;
 use fairy_dust::Anchor;
 use fairy_dust::CameraGuidance;
+use fairy_dust::CameraGuidanceAction;
 use fairy_dust::CameraGuidanceRow;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DescriptionPanel;
@@ -62,11 +67,11 @@ fn main() {
         .add_systems(Startup, spawn_camera)
         .add_systems(PostStartup, spawn_face_labels)
         .insert_resource(FaceLabelHold::default())
-        // `OrbitCamInputPhase::WriteManual` is the only schedule slot in which
+        // `CameraInputPhase::WriteManual` is the only schedule slot in which
         // `OrbitCamManualInputWriter` accepts writes.
         .add_systems(
             PreUpdate,
-            write_manual_input.in_set(OrbitCamInputPhase::WriteManual),
+            write_manual_input.in_set(CameraInputPhase::WriteManual),
         )
         .add_systems(Update, update_face_labels)
         .run();
@@ -79,11 +84,13 @@ fn main() {
 //   1. `spawn_camera` (Startup) spawns the OrbitCam with `OrbitCamInputMode::Manual`, a
 //      `ManualCamera` marker used by the writer query, custom `CameraGuidance` rows so the control
 //      panel advertises the keys this example actually reads, and the example shell marker.
-//   2. `write_manual_input` (PreUpdate, in `OrbitCamInputPhase::WriteManual`) reads the keyboard
+//   2. `write_manual_input` (PreUpdate, in `CameraInputPhase::WriteManual`) reads the keyboard
 //      directly, clears last frame's manual intent, gathers orbit/pan pixel deltas and a zoom
 //      amount, and pushes them into `OrbitCamManualInputWriter`. Arrows orbit, WASD pans, and +/-
 //      zooms can all be held together; the writer merges those simultaneous inputs into the same
 //      frame's camera intent.
+//   3. H is app-owned manual input too: it retargets `OrbitCam` to the stored `OrbitCamHomePose`
+//      through `OrbitCamKind::apply_home`.
 // ═════════════════════════════════════════════════════════════════════════════
 
 // Camera spawn.
@@ -107,13 +114,7 @@ const ZOOM_AMOUNT: f32 = 0.08;
 struct ManualCamera;
 
 fn spawn_camera(mut commands: Commands) {
-    let mut camera = OrbitCam {
-        focus: CAMERA_FOCUS,
-        yaw: Some(CAMERA_YAW),
-        pitch: Some(CAMERA_PITCH),
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
+    let mut camera = OrbitCam::from_pose(CAMERA_FOCUS, (CAMERA_YAW, CAMERA_PITCH), CAMERA_RADIUS);
     apply_example_orbit_cam_limits(&mut camera);
     commands.spawn((
         camera,
@@ -126,10 +127,20 @@ fn spawn_camera(mut commands: Commands) {
 
 fn write_manual_input(
     keys: Res<ButtonInput<KeyCode>>,
-    cameras: Query<Entity, With<ManualCamera>>,
+    mut commands: Commands,
+    mut cameras: Query<(Entity, &mut OrbitCam, &OrbitCamHomePose), With<ManualCamera>>,
     mut writer: OrbitCamManualInputWriter,
 ) {
-    for camera in &cameras {
+    let home_pressed = keys.just_pressed(KeyCode::KeyH);
+    for (camera, mut orbit_cam, home) in &mut cameras {
+        if home_pressed {
+            OrbitCamKind::apply_home(&mut orbit_cam, home);
+            commands.trigger(CameraHomed {
+                camera,
+                sources: InteractionSources::KEYBOARD,
+            });
+        }
+
         let Ok(mut input) = writer.get_mut(camera, ManualInputSource::observed_keyboard()) else {
             continue;
         };
@@ -159,25 +170,25 @@ fn write_manual_input(
             continue;
         };
         if let Some(orbit) = orbit {
-            input.orbit_pixels(orbit);
+            input.orbit(orbit);
         }
         if let Some(pan) = pan {
-            input.pan_pixels(pan);
+            input.pan(pan);
         }
         if let Some(zoom) = zoom {
-            input.zoom_smooth_amount(zoom);
+            input.zoom_smooth(zoom);
         }
     }
 }
 
 fn manual_guidance() -> CameraGuidance {
     CameraGuidance::custom([
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Orbit, ORBIT_LABEL)
-            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Pan, PAN_LABEL)
-            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
-        CameraGuidanceRow::new(OrbitCamInteractionKind::Zoom, KEYBOARD_ZOOM_LABEL)
-            .with_camera_interaction_sources(CameraInteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(CameraGuidanceAction::Orbit, ORBIT_LABEL)
+            .with_camera_interaction_sources(InteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(CameraGuidanceAction::Pan, PAN_LABEL)
+            .with_camera_interaction_sources(InteractionSources::KEYBOARD),
+        CameraGuidanceRow::new(CameraGuidanceAction::Zoom, KEYBOARD_ZOOM_LABEL)
+            .with_camera_interaction_sources(InteractionSources::KEYBOARD),
     ])
 }
 

@@ -1,73 +1,165 @@
 //! `OrbitCam` component, systems, and helpers.
 
+mod constants;
 mod controller;
-mod orbital_math;
-mod preset_helpers;
+mod drag_state;
+mod input;
+mod intent;
+mod orbit_transform;
+mod presets;
 
 use bevy::camera::CameraUpdateSystems;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
 use bevy_enhanced_input::prelude::InputContextAppExt;
+use constants::DEFAULT_ORBIT_SMOOTHNESS;
+use constants::DEFAULT_PAN_SMOOTHNESS;
+use constants::DEFAULT_ZOOM_LOWER_LIMIT;
+use constants::DEFAULT_ZOOM_SMOOTHNESS;
 use controller::orbit_cam;
+use drag_state::OrbitDragState;
+pub use input::CameraInputGamepadSelectionPolicy;
+pub use input::GamepadInputGain;
+pub use input::MouseInputGain;
+pub use input::OrbitCamBindingWithInputGain;
+pub use input::OrbitCamBindings;
+pub use input::OrbitCamBindingsBuilder;
+pub use input::OrbitCamBlenderLikeKeyboardPreset;
+pub use input::OrbitCamBlenderLikePreset;
+pub use input::OrbitCamButtonDragZoom;
+pub use input::OrbitCamButtonDragZoomAxis;
+pub use input::OrbitCamGamepadPreset;
+pub use input::OrbitCamGamepadPresetBuilder;
+pub use input::OrbitCamHomeActionBindings;
+pub(super) use input::OrbitCamInputAdapterPlugin;
+pub use input::OrbitCamInputGain;
+pub use input::OrbitCamKeyboardPreset;
+pub use input::OrbitCamMouseDrag;
+pub use input::OrbitCamMouseWheelZoom;
+pub use input::OrbitCamOrbitActionBindings;
+pub use input::OrbitCamOrbitBinding;
+pub use input::OrbitCamPanActionBindings;
+pub use input::OrbitCamPanBinding;
+pub use input::OrbitCamPinchZoom;
+pub use input::OrbitCamPreset;
+pub use input::OrbitCamPresetKind;
+pub use input::OrbitCamSimpleMouseKeyboardPreset;
+pub use input::OrbitCamSimpleMousePreset;
+pub use input::OrbitCamTouchBinding;
+pub use input::OrbitCamTouchBindingConfig;
+pub use input::OrbitCamTrackpadScroll;
+pub use input::OrbitCamZoomBinding;
+pub use input::OrbitCamZoomCoarseActionBindings;
+pub use input::OrbitCamZoomSmoothActionBindings;
+pub use input::PinchGestureZoom;
+pub use input::SmoothScrollInputGain;
+pub use input::ZoomInversion;
+pub use intent::CoarseZoomDelta;
+pub use intent::OrbitCamChannels;
+pub use intent::OrbitCamInput;
+pub use intent::OrbitDelta;
+pub use intent::PanDelta;
+pub use intent::SmoothZoomDelta;
+pub use intent::ZoomDelta;
+pub(crate) use orbit_transform::transform_from_orbit;
 
-use super::constants::DEFAULT_INPUT_GAIN;
-use super::constants::DEFAULT_ORBIT_ANGLE;
-use super::constants::DEFAULT_ORBIT_SMOOTHNESS;
-use super::constants::DEFAULT_PAN_SMOOTHNESS;
-use super::constants::DEFAULT_TARGET_RADIUS;
-use super::constants::DEFAULT_ZOOM_LOWER_LIMIT;
-use super::constants::DEFAULT_ZOOM_SMOOTHNESS;
-use super::input::OrbitCamInput;
+use super::input::IntentChannel;
 use super::input::OrbitCamInputContext;
 use super::input::OrbitCamInputMode;
-use crate::input::AxisResponse;
-use crate::input::OrbitCamInputAdapterPlugin;
-use crate::input::OrbitCamInputLifecyclePlugin;
-use crate::input::OrbitCamInputModesPlugin;
-use crate::input::OrbitCamRoutingPlugin;
+use crate::CameraBasis;
+use crate::CameraHomeKind;
+use crate::CameraKind;
+use crate::Initialization;
+use crate::animation;
+use crate::camera_home;
+use crate::constants::DEFAULT_ORBIT_ANGLE;
+use crate::constants::DEFAULT_TARGET_RADIUS;
+use crate::fit;
+use crate::input::DEFAULT_INPUT_GAIN;
+use crate::input::OrbitCamInteractionStarted;
+use crate::operation::AnglePairLimit;
+use crate::operation::Focus;
+use crate::operation::Operation;
+use crate::operation::OrbitAngles;
+use crate::operation::Radius;
+use crate::operation::RegionLimit;
+use crate::operation::ScalarLimit;
+use crate::system_sets::CameraControllerSystemSet;
+use crate::time_source::TimeSource;
 
 /// Registers the `OrbitCam` controller and its input pipeline.
 pub(super) struct OrbitCamPlugin;
 
 impl Plugin for OrbitCamPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_input_context::<OrbitCamInputContext>()
-            .add_plugins((
-                OrbitCamInputModesPlugin,
-                OrbitCamRoutingPlugin,
-                OrbitCamInputAdapterPlugin,
-                OrbitCamInputLifecyclePlugin,
-            ))
+    fn build(&self, app: &mut App) { OrbitCamKind::add_camera_kind_systems(app); }
+}
+
+/// Compile-time type-family key for `OrbitCam`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+pub struct OrbitCamKind;
+
+impl CameraKind for OrbitCamKind {
+    type Camera = OrbitCam;
+
+    fn add_controller_systems(app: &mut App) {
+        app.register_type::<Operation<OrbitAngles>>()
+            .register_type::<Operation<Focus>>()
+            .register_type::<Operation<Radius>>()
+            .register_type::<OrbitCamHomePose>()
+            .register_type::<OrbitCamInput>()
+            .register_type::<OrbitCamInputMode>()
+            .register_type::<IntentChannel<OrbitDelta>>()
+            .register_type::<IntentChannel<PanDelta>>()
+            .register_type::<IntentChannel<ZoomDelta>>()
+            .add_input_context::<OrbitCamInputContext>()
+            .add_plugins(OrbitCamInputAdapterPlugin)
             .add_systems(
                 PostUpdate,
                 orbit_cam
                     .in_set(OrbitCamSystemSet)
+                    .in_set(CameraControllerSystemSet)
                     .before(TransformSystems::Propagate)
                     .before(CameraUpdateSystems),
             );
+        camera_home::add_home_systems::<Self>(app);
+        camera_home::add_orbit_cam_home_reset_systems(app);
+    }
+
+    fn add_animation_systems(app: &mut App) { animation::add_orbit_cam_animation_systems(app); }
+
+    fn add_animate_to_fit_systems(app: &mut App) {
+        app.add_observer(fit::on_orbit_cam_animate_to_fit);
+    }
+
+    fn add_zoom_to_fit_systems(app: &mut App) { app.add_observer(fit::on_orbit_cam_zoom_to_fit); }
+
+    fn add_look_at_systems(app: &mut App) {
+        app.add_observer(fit::on_orbit_cam_look_at)
+            .add_observer(fit::on_orbit_cam_look_at_and_zoom_to_fit);
     }
 }
 
-/// Base system set to allow ordering of `OrbitCam`.
+impl CameraHomeKind for OrbitCamKind {
+    type HomePose = OrbitCamHomePose;
+    type InteractionStarted = OrbitCamInteractionStarted;
+
+    fn capture_home(camera: &Self::Camera) -> Self::HomePose {
+        OrbitCamHomePose::from_current(camera)
+    }
+
+    fn apply_home(camera: &mut Self::Camera, home: &Self::HomePose) {
+        camera.orbit.set_target(home.orbit);
+        camera.pan.set_target(home.pan);
+        camera.zoom.set_target(home.zoom);
+    }
+}
+
+/// Schedule label for the private `OrbitCam` controller system.
+///
+/// Use this in `PostUpdate` to run systems before the controller reads
+/// `OrbitCam` and `OrbitCamInput`, or after it writes the camera `Transform`.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 pub struct OrbitCamSystemSet;
-
-/// The shape to restrict the camera's focus inside.
-#[derive(Clone, PartialEq, Debug, Reflect, Copy)]
-pub enum FocusBoundsShape {
-    /// Limit the camera's focus to a sphere centered on `focus_bounds_origin`.
-    Sphere(Sphere),
-    /// Limit the camera's focus to a cuboid centered on `focus_bounds_origin`.
-    Cuboid(Cuboid),
-}
-
-impl From<Sphere> for FocusBoundsShape {
-    fn from(value: Sphere) -> Self { Self::Sphere(value) }
-}
-
-impl From<Cuboid> for FocusBoundsShape {
-    fn from(value: Cuboid) -> Self { Self::Cuboid(value) }
-}
 
 /// Whether the camera is allowed to orbit past the poles into an upside-down orientation.
 #[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
@@ -77,16 +169,6 @@ pub enum UpsideDownPolicy {
     /// Camera pitch is clamped to prevent going upside down.
     #[default]
     Prevent,
-}
-
-/// Whether `OrbitCam` has been initialized from the camera's current transform.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
-pub enum InitializationState {
-    /// Initialization has not yet occurred.
-    #[default]
-    Pending,
-    /// Initialization is complete.
-    Complete,
 }
 
 /// One-shot controller request for recalculating the camera transform.
@@ -100,66 +182,21 @@ pub enum OrbitCamUpdateRequest {
     ForceUpdate,
 }
 
-/// Which time source drives camera smoothing.
-#[derive(Clone, PartialEq, Eq, Debug, Reflect, Copy, Default)]
-pub enum TimeSource {
-    /// Use Bevy's virtual time (respects pause).
-    #[default]
-    Virtual,
-    /// Use real (wall-clock) time (ignores pause).
-    Real,
-}
-
-/// Internal per-camera state used to keep orbit direction stable during a drag.
-#[derive(Component, Default, Copy, Clone, Debug, PartialEq, Eq)]
-pub(crate) struct OrbitDragState {
-    orientation: CameraOrientation,
-    orbit_drag:  DragActivity,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum DragActivity {
-    Active,
-    #[default]
-    Idle,
-}
-
-impl From<bool> for DragActivity {
-    fn from(active: bool) -> Self { if active { Self::Active } else { Self::Idle } }
-}
-
-/// Whether the camera was latched as upside down when orbit dragging started.
-#[derive(Clone, PartialEq, Eq, Debug, Copy, Default)]
-pub(crate) enum CameraOrientation {
-    #[default]
-    Normal,
-    UpsideDown,
-}
-
-const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
-    let mut clamped_value = value;
-    if let Some(min) = min
-        && clamped_value < min
-    {
-        clamped_value = min;
-    }
-    if let Some(max) = max
-        && clamped_value > max
-    {
-        clamped_value = max;
-    }
-    clamped_value
-}
-
 /// Tags an entity as capable of panning and orbiting.
 ///
-/// Provides a way to configure the camera's behaviour and controls.
+/// Provides a way to configure the camera's behaviour and controls. The camera's
+/// driven state lives in three [`Operation`]s — `orbit` (yaw/pitch), `pan`
+/// (focus), and `zoom` (radius) — each pairing a smoothed current/target value
+/// with its sensitivity, damping, and limit.
 ///
-/// Use preset helpers such as [`OrbitCam::blender_like`] for common input modes.
+/// Use preset constructors such as [`OrbitCam::blender_like`] for default-pose
+/// input modes. Preset bundle constructors and pose constructors stay separate;
+/// to start from an explicit pose and use a preset, insert both components.
+///
 /// # Example
 /// ```no_run
 /// # use bevy::prelude::*;
-/// # use bevy_lagrange::{LagrangePlugin, OrbitCam};
+/// # use bevy_lagrange::{LagrangePlugin, OrbitCam, OrbitCamInputMode, OrbitCamPreset};
 /// # fn main() {
 /// #     App::new()
 /// #         .add_plugins(DefaultPlugins)
@@ -168,155 +205,72 @@ const fn clamp_optional(value: f32, min: Option<f32>, max: Option<f32>) -> f32 {
 /// #         .run();
 /// # }
 /// fn setup(mut commands: Commands) {
-///     commands.spawn((Transform::from_xyz(0.0, 1.5, 5.0), OrbitCam::blender_like()));
+///     commands.spawn((
+///         Transform::default(),
+///         OrbitCam::from_pose(Vec3::ZERO, (0.0, 0.4), 5.0),
+///         OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
+///     ));
 /// }
 /// ```
 #[derive(Component, Reflect, Copy, Clone, Debug, PartialEq)]
 #[reflect(Component)]
 #[require(
     Camera3d,
+    Transform,
+    CameraBasis,
     OrbitDragState,
     OrbitCamInput,
     OrbitCamInputContext,
-    OrbitCamInputMode
+    OrbitCamInputMode,
+    TimeSource
 )]
 pub struct OrbitCam {
-    /// The point to orbit around, and what the camera looks at. Updated automatically.
-    /// If you want to change the focus programmatically after initialization, set `target_focus`
-    /// instead.
-    /// Defaults to `Vec3::ZERO`.
-    pub focus:               Vec3,
-    /// The radius of the orbit, or the distance from the `focus` point.
-    /// For orthographic projection, this is ignored, and the projection's `scale` is used instead.
-    /// If set to `None`, it will be calculated from the camera's current position during
-    /// initialization.
-    /// Automatically updated.
-    /// Defaults to `None`.
-    pub radius:              Option<f32>,
-    /// Rotation in radians around the global Y axis (longitudinal). Updated automatically.
-    /// If both `yaw` and `pitch` are `0.0`, then the camera will be looking forward, i.e. in
-    /// the `Vec3::NEG_Z` direction, with up being `Vec3::Y`.
-    /// If set to `None`, it will be calculated from the camera's current position during
-    /// initialization.
-    /// You should not update this after initialization - use `target_yaw` instead.
-    /// Defaults to `None`.
-    pub yaw:                 Option<f32>,
-    /// Rotation in radians around the local X axis (latitudinal). Updated automatically.
-    /// If both `yaw` and `pitch` are `0.0`, then the camera will be looking forward, i.e. in
-    /// the `Vec3::NEG_Z` direction, with up being `Vec3::Y`.
-    /// If set to `None`, it will be calculated from the camera's current position during
-    /// initialization.
-    /// You should not update this after initialization - use `target_pitch` instead.
-    /// Defaults to `None`.
-    pub pitch:               Option<f32>,
-    /// The target focus point. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it directly for programmatic camera motion.
-    /// Defaults to `Vec3::ZERO`.
-    pub target_focus:        Vec3,
-    /// The target yaw value. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it directly for programmatic camera motion.
-    /// Defaults to `0.0`.
-    pub target_yaw:          f32,
-    /// The target pitch value. The camera will smoothly transition to this value Updated
-    /// automatically, but you can also update it directly for programmatic camera motion.
-    /// Defaults to `0.0`.
-    pub target_pitch:        f32,
-    /// The target radius value. The camera will smoothly transition to this value. Updated
-    /// automatically, but you can also update it directly for programmatic camera motion.
-    /// Defaults to `1.0`.
-    pub target_radius:       f32,
-    /// Upper limit on the `yaw` value, in radians. Use this to restrict the maximum rotation
-    /// around the global Y axis.
-    /// Defaults to `None`.
-    pub yaw_upper_limit:     Option<f32>,
-    /// Lower limit on the `yaw` value, in radians. Use this to restrict the maximum rotation
-    /// around the global Y axis.
-    /// Defaults to `None`.
-    pub yaw_lower_limit:     Option<f32>,
-    /// Upper limit on the `pitch` value, in radians. Use this to restrict the maximum rotation
-    /// around the local X axis.
-    /// Defaults to `None`.
-    pub pitch_upper_limit:   Option<f32>,
-    /// Lower limit on the `pitch` value, in radians. Use this to restrict the maximum rotation
-    /// around the local X axis.
-    /// Defaults to `None`.
-    pub pitch_lower_limit:   Option<f32>,
-    /// The origin for a shape to restrict the cameras `focus` position.
-    /// Defaults to `Vec3::ZERO`.
-    pub focus_bounds_origin: Vec3,
-    /// The shape (`Sphere` or `Cuboid`) that the `focus` is restricted by. Centered on the
-    /// `focus_bounds_origin`.
-    /// Defaults to `None`.
-    pub focus_bounds_shape:  Option<FocusBoundsShape>,
-    /// Upper limit on the zoom. This applies to `radius`, in the case of using a perspective
-    /// camera, or the projection's `scale` in the case of using an orthographic camera.
-    /// Defaults to `None`.
-    pub zoom_upper_limit:    Option<f32>,
-    /// Lower limit on the zoom. This applies to `radius`, in the case of using a perspective
-    /// camera, or the projection's `scale` in the case of using an orthographic camera.
-    /// Should always be >0 otherwise you'll get stuck at 0.
-    /// Defaults to `1e-7`.
-    pub zoom_lower_limit:    f32,
-    /// Sensitivity and damping of the orbiting motion.
-    pub orbit:               AxisResponse,
-    /// Sensitivity and damping of the panning motion.
-    pub pan:                 AxisResponse,
-    /// Sensitivity and damping of the zoom motion. Damping applies only to
-    /// line-based scroll events; pixel-based scroll is already smooth.
-    pub zoom:                AxisResponse,
+    /// The orbit angles (yaw, pitch) eased toward their target, with the orbit
+    /// motion's sensitivity, damping, and per-axis angle limits. Set the target
+    /// directly (`orbit.set_target((yaw, pitch))`) for programmatic
+    /// orbiting.
+    pub orbit:              Operation<OrbitAngles>,
+    /// The focus point eased toward its target, with the pan motion's
+    /// sensitivity, damping, and region limit. Set the target directly
+    /// (`pan.set_target(focus)`) for programmatic panning or follow behavior.
+    pub pan:                Operation<Focus>,
+    /// The orbit radius eased toward its target, with the zoom motion's
+    /// sensitivity, damping, and scalar limit. For an orthographic camera this
+    /// drives the projection scale instead of a distance. Damping applies only to
+    /// line-based scroll; pixel-based scroll is already smooth. Set the target
+    /// directly (`zoom.set_target(radius)`) for programmatic zooming.
+    pub zoom:               Operation<Radius>,
     /// Whether to allow the camera to go upside down.
     /// Defaults to `UpsideDownPolicy::Prevent`.
-    pub upside_down_policy:  UpsideDownPolicy,
-    /// Whether `OrbitCam` has been initialized with the initial config.
-    /// Set to `InitializationState::Complete` if you want the camera to smoothly animate to its
-    /// initial position.
-    /// Defaults to `InitializationState::Pending`.
-    pub initialization:      InitializationState,
+    pub upside_down_policy: UpsideDownPolicy,
+    /// How the start pose is established on the first controller pass. Defaults to
+    /// [`Initialization::FromTransform`]; [`OrbitCam::from_pose`] sets
+    /// [`Initialization::FromPose`].
+    pub initialization:     Initialization,
     /// One-shot update request used by [`OrbitCam::force_update`].
     #[doc(hidden)]
-    pub update_request:      OrbitCamUpdateRequest,
-    /// Axis order definition. This can be used to e.g. define a different default
-    /// up direction. The default up is Y, but if you want the camera rotated.
-    /// The axis can be switched.
-    /// Defaults to `[Vec3::X, Vec3::Y, Vec3::Z]`.
-    pub axis:                [Vec3; 3],
-    /// Which time source drives camera smoothing.
-    /// Defaults to `TimeSource::Virtual`.
-    pub time_source:         TimeSource,
-}
-
-impl Default for OrbitCam {
-    fn default() -> Self {
-        Self {
-            focus:               Vec3::ZERO,
-            target_focus:        Vec3::ZERO,
-            radius:              None,
-            upside_down_policy:  UpsideDownPolicy::Prevent,
-            orbit:               AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_ORBIT_SMOOTHNESS),
-            pan:                 AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_PAN_SMOOTHNESS),
-            zoom:                AxisResponse::new(DEFAULT_INPUT_GAIN, DEFAULT_ZOOM_SMOOTHNESS),
-            yaw:                 None,
-            pitch:               None,
-            target_yaw:          DEFAULT_ORBIT_ANGLE,
-            target_pitch:        DEFAULT_ORBIT_ANGLE,
-            target_radius:       DEFAULT_TARGET_RADIUS,
-            initialization:      InitializationState::Pending,
-            yaw_upper_limit:     None,
-            yaw_lower_limit:     None,
-            pitch_upper_limit:   None,
-            pitch_lower_limit:   None,
-            focus_bounds_origin: Vec3::ZERO,
-            focus_bounds_shape:  None,
-            zoom_upper_limit:    None,
-            zoom_lower_limit:    DEFAULT_ZOOM_LOWER_LIMIT,
-            update_request:      OrbitCamUpdateRequest::None,
-            axis:                [Vec3::X, Vec3::Y, Vec3::Z],
-            time_source:         TimeSource::Virtual,
-        }
-    }
+    pub update_request:     OrbitCamUpdateRequest,
 }
 
 impl OrbitCam {
+    /// Returns an `OrbitCam` whose start pose comes from explicit angles, focus,
+    /// and radius rather than the entity's `Transform`. Seeds the three
+    /// operations and sets [`Initialization::FromPose`]; the controller writes the
+    /// `Transform` to match on its first pass.
+    #[must_use]
+    pub fn from_pose(
+        focus: impl Into<Focus>,
+        angles: impl Into<OrbitAngles>,
+        radius: impl Into<Radius>,
+    ) -> Self {
+        let mut camera = Self::default();
+        camera.orbit.snap_to(angles);
+        camera.pan.snap_to(focus);
+        camera.zoom.snap_to(radius);
+        camera.initialization = Initialization::FromPose;
+        camera
+    }
+
     /// Requests one transform update on the next controller pass.
     ///
     /// Use this after mutating current camera state or projection state directly,
@@ -329,27 +283,93 @@ impl OrbitCam {
     pub(crate) fn consume_update_request(&mut self) -> OrbitCamUpdateRequest {
         core::mem::take(&mut self.update_request)
     }
+}
 
-    pub(super) const fn clamp_yaw(&self, yaw: f32) -> f32 {
-        clamp_optional(yaw, self.yaw_lower_limit, self.yaw_upper_limit)
-    }
-
-    pub(super) const fn clamp_pitch(&self, pitch: f32) -> f32 {
-        clamp_optional(pitch, self.pitch_lower_limit, self.pitch_upper_limit)
-    }
-
-    pub(super) const fn clamp_zoom(&self, zoom: f32) -> f32 {
-        clamp_optional(zoom, Some(self.zoom_lower_limit), self.zoom_upper_limit)
-    }
-
-    pub(super) fn clamp_focus(&self, focus: Vec3) -> Vec3 {
-        let Some(shape) = self.focus_bounds_shape else {
-            return focus;
-        };
-        let origin = self.focus_bounds_origin;
-        match shape {
-            FocusBoundsShape::Cuboid(shape) => shape.closest_point(focus - origin) + origin,
-            FocusBoundsShape::Sphere(shape) => shape.closest_point(focus - origin) + origin,
+impl Default for OrbitCam {
+    fn default() -> Self {
+        Self {
+            orbit:              Operation::new(
+                OrbitAngles {
+                    yaw:   DEFAULT_ORBIT_ANGLE,
+                    pitch: DEFAULT_ORBIT_ANGLE,
+                },
+                DEFAULT_INPUT_GAIN,
+                DEFAULT_ORBIT_SMOOTHNESS,
+                AnglePairLimit::default(),
+            ),
+            pan:                Operation::new(
+                Focus(Vec3::ZERO),
+                DEFAULT_INPUT_GAIN,
+                DEFAULT_PAN_SMOOTHNESS,
+                RegionLimit::default(),
+            ),
+            zoom:               Operation::new(
+                Radius(DEFAULT_TARGET_RADIUS),
+                DEFAULT_INPUT_GAIN,
+                DEFAULT_ZOOM_SMOOTHNESS,
+                ScalarLimit::Clamp {
+                    min: DEFAULT_ZOOM_LOWER_LIMIT,
+                    max: f32::INFINITY,
+                },
+            ),
+            upside_down_policy: UpsideDownPolicy::Prevent,
+            initialization:     Initialization::FromTransform,
+            update_request:     OrbitCamUpdateRequest::None,
         }
+    }
+}
+
+/// The `OrbitCam` pose restored by the home/reset action.
+///
+/// Captured from the camera's current operation values. Insert one before spawn to define a
+/// fixed custom home pose instead.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Component)]
+pub struct OrbitCamHomePose {
+    /// Home orbit angles the camera returns to.
+    pub orbit: OrbitAngles,
+    /// Home focus point the camera returns to.
+    pub pan:   Focus,
+    /// Home radius the camera returns to.
+    pub zoom:  Radius,
+}
+
+impl OrbitCamHomePose {
+    pub(crate) const fn from_current(orbit_cam: &OrbitCam) -> Self {
+        Self {
+            orbit: orbit_cam.orbit.current(),
+            pan:   orbit_cam.pan.current(),
+            zoom:  orbit_cam.zoom.current(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TARGET_FOCUS: Vec3 = Vec3::new(1.0, 2.0, 3.0);
+    const TARGET_PITCH: f32 = 0.75;
+    const TARGET_RADIUS: Radius = Radius(12.0);
+    const TARGET_YAW: f32 = 1.5;
+
+    #[test]
+    fn home_pose_reads_operation_currents() {
+        let mut orbit_cam = OrbitCam::default();
+        orbit_cam.orbit.set_target(OrbitAngles {
+            yaw:   TARGET_YAW,
+            pitch: TARGET_PITCH,
+        });
+        orbit_cam.pan.set_target(Focus(TARGET_FOCUS));
+        orbit_cam.zoom.set_target(TARGET_RADIUS);
+
+        let home = OrbitCamHomePose::from_current(&orbit_cam);
+
+        assert_ne!(home.orbit, orbit_cam.orbit.target());
+        assert_ne!(home.pan, orbit_cam.pan.target());
+        assert_ne!(home.zoom, orbit_cam.zoom.target());
+        assert_eq!(home.orbit, orbit_cam.orbit.current());
+        assert_eq!(home.pan, orbit_cam.pan.current());
+        assert_eq!(home.zoom, orbit_cam.zoom.current());
     }
 }

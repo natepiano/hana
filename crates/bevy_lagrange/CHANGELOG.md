@@ -11,6 +11,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `CameraBasis` component with `Y_UP` and `Z_UP` presets for camera coordinate
+  bases shared by orbit and free cameras.
+- `FreeCam::with_preset()`, `FreeCam::with_bindings()`, and `FreeCam::manual()`
+  bundle constructors matching the `OrbitCam` preset-selection API.
+- `FreeCam` controller support with keyboard/mouse presets, bindings, BEI
+  actions, and `AnimateToFit` / `ZoomToFit` / `LookAt` /
+  `LookAtAndZoomToFit` handling.
+- `FreeCam::pitch_limited()` and `FreeCam::horizon_locked()` constructors for
+  common constrained free-flight setups.
+- `FreeCamBindings::builder()`, `FreeCamBindings::validate()`,
+  `FreeCamBindingsBuilder`, and `FreeCamTranslateKeys` for named, validated
+  FreeCam keyboard/mouse binding construction.
+- `FreeCamManualInputWriter` and `FreeCamManualInput` for app-authored
+  translate/look/roll intent while a `FreeCam` is in `FreeCamInputMode::Manual`.
+- Generic `describe_controls` / `describe_controls_for` entry points plus
+  `CameraControlBinding` summaries for camera control UI/help surfaces.
+- `ResetOrbitCamToHome` and `ResetFreeCamToHome` trigger events for
+  BRP/app-triggerable reset-to-home flows.
+- `FreeCamHomePose::from_orbit_home()` for explicit OrbitCam-to-FreeCam mode
+  switches that preserve Home behavior.
+
+### Changed
+
+- `OrbitCam::from_pose()` and `FreeCam::from_pose()` now accept
+  `impl Into<OrbitAngles>` / `impl Into<LookAngles>` for their angle
+  parameters, and `OrbitAngles` / `LookAngles` implement `From<(f32, f32)>` so
+  `(yaw, pitch)` tuples can be passed directly.
+- Update the fixed FreeCam example with a vertical title bar that switches
+  between free-flight, pitch-limited, and horizon-locked behavior presets,
+  adjusts the shared pitch clamp with `+` / `-`, and starts inside a generated
+  10x10x10 platform grid.
+- Route FreeCam timed `AnimateToFit` / `ZoomToFit` through `PlayAnimation` and
+  `CameraMoveList`; `CameraMove::ToLookAt` and `CameraMove::ToOrbitalLookAt` now
+  carry an optional FreeCam roll target, and `CameraKind` implementors must
+  register animation systems through `add_animation_systems` (breaking).
+- Replace `OrbitCam::axis` with the required `CameraBasis` component (breaking).
+  Callers that set `orbit_cam.axis = ...` should insert or mutate `CameraBasis`
+  on the camera entity instead.
+- Replace `OrbitCamInputPhase` with shared `CameraInputPhase` (breaking). Manual
+  input systems should run in `CameraInputPhase::WriteManual`.
+- Require `CameraKind` implementations to register controller, `AnimateToFit`,
+  `ZoomToFit`, and look-at support through
+  `CameraKind::add_camera_kind_systems` (breaking for external `CameraKind`
+  implementors).
+- Rename `OrbitCamManualInput` writer methods to domain verbs (breaking):
+  `orbit_pixels` -> `orbit`, `pan_pixels` -> `pan`, `zoom_coarse_amount` ->
+  `zoom_coarse`, `zoom_smooth_amount` -> `zoom_smooth`, and the zero-delta
+  active markers to `mark_{orbit,pan,zoom}_active`.
+- Remove `#[non_exhaustive]` from `OrbitCamBindingsError`; binding validation
+  errors are closed enums unless reopened by an explicit future policy
+  decision.
+
+### Removed
+
+- Remove `OrbitCam::keyboard()`, `OrbitCam::simple_mouse_keyboard()`, and
+  `OrbitCam::blender_like_keyboard()`. Use `OrbitCam::with_preset(...)` with the
+  matching `OrbitCamPreset` constructors instead (breaking).
+- Remove the unused `OrbitCamReportingDebounce` alias. Use
+  `CameraInputReportingDebounce` instead (breaking).
+
 ## [0.2.0] - 2026-06-23
 
 ### Changed
@@ -60,7 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.4] - 2026-06-20
 
 ### Added
-- `OrbitCamSlowMode` and `OrbitCamSlowModeState` — first-class slow control speed;
+- `OrbitCamSlowMode` and `CameraSlowModeState` — first-class slow control speed;
   BlenderLike preset adapters scale orbit/pan/zoom while a slow modifier is held, and the
   active speed is surfaced through `OrbitCamInteractionState`.
 - `OrbitCamScalePolicy` — configurable input-scaling policy for orbit-cam adapters.

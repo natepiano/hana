@@ -12,8 +12,12 @@ use bevy_diegetic::PanelDraw;
 use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
+use bevy_lagrange::CameraControlActivation;
+use bevy_lagrange::CameraControlBinding;
+use bevy_lagrange::CameraControlBindingKind;
 use bevy_lagrange::ControlSpeed;
-use bevy_lagrange::OrbitCamInteractionKind;
+use bevy_lagrange::FreeCamActiveDirections;
+use bevy_lagrange::InteractionSources;
 use bevy_lagrange::ZoomDirection;
 
 use super::constants::ACTION_COLUMN_WIDTH;
@@ -36,7 +40,7 @@ use super::constants::TABLE_ROW_GAP;
 use super::constants::TABLE_SECTION_DIVIDER_GAP;
 use super::constants::TRUNK_END_GAP;
 use super::display::CameraGuidanceDisplay;
-use super::display::SlowMode;
+use super::guidance::CameraGuidanceAction;
 use super::snapshot;
 use super::snapshot::CameraGuidanceSnapshot;
 use crate::connector;
@@ -111,7 +115,13 @@ fn build_guidance_table(
 ) {
     let speeds: Vec<ControlSpeed> = [ControlSpeed::Normal, ControlSpeed::Slow]
         .into_iter()
-        .filter(|&speed| snapshot.rows.iter().any(|row| row.speed() == speed))
+        .filter(|&speed| {
+            snapshot.rows.iter().any(|row| row.speed() == speed)
+                || snapshot
+                    .settings
+                    .iter()
+                    .any(|binding| binding.speed == speed)
+        })
         .collect();
     // Single-speed presets (mouse, keyboard) drop the speed column entirely.
     let speed_column = if speeds.len() > 1 {
@@ -139,7 +149,13 @@ fn build_guidance_table(
                 );
             }
             if let Some(binding_label) = snapshot.slow_mode_binding_label.as_deref() {
-                build_slow_mode_row(builder, binding_label, display.slow_mode(), label, active);
+                build_slow_mode_row(
+                    builder,
+                    binding_label,
+                    display.slow_mode_active(),
+                    label,
+                    active,
+                );
             }
         },
     );
@@ -148,30 +164,17 @@ fn build_guidance_table(
 fn build_slow_mode_row(
     builder: &mut LayoutBuilder,
     binding_label: &str,
-    slow_mode: SlowMode,
+    slow_mode_active: bool,
     label: &TextStyle,
     active: &TextStyle,
 ) {
-    let slow_mode_active = slow_mode.is_active();
     let style = if slow_mode_active { active } else { label };
     let connector_color = if slow_mode_active {
         ACTIVE_COLOR
     } else {
         Color::NONE
     };
-    let spacer_layout = SpacerLayout {
-        word_count:        1,
-        label_line_height: LABEL_LINE_HEIGHT,
-        row_gap:           Px(TABLE_ROW_GAP),
-        line_width:        CONNECTOR_LINE_WIDTH,
-        cap_size:          CONNECTOR_CAP_SIZE,
-        level_epsilon:     CONNECTOR_LEVEL_EPSILON,
-        trunk_end_gap:     TRUNK_END_GAP,
-        colors:            ConnectorColors {
-            active: ACTIVE_COLOR,
-            idle:   Color::NONE,
-        },
-    };
+    let spacer_layout = guidance_spacer_layout(1);
     let spacer_lines =
         connector::spacer_lines(spacer_layout, &[slow_mode_active], slow_mode_active);
 
@@ -214,11 +217,27 @@ fn build_slow_mode_row(
                     .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text((snapshot::speed_label(ControlSpeed::Slow), style.clone()));
+                    builder.text(("Slow", style.clone()));
                 },
             );
         },
     );
+}
+
+const fn guidance_spacer_layout(word_count: usize) -> SpacerLayout {
+    SpacerLayout {
+        word_count,
+        label_line_height: LABEL_LINE_HEIGHT,
+        row_gap: Px(TABLE_ROW_GAP),
+        line_width: CONNECTOR_LINE_WIDTH,
+        cap_size: CONNECTOR_CAP_SIZE,
+        level_epsilon: CONNECTOR_LEVEL_EPSILON,
+        trunk_end_gap: TRUNK_END_GAP,
+        colors: ConnectorColors {
+            active: ACTIVE_COLOR,
+            idle:   Color::NONE,
+        },
+    }
 }
 
 fn build_speed_block(
@@ -240,12 +259,16 @@ fn build_speed_block(
             if matches!(speed_column, SpeedColumn::Shown) {
                 let block_active = snapshot.rows.iter().any(|row| {
                     row.speed() == speed
-                        && display.speed(row.kind()) == Some(speed)
+                        && display.speed(row.action()) == Some(speed)
                         && snapshot::row_active(
                             row,
-                            display.sources(row.kind()),
+                            display.sources(row.action()),
                             display.zoom_direction(),
+                            display.free_directions(),
                         )
+                }) || snapshot.settings.iter().any(|binding| {
+                    binding.speed == speed
+                        && setting_activation(binding) == Some(CameraControlActivation::Active)
                 });
                 let speed_style = if block_active { active } else { label };
                 builder.with(
@@ -258,31 +281,17 @@ fn build_speed_block(
                 );
             }
             builder.with(action_rows_element(speed_column), |builder| {
-                for (kind, direction) in [
-                    (OrbitCamInteractionKind::Orbit, None),
-                    (OrbitCamInteractionKind::Pan, None),
-                    (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::In)),
-                    (OrbitCamInteractionKind::Zoom, Some(ZoomDirection::Out)),
-                    (OrbitCamInteractionKind::Zoom, None),
-                ] {
-                    build_action_row(
-                        builder,
-                        snapshot,
-                        (kind, speed, direction),
-                        display,
-                        label,
-                        active,
-                    );
+                for action in actions_for_speed(snapshot, speed) {
+                    build_action_row(builder, snapshot, action, speed, display, label, active);
                 }
             });
         },
     );
 }
 
-/// The action-row column element. Single-speed presets (`SimpleMouse`,
-/// `BlenderLike`) divide their rows with a border line — Orbit / Pan / Zoom In /
-/// Zoom Out — while multi-speed presets keep the rows gap-separated and rely on
-/// the divider between their `Normal` / `Slow` blocks instead.
+/// The action-row column element. Single-speed presets divide their action
+/// groups with a border line, while multi-speed presets keep the groups
+/// gap-separated and rely on the divider between `Normal` / `Slow` blocks.
 fn action_rows_element(speed_column: SpeedColumn) -> El<Column> {
     let element = El::column()
         .width(Sizing::GROW)
@@ -306,47 +315,58 @@ const fn action_row_group_gap(speed_column: SpeedColumn) -> f32 {
 fn build_action_row(
     builder: &mut LayoutBuilder,
     snapshot: &CameraGuidanceSnapshot,
-    group: (OrbitCamInteractionKind, ControlSpeed, Option<ZoomDirection>),
+    action: CameraGuidanceAction,
+    speed: ControlSpeed,
     display: CameraGuidanceDisplay,
     label: &TextStyle,
     active: &TextStyle,
 ) {
-    let (kind, speed, direction) = group;
-    let active_sources = display.sources(kind);
+    let active_sources = display.sources(action);
     let live_zoom_direction = display.zoom_direction();
+    let live_free_directions = display.free_directions();
     // `speed_matches` gates highlight so the slow row stays dim at normal speed.
-    let speed_matches = display.speed(kind) == Some(speed);
-    let rows = snapshot
-        .rows
-        .iter()
-        .filter(|row| {
-            row.kind() == kind && row.speed() == speed && row.zoom_direction() == direction
-        })
-        .collect::<Vec<_>>();
+    let speed_matches = display.speed(action) == Some(speed);
+    let rows = table_rows_for_action(
+        snapshot,
+        action,
+        speed,
+        speed_matches,
+        active_sources,
+        live_zoom_direction,
+        live_free_directions,
+    );
     if rows.is_empty() {
         return;
     }
 
-    let word_active = rows
-        .iter()
-        .map(|row| speed_matches && snapshot::row_active(row, active_sources, live_zoom_direction))
-        .collect::<Vec<_>>();
-    let group_active = word_active.iter().any(|&active| active);
-    let action_style = if group_active { active } else { label };
-    let spacer_layout = SpacerLayout {
-        word_count:        rows.len(),
-        label_line_height: LABEL_LINE_HEIGHT,
-        row_gap:           Px(TABLE_ROW_GAP),
-        line_width:        CONNECTOR_LINE_WIDTH,
-        cap_size:          CONNECTOR_CAP_SIZE,
-        level_epsilon:     CONNECTOR_LEVEL_EPSILON,
-        trunk_end_gap:     TRUNK_END_GAP,
-        colors:            ConnectorColors {
-            active: ACTIVE_COLOR,
-            idle:   Color::NONE,
+    builder.with(
+        El::column()
+            .width(Sizing::GROW)
+            .height(Sizing::FIT)
+            .gap(Px(TABLE_ROW_GAP)),
+        |builder| {
+            for row in rows {
+                build_guidance_table_row(builder, row, label, active);
+            }
         },
+    );
+}
+
+fn build_guidance_table_row(
+    builder: &mut LayoutBuilder,
+    row: GuidanceTableRow<'_>,
+    label: &TextStyle,
+    active: &TextStyle,
+) {
+    let connector_active = row.connector_activation == CameraControlActivation::Active;
+    let connector_color = if connector_active {
+        ACTIVE_COLOR
+    } else {
+        Color::NONE
     };
-    let spacer_lines = connector::spacer_lines(spacer_layout, &word_active, group_active);
+    let spacer_layout = guidance_spacer_layout(1);
+    let spacer_lines =
+        connector::spacer_lines(spacer_layout, &[connector_active], connector_active);
 
     builder.with(
         El::row()
@@ -356,35 +376,26 @@ fn build_action_row(
             .align_y(AlignY::Center),
         |builder| {
             builder.with(
-                El::column()
+                El::row()
                     .width(Sizing::GROW)
-                    .height(Sizing::FIT)
-                    .gap(Px(TABLE_ROW_GAP)),
+                    .height(Sizing::fixed(LABEL_LINE_HEIGHT))
+                    .align_y(AlignY::Center),
                 |builder| {
-                    for (row, &is_active) in rows.iter().zip(&word_active) {
-                        let binding_style = if is_active { active } else { label };
-                        let connector_color = if is_active { ACTIVE_COLOR } else { Color::NONE };
-                        builder.with(
-                            El::row()
-                                .width(Sizing::GROW)
-                                .height(Sizing::fixed(LABEL_LINE_HEIGHT))
-                                .align_y(AlignY::Center),
-                            |builder| {
-                                builder.text((row.label(), binding_style.clone()));
-                                builder.with(
-                                    El::new()
-                                        .width(Sizing::grow_min(FEEDER_CELL_MIN))
-                                        .height(Sizing::GROW)
-                                        .draw(PanelDraw::lines([connector::feeder_line(
-                                            FEEDER_START_GAP,
-                                            CONNECTOR_LINE_WIDTH,
-                                            connector_color,
-                                        )])),
-                                    |_| {},
-                                );
-                            },
-                        );
-                    }
+                    builder.text((
+                        row.label,
+                        style_for_activation(row.label_activation, label, active).clone(),
+                    ));
+                    builder.with(
+                        El::new()
+                            .width(Sizing::grow_min(FEEDER_CELL_MIN))
+                            .height(Sizing::GROW)
+                            .draw(PanelDraw::lines([connector::feeder_line(
+                                FEEDER_START_GAP,
+                                CONNECTOR_LINE_WIDTH,
+                                connector_color,
+                            )])),
+                        |_| {},
+                    );
                 },
             );
             builder.with(
@@ -400,11 +411,122 @@ fn build_action_row(
                     .height(Sizing::FIT),
                 |builder| {
                     builder.text((
-                        snapshot::action_label(kind, direction),
-                        action_style.clone(),
+                        row.value,
+                        style_for_activation(row.value_activation, label, active).clone(),
                     ));
                 },
             );
         },
     );
+}
+
+const fn style_for_activation<'a>(
+    activation: CameraControlActivation,
+    label: &'a TextStyle,
+    active: &'a TextStyle,
+) -> &'a TextStyle {
+    match activation {
+        CameraControlActivation::Active => active,
+        CameraControlActivation::Inactive => label,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GuidanceTableRow<'a> {
+    label:                &'a str,
+    value:                &'a str,
+    label_activation:     CameraControlActivation,
+    value_activation:     CameraControlActivation,
+    connector_activation: CameraControlActivation,
+}
+
+fn table_rows_for_action(
+    snapshot: &CameraGuidanceSnapshot,
+    action: CameraGuidanceAction,
+    speed: ControlSpeed,
+    speed_matches: bool,
+    active_sources: InteractionSources,
+    live_zoom_direction: Option<ZoomDirection>,
+    live_free_directions: FreeCamActiveDirections,
+) -> Vec<GuidanceTableRow<'_>> {
+    let mut rows = snapshot
+        .rows
+        .iter()
+        .filter(|row| row.action() == action && row.speed() == speed)
+        .map(|row| {
+            let activation = if speed_matches
+                && snapshot::row_active(
+                    row,
+                    active_sources,
+                    live_zoom_direction,
+                    live_free_directions,
+                ) {
+                CameraControlActivation::Active
+            } else {
+                CameraControlActivation::Inactive
+            };
+            GuidanceTableRow {
+                label:                row.label(),
+                value:                row.action_label().unwrap_or_else(|| action.label()),
+                label_activation:     activation,
+                value_activation:     activation,
+                connector_activation: activation,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    rows.extend(
+        snapshot
+            .settings
+            .iter()
+            .filter(|binding| {
+                CameraGuidanceAction::from(binding.action) == action && binding.speed == speed
+            })
+            .filter_map(|binding| {
+                setting_value(binding).map(|(value, activation)| GuidanceTableRow {
+                    label: binding.label.as_str(),
+                    value,
+                    label_activation: CameraControlActivation::Inactive,
+                    value_activation: activation,
+                    connector_activation: activation,
+                })
+            }),
+    );
+    rows
+}
+
+const fn setting_value(binding: &CameraControlBinding) -> Option<(&str, CameraControlActivation)> {
+    match &binding.kind {
+        CameraControlBindingKind::Setting { value, activation } => {
+            Some((value.as_str(), *activation))
+        },
+        CameraControlBindingKind::Direct => None,
+    }
+}
+
+fn setting_activation(binding: &CameraControlBinding) -> Option<CameraControlActivation> {
+    setting_value(binding).map(|(_, activation)| activation)
+}
+
+fn actions_for_speed(
+    snapshot: &CameraGuidanceSnapshot,
+    speed: ControlSpeed,
+) -> Vec<CameraGuidanceAction> {
+    let mut actions = Vec::new();
+    for row in snapshot.rows.iter().filter(|row| row.speed() == speed) {
+        if !actions.contains(&row.action()) {
+            actions.push(row.action());
+        }
+    }
+    for binding in snapshot
+        .settings
+        .iter()
+        .filter(|binding| binding.speed == speed)
+    {
+        let action = CameraGuidanceAction::from(binding.action);
+        if !actions.contains(&action) {
+            actions.push(action);
+        }
+    }
+    actions
 }

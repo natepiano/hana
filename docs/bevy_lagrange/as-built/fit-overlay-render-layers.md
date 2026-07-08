@@ -4,7 +4,7 @@ How `bevy_lagrange`'s `FitOverlay` renders with multiple cameras, custom render
 layers, and screen-space overlay cameras. The overlay draws retained Core3d line
 meshes plus plain Bevy UI labels.
 
-Source: `crates/bevy_lagrange/src/fit_overlay/`.
+Source: `crates/bevy_lagrange/src/fit/overlay/`.
 
 ## Model
 
@@ -20,7 +20,7 @@ Removing that marker disables the overlay:
 commands.entity(camera).remove::<FitOverlay>();
 ```
 
-`FitOverlay` is a zero-config marker (`components.rs`). Render layers and pass
+`FitOverlay` is a zero-config marker (`fit/overlay/mod.rs`). Render layers and pass
 order come from the camera; `FitTargetOverlayConfig` carries visual appearance.
 
 Lines are retained Core3d mesh entities carrying `Mesh3d`,
@@ -90,7 +90,7 @@ marker is an update/cleanup identity, not a Bevy render visibility filter. ECS
 does not enforce uniqueness, so `deduplicate_fit_overlay_visuals` despawns any
 duplicate `(camera, kind)` each frame, keeping one deterministic survivor.
 
-`FitOverlayVisual` and `FitOverlayVisualKind` stay internal to `fit_overlay`;
+`FitOverlayVisual` and `FitOverlayVisualKind` stay internal to `fit::overlay`;
 they derive reflection for BRP inspection rather than being public Rust API.
 
 ## Render layers

@@ -1,7 +1,6 @@
 //! Demonstrates re-pointing an `OrbitCam` between coordinate-system conventions
-//! at runtime: swapping `OrbitCam::axis` (the `[right, up, forward]` orbit
-//! basis) per engine, flying the camera with
-//! `PlayAnimation([CameraMove::ToOrbit { ... }])`, and chaining a two-leg fly
+//! at runtime: swapping the camera's `CameraBasis` per engine, animating the camera with
+//! `PlayAnimation([CameraMove::ToOrbitalLookAt { ... }])`, and chaining a two-leg camera animation
 //! by observing `AnimationEnd` to fire the second leg once the first lands.
 //! `UpsideDownPolicy::Allow` removes the ±90° pitch clamp so orbit spins
 //! freely; `FairyDustOrbitCam` tags the camera so the shared control panel
@@ -42,10 +41,10 @@ use bevy_diegetic::Px;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::StableTransparency;
 use bevy_diegetic::TextStyle;
-use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
-use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraBasis;
+use bevy_lagrange::CameraHomed;
 use bevy_lagrange::CameraMove;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamInputMode;
@@ -85,15 +84,14 @@ fn main() {
         .yaw(HOME_YAW_Y_UP)
         .pitch(HOME_PITCH_Y_UP)
         .margin(HOME_FIT_MARGIN)
-        .duration(Duration::from_millis(FLY_TO_HOME_MS))
         .with_camera_control_panel()
         .init_resource::<Engine>()
         .init_resource::<PendingEngine>()
         .init_resource::<RequestedEngine>()
-        // The fly's second leg fires from this observer when the first leg lands.
-        .add_observer(advance_engine_fly)
+        // The camera animation's second leg fires from this observer when the first leg lands.
+        .add_observer(advance_engine_animation)
         // `H` is bound by Fairy Dust's camera home; `reset_home_state` observes
-        // the home fit it triggers and resets the example's engine state to match.
+        // the home-started event and resets the example's engine state to match.
         .add_observer(reset_home_state)
         .add_systems(Startup, (spawn_camera, spawn_gizmo, spawn_engine_panel))
         // After the ground spawns, fade its default material to mostly transparent.
@@ -125,40 +123,41 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CAMERA — driving OrbitCam: per-engine `OrbitCam::axis` (the `[right, up,
-// forward]` orbit basis), `PlayAnimation([CameraMove::ToOrbit { .. }])` for
-// the fly, and an `AnimationEnd` observer chaining the second leg. This is
-// the part to read to learn how the camera is driven.
+// CAMERA — driving OrbitCam: per-engine `CameraBasis`, `PlayAnimation(
+// [CameraMove::ToOrbitalLookAt { .. }])` for the camera animation, and an `AnimationEnd` observer
+// chaining the second leg. This is the part to read to learn how the camera is
+// driven.
 //
 // How it works:
-//   1. `spawn_camera` (Startup) spawns one `OrbitCam` already at the default engine's home: `axis =
-//      engine_camera_axis(engine)` picks the orbit basis (Y-up engines orbit about world Y; Z-up
-//      engines about Z via `SWAPPED_AXIS`); `yaw`/`pitch`/`radius` are `Some(...)` so
-//      initialization keeps them and skips any opening fit. `UpsideDownPolicy::Allow` removes the
-//      pitch clamp; `FairyDustOrbitCam` tags the camera for the shared panel and home logic.
+//   1. `spawn_camera` (Startup) spawns one `OrbitCam` already at the default engine's home:
+//      `engine_camera_basis(engine)` picks the orbit basis (Y-up engines orbit about world Y; Z-up
+//      engines about Z via `Z_UP_BASIS`); `yaw`/`pitch`/`radius` are seeded by
+//      `OrbitCam::from_pose`, so initialization keeps them and skips any opening fit.
+//      `UpsideDownPolicy::Allow` removes the pitch clamp; `FairyDustOrbitCam` tags the camera for
+//      the shared panel and home logic.
 //   2. Number keys 1–4 record a `RequestedEngine` through Fairy Dust's shortcut binding;
 //      `select_engine` (Update) applies it. Re-pressing the current engine fires one
-//      `PlayAnimation` straight back to its home view. A new engine starts a two-leg fly: it
-//      records the switch in `PendingEngine`, seeds the gizmo arc tweens, and fires the first
-//      `PlayAnimation` to `yaw=0, pitch=0` — the shared front pose where every basis renders
-//      identically, so the upcoming axis swap is invisible.
-//   3. `advance_engine_fly` (observer on `AnimationEnd`) wakes when the first leg lands. It pulls
-//      the switch out of `PendingEngine`, rotates the orbit focus through `engine_up_world(from) →
-//      engine_up_world(to)` so the floor keeps its screen-space footprint, swaps `OrbitCam::axis`
-//      to the new basis, and fires the second `PlayAnimation` out to the new engine's home angles.
-//      Cancelled or second-leg `AnimationEnd`s short-circuit because `PendingEngine` is already
-//      empty.
-//   4. `reset_home_state` (observer on `AnimationBegin`) wakes when Fairy Dust's home fit starts —
-//      the only `AnimateToFit` in the example — resets the resource state, swaps `OrbitCam::axis`
-//      back to the default engine's basis, and re-seeds gizmo + ground tweens. Fairy Dust's own `H`
-//      handler flies the camera; this only realigns the example's state to match.
+//      `PlayAnimation` straight back to its home view. A new engine starts a two-leg camera
+//      animation: it records the switch in `PendingEngine`, seeds the gizmo arc tweens, and fires
+//      the first `PlayAnimation` to `yaw=0, pitch=0` — the shared front pose where every basis
+//      renders identically, so the upcoming axis swap is invisible.
+//   3. `advance_engine_animation` (observer on `AnimationEnd`) wakes when the first leg lands. It
+//      pulls the switch out of `PendingEngine`, rotates the orbit focus through
+//      `engine_up_world(from) → engine_up_world(to)` so the floor keeps its screen-space footprint,
+//      swaps `CameraBasis` to the new basis, and fires the second `PlayAnimation` out to the new
+//      engine's home angles. Cancelled or second-leg `AnimationEnd`s short-circuit because
+//      `PendingEngine` is already empty.
+//   4. `reset_home_state` (observer on `CameraHomed`) wakes when Fairy Dust's home input fires,
+//      resets the resource state, swaps `CameraBasis` back to the default engine's basis, and
+//      re-seeds gizmo + ground tweens. Lagrange glides the camera to the stored home pose; this
+//      only realigns the example's state to match.
 // ═════════════════════════════════════════════════════════════════════════════
 
-// The Z-up engines' (Blender, Unreal) orbit basis: a right-handed Z-up frame
-// (right=X, up=Z, forward=-Y). Using `-Y` for forward keeps the determinant
+// The Z-up engines' (Blender, Unreal) camera basis: a right-handed Z-up frame
+// (right=X, up=Z, back=-Y). Using `-Y` for back keeps the determinant
 // positive, so tilting to the Y-up basis `[X, Y, Z]` is a clean 90° rotation
 // about X rather than a handedness flip the camera can't interpolate through.
-const SWAPPED_AXIS: [Vec3; 3] = [Vec3::X, Vec3::Z, Vec3::NEG_Y];
+const Z_UP_BASIS: CameraBasis = CameraBasis::Z_UP;
 // Distance the camera orbits the origin-centered gizmo at — frames the arms and
 // labels with a little margin.
 const HOME_RADIUS: f32 = 6.5;
@@ -170,16 +169,16 @@ const HOME_FIT_MARGIN: f32 = 0.1;
 const HOME_YAW_Y_UP: f32 = 0.365;
 const HOME_PITCH_Y_UP: f32 = 0.288;
 
-// Home `(yaw, pitch)` for the Z-up engines (Blender, Unreal) on `SWAPPED_AXIS`.
+// Home `(yaw, pitch)` for the Z-up engines (Blender, Unreal) on `Z_UP_BASIS`.
 // This is the Y-up home view rotated with the floor onto Blender's Z-up plane,
 // preserving the camera's screen-space relationship to the ground.
 const HOME_YAW: f32 = HOME_YAW_Y_UP;
 const HOME_PITCH: f32 = HOME_PITCH_Y_UP - PI / 2.0;
 
-// Camera fly on engine switch — swing to the shared front pose (where the orbit
+// Camera animation on engine switch — swing to the shared front pose (where the orbit
 // basis swap is invisible), then out to the new engine's home view.
-const FLY_TO_FRONT_MS: u64 = 350;
-const FLY_TO_HOME_MS: u64 = 450;
+const CAMERA_TO_FRONT_MS: u64 = 350;
+const CAMERA_TO_HOME_MS: u64 = 450;
 
 /// The selected engine. Drives the bottom-left selector highlight and the camera
 /// + gizmo targets that the number keys (and `H`) animate to.
@@ -210,11 +209,11 @@ const ENGINES: [(Engine, &str, &str, &str, &str); 4] = [
 
 impl Engine {
     /// Whether this engine stands `+Y` up (vs `+Z`). Selects the orbit basis in
-    /// [`engine_camera_axis`] and the home angles in [`home_angles`](Self::home_angles).
+    /// [`engine_camera_basis`] and the home angles in [`home_angles`](Self::home_angles).
     const fn standing_axis_is_y(self) -> bool { matches!(self, Self::Bevy | Self::Unity) }
 
     /// The camera's home `(yaw, pitch)` under this engine's orbit axis — paired
-    /// with [`engine_camera_axis`] so the engine's up-axis stands vertical. Both
+    /// with [`engine_camera_basis`] so the engine's up-axis stands vertical. Both
     /// Y-up engines share one 3/4 view and both Z-up engines share the baked
     /// view; the gizmo's per-engine endpoint swap, not the camera, distinguishes
     /// the two handednesses that share an up-axis.
@@ -244,62 +243,53 @@ fn spawn_camera(mut commands: Commands) {
     // to `Some` makes `OrbitCam` initialization keep them and build the transform
     // from them, so the scene opens at that view with no fit or snap. Tagging the
     // entity with `FairyDustOrbitCam` lets the camera control panel and the engine
-    // fly find it. `UpsideDownPolicy::Allow` drops the ±90° pitch clamp so orbit
+    // animation find it. `UpsideDownPolicy::Allow` drops the ±90° pitch clamp so orbit
     // spins freely; `StableTransparency` enables OIT for the world-text labels.
     let engine = Engine::default();
     let (yaw, pitch) = engine.home_angles();
+    let basis = engine_camera_basis(engine);
+    let mut camera = OrbitCam::from_pose(Vec3::ZERO, (yaw, pitch), HOME_RADIUS);
+    camera.upside_down_policy = UpsideDownPolicy::Allow;
     commands.spawn((
-        OrbitCam {
-            axis: engine_camera_axis(engine),
-            yaw: Some(yaw),
-            pitch: Some(pitch),
-            radius: Some(HOME_RADIUS),
-            upside_down_policy: UpsideDownPolicy::Allow,
-            ..default()
-        },
+        camera,
+        basis,
         OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
         FairyDustOrbitCam,
         StableTransparency,
     ));
 }
 
-/// The right-handed orbit basis (`[right, up, forward]`) the camera uses for
+/// The right-handed camera basis (`right`, `up`, `back`) the camera uses for
 /// `engine`: Y-up engines orbit about world `Y`, Z-up engines about world `Z`.
 /// Only the standing axis is matched — the horizontal orbit direction stays the
-/// same for every engine regardless of handedness. `axis[1]` (up) is the axis a
+/// same for every engine regardless of handedness. `basis.up` is the axis a
 /// drag-to-orbit revolves around, so this is what makes orbiting "feel" like the
 /// engine, not just the framing.
-const fn engine_camera_axis(engine: Engine) -> [Vec3; 3] {
+const fn engine_camera_basis(engine: Engine) -> CameraBasis {
     if engine.standing_axis_is_y() {
-        [Vec3::X, Vec3::Y, Vec3::Z]
+        CameraBasis::Y_UP
     } else {
-        SWAPPED_AXIS
+        Z_UP_BASIS
     }
 }
 
-/// Resets the example-owned state when Fairy Dust handles `H Home`. The only
-/// `AnimateToFit` in this example is that home fit (the startup snap and `H`);
-/// the example's own flies are `PlayAnimation`. So an `AnimateToFit` begin is
-/// the home press — reset the engine, gizmo, and ground to the default engine
-/// to match the camera Fairy Dust is flying home, without firing an animation.
+/// Resets the example-owned state when Lagrange handles `H Home`. The camera
+/// glides to the stored home pose; this observer resets the engine, gizmo, and
+/// ground to the default engine to match it, without firing another animation.
 fn reset_home_state(
-    begin: On<AnimationBegin>,
+    _event: On<CameraHomed>,
     mut current: ResMut<Engine>,
     mut pending: ResMut<PendingEngine>,
-    mut camera: Query<&mut OrbitCam, With<FairyDustOrbitCam>>,
+    mut camera_basis: Query<&mut CameraBasis, With<FairyDustOrbitCam>>,
     mut gizmo: Query<&mut GizmoMotion, With<GizmoRoot>>,
     mut ground: Query<&mut Transform, With<GroundPlane>>,
 ) {
-    if begin.source != AnimationSource::AnimateToFit {
-        return;
-    }
-
     let engine = Engine::default();
     *current = engine;
     pending.0 = None;
 
-    if let Ok(mut orbit) = camera.single_mut() {
-        orbit.axis = engine_camera_axis(engine);
+    if let Ok(mut basis) = camera_basis.single_mut() {
+        *basis = engine_camera_basis(engine);
     }
 
     if let Ok(mut ground) = ground.single_mut() {
@@ -347,18 +337,19 @@ fn select_engine(
     };
 
     // Re-pressing the current engine's key re-homes it: the orbit axis and gizmo
-    // are already correct, so skip the front-route axis swap and fly the camera
+    // are already correct, so skip the front-route axis swap and animate the camera
     // straight back to this engine's home view from wherever it was dragged.
     if *current == requested {
         let (yaw, pitch) = requested.home_angles();
         commands.trigger(PlayAnimation::new(
             entity,
-            [CameraMove::ToOrbit {
-                focus: orbit.focus,
+            [CameraMove::ToOrbitalLookAt {
+                target: orbit.pan.current().0,
                 yaw,
                 pitch,
-                radius: orbit.radius.unwrap_or(HOME_RADIUS),
-                duration: Duration::from_millis(FLY_TO_HOME_MS),
+                radius: orbit.zoom.current().0,
+                roll: None,
+                duration: Duration::from_millis(CAMERA_TO_HOME_MS),
                 easing: EaseFunction::SmoothStep,
             }],
         ));
@@ -385,18 +376,19 @@ fn select_engine(
         *tween = Some(axis_tween(dir, target, up, Vec3::X));
     }
 
-    // Fly to the shared front pose under the current axis; [`advance_engine_fly`]
-    // swaps the orbit basis there (invisible) and flies to the engine home. Using
+    // Animate to the shared front pose under the current axis; [`advance_engine_animation`]
+    // swaps the orbit basis there (invisible) and animates to the engine home. Using
     // the library's animation keeps smoothing handled and the controller's state
     // consistent, so the next drag continues cleanly.
     commands.trigger(PlayAnimation::new(
         entity,
-        [CameraMove::ToOrbit {
-            focus:    orbit.focus,
+        [CameraMove::ToOrbitalLookAt {
+            target:   orbit.pan.current().0,
             yaw:      0.0,
             pitch:    0.0,
-            radius:   orbit.radius.unwrap_or(HOME_RADIUS),
-            duration: Duration::from_millis(FLY_TO_FRONT_MS),
+            radius:   orbit.zoom.current().0,
+            roll:     None,
+            duration: Duration::from_millis(CAMERA_TO_FRONT_MS),
             easing:   EaseFunction::SmoothStep,
         }],
     ));
@@ -404,13 +396,13 @@ fn select_engine(
 
 /// Second leg of an engine switch. On reaching the front pose, swaps the orbit
 /// basis to the pending engine — visually a no-op, since every basis renders
-/// identically at `yaw=0, pitch=0` — then flies the camera out to that engine's
+/// identically at `yaw=0, pitch=0` — then animates the camera out to that engine's
 /// home view. The second leg's own completion is skipped (the pending engine is
 /// already taken), as is any cancelled animation.
-fn advance_engine_fly(
+fn advance_engine_animation(
     event: On<AnimationEnd>,
     mut pending: ResMut<PendingEngine>,
-    mut camera: Query<(Entity, &mut OrbitCam), With<FairyDustOrbitCam>>,
+    mut camera: Query<(Entity, &OrbitCam, &mut CameraBasis), With<FairyDustOrbitCam>>,
     mut commands: Commands,
 ) {
     if !matches!(event.reason, AnimationReason::Completed) {
@@ -419,21 +411,22 @@ fn advance_engine_fly(
     let Some(engine_switch) = pending.0.take() else {
         return;
     };
-    let Ok((entity, mut orbit)) = camera.single_mut() else {
+    let Ok((entity, orbit, mut basis)) = camera.single_mut() else {
         return;
     };
     let engine = engine_switch.to;
-    let focus = rotate_focus_between_engines(orbit.focus, engine_switch.from, engine);
-    orbit.axis = engine_camera_axis(engine);
+    let focus = rotate_focus_between_engines(orbit.pan.current().0, engine_switch.from, engine);
+    *basis = engine_camera_basis(engine);
     let (yaw, pitch) = engine.home_angles();
     commands.trigger(PlayAnimation::new(
         entity,
-        [CameraMove::ToOrbit {
-            focus,
+        [CameraMove::ToOrbitalLookAt {
+            target: focus,
             yaw,
             pitch,
-            radius: orbit.radius.unwrap_or(HOME_RADIUS),
-            duration: Duration::from_millis(FLY_TO_HOME_MS),
+            radius: orbit.zoom.current().0,
+            roll: None,
+            duration: Duration::from_millis(CAMERA_TO_HOME_MS),
             easing: EaseFunction::SmoothStep,
         }],
     ));
@@ -454,7 +447,7 @@ fn rotate_focus_between_engines(focus: Vec3, from: Engine, to: Engine) -> Vec3 {
 // How transparent the floor is (the fairy_dust default, 0.78, is fairly solid).
 const GROUND_ALPHA: f32 = 0.3;
 // Floor reorientation speed when the up-axis changes (Y-up ↔ Z-up). Tuned to
-// roughly track the camera fly so the floor finishes turning as the camera lands.
+// roughly track the camera animation so the floor finishes turning as the camera lands.
 const GROUND_TURN_RATE: f32 = 4.0;
 
 /// Tags the `fairy_dust` ground plane so it can be faded and reoriented per engine.
@@ -898,7 +891,7 @@ const fn engine_axis_dirs(engine: Engine) -> [Vec3; 3] {
 }
 
 /// World up for `engine` — the axis its convention stands vertical, matching the
-/// orbit basis in [`engine_camera_axis`]. The floor's normal.
+/// camera basis in [`engine_camera_basis`]. The floor's normal.
 const fn engine_up_world(engine: Engine) -> Vec3 {
     if engine.standing_axis_is_y() {
         Vec3::Y

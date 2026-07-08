@@ -1,15 +1,15 @@
-//! Per-frame camera input routing: which `OrbitCam` (if any) owns input this frame.
+//! Per-frame camera input routing: which lagrange camera, if any, owns input this frame.
 //!
 //! Public surface (re-exported here from submodules):
 //! - [`CameraInputRouting`], [`NoPositionFallback`], [`CameraInputRoutingConfig`] — caller-facing
 //!   configuration (see [`config`]).
-//! - [`ResolvedOrbitCamInputRoute`] — the per-frame result: routed camera, surface metrics, and
+//! - [`ResolvedCameraInputRoute`] — the per-frame result: routed camera, surface metrics, and
 //!   per-camera blocker reasons.
 //!
 //! Internal surface (this file):
-//! - [`OrbitCamRoutingPlugin`] — registers the resources, the `clear_latches_on_mode_replaced`
+//! - [`CameraInputRoutingPlugin`] — registers the resources, the `clear_latches_on_mode_replaced`
 //!   observer, and the `resolve_camera_input_routing` system in
-//!   [`OrbitCamInputInternalSet::Routing`].
+//!   [`CameraInputInternalSet::Routing`].
 //! - `resolve_camera_input_routing` — the system itself; collects window/camera snapshots, picks
 //!   the routed camera, computes blockers, writes the resolved route and the per-camera gate
 //!   components.
@@ -19,8 +19,8 @@
 //! Submodules:
 //! - [`config`] — public config types.
 //! - [`latches`] — per-source ownership state (`CameraInputSourceLatches`).
-//! - [`blockers`] — per-camera gating components (`OrbitCamInputBlockers`,
-//!   `OrbitCamInputContextGated`).
+//! - [`blockers`] — per-camera gating components (`CameraInputBlockers`,
+//!   `CameraInputContextGated`).
 //! - [`snapshot`] — per-frame window/camera capture used internally by the system.
 
 mod blockers;
@@ -31,15 +31,15 @@ mod snapshot;
 use std::collections::HashMap;
 
 use bevy::prelude::*;
+pub(crate) use blockers::CameraInputBlockers;
+pub(crate) use blockers::CameraInputContextGated;
 use blockers::ContextGate;
-pub(crate) use blockers::OrbitCamInputBlockers;
-pub(crate) use blockers::OrbitCamInputContextGated;
 pub use config::CameraInputRouting;
 pub use config::CameraInputRoutingConfig;
 pub use config::NoPositionFallback;
 pub(crate) use latches::CameraInputSourceLatches;
-pub(crate) use latches::OrbitCamSlowModeLatches;
-pub use latches::OrbitCamSlowModeState;
+pub(crate) use latches::CameraSlowModeLatches;
+pub use latches::CameraSlowModeState;
 use latches::clear_latches_on_mode_replaced;
 use snapshot::CameraRoutingSnapshot;
 use snapshot::CameraRoutingSnapshotFlags;
@@ -47,17 +47,17 @@ use snapshot::collect_camera_snapshots;
 use snapshot::collect_window_snapshots;
 
 use super::CameraInputSurfaceMetrics;
-use crate::system_sets::OrbitCamInputInternalSet;
+use crate::system_sets::CameraInputInternalSet;
 
-pub(super) fn is_slow_mode_active(slow_latches: &OrbitCamSlowModeLatches, camera: Entity) -> bool {
+pub(super) fn is_slow_mode_active(slow_latches: &CameraSlowModeLatches, camera: Entity) -> bool {
     slow_latches.is_active(camera)
 }
 
-pub(super) fn toggle_slow_mode_latch(slow_latches: &mut OrbitCamSlowModeLatches, camera: Entity) {
+pub(super) fn toggle_slow_mode_latch(slow_latches: &mut CameraSlowModeLatches, camera: Entity) {
     slow_latches.toggle(camera);
 }
 
-/// Result of the per-frame input routing pass: which `OrbitCam` (if any)
+/// Result of the per-frame input routing pass: which lagrange camera, if any,
 /// currently owns input, plus the cursor-surface metrics and blocker reasons
 /// for every candidate camera.
 ///
@@ -65,15 +65,15 @@ pub(super) fn toggle_slow_mode_latch(slow_latches: &mut OrbitCamSlowModeLatches,
 /// multi-camera HUDs, per-camera home-key bindings, and any feature that
 /// needs to react to "which viewport is the cursor over."
 #[derive(Resource, Clone, Debug, Default, PartialEq)]
-pub struct ResolvedOrbitCamInputRoute {
+pub struct ResolvedCameraInputRoute {
     routed_camera: Option<Entity>,
     metrics:       HashMap<Entity, CameraInputSurfaceMetrics>,
-    blockers:      HashMap<Entity, OrbitCamInputBlockers>,
+    blockers:      HashMap<Entity, CameraInputBlockers>,
 }
 
-impl ResolvedOrbitCamInputRoute {
-    /// The `OrbitCam` entity currently receiving input, if any. Returns
-    /// `None` when the cursor is not over any orbit-camera viewport.
+impl ResolvedCameraInputRoute {
+    /// The lagrange camera entity currently receiving input, if any. Returns
+    /// `None` when no eligible camera viewport owns input.
     #[must_use]
     pub const fn routed_camera(&self) -> Option<Entity> { self.routed_camera }
 
@@ -81,23 +81,23 @@ impl ResolvedOrbitCamInputRoute {
         self.metrics.get(&camera).copied()
     }
 
-    pub(crate) fn blockers_for(&self, camera: Entity) -> Option<OrbitCamInputBlockers> {
+    pub(crate) fn blockers_for(&self, camera: Entity) -> Option<CameraInputBlockers> {
         self.blockers.get(&camera).copied()
     }
 }
 
-pub(crate) struct OrbitCamRoutingPlugin;
+pub(crate) struct CameraInputRoutingPlugin;
 
-impl Plugin for OrbitCamRoutingPlugin {
+impl Plugin for CameraInputRoutingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<CameraInputRoutingConfig>()
             .init_resource::<CameraInputSourceLatches>()
-            .init_resource::<OrbitCamSlowModeLatches>()
-            .init_resource::<ResolvedOrbitCamInputRoute>()
+            .init_resource::<CameraSlowModeLatches>()
+            .init_resource::<ResolvedCameraInputRoute>()
             .add_observer(clear_latches_on_mode_replaced)
             .add_systems(
                 PreUpdate,
-                resolve_camera_input_routing.in_set(OrbitCamInputInternalSet::Routing),
+                resolve_camera_input_routing.in_set(CameraInputInternalSet::Routing),
             );
     }
 }
@@ -121,27 +121,27 @@ fn resolve_camera_input_routing(world: &mut World) {
         latches.clone()
     };
     let slow_latches = {
-        let mut slow_latches = world.resource_mut::<OrbitCamSlowModeLatches>();
+        let mut slow_latches = world.resource_mut::<CameraSlowModeLatches>();
         slow_latches.recover_unavailable_latches(&available_cameras);
         slow_latches.clone()
     };
 
     let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras, &latches);
-    let mut resolved = ResolvedOrbitCamInputRoute {
+    let mut resolved = ResolvedCameraInputRoute {
         routed_camera,
         metrics: HashMap::new(),
         blockers: HashMap::new(),
     };
 
     for snapshot in snapshots {
-        let blockers = OrbitCamInputBlockers::from_snapshot(&snapshot, routed_camera);
+        let blockers = CameraInputBlockers::from_snapshot(&snapshot, routed_camera);
 
         world.entity_mut(snapshot.entity).insert((
             blockers,
-            OrbitCamInputContextGated {
+            CameraInputContextGated {
                 context_gate: ContextGate::from(!blockers.is_blocked()),
             },
-            OrbitCamSlowModeState::from_active(slow_latches.is_active(snapshot.entity)),
+            CameraSlowModeState::from_active(slow_latches.is_active(snapshot.entity)),
         ));
         resolved.metrics.insert(snapshot.entity, snapshot.metrics);
         resolved.blockers.insert(snapshot.entity, blockers);
@@ -217,22 +217,31 @@ mod tests {
     use bevy::window::WindowRef;
     use bevy_enhanced_input::prelude::ModKeys;
 
-    use super::blockers::OrbitCamInputBlockerBits;
+    use super::blockers::CameraInputBlockerBits;
     use super::*;
+    use crate::FreeCam;
+    use crate::FreeCamKind;
     use crate::OrbitCam;
+    use crate::OrbitCamKind;
+    use crate::input::BindingsError;
+    use crate::input::CUSTOM_SLOW_SCALE;
     use crate::input::CameraInputDisabled;
-    use crate::input::CameraInteractionSources;
+    use crate::input::CameraInputModeReplaced;
+    use crate::input::CameraInputScalePolicy;
+    use crate::input::CameraResolvedBindings;
+    use crate::input::CameraSlowMode;
+    use crate::input::FreeCamBindings;
+    use crate::input::FreeCamInputMode;
+    use crate::input::FreeCamMouseLook;
+    use crate::input::FreeCamRollBinding;
+    use crate::input::FreeCamTranslateKeys;
+    use crate::input::InputBinding;
     use crate::input::InputGain;
+    use crate::input::InteractionSources;
     use crate::input::OrbitCamBindings;
-    use crate::input::OrbitCamBindingsError;
     use crate::input::OrbitCamInputMode;
-    use crate::input::OrbitCamInputModeReplaced;
     use crate::input::OrbitCamMouseDrag;
     use crate::input::OrbitCamPreset;
-    use crate::input::OrbitCamResolvedBindings;
-    use crate::input::OrbitCamScalePolicy;
-    use crate::input::OrbitCamSlowMode;
-    use crate::input::constants::CUSTOM_SLOW_SCALE;
     use crate::system_sets::LagrangeSystemSetsPlugin;
 
     fn test_app() -> App {
@@ -240,7 +249,7 @@ mod tests {
         app.add_plugins((
             MinimalPlugins,
             LagrangeSystemSetsPlugin,
-            OrbitCamRoutingPlugin,
+            CameraInputRoutingPlugin,
         ));
         app
     }
@@ -263,6 +272,41 @@ mod tests {
                 RenderTarget::Window(WindowRef::Primary),
             ))
             .id()
+    }
+
+    fn spawn_free_camera(world: &mut World, bindings: FreeCamBindings) -> Entity {
+        world
+            .spawn((
+                FreeCam::default(),
+                Camera::default(),
+                RenderTarget::Window(WindowRef::Primary),
+                FreeCamInputMode::Bindings(bindings.clone()),
+                CameraResolvedBindings::<FreeCamKind>(bindings),
+            ))
+            .id()
+    }
+
+    fn disabled_free_bindings_with_slow_mode() -> Result<FreeCamBindings, BindingsError> {
+        let disabled = InputGain::DISABLED.0;
+        FreeCamBindings::builder()
+            .slow_mode(CameraSlowMode {
+                toggle_key: KeyCode::KeyS,
+                mod_keys:   ModKeys::ALT,
+                scale:      CameraInputScalePolicy {
+                    normal: InputGain::DEFAULT.0,
+                    slow:   CUSTOM_SLOW_SCALE,
+                },
+            })
+            .translate(FreeCamTranslateKeys::default().with_input_gain(disabled))
+            .look(FreeCamMouseLook::button(MouseButton::Right).with_input_gain(disabled))
+            .roll(
+                FreeCamRollBinding::from(InputBinding::bidirectional_keys(
+                    KeyCode::KeyQ,
+                    KeyCode::KeyE,
+                ))
+                .with_input_gain(disabled),
+            )
+            .build()
     }
 
     fn test_window(focused: bool) -> Window {
@@ -301,7 +345,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .routed_camera,
             Some(camera)
         );
@@ -313,10 +357,10 @@ mod tests {
         let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Manual);
         app.world_mut()
             .resource_mut::<CameraInputSourceLatches>()
-            .acquire_sources(camera, CameraInteractionSources::MOUSE);
+            .acquire_sources(camera, InteractionSources::MOUSE);
         app.world_mut()
             .entity_mut(camera)
-            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+            .trigger(|camera| CameraInputModeReplaced { camera });
 
         assert!(
             app.world()
@@ -331,28 +375,28 @@ mod tests {
         let mut app = test_app();
         let camera = spawn_camera(app.world_mut(), OrbitCamInputMode::Manual);
         app.world_mut()
-            .resource_mut::<OrbitCamSlowModeLatches>()
+            .resource_mut::<CameraSlowModeLatches>()
             .toggle(camera);
 
         app.world_mut()
             .entity_mut(camera)
-            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+            .trigger(|camera| CameraInputModeReplaced { camera });
 
         assert!(
             !app.world()
-                .resource::<OrbitCamSlowModeLatches>()
+                .resource::<CameraSlowModeLatches>()
                 .is_active(camera)
         );
     }
 
     #[test]
     fn mode_replacement_clears_slow_latch_without_effective_slow_controls()
-    -> Result<(), OrbitCamBindingsError> {
+    -> Result<(), BindingsError> {
         let bindings = OrbitCamBindings::builder()
-            .slow_mode(OrbitCamSlowMode {
+            .slow_mode(CameraSlowMode {
                 toggle_key: KeyCode::KeyS,
                 mod_keys:   ModKeys::ALT,
-                scale:      OrbitCamScalePolicy {
+                scale:      CameraInputScalePolicy {
                     normal: InputGain::DEFAULT.0,
                     slow:   CUSTOM_SLOW_SCALE,
                 },
@@ -368,18 +412,40 @@ mod tests {
         );
         app.world_mut()
             .entity_mut(camera)
-            .insert(OrbitCamResolvedBindings(bindings));
+            .insert(CameraResolvedBindings::<OrbitCamKind>(bindings));
         app.world_mut()
-            .resource_mut::<OrbitCamSlowModeLatches>()
+            .resource_mut::<CameraSlowModeLatches>()
             .toggle(camera);
 
         app.world_mut()
             .entity_mut(camera)
-            .trigger(|camera| OrbitCamInputModeReplaced { camera });
+            .trigger(|camera| CameraInputModeReplaced { camera });
 
         assert!(
             !app.world()
-                .resource::<OrbitCamSlowModeLatches>()
+                .resource::<CameraSlowModeLatches>()
+                .is_active(camera)
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn mode_replacement_clears_free_slow_latch_without_effective_slow_controls()
+    -> Result<(), BindingsError> {
+        let bindings = disabled_free_bindings_with_slow_mode()?;
+        let mut app = test_app();
+        let camera = spawn_free_camera(app.world_mut(), bindings);
+        app.world_mut()
+            .resource_mut::<CameraSlowModeLatches>()
+            .toggle(camera);
+
+        app.world_mut()
+            .entity_mut(camera)
+            .trigger(|camera| CameraInputModeReplaced { camera });
+
+        assert!(
+            !app.world()
+                .resource::<CameraSlowModeLatches>()
                 .is_active(camera)
         );
         Ok(())
@@ -393,7 +459,7 @@ mod tests {
             OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse()),
         );
         app.world_mut()
-            .resource_mut::<OrbitCamSlowModeLatches>()
+            .resource_mut::<CameraSlowModeLatches>()
             .toggle(camera);
         let _ = app.world_mut().despawn(camera);
 
@@ -401,7 +467,7 @@ mod tests {
 
         assert!(
             !app.world()
-                .resource::<OrbitCamSlowModeLatches>()
+                .resource::<CameraSlowModeLatches>()
                 .is_active(camera)
         );
     }
@@ -412,7 +478,7 @@ mod tests {
         let stale_camera = Entity::PLACEHOLDER;
         app.world_mut()
             .resource_mut::<CameraInputSourceLatches>()
-            .acquire_sources(stale_camera, CameraInteractionSources::KEYBOARD);
+            .acquire_sources(stale_camera, InteractionSources::KEYBOARD);
 
         app.update();
 
@@ -433,13 +499,13 @@ mod tests {
         );
         app.world_mut()
             .resource_mut::<CameraInputSourceLatches>()
-            .acquire_sources(camera, CameraInteractionSources::KEYBOARD);
+            .acquire_sources(camera, InteractionSources::KEYBOARD);
 
         app.update();
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .routed_camera,
             Some(camera)
         );
@@ -468,7 +534,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .routed_camera,
             Some(primary_camera)
         );
@@ -484,7 +550,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .routed_camera,
             Some(second_camera)
         );
@@ -505,12 +571,12 @@ mod tests {
 
         app.update();
 
-        let resolved = app.world().resource::<ResolvedOrbitCamInputRoute>();
+        let resolved = app.world().resource::<ResolvedCameraInputRoute>();
         assert_eq!(resolved.routed_camera, Some(camera));
         assert!(!resolved.metrics.contains_key(&overlay));
         assert!(
             app.world()
-                .get::<OrbitCamInputContextGated>(overlay)
+                .get::<CameraInputContextGated>(overlay)
                 .is_none()
         );
     }
@@ -527,7 +593,7 @@ mod tests {
 
         app.update();
 
-        let resolved = app.world().resource::<ResolvedOrbitCamInputRoute>();
+        let resolved = app.world().resource::<ResolvedCameraInputRoute>();
         assert!(resolved.metrics.contains_key(&manual));
         assert_eq!(resolved.routed_camera, Some(routed));
     }
@@ -552,7 +618,7 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .metrics_for(camera),
             Some(metrics)
         );
@@ -574,24 +640,24 @@ mod tests {
 
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .blockers
                 .get(&camera)
-                .map(|blockers| blockers.bits.contains(OrbitCamInputBlockerBits::DISABLED)),
+                .map(|blockers| blockers.bits.contains(CameraInputBlockerBits::DISABLED)),
             Some(true)
         );
         assert_eq!(
             app.world()
-                .resource::<ResolvedOrbitCamInputRoute>()
+                .resource::<ResolvedCameraInputRoute>()
                 .blockers
                 .get(&camera)
                 .copied()
-                .map(OrbitCamInputBlockers::is_blocked),
+                .map(CameraInputBlockers::is_blocked),
             Some(true)
         );
         assert_eq!(
             app.world()
-                .get::<OrbitCamInputContextGated>(camera)
+                .get::<CameraInputContextGated>(camera)
                 .map(|gated| gated.context_gate),
             Some(ContextGate::Blocked)
         );

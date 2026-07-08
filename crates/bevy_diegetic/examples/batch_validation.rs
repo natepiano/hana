@@ -60,6 +60,7 @@ use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::FairyDustOrbitCam;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::SprinkleBuilder;
 use fairy_dust::StatsPanelRow;
 use fairy_dust::StatsPanelSection;
@@ -628,12 +629,12 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_SIZE)
-        .with_orbit_cam_preset(
-            |cam| {
-                cam.focus = HOME_FOCUS;
-                cam.radius = Some(HOME_RADIUS);
-                cam.yaw = Some(0.0);
-                cam.pitch = Some(HOME_PITCH);
+        .with_orbit_cam_preset_pose(
+            OrbitCamPose {
+                focus:  HOME_FOCUS,
+                yaw:    0.0,
+                pitch:  HOME_PITCH,
+                radius: HOME_RADIUS,
             },
             OrbitCamPreset::blender_like(),
         )

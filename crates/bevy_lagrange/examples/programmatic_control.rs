@@ -1,7 +1,7 @@
-//! Drives an `OrbitCam` from app code by mutating `target_focus`, `target_yaw`,
-//! `target_pitch`, and `target_radius` directly. Pressing **H** kicks off a home
+//! Drives an `OrbitCam` from app code by setting the `pan`/`orbit`/`zoom`
+//! operation targets directly. Pressing **H** kicks off a home
 //! animation that temporarily raises the camera's per-axis damping so the lerp
-//! reads as a slow fly-to, then restores the previous damping once the camera
+//! reads as a slow camera move, then restores the previous damping once the camera
 //! arrives. The
 //! `HomeAnimationBegin` / `HomeAnimationEnd` events expose the animation window
 //! for other systems (here, the title-bar control chip) to react to.
@@ -15,6 +15,7 @@ use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::DescriptionPanel;
+use fairy_dust::OrbitCamPose;
 use fairy_dust::TitleBar;
 
 const EXAMPLE_TITLE: &str = "Programmatic Control";
@@ -23,8 +24,13 @@ fn main() {
     fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
-        .with_orbit_cam_preset_bundle(
-            configure_camera,
+        .with_orbit_cam_preset_pose_bundle(
+            OrbitCamPose {
+                focus:  HOME_FOCUS,
+                yaw:    HOME_YAW,
+                pitch:  HOME_PITCH,
+                radius: HOME_RADIUS,
+            },
             OrbitCamPreset::blender_like(),
             ProgrammaticCamera,
         )
@@ -54,14 +60,15 @@ fn main() {
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
-// CAMERA HOME — programmatic OrbitCam control via target_focus/yaw/pitch/radius.
+// CAMERA HOME — programmatic OrbitCam control via the pan/orbit/zoom operation targets.
 //
 // How it works:
-//   1. `configure_camera` seeds the initial `focus`/`yaw`/`pitch`/`radius` when the camera spawns.
+//   1. The Fairy Dust pose helper seeds the initial `pan`/`orbit`/`zoom` values when the camera
+//      spawns.
 //   2. On **H**, `home_camera` records the camera's current smoothness into `HomeReset`, raises
-//      smoothness so the lerp is slow, writes the home `target_*` fields, and emits
+//      smoothness so the lerp is slow, sets the home `pan`/`orbit`/`zoom` targets, and emits
 //      `HomeAnimationBegin`.
-//   3. `OrbitCam` itself lerps `focus`/`yaw`/`pitch`/`radius` toward those targets each frame.
+//   3. `OrbitCam` itself eases each operation's current toward its target each frame.
 //   4. `update_home_reset` checks each frame whether the targets still point at home (user takeover
 //      changes them) and whether the camera has arrived; either condition restores the saved
 //      smoothness and emits `HomeAnimationEnd`.
@@ -134,23 +141,15 @@ impl CameraSmoothness {
     }
 }
 
-const fn configure_camera(camera: &mut OrbitCam) {
-    camera.focus = HOME_FOCUS;
-    camera.yaw = Some(HOME_YAW);
-    camera.pitch = Some(HOME_PITCH);
-    camera.radius = Some(HOME_RADIUS);
-}
-
 fn home_camera(
     mut commands: Commands,
     mut reset: ResMut<HomeReset>,
     mut camera: Single<&mut OrbitCam, With<ProgrammaticCamera>>,
 ) {
     reset.start(&mut camera);
-    camera.target_focus = HOME_FOCUS;
-    camera.target_yaw = HOME_YAW;
-    camera.target_pitch = HOME_PITCH;
-    camera.target_radius = HOME_RADIUS;
+    camera.pan.set_target(HOME_FOCUS);
+    camera.orbit.set_target((HOME_YAW, HOME_PITCH));
+    camera.zoom.set_target(HOME_RADIUS);
     commands.trigger(HomeAnimationBegin);
 }
 
@@ -176,21 +175,18 @@ fn update_home_reset(
 }
 
 fn camera_targets_home(camera: &OrbitCam) -> bool {
-    camera.target_focus.distance(HOME_FOCUS) <= HOME_FOCUS_EPSILON
-        && (camera.target_yaw - HOME_YAW).abs() <= HOME_ORBIT_EPSILON
-        && (camera.target_pitch - HOME_PITCH).abs() <= HOME_ORBIT_EPSILON
-        && (camera.target_radius - HOME_RADIUS).abs() <= HOME_FOCUS_EPSILON
+    camera.pan.target().0.distance(HOME_FOCUS) <= HOME_FOCUS_EPSILON
+        && (camera.orbit.target().yaw - HOME_YAW).abs() <= HOME_ORBIT_EPSILON
+        && (camera.orbit.target().pitch - HOME_PITCH).abs() <= HOME_ORBIT_EPSILON
+        && (camera.zoom.target().0 - HOME_RADIUS).abs() <= HOME_FOCUS_EPSILON
 }
 
 fn camera_at_home(camera: &OrbitCam) -> bool {
-    let (Some(yaw), Some(pitch), Some(radius)) = (camera.yaw, camera.pitch, camera.radius) else {
-        return false;
-    };
-
-    camera.focus.distance(HOME_FOCUS) <= HOME_FOCUS_EPSILON
-        && (yaw - HOME_YAW).abs() <= HOME_ORBIT_EPSILON
-        && (pitch - HOME_PITCH).abs() <= HOME_ORBIT_EPSILON
-        && (radius - HOME_RADIUS).abs() <= HOME_FOCUS_EPSILON
+    let angles = camera.orbit.current();
+    camera.pan.current().0.distance(HOME_FOCUS) <= HOME_FOCUS_EPSILON
+        && (angles.yaw - HOME_YAW).abs() <= HOME_ORBIT_EPSILON
+        && (angles.pitch - HOME_PITCH).abs() <= HOME_ORBIT_EPSILON
+        && (camera.zoom.current().0 - HOME_RADIUS).abs() <= HOME_FOCUS_EPSILON
 }
 
 // ═════════════════════════════════════════════════════════════════════════════

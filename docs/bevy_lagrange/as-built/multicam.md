@@ -13,7 +13,7 @@ Source: `crates/bevy_lagrange/examples/viewports_windows.rs`
   corner of the primary window.
 - `RenderTarget::Window(WindowRef::Entity(..))` aims a third camera at a
   second OS window spawned via `bevy_clerestory::ManagedWindow`.
-- `ResolvedOrbitCamInputRoute::routed_camera()` resolves which camera the
+- `ResolvedCameraInputRoute::routed_camera()` resolves which camera the
   cursor is over, so input — and the `H` home key — applies to that camera.
 
 The primary window shows a full-size view plus a minimap overlay in the
@@ -46,7 +46,7 @@ commands.spawn((
 
 It defaults to `OrbitCamInputMode::with_preset(OrbitCamPreset::simple_mouse())`. The
 `OrbitCam::blender_like()` / `OrbitCam::simple_mouse()` / `OrbitCam::manual()`
-helpers (`crates/bevy_lagrange/src/orbit_cam/preset_helpers.rs`) return an
+helpers (`crates/bevy_lagrange/src/orbit_cam/presets.rs`) return an
 `impl Bundle` pairing `OrbitCam::default()` with the matching
 `OrbitCamInputMode`; the example writes the pair out by hand to keep each
 camera's other components inline.
@@ -59,7 +59,7 @@ The second-window camera adds
 
 ## Input routing
 
-`ResolvedOrbitCamInputRoute` is a public resource
+`ResolvedCameraInputRoute` is a public resource
 (`crates/bevy_lagrange/src/input/routing/mod.rs`, re-exported from
 `input::mod` and `lib.rs`). It holds the camera currently receiving input plus
 per-camera cursor-surface metrics and blocker reasons. The single public
@@ -76,7 +76,7 @@ example reads this in `home_on_keypress` to pick which camera `H` homes.
 
 The home pose is built in the example, not by a dedicated multi-camera API.
 The fairy_dust home capability is a singleton: the builder's
-`.with_camera_home().yaw(..).pitch(..).duration(..).margin(..)` frames the
+`.with_camera_home().yaw(..).pitch(..).margin(..)` frames the
 union of every `CameraHomeTarget` entity, and `CameraHomeEntity(Entity)` is
 the resource holding the proxy entity to fit against
 (`crates/fairy_dust/src/camera_home.rs`). The example marks the cube with
@@ -89,11 +89,11 @@ Per-camera angle differences live in the example's own `CameraHomes` resource
 - `home_main_camera_on_startup` waits until the home proxy settles at the cube
   translation, then fires `AnimateToFit::new(camera, home.0)` with
   `Duration::ZERO` so the scene opens already framed.
-- `home_on_keypress` reads `ResolvedOrbitCamInputRoute::routed_camera()`,
+- `home_on_keypress` reads `ResolvedCameraInputRoute::routed_camera()`,
   looks up that camera's `HomePose`, and fires `AnimateToFit` with that pose's
   `yaw`/`pitch` and the shared `HOME_DURATION`/`HOME_MARGIN`.
 
-`AnimateToFit` (`crates/bevy_lagrange/src/events/fit.rs`) is triggered as an
+`AnimateToFit` (`crates/bevy_lagrange/src/fit/triggers/animate.rs`) is triggered as an
 event; the builder methods `.yaw()`, `.pitch()`, `.duration()`, `.margin()`
 configure the pose. The `H Home` control is surfaced through the title bar
 (`TitleBar::new().with_title(..).with_anchor(Anchor::TopLeft).control("H

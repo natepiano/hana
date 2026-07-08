@@ -33,6 +33,7 @@ use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::AnimationRejected;
 use bevy_lagrange::AnimationSource;
+use bevy_lagrange::CameraHomed;
 use bevy_lagrange::CameraInputDisabled;
 use bevy_lagrange::CameraInputInterruptBehavior;
 use bevy_lagrange::CameraMove;
@@ -176,6 +177,7 @@ fn main() {
         .add_observer(event_log::enable_log_on_initial_fit)
         .add_observer(event_log::log_animation_begin)
         .add_observer(event_log::log_animation_end)
+        .add_observer(event_log::log_camera_homed)
         .add_observer(event_log::log_camera_move_start)
         .add_observer(event_log::log_camera_move_end)
         .add_observer(event_log::log_zoom_begin)
@@ -225,11 +227,10 @@ fn setup(
     // numpad-driven view changes).
     let camera = commands
         .spawn((
-            OrbitCam {
-                yaw: Some(CAMERA_START_YAW),
-                pitch: Some(CAMERA_START_PITCH),
-                ..default()
-            },
+            // `initial_fit_to_scene` reframes to `CAMERA_START_YAW`/`PITCH` and the
+            // fitted radius/focus before the scene is shown, so the spawn pose is
+            // transient — a plain default is enough.
+            OrbitCam::default(),
             OrbitCamInputMode::with_preset(OrbitCamPreset::blender_like()),
             FairyDustOrbitCam,
         ))

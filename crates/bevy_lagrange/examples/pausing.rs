@@ -1,9 +1,8 @@
-//! Demonstrates choosing the `OrbitCam` time source so pausing virtual game
-//! time does not pause camera controls. `configure_camera` sets
-//! `OrbitCam::time_source = TimeSource::Real`; `pause_game_system` toggles
-//! `Time<Virtual>`; `cube_rotator_system` reads the default `Res<Time>` which
-//! resolves to virtual time inside `Update`, so the cube freezes while the
-//! camera keeps lerping.
+//! Demonstrates choosing the camera time source so pausing virtual game time
+//! does not pause camera controls. The camera spawns with a `TimeSource::Real`
+//! component; `pause_game_system` toggles `Time<Virtual>`; `cube_rotator_system`
+//! reads the default `Res<Time>` which resolves to virtual time inside `Update`,
+//! so the cube freezes while the camera keeps lerping.
 //!
 //! Controls:
 //!   P or Space — toggle game pause
@@ -40,7 +39,11 @@ fn main() {
         .color(CUBE_COLOR)
         .transform(Transform::from_translation(CUBE_TRANSLATION))
         .insert((Cube, CameraHomeTarget))
-        .with_orbit_cam_preset(configure_camera, OrbitCamPreset::blender_like())
+        .with_orbit_cam_preset_bundle(
+            |_camera: &mut OrbitCam| {},
+            OrbitCamPreset::blender_like(),
+            TimeSource::Real,
+        )
         .with_camera_home()
         .yaw(HOME_YAW)
         .pitch(HOME_PITCH)
@@ -68,12 +71,12 @@ fn main() {
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CAMERA TIME SOURCE & VIRTUAL-TIME PAUSE — the demonstrated API.
-// `OrbitCam::time_source = TimeSource::Real` plus `Time<Virtual>` pause is what
-// makes the camera keep moving while the cube freezes.
+// The `TimeSource::Real` component on the camera plus `Time<Virtual>` pause is
+// what makes the camera keep moving while the cube freezes.
 //
 // How it works:
-//   1. `configure_camera` runs when the OrbitCam spawns and sets `time_source = TimeSource::Real`
-//      so the camera's smoothing reads wall-clock time.
+//   1. The camera spawns with a `TimeSource::Real` component (passed as the spawn bundle to
+//      `with_orbit_cam_preset_bundle`), so its smoothing reads wall-clock time.
 //   2. `toggle_pause` toggles `Time<Virtual>`, bound to P / Space through Fairy Dust's shortcut
 //      binding.
 //   3. `cube_rotator_system` reads the default `Res<Time>`, which resolves to `Time<Virtual>`
@@ -106,8 +109,6 @@ impl PauseState {
 impl TitleChipActivation for PauseState {
     fn activation(&self) -> ControlActivation { self.control_activation() }
 }
-
-const fn configure_camera(camera: &mut OrbitCam) { camera.time_source = TimeSource::Real; }
 
 fn toggle_pause(mut time: ResMut<Time<Virtual>>, mut pause_state: ResMut<PauseState>) {
     if time.is_paused() {

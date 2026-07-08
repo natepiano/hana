@@ -1,5 +1,7 @@
 //! Constants for the `screen_panels` module.
 
+use std::time::Duration;
+
 use bevy::prelude::Color;
 use bevy_diegetic::Pt;
 use bevy_diegetic::Px;
@@ -59,6 +61,9 @@ pub(super) const STATUS_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.9);
 /// Identity and visible label of the always-present help chip. Highlighted
 /// while the keyboard-shortcut overlay is open.
 pub(super) const HELP_CONTROL: &str = "?";
+/// Home title-bar highlight window after a stored-pose home tap. The glide has
+/// no end event, so the title chip stays lit for this fixed span.
+pub(super) const HOME_TITLE_BAR_HIGHLIGHT_HOLD: Duration = Duration::from_millis(1500);
 pub(super) const SEPARATOR_HEIGHT: Px = Px(18.0);
 pub(super) const SEPARATOR_WIDTH: Px = Px(1.0);
 pub(super) const TITLE_BAR_CHILD_GAP: Px = Px(10.0);

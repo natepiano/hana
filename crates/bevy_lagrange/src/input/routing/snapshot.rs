@@ -20,10 +20,13 @@ use bevy::window::WindowRef;
 
 use crate::CameraInputInterruptBehavior;
 use crate::CameraMoveList;
+use crate::FreeCam;
+use crate::FreeCamKind;
 use crate::OrbitCam;
+use crate::OrbitCamKind;
 use crate::input::CameraInputDisabled;
 use crate::input::CameraInputSurfaceMetrics;
-use crate::input::OrbitCamManual;
+use crate::input::CameraManual;
 
 #[derive(Clone, Copy)]
 pub(super) struct WindowSnapshot {
@@ -129,7 +132,7 @@ struct CameraSnapshotInputs<'a> {
     entity:           Entity,
     camera:           &'a Camera,
     target:           &'a RenderTarget,
-    manual:           Option<&'a OrbitCamManual>,
+    manual:           bool,
     disabled:         Option<&'a CameraInputDisabled>,
     move_list:        Option<&'a CameraMoveList>,
     interrupt:        Option<&'a CameraInputInterruptBehavior>,
@@ -156,37 +159,67 @@ pub(super) fn collect_camera_snapshots(
     world: &mut World,
     windows: &WindowSnapshots,
 ) -> Vec<CameraRoutingSnapshot> {
-    let mut query = world.query_filtered::<(
+    let mut snapshots = Vec::new();
+
+    let mut orbit_query = world.query_filtered::<(
         Entity,
         &Camera,
         &RenderTarget,
-        Option<&OrbitCamManual>,
+        Option<&CameraManual<OrbitCamKind>>,
         Option<&CameraInputDisabled>,
         Option<&CameraMoveList>,
         Option<&CameraInputInterruptBehavior>,
         Option<&CameraInputSurfaceMetrics>,
     ), With<OrbitCam>>();
 
-    query
-        .iter(world)
-        .map(
-            |(entity, camera, target, manual, disabled, move_list, interrupt, explicit_metrics)| {
-                camera_snapshot(
-                    CameraSnapshotInputs {
-                        entity,
-                        camera,
-                        target,
-                        manual,
-                        disabled,
-                        move_list,
-                        interrupt,
-                        explicit_metrics,
-                    },
-                    windows,
-                )
-            },
-        )
-        .collect()
+    snapshots.extend(orbit_query.iter(world).map(
+        |(entity, camera, target, manual, disabled, move_list, interrupt, explicit_metrics)| {
+            camera_snapshot(
+                CameraSnapshotInputs {
+                    entity,
+                    camera,
+                    target,
+                    manual: manual.is_some(),
+                    disabled,
+                    move_list,
+                    interrupt,
+                    explicit_metrics,
+                },
+                windows,
+            )
+        },
+    ));
+
+    let mut free_query = world.query_filtered::<(
+        Entity,
+        &Camera,
+        &RenderTarget,
+        Option<&CameraManual<FreeCamKind>>,
+        Option<&CameraInputDisabled>,
+        Option<&CameraMoveList>,
+        Option<&CameraInputInterruptBehavior>,
+        Option<&CameraInputSurfaceMetrics>,
+    ), (With<FreeCam>, Without<OrbitCam>)>();
+
+    snapshots.extend(free_query.iter(world).map(
+        |(entity, camera, target, manual, disabled, move_list, interrupt, explicit_metrics)| {
+            camera_snapshot(
+                CameraSnapshotInputs {
+                    entity,
+                    camera,
+                    target,
+                    manual: manual.is_some(),
+                    disabled,
+                    move_list,
+                    interrupt,
+                    explicit_metrics,
+                },
+                windows,
+            )
+        },
+    ));
+
+    snapshots
 }
 
 fn camera_snapshot(
@@ -212,7 +245,7 @@ fn camera_snapshot(
         && interrupt.copied().unwrap_or_default() == CameraInputInterruptBehavior::Ignore;
     let mut flags = CameraRoutingSnapshotFlags::empty();
     flags.set(CameraRoutingSnapshotFlags::ACTIVE, camera.is_active);
-    flags.set(CameraRoutingSnapshotFlags::MANUAL, manual.is_some());
+    flags.set(CameraRoutingSnapshotFlags::MANUAL, manual);
     flags.set(CameraRoutingSnapshotFlags::DISABLED, disabled.is_some());
     flags.set(CameraRoutingSnapshotFlags::ANIMATION_IGNORE, animation);
     flags.set(CameraRoutingSnapshotFlags::CURSOR_HIT, cursor_hit);

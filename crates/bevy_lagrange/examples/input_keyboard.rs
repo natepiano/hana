@@ -4,6 +4,7 @@
 //!   Arrows — orbit
 //!   WASD   — pan
 //!   +/-    — zoom
+//!   H      — return to the camera home pose
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticTextMut;
@@ -77,13 +78,7 @@ const CAMERA_ZOOM_SENSITIVITY: f32 = 0.08;
 const HOME_MARGIN: f32 = 0.5;
 
 fn spawn_camera(mut commands: Commands) {
-    let mut camera = OrbitCam {
-        focus: CAMERA_FOCUS,
-        yaw: Some(CAMERA_YAW),
-        pitch: Some(CAMERA_PITCH),
-        radius: Some(CAMERA_RADIUS),
-        ..default()
-    };
+    let mut camera = OrbitCam::from_pose(CAMERA_FOCUS, (CAMERA_YAW, CAMERA_PITCH), CAMERA_RADIUS);
     camera.orbit.set_sensitivity(CAMERA_ORBIT_SENSITIVITY);
     camera.pan.set_sensitivity(CAMERA_PAN_SENSITIVITY);
     camera.zoom.set_sensitivity(CAMERA_ZOOM_SENSITIVITY);
