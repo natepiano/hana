@@ -29,6 +29,14 @@ use crate::restore::MonitorScaleStrategy;
 use crate::restore::TargetPosition;
 use crate::restore::X11FrameCompensated;
 
+/// The `_NET_FRAME_EXTENTS` top (physical pixels) queried during W6 compensation.
+///
+/// Recorded so [`reapply_compensated_position`] knows the expected mapped-window
+/// readback (`compensated_position + frame_top`) without re-opening an X11 connection
+/// every frame. Present only on windows whose position was compensated.
+#[derive(Component)]
+pub(crate) struct X11FrameTop(i32);
+
 /// Subtract the X11 title bar height from `TargetPosition.physical_position`.
 ///
 /// Inserts `X11FrameCompensated` once frame extents are available; this gates
@@ -62,14 +70,6 @@ pub(crate) fn compensate_target_position(
             .insert((X11FrameCompensated, X11FrameTop(physical_frame_top)));
     }
 }
-
-/// The `_NET_FRAME_EXTENTS` top (physical pixels) queried during W6 compensation.
-///
-/// Recorded so [`reapply_compensated_position`] knows the expected mapped-window
-/// readback (`compensated_position + frame_top`) without re-opening an X11 connection
-/// every frame. Present only on windows whose position was compensated.
-#[derive(Component)]
-pub(crate) struct X11FrameTop(i32);
 
 /// Re-issue the W6-compensated position once the window is mapped.
 ///

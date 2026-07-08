@@ -26,6 +26,15 @@ impl From<bool> for FocusState {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct CachedWindowDebug {
+    physical_position: Option<WindowPosition>,
+    physical_width:    u32,
+    physical_height:   u32,
+    window_mode:       Option<WindowMode>,
+    focus_state:       FocusState,
+}
+
 /// Logs every monitor's `MonitorId` at startup — the cross-platform spot-check.
 /// On any OS, boot the example and confirm each display reports a distinct,
 /// non-zero id (a `0` on macOS or an all-same value elsewhere means the native
@@ -91,15 +100,6 @@ pub(crate) fn debug_winit_monitor(
         );
         *cached_monitor = winit_monitor_index;
     }
-}
-
-#[derive(Default)]
-pub(crate) struct CachedWindowDebug {
-    physical_position: Option<WindowPosition>,
-    physical_width:    u32,
-    physical_height:   u32,
-    window_mode:       Option<WindowMode>,
-    focus_state:       FocusState,
 }
 
 pub(crate) fn debug_window_changed(

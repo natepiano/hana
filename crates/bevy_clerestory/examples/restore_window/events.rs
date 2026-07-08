@@ -137,36 +137,36 @@ pub(crate) fn on_window_restored(
     mut restored_states: ResMut<RestoredStates>,
     mut settled_count: ResMut<WindowsSettledCount>,
 ) {
-    let event = trigger.event();
+    let window_restored = trigger.event();
     info!(
         "[on_window_restored] Restore complete: window_key={} entity={:?} physical_position={:?} logical_position={:?} physical_size={} logical_size={} mode={:?} monitor={}",
-        event.window_key,
-        event.entity,
-        event.physical_position,
-        event.logical_position,
-        event.physical_size,
-        event.logical_size,
-        event.window_mode,
-        event.monitor_index
+        window_restored.window_key,
+        window_restored.entity,
+        window_restored.physical_position,
+        window_restored.logical_position,
+        window_restored.physical_size,
+        window_restored.logical_size,
+        window_restored.window_mode,
+        window_restored.monitor_index
     );
 
     restored_states.by_entity.insert(
-        event.entity,
+        window_restored.entity,
         CachedRestoredState {
-            physical_position: event.physical_position,
-            logical_position:  event.logical_position,
-            physical_size:     event.physical_size,
-            logical_size:      event.logical_size,
-            monitor:           event.monitor_index,
-            window_mode:       event.window_mode,
+            physical_position: window_restored.physical_position,
+            logical_position:  window_restored.logical_position,
+            physical_size:     window_restored.physical_size,
+            logical_size:      window_restored.logical_size,
+            monitor:           window_restored.monitor_index,
+            window_mode:       window_restored.window_mode,
         },
     );
 
     commands.insert_resource(WindowRestoredReceived {
-        physical_position: event.physical_position,
-        physical_size:     event.physical_size,
-        window_mode:       event.window_mode,
-        monitor:           event.monitor_index,
+        physical_position: window_restored.physical_position,
+        physical_size:     window_restored.physical_size,
+        window_mode:       window_restored.window_mode,
+        monitor:           window_restored.monitor_index,
     });
     settled_count.value += 1;
 }
@@ -178,78 +178,78 @@ pub(crate) fn on_window_restore_mismatch(
     mut mismatch_states: ResMut<MismatchStates>,
     mut settled_count: ResMut<WindowsSettledCount>,
 ) {
-    let event = trigger.event();
+    let window_restore_mismatch = trigger.event();
     warn!(
         "[on_window_restore_mismatch] window_key={} entity={:?} \
          monitor: {} vs {}, size: {} vs {}, mode: {:?} vs {:?}",
-        event.window_key,
-        event.entity,
-        event.expected_monitor,
-        event.actual_monitor,
-        event.expected_physical_size,
-        event.actual_physical_size,
-        event.expected_window_mode,
-        event.actual_window_mode,
+        window_restore_mismatch.window_key,
+        window_restore_mismatch.entity,
+        window_restore_mismatch.expected_monitor,
+        window_restore_mismatch.actual_monitor,
+        window_restore_mismatch.expected_physical_size,
+        window_restore_mismatch.actual_physical_size,
+        window_restore_mismatch.expected_window_mode,
+        window_restore_mismatch.actual_window_mode,
     );
 
     restored_states.by_entity.insert(
-        event.entity,
+        window_restore_mismatch.entity,
         CachedRestoredState {
-            physical_position: event.expected_physical_position,
-            logical_position:  event.expected_logical_position,
-            physical_size:     event.expected_physical_size,
-            logical_size:      event.expected_logical_size,
-            monitor:           event.expected_monitor,
-            window_mode:       event.expected_window_mode,
+            physical_position: window_restore_mismatch.expected_physical_position,
+            logical_position:  window_restore_mismatch.expected_logical_position,
+            physical_size:     window_restore_mismatch.expected_physical_size,
+            logical_size:      window_restore_mismatch.expected_logical_size,
+            monitor:           window_restore_mismatch.expected_monitor,
+            window_mode:       window_restore_mismatch.expected_window_mode,
         },
     );
 
     mismatch_states.by_entity.insert(
-        event.entity,
+        window_restore_mismatch.entity,
         CachedMismatchState {
             physical_position_mismatch: PhysicalPositionMismatch {
-                expected: event.expected_physical_position,
-                actual:   event.actual_physical_position,
+                expected: window_restore_mismatch.expected_physical_position,
+                actual:   window_restore_mismatch.actual_physical_position,
             },
             logical_position_mismatch:  LogicalPositionMismatch {
-                expected: event.expected_logical_position,
-                actual:   event.actual_logical_position,
+                expected: window_restore_mismatch.expected_logical_position,
+                actual:   window_restore_mismatch.actual_logical_position,
             },
             physical_size_mismatch:     PhysicalSizeMismatch {
-                expected: event.expected_physical_size,
-                actual:   event.actual_physical_size,
+                expected: window_restore_mismatch.expected_physical_size,
+                actual:   window_restore_mismatch.actual_physical_size,
             },
             logical_size_mismatch:      LogicalSizeMismatch {
-                expected: event.expected_logical_size,
-                actual:   event.actual_logical_size,
+                expected: window_restore_mismatch.expected_logical_size,
+                actual:   window_restore_mismatch.actual_logical_size,
             },
             window_mode_difference:     WindowModeDifference {
-                expected: event.expected_window_mode,
-                actual:   event.actual_window_mode,
+                expected: window_restore_mismatch.expected_window_mode,
+                actual:   window_restore_mismatch.actual_window_mode,
             },
             monitor_difference:         MonitorDifference {
-                expected: event.expected_monitor,
-                actual:   event.actual_monitor,
+                expected: window_restore_mismatch.expected_monitor,
+                actual:   window_restore_mismatch.actual_monitor,
             },
             scale_factor_difference:    ScaleFactorDifference {
-                expected: event.expected_scale,
-                actual:   event.actual_scale,
+                expected: window_restore_mismatch.expected_scale,
+                actual:   window_restore_mismatch.actual_scale,
             },
         },
     );
 
     commands.insert_resource(WindowRestoreMismatchReceived {
         monitor_difference:     MonitorDifference {
-            expected: event.expected_monitor,
-            actual:   event.actual_monitor,
+            expected: window_restore_mismatch.expected_monitor,
+            actual:   window_restore_mismatch.actual_monitor,
         },
         physical_size_mismatch: PhysicalSizeMismatch {
-            expected: event.expected_physical_size,
-            actual:   event.actual_physical_size,
+            expected: window_restore_mismatch.expected_physical_size,
+            actual:   window_restore_mismatch.actual_physical_size,
         },
         window_mode_difference: WindowModeDifference {
-            expected: event.expected_window_mode,
-            actual:   event.actual_window_mode,
+            expected: window_restore_mismatch.expected_window_mode,
+            actual:   window_restore_mismatch.actual_window_mode,
         },
     });
     settled_count.value += 1;

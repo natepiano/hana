@@ -51,6 +51,22 @@ struct SendSyncHwnd(HWND);
 unsafe impl Send for SendSyncHwnd {}
 unsafe impl Sync for SendSyncHwnd {}
 
+/// Guard resource that removes the window subclass on drop.
+#[derive(Resource)]
+struct DpiFixGuard {
+    hwnd: SendSyncHwnd,
+}
+
+impl Drop for DpiFixGuard {
+    fn drop(&mut self) {
+        // SAFETY: `RemoveWindowSubclass` is safe with a valid `HWND` and matching subclass ID.
+        let result = unsafe { RemoveWindowSubclass(self.hwnd.0, Some(subclass_proc), SUBCLASS_ID) };
+        if result.as_bool() {
+            debug!("[windows_dpi_fix] Removed DPI fix subclass");
+        }
+    }
+}
+
 /// Get the `HWND` from a Bevy window entity.
 fn get_hwnd(window_entity: Entity) -> Option<HWND> {
     WINIT_WINDOWS.with(|winit_windows| {
@@ -112,22 +128,6 @@ unsafe extern "system" fn subclass_proc(
     // Pass all other messages to the original window procedure.
     // SAFETY: `DefSubclassProc` is safe when called from a subclass proc.
     unsafe { DefSubclassProc(hwnd, msg, wparam, lparam) }
-}
-
-/// Guard resource that removes the window subclass on drop.
-#[derive(Resource)]
-struct DpiFixGuard {
-    hwnd: SendSyncHwnd,
-}
-
-impl Drop for DpiFixGuard {
-    fn drop(&mut self) {
-        // SAFETY: `RemoveWindowSubclass` is safe with a valid `HWND` and matching subclass ID.
-        let result = unsafe { RemoveWindowSubclass(self.hwnd.0, Some(subclass_proc), SUBCLASS_ID) };
-        if result.as_bool() {
-            debug!("[windows_dpi_fix] Removed DPI fix subclass");
-        }
-    }
 }
 
 /// System to install the DPI fix subclass on the primary window.

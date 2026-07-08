@@ -54,6 +54,66 @@ impl SettleState {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Comparison {
+    Match,
+    Mismatch,
+}
+
+impl From<bool> for Comparison {
+    fn from(matches: bool) -> Self { if matches { Self::Match } else { Self::Mismatch } }
+}
+
+impl Comparison {
+    const fn is_match(self) -> bool { matches!(self, Self::Match) }
+}
+
+struct SettleComparison {
+    position: Comparison,
+    size:     Comparison,
+    mode:     Comparison,
+    monitor:  Comparison,
+}
+
+impl SettleComparison {
+    const fn all_match(&self) -> bool {
+        self.position.is_match()
+            && self.size.is_match()
+            && self.mode.is_match()
+            && self.monitor.is_match()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TimeoutState {
+    Active,
+    TimedOut,
+}
+
+#[derive(Clone, Copy)]
+enum ChangeHandling {
+    Skip,
+    Continue,
+}
+
+/// Bundled actual values for settle mismatch reporting.
+struct SettleActual {
+    settle_snapshot: SettleSnapshot,
+    scale:           f64,
+    logical_size:    UVec2,
+}
+
+/// Extracted target values for settle resolution, avoiding too-many-arguments.
+struct SettleTarget {
+    physical_position: Option<IVec2>,
+    logical_position:  Option<IVec2>,
+    logical_size:      UVec2,
+    physical_size:     UVec2,
+    window_mode:       WindowMode,
+    monitor:           usize,
+    scale:             f64,
+}
+
 /// Build a [`SettleSnapshot`] from the current window state, returning the snapshot
 /// and the actual scale factor (tracked separately since scale is informational).
 fn build_actual_snapshot(
@@ -122,48 +182,6 @@ fn check_settle_matches(
         mode:     mode_match.into(),
         monitor:  monitor_match.into(),
     }
-}
-
-#[derive(Clone, Copy)]
-enum Comparison {
-    Match,
-    Mismatch,
-}
-
-impl From<bool> for Comparison {
-    fn from(matches: bool) -> Self { if matches { Self::Match } else { Self::Mismatch } }
-}
-
-impl Comparison {
-    const fn is_match(self) -> bool { matches!(self, Self::Match) }
-}
-
-struct SettleComparison {
-    position: Comparison,
-    size:     Comparison,
-    mode:     Comparison,
-    monitor:  Comparison,
-}
-
-impl SettleComparison {
-    const fn all_match(&self) -> bool {
-        self.position.is_match()
-            && self.size.is_match()
-            && self.mode.is_match()
-            && self.monitor.is_match()
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum TimeoutState {
-    Active,
-    TimedOut,
-}
-
-#[derive(Clone, Copy)]
-enum ChangeHandling {
-    Skip,
-    Continue,
 }
 
 /// Detect whether the settle snapshot changed from the previous frame and reset the
@@ -339,13 +357,6 @@ pub(crate) fn check_restore_settling(
     }
 }
 
-/// Bundled actual values for settle mismatch reporting.
-struct SettleActual {
-    settle_snapshot: SettleSnapshot,
-    scale:           f64,
-    logical_size:    UVec2,
-}
-
 fn build_settle_actual(
     window: &Window,
     settle_snapshot: SettleSnapshot,
@@ -359,17 +370,6 @@ fn build_settle_actual(
             window.resolution.height().to_u32(),
         ),
     }
-}
-
-/// Extracted target values for settle resolution, avoiding too-many-arguments.
-struct SettleTarget {
-    physical_position: Option<IVec2>,
-    logical_position:  Option<IVec2>,
-    logical_size:      UVec2,
-    physical_size:     UVec2,
-    window_mode:       WindowMode,
-    monitor:           usize,
-    scale:             f64,
 }
 
 /// Emit `WindowRestored` and clean up `TargetPosition` when settle succeeds.

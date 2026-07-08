@@ -61,15 +61,16 @@ pub(crate) fn update_current_monitor(
 
         let effective_window_mode = compute_effective_window_mode(window, &monitor_info, &monitors);
 
-        let new_current = CurrentMonitor {
+        let current_monitor = CurrentMonitor {
             monitor_info,
             effective_window_mode,
         };
 
         // `changed` prevents redundant `CurrentMonitor` inserts and Bevy change detection.
-        let changed = existing.is_none_or(|current_monitor| {
-            current_monitor.monitor_info.index != new_current.monitor_info.index
-                || current_monitor.effective_window_mode != new_current.effective_window_mode
+        let changed = existing.is_none_or(|existing_current_monitor| {
+            existing_current_monitor.monitor_info.index != current_monitor.monitor_info.index
+                || existing_current_monitor.effective_window_mode
+                    != current_monitor.effective_window_mode
         });
 
         if changed {
@@ -77,7 +78,7 @@ pub(crate) fn update_current_monitor(
                 "[update_current_monitor] source={} index={} scale={} effective_window_mode={:?}",
                 source, monitor_info.index, monitor_info.scale, effective_window_mode
             );
-            commands.entity(entity).insert(new_current);
+            commands.entity(entity).insert(current_monitor);
         }
     }
 }
@@ -266,14 +267,15 @@ mod tests {
     #[test]
     fn effective_window_mode_returns_mode_when_no_monitors() {
         let monitor_info = monitor_0();
-        let empty = Monitors { list: vec![] };
+        let empty_monitors = Monitors { list: vec![] };
         let window = window_at(
             IVec2::ZERO,
             monitor_info.physical_size.x,
             monitor_info.physical_size.y,
         );
 
-        let effective_window_mode = compute_effective_window_mode(&window, &monitor_info, &empty);
+        let effective_window_mode =
+            compute_effective_window_mode(&window, &monitor_info, &empty_monitors);
         assert_eq!(effective_window_mode, WindowMode::Windowed);
     }
 }

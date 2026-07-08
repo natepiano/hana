@@ -23,6 +23,11 @@ use crate::persistence::SavedWindowMode;
 use crate::restore::settle_state::SettleState;
 use crate::restore::winit_info::X11FrameCompensated;
 
+enum RestoreStatus {
+    Complete,
+    Waiting,
+}
+
 /// Apply the initial window move to the target monitor.
 fn apply_initial_move(target_position: &TargetPosition, window: &mut Window) {
     if target_position.saved_window_mode.is_fullscreen() {
@@ -255,11 +260,6 @@ pub(crate) fn restore_windows(
             target_position.settle_state = Some(SettleState::new());
         }
     }
-}
-
-enum RestoreStatus {
-    Complete,
-    Waiting,
 }
 
 fn apply_window_geometry(

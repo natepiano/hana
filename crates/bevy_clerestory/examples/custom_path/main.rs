@@ -28,6 +28,9 @@ use self::constants::NOT_AVAILABLE_TEXT;
 use self::constants::PRIMARY_WINDOW_TITLE;
 use self::constants::STATE_FILE_NAME;
 
+#[derive(Component)]
+struct InfoText;
+
 #[expect(
     clippy::expect_used,
     reason = "example code - panicking on missing config dir is acceptable"
@@ -52,9 +55,6 @@ fn main() {
         .add_systems(Update, update_info_text)
         .run();
 }
-
-#[derive(Component)]
-struct InfoText;
 
 fn setup(mut commands: Commands) {
     commands.spawn(Camera2d);

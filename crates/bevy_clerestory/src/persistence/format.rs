@@ -91,34 +91,6 @@ struct VersionProbe {
     version: u8,
 }
 
-/// Decode persisted state text into typed runtime state.
-///
-/// Tries versioned formats first (dispatching by the `version` field),
-/// then falls back to legacy unversioned formats. See the module-level
-/// docs for the full list of supported formats.
-pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
-    // Probe only `VersionProbe::version` before dispatching to `PersistedStateV1` or
-    // `PersistedState`.
-    if let Ok(probe) = from_str::<VersionProbe>(contents) {
-        match probe.version {
-            PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
-            CURRENT_STATE_VERSION => decode_v2(contents),
-            unsupported => {
-                warn!(
-                    "[decode] Unsupported persisted state version {unsupported} \
-                     (latest supported: {CURRENT_STATE_VERSION})"
-                );
-                None
-            },
-        }
-    } else {
-        // Legacy unversioned format — bare `WindowState` from before multi-window
-        // support. Cannot participate in the version match above because it has no
-        // `version` field.
-        decode_legacy_single_window(contents)
-    }
-}
-
 /// v1 window state layout (used `width`/`height` field names on the wire).
 /// Used only for deserializing v1 and legacy files.
 #[derive(Debug, Clone, Deserialize)]
@@ -165,6 +137,34 @@ struct PersistedEntryV1 {
 struct PersistedStateV1 {
     version: u8,
     entries: Vec<PersistedEntryV1>,
+}
+
+/// Decode persisted state text into typed runtime state.
+///
+/// Tries versioned formats first (dispatching by the `version` field),
+/// then falls back to legacy unversioned formats. See the module-level
+/// docs for the full list of supported formats.
+pub(super) fn decode(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
+    // Probe only `VersionProbe::version` before dispatching to `PersistedStateV1` or
+    // `PersistedState`.
+    if let Ok(probe) = from_str::<VersionProbe>(contents) {
+        match probe.version {
+            PERSISTED_STATE_VERSION_V1 => decode_v1(contents),
+            CURRENT_STATE_VERSION => decode_v2(contents),
+            unsupported => {
+                warn!(
+                    "[decode] Unsupported persisted state version {unsupported} \
+                     (latest supported: {CURRENT_STATE_VERSION})"
+                );
+                None
+            },
+        }
+    } else {
+        // Legacy unversioned format — bare `WindowState` from before multi-window
+        // support. Cannot participate in the version match above because it has no
+        // `version` field.
+        decode_legacy_single_window(contents)
+    }
 }
 
 fn decode_legacy_single_window(contents: &str) -> Option<HashMap<WindowKey, WindowState>> {
@@ -552,13 +552,13 @@ mod tests {
         assert!(decoded.is_some(), "roundtrip decode should succeed");
         let decoded = decoded.unwrap_or_default();
         assert_eq!(decoded.len(), 2);
-        let primary = &decoded[&WindowKey::Primary];
-        assert_eq!(primary.logical_width, 800);
-        assert_eq!(primary.logical_height, 600);
-        assert!((primary.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
-        let inspector = &decoded[&WindowKey::Managed("inspector".to_string())];
-        assert_eq!(inspector.logical_width, 1024);
-        assert_eq!(inspector.logical_height, 768);
-        assert!((inspector.scale - 2.0).abs() < f64::EPSILON);
+        let primary_window_state = &decoded[&WindowKey::Primary];
+        assert_eq!(primary_window_state.logical_width, 800);
+        assert_eq!(primary_window_state.logical_height, 600);
+        assert!((primary_window_state.scale - DEFAULT_SCALE_FACTOR).abs() < f64::EPSILON);
+        let inspector_window_state = &decoded[&WindowKey::Managed("inspector".to_string())];
+        assert_eq!(inspector_window_state.logical_width, 1024);
+        assert_eq!(inspector_window_state.logical_height, 768);
+        assert!((inspector_window_state.scale - 2.0).abs() < f64::EPSILON);
     }
 }

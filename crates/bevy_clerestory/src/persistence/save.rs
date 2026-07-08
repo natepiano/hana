@@ -32,26 +32,6 @@ use crate::monitors::CurrentMonitor;
 use crate::monitors::Monitors;
 use crate::restore_window_config::RestoreWindowConfig;
 
-/// Save all window states to the given path.
-pub(crate) fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
-    if let Some(parent) = path.parent()
-        && let Err(e) = create_dir_all(parent)
-    {
-        warn!("[save_all_states] Failed to create directory {parent:?}: {e}");
-        return;
-    }
-    match format::encode(states) {
-        Ok(contents) => {
-            if let Err(e) = write(path, &contents) {
-                warn!("[save_all_states] Failed to write state file {path:?}: {e}");
-            }
-        },
-        Err(e) => {
-            warn!("[save_all_states] Failed to serialize state: {e}");
-        },
-    }
-}
-
 /// Cached window state for change detection comparison.
 #[derive(Default)]
 struct CachedWindowState {
@@ -72,6 +52,26 @@ enum StateWrite {
     #[default]
     NotNeeded,
     Needed,
+}
+
+/// Save all window states to the given path.
+pub(crate) fn save_all_states(path: &Path, states: &HashMap<WindowKey, WindowState>) {
+    if let Some(parent) = path.parent()
+        && let Err(e) = create_dir_all(parent)
+    {
+        warn!("[save_all_states] Failed to create directory {parent:?}: {e}");
+        return;
+    }
+    match format::encode(states) {
+        Ok(contents) => {
+            if let Err(e) = write(path, &contents) {
+                warn!("[save_all_states] Failed to write state file {path:?}: {e}");
+            }
+        },
+        Err(e) => {
+            warn!("[save_all_states] Failed to serialize state: {e}");
+        },
+    }
 }
 
 /// Build state from all currently-active windows and write it to the state file.

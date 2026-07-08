@@ -28,6 +28,9 @@ use self::constants::MILLIHERTZ_PER_HERTZ;
 use self::constants::NOT_AVAILABLE_TEXT;
 use self::constants::PRIMARY_WINDOW_TITLE;
 
+#[derive(Component)]
+struct InfoText;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -42,9 +45,6 @@ fn main() {
         .add_systems(Update, update_info_text)
         .run();
 }
-
-#[derive(Component)]
-struct InfoText;
 
 fn setup(mut commands: Commands) {
     commands.spawn(Camera2d);
