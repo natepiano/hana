@@ -9,6 +9,19 @@
 depends on the published `0.1.1`; it switches to the display-space events once
 `0.2.0` is released.
 
+## Next steps
+
+Ordered path from this branch to hana on the display-space events:
+
+1. **Merge** `feature/monitor-events` → `main`.
+2. **Release** `bevy_clerestory` 0.2.0 (`/release bevy_clerestory`): bumps
+   `0.2.0-dev` → `0.2.0` and publishes.
+3. **Bump hana's dep** `bevy_clerestory` `0.1.1` → `0.2.0` in
+   `crates/hana/Cargo.toml`.
+4. **Migrate hana's code** per [Migration](#migration) below — swap the interim
+   raw-`Monitor` observers for observers on `bevy_clerestory::MonitorConnected` /
+   `MonitorDisconnected`, and rename the clashing panel-space events.
+
 ## Motivation
 
 An app that mirrors OS displays in-world (live screen capture on 3D panels)
