@@ -1,5 +1,7 @@
 //! Compact top-left title bar for example-level controls.
 
+use std::collections::HashMap;
+
 use bevy::prelude::*;
 use bevy_diegetic::AlignY;
 use bevy_diegetic::Anchor;
@@ -15,6 +17,7 @@ use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 
 use super::constants::CONTROL_ACTIVE_COLOR;
+use super::constants::CONTROL_DISABLED_COLOR;
 use super::constants::CONTROL_INACTIVE_COLOR;
 use super::constants::DIVIDER_COLOR;
 use super::constants::HELP_CONTROL;
@@ -78,17 +81,19 @@ impl TitleBarSegment {
 #[derive(Clone, Debug, PartialEq, Eq)]
 /// Stored title-bar control with stable identity and visible label.
 pub struct TitleBarControl {
-    id:       String,
-    label:    String,
-    segments: Vec<TitleBarSegment>,
+    id:            String,
+    label:         String,
+    segments:      Vec<TitleBarSegment>,
+    disabled_note: Option<String>,
 }
 
 impl TitleBarControl {
     fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
         Self {
-            id:       id.into(),
-            label:    label.into(),
-            segments: Vec::new(),
+            id:            id.into(),
+            label:         label.into(),
+            segments:      Vec::new(),
+            disabled_note: None,
         }
     }
 
@@ -98,7 +103,18 @@ impl TitleBarControl {
             id: label.clone(),
             label,
             segments: Vec::new(),
+            disabled_note: None,
         }
+    }
+
+    /// Adds a note rendered beside the label while the control is
+    /// [`ControlActivation::Disabled`], explaining why it is unavailable
+    /// (for example `"(no gamepad)"`). Only plain (non-segmented) controls
+    /// show the note.
+    #[must_use]
+    pub fn with_disabled_note(mut self, note: impl Into<String>) -> Self {
+        self.disabled_note = Some(note.into());
+        self
     }
 
     /// Creates a control rendered as one cell: a key-hint label followed by
@@ -111,9 +127,10 @@ impl TitleBarControl {
     ) -> Self {
         let hint = hint.into();
         Self {
-            id:       hint.clone(),
-            label:    hint,
-            segments: segments.into_iter().collect(),
+            id:            hint.clone(),
+            label:         hint,
+            segments:      segments.into_iter().collect(),
+            disabled_note: None,
         }
     }
 }
@@ -255,49 +272,57 @@ impl TitleBar {
     }
 }
 
-/// Whether a control label should be highlighted.
+/// How a control label should be styled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlActivation {
     /// Highlight the control.
     Active,
     /// Clear the control's highlight.
     Inactive,
+    /// Grey the control out to show it cannot be used right now. A control's
+    /// disabled note (see [`TitleBarControl::with_disabled_note`]) renders
+    /// beside its label in this state.
+    Disabled,
 }
 
 #[derive(Component, Clone, Debug, Default, PartialEq, Eq)]
 pub(crate) struct TitleBarControlState {
-    active_controls: Vec<String>,
+    activations: HashMap<String, ControlActivation>,
 }
 
 impl TitleBarControlState {
     fn from_title_bar(title_bar: &TitleBar) -> Self {
         Self {
-            active_controls: title_bar.active_controls.clone(),
+            activations: title_bar
+                .active_controls
+                .iter()
+                .map(|control| (control.clone(), ControlActivation::Active))
+                .collect(),
         }
     }
 
-    /// Sets whether a control label is highlighted. Repeated calls in the same
-    /// state are no-ops.
+    /// Sets a control's activation. Repeated calls with the same value are
+    /// no-ops. [`ControlActivation::Inactive`] is the default and is stored as
+    /// the absence of an entry.
     pub fn set_active(&mut self, control: &str, activation: ControlActivation) {
-        let position = self
-            .active_controls
-            .iter()
-            .position(|active_control| active_control == control);
-        match (position, activation) {
-            (None, ControlActivation::Active) => self.active_controls.push(control.to_string()),
-            (Some(index), ControlActivation::Inactive) => {
-                self.active_controls.remove(index);
+        match activation {
+            ControlActivation::Inactive => {
+                self.activations.remove(control);
             },
-            (None, ControlActivation::Inactive) | (Some(_), ControlActivation::Active) => {},
+            ControlActivation::Active | ControlActivation::Disabled => {
+                self.activations.insert(control.to_string(), activation);
+            },
         }
     }
 
-    /// Returns whether a control label is highlighted.
+    /// Returns a control's activation, defaulting to
+    /// [`ControlActivation::Inactive`] for controls that were never set.
     #[must_use]
-    pub fn is_active(&self, control: &str) -> bool {
-        self.active_controls
-            .iter()
-            .any(|active_control| active_control == control)
+    pub fn activation(&self, control: &str) -> ControlActivation {
+        self.activations
+            .get(control)
+            .copied()
+            .unwrap_or(ControlActivation::Inactive)
     }
 }
 
@@ -415,6 +440,37 @@ fn build_title_bar_tree(title_bar: &TitleBar, state: &TitleBarControlState) -> L
     builder.build()
 }
 
+/// The three label styles a control cell picks between by its
+/// [`ControlActivation`].
+struct ControlStyles {
+    active:   TextStyle,
+    inactive: TextStyle,
+    disabled: TextStyle,
+}
+
+impl ControlStyles {
+    fn new() -> Self {
+        let control_style = |color| {
+            TextStyle::new(LABEL_SIZE)
+                .with_color(color)
+                .with_shadow_mode(GlyphShadowMode::None)
+        };
+        Self {
+            active:   control_style(CONTROL_ACTIVE_COLOR),
+            inactive: control_style(CONTROL_INACTIVE_COLOR),
+            disabled: control_style(CONTROL_DISABLED_COLOR),
+        }
+    }
+
+    fn for_activation(&self, activation: ControlActivation) -> TextStyle {
+        match activation {
+            ControlActivation::Active => self.active.clone(),
+            ControlActivation::Inactive => self.inactive.clone(),
+            ControlActivation::Disabled => self.disabled.clone(),
+        }
+    }
+}
+
 fn build_title_bar_layout(
     builder: &mut LayoutBuilder,
     title_bar: &TitleBar,
@@ -423,12 +479,7 @@ fn build_title_bar_layout(
     let title = TextStyle::new(TITLE_SIZE)
         .with_color(TITLE_COLOR)
         .with_shadow_mode(GlyphShadowMode::None);
-    let inactive_control = TextStyle::new(LABEL_SIZE)
-        .with_color(CONTROL_INACTIVE_COLOR)
-        .with_shadow_mode(GlyphShadowMode::None);
-    let active_control = TextStyle::new(LABEL_SIZE)
-        .with_color(CONTROL_ACTIVE_COLOR)
-        .with_shadow_mode(GlyphShadowMode::None);
+    let controls = ControlStyles::new();
 
     let background = title_bar
         .background_color
@@ -450,8 +501,7 @@ fn build_title_bar_layout(
                     .gap(TITLE_BAR_CHILD_GAP)
                     .align_y(AlignY::Center),
                 &title,
-                &active_control,
-                &inactive_control,
+                &controls,
             ),
             TitleBarOrientation::Vertical => build_title_bar_contents(
                 builder,
@@ -460,8 +510,7 @@ fn build_title_bar_layout(
                 orientation,
                 El::column().width(Sizing::GROW).gap(TITLE_BAR_CHILD_GAP),
                 &title,
-                &active_control,
-                &inactive_control,
+                &controls,
             ),
         },
     );
@@ -474,32 +523,43 @@ fn build_title_bar_contents<L: ChildLayoutState>(
     orientation: TitleBarOrientation,
     container: El<L>,
     title: &TextStyle,
-    active_control: &TextStyle,
-    inactive_control: &TextStyle,
+    controls: &ControlStyles,
 ) {
     builder.with(container, |builder| {
         builder.text((&title_bar.title, title.clone()));
         for control in &title_bar.controls {
             title_separator(builder, orientation);
             if control.segments.is_empty() {
-                let style = if state.is_active(&control.id) {
-                    active_control.clone()
-                } else {
-                    inactive_control.clone()
-                };
-                builder.text((&control.label, style));
+                plain_control_cell(builder, control, state, controls);
             } else {
-                segmented_control_cell(builder, control, state, active_control, inactive_control);
+                segmented_control_cell(builder, control, state, controls);
             }
         }
         title_separator(builder, orientation);
-        let help_style = if state.is_active(HELP_CONTROL) {
-            active_control.clone()
-        } else {
-            inactive_control.clone()
-        };
+        let help_style = controls.for_activation(state.activation(HELP_CONTROL));
         builder.text((HELP_CONTROL, help_style));
     });
+}
+
+/// One title-bar cell holding a plain control label. A disabled control with a
+/// note renders the note beside its label.
+fn plain_control_cell(
+    builder: &mut LayoutBuilder,
+    control: &TitleBarControl,
+    state: &TitleBarControlState,
+    controls: &ControlStyles,
+) {
+    let activation = state.activation(&control.id);
+    let style = controls.for_activation(activation);
+    match (activation, control.disabled_note.as_deref()) {
+        (ControlActivation::Disabled, Some(note)) => {
+            let label = format!("{} {note}", control.label);
+            builder.text((label.as_str(), style));
+        },
+        _ => {
+            builder.text((&control.label, style));
+        },
+    }
 }
 
 /// One title-bar cell holding a segmented control: the key hint followed by
@@ -508,18 +568,13 @@ fn segmented_control_cell(
     builder: &mut LayoutBuilder,
     control: &TitleBarControl,
     state: &TitleBarControlState,
-    active: &TextStyle,
-    inactive: &TextStyle,
+    controls: &ControlStyles,
 ) {
     let row = El::row().gap(TITLE_BAR_SEGMENT_GAP).align_y(AlignY::Center);
     builder.with(row, |builder| {
-        builder.text((&control.label, inactive.clone()));
+        builder.text((&control.label, controls.inactive.clone()));
         for segment in &control.segments {
-            let style = if state.is_active(&segment.id) {
-                active.clone()
-            } else {
-                inactive.clone()
-            };
+            let style = controls.for_activation(state.activation(&segment.id));
             builder.text((&segment.label, style));
         }
     });
@@ -551,17 +606,17 @@ mod tests {
         let mut state = TitleBarControlState::default();
 
         state.set_active("H Home", ControlActivation::Active);
-        assert!(state.is_active("H Home"));
+        assert_eq!(state.activation("H Home"), ControlActivation::Active);
 
-        // Repeat Active must be a no-op — otherwise the duplicate would survive
-        // the single Inactive below and `is_active` would still return true.
+        // Repeat Active must be a no-op — otherwise a duplicate entry could
+        // survive the single Inactive below.
         state.set_active("H Home", ControlActivation::Active);
         state.set_active("H Home", ControlActivation::Inactive);
-        assert!(!state.is_active("H Home"));
+        assert_eq!(state.activation("H Home"), ControlActivation::Inactive);
 
-        // Repeat Inactive on an empty list must be a no-op.
+        // Repeat Inactive on a control with no entry must be a no-op.
         state.set_active("H Home", ControlActivation::Inactive);
-        assert!(!state.is_active("H Home"));
+        assert_eq!(state.activation("H Home"), ControlActivation::Inactive);
     }
 
     #[test]
@@ -580,9 +635,34 @@ mod tests {
         // Segment highlight uses the same id-based state as whole chips.
         let mut state = TitleBarControlState::default();
         state.set_active("aa-both", ControlActivation::Active);
-        assert!(state.is_active("aa-both"));
-        assert!(!state.is_active("aa-off"));
-        assert!(!state.is_active("A"));
+        assert_eq!(state.activation("aa-both"), ControlActivation::Active);
+        assert_eq!(state.activation("aa-off"), ControlActivation::Inactive);
+        assert_eq!(state.activation("A"), ControlActivation::Inactive);
+    }
+
+    #[test]
+    fn disabled_control_reads_as_disabled() {
+        let mut state = TitleBarControlState::default();
+
+        state.set_active("G Cycle Input", ControlActivation::Disabled);
+        assert_eq!(
+            state.activation("G Cycle Input"),
+            ControlActivation::Disabled
+        );
+
+        // Clearing to Inactive drops the entry back to the default.
+        state.set_active("G Cycle Input", ControlActivation::Inactive);
+        assert_eq!(
+            state.activation("G Cycle Input"),
+            ControlActivation::Inactive
+        );
+    }
+
+    #[test]
+    fn with_disabled_note_stores_the_note() {
+        let control = TitleBarControl::from("G Cycle Input").with_disabled_note("(no gamepad)");
+
+        assert_eq!(control.disabled_note.as_deref(), Some("(no gamepad)"));
     }
 
     #[test]
@@ -593,7 +673,7 @@ mod tests {
             .active_control("T Toggle");
         let state = TitleBarControlState::from_title_bar(&title_bar);
 
-        assert!(!state.is_active("A Action"));
-        assert!(state.is_active("T Toggle"));
+        assert_eq!(state.activation("A Action"), ControlActivation::Inactive);
+        assert_eq!(state.activation("T Toggle"), ControlActivation::Active);
     }
 }

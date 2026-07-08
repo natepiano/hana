@@ -388,16 +388,13 @@ fn describe_free_controls(
 ) -> CameraControlSummary {
     match mode {
         FreeCamInputMode::Preset(preset) => match preset.to_bindings() {
-            Ok(bindings) => describe_free_bindings(
-                PRESET_MODE_LABEL,
-                preset.kind().name(),
-                &bindings,
-                roll_control,
-            ),
+            Ok(bindings) => {
+                describe_free_bindings(PRESET_MODE_LABEL, preset.name(), &bindings, roll_control)
+            },
             Err(_) => CameraControlSummary {
                 camera_label: FREE_CAM_CAMERA_LABEL.to_string(),
                 mode_label: PRESET_MODE_LABEL.to_string(),
-                mode_value: preset.kind().name().to_string(),
+                mode_value: preset.name().to_string(),
                 ..Default::default()
             },
         },

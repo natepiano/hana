@@ -11,6 +11,7 @@
 //!   Alt+S - toggle slow mode
 //!   H - return to the start pose
 //!   G - cycle input preset: keyboard/mouse, then gamepad + southpaw when a gamepad is connected
+//!       (greyed out as "(no gamepad)" while none is connected)
 //!   Gamepad - sticks move/look, triggers up/down, bumpers roll, L3 boost, Select or H home
 
 use std::f32::consts::FRAC_PI_2;
@@ -62,6 +63,7 @@ const KEYBOARD_MOUSE_LOOK_INPUT_GAIN: f32 = 0.85;
 // title bar
 const CAMERA_HOME_CONTROL: &str = "H Home";
 const CYCLE_INPUT_CONTROL: &str = "G Cycle Input";
+const CYCLE_INPUT_NO_GAMEPAD_NOTE: &str = "(no gamepad)";
 const FREE_FLIGHT_CONTROL: &str = "free-flight";
 const PITCH_LIMITED_CONTROL: &str = "pitch-limited";
 const HORIZON_LOCKED_CONTROL: &str = "horizon-locked";
@@ -106,16 +108,24 @@ fn main() {
         .wire_chip_to_state::<PitchLimitAdjustment, _>(INCREASE_PITCH_LIMIT_CONTROL, |adjustment| {
             adjustment.increase_activation()
         })
+        .wire_chip_to_state::<GamepadAvailability, _>(CYCLE_INPUT_CONTROL, |availability| {
+            availability.cycle_input_activation()
+        })
         .init_resource::<FreeCamExamplePreset>()
         .init_resource::<PitchLimit>()
         .init_resource::<PitchLimitAdjustment>()
         .init_resource::<FreeCamInputDevice>()
+        .init_resource::<GamepadAvailability>()
         .with_camera_control_panel()
         .lock_camera_preset()
         .add_systems(Startup, (spawn_camera, spawn_grid))
         .add_systems(
             Update,
-            (update_pitch_limit, revert_free_cam_to_keyboard_mouse),
+            (
+                update_pitch_limit,
+                revert_free_cam_to_keyboard_mouse,
+                track_gamepad_availability,
+            ),
         )
         .with_shortcut(KeyCode::Digit1, select_free_flight)
         .with_shortcut(KeyCode::Digit2, select_pitch_limited)
@@ -271,6 +281,40 @@ impl FreeCamInputDevice {
                     .with_look_pitch(FreeCamLookPitch::Inverted),
             ),
         }
+    }
+}
+
+/// Whether a gamepad is currently connected. Drives the greyed-out state of the
+/// `G Cycle Input` control: with no gamepad there is no preset to cycle to.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum GamepadAvailability {
+    #[default]
+    Absent,
+    Present,
+}
+
+impl GamepadAvailability {
+    const fn cycle_input_activation(self) -> ControlActivation {
+        match self {
+            Self::Absent => ControlActivation::Disabled,
+            Self::Present => ControlActivation::Inactive,
+        }
+    }
+}
+
+/// Mirrors gamepad connection into [`GamepadAvailability`] so the `G Cycle Input`
+/// control greys out while no gamepad is present.
+fn track_gamepad_availability(
+    mut availability: ResMut<GamepadAvailability>,
+    gamepads: Query<(), With<Gamepad>>,
+) {
+    let next = if gamepads.is_empty() {
+        GamepadAvailability::Absent
+    } else {
+        GamepadAvailability::Present
+    };
+    if *availability != next {
+        *availability = next;
     }
 }
 
@@ -524,7 +568,10 @@ fn free_cam_title_bar(pitch_limit: f32) -> TitleBar {
         .with_anchor(Anchor::TopLeft)
         .with_orientation(TitleBarOrientation::Vertical)
         .control(CAMERA_HOME_CONTROL)
-        .control(CYCLE_INPUT_CONTROL)
+        .control(
+            TitleBarControl::from(CYCLE_INPUT_CONTROL)
+                .with_disabled_note(CYCLE_INPUT_NO_GAMEPAD_NOTE),
+        )
         .control(TitleBarControl::segmented(
             "1",
             [TitleBarSegment::new(FREE_FLIGHT_CONTROL, "Free Flight")],

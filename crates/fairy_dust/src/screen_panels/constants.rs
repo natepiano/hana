@@ -11,6 +11,7 @@ pub(super) const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 
 // control
 pub(super) const CONTROL_ACTIVE_COLOR: Color = Color::srgb(1.0, 0.9, 0.25);
+pub(super) const CONTROL_DISABLED_COLOR: Color = Color::srgba(0.45, 0.48, 0.55, 0.45);
 pub(super) const CONTROL_INACTIVE_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);
 
 // description

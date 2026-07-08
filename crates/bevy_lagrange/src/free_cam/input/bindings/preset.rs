@@ -255,9 +255,20 @@ impl FreeCamPreset {
         }
     }
 
-    /// Returns the preset's display name.
+    /// Returns the preset's display name, including the gamepad stick layout so
+    /// the standard and southpaw gamepad layouts read differently in a control
+    /// panel. Use this for display; [`Self::kind`] is the setting-insensitive
+    /// identity for matching and equality.
     #[must_use]
-    pub const fn name(&self) -> &'static str { self.kind().name() }
+    pub const fn name(&self) -> &'static str {
+        match self {
+            Self::KeyboardMouse(_) => FreeCamPresetKind::KeyboardMouse.name(),
+            Self::Gamepad(preset) => match preset.layout {
+                FreeCamGamepadLayout::Standard => FreeCamPresetKind::Gamepad.name(),
+                FreeCamGamepadLayout::Southpaw => "Gamepad Southpaw",
+            },
+        }
+    }
 
     /// Adds a binding that returns the camera to its home pose.
     ///
@@ -718,6 +729,14 @@ mod tests {
 
         assert_eq!(preset.kind(), FreeCamPresetKind::Gamepad);
         assert_eq!(preset.name(), "Gamepad");
+    }
+
+    #[test]
+    fn southpaw_shares_gamepad_identity_but_has_distinct_name() {
+        let preset = FreeCamPreset::gamepad_southpaw();
+
+        assert_eq!(preset.kind(), FreeCamPresetKind::Gamepad);
+        assert_eq!(preset.name(), "Gamepad Southpaw");
     }
 
     #[test]
