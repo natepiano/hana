@@ -60,6 +60,9 @@ fn main() {
         .run();
 }
 
+#[derive(Component)]
+struct WidthText;
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -141,9 +144,6 @@ fn handle_width_input(
     outline.width += delta;
     text_query.0 = width_text(outline.width);
 }
-
-#[derive(Component)]
-struct WidthText;
 
 fn setup_ui(mut commands: Commands) {
     commands.spawn((

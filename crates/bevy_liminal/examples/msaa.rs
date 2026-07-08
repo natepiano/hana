@@ -119,6 +119,9 @@ impl PostAntiAliasing {
     }
 }
 
+#[derive(Component)]
+struct MsaaText;
+
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -243,9 +246,6 @@ fn switch_anti_aliasing(
         text_query.0 = build_msaa_text(msaa_label(*msaa), post_anti_aliasing);
     }
 }
-
-#[derive(Component)]
-struct MsaaText;
 
 fn setup_ui(mut commands: Commands) {
     commands.spawn((

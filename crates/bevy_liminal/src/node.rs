@@ -45,6 +45,34 @@ use super::mask::HullOutlinePhase;
 use super::mask::JumpFloodOutlinePhase;
 use super::texture::FloodTextures;
 
+struct MaskInitPassContext<'a> {
+    flood_textures:     &'a FloodTextures,
+    outline_depth_view: &'a TextureView,
+    camera:             &'a ExtractedCamera,
+    outline_phase:      Option<&'a BinnedRenderPhase<JumpFloodOutlinePhase>>,
+    world:              &'a World,
+    view_entity:        Entity,
+}
+
+struct HullPassContext<'a> {
+    view_target:        &'a ViewTarget,
+    view_depth_texture: &'a ViewDepthTexture,
+    camera:             &'a ExtractedCamera,
+    phase:              &'a BinnedRenderPhase<HullOutlinePhase>,
+    world:              &'a World,
+    view_entity:        Entity,
+}
+
+struct JumpFloodCompositeContext<'a> {
+    flood_textures:     &'a mut FloodTextures,
+    outline_depth_view: &'a TextureView,
+    global_depth:       &'a ColorAttachment,
+    view_target:        &'a ViewTarget,
+    view_depth_texture: &'a ViewDepthTexture,
+    dynamic_range:      DynamicRange,
+    msaa:               Msaa,
+}
+
 /// Renders the outline passes for one view. Runs in the `Core3d` schedule in
 /// `Core3dSystems::EarlyPostProcess` (after the main pass, before bloom),
 /// replacing the former `OutlineNode` render-graph node.
@@ -150,15 +178,6 @@ pub(crate) fn outline_pass(
     );
 }
 
-struct MaskInitPassContext<'a> {
-    flood_textures:     &'a FloodTextures,
-    outline_depth_view: &'a TextureView,
-    camera:             &'a ExtractedCamera,
-    outline_phase:      Option<&'a BinnedRenderPhase<JumpFloodOutlinePhase>>,
-    world:              &'a World,
-    view_entity:        Entity,
-}
-
 fn run_mask_init_pass(
     render_context: &mut RenderContext<'_, '_>,
     mask_init_pass_context: MaskInitPassContext<'_>,
@@ -239,15 +258,6 @@ fn run_mask_init_pass(
     }
 }
 
-struct HullPassContext<'a> {
-    view_target:        &'a ViewTarget,
-    view_depth_texture: &'a ViewDepthTexture,
-    camera:             &'a ExtractedCamera,
-    phase:              &'a BinnedRenderPhase<HullOutlinePhase>,
-    world:              &'a World,
-    view_entity:        Entity,
-}
-
 fn run_hull_pass(
     render_context: &mut RenderContext<'_, '_>,
     hull_pass_context: HullPassContext<'_>,
@@ -285,16 +295,6 @@ fn run_hull_pass(
     }
 }
 
-struct JumpFloodCompositeContext<'a> {
-    flood_textures:     &'a mut FloodTextures,
-    outline_depth_view: &'a TextureView,
-    global_depth:       &'a ColorAttachment,
-    view_target:        &'a ViewTarget,
-    view_depth_texture: &'a ViewDepthTexture,
-    dynamic_range:      DynamicRange,
-    msaa:               Msaa,
-}
-
 fn run_jump_flood_composite(
     render_context: &mut RenderContext<'_, '_>,
     world: &World,
@@ -325,8 +325,8 @@ fn run_jump_flood_composite(
     let pipeline_cache = world.resource::<PipelineCache>();
 
     let sample_mode = SampleMode::from(msaa);
-    let variant = ComposeVariant::new(sample_mode, dynamic_range);
-    let pipeline_id = compose_pipeline.pipeline_id(variant);
+    let compose_variant = ComposeVariant::new(sample_mode, dynamic_range);
+    let pipeline_id = compose_pipeline.pipeline_id(compose_variant);
 
     let Some(pipeline) = pipeline_cache.get_render_pipeline(pipeline_id) else {
         return;
@@ -352,7 +352,7 @@ fn run_jump_flood_composite(
 
     let bind_group = render_context.render_device().create_bind_group(
         COMPOSE_OUTPUT_BIND_GROUP_LABEL,
-        &pipeline_cache.get_bind_group_layout(compose_pipeline.layout_for(variant)),
+        &pipeline_cache.get_bind_group_layout(compose_pipeline.layout_for(compose_variant)),
         &BindGroupEntries::sequential((
             post_process.source,
             &jump_flood_pass.pipeline.sampler,

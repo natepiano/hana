@@ -107,6 +107,9 @@ struct MeshAndMaterial {
 #[derive(Resource)]
 struct SceneBounds(Entity);
 
+#[derive(Component)]
+struct OverlapLabel;
+
 fn main() {
     App::new()
         .add_plugins((
@@ -353,9 +356,6 @@ fn on_ground_clicked(click: On<Pointer<Click>>, mut commands: Commands, scene: R
             .duration(Duration::from_millis(ZOOM_DURATION_MS)),
     );
 }
-
-#[derive(Component)]
-struct OverlapLabel;
 
 fn toggle_overlap(
     keys: Res<ButtonInput<KeyCode>>,

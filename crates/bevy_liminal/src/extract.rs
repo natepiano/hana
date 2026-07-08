@@ -120,7 +120,7 @@ impl ActiveOutlineMethods {
 pub(crate) struct ExtractedOutline {
     /// Color multiplier for HDR glow via bloom.
     pub(crate) intensity:      f32,
-    /// Outline width in pixels or world units depending on `method`.
+    /// Outline width in pixels or world units depending on `outline_method`.
     pub(crate) width:          f32,
     /// Draw priority for ordering (reserved for future use).
     pub(crate) priority:       f32,
@@ -164,10 +164,10 @@ pub(crate) fn extract_outline_uniforms(
     mut removed_outlines: Extract<RemovedComponents<Outline>>,
     mut removed_meshes: Extract<RemovedComponents<Mesh3d>>,
 ) {
-    let mut dirty = CacheUpdate::Unchanged;
+    let mut cache_update = CacheUpdate::Unchanged;
 
     for entity in removed_outlines.read() {
-        dirty = dirty.merge(
+        cache_update = cache_update.merge(
             extracted_outlines
                 .by_main_entity
                 .remove(&MainEntity::from(entity))
@@ -176,7 +176,7 @@ pub(crate) fn extract_outline_uniforms(
     }
 
     for entity in removed_meshes.read() {
-        dirty = dirty.merge(
+        cache_update = cache_update.merge(
             extracted_outlines
                 .by_main_entity
                 .remove(&MainEntity::from(entity))
@@ -186,12 +186,12 @@ pub(crate) fn extract_outline_uniforms(
 
     for (entity, outline) in &added_or_changed_outlines {
         if outline.activity.is_enabled() {
-            dirty = dirty.merge(extracted_outlines.upsert(
+            cache_update = cache_update.merge(extracted_outlines.upsert(
                 MainEntity::from(entity),
                 ExtractedOutline::from_main_world(entity, outline),
             ));
         } else {
-            dirty = dirty.merge(
+            cache_update = cache_update.merge(
                 extracted_outlines
                     .by_main_entity
                     .remove(&MainEntity::from(entity))
@@ -202,14 +202,14 @@ pub(crate) fn extract_outline_uniforms(
 
     for (entity, outline) in &added_mesh_outlines {
         if outline.activity.is_enabled() {
-            dirty = dirty.merge(extracted_outlines.upsert(
+            cache_update = cache_update.merge(extracted_outlines.upsert(
                 MainEntity::from(entity),
                 ExtractedOutline::from_main_world(entity, outline),
             ));
         }
     }
 
-    if dirty.is_changed() {
+    if cache_update.is_changed() {
         extracted_outlines.recompute_flags_and_width();
     }
 }

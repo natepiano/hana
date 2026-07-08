@@ -102,6 +102,54 @@ pub(crate) struct HullOutlineUniformBuffer(pub(crate) GpuArrayBuffer<OutlineUnif
 #[derive(Resource, Default)]
 pub(crate) struct HullOutlineBindGroup(pub(crate) Option<BindGroup>);
 
+pub(crate) struct SetHullOutlineBindGroup<const I: usize>();
+
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetHullOutlineBindGroup<I> {
+    type Param = SRes<HullOutlineBindGroup>;
+    type ViewQuery = ();
+    type ItemQuery = ();
+
+    fn render<'w>(
+        _: &P,
+        (): ROQueryItem<'w, '_, Self::ViewQuery>,
+        _: Option<()>,
+        outline_bind_group: SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let outline_bind_group = outline_bind_group.into_inner();
+
+        outline_bind_group
+            .0
+            .as_ref()
+            .map_or(RenderCommandResult::Skip, |bind_group| {
+                pass.set_bind_group(I, bind_group, &[]);
+                RenderCommandResult::Success
+            })
+    }
+}
+
+pub(crate) struct SetHullDepthBindGroup<const I: usize>();
+
+#[derive(Component)]
+pub(crate) struct HullDepthViewBindGroup(pub(crate) BindGroup);
+
+impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetHullDepthBindGroup<I> {
+    type Param = ();
+    type ViewQuery = &'static HullDepthViewBindGroup;
+    type ItemQuery = ();
+
+    fn render<'w>(
+        _: &P,
+        depth_bind_group: ROQueryItem<'w, '_, Self::ViewQuery>,
+        _: Option<()>,
+        (): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        pass.set_bind_group(I, &depth_bind_group.0, &[]);
+        RenderCommandResult::Success
+    }
+}
+
 /// Pushes `OutlineUniform` data into the `GpuArrayBuffer` in the same order
 /// that `batch_and_prepare_binned_render_phase` pushes `MeshUniform` data,
 /// so that `instance_index` in the shader indexes both buffers identically.
@@ -188,54 +236,6 @@ pub(crate) fn prepare_outline_bind_group(
         outline_bind_group.0 = Some(bind_group);
     } else {
         outline_bind_group.0 = None;
-    }
-}
-
-pub(crate) struct SetHullOutlineBindGroup<const I: usize>();
-
-impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetHullOutlineBindGroup<I> {
-    type Param = SRes<HullOutlineBindGroup>;
-    type ViewQuery = ();
-    type ItemQuery = ();
-
-    fn render<'w>(
-        _: &P,
-        (): ROQueryItem<'w, '_, Self::ViewQuery>,
-        _: Option<()>,
-        outline_bind_group: SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        let outline_bind_group = outline_bind_group.into_inner();
-
-        outline_bind_group
-            .0
-            .as_ref()
-            .map_or(RenderCommandResult::Skip, |bind_group| {
-                pass.set_bind_group(I, bind_group, &[]);
-                RenderCommandResult::Success
-            })
-    }
-}
-
-pub(crate) struct SetHullDepthBindGroup<const I: usize>();
-
-#[derive(Component)]
-pub(crate) struct HullDepthViewBindGroup(pub(crate) BindGroup);
-
-impl<P: PhaseItem, const I: usize> RenderCommand<P> for SetHullDepthBindGroup<I> {
-    type Param = ();
-    type ViewQuery = &'static HullDepthViewBindGroup;
-    type ItemQuery = ();
-
-    fn render<'w>(
-        _: &P,
-        depth_bind_group: ROQueryItem<'w, '_, Self::ViewQuery>,
-        _: Option<()>,
-        (): SystemParamItem<'w, '_, Self::Param>,
-        pass: &mut TrackedRenderPass<'w>,
-    ) -> RenderCommandResult {
-        pass.set_bind_group(I, &depth_bind_group.0, &[]);
-        RenderCommandResult::Success
     }
 }
 

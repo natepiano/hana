@@ -76,8 +76,8 @@ pub(crate) struct ComposePipelines {
 }
 
 impl ComposePipelines {
-    pub(crate) const fn get(&self, variant: ComposeVariant) -> CachedRenderPipelineId {
-        match variant {
+    pub(crate) const fn get(&self, compose_variant: ComposeVariant) -> CachedRenderPipelineId {
+        match compose_variant {
             ComposeVariant::Sdr => self.sdr,
             ComposeVariant::Hdr => self.hdr,
             ComposeVariant::MsaaSdr => self.msaa_sdr,
@@ -94,12 +94,18 @@ pub(crate) struct ComposeOutputPipeline {
 }
 
 impl ComposeOutputPipeline {
-    pub(crate) const fn pipeline_id(&self, variant: ComposeVariant) -> CachedRenderPipelineId {
-        self.pipelines.get(variant)
+    pub(crate) const fn pipeline_id(
+        &self,
+        compose_variant: ComposeVariant,
+    ) -> CachedRenderPipelineId {
+        self.pipelines.get(compose_variant)
     }
 
-    pub(crate) const fn layout_for(&self, variant: ComposeVariant) -> &BindGroupLayoutDescriptor {
-        if variant.is_msaa() {
+    pub(crate) const fn layout_for(
+        &self,
+        compose_variant: ComposeVariant,
+    ) -> &BindGroupLayoutDescriptor {
+        if compose_variant.is_msaa() {
             &self.msaa_layout
         } else {
             &self.layout

@@ -39,6 +39,11 @@ pub(super) struct HudText;
 #[derive(Resource)]
 pub(super) struct HudUpdateTimer(pub(super) Timer);
 
+struct LiveMetrics {
+    fps:        f64,
+    frame_time: f64,
+}
+
 pub(super) fn update_hud(
     state: Res<BenchmarkState>,
     diagnostics: Res<DiagnosticsStore>,
@@ -50,11 +55,6 @@ pub(super) fn update_hud(
         return;
     }
     text.0 = build_hud_text(&state, &diagnostics);
-}
-
-struct LiveMetrics {
-    fps:        f64,
-    frame_time: f64,
 }
 
 fn build_hud_text(state: &BenchmarkState, diagnostics: &DiagnosticsStore) -> String {
