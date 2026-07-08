@@ -156,9 +156,11 @@ mod tests {
     use bevy::window::WindowPosition;
 
     use super::*;
+    use crate::monitors::MonitorId;
 
     fn monitor_0() -> MonitorInfo {
         MonitorInfo {
+            id:                MonitorId(0),
             index:             0,
             scale:             2.0,
             physical_position: IVec2::ZERO,

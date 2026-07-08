@@ -3,14 +3,26 @@
 //! Provides a `Monitors` resource that maintains a sorted list of monitors,
 //! automatically updated when monitors are added or removed.
 
+use std::collections::hash_map::DefaultHasher;
+use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 
+use bevy::ecs::system::NonSendMarker;
 use bevy::prelude::*;
 use bevy::window::Monitor;
 use bevy::window::PrimaryWindow;
 use bevy::window::WindowMode;
+use bevy::winit::WinitMonitors;
 use bevy_diagnostic::FrameCount;
 use bevy_kana::ToI32;
+use winit::monitor::MonitorHandle;
+#[cfg(target_os = "macos")]
+use winit::platform::macos::MonitorHandleExtMacOS;
+#[cfg(target_os = "windows")]
+use winit::platform::windows::MonitorHandleExtWindows;
+#[cfg(all(unix, not(target_os = "macos")))]
+use winit::platform::x11::MonitorHandleExtX11;
 
 /// Plugin that manages the `Monitors` resource.
 pub(crate) struct MonitorPlugin;
@@ -22,9 +34,21 @@ impl Plugin for MonitorPlugin {
     }
 }
 
+/// Stable, OS-assigned identifier for a display, uniform across platforms.
+///
+/// Sourced from winit's per-platform native id — `CGDirectDisplayID` on macOS,
+/// the `RandR` / `wl_output` id on X11 / Wayland, and a hash of the GDI device
+/// name on Windows — normalized to one `u64` so the same value keys the
+/// connect/disconnect diff on every platform. Unlike [`MonitorInfo::index`], it
+/// survives display rearrangement.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Reflect)]
+pub struct MonitorId(pub u64);
+
 /// Information about a single monitor.
 #[derive(Clone, Copy, Debug, Reflect)]
 pub struct MonitorInfo {
+    /// Stable OS display id, unchanged across rearrangement.
+    pub id:                MonitorId,
     /// Index in the sorted monitor list.
     pub index:             usize,
     /// Scale factor (typically 1.0 or 2.0 on macOS).
@@ -74,6 +98,38 @@ impl Deref for CurrentMonitor {
     type Target = MonitorInfo;
 
     fn deref(&self) -> &Self::Target { &self.monitor_info }
+}
+
+/// A display was connected.
+///
+/// Triggered after [`Monitors`] is rebuilt to include it. Global rather than
+/// entity-targeted because the payload is the identity of the changed display; a
+/// consumer maps [`MonitorInfo::id`] to its own state.
+///
+/// Observe it:
+/// ```ignore
+/// app.add_observer(|connected: On<MonitorConnected>| {
+///     let id = connected.event().monitor.id;
+/// });
+/// ```
+///
+/// A reconnect of the same physical display fires this again, so treat connect
+/// as idempotent (resume, don't duplicate).
+#[derive(Event, Debug, Clone, Reflect)]
+pub struct MonitorConnected {
+    /// The newly present monitor, as recorded in [`Monitors`].
+    pub monitor: MonitorInfo,
+}
+
+/// A display was disconnected.
+///
+/// Triggered after [`Monitors`] is rebuilt without it. The payload comes from the
+/// previous [`Monitors`] snapshot, since the winit `Monitor` entity and its handle
+/// are gone by the time this fires.
+#[derive(Event, Debug, Clone, Reflect)]
+pub struct MonitorDisconnected {
+    /// Geometry of the monitor as last known, before it vanished.
+    pub monitor: MonitorInfo,
 }
 
 impl Monitors {
@@ -185,16 +241,81 @@ impl Monitors {
     }
 }
 
+/// Stable 64-bit hash used to normalize a platform key into a [`MonitorId`].
+fn hash_monitor_key(key: impl Hash) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    key.hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Read winit's per-platform native display id and normalize it to [`MonitorId`].
+fn native_monitor_id(handle: &MonitorHandle) -> MonitorId {
+    #[cfg(target_os = "macos")]
+    let raw = { u64::from(handle.native_id()) };
+    #[cfg(target_os = "windows")]
+    let raw = { hash_monitor_key(handle.native_id()) };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let raw = {
+        // X11 and Wayland both expose `native_id() -> u32`; winit dispatches to
+        // the active backend, so importing either trait resolves the same value.
+        u64::from(handle.native_id())
+    };
+    MonitorId(raw)
+}
+
+/// Connect/disconnect deltas between two monitor snapshots, keyed on
+/// [`MonitorId`]. Returns `(connected, disconnected)`: displays present only in
+/// `rebuilt`, and displays present only in `previous`.
+fn monitor_deltas(
+    previous: &[MonitorInfo],
+    rebuilt: &[MonitorInfo],
+) -> (Vec<MonitorInfo>, Vec<MonitorInfo>) {
+    let connected = rebuilt
+        .iter()
+        .filter(|monitor| !previous.iter().any(|prev| prev.id == monitor.id))
+        .copied()
+        .collect();
+    let disconnected = previous
+        .iter()
+        .filter(|monitor| !rebuilt.iter().any(|next| next.id == monitor.id))
+        .copied()
+        .collect();
+    (connected, disconnected)
+}
+
 /// Build monitor list from query (preserves winit enumeration order).
-fn build_monitors(monitors: &Query<&Monitor>) -> Monitors {
+///
+/// Each monitor's [`MonitorId`] comes from its winit `MonitorHandle` in
+/// [`WinitMonitors`]; a monitor missing from that map (a broken winit invariant)
+/// falls back to a hash of its physical position so distinct displays keep
+/// distinct ids.
+fn build_monitors(
+    monitors: &Query<(Entity, &Monitor)>,
+    winit_monitors: &WinitMonitors,
+) -> Monitors {
     let list: Vec<_> = monitors
         .iter()
         .enumerate()
-        .map(|(idx, monitor)| MonitorInfo {
-            index:             idx,
-            scale:             monitor.scale_factor,
-            physical_position: monitor.physical_position,
-            physical_size:     monitor.physical_size(),
+        .map(|(idx, (entity, monitor))| {
+            let id = winit_monitors.find_entity(entity).map_or_else(
+                || {
+                    warn!(
+                        "[build_monitors] no winit handle for monitor entity {entity}; keying id on position"
+                    );
+                    MonitorId(hash_monitor_key((
+                        monitor.physical_position.x,
+                        monitor.physical_position.y,
+                    )))
+                },
+                |handle| native_monitor_id(&handle),
+            );
+            MonitorInfo {
+                id,
+                index: idx,
+                scale: monitor.scale_factor,
+                physical_position: monitor.physical_position,
+                physical_size: monitor.physical_size(),
+            }
         })
         .collect();
 
@@ -202,8 +323,13 @@ fn build_monitors(monitors: &Query<&Monitor>) -> Monitors {
 }
 
 /// Initialize `Monitors` resource at startup.
-pub(crate) fn init_monitors(mut commands: Commands, monitors: Query<&Monitor>) {
-    let monitors_resource = build_monitors(&monitors);
+pub(crate) fn init_monitors(
+    mut commands: Commands,
+    monitors: Query<(Entity, &Monitor)>,
+    winit_monitors: Res<WinitMonitors>,
+    _: NonSendMarker,
+) {
+    let monitors_resource = build_monitors(&monitors, &winit_monitors);
     debug!(
         "[init_monitors] Found {} monitors",
         monitors_resource.list.len()
@@ -222,34 +348,116 @@ pub(crate) fn init_monitors(mut commands: Commands, monitors: Query<&Monitor>) {
     commands.insert_resource(monitors_resource);
 }
 
-/// Update `Monitors` resource when monitors are added or removed.
+/// Update `Monitors` resource when monitors are added or removed, and trigger a
+/// [`MonitorConnected`] / [`MonitorDisconnected`] per changed display.
 fn update_monitors(
     mut commands: Commands,
-    monitors: Query<&Monitor>,
+    monitors: Query<(Entity, &Monitor)>,
+    winit_monitors: Res<WinitMonitors>,
+    previous: Res<Monitors>,
     added: Query<Entity, Added<Monitor>>,
     mut removed: RemovedComponents<Monitor>,
     frame_count: Res<FrameCount>,
     current_monitor_query: Query<Option<&CurrentMonitor>, With<PrimaryWindow>>,
+    _: NonSendMarker,
 ) {
     let has_changes = !added.is_empty() || removed.read().next().is_some();
+    if !has_changes {
+        return;
+    }
 
-    if has_changes {
-        let monitors_resource = build_monitors(&monitors);
-        if let Some(current_monitor) = current_monitor_query.iter().next().flatten() {
-            debug!(
-                "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
-                frame_count.0,
-                monitors_resource.list.len(),
-                current_monitor.monitor_info.index,
-                current_monitor.monitor_info.scale,
-            );
-        } else {
-            debug!(
-                "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor=None",
-                frame_count.0,
-                monitors_resource.list.len(),
-            );
+    let rebuilt = build_monitors(&monitors, &winit_monitors);
+
+    // Diff before overwriting the resource: connect events read the rebuilt list,
+    // disconnect events read the previous snapshot (the vanished monitor is
+    // already gone from `monitors` and `winit_monitors`).
+    let (connected, disconnected) = monitor_deltas(&previous.list, &rebuilt.list);
+    for monitor in connected {
+        commands.trigger(MonitorConnected { monitor });
+    }
+    for monitor in disconnected {
+        commands.trigger(MonitorDisconnected { monitor });
+    }
+
+    if let Some(current_monitor) = current_monitor_query.iter().next().flatten() {
+        debug!(
+            "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor_index={} current_monitor_scale={}",
+            frame_count.0,
+            rebuilt.list.len(),
+            current_monitor.monitor_info.index,
+            current_monitor.monitor_info.scale,
+        );
+    } else {
+        debug!(
+            "[update_monitors] frame={} Monitors changed, now {} monitors, current_monitor=None",
+            frame_count.0,
+            rebuilt.list.len(),
+        );
+    }
+    commands.insert_resource(rebuilt);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn monitor(id: u64, position: IVec2) -> MonitorInfo {
+        MonitorInfo {
+            id:                MonitorId(id),
+            index:             0,
+            scale:             2.0,
+            physical_position: position,
+            physical_size:     UVec2::new(2560, 1440),
         }
-        commands.insert_resource(monitors_resource);
+    }
+
+    #[test]
+    fn deltas_report_new_display_as_connected() {
+        let previous = vec![monitor(1, IVec2::ZERO)];
+        let rebuilt = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
+
+        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+
+        assert_eq!(connected.len(), 1);
+        assert_eq!(connected[0].id, MonitorId(2));
+        assert!(disconnected.is_empty());
+    }
+
+    #[test]
+    fn deltas_report_vanished_display_as_disconnected() {
+        let previous = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
+        let rebuilt = vec![monitor(1, IVec2::ZERO)];
+
+        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+
+        assert!(connected.is_empty());
+        assert_eq!(disconnected.len(), 1);
+        assert_eq!(disconnected[0].id, MonitorId(2));
+    }
+
+    #[test]
+    fn deltas_ignore_rearrangement_of_same_ids() {
+        // Same displays, rearranged: positions differ but ids match, so no
+        // connect/disconnect fires.
+        let previous = vec![monitor(1, IVec2::ZERO), monitor(2, IVec2::new(2560, 0))];
+        let rebuilt = vec![monitor(1, IVec2::new(2560, 0)), monitor(2, IVec2::ZERO)];
+
+        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+
+        assert!(connected.is_empty());
+        assert!(disconnected.is_empty());
+    }
+
+    #[test]
+    fn deltas_report_swap_as_one_each() {
+        let previous = vec![monitor(1, IVec2::ZERO)];
+        let rebuilt = vec![monitor(2, IVec2::ZERO)];
+
+        let (connected, disconnected) = monitor_deltas(&previous, &rebuilt);
+
+        assert_eq!(connected.len(), 1);
+        assert_eq!(connected[0].id, MonitorId(2));
+        assert_eq!(disconnected.len(), 1);
+        assert_eq!(disconnected[0].id, MonitorId(1));
     }
 }

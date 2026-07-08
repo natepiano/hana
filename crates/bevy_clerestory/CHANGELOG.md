@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Added
+- `MonitorConnected` / `MonitorDisconnected` events, triggered from `update_monitors` after the `Monitors` resource is rebuilt, one per changed display. Observe them with `On<MonitorConnected>` / `On<MonitorDisconnected>`; the payload is the changed `MonitorInfo`. Disconnect payloads come from the previous `Monitors` snapshot.
+- `MonitorId`: a stable, OS-assigned display identifier normalized to `u64` across platforms (macOS `CGDirectDisplayID`, X11 / Wayland output id, hashed GDI device name on Windows). Keys the connect/disconnect diff so it survives display rearrangement.
+
+### Changed
+- `MonitorInfo` gains an `id: MonitorId` field. Breaking for code that constructs `MonitorInfo` directly; field access is unaffected.
+- Added a direct `winit` dependency (pinned to bevy 0.19's version) to read per-platform native monitor ids.
+
 ## [0.1.1] - 2026-07-02
 
 ### Fixed

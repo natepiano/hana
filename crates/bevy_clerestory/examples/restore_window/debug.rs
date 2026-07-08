@@ -5,6 +5,8 @@ use bevy::window::WindowMode;
 use bevy::window::WindowPosition;
 use bevy::window::WindowScaleFactorChanged;
 use bevy::winit::WINIT_WINDOWS;
+use bevy_clerestory::MonitorConnected;
+use bevy_clerestory::MonitorDisconnected;
 use bevy_clerestory::Monitors;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -22,6 +24,42 @@ impl From<bool> for FocusState {
             Self::Unfocused
         }
     }
+}
+
+/// Logs every monitor's `MonitorId` at startup — the cross-platform spot-check.
+/// On any OS, boot the example and confirm each display reports a distinct,
+/// non-zero id (a `0` on macOS or an all-same value elsewhere means the native
+/// id lookup fell back to the position hash).
+pub(crate) fn log_monitor_ids(monitors: Res<Monitors>) {
+    for monitor in &monitors.list {
+        info!(
+            "[log_monitor_ids] index={} id={:?} position={:?} size={} scale={}",
+            monitor.index,
+            monitor.id,
+            monitor.physical_position,
+            monitor.physical_size,
+            monitor.scale
+        );
+    }
+}
+
+/// Logs `MonitorConnected` — plug in a display and confirm the id and geometry.
+pub(crate) fn on_monitor_connected(trigger: On<MonitorConnected>) {
+    let monitor = &trigger.event().monitor;
+    info!(
+        "[on_monitor_connected] id={:?} index={} position={:?} size={}",
+        monitor.id, monitor.index, monitor.physical_position, monitor.physical_size
+    );
+}
+
+/// Logs `MonitorDisconnected` — unplug a display and confirm the id matches the
+/// one it connected with (proof the id survives across the session).
+pub(crate) fn on_monitor_disconnected(trigger: On<MonitorDisconnected>) {
+    let monitor = &trigger.event().monitor;
+    info!(
+        "[on_monitor_disconnected] id={:?} index={} position={:?} size={}",
+        monitor.id, monitor.index, monitor.physical_position, monitor.physical_size
+    );
 }
 
 pub(crate) fn debug_winit_monitor(
@@ -47,7 +85,7 @@ pub(crate) fn debug_winit_monitor(
     });
 
     if *cached_monitor != winit_monitor_index {
-        info!(
+        debug!(
             "[debug_winit_monitor] Monitor changed: {:?} -> {:?}",
             *cached_monitor, winit_monitor_index
         );
@@ -107,7 +145,7 @@ pub(crate) fn debug_window_changed(
     }
 
     if !changes.is_empty() {
-        info!("[debug_window_changed] {}", changes.join(", "));
+        debug!("[debug_window_changed] {}", changes.join(", "));
     }
 
     cached.physical_position = Some(window.position);
@@ -119,7 +157,7 @@ pub(crate) fn debug_window_changed(
 
 pub(crate) fn debug_scale_factor_changed(mut messages: MessageReader<WindowScaleFactorChanged>) {
     for message in messages.read() {
-        info!(
+        debug!(
             "[debug_scale_factor_changed] WindowScaleFactorChanged received: scale_factor={}",
             message.scale_factor
         );

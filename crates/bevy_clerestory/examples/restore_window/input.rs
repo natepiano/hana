@@ -19,7 +19,8 @@ use super::constants::BACKWARD_SCROLL_OFFSET;
 use super::constants::DEFAULT_VIDEO_MODE_INDEX;
 use super::constants::FORWARD_SCROLL_OFFSET;
 use super::constants::MILLIHERTZ_PER_HERTZ;
-use super::constants::MONITOR_LABEL;
+use super::constants::MONITOR_ID_LABEL;
+use super::constants::MONITOR_INDEX_LABEL;
 use super::constants::NO_VIDEO_MODES_TEXT;
 use super::constants::NON_PRIMARY_MONITOR_MARKER;
 use super::constants::NOT_AVAILABLE_TEXT;
@@ -274,7 +275,8 @@ pub(crate) fn format_monitor_row(
         NON_PRIMARY_MONITOR_MARKER
     };
     format!(
-        "{MONITOR_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
+        "{MONITOR_ID_LABEL} {}\n{MONITOR_INDEX_LABEL} {}{primary_marker} {SCALE_LABEL} {} - {REFRESH_RATE_LABEL} {refresh_display}{}",
+        current_monitor.id.0,
         current_monitor.index,
         current_monitor.scale,
         platform_suffix()

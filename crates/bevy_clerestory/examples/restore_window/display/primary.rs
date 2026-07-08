@@ -12,7 +12,7 @@ use super::super::constants::AUTOMATIC_TEXT;
 use super::super::constants::DEFAULT_COLOR;
 use super::super::constants::FONT_SIZE;
 use super::super::constants::MANAGED_WINDOWS_HEADER;
-use super::super::constants::MONITOR_LABEL;
+use super::super::constants::MONITOR_INDEX_LABEL;
 use super::super::constants::NO_MANAGED_WINDOWS_TEXT;
 use super::super::constants::SCALE_LABEL;
 use super::super::constants::VIDEO_MODES_HEADER;
@@ -124,7 +124,7 @@ pub(crate) fn update_primary_display(
                     _ => AUTOMATIC_TEXT.to_string(),
                 };
                 managed_lines.push(format!(
-                    "  {}: position={position} physical={}x{} logical={}x{} {SCALE_LABEL} {} {MONITOR_LABEL} {}\n",
+                    "  {}: position={position} physical={}x{} logical={}x{} {SCALE_LABEL} {} {MONITOR_INDEX_LABEL} {}\n",
                     managed.name,
                     managed_window.physical_width(),
                     managed_window.physical_height(),

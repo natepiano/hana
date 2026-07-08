@@ -628,6 +628,7 @@ dependencies = [
  "serde",
  "tempfile",
  "windows",
+ "winit",
  "x11rb",
 ]
 

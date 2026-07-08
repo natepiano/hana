@@ -7,7 +7,7 @@ use crate::constants::DEFAULT_COLOR;
 use crate::constants::LABEL_WIDTH;
 use crate::constants::MISMATCH_COLOR;
 use crate::constants::MODE_LABEL;
-use crate::constants::MONITOR_LABEL;
+use crate::constants::MONITOR_INDEX_LABEL;
 use crate::constants::NO_RESTORE_DATA_TEXT;
 use crate::constants::POSITION_LOGICAL_LABEL;
 use crate::constants::POSITION_PHYSICAL_LABEL;
@@ -74,7 +74,7 @@ pub(super) fn build_current_only_spans(
         text_font,
         &format!(
             "{:<LABEL_WIDTH$}{}\n",
-            MONITOR_LABEL, current_values.monitor
+            MONITOR_INDEX_LABEL, current_values.monitor
         ),
         DEFAULT_COLOR,
     );

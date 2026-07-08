@@ -13,7 +13,7 @@ use crate::constants::MIN_COMPARISON_COLUMN_WIDTH;
 use crate::constants::MISMATCH_COLOR;
 use crate::constants::MISMATCH_WARN_COLOR;
 use crate::constants::MODE_LABEL;
-use crate::constants::MONITOR_LABEL;
+use crate::constants::MONITOR_INDEX_LABEL;
 use crate::constants::NONE_TEXT;
 use crate::constants::POSITION_LOGICAL_LABEL;
 use crate::constants::POSITION_PHYSICAL_LABEL;
@@ -292,7 +292,7 @@ fn add_monitor_row(
         child_spawner,
         text_font,
         &ComparisonRow {
-            label:    MONITOR_LABEL,
+            label:    MONITOR_INDEX_LABEL,
             restored: restored_values.monitor.clone(),
             current:  current_values.monitor.clone(),
             mismatch: cached_mismatch_state.map(|cached_mismatch_state| ComparisonMismatch {

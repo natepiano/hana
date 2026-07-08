@@ -69,6 +69,8 @@ fn main() {
         .add_observer(mode_observers::on_toggle_persistence)
         .add_observer(mode_observers::on_clear_state_and_quit)
         .add_observer(mode_observers::on_quit_app)
+        .add_observer(debug::on_monitor_connected)
+        .add_observer(debug::on_monitor_disconnected)
         .insert_resource(KeyboardInputMode::from(
             var(TEST_MODE_ENVIRONMENT_VARIABLE).is_err(),
         ))
@@ -77,7 +79,7 @@ fn main() {
         .init_resource::<RestoredStates>()
         .init_resource::<MismatchStates>()
         .init_resource::<WindowsSettledCount>()
-        .add_systems(Startup, setup::setup)
+        .add_systems(Startup, (setup::setup, debug::log_monitor_ids))
         .add_systems(
             Update,
             (
