@@ -26,37 +26,6 @@ impl ModifierBlockers {
     fn non_shift_entities(&self) -> Vec<Entity> { self.non_shift_entities.clone() }
 }
 
-/// Non-consuming modifier action for `Cmd` (macOS) / `Ctrl` (other platforms).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct PrimaryShortcutsModifier;
-
-/// Non-consuming modifier action for `Option` (macOS) / `Alt` (other platforms).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct AltModifier;
-
-/// Non-consuming modifier action for `Ctrl` on macOS (distinct from `Cmd`).
-#[derive(InputAction)]
-#[action_output(bool)]
-struct ControlModifier;
-
-#[derive(Clone, Copy)]
-enum PlatformShortcutMode {
-    Command,
-    Control,
-}
-
-impl PlatformShortcutMode {
-    const fn current() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Command
-        } else {
-            Self::Control
-        }
-    }
-}
-
 /// Modifier-aware keybinding builder with platform-specific `Cmd`/`Ctrl` handling.
 ///
 /// Spawns modifier actions and provides methods to bind keys with automatic
@@ -219,5 +188,36 @@ impl<C: Component> Keybindings<C> {
             PlatformShortcutMode::Control => bindings![key_code.with_mod_keys(ModKeys::CONTROL)],
         };
         action_spawner.spawn((Action::<A>::new(), self.action_settings, platform_bindings));
+    }
+}
+
+/// Non-consuming modifier action for `Cmd` (macOS) / `Ctrl` (other platforms).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct PrimaryShortcutsModifier;
+
+/// Non-consuming modifier action for `Option` (macOS) / `Alt` (other platforms).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct AltModifier;
+
+/// Non-consuming modifier action for `Ctrl` on macOS (distinct from `Cmd`).
+#[derive(InputAction)]
+#[action_output(bool)]
+struct ControlModifier;
+
+#[derive(Clone, Copy)]
+enum PlatformShortcutMode {
+    Command,
+    Control,
+}
+
+impl PlatformShortcutMode {
+    const fn current() -> Self {
+        if cfg!(target_os = "macos") {
+            Self::Command
+        } else {
+            Self::Control
+        }
     }
 }

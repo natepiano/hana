@@ -32,7 +32,10 @@ trybuild = "1"
 ttf-parser = "0.25"
 # Pinned to the exact winit that bevy 0.19 resolves so `MonitorHandle` unifies to
 # one crate instance; used only for per-platform native monitor ids.
-winit = { version = "0.30.13", default-features = false, features = ["x11", "wayland"] }
+winit = { version = "0.30.13", default-features = false, features = [
+  "wayland",
+  "x11",
+] }
 
 # dev-dependencies
 bevy_brp_extras = "0.20.1"
