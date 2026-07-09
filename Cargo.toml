@@ -13,12 +13,31 @@ version    = "0.0.1"
 [workspace.dependencies]
 bevy = { version = "0.19.0", default-features = false }
 bevy_diagnostic = "0.19.0"
+bevy_ecs = { version = "0.19.0", default-features = false, features = [
+  "bevy_reflect",
+  "std",
+] }
 bevy_enhanced_input = { version = "0.26.0", default-features = false, features = [
   "reflect",
 ] }
 bevy_kana = { path = "crates/bevy_kana" }
+bevy_math = { version = "0.19.0", default-features = false, features = [
+  "bevy_reflect",
+  "std",
+] }
+bevy_platform = { version = "0.19.0", default-features = false, features = [
+  "std",
+] }
+bevy_reflect = { version = "0.19.0", default-features = false, features = [
+  "glam",
+  "std",
+] }
 bevy_remote = "0.19.0"
 bevy_render = "0.19.0"
+bevy_transform = { version = "0.19.0", default-features = false, features = [
+  "std",
+] }
+bevy_tween = { version = "0.13.0", default-features = false }
 bitflags = "2"
 bytemuck = "1"
 getrandom = { version = "0.4.3", features = ["wasm_js"] }
@@ -28,6 +47,7 @@ nonmax = "0.5"
 parley = { version = "0.9.0", default-features = false, features = ["std"] }
 rand = "0.10.1"
 smallvec = "1"
+tracing = { version = "0.1", default-features = false, features = ["std"] }
 trybuild = "1"
 ttf-parser = "0.25"
 # Pinned to the exact winit that bevy 0.19 resolves so `MonitorHandle` unifies to

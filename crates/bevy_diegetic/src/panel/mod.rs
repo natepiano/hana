@@ -16,6 +16,14 @@ mod gizmos;
 mod perf;
 mod precompose;
 mod sizing;
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "phase 7 registers the valence provider; phase 6 keeps it unscheduled"
+    )
+)]
+mod valence_provider;
 mod world_anchoring;
 
 pub use anchor_geometry::PanelAnchorEdge;

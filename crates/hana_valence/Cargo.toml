@@ -7,6 +7,7 @@ homepage             = "https://github.com/natepiano/hana/tree/main/crates/hana_
 keywords             = ["bevy", "gamedev"]
 license.workspace    = true
 name                 = "hana_valence"
+publish              = false
 readme               = "README.md"
 repository.workspace = true
 version              = "0.1.0"
@@ -14,5 +15,23 @@ version              = "0.1.0"
 [lints]
 workspace = true
 
+[features]
+default = []
+tween   = ["dep:bevy_tween"]
+
 [dependencies]
-bevy.workspace = true
+bevy_ecs       = { workspace = true }
+bevy_math      = { workspace = true }
+bevy_platform  = { workspace = true }
+bevy_reflect   = { workspace = true }
+bevy_transform = { workspace = true, features = ["bevy-support"] }
+bevy_tween     = { workspace = true, optional = true }
+tracing        = { workspace = true }
+
+[dev-dependencies]
+bevy       = { workspace = true, features = ["default"] }
+bevy_tween = { workspace = true }
+
+[[example]]
+name              = "staggered_unfold"
+required-features = ["tween"]

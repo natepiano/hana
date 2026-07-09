@@ -1,0 +1,53 @@
+use bevy_ecs::prelude::Component;
+use bevy_ecs::prelude::ReflectComponent;
+use bevy_ecs::prelude::SystemSet;
+use bevy_math::Quat;
+use bevy_math::Vec3;
+use bevy_platform::collections::HashMap;
+use bevy_reflect::Reflect;
+use bevy_reflect::std_traits::ReflectDefault;
+
+use crate::AnchorId;
+
+/// Local-frame resolver input for an anchored entity.
+///
+/// `AnchorPose` is deliberately not `Transform`: animation systems write
+/// `AnchorPose`, and resolver systems convert it into a `Transform` later.
+/// Keeping those components separate prevents animation systems and resolver
+/// systems from writing the same component for different meanings.
+/// [`Hinge`](crate::Hinge) is an `AnchorPose` driver; remove `Hinge` when
+/// another system should write `AnchorPose` directly.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Default)]
+pub struct AnchorPose {
+    /// Local rotation around the resolved anchor.
+    pub rotation:    Quat,
+    /// Local translation from the resolved anchor.
+    pub translation: Vec3,
+}
+
+/// Optional per-entity cache of resolved world-space anchor points.
+///
+/// Resolver systems recompute `ResolvedAnchorWorld` every frame for entities
+/// carrying it, so gizmos and UI can read cached points without owning their
+/// lifetime.
+#[derive(Component, Clone, Debug, Default, PartialEq, Reflect)]
+#[reflect(Component, Default)]
+pub struct ResolvedAnchorWorld {
+    /// World-space anchor points keyed by provider-authored ids.
+    pub points: HashMap<AnchorId, Vec3>,
+}
+
+/// System sets used by anchor providers, animation drivers, and resolvers.
+///
+/// Consumers configure the sets in their own plugin or app. `hana_valence`
+/// does not expose a plugin type.
+#[derive(SystemSet, Clone, Copy, Debug, Hash, PartialEq, Eq)]
+pub enum AnchorSystems {
+    /// Providers write [`ResolvedAnchorGeometry`](crate::ResolvedAnchorGeometry).
+    FillGeometry,
+    /// Drivers write [`AnchorPose`], hinge data, or source transforms.
+    AnimatePose,
+    /// Resolver systems read geometry, relations, and pose, then write transforms.
+    Resolve,
+}

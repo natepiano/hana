@@ -35,6 +35,7 @@ bevy = { workspace = true, features = [
 ] }
 bevy_kana = { workspace = true }
 bitflags = { workspace = true }
+hana_valence = { workspace = true }
 image = { workspace = true }
 parley = { workspace = true }
 smallvec = { workspace = true }

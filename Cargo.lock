@@ -771,6 +771,7 @@ dependencies = [
  "clay-layout",
  "criterion",
  "fairy_dust",
+ "hana_valence",
  "image",
  "parley",
  "smallvec",
@@ -1796,6 +1797,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_time_runner"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "13d4a4ad3990e6058427394b5e24223ec7f65b0d3fd06482f5f5b53d77e08556"
+dependencies = [
+ "bevy_app",
+ "bevy_ecs",
+ "bevy_log",
+ "bevy_reflect",
+ "bevy_time",
+ "rustc_version",
+]
+
+[[package]]
 name = "bevy_transform"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1810,6 +1825,19 @@ dependencies = [
  "derive_more",
  "serde",
  "thiserror 2.0.18",
+]
+
+[[package]]
+name = "bevy_tween"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e838a06f232e8f7f7e00fc6c245d7c6080a2a2b892f4cb397028af03a3749c39"
+dependencies = [
+ "bevy",
+ "bevy_math",
+ "bevy_time_runner",
+ "rustc_version",
+ "tracing",
 ]
 
 [[package]]
@@ -3290,6 +3318,13 @@ name = "hana_valence"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_ecs",
+ "bevy_math",
+ "bevy_platform",
+ "bevy_reflect",
+ "bevy_transform",
+ "bevy_tween",
+ "tracing",
 ]
 
 [[package]]
