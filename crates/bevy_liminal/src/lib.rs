@@ -54,6 +54,7 @@ pub use outline::LineStyle;
 pub use outline::NoOutline;
 pub use outline::Outline;
 pub use outline::OutlineActivity;
+pub use outline::OutlineBarrier;
 pub use outline::OutlineMethod;
 pub use outline::OverlapMode;
 pub use outline_builder::HullModeState;

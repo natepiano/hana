@@ -139,17 +139,21 @@ impl<M: OutlineModeState> OutlineBuilder<M> {
         self.overlap_mode = OverlapMode::Grouped;
         self
     }
-}
 
-/// Settings only available on hull methods (`WorldHull`, `ScreenHull`).
-impl<M: HullModeState> OutlineBuilder<M> {
-    /// Set the overlap mode for hull outlines.
+    /// Set how overlapping outlines interact. See [`OverlapMode`].
+    ///
+    /// Unlike [`with_group`](Self::with_group), this leaves `group_source`
+    /// unset, so an outline inserted on a hierarchy root still propagates to
+    /// descendant meshes — propagation assigns the group automatically.
     #[must_use]
     pub const fn with_overlap(mut self, overlap_mode: OverlapMode) -> Self {
         self.overlap_mode = overlap_mode;
         self
     }
+}
 
+/// Settings only available on hull methods (`WorldHull`, `ScreenHull`).
+impl<M: HullModeState> OutlineBuilder<M> {
     /// Consume the builder and produce a configured `Outline` component.
     #[must_use]
     pub const fn build(self) -> Outline {
@@ -204,6 +208,16 @@ mod tests {
 
         assert_eq!(outline.method, OutlineMethod::WorldHull);
         assert_eq!(outline.overlap_mode, OverlapMode::Grouped);
+    }
+
+    #[test]
+    fn jump_flood_with_overlap_keeps_group_source_unset() {
+        let outline = Outline::jump_flood(4.0)
+            .with_overlap(OverlapMode::Grouped)
+            .build();
+
+        assert_eq!(outline.overlap_mode, OverlapMode::Grouped);
+        assert_eq!(outline.group_source, None);
     }
 
     #[test]

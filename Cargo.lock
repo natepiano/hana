@@ -1207,6 +1207,7 @@ dependencies = [
  "bevy_lagrange",
  "bevy_render",
  "bytemuck",
+ "fairy_dust",
  "getrandom 0.4.3",
  "nonmax",
  "rand",

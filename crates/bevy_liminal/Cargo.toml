@@ -50,6 +50,7 @@ bevy = { version = "0.19.0", features = [
 bevy_brp_extras = { workspace = true }
 bevy_clerestory = { workspace = true }
 bevy_lagrange = { workspace = true, features = ["fit_overlay"] }
+fairy_dust = { workspace = true }
 
 [[example]]
 name = "simple"
@@ -73,3 +74,6 @@ path = "examples/benchmark/main.rs"
 
 [[example]]
 name = "all_modes"
+
+[[example]]
+name = "outline_propagation"

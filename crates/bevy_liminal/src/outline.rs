@@ -189,3 +189,34 @@ impl Outline {
 #[derive(Debug, Component, Reflect, Clone, Copy, Default)]
 #[reflect(Component)]
 pub struct NoOutline;
+
+/// Marker component that stops outline propagation at this entity's subtree.
+///
+/// An ancestor's `Outline` never crosses a barrier: neither the barrier entity
+/// nor any of its descendants inherit it. The barrier can still source its own
+/// outline — inserting `Outline` on the barrier entity propagates to its
+/// subtree as usual.
+///
+/// Use [`NoOutline`] to exempt a single mesh; use `OutlineBarrier` to exempt a
+/// whole subtree that manages its own outline, such as an interactive control
+/// mounted on an outlined host.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// # use bevy::prelude::*;
+/// # use bevy_liminal::Outline;
+/// # use bevy_liminal::OutlineBarrier;
+/// # fn setup(mut commands: Commands) {
+/// // A jack mounted on a screen: the screen's outline stops at the jack,
+/// // and hovering the jack outlines only the jack's own subtree.
+/// commands.spawn((
+///     Name::new("Input Jack"),
+///     OutlineBarrier,
+///     Outline::jump_flood(2.0).with_color(Color::WHITE).build(),
+/// ));
+/// # }
+/// ```
+#[derive(Debug, Component, Reflect, Clone, Copy, Default)]
+#[reflect(Component)]
+pub struct OutlineBarrier;
