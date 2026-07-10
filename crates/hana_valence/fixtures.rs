@@ -155,7 +155,12 @@ pub fn triangle_edge_anchor(edge: Edge) -> Option<AnchorId> {
     }
 }
 
-/// Alternating strip edge selector for triangle tiling.
+/// Seating edge for member `index` in a straight triangle strip.
+///
+/// Cycling all three edges keeps the strip running straight: each triangle is
+/// the edge-reflection of its predecessor, so a full fold along the shared edge
+/// lands it exactly on that predecessor and the whole strip collapses onto one
+/// triangle. The member glues this edge to the same edge on its predecessor.
 #[must_use]
 pub const fn triangle_edge(index: usize) -> Edge {
     match index % 3 {

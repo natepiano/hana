@@ -96,6 +96,9 @@ fn triangle_strip_uses_tiling_rule_for_alternating_seats() {
     run_arrangement_schedule::<TriangleTiling>(&mut world);
 
     let half_side = TRIANGLE_SIDE / 2.0;
+    // Rest centroids of the four members seated as a straight strip running down
+    // and to the right; a full fold along each shared edge stacks them onto one
+    // triangle.
     let expected = [
         Vec3::new(0.0, -TRIANGLE_HEIGHT * TRIANGLE_TWO_THIRDS, 0.0),
         Vec3::new(half_side, -TRIANGLE_HEIGHT, 0.0),

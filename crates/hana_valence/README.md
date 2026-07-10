@@ -25,11 +25,7 @@ reconfigure.
 
 The crate is named `hana_valence`, but the concrete API keeps the **anchor**
 noun: `AnchorId`, `AnchoredTo`, `AnchorPose`. An anchor point is the connection
-site. Valence is the capacity those points add up to.
-
-This follows the workspace convention of borrowing one precise term from
-another field: diegetic from film theory, lagrange from orbital mechanics,
-liminal from anthropology, and valence from chemistry.
+site. 
 
 ## Quick start
 
@@ -98,16 +94,16 @@ assign `MemberIndex`, place the member with `AnchoredTo`, add `AnchorPose` and
 The examples in `examples/` are standalone Bevy apps:
 
 - `staggered_unfold` -- five quads with staggered `bevy_tween` hinge animation.
-- `triangle_accordion` -- equilateral triangles using an example-defined
+- `triangles` -- equilateral triangles using an example-defined
   `TriangleTiling` implementation.
-- `box_net` -- a six-quad cross net that folds into a closed box with direct
+- `box` -- a six-quad cross net that folds into a closed box with direct
   `AnchoredTo` and `Hinge` relations.
 
 Run the default-feature examples with:
 
 ```sh
-cargo run -p hana_valence --example triangle_accordion
-cargo run -p hana_valence --example box_net
+cargo run -p hana_valence --example triangles
+cargo run -p hana_valence --example box
 ```
 
 `staggered_unfold` requires the default `tween` feature:

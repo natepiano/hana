@@ -3318,7 +3318,9 @@ name = "hana_valence"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy_diegetic",
  "bevy_ecs",
+ "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "bevy_math",
  "bevy_platform",

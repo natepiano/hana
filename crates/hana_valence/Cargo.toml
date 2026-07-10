@@ -30,6 +30,8 @@ tracing        = { workspace = true }
 
 [dev-dependencies]
 bevy          = { workspace = true, features = ["default"] }
+bevy_kana     = { workspace = true }
+bevy_diegetic = { workspace = true }
 bevy_lagrange = { workspace = true }
 bevy_tween    = { workspace = true }
 fairy_dust    = { workspace = true }
