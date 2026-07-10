@@ -6,6 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- Group-aware overlap for jump-flood outlines via `OutlineBuilder::with_group(Entity)`: outlines sharing a group merge into one silhouette but may draw over another group's surface, so a nested mesh keeps its own outline on top of its host (previously jump-flood was hardcoded to `Merged`)
+
+### Fixed
+
+- Jump-flood seed priority under reverse-Z so closer seeds win the flood instead of losing
+
 ## [0.0.2] - 2026-06-20
 
 ### Changed
