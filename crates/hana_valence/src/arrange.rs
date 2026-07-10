@@ -21,6 +21,7 @@ use crate::AnchorId;
 use crate::AnchorPose;
 use crate::AnchoredTo;
 use crate::Edge;
+use crate::FoldAngles;
 use crate::Hinge;
 use crate::ResolvedAnchorGeometry;
 
@@ -377,9 +378,9 @@ pub fn apply_member_placements<R: Component + TilingRule>(
     }
 }
 
-/// Writes arrangement angles to every member [`Hinge`].
+/// Writes arrangement angles to member hinges that do not carry [`FoldAngles`].
 pub fn drive_arrangement_hinges<R: Component + TilingRule>(
-    mut hinges: Query<(&Member, &MemberIndex, &mut Hinge)>,
+    mut hinges: Query<(&Member, &MemberIndex, &mut Hinge), Without<FoldAngles>>,
     rules: Query<&R>,
     accordions: Query<&Accordion>,
     strips: Query<&Strip>,
@@ -529,6 +530,7 @@ mod tests {
     use super::assign_member_indices;
     use super::drive_arrangement_hinges;
     use crate::AnchoredTo;
+    use crate::FoldAngles;
     use crate::Hinge;
     use crate::hinge_to_pose;
     use crate::resolve;
@@ -605,6 +607,52 @@ mod tests {
 
         let angle = world.get::<Hinge>(member).map_or(0.0, |hinge| hinge.angle);
         assert_close(angle, FOLD_ANGLE * HALF_FOLD);
+    }
+
+    #[test]
+    fn fold_angles_transfer_hinge_ownership_until_removed() {
+        let mut world = World::new();
+        let arrangement = world
+            .spawn((
+                Accordion {
+                    fold:    FOLD,
+                    lean:    FOLD_ANGLE,
+                    pattern: FoldPattern::Accordion,
+                },
+                QuadTiling,
+            ))
+            .id();
+        let member = world
+            .spawn((
+                Member { arrangement },
+                MemberIndex {
+                    index: MEMBER_ONE_INDEX,
+                },
+                Hinge {
+                    edge:  super::QUAD_TOP_EDGE,
+                    angle: HALF_FOLD,
+                },
+                FoldAngles {
+                    unfolded: 0.0,
+                    folded:   HALF_FOLD,
+                },
+            ))
+            .id();
+        let mut schedule = Schedule::default();
+        schedule.add_systems(drive_arrangement_hinges::<QuadTiling>);
+
+        schedule.run(&mut world);
+        assert_close(
+            world.get::<Hinge>(member).map_or(0.0, |hinge| hinge.angle),
+            HALF_FOLD,
+        );
+
+        world.entity_mut(member).remove::<FoldAngles>();
+        schedule.run(&mut world);
+        assert_close(
+            world.get::<Hinge>(member).map_or(0.0, |hinge| hinge.angle),
+            FOLD_ANGLE,
+        );
     }
 
     #[test]

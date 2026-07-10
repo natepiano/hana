@@ -1,5 +1,6 @@
 //! Authored fold sequences and Hana-owned playback state.
 
+mod hinge;
 mod playback;
 mod sequence;
 
@@ -8,6 +9,11 @@ use bevy_app::Plugin;
 use bevy_app::PostUpdate;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::schedule::SystemSet;
+pub use hinge::FoldAngleDiagnostic;
+pub use hinge::FoldAngleDiagnostics;
+pub use hinge::FoldAngleInvalidReason;
+pub use hinge::FoldAngles;
+pub use hinge::actuate_fold_hinges;
 pub use playback::FoldCommand;
 pub use playback::FoldCommandEvent;
 pub use playback::FoldDirection;
@@ -33,7 +39,8 @@ pub struct FoldPlugin;
 
 impl Plugin for FoldPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FoldDiagnostics>()
+        app.init_resource::<FoldAngleDiagnostics>()
+            .init_resource::<FoldDiagnostics>()
             .add_observer(playback::on_fold_command)
             .add_observer(sequence::on_fold_member_inserted)
             .add_observer(sequence::on_fold_member_discarded)
@@ -41,9 +48,12 @@ impl Plugin for FoldPlugin {
             .add_observer(sequence::on_fold_sequence_removed)
             .configure_sets(
                 PostUpdate,
-                (FoldSystems::Advance, FoldSystems::Actuate)
-                    .chain()
-                    .in_set(AnchorSystems::AnimatePose),
+                (
+                    (FoldSystems::Advance, FoldSystems::Actuate)
+                        .chain()
+                        .in_set(AnchorSystems::AnimatePose),
+                    FoldSystems::Actuate.before(crate::hinge_to_pose),
+                ),
             )
             .add_systems(
                 PostUpdate,
@@ -52,6 +62,7 @@ impl Plugin for FoldPlugin {
                         .in_set(AnchorSystems::AnimatePose)
                         .before(FoldSystems::Advance),
                     playback::advance_fold_sequences.in_set(FoldSystems::Advance),
+                    hinge::actuate_fold_hinges.in_set(FoldSystems::Actuate),
                 ),
             );
     }

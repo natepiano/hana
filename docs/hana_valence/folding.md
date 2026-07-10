@@ -313,7 +313,7 @@
 - Phase 9 now explicitly uses absolute box angles and the intentional no-pivot path for zero-thickness faces.
 - The full lint workflow completed with clean Mend, style review, Clippy, rustdoc, and nightly formatting. No user decision remains.
 
-### Phase 4 — Fold-angle hinge actuation  · status: todo
+### Phase 4 — Fold-angle hinge actuation  · status: done (checkpoint)
 
 #### Work Order
 
@@ -348,6 +348,35 @@
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes actuation, grouped-stage, writer-ownership, and schedule-order tests; `cargo check --workspace --all-targets --all-features` is green.
 
+#### Retrospective
+
+**What worked:**
+
+- `FoldAngles` now gives fold actuation explicit ownership of `Hinge::angle`, while removing it restores arrangement driving.
+- Absolute endpoint interpolation runs after playback advancement and before `hinge_to_pose`, so physical poses use the current frame's angle.
+
+**What deviated from the plan:**
+
+- `FoldAngleDiagnostics` and its public reason/entry types were added so rejected writes remain inspectable rather than warning only.
+- The first blind review required an arrangement-level test; the follow-up added real `FoldPlugin` scheduling, grouped stages, and resolved physical endpoint assertions.
+
+**Surprises:**
+
+- Finite authored endpoints can still overflow during interpolation, so actuation diagnoses `NonFiniteInterpolation` and preserves the prior hinge angle.
+
+**Implications for remaining phases:**
+
+- Authoring creates membership only; examples must attach absolute `FoldAngles` endpoints explicitly.
+- Fairy Dust can derive chip state from Hana playback without mirroring hinge angles or fold fractions.
+- Migrated examples inherit same-frame actuation before `hinge_to_pose`; they must not retain local angle writers or pivot compensation.
+
+#### Phase 4 Review
+
+- Phase 5 now validates complete builder input before queuing writes, reconciles removed and reordered arrangement members during resnapshot, and names `sequence.rs` as the validation owner.
+- Phase 6 now routes and highlights controls only from Hana sequence playback state, without mirroring angle endpoints, fractions, or actuation diagnostics.
+- Phases 7–9 now require normal example interactions to produce no fold-angle actuation diagnostics.
+- Independent and main-agent reviews approved the final grouped-stage integration coverage and same-frame physical endpoint behavior. No user decision remains.
+
 ### Phase 5 — Explicit and arrangement-based authoring  · status: todo
 
 #### Work Order
@@ -365,17 +394,19 @@
       .finish();
   ```
 
-  Each `stage` call assigns the next zero-based `FoldStage` and inserts/replaces `FoldMember` on every listed entity. `finish` writes only ordinary relationship/components and returns a typed error for an empty authored group or a duplicate member in the builder input. It does not become a second runtime representation and cannot synchronously validate whether deferred `Commands` targets still exist.
+  Each `stage` call accumulates the next zero-based `FoldStage` group locally. `finish` validates the complete builder input before queuing any relationship commands, returns a typed error for an empty authored group or duplicate member, and queues no writes on error. On success it inserts/replaces `FoldMember` on every listed entity using ordinary relationship/components. It does not become a second runtime representation and cannot synchronously validate whether deferred `Commands` targets still exist.
 - Add `FoldFromArrangement` as a one-time request on a sequence entity, containing the arrangement entity to snapshot. Register a readiness-driven snapshot system in `FoldPlugin` before sequence validation. It reads insertion-ordered `ArrangementMembers::iter()` and succeeds only when every listed entity has `MemberIndex`; otherwise it retains the request and retries on a later update. Once ready, enumerate fresh zero-based stages and insert `FoldMember` relationships. Remove the request only after relationship insertion succeeds.
 - A new sequence carrying `FoldFromArrangement` must not validate as an empty sequence while the request is pending: exclude pending requests from sequence validation, then order request removal and deferred relationship insertion so the first accepted revision sees the derived stage count. An already-initialized sequence being resnapshotted retains its prior valid state until the replacement snapshot succeeds. Validation may occur after deferred commands settle in the same update or on the following update, but never between request removal and visible membership.
 - Do not copy `MemberIndex` values: they begin at one and may contain gaps after removal. Use `MemberIndex` only to ensure the assignment phase has settled if required by scheduling.
 - On missing sequence/arrangement/not-ready arrangement data, emit one diagnostic for that request and retain it for a later retry. Remove `FoldFromArrangement` only after a successful snapshot. Later arrangement edits do not rewrite an active sequence; the caller must insert another request.
+- A successful resnapshot reconciles the sequence to the new ordered snapshot: remove `FoldMember` from entities no longer present, replace stages for retained or reordered members, and insert membership for new members. Queue the complete reconciliation before removing `FoldFromArrangement` so validation never observes a partially replaced membership set.
 - Both authoring paths create membership/stages only. They never infer `FoldAngles`, endpoint signs, `HingePivot`, or algorithm policy. A triangle accordion uses a constant local fold sign because its rest angle is a half-turn, while a quad accordion alternates local signs; order alone cannot distinguish them.
-- Test the grouped lid/walls call, consecutive explicit stages, empty/duplicate errors, insertion-order snapshots, fresh zero-based stages despite gapped `MemberIndex`, deferred readiness, retained failed requests, folded initialization deriving its terminal boundary from the completed first snapshot, removal after success, prior-state retention during resnapshot, explicit resnapshot after arrangement mutation, and equivalence of manually/automatically authored membership.
+- Test the grouped lid/walls call, consecutive explicit stages, empty/duplicate errors with no partial membership writes, insertion-order snapshots, fresh zero-based stages despite gapped `MemberIndex`, deferred readiness, retained failed requests, folded initialization deriving its terminal boundary from the completed first snapshot, removal after success, prior-state retention during resnapshot, removal and reordering reconciliation, explicit resnapshot after arrangement mutation, and equivalence of manually/automatically authored membership.
 
 **Files:**
 - `crates/hana_valence/src/fold/author.rs` — create builder, one-time request, snapshot system, diagnostics, and tests.
 - `crates/hana_valence/src/fold/mod.rs` — export authoring APIs and register the snapshot system in the required order.
+- `crates/hana_valence/src/fold/sequence.rs` — gate `validate_fold_sequences` while a new arrangement snapshot is pending, preserving existing valid state during resnapshot.
 - `crates/hana_valence/src/lib.rs` — re-export public authoring APIs/errors.
 - `crates/hana_valence/src/arrange.rs` — read arrangement ordering/assignment contracts; edit only if a public scheduling label or accessor is required.
 - `crates/hana_valence/tests/arrangements.rs` — add grouped-box and arrangement-snapshot integration coverage.
@@ -419,7 +450,7 @@
 - `crates/fairy_dust/src/restart.rs` — read-only BEI pattern reference.
 - `crates/bevy_diegetic/src/panel/mod.rs` — read-only registration contract; do not edit.
 
-**Constraints from prior phases:** Phases 1–5 provide the public `FoldPlugin`, `FoldCommand`, `FoldCommandEvent`, ready-state accessors, motion/direction accessors, and authoring APIs. Hana owns the state machine; Fairy Dust owns only input, routing, diagnostics, and presentation.
+**Constraints from prior phases:** Phases 1–5 provide the public `FoldPlugin`, `FoldCommand`, `FoldCommandEvent`, ready-state accessors, motion/direction accessors, and authoring APIs. Hana owns the state machine; Fairy Dust owns only input, routing, diagnostics, and presentation. Route and highlight solely from ready `FoldSequenceState`, `FoldMotion`, and `FoldDirection`; do not mirror `FoldAngles`, fractions, or `FoldAngleDiagnostics` into Fairy Dust.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p fairy_dust --all-features` passes all named input/routing/chip tests; `cargo nextest run -p hana_valence --all-features` remains green; `cargo check --workspace --all-targets --all-features` is green and the anchor pipeline is registered once.
 
@@ -446,7 +477,7 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide the runtime, frame-correct pivot, hinge adapter, explicit authoring, and Fairy controls. This phase is independent of Phases 8 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, and teaching-panel text that matches the staged runtime.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
 
 ### Phase 8 — Migrate `triangles`  · status: todo
 
@@ -469,7 +500,7 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, and teaching-panel content.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
 
 ### Phase 9 — Migrate `box`  · status: todo
 
@@ -492,4 +523,4 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide explicit grouped authoring, runtime, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 8 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, and teaching-panel content. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.

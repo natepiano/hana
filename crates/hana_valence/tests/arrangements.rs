@@ -1,5 +1,9 @@
 //! Arrangement and net closure tests for `hana_valence`.
 
+use std::time::Duration;
+
+use bevy::app::App;
+use bevy::app::PostUpdate;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::Schedule;
@@ -9,14 +13,27 @@ use bevy::prelude::Entity;
 use bevy::prelude::GlobalTransform;
 use bevy::prelude::Transform;
 use bevy::prelude::Vec3;
+use bevy::time::Time;
+use bevy::time::Virtual;
 use hana_valence::Accordion;
 use hana_valence::AnchorId;
 use hana_valence::AnchorPose;
+use hana_valence::AnchorSystems;
 use hana_valence::AnchoredTo;
 use hana_valence::Edge;
+use hana_valence::FoldAngles;
+use hana_valence::FoldCommand;
+use hana_valence::FoldCommandEvent;
+use hana_valence::FoldDirection;
+use hana_valence::FoldEndpoint;
+use hana_valence::FoldMember;
 use hana_valence::FoldPattern;
+use hana_valence::FoldPlugin;
+use hana_valence::FoldSequence;
+use hana_valence::FoldStage;
 use hana_valence::Hinge;
 use hana_valence::Member;
+use hana_valence::QuadTiling;
 use hana_valence::ResolveDiagnostics;
 use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::TilingRule;
@@ -44,7 +61,9 @@ const BOX_FOLD_ANGLE: f32 = -core::f32::consts::FRAC_PI_2;
 const BOX_HALF_SIDE: f32 = BOX_FACE_SIDE / 2.0;
 const BOX_RESOLVE_FRAMES: usize = 2;
 const FIVE_THIRDS: f32 = 5.0 / 3.0;
+const FOLD_STEP_SECONDS: f32 = 1.0;
 const FOUR_TRIANGLE_MEMBERS: usize = 4;
+const GROUPED_MEMBER_COUNT: usize = 2;
 const TRIANGLE_HEIGHT: f32 = 0.866_025_4;
 const TRIANGLE_REST_FLIP: f32 = core::f32::consts::PI;
 const TRIANGLE_SIDE: f32 = 1.0;
@@ -166,6 +185,99 @@ fn box_net_folds_closed_after_fixed_frames() {
         QUAD_LEFT_EDGE,
         faces.west,
         QUAD_LEFT_EDGE,
+    );
+}
+
+#[test]
+fn grouped_fold_stage_reaches_arrangement_endpoints_in_the_actuation_frame() {
+    let mut app = App::new();
+    app.insert_resource(Time::<Virtual>::default())
+        .insert_resource(ResolveDiagnostics::default())
+        .add_plugins(FoldPlugin)
+        .configure_sets(
+            PostUpdate,
+            (AnchorSystems::AnimatePose, AnchorSystems::Resolve).chain(),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                assign_member_indices,
+                ApplyDeferred,
+                apply_member_placements::<QuadTiling>,
+                ApplyDeferred,
+                drive_arrangement_hinges::<QuadTiling>,
+            )
+                .chain()
+                .before(AnchorSystems::AnimatePose),
+        )
+        .add_systems(PostUpdate, hinge_to_pose.in_set(AnchorSystems::AnimatePose))
+        .add_systems(PostUpdate, resolve_anchors.in_set(AnchorSystems::Resolve));
+
+    let root = spawn_box_face(app.world_mut(), Transform::default());
+    app.world_mut()
+        .entity_mut(root)
+        .insert((Accordion::default(), QuadTiling));
+    let sequence = app
+        .world_mut()
+        .spawn(FoldSequence::new(FOLD_STEP_SECONDS).with_initial(FoldEndpoint::Unfolded))
+        .id();
+    let members = [FoldStage(0), FoldStage(0), FoldStage(1)].map(|stage| {
+        let member = spawn_box_face(app.world_mut(), Transform::default());
+        app.world_mut().entity_mut(member).insert((
+            Member { arrangement: root },
+            FoldMember::new(sequence, stage),
+            FoldAngles {
+                unfolded: 0.0,
+                folded:   BOX_FOLD_ANGLE,
+            },
+        ));
+        member
+    });
+    app.update();
+
+    app.world_mut().trigger(FoldCommandEvent::new(
+        sequence,
+        FoldCommand::Step(FoldDirection::Folding),
+    ));
+    app.world_mut()
+        .resource_mut::<Time<Virtual>>()
+        .advance_by(Duration::from_secs_f32(FOLD_STEP_SECONDS));
+    app.update();
+
+    for member in members.into_iter().take(GROUPED_MEMBER_COUNT) {
+        assert_anchor_close(
+            app.world(),
+            member,
+            QUAD_TOP_EDGE,
+            app.world()
+                .get::<AnchoredTo>(member)
+                .map_or(root, AnchoredTo::target),
+            QUAD_BOTTOM_EDGE,
+        );
+        assert_close(
+            app.world()
+                .get::<Hinge>(member)
+                .map_or(0.0, |hinge| hinge.angle),
+            BOX_FOLD_ANGLE,
+        );
+    }
+    assert_vec3_close(
+        anchor_position(app.world(), members[0], QUAD_BOTTOM_EDGE),
+        anchor_position(app.world(), members[1], QUAD_TOP_EDGE),
+    );
+    assert_vec3_close(
+        anchor_position(app.world(), members[0], QUAD_BOTTOM_EDGE),
+        Vec3::new(0.0, -BOX_HALF_SIDE, BOX_FACE_SIDE),
+    );
+    assert_vec3_close(
+        anchor_position(app.world(), members[1], QUAD_BOTTOM_EDGE),
+        Vec3::new(0.0, BOX_HALF_SIDE, BOX_FACE_SIDE),
+    );
+    assert_close(
+        app.world()
+            .get::<Hinge>(members[2])
+            .map_or(BOX_FOLD_ANGLE, |hinge| hinge.angle),
+        0.0,
     );
 }
 

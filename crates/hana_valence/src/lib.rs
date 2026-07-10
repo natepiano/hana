@@ -77,11 +77,10 @@
 //! component contract.
 //!
 //! Arrangements add another driver layer: [`Accordion`] and [`Strip`] write
-//! [`Hinge::angle`] for their [`Member`] entities every frame. The animatable
-//! surface for an arranged set is the arrangement component, for example
-//! [`Accordion::fold`] and [`Accordion::lean`]. A direct `HingeAngleLens` on a
-//! member is overwritten by [`drive_arrangement_hinges`], just as a direct
-//! `AnchorPoseLens` is overwritten by [`hinge_to_pose`] on a hinged entity.
+//! [`Hinge::angle`] for their [`Member`] entities every frame unless a member
+//! carries [`FoldAngles`]. The marker gives [`actuate_fold_hinges`] exclusive
+//! ownership of that member's angle; removing it returns ownership to
+//! [`drive_arrangement_hinges`].
 //!
 //! Anchor naming has three tiers. Generated geometry should use ids derived
 //! from adjacency and never require authored names. Hand-authored regular
@@ -166,6 +165,10 @@ pub use attachment::AttachmentResolveDiagnostic;
 pub use attachment::AttachmentResolveDiagnostics;
 pub use attachment::AttachmentResolveReasons;
 pub use attachment::resolve_attachments;
+pub use fold::FoldAngleDiagnostic;
+pub use fold::FoldAngleDiagnostics;
+pub use fold::FoldAngleInvalidReason;
+pub use fold::FoldAngles;
 pub use fold::FoldCommand;
 pub use fold::FoldCommandEvent;
 pub use fold::FoldDiagnostic;
@@ -181,6 +184,7 @@ pub use fold::FoldSequence;
 pub use fold::FoldSequenceState;
 pub use fold::FoldStage;
 pub use fold::FoldSystems;
+pub use fold::actuate_fold_hinges;
 pub use geometry::AnchorId;
 pub use geometry::AnchorPoint;
 pub use geometry::Edge;
