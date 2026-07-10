@@ -11,7 +11,7 @@ name                 = "bevy_liminal"
 readme               = "README.md"
 repository.workspace = true
 rust-version         = "1.92.0"
-version              = "0.0.3"
+version              = "0.1.0-dev"
 
 [lints]
 workspace = true
