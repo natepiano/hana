@@ -377,7 +377,7 @@
 - Phases 7–9 now require normal example interactions to produce no fold-angle actuation diagnostics.
 - Independent and main-agent reviews approved the final grouped-stage integration coverage and same-frame physical endpoint behavior. No user decision remains.
 
-### Phase 5 — Explicit and arrangement-based authoring  · status: todo
+### Phase 5 — Explicit and arrangement-based authoring  · status: done (checkpoint)
 
 #### Work Order
 
@@ -415,6 +415,35 @@
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes all explicit/snapshot/deferred/equivalence tests; the grouped box derives two stages from five members; `cargo check --workspace --all-targets --all-features` is green.
 
+#### Retrospective
+
+**What worked:**
+
+- `FoldSequenceBuilder` validates all grouped input before queuing relationship writes, so empty and duplicate errors are atomic.
+- `FoldFromArrangement` applies removal, reordering, insertion, and request cleanup inside one deferred world command before sequence validation.
+
+**What deviated from the plan:**
+
+- Public bounded snapshot diagnostics and a private per-request marker were added to keep retry failures inspectable without repeated warnings.
+- The delegated Clippy pass added the required `# Errors` documentation and changed the copyable snapshot request helper to pass by value.
+
+**Surprises:**
+
+- The blind review found that the reflected arrangement request needed `#[entities]` so Bevy remaps its arrangement entity during reflective cloning.
+
+**Implications for remaining phases:**
+
+- Fairy Dust can treat authoring as complete only when `FoldSequenceState::is_ready()` is true; pending snapshots retain prior valid state.
+- `triangles` can request arrangement-derived membership without copying `MemberIndex` or inferring its algorithm profile.
+- `box` can author its lid and four-wall groups through the explicit builder with no manual stage count.
+
+#### Phase 5 Review
+
+- Phase 6 now leaves controls quietly inactive while no sequence is ready and emits routing diagnostics only for failed input routing or ambiguous ready sequences.
+- Phase 8 now verifies its arrangement snapshot is diagnostic-free and ready with one stage per member before folding.
+- Phase 9 now handles `FoldSequenceBuilder::finish()` explicitly and verifies successful grouped authoring.
+- The remaining phases stay distinct and correctly ordered, with Phases 7–9 still parallel after Phase 6. No user decision remains.
+
 ### Phase 6 — Fairy Dust fold controls  · status: todo
 
 #### Work Order
@@ -433,9 +462,9 @@
 - `with_fold_controls` idempotently installs Hana's public `FoldPlugin` and Fairy Dust's existing enhanced-input support. It must not register `hinge_to_pose`, arrangement driving, `resolve_anchors`, or any other anchor pipeline system already installed by `bevy_diegetic`.
 - Define private BEI input context/actions for one folding step, one unfolding step, and play-to-terminal. Bind bare `Space` only when no modifier is held, `Shift+Space` for unfolding with either Shift key normalized by BEI, and bare `P` for play. Reserve conflicting bare keys through the existing shortcut registry. Do not read `ButtonInput<KeyCode>` directly.
 - Register title chips with stable ids and visible labels `Space Fold`, `Shift+Space Unfold`, and `P Play`. Step chips are active only while `FoldMotion::Step` moves in their direction. `P Play` is active only during `FoldMotion::Play`. All are inactive when idle; there is no pause control. Run chip synchronization in `PostUpdate` after `FoldSystems::Advance` and before `refresh_changed_title_bar` so activation clears on the exact frame playback settles.
-- Route actions to Hana by triggering `FoldCommandEvent::new(sequence_entity, command)` for the selected sequence. If exactly one ready `FoldSequenceState` exists, route automatically. With multiple sequences, exactly one sequence carrying `FairyDustFoldTarget` is required. Zero ready sequences, zero/multiple marked targets in an ambiguous scene, or multiple unmarked sequences emit a stable diagnostic and leave controls inactive. Fairy Dust reads Hana accessors and never reproduces validation or transition rules.
+- Route actions to Hana by triggering `FoldCommandEvent::new(sequence_entity, command)` for the selected sequence. If exactly one ready `FoldSequenceState` exists, route automatically. With multiple ready sequences, exactly one sequence carrying `FairyDustFoldTarget` is required. Passive chip synchronization with no ready sequence leaves controls inactive without diagnosing because arrangement snapshot authoring may still be pending. Emit one stable diagnostic when an input action cannot route because no sequence is ready, or when multiple ready sequences are ambiguous because zero or multiple targets are marked. Fairy Dust reads Hana accessors and never reproduces validation or transition rules.
 - Keep title bars controls-only; no instructional prose belongs in the title bar. The capability must coexist with camera/home/help actions and with an example-owned BEI algorithm-toggle action. Extend key reservation so reinstalling the same capability is idempotent while two different capabilities reserving the same bare key are rejected; explicitly cover the existing cube-spin `P` control versus `P Play`.
-- Add tests for idempotent plugin/input installation, bare/modifier binding separation, same-capability reservation idempotence, cube-spin `P` versus `P Play` rejection, zero/one/multiple routing, marker selection, invalid target inactivity, emitted commands, exact-settle-frame step/play chip activation, and coexistence with another BEI action.
+- Add tests for idempotent plugin/input installation, bare/modifier binding separation, same-capability reservation idempotence, cube-spin `P` versus `P Play` rejection, passive zero-ready inactivity without diagnostics, zero/one/multiple input routing, marker selection, invalid target inactivity, stable failed-input and ambiguous-ready diagnostics, emitted commands, exact-settle-frame step/play chip activation, and coexistence with another BEI action.
 
 **Files:**
 - `crates/fairy_dust/Cargo.toml` — add direct `hana_valence` dependency.
@@ -500,7 +529,7 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, no `FoldSnapshotDiagnostic` during normal setup, a ready sequence with one zero-based stage per arrangement member before the first command, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
 
 ### Phase 9 — Migrate `box`  · status: todo
 
@@ -512,7 +541,7 @@
 
 - Confine implementation edits to `box.rs` so this Work Order can run in parallel with Phases 7 and 8. Do not edit shared fixtures or the other examples.
 - Remove example-local `FoldPhase`, `FoldTarget`, `FoldPlayback`, replay input, timing, and hinge driver. Install `.with_fold_controls()` and author `FoldAngles` on the moving faces.
-- Spawn one unfolded `FoldSequence`. Use `FoldSequenceBuilder` to author exactly two stages: stage zero contains only the lid; stage one contains north, south, east, and west. The center face is the fixed root, carries no `FoldMember`, and consumes no stage. Five moving faces must derive a stage count of two.
+- Spawn one unfolded `FoldSequence`. Use `FoldSequenceBuilder` to author exactly two stages: stage zero contains only the lid; stage one contains north, south, east, and west. Handle `FoldSequenceBuilder::finish()` and fail setup with a clear error if this statically authored grouping is rejected; do not discard the `Result`. The center face is the fixed root, carries no `FoldMember`, and consumes no stage. Five moving faces must derive a stage count of two.
 - Preserve the physical topology: the lid remains anchored to north's free outer edge, so folding stage zero raises the lid first and stage one raises all four walls while carrying the lid through the anchor chain. Do not derive stages from descendants or member count.
 - Author absolute `FoldAngles { unfolded: 0.0, folded: BOX_FOLD_ANGLE }` on each moving face and omit `HingePivot` for the current zero-thickness planar faces; `hinge_to_pose` therefore preserves zero `AnchorPose::translation`.
 - The example starts idle. `Space` advances lid then walls, `Shift+Space` reverses walls then lid, and `P` continues to the terminal boundary in the remembered direction.
@@ -523,4 +552,4 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide explicit grouped authoring, runtime, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 8 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.

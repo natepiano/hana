@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use bevy::app::App;
 use bevy::app::PostUpdate;
+use bevy::app::Update;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::schedule::Schedule;
@@ -26,10 +27,13 @@ use hana_valence::FoldCommand;
 use hana_valence::FoldCommandEvent;
 use hana_valence::FoldDirection;
 use hana_valence::FoldEndpoint;
+use hana_valence::FoldFromArrangement;
 use hana_valence::FoldMember;
 use hana_valence::FoldPattern;
 use hana_valence::FoldPlugin;
 use hana_valence::FoldSequence;
+use hana_valence::FoldSequenceBuilder;
+use hana_valence::FoldSequenceState;
 use hana_valence::FoldStage;
 use hana_valence::Hinge;
 use hana_valence::Member;
@@ -64,6 +68,7 @@ const FIVE_THIRDS: f32 = 5.0 / 3.0;
 const FOLD_STEP_SECONDS: f32 = 1.0;
 const FOUR_TRIANGLE_MEMBERS: usize = 4;
 const GROUPED_MEMBER_COUNT: usize = 2;
+const GROUPED_BOX_MEMBER_COUNT: usize = 5;
 const TRIANGLE_HEIGHT: f32 = 0.866_025_4;
 const TRIANGLE_REST_FLIP: f32 = core::f32::consts::PI;
 const TRIANGLE_SIDE: f32 = 1.0;
@@ -278,6 +283,91 @@ fn grouped_fold_stage_reaches_arrangement_endpoints_in_the_actuation_frame() {
             .get::<Hinge>(members[2])
             .map_or(BOX_FOLD_ANGLE, |hinge| hinge.angle),
         0.0,
+    );
+}
+
+#[test]
+fn grouped_box_builder_derives_two_stages_from_five_members() {
+    let mut app = App::new();
+    app.insert_resource(Time::<Virtual>::default())
+        .add_plugins(FoldPlugin);
+    let faces = spawn_box_net(app.world_mut());
+    let sequence = app
+        .world_mut()
+        .spawn(FoldSequence::new(FOLD_STEP_SECONDS))
+        .id();
+
+    let result = FoldSequenceBuilder::new(&mut app.world_mut().commands(), sequence)
+        .stage([faces.lid])
+        .stage([faces.north, faces.south, faces.east, faces.west])
+        .finish();
+    app.world_mut().flush();
+    app.update();
+
+    assert_eq!(result, Ok(()));
+    assert_eq!(
+        app.world()
+            .get::<FoldSequenceState>(sequence)
+            .map(FoldSequenceState::stage_count),
+        Some(2)
+    );
+    assert_eq!(
+        app.world()
+            .get::<hana_valence::FoldMembers>(sequence)
+            .map(hana_valence::FoldMembers::len),
+        Some(GROUPED_BOX_MEMBER_COUNT)
+    );
+    assert_eq!(app.world().get::<FoldMember>(faces.center), None);
+}
+
+#[test]
+fn arrangement_snapshot_authors_insertion_order_without_copying_member_indexes() {
+    let mut app = App::new();
+    app.insert_resource(Time::<Virtual>::default())
+        .add_plugins(FoldPlugin)
+        .add_systems(Update, assign_member_indices);
+    let arrangement = app
+        .world_mut()
+        .spawn((Accordion::default(), QuadTiling))
+        .id();
+    let members: [Entity; 3] = core::array::from_fn(|_| {
+        let member = spawn_box_face(app.world_mut(), Transform::default());
+        app.world_mut()
+            .entity_mut(member)
+            .insert(Member { arrangement });
+        member
+    });
+    app.update();
+    app.world_mut()
+        .entity_mut(members[1])
+        .remove::<hana_valence::MemberIndex>();
+    app.world_mut()
+        .entity_mut(members[1])
+        .insert(hana_valence::MemberIndex { index: 7 });
+    let sequence = app
+        .world_mut()
+        .spawn((
+            FoldSequence::new(FOLD_STEP_SECONDS),
+            FoldFromArrangement::new(arrangement),
+        ))
+        .id();
+
+    app.update();
+
+    let authored = members.map(|member| {
+        app.world()
+            .get::<FoldMember>(member)
+            .map(|fold_member| fold_member.stage)
+    });
+    assert_eq!(
+        authored,
+        [Some(FoldStage(0)), Some(FoldStage(1)), Some(FoldStage(2))]
+    );
+    assert_eq!(
+        app.world()
+            .get::<hana_valence::FoldMembers>(sequence)
+            .map(|fold_members| fold_members.iter().collect::<Vec<_>>()),
+        Some(members.to_vec())
     );
 }
 

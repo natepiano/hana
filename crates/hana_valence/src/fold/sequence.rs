@@ -18,6 +18,7 @@ use bevy_ecs::prelude::ReflectFromWorld;
 use bevy_ecs::prelude::ResMut;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::prelude::With;
+use bevy_ecs::prelude::Without;
 use bevy_ecs::prelude::World;
 use bevy_kana::ToF32;
 use bevy_math::curve::Curve;
@@ -27,6 +28,7 @@ use bevy_reflect::Reflect;
 use bevy_reflect::std_traits::ReflectDefault;
 
 use super::FoldDirection;
+use super::FoldFromArrangement;
 use super::FoldMotion;
 use super::playback::FoldPlayback;
 
@@ -370,7 +372,7 @@ pub(super) fn validate_fold_sequences(
             Option<Ref<FoldMembers>>,
             Option<&FoldSequenceState>,
         ),
-        ValidationFilter,
+        (ValidationFilter, Without<FoldFromArrangement>),
     >,
     members: Query<&FoldMember>,
     mut diagnostics: ResMut<FoldDiagnostics>,
