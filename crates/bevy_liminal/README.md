@@ -61,7 +61,7 @@ Outline::world_hull(0.05).build();
 
 ## Overlap Modes
 
-Hull methods support three overlap modes for controlling how outlines interact:
+All outline methods support three overlap modes for controlling how outlines interact:
 
 - **Merged** (default) -- Overlapping outlines merge into one shared silhouette.
 - **Grouped** -- Meshes in the same entity hierarchy merge, but are distinct from other groups.

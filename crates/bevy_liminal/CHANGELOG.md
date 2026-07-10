@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 
 - `OutlineBarrier` marker to define a hierarchy boundary: outlines inherited from ancestors skip the marked entity and all its descendants, while an outline sourced on the marked entity propagates normally beneath it
+- `OutlineBuilder::with_overlap` support for jump-flood outlines, allowing overlap behavior to be selected without assigning an explicit group source
 
 ## [0.0.3] - 2026-07-10
 
