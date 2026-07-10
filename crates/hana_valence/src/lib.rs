@@ -33,7 +33,7 @@
 //! [`AnchorSystems::AnimatePose`] so their writes happen before
 //! [`resolve_anchors`] runs in [`AnchorSystems::Resolve`].
 //!
-//! With the `tween` feature enabled, [`HingeAngleLens`] and [`AnchorPoseLens`]
+//! With the `tween` feature enabled, `HingeAngleLens` and `AnchorPoseLens`
 //! are `bevy_tween` component interpolators for the two valence components:
 //!
 //! ```rust,ignore
@@ -65,13 +65,27 @@
 //! );
 //! ```
 //!
-//! [`AnchorPoseLens`] and [`Hinge`] are mutually exclusive on one entity.
+//! `AnchorPoseLens` and [`Hinge`] are mutually exclusive on one entity.
 //! [`hinge_to_pose`] overwrites the whole [`AnchorPose`] every frame and resets
 //! [`AnchorPose::translation`] to [`bevy_math::Vec3::ZERO`], so a direct
 //! `AnchorPose` tween on a hinged entity is discarded. Debug builds warn when
 //! `hinge_to_pose` sees an earlier same-frame `AnchorPose` change.
 //! `bevy_animation` property adapters can be added later without changing this
 //! component contract.
+//!
+//! Arrangements add another driver layer: [`Accordion`] and [`Strip`] write
+//! [`Hinge::angle`] for their [`Member`] entities every frame. The animatable
+//! surface for an arranged set is the arrangement component, for example
+//! [`Accordion::fold`] and [`Accordion::lean`]. A direct `HingeAngleLens` on a
+//! member is overwritten by [`drive_arrangement_hinges`], just as a direct
+//! `AnchorPoseLens` is overwritten by [`hinge_to_pose`] on a hinged entity.
+//!
+//! Anchor naming has three tiers. Generated geometry should use ids derived
+//! from adjacency and never require authored names. Hand-authored regular
+//! geometry should use provider names such as `Anchor::TopLeft` when offered.
+//! One-off geometry can use raw [`AnchorId`] values. Pick the highest tier that
+//! matches the data you own; reusable recipes ask [`ResolvedAnchorGeometry`]
+//! which edge is shared with the predecessor instead of hardcoding ids.
 //!
 //! Resolver math for an entity with [`AnchoredTo`] is:
 //!
@@ -111,6 +125,11 @@
 //! [`AnchorSystems::Resolve`] runs before `TransformSystems::Propagate`. The
 //! cache has the same freshness as the resolve pass that writes it.
 
+// Lets the shared `../fixtures.rs` include reference this crate by name from the
+// `resolve` unit tests, matching the external examples and integration test.
+extern crate self as hana_valence;
+
+mod arrange;
 mod attachment;
 mod geometry;
 mod hinge;
@@ -120,6 +139,23 @@ mod resolve;
 #[cfg(feature = "tween")]
 mod tween;
 
+pub use arrange::Accordion;
+pub use arrange::ArrangementMembers;
+pub use arrange::ArrangementPlacement;
+pub use arrange::FoldPattern;
+pub use arrange::Member;
+pub use arrange::MemberIndex;
+pub use arrange::MemberPlacement;
+pub use arrange::PendingMemberPlacement;
+pub use arrange::QuadTiling;
+pub use arrange::Strip;
+pub use arrange::TilingRule;
+pub use arrange::apply_member_placements;
+pub use arrange::assign_member_indices;
+pub use arrange::drive_arrangement_hinges;
+pub use arrange::member_placement;
+pub use arrange::on_member_added;
+pub use arrange::on_member_removed;
 pub use attachment::AttachmentResolveAction;
 pub use attachment::AttachmentResolveCandidate;
 pub use attachment::AttachmentResolveDiagnostic;

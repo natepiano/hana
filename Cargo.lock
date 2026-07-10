@@ -3319,11 +3319,13 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_ecs",
+ "bevy_lagrange",
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
  "bevy_transform",
  "bevy_tween",
+ "fairy_dust",
  "tracing",
 ]
 

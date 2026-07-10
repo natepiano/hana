@@ -28,12 +28,18 @@ use crate::AttachmentResolveAction;
 use crate::AttachmentResolveCandidate;
 use crate::AttachmentResolveDiagnostics;
 use crate::AttachmentResolveReasons;
-#[cfg(test)]
-use crate::Edge;
 use crate::ResolvedAnchorGeometry;
 use crate::ResolvedAnchorOffset;
 use crate::ResolvedAnchorWorld;
 use crate::resolve_attachments;
+
+#[cfg(test)]
+#[path = "../fixtures.rs"]
+#[allow(
+    dead_code,
+    reason = "shared geometry fixtures; the resolver tests use a subset"
+)]
+mod fixtures;
 
 const ORTHONORMAL_EPSILON: f32 = 1e-4;
 #[cfg(test)]
@@ -442,93 +448,7 @@ pub(crate) fn spawn_quad(world: &mut World, transform: Transform) -> Entity {
 /// Test helper that returns the canonical flat quad geometry.
 #[cfg(test)]
 pub(crate) fn quad_geometry() -> ResolvedAnchorGeometry {
-    let half_width = TEST_QUAD_WIDTH / 2.0;
-    let half_height = TEST_QUAD_HEIGHT / 2.0;
-    ResolvedAnchorGeometry {
-        points: HashMap::from_iter([
-            (
-                AnchorId::Vertex(0),
-                AnchorPoint {
-                    position: Vec3::new(-half_width, half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(1),
-                AnchorPoint {
-                    position: Vec3::new(half_width, half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(2),
-                AnchorPoint {
-                    position: Vec3::new(half_width, -half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(3),
-                AnchorPoint {
-                    position: Vec3::new(-half_width, -half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::EdgeMid(0),
-                AnchorPoint {
-                    position: Vec3::new(0.0, half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::EdgeMid(1),
-                AnchorPoint {
-                    position: Vec3::new(half_width, 0.0, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::EdgeMid(2),
-                AnchorPoint {
-                    position: Vec3::new(0.0, -half_height, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::EdgeMid(3),
-                AnchorPoint {
-                    position: Vec3::new(-half_width, 0.0, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Center,
-                AnchorPoint {
-                    position: Vec3::ZERO,
-                    frame:    None,
-                },
-            ),
-        ]),
-        edges:  vec![
-            Edge {
-                start: AnchorId::Vertex(0),
-                end:   AnchorId::Vertex(1),
-            },
-            Edge {
-                start: AnchorId::Vertex(1),
-                end:   AnchorId::Vertex(2),
-            },
-            Edge {
-                start: AnchorId::Vertex(2),
-                end:   AnchorId::Vertex(3),
-            },
-            Edge {
-                start: AnchorId::Vertex(3),
-                end:   AnchorId::Vertex(0),
-            },
-        ],
-    }
+    fixtures::quad_geometry(TEST_QUAD_WIDTH, TEST_QUAD_HEIGHT)
 }
 
 #[cfg(test)]

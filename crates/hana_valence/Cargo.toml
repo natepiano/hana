@@ -16,7 +16,7 @@ version              = "0.1.0"
 workspace = true
 
 [features]
-default = []
+default = ["tween"]
 tween   = ["dep:bevy_tween"]
 
 [dependencies]
@@ -29,8 +29,10 @@ bevy_tween     = { workspace = true, optional = true }
 tracing        = { workspace = true }
 
 [dev-dependencies]
-bevy       = { workspace = true, features = ["default"] }
-bevy_tween = { workspace = true }
+bevy          = { workspace = true, features = ["default"] }
+bevy_lagrange = { workspace = true }
+bevy_tween    = { workspace = true }
+fairy_dust    = { workspace = true }
 
 [[example]]
 name              = "staggered_unfold"

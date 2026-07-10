@@ -10,7 +10,7 @@ use bevy::color::palettes::css::SEA_GREEN;
 use bevy::color::palettes::css::SKY_BLUE;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
-use bevy_platform::collections::HashMap;
+use bevy_lagrange::OrbitCamPreset;
 use bevy_tween::BevyTweenRegisterSystems;
 use bevy_tween::DefaultTweenPlugins;
 use bevy_tween::TweenSystemSet;
@@ -21,19 +21,31 @@ use bevy_tween::prelude::AnimationBuilderExt;
 use bevy_tween::prelude::EaseKind;
 use bevy_tween::prelude::IntoTarget;
 use bevy_tween::tween::component_tween_system;
+use fairy_dust::Anchor;
+use fairy_dust::CameraHomeTarget;
+use fairy_dust::TitleBar;
 use hana_valence::AnchorId;
-use hana_valence::AnchorPoint;
 use hana_valence::AnchorPose;
 use hana_valence::AnchorPoseLens;
 use hana_valence::AnchorSystems;
 use hana_valence::AnchoredTo;
-use hana_valence::Edge;
 use hana_valence::Hinge;
 use hana_valence::HingeAngleLens;
 use hana_valence::ResolveDiagnostics;
-use hana_valence::ResolvedAnchorGeometry;
 use hana_valence::hinge_to_pose;
 use hana_valence::resolve_anchors;
+
+#[path = "../fixtures.rs"]
+#[allow(
+    dead_code,
+    reason = "shared geometry fixtures; this example uses a subset"
+)]
+mod fixtures;
+
+use fixtures::QUAD_TOP_EDGE;
+
+// app
+const EXAMPLE_TITLE: &str = "Staggered Unfold";
 
 // animation
 const HINGE_START_ANGLES: [f32; HINGED_TILE_COUNT] = [
@@ -51,81 +63,71 @@ const HINGE_START_DELAYS: [Duration; HINGED_TILE_COUNT] = [
 const HINGED_TILE_COUNT: usize = TILE_COUNT - 1;
 const UNFOLD_DURATION: Duration = Duration::from_millis(900);
 
-// camera
-const CAMERA_FOCUS: Vec3 = Vec3::new(4.0, 0.0, 0.0);
-const CAMERA_TRANSLATION: Vec3 = Vec3::new(4.0, -6.0, 4.0);
-
-// lighting
-const LIGHT_INTENSITY: f32 = 4_000_000.0;
-const LIGHT_POSITION: Vec3 = Vec3::new(4.0, -4.0, 8.0);
-const LIGHT_RANGE: f32 = 50.0;
+// camera home
+const HOME_MARGIN: f32 = 0.45;
+const HOME_PITCH: f32 = -0.98;
+const HOME_YAW: f32 = 0.0;
 
 // quad
-const BOTTOM_EDGE: Edge = Edge {
-    start: AnchorId::Vertex(2),
-    end:   AnchorId::Vertex(3),
-};
-const HALF_QUAD_HEIGHT: f32 = QUAD_HEIGHT / 2.0;
-const HALF_QUAD_WIDTH: f32 = QUAD_WIDTH / 2.0;
-const LEFT_EDGE: Edge = Edge {
-    start: AnchorId::Vertex(3),
-    end:   AnchorId::Vertex(0),
-};
 const QUAD_HEIGHT: f32 = 1.0;
 const QUAD_WIDTH: f32 = 2.0;
-const RIGHT_EDGE: Edge = Edge {
-    start: AnchorId::Vertex(1),
-    end:   AnchorId::Vertex(2),
-};
 const TILE_COUNT: usize = 5;
 const TILE_ROUGHNESS: f32 = 0.55;
-const TOP_EDGE: Edge = Edge {
-    start: AnchorId::Vertex(0),
-    end:   AnchorId::Vertex(1),
-};
 
 // scene
 const TILE_COLORS: [Srgba; TILE_COUNT] = [CORAL, GOLD, SKY_BLUE, SEA_GREEN, MEDIUM_PURPLE];
 
 fn main() {
-    App::new()
-        .add_plugins((
-            DefaultPlugins,
-            DefaultTweenPlugins::<()>::in_schedule(PostUpdate),
-        ))
-        .init_resource::<ResolveDiagnostics>()
-        .configure_sets(
-            PostUpdate,
-            (
-                AnchorSystems::FillGeometry,
-                AnchorSystems::AnimatePose,
-                AnchorSystems::Resolve,
-            )
-                .chain()
-                .before(TransformSystems::Propagate),
+    let mut app = fairy_dust::sprinkle_example()
+        .with_brp_extras()
+        .with_save_window_position()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
+        .with_camera_home()
+        .pitch(HOME_PITCH)
+        .yaw(HOME_YAW)
+        .margin(HOME_MARGIN)
+        .with_title_bar(
+            TitleBar::new()
+                .with_title(EXAMPLE_TITLE)
+                .with_anchor(Anchor::TopLeft),
         )
-        .configure_sets(
-            PostUpdate,
-            TweenSystemSet::ApplyTween.in_set(AnchorSystems::AnimatePose),
+        .with_camera_control_panel()
+        .add_plugins(DefaultTweenPlugins::<()>::in_schedule(PostUpdate))
+        .init_resource::<ResolveDiagnostics>();
+    app.app_mut().configure_sets(
+        PostUpdate,
+        (
+            AnchorSystems::FillGeometry,
+            AnchorSystems::AnimatePose,
+            AnchorSystems::Resolve,
         )
-        .add_tween_systems(
-            PostUpdate,
-            (
-                component_tween_system::<HingeAngleLens>(),
-                component_tween_system::<AnchorPoseLens>(),
-            ),
-        )
-        .add_systems(
-            PostUpdate,
-            (
-                hinge_to_pose
-                    .in_set(AnchorSystems::AnimatePose)
-                    .after(TweenSystemSet::ApplyTween),
-                resolve_anchors.in_set(AnchorSystems::Resolve),
-            ),
-        )
-        .add_systems(Startup, setup)
-        .run();
+            .chain()
+            .before(TransformSystems::Propagate),
+    );
+    app.app_mut().configure_sets(
+        PostUpdate,
+        TweenSystemSet::ApplyTween.in_set(AnchorSystems::AnimatePose),
+    );
+    app.app_mut().add_tween_systems(
+        PostUpdate,
+        (
+            component_tween_system::<HingeAngleLens>(),
+            component_tween_system::<AnchorPoseLens>(),
+        ),
+    );
+    app.add_systems(
+        PostUpdate,
+        (
+            hinge_to_pose
+                .in_set(AnchorSystems::AnimatePose)
+                .after(TweenSystemSet::ApplyTween),
+            resolve_anchors.in_set(AnchorSystems::Resolve),
+        ),
+    )
+    .add_systems(Startup, setup)
+    .run();
 }
 
 fn setup(
@@ -133,8 +135,6 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    spawn_camera_and_light(&mut commands);
-
     let quad_mesh = meshes.add(Rectangle::new(QUAD_WIDTH, QUAD_HEIGHT));
     let [
         root_surface,
@@ -169,21 +169,6 @@ fn setup(
     }
 }
 
-fn spawn_camera_and_light(commands: &mut Commands) {
-    commands.spawn((
-        Camera3d::default(),
-        Transform::from_translation(CAMERA_TRANSLATION).looking_at(CAMERA_FOCUS, Vec3::Y),
-    ));
-    commands.spawn((
-        PointLight {
-            intensity: LIGHT_INTENSITY,
-            range: LIGHT_RANGE,
-            ..default()
-        },
-        Transform::from_translation(LIGHT_POSITION),
-    ));
-}
-
 fn spawn_tile(
     commands: &mut Commands,
     mesh: Handle<Mesh>,
@@ -194,7 +179,8 @@ fn spawn_tile(
         .spawn((
             Mesh3d(mesh),
             MeshMaterial3d(material),
-            quad_geometry(),
+            CameraHomeTarget,
+            fixtures::quad_geometry(QUAD_WIDTH, QUAD_HEIGHT),
             transform,
             GlobalTransform::from(transform),
         ))
@@ -213,7 +199,7 @@ fn spawn_hinged_tile(
         AnchoredTo::new(parent, AnchorId::Vertex(0), AnchorId::Vertex(1)),
         AnchorPose::default(),
         Hinge {
-            edge:  TOP_EDGE,
+            edge:  QUAD_TOP_EDGE,
             angle: start_angle,
         },
     ));
@@ -242,48 +228,5 @@ fn tile_material(color: Srgba) -> StandardMaterial {
         double_sided: true,
         perceptual_roughness: TILE_ROUGHNESS,
         ..default()
-    }
-}
-
-fn quad_geometry() -> ResolvedAnchorGeometry {
-    ResolvedAnchorGeometry {
-        points: HashMap::from_iter([
-            (
-                AnchorId::Vertex(0),
-                AnchorPoint {
-                    position: Vec3::new(-HALF_QUAD_WIDTH, HALF_QUAD_HEIGHT, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(1),
-                AnchorPoint {
-                    position: Vec3::new(HALF_QUAD_WIDTH, HALF_QUAD_HEIGHT, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(2),
-                AnchorPoint {
-                    position: Vec3::new(HALF_QUAD_WIDTH, -HALF_QUAD_HEIGHT, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Vertex(3),
-                AnchorPoint {
-                    position: Vec3::new(-HALF_QUAD_WIDTH, -HALF_QUAD_HEIGHT, 0.0),
-                    frame:    None,
-                },
-            ),
-            (
-                AnchorId::Center,
-                AnchorPoint {
-                    position: Vec3::ZERO,
-                    frame:    None,
-                },
-            ),
-        ]),
-        edges:  vec![TOP_EDGE, RIGHT_EDGE, BOTTOM_EDGE, LEFT_EDGE],
     }
 }

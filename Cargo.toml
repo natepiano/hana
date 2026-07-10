@@ -65,7 +65,7 @@ clay-layout     = { path = "vendor/clay-layout" }
 criterion       = { version = "0.8.2", features = ["html_reports"] }
 fairy_dust      = { path = "crates/fairy_dust" }
 float-cmp       = "0.10.0"
-hana_valence    = { path = "crates/hana_valence" }
+hana_valence    = { path = "crates/hana_valence", default-features = false }
 
 [workspace.lints.clippy]
 # Our strict lints
