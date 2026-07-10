@@ -20,7 +20,9 @@ default = ["tween"]
 tween   = ["dep:bevy_tween"]
 
 [dependencies]
+bevy_app       = { workspace = true }
 bevy_ecs       = { workspace = true }
+bevy_kana      = { workspace = true }
 bevy_math      = { workspace = true }
 bevy_platform  = { workspace = true }
 bevy_reflect   = { workspace = true }
@@ -30,7 +32,6 @@ tracing        = { workspace = true }
 
 [dev-dependencies]
 bevy          = { workspace = true, features = ["default"] }
-bevy_kana     = { workspace = true }
 bevy_diegetic = { workspace = true }
 bevy_lagrange = { workspace = true }
 bevy_tween    = { workspace = true }

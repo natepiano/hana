@@ -40,8 +40,8 @@ pub struct ResolvedAnchorWorld {
 
 /// System sets used by anchor providers, animation drivers, and resolvers.
 ///
-/// Consumers configure the sets in their own plugin or app. `hana_valence`
-/// does not expose a plugin type.
+/// Consumers own anchor-system wiring. [`FoldPlugin`](crate::FoldPlugin) is the
+/// folding-only exception.
 #[derive(SystemSet, Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum AnchorSystems {
     /// Providers write [`ResolvedAnchorGeometry`](crate::ResolvedAnchorGeometry).

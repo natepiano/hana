@@ -7,8 +7,10 @@
 //! drivers animate [`AnchorPose`], and consumers run their resolver systems in
 //! [`AnchorSystems`].
 //!
-//! The crate exposes components and system sets only. Consumers own plugin
-//! wiring and type registration:
+//! Consumers own anchor-provider, arrangement-driver, hinge, resolver, and
+//! transform-propagation wiring. [`FoldPlugin`] is the one plugin provided by
+//! this crate; it installs only folding state, observers, validation,
+//! diagnostics, and fold system ordering:
 //!
 //! ```rust,ignore
 //! use bevy::app::PostUpdate;
@@ -131,6 +133,7 @@ extern crate self as hana_valence;
 
 mod arrange;
 mod attachment;
+mod fold;
 mod geometry;
 mod hinge;
 mod pose;
@@ -162,6 +165,19 @@ pub use attachment::AttachmentResolveDiagnostic;
 pub use attachment::AttachmentResolveDiagnostics;
 pub use attachment::AttachmentResolveReasons;
 pub use attachment::resolve_attachments;
+pub use fold::FoldDiagnostic;
+pub use fold::FoldDiagnostics;
+pub use fold::FoldDirection;
+pub use fold::FoldEndpoint;
+pub use fold::FoldInvalidReason;
+pub use fold::FoldMember;
+pub use fold::FoldMembers;
+pub use fold::FoldMotion;
+pub use fold::FoldPlugin;
+pub use fold::FoldSequence;
+pub use fold::FoldSequenceState;
+pub use fold::FoldStage;
+pub use fold::FoldSystems;
 pub use geometry::AnchorId;
 pub use geometry::AnchorPoint;
 pub use geometry::Edge;
