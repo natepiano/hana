@@ -18,7 +18,7 @@
   - `crates/hana_valence/src/lib.rs:1-130` — update crate-level wiring/ownership documentation for the approved `FoldPlugin` exception; `crates/hana_valence/src/lib.rs:132-185` — declare and re-export the fold modules and `HingePivot`.
   - `crates/hana_valence/src/fold/mod.rs` — new public `FoldPlugin`, `FoldSystems::{Advance, Actuate}`, reflection/observer/system registration, and public exports.
   - `crates/hana_valence/src/fold/sequence.rs` — new `FoldSequence`, `FoldEndpoint`, immutable `FoldMember` relationship, reverse `FoldMembers`, `FoldStage`, validation/revision handling, diagnostics, and read-only `FoldSequenceState`; membership/state tests live here.
-  - `crates/hana_valence/src/fold/playback.rs` — new private `FoldPlayback`, public `FoldDirection`, `FoldMotion`, targeted `FoldCommand`, transition observer, virtual-time advancement, fraction accessors, and transition/reversal tests.
+  - `crates/hana_valence/src/fold/playback.rs` — new private `FoldPlayback`, public `FoldDirection`, `FoldMotion`, `FoldCommand` payload and targeted `FoldCommandEvent`, transition observer, virtual-time advancement, fraction accessors, and transition/reversal tests.
   - `crates/hana_valence/src/fold/hinge.rs` — new `FoldAngles` and sequence-fraction-to-`Hinge::angle` adapter; actuation tests live here.
   - `crates/hana_valence/src/fold/author.rs` — new `FoldSequenceBuilder`, `FoldFromArrangement`, scheduled one-time arrangement snapshot, diagnostics, and manual/generated equivalence tests.
   - `crates/hana_valence/src/pose.rs:41-53` — existing `AnchorSystems` ordering contract into which `FoldSystems::Advance` then `FoldSystems::Actuate` must fit.
@@ -148,7 +148,7 @@
 - Phases 7–9 now require teaching panels whose content matches the staged runtime behavior.
 - No user decision was required.
 
-### Phase 2 — Playback commands and virtual-time advancement  · status: todo
+### Phase 2 — Playback commands and virtual-time advancement  · status: done (checkpoint)
 
 #### Work Order
 
@@ -157,21 +157,29 @@
 **Spec:**
 
 - Add focused workspace/member `bevy_time` dependencies. Use `Time<Virtual>` and `FoldSequence::step_seconds`; playback starts idle and has no autoplay or pause state.
-- Add the entity-targeted event exactly around this public API:
+- Keep the operation separate from its Bevy transport: public `FoldCommand` is the step/play payload, while public `FoldCommandEvent` is the entity-targeted envelope. Name the target field `sequence_entity` so its `Entity` type is explicit:
 
   ```rust
-  #[derive(Event)]
+  #[derive(Clone, Copy, Debug, Reflect)]
   pub enum FoldCommand {
       Step(FoldDirection),
       Play,
   }
 
-  commands
-      .entity(sequence)
-      .trigger(FoldCommand::Step(FoldDirection::Folding));
+  #[derive(EntityEvent, Clone, Copy, Debug)]
+  pub struct FoldCommandEvent {
+      #[event_target]
+      sequence_entity: Entity,
+      pub command: FoldCommand,
+  }
+
+  commands.trigger(FoldCommandEvent::new(
+      sequence_entity,
+      FoldCommand::Step(FoldDirection::Folding),
+  ));
   ```
 
-  The target entity is implicit in the trigger. Invalid/not-ready/zero-stage targets remain idle and diagnose only according to the Phase 1 diagnostic policy.
+  Provide `FoldCommandEvent::new(sequence_entity, command)` and a read-only `sequence_entity()` accessor. The event is entity-targeted through its `#[event_target]` field even when sent through `Commands::trigger`; no extension trait is needed. Invalid/not-ready/zero-stage targets remain idle and diagnose only according to the Phase 1 diagnostic policy.
 - Implement the command observer with these transitions:
   - A same-direction `Step(Folding)` while `FoldMotion::Step` sets `min(target + 1, stages)`.
   - A same-direction `Step(Unfolding)` while `FoldMotion::Step` sets `target.saturating_sub(1)`.
@@ -195,6 +203,39 @@
 **Constraints from prior phases:** Phase 1 provides `FoldPlugin`, `FoldSystems`, `FoldSequence`, validated `FoldSequenceState`, the immutable membership relationship, private playback fields, and the rule that only ready sequences move. Preserve its initialization/membership mutation behavior. Use the existing normal `bevy_kana` dependency and `ToF32` for stage conversions. Concrete reflected types derive `Reflect` and rely on workspace auto-registration; do not add explicit registrations.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes all named transition/reversal/fraction tests; `cargo check --workspace --all-targets --all-features` is green; no per-member fraction component or autoplay/pause state exists.
+
+#### Retrospective
+
+**What worked:**
+
+- Phase 1's private `FoldPlayback` and validated `FoldSequenceState` extended directly into commands, continuous advancement, and eased per-stage fractions without adding per-member runtime state.
+- The existing set chain already placed validation before `FoldSystems::Advance` and advancement before `FoldSystems::Actuate`; Phase 2 only had to install the advance system in the declared set.
+- The transition matrix is covered by 57 passing Hana Valence tests, including fractional reversal, queued steps, exact-boundary behavior, terminal no-ops, large deltas, and grouped easing.
+
+**What deviated from the plan:**
+
+- Bevy 0.19 cannot derive `EntityEvent` for the originally planned payload enum. The approved API now separates public `FoldCommand` from public `FoldCommandEvent`, whose private `sequence_entity: Entity` field supplies the event target.
+- Callers use `commands.trigger(FoldCommandEvent::new(sequence_entity, command))`; the event remains entity-targeted without an extension trait or private transport wrapper.
+- `crates/hana_valence/src/pose.rs` required no edit because its existing `AnchorSystems::AnimatePose` contract already supports the fold set ordering.
+
+**Surprises:**
+
+- The first delegated verification was interrupted by model capacity after its workspace check passed. An xhigh escalation audit completed format, all tests, workspace check, and diff checks without changing the implementation.
+
+**Implications for remaining phases:**
+
+- Later controls and examples must emit `FoldCommandEvent` rather than treating `FoldCommand` itself as the Bevy event.
+- Later actuation reads the already-eased `FoldSequenceState::fraction(FoldStage)` and must not duplicate easing or timing.
+- Motion and direction accessors are now the sole source for Fairy Dust chip activation and remembered-direction presentation.
+
+#### Phase 2 Review
+
+- Independent and main-agent reviews approved the command API, state-machine behavior, scheduling, tests, and scope without implementation findings.
+- Phases 4–5 now require focused `FoldPlugin` test apps to provide `Time<Virtual>` explicitly.
+- Phase 5 now prevents pending arrangement requests from accepting an empty first revision and covers folded initialization plus resnapshot state retention.
+- Phase 8 now schedules queued algorithm-profile activation between advancement and actuation on the exact zero-settle frame.
+- The full lint workflow applied six approved Mend fixes, passed the rule-by-rule style review, and completed with clean Mend, Clippy, rustdoc, and nightly formatting.
+- No user decision remains.
 
 ### Phase 3 — Frame-correct physical hinge pivots  · status: todo
 
@@ -269,7 +310,7 @@
 - `crates/hana_valence/tests/arrangements.rs` — add staged/grouped actuation and ordering coverage.
 - `crates/hana_valence/src/hinge.rs` — read-only `Hinge`/`HingePivot` actuation target.
 
-**Constraints from prior phases:** Phase 2 supplies eased `FoldSequenceState::fraction`; Phase 3 supplies optional `HingePivot` translation. The adapter writes only `Hinge::angle`; `hinge_to_pose` remains consumer-registered after actuation. Use `ToF32` for stage conversions and derive `Reflect` without explicit registration for concrete types.
+**Constraints from prior phases:** Phase 2 supplies eased `FoldSequenceState::fraction`; Phase 3 supplies optional `HingePivot` translation. The adapter writes only `Hinge::angle`; `hinge_to_pose` remains consumer-registered after actuation. Any focused app installing `FoldPlugin` must install Bevy time support or insert `Time::<Virtual>::default()`; `FoldPlugin` does not own global time initialization. Use `ToF32` for stage conversions and derive `Reflect` without explicit registration for concrete types.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes actuation, grouped-stage, writer-ownership, and schedule-order tests; `cargo check --workspace --all-targets --all-features` is green.
 
@@ -291,11 +332,12 @@
   ```
 
   Each `stage` call assigns the next zero-based `FoldStage` and inserts/replaces `FoldMember` on every listed entity. `finish` writes only ordinary relationship/components and returns a typed error for an empty authored group or a duplicate member in the builder input. It does not become a second runtime representation and cannot synchronously validate whether deferred `Commands` targets still exist.
-- Add `FoldFromArrangement` as a one-time request on a sequence entity, containing the arrangement entity to snapshot. Register a readiness-driven snapshot system in `FoldPlugin` before sequence validation. It reads insertion-ordered `ArrangementMembers::iter()` and succeeds only when every listed entity has `MemberIndex`; otherwise it retains the request and retries on a later update. Once ready, enumerate fresh zero-based stages and insert `FoldMember` relationships. Remove the request only after relationship insertion succeeds; sequence validation may observe the new relationships on the following update.
+- Add `FoldFromArrangement` as a one-time request on a sequence entity, containing the arrangement entity to snapshot. Register a readiness-driven snapshot system in `FoldPlugin` before sequence validation. It reads insertion-ordered `ArrangementMembers::iter()` and succeeds only when every listed entity has `MemberIndex`; otherwise it retains the request and retries on a later update. Once ready, enumerate fresh zero-based stages and insert `FoldMember` relationships. Remove the request only after relationship insertion succeeds.
+- A new sequence carrying `FoldFromArrangement` must not validate as an empty sequence while the request is pending: exclude pending requests from sequence validation, then order request removal and deferred relationship insertion so the first accepted revision sees the derived stage count. An already-initialized sequence being resnapshotted retains its prior valid state until the replacement snapshot succeeds. Validation may occur after deferred commands settle in the same update or on the following update, but never between request removal and visible membership.
 - Do not copy `MemberIndex` values: they begin at one and may contain gaps after removal. Use `MemberIndex` only to ensure the assignment phase has settled if required by scheduling.
 - On missing sequence/arrangement/not-ready arrangement data, emit one diagnostic for that request and retain it for a later retry. Remove `FoldFromArrangement` only after a successful snapshot. Later arrangement edits do not rewrite an active sequence; the caller must insert another request.
 - Both authoring paths create membership/stages only. They never infer `FoldAngles`, endpoint signs, `HingePivot`, or algorithm policy. A triangle accordion uses a constant local fold sign because its rest angle is a half-turn, while a quad accordion alternates local signs; order alone cannot distinguish them.
-- Test the grouped lid/walls call, consecutive explicit stages, empty/duplicate errors, insertion-order snapshots, fresh zero-based stages despite gapped `MemberIndex`, deferred readiness, retained failed requests, removal after success, explicit resnapshot after arrangement mutation, and equivalence of manually/automatically authored membership.
+- Test the grouped lid/walls call, consecutive explicit stages, empty/duplicate errors, insertion-order snapshots, fresh zero-based stages despite gapped `MemberIndex`, deferred readiness, retained failed requests, folded initialization deriving its terminal boundary from the completed first snapshot, removal after success, prior-state retention during resnapshot, explicit resnapshot after arrangement mutation, and equivalence of manually/automatically authored membership.
 
 **Files:**
 - `crates/hana_valence/src/fold/author.rs` — create builder, one-time request, snapshot system, diagnostics, and tests.
@@ -304,7 +346,7 @@
 - `crates/hana_valence/src/arrange.rs` — read arrangement ordering/assignment contracts; edit only if a public scheduling label or accessor is required.
 - `crates/hana_valence/tests/arrangements.rs` — add grouped-box and arrangement-snapshot integration coverage.
 
-**Constraints from prior phases:** Phase 1 owns relationship validation and derived stage count. Phase 4 owns endpoint actuation. Authoring must produce `FoldMember`/`FoldStage` only and leave endpoint/pivot policy to callers. Use `ToF32` for stage conversions and derive `Reflect` without explicit registration for concrete types.
+**Constraints from prior phases:** Phase 1 owns relationship validation and derived stage count. Phase 4 owns endpoint actuation. Authoring must produce `FoldMember`/`FoldStage` only and leave endpoint/pivot policy to callers. Any focused app installing `FoldPlugin` must install Bevy time support or insert `Time::<Virtual>::default()`; `FoldPlugin` does not own global time initialization. Use `ToF32` for stage conversions and derive `Reflect` without explicit registration for concrete types.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes all explicit/snapshot/deferred/equivalence tests; the grouped box derives two stages from five members; `cargo check --workspace --all-targets --all-features` is green.
 
@@ -326,7 +368,7 @@
 - `with_fold_controls` idempotently installs Hana's public `FoldPlugin` and Fairy Dust's existing enhanced-input support. It must not register `hinge_to_pose`, arrangement driving, `resolve_anchors`, or any other anchor pipeline system already installed by `bevy_diegetic`.
 - Define private BEI input context/actions for one folding step, one unfolding step, and play-to-terminal. Bind bare `Space` only when no modifier is held, `Shift+Space` for unfolding with either Shift key normalized by BEI, and bare `P` for play. Reserve conflicting bare keys through the existing shortcut registry. Do not read `ButtonInput<KeyCode>` directly.
 - Register title chips with stable ids and visible labels `Space Fold`, `Shift+Space Unfold`, and `P Play`. Step chips are active only while `FoldMotion::Step` moves in their direction. `P Play` is active only during `FoldMotion::Play`. All are inactive when idle; there is no pause control. Run chip synchronization in `PostUpdate` after `FoldSystems::Advance` and before `refresh_changed_title_bar` so activation clears on the exact frame playback settles.
-- Route actions to Hana by triggering `FoldCommand` on the selected sequence. If exactly one ready `FoldSequenceState` exists, route automatically. With multiple sequences, exactly one sequence carrying `FairyDustFoldTarget` is required. Zero ready sequences, zero/multiple marked targets in an ambiguous scene, or multiple unmarked sequences emit a stable diagnostic and leave controls inactive. Fairy Dust reads Hana accessors and never reproduces validation or transition rules.
+- Route actions to Hana by triggering `FoldCommandEvent::new(sequence_entity, command)` for the selected sequence. If exactly one ready `FoldSequenceState` exists, route automatically. With multiple sequences, exactly one sequence carrying `FairyDustFoldTarget` is required. Zero ready sequences, zero/multiple marked targets in an ambiguous scene, or multiple unmarked sequences emit a stable diagnostic and leave controls inactive. Fairy Dust reads Hana accessors and never reproduces validation or transition rules.
 - Keep title bars controls-only; no instructional prose belongs in the title bar. The capability must coexist with camera/home/help actions and with an example-owned BEI algorithm-toggle action. Extend key reservation so reinstalling the same capability is idempotent while two different capabilities reserving the same bare key are rejected; explicitly cover the existing cube-spin `P` control versus `P Play`.
 - Add tests for idempotent plugin/input installation, bare/modifier binding separation, same-capability reservation idempotence, cube-spin `P` versus `P Play` rejection, zero/one/multiple routing, marker selection, invalid target inactivity, emitted commands, exact-settle-frame step/play chip activation, and coexistence with another BEI action.
 
@@ -343,7 +385,7 @@
 - `crates/fairy_dust/src/restart.rs` — read-only BEI pattern reference.
 - `crates/bevy_diegetic/src/panel/mod.rs` — read-only registration contract; do not edit.
 
-**Constraints from prior phases:** Phases 1–5 provide the public `FoldPlugin`, `FoldCommand`, ready-state accessors, motion/direction accessors, and authoring APIs. Hana owns the state machine; Fairy Dust owns only input, routing, diagnostics, and presentation.
+**Constraints from prior phases:** Phases 1–5 provide the public `FoldPlugin`, `FoldCommand`, `FoldCommandEvent`, ready-state accessors, motion/direction accessors, and authoring APIs. Hana owns the state machine; Fairy Dust owns only input, routing, diagnostics, and presentation.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p fairy_dust --all-features` passes all named input/routing/chip tests; `cargo nextest run -p hana_valence --all-features` remains green; `cargo check --workspace --all-targets --all-features` is green and the anchor pipeline is registered once.
 
@@ -383,7 +425,7 @@
 - Replace `AccordionPlayback`, local playback/motion state, raw fold input, local timing, replay behavior, duplicate fold scheduling, and `apply_crease_gap`/`ResolvedAnchorOffset` compensation with the shared fold runtime. Keep only example-owned algorithm selection state.
 - Place `FoldFromArrangement` on the sequence after the arrangement is authored. It snapshots `ArrangementMembers` after member indices settle and assigns one zero-based stage per moving crease; the arrangement root is not a moving fold member.
 - Author `FoldAngles` and `HingePivot` in the example's algorithm profile. Triangle members have an unfolded rest angle of `PI`; use it as `HingePivot.reference_angle`. The accordion uses a constant local fold sign because each member already has a half-turn rest orientation; the wrap algorithm uses the existing alternate policy. Do not ask `FoldFromArrangement` to infer signs, endpoints, or pivot gaps.
-- Keep the accordion/wrap toggle as an example-owned BEI action, independent of Space/Shift+Space/P. Do not read `ButtonInput<KeyCode>` directly. Track selected and active algorithm profiles separately: the selection/title chip changes immediately, but when `FoldSequenceState::position()` is nonzero, queue endpoint/pivot changes until playback reaches fully unfolded position zero. Applying the queued profile must not change playback position, target, direction, stage membership, or grouping.
+- Keep the accordion/wrap toggle as an example-owned BEI action, independent of Space/Shift+Space/P. Do not read `ButtonInput<KeyCode>` directly. Track selected and active algorithm profiles separately: the selection/title chip changes immediately, but when `FoldSequenceState::position()` is nonzero, queue endpoint/pivot changes until playback reaches fully unfolded position zero. Run queued-profile activation in `PostUpdate` after `FoldSystems::Advance` and before `FoldSystems::Actuate`, using Phase 2's exact `0.0` settle boundary as the deterministic activation point. Applying the queued profile must not change playback position, target, direction, stage membership, or grouping.
 - Route the standard three controls through `.with_fold_controls()`. The example starts idle; one step moves one crease; `P` continues in the remembered direction.
 - Retain `.with_brp_extras()`, `.with_stable_transparency()`, the Fairy Dust orbit camera, camera-control panel, useful authored camera-home target, and controls-only title bar. Add a concise screen-space teaching panel explaining arrangement-derived stages and queued algorithm-profile activation.
 
@@ -392,7 +434,7 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, no transform jump when selection changes away from zero, queued activation exactly at zero, unchanged playback state across the toggle, stable transparency, BRP port display, orbit camera, home view, and teaching-panel content.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, and teaching-panel content.
 
 ### Phase 9 — Migrate `box`  · status: todo
 

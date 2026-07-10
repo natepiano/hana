@@ -3326,6 +3326,7 @@ dependencies = [
  "bevy_math",
  "bevy_platform",
  "bevy_reflect",
+ "bevy_time",
  "bevy_transform",
  "bevy_tween",
  "fairy_dust",

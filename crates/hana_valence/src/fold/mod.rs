@@ -8,6 +8,8 @@ use bevy_app::Plugin;
 use bevy_app::PostUpdate;
 use bevy_ecs::schedule::IntoScheduleConfigs;
 use bevy_ecs::schedule::SystemSet;
+pub use playback::FoldCommand;
+pub use playback::FoldCommandEvent;
 pub use playback::FoldDirection;
 pub use playback::FoldMotion;
 pub use sequence::FoldDiagnostic;
@@ -32,6 +34,7 @@ pub struct FoldPlugin;
 impl Plugin for FoldPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FoldDiagnostics>()
+            .add_observer(playback::on_fold_command)
             .add_observer(sequence::on_fold_member_inserted)
             .add_observer(sequence::on_fold_member_discarded)
             .add_observer(sequence::on_fold_sequence_inserted)
@@ -44,9 +47,12 @@ impl Plugin for FoldPlugin {
             )
             .add_systems(
                 PostUpdate,
-                sequence::validate_fold_sequences
-                    .in_set(AnchorSystems::AnimatePose)
-                    .before(FoldSystems::Advance),
+                (
+                    sequence::validate_fold_sequences
+                        .in_set(AnchorSystems::AnimatePose)
+                        .before(FoldSystems::Advance),
+                    playback::advance_fold_sequences.in_set(FoldSystems::Advance),
+                ),
             );
     }
 }

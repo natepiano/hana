@@ -165,6 +165,8 @@ pub use attachment::AttachmentResolveDiagnostic;
 pub use attachment::AttachmentResolveDiagnostics;
 pub use attachment::AttachmentResolveReasons;
 pub use attachment::resolve_attachments;
+pub use fold::FoldCommand;
+pub use fold::FoldCommandEvent;
 pub use fold::FoldDiagnostic;
 pub use fold::FoldDiagnostics;
 pub use fold::FoldDirection;

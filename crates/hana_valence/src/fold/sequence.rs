@@ -19,6 +19,8 @@ use bevy_ecs::prelude::ResMut;
 use bevy_ecs::prelude::Resource;
 use bevy_ecs::prelude::With;
 use bevy_ecs::prelude::World;
+use bevy_kana::ToF32;
+use bevy_math::curve::Curve;
 use bevy_math::curve::easing::EaseFunction;
 use bevy_platform::collections::HashSet;
 use bevy_reflect::Reflect;
@@ -153,6 +155,7 @@ impl Deref for FoldMembers {
 pub struct FoldSequenceState {
     stages:      Option<usize>,
     playback:    FoldPlayback,
+    easing:      EaseFunction,
     initialized: bool,
     revision:    u64,
 }
@@ -162,6 +165,7 @@ impl FoldSequenceState {
         Self {
             stages:      None,
             playback:    FoldPlayback::uninitialized(),
+            easing:      EaseFunction::SmootherStep,
             initialized: false,
             revision:    0,
         }
@@ -196,6 +200,21 @@ impl FoldSequenceState {
     #[must_use]
     pub const fn motion(&self) -> FoldMotion { self.playback.motion() }
 
+    /// Eased fold fraction for `stage` at the current continuous position.
+    #[must_use]
+    pub fn fraction(&self, stage: FoldStage) -> f32 {
+        let fraction = (self.position() - stage.0.to_f32()).clamp(0.0, 1.0);
+        self.easing.sample_clamped(fraction)
+    }
+
+    pub(super) fn apply(&mut self, command: super::FoldCommand) {
+        if let Some(stages) = self.stages {
+            self.playback.apply(command, stages);
+        }
+    }
+
+    pub(super) fn advance(&mut self, stage_delta: f32) { self.playback.advance(stage_delta); }
+
     fn accept(&mut self, sequence: &FoldSequence, stages: usize) {
         if self.initialized {
             self.playback.clamp_to(stages);
@@ -203,6 +222,7 @@ impl FoldSequenceState {
             self.playback = FoldPlayback::initial(sequence.initial, stages);
             self.initialized = true;
         }
+        self.easing = sequence.easing;
         self.stages = Some(stages);
     }
 
@@ -433,13 +453,17 @@ fn validate_sequence(
 #[cfg(test)]
 mod tests {
     use std::any::TypeId;
+    use std::time::Duration;
 
     use bevy_app::App;
     use bevy_ecs::entity::Entity;
     use bevy_ecs::prelude::AppTypeRegistry;
     use bevy_ecs::prelude::ReflectComponent;
     use bevy_ecs::world::World;
+    use bevy_math::curve::easing::EaseFunction;
     use bevy_reflect::TypeRegistry;
+    use bevy_time::Time;
+    use bevy_time::Virtual;
 
     use super::FoldDiagnostic;
     use super::FoldDiagnostics;
@@ -450,6 +474,8 @@ mod tests {
     use super::FoldSequence;
     use super::FoldSequenceState;
     use super::FoldStage;
+    use crate::FoldCommand;
+    use crate::FoldCommandEvent;
     use crate::FoldDirection;
     use crate::FoldMotion;
     use crate::FoldPlugin;
@@ -458,7 +484,8 @@ mod tests {
 
     fn fold_app() -> App {
         let mut app = App::new();
-        app.add_plugins(FoldPlugin);
+        app.insert_resource(Time::<Virtual>::default())
+            .add_plugins(FoldPlugin);
         app
     }
 
@@ -557,6 +584,38 @@ mod tests {
             Some((true, 2))
         );
         assert!(diagnostics(app.world()).is_empty());
+    }
+
+    #[test]
+    fn grouped_stage_fractions_share_authored_easing() {
+        let mut app = fold_app();
+        let mut authored = FoldSequence::new(1.0);
+        authored.easing = EaseFunction::QuadraticIn;
+        let sequence = app.world_mut().spawn(authored).id();
+        let first = spawn_member(&mut app, sequence, 0);
+        let second = spawn_member(&mut app, sequence, 0);
+        let later = spawn_member(&mut app, sequence, 1);
+        app.update();
+
+        app.world_mut().trigger(FoldCommandEvent::new(
+            sequence,
+            FoldCommand::Step(FoldDirection::Folding),
+        ));
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::from_secs_f32(0.5));
+        app.update();
+
+        let fractions = [first, second, later].map(|member_entity| {
+            app.world()
+                .get::<FoldMember>(member_entity)
+                .and_then(|member| {
+                    app.world()
+                        .get::<FoldSequenceState>(sequence)
+                        .map(|state| state.fraction(member.stage))
+                })
+        });
+        assert_eq!(fractions, [Some(0.25), Some(0.25), Some(0.0)]);
     }
 
     #[test]

@@ -43,19 +43,19 @@ pub const QUAD_LEFT_EDGE: Edge = Edge {
 };
 
 /// Right edge of [`triangle_geometry`].
-pub const TRIANGLE_RIGHT_EDGE: Edge = Edge {
+const TRIANGLE_RIGHT_EDGE: Edge = Edge {
     start: AnchorId::Vertex(0),
     end:   AnchorId::Vertex(1),
 };
 
 /// Bottom edge of [`triangle_geometry`].
-pub const TRIANGLE_BOTTOM_EDGE: Edge = Edge {
+const TRIANGLE_BOTTOM_EDGE: Edge = Edge {
     start: AnchorId::Vertex(1),
     end:   AnchorId::Vertex(2),
 };
 
 /// Left edge of [`triangle_geometry`].
-pub const TRIANGLE_LEFT_EDGE: Edge = Edge {
+const TRIANGLE_LEFT_EDGE: Edge = Edge {
     start: AnchorId::Vertex(2),
     end:   AnchorId::Vertex(0),
 };

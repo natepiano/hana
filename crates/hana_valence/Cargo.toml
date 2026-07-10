@@ -26,6 +26,7 @@ bevy_kana      = { workspace = true }
 bevy_math      = { workspace = true }
 bevy_platform  = { workspace = true }
 bevy_reflect   = { workspace = true }
+bevy_time      = { workspace = true }
 bevy_transform = { workspace = true, features = ["bevy-support"] }
 bevy_tween     = { workspace = true, optional = true }
 tracing        = { workspace = true }
