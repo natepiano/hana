@@ -91,7 +91,7 @@ Outline::jump_flood(3.0)
 
 ## Hierarchy Propagation
 
-Adding `Outline` to a parent entity automatically propagates it to all descendant `Mesh3d` entities. Use `NoOutline` to exclude specific children.
+Adding `Outline` to a parent entity automatically propagates it through the `ChildOf` hierarchy to all descendant `Mesh3d` entities. Use `NoOutline` to exclude a single mesh. `OutlineBarrier` defines a hierarchy boundary: outlines inherited from ancestors skip the marked entity and all its descendants, while an outline placed on the marked entity still propagates normally beneath it.
 
 ## Version Compatibility
 
