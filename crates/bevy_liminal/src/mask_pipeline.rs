@@ -41,7 +41,6 @@ use super::constants::GET_BATCH_DATA_GPU_MODE_ERROR;
 use super::constants::GET_BINNED_BATCH_DATA_GPU_MODE_ERROR;
 use super::constants::GET_BINNED_INDEX_CPU_MODE_ERROR;
 use super::constants::GET_INDEX_AND_COMPARE_DATA_CPU_MODE_ERROR;
-use super::constants::HULL_OUTLINES_SHADER_DEF;
 use super::constants::MASK_SHADER_HANDLE;
 use super::constants::MISSING_BATCH_SET_INDEX;
 use super::constants::OUTLINE_INSTANCE_BIND_GROUP_LAYOUT_LABEL;
@@ -49,16 +48,6 @@ use super::constants::OUTLINE_PIPELINE_LABEL;
 use super::constants::PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF;
 use super::indexing_mode::IndexingMode;
 use super::uniforms::OutlineUniform;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) enum HullPresence {
-    Absent,
-    Present,
-}
-
-impl HullPresence {
-    const fn is_present(self) -> bool { matches!(self, Self::Present) }
-}
 
 #[derive(Resource)]
 pub(crate) struct MeshMaskPipeline {
@@ -98,23 +87,15 @@ impl FromWorld for MeshMaskPipeline {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct MaskPipelineKey {
-    pub(crate) mesh_pipeline_key: MeshPipelineKey,
-    pub(crate) hull_presence:     HullPresence,
-}
-
 impl SpecializedMeshPipeline for MeshMaskPipeline {
-    type Key = MaskPipelineKey;
+    type Key = MeshPipelineKey;
 
     fn specialize(
         &self,
         key: Self::Key,
         layout: &MeshVertexBufferLayoutRef,
     ) -> Result<RenderPipelineDescriptor, SpecializedMeshPipelineError> {
-        let mut descriptor = self
-            .mesh_pipeline
-            .specialize(key.mesh_pipeline_key, layout)?;
+        let mut descriptor = self.mesh_pipeline.specialize(key, layout)?;
 
         // Force single-sample rendering. The mask pass renders data (UV coords, depth,
         // width, color) into `Rgba32Float` textures, not visual output. Multisampling
@@ -130,13 +111,9 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
                 per_object_buffer_batch_size,
             ));
         }
-        if key.hull_presence.is_present() {
-            shader_defs.push(ShaderDefVal::Bool(HULL_OUTLINES_SHADER_DEF.into(), true));
-        }
-
         descriptor.vertex.shader_defs.extend(shader_defs.clone());
 
-        let mut targets = vec![
+        let targets = vec![
             // RT0 maps to `FloodTextures::output` and mask `flood_data`:
             // seed uv, outline width, and surface depth.
             Some(ColorTargetState {
@@ -151,16 +128,15 @@ impl SpecializedMeshPipeline for MeshMaskPipeline {
                 blend:      None,
                 write_mask: ColorWrites::ALL,
             }),
-        ];
-        if key.hull_presence.is_present() {
             // RT2 maps to `FloodTextures::owner` and mask `owner_data`: owner ID
-            // in x, allocated only when hull outlines exist.
-            targets.push(Some(ColorTargetState {
+            // in x and overlap factor in y, read by both the hull and jump-flood
+            // compose shaders for group-aware overlap resolution.
+            Some(ColorTargetState {
                 format:     TextureFormat::Rgba32Float,
                 blend:      None,
                 write_mask: ColorWrites::ALL,
-            }));
-        }
+            }),
+        ];
 
         descriptor.fragment = Some(FragmentState {
             shader: MASK_SHADER_HANDLE,

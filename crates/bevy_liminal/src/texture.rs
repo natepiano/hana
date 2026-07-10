@@ -16,7 +16,6 @@ use super::constants::MSAA_DISABLED_SAMPLE_COUNT;
 use super::constants::OUTLINE_DEPTH_TEXTURE_LABEL;
 use super::constants::OUTLINE_TEXTURE_BASE_MIP_ONLY;
 use super::constants::OUTLINE_TEXTURE_SINGLE_LAYER;
-use super::extract::ActiveOutlineModes;
 
 #[derive(Clone, Copy)]
 pub(crate) enum PingPongState {
@@ -36,8 +35,9 @@ pub(crate) struct FloodTextures {
     pub(crate) outline_depth:   Texture,
     /// Stores mask `appearance_data`: color in rgb and priority in alpha.
     pub(crate) appearance:      CachedTexture,
-    /// Stores per-mesh owner ID in x channel — only allocated when hull outlines are active
-    pub(crate) owner:           Option<CachedTexture>,
+    /// Stores mask `owner_data`: owner ID in x and overlap factor in y, read by
+    /// the hull and jump-flood compose shaders for group-aware overlap resolution.
+    pub(crate) owner:           CachedTexture,
 }
 
 impl FloodTextures {
@@ -67,7 +67,6 @@ pub(crate) fn prepare_flood_textures(
     mut commands: Commands,
     mut texture_cache: ResMut<TextureCache>,
     render_device: Res<RenderDevice>,
-    active: Res<ActiveOutlineModes>,
     cameras: Query<(Entity, &ExtractedCamera), With<OutlineCamera>>,
 ) {
     for (entity, camera) in cameras.iter() {
@@ -106,19 +105,13 @@ pub(crate) fn prepare_flood_textures(
             view_formats: &[],
         });
 
-        let owner = if active.methods.has_hull() {
-            Some(texture_cache.get(&render_device, texture_descriptor.clone()))
-        } else {
-            None
-        };
-
         commands.entity(entity).insert(FloodTextures {
             ping_pong_state: PingPongState::PrimaryInput,
             input: texture_cache.get(&render_device, texture_descriptor.clone()),
             output: texture_cache.get(&render_device, texture_descriptor.clone()),
             outline_depth,
-            appearance: texture_cache.get(&render_device, texture_descriptor),
-            owner,
+            appearance: texture_cache.get(&render_device, texture_descriptor.clone()),
+            owner: texture_cache.get(&render_device, texture_descriptor),
         });
         texture_cache.update();
     }

@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 
 use bevy::prelude::Color;
+use bevy::prelude::Entity;
 
 use super::constants::DEFAULT_OUTLINE_INTENSITY;
 use super::outline::LineStyle;
@@ -52,6 +53,7 @@ pub struct OutlineBuilder<M: OutlineModeState> {
     intensity:    f32,
     color:        Color,
     overlap_mode: OverlapMode,
+    group_source: Option<Entity>,
     mode:         PhantomData<M>,
 }
 
@@ -61,6 +63,7 @@ const fn defaults<M: OutlineModeState>(width: f32) -> OutlineBuilder<M> {
         intensity: DEFAULT_OUTLINE_INTENSITY,
         color: Color::BLACK,
         overlap_mode: OverlapMode::Merged,
+        group_source: None,
         mode: PhantomData,
     }
 }
@@ -76,8 +79,8 @@ impl OutlineBuilder<JumpFloodState> {
         Outline {
             intensity:    self.intensity,
             width:        self.width,
-            overlap_mode: OverlapMode::Merged,
-            group_source: None,
+            overlap_mode: self.overlap_mode,
+            group_source: self.group_source,
             color:        self.color,
             method:       OutlineMethod::JumpFlood,
             line_style:   LineStyle::Solid,
@@ -118,6 +121,22 @@ impl<M: OutlineModeState> OutlineBuilder<M> {
     #[must_use]
     pub const fn with_color(mut self, color: Color) -> Self {
         self.color = color;
+        self
+    }
+
+    /// Assign this outline to a group and switch to [`OverlapMode::Grouped`].
+    ///
+    /// Outlines sharing the same `group` entity merge into one silhouette that
+    /// stays visually distinct from other groups: a grouped outline may draw
+    /// over another group's outlined surface (subject to depth), so nested
+    /// outlined meshes keep their own outline on top of their host.
+    ///
+    /// Use this when inserting `Outline` per mesh instead of relying on
+    /// hierarchy propagation, which assigns the group automatically.
+    #[must_use]
+    pub const fn with_group(mut self, group: Entity) -> Self {
+        self.group_source = Some(group);
+        self.overlap_mode = OverlapMode::Grouped;
         self
     }
 }

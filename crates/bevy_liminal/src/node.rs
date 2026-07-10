@@ -209,31 +209,23 @@ fn run_mask_init_pass(
         },
         depth_slice:    None,
     };
-    let owner_color_attachment =
-        flood_textures
-            .owner
-            .as_ref()
-            .map(|tex| RenderPassColorAttachment {
-                view:           &tex.default_view,
-                resolve_target: None,
-                ops:            Operations {
-                    load:  LoadOp::Clear(LinearRgba::NONE.into()),
-                    store: StoreOp::Store,
-                },
-                depth_slice:    None,
-            });
-
-    let mut color_attachments: Vec<Option<RenderPassColorAttachment>> = vec![
-        Some(flood_color_attachment),
-        Some(appearance_color_attachment),
-    ];
-    if let Some(attachment) = owner_color_attachment {
-        color_attachments.push(Some(attachment));
-    }
+    let owner_color_attachment = RenderPassColorAttachment {
+        view:           &flood_textures.owner.default_view,
+        resolve_target: None,
+        ops:            Operations {
+            load:  LoadOp::Clear(LinearRgba::NONE.into()),
+            store: StoreOp::Store,
+        },
+        depth_slice:    None,
+    };
 
     let mut init_pass = render_context.begin_tracked_render_pass(RenderPassDescriptor {
         label:                    Some(OUTLINE_FLOOD_INIT_PASS_LABEL),
-        color_attachments:        &color_attachments,
+        color_attachments:        &[
+            Some(flood_color_attachment),
+            Some(appearance_color_attachment),
+            Some(owner_color_attachment),
+        ],
         depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
             view:        outline_depth_view,
             depth_ops:   Some(Operations {
@@ -361,6 +353,7 @@ fn run_jump_flood_composite(
             &global_depth.texture.default_view,
             outline_depth_view,
             view_depth_texture.view(),
+            &flood_textures.owner.default_view,
         )),
     );
 

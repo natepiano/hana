@@ -39,8 +39,6 @@ use super::mask::HullOutlinePhase;
 use super::mask::JumpFloodOutlinePhase;
 use super::mask::OutlineBatchSetKey;
 use super::mask::OutlineBinKey;
-use super::mask_pipeline::HullPresence;
-use super::mask_pipeline::MaskPipelineKey;
 use super::mask_pipeline::MeshMaskPipeline;
 use super::outline::OutlineMethod;
 
@@ -54,7 +52,6 @@ pub(crate) fn queue_outline(
     mesh_allocator: Res<MeshAllocator>,
     render_meshes: Res<RenderAssets<RenderMesh>>,
     render_mesh_instances: Res<RenderMeshInstances>,
-    active: Res<ActiveOutlineModes>,
     views: Query<
         (
             Entity,
@@ -139,14 +136,7 @@ pub(crate) fn queue_outline(
             let Ok(pipeline_id) = mesh_mask_pipelines.specialize(
                 &pipeline_cache,
                 &mesh_mask_pipeline,
-                MaskPipelineKey {
-                    mesh_pipeline_key,
-                    hull_presence: if active.methods.has_hull() {
-                        HullPresence::Present
-                    } else {
-                        HullPresence::Absent
-                    },
-                },
+                mesh_pipeline_key,
                 &mesh.layout,
             ) else {
                 warn!(

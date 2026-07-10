@@ -146,7 +146,6 @@ pub(super) const POST_PROCESS_PASS_LABEL: &str = "post_process_pass";
 
 // shader defs
 pub(super) const HAS_OUTLINE_NORMALS_SHADER_DEF: &str = "HAS_OUTLINE_NORMALS";
-pub(super) const HULL_OUTLINES_SHADER_DEF: &str = "HULL_OUTLINES";
 pub(super) const MULTISAMPLED_SHADER_DEF: &str = "MULTISAMPLED";
 pub(super) const PER_OBJECT_BUFFER_BATCH_SIZE_SHADER_DEF: &str = "PER_OBJECT_BUFFER_BATCH_SIZE";
 

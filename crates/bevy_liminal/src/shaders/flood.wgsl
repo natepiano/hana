@@ -15,7 +15,8 @@ struct JumpFloodUniform {
 @group(0) @binding(4) var appearance_texture: texture_2d<f32>;
 
 fn calculate_priority(candidate_depth: f32, mesh_priority: f32) -> f32 {
-    let depth_factor = (1.0 - candidate_depth) * 10.0;  // Closer is better
+    // Bevy uses reverse-Z: larger depth is closer, and closer seeds win.
+    let depth_factor = candidate_depth * 10.0;
     return depth_factor + mesh_priority;
 }
 

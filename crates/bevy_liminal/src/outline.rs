@@ -42,9 +42,6 @@ impl OutlineMethod {
 
 /// How overlapping outlines from different entities interact.
 ///
-/// **Note:** `OverlapMode` only affects hull methods (`WorldHull`/`ScreenHull`).
-/// `JumpFlood` always produces merged outlines regardless of this setting.
-///
 /// - [`Merged`](OverlapMode::Merged): Overlapping outlined meshes share a single unified silhouette
 ///   outline. No outline is drawn where two outlined surfaces overlap — they merge into a single
 ///   silhouette.

@@ -127,6 +127,7 @@ impl FromWorld for ComposeOutputPipeline {
                     binding_types::texture_depth_2d(),
                     binding_types::texture_depth_2d(),
                     binding_types::texture_depth_2d(),
+                    binding_types::texture_2d(TextureSampleType::Float { filterable: true }),
                 ),
             ),
         );
@@ -143,6 +144,7 @@ impl FromWorld for ComposeOutputPipeline {
                     binding_types::texture_2d_multisampled(TextureSampleType::Depth),
                     binding_types::texture_depth_2d(),
                     binding_types::texture_2d_multisampled(TextureSampleType::Depth),
+                    binding_types::texture_2d(TextureSampleType::Float { filterable: true }),
                 ),
             ),
         );

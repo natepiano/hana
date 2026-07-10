@@ -25,9 +25,7 @@ struct VertexOutput {
 struct FragmentOutput {
     @location(0) flood_data: vec4<f32>,
     @location(1) appearance_data: vec4<f32>,
-#ifdef HULL_OUTLINES
     @location(2) owner_data: vec4<f32>,
-#endif
 }
 
 #ifdef PER_OBJECT_BUFFER_BATCH_SIZE
@@ -101,10 +99,10 @@ fn fragment(vertex: VertexOutput) -> FragmentOutput {
     output.flood_data = vec4<f32>(uv, outline.width, depth);
     // RT1: color.rgb, priority
     output.appearance_data = vec4<f32>(outline.color.rgb * outline.intensity, outline.priority);
-#ifdef HULL_OUTLINES
-    // RT2: owner ID (x) for per-mesh overlap separation in hull mode
-    output.owner_data = outline.owner_data;
-#endif
+    // RT2: owner ID (x) and overlap factor (y). Hull fragments compare x against
+    // their own owner ID; the jump-flood compose pass reads both to decide whether
+    // an outline may draw over another group's outlined surface.
+    output.owner_data = vec4<f32>(outline.owner_data.x, outline.overlap, 0.0, 0.0);
 
     return output;
 }
