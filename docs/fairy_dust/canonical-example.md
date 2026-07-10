@@ -40,6 +40,7 @@ fairy_dust::sprinkle_example()
         |cam| { /* per-example camera tweaks */ },
         OrbitCamPreset::blender_like(),
     )
+    .with_stable_transparency()
     .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -82,6 +83,9 @@ the lifecycle: process plumbing → scene primitives → camera → HUD → syst
   `.with_camera_home()`) is the standard homing affordance. Click-to-home
   on the ground tends to fire on stray clicks and interferes with picking
   the actual demo entities.
+- `.with_stable_transparency()` — order-independent transparency, called after
+  the camera helper. Every example has translucent geometry (ground plane,
+  panels, `WorldText`), so this is unconditional.
 - `.with_camera_control_panel()` — bottom-right camera controls HUD.
 - `.with_title_bar(TitleBar::new()...)` — top-left chip bar listing the
   example's keyboard shortcuts. Always set `.with_title(...)` to the example's
@@ -258,12 +262,6 @@ Rules:
 - A modifier chord an example genuinely demonstrates can't be a bare shortcut
   (it fires only when no modifier is held) — leave that as its own input
   system.
-
-### Stable transparency
-
-Use `.with_stable_transparency()` after installing a Fairy Dust OrbitCam helper
-when the scene contains coplanar `WorldText` or other translucent geometry that
-benefits from order-independent transparency.
 
 ### Custom screen-space panels
 
