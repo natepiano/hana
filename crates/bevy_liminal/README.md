@@ -97,7 +97,7 @@ Adding `Outline` to a parent entity automatically propagates it through the `Chi
 
 | bevy_liminal | Bevy |
 |--------------|------|
-| 0.0.2–0.0.3  | 0.19 |
+| 0.0.2–0.0.4  | 0.19 |
 | 0.0.0–0.0.1  | 0.18 |
 
 ## License
