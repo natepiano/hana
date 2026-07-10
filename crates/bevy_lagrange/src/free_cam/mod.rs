@@ -83,7 +83,6 @@ impl CameraKind for FreeCamKind {
         app.register_type::<Operation<LookAngles>>()
             .register_type::<Operation<Position>>()
             .register_type::<Operation<Roll>>()
-            .register_type::<FreeCamHomePose>()
             .register_type::<FreeCamInput>()
             .register_type::<FreeCamInputMode>()
             .register_type::<IntentChannel<TranslateDelta>>()

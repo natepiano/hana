@@ -61,7 +61,6 @@ mod shortcuts;
 mod transparency;
 mod unclamp;
 
-use bevy::core_pipeline::oit::OrderIndependentTransparencySettings;
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
 pub use bevy_diegetic::Anchor;
@@ -153,7 +152,6 @@ pub use screen_panels::screen_panel_material_handle;
 #[must_use]
 pub fn sprinkle_example() -> SprinkleBuilder<NoOrbitCam> {
     let mut app = App::new();
-    app.register_type::<OrderIndependentTransparencySettings>();
     app.add_plugins(DefaultPlugins.set(quiet_log_plugin()));
     sprinkle_builder(app)
 }

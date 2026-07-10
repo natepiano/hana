@@ -105,7 +105,6 @@ impl CameraKind for OrbitCamKind {
         app.register_type::<Operation<OrbitAngles>>()
             .register_type::<Operation<Focus>>()
             .register_type::<Operation<Radius>>()
-            .register_type::<OrbitCamHomePose>()
             .register_type::<OrbitCamInput>()
             .register_type::<OrbitCamInputMode>()
             .register_type::<IntentChannel<OrbitDelta>>()
