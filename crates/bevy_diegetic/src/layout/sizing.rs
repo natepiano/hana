@@ -1,9 +1,13 @@
 //! Layout sizing and child-flow types.
 
+use bevy::prelude::Reflect;
+use bevy::prelude::ReflectDefault;
+
 use super::Dimension;
 
 /// `Sizing` behavior for a layout element along one axis.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Default, PartialEq, Debug)]
 pub enum Sizing {
     /// Shrink-wrap to content, clamped to `[min, max]`.
     ///

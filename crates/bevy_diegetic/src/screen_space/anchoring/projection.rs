@@ -2,7 +2,7 @@
 
 use bevy::prelude::*;
 
-/// Projects `PanelAnchorPose::rotation` onto the shared screen plane.
+/// Projects `hana_valence::AnchorPose::rotation` onto the shared screen plane.
 ///
 /// Screen honors in-plane rotation; out-of-plane rotation has no screen
 /// effect. The panel cannot leave the plane, so the screen resolver keeps only

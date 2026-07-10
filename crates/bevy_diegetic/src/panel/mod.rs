@@ -3,7 +3,7 @@
 
 mod anchor_geometry;
 mod anchoring;
-mod attachment_resolver;
+mod arrangement;
 mod builder;
 mod compute_layout;
 mod constants;
@@ -16,15 +16,7 @@ mod gizmos;
 mod perf;
 mod precompose;
 mod sizing;
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "phase 7 registers the valence provider; phase 6 keeps it unscheduled"
-    )
-)]
 mod valence_provider;
-mod world_anchoring;
 
 pub use anchor_geometry::PanelAnchorEdge;
 pub use anchor_geometry::PanelAnchorEdgeEndpoints;
@@ -38,14 +30,9 @@ pub use anchor_geometry::ResolvedPanelAnchorGeometry;
 pub(crate) use anchor_geometry::screen_anchor_position;
 pub use anchoring::AnchoredToPanel;
 pub use anchoring::PanelAnchorOffset;
-pub use anchoring::PanelAnchorPose;
-pub use anchoring::PanelsAnchoredHere;
+pub(crate) use anchoring::PanelAttachmentAuthored;
 pub(crate) use anchoring::ResolvedScreenPanelPosition;
-pub(crate) use attachment_resolver::AttachmentResolveAction;
-pub(crate) use attachment_resolver::AttachmentResolveCandidate;
-pub(crate) use attachment_resolver::AttachmentResolveDiagnostics;
-pub(crate) use attachment_resolver::AttachmentResolveReasons;
-pub(crate) use attachment_resolver::resolve_panel_attachments;
+pub use arrangement::ArrangedPanel;
 use bevy::ecs::schedule::ApplyDeferred;
 use bevy::prelude::*;
 use bevy::transform::TransformSystems;
@@ -70,6 +57,7 @@ pub(crate) use conversion::apply_world_conversion;
 pub(crate) use conversion::validate_screen_conversion;
 pub(crate) use conversion::validate_world_conversion;
 pub use coordinate_space::CoordinateSpace;
+pub use coordinate_space::PanelSpace;
 pub use coordinate_space::ScreenPosition;
 pub use coordinate_space::SurfaceShadow;
 pub use diegetic_panel::ComputedDiegeticPanel;
@@ -86,6 +74,8 @@ pub(crate) use events::trigger_panel_dimensions_changed;
 pub use field::PanelFieldRecord;
 pub use gizmos::DiegeticPanelGizmoGroup;
 pub use gizmos::ShowTextGizmos;
+use hana_valence::AnchorSystems;
+use hana_valence::ResolveDiagnostics;
 pub use perf::BatchPerfStats;
 pub use perf::BatchSummary;
 use perf::DiagnosticsPlugin;
@@ -111,7 +101,6 @@ pub use sizing::PanelSizing;
 pub use sizing::Percent;
 pub use sizing::Pixels;
 pub use sizing::Points;
-use world_anchoring::WorldAnchorResolveDiagnostics;
 
 use crate::cascade::CascadePlugin;
 use crate::cascade::CascadeSet;
@@ -147,8 +136,8 @@ pub enum PanelSystems {
     /// (`render_debug_gizmos`).
     RenderGizmos,
     /// `PostUpdate` ordering point for animation systems that write
-    /// resolver-read inputs — `PanelAnchorPose`, and relation insert/remove at
-    /// state boundaries — before `resolve_world_space_panel_attachments`.
+    /// resolver-read inputs — `hana_valence::AnchorPose`, and relation
+    /// insert/remove at state boundaries — before `hana_valence::resolve_anchors`.
     /// Writes here land this frame; writes after the resolver land next frame.
     AnimateAnchorPose,
 }
@@ -180,7 +169,13 @@ impl Plugin for HeadlessLayoutPlugin {
             .init_resource::<DiegeticPerfStats>()
             .init_resource::<ShapedTextCache>()
             .init_resource::<PanelDefaults>()
-            .init_resource::<WorldAnchorResolveDiagnostics>()
+            .init_resource::<ResolveDiagnostics>()
+            .add_observer(coordinate_space::sync_panel_space_on_add)
+            .add_observer(hana_valence::on_member_added)
+            .add_observer(hana_valence::on_member_removed)
+            .add_observer(anchoring::on_panel_attachment_inserted)
+            .add_observer(anchoring::on_panel_attachment_removed)
+            .add_observer(anchoring::on_panel_space_changed)
             .configure_sets(
                 Update,
                 (
@@ -207,17 +202,40 @@ impl Plugin for HeadlessLayoutPlugin {
             )
             .configure_sets(
                 PostUpdate,
-                PanelSystems::AnimateAnchorPose
-                    .before(world_anchoring::resolve_world_space_panel_attachments),
+                (
+                    (
+                        AnchorSystems::FillGeometry,
+                        AnchorSystems::AnimatePose,
+                        AnchorSystems::Resolve,
+                    )
+                        .chain()
+                        .before(TransformSystems::Propagate),
+                    PanelSystems::AnimateAnchorPose.in_set(AnchorSystems::AnimatePose),
+                ),
             )
             .add_systems(
                 PostUpdate,
                 (
-                    world_anchoring::restore_inactive_world_panel_poses,
-                    world_anchoring::resolve_world_space_panel_attachments,
-                )
-                    .chain()
-                    .before(TransformSystems::Propagate),
+                    anchoring::restore_inactive_world_panel_poses.before(AnchorSystems::Resolve),
+                    valence_provider::write_panel_anchor_geometry
+                        .in_set(AnchorSystems::FillGeometry),
+                    (
+                        hana_valence::assign_member_indices,
+                        arrangement::apply_panel_member_placements,
+                        ApplyDeferred,
+                    )
+                        .chain()
+                        .after(AnchorSystems::FillGeometry)
+                        .before(AnchorSystems::AnimatePose),
+                    anchoring::write_panel_anchor_offsets.before(AnchorSystems::Resolve),
+                    hana_valence::drive_arrangement_hinges::<hana_valence::QuadTiling>
+                        .in_set(AnchorSystems::AnimatePose)
+                        .after(PanelSystems::AnimateAnchorPose),
+                    hana_valence::hinge_to_pose
+                        .in_set(AnchorSystems::AnimatePose)
+                        .after(hana_valence::drive_arrangement_hinges::<hana_valence::QuadTiling>),
+                    hana_valence::resolve_anchors.in_set(AnchorSystems::Resolve),
+                ),
             );
     }
 }

@@ -16,7 +16,6 @@ const BOTTOM_LEFT_VERTEX: u32 = 3;
 const BOTTOM_RIGHT_VERTEX: u32 = 2;
 const CENTER_LEFT_EDGE: u32 = 3;
 const CENTER_RIGHT_EDGE: u32 = 1;
-const HALF_EXTENT_FACTOR: f32 = 0.5;
 const QUAD_ANCHOR_COUNT: usize = 9;
 const QUAD_EDGE_COUNT: usize = 4;
 const TOP_CENTER_EDGE: u32 = 0;
@@ -70,27 +69,36 @@ pub(super) fn write_panel_anchor_geometry(
             continue;
         }
 
-        let size = Vec2::new(panel.world_width(), panel.world_height());
         if let Some(mut geometry) = geometry {
-            write_geometry(&mut geometry, size);
+            let size = Vec2::new(panel.world_width(), panel.world_height());
+            write_geometry(&mut geometry, size, panel.anchor());
         } else {
-            let mut geometry = ResolvedAnchorGeometry {
-                points: HashMap::default(),
-                edges:  Vec::with_capacity(QUAD_EDGE_COUNT),
-            };
-            geometry.points.reserve(QUAD_ANCHOR_COUNT);
-            write_geometry(&mut geometry, size);
-            commands.entity(entity).insert(geometry);
+            commands.entity(entity).insert(panel_anchor_geometry(panel));
         }
     }
 }
 
-fn write_geometry(geometry: &mut ResolvedAnchorGeometry, size: Vec2) {
+/// Builds fresh quad anchor geometry for `panel` in its local frame.
+pub(super) fn panel_anchor_geometry(panel: &DiegeticPanel) -> ResolvedAnchorGeometry {
+    let mut geometry = ResolvedAnchorGeometry {
+        points: HashMap::default(),
+        edges:  Vec::with_capacity(QUAD_EDGE_COUNT),
+    };
+    geometry.points.reserve(QUAD_ANCHOR_COUNT);
+    write_geometry(
+        &mut geometry,
+        Vec2::new(panel.world_width(), panel.world_height()),
+        panel.anchor(),
+    );
+    geometry
+}
+
+fn write_geometry(geometry: &mut ResolvedAnchorGeometry, size: Vec2, panel_anchor: Anchor) {
     let anchor_ids = quad_anchor_ids();
     geometry
         .points
         .retain(|anchor_id, _| anchor_ids.contains(anchor_id));
-    for (anchor, position) in quad_anchor_points(size) {
+    for (anchor, position) in quad_anchor_points(size, panel_anchor) {
         let point = AnchorPoint {
             position,
             frame: None,
@@ -127,26 +135,60 @@ fn quad_anchor_ids() -> [AnchorId; QUAD_ANCHOR_COUNT] {
     ]
 }
 
-fn quad_anchor_points(size: Vec2) -> [(Anchor, Vec3); QUAD_ANCHOR_COUNT] {
-    let half_width = size.x * HALF_EXTENT_FACTOR;
-    let half_height = size.y * HALF_EXTENT_FACTOR;
+fn quad_anchor_points(size: Vec2, panel_anchor: Anchor) -> [(Anchor, Vec3); QUAD_ANCHOR_COUNT] {
+    let panel_offset = anchor_offset(panel_anchor, size);
     [
-        (Anchor::TopLeft, Vec3::new(-half_width, half_height, 0.0)),
-        (Anchor::TopRight, Vec3::new(half_width, half_height, 0.0)),
+        (
+            Anchor::TopLeft,
+            anchor_position(Anchor::TopLeft, size, panel_offset),
+        ),
+        (
+            Anchor::TopRight,
+            anchor_position(Anchor::TopRight, size, panel_offset),
+        ),
         (
             Anchor::BottomRight,
-            Vec3::new(half_width, -half_height, 0.0),
+            anchor_position(Anchor::BottomRight, size, panel_offset),
         ),
         (
             Anchor::BottomLeft,
-            Vec3::new(-half_width, -half_height, 0.0),
+            anchor_position(Anchor::BottomLeft, size, panel_offset),
         ),
-        (Anchor::TopCenter, Vec3::new(0.0, half_height, 0.0)),
-        (Anchor::CenterRight, Vec3::new(half_width, 0.0, 0.0)),
-        (Anchor::BottomCenter, Vec3::new(0.0, -half_height, 0.0)),
-        (Anchor::CenterLeft, Vec3::new(-half_width, 0.0, 0.0)),
-        (Anchor::Center, Vec3::ZERO),
+        (
+            Anchor::TopCenter,
+            anchor_position(Anchor::TopCenter, size, panel_offset),
+        ),
+        (
+            Anchor::CenterRight,
+            anchor_position(Anchor::CenterRight, size, panel_offset),
+        ),
+        (
+            Anchor::BottomCenter,
+            anchor_position(Anchor::BottomCenter, size, panel_offset),
+        ),
+        (
+            Anchor::CenterLeft,
+            anchor_position(Anchor::CenterLeft, size, panel_offset),
+        ),
+        (
+            Anchor::Center,
+            anchor_position(Anchor::Center, size, panel_offset),
+        ),
     ]
+}
+
+fn anchor_position(anchor: Anchor, size: Vec2, panel_offset: Vec2) -> Vec3 {
+    let anchor_offset = anchor_offset(anchor, size);
+    Vec3::new(
+        anchor_offset.x - panel_offset.x,
+        panel_offset.y - anchor_offset.y,
+        0.0,
+    )
+}
+
+fn anchor_offset(anchor: Anchor, size: Vec2) -> Vec2 {
+    let (x, y) = anchor.offset(size.x, size.y);
+    Vec2::new(x, y)
 }
 
 const fn quad_edges() -> [Edge; QUAD_EDGE_COUNT] {
@@ -183,7 +225,6 @@ mod tests {
     use hana_valence::AnchorId;
     use hana_valence::ResolvedAnchorGeometry;
 
-    use super::HALF_EXTENT_FACTOR;
     use super::quad_edges;
     use super::write_panel_anchor_geometry;
     use crate::layout::Anchor;
@@ -192,6 +233,7 @@ mod tests {
     const EXPECTED_EDGE_COUNT: usize = 4;
     const EXPECTED_POINT_COUNT: usize = 9;
     const GEOMETRY_EPSILON: f32 = 1e-5;
+    const HALF_EXTENT_FACTOR: f32 = 0.5;
     const PANEL_HEIGHT: f32 = 1.0;
     const PANEL_WIDTH: f32 = 2.0;
     const RESIZED_PANEL_HEIGHT: f32 = 2.0;
@@ -303,24 +345,38 @@ mod tests {
         expected_width: f32,
         expected_height: f32,
     ) {
-        let half_width = expected_width * HALF_EXTENT_FACTOR;
-        let half_height = expected_height * HALF_EXTENT_FACTOR;
         let cases = [
-            (Anchor::TopLeft, Vec3::new(-half_width, half_height, 0.0)),
-            (Anchor::TopRight, Vec3::new(half_width, half_height, 0.0)),
+            (Anchor::TopLeft, Vec3::ZERO),
+            (Anchor::TopRight, Vec3::new(expected_width, 0.0, 0.0)),
             (
                 Anchor::BottomRight,
-                Vec3::new(half_width, -half_height, 0.0),
+                Vec3::new(expected_width, -expected_height, 0.0),
+            ),
+            (Anchor::BottomLeft, Vec3::new(0.0, -expected_height, 0.0)),
+            (
+                Anchor::TopCenter,
+                Vec3::new(expected_width * HALF_EXTENT_FACTOR, 0.0, 0.0),
             ),
             (
-                Anchor::BottomLeft,
-                Vec3::new(-half_width, -half_height, 0.0),
+                Anchor::CenterRight,
+                Vec3::new(expected_width, -expected_height * HALF_EXTENT_FACTOR, 0.0),
             ),
-            (Anchor::TopCenter, Vec3::new(0.0, half_height, 0.0)),
-            (Anchor::CenterRight, Vec3::new(half_width, 0.0, 0.0)),
-            (Anchor::BottomCenter, Vec3::new(0.0, -half_height, 0.0)),
-            (Anchor::CenterLeft, Vec3::new(-half_width, 0.0, 0.0)),
-            (Anchor::Center, Vec3::ZERO),
+            (
+                Anchor::BottomCenter,
+                Vec3::new(expected_width * HALF_EXTENT_FACTOR, -expected_height, 0.0),
+            ),
+            (
+                Anchor::CenterLeft,
+                Vec3::new(0.0, -expected_height * HALF_EXTENT_FACTOR, 0.0),
+            ),
+            (
+                Anchor::Center,
+                Vec3::new(
+                    expected_width * HALF_EXTENT_FACTOR,
+                    -expected_height * HALF_EXTENT_FACTOR,
+                    0.0,
+                ),
+            ),
         ];
 
         for (anchor, expected) in cases {

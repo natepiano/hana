@@ -2,6 +2,9 @@
 
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use hana_valence::AnchorPose;
+use hana_valence::AttachmentResolveCandidate;
+use hana_valence::AttachmentResolveDiagnostics;
 
 use super::AnchorResolveSkip;
 use super::candidate;
@@ -9,12 +12,9 @@ use super::placement;
 use super::placement::ScreenAttachmentPlacer;
 use super::rect;
 use super::window;
-use crate::panel;
-use crate::panel::AnchoredToPanel;
-use crate::panel::AttachmentResolveCandidate;
-use crate::panel::AttachmentResolveDiagnostics;
 use crate::panel::DiegeticPanel;
-use crate::panel::PanelAnchorPose;
+use crate::panel::PanelAnchorOffset;
+use crate::panel::PanelAttachmentAuthored;
 use crate::panel::ResolvedScreenPanelPosition;
 
 pub(crate) type AnchorResolveDiagnostics = AttachmentResolveDiagnostics<AnchorResolveSkip>;
@@ -24,8 +24,8 @@ pub(crate) fn resolve_screen_space_panel_attachments(
     windows: Query<(Entity, &Window)>,
     primary: Query<Entity, With<PrimaryWindow>>,
     entities: Query<()>,
-    attachments: Query<(Entity, &AnchoredToPanel)>,
-    anchor_poses: Query<(Entity, &PanelAnchorPose)>,
+    attachments: Query<(Entity, &PanelAttachmentAuthored, &PanelAnchorOffset)>,
+    anchor_poses: Query<(Entity, &AnchorPose)>,
     panels: Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
     transforms: Query<&Transform>,
     mut resolved_positions: Query<&mut ResolvedScreenPanelPosition>,
@@ -35,6 +35,7 @@ pub(crate) fn resolve_screen_space_panel_attachments(
     let mut desired_placements = placement::desired_placement_map(&panels);
     let mut depths = placement::panel_depths(&panels, &resolved_positions, &transforms);
     let anchor_poses = placement::panel_anchor_pose_map(&anchor_poses);
+    let attachments_by_source = placement::screen_attachment_map(&attachments);
     let mut rects = rect::screen_panel_rects(
         &panels,
         &resolved_positions,
@@ -57,8 +58,9 @@ pub(crate) fn resolve_screen_space_panel_attachments(
         desired_placements: &mut desired_placements,
         depths:             &mut depths,
         anchor_poses:       &anchor_poses,
+        attachments:        &attachments_by_source,
     };
-    panel::resolve_panel_attachments(
+    hana_valence::resolve_attachments(
         candidates,
         placement::screen_attachment_resolve_reasons(),
         &mut diagnostics,
@@ -79,6 +81,7 @@ mod tests {
     use bevy::prelude::*;
     use bevy::window::PrimaryWindow;
     use bevy::window::Window;
+    use hana_valence::AnchorPose;
 
     use super::AnchorResolveDiagnostics;
     use super::AnchorResolveSkip;
@@ -86,7 +89,6 @@ mod tests {
     use crate::Fit;
     use crate::HeadlessLayoutPlugin;
     use crate::PanelAnchorOffset;
-    use crate::PanelAnchorPose;
     use crate::PanelDimensionsChanged;
     use crate::PanelSystems;
     use crate::Pt;
@@ -97,6 +99,7 @@ mod tests {
     use crate::layout::TextMeasure;
     use crate::layout::TextStyle;
     use crate::panel::DiegeticPanel;
+    use crate::panel::PanelAttachmentAuthored;
     use crate::panel::ResolvedScreenPanelPosition;
     use crate::screen_space::ScreenSpacePlugin;
     use crate::screen_space::ScreenSpaceSystems;
@@ -375,7 +378,7 @@ mod tests {
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::new(0.0, 0.0)),
                 AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::new(10.0, 20.0, 30.0),
                 },
@@ -442,7 +445,7 @@ mod tests {
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::Center, Vec2::ZERO),
                 AnchoredToPanel::new(target, Anchor::BottomRight, Anchor::BottomLeft),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::IDENTITY,
                     translation: Vec3::ZERO,
                 },
@@ -454,7 +457,7 @@ mod tests {
         let identity_pin = panel_anchor_screen_point(&app, source, Anchor::BottomRight);
         assert_vec2_close(identity_pin, Vec2::new(100.0, 140.0));
 
-        app.world_mut().entity_mut(source).insert(PanelAnchorPose {
+        app.world_mut().entity_mut(source).insert(AnchorPose {
             rotation:    Quat::from_rotation_z(FRAC_PI_2),
             translation: Vec3::ZERO,
         });
@@ -488,7 +491,7 @@ mod tests {
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::new(Px(0.0), Px(1.0))),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_x(FRAC_PI_2),
                     translation: Vec3::ZERO,
                 },
@@ -587,8 +590,8 @@ mod tests {
 
         let attachment = app
             .world()
-            .get::<AnchoredToPanel>(dependent)
-            .expect("observer inserted relationship");
+            .get::<PanelAttachmentAuthored>(dependent)
+            .expect("observer inserted attachment authoring");
         assert_eq!(attachment.target(), target);
         assert_translation(&app, dependent, Vec2::new(-300.0, 159.0));
     }
@@ -876,7 +879,7 @@ mod tests {
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft)
                     .with_offset(PanelAnchorOffset::ZERO.with_z(Px(5.0))),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::IDENTITY,
                     translation: Vec3::new(0.0, 0.0, -5.0),
                 },
@@ -897,7 +900,7 @@ mod tests {
                 Anchor::TopLeft,
                 Anchor::BottomLeft,
             ))
-            .remove::<PanelAnchorPose>();
+            .remove::<AnchorPose>();
         app.update();
 
         assert_eq!(resolved_depth(&app, source), None);
@@ -989,7 +992,7 @@ mod tests {
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(target, Anchor::TopLeft, Anchor::BottomLeft),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
                 },
@@ -1005,9 +1008,7 @@ mod tests {
         assert_eq!(authored_rotation(&app, source), Some(0.0));
         assert_rotation_z(&app, source, FRAC_PI_2);
 
-        app.world_mut()
-            .entity_mut(source)
-            .remove::<PanelAnchorPose>();
+        app.world_mut().entity_mut(source).remove::<AnchorPose>();
         app.update();
 
         assert_eq!(resolved_rotation(&app, source), None);
@@ -1221,7 +1222,7 @@ mod tests {
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::TopLeft),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
                 },
@@ -1266,7 +1267,7 @@ mod tests {
             .spawn((
                 fixed_screen_panel(Vec2::new(50.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(root, Anchor::TopLeft, Anchor::BottomLeft),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_z(FRAC_PI_2),
                     translation: Vec3::ZERO,
                 },
@@ -1277,7 +1278,7 @@ mod tests {
             .spawn((
                 fixed_screen_panel(Vec2::new(25.0, 10.0), Anchor::TopLeft, Vec2::ZERO),
                 AnchoredToPanel::new(middle, Anchor::TopLeft, Anchor::BottomLeft),
-                PanelAnchorPose {
+                AnchorPose {
                     rotation:    Quat::from_rotation_z(-FRAC_PI_2),
                     translation: Vec3::ZERO,
                 },

@@ -2,17 +2,18 @@
 
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
+use hana_valence::AnchorPose;
+use hana_valence::AttachmentResolveAction;
+use hana_valence::AttachmentResolveReasons;
 
 use super::candidate::AnchorResolveSkip;
 use super::rect::ScreenPanelRect;
 use super::rotate_screen_offset;
 use super::screen_in_plane_angle;
 use crate::layout::Anchor;
-use crate::panel::AnchoredToPanel;
-use crate::panel::AttachmentResolveAction;
-use crate::panel::AttachmentResolveReasons;
 use crate::panel::DiegeticPanel;
-use crate::panel::PanelAnchorPose;
+use crate::panel::PanelAnchorOffset;
+use crate::panel::PanelAttachmentAuthored;
 use crate::panel::PanelScreenBounds;
 use crate::panel::ResolvedScreenPanelPosition;
 
@@ -65,13 +66,37 @@ pub(super) fn panel_depths(
 }
 
 pub(super) fn panel_anchor_pose_map(
-    anchor_poses: &Query<(Entity, &PanelAnchorPose)>,
-) -> HashMap<Entity, PanelAnchorPose> {
+    anchor_poses: &Query<(Entity, &AnchorPose)>,
+) -> HashMap<Entity, AnchorPose> {
     let mut pose_by_entity = HashMap::default();
     for (entity, pose) in anchor_poses {
         pose_by_entity.insert(entity, *pose);
     }
     pose_by_entity
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct ScreenAttachment {
+    source_anchor: Anchor,
+    target_anchor: Anchor,
+    offset:        PanelAnchorOffset,
+}
+
+pub(super) fn screen_attachment_map(
+    attachments: &Query<(Entity, &PanelAttachmentAuthored, &PanelAnchorOffset)>,
+) -> HashMap<Entity, ScreenAttachment> {
+    let mut by_source = HashMap::default();
+    for (source, authored, offset) in attachments {
+        by_source.insert(
+            source,
+            ScreenAttachment {
+                source_anchor: authored.source_anchor(),
+                target_anchor: authored.target_anchor(),
+                offset:        *offset,
+            },
+        );
+    }
+    by_source
 }
 
 pub(super) fn write_desired_placements(
@@ -98,7 +123,8 @@ pub(super) struct ScreenAttachmentPlacer<'a> {
     pub(super) rects:              &'a mut HashMap<Entity, ScreenPanelRect>,
     pub(super) desired_placements: &'a mut HashMap<Entity, DesiredScreenPlacement>,
     pub(super) depths:             &'a mut HashMap<Entity, f32>,
-    pub(super) anchor_poses:       &'a HashMap<Entity, PanelAnchorPose>,
+    pub(super) anchor_poses:       &'a HashMap<Entity, AnchorPose>,
+    pub(super) attachments:        &'a HashMap<Entity, ScreenAttachment>,
 }
 
 impl ScreenAttachmentPlacer<'_> {
@@ -110,8 +136,8 @@ impl ScreenAttachmentPlacer<'_> {
             AttachmentResolveAction::Place {
                 source,
                 target,
-                attachment,
-            } => self.place(source, target, attachment),
+                attachment: _,
+            } => self.place(source, target),
             AttachmentResolveAction::Fallback { source } => {
                 self.fallback(source);
                 Ok(())
@@ -119,16 +145,14 @@ impl ScreenAttachmentPlacer<'_> {
         }
     }
 
-    fn place(
-        &mut self,
-        source: Entity,
-        target: Entity,
-        attachment: AnchoredToPanel,
-    ) -> Result<(), AnchorResolveSkip> {
+    fn place(&mut self, source: Entity, target: Entity) -> Result<(), AnchorResolveSkip> {
         let Some(target_rect) = self.rects.get(&target).copied() else {
             return Err(AnchorResolveSkip::TargetWithoutPanel);
         };
         let Some(source_rect) = self.rects.get(&source).copied() else {
+            return Err(AnchorResolveSkip::SourceWithoutPanel);
+        };
+        let Some(attachment) = self.attachments.get(&source).copied() else {
             return Err(AnchorResolveSkip::SourceWithoutPanel);
         };
         let Some(target_bounds) = target_rect.bounds() else {

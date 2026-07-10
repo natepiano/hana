@@ -23,6 +23,7 @@ use super::builder::World;
 use super::constants::PANEL_RESIZE_EPSILON;
 use super::conversion;
 use super::coordinate_space::CoordinateSpace;
+use super::coordinate_space::PanelSpace;
 use super::coordinate_space::ScreenPosition;
 use super::coordinate_space::SurfaceShadow;
 use super::events::LastPanelDimensions;
@@ -936,7 +937,7 @@ fn apply_panel_screen_conversion_now(
     transform.scale = Vec3::ONE;
     *resolved_position = ResolvedScreenPanelPosition::default();
     let mut entity_commands = commands.entity(entity);
-    entity_commands.insert(render_layers);
+    entity_commands.insert((render_layers, PanelSpace::Screen));
     if let Some(handoff) = handoff.filter(|_| was_world_panel) {
         entity_commands.insert(handoff);
     }
@@ -1115,6 +1116,7 @@ fn apply_panel_world_conversion_now(
     *transform = next_transform;
     *resolved_position = ResolvedScreenPanelPosition::default();
     let mut entity_commands = commands.entity(entity);
+    entity_commands.insert(PanelSpace::World);
     if let Some(saved) = saved {
         entity_commands.insert((
             Override(FontUnit(saved.resolved_font_unit)),

@@ -6,17 +6,17 @@
 //! and spin modes share the diagonal anchor fan, and the hinge chain is
 //! the same tiles re-anchored edge-to-edge into a folding strip. A switch between
 //! the fan and the strip arms a [`ModeMorph`]: the tiles keep their outgoing
-//! relation, their [`PanelAnchorPose`] eases from the live pose to the pose that
+//! relation, their [`AnchorPose`] eases from the live pose to the pose that
 //! reproduces the incoming layout, and only when the ease completes are the
 //! relations re-pointed to the incoming mode — so the swap is invisible and the
 //! tiles glide between layouts from any animation state.
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::PanelAnchorPose;
 use bevy_lagrange::ZoomToFit;
 use fairy_dust::CameraHomeEntity;
 use fairy_dust::FairyDustOrbitCam;
+use hana_valence::AnchorPose;
 
 use crate::anchor_demo::AnchorChain;
 use crate::anchor_demo::AnchorSelection;
@@ -91,7 +91,7 @@ impl ModeMorph {
 /// glides on from where it was rather than snapping to rest.
 #[derive(Component, Clone, Copy)]
 pub(crate) struct TileMorph {
-    start: PanelAnchorPose,
+    start: AnchorPose,
 }
 
 /// Spawns the one persistent tile set (in the anchor fan) and primes the active
@@ -123,7 +123,7 @@ pub(crate) fn handle_capability_input(
     mut morph: ResMut<ModeMorph>,
     mut spin: ResMut<Spin>,
     mut hinge: ResMut<HingeChain>,
-    tiles: Query<(Entity, &AnchorTile, &Transform, Option<&PanelAnchorPose>)>,
+    tiles: Query<(Entity, &AnchorTile, &Transform, Option<&AnchorPose>)>,
     mut commands: Commands,
 ) {
     if morph.active {
@@ -202,7 +202,7 @@ fn handle_hinge_selection(keyboard: &ButtonInput<KeyCode>, hinge: &mut HingeChai
 }
 
 /// Captures each tile's current pose as the morph start, rebuilds every tile tree
-/// for the incoming mode, and seeds a [`PanelAnchorPose`] on every anchored tile
+/// for the incoming mode, and seeds a [`AnchorPose`] on every anchored tile
 /// so [`advance_mode_morph`] has a pose to drive. The outgoing relations stay
 /// attached; only the trees and the pose change here.
 fn arm_mode_morph(
@@ -210,7 +210,7 @@ fn arm_mode_morph(
     selection: AnchorSelection,
     count: usize,
     show_marker: bool,
-    tiles: &Query<(Entity, &AnchorTile, &Transform, Option<&PanelAnchorPose>)>,
+    tiles: &Query<(Entity, &AnchorTile, &Transform, Option<&AnchorPose>)>,
     commands: &mut Commands,
 ) {
     for (entity, tile, _, pose) in tiles {
@@ -252,7 +252,7 @@ pub(crate) fn advance_mode_morph(
     mut spin: ResMut<Spin>,
     selection: Res<AnchorSelection>,
     all_tiles: Query<(Entity, &AnchorTile)>,
-    mut poses: Query<(Option<&TileMorph>, &mut PanelAnchorPose), With<AnchorTile>>,
+    mut poses: Query<(Option<&TileMorph>, &mut AnchorPose), With<AnchorTile>>,
     mut commands: Commands,
 ) {
     if !morph.active {
@@ -303,9 +303,9 @@ fn finalize_mode_morph(
         tile.insert(anchoring_relation(to_index, by_order[order - 1], selection))
             .remove::<TileMorph>();
         if to_index == HINGE_CHAIN_INDEX || to_index == SPIN_INDEX {
-            tile.insert(PanelAnchorPose::default());
+            tile.insert(AnchorPose::default());
         } else {
-            tile.remove::<PanelAnchorPose>();
+            tile.remove::<AnchorPose>();
         }
     }
 }

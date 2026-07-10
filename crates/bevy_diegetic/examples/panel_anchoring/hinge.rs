@@ -5,7 +5,7 @@
 //! The tiles are the same persistent set the anchor fan uses; switching to the
 //! hinge chain morphs them into the flat strip (see [`crate::scene`]). Tile `0` is
 //! the fixed top of the strip; every later tile anchors its top edge onto its
-//! parent's bottom edge and carries a [`PanelAnchorPose`] that [`drive_hinge_pose`]
+//! parent's bottom edge and carries a [`AnchorPose`] that [`drive_hinge_pose`]
 //! writes as the hinge angle, so the chain collapses toward tile `0` and unwraps
 //! back. `A`/`C` pick accordion vs coil, `F`/`B` the lean toward or away from the
 //! camera, `G`/`S` glide vs step travel, and `U`/`D`/`R` fold, mirror-fold, and
@@ -21,11 +21,13 @@ use bevy_diegetic::GlyphShadowMode;
 use bevy_diegetic::LayoutBuilder;
 use bevy_diegetic::LayoutTree;
 use bevy_diegetic::Mm;
-use bevy_diegetic::PanelAnchorPose;
 use bevy_diegetic::Sizing;
 use bevy_diegetic::TextStyle;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleChipActivation;
+use hana_valence::Accordion;
+use hana_valence::AnchorPose;
+pub(crate) use hana_valence::FoldPattern;
 
 use crate::anchor_demo::AnchorChain;
 use crate::anchor_demo::AnchorTile;
@@ -41,16 +43,6 @@ pub(crate) enum HingePhase {
     Unwrapping,
     /// Easing back to the folded chain (`unwrap` → `0`).
     Folding,
-}
-
-/// Which fold pattern the chain collapses with (`A`/`C`). Selecting one only
-/// relights the control; the next `U`/`D`/`R` is what moves the chain.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FoldPattern {
-    /// Adjacent creases bend opposite ways (the current fold).
-    Accordion,
-    /// Each link rolls onto its neighbor the same way.
-    Coil,
 }
 
 /// Which way the folded stack leans relative to the camera (`F`/`B`). Selecting
@@ -145,10 +137,6 @@ impl Default for HingeChain {
 }
 
 impl HingeChain {
-    /// Hinge angle (radians) each dependent link tilts about its pinned edge at the
-    /// current unwrap progress; zero when fully unwrapped.
-    fn link_angle(self) -> f32 { HINGE_FOLD_ANGLE_RAD * (1.0 - self.unwrap) }
-
     /// The lit fold pattern (`A`/`C`).
     pub(crate) const fn pattern(self) -> FoldPattern { self.lit.pattern }
 
@@ -237,6 +225,14 @@ impl HingeChain {
         self.from_unwrap = self.unwrap;
         self.timer = 0.0;
     }
+
+    fn accordion(self, lean: f32) -> Accordion {
+        Accordion {
+            fold: 1.0 - self.unwrap,
+            lean,
+            pattern: self.folded.pattern,
+        }
+    }
 }
 
 impl TitleChipActivation for HingeChain {
@@ -247,17 +243,6 @@ impl TitleChipActivation for HingeChain {
         } else {
             ControlActivation::Inactive
         }
-    }
-}
-
-/// Per-crease fold sign for a folding link `steps` links from the fixed top under
-/// `pattern`. An accordion alternates the sign so adjacent creases bend opposite
-/// ways (zigzag); a coil keeps it constant so each crease bends the same way and
-/// the links roll onto one another.
-const fn crease_sign(pattern: FoldPattern, steps: usize) -> f32 {
-    match pattern {
-        FoldPattern::Accordion if steps.is_multiple_of(2) => -1.0,
-        FoldPattern::Accordion | FoldPattern::Coil => 1.0,
     }
 }
 
@@ -301,7 +286,7 @@ pub(crate) fn advance_hinge(hinge: &mut HingeChain, dt: f32) {
 pub(crate) const fn hinge_paused(hinge: &HingeChain) -> bool { hinge.paused }
 
 /// Writes the right-axis hinge rotation onto every folding tile in
-/// `PanelSystems::AnimateAnchorPose`, before the world resolver. Tile `0` is the
+/// `PanelSystems::AnimateAnchorPose`, before the valence resolver. Tile `0` is the
 /// fixed top and carries no pose; every later tile tilts about its pinned top edge
 /// by the hinge angle times its crease sign (alternating for an accordion, constant
 /// for a coil) and the committed lean, so the chain collapses toward tile `0` and
@@ -312,22 +297,21 @@ pub(crate) fn drive_hinge_pose(
     morph: Res<ModeMorph>,
     hinge: Res<HingeChain>,
     chain: Res<AnchorChain>,
-    mut poses: Query<(&mut PanelAnchorPose, &AnchorTile)>,
+    mut poses: Query<(&mut AnchorPose, &AnchorTile)>,
 ) {
     if morph.active() || active.index != HINGE_CHAIN_INDEX {
         return;
     }
-    let angle = hinge.link_angle();
     let count = chain.count();
     let fold = hinge.folded;
     let down = matches!(fold.action, FoldAction::Down);
-    let lean = fold_lean(fold.direction) * if down { -1.0 } else { 1.0 };
+    let lean = HINGE_FOLD_ANGLE_RAD * fold_lean(fold.direction) * if down { -1.0 } else { 1.0 };
+    let accordion = hinge.accordion(lean);
     for (mut pose, tile) in &mut poses {
         if tile.order == 0 || tile.order >= count {
             continue;
         }
-        let sign = crease_sign(fold.pattern, tile.order);
-        pose.rotation = Quat::from_rotation_x(angle * sign * lean);
+        pose.rotation = Quat::from_rotation_x(accordion.fold_contribution(tile.order));
         pose.translation = Vec3::ZERO;
     }
 }

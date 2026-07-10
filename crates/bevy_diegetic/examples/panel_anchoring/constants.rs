@@ -153,7 +153,7 @@ pub(crate) const HINGE_BORDER_WIDTH: f32 = 1.2;
 /// half-turn so every link folds flat back onto its neighbour, collapsing the
 /// chain to a single coplanar stack. The unwrap eases this to zero (coplanar
 /// strip spread out). Sign alternates per link for an accordion, stays constant
-/// for a coil (see [`crate::hinge::crease_sign`]).
+/// for a coil through [`hana_valence::Accordion::fold_contribution`].
 pub(crate) const HINGE_FOLD_ANGLE_RAD: f32 = std::f32::consts::PI;
 /// Seconds for a full fold/unwrap ease, independent of link count: every
 /// transition takes the same wall-clock time whether the chain has three links

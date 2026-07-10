@@ -21,7 +21,6 @@ use bevy_diegetic::Mm;
 use bevy_diegetic::Padding;
 use bevy_diegetic::PanelAnchorGeometryParam;
 use bevy_diegetic::PanelAnchorOffset;
-use bevy_diegetic::PanelAnchorPose;
 use bevy_diegetic::PanelCircle;
 use bevy_diegetic::PanelCoord;
 use bevy_diegetic::PanelDraw;
@@ -34,6 +33,7 @@ use bevy_diegetic::Unit;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleChipActivation;
+use hana_valence::AnchorPose;
 
 use crate::constants::*;
 use crate::hinge::HingeChain;
@@ -49,7 +49,7 @@ use crate::scene::ModeMorph;
 /// A tile in the shared chain used by every capability. `order` is its fixed
 /// position along the chain (`0` = the origin). Tile `0` is the unanchored origin
 /// at [`TARGET_POSITION`]; every later tile anchors onto the previous one and
-/// carries a [`PanelAnchorPose`] while a spin, hinge fold, anchor
+/// carries a [`AnchorPose`] while a spin, hinge fold, anchor
 /// transition, or mode morph is in flight.
 #[derive(Component)]
 pub(crate) struct AnchorTile {
@@ -425,7 +425,7 @@ pub(crate) fn spawn_anchor_scene(
 /// Spawns one tile for `mode`. The origin (`order == 0`, `parent` `None`) carries
 /// no relation and rests at [`TARGET_POSITION`]; every later tile anchors onto
 /// `parent` with `mode`'s relation and — when `animating` or in the hinge chain —
-/// an initial [`PanelAnchorPose`] so a tile added mid-animation joins the
+/// an initial [`AnchorPose`] so a tile added mid-animation joins the
 /// pose-driven set.
 fn spawn_tile(
     commands: &mut Commands,
@@ -461,7 +461,7 @@ fn spawn_tile(
     if let Some(parent) = parent {
         tile.insert(anchoring_relation(mode, parent, selection));
         if animating || mode == HINGE_CHAIN_INDEX {
-            tile.insert(PanelAnchorPose::default());
+            tile.insert(AnchorPose::default());
         }
     }
     Some(tile.id())
@@ -507,10 +507,10 @@ pub(crate) fn tile_link_delta(mode: usize, selection: AnchorSelection) -> Vec3 {
 
 /// Starts or reverses the spin envelope. A rising/holding spin starts falling; an
 /// idle or falling spin starts rising and the dependent gains its
-/// `PanelAnchorPose`.
+/// `AnchorPose`.
 pub(crate) fn toggle_spin(
     spin: &mut Spin,
-    tiles: &Query<(Entity, &AnchorTile, &Transform, Option<&PanelAnchorPose>)>,
+    tiles: &Query<(Entity, &AnchorTile, &Transform, Option<&AnchorPose>)>,
     commands: &mut Commands,
 ) {
     let spinning = matches!(spin.phase, Some(SpinPhase::Rising | SpinPhase::Holding));
@@ -526,7 +526,7 @@ pub(crate) fn toggle_spin(
         // the rotation composes cumulatively down the chain.
         for (tile, anchor, _, _) in tiles {
             if anchor.order >= 1 {
-                commands.entity(tile).insert(PanelAnchorPose::default());
+                commands.entity(tile).insert(AnchorPose::default());
             }
         }
     }
@@ -535,7 +535,7 @@ pub(crate) fn toggle_spin(
 /// Arms the spin envelope at its rising edge. `angle` is left untouched, so a
 /// spin resumed after a Spin→Anchor freeze continues from where it stopped rather
 /// than snapping upright; a fresh spin starts from the default zero angle. The
-/// caller owns whether the anchored tiles already carry a [`PanelAnchorPose`] for
+/// caller owns whether the anchored tiles already carry a [`AnchorPose`] for
 /// the spin to drive (`toggle_spin` inserts them; the mode morph leaves them in
 /// place).
 pub(crate) const fn begin_spin(spin: &mut Spin) {
@@ -615,9 +615,9 @@ impl TitleChipActivation for Spin {
     }
 }
 
-/// Sole writer of every anchored tile's [`PanelAnchorPose`], composing both
+/// Sole writer of every anchored tile's [`AnchorPose`], composing both
 /// animations from their already-advanced state each frame in
-/// `PanelSystems::AnimateAnchorPose`, before the world resolver, so every offset
+/// `PanelSystems::AnimateAnchorPose`, before the valence resolver, so every offset
 /// lands that frame and the relation stays the sole transform writer.
 ///
 /// - Spin (menu capability `2`): a spin about the pinned anchor; `Rising`/`Falling` share
@@ -634,7 +634,7 @@ pub(crate) fn drive_anchor_pose(
     morph: Res<ModeMorph>,
     spin: Res<Spin>,
     transition: Res<AnchorTransition>,
-    mut poses: Query<(Entity, &mut PanelAnchorPose), With<AnchorTile>>,
+    mut poses: Query<(Entity, &mut AnchorPose), With<AnchorTile>>,
     mut commands: Commands,
 ) {
     // The morph owns every pose while it runs, and the hinge chain has its own
@@ -648,7 +648,7 @@ pub(crate) fn drive_anchor_pose(
     // (Spin→Anchor) keeps its pose, so it stops where it was instead of resetting.
     if spin.phase.is_none() && !transition.active && rotation.is_near_identity() {
         for (tile, _) in &poses {
-            commands.entity(tile).remove::<PanelAnchorPose>();
+            commands.entity(tile).remove::<AnchorPose>();
         }
         return;
     }
@@ -818,7 +818,7 @@ pub(crate) fn cycle_anchor_selection(
         let mut tile_entity = commands.entity(by_order[order]);
         tile_entity.insert(anchoring_relation(active.index, by_order[order - 1], next));
         if eased && transition.active {
-            tile_entity.insert(PanelAnchorPose::default());
+            tile_entity.insert(AnchorPose::default());
         }
     }
 }

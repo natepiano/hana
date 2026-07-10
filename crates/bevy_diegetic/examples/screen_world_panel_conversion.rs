@@ -359,7 +359,7 @@ enum FinishAction {
 }
 
 fn main() {
-    let mut app = fairy_dust::sprinkle_example()
+    let app = fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
@@ -372,7 +372,6 @@ fn main() {
         .margin(HOME_MARGIN)
         .with_title_bar(TitleBar::new().with_title("Screen/World Panel Conversion"))
         .with_camera_control_panel();
-    app.app_mut().register_type::<PanelConversionRequest>();
     app.init_resource::<PanelConversionRequest>()
         .init_resource::<OperationHighlights>()
         .add_systems(Startup, spawn_panels)

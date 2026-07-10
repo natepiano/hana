@@ -3,24 +3,25 @@
 use bevy::platform::collections::HashMap;
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
+use hana_valence::AttachmentResolveCandidate;
 
 use super::window;
 use super::window::WindowResolveFailure;
-use crate::panel::AnchoredToPanel;
-use crate::panel::AttachmentResolveCandidate;
 use crate::panel::CoordinateSpace;
 use crate::panel::DiegeticPanel;
+use crate::panel::PanelAnchorOffset;
+use crate::panel::PanelAttachmentAuthored;
 use crate::panel::ResolvedScreenPanelPosition;
 
 pub(super) fn classify_candidates(
-    attachments: &Query<(Entity, &AnchoredToPanel)>,
+    attachments: &Query<(Entity, &PanelAttachmentAuthored, &PanelAnchorOffset)>,
     panels: &Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
     entities: &Query<()>,
     primary: &Query<Entity, With<PrimaryWindow>>,
     window_sizes: &HashMap<Entity, Vec2>,
 ) -> Vec<AttachmentResolveCandidate<AnchorResolveSkip>> {
     let mut candidates = Vec::new();
-    for (source, attachment) in attachments {
+    for (source, attachment, _) in attachments {
         if panels.get(source).is_ok_and(|(_, panel)| {
             matches!(panel.coordinate_space(), CoordinateSpace::World { .. })
         }) {
@@ -40,7 +41,7 @@ pub(super) fn classify_candidates(
 
 fn classify_candidate(
     source: Entity,
-    attachment: AnchoredToPanel,
+    attachment: PanelAttachmentAuthored,
     panels: &Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
     entities: &Query<()>,
     primary: &Query<Entity, With<PrimaryWindow>>,
@@ -51,7 +52,7 @@ fn classify_candidate(
         Ok(()) => AttachmentResolveCandidate::Active {
             source,
             target,
-            attachment,
+            attachment: attachment.valence_relation(),
         },
         Err(reason) => AttachmentResolveCandidate::Skipped {
             source,
@@ -63,7 +64,7 @@ fn classify_candidate(
 
 fn validate_candidate(
     source: Entity,
-    attachment: AnchoredToPanel,
+    attachment: PanelAttachmentAuthored,
     panels: &Query<(Entity, &DiegeticPanel), With<ResolvedScreenPanelPosition>>,
     entities: &Query<()>,
     primary: &Query<Entity, With<PrimaryWindow>>,

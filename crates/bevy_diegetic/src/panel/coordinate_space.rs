@@ -9,6 +9,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 use bevy::window::WindowRef;
 
+use super::DiegeticPanel;
 use crate::layout::Dimension;
 use crate::layout::ShadowCasting;
 use crate::layout::Sizing;
@@ -72,10 +73,8 @@ pub enum CoordinateSpace {
         /// `Fit { min, max }` shrink-wraps content (bounded by `max`).
         /// `Grow` / `Percent` are screen-only and rejected by the world
         /// builder at compile time.
-        #[reflect(ignore)]
         width:  Sizing,
         /// Panel height, same semantics as `width`.
-        #[reflect(ignore)]
         height: Sizing,
     },
     /// Panel renders as a 2D screen overlay.
@@ -86,10 +85,8 @@ pub enum CoordinateSpace {
         /// `Fixed` is a pixel value; `Percent(f)` is a fraction of the
         /// window; `Fit { min, max }` grows to content (bounded by `max` if
         /// set); `Grow { min, max }` fills the window clamped to `[min, max]`.
-        #[reflect(ignore)]
         width:         Sizing,
         /// Panel height, same semantics as `width`.
-        #[reflect(ignore)]
         height:        Sizing,
         /// Camera render order. Higher orders render on top. Default: `1`.
         camera_order:  isize,
@@ -121,4 +118,64 @@ impl CoordinateSpace {
     /// Returns `true` if this is a screen-space panel.
     #[must_use]
     pub const fn is_screen(&self) -> bool { matches!(self, Self::Screen { .. }) }
+}
+
+/// Queryable, reflectable mirror of a panel's [`CoordinateSpace`] discriminant.
+///
+/// [`DiegeticPanel`] keeps [`CoordinateSpace`] as an internal field — the
+/// authoritative source for layout and conversion math, carrying the sizing and
+/// screen configuration. That field reflects but is not independently
+/// queryable, and mutating it in place through `&mut DiegeticPanel` fires no
+/// component hook, so a world<->screen conversion cannot be observed.
+///
+/// `PanelSpace` duplicates only the `World`/`Screen` discriminant as a
+/// standalone component. It lowers the query requirement (`Query<&PanelSpace>`
+/// instead of pulling the whole panel), enables a native `On<Insert,
+/// PanelSpace>` observer that fires on every space flip — which reconciles
+/// panel-attachment anchoring, see `on_panel_space_changed` — and gives cheap
+/// reflect/BRP inspection of a panel's space.
+///
+/// The cost is one duplicated discriminant kept in sync at four write sites:
+/// panel spawn (`sync_panel_space_on_add`) and the three coordinate-space
+/// conversion apply points. `PanelSpace` never carries sizing or screen config;
+/// the field stays the single source for geometry. Removing the field entirely
+/// (true single source) would thread the space through the panel's geometry and
+/// conversion hot paths and is deliberately out of scope.
+#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, Reflect)]
+#[reflect(Component, Default, PartialEq, Debug)]
+pub enum PanelSpace {
+    /// Panel is placed in 3D world space.
+    #[default]
+    World,
+    /// Panel renders as a 2D screen overlay.
+    Screen,
+}
+
+impl From<&CoordinateSpace> for PanelSpace {
+    fn from(space: &CoordinateSpace) -> Self {
+        if space.is_screen() {
+            Self::Screen
+        } else {
+            Self::World
+        }
+    }
+}
+
+/// Seeds the [`PanelSpace`] mirror from a panel's coordinate space at spawn.
+///
+/// Conversions re-insert `PanelSpace` at their apply points; this observer
+/// covers the initial insert so a freshly spawned panel is queryable and its
+/// anchoring reconciles through `on_panel_space_changed`.
+pub(super) fn sync_panel_space_on_add(
+    added: On<Add, DiegeticPanel>,
+    panels: Query<&DiegeticPanel>,
+    mut commands: Commands,
+) {
+    let entity = added.entity;
+    let Ok(panel) = panels.get(entity) else {
+        return;
+    };
+    commands
+        .entity(entity)
+        .insert(PanelSpace::from(panel.coordinate_space()));
 }
