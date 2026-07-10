@@ -19,9 +19,11 @@ use crate::Hinge;
 ///
 /// Do not pair a [`Hinge`] component with [`AnchorPoseLens`] on the same
 /// entity. `hinge_to_pose` overwrites the whole [`AnchorPose`] every frame and
-/// resets [`AnchorPose::translation`] to [`bevy_math::Vec3::ZERO`], so direct
-/// pose tweens on that entity are discarded. Debug builds warn when
-/// `hinge_to_pose` sees an earlier same-frame `AnchorPose` change.
+/// writes [`AnchorPose::translation`] from optional
+/// [`HingePivot`](crate::HingePivot) compensation, or
+/// [`bevy_math::Vec3::ZERO`] when no pivot is present. Direct pose tweens on
+/// that entity are discarded. Debug builds warn when `hinge_to_pose` sees an
+/// earlier same-frame `AnchorPose` change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct HingeAngleLens {
     /// Starting fold angle in radians.
@@ -50,10 +52,11 @@ impl Interpolator for HingeAngleLens {
 ///
 /// Do not pair a [`Hinge`] component with [`AnchorPoseLens`] on the same
 /// entity. [`hinge_to_pose`](crate::hinge_to_pose) overwrites the whole
-/// [`AnchorPose`] every frame and resets [`AnchorPose::translation`] to
-/// [`bevy_math::Vec3::ZERO`], so direct pose tweens on that entity are
-/// discarded. Debug builds warn when `hinge_to_pose` sees an earlier same-frame
-/// `AnchorPose` change.
+/// [`AnchorPose`] every frame and writes [`AnchorPose::translation`] from
+/// optional [`HingePivot`](crate::HingePivot) compensation, or
+/// [`bevy_math::Vec3::ZERO`] when no pivot is present. Direct pose tweens on
+/// that entity are discarded. Debug builds warn when `hinge_to_pose` sees an
+/// earlier same-frame `AnchorPose` change.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnchorPoseLens {
     /// Starting local pose.

@@ -68,9 +68,10 @@
 //! ```
 //!
 //! `AnchorPoseLens` and [`Hinge`] are mutually exclusive on one entity.
-//! [`hinge_to_pose`] overwrites the whole [`AnchorPose`] every frame and resets
-//! [`AnchorPose::translation`] to [`bevy_math::Vec3::ZERO`], so a direct
-//! `AnchorPose` tween on a hinged entity is discarded. Debug builds warn when
+//! [`hinge_to_pose`] overwrites the whole [`AnchorPose`] every frame. It writes
+//! [`AnchorPose::translation`] from optional [`HingePivot`] compensation, or
+//! [`bevy_math::Vec3::ZERO`] when no pivot is present, so a direct `AnchorPose`
+//! tween on a hinged entity is discarded. Debug builds warn when
 //! `hinge_to_pose` sees an earlier same-frame `AnchorPose` change.
 //! `bevy_animation` property adapters can be added later without changing this
 //! component contract.
@@ -187,6 +188,7 @@ pub use geometry::EdgeAxisError;
 pub use geometry::GeometryError;
 pub use geometry::ResolvedAnchorGeometry;
 pub use hinge::Hinge;
+pub use hinge::HingePivot;
 pub use hinge::hinge_to_pose;
 pub use pose::AnchorPose;
 pub use pose::AnchorSystems;

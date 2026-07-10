@@ -478,9 +478,13 @@ mod tests {
     use crate::AnchorSystems;
     use crate::AnchoredTo;
     use crate::AttachmentResolveDiagnostics;
+    use crate::Edge;
+    use crate::Hinge;
+    use crate::HingePivot;
     use crate::ResolvedAnchorGeometry;
     use crate::ResolvedAnchorOffset;
     use crate::ResolvedAnchorWorld;
+    use crate::hinge_to_pose;
 
     const ASSERT_EPSILON: f32 = 1e-4;
     const CHAIN_LIFT: f32 = 1.0;
@@ -488,6 +492,7 @@ mod tests {
     const OFFSET_OVERRIDE_Y: f32 = 2.0;
     const OFFSET_TRACE_X: f32 = 0.25;
     const OFFSET_TRACE_Y: f32 = -0.5;
+    const PIVOT_OFFSET: Vec3 = Vec3::new(0.0, 0.0, 0.25);
     const POSE_LIFT: f32 = 0.5;
     const QUAD_HEIGHT: f32 = 1.0;
     const QUAD_WIDTH: f32 = 2.0;
@@ -609,6 +614,50 @@ mod tests {
         assert_close_vec3(
             world_anchor_point(&world, source, AnchorId::Center),
             world_anchor_point(&world, target, AnchorId::Center) + Vec3::Z * POSE_LIFT,
+        );
+    }
+
+    #[test]
+    fn hinge_pivot_translation_composes_with_authored_offset() {
+        let mut world = world_with_diagnostics();
+        let target = spawn_quad(&mut world, Transform::default());
+        let source = spawn_quad(&mut world, Transform::default());
+        let authored_offset = Vec3::new(0.25, -0.5, 0.75);
+        world.entity_mut(source).insert((
+            AnchoredTo::new(target, AnchorId::Center, AnchorId::Center)
+                .with_offset(authored_offset),
+            AnchorPose::default(),
+            Hinge {
+                edge:  Edge {
+                    start: AnchorId::Vertex(0),
+                    end:   AnchorId::Vertex(1),
+                },
+                angle: core::f32::consts::FRAC_PI_2,
+            },
+            HingePivot {
+                offset:          PIVOT_OFFSET,
+                reference_angle: 0.0,
+            },
+        ));
+        let mut schedule = Schedule::default();
+        schedule.configure_sets((AnchorSystems::AnimatePose, AnchorSystems::Resolve).chain());
+        schedule.add_systems((
+            hinge_to_pose.in_set(AnchorSystems::AnimatePose),
+            resolve_anchors.in_set(AnchorSystems::Resolve),
+        ));
+
+        schedule.run(&mut world);
+
+        let pivot_translation = world
+            .get::<AnchorPose>(source)
+            .copied()
+            .unwrap_or_default()
+            .translation;
+        assert_close_vec3(
+            world_anchor_point(&world, source, AnchorId::Center),
+            world_anchor_point(&world, target, AnchorId::Center)
+                + authored_offset
+                + pivot_translation,
         );
     }
 

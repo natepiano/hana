@@ -237,7 +237,7 @@
 - The full lint workflow applied six approved Mend fixes, passed the rule-by-rule style review, and completed with clean Mend, Clippy, rustdoc, and nightly formatting.
 - No user decision remains.
 
-### Phase 3 — Frame-correct physical hinge pivots  · status: todo
+### Phase 3 — Frame-correct physical hinge pivots  · status: done (checkpoint)
 
 #### Work Order
 
@@ -279,6 +279,40 @@
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p hana_valence --all-features` passes all named pivot/frame/offset tests; existing no-pivot hinge tests remain unchanged in behavior; `cargo check --workspace --all-targets --all-features` is green and no transform becomes non-finite.
 
+#### Retrospective
+
+**What worked:**
+
+- `hinge_to_pose` remained the single owner of hinge-driven `AnchorPose`: the optional pivot branch adds translation without introducing another compensation system or `ResolvedAnchorOffset` writer.
+- Converting the child-local edge axis through `source_frame.inverse()` places rotation and pivot compensation in the same source-anchor tangent coordinates used by the resolver.
+- The non-identity-frame test identifies one fixed source-local pivot point and verifies its world position across four angles, independently exercising the resolver rather than only comparing the compensation formula.
+- The Hana Valence suite now has 66 passing tests, including missing relationship/geometry/anchor data, invalid frames, degenerate axes, endpoint reversal, nonzero reference angle, finite-output guards, and authored-offset composition.
+
+**What deviated from the plan:**
+
+- `hinge_to_pose` now queries source geometry optionally so a pivoted entity with missing geometry can emit the pivot-specific diagnostic before skipping; no-pivot entities still retain their prior skip behavior.
+- Existing crate and tween documentation was updated because `hinge_to_pose` no longer always resets translation to zero when a pivot is present.
+- No geometry or relationship API change was needed; the existing public `AnchoredTo::source_anchor` field and `AnchorPoint::rotation()` supplied the required frame data.
+
+**Surprises:**
+
+- `reference_angle` affects only the compensation delta. `AnchorPose::rotation` must continue to use the absolute hinge angle so the resolver seats the source tangent frame correctly.
+
+**Implications for remaining phases:**
+
+- Example pivot offsets must be authored in the source-anchor tangent coordinates of the reference configuration, never copied from an unconverted child-local axis calculation.
+- `FoldAngles::unfolded` should normally be the corresponding `HingePivot::reference_angle`; changing an algorithm profile must update both values together.
+- Example-local `ResolvedAnchorOffset` or translation compensation is now duplicate behavior and must be removed during migration.
+
+#### Phase 3 Review
+
+- Independent and main-agent reviews approved the frame conversion, compensation math, failure behavior, resolver composition, and world-space invariant test without implementation findings.
+- Phase 4 now writes absolute hinge endpoints, rejects non-finite authored endpoints before they reach `Hinge`, and tests a nonzero unfolded/reference endpoint.
+- Phase 7 now pins the staggered chain to zero-angle reference configurations and source-anchor tangent offsets.
+- Phase 8 now authors triangle endpoints as `PI + signed_lean` and atomically updates the complete angle/pivot profile before actuation.
+- Phase 9 now explicitly uses absolute box angles and the intentional no-pivot path for zero-thickness faces.
+- The full lint workflow completed with clean Mend, style review, Clippy, rustdoc, and nightly formatting. No user decision remains.
+
 ### Phase 4 — Fold-angle hinge actuation  · status: todo
 
 #### Work Order
@@ -296,11 +330,11 @@
   }
   ```
 
-- Implement the built-in adapter: for every entity carrying `FoldMember`, `FoldAngles`, and `Hinge`, follow the relationship to ready `FoldSequenceState`, read the eased `fraction(member.stage)`, linearly map `unfolded..=folded`, and write `Hinge::angle`. Missing/not-ready sequence state leaves the existing angle unchanged and follows the sequence diagnostic policy.
+- Implement the built-in adapter: for every entity carrying `FoldMember`, `FoldAngles`, and `Hinge`, follow the relationship to ready `FoldSequenceState`, read the eased `fraction(member.stage)`, and write the absolute hinge angle `unfolded + fraction * (folded - unfolded)`. Never subtract `HingePivot::reference_angle`; Phase 3 uses that value only for the compensation delta. Missing/not-ready sequence state leaves the existing angle unchanged and follows the sequence diagnostic policy. Non-finite `FoldAngles` endpoints diagnose and also leave the existing `Hinge::angle` unchanged rather than relying on Phase 3's downstream finite-pose guard.
 - `FoldAngles` is the explicit ownership marker for `Hinge::angle`. Change `drive_arrangement_hinges` to exclude entities carrying `FoldAngles`; removing `FoldAngles` returns ownership to the arrangement driver. Do not rely on registration order to resolve two writers.
 - Register actuation in `FoldSystems::Actuate`, after `FoldSystems::Advance`, inside `AnchorSystems::AnimatePose`. Configure `FoldSystems::Actuate.before(crate::hinge_to_pose)` so a consumer-installed `hinge_to_pose` observes the current frame's angle; `FoldPlugin` still must not register that system or any other anchor-pipeline system.
-- Keep `FoldAngles` independent of algorithm policy: it stores endpoints only. `HingePivot.reference_angle` is normally authored as the unfolded endpoint, but callers may supply another reference. Do not infer signs or pivot offsets from arrangement order.
-- Test unfolded/folded endpoints, partial easing, grouped members receiving identical fractions, reverse playback, absent/not-ready state, `FoldAngles` ownership exclusion from the arrangement driver, ownership returning after removal, and scheduling before `hinge_to_pose` in an integration schedule. The schedule test must prove `hinge_to_pose` observes the current frame's angle rather than a one-frame-old value.
+- Keep `FoldAngles` independent of algorithm policy: it stores absolute endpoints only. `HingePivot.reference_angle` normally equals `FoldAngles::unfolded`, but callers may supply another reference. Do not infer signs or pivot offsets from arrangement order.
+- Test unfolded/folded endpoints, partial easing, grouped members receiving identical fractions, reverse playback, absent/not-ready state, non-finite endpoints preserving the previous angle, `FoldAngles` ownership exclusion from the arrangement driver, ownership returning after removal, and scheduling before `hinge_to_pose` in an integration schedule. The schedule test must prove `hinge_to_pose` observes the current frame's angle rather than a one-frame-old value. Add a nonzero unfolded/reference-angle case proving that actuation writes the absolute pose rotation while pivot compensation is zero at that endpoint.
 
 **Files:**
 - `crates/hana_valence/src/fold/hinge.rs` — create `FoldAngles`, adapter, and tests.
@@ -401,6 +435,7 @@
 - Replace the local fold step/playback resource, autoplay/pause logic, fold-motion mirror, raw keyboard reads, example-local fold tween registration, duplicate fold scheduling, and `apply_hinge_pivot`/`ResolvedAnchorOffset` compensation with `FoldSequence`, `FoldMember`, `FoldAngles`, `HingePivot`, and `.with_fold_controls()`.
 - Keep the gold fixed root visually and structurally distinct. It supplies the authored world transform and first `AnchoredTo` relationship but has no `FoldMember` and consumes no stage.
 - Give the five moving panels consecutive zero-based stages. Preserve the accordion endpoints with the current edge ordering: panel one stops at a quarter-turn parallel to the mount face; panels two through five use alternating half-turns so they close face-to-face rather than coil inward. Use the current sign sequence as the starting authored values: `[FRAC_PI_2, -PI, PI, -PI, PI]`; if an existing edge endpoint order reverses an axis, adjust that endpoint's authored sign while preserving the stated world-space result.
+- Every panel authors `FoldAngles::unfolded = 0.0` and `HingePivot::reference_angle = 0.0`; the listed values are absolute `FoldAngles::folded` endpoints. Author each `HingePivot::offset` in source-anchor tangent coordinates. The current identity-framed quad anchors allow the same vector to place the child-local knuckle axis; if that frame changes, convert the tangent-frame pivot line before positioning the visuals.
 - Author pivot placement per joint from the connected solids. Panel-to-panel half-turns use the panel half-thickness required for face contact; do not add rendered cylinder radius to the kinematic offset. Compute the first root joint separately from mount-face clearance and its quarter-turn limit. A panel must never pass through the previous panel or fixed root.
 - Render segmented hinge knuckles on the same edge line as each physical pivot. The visuals do not create relationships or stages; the panel spawn helper derives knuckles, `AnchoredTo`, `FoldMember`, `FoldAngles`, and `HingePivot` from one edge definition so their axes cannot diverge.
 - Retain `.with_brp_extras()`, `.with_stable_transparency()`, the Fairy Dust orbit camera, camera-control panel, useful authored camera-home target/home proxy, fixed-root label, and screen-space teaching panel. Rewrite the teaching panel so it explains the authored fold stages, fixed root, and physical pivots; remove tween/ping-pong descriptions. The title bar contains only `H Home`, the standard folding controls, and help. The initial home view must show the physical attachment and moving panels clearly.
@@ -424,8 +459,8 @@
 - Confine implementation edits to `triangles.rs` so this Work Order can run in parallel with Phases 7 and 9. Do not edit shared fixtures or the other examples.
 - Replace `AccordionPlayback`, local playback/motion state, raw fold input, local timing, replay behavior, duplicate fold scheduling, and `apply_crease_gap`/`ResolvedAnchorOffset` compensation with the shared fold runtime. Keep only example-owned algorithm selection state.
 - Place `FoldFromArrangement` on the sequence after the arrangement is authored. It snapshots `ArrangementMembers` after member indices settle and assigns one zero-based stage per moving crease; the arrangement root is not a moving fold member.
-- Author `FoldAngles` and `HingePivot` in the example's algorithm profile. Triangle members have an unfolded rest angle of `PI`; use it as `HingePivot.reference_angle`. The accordion uses a constant local fold sign because each member already has a half-turn rest orientation; the wrap algorithm uses the existing alternate policy. Do not ask `FoldFromArrangement` to infer signs, endpoints, or pivot gaps.
-- Keep the accordion/wrap toggle as an example-owned BEI action, independent of Space/Shift+Space/P. Do not read `ButtonInput<KeyCode>` directly. Track selected and active algorithm profiles separately: the selection/title chip changes immediately, but when `FoldSequenceState::position()` is nonzero, queue endpoint/pivot changes until playback reaches fully unfolded position zero. Run queued-profile activation in `PostUpdate` after `FoldSystems::Advance` and before `FoldSystems::Actuate`, using Phase 2's exact `0.0` settle boundary as the deterministic activation point. Applying the queued profile must not change playback position, target, direction, stage membership, or grouping.
+- Author `FoldAngles` and `HingePivot` in the example's algorithm profile. For every triangle member, use the absolute endpoint `FoldAngles::unfolded = HingePivot::reference_angle = PI` and compute `FoldAngles::folded = PI + signed_lean`; never store `signed_lean` alone as the folded endpoint. The accordion uses a constant local fold sign because each member already has a half-turn rest orientation; the wrap algorithm uses the existing alternate policy. Express every pivot offset in source-anchor tangent coordinates. Do not ask `FoldFromArrangement` to infer signs, endpoints, or pivot gaps.
+- Keep the accordion/wrap toggle as an example-owned BEI action, independent of Space/Shift+Space/P. Do not read `ButtonInput<KeyCode>` directly. Track selected and active algorithm profiles separately: the selection/title chip changes immediately, but when `FoldSequenceState::position()` is nonzero, queue endpoint/pivot changes until playback reaches fully unfolded position zero. Run queued-profile activation in `PostUpdate` after `FoldSystems::Advance` and before `FoldSystems::Actuate`, using Phase 2's exact `0.0` settle boundary as the deterministic activation point. Applying an active profile updates `FoldAngles` and the complete `HingePivot` atomically before actuation and must not change playback position, target, direction, stage membership, or grouping.
 - Route the standard three controls through `.with_fold_controls()`. The example starts idle; one step moves one crease; `P` continues in the remembered direction.
 - Retain `.with_brp_extras()`, `.with_stable_transparency()`, the Fairy Dust orbit camera, camera-control panel, useful authored camera-home target, and controls-only title bar. Add a concise screen-space teaching panel explaining arrangement-derived stages and queued algorithm-profile activation.
 
@@ -434,7 +469,7 @@
 
 **Constraints from prior phases:** Phases 1–6 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, and teaching-panel content.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, and teaching-panel content.
 
 ### Phase 9 — Migrate `box`  · status: todo
 
@@ -448,6 +483,7 @@
 - Remove example-local `FoldPhase`, `FoldTarget`, `FoldPlayback`, replay input, timing, and hinge driver. Install `.with_fold_controls()` and author `FoldAngles` on the moving faces.
 - Spawn one unfolded `FoldSequence`. Use `FoldSequenceBuilder` to author exactly two stages: stage zero contains only the lid; stage one contains north, south, east, and west. The center face is the fixed root, carries no `FoldMember`, and consumes no stage. Five moving faces must derive a stage count of two.
 - Preserve the physical topology: the lid remains anchored to north's free outer edge, so folding stage zero raises the lid first and stage one raises all four walls while carrying the lid through the anchor chain. Do not derive stages from descendants or member count.
+- Author absolute `FoldAngles { unfolded: 0.0, folded: BOX_FOLD_ANGLE }` on each moving face and omit `HingePivot` for the current zero-thickness planar faces; `hinge_to_pose` therefore preserves zero `AnchorPose::translation`.
 - The example starts idle. `Space` advances lid then walls, `Shift+Space` reverses walls then lid, and `P` continues to the terminal boundary in the remembered direction.
 - Retain `.with_brp_extras()`, the Fairy Dust orbit camera, camera-control panel, useful authored camera-home target, ground plane/studio lighting, and controls-only title bar. Add a concise screen-space teaching panel explaining the lid stage, grouped wall stage, and fixed root. Preserve any currently configured transparency capability; do not add unrelated presentation changes.
 
