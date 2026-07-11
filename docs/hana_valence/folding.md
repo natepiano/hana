@@ -602,7 +602,7 @@
 - The parallel-wave join now requires root-visible presentation verification whenever delegated screenshots were unavailable or occluded; BRP state alone does not satisfy visual acceptance.
 - Phase 7 introduced no shared change requiring amendments to the already implemented Phase 8 or Phase 9 Work Orders. No user decision remains.
 
-### Phase 8 — Migrate `triangles`  · status: todo
+### Phase 8 — Migrate `triangles`  · status: done (checkpoint)
 
 #### Work Order
 
@@ -625,6 +625,26 @@
 **Constraints from prior phases:** Phases 1–6.5 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, Fairy controls, and direct example access to BEI plus `bevy_kana` input macros. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, no `FoldSnapshotDiagnostic` during normal setup, a ready sequence with one zero-based stage per arrangement member before the first input, no `FoldControlDiagnostic` during standard inputs after readiness, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
+
+#### Retrospective
+
+**What worked:**
+
+- Arrangement snapshot authoring supplies one stage per moving triangle while absolute PI-based angle/pivot profiles remain example-owned.
+- The BEI T action updates selected state immediately and activates the complete profile only at ready position zero between fold advancement and actuation.
+
+**What deviated from the plan:**
+
+- Static checks and startup diagnostics passed, but interactive motion, both physical profiles, queued switching continuity, and presentation remain root-visible verification work.
+
+**Implications for remaining phases:**
+
+- Phase 9 needs no profile-switching behavior; the join gate must visually verify both triangle algorithms and same-frame queued activation.
+
+#### Phase 8 Review
+
+- The parallel-wave join now explicitly exercises Accordion and Wrap, step/reverse/play, and a mid-fold T selection that activates only at fully unfolded position without a visible jump or playback-state change.
+- Phase 8 introduced no shared change requiring a Phase 9 amendment. No user decision remains.
 
 ### Phase 9 — Migrate `box`  · status: todo
 
@@ -653,3 +673,5 @@
 ## Parallel-wave join gate
 
 After Phases 7–9 are individually reviewed and checkpointed, the root orchestrator runs `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `clippy` workflow with `auto-proceed`. The root also visibly verifies each example's presentation whenever delegated window evidence was unavailable or occluded: hinge/panel geometry, home framing, transparency, title controls, teaching-panel legibility, orbit interaction, and BRP port text. BRP state inspection alone does not satisfy this visual gate. Any cross-example, shared, or presentation regression is fixed and re-reviewed before the plan is complete.
+
+For `triangles`, the root interaction pass must exercise Accordion and Wrap, one-step folding and unfolding, remembered-direction play, and a mid-fold T selection that stays queued until fully unfolded. Activation at position zero must not visibly jump or change playback position, target, direction, membership, or grouping.

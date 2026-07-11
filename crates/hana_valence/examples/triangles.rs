@@ -8,14 +8,21 @@ use bevy::color::palettes::css::SEA_GREEN;
 use bevy::color::palettes::css::SKY_BLUE;
 use bevy::color::palettes::css::TURQUOISE;
 use bevy::ecs::schedule::ApplyDeferred;
+use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Sidedness;
+use bevy_enhanced_input::prelude::*;
+use bevy_kana::Keybindings;
 use bevy_kana::ToF32;
+use bevy_kana::action;
+use bevy_kana::bind_action_system;
+use bevy_kana::event;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::ControlActivation;
+use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
 use fairy_dust::TitleBarControl;
 use fairy_dust::TitleBarSegment;
@@ -23,16 +30,18 @@ use hana_valence::Accordion;
 use hana_valence::AnchorId;
 use hana_valence::AnchorSystems;
 use hana_valence::Edge;
+use hana_valence::FoldAngles;
+use hana_valence::FoldFromArrangement;
 use hana_valence::FoldPattern;
-use hana_valence::Hinge;
+use hana_valence::FoldSequence;
+use hana_valence::FoldSequenceState;
+use hana_valence::FoldSystems;
+use hana_valence::HingePivot;
 use hana_valence::Member;
 use hana_valence::MemberIndex;
-use hana_valence::ResolvedAnchorGeometry;
-use hana_valence::ResolvedAnchorOffset;
 use hana_valence::TilingRule;
 use hana_valence::apply_member_placements;
 use hana_valence::assign_member_indices;
-use hana_valence::hinge_to_pose;
 
 #[path = "../fixtures.rs"]
 #[allow(
@@ -44,38 +53,28 @@ mod fixtures;
 // app
 const EXAMPLE_TITLE: &str = "Triangles";
 
-// title-bar chips. The fold/unfold/replay chips light while that motion runs; the
-// mode chip is a segmented "T" control whose active word (Accordion or Wrap) marks
-// the current fold style.
-const FOLD_CONTROL: &str = "Space Fold";
-const UNFOLD_CONTROL: &str = "Shift+Space Unfold";
-const REPLAY_CONTROL: &str = "R Replay";
+// title-bar chips
 const MODE_KEY: &str = "T";
 const ACCORDION_CONTROL: &str = "Accordion";
 const WRAP_CONTROL: &str = "Wrap";
 
 // animation
-// Each crease folds a half-turn, so the folded strip collapses onto a single
-// triangle footprint. Real folded paper still stacks cleanly because its
-// thickness holds neighboring panels apart; `TILE_GAP` stands in for that
-// thickness — `apply_crease_gap` pivots every crease about a line lifted half a
-// gap off the tile face, so closed tiles land a full gap apart instead of
-// coincident. Creases close one at a time down the strip.
 const ACCORDION_LEAN: f32 = core::f32::consts::PI;
-const CREASE_COUNT: f32 = 5.0;
 const EVEN_PERIOD: usize = 2;
-const FOLD_SECONDS: f32 = 2.5;
 const MOUNTAIN_SIGN: f32 = 1.0;
+const STEP_SECONDS: f32 = 0.5;
 const VALLEY_SIGN: f32 = -1.0;
-// Ease closer than this to the target counts as settled, so the motion chips clear.
-const MOTION_EPSILON: f32 = 1.0e-4;
-const SMOOTHSTEP_DOUBLE: f32 = 2.0;
-const SMOOTHSTEP_TRIPLE: f32 = 3.0;
-// One step folds or unfolds a single crease; the strip has one crease per member.
-const STEP_COUNT: i32 = 5;
 // Face-to-face spacing between folded tiles. Must exceed two label offsets so the
 // labels floating off facing tile surfaces keep their own clearance in the stack.
 const TILE_GAP: f32 = 0.001;
+
+// teaching panel
+const DESCRIPTION_TITLE: &str = "Arrangement-derived folding";
+const DESCRIPTION_LINES: [&str; 3] = [
+    "Arrangement order becomes one zero-based fold stage per triangle.",
+    "Space and Shift+Space step one crease; P continues the remembered direction.",
+    "T selects Accordion or Wrap; mid-fold selections wait until fully unfolded.",
+];
 
 // labels
 const FIRST_TILE_NUMBER: usize = 1;
@@ -103,64 +102,60 @@ const TRIANGLE_REST_FLIP: f32 = core::f32::consts::PI;
 const TRIANGLE_SIDE: f32 = 1.0;
 const TRIANGLE_TWO_THIRDS: f32 = 2.0 / 3.0;
 
+struct TriangleAlgorithmInputPlugin;
+
+impl Plugin for TriangleAlgorithmInputPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_input_context::<TriangleAlgorithmInput>()
+            .add_systems(Startup, spawn_algorithm_input);
+        bind_action_system!(app, ToggleAlgorithm, ToggleAlgorithmEvent, toggle_algorithm);
+    }
+}
+
+#[derive(Component)]
+struct TriangleAlgorithmInput;
+
+action!(
+    /// Selects the next triangle fold algorithm.
+    ToggleAlgorithm
+);
+action!(
+    /// Tracks Shift so the bare T binding is modifier-safe.
+    AlgorithmShift
+);
+event!(
+    /// Routes a fold-algorithm selection request into the example system.
+    ToggleAlgorithmEvent
+);
+
 #[derive(Component)]
 struct TriangleTiling;
 
-// Accordion clock. `step` is the target number of closed creases (0 flat, up to
-// `STEP_COUNT` fully folded); `progress` eases toward `step / CREASE_COUNT` each
-// frame. `Space` raises `step` one crease, `Shift+Space` lowers it, `R` snaps
-// between flat and fully folded.
-#[derive(Default, Resource)]
-struct AccordionPlayback {
-    progress: f32,
-    step:     i32,
-}
-
-// Fold shape. Each tile rests flipped a half-turn from its neighbor, so a constant
-// crease sign swings consecutive creases to opposite world sides (`Accordion`, the
-// back-and-forth zigzag pleat), while an alternating crease sign cancels the rest
-// flip so every crease folds the same world direction and the strip curls onto
-// itself (`Wrap`). `T` toggles between them.
-#[derive(Clone, Copy, Default, PartialEq, Resource)]
-enum FoldStyle {
+#[derive(Clone, Copy, Default, Eq, PartialEq)]
+enum FoldAlgorithm {
     #[default]
     Accordion,
     Wrap,
 }
 
-// Current fold motion, mirrored onto the title-bar chips. `animate_accordion`
-// updates `direction` each frame from the sign of the remaining ease; `R` sets
-// `replaying` until the strip settles. The fold/unfold chips stay dark during a
-// replay so each of the three actions lights its own chip.
-#[derive(Clone, Copy, Default, PartialEq, Resource)]
-struct FoldMotion {
-    direction: MotionDirection,
-    replaying: bool,
+#[derive(Resource)]
+struct AlgorithmSelection {
+    selected_algorithm: FoldAlgorithm,
+    active_algorithm:   FoldAlgorithm,
 }
 
-#[derive(Clone, Copy, Default, PartialEq)]
-enum MotionDirection {
-    #[default]
-    Idle,
-    Folding,
-    Unfolding,
+impl Default for AlgorithmSelection {
+    fn default() -> Self {
+        Self {
+            selected_algorithm: FoldAlgorithm::Accordion,
+            active_algorithm:   FoldAlgorithm::Accordion,
+        }
+    }
 }
 
-impl FoldMotion {
-    // A replay steers the same fold/unfold ease, so the manual chips stay dark while
-    // `replaying` is set; only the replay chip lights.
-    fn fold_activation(self) -> ControlActivation {
-        Self::activation(self.direction == MotionDirection::Folding && !self.replaying)
-    }
-
-    fn unfold_activation(self) -> ControlActivation {
-        Self::activation(self.direction == MotionDirection::Unfolding && !self.replaying)
-    }
-
-    const fn replay_activation(self) -> ControlActivation { Self::activation(self.replaying) }
-
-    const fn activation(active: bool) -> ControlActivation {
-        if active {
+impl AlgorithmSelection {
+    fn activation_for(&self, algorithm: FoldAlgorithm) -> ControlActivation {
+        if self.selected_algorithm == algorithm {
             ControlActivation::Active
         } else {
             ControlActivation::Inactive
@@ -168,14 +163,10 @@ impl FoldMotion {
     }
 }
 
-impl FoldStyle {
-    fn activation_for(self, style: Self) -> ControlActivation {
-        if self == style {
-            ControlActivation::Active
-        } else {
-            ControlActivation::Inactive
-        }
-    }
+#[derive(Clone, Copy)]
+struct AlgorithmMemberProfile {
+    fold_angles: FoldAngles,
+    hinge_pivot: HingePivot,
 }
 
 impl TilingRule for TriangleTiling {
@@ -197,6 +188,7 @@ fn main() {
         .with_ground_plane()
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
         .with_stable_transparency()
+        .with_fold_controls()
         .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -205,9 +197,6 @@ fn main() {
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
                 .with_anchor(Anchor::TopLeft)
-                .control(FOLD_CONTROL)
-                .control(UNFOLD_CONTROL)
-                .control(REPLAY_CONTROL)
                 .control(TitleBarControl::segmented(
                     MODE_KEY,
                     [
@@ -216,30 +205,16 @@ fn main() {
                     ],
                 )),
         )
-        .wire_chip_to_state::<FoldMotion, _>(FOLD_CONTROL, |motion| motion.fold_activation())
-        .wire_chip_to_state::<FoldMotion, _>(UNFOLD_CONTROL, |motion| motion.unfold_activation())
-        .wire_chip_to_state::<FoldMotion, _>(REPLAY_CONTROL, |motion| motion.replay_activation())
-        .wire_chip_to_state::<FoldStyle, _>(ACCORDION_CONTROL, |style| {
-            style.activation_for(FoldStyle::Accordion)
+        .wire_chip_to_state::<AlgorithmSelection, _>(ACCORDION_CONTROL, |selection| {
+            selection.activation_for(FoldAlgorithm::Accordion)
         })
-        .wire_chip_to_state::<FoldStyle, _>(WRAP_CONTROL, |style| {
-            style.activation_for(FoldStyle::Wrap)
+        .wire_chip_to_state::<AlgorithmSelection, _>(WRAP_CONTROL, |selection| {
+            selection.activation_for(FoldAlgorithm::Wrap)
         })
+        .with_description_panel(description_panel())
         .with_camera_control_panel()
-        .with_shortcut(KeyCode::KeyR, toggle_accordion)
-        .with_shortcut(KeyCode::KeyT, toggle_fold_style);
-    // `DiegeticUiPlugin` (added by `sprinkle_example`) already registers the
-    // shared anchor pipeline — the `AnchorSystems` chain, `assign_member_indices`,
-    // `hinge_to_pose`, `resolve_anchors`, `ResolveDiagnostics`, and the member
-    // observers. This example adds `apply_member_placements::<TriangleTiling>` to
-    // seat the strip, then `animate_accordion` writes each member hinge angle
-    // directly (in place of `drive_arrangement_hinges`) so the creases can close
-    // one at a time, and `apply_crease_gap` writes each member's offset so folded
-    // tiles stack a gap apart. Re-registering `hinge_to_pose` here is what
-    // produced the per-frame "hinge overwrote an AnchorPose" spam.
-    app.init_resource::<AccordionPlayback>()
-        .init_resource::<FoldStyle>()
-        .init_resource::<FoldMotion>()
+        .add_plugins(TriangleAlgorithmInputPlugin);
+    app.init_resource::<AlgorithmSelection>()
         .add_systems(
             PostUpdate,
             (
@@ -251,15 +226,32 @@ fn main() {
                     .chain()
                     .after(assign_member_indices)
                     .before(AnchorSystems::AnimatePose),
-                (animate_accordion, apply_crease_gap)
-                    .chain()
+                activate_selected_algorithm
                     .in_set(AnchorSystems::AnimatePose)
-                    .before(hinge_to_pose),
+                    .after(FoldSystems::Advance)
+                    .before(FoldSystems::Actuate),
             ),
         )
-        .add_systems(Update, step_accordion)
         .add_systems(Startup, setup)
         .run();
+}
+
+fn description_panel() -> DescriptionPanel {
+    DescriptionPanel::new(DESCRIPTION_TITLE)
+        .with_fit_width()
+        .lines(DESCRIPTION_LINES)
+}
+
+fn spawn_algorithm_input(mut commands: Commands) {
+    commands.spawn((
+        TriangleAlgorithmInput,
+        Actions::<TriangleAlgorithmInput>::spawn(SpawnWith(spawn_algorithm_actions)),
+    ));
+}
+
+fn spawn_algorithm_actions(spawner: &mut ActionSpawner<TriangleAlgorithmInput>) {
+    let keybindings = Keybindings::new::<AlgorithmShift>(spawner, ActionSettings::default());
+    keybindings.spawn_key::<ToggleAlgorithm>(spawner, KeyCode::KeyT);
 }
 
 fn setup(
@@ -302,153 +294,96 @@ fn setup(
     .into_iter()
     .enumerate()
     {
-        let number = FIRST_TILE_NUMBER + 1 + offset;
-        let tile = spawn_member_tile(&mut commands, root);
+        let member_index = offset + 1;
+        let number = FIRST_TILE_NUMBER + member_index;
+        let tile = spawn_member_tile(&mut commands, root, member_index, FoldAlgorithm::Accordion);
         spawn_tile_visual(&mut commands, tile, triangle_mesh.clone(), material, number);
     }
+    commands.entity(root).insert((
+        FoldSequence {
+            easing: EaseFunction::SmoothStep,
+            ..FoldSequence::new(STEP_SECONDS)
+        },
+        FoldFromArrangement::new(root),
+    ));
 }
 
-fn animate_accordion(
-    time: Res<Time>,
-    style: Res<FoldStyle>,
-    mut playback: ResMut<AccordionPlayback>,
-    mut motion: ResMut<FoldMotion>,
-    mut hinges: Query<(&MemberIndex, &mut Hinge), With<Member>>,
+fn toggle_algorithm(mut selection: ResMut<AlgorithmSelection>) {
+    selection.selected_algorithm = match selection.selected_algorithm {
+        FoldAlgorithm::Accordion => FoldAlgorithm::Wrap,
+        FoldAlgorithm::Wrap => FoldAlgorithm::Accordion,
+    };
+}
+
+fn activate_selected_algorithm(
+    mut selection: ResMut<AlgorithmSelection>,
+    sequences: Query<(Entity, &FoldSequenceState), With<TriangleTiling>>,
+    mut members: Query<(&Member, &MemberIndex, &mut FoldAngles, &mut HingePivot)>,
 ) {
-    let goal = playback.step.to_f32() / CREASE_COUNT;
-    let step = time.delta_secs() / FOLD_SECONDS;
-    playback.progress += (goal - playback.progress).clamp(-step, step);
-    let progress = playback.progress;
-    for (index, mut hinge) in &mut hinges {
-        hinge.angle = crease_angle(index.index, progress, *style);
-    }
-    // Mirror the current ease onto the title-bar chips. Touch the resource only on a
-    // real transition so change detection fires exactly when a chip flips.
-    let remaining = goal - progress;
-    let direction = if remaining.abs() <= MOTION_EPSILON {
-        MotionDirection::Idle
-    } else if remaining > 0.0 {
-        MotionDirection::Folding
-    } else {
-        MotionDirection::Unfolding
-    };
-    if motion.direction != direction {
-        motion.direction = direction;
-    }
-    if direction == MotionDirection::Idle && motion.replaying {
-        motion.replaying = false;
-    }
-}
-
-// Hinge angle for the crease seating member `index`, swinging the tile from its
-// rest flip by the eased fold fraction times the lean.
-fn crease_angle(index: usize, progress: f32, style: FoldStyle) -> f32 {
-    crease_fraction(index, progress)
-        .mul_add(ACCORDION_LEAN * fold_sign(index, style), TRIANGLE_REST_FLIP)
-}
-
-// Eased closed-fraction of member `index`'s crease, `0` flat to `1` fully closed.
-// Creases close in order down the strip: member 1's crease closes over the first
-// `1 / CREASE_COUNT` of `progress`, member 2's over the next slice, and so on, so
-// the fold builds a flat stack a triangle at a time.
-fn crease_fraction(index: usize, progress: f32) -> f32 {
-    let start = (index - 1).to_f32();
-    let local = progress.mul_add(CREASE_COUNT, -start).clamp(0.0, 1.0);
-    local * local * SMOOTHSTEP_DOUBLE.mul_add(-local, SMOOTHSTEP_TRIPLE)
-}
-
-// Sign of each crease's fold. Because every tile rests flipped a half-turn from its
-// neighbor, a constant sign swings consecutive creases to opposite world sides (the
-// back-and-forth zigzag pleat), while an alternating sign folds every crease the
-// same world direction (the inward curl).
-const fn fold_sign(index: usize, style: FoldStyle) -> f32 {
-    match style {
-        FoldStyle::Accordion => MOUNTAIN_SIGN,
-        FoldStyle::Wrap if index.is_multiple_of(EVEN_PERIOD) => MOUNTAIN_SIGN,
-        FoldStyle::Wrap => VALLEY_SIGN,
-    }
-}
-
-// Pivot lift per crease, in half-gap units. Accordion tiles land one gap above
-// their predecessor, while each wrap crease coils around every layer already
-// inside it and must clear them all, so its lift grows with the member index.
-fn gap_scale(index: usize, style: FoldStyle) -> f32 {
-    match style {
-        FoldStyle::Accordion => 1.0,
-        FoldStyle::Wrap => index.to_f32(),
-    }
-}
-
-// Lift each crease's pivot off the tile face so folded tiles stack a gap apart.
-// Rotating about a line at `pivot` instead of in the face plane keeps the same
-// rotation but adds the translation `pivot - swing * pivot`: zero while the strip
-// is flat, a full gap along the parent's normal once the crease closes to a
-// half-turn. Because the translation is derived from the crease's own swing, the
-// tile always lands on the side it approached from.
-fn apply_crease_gap(
-    style: Res<FoldStyle>,
-    mut tiles: Query<
-        (
-            &MemberIndex,
-            &Hinge,
-            &ResolvedAnchorGeometry,
-            &mut ResolvedAnchorOffset,
-        ),
-        With<Member>,
-    >,
-) {
-    for (index, hinge, geometry, mut offset) in &mut tiles {
-        let Ok(axis) = hinge.edge.axis(geometry) else {
-            continue;
-        };
-        let swing = Quat::from_axis_angle(*axis, hinge.angle - TRIANGLE_REST_FLIP);
-        let lift = fold_sign(index.index, *style) * gap_scale(index.index, *style) * TILE_GAP / 2.0;
-        let pivot = Vec3::Z * lift;
-        offset.0 = pivot - swing * pivot;
-    }
-}
-
-// `R` handler: snap the target between flat and fully folded so the strip replays
-// the whole fold or unfold. `replaying` lights the R chip until the strip settles.
-fn toggle_accordion(mut playback: ResMut<AccordionPlayback>, mut motion: ResMut<FoldMotion>) {
-    playback.step = if playback.step >= STEP_COUNT {
-        0
-    } else {
-        STEP_COUNT
-    };
-    motion.replaying = true;
-}
-
-// `T` handler: switch between the back-and-forth accordion and the inward wrap,
-// snapping the strip flat so the new fold pattern reads from the first crease.
-fn toggle_fold_style(mut style: ResMut<FoldStyle>, mut playback: ResMut<AccordionPlayback>) {
-    *style = match *style {
-        FoldStyle::Accordion => FoldStyle::Wrap,
-        FoldStyle::Wrap => FoldStyle::Accordion,
-    };
-    playback.step = 0;
-}
-
-// `Space` closes one more crease; `Shift+Space` opens the last one. Each press
-// nudges the target crease count and `animate_accordion` eases the strip to it, so
-// the fold advances one triangle at a time in either direction.
-fn step_accordion(keys: Res<ButtonInput<KeyCode>>, mut playback: ResMut<AccordionPlayback>) {
-    if !keys.just_pressed(KeyCode::Space) {
+    if selection.selected_algorithm == selection.active_algorithm {
         return;
     }
-    let reverse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    playback.step = if reverse {
-        (playback.step - 1).max(0)
-    } else {
-        (playback.step + 1).min(STEP_COUNT)
+    let Ok((sequence, state)) = sequences.single() else {
+        return;
     };
+    if !state.is_ready() || state.position() != 0.0 {
+        return;
+    }
+    for (member, index, mut fold_angles, mut hinge_pivot) in &mut members {
+        if member.arrangement != sequence {
+            continue;
+        }
+        let profile = algorithm_member_profile(index.index, selection.selected_algorithm);
+        *fold_angles = profile.fold_angles;
+        *hinge_pivot = profile.hinge_pivot;
+    }
+    selection.active_algorithm = selection.selected_algorithm;
 }
 
-fn spawn_member_tile(commands: &mut Commands, arrangement: Entity) -> Entity {
+fn algorithm_member_profile(index: usize, algorithm: FoldAlgorithm) -> AlgorithmMemberProfile {
+    let sign = fold_sign(index, algorithm);
+    let signed_lean = ACCORDION_LEAN * sign;
+    let pivot_offset = Vec3::Z * (sign * pivot_scale(index, algorithm) * TILE_GAP / 2.0);
+    AlgorithmMemberProfile {
+        fold_angles: FoldAngles {
+            unfolded: TRIANGLE_REST_FLIP,
+            folded:   TRIANGLE_REST_FLIP + signed_lean,
+        },
+        hinge_pivot: HingePivot {
+            offset:          pivot_offset,
+            reference_angle: TRIANGLE_REST_FLIP,
+        },
+    }
+}
+
+const fn fold_sign(index: usize, algorithm: FoldAlgorithm) -> f32 {
+    match algorithm {
+        FoldAlgorithm::Accordion => MOUNTAIN_SIGN,
+        FoldAlgorithm::Wrap if index.is_multiple_of(EVEN_PERIOD) => MOUNTAIN_SIGN,
+        FoldAlgorithm::Wrap => VALLEY_SIGN,
+    }
+}
+
+fn pivot_scale(index: usize, algorithm: FoldAlgorithm) -> f32 {
+    match algorithm {
+        FoldAlgorithm::Accordion => 1.0,
+        FoldAlgorithm::Wrap => index.to_f32(),
+    }
+}
+
+fn spawn_member_tile(
+    commands: &mut Commands,
+    arrangement: Entity,
+    index: usize,
+    algorithm: FoldAlgorithm,
+) -> Entity {
     let entity = spawn_tile(commands, Transform::default());
-    commands
-        .entity(entity)
-        .insert((Member { arrangement }, ResolvedAnchorOffset::default()));
+    let profile = algorithm_member_profile(index, algorithm);
+    commands.entity(entity).insert((
+        Member { arrangement },
+        profile.fold_angles,
+        profile.hinge_pivot,
+    ));
     entity
 }
 
