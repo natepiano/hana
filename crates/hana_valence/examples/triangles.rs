@@ -70,9 +70,13 @@ const TILE_GAP: f32 = 0.001;
 
 // teaching panel
 const DESCRIPTION_TITLE: &str = "Arrangement-derived folding";
-const DESCRIPTION_LINES: [&str; 3] = [
+const DESCRIPTION_LINES: [&str; 7] = [
     "Arrangement order becomes one zero-based fold stage per triangle.",
-    "Space and Shift+Space step one crease; P continues the remembered direction.",
+    "Space / Shift+Space steps one crease forward / backward.",
+    "At a terminal, P selects the other endpoint.",
+    "Idle in the interior: P follows the latest step direction.",
+    "During a step: P continues that direction to the terminal.",
+    "During Play: P reverses immediately.",
     "T selects Accordion or Wrap; mid-fold selections wait until fully unfolded.",
 ];
 

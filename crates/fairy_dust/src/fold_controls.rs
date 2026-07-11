@@ -41,7 +41,9 @@ pub enum FoldControlAction {
     Fold,
     /// One stage toward the unfolded endpoint.
     Unfold,
-    /// Continuous playback toward the remembered endpoint.
+    /// Playback that selects the other endpoint from a terminal, follows the
+    /// latest step direction while idle in the interior, continues an active
+    /// step to the terminal, and reverses during playback.
     Play,
 }
 
@@ -721,7 +723,7 @@ mod tests {
     }
 
     #[test]
-    fn play_chip_clears_on_the_exact_settle_frame() {
+    fn play_chip_stays_active_after_reversal_and_clears_on_the_exact_settle_frame() {
         let mut app = test_app();
         let sequence = spawn_sequence(&mut app, 2, FoldEndpoint::Unfolded);
         let bar = app.world_mut().spawn(TitleBarControlState::default()).id();
@@ -735,6 +737,25 @@ mod tests {
         assert_eq!(
             chip_activation(&app, bar, FOLD_PLAY_CONTROL_ID),
             ControlActivation::Active
+        );
+
+        app.world_mut()
+            .trigger(FoldCommandEvent::new(sequence, FoldCommand::Play));
+        app.world_mut()
+            .resource_mut::<Time<Virtual>>()
+            .advance_by(Duration::ZERO);
+        app.update();
+        assert_eq!(
+            chip_activation(&app, bar, FOLD_PLAY_CONTROL_ID),
+            ControlActivation::Active
+        );
+        assert!(
+            app.world()
+                .get::<FoldSequenceState>(sequence)
+                .is_some_and(|state| {
+                    state.direction() == FoldDirection::Unfolding
+                        && state.motion() == FoldMotion::Play
+                })
         );
 
         app.world_mut()

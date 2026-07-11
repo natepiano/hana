@@ -73,6 +73,11 @@ pub struct SprinkleBuilder<S> {
 impl<S> SprinkleBuilder<S> {
     /// Installs Hana fold playback with the standard `Space` fold,
     /// `Shift+Space` unfold, and `P` play controls.
+    ///
+    /// At a terminal, `P` selects the other endpoint. While idle in the
+    /// interior, it follows the latest step direction; during a step, it
+    /// continues that direction to the terminal; during play, it reverses
+    /// immediately.
     #[must_use]
     pub fn with_fold_controls(mut self) -> Self {
         fold_controls::install(&mut self.app);

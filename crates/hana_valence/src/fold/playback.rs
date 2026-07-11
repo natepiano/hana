@@ -15,7 +15,7 @@ use super::FoldEndpoint;
 use super::FoldSequence;
 use super::FoldSequenceState;
 
-/// Remembered direction for fold commands and terminal playback.
+/// Direction established by a step or selected for terminal playback.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Reflect)]
 #[reflect(PartialEq, Debug, Clone)]
 pub enum FoldDirection {
@@ -33,7 +33,7 @@ pub enum FoldMotion {
     Idle,
     /// Playback is moving to one or more queued stage boundaries.
     Step,
-    /// Playback is moving to the terminal boundary in the remembered direction.
+    /// Playback is moving to a terminal boundary and can reverse without stopping.
     Play,
 }
 
@@ -43,7 +43,12 @@ pub enum FoldMotion {
 pub enum FoldCommand {
     /// Moves one stage boundary in the requested direction.
     Step(FoldDirection),
-    /// Moves to the terminal boundary in the remembered direction.
+    /// Plays toward a terminal boundary, or reverses active terminal playback.
+    ///
+    /// At an endpoint, playback selects the opposite endpoint. At an idle
+    /// interior position, it continues the latest step direction. During a
+    /// step it promotes that direction, and during playback it reverses without
+    /// changing the continuous position.
     Play,
 }
 
@@ -174,10 +179,25 @@ impl FoldPlayback {
     }
 
     fn play(&mut self, stages: usize) {
-        if self.motion == FoldMotion::Play || self.at_terminal(self.direction, stages) {
+        if stages == 0 {
+            self.target = 0;
+            self.motion = FoldMotion::Idle;
             return;
         }
 
+        self.direction = match self.motion {
+            FoldMotion::Play => match self.direction {
+                FoldDirection::Folding => FoldDirection::Unfolding,
+                FoldDirection::Unfolding => FoldDirection::Folding,
+            },
+            FoldMotion::Idle if self.at_terminal(FoldDirection::Unfolding, stages) => {
+                FoldDirection::Folding
+            },
+            FoldMotion::Idle if self.at_terminal(FoldDirection::Folding, stages) => {
+                FoldDirection::Unfolding
+            },
+            FoldMotion::Idle | FoldMotion::Step => self.direction,
+        };
         self.target = match self.direction {
             FoldDirection::Folding => stages,
             FoldDirection::Unfolding => 0,
@@ -517,7 +537,7 @@ mod tests {
     }
 
     #[test]
-    fn terminal_commands_and_repeated_play_do_not_start_new_motion() {
+    fn idle_play_moves_from_each_endpoint_to_the_other_endpoint() {
         let mut app = fold_app();
         let unfolded = spawn_sequence(&mut app, 3, FoldEndpoint::Unfolded, 1.0);
         let folded = spawn_sequence(&mut app, 3, FoldEndpoint::Folded, 1.0);
@@ -527,34 +547,70 @@ mod tests {
             unfolded,
             FoldCommand::Step(FoldDirection::Unfolding),
         );
-        trigger(&mut app, unfolded, FoldCommand::Play);
         trigger(&mut app, folded, FoldCommand::Step(FoldDirection::Folding));
+        trigger(&mut app, unfolded, FoldCommand::Play);
         trigger(&mut app, folded, FoldCommand::Play);
 
         assert_eq!(
             snapshot(app.world(), unfolded),
-            Some((0.0, 0, FoldDirection::Unfolding, FoldMotion::Idle))
+            Some((0.0, 3, FoldDirection::Folding, FoldMotion::Play))
         );
         assert_eq!(
             snapshot(app.world(), folded),
-            Some((3.0, 3, FoldDirection::Folding, FoldMotion::Idle))
+            Some((3.0, 0, FoldDirection::Unfolding, FoldMotion::Play))
         );
-
-        trigger(
-            &mut app,
-            unfolded,
-            FoldCommand::Step(FoldDirection::Folding),
-        );
-        trigger(&mut app, unfolded, FoldCommand::Play);
-        advance(&mut app, 0.25);
-        let before_repeated_play = snapshot(app.world(), unfolded);
-        trigger(&mut app, unfolded, FoldCommand::Play);
-
-        assert_eq!(snapshot(app.world(), unfolded), before_repeated_play);
     }
 
     #[test]
-    fn play_uses_the_direction_remembered_by_the_last_step() {
+    fn repeated_play_reverses_fractional_playback_in_both_directions() {
+        let mut app = fold_app();
+        let folding = spawn_sequence(&mut app, 4, FoldEndpoint::Unfolded, 1.0);
+        let unfolding = spawn_sequence(&mut app, 4, FoldEndpoint::Folded, 1.0);
+
+        trigger(&mut app, folding, FoldCommand::Play);
+        trigger(&mut app, unfolding, FoldCommand::Play);
+        advance(&mut app, 0.75);
+        trigger(&mut app, folding, FoldCommand::Play);
+        trigger(&mut app, unfolding, FoldCommand::Play);
+
+        assert_eq!(
+            snapshot(app.world(), folding),
+            Some((0.75, 0, FoldDirection::Unfolding, FoldMotion::Play))
+        );
+        assert_eq!(
+            snapshot(app.world(), unfolding),
+            Some((3.25, 4, FoldDirection::Folding, FoldMotion::Play))
+        );
+    }
+
+    #[test]
+    fn play_promotes_fractional_steps_in_both_directions() {
+        let mut app = fold_app();
+        let folding = spawn_sequence(&mut app, 4, FoldEndpoint::Unfolded, 1.0);
+        let unfolding = spawn_sequence(&mut app, 4, FoldEndpoint::Folded, 1.0);
+
+        trigger(&mut app, folding, FoldCommand::Step(FoldDirection::Folding));
+        trigger(
+            &mut app,
+            unfolding,
+            FoldCommand::Step(FoldDirection::Unfolding),
+        );
+        advance(&mut app, 0.25);
+        trigger(&mut app, folding, FoldCommand::Play);
+        trigger(&mut app, unfolding, FoldCommand::Play);
+
+        assert_eq!(
+            snapshot(app.world(), folding),
+            Some((0.25, 4, FoldDirection::Folding, FoldMotion::Play))
+        );
+        assert_eq!(
+            snapshot(app.world(), unfolding),
+            Some((3.75, 0, FoldDirection::Unfolding, FoldMotion::Play))
+        );
+    }
+
+    #[test]
+    fn idle_interior_play_continues_the_last_step_direction() {
         let mut app = fold_app();
         let sequence = spawn_sequence(&mut app, 4, FoldEndpoint::Folded, 1.0);
 

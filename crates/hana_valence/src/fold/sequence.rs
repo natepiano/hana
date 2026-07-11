@@ -67,10 +67,10 @@ impl FoldSequence {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
 #[reflect(PartialEq, Debug, Default, Clone)]
 pub enum FoldEndpoint {
-    /// Boundary zero, with folding remembered as the next play direction.
+    /// Boundary zero, where idle playback begins by folding.
     #[default]
     Unfolded,
-    /// The terminal stage boundary, with unfolding remembered as the next play direction.
+    /// The terminal stage boundary, where idle playback begins by unfolding.
     Folded,
 }
 
@@ -194,7 +194,7 @@ impl FoldSequenceState {
     #[must_use]
     pub const fn target(&self) -> usize { self.playback.target() }
 
-    /// Remembered playback direction.
+    /// Direction most recently selected by a step or terminal playback.
     #[must_use]
     pub const fn direction(&self) -> FoldDirection { self.playback.direction() }
 

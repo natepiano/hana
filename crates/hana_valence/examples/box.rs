@@ -34,18 +34,22 @@ use fixtures::QUAD_RIGHT_EDGE;
 use fixtures::QUAD_TOP_EDGE;
 
 // app
-const DESCRIPTION_LINES: [&str; 4] = [
+const DESCRIPTION_LINES: [&str; 8] = [
     "Space: stage 0 raises the lid",
     "Space: stage 1 raises all four walls",
     "Shift+Space reverses walls, then lid",
-    "P plays toward the remembered endpoint; center stays fixed",
+    "At a terminal, P selects the other endpoint",
+    "Idle in the interior: P follows the latest step direction",
+    "During a step: P continues that direction to the terminal",
+    "During Play: P reverses immediately",
+    "The center stays fixed",
 ];
 const DESCRIPTION_TITLE: &str = "Two-stage fold sequence";
 const EXAMPLE_TITLE: &str = "Box Net";
 
 // animation
 const BOX_FOLD_ANGLE: f32 = -core::f32::consts::FRAC_PI_2;
-const FOLD_SECONDS: f32 = 2.5;
+const FOLD_SECONDS: f32 = 1.0;
 
 // camera home
 const HOME_MARGIN: f32 = 0.4;

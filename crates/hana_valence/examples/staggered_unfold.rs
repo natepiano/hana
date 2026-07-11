@@ -1,5 +1,6 @@
 //! Five hinged panels form a staged accordion from a visible fixed mount.
 
+use bevy::anti_alias::taa::TemporalAntiAliasing;
 use bevy::camera::primitives::Aabb;
 use bevy::color::Srgba;
 use bevy::color::palettes::css::CORAL;
@@ -79,12 +80,16 @@ const HOME_TARGET_SIZE: Vec3 = Vec3::new(
 const HOME_YAW: f32 = 0.37;
 
 // description panel
-const DESCRIPTION_LINES: [&str; 5] = [
+const DESCRIPTION_LINES: [&str; 9] = [
     "Gold fixed root owns the chain transform and no fold stage.",
     "Panels 1–5 use consecutive authored FoldMember stages.",
     "Segmented knuckles mark invariant HingePivot axes.",
     "Half-turn stages stack panel faces after panel 1 clears the root.",
-    "Space / Shift+Space step; P plays in the remembered direction.",
+    "Space / Shift+Space steps one stage forward / backward.",
+    "At a terminal, P selects the other endpoint.",
+    "Idle in the interior: P follows the latest step direction.",
+    "During a step: P continues that direction to the terminal.",
+    "During Play: P reverses immediately.",
 ];
 const DESCRIPTION_TITLE: &str = "Authored Accordion";
 
@@ -189,7 +194,11 @@ fn main() {
         .with_studio_lighting()
         .with_ground_plane()
         .size(GROUND_SIZE)
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
+        .with_orbit_cam_preset_bundle(
+            |_| {},
+            OrbitCamPreset::blender_like(),
+            (Msaa::Off, TemporalAntiAliasing::default()),
+        )
         .with_stable_transparency()
         .with_camera_home()
         .pitch(HOME_PITCH)
