@@ -2873,6 +2873,7 @@ dependencies = [
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
+ "hana_valence",
 ]
 
 [[package]]

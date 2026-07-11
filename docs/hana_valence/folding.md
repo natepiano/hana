@@ -444,7 +444,7 @@
 - Phase 9 now handles `FoldSequenceBuilder::finish()` explicitly and verifies successful grouped authoring.
 - The remaining phases stay distinct and correctly ordered, with Phases 7–9 still parallel after Phase 6. No user decision remains.
 
-### Phase 6 — Fairy Dust fold controls  · status: todo
+### Phase 6 — Fairy Dust fold controls  · status: done (checkpoint)
 
 #### Work Order
 
@@ -483,6 +483,57 @@
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo nextest run -p fairy_dust --all-features` passes all named input/routing/chip tests; `cargo nextest run -p hana_valence --all-features` remains green; `cargo check --workspace --all-targets --all-features` is green and the anchor pipeline is registered once.
 
+#### Retrospective
+
+**What worked:**
+
+- `.with_fold_controls()` installs Hana playback and private BEI actions idempotently without registering any anchor-pipeline systems.
+- Routing selects only ready sequences, remains quiet while authoring is pending, and drives the three title chips from Hana motion state on the settle frame.
+
+**What deviated from the plan:**
+
+- Shortcut reservations now carry a capability `TypeId`; `camera_home.rs` and `cube_spin.rs` were updated to name their owners so repeat installation is idempotent and cross-capability collisions fail immediately.
+- Public bounded routing diagnostics expose the rejected action and ready/marked counts for inspection.
+
+**Surprises:**
+
+- The full Fairy Dust verification required 66 tests; the existing macOS compact-unwind linker warning remained non-fatal.
+
+**Implications for remaining phases:**
+
+- All three examples can remove raw fold input and install the same Space, Shift+Space, and P controls through one builder call.
+- Example-owned BEI algorithm controls coexist with folding as long as they reserve different bare keys.
+- Title bars need no example-local fold activation state; instructional content remains in screen-space teaching panels.
+
+#### Phase 6 Review
+
+- A new Phase 6.5 prepares the shared Hana example dependency graph before the three example-local migrations run in parallel.
+- Phases 7–9 now call `.with_fold_controls()` while they still hold `SprinkleBuilder`, remove conflicting legacy shortcuts and local fold-chip wiring, and verify installation without reservation collisions.
+- All three example acceptance gates now require a single routable sequence with no `FoldControlDiagnostic` during normal controls; Phase 8 waits for its arrangement snapshot before the first input.
+- No product or architecture decision blocks the parallel example wave.
+
+### Phase 6.5 — Prepare parallel example dependencies  · status: todo
+
+#### Work Order
+
+**Goal:** Make the shared Hana manifest support three isolated, parallel example migrations without requiring any example agent to edit shared files.
+
+**Spec:**
+
+- Remove the `staggered_unfold` `required-features = ["tween"]` example declaration because Phase 7 removes its tween-based implementation and the example must compile without the optional Hana tween feature.
+- Remove the direct `bevy_tween` dev-dependency once no Hana example imports it. Preserve Hana's optional normal `bevy_tween` dependency and public `tween` feature; this phase does not remove the library's tween adapters.
+- Add direct `bevy_enhanced_input` example/dev access for the Phase 8 algorithm action and enable the `input` feature on Hana's existing `bevy_kana` dependency so the example can use the workspace BEI macros without reaching through Fairy Dust.
+- Update `Cargo.lock` mechanically. Do not edit any example source or shared runtime API.
+
+**Files:**
+
+- `crates/hana_valence/Cargo.toml` — prepare the example dependency graph and remove the obsolete example feature gate.
+- `Cargo.lock` — record the manifest dependency change.
+
+**Constraints from prior phases:** Phase 6 provides `.with_fold_controls()` through Fairy Dust. Preserve Hana's optional `tween` library feature and all Phase 1–6 runtime APIs. This checkpoint must leave Phases 7–9 isolated to their named example source files.
+
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --examples`; `cargo check -p hana_valence --examples --all-features`; `cargo check --workspace --all-targets --all-features`; `cargo nextest run -p hana_valence --all-features` and `cargo nextest run -p fairy_dust --all-features` remain green.
+
 ### Phase 7 — Migrate `staggered_unfold`  · status: todo
 
 #### Work Order
@@ -493,6 +544,7 @@
 
 - Confine implementation edits to `staggered_unfold.rs` so this Work Order can run in parallel with Phases 8 and 9. Do not edit shared fixtures or the other examples.
 - Replace the local fold step/playback resource, autoplay/pause logic, fold-motion mirror, raw keyboard reads, example-local fold tween registration, duplicate fold scheduling, and `apply_hinge_pivot`/`ResolvedAnchorOffset` compensation with `FoldSequence`, `FoldMember`, `FoldAngles`, `HingePivot`, and `.with_fold_controls()`.
+- Call `.with_fold_controls()` before `.with_title_bar(...)` while the chain still holds `SprinkleBuilder`. Remove `.with_shortcut(KeyP, toggle_pause)`, manually declared Space/Shift+Space/P title controls, and all local activation wiring; the shared capability owns those bindings and chips.
 - Keep the gold fixed root visually and structurally distinct. It supplies the authored world transform and first `AnchoredTo` relationship but has no `FoldMember` and consumes no stage.
 - Give the five moving panels consecutive zero-based stages. Preserve the accordion endpoints with the current edge ordering: panel one stops at a quarter-turn parallel to the mount face; panels two through five use alternating half-turns so they close face-to-face rather than coil inward. Use the current sign sequence as the starting authored values: `[FRAC_PI_2, -PI, PI, -PI, PI]`; if an existing edge endpoint order reverses an axis, adjust that endpoint's authored sign while preserving the stated world-space result.
 - Every panel authors `FoldAngles::unfolded = 0.0` and `HingePivot::reference_angle = 0.0`; the listed values are absolute `FoldAngles::folded` endpoints. Author each `HingePivot::offset` in source-anchor tangent coordinates. The current identity-framed quad anchors allow the same vector to place the child-local knuckle axis; if that frame changes, convert the tangent-frame pivot line before positioning the visuals.
@@ -504,9 +556,9 @@
 **Files:**
 - `crates/hana_valence/examples/staggered_unfold.rs` — complete migration and presentation/physical endpoint verification.
 
-**Constraints from prior phases:** Phases 1–6 are complete and provide the runtime, frame-correct pivot, hinge adapter, explicit authoring, and Fairy controls. This phase is independent of Phases 8 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
+**Constraints from prior phases:** Phases 1–6.5 are complete and provide the runtime, frame-correct pivot, hinge adapter, explicit authoring, Fairy controls, and a manifest that no longer requires tween support for this example. This phase is independent of Phases 8 and 9 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
 
 ### Phase 8 — Migrate `triangles`  · status: todo
 
@@ -518,6 +570,7 @@
 
 - Confine implementation edits to `triangles.rs` so this Work Order can run in parallel with Phases 7 and 9. Do not edit shared fixtures or the other examples.
 - Replace `AccordionPlayback`, local playback/motion state, raw fold input, local timing, replay behavior, duplicate fold scheduling, and `apply_crease_gap`/`ResolvedAnchorOffset` compensation with the shared fold runtime. Keep only example-owned algorithm selection state.
+- Call `.with_fold_controls()` before `.with_title_bar(...)` while the chain still holds `SprinkleBuilder`. Remove the obsolete `R` replay shortcut, manually declared Space/Shift+Space/P controls, and local fold-chip activation. Replace only the existing `T` algorithm toggle with its example-owned BEI action and retain only its segmented algorithm control.
 - Place `FoldFromArrangement` on the sequence after the arrangement is authored. It snapshots `ArrangementMembers` after member indices settle and assigns one zero-based stage per moving crease; the arrangement root is not a moving fold member.
 - Author `FoldAngles` and `HingePivot` in the example's algorithm profile. For every triangle member, use the absolute endpoint `FoldAngles::unfolded = HingePivot::reference_angle = PI` and compute `FoldAngles::folded = PI + signed_lean`; never store `signed_lean` alone as the folded endpoint. The accordion uses a constant local fold sign because each member already has a half-turn rest orientation; the wrap algorithm uses the existing alternate policy. Express every pivot offset in source-anchor tangent coordinates. Do not ask `FoldFromArrangement` to infer signs, endpoints, or pivot gaps.
 - Keep the accordion/wrap toggle as an example-owned BEI action, independent of Space/Shift+Space/P. Do not read `ButtonInput<KeyCode>` directly. Track selected and active algorithm profiles separately: the selection/title chip changes immediately, but when `FoldSequenceState::position()` is nonzero, queue endpoint/pivot changes until playback reaches fully unfolded position zero. Run queued-profile activation in `PostUpdate` after `FoldSystems::Advance` and before `FoldSystems::Actuate`, using Phase 2's exact `0.0` settle boundary as the deterministic activation point. Applying an active profile updates `FoldAngles` and the complete `HingePivot` atomically before actuation and must not change playback position, target, direction, stage membership, or grouping.
@@ -527,9 +580,9 @@
 **Files:**
 - `crates/hana_valence/examples/triangles.rs` — complete migration, BEI algorithm selection, queued profile activation, and presentation verification.
 
-**Constraints from prior phases:** Phases 1–6 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
+**Constraints from prior phases:** Phases 1–6.5 are complete and provide arrangement snapshot authoring, runtime accessors, frame-correct pivots, hinge actuation, Fairy controls, and direct example access to BEI plus `bevy_kana` input macros. This phase is independent of Phases 7 and 9 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify idle startup, no `FoldSnapshotDiagnostic` during normal setup, a ready sequence with one zero-based stage per arrangement member before the first command, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example triangles --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, no `FoldSnapshotDiagnostic` during normal setup, a ready sequence with one zero-based stage per arrangement member before the first input, no `FoldControlDiagnostic` during standard inputs after readiness, one-crease steps in both directions, remembered-direction play, both algorithms, zero pivot compensation at the absolute `PI` reference endpoint, finite invariant pivots for both profiles, no transform jump when selection changes away from zero, queued activation on the same frame playback settles at zero, unchanged position/target/direction/membership/grouping across activation, stable transparency, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, play, or algorithm switching.
 
 ### Phase 9 — Migrate `box`  · status: todo
 
@@ -541,6 +594,7 @@
 
 - Confine implementation edits to `box.rs` so this Work Order can run in parallel with Phases 7 and 8. Do not edit shared fixtures or the other examples.
 - Remove example-local `FoldPhase`, `FoldTarget`, `FoldPlayback`, replay input, timing, and hinge driver. Install `.with_fold_controls()` and author `FoldAngles` on the moving faces.
+- Call `.with_fold_controls()` before `.with_title_bar(...)` while the chain still holds `SprinkleBuilder`. Remove the obsolete `R Replay` shortcut, manually declared Space/Shift+Space/P controls, and all local fold-chip activation wiring.
 - Spawn one unfolded `FoldSequence`. Use `FoldSequenceBuilder` to author exactly two stages: stage zero contains only the lid; stage one contains north, south, east, and west. Handle `FoldSequenceBuilder::finish()` and fail setup with a clear error if this statically authored grouping is rejected; do not discard the `Result`. The center face is the fixed root, carries no `FoldMember`, and consumes no stage. Five moving faces must derive a stage count of two.
 - Preserve the physical topology: the lid remains anchored to north's free outer edge, so folding stage zero raises the lid first and stage one raises all four walls while carrying the lid through the anchor chain. Do not derive stages from descendants or member count.
 - Author absolute `FoldAngles { unfolded: 0.0, folded: BOX_FOLD_ANGLE }` on each moving face and omit `HingePivot` for the current zero-thickness planar faces; `hinge_to_pose` therefore preserves zero `AnchorPose::translation`.
@@ -550,6 +604,6 @@
 **Files:**
 - `crates/hana_valence/examples/box.rs` — complete grouped-stage migration and presentation verification.
 
-**Constraints from prior phases:** Phases 1–6 are complete and provide explicit grouped authoring, runtime, hinge actuation, and Fairy controls. This phase is independent of Phases 7 and 8 and may run in parallel with them. Do not change shared APIs or fixtures in this phase.
+**Constraints from prior phases:** Phases 1–6.5 are complete and provide explicit grouped authoring, runtime, hinge actuation, Fairy controls, and a prepared shared example dependency graph. This phase is independent of Phases 7 and 8 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.

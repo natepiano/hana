@@ -154,6 +154,17 @@ pub(crate) const FACE_TEXT_Z_OFFSET: f32 = 0.001;
 pub(crate) const FILL_LIGHT_ILLUMINANCE: f32 = 1_400.0;
 pub(crate) const FILL_LIGHT_POS: Vec3 = Vec3::new(4.5, 4.0, -3.5);
 
+// fold controls
+pub(crate) const FOLD_CONTROL_DIAGNOSTIC_CAPACITY: usize = 128;
+pub(crate) const FOLD_CONTROL_ID: &str = "fold_step";
+pub(crate) const FOLD_CONTROL_LABEL: &str = "Space Fold";
+pub(crate) const FOLD_CONTROL_RESERVE_LABEL: &str = "fold step";
+pub(crate) const FOLD_PLAY_CONTROL_ID: &str = "fold_play";
+pub(crate) const FOLD_PLAY_CONTROL_LABEL: &str = "P Play";
+pub(crate) const FOLD_PLAY_RESERVE_LABEL: &str = "fold play";
+pub(crate) const UNFOLD_CONTROL_ID: &str = "unfold_step";
+pub(crate) const UNFOLD_CONTROL_LABEL: &str = "Shift+Space Unfold";
+
 // ground plane defaults
 pub(crate) const GROUND_PLANE_ALPHA: f32 = 0.78;
 pub(crate) const GROUND_PLANE_DEFAULT_COLOR: Color = Color::srgb(0.125, 0.14, 0.16);

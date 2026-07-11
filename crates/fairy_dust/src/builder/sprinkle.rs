@@ -31,6 +31,7 @@ use crate::camera_home::HomeTitleBarControl;
 use crate::cube_spin;
 use crate::cube_spin::CubeSpinConfig;
 use crate::environment_map;
+use crate::fold_controls;
 use crate::hdr;
 use crate::lighting::StudioLightingConfig;
 use crate::orbit_cam;
@@ -70,6 +71,14 @@ pub struct SprinkleBuilder<S> {
 // State-agnostic capabilities — available regardless of whether an `OrbitCam`
 // has been configured.
 impl<S> SprinkleBuilder<S> {
+    /// Installs Hana fold playback with the standard `Space` fold,
+    /// `Shift+Space` unfold, and `P` play controls.
+    #[must_use]
+    pub fn with_fold_controls(mut self) -> Self {
+        fold_controls::install(&mut self.app);
+        self
+    }
+
     /// Add a `bevy_clerestory` `WindowManagerPlugin` so window position
     /// and size are persisted across runs.
     #[must_use]
@@ -167,8 +176,9 @@ impl<S> SprinkleBuilder<S> {
     ///
     /// Reusing a key Fairy Dust already binds bare (`H` home with
     /// [`with_camera_home`](Self::with_camera_home), `P` with
-    /// [`with_cube_spin`](Self::with_cube_spin)) fails at startup — use the
-    /// matching capability instead of a manual shortcut.
+    /// [`with_cube_spin`](Self::with_cube_spin) or
+    /// [`with_fold_controls`](Self::with_fold_controls)) fails at startup —
+    /// use the matching capability instead of a manual shortcut.
     #[must_use]
     pub fn with_shortcut<Sys, M>(mut self, key: KeyCode, system: Sys) -> Self
     where

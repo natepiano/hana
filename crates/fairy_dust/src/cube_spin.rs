@@ -241,7 +241,7 @@ impl<M: 'static> TitleChipActivation for CubeSpinControl<M> {
 
 pub(crate) fn install<M: Component>(app: &mut App, config: CubeSpinConfig) {
     if let Some(key) = config.key {
-        shortcuts::reserve_key(app, key, CUBE_SPIN_RESERVE_LABEL);
+        shortcuts::reserve_key::<CubeSpinContext<M>>(app, key, CUBE_SPIN_RESERVE_LABEL);
     }
     if let Some(chip) = config.chip {
         screen_panels::register_title_control(app, chip);

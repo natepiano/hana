@@ -422,7 +422,7 @@ fn spawn_title_bar(
     }
 }
 
-pub(super) fn refresh_changed_title_bar(
+pub(crate) fn refresh_changed_title_bar(
     mut commands: Commands,
     title_bars: Query<
         (Entity, &TitleBar, &TitleBarControlState),

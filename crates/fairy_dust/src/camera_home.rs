@@ -165,7 +165,7 @@ pub(crate) fn install(app: &mut App, config: CameraHomeConfig) {
     app.init_resource::<AtHome>();
     app.init_resource::<HomeAabbGizmoVisible>();
     app.add_input_context::<CameraHomeContext>();
-    shortcuts::reserve_key(app, HOME_KEY, HOME_CONTROL);
+    shortcuts::reserve_key::<CameraHomeContext>(app, HOME_KEY, HOME_CONTROL);
     app.add_systems(Startup, (spawn_home_marker, spawn_home_debug_actions));
     app.add_systems(
         PreUpdate,

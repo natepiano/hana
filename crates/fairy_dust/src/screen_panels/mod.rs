@@ -36,6 +36,7 @@ pub use title_bar::TitleBarOrientation;
 pub use title_bar::TitleBarSegment;
 pub use title_bar::TitleChip;
 pub use title_bar::TitleChipActivation;
+pub(crate) use title_bar::refresh_changed_title_bar;
 
 use crate::camera_home::CameraHomeConfig;
 use crate::constants::BORDER;

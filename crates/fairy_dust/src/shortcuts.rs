@@ -15,9 +15,12 @@
 //! chord on the same letter never both fire — the modifier guard is what the
 //! original raw-input examples were missing.
 //!
-//! Bare keys Fairy Dust already binds (`H` home, `P` cube spin) register into
-//! [`ReservedKeys`]; [`assert_no_reserved_collisions`] rejects an example
-//! shortcut that reuses one at startup, instead of letting it double-fire.
+//! Bare keys Fairy Dust already binds (`H` home, `P` cube spin or fold play)
+//! register into [`ReservedKeys`]. A second capability is rejected immediately,
+//! while [`assert_no_reserved_collisions`] rejects an example shortcut that
+//! reuses one at startup.
+
+use std::any::TypeId;
 
 use bevy::ecs::system::SystemId;
 use bevy::prelude::*;
@@ -40,12 +43,14 @@ struct ShortcutsInstalled;
 
 /// A Fairy Dust bare-key binding that example shortcuts must not reuse.
 struct ReservedKey {
-    key:   KeyCode,
-    label: &'static str,
+    key:        KeyCode,
+    owner:      TypeId,
+    owner_name: &'static str,
+    label:      &'static str,
 }
 
-/// Bare keys already bound by Fairy Dust capabilities. Populated at capability
-/// install; read once by [`assert_no_reserved_collisions`].
+/// Bare keys already bound by Fairy Dust capabilities. Populated and checked at
+/// capability install, then read by [`assert_no_reserved_collisions`].
 #[derive(Resource, Default)]
 struct ReservedKeys(Vec<ReservedKey>);
 
@@ -94,14 +99,32 @@ fn push(app: &mut App, key: KeyCode, timing: ShortcutTiming, system_id: SystemId
         });
 }
 
-/// Records a Fairy Dust bare-key binding so [`assert_no_reserved_collisions`]
-/// can reject an example shortcut that reuses it.
-pub(crate) fn reserve_key(app: &mut App, key: KeyCode, label: &'static str) {
+/// Records a Fairy Dust bare-key binding. Repeated reservations by `O` are
+/// idempotent; another owner reserving `key` is rejected immediately, and
+/// [`assert_no_reserved_collisions`] rejects example shortcuts at startup.
+pub(crate) fn reserve_key<O: 'static>(app: &mut App, key: KeyCode, label: &'static str) {
     app.init_resource::<ReservedKeys>();
-    app.world_mut()
-        .resource_mut::<ReservedKeys>()
-        .0
-        .push(ReservedKey { key, label });
+    let owner = TypeId::of::<O>();
+    let owner_name = std::any::type_name::<O>();
+    let mut reserved = app.world_mut().resource_mut::<ReservedKeys>();
+    if let Some(existing) = reserved.0.iter().find(|reserved| reserved.key == key) {
+        assert!(
+            existing.owner == owner,
+            "fairy_dust reserved key {:?} for `{}` ({}) collides with `{}` ({}); use only one capability for a bare key",
+            key,
+            label,
+            owner_name,
+            existing.label,
+            existing.owner_name,
+        );
+        return;
+    }
+    reserved.0.push(ReservedKey {
+        key,
+        owner,
+        owner_name,
+        label,
+    });
 }
 
 /// Runs each registered shortcut whose key fires this frame, skipping all of
@@ -144,5 +167,40 @@ fn assert_no_reserved_collisions(
             registration.key,
             collision.map_or("", |reserved| reserved.label),
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::panic::AssertUnwindSafe;
+
+    use bevy::prelude::*;
+
+    use super::ReservedKeys;
+    use super::reserve_key;
+
+    struct FirstCapability;
+    struct SecondCapability;
+
+    #[test]
+    fn same_capability_key_reservation_is_idempotent() {
+        let mut app = App::new();
+
+        reserve_key::<FirstCapability>(&mut app, KeyCode::KeyP, "first");
+        reserve_key::<FirstCapability>(&mut app, KeyCode::KeyP, "first");
+
+        assert_eq!(app.world().resource::<ReservedKeys>().0.len(), 1);
+    }
+
+    #[test]
+    fn different_capability_key_reservation_is_rejected() {
+        let mut app = App::new();
+        reserve_key::<FirstCapability>(&mut app, KeyCode::KeyP, "first");
+
+        let collision = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            reserve_key::<SecondCapability>(&mut app, KeyCode::KeyP, "second");
+        }));
+
+        assert!(collision.is_err());
     }
 }
