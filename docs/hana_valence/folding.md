@@ -556,7 +556,7 @@
 - Workspace-wide check, nextest, and Clippy run at a root-owned parallel-wave join after all three example checkpoints rather than inside Phase 9.
 - Phases 7–9 are isolated to distinct example files and safe to dispatch concurrently. No user decision remains.
 
-### Phase 7 — Migrate `staggered_unfold`  · status: todo
+### Phase 7 — Migrate `staggered_unfold`  · status: done (checkpoint)
 
 #### Work Order
 
@@ -581,6 +581,26 @@
 **Constraints from prior phases:** Phases 1–6.5 are complete and provide the runtime, frame-correct pivot, hinge adapter, explicit authoring, Fairy controls, and a manifest that no longer requires tween support for this example. This phase is independent of Phases 8 and 9 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --no-default-features`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
+
+#### Retrospective
+
+**What worked:**
+
+- One `PanelJoint` definition now authors the attachment, fold endpoint, tangent-frame pivot, and segmented knuckle line for each moving panel.
+- The fixed gold mount remains outside the five-stage sequence; shared controls start idle and replace all tween, autoplay, pause, and local input behavior.
+
+**What deviated from the plan:**
+
+- BRP runtime inspection verified stage motion, pivot invariance, face spacing, root clearance, and clean diagnostics, but the captured native window was occluded and visually black.
+
+**Implications for remaining phases:**
+
+- Interactive root verification still needs to inspect visible knuckles, home framing, transparency, title text, and teaching-panel legibility.
+
+#### Phase 7 Review
+
+- The parallel-wave join now requires root-visible presentation verification whenever delegated screenshots were unavailable or occluded; BRP state alone does not satisfy visual acceptance.
+- Phase 7 introduced no shared change requiring amendments to the already implemented Phase 8 or Phase 9 Work Orders. No user decision remains.
 
 ### Phase 8 — Migrate `triangles`  · status: todo
 
@@ -632,4 +652,4 @@
 
 ## Parallel-wave join gate
 
-After Phases 7–9 are individually reviewed and checkpointed, the root orchestrator runs `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `clippy` workflow with `auto-proceed`. Any cross-example or shared regression is fixed and re-reviewed before the plan is complete.
+After Phases 7–9 are individually reviewed and checkpointed, the root orchestrator runs `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `clippy` workflow with `auto-proceed`. The root also visibly verifies each example's presentation whenever delegated window evidence was unavailable or occluded: hinge/panel geometry, home framing, transparency, title controls, teaching-panel legibility, orbit interaction, and BRP port text. BRP state inspection alone does not satisfy this visual gate. Any cross-example, shared, or presentation regression is fixed and re-reviewed before the plan is complete.

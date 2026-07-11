@@ -1,4 +1,4 @@
-//! Five hinged panels unfold from a visible fixed mount with staggered tweens.
+//! Five hinged panels form a staged accordion from a visible fixed mount.
 
 use bevy::camera::primitives::Aabb;
 use bevy::color::Srgba;
@@ -9,42 +9,27 @@ use bevy::color::palettes::css::SEA_GREEN;
 use bevy::color::palettes::css::SILVER;
 use bevy::color::palettes::css::SKY_BLUE;
 use bevy::color::palettes::css::TURQUOISE;
+use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticText;
-use bevy_diegetic::PanelSystems;
 use bevy_diegetic::Sidedness;
 use bevy_kana::ToF32;
-use bevy_kana::ToUsize;
 use bevy_lagrange::OrbitCamPreset;
-use bevy_tween::BevyTweenRegisterSystems;
-use bevy_tween::DefaultTweenPlugins;
-use bevy_tween::TweenSystemSet;
-use bevy_tween::bevy_time_runner::TimeRunner;
-use bevy_tween::combinator::forward;
-use bevy_tween::combinator::sequence;
-use bevy_tween::combinator::tween;
-use bevy_tween::prelude::AnimationBuilderExt;
-use bevy_tween::prelude::Duration;
-use bevy_tween::prelude::EaseKind;
-use bevy_tween::prelude::IntoTarget;
-use bevy_tween::prelude::Repeat;
-use bevy_tween::prelude::RepeatStyle;
-use bevy_tween::tween::component_tween_system;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
-use fairy_dust::ControlActivation;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
-use fairy_dust::TitleChipActivation;
 use hana_valence::AnchorId;
 use hana_valence::AnchorPose;
-use hana_valence::AnchorPoseLens;
-use hana_valence::AnchorSystems;
 use hana_valence::AnchoredTo;
+use hana_valence::Edge;
+use hana_valence::FoldAngles;
+use hana_valence::FoldMember;
+use hana_valence::FoldSequence;
+use hana_valence::FoldStage;
 use hana_valence::Hinge;
-use hana_valence::HingeAngleLens;
+use hana_valence::HingePivot;
 use hana_valence::ResolvedAnchorGeometry;
-use hana_valence::ResolvedAnchorOffset;
 
 #[path = "../fixtures.rs"]
 #[allow(
@@ -57,16 +42,10 @@ use fixtures::QUAD_LEFT_EDGE;
 
 // app
 const EXAMPLE_TITLE: &str = "Staggered Unfold";
-const FOLD_CONTROL: &str = "Space Fold";
-const UNFOLD_CONTROL: &str = "Shift+Space Unfold";
-const PAUSE_CONTROL: &str = "P Pause";
 
-// animation
-const CASCADE_SPAN: Duration = Duration::from_millis(800);
-const FLAT_PAUSE: Duration = Duration::from_millis(900);
+// folding
 const FOLD_SECONDS: f32 = 0.8;
 const FULL_FOLD_ANGLE: f32 = core::f32::consts::PI;
-const FOLDED_PAUSE: Duration = Duration::from_millis(700);
 const HALF_FOLD_ANGLE: f32 = core::f32::consts::FRAC_PI_2;
 // Panel 1 stops parallel to the fixed mount. The remaining signs alternate for
 // the accordion motion; ±PI close to the same panel plane, forming a stack.
@@ -77,14 +56,13 @@ const PANEL_FOLD_ANGLES: [f32; PANEL_COUNT] = [
     -FULL_FOLD_ANGLE,
     FULL_FOLD_ANGLE,
 ];
-const PANEL_START_DELAYS: [Duration; PANEL_COUNT] = [
-    Duration::from_millis(0),
-    Duration::from_millis(200),
-    Duration::from_millis(400),
-    Duration::from_millis(600),
-    Duration::from_millis(800),
+const PANEL_ATTACHMENT_OFFSETS: [Vec3; PANEL_COUNT] = [
+    Vec3::new(0.0, 0.0, (PANEL_THICKNESS - MOUNT_DEPTH) / 2.0),
+    Vec3::ZERO,
+    Vec3::ZERO,
+    Vec3::ZERO,
+    Vec3::ZERO,
 ];
-const UNFOLD_DURATION: Duration = Duration::from_millis(1_100);
 
 // camera home
 const HOME_MARGIN: f32 = 0.43;
@@ -101,13 +79,14 @@ const HOME_TARGET_SIZE: Vec3 = Vec3::new(
 const HOME_YAW: f32 = 0.37;
 
 // description panel
-const DESCRIPTION_LINES: [&str; 4] = [
-    "Gold mount: authored world transform for the chain.",
-    "AnchoredTo links panels 1–5 at shared side edges.",
-    "HingeAngleLens staggers each panel's bevy_tween track.",
-    "Ping-pong playback refolds from panel 5 to panel 1.",
+const DESCRIPTION_LINES: [&str; 5] = [
+    "Gold fixed root owns the chain transform and no fold stage.",
+    "Panels 1–5 use consecutive authored FoldMember stages.",
+    "Segmented knuckles mark invariant HingePivot axes.",
+    "Half-turn stages stack panel faces after panel 1 clears the root.",
+    "Space / Shift+Space step; P plays in the remembered direction.",
 ];
-const DESCRIPTION_TITLE: &str = "Anchor Chain";
+const DESCRIPTION_TITLE: &str = "Authored Accordion";
 
 // labels
 const FIRST_PANEL_NUMBER: usize = 1;
@@ -135,8 +114,9 @@ const MOUNT_WIDTH: f32 = 0.28;
 
 // panels
 const HINGE_HEIGHT: f32 = PANEL_HEIGHT + 0.12;
+const HINGE_KNUCKLE_COUNT: usize = 3;
+const HINGE_KNUCKLE_GAP: f32 = 0.08;
 const HINGE_RADIUS: f32 = 0.065;
-const HINGE_AXIS_OFFSET: f32 = PANEL_THICKNESS / 2.0 + HINGE_RADIUS;
 const PANEL_COLORS: [Srgba; PANEL_COUNT] = [CORAL, SKY_BLUE, SEA_GREEN, MEDIUM_PURPLE, TURQUOISE];
 const PANEL_COUNT: usize = 5;
 const PANEL_HEIGHT: f32 = 1.2;
@@ -157,50 +137,53 @@ enum Face {
 }
 
 struct PanelAssets {
-    hinge_material: Handle<StandardMaterial>,
-    hinge_mesh:     Handle<Mesh>,
-    panel_mesh:     Handle<Mesh>,
+    knuckle_material: Handle<StandardMaterial>,
+    knuckle_mesh:     Handle<Mesh>,
+    panel_mesh:       Handle<Mesh>,
 }
 
 #[derive(Clone, Copy)]
-struct PanelTween {
-    angle: f32,
-    delay: Duration,
+struct PanelJoint {
+    attachment_offset: Vec3,
+    edge:              Edge,
+    folded_angle:      f32,
+    pivot_offset:      Vec3,
+    source_anchor:     AnchorId,
+    target_anchor:     AnchorId,
 }
 
-#[derive(Component)]
-struct UnfoldAnimation;
-
-#[derive(Component)]
-struct PanelIndex(usize);
-
-#[derive(Default, Resource)]
-struct FoldStepPlayback {
-    manual:   bool,
-    progress: f32,
-    target:   usize,
-}
-
-#[derive(Clone, Copy, Default, Eq, PartialEq, Resource)]
-enum Playback {
-    #[default]
-    Playing,
-    Paused,
-}
-
-impl TitleChipActivation for Playback {
-    fn activation(&self) -> ControlActivation {
-        match self {
-            Self::Playing => ControlActivation::Inactive,
-            Self::Paused => ControlActivation::Active,
+impl PanelJoint {
+    fn new(folded_angle: f32, attachment_offset: Vec3) -> Self {
+        Self {
+            attachment_offset,
+            edge: QUAD_LEFT_EDGE,
+            folded_angle,
+            pivot_offset: Vec3::Z * (-folded_angle.signum() * PANEL_THICKNESS / 2.0),
+            source_anchor: PANEL_SOURCE_ANCHOR,
+            target_anchor: PANEL_TARGET_ANCHOR,
         }
     }
+
+    fn knuckle_line(self, geometry: &ResolvedAnchorGeometry) -> Option<KnuckleLine> {
+        let direction = self.edge.axis(geometry).ok()?;
+        let source_point = geometry.points.get(&self.source_anchor)?;
+        Some(KnuckleLine {
+            center: source_point.position + source_point.rotation() * self.pivot_offset,
+            direction,
+        })
+    }
+}
+
+#[derive(Clone, Copy)]
+struct KnuckleLine {
+    center:    Vec3,
+    direction: Dir3,
 }
 
 fn main() {
     // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
-    let mut app = fairy_dust::sprinkle_example()
+    let app = fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
@@ -213,52 +196,14 @@ fn main() {
         .yaw(HOME_YAW)
         .margin(HOME_MARGIN)
         .offset_px(HOME_OFFSET_PX)
+        .with_camera_control_panel()
+        .with_fold_controls()
         .with_title_bar(
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
-                .with_anchor(Anchor::TopLeft)
-                .control(FOLD_CONTROL)
-                .control(UNFOLD_CONTROL)
-                .control(PAUSE_CONTROL),
+                .with_anchor(Anchor::TopLeft),
         )
-        .wire_chip_to_activation::<Playback>(PAUSE_CONTROL)
-        .with_description_panel(description_panel())
-        .with_camera_control_panel()
-        .add_plugins(DefaultTweenPlugins::<()>::in_schedule(PostUpdate))
-        .init_resource::<Playback>()
-        .init_resource::<FoldStepPlayback>()
-        .add_systems(Update, step_fold)
-        .with_shortcut(KeyCode::KeyP, toggle_pause);
-    // `DiegeticUiPlugin` already registers `hinge_to_pose`. Ordering
-    // `TweenSystemSet::ApplyTween` before `PanelSystems::AnimateAnchorPose`
-    // puts each `HingeAngleLens` write before that shared system without
-    // registering a second copy of it.
-    app.app_mut().configure_sets(
-        PostUpdate,
-        TweenSystemSet::ApplyTween
-            .in_set(AnchorSystems::AnimatePose)
-            .before(PanelSystems::AnimateAnchorPose),
-    );
-    app.app_mut().add_tween_systems(
-        PostUpdate,
-        (
-            component_tween_system::<HingeAngleLens>(),
-            component_tween_system::<AnchorPoseLens>(),
-        ),
-    );
-    app.app_mut().add_systems(
-        PostUpdate,
-        apply_fold_steps
-            .in_set(AnchorSystems::AnimatePose)
-            .after(TweenSystemSet::ApplyTween)
-            .before(apply_hinge_pivot),
-    );
-    app.app_mut().add_systems(
-        PostUpdate,
-        apply_hinge_pivot
-            .in_set(AnchorSystems::AnimatePose)
-            .before(PanelSystems::AnimateAnchorPose),
-    );
+        .with_description_panel(description_panel());
     app.add_systems(Startup, setup).run();
 }
 
@@ -274,17 +219,18 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     let panel_assets = PanelAssets {
-        hinge_material: materials.add(metal_material(SILVER)),
-        hinge_mesh:     meshes.add(Cylinder::new(HINGE_RADIUS, HINGE_HEIGHT)),
-        panel_mesh:     meshes.add(Cuboid::new(PANEL_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS)),
+        knuckle_material: materials.add(metal_material(SILVER)),
+        knuckle_mesh:     meshes.add(Cylinder::new(HINGE_RADIUS, hinge_knuckle_height())),
+        panel_mesh:       meshes.add(Cuboid::new(PANEL_WIDTH, PANEL_HEIGHT, PANEL_THICKNESS)),
     };
     let panel_materials = PANEL_COLORS.map(|color| materials.add(panel_material(color)));
 
     spawn_home_target(&mut commands);
+    let sequence = commands.spawn(FoldSequence::new(FOLD_SECONDS)).id();
     let mut parent = spawn_fixed_mount(&mut commands, &mut meshes, &mut materials);
-    for (index, ((angle, delay), material)) in PANEL_FOLD_ANGLES
+    for (stage, ((folded_angle, attachment_offset), material)) in PANEL_FOLD_ANGLES
         .into_iter()
-        .zip(PANEL_START_DELAYS)
+        .zip(PANEL_ATTACHMENT_OFFSETS)
         .zip(panel_materials)
         .enumerate()
     {
@@ -293,15 +239,17 @@ fn setup(
             &panel_assets,
             material,
             parent,
-            PanelTween { angle, delay },
-            index + FIRST_PANEL_NUMBER,
+            sequence,
+            FoldStage(stage),
+            PanelJoint::new(folded_angle, attachment_offset),
+            stage + FIRST_PANEL_NUMBER,
         );
     }
 }
 
 // Every `AnchoredTo` chain ends at an entity whose `Transform` is authored
 // instead of resolved. The gold mount is that reference: it exposes anchor
-// geometry, but carries neither `AnchoredTo` nor `Hinge`.
+// geometry, but carries neither `AnchoredTo`, `Hinge`, nor `FoldMember`.
 fn spawn_fixed_mount(
     commands: &mut Commands,
     meshes: &mut Assets<Mesh>,
@@ -333,34 +281,45 @@ fn spawn_hinged_panel(
     panel_assets: &PanelAssets,
     material: Handle<StandardMaterial>,
     parent: Entity,
-    panel_tween: PanelTween,
+    sequence: Entity,
+    stage: FoldStage,
+    joint: PanelJoint,
     number: usize,
 ) -> Entity {
+    let geometry = fixtures::quad_geometry(PANEL_WIDTH, PANEL_HEIGHT);
+    let knuckle_line = joint.knuckle_line(&geometry);
     let entity = commands
         .spawn((
             Mesh3d(panel_assets.panel_mesh.clone()),
             MeshMaterial3d(material),
-            fixtures::quad_geometry(PANEL_WIDTH, PANEL_HEIGHT),
-            PanelIndex(number - FIRST_PANEL_NUMBER),
+            geometry,
             Transform::default(),
             GlobalTransform::default(),
-            AnchoredTo::new(parent, PANEL_SOURCE_ANCHOR, PANEL_TARGET_ANCHOR),
+            AnchoredTo::new(parent, joint.source_anchor, joint.target_anchor)
+                .with_offset(joint.attachment_offset),
             AnchorPose::default(),
-            ResolvedAnchorOffset::default(),
             Hinge {
-                edge:  QUAD_LEFT_EDGE,
-                angle: panel_tween.angle,
+                edge:  joint.edge,
+                angle: 0.0,
+            },
+            HingePivot {
+                offset:          joint.pivot_offset,
+                reference_angle: 0.0,
+            },
+            FoldMember::new(sequence, stage),
+            FoldAngles {
+                unfolded: 0.0,
+                folded:   joint.folded_angle,
             },
         ))
         .id();
-    spawn_panel_details(commands, panel_assets, entity, number);
-    spawn_unfold_tween(commands, entity, panel_tween);
+    spawn_panel_details(commands, panel_assets, entity, number, knuckle_line);
     entity
 }
 
-// The panel meshes begin folded, so their live AABBs cannot define the startup
-// home view. This proxy matches the fully unfolded panels plus the fixed mount
-// and base; `CameraHomeTarget` gives startup and `H Home` the same stable region.
+// The render AABBs are not available when the startup home view is authored.
+// This proxy covers the unfolded panels, fixed mount, and base so startup and
+// `H Home` frame the complete physical attachment.
 fn spawn_home_target(commands: &mut Commands) {
     let half_size = HOME_TARGET_SIZE / 2.0;
     commands.spawn((
@@ -379,121 +338,33 @@ fn spawn_panel_details(
     panel_assets: &PanelAssets,
     panel: Entity,
     number: usize,
+    knuckle_line: Option<KnuckleLine>,
 ) {
     commands.entity(panel).with_children(|visual| {
-        visual.spawn((
-            Mesh3d(panel_assets.hinge_mesh.clone()),
-            MeshMaterial3d(panel_assets.hinge_material.clone()),
-            Transform::from_xyz(-PANEL_WIDTH / 2.0, 0.0, HINGE_AXIS_OFFSET),
-        ));
+        if let Some(knuckle_line) = knuckle_line {
+            let rotation = Quat::from_rotation_arc(Vec3::Y, *knuckle_line.direction);
+            let stride = hinge_knuckle_height() + HINGE_KNUCKLE_GAP;
+            let center_index = (HINGE_KNUCKLE_COUNT - 1).to_f32() / 2.0;
+            for index in 0..HINGE_KNUCKLE_COUNT {
+                let offset = (index.to_f32() - center_index) * stride;
+                visual.spawn((
+                    Mesh3d(panel_assets.knuckle_mesh.clone()),
+                    MeshMaterial3d(panel_assets.knuckle_material.clone()),
+                    Transform::from_translation(
+                        knuckle_line.center + *knuckle_line.direction * offset,
+                    )
+                    .with_rotation(rotation),
+                ));
+            }
+        }
         visual.spawn(panel_label(number, Face::Front));
         visual.spawn(panel_label(number, Face::Back));
     });
 }
 
-fn spawn_unfold_tween(commands: &mut Commands, entity: Entity, panel_tween: PanelTween) {
-    let folded_delay = FOLDED_PAUSE + panel_tween.delay;
-    let flat_delay = FLAT_PAUSE + CASCADE_SPAN.saturating_sub(panel_tween.delay);
-    let target = entity.into_target();
-    let mut animation = commands.animation();
-    animation.entity_commands().insert(UnfoldAnimation);
-    animation
-        .repeat(Repeat::Infinitely)
-        .repeat_style(RepeatStyle::PingPong)
-        .insert(sequence((
-            forward(folded_delay),
-            tween(
-                UNFOLD_DURATION,
-                EaseKind::SmootherStep,
-                target.with(HingeAngleLens {
-                    start: panel_tween.angle,
-                    end:   0.0,
-                }),
-            ),
-            forward(flat_delay),
-        )));
-}
-
-fn toggle_pause(
-    mut playback: ResMut<Playback>,
-    mut animations: Query<&mut TimeRunner, With<UnfoldAnimation>>,
-) {
-    *playback = match *playback {
-        Playback::Playing => Playback::Paused,
-        Playback::Paused => Playback::Playing,
-    };
-    let paused = *playback == Playback::Paused;
-    for mut time_runner in &mut animations {
-        time_runner.set_paused(paused);
-    }
-}
-
-// `Space` and `Shift+Space` switch from the looping tween to the stepped clock.
-// The current hinge angles seed the first step, so a keypress never snaps the
-// panels to an unrelated stage of the fold.
-fn step_fold(
-    keys: Res<ButtonInput<KeyCode>>,
-    mut playback: ResMut<FoldStepPlayback>,
-    panels: Query<(&PanelIndex, &Hinge)>,
-    mut animations: Query<&mut TimeRunner, With<UnfoldAnimation>>,
-) {
-    if !keys.just_pressed(KeyCode::Space) {
-        return;
-    }
-    if !playback.manual {
-        playback.progress = panels
-            .iter()
-            .map(|(index, hinge)| {
-                let fraction = (hinge.angle / PANEL_FOLD_ANGLES[index.0]).clamp(0.0, 1.0);
-                index.0.to_f32() + fraction
-            })
-            .fold(0.0, f32::max);
-        playback.manual = true;
-        for mut animation in &mut animations {
-            animation.set_paused(true);
-        }
-    }
-    let current_step = playback.progress.round().to_usize();
-    let reverse = keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight);
-    playback.target = if reverse {
-        current_step.saturating_sub(1)
-    } else {
-        (current_step + 1).min(PANEL_COUNT)
-    };
-}
-
-fn apply_fold_steps(
-    time: Res<Time>,
-    playback: Res<Playback>,
-    mut steps: ResMut<FoldStepPlayback>,
-    mut panels: Query<(&PanelIndex, &mut Hinge)>,
-) {
-    if !steps.manual || *playback == Playback::Paused {
-        return;
-    }
-    let target = steps.target.to_f32();
-    let step = time.delta_secs() / FOLD_SECONDS;
-    steps.progress += (target - steps.progress).clamp(-step, step);
-    for (index, mut hinge) in &mut panels {
-        let fraction = (steps.progress - index.0.to_f32()).clamp(0.0, 1.0);
-        hinge.angle = PANEL_FOLD_ANGLES[index.0] * fraction;
-    }
-}
-
-// The cylinder axis sits just beyond the panel face. `ResolvedAnchorOffset`
-// keeps that axis fixed while its panel rotates, so the visual pole and the
-// hinge pivot remain the same line throughout the accordion motion.
-fn apply_hinge_pivot(
-    mut panels: Query<(&Hinge, &ResolvedAnchorGeometry, &mut ResolvedAnchorOffset)>,
-) {
-    let pivot = Vec3::Z * HINGE_AXIS_OFFSET;
-    for (hinge, geometry, mut offset) in &mut panels {
-        let Ok(axis) = hinge.edge.axis(geometry) else {
-            continue;
-        };
-        let swing = Quat::from_axis_angle(*axis, hinge.angle);
-        offset.0 = pivot - swing * pivot;
-    }
+fn hinge_knuckle_height() -> f32 {
+    let gaps = (HINGE_KNUCKLE_COUNT - 1).to_f32();
+    (HINGE_HEIGHT - gaps * HINGE_KNUCKLE_GAP) / HINGE_KNUCKLE_COUNT.to_f32()
 }
 
 fn panel_label(number: usize, face: Face) -> impl Bundle {
