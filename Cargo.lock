@@ -3322,6 +3322,7 @@ dependencies = [
  "bevy_app",
  "bevy_diegetic",
  "bevy_ecs",
+ "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "bevy_math",

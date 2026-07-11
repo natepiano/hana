@@ -512,7 +512,7 @@
 - All three example acceptance gates now require a single routable sequence with no `FoldControlDiagnostic` during normal controls; Phase 8 waits for its arrangement snapshot before the first input.
 - No product or architecture decision blocks the parallel example wave.
 
-### Phase 6.5 — Prepare parallel example dependencies  · status: todo
+### Phase 6.5 — Prepare parallel example dependencies  · status: done (checkpoint)
 
 #### Work Order
 
@@ -533,6 +533,28 @@
 **Constraints from prior phases:** Phase 6 provides `.with_fold_controls()` through Fairy Dust. Preserve Hana's optional `tween` library feature and all Phase 1–6 runtime APIs. This checkpoint must leave Phases 7–9 isolated to their named example source files.
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --examples`; `cargo check -p hana_valence --examples --all-features`; `cargo check --workspace --all-targets --all-features`; `cargo nextest run -p hana_valence --all-features` and `cargo nextest run -p fairy_dust --all-features` remain green.
+
+#### Retrospective
+
+**What worked:**
+
+- The manifest-only checkpoint removed the obsolete example tween gate and direct dev tween dependency while preserving Hana's optional tween library API.
+- Direct BEI and dev-only `bevy_kana/input` access now support the triangle example without widening normal Hana consumer features.
+
+**What deviated from the plan:**
+
+- The blind review moved `bevy_kana/input` from the normal dependency to a duplicate dev-dependency so Cargo feature unification affects examples/tests only.
+
+**Implications for remaining phases:**
+
+- Phases 7–9 can now edit only their named example files and run concurrently without manifest conflicts.
+- `staggered_unfold` compiles without Hana's optional tween feature; `triangles` can author its own BEI algorithm action directly.
+
+#### Phase 6.5 Review
+
+- Phase 7 now compiles `staggered_unfold` with `--no-default-features` so residual tween imports cannot hide behind the preserved optional library feature.
+- Workspace-wide check, nextest, and Clippy run at a root-owned parallel-wave join after all three example checkpoints rather than inside Phase 9.
+- Phases 7–9 are isolated to distinct example files and safe to dispatch concurrently. No user decision remains.
 
 ### Phase 7 — Migrate `staggered_unfold`  · status: todo
 
@@ -558,7 +580,7 @@
 
 **Constraints from prior phases:** Phases 1–6.5 are complete and provide the runtime, frame-correct pivot, hinge adapter, explicit authoring, Fairy controls, and a manifest that no longer requires tween support for this example. This phase is independent of Phases 8 and 9 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example staggered_unfold --no-default-features`; `cargo check -p hana_valence --example staggered_unfold --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, idle startup, both step directions, remembered-direction play, an invariant visible hinge axis during motion, face-to-face final panel contact, first-panel root clearance, BRP port display, stable transparency, orbit camera, authored home view, teaching-panel text that matches the staged runtime, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
 
 ### Phase 8 — Migrate `triangles`  · status: todo
 
@@ -606,4 +628,8 @@
 
 **Constraints from prior phases:** Phases 1–6.5 are complete and provide explicit grouped authoring, runtime, hinge actuation, Fairy controls, and a prepared shared example dependency graph. This phase is independent of Phases 7 and 8 and may run in parallel with them. Do not change shared APIs, manifests, or fixtures in this phase.
 
-**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play. After Phases 7–9 all complete, run `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `/clippy` workflow.
+**Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
+
+## Parallel-wave join gate
+
+After Phases 7–9 are individually reviewed and checkpointed, the root orchestrator runs `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `clippy` workflow with `auto-proceed`. Any cross-example or shared regression is fixed and re-reviewed before the plan is complete.

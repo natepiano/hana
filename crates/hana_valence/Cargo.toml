@@ -32,12 +32,9 @@ bevy_tween     = { workspace = true, optional = true }
 tracing        = { workspace = true }
 
 [dev-dependencies]
-bevy          = { workspace = true, features = ["default"] }
-bevy_diegetic = { workspace = true }
-bevy_lagrange = { workspace = true }
-bevy_tween    = { workspace = true }
-fairy_dust    = { workspace = true }
-
-[[example]]
-name              = "staggered_unfold"
-required-features = ["tween"]
+bevy                = { workspace = true, features = ["default"] }
+bevy_diegetic       = { workspace = true }
+bevy_enhanced_input = { workspace = true }
+bevy_kana           = { workspace = true, features = ["input"] }
+bevy_lagrange       = { workspace = true }
+fairy_dust          = { workspace = true }
