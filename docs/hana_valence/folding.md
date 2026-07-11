@@ -679,16 +679,20 @@
 
 **What deviated from the plan:**
 
-- Static verification passed, but the delegated environment reported no GPU; physical sequencing, orbit/home behavior, BRP title, and panel presentation remain root-visible checks.
+- The delegated environment reported no GPU, so the root completed physical sequencing, orbit/home, BRP, title-control, and teaching-panel verification in live windows.
+- The root join found that `box.rs` omitted `.with_stable_transparency()` despite the cross-example invariant; the capability was restored and independently reviewed.
 
 **Implications for remaining phases:**
 
-- All implementation phases are complete; only the parallel-wave join validation and interactive acceptance remain.
+- All implementation phases and the parallel-wave join are complete; no later Work Order needs amendment.
 
 #### Phase 9 Review
 
 - The parallel-wave join now explicitly exercises box idle state, lid-only then grouped-wall motion, reverse order, remembered-direction play, fixed-center behavior, and clean fold-control/fold-angle diagnostics.
-- Existing static, lint, presentation, triangle, and box join checks cover the remaining evidence. No user decision remains.
+- Root-visible verification confirmed that `P` routes to terminal playback in both remembered directions and that the `P Play` title control highlights during motion.
+- The missing stable-transparency capability was restored in `box.rs`; focused compilation and a fresh blind review passed with no findings.
+- Final review found transform-only triangle parents missing inherited visibility; adding `Visibility::default()` removed all six Bevy B0004 runtime warnings without changing fold behavior.
+- Existing static, lint, presentation, triangle, and box join checks cover the completed implementation. No user decision remains.
 
 ## Parallel-wave join gate
 
@@ -697,3 +701,14 @@ After Phases 7–9 are individually reviewed and checkpointed, the root orchestr
 For `triangles`, the root interaction pass must exercise Accordion and Wrap, one-step folding and unfolding, remembered-direction play, and a mid-fold T selection that stays queued until fully unfolded. Activation at position zero must not visibly jump or change playback position, target, direction, membership, or grouping.
 
 For `box`, the root interaction pass must verify idle startup, a first Space that moves only the lid, a second Space that moves all four walls while carrying the lid, Shift+Space reversing walls before lid, and P following the remembered direction. The center must remain fixed and normal interaction must leave fold-control and fold-angle diagnostics empty.
+
+### Join-gate result
+
+- `cargo check --workspace --all-targets --all-features` passed.
+- `cargo nextest run --workspace --all-features` passed with 1,198 tests and four skipped tests.
+- The full local Clippy workflow passed Clippy, rustdoc, and nightly formatting checks.
+- Root-visible runs confirmed presentation, camera home/orbit controls, BRP, stable transparency, step/reverse sequencing, and remembered-direction playback across `staggered_unfold`, `triangles`, and `box`.
+- `triangles` queued a mid-fold algorithm selection without changing the active profile, then activated the complete profile at unfolded position zero without changing playback state.
+- A final `triangles` relaunch confirmed that the tile-parent visibility correction removed all Bevy B0004 hierarchy warnings.
+- `box` raised only the lid in stage zero, carried it with all four walls in stage one, reversed walls before the lid, and kept the center fixed.
+- The existing macOS `__eh_frame section too large` linker warning remained the only build-time warning relevant to these example launches.

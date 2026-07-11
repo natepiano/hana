@@ -396,6 +396,7 @@ fn spawn_tile(commands: &mut Commands, transform: Transform) -> Entity {
             fixtures::triangle_geometry(),
             transform,
             GlobalTransform::from(transform),
+            Visibility::default(),
         ))
         .id()
 }
