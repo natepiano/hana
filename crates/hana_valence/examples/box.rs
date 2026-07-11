@@ -11,13 +11,15 @@ use bevy::prelude::*;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
+use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
 use hana_valence::AnchorPose;
-use hana_valence::AnchorSystems;
 use hana_valence::AnchoredTo;
 use hana_valence::Edge;
+use hana_valence::FoldAngles;
+use hana_valence::FoldSequence;
+use hana_valence::FoldSequenceBuilder;
 use hana_valence::Hinge;
-use hana_valence::hinge_to_pose;
 
 #[path = "../fixtures.rs"]
 #[allow(
@@ -32,14 +34,18 @@ use fixtures::QUAD_RIGHT_EDGE;
 use fixtures::QUAD_TOP_EDGE;
 
 // app
+const DESCRIPTION_LINES: [&str; 4] = [
+    "Space: stage 0 raises the lid",
+    "Space: stage 1 raises all four walls",
+    "Shift+Space reverses walls, then lid",
+    "P plays toward the remembered endpoint; center stays fixed",
+];
+const DESCRIPTION_TITLE: &str = "Two-stage fold sequence";
 const EXAMPLE_TITLE: &str = "Box Net";
 
 // animation
 const BOX_FOLD_ANGLE: f32 = -core::f32::consts::FRAC_PI_2;
 const FOLD_SECONDS: f32 = 2.5;
-const LID_FOLD_PORTION: f32 = 0.3;
-const SMOOTHSTEP_DOUBLE: f32 = 2.0;
-const SMOOTHSTEP_TRIPLE: f32 = 3.0;
 
 // camera home
 const HOME_MARGIN: f32 = 0.4;
@@ -58,43 +64,14 @@ const FACE_COUNT: usize = 6;
 const FACE_ROUGHNESS: f32 = 0.55;
 const FACE_SIDE: f32 = 1.0;
 
-#[derive(Component)]
-struct FoldTarget {
-    angle: f32,
-    phase: FoldPhase,
-}
-
-#[derive(Clone, Copy)]
-enum FoldPhase {
-    Lid,
-    Box,
-}
-
-// Directed fold clock. `progress` runs 0 (flat net) to 1 (folded box); each
-// frame it steps toward `folding`'s target so pressing `R` reverses the fold in
-// place instead of restarting from scratch.
-#[derive(Resource)]
-struct FoldPlayback {
-    progress: f32,
-    folding:  bool,
-}
-
-impl Default for FoldPlayback {
-    fn default() -> Self {
-        Self {
-            progress: 0.0,
-            folding:  true,
-        }
-    }
-}
-
 fn main() {
-    let app = fairy_dust::sprinkle_example()
+    fairy_dust::sprinkle_example()
         .with_brp_extras()
         .with_save_window_position()
         .with_studio_lighting()
         .with_ground_plane()
         .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
+        .with_fold_controls()
         .with_camera_home()
         .pitch(HOME_PITCH)
         .yaw(HOME_YAW)
@@ -102,24 +79,18 @@ fn main() {
         .with_title_bar(
             TitleBar::new()
                 .with_title(EXAMPLE_TITLE)
-                .with_anchor(Anchor::TopLeft)
-                .control("R Replay"),
+                .with_anchor(Anchor::TopLeft),
         )
+        .with_description_panel(description_panel())
         .with_camera_control_panel()
-        .with_shortcut(KeyCode::KeyR, toggle_box_fold);
-    // `DiegeticUiPlugin` (added by `sprinkle_example`) already registers the
-    // anchor pipeline — the `AnchorSystems` chain, `hinge_to_pose`,
-    // `resolve_anchors`, and `ResolveDiagnostics`. This example only adds its
-    // own hinge driver, ordered before the shared `hinge_to_pose`.
-    app.init_resource::<FoldPlayback>()
-        .add_systems(
-            PostUpdate,
-            drive_box_hinges
-                .in_set(AnchorSystems::AnimatePose)
-                .before(hinge_to_pose),
-        )
         .add_systems(Startup, setup)
         .run();
+}
+
+fn description_panel() -> DescriptionPanel {
+    DescriptionPanel::new(DESCRIPTION_TITLE)
+        .with_fit_width()
+        .lines(DESCRIPTION_LINES)
 }
 
 fn setup(
@@ -152,46 +123,49 @@ fn setup(
         center,
         QUAD_BOTTOM_EDGE,
         QUAD_TOP_EDGE,
-        FoldPhase::Box,
     );
-    spawn_hinged_face(
+    let south = spawn_hinged_face(
         &mut commands,
         face_mesh.clone(),
         south_material,
         center,
         QUAD_TOP_EDGE,
         QUAD_BOTTOM_EDGE,
-        FoldPhase::Box,
     );
-    spawn_hinged_face(
+    let east = spawn_hinged_face(
         &mut commands,
         face_mesh.clone(),
         east_material,
         center,
         QUAD_LEFT_EDGE,
         QUAD_RIGHT_EDGE,
-        FoldPhase::Box,
     );
-    spawn_hinged_face(
+    let west = spawn_hinged_face(
         &mut commands,
         face_mesh.clone(),
         west_material,
         center,
         QUAD_RIGHT_EDGE,
         QUAD_LEFT_EDGE,
-        FoldPhase::Box,
     );
-    // The lid hinges off north's free outer edge. Its `FoldPhase::Lid` motion
-    // raises it first; `FoldPhase::Box` then raises north and carries the lid
-    // over the top of the box.
-    spawn_hinged_face(
+    // The lid hinges off north's free outer edge. Stage zero raises the lid;
+    // stage one then raises north and carries the lid over the box.
+    let lid = spawn_hinged_face(
         &mut commands,
         face_mesh,
         lid_material,
         north,
         QUAD_BOTTOM_EDGE,
         QUAD_TOP_EDGE,
-        FoldPhase::Lid,
+    );
+    let sequence = commands.spawn(FoldSequence::new(FOLD_SECONDS)).id();
+    let authored = FoldSequenceBuilder::new(&mut commands, sequence)
+        .stage([lid])
+        .stage([north, south, east, west])
+        .finish();
+    assert!(
+        authored.is_ok(),
+        "box fold sequence authoring failed: {authored:?}",
     );
     // Frame the space the folded box occupies, not the unfolded cross: a hidden
     // unit cube resting on the ground at the box's final position. The faces
@@ -204,30 +178,6 @@ fn setup(
         Visibility::Hidden,
     ));
 }
-
-fn drive_box_hinges(
-    time: Res<Time>,
-    mut playback: ResMut<FoldPlayback>,
-    mut hinges: Query<(&FoldTarget, &mut Hinge)>,
-) {
-    let goal = if playback.folding { 1.0 } else { 0.0 };
-    let step = time.delta_secs() / FOLD_SECONDS;
-    playback.progress += (goal - playback.progress).clamp(-step, step);
-    let progress = playback.progress;
-    for (target, mut hinge) in &mut hinges {
-        let progress = match target.phase {
-            FoldPhase::Lid => progress / LID_FOLD_PORTION,
-            FoldPhase::Box => (progress - LID_FOLD_PORTION) / (1.0 - LID_FOLD_PORTION),
-        }
-        .clamp(0.0, 1.0);
-        let eased = progress * progress * SMOOTHSTEP_DOUBLE.mul_add(-progress, SMOOTHSTEP_TRIPLE);
-        hinge.angle = target.angle * eased;
-    }
-}
-
-// `R` handler: reverse the fold direction. Because `drive_box_hinges` chases the
-// current target, this both replays (net -> box) and rewinds (box -> net).
-fn toggle_box_fold(mut playback: ResMut<FoldPlayback>) { playback.folding = !playback.folding; }
 
 fn spawn_face(
     commands: &mut Commands,
@@ -253,7 +203,6 @@ fn spawn_hinged_face(
     parent: Entity,
     source_edge: Edge,
     target_edge: Edge,
-    phase: FoldPhase,
 ) -> Entity {
     let entity = spawn_face(commands, mesh, material, Transform::default());
     let source_anchor = fixtures::quad_edge_anchor(source_edge);
@@ -268,9 +217,9 @@ fn spawn_hinged_face(
     commands.entity(entity).insert((
         AnchoredTo::new(parent, source_anchor, target_anchor),
         AnchorPose::default(),
-        FoldTarget {
-            angle: BOX_FOLD_ANGLE,
-            phase,
+        FoldAngles {
+            unfolded: 0.0,
+            folded:   BOX_FOLD_ANGLE,
         },
         Hinge {
             edge:  source_edge,

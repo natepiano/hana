@@ -646,7 +646,7 @@
 - The parallel-wave join now explicitly exercises Accordion and Wrap, step/reverse/play, and a mid-fold T selection that activates only at fully unfolded position without a visible jump or playback-state change.
 - Phase 8 introduced no shared change requiring a Phase 9 amendment. No user decision remains.
 
-### Phase 9 — Migrate `box`  · status: todo
+### Phase 9 — Migrate `box`  · status: done (checkpoint)
 
 #### Work Order
 
@@ -670,8 +670,30 @@
 
 **Acceptance gate:** `cargo +nightly fmt --all -- --check`; `cargo check -p hana_valence --example box --all-features`; `cargo nextest run -p hana_valence --all-features`; launch the example and verify fold-control installation without a reservation panic, successful builder completion, idle startup, lid-only stage zero, four-wall stage one, reverse order, remembered-direction play, fixed center exclusion, BRP port display, orbit camera, home view, teaching-panel content, no `FoldControlDiagnostic` during normal startup and standard fold inputs, and no `FoldAngleDiagnostic` during normal startup, stepping, reversal, or play.
 
+#### Retrospective
+
+**What worked:**
+
+- `FoldSequenceBuilder` expresses the physical topology directly: lid-only stage zero, four walls grouped at stage one, and the fixed center outside membership.
+- Absolute planar endpoints use the intentional no-pivot path, and shared controls replace all replay timing and local hinge driving.
+
+**What deviated from the plan:**
+
+- Static verification passed, but the delegated environment reported no GPU; physical sequencing, orbit/home behavior, BRP title, and panel presentation remain root-visible checks.
+
+**Implications for remaining phases:**
+
+- All implementation phases are complete; only the parallel-wave join validation and interactive acceptance remain.
+
+#### Phase 9 Review
+
+- The parallel-wave join now explicitly exercises box idle state, lid-only then grouped-wall motion, reverse order, remembered-direction play, fixed-center behavior, and clean fold-control/fold-angle diagnostics.
+- Existing static, lint, presentation, triangle, and box join checks cover the remaining evidence. No user decision remains.
+
 ## Parallel-wave join gate
 
 After Phases 7–9 are individually reviewed and checkpointed, the root orchestrator runs `cargo check --workspace --all-targets --all-features`, `cargo nextest run --workspace --all-features`, and the full local `clippy` workflow with `auto-proceed`. The root also visibly verifies each example's presentation whenever delegated window evidence was unavailable or occluded: hinge/panel geometry, home framing, transparency, title controls, teaching-panel legibility, orbit interaction, and BRP port text. BRP state inspection alone does not satisfy this visual gate. Any cross-example, shared, or presentation regression is fixed and re-reviewed before the plan is complete.
 
 For `triangles`, the root interaction pass must exercise Accordion and Wrap, one-step folding and unfolding, remembered-direction play, and a mid-fold T selection that stays queued until fully unfolded. Activation at position zero must not visibly jump or change playback position, target, direction, membership, or grouping.
+
+For `box`, the root interaction pass must verify idle startup, a first Space that moves only the lid, a second Space that moves all four walls while carrying the lid, Shift+Space reversing walls before lid, and P following the remembered direction. The center must remain fixed and normal interaction must leave fold-control and fold-angle diagnostics empty.
