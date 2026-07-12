@@ -1,169 +1,219 @@
 # Panel anchoring
 
-## What It Is
+## What it is
 
 Panel anchoring is declarative panel-to-panel placement for `bevy_diegetic`.
-An `AnchoredToPanel` relationship pins one anchor point on a source panel to one
-anchor point on a target panel, with an optional `PanelAnchorOffset` and mutable
-`PanelAnchorPose`. It works for screen panels and world panels, but each
-resolver owns only edges in its own coordinate space. Attachments determine
-position, depth, and resolver-owned pose around a pin; they do not compute width
-or height.
+Callers insert an `AnchoredToPanel` bundle that names the source and target
+panel anchors plus an optional `PanelAnchorOffset`. The bundle feeds two
+coordinate-space adapters:
 
-The public surface is exported from `panel/mod.rs` and `lib.rs`:
-`AnchoredToPanel`, `PanelsAnchoredHere`, `PanelAnchorOffset`,
-`PanelAnchorPose`, and read-only anchor geometry types such as
-`PanelAnchorGeometryParam`, `PanelScreenBounds`, `PanelPlane`, and
-`ResolvedPanelAnchorGeometry`.
+- world panels lower into `hana_valence::AnchoredTo` and are placed by
+  `hana_valence::resolve_anchors`;
+- screen panels retain the shared panel authoring and are placed by the
+  screen-space adapter over `hana_valence::resolve_attachments`.
 
-## How It Works
+Both paths use `hana_valence::AnchorPose` for animated rotation and translation.
+Attachments determine position, depth, and pose around a pin; they do not
+compute panel width or height. The shape-agnostic contracts behind this adapter
+are documented in
+[hana_valence anchoring and arrangements](../../hana_valence/as-built/anchoring-and-arrangements.md).
 
-`panel/anchoring.rs` defines the relationship and resolver-owned state:
+The public panel-specific surface is `AnchoredToPanel`, `PanelAnchorOffset`,
+`PanelSpace`, and `ArrangedPanel`. There is no panel-specific public
+relationship, reverse index, pose type, or graph resolver. Read-only panel
+geometry APIs such as `PanelAnchorGeometryParam`, `PanelScreenBounds`,
+`PanelPlane`, and `ResolvedPanelAnchorGeometry` serve callers, while world
+attachment placement reads the Hana Valence geometry component.
 
-- `AnchoredToPanel` is an immutable Bevy relationship source. It stores a
-  private target entity plus `source_anchor`, `target_anchor`, and `offset`.
-- `PanelsAnchoredHere` is the reverse relationship target.
-- `PanelAnchorOffset` stores `x`, `y`, and `z` as `Dimension`s. Static offsets
-  are authored in target-panel layout units.
-- `PanelAnchorPose` is mutable resolver input for animation:
-  `rotation: Quat` and `translation: Vec3`.
-- `ResolvedScreenPanelPosition` is the screen resolver's private override
-  component: `anchor_position`, `depth`, `authored_depth`, `rotation`, and
-  `authored_rotation`.
+## How it works
 
-`panel/attachment_resolver.rs` provides the shared graph resolver.
-Coordinate-space-specific code classifies attachments into active or skipped
-candidates, then `resolve_panel_attachments` resolves the dependency graph in
-target-before-source order. Skipped candidates, skipped dependencies, and cycles
-record diagnostics and receive fallback handling.
+### Shared authoring
 
-`panel/anchor_geometry.rs` provides read-only geometry. `PanelScreenBounds`
-resolves axis-aligned logical-pixel bounds and anchor points. `PanelPlane`
-resolves a world panel's top-left origin, right/up/normal basis, and meter size
-from the current transform. `PanelAnchorGeometryParam` exposes this geometry for
-callers without making either resolver's internal placement state public.
+[`panel/anchoring.rs`](../../../crates/bevy_diegetic/src/panel/anchoring.rs)
+defines the insert-only public bundle:
 
-World anchoring lives in `panel/world_anchoring.rs`. It runs in `PostUpdate`
-before `TransformSystems::Propagate`. The resolver ignores screen sources,
-rejects mixed-space edges, computes target and source planes through
-`TransformHelper`, and writes the source `Transform`. Placement is:
-
-```text
-target_point = target anchor + static offset + plane_frame_translation(pose.translation)
-desired_rotation = plane_rotation(target_plane) * pose.rotation
-desired_translation = target_point - desired_rotation * source_anchor_offset
+```rust
+AnchoredToPanel::new(target, source_anchor, target_anchor)
+    .with_offset(offset)
 ```
 
-That equation keeps the source anchor pinned while allowing arbitrary rotation
-about the pin. `AnchoredWorldPanelPose` captures the authored local transform
-the first time the resolver takes ownership and restores it when the relation
-stops resolving.
+Inserting it writes a private immutable `PanelAttachmentAuthored` component and
+a mutable `PanelAnchorOffset`. `PanelAttachmentAuthored` is the one authoring
+record read by both coordinate-space adapters; it is not a Bevy relationship
+and is deliberately not public or reflectively mutable.
 
-Screen anchoring lives under `screen_space/anchoring/`. `resolve.rs` gathers
-windows, panel rects, transforms, anchor poses, depth state, and desired
-placements. `candidate.rs` validates screen-only, same-window edges.
-`placement.rs` computes the resolved anchor position, depth, and in-plane
-rotation. `rect.rs` snapshots `ScreenPanelRect` with anchor position, size,
-layout unit, cached bounds, and current angle so rotated targets can anchor
-downstream panels in the same update. `projection.rs` projects
-`PanelAnchorPose::rotation` to a single z-twist angle with
-`screen_in_plane_angle` and rotates 2D offsets with `rotate_screen_offset`.
+`AnchoredToPanel` is a bundle rather than a queryable component. Runtime
+retargeting reinserts a complete replacement bundle, and removal removes the
+bundle. This preserves one public authoring shape without exposing the private
+screen/world lowering state.
 
-`screen_space/mod.rs` schedules the screen resolver in `Update` after screen
-panel dimensions and observer flushes, before `position_screen_space_panels`.
-The placer writes transform x/y from the resolved or configured anchor position,
-writes z only when the resolver produced depth, and writes
-`Transform.rotation = Quat::from_rotation_z(angle)` only when the resolver
-produced a rotation. Authored depth and authored rotation are captured on first
-resolver ownership and restored when the resolver returns `None`.
+### World panels
 
-`PanelSystems::AnimateAnchorPose` is the `PostUpdate` ordering point for systems
-that write resolver-read inputs before the world resolver. Writes in that set
-land in the current frame; writes after world attachment resolution land in the
-next frame.
+For a world source panel, the attachment observer converts
+`PanelAttachmentAuthored` to an immutable `hana_valence::AnchoredTo`. The
+conversion maps the nine diegetic `Anchor` values to Hana Valence `AnchorId`
+values. The relation hooks maintain `hana_valence::AnchoredHere` on the target.
+
+[`panel/valence_provider.rs`](../../../crates/bevy_diegetic/src/panel/valence_provider.rs)
+publishes `ResolvedAnchorGeometry` for world panels. The component contains nine
+local anchor points and four ordered perimeter edges. Points are centered in the
+panel's local authored frame, use the panel's world width and height, and do not
+bake `Transform` or `GlobalTransform`. The provider runs on
+`Changed<DiegeticPanel>`, not `Changed<Transform>`, and updates an existing
+geometry component in place.
+
+`write_panel_anchor_offsets` resolves `PanelAnchorOffset` against the live
+target panel size, layout unit, and global scale. It writes the result to
+`hana_valence::ResolvedAnchorOffset`, which overrides the zero static offset on
+the lowered relation for that resolve pass. Panel-local positive-down y is
+converted to the resolver's positive-up y here; unit and DPI policy therefore
+stay in `bevy_diegetic`.
+
+World placement follows the Hana Valence pipeline:
+
+```text
+AnchorSystems::FillGeometry
+    -> AnchorSystems::AnimatePose
+    -> AnchorSystems::Resolve
+    -> TransformSystems::Propagate
+```
+
+`HeadlessLayoutPlugin` initializes `ResolveDiagnostics`, installs the panel
+provider and offset lowering, and runs `resolve_anchors` in
+`AnchorSystems::Resolve`. `resolve_anchors` is the sole `Transform` writer for a
+world panel carrying the lowered `AnchoredTo`; animation systems write
+`AnchorPose`, `Hinge`, or `HingePivot` instead.
+
+When world attachment ownership begins, `AnchoredWorldPanelPose` captures the
+source's authored local transform. Removing the attachment restores that
+transform. Coordinate-space conversion owns its own transform handoff while
+the anchoring observer adds or removes world-only relation state.
+
+### Screen panels
+
+Screen panels keep `PanelAttachmentAuthored` and `PanelAnchorOffset` but do not
+carry the world `hana_valence::AnchoredTo`. The screen resolver classifies
+same-window screen attachments, builds screen rectangles, and calls
+`hana_valence::resolve_attachments` for target-before-source ordering, cycle
+detection, skipped-dependency propagation, fallback, and bounded diagnostics.
+Its placement callback retains window, viewport, logical-pixel, and draw-depth
+math inside `bevy_diegetic`.
+
+The screen adapter reads `hana_valence::AnchorPose`. Translation x/y is applied
+in the flat screen plane, positive pose y is converted to screen-down
+coordinates, z participates in resolved draw depth, and rotation is projected
+to a single in-plane z angle. Out-of-plane rotation has no screen effect.
+
+`ResolvedScreenPanelPosition` is the private output seam between attachment
+resolution and `position_screen_space_panels`. Its optional position, depth,
+and rotation fields are cleared on fallback. Depth and rotation capture the
+authored `Transform` values when the resolver first takes ownership and restore
+them when ownership ends.
+
+The screen resolver runs in `Update` after final screen dimensions and observer
+commands, then `position_screen_space_panels` applies its output. A screen pose
+writer that needs same-frame placement must run before
+`PanelSystems::ResolvePanelAttachments`. `PanelSystems::AnimateAnchorPose` is a
+`PostUpdate` ordering point for the world resolver, so writes there become
+visible to the screen path on the next `Update`.
+
+### Coordinate-space changes
+
+`DiegeticPanel.coordinate_space` remains authoritative for sizing and
+conversion. Because conversion mutates that field in place, it cannot drive a
+component observer directly. `PanelSpace` mirrors only the `World`/`Screen`
+discriminant and is reinserted at panel spawn and conversion apply points.
+
+`On<Insert, PanelSpace>` reconciles attachment state:
+
+- moving to screen removes `AnchoredTo`, `ResolvedAnchorOffset`, and captured
+  world-attachment pose;
+- moving to world recreates the lowered relation and resumes world offset
+  lowering.
+
+Every writer of `DiegeticPanel.coordinate_space` must update `PanelSpace` in the
+same operation. The possible removal of this mirrored state is tracked in the
+[Hana Valence future-work backlog](../../hana_valence/future-work.md).
+
+### Panel arrangements
+
+[`panel/arrangement.rs`](../../../crates/bevy_diegetic/src/panel/arrangement.rs)
+provides the insert-only `ArrangedPanel` adapter for Hana Valence `QuadTiling`.
+It uses `ArrangementMembers` insertion order and applies one placement per
+member once the geometry and transforms are ready. The arrangement root carries
+exactly one first-class arrangement component: `Strip`, `Accordion`, or `Coil`.
+
+World members receive raw `hana_valence::AnchoredTo`, `AnchorPose`, and `Hinge`
+components. For a connected arrangement whose root is a screen panel, only the
+root participates in screen attachment authoring; the member chain remains in
+one world fold frame and each member targets its predecessor through the raw
+Valence relation. Linear arrangements do not represent branching panel nets.
 
 ## Invariants
 
-`AnchoredToPanel` is immutable. Retargeting happens by replacing the
-relationship component, not by mutating the target in place.
+- `AnchoredToPanel` is insert-only authoring, not a public relationship
+  component. World and screen placement share its private authored record.
+- A screen panel must not carry the lowered world `hana_valence::AnchoredTo`.
+- A world attachment is resolved only by `hana_valence::resolve_anchors`, which
+  is the sole transform writer for that anchored source.
+- World panel geometry is entity-local, centered, expressed in authored units,
+  and never transform-baked.
+- Panel unit conversion, DPI handling, target-relative sizing, and y-axis
+  lowering remain outside `hana_valence`.
+- `PanelAnchorOffset` is mutable live input. The lowered world
+  `ResolvedAnchorOffset` does not require replacing the immutable relation.
+- Animation writes `hana_valence::AnchorPose`; hinge animation owns the whole
+  pose while `Hinge` is present.
+- Screen placement owns only the optional position/depth/rotation outputs it
+  resolved and restores authored state when those outputs clear.
+- Screen attachments require a live screen-panel target in the same window.
+  Cross-space and cross-window edges diagnose and fall back.
+- Attachments are not `ChildOf` parenting and do not couple source lifetime to
+  target lifetime.
+- `PanelSpace` and `DiegeticPanel.coordinate_space` must remain synchronized.
 
-An active attachment gives the resolver ownership of the resolved fields.
-Animation systems write `PanelAnchorPose` or replace the relationship at a
-state boundary; they do not directly fight the resolver by writing the same
-`Transform` fields.
+## Calibration and gotchas
 
-Attachments pin one point. They never compute panel width or height.
+- `PanelAnchorOffset` uses layout coordinates: positive x right, positive y
+  down, positive z in front. World lowering negates y; screen placement also
+  converts pose y from up to screen-down.
+- World z offset is converted with the target's horizontal panel scale. Screen
+  z is draw-order depth under the shared orthographic camera, not perspective
+  distance.
+- The screen camera sits at z = 1000 with far = 2000, so very large resolved
+  depths clip rather than clamp.
+- The screen resolver treats depth as authored when either static offset z or
+  pose translation z is nonzero. Do not reduce that rule to whether their sum
+  is nonzero.
+- `ScreenPanelRect` caches bounds. Update its anchor position and angle through
+  `with_anchor_position_and_angle` so the cache and chain placement remain
+  coherent.
+- `PanelScreenBounds::point` remains axis-aligned. Oriented screen anchor math
+  is intentionally private to screen placement.
+- Geometry fill for a non-world panel is a no-op. Correctness depends on
+  `PanelSpace` reconciliation removing its world relation, not on deleting a
+  retained geometry component.
+- Resolver diagnostics are bounded, but repeated persistent skips currently
+  emit a warning every frame.
 
-Screen and world resolvers own edges by source coordinate space. Cross-space
-and cross-window screen attachments are diagnosed rather than partially
-resolved.
+## Why it is this way
 
-No attachment uses `ChildOf`. A target despawn detaches or skips dependents
-through relationship state and diagnostics; it does not despawn dependent panels
-as children.
+The public bundle is separate from the stored world relation because one
+panel-facing API feeds two coordinate-space positioners. Inserting a world
+relation for screen panels would send them through the 3D resolver without
+world geometry and produce persistent false diagnostics.
 
-`ResolvedScreenPanelPosition` uses `None` to mean "use authored/configured
-state." The resolver writes `Some` only for fields it owns, and fallback clears
-back to `None`.
+World anchoring delegates geometry-independent placement to Hana Valence so
+panels, tiles, and other shapes share relationship hooks, dependency ordering,
+hinges, and diagnostics. The screen adapter reuses only the graph layer because
+window selection, logical pixels, draw depth, and in-plane projection do not
+belong in a shape-agnostic 3D resolver.
 
-Screen rotation is in-plane only. Out-of-plane components of
-`PanelAnchorPose::rotation` have no screen effect.
+`AnchorPose` is shared across both adapters so animation policy does not split
+by panel space. It remains separate from `Transform` because placement owns the
+final transform, while animation describes motion around the attachment.
 
-World planes must be finite, positive-sized, and orthonormal enough to form a
-stable `PanelPlane`. Unsupported parent transforms for anchored world panels are
-rejected.
-
-## Calibration And Gotchas
-
-Static `PanelAnchorOffset` uses layout coordinates: positive x right, positive
-y down, positive z in front of the target. World static y therefore maps
-through `-target_plane.up()`, while `PanelAnchorPose::translation` is
-plane-frame input where positive y maps to `plane.up()`.
-
-Screen `PanelAnchorPose::translation.y` is negated when applied because screen
-logical coordinates are y-down but pose authoring treats positive y as up.
-
-Screen depth is draw-order depth under the shared orthographic camera, not
-perspective distance. The screen camera is at z = 1000 with far = 2000, so very
-large resolved depths can clip.
-
-The screen resolver treats depth ownership as authored when either static z or
-pose z is individually nonzero. Do not collapse that to "sum is nonzero";
-canceling z inputs still mean the resolver owns depth for that frame.
-
-`ScreenPanelRect` caches bounds. Its `anchor_position` is visible within the
-anchoring module, so future code should update it through
-`with_anchor_position_and_angle` to keep the cache and threaded angle coherent.
-
-`PanelScreenBounds::point` remains axis-aligned. Oriented screen anchor math is
-intentionally local to the screen placer via `oriented_anchor_point`; extending
-`PanelScreenBounds` for oriented points would be a public API change.
-
-World placement reads `PanelAnchorPose` only inside active world candidate
-placement. A standalone pose component on an unattached panel is inert.
-
-## Why It Is This Way
-
-The feature is a relationship, not parenting, because attachment depends on
-both panels' measured sizes and current coordinate-space placement. Reparenting
-would make window-absolute screen transforms double-apply, inherit target scale
-chains, couple lifetimes, and turn attachment cycles into hierarchy problems.
-
-`PanelAnchorPose` is separate from `AnchoredToPanel` because the relationship is
-immutable and maintains a reverse index. Animation needs a mutable input that
-can change every frame without replacing the relationship or churning
-`PanelsAnchoredHere`.
-
-The shared graph resolver keeps cycle handling, skipped dependency behavior, and
-diagnostics identical for screen and world anchoring while letting each
-coordinate-space adapter own validation and placement math.
-
-World anchoring uses full quaternion pose composition because a world panel can
-hinge off the target plane. Screen anchoring projects to z twist because the
-shared overlay camera defines a flat screen plane; only in-plane rotation
-preserves the screen panel model.
-
-Screen depth and rotation both use captured authored values because the resolver
-only temporarily owns those transform fields. Removing the relation or pose
-should return the panel to the user's authored transform, not to whatever value
-the resolver last wrote.
+Attachments are relationships rather than transform parenting because their
+position depends on measured panel sizes and current coordinate space.
+Parenting would double-apply window-absolute screen transforms, inherit target
+scale and lifetime, and turn attachment cycles into hierarchy cycles.

@@ -9,7 +9,7 @@
 - **Layout** (only phase-touched paths):
   - `crates/bevy_diegetic/src/widgets/` — NEW module: `mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `id.rs`, `relationship.rs`, `interactivity.rs`, `focus.rs`, `picking.rs`, `reify.rs`, `presets/` (`mod.rs`, `button.rs`, `slider.rs`, `tooltip.rs`, `style.rs`).
   - `crates/bevy_diegetic/src/ime/` — `activation.rs`, `field.rs`, `ids.rs`, `mod.rs` (`ImePlugin`).
-  - `crates/bevy_diegetic/src/panel/` — `builder.rs`, `anchoring.rs`, `anchor_geometry.rs`, `diegetic_panel.rs`, `world_anchoring.rs`, `attachment_resolver.rs`, `perf.rs`.
+  - `crates/bevy_diegetic/src/panel/` — `builder.rs`, `anchoring.rs`, `anchor_geometry.rs`, `arrangement.rs`, `diegetic_panel.rs`, `valence_provider.rs`, `perf.rs`.
   - `crates/bevy_diegetic/src/render/panel_text/` — `reconcile.rs`, `relationship.rs`, `mod.rs`.
   - `crates/bevy_diegetic/src/screen_space/anchoring/` — `candidate.rs`, `placement.rs`, `projection.rs`, `rect.rs`, `resolve.rs`, `window.rs`, `mod.rs`.
   - `crates/bevy_diegetic/src/cascade/` — `attributes.rs`, `resolved.rs`, `cascade_set.rs`, `plugin.rs`, `mod.rs`.
@@ -25,9 +25,9 @@
   - `src/ime/mod.rs` — `ImePlugin` (`pub(crate)` `:70`, `impl Plugin` `:89`); mirror for `WidgetsPlugin`.
   - `src/cascade/mod.rs` — `Override<A>`, `Resolved<A>`, `resolve_walk` parent-walk, most-specific-wins (`:43`, `:75`, `:95`).
   - `src/cascade/attributes.rs`, `src/cascade/resolved.rs` — attribute defs + `Resolved<A>` cache.
-  - `src/panel/anchor_geometry.rs` — current diegetic geometry provider: `PanelAnchorGeometryParam` (`:34`), `ResolvedPanelAnchorGeometry` with `from_screen_panel`/`from_world_panel` (`:67`, `:79`). The `ResolvedAnchorGeometry` widgets publish is the `hana_valence` contract component (see `../hana_valence/initialize.md`).
-  - `src/panel/world_anchoring.rs` + `src/panel/attachment_resolver.rs` — panel anchoring bridge keyed on `AnchoredToPanel` (`AnchoredTo`/`AnchoredHere` are the hana_valence successors).
-  - `src/screen_space/anchoring/candidate.rs` — screen placer builds candidate rects from panels only today; Phase 11 teaches it widget targets. Ordered `.after(PanelChildSystems::Build)`.
+  - `src/panel/anchor_geometry.rs` — read-only panel geometry API: `PanelAnchorGeometryParam`, `PanelScreenBounds`, `PanelPlane`, and `ResolvedPanelAnchorGeometry`. `src/panel/valence_provider.rs` is the world-panel provider for the `hana_valence::ResolvedAnchorGeometry` component that widgets also publish (see `../hana_valence/as-built/anchoring-and-arrangements.md`).
+  - `src/panel/anchoring.rs` — insert-only `AnchoredToPanel` authoring, private `PanelAttachmentAuthored`, world-only lowering to `hana_valence::AnchoredTo`, offset lowering, and `PanelSpace` reconciliation. Screen panels keep the shared authoring without the world relation.
+  - `src/screen_space/anchoring/candidate.rs` + `resolve.rs` — screen placement builds candidates from private `PanelAttachmentAuthored` and delegates ordering and diagnostics to `hana_valence::resolve_attachments`; it accepts panel targets only today, and Phase 11 teaches it widget targets.
   - `src/panel/perf.rs` — `DiegeticPerfStats` (`:45`), `pub reconcile_ms: f32` (`:54`, rename target), `DIAG_PANEL_RECONCILE_MS` (`:258`).
   - `src/render/mod.rs` — `PanelChildSystems` set enum (`:128`); `TextRunOf`/`PanelTextRuns` re-exports.
   - `src/lib.rs` — curated re-exports (`PanelBuildError` `:255`); widget public types re-export here.
@@ -36,12 +36,12 @@
 - **Lint:** the `clippy` skill. Workspace lints are strict: `all`/`cargo`/`nursery`/`pedantic` denied, `unwrap_used`/`expect_used`/`panic`/`unreachable` denied, `missing_docs = "deny"`, `self_named_module_files` denied (use `module/mod.rs` directory form).
 - **Style:** `zsh ~/.claude/scripts/rust_style/load-rust-style.sh --project-root /Users/natemccoy/rust/bevy_hana`
 - **Invariants:**
-  - **Valence gate:** `hana_valence` exists at `crates/hana_valence`, but Phases 1+ are gated on its milestones 1 and 4 — skeleton + resolver extracted, panel bridge and screen-placer re-pointed — per `../hana_valence/initialize.md`. The gate excludes M4's `panel_anchoring` example port (that transitively needs M2). hana_valence types stay out of diegetic's public signatures; diegetic authoring helpers insert `hana_valence::AnchoredTo` internally.
+  - **Valence gate:** `hana_valence` exists at `crates/hana_valence`; its resolver, panel bridge, and screen-adapter integration are described in `../hana_valence/as-built/anchoring-and-arrangements.md`. Hana Valence types stay out of diegetic's public widget signatures. Diegetic authoring lowers to `hana_valence::AnchoredTo` only for world sources; screen sources retain `PanelAttachmentAuthored` and use the shared attachment graph without carrying the world relation.
   - No bevy_ui / bevy_a11y dependency. `WidgetDisabled`, `WidgetFocused`, `ButtonPress` stay bespoke; only already-present deps may be reused (`bevy_picking::Hovered`, `bevy_enhanced_input`).
   - Widgets materialize as panel child entities under `ChildOf(panel)`; the `WidgetOf`/`PanelWidgets` relationship is a traversal index only, no `linked_spawn` — `ChildOf` owns despawn.
   - Behavior modules never construct layout/render primitives (`El`, `LayoutTree`, `PanelDraw`, materials, `TextStyle`, `DrawZIndex`). Presets depend on behavior, never the reverse.
   - No relayout on hover/press/focus/disabled flips: pure-visual component-level writes only; presets must not regenerate their `LayoutTree` fragment on state change (that trips `Changed<DiegeticPanel>` and forces a full relayout).
-  - Change-gated systems, never unconditional per-frame walks: reify gated on `Changed<ComputedDiegeticPanel>` and reuses entities by id; interactivity resolver writes `WidgetDisabled` only on diff; anchor-geometry fill is lazy (`With<AnchoredHere>`-gated).
+  - Change-gated systems, never unconditional per-frame walks: reify gated on `Changed<ComputedDiegeticPanel>` and reuses entities by id; interactivity resolver writes `WidgetDisabled` only on diff; anchor-geometry fill is lazy. World target demand comes from `AnchoredHere`; screen target demand needs a private diegetic marker because screen sources deliberately do not create the world relationship.
   - Widget ids reuse `PanelElementId` and its `duplicate_named_element_id` → `DuplicateElementId` validation; event-emitting widgets require `Named` ids (auto ids reposition on structural edits and would fire spurious cancels).
   - Cascade attributes use the existing `Override<A>`/`Resolved<A>`/`resolve_walk` convention, most-specific-wins.
   - Widget events derive `EntityEvent` targeting the widget entity; the panel-local id is a payload convenience only, never the routing key. Owning panel resolves through `WidgetOf`, never duplicated on components or events.
@@ -76,7 +76,10 @@
 
 **Goal:** Widgets can be authored in a panel's element tree and materialize as reused, relationship-indexed panel child entities.
 
-**Precondition (verify before starting):** hana_valence milestones 1 and 4 complete per the Valence gate invariant. If not landed, stop and report.
+**Precondition (verify before starting):** the shipped Hana Valence resolver,
+world-panel provider, `AnchoredToPanel` lowering, and screen attachment adapter
+still match the Valence gate invariant. If that contract has changed, reconcile
+this plan before implementing widgets.
 
 **Spec:**
 - **Ids** (`widgets/id.rs`): widget ids ARE `PanelElementId` — no newtype. Event-emitting widgets require `Named` ids; reject auto/positional ids for widgets at build time. Duplicate rejection comes free: the widget id lands in the element-id namespace, so `duplicate_named_element_id` → `PanelBuildError::DuplicateElementId` already covers it. `id.rs` holds only validation helpers (e.g. the named-id requirement).
@@ -156,20 +159,20 @@
 **Goal:** Entities can anchor to widgets: widget reify publishes `hana_valence` `ResolvedAnchorGeometry` on demand.
 
 **Spec:**
-- Publish `ResolvedAnchorGeometry` (the hana_valence contract component — the valence resolver reads a component, never a diegetic `SystemParam`) on widget entities **lazily**: only widgets `With<AnchoredHere>`, triggered on widget-layout change or `Added<AnchoredHere>`. Never eager on every widget (a resident ~9-entry map per untargeted widget, hundreds mostly never read), and never `Changed<Transform>`-gated refill (valence M34 forbids it).
+- Publish `ResolvedAnchorGeometry` (the Hana Valence contract component — the world resolver reads a component, never a diegetic `SystemParam`) on widget entities **lazily**. World-target demand is `With<AnchoredHere>`, triggered on widget-layout change or `Added<AnchoredHere>`. Phase 11 adds a private diegetic demand marker for widgets targeted through screen `PanelAttachmentAuthored`, because screen sources intentionally carry no world `AnchoredTo`. Never publish eagerly on every widget (a resident ~9-entry map per untargeted widget, hundreds mostly never read), and never use `Changed<Transform>` as a refill trigger.
 - Runs inside valence's `AnchorSystems::FillGeometry` set, before `Resolve`, so panel and widget geometry providers order cleanly ahead of the resolver — and in the same frame as reify so widget geometry is published before tooltip/anchor resolve.
 - Geometry points are projections of the Phase 3 single rect, expressed in the **widget-local frame** matching the panel provider's centered convention; the resolver composes `global_transform * geometry[anchor]`, which is why the widget's own `Transform` must carry its panel-local offset.
 - Publication lives in the same system that writes the rect (no divergent triggers).
-- **Diagnostics:** warn once per target-and-reason (not once-ever) when `AnchoredTo` targets an entity lacking `ResolvedAnchorGeometry` or a despawned target — parity with valence M16, sharing valence's dedup key convention so both crates deduplicate the same way.
+- **Diagnostics:** use `AttachmentResolveDiagnostics`' source/target/reason key when an attachment names missing geometry or a despawned target. World failures already flow through `ResolveDiagnostics`; the screen adapter keeps its coordinate-space-specific reason type over the same bounded diagnostic mechanism.
 
 **Files:**
 - `src/widgets/reify.rs` (or a sibling geometry system in `widgets/`) — publication + lazy gating
 - `src/widgets/mod.rs` — `AnchorSystems::FillGeometry` set membership
-- Read-only: `src/panel/anchor_geometry.rs` (centered-convention reference), `crates/hana_valence` (contract types), `../hana_valence/initialize.md`
+- Read-only: `src/panel/valence_provider.rs` (centered provider convention), `crates/hana_valence` (contract types), `../hana_valence/as-built/anchoring-and-arrangements.md`
 
 **Constraints from prior phases:** Phase 3 built the single panel-local rect source and gave widgets a real panel-local `Transform` (`GlobalTransform` via `ChildOf`). Phase 1's reify is change-gated on `Changed<ComputedDiegeticPanel>`.
 
-**Acceptance gate:** `cargo nextest run` green with new tests: a panel `AnchoredTo` an **off-origin** widget's corner resolves to the correct world position (catches the Transform/centered-frame composition); geometry is absent on widgets nothing anchors to; geometry refills on widget-layout change; missing-geometry warning fires once per target-and-reason.
+**Acceptance gate:** `cargo nextest run` green with new tests: a world panel attached to an **off-origin** widget's corner resolves to the correct world position (catches the Transform/centered-frame composition); geometry is absent on widgets nothing targets; geometry refills on widget-layout change; world and screen target-demand paths publish lazily; missing-geometry diagnostics deduplicate by source, target, and reason.
 
 ### Phase 5 — Focus subsystem  · status: todo
 
@@ -299,7 +302,7 @@
 **Goal:** Tooltips as normal anchored panels with hover/focus show-hide policy, lazy-spawned on first show.
 
 **Spec:**
-- `widgets/tooltip.rs`. A tooltip is a normal `DiegeticPanel` + `Tooltip` + `hana_valence::AnchoredTo` — no separate `TooltipOf`/`TooltipsFor` relationship (`AnchoredTo` already identifies the target; `Tooltip` marks the panel as a tooltip). Ownership split: hana_valence owns placement (`AnchoredTo`, geometry contract, resolver); diegetic owns tooltip behavior (show/hide policy, timers) and geometry provision. Authoring helpers insert `AnchoredTo` internally; hana_valence types stay out of public signatures.
+- `widgets/tooltip.rs`. A tooltip is a normal `DiegeticPanel` + `Tooltip` + `AnchoredToPanel` bundle — no separate `TooltipOf`/`TooltipsFor` relationship (`PanelAttachmentAuthored` already identifies the target internally; `Tooltip` marks the panel as a tooltip). Ownership splits by coordinate space: world tooltips lower to `hana_valence::AnchoredTo` and use the Valence resolver, while screen tooltips retain panel authoring and use the screen adapter over `resolve_attachments`. Diegetic owns tooltip behavior, timers, unit lowering, and geometry provision; Hana Valence types stay out of public signatures.
 - Public policy type:
   ```rust
   pub struct Tooltip {
@@ -315,18 +318,18 @@
   ```
   No public `TooltipTrigger` enum, no `TooltipTiming` struct; hover-or-focus behavior is assumed.
 - **Runtime state is component-driven and private.** Split the delay timers into `TooltipShowDelay`/`TooltipHideDelay` (or an explicit phase enum) so "waiting to show while already visible" is unrepresentable. Visibility is represented by component presence on the tooltip panel entity, never a `visible: bool` field — name that component explicitly. While hidden: the show timer waits and is removed if hover/focus stops. While visible: the hide timer waits out `hide_after`, and the tooltip hides immediately if hover/focus stops.
-- **Residency:** lazy-spawn the tooltip panel on first show — `show_after` masks the spawn+layout latency (only `show_after == 0` risks a one-frame flash). After first spawn, subsequent show/hide transitions toggle `Visibility` (Hidden/Inherited) only — never despawn/respawn per hover (a spawn costs full layout + reify + geometry fill). Lazy spawn also defers the Phase 4 geometry fill to first show (`Added<AnchoredHere>` trigger).
-- **Lifecycle:** hide/despawn the tooltip when its `AnchoredTo` target despawns — do not ride valence M16's silent last-transform fallback. Specify the visible→disabled transition per `TooltipDisabledPolicy`. Hover/focus eligibility reads `Hovered` and `WidgetFocused`.
-- **Authoring:** widget builders accept a prebuilt tooltip panel or a layout helper — `TooltipPanel::layout(|b| { ... })` or a `.tooltip_layout(|b| { ... })` method; do not promise bare `.tooltip(|b| { ... })` unless a prototype proves closure inference works without annotating the builder parameter. Defaults for `show_after`, `hide_after`, `disabled_policy`, anchors, offset. Standalone tooltip creation uses the same `TooltipPanel` machinery — both entry points visibly lower to `DiegeticPanel + Tooltip + AnchoredTo`; include the standalone snippet in module docs. Rich content (text, dividers, icons, materials, multiple styles) is ordinary panel content; shortcut labels are content supplied by the client, not headless behavior. Overflow avoidance is not a first-pass concept.
+- **Residency:** lazy-spawn the tooltip panel on first show — `show_after` masks the spawn+layout latency (only `show_after == 0` risks a one-frame flash). After first spawn, subsequent show/hide transitions toggle `Visibility` (Hidden/Inherited) only — never despawn/respawn per hover (a spawn costs full layout + reify + geometry fill). Lazy spawn also defers Phase 4 geometry publication until the attachment creates world `AnchoredHere` demand or Phase 11's screen-target demand.
+- **Lifecycle:** hide/despawn the tooltip when its `PanelAttachmentAuthored` target despawns; do not leave either adapter's fallback transform visible indefinitely. Specify the visible→disabled transition per `TooltipDisabledPolicy`. Hover/focus eligibility reads `Hovered` and `WidgetFocused`.
+- **Authoring:** widget builders accept a prebuilt tooltip panel or a layout helper — `TooltipPanel::layout(|b| { ... })` or a `.tooltip_layout(|b| { ... })` method; do not promise bare `.tooltip(|b| { ... })` unless a prototype proves closure inference works without annotating the builder parameter. Defaults for `show_after`, `hide_after`, `disabled_policy`, anchors, offset. Standalone tooltip creation uses the same `TooltipPanel` machinery — both entry points visibly lower to `DiegeticPanel + Tooltip + AnchoredToPanel`; include the standalone snippet in module docs. Rich content (text, dividers, icons, materials, multiple styles) is ordinary panel content; shortcut labels are content supplied by the client, not headless behavior. Overflow avoidance is not a first-pass concept.
 - **Placement spaces:** world tooltip on world target → valence 3D placer; screen tooltip on screen target → existing diegetic screen placer (widget targets land in Phase 11). Cross-space (screen tooltip on world target) is out of scope; the later seam is projecting the world anchor to viewport coordinates.
 
 **Files:**
 - `src/widgets/tooltip.rs` — new
 - `src/panel/builder.rs` / widget spec types — tooltip authoring hooks
 - `src/widgets/presets/tooltip.rs` — default tooltip panel presentation
-- Read-only: `crates/hana_valence` resolver + `AnchoredTo`, `src/panel/attachment_resolver.rs`
+- Read-only: `crates/hana_valence` resolver and attachment graph, `src/panel/anchoring.rs`, `src/screen_space/anchoring/`
 
-**Constraints from prior phases:** Phase 4 publishes widget `ResolvedAnchorGeometry` lazily on `Added<AnchoredHere>` — tooltip spawn triggers it; the same-frame ordering guarantee (widget geometry before resolve, both in `AnchorSystems::FillGeometry`→`Resolve`) holds. Phase 3's `Hovered` and Phase 5's `WidgetFocused` drive eligibility. Phase 2's `WidgetDisabled` drives `TooltipDisabledPolicy`.
+**Constraints from prior phases:** Phase 4 publishes widget `ResolvedAnchorGeometry` lazily for world targets; Phase 11 adds equivalent screen-target demand and must order widget target publication before screen attachment resolution. Phase 3's `Hovered` and Phase 5's `WidgetFocused` drive eligibility. Phase 2's `WidgetDisabled` drives `TooltipDisabledPolicy`.
 
 **Acceptance gate:** `cargo nextest run` green with new tests: show-delay timer removed when hover stops before `show_after`; visible tooltip hides immediately on hover/focus stop and after `hide_after`; first show spawns, second show only toggles `Visibility`; target despawn hides/despawns the tooltip; `TooltipDisabledPolicy::Suppress` blocks show on a disabled widget; world-space tooltip anchored to a widget places correctly.
 
@@ -337,16 +340,16 @@
 **Goal:** Screen-space tooltips and anchored panels can target widgets, not only panels.
 
 **Spec:**
-- The screen placer (`src/screen_space/anchoring/`) builds candidate rects solely from panels today and silently drops non-panel targets; valence M4 only re-pointed the panel path. Teach `candidate.rs`/`resolve.rs` to read widget targets: when an `AnchoredTo` target is a widget, derive the candidate rect from the widget's published `ResolvedAnchorGeometry` (projected to viewport space via the existing projection helpers) instead of the panel rect.
-- Keep the placer's existing ordering (`.after(PanelChildSystems::Build)`) and fit-on-screen fallback behavior; it stays in diegetic (needs window sizes) and plugs into the valence attachment skeleton.
-- Apply the Phase 4 diagnostics convention here too: a screen-space `AnchoredTo` naming a target with no geometry warns once per target-and-reason with the shared dedup key.
+- The screen placer (`src/screen_space/anchoring/`) builds candidates from `PanelAttachmentAuthored` but accepts panel targets only today. Teach `candidate.rs`/`resolve.rs` to recognize a widget target, resolve its owning screen panel/window through `WidgetOf`, and derive the target rectangle from the widget's published `ResolvedAnchorGeometry` and transform instead of `ScreenPanelRect` for a panel entity. The screen source still must not carry `hana_valence::AnchoredTo`.
+- Add private screen-target demand tracking so Phase 4 publishes geometry while at least one screen `PanelAttachmentAuthored` names the widget. Explicitly order widget reification and target-geometry publication before `PanelSystems::ResolvePanelAttachments`; the current screen resolver runs in `Update`, so this is a scheduling requirement rather than an existing `.after(PanelChildSystems::Build)` guarantee.
+- Keep window and viewport projection in diegetic, but continue delegating graph ordering, cycles, fallback, and diagnostics to `hana_valence::resolve_attachments`. Missing widget geometry uses the screen adapter's `AttachmentResolveDiagnostics` source/target/reason key.
 
 **Files:**
 - `src/screen_space/anchoring/candidate.rs` — widget-target candidate rects
 - `src/screen_space/anchoring/resolve.rs` — target resolution
 - `src/screen_space/anchoring/projection.rs` — reuse/extend projection helpers
 
-**Constraints from prior phases:** Phase 4: widgets publish `ResolvedAnchorGeometry` (widget-local frame, composed through `GlobalTransform`) lazily on `AnchoredHere`. Phase 10: screen-space tooltips lower to `DiegeticPanel + Tooltip + AnchoredTo` and currently only place against panel targets.
+**Constraints from prior phases:** Phase 4 publishes widget-local `ResolvedAnchorGeometry` lazily for world target demand and leaves a screen-demand seam. Phase 10 screen tooltips lower to `DiegeticPanel + Tooltip + AnchoredToPanel`; they retain private `PanelAttachmentAuthored` and do not enter the world resolver.
 
 **Acceptance gate:** `cargo nextest run` green with new tests: screen-space tooltip anchored to a widget places at the widget's viewport rect (not the panel's); panel-target placement is unregressed; missing-geometry warning dedups per target-and-reason.
 
