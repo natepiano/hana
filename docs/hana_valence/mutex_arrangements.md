@@ -223,20 +223,20 @@ answers are recorded in this document rather than duplicated in
 
 The later A9 review established that a valid `Arrangement` does not require any
 of `Strip`, `Accordion`, or `Coil`. M2's exactly-one validity premise is
-therefore rejected. A9.2 is now comparing the observer design below with one
-optional sum component (`name TBD`) whose variants contain the three distinct
-built-in chain recipes. Choosing the sum component would structurally enforce
-at most one recipe and make M1, M3, M4, and M5 unnecessary. Those decisions
-remain open until A9.2 selects the representation.
+therefore rejected. A9.2 is now decomposed into A9.2.1-A9.2.7 and no longer
+assumes that folding recipes survive as ECS components at all. A transient
+recipe model would make M1, M3, M4, and M5 unnecessary; those decisions remain
+open until A9.2 selects the representation after A6 defines the
+topology-provider contract.
 
 **Confirmed decisions:** 1
 
 - **M1 — Plugin ownership:** Confirm the plugin name `ArrangementPlugin` and whether it should absorb the
   two existing member observers as recommended.
 - **M2 — Valid cardinality:** **Decided:** a valid arrangement may carry no
-  built-in endpoint recipe. When a built-in recipe is present, its cardinality
-  is at most one; A9.2 decides whether a sum type or component exclusivity
-  represents that constraint.
+  built-in endpoint recipe. If recipes survive as ECS state, their cardinality
+  is at most one; A9.2 now first decides whether transient authoring removes
+  that runtime cardinality concern entirely.
 - **M3 — Transition winner:** Confirm the incoming-component-wins rule for one-at-a-time transitions.
 - **M4 — Conflicting insertion:** Decide whether multi-component insertion should merely resolve to no active
   arrangement, emit a debug diagnostic, or become a documented unsupported

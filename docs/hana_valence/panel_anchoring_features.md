@@ -137,9 +137,9 @@ that the resolved assembly graph is primary:
 
 Under this direction, `Strip`, `Accordion`, `Coil`, and future polyhedron
 folding policies are optional recipes that materialize `Hinge` endpoints. They
-are not exhaustive arrangement kinds. A connection rule (`name TBD`) or direct
-authoring materializes `AnchoredTo` and the hinge edge. Direct authoring and
-recipes converge on the same resolved components.
+are not exhaustive arrangement kinds. A topology provider (`name TBD`) or
+direct authoring materializes `AnchoredTo` and the hinge edge. Direct authoring
+and recipes converge on the same resolved components.
 
 One controller and one `Member` / `Members` relationship replaces
 `FoldMember` / `FoldMembers`: the controller carries the optional
@@ -292,7 +292,7 @@ control to a future single-writer raw-progress adapter.
 The resulting built-in data flow is:
 
 ```text
-connection rule + Strip / Accordion / Coil
+topology provider + folding recipe
     -> AnchoredTo + Hinge { edge, unfolded angle, folded angle }
 
 FoldCommand -> FoldSequenceState position
@@ -331,12 +331,12 @@ reconfiguration. A9.4 later folds the one-field `HingePivot` component into
   `Coil::fold`; use `FoldSequence` for both one-stage simultaneous and staged
   progress. Add external seeking as a `FoldCommand` variant rather than another
   angle or progress component. **Status: proposed.**
-- **A9.2 — Policy materialization:** `Strip`, `Accordion`, and `Coil` are
-  distinct first-class built-in recipes that materialize each member's two
-  `Hinge` endpoints during arrangement reconciliation. Whether they remain
-  separate ECS components or become values in one optional sum component is
-  unresolved, as is the exact shape-agnostic policy input. **Status: active;
-  representation and contract pending.**
+- **A9.2 — Fold-recipe authoring:** The POC roles of `Strip`, `Accordion`, and
+  `Coil` are not presumed to be the final model. A9.2 is decomposed into seven
+  decisions covering transient recipes, ordered fold groups, the optional
+  topology-provider capability, compatibility, Accordion semantics,
+  Coil/Wrap clearance, and safe initial or runtime application. **Status:
+  pending A6; decomposed into A9.2.1-A9.2.7.**
 - **A9.4 — Further removals:** `MemberPlacement`, `ArrangementPlacement`,
   `FoldFromArrangement`, and the snapshot diagnostic family are removed. The
   approved model has neither a stored live angle for `MemberPlacement` nor a
@@ -440,11 +440,9 @@ dimensionless fold progress remains `f32`.
 edges and anchors that meet, plus the fixed starting `Angle` that aligns them.
 The current arrangement code separately inserts `AnchoredTo` on each tile with
 the preceding tile as `AnchoredTo::target()`, so it only constructs a linear
-chain. In this plan, *connection rule* (`name TBD`) denotes the redesigned
-responsibility that also decides whether each `Member` has no `AnchoredTo` or
-has `AnchoredTo` targeting another `Member`. This allows branches and multiple
-disconnected connection trees. A6 decides its final type name and contract
-through six atomic review items.
+chain. A6.0 classifies the redesigned responsibility as a topology provider
+(`name TBD`). It owns a complete logical pattern and materializes the physical
+connection graph. A6.1-A6.6 decide its exact contract and final type names.
 
 `Strip`, `Accordion`, and `Coil` are existing, separate ECS components. They do
 not choose `Member` entities, `AnchoredTo::target()` values, or edges. Under
@@ -452,8 +450,8 @@ A9.1, they contribute the endpoint `Angle` values stored on the `Hinge` created 
 the connection information: equal endpoints for `Strip`, alternating folded
 directions for `Accordion`, and one folded direction for `Coil`. A9.2 decides
 the exact endpoint-calculation contract. This folding responsibility remains
-separate from the connection rule (`name TBD`) so that one connection topology
-can be reused with different folding behavior.
+separate from the topology provider (`name TBD`) so that one connection
+topology can be reused with different folding behavior.
 
 The planned `Arrangement` component identifies a non-spatial assembly
 controller entity. A4.2 no longer requires that controller to carry one of
@@ -486,15 +484,17 @@ any `FoldStage` insertions.
 
 ## Review status
 
-- Foundational API review items: 25
+- Foundational API review items: 33
 - Feature candidates: 15
 - Mutual-exclusion decisions: 6, recorded in
   [`mutex_arrangements.md`](mutex_arrangements.md)
-- Complete confirmed decisions: 14
+- Complete confirmed decisions: 16
 - Reopened decision: A4.2; `Arrangement` identity and optional built-in recipe
   cardinality are settled, while the complete validity contract remains open
-- Paused decision: A6.1, ownership of `AnchoredTo` presence and target selection
-- Active work: A9.2 built-in endpoint recipe representation and contract
+- Active work: A6.2, how a topology provider identifies source and target
+  `Member` entities
+- A9.2 fold-recipe authoring: decomposed into A9.2.1-A9.2.7 and pending the A6
+  topology-provider contract
 - F1, arrangement activation and suspension: paused until the
   foundational arrangement API is settled
 - Scope selection: pending review completion
@@ -550,19 +550,27 @@ explaining one decision cannot silently expand its scope.
 | A4.2 | Which component set makes an arrangement root valid? | Reopened: `Arrangement` identity retained; no built-in folding recipe is required; remaining validity contract pending |
 | A4.3 | What happens while an arrangement root is incomplete? | Decided in principle: explicit spawn helper and inert diagnosed incompleteness; helper signature pending A4.2 and A9.2 |
 | A5 | Where is the boundary between connection rules and fold patterns? | Decided: connection structure and folding behavior remain separate |
-| A6.1 | Must the connection rule (`name TBD`) decide whether each `Member` has `AnchoredTo` and select its `AnchoredTo::target()`, instead of Hana always selecting the preceding `Member`? | Pending |
-| A6.2 | How does the connection rule (`name TBD`) identify `Member` entities and refer to the target `Member` used by `AnchoredTo`? | Pending |
+| A6.0 | Is the proposed connection-rule responsibility better modeled as a topology provider (`name TBD`) that materializes connections and may expose optional capabilities such as ordered fold groups? | Decided: yes; a topology provider owns a logical pattern, materializes its root-or-connected physical graph, and may expose recipe-compatible fold directions; regular triangle, quad, and hex sheet providers should support arbitrary dimensions and Accordion, Coil, and Wrap, with a strip as the one-dimensional degenerate case |
+| A6.1 | Must the topology provider (`name TBD`) decide whether each `Member` has `AnchoredTo` and select its `AnchoredTo::target()`, instead of Hana always selecting the preceding `Member`? | Decided: yes; for every `Member`, the provider chooses either no `AnchoredTo` or one `AnchoredTo` whose target it selects; Hana never infers the preceding `Member` |
+| A6.2 | How does the topology provider (`name TBD`) identify `Member` entities and refer to the target `Member` used by `AnchoredTo`? | Active |
 | A6.3 | What result type (`name TBD`) represents either a `Member` without `AnchoredTo` or the data needed to add `AnchoredTo`? | Partial: use a named root-or-connected sum type rather than `Option`; exact type, variant, payload, and failure names pending |
-| A6.4 | What methods and failure contract does the connection-rule trait expose? | Pending |
-| A6.5 | How are concrete connection-rule components discovered and scheduled? | Pending |
-| A6.6 | What should the redesigned trait and its related concepts be called? | Pending |
+| A6.4 | What methods and failure contract does the topology-provider trait (`name TBD`) expose? | Pending |
+| A6.5 | How are concrete topology providers (`name TBD`) discovered and scheduled? | Pending |
+| A6.6 | What should the topology-provider trait and its related concepts be called? | Pending |
 | A7 | What do `AnchorId`, `AnchorPoint`, `Edge`, and `AnchoredTo` mean and which names should change? | Pending |
 | A7.1 | How is an anchor's local orientation represented on `AnchorPoint`? | Decided: `orientation: AnchorOrientation`; non-optional identity default |
 | A7.2 | Should the `AnchorPoint` type itself be renamed now that it stores position and orientation? | Pending |
 | A8 | Are `ArrangementPlacement`, `MemberPlacement`, and raw angle values still needed? | Decided: remove both placement types; use shared `bevy_kana::Angle` for the A6 connected payload's fixed connection angle, recipe offsets, and `Hinge` endpoints; A9.4 later supersedes the planned `HingePivot::reference_angle` conversion by merging the remaining pivot offset into `Hinge` and removing `HingePivot` |
 | A9 | How do folding policies, angle ownership, transport timing, and staged `FoldSequence` ordering form one coherent fold pipeline? | Pending; split into A9.1-A9.5 |
 | A9.1 | Should `Hinge` store unfolded and folded endpoints while `hinge_to_pose()` derives the current angle instead of storing `Hinge::angle`? | Decided: yes; remove `FoldAngles` and stored current-angle state; endpoint field names remain pending |
-| A9.2 | Should `Strip`, `Accordion`, and `Coil` define the per-member unfolded and folded endpoints currently represented partly by `FoldAngles`? | Pending |
+| A9.2 | How do folding recipes obtain compatible topology, materialize complete `Hinge` data, and support both initial authoring and runtime re-authoring? | Pending; decomposed into A9.2.1-A9.2.7 and blocked by A6 |
+| A9.2.1 | Are folding recipes transient authoring operations whose durable result is complete `Hinge` data rather than a recipe ECS component? | Pending |
+| A9.2.2 | What authoring value (`name TBD`) represents ordered, consistently oriented groups of connections that fold together? | Pending |
+| A9.2.3 | What optional topology-provider capability (`name TBD`) returns those fold groups, and what must remain available for runtime re-authoring? | Pending |
+| A9.2.4 | Which compatibility invariants and failures govern applying a folding recipe to returned fold groups? | Pending |
+| A9.2.5 | What geometry-independent behavior defines Accordion across strips, grids, sheets, and other compatible topologies? | Pending |
+| A9.2.6 | What distinct behaviors define Coil and Wrap, and what clearance or pivot calibration must a provider guarantee? | Pending |
+| A9.2.7 | How do initial recipe application and runtime replacement commit atomically and interact with neutral-state travel? | Pending; coordinated with F9 and A10 |
 | A9.3 | How should `FoldSequence`, `FoldSequenceState`, `FoldMember`, and `FoldStage` jointly represent simultaneous, staged, and externally controlled progress, and can any be combined or removed? | Partial; decided within item: keep `FoldSequence` as a separate optional component colocated with `Arrangement`; keep `FoldStage`; use one duration-plus-easing value (`name TBD`) for the sequence default and stage overrides; a distinct-duration fold occupies a one-member stage; only easing may vary per member; keep raw progress and canonical transport in `FoldSequenceState`; use `FoldCommandEvent` carrying `Step(FoldDirection)`, `PlayTo(FoldEndpoint)`, `Pause`, `Resume`, or `Reverse`; defer continuous external driving to a single-writer raw-progress adapter; exact names and remaining questions pending |
 | A9.4 | Which existing fold types, fields, and systems can the A9 pipeline combine or remove, and what is its net concept count? | Decided: remove `MemberPlacement`, `ArrangementPlacement`, `FoldFromArrangement`, both obsolete diagnostic families, `FoldSystems::Actuate`, public `Hinge::rotation()`, `HingePivot`, and `AnchorPoseLens` plus its empty tween integration; retain `FoldPlugin`, `FoldSystems::Advance`, `FoldSequenceBuilder`, and `FoldAuthorError`; require `AnchorPose` with `Hinge`; add nonempty authoring-only `SharedFoldStage` and accept it through `Into`; F13 owns replacement diagnostic policy; net ten fewer public types, one fewer public system-set variant, one fewer public method, and one fewer optional integration, with no new runtime ECS component or relationship |
 | A9.5 | Is sequence membership distinct from arrangement membership, and if so, what should `FoldMember` / `FoldMembers` be called? | Decided: use only `Member` / `Members`; put optional `FoldStage` directly on participating `Member` entities; remove `FoldMember` / `FoldMembers` |
@@ -685,11 +693,12 @@ closed ring such as a kaleidocycle requires the future closed-loop capability
 tracked by F14. `AnchoredTo` remains acyclic; a closure constraint must not be
 implemented by creating a relationship cycle.
 
-A6 will decide how a connection rule expresses branches and multiple physical
-roots. A9 will decide authored fold stages, including simultaneous folds. A10
-will validate their interaction: connection dependency order remains separate
-from animation order, all sequenced entities belong to the arrangement, and
-the connection graph can be resolved regardless of the chosen fold stages.
+A6.1-A6.6 will decide how a topology provider (`name TBD`) expresses branches
+and multiple physical roots. A9 will decide authored fold stages, including
+simultaneous folds. A10 will validate their interaction: connection dependency
+order remains separate from animation order, all sequenced entities belong to
+the arrangement, and the connection graph can be resolved regardless of the
+chosen fold stages.
 
 **Status:** Decided.
 
@@ -718,10 +727,11 @@ lifecycle to creation of the controller.
 
 The controller does not require geometry, anchors, spatial transforms,
 `AnchoredTo`, or `Hinge`; those components belong to physical members. Whether
-a usable connection rule remains part of controller validity is still open.
-`FoldSequence`, when present, lives on this same controller as a separate
-optional ECS capability rather than as an `Arrangement` field or on a second
-controller entity.
+a selected topology provider (`name TBD`) has enough input to materialize its
+graph remains part of the open validity contract, but a provider is not
+required when connections are authored directly. `FoldSequence`, when present,
+lives on this same controller as a separate optional ECS capability rather than
+as an `Arrangement` field or on a second controller entity.
 
 A4.3 provides explicit construction without required-component defaults and
 defines how incomplete controllers behave.
@@ -733,19 +743,19 @@ pending A6 and A9.2.
 ### A4.3. Construction and incomplete-controller behavior
 
 The `spawn_arrangement` helper and inert diagnostic behavior remain approved,
-but the helper's previously proposed connection-rule and folding-policy
+but the helper's previously proposed topology-provider and folding-policy
 parameters are no longer final because A4.2 has reopened.
 
 **Decision:** Do not attach default connection or folding policies as required
 components of `Arrangement`. There is no shape-agnostic default connection
-rule, and silently choosing `Strip`, `Accordion`, or `Coil` would hide author
+topology, and silently choosing `Strip`, `Accordion`, or `Coil` would hide author
 intent without preventing later invalid component edits.
 
 Provide `commands.spawn_arrangement(...)` through a `Commands` extension trait
 as the guided construction path. Its final parameters are pending: it must
 support a controller whose connections and hinge endpoints are authored
 directly, as well as one using optional connection and endpoint recipes. A6
-will supply the final connection-rule bound and representation; A9.2 will
+will supply the final topology-provider bound and representation; A9.2 will
 supply the built-in endpoint-recipe representation.
 
 ```rust
@@ -764,9 +774,10 @@ the resolved graph is invalid:
 - never panic, invent a default, or choose one policy arbitrarily.
 
 When the required data becomes valid again, request member reconciliation and
-resume automatically. A9.2 decides whether one optional sum type eliminates
-the folding-policy exclusivity problem; F1 owns intentional suspension, and
-F12 owns the reconciliation mechanism.
+resume automatically. A9.2 decides whether folding recipes persist as ECS
+state at all and therefore whether a folding-policy exclusivity problem
+remains; F1 owns intentional suspension, and F12 owns the reconciliation
+mechanism.
 
 When `FoldSequence` is present, its `initial: FoldEndpoint` selects the initial
 conformation as members become resolvable. The source of the initial hinge
@@ -781,13 +792,13 @@ endpoint for an arrangement with two distinct `Hinge` endpoints but no
 **Decision:** Keep connection structure and folding behavior separate because
 different connection topologies can work with different folding behaviors.
 
-The redesigned connection-rule responsibility (`name TBD`) decides whether
+The topology provider (`name TBD`) decides whether
 each `Member` has `AnchoredTo`, selects its `AnchoredTo::target()`, and owns the
 paired tile edges and anchors plus the fixed connection `Angle` needed to align
-a connection. `Strip`, `Accordion`, and `Coil` remain separate ECS components
-that contribute endpoint `Angle` offsets to the resulting hinges.
-They are not connection-rule implementations, and this decision does not add a
-shared folding trait.
+a connection. The original POC represented folding behavior through `Strip`,
+`Accordion`, and `Coil` ECS components. A9.2 has reopened that representation;
+the durable A5 decision is only that topology construction and folding behavior
+remain separate responsibilities.
 
 ```rust
 let root_entity = commands.spawn_arrangement(
@@ -796,10 +807,89 @@ let root_entity = commands.spawn_arrangement(
 );
 ```
 
-The same `triangle_connections` component can be used with `Strip`,
-`Accordion`, `Coil`, or a future folding component without redefining
-membership or physical connections. `FoldSequence` remains optional
-orchestration; its ownership and membership model are decided under A9.
+The same `triangle_connections` component can be reused with different folding
+behavior without redefining membership or physical connections. `FoldSequence`
+remains optional orchestration; its ownership and membership model are decided
+under A9.
+
+**Status:** Decided.
+
+### A6.0. Topology-provider classification
+
+A6 is the prerequisite for A9.2.
+
+**Decision:** Model this responsibility as a topology provider (`name TBD`),
+not as a connection rule. A topology provider owns a complete logical pattern
+and materializes the root-or-connected physical graph used by Hana. It may
+expose structural capabilities for recipe-compatible fold directions. Each
+direction can provide ordered, consistently oriented connection groups and
+additional calibration required by compatible folding recipes, while topology
+construction and folding behavior remain separate under A5.
+
+A provider may know logical adjacencies that do not each become an
+`AnchoredTo` relationship. The materialized `AnchoredTo` relationships remain
+the acyclic, one-target-per-`Member` graph used for transform evaluation; the
+provider is responsible for guaranteeing that its generated fold groups remain
+coherent with the complete logical pattern.
+
+Regular triangle-sheet, quad-sheet, and hex-sheet providers (exact public type
+names TBD) should derive recipe-compatible directions for arbitrary finite
+dimensions and support Accordion, Coil, and Wrap behavior. A strip is the
+one-dimensional degenerate case in which each connection group contains one
+connection. Wrap may require more provider-supplied geometry or calibration
+than Accordion or Coil, but that requirement does not make regular sheets
+inherently bespoke.
+
+```rust
+let sheet = TriangleSheet::new(8, 12); // provider name TBD
+let groups = sheet.fold_groups(TriangleDirection::A)?; // names TBD
+
+commands.apply_fold(
+    arrangement,
+    Wrap::new(groups), // recipe representation TBD under A9.2
+)?;
+```
+
+A6.1-A6.6 still decide `AnchoredTo` target ownership, member references, the
+root-or-connected result, trait methods and failures, discovery and scheduling,
+and final terminology. A9.2 still decides the fold-group value and capability
+types, compatibility checks, precise Accordion/Coil/Wrap behavior, wrap
+calibration, and application lifecycle.
+
+**Closure gate:** A6 closes only when its exact types and methods can materialize
+a branching or multi-root connection graph without mentioning Accordion, Coil,
+Wrap, or `FoldSequence`, and direct `AnchoredTo` / `Hinge` authoring remains
+valid without a provider.
+
+**Status:** Decided.
+
+### A6.1. `AnchoredTo` presence and target ownership
+
+**Decision:** For every `Member`, the topology provider (`name TBD`) decides
+whether the physical member has no `AnchoredTo` or has one `AnchoredTo`, and it
+selects the entity returned by `AnchoredTo::target()`. A `Member` without
+`AnchoredTo` is a physical root. Hana validates and materializes the provider's
+graph but never infers the preceding `Member` as a default target.
+
+This ownership supports multiple physical roots, branching connection trees,
+sheets, and polyhedral nets while keeping `Member` / `Members` order separate
+from physical topology. Direct authoring may produce the same ordinary
+components without using a topology provider. `AnchoredTo` remains acyclic;
+F14 separately owns future closed-loop constraints.
+
+```rust
+commands.materialize_topology(arrangement, topology)?; // method name TBD
+
+// Result selected by the topology provider:
+// center: no AnchoredTo
+// north:  AnchoredTo::target() == center
+// south:  AnchoredTo::target() == center
+// lid:    AnchoredTo::target() == north
+```
+
+A6.2 still decides how provider input and output identify these `Member`
+entities. A6.3 still defines the named root-or-connected result, and A6.4
+defines validation and failures.
 
 **Status:** Decided.
 
@@ -935,11 +1025,45 @@ merges the demonstrated `HingePivot` data into `Hinge::pivot_offset`, while A9.5
 removes `FoldMember` / `FoldMembers` and puts `FoldStage` directly on
 participating `Member` entities.
 
-The endpoint field names remain undecided. A9.2 decides how `Strip`,
-`Accordion`, and `Coil` calculate the endpoint values. A9.4 audits the
-remaining fold types and reports the final net concept count.
+The endpoint field names remain undecided. A9.2 decides how compatible,
+potentially transient folding recipes materialize those endpoint values without
+presuming that the POC `Strip`, `Accordion`, and `Coil` components survive.
+A9.4 audits the remaining fold types and reports the final net concept count.
 
 **Status:** Decided.
+
+### A9.2. Fold-recipe authoring and topology capabilities
+
+A9.2 no longer assumes that the POC `Strip`, `Accordion`, and `Coil` components
+survive. It is parked until A6 defines the topology-provider boundary, then it
+will resolve these decisions in order:
+
+1. **A9.2.1 — Durable result:** Decide whether a folding recipe is transient
+   authoring input whose durable ECS result is complete `Hinge` data.
+2. **A9.2.2 — Fold-group value:** Define the authoring-only value (`name TBD`)
+   containing ordered, consistently oriented groups of connections that fold
+   together. These spatial groups are not `FoldStage` timing groups.
+3. **A9.2.3 — Provider capability:** Define the optional topology-provider
+   capability (`name TBD`) that returns fold groups and what provider data must
+   remain available for runtime re-authoring.
+4. **A9.2.4 — Compatibility:** Define nonempty, membership, connectivity,
+   orientation, uniqueness, finite-calibration, overlap, and failure
+   invariants.
+5. **A9.2.5 — Accordion:** Define alternating physical fold sense without
+   reducing it to raw local-angle sign parity.
+6. **A9.2.6 — Coil and Wrap:** Separate cumulative turning from physically
+   exterior wrapping and define required clearance or pivot calibration.
+7. **A9.2.7 — Application lifecycle:** Define initial application, runtime
+   replacement, neutral-state travel, and all-or-nothing commit behavior with
+   F9 and A10.
+
+**Closure gate:** A9.2 closes only after final, non-TBD API examples cover a
+triangle strip, quad grid, hex grid, direct-authored box or polyhedral net that
+implements no fold-group capability, and one incompatible request that writes
+nothing. The final type inventory must distinguish persistent ECS state from
+authoring-only values and report the net public-type cost.
+
+**Status:** Pending A6.
 
 ### A9.3. Fold transport, stage timing, and easing
 
@@ -1780,17 +1904,25 @@ new members once the example inserted `ArrangedPanel` in tile order.
 - **A4.2 (reopened):** Add `Arrangement` as the controller identity and allow
   zero-member arrangements. Do not require `Strip`, `Accordion`, or `Coil`;
   directly authored `AnchoredTo` and `Hinge` data is valid. Decide the remaining
-  connection-rule validity contract under A6 and the optional built-in recipe
+  topology-provider validity contract under A6 and the optional built-in recipe
   representation under A9.2.
 - **A4.3:** Add a `Commands` extension method named `spawn_arrangement` without
   hidden defaults. Keep invalid resolved data and membership intact but make
   dependent writers inert, emit a non-spamming diagnostic, and reconcile
-  automatically after validity is restored. Finalize the helper parameters
-  after A4.2, A6, and A9.2.
-- **A5:** Keep the redesigned connection-rule responsibility separate from
+automatically after validity is restored. Finalize the helper parameters
+after A4.2, A6, and A9.2.
+- **A5:** Keep the topology-provider responsibility separate from
   `Strip`, `Accordion`, and `Coil`. Allow one connection topology to be reused
   with different folding behavior; keep staged `FoldSequence` orchestration
   outside both responsibilities.
+- **A6.0:** Model logical-pattern and physical-graph authoring as a topology
+  provider (`name TBD`) that may expose recipe-compatible fold directions.
+  Expect regular triangle, quad, and hex sheets to support arbitrary finite
+  dimensions plus Accordion, Coil, and Wrap; treat a strip as their
+  one-dimensional degenerate case.
+- **A6.1:** Let the topology provider decide independently for every `Member`
+  whether it has no `AnchoredTo` or has one whose `AnchoredTo::target()` it
+  selects. Never infer the preceding `Member` as a physical connection.
 - **A7.1:** Represent every `AnchorPoint` orientation with a non-optional
   `AnchorOrientation`; its identity value means the entity's own local
   orientation.
