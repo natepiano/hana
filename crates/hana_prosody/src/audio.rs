@@ -25,8 +25,17 @@ use cpal::traits::HostTrait;
 use cpal::traits::StreamTrait;
 use hound::WavSpec;
 
+use crate::constants::AUDIO_READY_CHANNEL_CAPACITY;
 use crate::constants::AUDIO_READY_TIMEOUT;
 use crate::constants::AUDIO_THREAD_POLL;
+use crate::constants::DEFAULT_INPUT_DEVICE_NAME;
+use crate::constants::NO_DEFAULT_INPUT_ERROR;
+use crate::constants::PCM_SAMPLE_MAX;
+use crate::constants::PCM_SAMPLE_MIN;
+use crate::constants::UNSIGNED_SAMPLE_CENTER;
+use crate::constants::UNSIGNED_SAMPLE_SPAN;
+use crate::constants::WAV_BITS_PER_SAMPLE;
+use crate::constants::WAV_CHANNELS;
 
 /// A running default-input microphone capture thread.
 pub struct AudioInput {
@@ -47,7 +56,7 @@ impl AudioInput {
         let (sample_tx, sample_rx) = mpsc::channel();
         let (error_tx, error_rx) = mpsc::channel();
         let (stop_tx, stop_rx) = mpsc::channel();
-        let (ready_tx, ready_rx) = mpsc::sync_channel(1);
+        let (ready_tx, ready_rx) = mpsc::sync_channel(AUDIO_READY_CHANNEL_CAPACITY);
 
         let ready_error_tx = ready_tx.clone();
         thread::spawn(move || {
@@ -135,7 +144,7 @@ pub enum AudioInputError {
 impl Display for AudioInputError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoDefaultInput => formatter.write_str("no default input device"),
+            Self::NoDefaultInput => formatter.write_str(NO_DEFAULT_INPUT_ERROR),
             Self::DefaultConfig(error) => {
                 write!(formatter, "default input config failed: {error}")
             },
@@ -159,9 +168,9 @@ pub fn write_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(), h
         fs::create_dir_all(parent)?;
     }
     let wav_spec = WavSpec {
-        channels: 1,
+        channels: WAV_CHANNELS,
         sample_rate,
-        bits_per_sample: 16,
+        bits_per_sample: WAV_BITS_PER_SAMPLE,
         sample_format: hound::SampleFormat::Int,
     };
     let mut wav_writer = hound::WavWriter::create(path, wav_spec)?;
@@ -172,7 +181,7 @@ pub fn write_wav(path: &Path, sample_rate: u32, samples: &[f32]) -> Result<(), h
 }
 
 fn to_pcm_i16(sample: f32) -> i16 {
-    let sample = (sample.clamp(-1.0, 1.0) * f32::from(i16::MAX))
+    let sample = (sample.clamp(PCM_SAMPLE_MIN, PCM_SAMPLE_MAX) * f32::from(i16::MAX))
         .round()
         .clamp(f32::from(i16::MIN), f32::from(i16::MAX))
         .to_i32();
@@ -190,7 +199,7 @@ fn run_audio_thread(
         .default_input_device()
         .ok_or(AudioInputError::NoDefaultInput)?;
     let device_name = device.description().map_or_else(
-        |_| String::from("default input"),
+        |_| String::from(DEFAULT_INPUT_DEVICE_NAME),
         |description| description.name().to_string(),
     );
     let supported_stream_config = device
@@ -297,7 +306,7 @@ fn downmix_i16(data: &[i16], channels: usize) -> Vec<f32> {
 
 fn downmix_u16(data: &[u16], channels: usize) -> Vec<f32> {
     downmix(data, channels, |sample| {
-        (f32::from(*sample) / f32::from(u16::MAX) - 0.5) * 2.0
+        (f32::from(*sample) / f32::from(u16::MAX) - UNSIGNED_SAMPLE_CENTER) * UNSIGNED_SAMPLE_SPAN
     })
 }
 

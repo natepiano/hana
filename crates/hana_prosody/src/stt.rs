@@ -26,9 +26,28 @@ use speech::SpeechRecognizer;
 #[cfg(target_os = "macos")]
 use crate::constants::APPLE_CONTEXTUAL_STRINGS;
 #[cfg(target_os = "macos")]
+use crate::constants::APPLE_SPEECH_CALLBACK_QUEUE;
+#[cfg(target_os = "macos")]
+use crate::constants::APPLE_SPEECH_RECOGNIZER_UNAVAILABLE;
+use crate::constants::AUDIO_FILE_STEM_REPLACEMENT;
+use crate::constants::AUDIO_FILE_STEM_SAFE_CHARACTERS;
+use crate::constants::FALLBACK_AUDIO_FILE_STEM;
+#[cfg(target_os = "macos")]
 use crate::constants::HANA_STT_LOCALE;
 #[cfg(target_os = "macos")]
 use crate::constants::HANA_STT_REQUIRE_ON_DEVICE;
+#[cfg(any(target_os = "macos", test))]
+use crate::constants::MIN_TRANSCRIPT_ALPHANUMERICS;
+#[cfg(target_os = "macos")]
+use crate::constants::NO_SPEECH_ERROR_PATTERNS;
+use crate::constants::TRANSCRIPTION_RECEIVER_LOCK_ERROR;
+use crate::constants::TRANSCRIPTION_WORKER_DISCONNECTED_ERROR;
+#[cfg(target_os = "macos")]
+use crate::constants::TRUTHY_ENV_VALUES;
+#[cfg(not(target_os = "macos"))]
+use crate::constants::UNSUPPORTED_PLATFORM_ERROR;
+#[cfg(target_os = "macos")]
+use crate::constants::UNUSABLE_TRANSCRIPT_ERROR;
 use crate::write_wav;
 
 /// Audio samples and scratch location for one transcription request.
@@ -80,7 +99,7 @@ impl PendingTranscription {
         let Ok(receiver) = self.receiver.lock() else {
             return Some(TranscriptionOutcome::Failed {
                 session_id: self.session_id.clone(),
-                error:      String::from("transcription receiver lock failed"),
+                error:      String::from(TRANSCRIPTION_RECEIVER_LOCK_ERROR),
             });
         };
         match receiver.try_recv() {
@@ -88,7 +107,7 @@ impl PendingTranscription {
             Err(TryRecvError::Empty) => None,
             Err(TryRecvError::Disconnected) => Some(TranscriptionOutcome::Failed {
                 session_id: self.session_id.clone(),
-                error:      String::from("transcription worker disconnected"),
+                error:      String::from(TRANSCRIPTION_WORKER_DISCONNECTED_ERROR),
             }),
         }
     }
@@ -185,15 +204,17 @@ fn audio_file_stem(session_id: &str) -> String {
     let stem: String = session_id
         .chars()
         .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+            if character.is_ascii_alphanumeric()
+                || AUDIO_FILE_STEM_SAFE_CHARACTERS.contains(&character)
+            {
                 character
             } else {
-                '_'
+                AUDIO_FILE_STEM_REPLACEMENT
             }
         })
         .collect();
     if stem.is_empty() {
-        String::from("recording")
+        String::from(FALLBACK_AUDIO_FILE_STEM)
     } else {
         stem
     }
@@ -247,10 +268,10 @@ impl AppleSpeechTranscriber {
         let speech_recognizer = self
             .recognizer()?
             .with_default_task_hint(TaskHint::Dictation)
-            .with_callback_queue(CallbackQueue::named("hana-prosody-stt"));
+            .with_callback_queue(CallbackQueue::named(APPLE_SPEECH_CALLBACK_QUEUE));
         if !speech_recognizer.is_available() {
             return Err(TranscriptionError::AppleSpeech(String::from(
-                "Apple Speech recognizer is unavailable",
+                APPLE_SPEECH_RECOGNIZER_UNAVAILABLE,
             )));
         }
 
@@ -278,7 +299,7 @@ impl AppleSpeechTranscriber {
         let text = detailed_recognition_result.transcript().trim().to_string();
         if !is_valid_transcript(&text) {
             return Err(TranscriptionError::NoSpeech(String::from(
-                "recording did not contain a usable transcript",
+                UNUSABLE_TRANSCRIPT_ERROR,
             )));
         }
         let mode = match (self.recognition_mode, on_device) {
@@ -338,7 +359,7 @@ impl Display for TranscriptionError {
             #[cfg(target_os = "macos")]
             Self::AppleSpeech(error) => write!(formatter, "Apple Speech failed: {error}"),
             #[cfg(not(target_os = "macos"))]
-            Self::UnsupportedPlatform => formatter.write_str("Apple Speech requires macOS"),
+            Self::UnsupportedPlatform => formatter.write_str(UNSUPPORTED_PLATFORM_ERROR),
         }
     }
 }
@@ -349,7 +370,7 @@ fn is_valid_transcript(text: &str) -> bool {
         .chars()
         .filter(|character| character.is_alphanumeric())
         .count();
-    alphanumeric >= 2 && text.chars().any(char::is_alphabetic)
+    alphanumeric >= MIN_TRANSCRIPT_ALPHANUMERICS && text.chars().any(char::is_alphabetic)
 }
 
 impl Error for TranscriptionError {}
@@ -362,7 +383,10 @@ impl From<SpeechError> for TranscriptionError {
 #[cfg(target_os = "macos")]
 fn classify_speech_error(message: String) -> TranscriptionError {
     let normalized = message.to_ascii_lowercase();
-    if normalized.contains("no speech detected") || normalized.contains("no speech") {
+    if NO_SPEECH_ERROR_PATTERNS
+        .iter()
+        .any(|pattern| normalized.contains(pattern))
+    {
         TranscriptionError::NoSpeech(message)
     } else {
         TranscriptionError::AppleSpeech(message)
@@ -371,12 +395,9 @@ fn classify_speech_error(message: String) -> TranscriptionError {
 
 #[cfg(target_os = "macos")]
 fn recognition_mode_from_env() -> RecognitionMode {
-    if env::var(HANA_STT_REQUIRE_ON_DEVICE).is_ok_and(|value| {
-        matches!(
-            value.trim().to_ascii_lowercase().as_str(),
-            "1" | "true" | "yes" | "on"
-        )
-    }) {
+    if env::var(HANA_STT_REQUIRE_ON_DEVICE)
+        .is_ok_and(|value| TRUTHY_ENV_VALUES.contains(&value.trim().to_ascii_lowercase().as_str()))
+    {
         RecognitionMode::OnDeviceRequired
     } else {
         RecognitionMode::SystemAllowed
