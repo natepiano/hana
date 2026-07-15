@@ -19,32 +19,6 @@ use crate::constants::POSE_FIELD_SEPARATOR;
 use crate::constants::RESTART_CAMERA_RESTORE_DURATION;
 use crate::orbit_cam::FairyDustOrbitCam;
 
-/// Resource inserted when restart-camera restoration is enabled.
-///
-/// Examples can read this resource to branch startup camera behavior when a
-/// restart pose is available.
-#[derive(Resource, Debug)]
-pub struct RestartCameraRestore {
-    pose:   Option<RestartCameraPose>,
-    status: RestartCameraRestoreStatus,
-}
-
-impl RestartCameraRestore {
-    fn from_env() -> Self {
-        Self {
-            pose:   std::env::var(POSE_ENV)
-                .ok()
-                .and_then(|encoded| RestartCameraPose::decode(&encoded)),
-            status: RestartCameraRestoreStatus::Pending,
-        }
-    }
-
-    /// Returns true when this process was launched with a Fairy Dust restart
-    /// camera pose.
-    #[must_use]
-    pub const fn has_restart_camera_pose(&self) -> bool { self.pose.is_some() }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum RestartCameraRestoreStatus {
     #[default]
@@ -117,6 +91,32 @@ impl From<&OrbitCam> for RestartCameraPose {
             radius: orbit_cam.zoom.current().0,
         }
     }
+}
+
+/// Resource inserted when restart-camera restoration is enabled.
+///
+/// Examples can read this resource to branch startup camera behavior when a
+/// restart pose is available.
+#[derive(Resource, Debug)]
+pub struct RestartCameraRestore {
+    pose:   Option<RestartCameraPose>,
+    status: RestartCameraRestoreStatus,
+}
+
+impl RestartCameraRestore {
+    fn from_env() -> Self {
+        Self {
+            pose:   std::env::var(POSE_ENV)
+                .ok()
+                .and_then(|encoded| RestartCameraPose::decode(&encoded)),
+            status: RestartCameraRestoreStatus::Pending,
+        }
+    }
+
+    /// Returns true when this process was launched with a Fairy Dust restart
+    /// camera pose.
+    #[must_use]
+    pub const fn has_restart_camera_pose(&self) -> bool { self.pose.is_some() }
 }
 
 /// Plays the camera animation back to the pose captured before Fairy Dust hot

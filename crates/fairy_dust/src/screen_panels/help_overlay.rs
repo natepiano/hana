@@ -62,27 +62,6 @@ event!(ShowHelpEvent);
 action!(CloseHelp);
 event!(CloseHelpEvent);
 
-pub(super) fn install(app: &mut App) {
-    ensure_plugin(app, EnhancedInputPlugin);
-    app.add_input_context::<HelpContext>();
-    app.add_input_context::<HelpCloseContext>();
-    app.add_systems(Startup, spawn_help_context);
-    bind_action_system!(app, ShowHelp, ShowHelpEvent, show_or_toggle_help);
-    bind_action_system!(app, CloseHelp, CloseHelpEvent, close_help);
-}
-
-fn spawn_help_context(mut commands: Commands) {
-    commands.spawn((
-        HelpContext,
-        Actions::<HelpContext>::spawn(SpawnWith(|spawner: &mut ActionSpawner<HelpContext>| {
-            spawner.spawn((
-                Action::<ShowHelp>::new(),
-                bindings![KeyCode::Slash.with_mod_keys(ModKeys::SHIFT)],
-            ));
-        })),
-    ));
-}
-
 #[derive(Component)]
 pub(super) struct KeyboardShortcutHelp;
 
@@ -105,6 +84,27 @@ struct HelpShortcuts {
 struct HelpRow {
     keys:  &'static str,
     label: &'static str,
+}
+
+pub(super) fn install(app: &mut App) {
+    ensure_plugin(app, EnhancedInputPlugin);
+    app.add_input_context::<HelpContext>();
+    app.add_input_context::<HelpCloseContext>();
+    app.add_systems(Startup, spawn_help_context);
+    bind_action_system!(app, ShowHelp, ShowHelpEvent, show_or_toggle_help);
+    bind_action_system!(app, CloseHelp, CloseHelpEvent, close_help);
+}
+
+fn spawn_help_context(mut commands: Commands) {
+    commands.spawn((
+        HelpContext,
+        Actions::<HelpContext>::spawn(SpawnWith(|spawner: &mut ActionSpawner<HelpContext>| {
+            spawner.spawn((
+                Action::<ShowHelp>::new(),
+                bindings![KeyCode::Slash.with_mod_keys(ModKeys::SHIFT)],
+            ));
+        })),
+    ));
 }
 
 /// Toggles the overlay on Shift+/: despawns it when open, otherwise spawns it

@@ -33,33 +33,6 @@ use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 
-fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
-    // `fairy_dust::sprinkle_example`. `advance_tick` runs first in the chain so
-    // the four mutators observe the second-counter change the same frame.
-    fairy_dust::sprinkle_example()
-        .with_studio_lighting()
-        .with_ground_plane()
-        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
-        .with_camera_home()
-        .yaw(HOME_YAW)
-        .pitch(HOME_PITCH)
-        .insert_resource(Tick::default())
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                advance_tick,
-                mutate_world_text,
-                mutate_screen_text,
-                mutate_world_panel,
-                mutate_screen_panel,
-            )
-                .chain(),
-        )
-        .run();
-}
-
 // ═════════════════════════════════════════════════════════════════════════════
 // RUNTIME TEXT MUTATION — DiegeticTextMut<M> for markers, PanelText for ids.
 // ═════════════════════════════════════════════════════════════════════════════
@@ -117,6 +90,33 @@ struct ScreenPanel;
 /// mutator's `is_changed` gate retexts once per second.
 #[derive(Resource, Default)]
 struct Tick(u64);
+
+fn main() {
+    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `fairy_dust::sprinkle_example`. `advance_tick` runs first in the chain so
+    // the four mutators observe the second-counter change the same frame.
+    fairy_dust::sprinkle_example()
+        .with_studio_lighting()
+        .with_ground_plane()
+        .with_orbit_cam_preset(|_| {}, OrbitCamPreset::blender_like())
+        .with_camera_home()
+        .yaw(HOME_YAW)
+        .pitch(HOME_PITCH)
+        .insert_resource(Tick::default())
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                advance_tick,
+                mutate_world_text,
+                mutate_screen_text,
+                mutate_world_panel,
+                mutate_screen_panel,
+            )
+                .chain(),
+        )
+        .run();
+}
 
 fn setup(mut commands: Commands, mut materials: ResMut<Assets<StandardMaterial>>) {
     // Standalone labels: a marker plus the one-element `DiegeticText` bundle.

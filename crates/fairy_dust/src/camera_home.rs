@@ -90,6 +90,13 @@ pub(crate) struct CameraHomeMarker;
 #[derive(Component, Clone, Copy, Debug, Default)]
 pub struct CameraHomeTarget;
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum HomeTitleBarControl {
+    #[default]
+    Shown,
+    Hidden,
+}
+
 /// Stashed home configuration. Read by the title-bar installer to decide
 /// whether to prepend the `H Home` chip.
 #[derive(Resource, Clone)]
@@ -100,13 +107,6 @@ pub(crate) struct CameraHomeConfig {
     pub anchor:            Anchor,
     pub offset_px:         Vec2,
     pub title_bar_control: HomeTitleBarControl,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum HomeTitleBarControl {
-    #[default]
-    Shown,
-    Hidden,
 }
 
 /// Resource holding the entity used as the invisible home cube.

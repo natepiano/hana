@@ -197,10 +197,6 @@ pub struct TitleBar {
     background_color: Option<Color>,
 }
 
-impl Default for TitleBar {
-    fn default() -> Self { Self::new() }
-}
-
 impl TitleBar {
     /// Creates a title bar with the visible example title.
     #[must_use]
@@ -272,6 +268,10 @@ impl TitleBar {
     }
 }
 
+impl Default for TitleBar {
+    fn default() -> Self { Self::new() }
+}
+
 /// How a control label should be styled.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ControlActivation {
@@ -340,6 +340,37 @@ impl HomeTitleBarFlash {
     }
 
     pub(crate) const fn cancel(&mut self) { self.timer = None; }
+}
+
+/// The three label styles a control cell picks between by its
+/// [`ControlActivation`].
+struct ControlStyles {
+    active:   TextStyle,
+    inactive: TextStyle,
+    disabled: TextStyle,
+}
+
+impl ControlStyles {
+    fn new() -> Self {
+        let control_style = |color| {
+            TextStyle::new(LABEL_SIZE)
+                .with_color(color)
+                .with_shadow_mode(GlyphShadowMode::None)
+        };
+        Self {
+            active:   control_style(CONTROL_ACTIVE_COLOR),
+            inactive: control_style(CONTROL_INACTIVE_COLOR),
+            disabled: control_style(CONTROL_DISABLED_COLOR),
+        }
+    }
+
+    fn for_activation(&self, activation: ControlActivation) -> TextStyle {
+        match activation {
+            ControlActivation::Active => self.active.clone(),
+            ControlActivation::Inactive => self.inactive.clone(),
+            ControlActivation::Disabled => self.disabled.clone(),
+        }
+    }
 }
 
 pub(crate) fn tick_home_title_bar_flash(
@@ -438,37 +469,6 @@ fn build_title_bar_tree(title_bar: &TitleBar, state: &TitleBarControlState) -> L
     let mut builder = LayoutBuilder::with_root(El::new().width(Sizing::FIT).height(Sizing::FIT));
     build_title_bar_layout(&mut builder, title_bar, state);
     builder.build()
-}
-
-/// The three label styles a control cell picks between by its
-/// [`ControlActivation`].
-struct ControlStyles {
-    active:   TextStyle,
-    inactive: TextStyle,
-    disabled: TextStyle,
-}
-
-impl ControlStyles {
-    fn new() -> Self {
-        let control_style = |color| {
-            TextStyle::new(LABEL_SIZE)
-                .with_color(color)
-                .with_shadow_mode(GlyphShadowMode::None)
-        };
-        Self {
-            active:   control_style(CONTROL_ACTIVE_COLOR),
-            inactive: control_style(CONTROL_INACTIVE_COLOR),
-            disabled: control_style(CONTROL_DISABLED_COLOR),
-        }
-    }
-
-    fn for_activation(&self, activation: ControlActivation) -> TextStyle {
-        match activation {
-            ControlActivation::Active => self.active.clone(),
-            ControlActivation::Inactive => self.inactive.clone(),
-            ControlActivation::Disabled => self.disabled.clone(),
-        }
-    }
 }
 
 fn build_title_bar_layout(

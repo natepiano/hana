@@ -16,10 +16,6 @@ use crate::ensure_plugin;
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct FreeCamLookPitchPreference(FreeCamLookPitch);
 
-impl Default for FreeCamLookPitchPreference {
-    fn default() -> Self { Self(FreeCamLookPitch::Inverted) }
-}
-
 impl FreeCamLookPitchPreference {
     pub(super) const fn look_pitch(self) -> FreeCamLookPitch { self.0 }
 
@@ -29,11 +25,21 @@ impl FreeCamLookPitchPreference {
     }
 }
 
+impl Default for FreeCamLookPitchPreference {
+    fn default() -> Self { Self(FreeCamLookPitch::Inverted) }
+}
+
 #[derive(Component)]
 struct FairyDustFreeCamSettingsContext;
 
 action!(ToggleFreeCamLookPitch);
 event!(ToggleFreeCamLookPitchEvent);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LookPitchUpdate {
+    Applied,
+    Unsupported,
+}
 
 pub(super) fn install(app: &mut App) {
     ensure_plugin(app, EnhancedInputPlugin);
@@ -109,12 +115,6 @@ const fn mode_look_pitch(mode: &FreeCamInputMode) -> Option<FreeCamLookPitch> {
         FreeCamInputMode::Bindings(bindings) => Some(bindings.look_pitch()),
         _ => None,
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LookPitchUpdate {
-    Applied,
-    Unsupported,
 }
 
 fn set_look_pitch(mode: &mut FreeCamInputMode, look_pitch: FreeCamLookPitch) -> LookPitchUpdate {

@@ -61,6 +61,9 @@ pub(crate) const CARGO_EXAMPLE_FLAG: &str = "--example";
 pub(crate) const CARGO_MANIFEST_PATH_FLAG: &str = "--manifest-path";
 pub(crate) const CARGO_RELEASE_FLAG: &str = "--release";
 pub(crate) const CARGO_RUN_SUBCOMMAND: &str = "run";
+pub(crate) const EXIT_STATUS_FAILURE: i32 = 1;
+#[cfg(windows)]
+pub(crate) const EXIT_STATUS_SUCCESS: i32 = 0;
 
 // cascade shadow
 // An orthographic `OrbitCam` parks at a fixed `(near + far) / 2` distance that a
@@ -111,12 +114,6 @@ pub(crate) const CUBE_DEFAULT_SIZE: f32 = 1.0;
 pub const EXAMPLE_CUBE_COLOR: Color = CUBE_DEFAULT_COLOR;
 /// Canonical example cube edge length in world units.
 pub const EXAMPLE_CUBE_SIZE: f32 = CUBE_DEFAULT_SIZE;
-/// Canonical cube transform for a cube sitting on the ground plane with extra clearance.
-#[must_use]
-pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
-    Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
-}
-
 // cube face panel
 pub(crate) const CUBE_FACE_PANEL_ACTIVE_BODY_SIZE: f32 = 52.0;
 pub(crate) const CUBE_FACE_PANEL_BODY_SIZE: f32 = 44.0;
@@ -259,3 +256,9 @@ pub const TITLE_SIZE: Pt = Pt(14.0);
 /// Zoom floor left in place after unclamping. The zoom limit's lower bound must
 /// stay > 0, or the camera sticks at radius 0.
 pub(crate) const UNCLAMPED_ZOOM_LOWER_LIMIT: f32 = 1e-9;
+
+/// Canonical cube transform for a cube sitting on the ground plane with extra clearance.
+#[must_use]
+pub const fn example_cube_on_ground(clearance: f32) -> Vec3 {
+    Vec3::new(0.0, EXAMPLE_CUBE_SIZE * 0.5 + clearance, 0.0)
+}

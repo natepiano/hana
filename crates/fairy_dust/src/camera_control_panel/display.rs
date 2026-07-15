@@ -73,10 +73,6 @@ pub(super) struct CameraGuidanceDisplayState {
     pub(super) render_state: RenderState,
 }
 
-impl Default for CameraGuidanceDisplayState {
-    fn default() -> Self { Self::from_display(CameraGuidanceDisplay::default()) }
-}
-
 impl CameraGuidanceDisplayState {
     pub(super) const fn from_display(display: CameraGuidanceDisplay) -> Self {
         Self {
@@ -262,23 +258,8 @@ impl CameraGuidanceDisplayState {
     }
 }
 
-fn tick_release_countdown(
-    sources: &mut InteractionSources,
-    release: &mut Option<Duration>,
-    delta: Duration,
-) -> bool {
-    let Some(remaining) = release.as_mut() else {
-        return false;
-    };
-    let next = remaining.saturating_sub(delta);
-    if next == Duration::ZERO {
-        *sources = InteractionSources::NONE;
-        *release = None;
-        return true;
-    }
-
-    *remaining = next;
-    false
+impl Default for CameraGuidanceDisplayState {
+    fn default() -> Self { Self::from_display(CameraGuidanceDisplay::default()) }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -387,6 +368,25 @@ impl CameraGuidanceDisplay {
             CameraGuidanceAction::Other => None,
         }
     }
+}
+
+fn tick_release_countdown(
+    sources: &mut InteractionSources,
+    release: &mut Option<Duration>,
+    delta: Duration,
+) -> bool {
+    let Some(remaining) = release.as_mut() else {
+        return false;
+    };
+    let next = remaining.saturating_sub(delta);
+    if next == Duration::ZERO {
+        *sources = InteractionSources::NONE;
+        *release = None;
+        return true;
+    }
+
+    *remaining = next;
+    false
 }
 
 #[cfg(test)]

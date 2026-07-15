@@ -89,61 +89,6 @@ impl Face {
     }
 }
 
-/// Bundle that renders a single line of world-space [`DiegeticText`] centered on
-/// one face of a cube. Spawn as a child of the cube entity (or independently
-/// using the cube's transform as a parent).
-///
-/// Use this when you spawn a cube manually with `commands.spawn`. For cubes
-/// built through [`PrimitiveBuilder`](crate::PrimitiveBuilder), prefer
-/// [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text).
-#[must_use]
-pub fn cube_face_text(
-    face: Face,
-    text: impl Into<String>,
-    cube_size: f32,
-    text_size: f32,
-    color: Color,
-) -> impl Bundle {
-    (
-        CubeFaceLabel,
-        DiegeticText::world(text)
-            .size(text_size)
-            .color(color)
-            .sidedness(Sidedness::FrontOnly)
-            .transform(face.local_transform(cube_size * 0.5))
-            .build(),
-    )
-}
-
-/// Canonical single-line blue label centered on a cube face.
-#[must_use]
-pub fn cube_face_label(face: Face, text: impl Into<String>, cube_size: f32) -> impl Bundle {
-    cube_face_text(
-        face,
-        text,
-        cube_size,
-        CUBE_FACE_LABEL_SIZE,
-        CUBE_FACE_PANEL_BLUE,
-    )
-}
-
-/// Local transform for a cube-mounted panel centered on `face`.
-#[must_use]
-pub fn cube_face_transform(face: Face, cube_size: f32) -> Transform {
-    face.local_transform(cube_size * 0.5)
-}
-
-/// Transparent unlit material for cube-mounted face panels.
-#[must_use]
-pub fn cube_face_panel_material() -> StandardMaterial {
-    StandardMaterial {
-        base_color: Color::NONE,
-        alpha_mode: AlphaMode::Blend,
-        unlit: true,
-        ..default_panel_material()
-    }
-}
-
 /// Activity state for cube face panel content.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CubeFacePanelActivity {
@@ -225,82 +170,6 @@ impl CubeFacePanelStyle {
             color:            CUBE_FACE_PANEL_BLUE,
         }
     }
-}
-
-/// Builds a cube face panel with the canonical transparent material and tree.
-///
-/// # Errors
-///
-/// Returns [`PanelBuildError`] when `style.size` is not a positive, finite value.
-pub fn cube_face_panel(
-    style: CubeFacePanelStyle,
-    content: CubeFacePanelContent,
-    materials: &mut Assets<StandardMaterial>,
-) -> Result<DiegeticPanel, PanelBuildError> {
-    cube_face_panel_with_tree(style.size, cube_face_panel_tree(style, content), materials)
-}
-
-/// Builds a transparent cube face panel from a caller-authored layout tree.
-///
-/// # Errors
-///
-/// Returns [`PanelBuildError`] when `size` is not a positive, finite value.
-pub fn cube_face_panel_with_tree(
-    size: f32,
-    tree: LayoutTree,
-    materials: &mut Assets<StandardMaterial>,
-) -> Result<DiegeticPanel, PanelBuildError> {
-    let transparent = materials.add(cube_face_panel_material());
-    DiegeticPanel::world()
-        .size(size, size)
-        .font_unit(Unit::Millimeters)
-        .anchor(Anchor::Center)
-        .material(transparent.clone())
-        .text_material(transparent)
-        .with_tree(tree)
-        .build()
-}
-
-/// Builds the layout tree for a cube face panel.
-#[must_use]
-pub fn cube_face_panel_tree(
-    style: CubeFacePanelStyle,
-    content: CubeFacePanelContent,
-) -> LayoutTree {
-    let mut builder = LayoutBuilder::with_root(
-        El::column()
-            .width(Sizing::fixed(style.size))
-            .height(Sizing::fixed(style.size))
-            .alignment(AlignX::Center, AlignY::Center)
-            .gap(style.row_gap)
-            .padding(Padding::all(style.padding))
-            .clip(),
-    );
-
-    let title = TextStyle::new(style.title_size)
-        .with_color(style.color)
-        .with_align(TextAlign::Center)
-        .with_shadow_mode(GlyphShadowMode::None);
-    builder.text((content.title, title));
-
-    let body_size = match content.activity {
-        CubeFacePanelActivity::Active => style.active_body_size,
-        CubeFacePanelActivity::Idle => style.body_size,
-    };
-    let body = TextStyle::new(body_size)
-        .with_color(style.color)
-        .with_align(TextAlign::Center)
-        .with_shadow_mode(GlyphShadowMode::None);
-    for row in content.rows {
-        builder.text((row, body.clone()));
-    }
-
-    builder.build()
-}
-
-/// Replaces a cube face panel's layout tree.
-pub fn set_cube_face_panel_tree(commands: &mut Commands, entity: Entity, tree: LayoutTree) {
-    commands.set_tree(entity, tree);
 }
 
 /// Mesh kind spawned by [`crate::SprinkleBuilder`] scene helpers.
@@ -391,6 +260,137 @@ impl PrimitiveConfig {
 
 /// Boxed deferred-insert closure applied to a primitive entity at spawn time.
 type PrimitiveInsert = Box<dyn FnOnce(&mut EntityCommands) + Send + Sync>;
+
+/// Bundle that renders a single line of world-space [`DiegeticText`] centered on
+/// one face of a cube. Spawn as a child of the cube entity (or independently
+/// using the cube's transform as a parent).
+///
+/// Use this when you spawn a cube manually with `commands.spawn`. For cubes
+/// built through [`PrimitiveBuilder`](crate::PrimitiveBuilder), prefer
+/// [`PrimitiveBuilder::face_text`](crate::PrimitiveBuilder::face_text).
+#[must_use]
+pub fn cube_face_text(
+    face: Face,
+    text: impl Into<String>,
+    cube_size: f32,
+    text_size: f32,
+    color: Color,
+) -> impl Bundle {
+    (
+        CubeFaceLabel,
+        DiegeticText::world(text)
+            .size(text_size)
+            .color(color)
+            .sidedness(Sidedness::FrontOnly)
+            .transform(face.local_transform(cube_size * 0.5))
+            .build(),
+    )
+}
+
+/// Canonical single-line blue label centered on a cube face.
+#[must_use]
+pub fn cube_face_label(face: Face, text: impl Into<String>, cube_size: f32) -> impl Bundle {
+    cube_face_text(
+        face,
+        text,
+        cube_size,
+        CUBE_FACE_LABEL_SIZE,
+        CUBE_FACE_PANEL_BLUE,
+    )
+}
+
+/// Local transform for a cube-mounted panel centered on `face`.
+#[must_use]
+pub fn cube_face_transform(face: Face, cube_size: f32) -> Transform {
+    face.local_transform(cube_size * 0.5)
+}
+
+/// Transparent unlit material for cube-mounted face panels.
+#[must_use]
+pub fn cube_face_panel_material() -> StandardMaterial {
+    StandardMaterial {
+        base_color: Color::NONE,
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        ..default_panel_material()
+    }
+}
+
+/// Builds a cube face panel with the canonical transparent material and tree.
+///
+/// # Errors
+///
+/// Returns [`PanelBuildError`] when `style.size` is not a positive, finite value.
+pub fn cube_face_panel(
+    style: CubeFacePanelStyle,
+    content: CubeFacePanelContent,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    cube_face_panel_with_tree(style.size, cube_face_panel_tree(style, content), materials)
+}
+
+/// Builds a transparent cube face panel from a caller-authored layout tree.
+///
+/// # Errors
+///
+/// Returns [`PanelBuildError`] when `size` is not a positive, finite value.
+pub fn cube_face_panel_with_tree(
+    size: f32,
+    tree: LayoutTree,
+    materials: &mut Assets<StandardMaterial>,
+) -> Result<DiegeticPanel, PanelBuildError> {
+    let transparent = materials.add(cube_face_panel_material());
+    DiegeticPanel::world()
+        .size(size, size)
+        .font_unit(Unit::Millimeters)
+        .anchor(Anchor::Center)
+        .material(transparent.clone())
+        .text_material(transparent)
+        .with_tree(tree)
+        .build()
+}
+
+/// Builds the layout tree for a cube face panel.
+#[must_use]
+pub fn cube_face_panel_tree(
+    style: CubeFacePanelStyle,
+    content: CubeFacePanelContent,
+) -> LayoutTree {
+    let mut builder = LayoutBuilder::with_root(
+        El::column()
+            .width(Sizing::fixed(style.size))
+            .height(Sizing::fixed(style.size))
+            .alignment(AlignX::Center, AlignY::Center)
+            .gap(style.row_gap)
+            .padding(Padding::all(style.padding))
+            .clip(),
+    );
+
+    let title = TextStyle::new(style.title_size)
+        .with_color(style.color)
+        .with_align(TextAlign::Center)
+        .with_shadow_mode(GlyphShadowMode::None);
+    builder.text((content.title, title));
+
+    let body_size = match content.activity {
+        CubeFacePanelActivity::Active => style.active_body_size,
+        CubeFacePanelActivity::Idle => style.body_size,
+    };
+    let body = TextStyle::new(body_size)
+        .with_color(style.color)
+        .with_align(TextAlign::Center)
+        .with_shadow_mode(GlyphShadowMode::None);
+    for row in content.rows {
+        builder.text((row, body.clone()));
+    }
+
+    builder.build()
+}
+
+/// Replaces a cube face panel's layout tree.
+pub fn set_cube_face_panel_tree(commands: &mut Commands, entity: Entity, tree: LayoutTree) {
+    commands.set_tree(entity, tree);
+}
 
 pub(crate) fn install(app: &mut App, config: PrimitiveConfig, inserts: Vec<PrimitiveInsert>) {
     let inserts_cell: Mutex<Option<Vec<PrimitiveInsert>>> = Mutex::new(Some(inserts));

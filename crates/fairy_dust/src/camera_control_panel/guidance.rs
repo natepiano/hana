@@ -16,6 +16,12 @@ use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_controls;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) enum CameraGuidanceContent {
+    Auto,
+    Rows(Vec<CameraGuidanceRow>),
+}
+
 /// Data-driven camera control metadata shown by [`SprinkleBuilder`](crate::SprinkleBuilder)
 /// examples.
 #[derive(Component, Clone, Debug, PartialEq, Eq)]
@@ -26,10 +32,6 @@ pub struct CameraGuidance {
     pub(super) mode_value: Option<String>,
     pub(super) settings:   Vec<CameraControlBinding>,
     pub(super) content:    CameraGuidanceContent,
-}
-
-impl Default for CameraGuidance {
-    fn default() -> Self { Self::auto() }
 }
 
 impl CameraGuidance {
@@ -103,25 +105,8 @@ impl CameraGuidance {
     }
 }
 
-pub(super) fn split_summary_bindings(
-    bindings: Vec<CameraControlBinding>,
-) -> (Vec<CameraControlBinding>, Vec<CameraGuidanceRow>) {
-    let mut settings = Vec::new();
-    let mut rows = Vec::new();
-    for binding in bindings {
-        if matches!(&binding.kind, CameraControlBindingKind::Direct) {
-            rows.push(CameraGuidanceRow::from_direct(binding));
-        } else {
-            settings.push(binding);
-        }
-    }
-    (settings, rows)
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) enum CameraGuidanceContent {
-    Auto,
-    Rows(Vec<CameraGuidanceRow>),
+impl Default for CameraGuidance {
+    fn default() -> Self { Self::auto() }
 }
 
 /// Semantic action represented by a camera guidance row.
@@ -197,6 +182,23 @@ impl CameraGuidanceAction {
             Self::ZoomIn => Some(ZoomDirection::In),
             Self::ZoomOut => Some(ZoomDirection::Out),
             _ => None,
+        }
+    }
+}
+
+impl From<CameraControlAction> for CameraGuidanceAction {
+    fn from(action: CameraControlAction) -> Self {
+        match action {
+            CameraControlAction::Orbit => Self::Orbit,
+            CameraControlAction::Pan => Self::Pan,
+            CameraControlAction::Zoom => Self::Zoom,
+            CameraControlAction::ZoomIn => Self::ZoomIn,
+            CameraControlAction::ZoomOut => Self::ZoomOut,
+            CameraControlAction::Look => Self::Look,
+            CameraControlAction::Translate => Self::Translate,
+            CameraControlAction::Roll => Self::Roll,
+            CameraControlAction::Home => Self::Home,
+            _ => Self::Other,
         }
     }
 }
@@ -285,23 +287,6 @@ impl CameraGuidanceRow {
     pub const fn speed(&self) -> ControlSpeed { self.speed }
 }
 
-impl From<CameraControlAction> for CameraGuidanceAction {
-    fn from(action: CameraControlAction) -> Self {
-        match action {
-            CameraControlAction::Orbit => Self::Orbit,
-            CameraControlAction::Pan => Self::Pan,
-            CameraControlAction::Zoom => Self::Zoom,
-            CameraControlAction::ZoomIn => Self::ZoomIn,
-            CameraControlAction::ZoomOut => Self::ZoomOut,
-            CameraControlAction::Look => Self::Look,
-            CameraControlAction::Translate => Self::Translate,
-            CameraControlAction::Roll => Self::Roll,
-            CameraControlAction::Home => Self::Home,
-            _ => Self::Other,
-        }
-    }
-}
-
 impl CameraGuidanceRow {
     fn from_direct(binding: CameraControlBinding) -> Self {
         let mut row = Self::new(CameraGuidanceAction::from(binding.action), binding.label)
@@ -311,4 +296,19 @@ impl CameraGuidanceRow {
         row.direction = binding.direction;
         row
     }
+}
+
+pub(super) fn split_summary_bindings(
+    bindings: Vec<CameraControlBinding>,
+) -> (Vec<CameraControlBinding>, Vec<CameraGuidanceRow>) {
+    let mut settings = Vec::new();
+    let mut rows = Vec::new();
+    for binding in bindings {
+        if matches!(&binding.kind, CameraControlBindingKind::Direct) {
+            rows.push(CameraGuidanceRow::from_direct(binding));
+        } else {
+            settings.push(binding);
+        }
+    }
+    (settings, rows)
 }

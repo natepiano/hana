@@ -36,6 +36,9 @@ use crate::constants::CARGO_EXAMPLES_DIR;
 use crate::constants::CARGO_MANIFEST_PATH_FLAG;
 use crate::constants::CARGO_RELEASE_FLAG;
 use crate::constants::CARGO_RUN_SUBCOMMAND;
+use crate::constants::EXIT_STATUS_FAILURE;
+#[cfg(windows)]
+use crate::constants::EXIT_STATUS_SUCCESS;
 use crate::ensure_plugin;
 use crate::orbit_cam::FairyDustOrbitCam;
 use crate::restart_camera;
@@ -84,7 +87,7 @@ fn do_restart(encoded_pose: Option<String>) {
     let mut command = restart_command(encoded_pose);
     let err = command.exec();
     eprintln!("fairy_dust: failed to exec `cargo run`: {err}");
-    process::exit(1);
+    process::exit(EXIT_STATUS_FAILURE);
 }
 
 #[cfg(windows)]
@@ -93,11 +96,11 @@ fn do_restart(encoded_pose: Option<String>) {
     match command.spawn() {
         Ok(child) => {
             info!("fairy_dust restart: cargo spawned as pid {}", child.id());
-            process::exit(0);
+            process::exit(EXIT_STATUS_SUCCESS);
         },
         Err(err) => {
             eprintln!("fairy_dust: failed to spawn `cargo run`: {err}");
-            process::exit(1);
+            process::exit(EXIT_STATUS_FAILURE);
         },
     }
 }
@@ -108,7 +111,7 @@ fn restart_command(encoded_pose: Option<String>) -> Command {
         Ok(path) => path,
         Err(err) => {
             eprintln!("fairy_dust: current_exe failed: {err}");
-            process::exit(1);
+            process::exit(EXIT_STATUS_FAILURE);
         },
     };
     let Some(example_name) = derive_example_name(&exe) else {
@@ -118,23 +121,27 @@ fn restart_command(encoded_pose: Option<String>) -> Command {
              <target>/<profile>/examples/<name>",
             exe.display(),
         );
-        process::exit(1);
+        process::exit(EXIT_STATUS_FAILURE);
     };
     let Some(manifest_path) = source_workspace_manifest() else {
         eprintln!(
             "fairy_dust: could not derive source workspace Cargo.toml from {}",
             env!("CARGO_MANIFEST_DIR"),
         );
-        process::exit(1);
+        process::exit(EXIT_STATUS_FAILURE);
     };
     let manifest_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     // Re-launch in the profile the running binary was built with: a release
     // build has `debug_assertions` off, so pass `--release`; a debug build uses
     // the default dev profile.
     let release = !cfg!(debug_assertions);
+    let release_fragment = if release {
+        format!(" {CARGO_RELEASE_FLAG}")
+    } else {
+        String::default()
+    };
     info!(
-        "fairy_dust restart: launching `cargo run{} --manifest-path {} --example {}` in {}",
-        if release { " --release" } else { "" },
+        "fairy_dust restart: launching `cargo run{release_fragment} --manifest-path {} --example {}` in {}",
         manifest_path.display(),
         example_name,
         manifest_dir.display(),

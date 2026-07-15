@@ -52,6 +52,22 @@ use crate::constants::TITLE_COLOR;
 use crate::constants::TITLE_SIZE;
 use crate::screen_panels;
 
+/// Whether a speed block renders the `Normal` / `Slow` label column.
+#[derive(Clone, Copy)]
+enum SpeedColumn {
+    Shown,
+    Hidden,
+}
+
+#[derive(Clone, Copy)]
+struct GuidanceTableRow<'a> {
+    label:                &'a str,
+    value:                &'a str,
+    label_activation:     CameraControlActivation,
+    value_activation:     CameraControlActivation,
+    connector_activation: CameraControlActivation,
+}
+
 pub(super) fn build_guidance_tree(
     snapshot: &CameraGuidanceSnapshot,
     display: CameraGuidanceDisplay,
@@ -97,13 +113,6 @@ fn build_guidance_layout(
             },
         );
     });
-}
-
-/// Whether a speed block renders the `Normal` / `Slow` label column.
-#[derive(Clone, Copy)]
-enum SpeedColumn {
-    Shown,
-    Hidden,
 }
 
 fn build_guidance_table(
@@ -217,7 +226,7 @@ fn build_slow_mode_row(
                     .width(Sizing::fixed(ACTION_COLUMN_WIDTH))
                     .height(Sizing::FIT),
                 |builder| {
-                    builder.text(("Slow", style.clone()));
+                    builder.text((snapshot::speed_label(ControlSpeed::Slow), style.clone()));
                 },
             );
         },
@@ -429,15 +438,6 @@ const fn style_for_activation<'a>(
         CameraControlActivation::Active => active,
         CameraControlActivation::Inactive => label,
     }
-}
-
-#[derive(Clone, Copy)]
-struct GuidanceTableRow<'a> {
-    label:                &'a str,
-    value:                &'a str,
-    label_activation:     CameraControlActivation,
-    value_activation:     CameraControlActivation,
-    connector_activation: CameraControlActivation,
 }
 
 fn table_rows_for_action(
