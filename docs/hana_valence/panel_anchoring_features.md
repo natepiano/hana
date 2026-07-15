@@ -37,16 +37,327 @@ overview is an additional view over that ledger, not its replacement.
 - Compare every proposal with a simpler alternative that uses fewer public
   types or fewer writers. Record removals as proposals until the user decides
   them explicitly under this preservation contract.
+- Label every code sample with who writes it and when it executes. When a
+  public convenience method hides deferred work, show the application call
+  first and the Hana-owned deferred implementation separately; do not present
+  internal library code as if the application must write it.
 
 The overview may therefore become much smaller than the ledger without making
 the work list smaller.
+
+### Shared semantic math types
+
+Use existing `bevy_kana` semantic math types in planned Hana Valence APIs
+whenever their meaning matches: `Position` for spatial points, `Displacement`
+for spatial offsets, `Orientation` for rotations, and `Angle` for signed
+angular displacement. Keep raw Bevy/glam values only at interoperability and
+calculation boundaries or when no shared type expresses the value. Do not add a
+Hana-specific wrapper that merely restates an existing `bevy_kana` meaning.
+
+A7.5 audits the remaining anchor and hinge fields against this rule so later
+work cannot apply it selectively.
+
+## Public API ergonomics reset
+
+The foundational item ledger is paused while the public authoring workflow is
+proved end to end. Internal topology generation, logical-key-to-`Entity`
+mapping, `MemberTopology`, and `Connection` must not appear in the ordinary
+application-facing construction path.
+
+### Confirmed arrangement construction model
+
+Support two friendly construction paths over the same topology provider:
+
+1. `spawn_arrangement()` spawns the `Arrangement` controller and bare `Member`
+   entities, then lets the caller iterate those members and add application
+   components afterward.
+2. A convenience variant (`name TBD`) accepts a named member-construction
+   function and inserts application components while each member is spawned.
+
+Both paths return the `Entity` of the `Arrangement` controller. The confirmed
+`Arrangement` component and `Member` / `Members` relationship model already
+represent the spawned arrangement in ECS, so Hana adds no caller-owned
+arrangement-result wrapper. Topology remains an authoring input rather than the
+public result name.
+
+```rust
+let arrangement_entity =
+    commands.spawn_arrangement(TriangleSheet::new(4, 6))?;
+```
+
+The construction-time convenience remains readable by passing a named
+function rather than an inline closure:
+
+```rust
+let arrangement_entity = commands.spawn_arrangement_with( // method name TBD
+    TriangleSheet::new(4, 6),
+    make_triangle_panel,
+)?;
+```
+
+Because `Commands` is deferred, the bare path cannot query the newly maintained
+`Members` in the same system invocation. The convenience path covers immediate
+per-member customization. The bare path uses an ordinary later system that
+queries `Members` after the commands have been applied:
+
+```rust
+fn decorate_new_arrangements(
+    arrangements: Query<&Members, Added<Arrangement>>,
+    mut commands: Commands,
+) {
+    for members in &arrangements {
+        for member_entity in members.iter() {
+            commands.entity(member_entity).insert(panel_bundle());
+        }
+    }
+}
+```
+
+Do not return a duplicate member `Vec<Entity>` merely to permit same-system
+iteration. It would duplicate the authoritative `Members` relationship target
+and could become stale as membership changes.
+
+**Status:** Construction behavior and returning the controller `Entity`
+decided. Immediate customization uses the convenience path and later
+customization queries `Members`; only the convenience-method name remains
+pending.
+
+This result correction supersedes the caller-owned `Topology` return portions
+of A6.5-A6.6. Those ledger entries remain intact until the complete public
+workflow is settled, at which point their retained topology-authoring concerns
+can be reconciled without restoring the rejected result wrapper.
+
+### Confirmed folding-capability retention
+
+A `TopologyProvider` may identify normalized groups of physical connections
+that support compatible folding behaviors. `Members` records only arrangement
+membership, and `AnchoredTo` records only physical connections; neither value
+preserves provider concepts such as the horizontal groups of a sheet.
+
+`spawn_arrangement()` therefore stores the provider-generated folding
+capabilities (`name and representation TBD`) as internal ECS data on the
+`Arrangement` controller. It does not retain the concrete provider. This lets
+an existing arrangement accept a different recipe or a changed recipe without
+requiring the caller to reconstruct and resupply its original provider:
+
+```rust
+let arrangement_entity = commands.spawn_arrangement_with(
+    TriangleSheet::new(4, 6),
+    make_triangle_panel,
+)?;
+
+commands.apply_fold_recipe( // method name TBD
+    arrangement_entity,
+    Accordion::default(), // recipe representation TBD
+);
+```
+
+This decision settles the persistence responsibility from A9.2.3 while leaving
+the capability's exact value type and recipe compatibility contract for the
+reconciled detailed design.
+
+**Status:** Decided.
+
+### Confirmed transient recipe lifecycle
+
+A folding recipe is an ordinary, transient authoring value. It reads the
+normalized folding capabilities retained on the `Arrangement` controller and
+authors complete folded and unfolded endpoint values on the affected `Hinge`
+components. Hana does not retain the recipe as an ECS component after that
+application.
+
+```rust
+commands.apply_fold_recipe( // method name TBD
+    arrangement_entity,
+    Accordion::default(), // recipe representation TBD
+);
+
+commands.apply_fold_recipe(
+    arrangement_entity,
+    adjusted_accordion,
+);
+```
+
+An application may retain its recipe value in application-owned state and
+submit it again after editing. Applying a different or adjusted recipe does not
+require recreating the arrangement or its topology provider. Accordion, Coil,
+and Wrap therefore are not mutually exclusive ECS components in this model.
+
+This decides A9.2.1. Compatibility failure behavior and replacement while a
+`FoldSequence` is away from its neutral endpoint remain under A9.2.4 and
+A9.2.7.
+
+**Status:** Decided.
+
+### Confirmed open recipe application path
+
+Hana supplies built-in recipes such as Accordion, Coil, and Wrap, but the recipe
+set is not closed. Application-defined recipes use the same application method
+as Hana's built-ins:
+
+```rust
+commands.apply_fold_recipe( // method name TBD
+    arrangement_entity,
+    Accordion::default(),
+);
+
+commands.apply_fold_recipe(
+    arrangement_entity,
+    MyFanFold::new(),
+);
+```
+
+Do not add one method per built-in recipe or a closed enum that prevents
+application-defined recipe values. Use one public `FoldRecipe` trait as that
+extension contract, matching the existing `FoldSequence`, `FoldStage`, and
+`FoldCommand` vocabulary:
+
+```rust
+pub trait FoldRecipe {
+    // The authoring method is the next public-API decision.
+}
+
+fn apply_fold_recipe<R: FoldRecipe>( // method name TBD
+    &mut self,
+    arrangement_entity: Entity,
+    recipe: R,
+);
+```
+
+`FoldRecipe` is an authoring extension trait, not a trait object or ECS
+component. Each built-in or application-defined recipe remains its own
+ordinary Rust value.
+
+**Status:** Decided.
+
+### Confirmed recipe output
+
+One `FoldRecipe` invocation returns the complete unvalidated set of
+recipe-owned values for proposed `Hinge` replacements as
+`Vec<HingeAssignment>`:
+
+```rust
+pub struct HingeAssignment {
+    pub member_entity: Entity,
+    pub unfolded_angle: Angle,       // endpoint field name TBD
+    pub folded_angle: Angle,         // endpoint field name TBD
+    pub pivot_offset: Displacement,
+}
+```
+
+`HingeAssignment` contains only values owned by the recipe. It does not contain
+the topology-authored `Edge`; after validation, Hana combines the assignment
+with the retained connection data to construct the complete `Hinge`.
+
+Use a vector rather than a map so duplicate assignments for one `Member`
+entity remain visible to Hana's whole-result validation instead of being
+silently overwritten during map construction. Preserve vector order for
+deterministic diagnostics; it expresses no folding or connection order.
+
+Do not add a `HingeAssignments` collection wrapper yet. The vector is
+deliberately unvalidated and is consumed immediately after validation, so no
+separate collection invariant or behavior currently justifies another public
+type.
+
+Name the pure `FoldRecipe` calculation method `hinge_assignments()`. It returns
+the values to be considered and does not mutate ECS; the deferred
+`apply_fold_recipe()` operation (`Commands` extension method name TBD) performs
+validation and application later.
+
+```rust
+pub trait FoldRecipe {
+    fn hinge_assignments(
+        &self,
+        fold_groups: &/* retained fold-group type TBD */,
+    ) -> Result<Vec<HingeAssignment>, FoldRecipeError>; // error type TBD
+}
+```
+
+**Status:** Decided. The retained fold-group input and error contract remain
+pending.
+
+### Confirmed automatic recipe validation
+
+The application invokes one public `Commands` extension method:
+
+```rust
+// Application code: queues the operation during a system.
+commands.apply_fold_recipe( // method name TBD
+    arrangement_entity,
+    Accordion::default(),
+);
+```
+
+Hana implements that extension by queuing one deferred command. The closure is
+library implementation; the application neither writes nor calls its validation
+functions:
+
+```rust
+// Hana implementation: runs later when Bevy applies deferred commands.
+self.queue(move |world: &mut World| -> Result {
+    let assignments = prepare_hinge_assignments(
+        world,
+        arrangement_entity,
+        &recipe,
+    )?;
+
+    apply_hinge_assignments(world, assignments);
+    Ok(())
+});
+```
+
+`prepare_hinge_assignments()` reads the controller's retained fold-group data,
+calls `FoldRecipe::hinge_assignments()`, and validates the complete returned
+vector before `apply_hinge_assignments()` performs the first ECS write. The
+validation always runs for Hana's built-ins and application-defined recipes;
+there is no public unchecked bypass and no validation call the application must
+remember.
+
+Validation owns structural and runtime consistency: current entity existence,
+`Member` ownership by the target `Arrangement`, eligibility in the retained
+fold groups, duplicate or conflicting assignments, the coverage contract
+still to be defined with the fold-group input, and finite endpoint and pivot
+values. It does not judge artistic intent, collisions, polyhedral closure, or
+finite multi-turn angles.
+
+Because the operation is deferred, its exact diagnostic and error-reporting
+surface remains pending; the public call cannot return the later validation
+result synchronously.
+
+**Status:** Decided.
+
+### Confirmed fold-group value
+
+`FoldGroup` is a nonempty, ordered collection of the already agreed
+`Connection` values:
+
+```rust
+pub struct FoldGroup {
+    connections: Vec<Connection>,
+}
+
+impl FoldGroup {
+    pub fn iter(&self) -> impl Iterator<Item = &Connection> {
+        self.connections.iter()
+    }
+}
+```
+
+It is an ordinary public authoring value, not an ECS component. Grouped
+`Connection` values remain available inside the controller's retained folding
+data instead of being discarded after `AnchoredTo` materialization. The
+fallible public constructor, orientation contract, and API that supplies one
+or more groups to arrangement construction remain pending.
+
+**Status:** Core value structure decided; construction and collection-transfer
+API pending.
 
 ## Cohesion overview status
 
 The cohesion overview is being rebuilt from the smallest end-to-end model of
 what an author supplies, which systems read and write that data, what changes
-at runtime, and which confirmed type contains each value. A6.1 remains pending
-while this work is in progress.
+at runtime, and which confirmed type contains each value. The A6 behavior is
+complete; A6.7 is a naming correction discovered by the A7 semantic-type audit.
 
 ### Simplification gate
 
@@ -55,8 +366,8 @@ them. These overlaps are visible in the current implementation:
 
 - `ArrangementPlacement` and `MemberPlacement` differ by one live angle value;
   A9.4 removes both placement wrappers, while A8 selects the shared `Angle`
-  value used by their surviving connection and hinge data. A6 still decides
-  the final connection-result and connected-payload names.
+  value used by their surviving connection and hinge data. A6 names those
+  authoring values `MemberTopology` and `Connection`.
 - `TilingRule::rest_delta()`, `Accordion::lean`, and `Coil::lean` contribute to
   the two `Angle` endpoint values that A9.1 decided will live on `Hinge`; A9.2
   must still decide how those values are calculated without adding another
@@ -137,7 +448,7 @@ that the resolved assembly graph is primary:
 
 Under this direction, `Strip`, `Accordion`, `Coil`, and future polyhedron
 folding policies are optional recipes that materialize `Hinge` endpoints. They
-are not exhaustive arrangement kinds. A topology provider (`name TBD`) or
+are not exhaustive arrangement kinds. A `TopologyProvider` or
 direct authoring materializes `AnchoredTo` and the hinge edge. Direct authoring
 and recipes converge on the same resolved components.
 
@@ -292,7 +603,7 @@ control to a future single-writer raw-progress adapter.
 The resulting built-in data flow is:
 
 ```text
-topology provider + folding recipe
+TopologyProvider + folding recipe
     -> AnchoredTo + Hinge { edge, unfolded angle, folded angle }
 
 FoldCommand -> FoldSequenceState position
@@ -310,8 +621,8 @@ The core reduction is:
   `FoldSequenceState::position()` to `FoldSequenceState::position()` alone;
 - angle/pose stages: `drive_arrangement_hinges()`,
   `actuate_fold_hinges()`, and `hinge_to_pose()` to `hinge_to_pose()` alone;
-- placement wrappers: `ArrangementPlacement` plus `MemberPlacement` to the
-  connected payload of one named A6 connection result (`name TBD`);
+- placement wrappers: `ArrangementPlacement` plus `MemberPlacement` to
+  `MemberTopology::Anchored(Connection)`;
 - new public types: one shared `bevy_kana::Angle`; no role-specific Hana
   Valence angle wrapper.
 
@@ -336,7 +647,7 @@ reconfiguration. A9.4 later folds the one-field `HingePivot` component into
   decisions covering transient recipes, ordered fold groups, the optional
   topology-provider capability, compatibility, Accordion semantics,
   Coil/Wrap clearance, and safe initial or runtime application. **Status:
-  pending A6; decomposed into A9.2.1-A9.2.7.**
+  pending; A6 dependency resolved; decomposed into A9.2.1-A9.2.7.**
 - **A9.4 — Further removals:** `MemberPlacement`, `ArrangementPlacement`,
   `FoldFromArrangement`, and the snapshot diagnostic family are removed. The
   approved model has neither a stored live angle for `MemberPlacement` nor a
@@ -368,9 +679,9 @@ here are planned API and are not implemented yet.
 
 `ResolvedAnchorGeometry` is the existing per-entity catalog of local anchor
 geometry. Its `points: HashMap<AnchorId, AnchorPoint>` maps each existing
-`AnchorId` key to an attachment position and orientation; under A7.1, the
-planned `AnchorPoint` fields are `position: Vec3` and
-`orientation: AnchorOrientation`. Its `edges: Vec<Edge>` lists available local
+`AnchorId` key to an attachment position and orientation; under corrected
+A7.1, the planned `AnchorPoint` fields are `position: Position` and
+`orientation: Orientation` from `bevy_kana`. Its `edges: Vec<Edge>` lists available local
 axes. An `Edge` is an existing value type—not a component or relationship—and
 its `start: AnchorId` and `end: AnchorId` refer to two entries in the same
 `points` map. The list catalogs available axes; it does not connect entities or
@@ -431,18 +742,17 @@ generic lens.
 `Angle` is the planned shared `bevy_kana` value for a signed, unwrapped angular
 displacement stored in radians. It is not an ECS component and does not
 normalize its value. Explicit constructors and accessors preserve unit meaning;
-implicit `f32` conversion and `Deref` are intentionally absent. Spatial
-orientation remains represented by `AnchorOrientation`, `Quat`, or `Rot2`, and
-dimensionless fold progress remains `f32`.
+implicit `f32` conversion and `Deref` are intentionally absent. Semantic APIs
+use `bevy_kana::Orientation` and convert to `Quat` or `Rot2` only at math or
+interoperability boundaries; dimensionless fold progress remains `f32`.
 
 `TilingRule` is the trait that exists today. Concrete components such as
 `QuadTiling` and the example's `TriangleTiling` use it to choose the two tile
 edges and anchors that meet, plus the fixed starting `Angle` that aligns them.
 The current arrangement code separately inserts `AnchoredTo` on each tile with
 the preceding tile as `AnchoredTo::target()`, so it only constructs a linear
-chain. A6.0 classifies the redesigned responsibility as a topology provider
-(`name TBD`). It owns a complete logical pattern and materializes the physical
-connection graph. A6.1-A6.6 decide its exact contract and final type names.
+chain. A6 replaces that responsibility with `TopologyProvider`. It owns a
+complete logical pattern and materializes the physical connection graph.
 
 `Strip`, `Accordion`, and `Coil` are existing, separate ECS components. They do
 not choose `Member` entities, `AnchoredTo::target()` values, or edges. Under
@@ -450,7 +760,7 @@ A9.1, they contribute the endpoint `Angle` values stored on the `Hinge` created 
 the connection information: equal endpoints for `Strip`, alternating folded
 directions for `Accordion`, and one folded direction for `Coil`. A9.2 decides
 the exact endpoint-calculation contract. This folding responsibility remains
-separate from the topology provider (`name TBD`) so that one connection
+separate from `TopologyProvider` so that one connection
 topology can be reused with different folding behavior.
 
 The planned `Arrangement` component identifies a non-spatial assembly
@@ -484,17 +794,16 @@ any `FoldStage` insertions.
 
 ## Review status
 
-- Foundational API review items: 33
+- Foundational API review items: 47
 - Feature candidates: 15
 - Mutual-exclusion decisions: 6, recorded in
   [`mutex_arrangements.md`](mutex_arrangements.md)
-- Complete confirmed decisions: 16
+- Complete confirmed decisions: 29
 - Reopened decision: A4.2; `Arrangement` identity and optional built-in recipe
   cardinality are settled, while the complete validity contract remains open
-- Active work: A6.2, how a topology provider identifies source and target
-  `Member` entities
-- A9.2 fold-recipe authoring: decomposed into A9.2.1-A9.2.7 and pending the A6
-  topology-provider contract
+- Active work: foundational ledger paused; public arrangement-result API active
+- A9.2 fold-recipe authoring: decomposed into A9.2.1-A9.2.7; its A6 dependency
+  is resolved
 - F1, arrangement activation and suspension: paused until the
   foundational arrangement API is settled
 - Scope selection: pending review completion
@@ -550,20 +859,34 @@ explaining one decision cannot silently expand its scope.
 | A4.2 | Which component set makes an arrangement root valid? | Reopened: `Arrangement` identity retained; no built-in folding recipe is required; remaining validity contract pending |
 | A4.3 | What happens while an arrangement root is incomplete? | Decided in principle: explicit spawn helper and inert diagnosed incompleteness; helper signature pending A4.2 and A9.2 |
 | A5 | Where is the boundary between connection rules and fold patterns? | Decided: connection structure and folding behavior remain separate |
-| A6.0 | Is the proposed connection-rule responsibility better modeled as a topology provider (`name TBD`) that materializes connections and may expose optional capabilities such as ordered fold groups? | Decided: yes; a topology provider owns a logical pattern, materializes its root-or-connected physical graph, and may expose recipe-compatible fold directions; regular triangle, quad, and hex sheet providers should support arbitrary dimensions and Accordion, Coil, and Wrap, with a strip as the one-dimensional degenerate case |
-| A6.1 | Must the topology provider (`name TBD`) decide whether each `Member` has `AnchoredTo` and select its `AnchoredTo::target()`, instead of Hana always selecting the preceding `Member`? | Decided: yes; for every `Member`, the provider chooses either no `AnchoredTo` or one `AnchoredTo` whose target it selects; Hana never infers the preceding `Member` |
-| A6.2 | How does the topology provider (`name TBD`) identify `Member` entities and refer to the target `Member` used by `AnchoredTo`? | Active |
-| A6.3 | What result type (`name TBD`) represents either a `Member` without `AnchoredTo` or the data needed to add `AnchoredTo`? | Partial: use a named root-or-connected sum type rather than `Option`; exact type, variant, payload, and failure names pending |
-| A6.4 | What methods and failure contract does the topology-provider trait (`name TBD`) expose? | Pending |
-| A6.5 | How are concrete topology providers (`name TBD`) discovered and scheduled? | Pending |
-| A6.6 | What should the topology-provider trait and its related concepts be called? | Pending |
-| A7 | What do `AnchorId`, `AnchorPoint`, `Edge`, and `AnchoredTo` mean and which names should change? | Pending |
-| A7.1 | How is an anchor's local orientation represented on `AnchorPoint`? | Decided: `orientation: AnchorOrientation`; non-optional identity default |
-| A7.2 | Should the `AnchorPoint` type itself be renamed now that it stores position and orientation? | Pending |
+| A6.0 | Is the proposed connection-rule responsibility better modeled as `TopologyProvider`, which materializes connections and may expose optional capabilities such as ordered fold groups? | Decided: yes; `TopologyProvider` owns a logical pattern, materializes its physical graph, and may expose recipe-compatible fold directions; regular triangle, quad, and hex sheet providers should support arbitrary dimensions and Accordion, Coil, and Wrap, with a strip as the one-dimensional degenerate case |
+| A6.1 | Must `TopologyProvider` decide whether each `Member` has `AnchoredTo` and select its `AnchoredTo::target()`, instead of Hana always selecting the preceding `Member`? | Decided: yes; for every `Member`, the provider chooses either no `AnchoredTo` or one `AnchoredTo` whose target it selects; Hana never infers the preceding `Member` |
+| A6.2 | How does `TopologyProvider` identify `Member` entities and refer to the target `Member` used by `AnchoredTo`? | Decided: each provider defines its own `Position`; the construction path maps those positions to actual `Member` entities and supplies that lookup during generation; Hana-facing results identify source and target with `Entity`, without a universal logical member ID |
+| A6.3 | What result type (`name TBD`) represents either a `Member` without `AnchoredTo` or the data needed to add `AnchoredTo`? | Decided for now: transient `MemberTopology::{Unanchored, Anchored}` with `Anchored(Connection)`; `Connection` stores `member_entity`, `anchored_to`, `member_edge`, and `connection_angle` |
+| A6.3.1 | What should the outer unanchored-or-anchored value and its variants be called? | Decided for now: authoring-only `MemberTopology::{Unanchored, Anchored}`; the value is consumed during materialization and is not an ECS component |
+| A6.3.2 | What should the connected payload be called, and which fields does it expose? | Decided for now: authoring-only `Connection { member_entity, anchored_to, member_edge, connection_angle }`; refine if implementation friction reveals a better boundary |
+| A6.4 | What methods and failure contract does `TopologyProvider` expose? | Decided through A6.4.1-A6.4.3: generate pure whole-topology values, validate a complete acyclic forest, queue validated replacements through ordinary `Commands`, return `TopologyError` immediately, and diagnose failures caused only by later ECS state |
+| A6.4.1 | What generation method does a topology provider expose, and what authoring values does it yield? | Decided: outside the Bevy `World`, enumerate provider-specific positions and generate `Vec<MemberTopology>` from a supplied position-to-`Entity` lookup; the owned vector contains one explicit entry per associated member and its order implies no topology or fold order |
+| A6.4.2 | Which structural invariants are validated over the complete generated topology, and must application commit atomically? | Decided through A6.4.2.1-A6.4.2.3: distinguish construction guarantees from validation, require a geometry-independent acyclic forest, and queue one completely validated replacement through ordinary `Commands` without requiring exclusive `World` access |
+| A6.4.2.1 | Which facts does topology-driven spawning guarantee by construction, and which generated values still require defensive validation on each construction path? | Decided: topology-driven spawning guarantees one entity, factory call, `Member` relationship, and binding per logical position; both paths validate generated-output coverage and references, while the existing-member path also validates current entity existence and membership |
+| A6.4.2.2 | Which structural invariants must every complete generated topology satisfy? | Decided: accept an empty topology, multiple unanchored members, disconnected trees, branching, repeated targets, and finite multi-turn angles; reject self-targets, cycles, non-finite offsets or angles, and a `member_edge` with identical anchor identifiers; defer geometry-dependent checks |
+| A6.4.2.3 | Must validation and topology materialization use an all-or-nothing commit boundary? | Decided: use a validated full replacement through ordinary `Commands`; an invalid candidate queues no topology writes, while a valid candidate queues the complete removal-and-replacement set; do not require exclusive `World` access or promise rollback against unrelated mutation before command application |
+| A6.4.3 | How are deferred-command failures, unavailable runtime inputs, diagnostics, and retry reported? | Decided: return generation and structural-validation failures immediately as `Result<_, TopologyError>`; report failures caused by later ECS state against the `Arrangement` controller through the F13 diagnostic channel (`name TBD`); entity lifetime and despawning remain entirely application-owned |
+| A6.5 | How are `TopologyProvider` values invoked, and what provider state persists or reruns? | Decided through A6.5.1-A6.5.2: support topology-driven spawning and existing-member binding, return caller-owned `Topology`, and persist no provider lifecycle state automatically in Hana |
+| A6.5.1 | Does the normal construction path let a logical topology drive `Member` spawning through an application-supplied member factory while retaining a separate existing-member path? | Decided: yes; the normal helper spawns one `Member` per `Position` and supplies the resulting entity lookup to topology generation, while `apply_topology()` accepts a caller-defined lookup for existing members; both return `Topology` for compatible folding recipes |
+| A6.5.2 | Which provider or topology-authoring state persists after topology materialization, and where? | Decided: Hana automatically persists neither the concrete provider nor `Topology` in ECS; return `Topology` as an ordinary Rust value that callers may use once and drop or retain in application-owned storage for later recipe re-authoring; reuse goes through ordinary validation and a caller explicitly creates any replacement value |
+| A6.6 | What should the topology-provider trait and its related concepts be called? | Decided: `TopologyProvider`, `Position`, `positions()`, `generate_topology()`, caller-owned `Topology`, `apply_topology()`, and `TopologyError`; retain the previously approved `spawn_arrangement()`; no separate bound-provider type |
+| A6.7 | Should `TopologyProvider::Position` and `positions()` be renamed now that `bevy_kana::Position` is the shared spatial-point type? | Pending; the provider value is a logical member key, not necessarily a spatial position |
+| A7 | What do `AnchorId`, `AnchorPoint`, `Edge`, and `AnchoredTo` mean and which names should change? | Partial: `Edge` remains the ordered pair of local anchor keys used to derive an axis; `AnchoredTo` remains the immutable point-to-point relationship; retain `AnchorPoint` with shared `bevy_kana::Position` and `Orientation`; key vocabulary, orientation validation, and the remaining semantic-math audit remain A7.3-A7.5 |
+| A7.1 | How is an anchor's local position and orientation represented on `AnchorPoint`? | Corrected and decided: `position: bevy_kana::Position` and `orientation: bevy_kana::Orientation`; both are non-optional and default to the origin and identity; remove the redundant proposed `AnchorOrientation` type |
+| A7.2 | Should the `AnchorPoint` type itself be renamed now that it stores position and orientation? | Decided: retain `AnchorPoint`; it names the local attachment location, while `Position` and `Orientation` name its spatial values and `AnchorPose` remains the separate runtime animation input |
+| A7.3 | What should `AnchorId` be called when it is the provider-authored key used to select an `AnchorPoint`? | Pending |
+| A7.4 | Where should invalid `bevy_kana::Orientation` values used by anchor geometry be rejected? | Pending |
+| A7.5 | Which remaining raw spatial fields in the anchor and hinge APIs should use existing `bevy_kana` semantic newtypes? | Pending; apply the confirmed shared-semantic-math rule consistently |
 | A8 | Are `ArrangementPlacement`, `MemberPlacement`, and raw angle values still needed? | Decided: remove both placement types; use shared `bevy_kana::Angle` for the A6 connected payload's fixed connection angle, recipe offsets, and `Hinge` endpoints; A9.4 later supersedes the planned `HingePivot::reference_angle` conversion by merging the remaining pivot offset into `Hinge` and removing `HingePivot` |
 | A9 | How do folding policies, angle ownership, transport timing, and staged `FoldSequence` ordering form one coherent fold pipeline? | Pending; split into A9.1-A9.5 |
 | A9.1 | Should `Hinge` store unfolded and folded endpoints while `hinge_to_pose()` derives the current angle instead of storing `Hinge::angle`? | Decided: yes; remove `FoldAngles` and stored current-angle state; endpoint field names remain pending |
-| A9.2 | How do folding recipes obtain compatible topology, materialize complete `Hinge` data, and support both initial authoring and runtime re-authoring? | Pending; decomposed into A9.2.1-A9.2.7 and blocked by A6 |
+| A9.2 | How do folding recipes obtain compatible topology, materialize complete `Hinge` data, and support both initial authoring and runtime re-authoring? | Pending; decomposed into A9.2.1-A9.2.7; A6 dependency resolved |
 | A9.2.1 | Are folding recipes transient authoring operations whose durable result is complete `Hinge` data rather than a recipe ECS component? | Pending |
 | A9.2.2 | What authoring value (`name TBD`) represents ordered, consistently oriented groups of connections that fold together? | Pending |
 | A9.2.3 | What optional topology-provider capability (`name TBD`) returns those fold groups, and what must remain available for runtime re-authoring? | Pending |
@@ -687,18 +1010,18 @@ commands.entity(lid).insert(AnchoredTo::new(
 
 This model can represent ordinary, concave, star, and compound polyhedra when
 their geometry providers supply the required face anchors and their connection
-rules supply the explicit connection trees. It does not yet represent every
+topology providers supply the explicit connection trees. It does not yet represent every
 model in the [Polyhedra.net catalog](https://www.polyhedra.net/en/): a moving
 closed ring such as a kaleidocycle requires the future closed-loop capability
 tracked by F14. `AnchoredTo` remains acyclic; a closure constraint must not be
 implemented by creating a relationship cycle.
 
-A6.1-A6.6 will decide how a topology provider (`name TBD`) expresses branches
-and multiple physical roots. A9 will decide authored fold stages, including
-simultaneous folds. A10 will validate their interaction: connection dependency
-order remains separate from animation order, all sequenced entities belong to
-the arrangement, and the connection graph can be resolved regardless of the
-chosen fold stages.
+A6 decides how `TopologyProvider` expresses branches and multiple unanchored
+`Member` entities. A9 will decide authored fold stages,
+including simultaneous folds. A10 will validate their interaction: connection
+dependency order remains separate from animation order, all sequenced entities
+belong to the arrangement, and the connection graph can be resolved regardless
+of the chosen fold stages.
 
 **Status:** Decided.
 
@@ -727,8 +1050,8 @@ lifecycle to creation of the controller.
 
 The controller does not require geometry, anchors, spatial transforms,
 `AnchoredTo`, or `Hinge`; those components belong to physical members. Whether
-a selected topology provider (`name TBD`) has enough input to materialize its
-graph remains part of the open validity contract, but a provider is not
+a selected `TopologyProvider` has enough input to materialize its graph remains
+part of the open validity contract, but a provider is not
 required when connections are authored directly. `FoldSequence`, when present,
 lives on this same controller as a separate optional ECS capability rather than
 as an `Arrangement` field or on a second controller entity.
@@ -738,7 +1061,7 @@ defines how incomplete controllers behave.
 
 **Status:** Reopened. `Arrangement` identity and the absence of a required
 built-in folding recipe are decided; the remaining validity contract is
-pending A6 and A9.2.
+pending A9.2.
 
 ### A4.3. Construction and incomplete-controller behavior
 
@@ -755,8 +1078,8 @@ Provide `commands.spawn_arrangement(...)` through a `Commands` extension trait
 as the guided construction path. Its final parameters are pending: it must
 support a controller whose connections and hinge endpoints are authored
 directly, as well as one using optional connection and endpoint recipes. A6
-will supply the final topology-provider bound and representation; A9.2 will
-supply the built-in endpoint-recipe representation.
+supplies `TopologyProvider`; A9.2 will supply the built-in endpoint-recipe
+representation.
 
 ```rust
 let root_entity = commands.spawn_arrangement(/* parameters TBD */);
@@ -792,7 +1115,7 @@ endpoint for an arrangement with two distinct `Hinge` endpoints but no
 **Decision:** Keep connection structure and folding behavior separate because
 different connection topologies can work with different folding behaviors.
 
-The topology provider (`name TBD`) decides whether
+`TopologyProvider` decides whether
 each `Member` has `AnchoredTo`, selects its `AnchoredTo::target()`, and owns the
 paired tile edges and anchors plus the fixed connection `Angle` needed to align
 a connection. The original POC represented folding behavior through `Strip`,
@@ -818,9 +1141,9 @@ under A9.
 
 A6 is the prerequisite for A9.2.
 
-**Decision:** Model this responsibility as a topology provider (`name TBD`),
-not as a connection rule. A topology provider owns a complete logical pattern
-and materializes the root-or-connected physical graph used by Hana. It may
+**Decision:** Model this responsibility with `TopologyProvider`, not as a
+connection rule. A provider owns a complete logical pattern and materializes
+the physical graph used by Hana. It may
 expose structural capabilities for recipe-compatible fold directions. Each
 direction can provide ordered, consistently oriented connection groups and
 additional calibration required by compatible folding recipes, while topology
@@ -850,35 +1173,34 @@ commands.apply_fold(
 )?;
 ```
 
-A6.1-A6.6 still decide `AnchoredTo` target ownership, member references, the
-root-or-connected result, trait methods and failures, discovery and scheduling,
-and final terminology. A9.2 still decides the fold-group value and capability
-types, compatibility checks, precise Accordion/Coil/Wrap behavior, wrap
-calibration, and application lifecycle.
+A9.2 still decides the fold-group value and capability types, compatibility
+checks, precise Accordion/Coil/Wrap behavior, wrap calibration, and application
+lifecycle.
 
 **Closure gate:** A6 closes only when its exact types and methods can materialize
-a branching or multi-root connection graph without mentioning Accordion, Coil,
-Wrap, or `FoldSequence`, and direct `AnchoredTo` / `Hinge` authoring remains
-valid without a provider.
+a branching graph with multiple unanchored `Member` entities without
+mentioning Accordion, Coil, Wrap, or `FoldSequence`, and direct `AnchoredTo` /
+`Hinge` authoring remains valid without a provider.
 
 **Status:** Decided.
 
 ### A6.1. `AnchoredTo` presence and target ownership
 
-**Decision:** For every `Member`, the topology provider (`name TBD`) decides
+**Decision:** For every `Member`, `TopologyProvider` decides
 whether the physical member has no `AnchoredTo` or has one `AnchoredTo`, and it
 selects the entity returned by `AnchoredTo::target()`. A `Member` without
-`AnchoredTo` is a physical root. Hana validates and materializes the provider's
-graph but never infers the preceding `Member` as a default target.
+`AnchoredTo` is unanchored in the physical graph. Hana validates and
+materializes the provider's graph but never infers the preceding `Member` as a
+default target.
 
-This ownership supports multiple physical roots, branching connection trees,
-sheets, and polyhedral nets while keeping `Member` / `Members` order separate
-from physical topology. Direct authoring may produce the same ordinary
-components without using a topology provider. `AnchoredTo` remains acyclic;
-F14 separately owns future closed-loop constraints.
+This ownership supports multiple unanchored `Member` entities, branching
+connection trees, sheets, and polyhedral nets while keeping `Member` / `Members`
+order separate from physical topology. Direct authoring may produce the same
+ordinary components without using a topology provider. `AnchoredTo` remains
+acyclic; F14 separately owns future closed-loop constraints.
 
 ```rust
-commands.materialize_topology(arrangement, topology)?; // method name TBD
+commands.apply_topology(arrangement, topology)?;
 
 // Result selected by the topology provider:
 // center: no AnchoredTo
@@ -887,57 +1209,585 @@ commands.materialize_topology(arrangement, topology)?; // method name TBD
 // lid:    AnchoredTo::target() == north
 ```
 
-A6.2 still decides how provider input and output identify these `Member`
-entities. A6.3 still defines the named root-or-connected result, and A6.4
-defines validation and failures.
+`TopologyProvider::Position` and the supplied entity lookup identify these
+`Member` entities. `MemberTopology` represents the generated result, and
+`TopologyError` reports immediate validation failures.
 
 **Status:** Decided.
 
-### A7.1. Anchor orientation representation
+### A6.2. Provider-owned pattern-position mapping
 
-**Decision:** Replace the optional quaternion representation with a named,
-non-optional value: `AnchorPoint::orientation: AnchorOrientation`.
+**Decision:** Each `TopologyProvider` defines its own `Position` type for
+positions in its logical pattern. The construction path creates or accepts the
+association from those positions to the actual `Entity` values carrying
+`Member`, then supplies that lookup to the provider while it generates
+Hana-facing connection results. Both the source `Member` and the entity
+returned by `AnchoredTo::target()` are identified with `Entity`.
 
-`AnchorOrientation` contains the `Quat` that rotates the entity's local axes
-into the anchor's local axes. Its identity/default value means that the anchor
-uses the entity's own local orientation. `AnchorPoint` therefore always has an
-orientation; the API does not encode entity-local orientation as `None`.
+Triangle, quad, hex, and future providers may use their own coordinates or keys
+internally. Hana does not introduce a universal `TileId`, `CellId`, logical
+member component, or coordinate-to-entity registry. The normal construction
+helper creates the entities and its temporary lookup; the existing-member path
+accepts an application-supplied association. F12 owns regeneration when
+dynamic membership changes.
 
 ```rust
-#[derive(Clone, Copy, Debug, Default)]
-pub struct AnchorOrientation(Quat);
+let topology = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6),
+    |position| triangle_panel_bundle(position),
+)?;
+
+// The helper maps each TriangleSheet position to the Entity it spawned and
+// supplies that lookup while TriangleSheet generates MemberTopology values.
+```
+
+`MemberTopology` and `Connection` represent the generated values;
+`TopologyError` reports incomplete or invalid entity associations.
+
+**Status:** Decided.
+
+### A6.3. Unanchored-or-anchored topology result
+
+The review has already decided that a topology provider returns a named sum
+value rather than using `Option` to distinguish an unanchored `Member` from an
+anchored `Member`. The remaining decisions are split as follows:
+
+1. **A6.3.1 — Outer value:** Name the unanchored-or-anchored authoring value and
+   its two variants.
+2. **A6.3.2 — Connected payload:** Name and define the value containing the
+   source `Member` entity, `AnchoredTo`, member-local `Edge`, and fixed
+   connection `Angle`.
+
+### A6.3.1. Authoring-only member-topology variants
+
+**Decision for now:** Use the authoring-only sum type `MemberTopology` with
+`Unanchored` and `Anchored` variants. It is not an ECS component. Topology
+materialization consumes it, inserts or omits `AnchoredTo`, passes its connected
+data through any remaining authoring work, and then drops it.
+
+```rust
+pub enum MemberTopology {
+    Unanchored {
+        member_entity: Entity,
+    },
+    Anchored(Connection), // payload decided under A6.3.2
+}
+```
+
+`Unanchored` means the `Member` receives no `AnchoredTo`; `Anchored` means the
+connected payload supplies the `AnchoredTo` to insert. Neither variant uses
+"root": the arrangement root remains only the controller entity referenced by
+`Member::root_entity`. A later topology change creates a new transient set of
+`MemberTopology` values. A9.2.3 separately decides which provider information
+must remain available to regenerate them.
+
+**Status:** Decided for now; the name may be revisited if later API composition
+reveals a clearer replacement.
+
+### A6.3.2. Connected topology payload
+
+**Decision for now:** Name the authoring-only connected payload `Connection`.
+It stores the source `Member` entity, the complete `AnchoredTo` relationship to
+insert, the ordered member-local `Edge`, and the fixed connection `Angle`.
+
+```rust
+pub struct Connection {
+    pub member_entity: Entity,
+    pub anchored_to: AnchoredTo,
+    pub member_edge: Edge,
+    pub connection_angle: Angle,
+}
+
+let topology = MemberTopology::Anchored(Connection {
+    member_entity: lid,
+    anchored_to: AnchoredTo::new(
+        north,
+        lid_inner_anchor,
+        north_outer_anchor,
+    ),
+    member_edge: lid_hinge_edge,
+    connection_angle: Angle::ZERO,
+});
+```
+
+`AnchoredTo` already contains the target entity, source and target anchors, and
+connection offset, so `Connection` does not duplicate those fields. Folded and
+unfolded endpoint angles and `Hinge::pivot_offset` remain folding-recipe output
+under A9.2. `Connection` may be grouped during authoring, but the value itself
+is dropped after its ordinary ECS outputs are committed.
+
+This structure is accepted as a practical starting point rather than an
+irreversible API commitment. Implementation and example friction should drive
+any later simplification or renaming.
+
+**Status:** Decided for now.
+
+**A6.3 status:** Decided for now.
+
+### A6.4. Topology-provider generation and failure contract
+
+A6.4 is split so the producer method can be understood independently from the
+validation transaction:
+
+1. **A6.4.1 — Generation:** Decide the provider method and the
+   `MemberTopology` values it yields.
+2. **A6.4.2 — Structural validation:** Decide the complete-candidate
+   validation contract through three subitems:
+   - **A6.4.2.1 — Construction guarantees:** Separate facts guaranteed by
+     topology-driven spawning from values that still require defensive
+     validation.
+   - **A6.4.2.2 — Graph invariants:** Decide the structural requirements for
+     every complete generated topology.
+   - **A6.4.2.3 — Atomic commit:** Decide whether validation and materialization
+     use an all-or-nothing boundary.
+3. **A6.4.3 — Failure delivery:** Decide how deferred-command errors,
+   unavailable runtime inputs, diagnostics, and retry are represented.
+
+The explicit application command and whether providers persist as ECS state
+remain separate under A6.5.
+
+### A6.4.1. Pure whole-topology generation
+
+**Decision:** A `TopologyProvider` enumerates its provider-specific
+logical positions and generates its complete candidate outside the Bevy
+`World`. Generation receives the position-to-`Entity` lookup created by the
+selected construction path:
+
+```rust
+pub trait TopologyProvider {
+    type Position;
+
+    fn positions(&self) -> impl Iterator<Item = Self::Position>;
+
+    fn generate_topology(
+        &self,
+        entity_for: impl Fn(&Self::Position) -> Entity,
+    ) -> Vec<MemberTopology>;
+}
+
+let topology = sheet.generate_topology(|position| entities[position]);
+commands.apply_topology(arrangement, topology)?;
+```
+
+The lookup is an ordinary Rust value, not access to ECS. The provider does not
+receive `World`, `Commands`, `Members`, or the arrangement controller. `&self`
+permits later regeneration. Passing the lookup directly avoids a second
+provider type whose only purpose would be to hold entity bindings. The owned
+`Vec<MemberTopology>` contains one explicit entry for every provider-associated
+member, including `Unanchored` entries, so A6.4.2 can inspect the complete
+candidate before any ECS mutation.
+
+Vector order is deterministic authoring and diagnostic order only. It does not
+define `Members` order, connection dependency order, or fold order. A6.4.2 may
+lift the return to a named `Result` if provider-local failure requires it
+without reopening the pure, outside-`World`, whole-result boundary.
+
+**Status:** Decided.
+
+### A6.4.2.1. Construction guarantees versus defensive validation
+
+**Decision:** The topology-driven construction path guarantees these facts by
+construction:
+
+- it calls the application bundle factory once per logical position;
+- it spawns exactly one entity from each factory result;
+- it inserts `Member::of(arrangement)` on every spawned entity; and
+- it creates a one-to-one logical-position-to-`Entity` association.
+
+Both construction paths defensively validate that the provider-authored
+`Vec<MemberTopology>` corresponds exactly to the bound entity set: no bound
+entity is omitted or represented more than once, and every entity referenced by
+the generated topology belongs to the binding. This does not revalidate member
+spawning; it validates the provider's generated connection description before
+that description becomes `AnchoredTo`.
+
+The existing-member path additionally verifies at application time that every
+bound entity still exists and carries `Member` targeting the intended
+`Arrangement` controller. A6.4.2.2 defines the remaining graph invariants, and
+A6.4.3 defines how deferred-state failures are delivered.
+
+```rust
+let topology = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6), // provider type name TBD
+    |cell| triangle_panel_bundle(cell),
+)?;
+
+// Internally, the helper supplies its new position-to-Entity lookup to the
+// provider, validates the complete candidate, and only then queues its writes.
+```
+
+**Status:** Decided.
+
+### A6.4.2.2. Complete generated-topology invariants
+
+**Decision:** After the A6.4.2.1 coverage checks, accept a complete generated
+topology when its `member_entity -> AnchoredTo::target()` references form a
+forest. Following `AnchoredTo::target()` from any
+`MemberTopology::Anchored(Connection)` must eventually reach a
+`MemberTopology::Unanchored` member.
+
+The contract accepts an empty topology for an arrangement with no members,
+multiple unanchored members, multiple disconnected connection trees,
+branching, and repeated targets. It does not require one global unanchored
+member or one connected graph.
+
+Reject self-targets and longer cycles. Also reject geometry-independent invalid
+payload values: a non-finite `AnchoredTo::offset`, a non-finite
+`connection_angle`, or a `member_edge` whose `start` and `end` are the same
+`AnchorId`. Finite `Angle` values remain signed and unwrapped; multi-turn values
+such as 720 degrees are valid.
+
+```rust
+let topology = vec![
+    MemberTopology::Unanchored {
+        member_entity: base,
+    },
+    MemberTopology::Anchored(Connection {
+        member_entity: wall,
+        anchored_to: AnchoredTo::new(
+            base,
+            AnchorId::EdgeMid(0),
+            AnchorId::EdgeMid(2),
+        ),
+        member_edge: Edge {
+            start: AnchorId::Vertex(0),
+            end: AnchorId::Vertex(1),
+        },
+        connection_angle: Angle::ZERO,
+    }),
+];
+
+validate_topology(&topology)?; // function name TBD
+```
+
+Whether referenced anchors exist, differently named edge endpoints are
+physically separated, orientations are compatible, and required geometry and
+transforms are ready depends on ECS geometry and remains A7 and A6.4.3.
+Folding-recipe, final `Hinge`, and `FoldSequence` compatibility remains A9.2
+and A10. Explicit closed-loop constraints remain F14 and do not become
+`AnchoredTo` cycles.
+
+**Status:** Decided.
+
+### A6.4.2.3. Validated full replacement
+
+**Decision:** Validate the complete topology before queuing any topology
+writes, then use ordinary `Commands` to queue the complete replacement. A
+known-invalid candidate queues no changes. A valid candidate queues removal of
+`AnchoredTo` for every `MemberTopology::Unanchored` entry and insertion or
+replacement of the complete `AnchoredTo` for every
+`MemberTopology::Anchored(Connection)` entry.
+
+```rust
+let plan = validate_topology(&members, candidate)?; // names TBD
+plan.queue(&mut commands);
+```
+
+The public application API remains a `Commands` extension and exposes neither
+`World` nor `&mut World`:
+
+```rust
+commands.apply_topology(arrangement, candidate)?;
+```
+
+Do not require an exclusive custom command or claim database-style rollback.
+If unrelated code despawns or retargets a member after validation but before
+the queued writes run, A6.4.3 handles the resulting failure or retry. The
+guarantee is a completely validated replacement plan, not isolation from
+arbitrary concurrent ECS mutation.
+
+**Status:** Decided.
+
+**A6.4.2 status:** Decided.
+
+### A6.4.3. Failure delivery, readiness, and retry
+
+F13 retains ownership of the final diagnostic storage, history, and warning
+deduplication policy.
+
+**Decision:** Deliver a failure according to when Hana can know it. Generation,
+binding, coverage, graph, and geometry-independent payload failures are known
+before topology writes are queued and return immediately as
+`Result<_, TopologyError>`.
+
+```rust
+let authored = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6),
+    |cell| triangle_panel_bundle(cell),
+)?;
+
+commands.apply_topology(arrangement, candidate)?;
+```
+
+Failures caused only by later ECS state cannot be returned from a call that has
+already completed. Report those failures against the `Arrangement` controller
+through the diagnostic channel (`name TBD`) whose storage, history, and warning
+policy F13 decides. Do not introduce a separate failure event or status
+component through this decision.
+
+The immediate `Result` covers everything knowable from the candidate and its
+bound entity mapping; it does not promise that those entities remain unchanged
+until deferred commands run. Entity lifetime, despawning, and replacement are
+entirely application-owned; Hana adds no cleanup or entity-lifecycle policy.
+
+**Status:** Decided.
+
+**A6.4 status:** Decided.
+
+### A6.5. Provider invocation and lifecycle
+
+A6.5 is split into two decisions:
+
+1. **A6.5.1 — Construction paths:** Decide topology-driven member spawning and
+   the separate path for existing member entities.
+2. **A6.5.2 — Persistence:** Decide which provider or topology-authoring state
+   persists after topology materialization, and where.
+
+A6.5.1 was reviewed before A6.4.2 because the normal construction path should
+guarantee member coverage by construction. A6.4.2 therefore defines only the
+defensive checks still needed for existing-member application, deferred
+commands, scene loading, and direct ECS mutation.
+
+#### A6.5.1. Topology-driven spawning and existing-member application
+
+**Decision:** Provide two construction paths. The normal path lets a logical
+topology drive member creation through an application-supplied bundle factory.
+The helper:
+
+1. spawns one controller carrying `Arrangement`;
+2. iterates every `Position` supplied by `TopologyProvider::positions()`;
+3. calls the bundle factory exactly once for each logical position;
+4. spawns the returned bundle with `Member::of(arrangement)`;
+5. associates each logical position with its new `Entity`;
+6. supplies that association to the pure `generate_topology()` decided by
+   A6.4.1; and
+7. materializes each generated `MemberTopology` as durable connection data.
+
+The factory supplies application-owned mesh, material, anchor geometry, and
+other member components. The helper owns member entity creation and the
+`Member` relationship, so every topology-declared logical position initially
+produces exactly one `Member` by construction.
+
+```rust
+let authored = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6), // provider type name TBD
+    |cell| triangle_panel_bundle(cell),
+);
+
+commands.apply_folding_recipe( // name TBD
+    &authored,
+    Accordion::default(), // recipe representation TBD
+);
+```
+
+The second path binds a logical topology to already-existing `Member` entities
+before invoking `generate_topology()`. It supports scene-loaded entities,
+entities created by other systems, and later topology replacement. A6.4.2
+provides its defensive validation and atomic-application contract.
+
+Both paths produce `Topology` rather than
+discarding the topology after inserting `AnchoredTo`. That result exposes the
+logical-position-to-`Entity` association and compatible fold-group
+capabilities needed by Accordion and future folding recipes. A compatible
+recipe uses those capabilities to author complete `Hinge` endpoints, which a
+`FoldSequence` can animate.
+
+Whether `Topology` is transient or retained outside ECS remains the caller's
+choice. A9.2.3 decides its folding-capability contents.
+
+**Status:** Decided.
+
+#### A6.5.2. Provider and topology-authoring persistence
+
+**Decision:** Hana automatically persists neither the concrete topology
+provider nor `Topology` in ECS. The
+provider remains an ordinary Rust authoring value and may be discarded after
+generation. Both construction paths return the result as an ordinary
+Rust value containing the logical-position-to-`Entity` association and the
+normalized capabilities needed by compatible folding recipes.
+
+```rust
+let topology = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6),
+    |cell| triangle_panel_bundle(cell),
+)?;
+
+commands.apply_folding_recipe(&topology, Accordion::default())?;
+
+// Drop `topology` after one-shot authoring, or retain it in
+// application-owned storage for later recipe replacement.
+```
+
+Runtime folding uses the durable `Hinge` values produced by recipe authoring
+and does not require either authoring value. An application that needs runtime
+recipe replacement may retain the returned result in its own resource,
+asset, or component. Hana does not add a trait-object provider component,
+provider-specific systems, or a duplicate persistent topology graph.
+
+A retained result is an ordinary snapshot containing `Entity` values.
+Every reuse passes through the normal validation contract. Hana adds no stale
+state, revision counter, observer, or automatic regeneration scheduler. A
+caller that needs a different value explicitly runs a provider again. A9.2.3
+defines the exact normalized fold-group capability inside `Topology`.
+
+**Status:** Decided.
+
+The provisional A6.5.2.2 invalidation-policy and A6.5.2.3 regeneration-scheduler
+items were removed from the review because they would add lifecycle machinery
+that A6.5.2 explicitly declines to retain.
+
+**A6.5 status:** Decided.
+
+### A6.6. Public topology-authoring vocabulary
+
+**Decision:** Use `TopologyProvider` for the ordinary Rust provider trait, its
+provider-specific logical location as `Position`, and its methods as
+`positions()` and `generate_topology()`. Pass the position-to-`Entity` lookup
+directly into generation, so no separate bound-provider type is needed.
+
+```rust
+pub trait TopologyProvider {
+    type Position;
+
+    fn positions(&self) -> impl Iterator<Item = Self::Position>;
+
+    fn generate_topology(
+        &self,
+        entity_for: impl Fn(&Self::Position) -> Entity,
+    ) -> Vec<MemberTopology>;
+}
+```
+
+Name the ordinary caller-owned materialized result `Topology`, the
+existing-member `Commands` extension `apply_topology()`, and the immediate
+authoring and validation error `TopologyError`. Retain the previously approved
+`spawn_arrangement()` name for topology-driven construction.
+
+```rust
+let topology = commands.spawn_arrangement(
+    TriangleSheet::new(4, 6),
+    |position| triangle_panel_bundle(position),
+)?;
+```
+
+**Status:** Decided.
+
+### A6.7. Logical topology-key vocabulary
+
+The shared-semantic-math correction introduces `bevy_kana::Position` as the
+type of `AnchorPoint::position`. The already approved
+`TopologyProvider::Position` has a different meaning: it is a provider-specific
+logical value used to map one planned member to an `Entity`, and may be a grid
+coordinate, enum, or other key rather than a spatial point.
+
+A6.7 must remove that public naming collision without changing the approved
+provider lookup flow.
+
+**Status:** Pending.
+
+### A7. Anchor geometry vocabulary
+
+The data flow is settled: `ResolvedAnchorGeometry` catalogs local anchor
+points; `Edge` is an ordered pair of keys into that catalog and derives a local
+axis; `AnchoredTo` is the immutable relationship selecting one source point,
+one target point, and the target entity. Corrected A7.1 settles position and
+orientation storage with shared `bevy_kana` types.
+
+The remaining work is tracked through these atomic decisions:
+
+1. **A7.2 — Point value:** Retain `AnchorPoint` for the stored
+   position-plus-orientation value.
+2. **A7.3 — Catalog key:** Replace or retain `AnchorId` for the
+   provider-authored key that selects an `AnchorPoint`.
+3. **A7.4 — Orientation validity:** Decide where invalid
+   `bevy_kana::Orientation` values in anchor geometry are rejected.
+4. **A7.5 — Semantic-math audit:** Apply the shared `bevy_kana`-type rule to
+   every remaining raw spatial field in the anchor and hinge APIs.
+
+**Status:** Partial; A7.2 decided and A7.3-A7.5 pending.
+
+### A7.1. Anchor position and orientation representation
+
+**Corrected decision:** Use the existing shared semantic types
+`bevy_kana::Position` and `bevy_kana::Orientation`:
+
+```rust
+use bevy_kana::Orientation;
+use bevy_kana::Position;
 
 pub struct AnchorPoint {
-    pub position: Vec3,
-    pub orientation: AnchorOrientation,
+    pub position: Position,
+    pub orientation: Orientation,
 }
 
 let anchor = AnchorPoint {
-    position: Vec3::ZERO,
-    orientation: AnchorOrientation::default(),
+    position: Position::default(),
+    orientation: Orientation::default(),
 };
 ```
+
+`Position` wraps `Vec3` and `Orientation` wraps `Quat`. The original
+Hana-specific `AnchorOrientation` proposal is superseded and adds no public
+type. `Orientation::default()` means the anchor uses the entity's own local
+orientation; the API does not encode that case as `None`.
 
 `anchor_placement()` reads the source and target `AnchorPoint::orientation`
 values when `resolve_anchors()` resolves an `AnchoredTo` relationship.
 `Edge::axis()` reads both endpoint orientations when checking whether an
 edge's local axes are compatible, and `ResolvedAnchorGeometry::validate()`
 performs the same compatibility check before resolver systems consume provider
-geometry. The constructor and validation contract for `AnchorOrientation`
-remain undecided under A7.
+geometry. A7.4 decides where invalid shared `Orientation` values are rejected.
 
-This decision removes the ambiguous distinction between a missing quaternion
-and an explicit identity quaternion. A7.2 separately decides whether
-`AnchorPoint` itself should be renamed; no type-name decision is implied here.
+This correction removes the ambiguous distinction between a missing quaternion
+and an explicit identity quaternion while following the shared semantic-math
+rule instead of introducing a Hana-specific wrapper.
+
+**Status:** Corrected and decided.
+
+### A7.2. Point-value name
+
+**Decision:** Retain `AnchorPoint`. It names one local attachment location in
+`ResolvedAnchorGeometry`; `Position` and `Orientation` name its two spatial
+values. Do not rename it to `AnchorPose`, which is the existing ECS component
+used for animation-provided rotation and translation, or to `AnchorFrame`,
+which adds no distinction needed by the API.
+
+```rust
+let point = AnchorPoint {
+    position: Position::new(0.0, 1.0, 0.0),
+    orientation: Orientation::default(),
+};
+
+geometry.points.insert(anchor_key, point); // key type pending A7.3
+```
 
 **Status:** Decided.
 
+### A7.5. Shared semantic-math audit scope
+
+The consistency audit identified these surviving or planned conversions for
+later A7.5 review:
+
+- `AnchoredTo::offset: Displacement`;
+- `ResolvedAnchorOffset(Displacement)`, retaining the outer ECS component;
+- `AnchorPose { rotation: Orientation, translation: Displacement }`;
+- `ResolvedAnchorWorld::points` values as `Position`;
+- `Hinge::pivot_offset: Displacement`; and
+- hinge endpoints, `Connection::connection_angle`, and surviving recipe angle
+  offsets as the planned `Angle`.
+
+Raw `Vec3`, `Quat`, and scalar values remain appropriate at Bevy transform,
+mesh, gizmo, axis-calculation, progress, easing, rate, and time boundaries.
+This inventory records the audit scope but does not decide the individual
+conversions before A7.5.
+
+**Status:** Pending.
+
 ### A8. Placement wrappers and angle representation
 
-**Decision:** Remove `ArrangementPlacement` and `MemberPlacement`. The named A6
-root-or-connected result (`name TBD`) retains one connected payload
-(`name TBD`) containing `AnchoredTo`, the member-local `Edge`, and the fixed
-connection `Angle`. Reconciliation combines that fixed angle with the built-in
+**Decision:** Remove `ArrangementPlacement` and `MemberPlacement`.
+`MemberTopology::Anchored(Connection)` retains `AnchoredTo`, the member-local
+`Edge`, and the fixed connection `Angle`. Reconciliation combines that fixed angle with the built-in
 recipe's endpoint offsets and stores only the resulting two `Angle` endpoints
 on `Hinge`.
 
@@ -984,10 +1834,11 @@ for `HingePivot::reference_angle`; A9.4 subsequently removes that field as
 redundant with the unfolded `Hinge` endpoint and then merges the remaining
 pivot offset into `Hinge`. This preserves the decision history while
 superseding the field conversion and separate `HingePivot` type. Keep fold
-progress and easing fractions as `f32`; keep spatial orientation as
-`AnchorOrientation`, `Quat`, or `Rot2`. After Hana Valence adopts `Angle`, audit
-the rest of the workspace for scalar angular-displacement fields. Do not
-blanket-convert orientations, progress values, or angular rates.
+progress and easing fractions as `f32`; use `bevy_kana::Orientation` for
+semantic spatial-orientation fields and convert to `Quat` or `Rot2` at math
+boundaries. After Hana Valence adopts `Angle`, audit the rest of the workspace
+for scalar angular-displacement fields. Do not blanket-convert dimensionless
+progress values or angular rates.
 
 **Status:** Decided.
 
@@ -1035,8 +1886,8 @@ A9.4 audits the remaining fold types and reports the final net concept count.
 ### A9.2. Fold-recipe authoring and topology capabilities
 
 A9.2 no longer assumes that the POC `Strip`, `Accordion`, and `Coil` components
-survive. It is parked until A6 defines the topology-provider boundary, then it
-will resolve these decisions in order:
+survive. A6 has now defined the `TopologyProvider` boundary. A9.2 will resolve
+these decisions in order:
 
 1. **A9.2.1 — Durable result:** Decide whether a folding recipe is transient
    authoring input whose durable ECS result is complete `Hinge` data.
@@ -1063,7 +1914,7 @@ implements no fold-group capability, and one incompatible request that writes
 nothing. The final type inventory must distinguish persistent ECS state from
 authoring-only values and report the net public-type cost.
 
-**Status:** Pending A6.
+**Status:** Pending; A6 dependency resolved.
 
 ### A9.3. Fold transport, stage timing, and easing
 
@@ -1198,7 +2049,7 @@ connection `Angle` remain together as the connected payload of the A6 result
 (`name TBD`) because changing any one invalidates the others. Reconciliation
 combines the fixed connection `Angle` with two endpoint-recipe `Angle` offsets
 and stores only the resulting endpoint `Angle` values on `Hinge`; it does not
-store a third base angle. A6.3 uses a named root-or-connected sum type rather
+store a third base angle. A6.3 uses a named unanchored-or-anchored sum type rather
 than `Option`, while its exact type, variant, and connected-payload names remain
 pending.
 
@@ -1374,7 +2225,7 @@ let thin_hinge = Hinge {
 
 For every `Hinge` carrying `AnchoredTo`, `hinge_to_pose()` converts the edge
 axis through the `AnchoredTo::source_anchor` tangent frame; `pivot_offset`
-controls translation only. A physical root without `AnchoredTo` may use
+controls translation only. An unanchored `Member` without `AnchoredTo` may use
 `Vec3::ZERO`; a nonzero offset without a source anchor frame is invalid and is
 handled by A10 and F13.
 
@@ -1905,27 +2756,91 @@ new members once the example inserted `ArrangedPanel` in tile order.
   zero-member arrangements. Do not require `Strip`, `Accordion`, or `Coil`;
   directly authored `AnchoredTo` and `Hinge` data is valid. Decide the remaining
   topology-provider validity contract under A6 and the optional built-in recipe
-  representation under A9.2.
+  representation under A9.2. The A6 behavior is complete; A6.7 retains only a
+  naming correction, and A9.2 remains open.
 - **A4.3:** Add a `Commands` extension method named `spawn_arrangement` without
   hidden defaults. Keep invalid resolved data and membership intact but make
   dependent writers inert, emit a non-spamming diagnostic, and reconcile
-automatically after validity is restored. Finalize the helper parameters
-after A4.2, A6, and A9.2.
+  automatically after validity is restored. Finalize the helper parameters
+  after A4.2 and A9.2.
 - **A5:** Keep the topology-provider responsibility separate from
   `Strip`, `Accordion`, and `Coil`. Allow one connection topology to be reused
   with different folding behavior; keep staged `FoldSequence` orchestration
   outside both responsibilities.
-- **A6.0:** Model logical-pattern and physical-graph authoring as a topology
-  provider (`name TBD`) that may expose recipe-compatible fold directions.
+- **A6.0:** Model logical-pattern and physical-graph authoring with
+  `TopologyProvider`, which may expose recipe-compatible fold directions.
   Expect regular triangle, quad, and hex sheets to support arbitrary finite
   dimensions plus Accordion, Coil, and Wrap; treat a strip as their
   one-dimensional degenerate case.
-- **A6.1:** Let the topology provider decide independently for every `Member`
+- **A6.1:** Let `TopologyProvider` decide independently for every `Member`
   whether it has no `AnchoredTo` or has one whose `AnchoredTo::target()` it
   selects. Never infer the preceding `Member` as a physical connection.
-- **A7.1:** Represent every `AnchorPoint` orientation with a non-optional
-  `AnchorOrientation`; its identity value means the entity's own local
-  orientation.
+- **A6.2:** Let each `TopologyProvider` define its own `Position` type.
+  Have the selected construction path associate those positions with actual
+  `Member` entities and supply that lookup during generation. Require
+  Hana-facing results to identify source and target with `Entity`; add no
+  universal logical member identity.
+- **A6.3.1:** Use transient, authoring-only
+  `MemberTopology::{Unanchored, Anchored}`. Materialization consumes it and
+  leaves ordinary `Member` plus optional `AnchoredTo` ECS state; reserve
+  "arrangement root" for the controller referenced by `Member::root_entity`.
+- **A6.3.2:** Use authoring-only
+  `Connection { member_entity, anchored_to, member_edge, connection_angle }`
+  as the payload of `MemberTopology::Anchored`. Treat it as a revisitable
+  starting point and refine it when implementation friction provides evidence.
+- **A6.4.1:** Generate topology outside the Bevy `World` from a supplied
+  provider-position-to-`Entity` lookup. Let the provider enumerate its logical
+  positions and return one explicit `MemberTopology` per associated member;
+  vector order is diagnostic only and expresses no connection or fold order.
+- **A6.4.2.1:** Let topology-driven spawning guarantee one factory call, one
+  entity, one `Member` relationship, and one binding per logical position.
+  Validate the provider-authored `MemberTopology` values against that binding
+  on both construction paths. On the existing-member path, additionally verify
+  current entity existence and `Member` ownership by the intended controller.
+- **A6.4.2.2:** Require generated `AnchoredTo` references to form a forest over
+  the exactly covered bound members. Permit an empty topology, multiple
+  unanchored members, disconnected trees, branching, repeated targets, and
+  finite multi-turn angles. Reject self-targets, longer cycles, non-finite
+  offsets or connection angles, and `member_edge` values with identical anchor
+  identifiers. Defer geometry-dependent checks.
+- **A6.4.2.3:** Validate the full topology before queuing topology writes. An
+  invalid candidate queues nothing; a valid candidate queues the complete
+  `AnchoredTo` removal-and-replacement plan through ordinary `Commands`. Keep
+  `World` and `&mut World` out of the public API, require no exclusive custom
+  command, and do not promise rollback against unrelated mutation before the
+  queued writes run.
+- **A6.4.3:** Return generation and structural-validation failures
+  immediately as `Result<_, TopologyError>`. Report failures that
+  arise only from later ECS state against the `Arrangement` controller through
+  the F13 diagnostic channel (`name TBD`); add no separate failure event or
+  status component. Keep entity lifetime and despawning entirely
+  application-owned.
+- **A6.5.1:** Make topology-driven spawning the normal construction path. Let
+  `TopologyProvider::positions()` enumerate logical positions, call an
+  application-supplied bundle factory once per position, and have the helper
+  spawn each entity with `Member::of(arrangement)`. Supply the resulting entity
+  lookup to topology generation. Retain `apply_topology()` for binding existing
+  `Member` entities. Have both paths return `Topology`, whose entity mapping
+  and compatible fold-group capabilities remain available to Accordion and
+  future folding recipes.
+- **A6.5.2:** Persist neither concrete topology providers nor `Topology`
+  automatically in ECS. Return `Topology` as an
+  ordinary Rust value that callers may use once and drop or retain in
+  application-owned storage for later recipe re-authoring. Runtime playback
+  depends only on the durable authored ECS outputs. Reuse validates the value
+  normally, and callers explicitly create replacements; add no invalidation or
+  regeneration lifecycle machinery.
+- **A6.6:** Use `TopologyProvider`, `Position`, `positions()`,
+  `generate_topology()`, caller-owned `Topology`, `apply_topology()`, and
+  `TopologyError`; retain `spawn_arrangement()`. Pass the provider-specific
+  position-to-`Entity` lookup directly into generation and add no separate
+  bound-provider type.
+- **A7.1 (corrected):** Represent `AnchorPoint::position` with
+  `bevy_kana::Position` and `AnchorPoint::orientation` with
+  `bevy_kana::Orientation`. Both are non-optional; origin and identity are
+  their defaults. Remove the superseded `AnchorOrientation` proposal.
+- **A7.2:** Retain `AnchorPoint` for the local attachment position and
+  orientation value. Keep `AnchorPose` as the separate runtime animation input.
 - **A8:** Remove `ArrangementPlacement` and `MemberPlacement`. Add the shared,
   signed, unwrapped `bevy_kana::Angle` value and use it for Hana Valence's fixed
   connection angles, recipe offsets, and `Hinge` endpoints. The initially
