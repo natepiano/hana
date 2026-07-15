@@ -310,22 +310,31 @@ fn update_face_labels(
         .or_else(|| gamepads.iter().next());
     // The engine's resolved speed is the single source of truth for "Slow" —
     // the example never re-reads the rb/lb gate buttons itself.
-    let state = cameras.iter().next().copied().unwrap_or_default();
+    let orbit_cam_interaction_state = cameras.iter().next().copied().unwrap_or_default();
 
     let orbit = held_content(
         &mut hold.orbit,
         time.delta(),
-        active_orbit_content(active_gamepad, state.speed(OrbitCamInteractionKind::Orbit)),
+        active_orbit_content(
+            active_gamepad,
+            orbit_cam_interaction_state.speed(OrbitCamInteractionKind::Orbit),
+        ),
     );
     let pan = held_content(
         &mut hold.pan,
         time.delta(),
-        active_pan_content(active_gamepad, state.speed(OrbitCamInteractionKind::Pan)),
+        active_pan_content(
+            active_gamepad,
+            orbit_cam_interaction_state.speed(OrbitCamInteractionKind::Pan),
+        ),
     );
     let zoom = held_content(
         &mut hold.zoom,
         time.delta(),
-        active_zoom_content(active_gamepad, state.speed(OrbitCamInteractionKind::Zoom)),
+        active_zoom_content(
+            active_gamepad,
+            orbit_cam_interaction_state.speed(OrbitCamInteractionKind::Zoom),
+        ),
     );
 
     for (entity, label) in &labels {

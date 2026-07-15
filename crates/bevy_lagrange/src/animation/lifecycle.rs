@@ -161,11 +161,11 @@ pub(super) fn on_play_animation(
         return;
     }
 
-    let policy = conflict_query.get(entity).copied().unwrap_or_default();
+    let animation_conflict_policy = conflict_query.get(entity).copied().unwrap_or_default();
     let has_in_flight = move_list_query.get(entity).is_ok();
 
     if has_in_flight {
-        match policy {
+        match animation_conflict_policy {
             AnimationConflictPolicy::FirstWins => {
                 commands.trigger(AnimationRejected {
                     camera: entity,

@@ -318,7 +318,7 @@ fn clear_camera_input<K: RuntimeInputModeKind>(world: &mut World, camera: Entity
 fn replace_input_installation<K: RuntimeInputModeKind>(
     world: &mut World,
     camera: Entity,
-    mode: RuntimeInputMode,
+    runtime_input_mode: RuntimeInputMode,
 ) {
     // Drop the previous installation through the `Actions` relationship rather
     // than iterating `installed_input_entities`. That flat list holds both the
@@ -331,7 +331,7 @@ fn replace_input_installation<K: RuntimeInputModeKind>(
         .entity_mut(camera)
         .despawn_related::<Actions<K::Context>>();
 
-    let entities = match mode {
+    let entities = match runtime_input_mode {
         RuntimeInputMode::Bindings => {
             vec![
                 world

@@ -89,11 +89,11 @@ impl ProjectionParameters {
 pub fn project_point(
     point: Vec3,
     camera: &ProjectionBasis,
-    mode: ProjectionMode,
+    projection_mode: ProjectionMode,
 ) -> Option<(f32, f32, f32)> {
     let relative = point - *camera.position;
     let depth = relative.dot(camera.forward);
-    let is_visible = match mode {
+    let is_visible = match projection_mode {
         ProjectionMode::Perspective => depth > MIN_VISIBLE_DEPTH,
         ProjectionMode::Orthographic => true,
     };
@@ -102,7 +102,7 @@ pub fn project_point(
     }
     let x = relative.dot(camera.right);
     let y = relative.dot(camera.up);
-    let (normalized_x, normalized_y) = match mode {
+    let (normalized_x, normalized_y) = match projection_mode {
         ProjectionMode::Orthographic => (x, y),
         ProjectionMode::Perspective => (x / depth, y / depth),
     };

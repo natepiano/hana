@@ -32,6 +32,9 @@ pub(super) const ORBIT_CAM_CAMERA_LABEL: &str = "OrbitCam";
 // debounce durations
 pub(super) const DEFAULT_REPORTING_DEBOUNCE: Duration = Duration::from_millis(100);
 
+// interaction lifecycle
+pub(super) const INTERACTION_CHANNEL_COUNT: usize = 3;
+
 // mode labels
 pub(super) const INPUT_MODE_LABEL: &str = "Input";
 pub(super) const PRESET_MODE_LABEL: &str = "Preset";

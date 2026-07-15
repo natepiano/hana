@@ -144,12 +144,12 @@ pub fn validate_slow_mode(slow_mode: Option<&CameraSlowMode>) -> Result<(), Bind
     validate_scale_policy(slow_mode.scale)
 }
 
-fn validate_scale_policy(policy: CameraInputScalePolicy) -> Result<(), BindingsError> {
-    if !policy.normal.is_finite()
-        || !policy.slow.is_finite()
-        || policy.normal <= 0.0
-        || policy.slow <= 0.0
-        || policy.slow > policy.normal
+fn validate_scale_policy(scale_policy: CameraInputScalePolicy) -> Result<(), BindingsError> {
+    if !scale_policy.normal.is_finite()
+        || !scale_policy.slow.is_finite()
+        || scale_policy.normal <= 0.0
+        || scale_policy.slow <= 0.0
+        || scale_policy.slow > scale_policy.normal
     {
         return Err(BindingsError::InvalidScale);
     }

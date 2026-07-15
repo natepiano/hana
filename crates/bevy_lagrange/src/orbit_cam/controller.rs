@@ -52,8 +52,8 @@ impl MotionStatus {
 
 /// Holds the orbit target's pitch within `[-PI/2, PI/2]` when the policy forbids
 /// orbiting upside down; leaves it untouched when the policy allows it.
-fn constrain_angles(angles: OrbitAngles, policy: UpsideDownPolicy) -> OrbitAngles {
-    match policy {
+fn constrain_angles(angles: OrbitAngles, upside_down_policy: UpsideDownPolicy) -> OrbitAngles {
+    match upside_down_policy {
         UpsideDownPolicy::Prevent => OrbitAngles {
             yaw:   angles.yaw,
             pitch: angles.pitch.clamp(-FRAC_PI_2, FRAC_PI_2),

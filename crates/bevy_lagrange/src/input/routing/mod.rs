@@ -103,7 +103,7 @@ impl Plugin for CameraInputRoutingPlugin {
 }
 
 fn resolve_camera_input_routing(world: &mut World) {
-    let config = *world.resource::<CameraInputRoutingConfig>();
+    let camera_input_routing_config = *world.resource::<CameraInputRoutingConfig>();
     let windows = collect_window_snapshots(world);
     let snapshots = collect_camera_snapshots(world, &windows);
     let available_cameras = snapshots
@@ -126,7 +126,12 @@ fn resolve_camera_input_routing(world: &mut World) {
         slow_latches.clone()
     };
 
-    let routed_camera = select_routed_camera(&config, &snapshots, &available_cameras, &latches);
+    let routed_camera = select_routed_camera(
+        &camera_input_routing_config,
+        &snapshots,
+        &available_cameras,
+        &latches,
+    );
     let mut resolved = ResolvedCameraInputRoute {
         routed_camera,
         metrics: HashMap::new(),

@@ -97,15 +97,17 @@ const fn interrupt_behavior_description(behavior: CameraInputInterruptBehavior) 
     }
 }
 
-const fn conflict_policy_label(policy: AnimationConflictPolicy) -> &'static str {
-    match policy {
+const fn conflict_policy_label(animation_conflict_policy: AnimationConflictPolicy) -> &'static str {
+    match animation_conflict_policy {
         AnimationConflictPolicy::LastWins => "LastWins",
         AnimationConflictPolicy::FirstWins => "FirstWins",
     }
 }
 
-const fn conflict_policy_description(policy: AnimationConflictPolicy) -> &'static str {
-    match policy {
+const fn conflict_policy_description(
+    animation_conflict_policy: AnimationConflictPolicy,
+) -> &'static str {
+    match animation_conflict_policy {
         AnimationConflictPolicy::LastWins => "new animation cancels current one",
         AnimationConflictPolicy::FirstWins => "new animation is rejected while one is playing",
     }
@@ -389,9 +391,9 @@ fn build_variant_row(
     styles: &PolicyTextStyles,
     label: &str,
     description: &str,
-    state: RowState,
+    row_state: RowState,
 ) {
-    let name_style = match state {
+    let name_style = match row_state {
         RowState::Active => &styles.active,
         RowState::Inactive => &styles.name,
     };

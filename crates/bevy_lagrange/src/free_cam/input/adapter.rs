@@ -599,14 +599,14 @@ mod tests {
         )
     }
 
-    fn spawn_camera_with_mode(app: &mut App, mode: FreeCamInputMode) -> Entity {
+    fn spawn_camera_with_mode(app: &mut App, free_cam_input_mode: FreeCamInputMode) -> Entity {
         app.world_mut()
             .spawn((
                 FreeCam::default(),
                 FreeCamInput::default(),
                 Camera::default(),
                 RenderTarget::Window(WindowRef::Primary),
-                mode,
+                free_cam_input_mode,
             ))
             .id()
     }

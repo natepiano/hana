@@ -1646,8 +1646,8 @@ mod tests {
                 .smooth_scroll_input_gain(OrbitCamInputGain::uniform(disabled)),
         );
         let bindings = preset.to_bindings()?;
-        let mode = OrbitCamInputMode::with_preset(preset);
-        let summary = describe_orbit_cam_controls(&mode);
+        let orbit_cam_input_mode = OrbitCamInputMode::with_preset(preset);
+        let summary = describe_orbit_cam_controls(&orbit_cam_input_mode);
         let labels = summary_labels(&summary);
 
         assert!(effective_slow_mode(&bindings).is_some());
@@ -1674,9 +1674,13 @@ mod tests {
             .orbit(OrbitCamMouseDrag::new(MouseButton::Middle).with_input_gain(disabled))
             .build()?;
         assert!(effective_slow_mode(&bindings).is_none());
-        let mode = OrbitCamInputMode::Bindings(bindings);
+        let orbit_cam_input_mode = OrbitCamInputMode::Bindings(bindings);
 
-        assert!(describe_orbit_cam_controls(&mode).rows.is_empty());
+        assert!(
+            describe_orbit_cam_controls(&orbit_cam_input_mode)
+                .rows
+                .is_empty()
+        );
 
         Ok(())
     }

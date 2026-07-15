@@ -35,12 +35,16 @@ use crate::system_sets::CameraInputInternalSet;
 
 pub struct OrbitCamInputAdapterPlugin;
 
-pub(super) fn apply_scale(value: f32, policy: CameraInputScalePolicy, slow_active: bool) -> f32 {
+pub(super) fn apply_scale(
+    value: f32,
+    scale_policy: CameraInputScalePolicy,
+    slow_active: bool,
+) -> f32 {
     value
         * if slow_active {
-            policy.slow
+            scale_policy.slow
         } else {
-            policy.normal
+            scale_policy.normal
         }
 }
 

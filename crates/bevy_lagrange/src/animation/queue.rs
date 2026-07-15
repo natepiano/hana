@@ -1162,7 +1162,7 @@ mod tests {
     fn spawn_pipeline_animated_camera(
         app: &mut App,
         interrupt_behavior: CameraInputInterruptBehavior,
-        mode: OrbitCamInputMode,
+        orbit_cam_input_mode: OrbitCamInputMode,
     ) -> Entity {
         let camera = app
             .world_mut()
@@ -1178,7 +1178,7 @@ mod tests {
                     ANIMATION_RADIUS,
                 )])),
                 interrupt_behavior,
-                mode,
+                orbit_cam_input_mode,
             ))
             .id();
         observe_animation_events(app.world_mut(), camera);

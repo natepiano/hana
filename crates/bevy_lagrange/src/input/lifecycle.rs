@@ -31,6 +31,7 @@ use super::OrbitCamInteractionState;
 use super::ResolvedCameraInputRoute;
 use super::ZoomDirection;
 use super::constants::DEFAULT_REPORTING_DEBOUNCE;
+use super::constants::INTERACTION_CHANNEL_COUNT;
 use crate::FreeCamKind;
 use crate::OrbitCamKind;
 use crate::system_sets::CameraInputPhase;
@@ -88,14 +89,12 @@ enum InputMetricStatus {
 
 #[derive(Clone)]
 struct FinalizedInput<K: CameraInputLifecycleKind> {
-    camera: Entity,
-    input:  InputIntent<K>,
-    state:  K::InteractionState,
-    settle: CameraReportedInteractionSettle<K>,
-    events: Vec<LifecycleEvent<K>>,
+    camera:            Entity,
+    input:             InputIntent<K>,
+    interaction_state: K::InteractionState,
+    settle:            CameraReportedInteractionSettle<K>,
+    events:            Vec<LifecycleEvent<K>>,
 }
-
-const INTERACTION_CHANNEL_COUNT: usize = 3;
 
 /// The source and speed settle deadlines tracked per interaction kind.
 #[derive(Clone, Copy, Debug, Default)]
@@ -589,7 +588,7 @@ fn finalize_camera_input<K: CameraInputLifecycleKind>(world: &mut World) {
         }
         world
             .entity_mut(finalized.camera)
-            .insert((finalized.state, finalized.settle));
+            .insert((finalized.interaction_state, finalized.settle));
         for event in finalized.events {
             apply_lifecycle_event::<K>(world, finalized.camera, event);
         }
@@ -631,7 +630,7 @@ fn finalize_camera_input_state<K: CameraInputLifecycleKind>(
         K::apply_metric_guard(camera, &mut input, metrics, &mut events);
     }
 
-    let mut state = K::InteractionState::default();
+    let mut interaction_state = K::InteractionState::default();
     let mut settle = CameraReportedInteractionSettle::default();
     for report in K::channel_reports(&input) {
         let previous_sources = K::state_sources(&previous, report.kind);
@@ -643,15 +642,15 @@ fn finalize_camera_input_state<K: CameraInputLifecycleKind>(
             settle_context,
         );
         push_state_transition(camera, report.kind, previous_sources, reported, &mut events);
-        K::set_state_sources(&mut state, report.kind, reported);
+        K::set_state_sources(&mut interaction_state, report.kind, reported);
     }
-    K::update_extra_state(&input, previous, &mut state);
+    K::update_extra_state(&input, previous, &mut interaction_state);
 
     report_speeds(
         &input,
         previous,
         settle_context,
-        &mut state,
+        &mut interaction_state,
         &mut settle,
         &mut events,
     );
@@ -659,7 +658,7 @@ fn finalize_camera_input_state<K: CameraInputLifecycleKind>(
     FinalizedInput {
         camera,
         input,
-        state,
+        interaction_state,
         settle,
         events,
     }
