@@ -32,6 +32,7 @@ use super::constants::ENTITY_ATTACHMENT_SECTION_INDEX;
 use super::constants::INSIDE_VIEW_SECTION_INDEX;
 use super::constants::NAV_PANEL_ACTIVE_COLOR;
 use super::constants::NAV_PANEL_DISABLED_COLOR;
+use super::constants::NAV_PANEL_HEADER;
 use super::constants::NAV_PANEL_HEADER_GAP;
 use super::constants::NAV_PANEL_HEADER_SIZE;
 use super::constants::NAV_PANEL_LEFT_ARROW;
@@ -246,7 +247,7 @@ fn build_header(
         El::row().gap(NAV_PANEL_HEADER_GAP).align_y(AlignY::Center),
         |builder| {
             builder.text((NAV_PANEL_LEFT_ARROW, text_style(left)));
-            builder.text(("Sections", header_text_style(TITLE_COLOR)));
+            builder.text((NAV_PANEL_HEADER, header_text_style(TITLE_COLOR)));
             builder.text((NAV_PANEL_RIGHT_ARROW, text_style(right)));
         },
     );

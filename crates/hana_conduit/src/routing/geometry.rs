@@ -59,15 +59,6 @@ pub struct Anchor {
     pub exit:     AnchorExit,
 }
 
-impl From<Vec3> for Anchor {
-    fn from(position: Vec3) -> Self {
-        Self {
-            position,
-            exit: AnchorExit::Unconstrained,
-        }
-    }
-}
-
 impl Anchor {
     /// World position of this anchor's lead tip, or `None` when the exit is
     /// [`AnchorExit::Unconstrained`].
@@ -76,6 +67,15 @@ impl Anchor {
         match self.exit {
             AnchorExit::Unconstrained => None,
             AnchorExit::Lead { direction, length } => Some(self.position + direction * length),
+        }
+    }
+}
+
+impl From<Vec3> for Anchor {
+    fn from(position: Vec3) -> Self {
+        Self {
+            position,
+            exit: AnchorExit::Unconstrained,
         }
     }
 }
@@ -118,6 +118,23 @@ pub struct CableSegment {
     pub length:      f32,
 }
 
+impl CableSegment {
+    /// Create a segment by evenly sampling `n` points along a straight line.
+    #[must_use]
+    pub fn straight_line(start: impl Into<Vec3>, end: impl Into<Vec3>, n: usize) -> Self {
+        let start: Vec3 = start.into();
+        let end: Vec3 = end.into();
+        let n = n.max(MIN_CABLE_SAMPLE_POINTS.to_usize());
+        let points: Vec<Vec3> = (0..n)
+            .map(|i| {
+                let t = i.to_f32() / (n - 1).to_f32();
+                start.lerp(end, t)
+            })
+            .collect();
+        points.into()
+    }
+}
+
 impl From<Vec<Vec3>> for CableSegment {
     fn from(points: Vec<Vec3>) -> Self {
         if points.is_empty() {
@@ -157,23 +174,6 @@ impl From<Vec<Vec3>> for CableSegment {
             arc_lengths,
             length: cumulative,
         }
-    }
-}
-
-impl CableSegment {
-    /// Create a segment by evenly sampling `n` points along a straight line.
-    #[must_use]
-    pub fn straight_line(start: impl Into<Vec3>, end: impl Into<Vec3>, n: usize) -> Self {
-        let start: Vec3 = start.into();
-        let end: Vec3 = end.into();
-        let n = n.max(MIN_CABLE_SAMPLE_POINTS.to_usize());
-        let points: Vec<Vec3> = (0..n)
-            .map(|i| {
-                let t = i.to_f32() / (n - 1).to_f32();
-                start.lerp(end, t)
-            })
-            .collect();
-        points.into()
     }
 }
 

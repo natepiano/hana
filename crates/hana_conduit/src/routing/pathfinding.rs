@@ -24,51 +24,6 @@ use super::obstacle::Obstacle;
 use super::obstacle::PointContainment;
 use super::solver::PathPlanner;
 
-/// 3D grid cell coordinate.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-struct Cell {
-    x: i32,
-    y: i32,
-    z: i32,
-}
-
-impl Cell {
-    fn to_world(self, origin: Vec3, grid_size: f32) -> Vec3 {
-        origin
-            + Vec3::new(
-                self.x.to_f32() * grid_size,
-                self.y.to_f32() * grid_size,
-                self.z.to_f32() * grid_size,
-            )
-    }
-}
-
-/// Entry in the A* priority queue (min-heap by `f_score`).
-struct OpenEntry {
-    cell:    Cell,
-    f_score: f32,
-}
-
-impl PartialEq for OpenEntry {
-    fn eq(&self, other: &Self) -> bool { self.f_score == other.f_score }
-}
-
-impl Eq for OpenEntry {}
-
-impl PartialOrd for OpenEntry {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
-}
-
-impl Ord for OpenEntry {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Reverse order for min-heap (`BinaryHeap` is max-heap)
-        other
-            .f_score
-            .partial_cmp(&self.f_score)
-            .unwrap_or(Ordering::Equal)
-    }
-}
-
 /// 3D grid-based A* path planner that routes around obstacles.
 #[derive(Clone, Debug)]
 pub struct AStarPlanner {
@@ -78,16 +33,6 @@ pub struct AStarPlanner {
     pub margin:    f32,
     /// Maximum number of cells to explore before giving up.
     pub max_cells: usize,
-}
-
-impl Default for AStarPlanner {
-    fn default() -> Self {
-        Self {
-            grid_size: DEFAULT_GRID_SIZE,
-            margin:    DEFAULT_OBSTACLE_MARGIN,
-            max_cells: DEFAULT_ASTAR_MAX_CELLS,
-        }
-    }
 }
 
 impl AStarPlanner {
@@ -257,6 +202,67 @@ impl AStarPlanner {
 
         None
     }
+
+    /// Check if any obstacle intersects the direct line from start to end.
+    fn is_direct_path_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
+        obstacle::is_segment_blocked(
+            start,
+            end,
+            obstacles,
+            self.margin,
+            ASTAR_SEGMENT_SAMPLE_STEPS,
+        )
+    }
+
+    /// Pull the path taut: from each kept waypoint, jump straight to the
+    /// farthest later waypoint whose connecting segment clears every obstacle,
+    /// discarding the grid staircase in between.
+    fn shortcut_path(&self, waypoints: &mut Vec<Vec3>, obstacles: &[Obstacle]) {
+        let Some(&first) = waypoints.first() else {
+            return;
+        };
+        let mut shortened = vec![first];
+        let mut current = 0;
+        while current + 1 < waypoints.len() {
+            let next = (current + 1..waypoints.len())
+                .rev()
+                .find(|&candidate| {
+                    match self.is_shortcut_blocked(
+                        waypoints[current],
+                        waypoints[candidate],
+                        obstacles,
+                    ) {
+                        Blockage::Clear => true,
+                        Blockage::Blocked => false,
+                    }
+                })
+                .unwrap_or(current + 1);
+            shortened.push(waypoints[next]);
+            current = next;
+        }
+        *waypoints = shortened;
+    }
+
+    /// Segment blockage test whose sample count scales with segment length
+    /// ([`ASTAR_SHORTCUT_SAMPLES_PER_CELL`] per grid cell), so a long shortcut
+    /// cannot step over a thin obstacle between samples.
+    fn is_shortcut_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
+        let steps = (start.distance(end) / self.grid_size * ASTAR_SHORTCUT_SAMPLES_PER_CELL)
+            .ceil()
+            .to_u32()
+            .max(1);
+        obstacle::is_segment_blocked(start, end, obstacles, self.margin, steps)
+    }
+}
+
+impl Default for AStarPlanner {
+    fn default() -> Self {
+        Self {
+            grid_size: DEFAULT_GRID_SIZE,
+            margin:    DEFAULT_OBSTACLE_MARGIN,
+            max_cells: DEFAULT_ASTAR_MAX_CELLS,
+        }
+    }
 }
 
 impl PathPlanner for AStarPlanner {
@@ -311,56 +317,48 @@ impl PathPlanner for AStarPlanner {
     }
 }
 
-impl AStarPlanner {
-    /// Check if any obstacle intersects the direct line from start to end.
-    fn is_direct_path_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
-        obstacle::is_segment_blocked(
-            start,
-            end,
-            obstacles,
-            self.margin,
-            ASTAR_SEGMENT_SAMPLE_STEPS,
-        )
-    }
+/// 3D grid cell coordinate.
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct Cell {
+    x: i32,
+    y: i32,
+    z: i32,
+}
 
-    /// Pull the path taut: from each kept waypoint, jump straight to the
-    /// farthest later waypoint whose connecting segment clears every obstacle,
-    /// discarding the grid staircase in between.
-    fn shortcut_path(&self, waypoints: &mut Vec<Vec3>, obstacles: &[Obstacle]) {
-        let Some(&first) = waypoints.first() else {
-            return;
-        };
-        let mut shortened = vec![first];
-        let mut current = 0;
-        while current + 1 < waypoints.len() {
-            let next = (current + 1..waypoints.len())
-                .rev()
-                .find(|&candidate| {
-                    match self.is_shortcut_blocked(
-                        waypoints[current],
-                        waypoints[candidate],
-                        obstacles,
-                    ) {
-                        Blockage::Clear => true,
-                        Blockage::Blocked => false,
-                    }
-                })
-                .unwrap_or(current + 1);
-            shortened.push(waypoints[next]);
-            current = next;
-        }
-        *waypoints = shortened;
+impl Cell {
+    fn to_world(self, origin: Vec3, grid_size: f32) -> Vec3 {
+        origin
+            + Vec3::new(
+                self.x.to_f32() * grid_size,
+                self.y.to_f32() * grid_size,
+                self.z.to_f32() * grid_size,
+            )
     }
+}
 
-    /// Segment blockage test whose sample count scales with segment length
-    /// ([`ASTAR_SHORTCUT_SAMPLES_PER_CELL`] per grid cell), so a long shortcut
-    /// cannot step over a thin obstacle between samples.
-    fn is_shortcut_blocked(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Blockage {
-        let steps = (start.distance(end) / self.grid_size * ASTAR_SHORTCUT_SAMPLES_PER_CELL)
-            .ceil()
-            .to_u32()
-            .max(1);
-        obstacle::is_segment_blocked(start, end, obstacles, self.margin, steps)
+/// Entry in the A* priority queue (min-heap by `f_score`).
+struct OpenEntry {
+    cell:    Cell,
+    f_score: f32,
+}
+
+impl PartialEq for OpenEntry {
+    fn eq(&self, other: &Self) -> bool { self.f_score == other.f_score }
+}
+
+impl Eq for OpenEntry {}
+
+impl PartialOrd for OpenEntry {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+}
+
+impl Ord for OpenEntry {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // Reverse order for min-heap (`BinaryHeap` is max-heap)
+        other
+            .f_score
+            .partial_cmp(&self.f_score)
+            .unwrap_or(Ordering::Equal)
     }
 }
 

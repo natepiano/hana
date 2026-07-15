@@ -20,24 +20,7 @@ use crate::routing::MIN_SEGMENT_LENGTH;
 use crate::routing::Obstacle;
 use crate::routing::RouteRequest;
 
-/// `SystemSet` for cross-plugin ordering. `GizmosPlugin` render systems run
-/// `.after(CableSystems::Compute)` to observe freshly-computed geometry in the
-/// same frame.
-#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum CableSystems {
-    Compute,
-}
-
-/// Cables queued for geometry recomputation this frame. Drained by
-/// [`recompute_dirty_cables`].
-#[derive(Resource, Default, Deref, DerefMut)]
-pub(super) struct DirtyCables(pub(super) EntityHashSet);
-
 pub(super) struct ComputePlugin;
-
-/// Last world-space position resolved for an endpoint while it was attached.
-#[derive(Component, Clone, Copy)]
-pub(super) struct ResolvedEndpointPosition(pub(super) Vec3);
 
 impl Plugin for ComputePlugin {
     fn build(&self, app: &mut App) {
@@ -58,6 +41,23 @@ impl Plugin for ComputePlugin {
         );
     }
 }
+
+/// `SystemSet` for cross-plugin ordering. `GizmosPlugin` render systems run
+/// `.after(CableSystems::Compute)` to observe freshly-computed geometry in the
+/// same frame.
+#[derive(SystemSet, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) enum CableSystems {
+    Compute,
+}
+
+/// Cables queued for geometry recomputation this frame. Drained by
+/// [`recompute_dirty_cables`].
+#[derive(Resource, Default, Deref, DerefMut)]
+pub(super) struct DirtyCables(pub(super) EntityHashSet);
+
+/// Last world-space position resolved for an endpoint while it was attached.
+#[derive(Component, Clone, Copy)]
+pub(super) struct ResolvedEndpointPosition(pub(super) Vec3);
 
 /// `ComputedCableGeometry`, populated by the cable recompute queue.
 ///

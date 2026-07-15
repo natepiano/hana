@@ -34,6 +34,90 @@ use super::geometry::RouteRequest;
 use super::solver::CurveSolver;
 use super::solver::RouteSolver;
 
+/// Solver that computes catenary curves between cable endpoints.
+///
+/// Implements both [`CurveSolver`] (for use with [`Router`](crate::Router)) and [`RouteSolver`]
+/// (for standalone use without obstacle avoidance).
+#[derive(Clone, Debug, Reflect)]
+pub struct CatenarySolver {
+    /// Cable length / straight-line distance. Values > 1.0 add sag.
+    pub slack:             f32,
+    /// Gravity direction (not necessarily normalized; magnitude is ignored).
+    pub gravity:           Vec3,
+    /// Default sample resolution when not specified by the request.
+    pub resolution:        u32,
+    /// Additional slack applied when a cable endpoint detaches. `None` disables the bump.
+    pub detach_slack_bump: Option<f32>,
+}
+
+impl CatenarySolver {
+    /// Create a catenary solver with default parameters.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self {
+            slack:             DEFAULT_SLACK,
+            gravity:           DEFAULT_GRAVITY,
+            resolution:        DEFAULT_RESOLUTION,
+            detach_slack_bump: None,
+        }
+    }
+
+    /// Set the slack factor.
+    #[must_use]
+    pub const fn with_slack(mut self, slack: f32) -> Self {
+        self.slack = slack;
+        self
+    }
+
+    /// Set the gravity vector.
+    #[must_use]
+    pub const fn with_gravity(mut self, gravity: Vec3) -> Self {
+        self.gravity = gravity;
+        self
+    }
+
+    /// Set the default sample resolution.
+    #[must_use]
+    pub const fn with_resolution(mut self, resolution: u32) -> Self {
+        self.resolution = resolution;
+        self
+    }
+
+    /// Configure extra slack to apply when any endpoint of the owning cable detaches.
+    #[must_use]
+    pub const fn with_detach_slack_bump(mut self, bump: f32) -> Self {
+        self.detach_slack_bump = Some(bump);
+        self
+    }
+}
+
+impl Default for CatenarySolver {
+    fn default() -> Self {
+        Self {
+            slack:             DEFAULT_SLACK,
+            gravity:           DEFAULT_GRAVITY,
+            resolution:        DEFAULT_RESOLUTION,
+            detach_slack_bump: None,
+        }
+    }
+}
+
+impl CurveSolver for CatenarySolver {
+    fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
+        let gravity_direction = self.gravity.normalize_or_zero();
+        sample_3d(start, end, self.slack, gravity_direction, resolution)
+    }
+}
+
+impl RouteSolver for CatenarySolver {
+    fn solve(&self, request: &RouteRequest) -> CableGeometry {
+        let resolution = request.effective_resolution(self.resolution);
+        let segment = self.solve_segment(request.start.position, request.end.position, resolution);
+        let waypoints = vec![request.start.position, request.end.position];
+        CableGeometry::from_segments(vec![segment], waypoints)
+    }
+}
+
 /// Evaluate the catenary function: `a * cosh(x / a)`.
 #[must_use]
 pub fn evaluate(x: f32, a: f32) -> f32 { a * (x / a).cosh() }
@@ -280,88 +364,4 @@ fn sample_parabolic_fallback(
         .collect();
 
     points.into()
-}
-
-/// Solver that computes catenary curves between cable endpoints.
-///
-/// Implements both [`CurveSolver`] (for use with [`Router`](crate::Router)) and [`RouteSolver`]
-/// (for standalone use without obstacle avoidance).
-#[derive(Clone, Debug, Reflect)]
-pub struct CatenarySolver {
-    /// Cable length / straight-line distance. Values > 1.0 add sag.
-    pub slack:             f32,
-    /// Gravity direction (not necessarily normalized; magnitude is ignored).
-    pub gravity:           Vec3,
-    /// Default sample resolution when not specified by the request.
-    pub resolution:        u32,
-    /// Additional slack applied when a cable endpoint detaches. `None` disables the bump.
-    pub detach_slack_bump: Option<f32>,
-}
-
-impl Default for CatenarySolver {
-    fn default() -> Self {
-        Self {
-            slack:             DEFAULT_SLACK,
-            gravity:           DEFAULT_GRAVITY,
-            resolution:        DEFAULT_RESOLUTION,
-            detach_slack_bump: None,
-        }
-    }
-}
-
-impl CatenarySolver {
-    /// Create a catenary solver with default parameters.
-    #[must_use]
-    pub const fn new() -> Self {
-        Self {
-            slack:             DEFAULT_SLACK,
-            gravity:           DEFAULT_GRAVITY,
-            resolution:        DEFAULT_RESOLUTION,
-            detach_slack_bump: None,
-        }
-    }
-
-    /// Set the slack factor.
-    #[must_use]
-    pub const fn with_slack(mut self, slack: f32) -> Self {
-        self.slack = slack;
-        self
-    }
-
-    /// Set the gravity vector.
-    #[must_use]
-    pub const fn with_gravity(mut self, gravity: Vec3) -> Self {
-        self.gravity = gravity;
-        self
-    }
-
-    /// Set the default sample resolution.
-    #[must_use]
-    pub const fn with_resolution(mut self, resolution: u32) -> Self {
-        self.resolution = resolution;
-        self
-    }
-
-    /// Configure extra slack to apply when any endpoint of the owning cable detaches.
-    #[must_use]
-    pub const fn with_detach_slack_bump(mut self, bump: f32) -> Self {
-        self.detach_slack_bump = Some(bump);
-        self
-    }
-}
-
-impl CurveSolver for CatenarySolver {
-    fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
-        let gravity_direction = self.gravity.normalize_or_zero();
-        sample_3d(start, end, self.slack, gravity_direction, resolution)
-    }
-}
-
-impl RouteSolver for CatenarySolver {
-    fn solve(&self, request: &RouteRequest) -> CableGeometry {
-        let resolution = request.effective_resolution(self.resolution);
-        let segment = self.solve_segment(request.start.position, request.end.position, resolution);
-        let waypoints = vec![request.start.position, request.end.position];
-        CableGeometry::from_segments(vec![segment], waypoints)
-    }
 }

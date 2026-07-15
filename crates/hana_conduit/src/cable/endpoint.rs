@@ -22,6 +22,65 @@ pub enum CableEnd {
     End,
 }
 
+/// How the cable leaves a [`CableEndpoint`] before the solver takes over.
+///
+/// A lead is waypoint-level geometry, so every [`Solver`] honors it — the
+/// routed span begins at the lead's tip and the lead itself is always a
+/// straight segment. Curve-level exit behavior (bending a catenary's end
+/// tangent) is a solver concern and belongs on `CatenarySolver`, not here.
+#[derive(Clone, Copy, Debug, Default, Reflect)]
+pub enum EndpointExit {
+    /// The solver routes directly from the endpoint position.
+    #[default]
+    Unconstrained,
+    /// The cable leaves along `axis` as a straight lead of `length` metres,
+    /// and the solver routes the remainder from the lead's tip. `axis` is in
+    /// the [`AttachedTo`] target's local space; world space when
+    /// world-attached.
+    Lead {
+        /// Exit axis the lead points along.
+        axis:   Dir3,
+        /// Length of the straight lead, in metres.
+        length: f32,
+    },
+}
+
+/// How the [`AttachedTo`] target of a [`CableEndpoint`] rotates to follow the cable's
+/// tangent at that endpoint.
+///
+/// Assumes the target's `+Y` axis is its "cable-exit" axis (matches Bevy's GLTF import
+/// convention). Models with a different local axis should wrap in a parent entity.
+#[derive(Clone, Copy, Debug, Default, Reflect)]
+pub enum EndpointAlignment {
+    /// The target's rotation is not touched. It stays in whatever orientation it
+    /// was spawned with.
+    #[default]
+    AsSpawned,
+    /// Orient the target's `+Y` axis along the cable's tangent at this endpoint,
+    /// constrained to world-`Y` up so the target never rolls as the cable sweeps.
+    Fixed,
+    /// Orient the target's `+Y` axis along the cable's tangent via shortest-arc
+    /// rotation — the target rolls with the cable's natural twist.
+    Rotating,
+}
+
+/// What happens when an endpoint's target entity is despawned.
+///
+/// When a target entity is despawned, Bevy auto-removes the [`AttachedTo`] relationship.
+/// An `OnRemove<AttachedTo>` observer fires and reads this policy to decide behavior.
+///
+/// How the curve itself reacts to detachment (e.g. increasing slack on a catenary) is a
+/// per-solver concern — see `CatenarySolver::with_detach_slack_bump`.
+#[derive(Clone, Debug, Default, Reflect)]
+pub enum DetachPolicy {
+    /// Convert to world-attached at the last resolved position. The cable's
+    /// `ComputedCableGeometry` curve stays unchanged.
+    #[default]
+    Remain,
+    /// Despawn the entire cable when this endpoint's target is removed.
+    Despawn,
+}
+
 /// A cable endpoint entity. Spawned as a child of a [`Cable`] entity.
 ///
 /// `offset` has different semantics depending on whether [`AttachedTo`] is present:
@@ -87,65 +146,6 @@ impl CableEndpoint {
         self.exit = exit;
         self
     }
-}
-
-/// How the cable leaves a [`CableEndpoint`] before the solver takes over.
-///
-/// A lead is waypoint-level geometry, so every [`Solver`] honors it — the
-/// routed span begins at the lead's tip and the lead itself is always a
-/// straight segment. Curve-level exit behavior (bending a catenary's end
-/// tangent) is a solver concern and belongs on `CatenarySolver`, not here.
-#[derive(Clone, Copy, Debug, Default, Reflect)]
-pub enum EndpointExit {
-    /// The solver routes directly from the endpoint position.
-    #[default]
-    Unconstrained,
-    /// The cable leaves along `axis` as a straight lead of `length` metres,
-    /// and the solver routes the remainder from the lead's tip. `axis` is in
-    /// the [`AttachedTo`] target's local space; world space when
-    /// world-attached.
-    Lead {
-        /// Exit axis the lead points along.
-        axis:   Dir3,
-        /// Length of the straight lead, in metres.
-        length: f32,
-    },
-}
-
-/// How the [`AttachedTo`] target of a [`CableEndpoint`] rotates to follow the cable's
-/// tangent at that endpoint.
-///
-/// Assumes the target's `+Y` axis is its "cable-exit" axis (matches Bevy's GLTF import
-/// convention). Models with a different local axis should wrap in a parent entity.
-#[derive(Clone, Copy, Debug, Default, Reflect)]
-pub enum EndpointAlignment {
-    /// The target's rotation is not touched. It stays in whatever orientation it
-    /// was spawned with.
-    #[default]
-    AsSpawned,
-    /// Orient the target's `+Y` axis along the cable's tangent at this endpoint,
-    /// constrained to world-`Y` up so the target never rolls as the cable sweeps.
-    Fixed,
-    /// Orient the target's `+Y` axis along the cable's tangent via shortest-arc
-    /// rotation — the target rolls with the cable's natural twist.
-    Rotating,
-}
-
-/// What happens when an endpoint's target entity is despawned.
-///
-/// When a target entity is despawned, Bevy auto-removes the [`AttachedTo`] relationship.
-/// An `OnRemove<AttachedTo>` observer fires and reads this policy to decide behavior.
-///
-/// How the curve itself reacts to detachment (e.g. increasing slack on a catenary) is a
-/// per-solver concern — see `CatenarySolver::with_detach_slack_bump`.
-#[derive(Clone, Debug, Default, Reflect)]
-pub enum DetachPolicy {
-    /// Convert to world-attached at the last resolved position. The cable's
-    /// `ComputedCableGeometry` curve stays unchanged.
-    #[default]
-    Remain,
-    /// Despawn the entire cable when this endpoint's target is removed.
-    Despawn,
 }
 
 /// Relationship: endpoint → target entity it follows.

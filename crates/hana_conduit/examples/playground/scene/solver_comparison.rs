@@ -16,8 +16,11 @@ use crate::constants::NODE_Y;
 use crate::constants::SECTION_X;
 use crate::constants::SLACK_NORMAL;
 use crate::constants::SOLVER_COMPARISON_SECTION_INDEX;
+use crate::constants::SOLVER_FACE_CATENARY_INDEX;
 use crate::constants::SOLVER_FACE_LABEL_SIZE;
 use crate::constants::SOLVER_FACE_LABELS;
+use crate::constants::SOLVER_FACE_LINEAR_INDEX;
+use crate::constants::SOLVER_FACE_ROUTED_INDEX;
 use crate::constants::SPAN_HALF_X;
 use crate::entities;
 
@@ -46,7 +49,7 @@ pub(super) fn setup_section_solver_comparison(
         node_material,
         start,
         end,
-        SOLVER_FACE_LABELS[0],
+        SOLVER_FACE_LABELS[SOLVER_FACE_CATENARY_INDEX],
     );
     entities::spawn_cable(
         commands,
@@ -73,7 +76,7 @@ pub(super) fn setup_section_solver_comparison(
         node_material,
         start,
         end,
-        SOLVER_FACE_LABELS[1],
+        SOLVER_FACE_LABELS[SOLVER_FACE_LINEAR_INDEX],
     );
     entities::spawn_cable(commands, start, end, Solver::Linear, vec![], cable_material);
 
@@ -93,7 +96,7 @@ pub(super) fn setup_section_solver_comparison(
         node_material,
         start,
         end,
-        SOLVER_FACE_LABELS[2],
+        SOLVER_FACE_LABELS[SOLVER_FACE_ROUTED_INDEX],
     );
     entities::spawn_cable(
         commands,

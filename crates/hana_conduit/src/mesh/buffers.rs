@@ -7,6 +7,20 @@ pub(super) enum WindingOrder {
     Reversed,
 }
 
+/// Mutable references to the mesh attribute buffers being built.
+pub(super) struct MeshBuffers<'a> {
+    pub(super) positions: &'a mut Vec<[f32; 3]>,
+    pub(super) normals:   &'a mut Vec<[f32; 3]>,
+    pub(super) uvs:       &'a mut Vec<[f32; 2]>,
+    pub(super) indices:   &'a mut Vec<u32>,
+}
+
+/// Extended mesh buffers that also track inside-face indices.
+pub(super) struct TubeMeshBuffers<'a> {
+    pub(super) mesh_buffers:   MeshBuffers<'a>,
+    pub(super) inside_indices: &'a mut Vec<u32>,
+}
+
 /// Push a triangle with the requested winding.
 pub(super) fn push_triangle(
     indices: &mut Vec<u32>,
@@ -36,18 +50,4 @@ pub(super) fn push_quad(
 ) {
     push_triangle(indices, a, b, c, winding_order);
     push_triangle(indices, b, d, c, winding_order);
-}
-
-/// Mutable references to the mesh attribute buffers being built.
-pub(super) struct MeshBuffers<'a> {
-    pub(super) positions: &'a mut Vec<[f32; 3]>,
-    pub(super) normals:   &'a mut Vec<[f32; 3]>,
-    pub(super) uvs:       &'a mut Vec<[f32; 2]>,
-    pub(super) indices:   &'a mut Vec<u32>,
-}
-
-/// Extended mesh buffers that also track inside-face indices.
-pub(super) struct TubeMeshBuffers<'a> {
-    pub(super) mesh_buffers:   MeshBuffers<'a>,
-    pub(super) inside_indices: &'a mut Vec<u32>,
 }

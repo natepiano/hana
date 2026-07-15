@@ -41,6 +41,29 @@ pub(crate) struct DragState {
     grab_offset: Vec2,
 }
 
+/// Lights the `+` slack segment in the title bar.
+#[derive(Event)]
+pub(crate) struct SlackPlusPulseBegin;
+
+/// Clears the `+` slack segment highlight.
+#[derive(Event)]
+pub(crate) struct SlackPlusPulseEnd;
+
+/// Lights the `-` slack segment in the title bar.
+#[derive(Event)]
+pub(crate) struct SlackMinusPulseBegin;
+
+/// Clears the `-` slack segment highlight.
+#[derive(Event)]
+pub(crate) struct SlackMinusPulseEnd;
+
+/// Deadlines (in elapsed seconds) at which each slack segment highlight clears.
+#[derive(Resource, Default)]
+pub(crate) struct SlackPulse {
+    plus_end_secs:  Option<f32>,
+    minus_end_secs: Option<f32>,
+}
+
 fn cursor_ray_y_plane(
     camera: &Camera,
     camera_transform: &GlobalTransform,
@@ -220,29 +243,6 @@ pub(crate) fn increase_slack(mut cables: Query<&mut Cable, Without<SlackLocked>>
 /// `-` held — decrease catenary slack each frame.
 pub(crate) fn decrease_slack(mut cables: Query<&mut Cable, Without<SlackLocked>>) {
     adjust_cable_slack(-SLACK_ADJUSTMENT_STEP, &mut cables);
-}
-
-/// Lights the `+` slack segment in the title bar.
-#[derive(Event)]
-pub(crate) struct SlackPlusPulseBegin;
-
-/// Clears the `+` slack segment highlight.
-#[derive(Event)]
-pub(crate) struct SlackPlusPulseEnd;
-
-/// Lights the `-` slack segment in the title bar.
-#[derive(Event)]
-pub(crate) struct SlackMinusPulseBegin;
-
-/// Clears the `-` slack segment highlight.
-#[derive(Event)]
-pub(crate) struct SlackMinusPulseEnd;
-
-/// Deadlines (in elapsed seconds) at which each slack segment highlight clears.
-#[derive(Resource, Default)]
-pub(crate) struct SlackPulse {
-    plus_end_secs:  Option<f32>,
-    minus_end_secs: Option<f32>,
 }
 
 /// Flashes the `+` slack segment for [`SLACK_PULSE_SECONDS`].

@@ -57,22 +57,6 @@ pub enum Faces {
     Both,
 }
 
-/// Configuration for cable mesh generation.
-#[derive(Component, Clone, Debug, Default, Reflect)]
-#[reflect(Component)]
-pub struct CableMeshConfig {
-    /// Tube cross-section: radius, side count, and rendered faces.
-    pub tube_config:  TubeConfig,
-    /// Cap styles at each end of the tube.
-    pub cap_config:   CapConfig,
-    /// Distance to trim the tube back from each end.
-    pub trim_config:  TrimConfig,
-    /// Elbow filleting between non-collinear tangents.
-    pub elbow_config: ElbowConfig,
-    /// Material to apply to the generated mesh. If `None`, no material is added.
-    pub material:     Option<Handle<StandardMaterial>>,
-}
-
 /// Tube cross-section configuration.
 #[derive(Clone, Debug, Reflect)]
 pub struct TubeConfig {
@@ -149,4 +133,20 @@ impl Default for ElbowConfig {
             arm_overrides:          None,
         }
     }
+}
+
+/// Configuration for cable mesh generation.
+#[derive(Component, Clone, Debug, Default, Reflect)]
+#[reflect(Component)]
+pub struct CableMeshConfig {
+    /// Tube cross-section: radius, side count, and rendered faces.
+    pub tube_config:  TubeConfig,
+    /// Cap styles at each end of the tube.
+    pub cap_config:   CapConfig,
+    /// Distance to trim the tube back from each end.
+    pub trim_config:  TrimConfig,
+    /// Elbow filleting between non-collinear tangents.
+    pub elbow_config: ElbowConfig,
+    /// Material to apply to the generated mesh. If `None`, no material is added.
+    pub material:     Option<Handle<StandardMaterial>>,
 }

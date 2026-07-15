@@ -7,7 +7,6 @@ use bevy::picking::Pickable;
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticText;
 use bevy_diegetic::Sidedness;
-use fairy_dust::Face;
 use fairy_dust::cube_face_transform;
 use hana_conduit::Cable;
 use hana_conduit::CableEnd;
@@ -16,18 +15,9 @@ use hana_conduit::CableMeshConfig;
 use hana_conduit::Obstacle;
 use hana_conduit::Solver;
 
+use super::constants::CUBE_FACES;
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::input;
-
-/// Every cube face, so a label reads from whichever side the camera sees.
-const CUBE_FACES: [Face; 6] = [
-    Face::Front,
-    Face::Back,
-    Face::Left,
-    Face::Right,
-    Face::Top,
-    Face::Bottom,
-];
 
 #[derive(Component)]
 pub(crate) struct Selected;

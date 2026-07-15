@@ -30,24 +30,6 @@ use super::solver::LinearSolver;
 use super::solver::PathPlanner;
 use super::solver::RouteSolver;
 
-/// Top-level solver selection for a cable.
-#[derive(Clone, Debug, Reflect)]
-pub enum Solver {
-    /// Direct catenary curve between endpoints.
-    Catenary(CatenarySolver),
-    /// Straight line between endpoints.
-    Linear,
-    /// Path planner + curve solver composition.
-    Routed {
-        /// How to find waypoints around obstacles.
-        path_strategy: PathStrategy,
-        /// How to generate curves between waypoints.
-        curve_kind:    CurveKind,
-        /// Sample resolution per segment (0 = use solver default).
-        resolution:    u32,
-    },
-}
-
 /// Path planning strategy (finds waypoints around obstacles).
 #[derive(Clone, Debug, Reflect)]
 pub enum PathStrategy {
@@ -71,6 +53,24 @@ pub enum CurveKind {
     Catenary(CatenarySolver),
     /// Straight line segment.
     Linear,
+}
+
+/// Top-level solver selection for a cable.
+#[derive(Clone, Debug, Reflect)]
+pub enum Solver {
+    /// Direct catenary curve between endpoints.
+    Catenary(CatenarySolver),
+    /// Straight line between endpoints.
+    Linear,
+    /// Path planner + curve solver composition.
+    Routed {
+        /// How to find waypoints around obstacles.
+        path_strategy: PathStrategy,
+        /// How to generate curves between waypoints.
+        curve_kind:    CurveKind,
+        /// Sample resolution per segment (0 = use solver default).
+        resolution:    u32,
+    },
 }
 
 impl Solver {
@@ -134,6 +134,30 @@ impl Solver {
     }
 }
 
+impl PathStrategy {
+    /// Find waypoints from `start` to `end`, routing around `obstacles`.
+    fn plan(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
+        match self {
+            Self::Direct => DirectPlanner.plan(start, end, obstacles),
+            Self::Orthogonal => OrthogonalPlanner::new().plan(start, end, obstacles),
+            Self::AStar { grid_size, margin } => AStarPlanner::new()
+                .with_grid_size(*grid_size)
+                .with_margin(*margin)
+                .plan(start, end, obstacles),
+        }
+    }
+}
+
+impl CurveKind {
+    /// Generate a curve segment between two waypoints.
+    fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
+        match self {
+            Self::Catenary(catenary) => catenary.solve_segment(start, end, resolution),
+            Self::Linear => LinearSolver.solve_segment(start, end, resolution),
+        }
+    }
+}
+
 /// Wrap a routed span with the straight lead segments declared by the request's
 /// anchors, extending the waypoint list back out to the true anchor positions.
 fn wrap_with_leads(span: CableGeometry, request: &RouteRequest) -> CableGeometry {
@@ -165,28 +189,4 @@ fn wrap_with_leads(span: CableGeometry, request: &RouteRequest) -> CableGeometry
     }
 
     CableGeometry::from_segments(segments, waypoints)
-}
-
-impl PathStrategy {
-    /// Find waypoints from `start` to `end`, routing around `obstacles`.
-    fn plan(&self, start: Vec3, end: Vec3, obstacles: &[Obstacle]) -> Vec<Vec3> {
-        match self {
-            Self::Direct => DirectPlanner.plan(start, end, obstacles),
-            Self::Orthogonal => OrthogonalPlanner::new().plan(start, end, obstacles),
-            Self::AStar { grid_size, margin } => AStarPlanner::new()
-                .with_grid_size(*grid_size)
-                .with_margin(*margin)
-                .plan(start, end, obstacles),
-        }
-    }
-}
-
-impl CurveKind {
-    /// Generate a curve segment between two waypoints.
-    fn solve_segment(&self, start: Vec3, end: Vec3, resolution: u32) -> CableSegment {
-        match self {
-            Self::Catenary(catenary) => catenary.solve_segment(start, end, resolution),
-            Self::Linear => LinearSolver.solve_segment(start, end, resolution),
-        }
-    }
 }

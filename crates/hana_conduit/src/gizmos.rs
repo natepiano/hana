@@ -13,6 +13,21 @@ use crate::constants::WAYPOINT_DOT_COLOR;
 use crate::constants::WAYPOINT_DOT_SIZE;
 use crate::routing::MIN_CABLE_SAMPLE_POINTS;
 
+pub(super) struct GizmosPlugin;
+
+impl Plugin for GizmosPlugin {
+    fn build(&self, app: &mut App) {
+        app.init_resource::<DebugGizmos>()
+            .init_gizmo_group::<CableGizmoGroup>()
+            .add_systems(
+                Update,
+                (render_cable_gizmos, render_debug_gizmos)
+                    .chain()
+                    .after(CableSystems::Compute),
+            );
+    }
+}
+
 /// Gizmo group for cable debug wireframes.
 ///
 /// Enable or disable via Bevy's `GizmoConfigStore`.
@@ -27,21 +42,6 @@ pub enum DebugGizmos {
     /// Debug gizmos are hidden.
     #[default]
     Disabled,
-}
-
-pub(super) struct GizmosPlugin;
-
-impl Plugin for GizmosPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<DebugGizmos>()
-            .init_gizmo_group::<CableGizmoGroup>()
-            .add_systems(
-                Update,
-                (render_cable_gizmos, render_debug_gizmos)
-                    .chain()
-                    .after(CableSystems::Compute),
-            );
-    }
 }
 
 /// Renders cable geometry as gizmo lines (only when debug is enabled).

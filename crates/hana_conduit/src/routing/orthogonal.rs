@@ -34,15 +34,6 @@ pub struct OrthogonalPlanner {
     pub axis_order: AxisOrder,
 }
 
-impl Default for OrthogonalPlanner {
-    fn default() -> Self {
-        Self {
-            margin:     DEFAULT_OBSTACLE_MARGIN,
-            axis_order: AxisOrder::default(),
-        }
-    }
-}
-
 impl OrthogonalPlanner {
     /// Create an orthogonal planner with default settings.
     #[must_use]
@@ -149,6 +140,27 @@ impl OrthogonalPlanner {
 
         waypoints
     }
+
+    /// Check if any segment of a multi-waypoint path is blocked.
+    fn is_path_blocked(&self, waypoints: &[Vec3], obstacles: &[Obstacle]) -> Blockage {
+        for pair in waypoints.windows(2) {
+            match self.is_segment_blocked(pair[0], pair[1], obstacles) {
+                Blockage::Blocked => return Blockage::Blocked,
+                Blockage::Clear => {},
+            }
+        }
+
+        Blockage::Clear
+    }
+}
+
+impl Default for OrthogonalPlanner {
+    fn default() -> Self {
+        Self {
+            margin:     DEFAULT_OBSTACLE_MARGIN,
+            axis_order: AxisOrder::default(),
+        }
+    }
 }
 
 impl PathPlanner for OrthogonalPlanner {
@@ -175,19 +187,5 @@ impl PathPlanner for OrthogonalPlanner {
 
         // `Blockage::Blocked` for every axis path uses `u_path`.
         self.u_path(start, end, obstacles)
-    }
-}
-
-impl OrthogonalPlanner {
-    /// Check if any segment of a multi-waypoint path is blocked.
-    fn is_path_blocked(&self, waypoints: &[Vec3], obstacles: &[Obstacle]) -> Blockage {
-        for pair in waypoints.windows(2) {
-            match self.is_segment_blocked(pair[0], pair[1], obstacles) {
-                Blockage::Blocked => return Blockage::Blocked,
-                Blockage::Clear => {},
-            }
-        }
-
-        Blockage::Clear
     }
 }
