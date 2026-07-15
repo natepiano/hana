@@ -20,8 +20,9 @@ reconfigure.
   anchor, while `resolve_anchors` writes the resulting `Transform`.
 - **Hinge animation** -- `Hinge` drives `AnchorPose` so an anchored entity folds
   around one of its authored edges.
-- **Arrangements** -- `Member` entities can be ordered under an arrangement
-  entity, then placed and folded by a `TilingRule` such as `QuadTiling`.
+- **Arrangements** -- `Member` entities can be ordered under a `Strip`,
+  `Accordion`, or `Coil`, then placed and folded by a `TilingRule` such as
+  `QuadTiling`.
 
 The crate is named `hana_valence`, but the concrete API keeps the **anchor**
 noun: `AnchorId`, `AnchoredTo`, `AnchorPose`. An anchor point is the connection
@@ -88,6 +89,10 @@ commands.spawn((
 Each member then inserts `Member { arrangement }`. The observer and systems
 assign `MemberIndex`, place the member with `AnchoredTo`, add `AnchorPose` and
 `Hinge`, and drive the hinge angle each frame.
+
+`Strip` keeps every member at its tiling rule's rest angle. `Accordion` folds
+adjacent hinges in alternating directions. `Coil` folds every hinge in the same
+direction so rotations accumulate down the member set.
 
 ## Examples
 

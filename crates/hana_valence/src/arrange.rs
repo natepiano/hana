@@ -55,38 +55,25 @@ const QUAD_RIGHT_EDGE: Edge = Edge {
     end:   AnchorId::Vertex(QUAD_BOTTOM_RIGHT_VERTEX),
 };
 
-/// Fold distribution for [`Accordion`].
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Reflect)]
-#[reflect(Default, PartialEq, Debug, Clone)]
-pub enum FoldPattern {
-    /// Adjacent member hinges alternate signs.
-    #[default]
-    Accordion,
-    /// Member hinges share one sign, so world rotations accumulate down the set.
-    Coil,
-}
-
 /// Drivable fold arrangement over an ordered member set.
 ///
 /// `fold` is clamped to `0..=1` when computing member hinge angles. `lean` is
-/// the fold angle, in radians, at `fold == 1`.
+/// the fold angle, in radians, at `fold == 1`. Adjacent member hinges alternate
+/// signs so the members fold as an accordion.
 #[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
 #[reflect(Component, PartialEq, Debug, Clone)]
 pub struct Accordion {
     /// Fold amount, interpreted as `0..=1`.
-    pub fold:    f32,
+    pub fold: f32,
     /// Fold angle in radians at full fold.
-    pub lean:    f32,
-    /// Distribution of signs across member hinges.
-    pub pattern: FoldPattern,
+    pub lean: f32,
 }
 
 impl Default for Accordion {
     fn default() -> Self {
         Self {
-            fold:    0.0,
-            lean:    core::f32::consts::PI,
-            pattern: FoldPattern::Accordion,
+            fold: 0.0,
+            lean: core::f32::consts::PI,
         }
     }
 }
@@ -95,8 +82,42 @@ impl Accordion {
     /// Returns the fold term added to the tiling rule's rest angle for `index`.
     #[must_use]
     pub fn fold_contribution(self, index: usize) -> f32 {
-        self.fold.clamp(0.0, 1.0) * self.lean * self.pattern.sign(index)
+        let sign = if index.is_multiple_of(ACCORDION_SIGN_PERIOD) {
+            NEGATIVE_FOLD_SIGN
+        } else {
+            POSITIVE_FOLD_SIGN
+        };
+        fold_angle(self.fold, self.lean) * sign
     }
+}
+
+/// Drivable coil arrangement over an ordered member set.
+///
+/// `fold` is clamped to `0..=1` when computing member hinge angles. `lean` is
+/// the fold angle, in radians, at `fold == 1`. Every member hinge uses the same
+/// sign, so world rotations accumulate down the member set.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Reflect)]
+#[reflect(Component, PartialEq, Debug, Clone)]
+pub struct Coil {
+    /// Fold amount, interpreted as `0..=1`.
+    pub fold: f32,
+    /// Fold angle in radians at full fold.
+    pub lean: f32,
+}
+
+impl Default for Coil {
+    fn default() -> Self {
+        Self {
+            fold: 0.0,
+            lean: core::f32::consts::PI,
+        }
+    }
+}
+
+impl Coil {
+    /// Returns the fold term added to every member's tiling-rule rest angle.
+    #[must_use]
+    pub fn fold_contribution(self) -> f32 { fold_angle(self.fold, self.lean) }
 }
 
 /// Static straight arrangement over an ordered member set.
@@ -260,7 +281,10 @@ pub fn on_member_added(
     added: On<Add, Member>,
     members: Query<&Member>,
     indexes: Query<&MemberIndex>,
-    arrangements: Query<Option<&ArrangementMembers>, Or<(With<Accordion>, With<Strip>)>>,
+    arrangements: Query<
+        Option<&ArrangementMembers>,
+        Or<(With<Accordion>, With<Coil>, With<Strip>)>,
+    >,
     mut commands: Commands,
 ) {
     let entity = added.entity;
@@ -299,7 +323,10 @@ pub fn on_member_removed(
 pub fn assign_member_indices(
     members: Query<(Entity, &Member), Without<MemberIndex>>,
     indexes: Query<&MemberIndex>,
-    arrangements: Query<Option<&ArrangementMembers>, Or<(With<Accordion>, With<Strip>)>>,
+    arrangements: Query<
+        Option<&ArrangementMembers>,
+        Or<(With<Accordion>, With<Coil>, With<Strip>)>,
+    >,
     mut commands: Commands,
 ) {
     let mut updates = HashMap::<Entity, ArrangementMembers>::default();
@@ -335,6 +362,7 @@ pub fn apply_member_placements<R: Component + TilingRule>(
     members: Query<&ArrangementMembers>,
     rules: Query<&R>,
     accordions: Query<&Accordion>,
+    coils: Query<&Coil>,
     strips: Query<&Strip>,
     ready: Query<
         (),
@@ -359,6 +387,7 @@ pub fn apply_member_placements<R: Component + TilingRule>(
             arrangement_members,
             rule,
             accordions.get(member.arrangement).ok(),
+            coils.get(member.arrangement).ok(),
             strips.get(member.arrangement).ok(),
         ) else {
             continue;
@@ -383,6 +412,7 @@ pub fn drive_arrangement_hinges<R: Component + TilingRule>(
     mut hinges: Query<(&Member, &MemberIndex, &mut Hinge), Without<FoldAngles>>,
     rules: Query<&R>,
     accordions: Query<&Accordion>,
+    coils: Query<&Coil>,
     strips: Query<&Strip>,
 ) {
     for (member, index, mut hinge) in &mut hinges {
@@ -393,6 +423,7 @@ pub fn drive_arrangement_hinges<R: Component + TilingRule>(
             index.index,
             rule,
             accordions.get(member.arrangement).ok(),
+            coils.get(member.arrangement).ok(),
             strips.get(member.arrangement).ok(),
         ) else {
             continue;
@@ -410,11 +441,12 @@ pub fn member_placement(
     members: &ArrangementMembers,
     rule: &dyn TilingRule,
     accordion: Option<&Accordion>,
+    coil: Option<&Coil>,
     strip: Option<&Strip>,
 ) -> Option<MemberPlacement> {
     let target = members.predecessor(member.arrangement, entity)?;
     let placement = rule.placement(target, index.index)?;
-    let angle = arrangement_angle(index.index, rule, accordion, strip)?;
+    let angle = arrangement_angle(index.index, rule, accordion, coil, strip)?;
     Some(placement.with_angle(angle))
 }
 
@@ -422,7 +454,10 @@ fn assign_one_member(
     entity: Entity,
     member: Member,
     indexes: &Query<&MemberIndex>,
-    arrangements: &Query<Option<&ArrangementMembers>, Or<(With<Accordion>, With<Strip>)>>,
+    arrangements: &Query<
+        Option<&ArrangementMembers>,
+        Or<(With<Accordion>, With<Coil>, With<Strip>)>,
+    >,
     commands: &mut Commands,
 ) {
     let mut updates = HashMap::<Entity, ArrangementMembers>::default();
@@ -445,7 +480,10 @@ fn assign_one_member_with_updates(
     entity: Entity,
     member: Member,
     indexes: &Query<&MemberIndex>,
-    arrangements: &Query<Option<&ArrangementMembers>, Or<(With<Accordion>, With<Strip>)>>,
+    arrangements: &Query<
+        Option<&ArrangementMembers>,
+        Or<(With<Accordion>, With<Coil>, With<Strip>)>,
+    >,
     updates: &mut HashMap<Entity, ArrangementMembers>,
     next_indices: &mut HashMap<Entity, usize>,
     commands: &mut Commands,
@@ -476,22 +514,19 @@ fn arrangement_angle(
     index: usize,
     rule: &dyn TilingRule,
     accordion: Option<&Accordion>,
+    coil: Option<&Coil>,
     strip: Option<&Strip>,
 ) -> Option<f32> {
-    if let Some(accordion) = accordion {
-        return Some(rule.rest_delta(index) + accordion.fold_contribution(index));
-    }
-    strip.map(|_| rule.rest_delta(index))
+    let contribution = match (accordion, coil, strip) {
+        (Some(accordion), None, None) => accordion.fold_contribution(index),
+        (None, Some(coil), None) => coil.fold_contribution(),
+        (None, None, Some(_)) => 0.0,
+        _ => return None,
+    };
+    Some(rule.rest_delta(index) + contribution)
 }
 
-impl FoldPattern {
-    const fn sign(self, index: usize) -> f32 {
-        match self {
-            Self::Accordion if index.is_multiple_of(ACCORDION_SIGN_PERIOD) => NEGATIVE_FOLD_SIGN,
-            Self::Accordion | Self::Coil => POSITIVE_FOLD_SIGN,
-        }
-    }
-}
+fn fold_angle(fold: f32, lean: f32) -> f32 { fold.clamp(0.0, 1.0) * lean }
 
 fn quad_edge_anchor(edge: Edge) -> Option<AnchorId> {
     if edge == QUAD_TOP_EDGE {
@@ -509,6 +544,7 @@ fn quad_edge_anchor(edge: Edge) -> Option<AnchorId> {
 
 #[cfg(test)]
 mod tests {
+    use bevy_ecs::bundle::Bundle;
     use bevy_ecs::entity::Entity;
     use bevy_ecs::schedule::ApplyDeferred;
     use bevy_ecs::schedule::IntoScheduleConfigs;
@@ -520,7 +556,7 @@ mod tests {
 
     use super::Accordion;
     use super::ArrangementMembers;
-    use super::FoldPattern;
+    use super::Coil;
     use super::Member;
     use super::MemberIndex;
     use super::PendingMemberPlacement;
@@ -553,9 +589,8 @@ mod tests {
         let root = spawn_arrangement_root(
             &mut world,
             Accordion {
-                fold:    FOLD,
-                lean:    FOLD_ANGLE,
-                pattern: FoldPattern::Accordion,
+                fold: FOLD,
+                lean: FOLD_ANGLE,
             },
         );
         let members = spawn_members(&mut world, root, EXPECTED_HINGED_MEMBERS);
@@ -573,10 +608,9 @@ mod tests {
         let mut world = resolve::world_with_diagnostics();
         let root = spawn_arrangement_root(
             &mut world,
-            Accordion {
-                fold:    FOLD,
-                lean:    FOLD_ANGLE,
-                pattern: FoldPattern::Coil,
+            Coil {
+                fold: FOLD,
+                lean: FOLD_ANGLE,
             },
         );
         let members = spawn_members(&mut world, root, EXPECTED_HINGED_MEMBERS);
@@ -595,9 +629,8 @@ mod tests {
         let root = spawn_arrangement_root(
             &mut world,
             Accordion {
-                fold:    HALF_FOLD,
-                lean:    FOLD_ANGLE,
-                pattern: FoldPattern::Accordion,
+                fold: HALF_FOLD,
+                lean: FOLD_ANGLE,
             },
         );
         run_arrangement_schedule(&mut world);
@@ -615,9 +648,8 @@ mod tests {
         let arrangement = world
             .spawn((
                 Accordion {
-                    fold:    FOLD,
-                    lean:    FOLD_ANGLE,
-                    pattern: FoldPattern::Accordion,
+                    fold: FOLD,
+                    lean: FOLD_ANGLE,
                 },
                 QuadTiling,
             ))
@@ -722,9 +754,9 @@ mod tests {
         schedule.run(world);
     }
 
-    fn spawn_arrangement_root(world: &mut World, accordion: Accordion) -> Entity {
+    fn spawn_arrangement_root(world: &mut World, arrangement: impl Bundle) -> Entity {
         let root = resolve::spawn_quad(world, Transform::default());
-        world.entity_mut(root).insert((accordion, QuadTiling));
+        world.entity_mut(root).insert((arrangement, QuadTiling));
         root
     }
 

@@ -1,5 +1,5 @@
 //! Shared constants for the panel-anchoring example: panel sizes, colors, info
-//! panel and menu layout metrics, animation timings, and the hinge-chain geometry.
+//! panel and menu layout metrics, animation timings, and arrangement controls.
 
 use bevy::prelude::*;
 use bevy_diegetic::Anchor;
@@ -152,8 +152,8 @@ pub(crate) const HINGE_BORDER_WIDTH: f32 = 1.2;
 /// Folded hinge angle (radians) each crease bends about its pinned edge: a full
 /// half-turn so every link folds flat back onto its neighbour, collapsing the
 /// chain to a single coplanar stack. The unwrap eases this to zero (coplanar
-/// strip spread out). Sign alternates per link for an accordion, stays constant
-/// for a coil through [`hana_valence::Accordion::fold_contribution`].
+/// strip spread out). [`hana_valence::Accordion`] alternates the sign per link;
+/// [`hana_valence::Coil`] keeps it constant.
 pub(crate) const HINGE_FOLD_ANGLE_RAD: f32 = std::f32::consts::PI;
 /// Seconds for a full fold/unwrap ease, independent of link count: every
 /// transition takes the same wall-clock time whether the chain has three links

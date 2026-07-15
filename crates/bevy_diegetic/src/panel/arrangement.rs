@@ -3,6 +3,7 @@
 use bevy::prelude::*;
 use hana_valence::Accordion;
 use hana_valence::ArrangementMembers;
+use hana_valence::Coil;
 use hana_valence::Hinge;
 use hana_valence::Member;
 use hana_valence::MemberIndex;
@@ -53,6 +54,7 @@ pub(super) fn apply_panel_member_placements(
     members: Query<&ArrangementMembers>,
     rules: Query<&QuadTiling>,
     accordions: Query<&Accordion>,
+    coils: Query<&Coil>,
     strips: Query<&Strip>,
     panel_targets: Query<
         (&DiegeticPanel, Option<&ResolvedAnchorGeometry>),
@@ -81,6 +83,7 @@ pub(super) fn apply_panel_member_placements(
             arrangement_members,
             rule,
             accordions.get(member.arrangement).ok(),
+            coils.get(member.arrangement).ok(),
             strips.get(member.arrangement).ok(),
         ) else {
             continue;
@@ -161,7 +164,6 @@ mod tests {
     use hana_valence::Accordion;
     use hana_valence::AnchorId;
     use hana_valence::AnchoredTo as ValenceAnchoredTo;
-    use hana_valence::FoldPattern;
     use hana_valence::QuadTiling;
     use hana_valence::ResolveDiagnostics;
     use hana_valence::ResolvedAnchorGeometry;
@@ -198,9 +200,8 @@ mod tests {
                 screen_panel(),
                 Transform::default(),
                 Accordion {
-                    fold:    FULL_FOLD,
-                    lean:    core::f32::consts::FRAC_PI_2,
-                    pattern: FoldPattern::Accordion,
+                    fold: FULL_FOLD,
+                    lean: core::f32::consts::FRAC_PI_2,
                 },
                 QuadTiling,
             ))

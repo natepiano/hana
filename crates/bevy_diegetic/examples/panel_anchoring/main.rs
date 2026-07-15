@@ -67,7 +67,7 @@ use crate::constants::PAUSE_CONTROL;
 use crate::constants::REMOVE_TILE_CONTROL;
 use crate::constants::SHOW_ANCHOR_CONTROL;
 use crate::hinge::HingeChain;
-use crate::hinge::drive_hinge_pose;
+use crate::hinge::reconcile_hinge_arrangement;
 use crate::info_panel::reconcile_info_panel;
 use crate::info_panel::spawn_info_panel;
 use crate::menu::reconcile_menu;
@@ -214,6 +214,12 @@ fn configure_panel_anchoring_systems(
                     .after(handle_anchor_count_input)
                     .after(advance_mode_morph)
                     .after(reconcile_panels),
+                // Commits capability `3` through the arrangement API after the
+                // shared tile count and mode-morph ownership are settled.
+                reconcile_hinge_arrangement
+                    .after(advance_animations)
+                    .after(advance_mode_morph)
+                    .after(reconcile_anchor_chain),
                 // Runs after the chain reconciles so a just-spawned tile is in
                 // the panel union this frame; the home cube it reads is updated
                 // by fairy_dust's camera-home systems (at most one frame stale).
@@ -222,7 +228,7 @@ fn configure_panel_anchoring_systems(
         )
         .add_systems(
             PostUpdate,
-            (drive_anchor_pose, drive_hinge_pose).in_set(PanelSystems::AnimateAnchorPose),
+            drive_anchor_pose.in_set(PanelSystems::AnimateAnchorPose),
         )
         .add_systems(
             PostUpdate,

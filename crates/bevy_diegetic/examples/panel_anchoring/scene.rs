@@ -3,13 +3,13 @@
 //!
 //! Every capability shares a single set of [`AnchorTile`] entities, spawned once
 //! at startup. Switching capability never despawns or respawns them: the anchor
-//! and spin modes share the diagonal anchor fan, and the hinge chain is
-//! the same tiles re-anchored edge-to-edge into a folding strip. A switch between
-//! the fan and the strip arms a [`ModeMorph`]: the tiles keep their outgoing
-//! relation, their [`AnchorPose`] eases from the live pose to the pose that
-//! reproduces the incoming layout, and only when the ease completes are the
-//! relations re-pointed to the incoming mode — so the swap is invisible and the
-//! tiles glide between layouts from any animation state.
+//! and spin modes share the diagonal anchor fan, and the hinge chain commits the
+//! same tiles to a `hana_valence` arrangement. A switch between the fan and the
+//! strip arms a [`ModeMorph`]: the tiles keep their outgoing relation and their
+//! [`AnchorPose`] eases from the live pose to the pose that reproduces the
+//! incoming layout. When the ease completes, fan relations or arrangement
+//! membership take ownership of the incoming layout, so the tiles glide between
+//! layouts from any animation state.
 
 use bevy::prelude::*;
 use bevy_diegetic::DiegeticPanelCommands;
@@ -24,17 +24,17 @@ use crate::anchor_demo::AnchorTile;
 use crate::anchor_demo::Autofit;
 use crate::anchor_demo::ShowAnchorMarkers;
 use crate::anchor_demo::Spin;
-use crate::anchor_demo::anchoring_relation;
 use crate::anchor_demo::begin_spin;
 use crate::anchor_demo::build_tile_tree;
 use crate::anchor_demo::collect_tiles_by_order;
+use crate::anchor_demo::fan_anchoring_relation;
 use crate::anchor_demo::freeze_spin;
 use crate::anchor_demo::spawn_anchor_scene;
 use crate::anchor_demo::tile_link_delta;
 use crate::anchor_demo::toggle_spin;
 use crate::constants::*;
+use crate::hinge::ChainArrangement;
 use crate::hinge::FoldDirection;
-use crate::hinge::FoldPattern;
 use crate::hinge::FoldTravel;
 use crate::hinge::HingeChain;
 use crate::presentation::AnchorPanelMaterials;
@@ -111,8 +111,8 @@ pub(crate) fn spawn_scene(
 /// fan, so switching between them swaps mode in place: the active Spin
 /// number toggles its envelope, the active Anchor number is inert. Switching to or
 /// from the hinge chain (`3`) crosses layouts and arms a [`ModeMorph`]. While the
-/// hinge chain is active, `A`/`C`, `F`/`B`, and `G`/`S` select the lit fold
-/// pattern, direction, and travel mode; `U`/`D`/`R` fold, mirror-fold, and unwrap
+/// hinge chain is active, `A`/`C`, `F`/`B`, and `G`/`S` select the lit
+/// arrangement, direction, and travel mode; `U`/`D`/`R` fold, mirror-fold, and unwrap
 /// it. All input is locked while a morph is in flight.
 pub(crate) fn handle_capability_input(
     keyboard: Res<ButtonInput<KeyCode>>,
@@ -181,9 +181,9 @@ pub(crate) fn handle_capability_input(
 /// relighting the lit selection; `U`/`D`/`R` move the chain).
 fn handle_hinge_selection(keyboard: &ButtonInput<KeyCode>, hinge: &mut HingeChain) {
     if keyboard.just_pressed(KeyCode::KeyA) {
-        hinge.set_pattern(FoldPattern::Accordion);
+        hinge.set_arrangement(ChainArrangement::Accordion);
     } else if keyboard.just_pressed(KeyCode::KeyC) {
-        hinge.set_pattern(FoldPattern::Coil);
+        hinge.set_arrangement(ChainArrangement::Coil);
     } else if keyboard.just_pressed(KeyCode::KeyF) {
         hinge.set_direction(FoldDirection::Front);
     } else if keyboard.just_pressed(KeyCode::KeyB) {
@@ -284,12 +284,11 @@ pub(crate) fn advance_mode_morph(
     morph.active = false;
 }
 
-/// Re-points every tile's relation to the incoming mode and clears the morph
-/// poses. The hinge and spin modes keep an identity pose per anchored tile (the
-/// fold writer / spin envelope drives it); plain anchoring drops the pose so the
-/// tile rests on its relation. The parent of each link comes from the full tile
-/// set (tile `0`, the unanchored origin, carries no pose, so it must be read here
-/// rather than from the pose set).
+/// Hands every tile from the morph to the incoming mode. Fan modes install their
+/// authored relation here. Hinge mode leaves relation construction to
+/// `reconcile_hinge_arrangement`, which commits arrangement membership after the
+/// morph. Spin keeps an identity pose for its envelope; plain anchoring drops the
+/// pose so each tile rests on its relation.
 fn finalize_mode_morph(
     to_index: usize,
     selection: AnchorSelection,
@@ -300,9 +299,12 @@ fn finalize_mode_morph(
     for order in 1..live {
         let entity = by_order[order];
         let mut tile = commands.entity(entity);
-        tile.insert(anchoring_relation(to_index, by_order[order - 1], selection))
-            .remove::<TileMorph>();
-        if to_index == HINGE_CHAIN_INDEX || to_index == SPIN_INDEX {
+        tile.remove::<TileMorph>();
+        if to_index == HINGE_CHAIN_INDEX {
+            continue;
+        }
+        tile.insert(fan_anchoring_relation(by_order[order - 1], selection));
+        if to_index == SPIN_INDEX {
             tile.insert(AnchorPose::default());
         } else {
             tile.remove::<AnchorPose>();

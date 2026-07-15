@@ -48,9 +48,10 @@ use crate::scene::ModeMorph;
 
 /// A tile in the shared chain used by every capability. `order` is its fixed
 /// position along the chain (`0` = the origin). Tile `0` is the unanchored origin
-/// at [`TARGET_POSITION`]; every later tile anchors onto the previous one and
-/// carries a [`AnchorPose`] while a spin, hinge fold, anchor
-/// transition, or mode morph is in flight.
+/// at [`TARGET_POSITION`]. In fan modes every later tile anchors onto the
+/// previous one; in hinge mode tile `0` becomes the arrangement root and the
+/// others become arrangement members. A tile carries an [`AnchorPose`] while a
+/// spin, arrangement hinge, anchor transition, or mode morph is in flight.
 #[derive(Component)]
 pub(crate) struct AnchorTile {
     pub(crate) order: usize,
@@ -423,10 +424,11 @@ pub(crate) fn spawn_anchor_scene(
 }
 
 /// Spawns one tile for `mode`. The origin (`order == 0`, `parent` `None`) carries
-/// no relation and rests at [`TARGET_POSITION`]; every later tile anchors onto
-/// `parent` with `mode`'s relation and — when `animating` or in the hinge chain —
-/// an initial [`AnchorPose`] so a tile added mid-animation joins the
-/// pose-driven set.
+/// no relation and rests at [`TARGET_POSITION`]. A later fan tile anchors onto
+/// `parent` and receives an initial [`AnchorPose`] when a fan animation is in
+/// flight. Hinge tiles receive no relation here;
+/// [`crate::hinge::reconcile_hinge_arrangement`] adds them through
+/// [`bevy_diegetic::ArrangedPanel`] membership.
 fn spawn_tile(
     commands: &mut Commands,
     mode: usize,
@@ -459,8 +461,10 @@ fn spawn_tile(
         Visibility::default(),
     ));
     if let Some(parent) = parent {
-        tile.insert(anchoring_relation(mode, parent, selection));
-        if animating || mode == HINGE_CHAIN_INDEX {
+        if mode != HINGE_CHAIN_INDEX {
+            tile.insert(fan_anchoring_relation(parent, selection));
+        }
+        if animating {
             tile.insert(AnchorPose::default());
         }
     }
@@ -553,11 +557,11 @@ pub(crate) const fn freeze_spin(spin: &mut Spin) {
 }
 
 /// Advances every capability animation by this frame's `dt`, in `Update` before
-/// the panel rebuild. The marker rebuild (`reconcile_panels`) and the pose writes
-/// (`drive_anchor_pose` / `drive_hinge_pose`, `PostUpdate`) then read one shared,
-/// already-advanced progress per frame, so the marker stays glued to the pin
-/// instead of lagging the slide by a frame. All animations freeze while a
-/// capability switch is in flight, so the outgoing scene recedes rigidly.
+/// the panel rebuild. The marker rebuild, fan pose writer, and arrangement
+/// component reconciliation then read one shared, already-advanced progress per
+/// frame, so the marker stays glued to the pin instead of lagging the slide by a
+/// frame. All animations freeze while a capability switch is in flight, so the
+/// outgoing scene recedes rigidly.
 pub(crate) fn advance_animations(
     time: Res<Time>,
     morph: Res<ModeMorph>,
@@ -615,7 +619,7 @@ impl TitleChipActivation for Spin {
     }
 }
 
-/// Sole writer of every anchored tile's [`AnchorPose`], composing both
+/// Fan-mode writer of each anchored tile's [`AnchorPose`], composing both
 /// animations from their already-advanced state each frame in
 /// `PanelSystems::AnimateAnchorPose`, before the valence resolver, so every offset
 /// lands that frame and the relation stays the sole transform writer.
@@ -637,8 +641,8 @@ pub(crate) fn drive_anchor_pose(
     mut poses: Query<(Entity, &mut AnchorPose), With<AnchorTile>>,
     mut commands: Commands,
 ) {
-    // The morph owns every pose while it runs, and the hinge chain has its own
-    // pose writer; this drives the fan modes only.
+    // `ModeMorph` owns every pose while it runs, and the arrangement hinge
+    // systems own hinge-mode poses; this system drives fan modes only.
     if morph.active() || active.index == HINGE_CHAIN_INDEX {
         return;
     }
@@ -816,7 +820,7 @@ pub(crate) fn cycle_anchor_selection(
     // depth labels) rebuild in `reconcile_panels`, which eases the markers.
     for order in 1..live {
         let mut tile_entity = commands.entity(by_order[order]);
-        tile_entity.insert(anchoring_relation(active.index, by_order[order - 1], next));
+        tile_entity.insert(fan_anchoring_relation(by_order[order - 1], next));
         if eased && transition.active {
             tile_entity.insert(AnchorPose::default());
         }
@@ -881,11 +885,12 @@ pub(crate) fn handle_anchor_count_input(
 
 /// Makes the live tile chain match [`AnchorChain`] by spawning or despawning tiles
 /// off the bottom end, in whichever mode is active. Growth anchors each new tile
-/// onto the current last tile with the active mode's relation (and a pose when an
-/// animation is in flight or the hinge chain is active); shrink despawns the
-/// surplus. Survivors keep their anchors — only the chain's tail changes — and the
-/// color wheel recolor of every tile for the new count is handled by
-/// [`reconcile_panels`], which rebuilds on a count change.
+/// onto the current last tile in fan modes, while hinge growth leaves relation
+/// setup to [`crate::hinge::reconcile_hinge_arrangement`]. Fan growth adds a pose when an
+/// animation is in flight; shrink despawns the surplus. Survivors keep their
+/// current ownership — only the chain's tail changes — and the color wheel
+/// recolor of every tile for the new count is handled by [`reconcile_panels`],
+/// which rebuilds on a count change.
 pub(crate) fn reconcile_anchor_chain(
     active: Res<ActiveCapability>,
     morph: Res<ModeMorph>,
@@ -1188,21 +1193,15 @@ fn eased_anchor_world(
     Some(from_point.lerp(to_point, progress))
 }
 
-/// The relation gluing a tile onto its parent for `mode`: the fan modes pin the
-/// selected source anchor to the parent's target anchor with the depth offset; the
-/// hinge chain pins each link's top edge to its parent's bottom edge so the strip
-/// stacks downward and folds about the shared edges.
-pub(crate) fn anchoring_relation(
-    mode: usize,
+/// The fan relation gluing a tile onto its parent: the selected source anchor is
+/// pinned to the parent's target anchor with the current depth offset.
+/// `apply_panel_member_placements` emits hinge relations instead.
+pub(crate) fn fan_anchoring_relation(
     target: Entity,
     selection: AnchorSelection,
 ) -> AnchoredToPanel {
-    if mode == HINGE_CHAIN_INDEX {
-        AnchoredToPanel::new(target, Anchor::TopCenter, Anchor::BottomCenter)
-    } else {
-        AnchoredToPanel::new(target, selection.source_anchor(), selection.target_anchor())
-            .with_offset(PanelAnchorOffset::ZERO.with_z(Mm(selection.depth_mm)))
-    }
+    AnchoredToPanel::new(target, selection.source_anchor(), selection.target_anchor())
+        .with_offset(PanelAnchorOffset::ZERO.with_z(Mm(selection.depth_mm)))
 }
 
 fn build_anchor_panel(

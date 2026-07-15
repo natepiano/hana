@@ -32,7 +32,6 @@ use hana_valence::AnchorSystems;
 use hana_valence::Edge;
 use hana_valence::FoldAngles;
 use hana_valence::FoldFromArrangement;
-use hana_valence::FoldPattern;
 use hana_valence::FoldSequence;
 use hana_valence::FoldSequenceState;
 use hana_valence::FoldSystems;
@@ -275,9 +274,8 @@ fn setup(
     let root = spawn_tile(&mut commands, Transform::from_xyz(0.0, ROOT_LIFT, 0.0));
     commands.entity(root).insert((
         Accordion {
-            fold:    0.0,
-            lean:    ACCORDION_LEAN,
-            pattern: FoldPattern::Accordion,
+            fold: 0.0,
+            lean: ACCORDION_LEAN,
         },
         TriangleTiling,
     ));

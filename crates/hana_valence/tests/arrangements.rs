@@ -29,7 +29,6 @@ use hana_valence::FoldDirection;
 use hana_valence::FoldEndpoint;
 use hana_valence::FoldFromArrangement;
 use hana_valence::FoldMember;
-use hana_valence::FoldPattern;
 use hana_valence::FoldPlugin;
 use hana_valence::FoldSequence;
 use hana_valence::FoldSequenceBuilder;
@@ -109,9 +108,8 @@ fn triangle_strip_uses_tiling_rule_for_alternating_seats() {
     let root = spawn_triangle(&mut world, Transform::default());
     world.entity_mut(root).insert((
         Accordion {
-            fold:    0.0,
-            lean:    core::f32::consts::FRAC_PI_3,
-            pattern: FoldPattern::Accordion,
+            fold: 0.0,
+            lean: core::f32::consts::FRAC_PI_3,
         },
         TriangleTiling,
     ));

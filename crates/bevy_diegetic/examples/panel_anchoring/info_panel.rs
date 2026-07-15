@@ -1,6 +1,6 @@
 //! The bottom-left info panel. For the anchor demo it shows the Navigation
 //! legend over the followed/following anchor sections; for the hinge chain it
-//! shows the fold-pattern (`A`/`C`), direction (`F`/`B`), and action (`U`/`D`/`R`)
+//! shows the arrangement (`A`/`C`), direction (`F`/`B`), and action (`U`/`D`/`R`)
 //! control rows. Rebuilt only when a shown field changes.
 
 use bevy::prelude::*;
@@ -28,9 +28,9 @@ use crate::anchor_demo::LegendGlow;
 use crate::anchor_demo::LegendHighlight;
 use crate::anchor_demo::SelectedPanel;
 use crate::constants::*;
+use crate::hinge::ChainArrangement;
 use crate::hinge::FoldAction;
 use crate::hinge::FoldDirection;
-use crate::hinge::FoldPattern;
 use crate::hinge::FoldTravel;
 use crate::hinge::HingeChain;
 use crate::presentation::AnchorPanelMaterials;
@@ -85,7 +85,7 @@ pub(crate) fn reconcile_info_panel(
             SelectedPanel,
             LegendGlow,
             usize,
-            FoldPattern,
+            ChainArrangement,
             FoldDirection,
             FoldTravel,
             FoldAction,
@@ -101,7 +101,7 @@ pub(crate) fn reconcile_info_panel(
         *selected,
         glow,
         active.index,
-        chain.pattern(),
+        chain.arrangement(),
         chain.direction(),
         chain.travel(),
         chain.action(),
@@ -178,7 +178,7 @@ fn anchor_info_sections(
     );
 }
 
-/// The hinge-chain info body: a `Modes` section (fold pattern `A`/`C`, direction
+/// The hinge-chain info body: a `Modes` section (arrangement `A`/`C`, direction
 /// `F`/`B`, travel `G`/`S`), a divider, then an `Actions` section (`U`/`D` fold,
 /// `+`/`-` resize, and a centered `R Reset`). The lit option in each mode pair
 /// tracks the chain's current selection.
@@ -198,7 +198,7 @@ fn hinge_info_section(builder: &mut LayoutBuilder, hinge: HingeChain) {
 
 /// The `Modes` section: a header over two-column rows of the persistent toggles.
 fn hinge_mode_section(builder: &mut LayoutBuilder, hinge: HingeChain) {
-    let pattern = hinge.pattern();
+    let arrangement = hinge.arrangement();
     let direction = hinge.direction();
     let travel = hinge.travel();
     builder.with(
@@ -210,8 +210,8 @@ fn hinge_mode_section(builder: &mut LayoutBuilder, hinge: HingeChain) {
             builder.text(("Modes", nav_text_style(INFO_TITLE_SIZE, false)));
             hinge_option_columns(
                 builder,
-                ("A", "Accordion", pattern == FoldPattern::Accordion),
-                ("C", "Coil", pattern == FoldPattern::Coil),
+                ("A", "Accordion", arrangement == ChainArrangement::Accordion),
+                ("C", "Coil", arrangement == ChainArrangement::Coil),
             );
             hinge_option_columns(
                 builder,

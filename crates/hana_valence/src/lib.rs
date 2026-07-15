@@ -76,11 +76,11 @@
 //! `bevy_animation` property adapters can be added later without changing this
 //! component contract.
 //!
-//! Arrangements add another driver layer: [`Accordion`] and [`Strip`] write
-//! [`Hinge::angle`] for their [`Member`] entities every frame unless a member
-//! carries [`FoldAngles`]. The marker gives [`actuate_fold_hinges`] exclusive
-//! ownership of that member's angle; removing it returns ownership to
-//! [`drive_arrangement_hinges`].
+//! Arrangements add another driver layer: [`Accordion`], [`Coil`], and [`Strip`]
+//! write [`Hinge::angle`] for their [`Member`] entities every frame unless a
+//! member carries [`FoldAngles`]. The marker gives [`actuate_fold_hinges`]
+//! exclusive ownership of that member's angle; removing it returns ownership
+//! to [`drive_arrangement_hinges`].
 //!
 //! Anchor naming has three tiers. Generated geometry should use ids derived
 //! from adjacency and never require authored names. Hand-authored regular
@@ -145,7 +145,7 @@ mod tween;
 pub use arrange::Accordion;
 pub use arrange::ArrangementMembers;
 pub use arrange::ArrangementPlacement;
-pub use arrange::FoldPattern;
+pub use arrange::Coil;
 pub use arrange::Member;
 pub use arrange::MemberIndex;
 pub use arrange::MemberPlacement;

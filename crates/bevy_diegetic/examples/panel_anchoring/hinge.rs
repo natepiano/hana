@@ -1,20 +1,23 @@
-//! The hinge-chain capability (`3`): the shared tile set re-anchored edge-to-edge
-//! into a numbered strip that folds into a coplanar stack and unwraps back (`R`),
-//! plus the fold-control state and the per-link hinge-pose writer.
+//! The hinge-chain capability (`3`): the shared tile set committed as a
+//! `hana_valence` arrangement that folds into a coplanar stack and unwraps back
+//! (`R`), plus the local interaction and easing state for its controls.
 //!
 //! The tiles are the same persistent set the anchor fan uses; switching to the
-//! hinge chain morphs them into the flat strip (see [`crate::scene`]). Tile `0` is
-//! the fixed top of the strip; every later tile anchors its top edge onto its
-//! parent's bottom edge and carries a [`AnchorPose`] that [`drive_hinge_pose`]
-//! writes as the hinge angle, so the chain collapses toward tile `0` and unwraps
-//! back. `A`/`C` pick accordion vs coil, `F`/`B` the lean toward or away from the
+//! hinge chain morphs them into the flat strip (see [`crate::scene`]). Tile `0`
+//! carries [`QuadTiling`] and the committed [`Accordion`] or [`Coil`]; every
+//! later tile is an [`ArrangedPanel`] member. `apply_panel_member_placements`
+//! places those members edge-to-edge, `drive_arrangement_hinges::<QuadTiling>`
+//! writes their [`Hinge::angle`] values, and `hinge_to_pose` writes their poses.
+//! `A`/`C` pick accordion vs coil, `F`/`B` the lean toward or away from the
 //! camera, `G`/`S` glide vs step travel, and `U`/`D`/`R` fold, mirror-fold, and
-//! unwrap. The link count is shared with the anchor fan ([`AnchorChain`]); `+`/`-`
-//! grow and shrink it in every mode.
+//! unwrap. The link count is shared with the anchor fan ([`AnchorChain`]);
+//! `+`/`-` grow and shrink it in every mode.
 
 use bevy::prelude::*;
 use bevy_diegetic::AlignX;
 use bevy_diegetic::AlignY;
+use bevy_diegetic::AnchoredToPanel;
+use bevy_diegetic::ArrangedPanel;
 use bevy_diegetic::Border;
 use bevy_diegetic::El;
 use bevy_diegetic::GlyphShadowMode;
@@ -26,8 +29,14 @@ use bevy_diegetic::TextStyle;
 use fairy_dust::ControlActivation;
 use fairy_dust::TitleChipActivation;
 use hana_valence::Accordion;
-use hana_valence::AnchorPose;
-pub(crate) use hana_valence::FoldPattern;
+use hana_valence::ArrangementMembers;
+use hana_valence::Coil;
+use hana_valence::Hinge;
+use hana_valence::Member;
+use hana_valence::MemberIndex;
+use hana_valence::PendingMemberPlacement;
+use hana_valence::QuadTiling;
+use hana_valence::Strip;
 
 use crate::anchor_demo::AnchorChain;
 use crate::anchor_demo::AnchorTile;
@@ -76,20 +85,31 @@ pub(crate) enum FoldTravel {
     Step,
 }
 
-/// The pattern, direction, and action a fold is built from. The lit selection is
+/// Arrangement selected for the hinge chain.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) enum ChainArrangement {
+    /// Adjacent hinges alternate fold direction.
+    #[default]
+    Accordion,
+    /// Every hinge folds in the same direction.
+    Coil,
+}
+
+/// The arrangement, direction, and action a fold is built from. The lit selection is
 /// what the panel shows; the committed copy is what the current pose reflects, so
 /// relighting a different selection while folded does not jump the chain.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct FoldSpec {
-    pub(crate) pattern:   FoldPattern,
-    pub(crate) direction: FoldDirection,
-    pub(crate) action:    FoldAction,
+    pub(crate) arrangement: ChainArrangement,
+    pub(crate) direction:   FoldDirection,
+    pub(crate) action:      FoldAction,
 }
 
 /// State of the hinge-chain fold (capability `3`). The chain starts unwrapped as a
 /// flat strip; `U`/`D` fold it into a coplanar stack and `R` unwraps it back. `lit`
-/// is the panel selection set by `A`/`C`/`F`/`B`/`U`/`D`; `folded` is what the pose
-/// is built from, captured when a fold ease begins. The link count lives in
+/// is the panel selection set by `A`/`C`/`F`/`B`/`U`/`D`; `folded` is what the
+/// committed arrangement component is built from, captured when a fold ease
+/// begins. The link count lives in
 /// [`AnchorChain`] — the one tile set shared with the anchor fan.
 #[derive(Resource, Clone, Copy, Debug)]
 pub(crate) struct HingeChain {
@@ -118,9 +138,9 @@ impl Default for HingeChain {
     /// Launches as a flat unwrapped strip with `A`/`F`/`D` lit.
     fn default() -> Self {
         let lit = FoldSpec {
-            pattern:   FoldPattern::Accordion,
-            direction: FoldDirection::Front,
-            action:    FoldAction::Down,
+            arrangement: ChainArrangement::Accordion,
+            direction:   FoldDirection::Front,
+            action:      FoldAction::Down,
         };
         Self {
             lit,
@@ -137,8 +157,8 @@ impl Default for HingeChain {
 }
 
 impl HingeChain {
-    /// The lit fold pattern (`A`/`C`).
-    pub(crate) const fn pattern(self) -> FoldPattern { self.lit.pattern }
+    /// The lit chain arrangement (`A`/`C`).
+    pub(crate) const fn arrangement(self) -> ChainArrangement { self.lit.arrangement }
 
     /// The lit fold direction (`F`/`B`).
     pub(crate) const fn direction(self) -> FoldDirection { self.lit.direction }
@@ -152,8 +172,10 @@ impl HingeChain {
     /// Selects the lit travel mode (`G`/`S`); does not move the chain.
     pub(crate) const fn set_travel(&mut self, travel: FoldTravel) { self.travel = travel; }
 
-    /// Selects the lit fold pattern (`A`/`C`); does not move the chain.
-    pub(crate) const fn set_pattern(&mut self, pattern: FoldPattern) { self.lit.pattern = pattern; }
+    /// Selects the lit chain arrangement (`A`/`C`); does not move the chain.
+    pub(crate) const fn set_arrangement(&mut self, arrangement: ChainArrangement) {
+        self.lit.arrangement = arrangement;
+    }
 
     /// Selects the lit fold direction (`F`/`B`); does not move the chain.
     pub(crate) const fn set_direction(&mut self, direction: FoldDirection) {
@@ -226,12 +248,19 @@ impl HingeChain {
         self.timer = 0.0;
     }
 
-    fn accordion(self, lean: f32) -> Accordion {
-        Accordion {
-            fold: 1.0 - self.unwrap,
-            lean,
-            pattern: self.folded.pattern,
-        }
+    /// Arrangement type committed to the current fold pose.
+    const fn committed_arrangement(self) -> ChainArrangement { self.folded.arrangement }
+
+    /// Fold amount committed to the arrangement root.
+    fn committed_fold(self) -> f32 { 1.0 - self.unwrap }
+
+    /// Full-fold angle committed to the arrangement root.
+    fn committed_lean(self) -> f32 {
+        let action_sign = match self.folded.action {
+            FoldAction::Up => 1.0,
+            FoldAction::Down => -1.0,
+        };
+        HINGE_FOLD_ANGLE_RAD * fold_lean(self.folded.direction) * action_sign
     }
 }
 
@@ -285,34 +314,88 @@ pub(crate) fn advance_hinge(hinge: &mut HingeChain, dt: f32) {
 /// Whether the hinge fold ease is currently frozen by `P`/`Space`.
 pub(crate) const fn hinge_paused(hinge: &HingeChain) -> bool { hinge.paused }
 
-/// Writes the right-axis hinge rotation onto every folding tile in
-/// `PanelSystems::AnimateAnchorPose`, before the valence resolver. Tile `0` is the
-/// fixed top and carries no pose; every later tile tilts about its pinned top edge
-/// by the hinge angle times its crease sign (alternating for an accordion, constant
-/// for a coil) and the committed lean, so the chain collapses toward tile `0` and
-/// unwraps to a coplanar strip. Runs only while the hinge chain is active and no
-/// mode morph is in flight (the morph owns the poses then).
-pub(crate) fn drive_hinge_pose(
+/// Reconciles the shared tiles with the arrangement API. While capability `3`
+/// is active and no [`ModeMorph`] owns the poses, tile `0` is the arrangement
+/// root and each later live tile is an [`ArrangedPanel`] member. Outside that
+/// state, arrangement membership, fold components, and [`Hinge`] are removed so
+/// the fan and morph systems retain exclusive ownership of relations and poses.
+pub(crate) fn reconcile_hinge_arrangement(
     active: Res<ActiveCapability>,
     morph: Res<ModeMorph>,
     hinge: Res<HingeChain>,
     chain: Res<AnchorChain>,
-    mut poses: Query<(&mut AnchorPose, &AnchorTile)>,
+    tiles: Query<(Entity, &AnchorTile, Option<&Member>)>,
+    mut commands: Commands,
 ) {
+    let mut by_order = [Entity::PLACEHOLDER; ANCHOR_MAX_TILES];
+    for (entity, tile, _) in &tiles {
+        if tile.order < ANCHOR_MAX_TILES {
+            by_order[tile.order] = entity;
+        }
+    }
+
     if morph.active() || active.index != HINGE_CHAIN_INDEX {
+        for (entity, _, member) in &tiles {
+            if member.is_some() {
+                commands
+                    .entity(entity)
+                    .remove::<(Member, MemberIndex, PendingMemberPlacement, Hinge)>();
+            } else {
+                commands.entity(entity).remove::<Hinge>();
+            }
+        }
+        let root = by_order[0];
+        if root != Entity::PLACEHOLDER {
+            commands
+                .entity(root)
+                .remove::<(Accordion, ArrangementMembers, Coil, QuadTiling, Strip)>();
+        }
         return;
     }
-    let count = chain.count();
-    let fold = hinge.folded;
-    let down = matches!(fold.action, FoldAction::Down);
-    let lean = HINGE_FOLD_ANGLE_RAD * fold_lean(fold.direction) * if down { -1.0 } else { 1.0 };
-    let accordion = hinge.accordion(lean);
-    for (mut pose, tile) in &mut poses {
-        if tile.order == 0 || tile.order >= count {
+
+    let root = by_order[0];
+    if root == Entity::PLACEHOLDER {
+        return;
+    }
+    let fold = hinge.committed_fold();
+    let lean = hinge.committed_lean();
+    let mut root_commands = commands.entity(root);
+    root_commands.insert(QuadTiling).remove::<(
+        AnchoredToPanel,
+        Hinge,
+        Member,
+        MemberIndex,
+        PendingMemberPlacement,
+    )>();
+    match hinge.committed_arrangement() {
+        ChainArrangement::Accordion => {
+            root_commands
+                .remove::<(Coil, Strip)>()
+                .insert(Accordion { fold, lean });
+        },
+        ChainArrangement::Coil => {
+            root_commands
+                .remove::<(Accordion, Strip)>()
+                .insert(Coil { fold, lean });
+        },
+    }
+
+    for entity in by_order.iter().take(chain.count()).skip(1) {
+        if *entity == Entity::PLACEHOLDER {
             continue;
         }
-        pose.rotation = Quat::from_rotation_x(accordion.fold_contribution(tile.order));
-        pose.translation = Vec3::ZERO;
+        let Ok((entity, _, member)) = tiles.get(*entity) else {
+            continue;
+        };
+        let belongs_to_root = member.is_some_and(|member| member.arrangement == root);
+        let mut tile_commands = commands.entity(entity);
+        tile_commands.remove::<AnchoredToPanel>();
+        if !belongs_to_root {
+            if member.is_some() {
+                tile_commands.remove::<(Member, MemberIndex, PendingMemberPlacement, Hinge)>();
+            }
+            tile_commands.insert(ArrangedPanel::new(root));
+        }
     }
 }
 
@@ -357,4 +440,114 @@ fn hinge_label_style(accent: Color) -> TextStyle {
     TextStyle::new(HINGE_LABEL_SIZE)
         .with_color(accent)
         .with_shadow_mode(GlyphShadowMode::None)
+}
+
+#[cfg(test)]
+mod tests {
+    use bevy::prelude::*;
+    use hana_valence::Accordion;
+    use hana_valence::ArrangementMembers;
+    use hana_valence::Coil;
+    use hana_valence::Member;
+    use hana_valence::MemberIndex;
+    use hana_valence::QuadTiling;
+    use hana_valence::Strip;
+
+    use super::ChainArrangement;
+    use super::HingeChain;
+    use super::reconcile_hinge_arrangement;
+    use crate::anchor_demo::AnchorChain;
+    use crate::anchor_demo::AnchorTile;
+    use crate::constants::ANCHOR_INDEX;
+    use crate::constants::HINGE_CHAIN_INDEX;
+    use crate::scene::ActiveCapability;
+    use crate::scene::ModeMorph;
+
+    #[test]
+    fn arrangement_membership_tracks_commit_switch_and_reentry_in_tile_order() {
+        let mut chain = AnchorChain::default();
+        chain.add_tile();
+        let mut app = App::new();
+        app.insert_resource(chain)
+            .insert_resource(HingeChain::default())
+            .insert_resource(ActiveCapability {
+                index: HINGE_CHAIN_INDEX,
+            })
+            .insert_resource(ModeMorph::default())
+            .add_observer(hana_valence::on_member_added)
+            .add_observer(hana_valence::on_member_removed)
+            .add_systems(Update, reconcile_hinge_arrangement);
+
+        let last = app.world_mut().spawn(AnchorTile { order: 2 }).id();
+        let root = app.world_mut().spawn(AnchorTile { order: 0 }).id();
+        let first = app.world_mut().spawn(AnchorTile { order: 1 }).id();
+        app.update();
+
+        assert!(app.world().get::<QuadTiling>(root).is_some());
+        assert!(app.world().get::<Accordion>(root).is_some());
+        assert!(app.world().get::<Coil>(root).is_none());
+        assert!(app.world().get::<Strip>(root).is_none());
+        assert_eq!(
+            app.world()
+                .get::<Member>(first)
+                .map(|member| member.arrangement),
+            Some(root)
+        );
+        assert_eq!(
+            app.world()
+                .get::<Member>(last)
+                .map(|member| member.arrangement),
+            Some(root)
+        );
+        assert_eq!(
+            app.world()
+                .get::<MemberIndex>(first)
+                .map(|index| index.index),
+            app.world().get::<AnchorTile>(first).map(|tile| tile.order)
+        );
+        assert_eq!(
+            app.world()
+                .get::<MemberIndex>(last)
+                .map(|index| index.index),
+            app.world().get::<AnchorTile>(last).map(|tile| tile.order)
+        );
+
+        app.world_mut()
+            .resource_mut::<HingeChain>()
+            .set_arrangement(ChainArrangement::Coil);
+        app.update();
+        assert!(app.world().get::<Accordion>(root).is_some());
+        assert!(app.world().get::<Coil>(root).is_none());
+
+        app.world_mut().resource_mut::<HingeChain>().down();
+        app.update();
+        assert!(app.world().get::<Accordion>(root).is_none());
+        assert!(app.world().get::<Coil>(root).is_some());
+        assert!(app.world().get::<Strip>(root).is_none());
+
+        app.world_mut().resource_mut::<ActiveCapability>().index = ANCHOR_INDEX;
+        app.update();
+        assert!(app.world().get::<QuadTiling>(root).is_none());
+        assert!(app.world().get::<Accordion>(root).is_none());
+        assert!(app.world().get::<Coil>(root).is_none());
+        assert!(app.world().get::<ArrangementMembers>(root).is_none());
+        assert!(app.world().get::<Member>(first).is_none());
+        assert!(app.world().get::<MemberIndex>(last).is_none());
+
+        app.world_mut().resource_mut::<ActiveCapability>().index = HINGE_CHAIN_INDEX;
+        app.update();
+        assert!(app.world().get::<Coil>(root).is_some());
+        assert_eq!(
+            app.world()
+                .get::<MemberIndex>(first)
+                .map(|index| index.index),
+            app.world().get::<AnchorTile>(first).map(|tile| tile.order)
+        );
+        assert_eq!(
+            app.world()
+                .get::<MemberIndex>(last)
+                .map(|index| index.index),
+            app.world().get::<AnchorTile>(last).map(|tile| tile.order)
+        );
+    }
 }
