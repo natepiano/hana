@@ -20,10 +20,21 @@ use bevy_liminal::OutlineCamera;
 use bevy_liminal::OutlineMethod;
 use bevy_liminal::OverlapMode;
 
+// assets
+const SCENE_ASSET_PATH: &str = "spaceship.glb#Scene0";
+
 // camera and lighting
 const CAMERA_FOCUS: Vec3 = Vec3::ZERO;
 const CAMERA_POSITION: Vec3 = Vec3::new(0.0, 12.0, 18.0);
 const LIGHT_POSITION: Vec3 = Vec3::new(4.0, 8.0, 4.0);
+
+// entity names
+const CUBE_NAME_PREFIX: &str = "Cube (";
+const NAME_SUFFIX: &str = ")";
+const SPACESHIP_NAME_PREFIX: &str = "Spaceship (";
+const SPHERE_NEGATIVE_X_NAME: &str = "Sphere -X";
+const SPHERE_POSITIVE_X_NAME: &str = "Sphere +X";
+const TORUS_NAME_PREFIX: &str = "Torus (";
 
 // environment
 const GROUND_COLOR: Color = Color::srgb(0.3, 0.5, 0.3);
@@ -44,6 +55,20 @@ const TORUS_ROW_Z: f32 = -GRID_SPACING;
 const COLUMN_LABEL_FONT_SIZE: f32 = 24.0;
 const COLUMN_LABEL_X_SCALE: f32 = 80.0;
 const COLUMN_LABEL_Y: f32 = 280.0;
+const COLUMN_LABELS: &[(OutlineMethod, &str)] = &[
+    (OutlineMethod::WorldHull, "WorldHull"),
+    (OutlineMethod::ScreenHull, "ScreenHull"),
+    (OutlineMethod::JumpFlood, "JumpFlood"),
+];
+const INITIAL_OVERLAP_LABEL: &str = "Overlap: Merged";
+const OVERLAP_LABEL_PREFIX: &str = "Overlap: ";
+const OVERLAP_MODE_GROUPED_LABEL: &str = "Grouped";
+const OVERLAP_MODE_MERGED_LABEL: &str = "Merged";
+const OVERLAP_MODE_PER_MESH_LABEL: &str = "PerMesh";
+
+// logging
+const GROUND_CLICK_LOG_MESSAGE: &str = "Ground clicked, zooming to scene bounds";
+const MESH_CLICK_LOG_PREFIX: &str = "Mesh clicked: ";
 
 // meshes
 const CUBE_BASE_COLOR: Color = Color::srgb(0.8, 0.7, 0.6);
@@ -69,6 +94,7 @@ const COLUMN_ROTATION_ANGLES: [(f32, f32, f32); 3] =
     [(0.7, 0.4, 0.0), (0.0, 0.0, 0.0), (-0.7, -0.9, 0.15)];
 
 // ui
+const GROUND_CLICK_UI_TEXT: &str = "Click a mesh to zoom-to-fit\nClick the ground to zoom back out\nPress 'O' to toggle overlap mode\n\nColumns: WorldHull | ScreenHull | JumpFlood\nRows: Torus | Cube | Spaceship";
 const OVERLAP_LABEL_COLOR: Color = Color::srgba(1.0, 1.0, 0.5, 0.9);
 const UI_PADDING: f32 = 12.0;
 const UI_TEXT_COLOR: Color = Color::srgba(1.0, 1.0, 1.0, 0.8);
@@ -78,26 +104,6 @@ const UI_TEXT_FONT_SIZE: f32 = 16.0;
 const ZOOM_DURATION_MS: u64 = 1000;
 const ZOOM_MARGIN_MESH: f32 = 0.15;
 const ZOOM_MARGIN_SCENE: f32 = 0.08;
-const COLUMN_LABELS: &[(OutlineMethod, &str)] = &[
-    (OutlineMethod::WorldHull, "WorldHull"),
-    (OutlineMethod::ScreenHull, "ScreenHull"),
-    (OutlineMethod::JumpFlood, "JumpFlood"),
-];
-const CUBE_NAME_PREFIX: &str = "Cube (";
-const GROUNDED_OVERLAP_LABEL: &str = "Overlap: Merged";
-const GROUND_CLICK_LOG_MESSAGE: &str = "Ground clicked, zooming to scene bounds";
-const GROUND_CLICK_UI_TEXT: &str = "Click a mesh to zoom-to-fit\nClick the ground to zoom back out\nPress 'O' to toggle overlap mode\n\nColumns: WorldHull | ScreenHull | JumpFlood\nRows: Torus | Cube | Spaceship";
-const MESH_CLICK_LOG_PREFIX: &str = "Mesh clicked: ";
-const OVERLAP_LABEL_PREFIX: &str = "Overlap: ";
-const OVERLAP_MODE_GROUPED_LABEL: &str = "Grouped";
-const OVERLAP_MODE_MERGED_LABEL: &str = "Merged";
-const OVERLAP_MODE_PER_MESH_LABEL: &str = "PerMesh";
-const SCENE_ASSET_PATH: &str = "spaceship.glb#Scene0";
-const SPHERE_NEGATIVE_X_NAME: &str = "Sphere -X";
-const SPHERE_POSITIVE_X_NAME: &str = "Sphere +X";
-const NAME_SUFFIX: &str = ")";
-const SPACESHIP_NAME_PREFIX: &str = "Spaceship (";
-const TORUS_NAME_PREFIX: &str = "Torus (";
 
 struct MeshAndMaterial {
     mesh:     Handle<Mesh>,
@@ -316,7 +322,7 @@ fn spawn_ui(commands: &mut Commands) {
 
     commands.spawn((
         OverlapLabel,
-        Text::new(GROUNDED_OVERLAP_LABEL),
+        Text::new(INITIAL_OVERLAP_LABEL),
         TextFont {
             font_size: FontSize::Px(UI_TEXT_FONT_SIZE),
             ..default()

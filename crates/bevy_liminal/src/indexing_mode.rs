@@ -7,16 +7,6 @@ pub(crate) enum IndexingMode {
     NonIndexed,
 }
 
-impl From<bool> for IndexingMode {
-    fn from(indexed: bool) -> Self {
-        if indexed {
-            Self::Indexed
-        } else {
-            Self::NonIndexed
-        }
-    }
-}
-
 impl IndexingMode {
     pub(crate) fn write_metadata(
         self,
@@ -27,6 +17,16 @@ impl IndexingMode {
         match self {
             Self::Indexed => buffers.indexed.set(offset, metadata),
             Self::NonIndexed => buffers.non_indexed.set(offset, metadata),
+        }
+    }
+}
+
+impl From<bool> for IndexingMode {
+    fn from(indexed: bool) -> Self {
+        if indexed {
+            Self::Indexed
+        } else {
+            Self::NonIndexed
         }
     }
 }

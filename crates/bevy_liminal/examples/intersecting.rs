@@ -17,17 +17,17 @@ use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
 
-// Camera
+// camera
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(1.5, 1.0, 1.5);
 
-// Lighting
+// lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
 const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
-// Scene
+// scene
 const CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CUBE_ROTATION_X: f32 = PI / 5.0;
 const CUBE_ROTATION_Y: f32 = PI / 3.0;

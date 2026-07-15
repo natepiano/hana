@@ -57,17 +57,6 @@ pub struct OutlineBuilder<M: OutlineModeState> {
     mode:         PhantomData<M>,
 }
 
-const fn defaults<M: OutlineModeState>(width: f32) -> OutlineBuilder<M> {
-    OutlineBuilder {
-        width,
-        intensity: DEFAULT_OUTLINE_INTENSITY,
-        color: Color::BLACK,
-        overlap_mode: OverlapMode::Merged,
-        group_source: None,
-        mode: PhantomData,
-    }
-}
-
 impl OutlineBuilder<JumpFloodState> {
     /// Create a new jump-flood outline builder with the given pixel width.
     #[must_use]
@@ -167,6 +156,17 @@ impl<M: HullModeState> OutlineBuilder<M> {
             activity:     OutlineActivity::Enabled,
             group_source: None,
         }
+    }
+}
+
+const fn defaults<M: OutlineModeState>(width: f32) -> OutlineBuilder<M> {
+    OutlineBuilder {
+        width,
+        intensity: DEFAULT_OUTLINE_INTENSITY,
+        color: Color::BLACK,
+        overlap_mode: OverlapMode::Merged,
+        group_source: None,
+        mode: PhantomData,
     }
 }
 

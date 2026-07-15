@@ -13,32 +13,32 @@ use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
 
-// Animation
+// animation
 const ROTATION_X_SPEED: f32 = 1.0 / 3.0;
 const ROTATION_Y_SPEED: f32 = 1.0 / 6.0;
 const WIDTH_STEP: f32 = 0.1;
 
-// Camera
+// camera
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 
-// Display formatting
+// display formatting
 const WIDTH_DISPLAY_PRECISION: usize = 1;
 
-// Lighting
+// lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
 const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
-// Scene
+// scene
 const GROUND_SIZE: f32 = 50.0;
 const GROUND_SUBDIVISIONS: u32 = 10;
 const INITIAL_OUTLINE_WIDTH: f32 = 10.0;
 const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const TRANSPARENT_ALPHA: f32 = 0.5;
 
-// UI
+// ui
 const UI_FONT_SIZE: f32 = 16.0;
 const UI_PADDING: f32 = 10.0;
 

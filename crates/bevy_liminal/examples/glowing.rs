@@ -14,21 +14,21 @@ use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
 
-// Animation
+// animation
 const ROTATION_X_SPEED: f32 = 1.0;
 const ROTATION_Y_SPEED: f32 = 0.5;
 
-// Camera
+// camera
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 
-// Lighting
+// lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
 const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
-// Scene
+// scene
 const GLOW_SINE_REMAP_OFFSET: f32 = 0.5;
 const GLOW_SINE_REMAP_SCALE: f32 = 0.5;
 const GROUND_SIZE: f32 = 50.0;

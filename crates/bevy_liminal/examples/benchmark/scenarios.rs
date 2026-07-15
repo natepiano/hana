@@ -7,19 +7,19 @@ use crate::grid::spawn_grid;
 use crate::viewport::ViewportInfo;
 
 #[derive(Clone, Copy)]
-pub(super) struct ScenarioDefinition {
-    pub(super) name:          &'static str,
-    pub(super) key:           KeyCode,
-    pub(super) scenario_kind: ScenarioKind,
-}
-
-#[derive(Clone, Copy)]
 pub(super) enum ScenarioKind {
     Grid {
         count:     u32,
         width:     f32,
         cube_fill: f32,
     },
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct ScenarioDefinition {
+    pub(super) name:          &'static str,
+    pub(super) key:           KeyCode,
+    pub(super) scenario_kind: ScenarioKind,
 }
 
 pub(super) fn spawn_scenario(

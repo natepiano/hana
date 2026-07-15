@@ -43,43 +43,61 @@ fn main() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// ROBOT HIERARCHY — the body owns `Outline`; every other mesh is its descendant.
+// robot hierarchy — the body owns `Outline`; every other mesh is its descendant.
 // `NoOutline` skips one arm, while `OutlineBarrier` prunes the other arm's
 // subtree.
 // ═════════════════════════════════════════════════════════════════════════════════
 
-const OUTLINE_WIDTH: f32 = 8.0;
-const BODY_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
-const NO_OUTLINE_COLOR: Color = Color::srgb(0.95, 0.35, 0.1);
-const NO_OUTLINE_DESCENDANT_COLOR: Color = Color::srgb(0.15, 0.45, 0.95);
-const BARRIER_COLOR: Color = Color::srgb(0.65, 0.2, 0.8);
-const BARRIER_DESCENDANT_COLOR: Color = Color::srgb(0.85, 0.45, 0.95);
+// arms
+const ARM_SIZE: Vec3 = Vec3::new(0.9, 0.28, 0.28);
+const ARM_X_OFFSET: f32 = 1.0;
+const ARM_Y: f32 = 0.15;
+const BARRIER_TRANSLATION: Vec3 = Vec3::new(ARM_X_OFFSET, ARM_Y, 0.0);
+const NO_OUTLINE_TRANSLATION: Vec3 = Vec3::new(-ARM_X_OFFSET, ARM_Y, 0.0);
 
+// body and head
 const BODY_SIZE: Vec3 = Vec3::new(1.2, 1.3, 0.7);
 const BODY_TRANSLATION: Vec3 = Vec3::new(0.0, 1.35, 0.0);
 const HEAD_RADIUS: f32 = 0.42;
 const HEAD_TRANSLATION: Vec3 = Vec3::new(0.0, 1.08, 0.0);
 
-const ARM_SIZE: Vec3 = Vec3::new(0.9, 0.28, 0.28);
-const ARM_X_OFFSET: f32 = 1.0;
-const ARM_Y: f32 = 0.15;
-const NO_OUTLINE_TRANSLATION: Vec3 = Vec3::new(-ARM_X_OFFSET, ARM_Y, 0.0);
-const BARRIER_TRANSLATION: Vec3 = Vec3::new(ARM_X_OFFSET, ARM_Y, 0.0);
+// camera home
+const HOME_MARGIN: f32 = 0.55;
+const HOME_PITCH: f32 = 0.3;
+const HOME_YAW: f32 = -0.35;
 
+// colors
+const BARRIER_COLOR: Color = Color::srgb(0.65, 0.2, 0.8);
+const BARRIER_DESCENDANT_COLOR: Color = Color::srgb(0.85, 0.45, 0.95);
+const BODY_COLOR: Color = fairy_dust::EXAMPLE_CUBE_COLOR;
+const NO_OUTLINE_COLOR: Color = Color::srgb(0.95, 0.35, 0.1);
+const NO_OUTLINE_DESCENDANT_COLOR: Color = Color::srgb(0.15, 0.45, 0.95);
+
+// entity labels
+const NO_OUTLINE_ARM_NAME: &str = "NoOutline robot arm";
+const NO_OUTLINE_DESCENDANT_NAME: &str = "Outlined hand beyond NoOutline";
+const OUTLINE_BARRIER_ARM_NAME: &str = "OutlineBarrier robot arm";
+const OUTLINE_BARRIER_DESCENDANT_NAME: &str = "Unoutlined hand behind OutlineBarrier";
+const OUTLINED_BODY_NAME: &str = "Outlined robot body";
+const OUTLINED_HEAD_NAME: &str = "Outlined robot head";
+const OUTLINED_LEFT_LEG_NAME: &str = "Outlined left leg";
+const OUTLINED_RIGHT_LEG_NAME: &str = "Outlined right leg";
+
+// hands
+const BARRIER_DESCENDANT_TRANSLATION: Vec3 = Vec3::new(HAND_X_OFFSET, 0.0, 0.0);
 const HAND_RADIUS: f32 = 0.3;
 const HAND_X_OFFSET: f32 = 0.6;
 const NO_OUTLINE_DESCENDANT_TRANSLATION: Vec3 = Vec3::new(-HAND_X_OFFSET, 0.0, 0.0);
-const BARRIER_DESCENDANT_TRANSLATION: Vec3 = Vec3::new(HAND_X_OFFSET, 0.0, 0.0);
 
+// legs
 const LEG_SIZE: Vec3 = Vec3::new(0.34, 0.9, 0.38);
 const LEG_X_OFFSET: f32 = 0.32;
 const LEG_Y: f32 = -0.9;
 const LEFT_LEG_TRANSLATION: Vec3 = Vec3::new(-LEG_X_OFFSET, LEG_Y, 0.0);
 const RIGHT_LEG_TRANSLATION: Vec3 = Vec3::new(LEG_X_OFFSET, LEG_Y, 0.0);
 
-const HOME_YAW: f32 = -0.35;
-const HOME_PITCH: f32 = 0.3;
-const HOME_MARGIN: f32 = 0.55;
+// outline
+const OUTLINE_WIDTH: f32 = 8.0;
 
 fn spawn_outlined_hierarchy(
     mut commands: Commands,
@@ -99,7 +117,7 @@ fn spawn_outlined_hierarchy(
 
     commands
         .spawn((
-            Name::new("Outlined robot body"),
+            Name::new(OUTLINED_BODY_NAME),
             Mesh3d(body_mesh),
             MeshMaterial3d(body_material.clone()),
             Transform::from_translation(BODY_TRANSLATION),
@@ -110,7 +128,7 @@ fn spawn_outlined_hierarchy(
         ))
         .with_children(|parent| {
             parent.spawn((
-                Name::new("Outlined robot head"),
+                Name::new(OUTLINED_HEAD_NAME),
                 Mesh3d(head_mesh),
                 MeshMaterial3d(body_material.clone()),
                 Transform::from_translation(HEAD_TRANSLATION),
@@ -118,8 +136,8 @@ fn spawn_outlined_hierarchy(
             ));
 
             for (name, translation) in [
-                ("Outlined left leg", LEFT_LEG_TRANSLATION),
-                ("Outlined right leg", RIGHT_LEG_TRANSLATION),
+                (OUTLINED_LEFT_LEG_NAME, LEFT_LEG_TRANSLATION),
+                (OUTLINED_RIGHT_LEG_NAME, RIGHT_LEG_TRANSLATION),
             ] {
                 parent.spawn((
                     Name::new(name),
@@ -132,7 +150,7 @@ fn spawn_outlined_hierarchy(
 
             parent
                 .spawn((
-                    Name::new("NoOutline robot arm"),
+                    Name::new(NO_OUTLINE_ARM_NAME),
                     Mesh3d(arm_mesh.clone()),
                     MeshMaterial3d(no_outline_material),
                     Transform::from_translation(NO_OUTLINE_TRANSLATION),
@@ -140,7 +158,7 @@ fn spawn_outlined_hierarchy(
                     CameraHomeTarget,
                 ))
                 .with_child((
-                    Name::new("Outlined hand beyond NoOutline"),
+                    Name::new(NO_OUTLINE_DESCENDANT_NAME),
                     Mesh3d(hand_mesh.clone()),
                     MeshMaterial3d(no_outline_descendant_material),
                     Transform::from_translation(NO_OUTLINE_DESCENDANT_TRANSLATION),
@@ -149,7 +167,7 @@ fn spawn_outlined_hierarchy(
 
             parent
                 .spawn((
-                    Name::new("OutlineBarrier robot arm"),
+                    Name::new(OUTLINE_BARRIER_ARM_NAME),
                     Mesh3d(arm_mesh),
                     MeshMaterial3d(barrier_material),
                     Transform::from_translation(BARRIER_TRANSLATION),
@@ -157,7 +175,7 @@ fn spawn_outlined_hierarchy(
                     CameraHomeTarget,
                 ))
                 .with_child((
-                    Name::new("Unoutlined hand behind OutlineBarrier"),
+                    Name::new(OUTLINE_BARRIER_DESCENDANT_NAME),
                     Mesh3d(hand_mesh),
                     MeshMaterial3d(barrier_descendant_material),
                     Transform::from_translation(BARRIER_DESCENDANT_TRANSLATION),
@@ -167,7 +185,7 @@ fn spawn_outlined_hierarchy(
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-// UI — explain the mesh-only and subtree exclusion behaviors.
+// ui — explain the mesh-only and subtree exclusion behaviors.
 // ════════════════════════════════════════════════════════════════════════════════
 
 const DESCRIPTION_HEADING: &str = "Propagation";

@@ -48,6 +48,14 @@ const INITIAL_HULL_WIDTH_WORLD: f32 = 0.01;
 const INITIAL_JUMP_FLOOD_WIDTH_PX: f32 = 5.0;
 const INITIAL_SHELL_WIDTH_PX: f32 = 2.0;
 
+// labels
+const MODE_LINE_JUMP_FLOOD: &str = "Mode: JumpFlood (M)";
+const MODE_LINE_SCREEN_HULL: &str = "Mode: ScreenHull (M)";
+const MODE_LINE_WORLD_HULL: &str = "Mode: WorldHull (M)";
+const OVERLAP_LABEL_GROUPED: &str = "Grouped";
+const OVERLAP_LABEL_MERGED: &str = "Merged";
+const OVERLAP_LABEL_PER_MESH: &str = "PerMesh";
+
 // mesh layout
 const INTERSECTING_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const INTERSECTING_SPHERE_POSITION: Vec3 = Vec3::new(-0.5, 1.0, 0.5);
@@ -74,13 +82,9 @@ const SCREEN_HULL_WIDTH_STEP: f32 = 0.5;
 const WORLD_HULL_WIDTH_MAX: f32 = 10.0;
 const WORLD_HULL_WIDTH_MIN: f32 = 0.0001;
 const WORLD_HULL_WIDTH_SCALE_FACTOR: f32 = 1.2;
+
+// window
 const WINDOW_TITLE: &str = "outline_mode - outline mode comparison";
-const MODE_LINE_JUMP_FLOOD: &str = "Mode: JumpFlood (M)";
-const MODE_LINE_WORLD_HULL: &str = "Mode: WorldHull (M)";
-const MODE_LINE_SCREEN_HULL: &str = "Mode: ScreenHull (M)";
-const OVERLAP_LABEL_GROUPED: &str = "Grouped";
-const OVERLAP_LABEL_MERGED: &str = "Merged";
-const OVERLAP_LABEL_PER_MESH: &str = "PerMesh";
 
 fn main() {
     App::new()

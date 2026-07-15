@@ -17,15 +17,15 @@ use bevy_liminal::LiminalPlugin;
 use bevy_liminal::Outline;
 use bevy_liminal::OutlineCamera;
 
-// Animation
+// animation
 const ROTATION_X_SPEED: f32 = 1.0 / 3.0;
 const ROTATION_Y_SPEED: f32 = 1.0 / 6.0;
 
-// Camera
+// camera
 const CAMERA_FOCUS: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 const CAMERA_POSITION: Vec3 = Vec3::new(3.0, 2.0, 3.0);
 
-// Input
+// input
 // Note: Sample8 is not supported on all hardware (e.g. Apple Silicon only
 // supports [1, 2, 4]).
 const MULTISAMPLE_ANTI_ALIASING_KEYS: [(KeyCode, Msaa); 4] = [
@@ -35,31 +35,31 @@ const MULTISAMPLE_ANTI_ALIASING_KEYS: [(KeyCode, Msaa); 4] = [
     (KeyCode::Digit4, Msaa::Sample8),
 ];
 
-// Lighting
+// lighting
 const LIGHT_INTENSITY: f32 = 10_000_000.0;
 const LIGHT_POSITION: Vec3 = Vec3::new(8.0, 16.0, 8.0);
 const LIGHT_RANGE: f32 = 100.0;
 const LIGHT_SHADOW_DEPTH_BIAS: f32 = 0.2;
 
-// Scene
+// scene
 const GROUND_SIZE: f32 = 50.0;
 const GROUND_SUBDIVISIONS: u32 = 10;
 const INITIAL_MSAA: Msaa = Msaa::Sample4;
 const INITIAL_OUTLINE_WIDTH: f32 = 10.0;
 const OUTLINED_CUBE_POSITION: Vec3 = Vec3::new(0.0, 1.0, 0.0);
 
-// UI
-const UI_FONT_SIZE: f32 = 16.0;
-const UI_PADDING: f32 = 10.0;
+// ui
+const CURRENT_POST_ANTI_ALIASING_LABEL: &str = "\nCurrent Post AA: ";
 const MSAA_LABEL_OFF: &str = "Off";
 const MSAA_LABEL_SAMPLE_2: &str = "2x";
 const MSAA_LABEL_SAMPLE_4: &str = "4x";
 const MSAA_LABEL_SAMPLE_8: &str = "8x";
+const MSAA_TEXT_HEADER: &str = "MSAA:\n1: Off\n2: 2x\n3: 4x (default)\n4: 8x\n\nPost AA:\nS: Toggle SMAA\nT: Toggle TAA\n\nCurrent MSAA: ";
 const POST_ANTI_ALIASING_LABEL_NONE: &str = "None";
 const POST_ANTI_ALIASING_LABEL_SMAA: &str = "SMAA";
 const POST_ANTI_ALIASING_LABEL_TAA: &str = "TAA";
-const MSAA_TEXT_HEADER: &str = "MSAA:\n1: Off\n2: 2x\n3: 4x (default)\n4: 8x\n\nPost AA:\nS: Toggle SMAA\nT: Toggle TAA\n\nCurrent MSAA: ";
-const CURRENT_POST_ANTI_ALIASING_LABEL: &str = "\nCurrent Post AA: ";
+const UI_FONT_SIZE: f32 = 16.0;
+const UI_PADDING: f32 = 10.0;
 
 fn main() {
     App::new()
