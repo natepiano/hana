@@ -41,9 +41,9 @@ bitflags = { workspace = true }
 bevy            = { workspace = true, features = ["3d"] }
 bevy_brp_extras = { workspace = true }
 bevy_clerestory = { workspace = true }
-bevy_diegetic   = { workspace = true }
 fairy_dust      = { workspace = true }
 float-cmp       = { workspace = true }
+hana_diegetic   = { workspace = true }
 
 [[example]]
 name              = "showcase"

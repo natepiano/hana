@@ -5,8 +5,6 @@
 use bevy::ecs::system::EntityCommands;
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Sidedness;
 use fairy_dust::cube_face_transform;
 use hana_conduit::Cable;
 use hana_conduit::CableEnd;
@@ -14,6 +12,8 @@ use hana_conduit::CableEndpoint;
 use hana_conduit::CableMeshConfig;
 use hana_conduit::Obstacle;
 use hana_conduit::Solver;
+use hana_diegetic::DiegeticText;
+use hana_diegetic::Sidedness;
 
 use super::constants::CUBE_FACES;
 use super::constants::DEFAULT_CABLE_RESOLUTION;

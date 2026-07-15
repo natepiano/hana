@@ -1,21 +1,21 @@
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::ChildDivider;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::Text;
-use bevy_diegetic::TextStyle;
-use bevy_diegetic::TextWrap;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
 use fairy_dust::TITLE_COLOR;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material_handle;
+use hana_diegetic::AlignX;
+use hana_diegetic::AlignY;
+use hana_diegetic::ChildDivider;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Px;
+use hana_diegetic::Sizing;
+use hana_diegetic::Text;
+use hana_diegetic::TextStyle;
+use hana_diegetic::TextWrap;
 
 use super::*;
 

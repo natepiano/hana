@@ -8,7 +8,6 @@
 //!   P or Space — toggle game pause
 
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticPanelCommands;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::TimeSource;
@@ -25,6 +24,7 @@ use fairy_dust::TitleChipActivation;
 use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
+use hana_diegetic::DiegeticPanelCommands;
 
 const EXAMPLE_TITLE: &str = "Pausing";
 

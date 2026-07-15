@@ -2,7 +2,7 @@
 
 A reusable recipe for moving a Cargo crate from a standalone git repo into `crates/<crate_name>/` alongside the existing workspace members. Pure relocation — no API changes, no version bump, no publishing.
 
-Throughout, `<crate_name>` is the name of the incoming crate (e.g. `bevy_lagrange`, `bevy_diegetic`) and `<source_repo_path>` is the path to its standalone git checkout (e.g. `~/rust/<crate_name>`).
+Throughout, `<crate_name>` is the name of the incoming crate (e.g. `bevy_lagrange`, `hana_diegetic`) and `<source_repo_path>` is the path to its standalone git checkout (e.g. `~/rust/<crate_name>`).
 
 ## Steps
 
@@ -33,7 +33,7 @@ Keep `LICENSE-APACHE`, `LICENSE-MIT`, `README.md`, `CHANGELOG.md`, `NOTICE` — 
 
 ### 4. Restructure `crates/<crate_name>/Cargo.toml` to match the workspace pattern
 
-Match the existing workspace-member pattern (e.g. `bevy_diegetic`): thin per-crate manifest, workspace-shared values via `*.workspace = true`, per-crate-distinct values stay declared per-crate. Concretely:
+Match the existing workspace-member pattern (e.g. `hana_diegetic`): thin per-crate manifest, workspace-shared values via `*.workspace = true`, per-crate-distinct values stay declared per-crate. Concretely:
 
 - `edition.workspace = true`, `license.workspace = true`, `authors.workspace = true`, `repository.workspace = true`, `[lints] workspace = true`. `repository.workspace = true` resolves to the monorepo (`https://github.com/<owner>/<repo>`), which is correct now that the crate lives there.
 - `readme = "README.md"` stays per-crate (there is no workspace `readme` default).

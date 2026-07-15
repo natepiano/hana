@@ -3,8 +3,8 @@
 use std::time::Duration;
 
 use bevy::prelude::Color;
-use bevy_diegetic::Pt;
-use bevy_diegetic::Px;
+use hana_diegetic::Pt;
+use hana_diegetic::Px;
 
 // body
 pub(super) const BODY_COLOR: Color = Color::srgba(0.68, 0.72, 0.82, 0.9);

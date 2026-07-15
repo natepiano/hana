@@ -64,8 +64,6 @@ mod unclamp;
 
 use bevy::log::LogPlugin;
 use bevy::prelude::*;
-pub use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticUiPlugin;
 use bevy_lagrange::LagrangePlugin;
 pub use bevy_lagrange::OrbitCam;
 pub use builder::CameraHomeBuilder;
@@ -102,6 +100,8 @@ pub use fold_controls::FoldControlAction;
 pub use fold_controls::FoldControlDiagnostic;
 pub use fold_controls::FoldControlDiagnosticReason;
 pub use fold_controls::FoldControlDiagnostics;
+pub use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticUiPlugin;
 pub use lighting::FairyDustStudioLightingSet;
 pub use orbit_cam::FairyDustOrbitCam;
 pub use orbit_cam::OrbitCamPose;
@@ -147,7 +147,7 @@ pub use screen_panels::screen_panel_material_handle;
 /// Construct a fresh [`SprinkleBuilder`] with `DefaultPlugins` configured
 /// for a quiet log filter. Chain capability methods, then call `.run()`.
 ///
-/// [`bevy_diegetic::DiegeticUiPlugin`] is registered unconditionally so any
+/// [`hana_diegetic::DiegeticUiPlugin`] is registered unconditionally so any
 /// example can spawn `WorldText` or `DiegeticPanel` without an explicit
 /// `add_plugins` call.
 ///

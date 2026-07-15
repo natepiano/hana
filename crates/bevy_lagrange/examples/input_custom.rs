@@ -14,7 +14,6 @@
 use std::f32::consts::TAU;
 
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticPanelCommands;
 use bevy_enhanced_input::prelude::ModKeys;
 use bevy_lagrange::BindingsError;
 use bevy_lagrange::CameraInputDisabled;
@@ -52,6 +51,7 @@ use fairy_dust::apply_example_orbit_cam_limits;
 use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
+use hana_diegetic::DiegeticPanelCommands;
 
 const EXAMPLE_TITLE: &str = "Custom Bindings";
 

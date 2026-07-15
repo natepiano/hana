@@ -6,8 +6,8 @@ use bevy::prelude::Color;
 use bevy::prelude::GamepadButton;
 use bevy::prelude::KeyCode;
 use bevy::prelude::Vec3;
-use bevy_diegetic::Pt;
-use bevy_diegetic::Px;
+use hana_diegetic::Pt;
+use hana_diegetic::Px;
 
 // aabb
 /// The 8 corner sign-patterns of a unit AABB, used by lighting and camera-home

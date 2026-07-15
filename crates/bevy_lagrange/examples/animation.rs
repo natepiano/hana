@@ -29,24 +29,6 @@ use std::time::Duration;
 use bevy::color::LinearRgba;
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
-use bevy_diegetic::PanelBuildError;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextAlign;
-use bevy_diegetic::TextStyle;
-use bevy_diegetic::Unit;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::AnimateToFit;
 use bevy_lagrange::AnimationBegin;
 use bevy_lagrange::AnimationEnd;
@@ -71,6 +53,24 @@ use fairy_dust::TITLE_SIZE;
 use fairy_dust::TitleBar;
 use fairy_dust::cube_face_transform;
 use fairy_dust::example_cube_on_ground;
+use hana_diegetic::AlignX;
+use hana_diegetic::AlignY;
+use hana_diegetic::Border;
+use hana_diegetic::CornerRadius;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::GlyphShadowMode;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Padding;
+use hana_diegetic::PanelBuildError;
+use hana_diegetic::Px;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextAlign;
+use hana_diegetic::TextStyle;
+use hana_diegetic::Unit;
+use hana_diegetic::default_panel_material;
 
 const EXAMPLE_TITLE: &str = "Animation";
 
@@ -398,7 +398,7 @@ const CUBE_OFFSET_X: f32 = 1.5;
 const CUBE_GROUND_CLEARANCE: f32 = 0.1;
 // Each cube wears its name on its faces via a transparent cube-face
 // `DiegeticPanel` whose `text_material` is strongly emissive — the same
-// example-level recipe as `focus_bounds`/`follow_target`, so no bevy_diegetic
+// example-level recipe as `focus_bounds`/`follow_target`, so no hana_diegetic
 // change is needed. Panel font sizes are in millimeters (the cube is 1 m).
 const FACE_LABEL_PANEL_SIZE: f32 = CUBE_SIZE * 0.88;
 const FACE_LABEL_TEXT_SIZE: f32 = 88.0;

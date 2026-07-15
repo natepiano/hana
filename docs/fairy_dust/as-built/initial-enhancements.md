@@ -2,7 +2,7 @@
 
 ## Objective
 
-Move repeated example-scaffolding code from `bevy_lagrange` and `bevy_diegetic`
+Move repeated example-scaffolding code from `bevy_lagrange` and `hana_diegetic`
 examples into small Fairy Dust APIs, while keeping examples explicit about the
 primary API they are demonstrating.
 

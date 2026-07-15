@@ -1,13 +1,13 @@
 //! Static side-panel that explains what an example demonstrates.
 
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextStyle;
 
 use super::constants::BODY_COLOR;
 use super::constants::DESCRIPTION_CHILD_GAP;

@@ -2,8 +2,6 @@
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticText;
 use hana_conduit::AttachedTo;
 use hana_conduit::Cable;
 use hana_conduit::CableEnd;
@@ -12,6 +10,8 @@ use hana_conduit::CableMeshConfig;
 use hana_conduit::CatenarySolver;
 use hana_conduit::DetachPolicy;
 use hana_conduit::Solver;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticText;
 
 use super::constants::DEFAULT_CABLE_RESOLUTION;
 use super::constants::DESPAWN_GREEN;

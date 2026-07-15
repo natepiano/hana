@@ -2,7 +2,7 @@
 
 ## Guiding Principle: Math and Rendering are Separate
 
-Inspired by Clay's layout library and `bevy_diegetic`, this crate splits into two layers:
+Inspired by Clay's layout library and `hana_diegetic`, this crate splits into two layers:
 
 ```
 ┌─────────────────────────────────────────────────────────┐

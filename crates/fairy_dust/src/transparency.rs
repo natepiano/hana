@@ -1,4 +1,4 @@
-//! Capability: insert `bevy_diegetic::StableTransparency` on the spawned
+//! Capability: insert `hana_diegetic::StableTransparency` on the spawned
 //! orbit camera so the proper OIT + `Msaa::Off` configuration is applied
 //! (removes the view-angle color shift on coplanar `WorldText`).
 //!
@@ -8,8 +8,8 @@
 //! without it.
 
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::StableTransparency;
+use hana_diegetic::DiegeticUiPlugin;
+use hana_diegetic::StableTransparency;
 
 use crate::ensure_plugin;
 use crate::orbit_cam::FairyDustOrbitCam;

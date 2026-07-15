@@ -87,7 +87,7 @@ impl<S> PrimitiveBuilder<S> {
         self
     }
 
-    /// Adds a centered world-space [`bevy_diegetic::DiegeticText`] label to one
+    /// Adds a centered world-space [`hana_diegetic::DiegeticText`] label to one
     /// face of a cube primitive. The label inherits the cube's `Transform` as parent,
     /// is sized in world meters by `text_size`, and uses one-sided glyphs.
     ///

@@ -12,14 +12,14 @@ use bevy::color::palettes::css::SKY_BLUE;
 use bevy::color::palettes::css::TURQUOISE;
 use bevy::math::Dir3;
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticText;
-use bevy_diegetic::Sidedness;
 use bevy_kana::ToF32;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
 use fairy_dust::CameraHomeTarget;
 use fairy_dust::DescriptionPanel;
 use fairy_dust::TitleBar;
+use hana_diegetic::DiegeticText;
+use hana_diegetic::Sidedness;
 use hana_valence::AnchorId;
 use hana_valence::AnchorPose;
 use hana_valence::AnchoredTo;
@@ -186,7 +186,7 @@ struct KnuckleLine {
 }
 
 fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
     let app = fairy_dust::sprinkle_example()
         .with_brp_extras()

@@ -276,7 +276,7 @@ of `Copy`/`const` easing accessors.
   updated `bevy_lagrange` builders. Fairy Dust remains responsible for controls
   and presentation, not sampling.
 - Mechanically migrate the `hana_conduit` playground camera calls.
-- Mechanically migrate the `bevy_diegetic` `aa_text` camera-animation example.
+- Mechanically migrate the `hana_diegetic` `aa_text` camera-animation example.
 - Leave examples that only choose a stock easing concise by relying on
   `From<EaseFunction>` and `impl Into<Easing>`.
 

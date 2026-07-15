@@ -7,7 +7,6 @@
 //!   H      — return to the camera home pose
 
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::CameraInputRoutingConfig;
 use bevy_lagrange::NoPositionFallback;
 use bevy_lagrange::OrbitCam;
@@ -27,6 +26,7 @@ use fairy_dust::ReleaseHold;
 use fairy_dust::TitleBar;
 use fairy_dust::apply_example_orbit_cam_limits;
 use fairy_dust::cube_face_label;
+use hana_diegetic::DiegeticTextMut;
 
 const EXAMPLE_TITLE: &str = "Keyboard Bindings";
 

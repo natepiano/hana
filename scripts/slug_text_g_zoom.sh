@@ -108,7 +108,7 @@ launch_if_needed() {
         return
     fi
 
-    BRP_EXTRAS_PORT="${PORT}" nohup cargo run -p bevy_diegetic --example slug_text \
+    BRP_EXTRAS_PORT="${PORT}" nohup cargo run -p hana_diegetic --example slug_text \
         > "${LOG_PATH}" 2>&1 &
 
     for _ in {1..300}; do

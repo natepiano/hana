@@ -1,19 +1,19 @@
 //! Shared screen-space instrumentation panels for examples.
 
 use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::PanelBuildError;
-use bevy_diegetic::Percent;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
+use hana_diegetic::AlignX;
+use hana_diegetic::AlignY;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::GlyphShadowMode;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::PanelBuildError;
+use hana_diegetic::Percent;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextStyle;
 
 use super::constants::GPU_METER_PANEL_WIDTH_FRACTION;
 use super::constants::PANEL_SEPARATOR_COLOR;
@@ -312,7 +312,7 @@ fn stats_group(builder: &mut LayoutBuilder, row: &StatsPanelRow) {
                     El::new()
                         .width(Sizing::fixed(STATS_ROW_WIDTH))
                         .height(Sizing::FIT)
-                        .padding(bevy_diegetic::Padding::new(
+                        .padding(hana_diegetic::Padding::new(
                             STATS_DETAIL_INDENT,
                             0.0,
                             0.0,

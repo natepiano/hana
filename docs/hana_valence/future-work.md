@@ -17,7 +17,7 @@
   pattern.
 - **Frame-aware hinge axis** — support folding on frame-divergent,
   curved-surface edges after the curved-surface sampler in
-  [surface-panels.md](../bevy_diegetic/surface-panels.md) fills
+  [surface-panels.md](../hana_diegetic/surface-panels.md) fills
   `AnchorPoint.frame` from `SurfaceSample`.
 - **Cross-space anchoring** — anchor a screen panel to a world target by
   projecting the world anchor into viewport coordinates before feeding the
@@ -33,7 +33,7 @@
 - **`NetClosure` validator** — optionally check that a net's topology and
   target angles close.
 - **Widgets handoff** — bind Phase 1 of
-  [widgets.md](../bevy_diegetic/widgets.md) to valence. Widget reification
+  [widgets.md](../hana_diegetic/widgets.md) to valence. Widget reification
   publishes `ResolvedAnchorGeometry` on materialized widget entities only while
   they are actual targets. World demand comes from `Has<AnchoredHere>`; screen
   demand needs a private diegetic marker maintained from

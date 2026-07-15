@@ -7,7 +7,7 @@ Geometry providers publish local anchor points and ordered edges on each entity;
 `AnchoredTo` connects one entity's anchor to another; animation systems drive
 `AnchorPose` or `Hinge`; and `resolve_anchors` converts that data into local
 `Transform` values in dependency order. The same primitives support direct
-entity bonds, linear tiling arrangements, and `bevy_diegetic` panel anchoring
+entity bonds, linear tiling arrangements, and `hana_diegetic` panel anchoring
 without putting panel units, window coordinates, or shape-specific vocabulary
 into the core resolver.
 
@@ -269,18 +269,18 @@ its predecessor. It has no public constructor and is maintained through the
 member observers. Branching nets are not linear arrangements; they author their
 `AnchoredTo` and `Hinge` tree directly.
 
-### bevy_diegetic integration
+### hana_diegetic integration
 
-`bevy_diegetic` composes with `hana_valence` while retaining panel-specific
+`hana_diegetic` composes with `hana_valence` while retaining panel-specific
 authoring and coordinate math.
 
-[`panel/valence_provider.rs`](../../../crates/bevy_diegetic/src/panel/valence_provider.rs)
+[`panel/valence_provider.rs`](../../../crates/hana_diegetic/src/panel/valence_provider.rs)
 maps the nine panel `Anchor` values to quad `AnchorId` values and fills
 world-panel geometry with nine local points and four ordered perimeter edges.
 The fill system runs on `Changed<DiegeticPanel>`, never `Changed<Transform>`,
 and mutates existing geometry in place to retain allocations.
 
-[`panel/anchoring.rs`](../../../crates/bevy_diegetic/src/panel/anchoring.rs)
+[`panel/anchoring.rs`](../../../crates/hana_diegetic/src/panel/anchoring.rs)
 exposes `AnchoredToPanel`, an insert-only bundle containing private shared
 authoring plus `PanelAnchorOffset`. It is not a queryable relationship
 component. The internal `PanelAttachmentAuthored` is consumed by two
@@ -303,13 +303,13 @@ resolver-local positive-up y. Unit conversion, DPI handling, target-relative
 sizing, and this y sign change remain outside `hana_valence`.
 
 The screen path in
-[`screen_space/anchoring`](../../../crates/bevy_diegetic/src/screen_space/anchoring)
+[`screen_space/anchoring`](../../../crates/hana_diegetic/src/screen_space/anchoring)
 uses `PanelAttachmentAuthored` to classify candidates, delegates graph ordering
 and diagnostics to `hana_valence::resolve_attachments`, and performs
 viewport/window placement in its own callback. It supports in-plane
 `AnchorPose` rotation and translation without inserting a world `AnchoredTo`.
 
-[`panel/arrangement.rs`](../../../crates/bevy_diegetic/src/panel/arrangement.rs)
+[`panel/arrangement.rs`](../../../crates/hana_diegetic/src/panel/arrangement.rs)
 exposes the insert-only `ArrangedPanel` wrapper and adapts `QuadTiling`
 placement for panel members. Connected screen arrangements screen-attach only
 their root; member panels remain in the shared world fold frame and connect to
@@ -375,7 +375,7 @@ diagnostics and placement.
   angle.
 - `Accordion::fold` and `Coil::fold` are clamped, but their `lean` values, rule
   rest angles, offsets, and authored geometry are otherwise caller-controlled.
-- `bevy_diegetic` consumes `hana_valence` with default features disabled, so its
+- `hana_diegetic` consumes `hana_valence` with default features disabled, so its
   anchoring integration does not pull in `bevy_tween`.
 - Workspace reflect auto-registration covers concrete reflected types. Generic
   monomorphizations and foreign reflected type-data patches still require

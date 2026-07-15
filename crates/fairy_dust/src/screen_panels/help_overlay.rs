@@ -1,20 +1,20 @@
 //! Keyboard shortcut help overlay for title bars.
 
 use bevy::prelude::*;
-use bevy_diegetic::AlignX;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
 use bevy_enhanced_input::prelude::*;
 use bevy_kana::action;
 use bevy_kana::bind_action_system;
 use bevy_kana::event;
+use hana_diegetic::AlignX;
+use hana_diegetic::AlignY;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextStyle;
 
 use super::ControlActivation;
 use super::TitleBarControlState;

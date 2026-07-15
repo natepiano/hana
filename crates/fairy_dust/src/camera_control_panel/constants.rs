@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use bevy::prelude::Color;
-use bevy_diegetic::Px;
+use hana_diegetic::Px;
 
 use crate::constants::LABEL_SIZE;
 

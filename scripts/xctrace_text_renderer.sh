@@ -4,7 +4,7 @@ set -euo pipefail
 DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 export DEVELOPER_DIR
 
-PACKAGE="bevy_diegetic"
+PACKAGE="hana_diegetic"
 EXAMPLE="text_renderer_gpu_bench"
 BINARY="target/release/examples/${EXAMPLE}"
 TRACE_DIR="target/xctrace"

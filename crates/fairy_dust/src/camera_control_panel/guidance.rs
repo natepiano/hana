@@ -1,7 +1,6 @@
 //! Public guidance configuration types: `CameraGuidance`, `CameraGuidanceRow`.
 
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
 use bevy_lagrange::CameraControlAction;
 use bevy_lagrange::CameraControlBinding;
 use bevy_lagrange::CameraControlBindingKind;
@@ -15,6 +14,7 @@ use bevy_lagrange::OrbitCamInteractionKind;
 use bevy_lagrange::OrbitCamPreset;
 use bevy_lagrange::ZoomDirection;
 use bevy_lagrange::describe_controls;
+use hana_diegetic::Anchor;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum CameraGuidanceContent {

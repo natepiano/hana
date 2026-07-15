@@ -1,17 +1,6 @@
 //! Diegetic layout-tree builders for the camera control panel.
 
 use bevy::prelude::*;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::ChildDivider;
-use bevy_diegetic::Column;
-use bevy_diegetic::El;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::PanelDraw;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
 use bevy_lagrange::CameraControlActivation;
 use bevy_lagrange::CameraControlBinding;
 use bevy_lagrange::CameraControlBindingKind;
@@ -19,6 +8,17 @@ use bevy_lagrange::ControlSpeed;
 use bevy_lagrange::FreeCamActiveDirections;
 use bevy_lagrange::InteractionSources;
 use bevy_lagrange::ZoomDirection;
+use hana_diegetic::AlignY;
+use hana_diegetic::ChildDivider;
+use hana_diegetic::Column;
+use hana_diegetic::El;
+use hana_diegetic::GlyphShadowMode;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::PanelDraw;
+use hana_diegetic::Px;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextStyle;
 
 use super::constants::ACTION_COLUMN_WIDTH;
 use super::constants::ACTIVE_COLOR;

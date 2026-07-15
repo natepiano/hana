@@ -1,4 +1,4 @@
-use bevy_diegetic::DiegeticText;
+use hana_diegetic::DiegeticText;
 
 use super::*;
 

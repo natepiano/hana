@@ -10,7 +10,6 @@
 
 use bevy::camera::ScalingMode;
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticTextMut;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::Anchor;
@@ -19,6 +18,7 @@ use fairy_dust::ControlActivation;
 use fairy_dust::CubeFaceLabel;
 use fairy_dust::Face;
 use fairy_dust::TitleBar;
+use hana_diegetic::DiegeticTextMut;
 
 const EXAMPLE_TITLE: &str = "Orthographic";
 

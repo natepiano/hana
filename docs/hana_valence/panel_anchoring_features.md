@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The `bevy_diegetic` `panel_anchoring` example contains behavior that is useful
+The `hana_diegetic` `panel_anchoring` example contains behavior that is useful
 beyond panels. This document inventories that behavior, records the API and
 feature review decisions, and accumulates the resulting implementation work in
 dependency order. It is the source plan that will later be converted into a
@@ -351,6 +351,157 @@ or more groups to arrangement construction remain pending.
 
 **Status:** Core value structure decided; construction and collection-transfer
 API pending.
+
+### Confirmed topology-provider and recipe separation
+
+`TopologyProvider` owns the basic spatial layout. It creates the physical
+`Connection` values and identifies which ordered connections form each
+`FoldGroup`. A compatible `FoldRecipe` consumes those groups and calculates
+`HingeAssignment` values; it does not rediscover or redefine the layout.
+
+The relationship is many-to-many. One provider's groups may support several
+recipes, and one recipe may operate on groups created by many providers. Hana
+built-ins and application-defined implementations may be mixed independently:
+
+```text
+TopologyProvider -> FoldGroup -> FoldRecipe -> HingeAssignment
+```
+
+`FoldGroup` is therefore publicly constructible. Hana's built-in providers,
+application-defined providers, and direct topology authors may all create it.
+The exact API that transfers the provider's connections and groups together is
+the next decision.
+
+**Status:** Decided.
+
+### Confirmed topology-provider output
+
+`TopologyProvider::generate_topology()` returns one named, pure authoring value
+containing both the member topology and its fold groups:
+
+```rust
+pub struct Topology {
+    pub members: Vec<MemberTopology>,
+    pub fold_groups: FoldGroups,
+}
+```
+
+Returning both collections together lets Hana validate that every retained
+group refers to the same connections being materialized. It avoids an unnamed
+tuple and separate connection/group generation calls that could disagree.
+
+`Topology` is not returned by `spawn_arrangement()`. A built-in or custom
+provider creates it outside the `World`; Hana consumes it while spawning or
+applying topology and returns only the `Arrangement` controller `Entity`.
+Direct authors may supply the same value to `apply_topology()` for an existing
+arrangement.
+
+```rust
+// Application code
+let arrangement_entity = commands.spawn_arrangement_with(
+    MyNet::new(),
+    make_panel,
+)?;
+
+// Custom TopologyProvider implementation
+Ok(Topology {
+    members,
+    fold_groups,
+})
+```
+
+This restores the previously planned `Topology` name only for the value that
+actually describes topology; it does not restore the rejected caller-owned
+spawn-result wrapper.
+
+**Status:** Decided.
+
+### Confirmed fold-group capability collection
+
+Use a semantic sum type rather than `Option<Vec<FoldGroup>>` or an empty vector
+to distinguish whether a `Topology` provides generic fold-group capability:
+
+```rust
+pub enum FoldGroups {
+    /// This topology does not expose groups for generic FoldRecipe use.
+    NotProvided,
+
+    /// This topology exposes one or more ordered FoldGroup values.
+    Provided(Vec<FoldGroup>),
+}
+```
+
+The normal constructor requires the first group separately, making its output
+nonempty by construction. Whole-`Topology` validation still rejects a directly
+constructed `Provided(Vec::new())`.
+
+```rust
+impl FoldGroups {
+    pub fn provided(
+        first: FoldGroup,
+        remaining: impl IntoIterator<Item = FoldGroup>,
+    ) -> Self {
+        let mut groups = vec![first];
+        groups.extend(remaining);
+        Self::Provided(groups)
+    }
+
+    pub const fn is_provided(&self) -> bool {
+        matches!(self, Self::Provided(_))
+    }
+}
+```
+
+Expose a read-only collection view. `NotProvided` dereferences to an empty
+slice for ordinary iteration, while callers that need the capability
+distinction use `is_provided()` or pattern matching. Implement
+`IntoIterator for &FoldGroups` as matching iteration sugar, but do not
+implement `DerefMut`; changes must return through topology validation.
+
+```rust
+impl Deref for FoldGroups {
+    type Target = [FoldGroup];
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::NotProvided => &[],
+            Self::Provided(groups) => groups.as_slice(),
+        }
+    }
+}
+
+for group in &topology.fold_groups {
+    // IntoIterator for &FoldGroups
+}
+```
+
+**Status:** Decided.
+
+### Confirmed recipe capability boundary
+
+Hana matches `Topology::fold_groups` before invoking a recipe. A
+`FoldGroups::NotProvided` value is an application-time compatibility failure;
+the recipe is not called and no `Hinge` values change. For
+`FoldGroups::Provided`, Hana passes the contained groups to
+`FoldRecipe::hinge_assignments()` as a validated, nonempty `&[FoldGroup]`.
+
+```rust
+// Hana implementation
+let fold_groups = match &topology.fold_groups {
+    FoldGroups::NotProvided => {
+        return Err(/* fold groups not provided; error type TBD */);
+    }
+    FoldGroups::Provided(groups) => groups.as_slice(),
+};
+
+let assignments = recipe.hinge_assignments(fold_groups)?;
+```
+
+The read-only `Deref` still treats `NotProvided` as an empty slice for ordinary
+inspection and iteration, but recipe application preserves the semantic sum
+distinction. Custom recipes never check absence or interpret an empty input.
+
+**Status:** Decided.
 
 ## Cohesion overview status
 
@@ -2352,7 +2503,7 @@ The boundary used here is:
 
 - `hana_valence` owns relationships, ordered arrangements, pose and hinge
   motion, transitions between authored relationships, and related diagnostics;
-- adapters such as `bevy_diegetic` provide geometry and coordinate-space
+- adapters such as `hana_diegetic` provide geometry and coordinate-space
   conversion;
 - applications own controls, labels, colors, camera presentation, and teaching
   UI.
@@ -2679,7 +2830,7 @@ These example features do not belong in the core crate:
 - camera orbit presets, viewport-overflow detection, and automatic camera
   fitting;
 - panel rebuilding thresholds used to limit presentation updates;
-- `bevy_diegetic` unit conversion and panel geometry publication.
+- `hana_diegetic` unit conversion and panel geometry publication.
 
 The general operations behind some of these features can still be Hana APIs.
 For example, the 3-by-3 keyboard navigator stays in the example, while smooth

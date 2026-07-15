@@ -304,7 +304,7 @@ and camera control panel.
 
 `DiegeticUiPlugin` is registered automatically inside `sprinkle_example`.
 Examples may spawn `WorldText` or `DiegeticPanel` directly without an explicit
-`add_plugins` call. The `crates/bevy_diegetic/examples/*` examples follow the
+`add_plugins` call. The `crates/hana_diegetic/examples/*` examples follow the
 same Fairy Dust scene, OrbitCam, lighting, ground, and HUD conventions as
 `bevy_lagrange` examples. Inside those examples, include a one-line comment at
 the top of `fn main` noting this so readers don't go hunting for the
@@ -312,7 +312,7 @@ registration:
 
 ```rust
 fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`.
     fairy_dust::sprinkle_example()
         // ...
@@ -413,7 +413,7 @@ Implemented shared APIs are tracked in
 - Should the example HUD support per-chip mouse-click activation (turn
   chips into buttons)?
 - Every `bevy_lagrange` example uses `sprinkle_example()`. Eight
-  `bevy_diegetic` examples still use raw `App::new()` (`side_by_side.rs`,
+  `hana_diegetic` examples still use raw `App::new()` (`side_by_side.rs`,
   `screen_space.rs`, `paper_sizes.rs`, `dimensions.rs`, `sizes.rs`,
   `font_loading.rs`, `font_features.rs`, `text_renderer_gpu_bench.rs`) —
   convert per this guide and drop manual `add_plugins(DiegeticUiPlugin)`

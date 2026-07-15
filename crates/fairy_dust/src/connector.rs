@@ -1,11 +1,11 @@
 //! Reusable connector-line geometry for `fairy_dust` panels.
 
 use bevy::prelude::Color;
-use bevy_diegetic::CalloutCap;
-use bevy_diegetic::PanelCoord;
-use bevy_diegetic::PanelLine;
-use bevy_diegetic::PanelPoint;
-use bevy_diegetic::Px;
+use hana_diegetic::CalloutCap;
+use hana_diegetic::PanelCoord;
+use hana_diegetic::PanelLine;
+use hana_diegetic::PanelPoint;
+use hana_diegetic::Px;
 
 use crate::constants::CENTER_FRACTION;
 use crate::constants::SPACER_EDGE_OFFSET;

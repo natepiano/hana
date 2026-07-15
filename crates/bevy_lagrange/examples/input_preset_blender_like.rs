@@ -6,7 +6,6 @@
 //! labeled `Preset / BlenderLike`.
 
 use bevy::prelude::*;
-use bevy_diegetic::DiegeticPanelCommands;
 use bevy_lagrange::InteractionSources;
 use bevy_lagrange::OrbitCam;
 use bevy_lagrange::OrbitCamBlenderLikePreset;
@@ -30,6 +29,7 @@ use fairy_dust::TitleBar;
 use fairy_dust::cube_face_panel;
 use fairy_dust::cube_face_panel_tree;
 use fairy_dust::cube_face_transform;
+use hana_diegetic::DiegeticPanelCommands;
 
 const EXAMPLE_TITLE: &str = "Blender-Like";
 

@@ -759,28 +759,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_diegetic"
-version = "0.0.1"
-dependencies = [
- "bevy",
- "bevy_brp_extras",
- "bevy_clerestory",
- "bevy_kana 0.2.0-dev",
- "bevy_lagrange",
- "bitflags 2.13.0",
- "clay-layout",
- "criterion",
- "fairy_dust",
- "hana_valence",
- "image",
- "parley",
- "smallvec",
- "trybuild",
- "ttf-parser",
- "wgpu",
-]
-
-[[package]]
 name = "bevy_ecs"
 version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1163,12 +1141,12 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_diegetic",
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bitflags 2.13.0",
  "fairy_dust",
  "float-cmp",
+ "hana_diegetic",
 ]
 
 [[package]]
@@ -2869,10 +2847,10 @@ dependencies = [
  "bevy",
  "bevy_brp_extras",
  "bevy_clerestory",
- "bevy_diegetic",
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
+ "hana_diegetic",
  "hana_valence",
 ]
 
@@ -3291,10 +3269,32 @@ name = "hana_conduit"
 version = "0.1.0"
 dependencies = [
  "bevy",
- "bevy_diegetic",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "fairy_dust",
+ "hana_diegetic",
+]
+
+[[package]]
+name = "hana_diegetic"
+version = "0.0.1"
+dependencies = [
+ "bevy",
+ "bevy_brp_extras",
+ "bevy_clerestory",
+ "bevy_kana 0.2.0-dev",
+ "bevy_lagrange",
+ "bitflags 2.13.0",
+ "clay-layout",
+ "criterion",
+ "fairy_dust",
+ "hana_valence",
+ "image",
+ "parley",
+ "smallvec",
+ "trybuild",
+ "ttf-parser",
+ "wgpu",
 ]
 
 [[package]]
@@ -3302,12 +3302,12 @@ name = "hana_prosody"
 version = "0.0.1"
 dependencies = [
  "bevy",
- "bevy_diegetic",
  "bevy_kana 0.2.0-dev",
  "bevy_lagrange",
  "bevy_remote",
  "cpal 0.18.1",
  "fairy_dust",
+ "hana_diegetic",
  "hound",
  "serde",
  "serde_json",
@@ -3320,7 +3320,6 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "bevy_app",
- "bevy_diegetic",
  "bevy_ecs",
  "bevy_enhanced_input",
  "bevy_kana 0.2.0-dev",
@@ -3332,6 +3331,7 @@ dependencies = [
  "bevy_transform",
  "bevy_tween",
  "fairy_dust",
+ "hana_diegetic",
  "tracing",
 ]
 

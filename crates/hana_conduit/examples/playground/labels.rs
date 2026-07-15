@@ -10,10 +10,10 @@ use std::f32::consts::FRAC_PI_2;
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticText;
-use bevy_diegetic::TextAlign;
 use fairy_dust::FairyDustOrbitCam;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticText;
+use hana_diegetic::TextAlign;
 
 use super::animation::LightAnimation;
 use super::constants::CAP_STYLE_ESC_ACTIVE_COLOR;

@@ -8,16 +8,16 @@ mod title_bar;
 
 use bevy::picking::Pickable;
 use bevy::prelude::*;
-use bevy_diegetic::Border;
-use bevy_diegetic::CornerRadius;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::El;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::Padding;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::default_panel_material;
 pub use description::DescriptionPanel;
+use hana_diegetic::Border;
+use hana_diegetic::CornerRadius;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticUiPlugin;
+use hana_diegetic::El;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::Padding;
+use hana_diegetic::Sizing;
+use hana_diegetic::default_panel_material;
 pub use performance::StatsPanelRow;
 pub use performance::StatsPanelSection;
 pub use performance::diegetic_stats_panel;
@@ -219,8 +219,8 @@ fn has_overlay_panel_ancestor(
 mod tests {
     use bevy::picking::Pickable;
     use bevy::prelude::*;
-    use bevy_diegetic::DiegeticPanel;
-    use bevy_diegetic::Sizing;
+    use hana_diegetic::DiegeticPanel;
+    use hana_diegetic::Sizing;
 
     use super::FairyDustOverlayPanel;
     use super::install_overlay_picking;

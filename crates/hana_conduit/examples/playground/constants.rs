@@ -1,8 +1,8 @@
 //! Constants for the playground example, grouped by domain.
 
 use bevy::prelude::*;
-use bevy_diegetic::Pt;
 use fairy_dust::Face;
+use hana_diegetic::Pt;
 
 // animation
 pub(crate) const LIGHT_TRAVEL_CYCLE_SECONDS: f32 =

@@ -29,18 +29,6 @@ use std::time::Duration;
 
 use bevy::math::curve::easing::EaseFunction;
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticText;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::StableTransparency;
-use bevy_diegetic::TextStyle;
 use bevy_lagrange::AnimationEnd;
 use bevy_lagrange::AnimationReason;
 use bevy_lagrange::CameraBasis;
@@ -59,6 +47,18 @@ use fairy_dust::TITLE_COLOR;
 use fairy_dust::TitleBar;
 use fairy_dust::screen_panel_frame;
 use fairy_dust::screen_panel_material_handle;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::DiegeticText;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Px;
+use hana_diegetic::Sizing;
+use hana_diegetic::StableTransparency;
+use hana_diegetic::TextStyle;
 
 const EXAMPLE_TITLE: &str = "Swapped Axis";
 

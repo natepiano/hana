@@ -531,7 +531,7 @@ impl SprinkleBuilder<WithOrbitCam> {
         self
     }
 
-    /// Insert `bevy_diegetic::StableTransparency` on the spawned `OrbitCam`,
+    /// Insert `hana_diegetic::StableTransparency` on the spawned `OrbitCam`,
     /// which adds `OrderIndependentTransparencySettings`, sets the camera's
     /// depth texture to `TEXTURE_BINDING`, and forces `Msaa::Off` on the
     /// camera and on every screen-space overlay camera in the app.

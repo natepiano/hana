@@ -1,4 +1,4 @@
-//! Capability: a singleton screen-space `bevy_diegetic` camera control panel
+//! Capability: a singleton screen-space `hana_diegetic` camera control panel
 //! that follows the currently selected lagrange camera.
 //!
 //! Single-camera examples and multi-camera examples both produce exactly one
@@ -17,12 +17,6 @@ mod snapshot;
 
 use bevy::picking::mesh_picking::MeshPickingPlugin;
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::DiegeticUiPlugin;
-use bevy_diegetic::Fit;
-use bevy_diegetic::PanelChanged;
 use bevy_lagrange::CameraHomed;
 use bevy_lagrange::CameraSlowModeState;
 use bevy_lagrange::FreeCam;
@@ -46,6 +40,12 @@ use display::RenderState;
 pub use guidance::CameraGuidance;
 pub use guidance::CameraGuidanceAction;
 pub use guidance::CameraGuidanceRow;
+use hana_diegetic::Anchor;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::DiegeticUiPlugin;
+use hana_diegetic::Fit;
+use hana_diegetic::PanelChanged;
 use layout::build_guidance_tree;
 pub(crate) use preset_switch::CameraPresetSwitching;
 use snapshot::CameraGuidanceSnapshot;

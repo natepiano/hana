@@ -12,26 +12,26 @@
 //! `PanelText` and `PanelElementId`.
 
 use bevy::prelude::*;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::CornerRadius;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticText;
-use bevy_diegetic::DiegeticTextMut;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Padding;
-use bevy_diegetic::PanelElementId;
-use bevy_diegetic::PanelText;
-use bevy_diegetic::Px;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::Text;
-use bevy_diegetic::TextStyle;
-use bevy_diegetic::Unit;
-use bevy_diegetic::default_panel_material;
 use bevy_lagrange::OrbitCamPreset;
 use fairy_dust::DEFAULT_PANEL_BACKGROUND;
+use hana_diegetic::Anchor;
+use hana_diegetic::CornerRadius;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticText;
+use hana_diegetic::DiegeticTextMut;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Padding;
+use hana_diegetic::PanelElementId;
+use hana_diegetic::PanelText;
+use hana_diegetic::Px;
+use hana_diegetic::Sizing;
+use hana_diegetic::Text;
+use hana_diegetic::TextStyle;
+use hana_diegetic::Unit;
+use hana_diegetic::default_panel_material;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RUNTIME TEXT MUTATION — DiegeticTextMut<M> for markers, PanelText for ids.
@@ -92,7 +92,7 @@ struct ScreenPanel;
 struct Tick(u64);
 
 fn main() {
-    // `bevy_diegetic::DiegeticUiPlugin` is registered automatically by
+    // `hana_diegetic::DiegeticUiPlugin` is registered automatically by
     // `fairy_dust::sprinkle_example`. `advance_tick` runs first in the chain so
     // the four mutators observe the second-counter change the same frame.
     fairy_dust::sprinkle_example()
@@ -221,7 +221,7 @@ fn screen_panel_label(n: u64) -> String { format!("screen panel {n}") }
 /// World panel: a `Fit` surface in meters with one named, centered counter run.
 fn world_panel(
     material: Handle<StandardMaterial>,
-) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+) -> Result<DiegeticPanel, hana_diegetic::PanelBuildError> {
     DiegeticPanel::world()
         .size(Fit, Fit)
         .font_unit(Unit::Meters)
@@ -235,7 +235,7 @@ fn world_panel(
 /// Screen panel: a `Fit` overlay surface, bottom-right, with one named run.
 fn screen_panel(
     material: Handle<StandardMaterial>,
-) -> Result<DiegeticPanel, bevy_diegetic::PanelBuildError> {
+) -> Result<DiegeticPanel, hana_diegetic::PanelBuildError> {
     DiegeticPanel::screen()
         .size(Fit, Fit)
         .anchor(Anchor::BottomRight)

@@ -3,18 +3,18 @@
 use std::collections::HashMap;
 
 use bevy::prelude::*;
-use bevy_diegetic::AlignY;
-use bevy_diegetic::Anchor;
-use bevy_diegetic::ChildLayoutState;
-use bevy_diegetic::DiegeticPanel;
-use bevy_diegetic::DiegeticPanelCommands;
-use bevy_diegetic::El;
-use bevy_diegetic::Fit;
-use bevy_diegetic::GlyphShadowMode;
-use bevy_diegetic::LayoutBuilder;
-use bevy_diegetic::LayoutTree;
-use bevy_diegetic::Sizing;
-use bevy_diegetic::TextStyle;
+use hana_diegetic::AlignY;
+use hana_diegetic::Anchor;
+use hana_diegetic::ChildLayoutState;
+use hana_diegetic::DiegeticPanel;
+use hana_diegetic::DiegeticPanelCommands;
+use hana_diegetic::El;
+use hana_diegetic::Fit;
+use hana_diegetic::GlyphShadowMode;
+use hana_diegetic::LayoutBuilder;
+use hana_diegetic::LayoutTree;
+use hana_diegetic::Sizing;
+use hana_diegetic::TextStyle;
 
 use super::constants::CONTROL_ACTIVE_COLOR;
 use super::constants::CONTROL_DISABLED_COLOR;
