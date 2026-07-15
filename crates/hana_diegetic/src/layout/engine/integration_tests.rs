@@ -1837,7 +1837,13 @@ fn empty_draw_sibling_does_not_hide_fixed_background_sibling() {
             builder.with(
                 El::column().width(Sizing::GROW).height(Sizing::GROW),
                 |builder| {
-                    builder.text(("29", TextStyle::new(8.0).with_color(Color::WHITE)));
+                    // Ruler numerals overflow their narrow label column instead
+                    // of reserving min-content width, so opt out of the
+                    // `TextWrap::Words` default.
+                    builder.text(
+                        Text::new("29", TextStyle::new(8.0).with_color(Color::WHITE))
+                            .wrap(TextWrap::None),
+                    );
                 },
             );
             builder.with(
@@ -2398,7 +2404,7 @@ fn text_no_wrap_overflows() {
     // "Hello World" in a narrow container with TextWrap::None.
     let mut b = LayoutBuilder::new(40.0, 200.0);
     b.with(El::column().width(Sizing::GROW).height(Sizing::GROW), |b| {
-        b.text(("Hello World", TextStyle::new(16.0)));
+        b.text(Text::new("Hello World", TextStyle::new(16.0)).wrap(TextWrap::None));
     });
     let tree = b.build();
 
@@ -2415,6 +2421,106 @@ fn text_no_wrap_overflows() {
         .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
         .collect();
     assert_eq!(text_commands.len(), 1);
+}
+
+#[test]
+fn fit_chain_wraps_words_text_at_ancestor_bound() {
+    let font_size = 16.0;
+    // Bound fits "Alpha Beta" (10 chars) but not "Alpha Beta Gamma" (16 chars).
+    let bound = text_width("Alpha Betax", font_size);
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.with(
+        El::column().width(Sizing::fixed(bound)).height(Sizing::FIT),
+        |b| {
+            b.with(El::column().width(Sizing::FIT).height(Sizing::FIT), |b| {
+                b.text(
+                    Text::new("Alpha Beta Gamma", TextStyle::new(font_size)).wrap(TextWrap::Words),
+                );
+            });
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
+
+    // Element 2 is the Fit column: clamped to the fixed ancestor's content
+    // size instead of keeping the natural text width.
+    assert!(approx_eq(result.computed[2].width, bound));
+    // Element 3 is the text leaf: wrapped to two lines within the bound.
+    assert!(approx_eq(
+        result.computed[3].width,
+        text_width("Alpha Beta", font_size)
+    ));
+    assert!(approx_eq(
+        result.computed[3].height,
+        text_height(2, font_size)
+    ));
+    let text_commands = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .count();
+    assert_eq!(text_commands, 2);
+}
+
+#[test]
+fn fit_words_text_floors_at_widest_word() {
+    let font_size = 16.0;
+    let widest_word_width = text_width("Alpha", font_size);
+    // Bound narrower than the widest word: the Fit chain floors at the word.
+    let bound = text_width("Alph", font_size);
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.with(
+        El::column().width(Sizing::fixed(bound)).height(Sizing::FIT),
+        |b| {
+            b.with(El::column().width(Sizing::FIT).height(Sizing::FIT), |b| {
+                b.text(
+                    Text::new("Alpha Beta Gamma", TextStyle::new(font_size)).wrap(TextWrap::Words),
+                );
+            });
+        },
+    );
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
+
+    // The text leaf's propagated minimum is its widest word.
+    assert!(approx_eq(result.computed[3].min_width, widest_word_width));
+    // Both the Fit column and the text floor at the widest word, overflowing
+    // the narrower fixed ancestor instead of breaking inside a word.
+    assert!(approx_eq(result.computed[2].width, widest_word_width));
+    assert!(approx_eq(result.computed[3].width, widest_word_width));
+    // One word per line.
+    assert!(approx_eq(
+        result.computed[3].height,
+        text_height(3, font_size)
+    ));
+}
+
+#[test]
+fn unbounded_fit_words_text_stays_single_line() {
+    let font_size = 16.0;
+    let natural_width = text_width("Alpha Beta Gamma", font_size);
+    let mut b = LayoutBuilder::new(500.0, 200.0);
+    b.with(El::column().width(Sizing::FIT).height(Sizing::FIT), |b| {
+        b.text(Text::new("Alpha Beta Gamma", TextStyle::new(font_size)).wrap(TextWrap::Words));
+    });
+    let tree = b.build();
+
+    let engine = LayoutEngine::new(monospace_measure());
+    let result = engine.compute(&tree, 500.0, 200.0, 1.0);
+
+    // No bound anywhere in the chain: the text keeps its natural width.
+    assert!(approx_eq(result.computed[2].width, natural_width));
+    assert!(approx_eq(result.computed[2].height, line_height(font_size)));
+    let text_commands = result
+        .commands
+        .iter()
+        .filter(|cmd| matches!(cmd.kind, RenderCommandKind::Text { .. }))
+        .count();
+    assert_eq!(text_commands, 1);
 }
 
 #[test]

@@ -4,6 +4,7 @@ use bevy_kana::ToF32;
 use super::layout_engine::ComputedLayout;
 use super::layout_engine::MeasureTextFn;
 use super::sizing;
+use crate::layout::TextMeasure;
 use crate::layout::TextSizing;
 use crate::layout::TextStyle;
 use crate::layout::TextWrap;
@@ -22,6 +23,21 @@ pub(super) struct WrappedLine {
 pub(super) struct WrappedText {
     pub(super) lines:       Vec<WrappedLine>,
     pub(super) line_height: f32,
+}
+
+/// Measures the widest single word in `text` — the minimum width word-wrapped
+/// text can compress to without breaking inside a word.
+///
+/// Words are split at whitespace, matching `wrap_text_words`. Returns zero for
+/// text with no words.
+pub(super) fn min_content_width(
+    text: &str,
+    text_measure: &TextMeasure,
+    measure: &MeasureTextFn,
+) -> f32 {
+    text.split_whitespace()
+        .map(|word| measure(word, text_measure).width)
+        .fold(0.0_f32, f32::max)
 }
 
 /// Word-wraps text within `max_width`, splitting at whitespace boundaries.

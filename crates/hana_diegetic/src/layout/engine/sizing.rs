@@ -3,6 +3,8 @@ use bevy_kana::ToF32;
 
 use super::layout_engine::ComputedLayout;
 use crate::layout::Sizing;
+use crate::layout::TextSizing;
+use crate::layout::TextWrap;
 use crate::layout::child_layout::AxisRole;
 use crate::layout::child_layout::ChildLayout;
 use crate::layout::constants::LAYOUT_EPSILON;
@@ -91,18 +93,18 @@ pub(super) fn propagate_fit_sizes(
     //
     // For text elements, Clay sets `minDimensions = { minWidth, height }`:
     // - height: measured height — text can't be compressed vertically.
-    // - width: shortest word width — text can wrap horizontally.
-    // We use the measured height for Y and the sizing floor for X (since we
-    // don't yet track per-word minimum width).
+    // - width: widest single word for `TextWrap::Words` (stored in
+    //   `ComputedLayout::min_text_width`) — wrapped text compresses to its longest unbreakable word
+    //   and no further. Zero for other wrap modes, leaving the sizing floor in charge.
     if children.is_empty() {
         let current_size = get_size(computed[index], axis);
-        let leaf_min = if axis == Axis::Y && matches!(element.content, ElementContent::Text { .. })
-        {
+        let content_min = match axis {
+            Axis::X => computed[index].min_text_width,
             // Text min height = measured height (matches Clay line 2003).
-            current_size.clamp(sizing.min_size(), sizing.max_size())
-        } else {
-            0.0_f32.clamp(sizing.min_size(), sizing.max_size())
+            Axis::Y if matches!(element.content, ElementContent::Text { .. }) => current_size,
+            Axis::Y => 0.0,
         };
+        let leaf_min = content_min.clamp(sizing.min_size(), sizing.max_size());
         set_min_size(&mut computed[index], axis, leaf_min);
         // Floor a childless leaf to its `min`: a `grow_min`/`fit_min` leaf has no
         // content of its own, so its `min` is the size it must contribute to a
@@ -217,7 +219,11 @@ pub(super) fn propagate_fit_sizes_xy(
     if children.is_empty() {
         let current_width = computed[index].width;
         let current_height = computed[index].height;
-        let min_width = 0.0_f32.clamp(width_sizing.min_size(), width_sizing.max_size());
+        // Widest single word for `TextWrap::Words` text, zero otherwise —
+        // see the leaf `minDimensions` comment in `propagate_fit_sizes`.
+        let min_width = computed[index]
+            .min_text_width
+            .clamp(width_sizing.min_size(), width_sizing.max_size());
         let min_height = if matches!(element.content, ElementContent::Text { .. }) {
             current_height.clamp(height_sizing.min_size(), height_sizing.max_size())
         } else {
@@ -564,9 +570,19 @@ fn size_children_cross_axis(
         let new_size = match child_sizing {
             Sizing::Grow { min, max } => content_size.clamp(min.value, max.value),
             Sizing::Fit { min, max } => {
-                // Fit elements keep their propagated content size.
+                // Fit elements keep their propagated content size, clamped to
+                // the parent's content size when Clay treats them as resizable
+                // (clay.h `Clay__SizeContainersAlongAxis` off-axis branch).
+                // Without the parent clamp, a Fit chain inside a bounded
+                // ancestor keeps its natural width and wrapped text inside it
+                // never reflows.
                 if current > f32::EPSILON {
-                    current.clamp(min.value, max.value)
+                    let clamped = current.clamp(min.value, max.value);
+                    if cross_axis_resizable(child_element) {
+                        clamped.min(content_size)
+                    } else {
+                        clamped
+                    }
                 } else {
                     min.value
                 }
@@ -578,6 +594,24 @@ fn size_children_cross_axis(
         // Apply minDimensions floor: MAX(minDimensions, MIN(childSize, maxSize)).
         let floored = new_size.max(min_dim);
         set_size(&mut computed[child_idx], axis, floored);
+    }
+}
+
+/// Returns whether Clay's off-axis sizing clamps this element to the parent's
+/// content size.
+///
+/// Clay includes an element in its resizable buffer unless it is a text
+/// element whose wrap mode is not `CLAY_TEXT_WRAP_WORDS` — text that cannot
+/// reflow keeps its natural box and overflows instead.
+const fn cross_axis_resizable(element: &Element) -> bool {
+    match &element.content {
+        ElementContent::Text { sizing, .. } => matches!(
+            sizing,
+            TextSizing::Natural {
+                wrap: TextWrap::Words,
+            }
+        ),
+        _ => true,
     }
 }
 

@@ -94,7 +94,7 @@ pub enum TextSizing {
 impl Default for TextSizing {
     fn default() -> Self {
         Self::Natural {
-            wrap: TextWrap::None,
+            wrap: TextWrap::Words,
         }
     }
 }

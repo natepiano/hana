@@ -42,7 +42,7 @@ smallvec = { workspace = true }
 ttf-parser = { workspace = true }
 
 [dev-dependencies]
-bevy            = { workspace = true, features = ["default_font"] }
+bevy            = { workspace = true, features = ["default_font", "tonemapping_luts"] }
 bevy_brp_extras = { workspace = true }
 bevy_clerestory = { workspace = true }
 bevy_lagrange   = { workspace = true, features = ["fit_overlay"] }

@@ -60,7 +60,9 @@ use hana_diegetic::PaperSize;
 use hana_diegetic::Pt;
 use hana_diegetic::ShadowCasting;
 use hana_diegetic::Sizing;
+use hana_diegetic::Text;
 use hana_diegetic::TextStyle;
+use hana_diegetic::TextWrap;
 use hana_diegetic::Unit;
 
 // ── A4 dimensions ────────────────────────────────────────────────────
@@ -1209,7 +1211,10 @@ fn build_metric_panel_ruler(height_millimeters: i32, ruler_color: Color) -> Layo
                             .align_x(AlignX::Right)
                             .align_y(AlignY::Center),
                         |b| {
-                            b.text((format!("{centimeter}"), label_style.clone()));
+                            b.text(
+                                Text::new(format!("{centimeter}"), label_style.clone())
+                                    .wrap(TextWrap::None),
+                            );
                         },
                     );
                 }
@@ -1303,7 +1308,10 @@ fn build_imperial_panel_ruler(
                                 .align_x(AlignX::Left)
                                 .align_y(AlignY::Center),
                             |b| {
-                                b.text((format!("{inch}"), label_style.clone()));
+                                b.text(
+                                    Text::new(format!("{inch}"), label_style.clone())
+                                        .wrap(TextWrap::None),
+                                );
                             },
                         );
                     }
@@ -1384,7 +1392,10 @@ fn build_metric_horizontal_ruler(width_millimeters: i32, ruler_color: Color) -> 
                                     .height(Sizing::GROW)
                                     .align_x(AlignX::Center),
                                 |b| {
-                                    b.text((format!("{centimeter}"), label_style.clone()));
+                                    b.text(
+                                        Text::new(format!("{centimeter}"), label_style.clone())
+                                            .wrap(TextWrap::None),
+                                    );
                                 },
                             );
                         },
@@ -1449,7 +1460,10 @@ fn build_imperial_horizontal_ruler(width_sixteenths: i32, ruler_color: Color) ->
                                     .height(Sizing::GROW)
                                     .align_x(AlignX::Center),
                                 |b| {
-                                    b.text((format!("{inch}"), label_style.clone()));
+                                    b.text(
+                                        Text::new(format!("{inch}"), label_style.clone())
+                                            .wrap(TextWrap::None),
+                                    );
                                 },
                             );
                         },

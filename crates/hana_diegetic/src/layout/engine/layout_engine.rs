@@ -9,6 +9,8 @@ use crate::layout::BoundingBox;
 use crate::layout::Sizing;
 use crate::layout::TextDimensions;
 use crate::layout::TextMeasure;
+use crate::layout::TextSizing;
+use crate::layout::TextWrap;
 use crate::layout::element::ElementContent;
 use crate::layout::element::LayoutTree;
 use crate::layout::render::RenderCommand;
@@ -49,6 +51,13 @@ pub struct ComputedLayout {
     /// can check whether wrapping is needed without re-calling the measure
     /// function. Zero for non-text elements.
     pub(super) natural_text_width: f32,
+    /// Width of the widest single word for `TextWrap::Words` elements.
+    ///
+    /// Measured once during `initialize_leaf_sizes` and propagated into
+    /// `min_width` so overflow compression stops at the longest unbreakable
+    /// word instead of collapsing wrapped text to zero. Zero for non-text
+    /// elements and other wrap modes.
+    pub(super) min_text_width:     f32,
 }
 
 /// The layout engine. Thread-safe, no global state.
@@ -159,9 +168,21 @@ impl LayoutEngine {
             } = element.content
             {
                 let measurement_text = sizing.measure_text(text);
-                let dims =
-                    (self.measure_text)(measurement_text, &config.as_measure().scaled(font_scale));
+                let text_measure = config.as_measure().scaled(font_scale);
+                let dims = (self.measure_text)(measurement_text, &text_measure);
                 computed[index].natural_text_width = dims.width;
+                if matches!(
+                    sizing,
+                    TextSizing::Natural {
+                        wrap: TextWrap::Words,
+                    }
+                ) {
+                    computed[index].min_text_width = wrapping::min_content_width(
+                        measurement_text,
+                        &text_measure,
+                        &self.measure_text,
+                    );
+                }
                 if element.width.is_fit() {
                     computed[index].width = dims
                         .width

@@ -26,13 +26,13 @@ use crate::cascade::Cascade;
 pub enum TextWrap {
     /// Never wrap. The full text is measured as a single run and may
     /// overflow the element's bounds.
-    #[default]
     None,
     /// Break at word boundaries when text exceeds the element's width.
     ///
     /// Words are split on ASCII whitespace. The engine measures each word
     /// individually, accumulates widths on a line, and breaks when the
     /// next word would exceed the available width.
+    #[default]
     Words,
     /// Break only at explicit `\n` characters.
     ///
