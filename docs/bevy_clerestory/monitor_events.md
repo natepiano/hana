@@ -56,6 +56,7 @@ identity of the changed display; the consumer maps that to its own entity.
 ```rust
 /// A display was connected. Triggered after `Monitors` is rebuilt to include it.
 #[derive(Event, Debug, Clone, Reflect)]
+#[reflect(Event)]
 pub struct MonitorConnected {
     /// The newly present monitor, as recorded in `Monitors`.
     pub monitor: MonitorInfo,
@@ -63,11 +64,17 @@ pub struct MonitorConnected {
 
 /// A display was disconnected. Triggered after `Monitors` is rebuilt without it.
 #[derive(Event, Debug, Clone, Reflect)]
+#[reflect(Event)]
 pub struct MonitorDisconnected {
     /// Geometry of the monitor as last known, before it vanished.
     pub monitor: MonitorInfo,
 }
 ```
+
+The workspace enables `reflect_auto_register`, so these non-generic reflected
+events require no explicit `App::register_type` calls. `#[reflect(Event)]`
+provides the event type data used by BRP `world.trigger_event` and
+`world.observe+watch`.
 
 `MonitorInfo` carries a new `id: MonitorId` field — a stable, OS-assigned display
 id normalized to `u64` across platforms (macOS `CGDirectDisplayID`, X11 /
